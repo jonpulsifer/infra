@@ -657,10 +657,38 @@ describe('deployApp selects which Component it acts on', () => {
     return component!;
   }
 
-  test('a fresh second Component gets its own Build, not the primary’s', async () => {
+  /**
+   * The upload a second Component of an **archive** App has to have of its own.
+   *
+   * §15 holds an archive's bytes per Component — `uploadArchive` writes them
+   * onto a Build row — so a sibling that never had one has nothing any route
+   * could fetch, and `deployApp` refuses that rather than writing a Build
+   * `dispatchBuild` closes on sight. These tests are about *which* Component
+   * the press acts on, so the sibling carries the upload that refusal asks for.
+   * `FAILED`, so the press below is still the Build-starting act rather than
+   * the deploy one.
+   */
+  async function uploadedBundle(componentId: string, seed: number) {
+    const [row] = await database()
+      .db.insert(builds)
+      .values({
+        componentId,
+        commit: digest(seed),
+        targetShape: 'image',
+        artifactType: 'image',
+        bundleDigest: digest(seed),
+        bundleLocation: `https://depot.lolwtf.ca/bundles/${seed}.zip`,
+        status: 'FAILED',
+      })
+      .returning();
+    return row!;
+  }
+
+  test('a second Component gets its own Build, not the primary’s', async () => {
     const { app, component, target } = await fixture();
     const primaryBuild = await succeededBuild(component.id, 10);
     const worker = await secondComponent(app.id, target.id);
+    const workerUpload = await uploadedBundle(worker.id, 11);
 
     const result = await deployApp(
       { name: app.name, component: worker.name },
@@ -679,6 +707,9 @@ describe('deployApp selects which Component it acts on', () => {
       .from(builds)
       .where(eq(builds.id, result.value.buildId));
     expect(started?.componentId).toBe(worker.id);
+    // Its own row, not the one its bundle came off: a rerun writes a new Build
+    // keyed by when it was asked for.
+    expect(started?.id).not.toBe(workerUpload.id);
 
     // The primary's own Build is untouched — a different Component's deploy
     // wrote nothing onto it.
@@ -756,6 +787,7 @@ describe('deployApp selects which Component it acts on', () => {
         auth: 'none',
       })
       .returning();
+    await uploadedBundle(nightly!.id, 15);
 
     const result = await deployApp(
       { name: app.name, component: nightly!.name, target: target.id },

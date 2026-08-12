@@ -337,6 +337,24 @@ describe('a moved-but-never-deployed Component reads the same everywhere', () =>
     expect(workspace.value.workspace.targetId).toBe(to.target.id);
     expect(workspace.value.workspace.vessel).toBe(to.vesselName);
 
+    // The uploaded bundle this archive App was created from. An archive
+    // Component carries one from the moment it exists — `uploadArchive` and
+    // `completeCreationDraft` are the only ways it gets a Build at all — and
+    // without it `deployApp` refuses rather than writing a Build no route
+    // could fetch a bundle for. It failed, so the press below is still a
+    // rebuild rather than a Deploy of something already built.
+    await database()
+      .db.insert(builds)
+      .values({
+        componentId: component.id,
+        commit: digest(9),
+        targetShape: 'image',
+        artifactType: 'image',
+        bundleDigest: digest(9),
+        bundleLocation: `https://depot.lolwtf.ca/bundles/${digest(9)}.zip`,
+        status: 'FAILED',
+      });
+
     // The button acts on the same Target the screen named: with nothing built
     // yet, it stages a Build for the moved-to placement.
     const pressed = await deployApp({ name: app.name }, ctx);

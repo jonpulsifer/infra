@@ -86,6 +86,15 @@ export const getAppWorkspace: Command<
           // The placement of record — the stored fact `deployApp` acts on,
           // with its vessel because the screen states the boundary from it.
           placedTarget: { with: { vessel: true } },
+          // The pairs that still serve. `placeComponent` leaves the old pair's
+          // desired row behind on purpose — "what is live there keeps serving
+          // until `unplaceComponent` retires it" (`components/place.ts:22-24`)
+          // — and this relation had never been read anywhere in `src/`, which
+          // is exactly why that command has had no control: nothing could name
+          // the pair to retire. Per row rather than for the selection alone,
+          // because this list already states each Component's placement and a
+          // second Target that is still serving is the same kind of fact.
+          desiredTargets: { with: { target: { with: { vessel: true } } } },
         },
       },
       datastores: {
@@ -150,6 +159,16 @@ export const getAppWorkspace: Command<
       // pressing each row in turn, which is the one thing a list exists to
       // spare a reader.
       ...(placed === undefined ? {} : { target: targetRowLabel(placed) }),
+      // Sorted by label so the list a person reads is stable across loads:
+      // the rows come back in whatever order the planner returned them, and a
+      // pair that moves position between two reads of the same screen reads as
+      // a pair that changed.
+      serving: comp.desiredTargets
+        .map((pair) => ({
+          targetId: pair.targetId,
+          label: targetRowLabel(pair.target),
+        }))
+        .sort((left, right) => left.label.localeCompare(right.label)),
       ...(deploy?.url == null || deploy.url === ''
         ? {}
         : { url: deploy.url, urlLive: deploy.phase === 'LIVE' }),

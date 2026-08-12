@@ -265,6 +265,39 @@ describe('the bundle a rerun stages', () => {
     expect(rows).toHaveLength(1);
   });
 
+  test('an archive Component with no bundle of its own is refused at the press', async () => {
+    // The hole the Components card opens (ticket 118). An archive App's bytes
+    // are held per Component — `uploadArchive` and `completeCreationDraft` are
+    // what put them on a Build row — so a Component added beside a sibling has
+    // none, and this used to answer with `ok` and a null location: a PENDING
+    // Build `dispatchBuild` closes on sight
+    // (`src/commands/builds/dispatch.ts:524`). A dead Build is the wrong answer
+    // to a button press, so the refusal names the two acts that would give this
+    // Component an artifact.
+    const seeded = await seedFailedBuild({
+      location: null,
+      sourceKind: 'archive',
+      connectRepository: true,
+      previousBuild: false,
+    });
+
+    const result = await deployApp({ name: seeded.app.name }, ctx);
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.failure.code).toBe('NOT_BUILDABLE');
+    expect(result.failure.message).toContain(seeded.component.name);
+    expect(result.failure.message).toContain('upload an archive for this');
+    expect(result.failure.message).toContain('adopt the artifact');
+    expect(stager.staged).toHaveLength(0);
+
+    // Nothing was written behind the refusal — no Build, and no placement.
+    const rows = await ctx.db
+      .select()
+      .from(builds)
+      .where(eq(builds.componentId, seeded.component.id));
+    expect(rows).toHaveLength(0);
+  });
+
   test('a repo App with nothing connected is told what would make it buildable', async () => {
     const seeded = await seedFailedBuild({ location: STALE_HANDLE });
 

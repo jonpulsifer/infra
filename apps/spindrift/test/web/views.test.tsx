@@ -17,8 +17,15 @@ import { logos } from '../../src/web/client/logos/index.ts';
 import type { DeployView, WorkspaceView } from '../../src/web/model.ts';
 import { DeployDetail } from '../../src/web/views/apps/deploy-detail.tsx';
 import {
+  AUTH_NOTE,
+  REACH_NOTE,
+} from '../../src/web/views/apps/new/summary.tsx';
+import {
   DeleteConfigVarButton,
+  NewComponentForm,
+  PlacementEditor,
   ReachEditor,
+  SupplyDemand,
   Workspace,
 } from '../../src/web/views/apps/workspace.tsx';
 import { Gate } from '../../src/web/views/auth/gate.tsx';
@@ -1410,6 +1417,199 @@ describe('changing how a Component is reached (§9)', () => {
     for (const cell of ['none', 'private', 'public', 'proxy']) {
       expect(markup).toContain(cell);
     }
+  });
+});
+
+describe('moving a placed Component from the App workspace (§3, §10)', () => {
+  const view = WORKSPACE_SCENARIOS.service;
+  const component = {
+    ...view.components[0]!,
+    // A Component mid-move: placed on the second Target, still answering on
+    // the first. That is the state `placeComponent` leaves behind on purpose,
+    // and it is the only one an Unplace control has anything to act on.
+    target: 'primary/kubernetes',
+    serving: [
+      { targetId: 'target-primary', label: 'primary/kubernetes' },
+      { targetId: 'target-cloudrun', label: 'vessel-a/cloudrun' },
+    ],
+  };
+  const placed = { ...view, components: [component] };
+  const move = async () => ({ ok: true as const, carried: [] });
+  const unplace = async () => ({ ok: true as const, destroyed: true });
+
+  test('the verb is on the row only where both acts and a list of Targets are', () => {
+    // Both, or neither: a screen that can strand a workload on a Target it
+    // cannot then tear down is worse than one that does not move it at all.
+    expect(workspace(placed)).not.toContain('Move');
+    expect(
+      renderToStaticMarkup(
+        <Workspace
+          view={placed}
+          onMoveComponent={move}
+          onUnplaceComponent={unplace}
+        />,
+      ),
+    ).not.toContain('Move');
+
+    expect(
+      renderToStaticMarkup(
+        <Workspace
+          view={placed}
+          onMoveComponent={move}
+          onUnplaceComponent={unplace}
+          targets={TARGET_LIST}
+        />,
+      ),
+    ).toContain('Move');
+  });
+
+  test('a Component nothing has placed is not offered a move', () => {
+    // A first placement is not a move: `deployApp` writes it while it is NULL
+    // (`src/commands/apps/deploy.ts:529-534`), which is the one act that owns
+    // that fact. The verb here would be a second answer to it.
+    expect(
+      renderToStaticMarkup(
+        <Workspace
+          view={view}
+          onMoveComponent={move}
+          onUnplaceComponent={unplace}
+          targets={TARGET_LIST}
+        />,
+      ),
+    ).not.toContain('Move');
+  });
+
+  test('every pair that still serves gets its own Unplace', () => {
+    const markup = renderToStaticMarkup(
+      <PlacementEditor
+        component={component}
+        targets={TARGET_LIST}
+        onMoveComponent={move}
+        onUnplaceComponent={unplace}
+        onDone={() => undefined}
+      />,
+    );
+
+    // One control per pair, because `unplaceComponent` takes a pair. A move
+    // leaves two rows answering and a single button could not say which of
+    // them it meant — which is why the command shipped without one.
+    expect(markup).toContain('primary/kubernetes');
+    expect(markup).toContain('vessel-a/cloudrun');
+    expect(markup.match(/Unplace/g)?.length).toBe(2);
+  });
+
+  test('the Targets offered are the ones that take this kind', () => {
+    const website = { ...component, kind: 'website' as const };
+    const jobOnly = [
+      ...TARGET_LIST.filter((target) => target.adapter !== 'static'),
+      {
+        ...TARGET_LIST[0]!,
+        id: 'target-files',
+        vessel: 'edge',
+        adapter: 'static' as const,
+        kinds: ['website' as const],
+      },
+    ];
+
+    const asWebsite = renderToStaticMarkup(
+      <PlacementEditor
+        component={website}
+        targets={jobOnly}
+        onMoveComponent={move}
+        onUnplaceComponent={unplace}
+        onDone={() => undefined}
+      />,
+    );
+    expect(asWebsite).toContain('edge/static');
+
+    // A `static` surface takes no service, so offering it here would be a tile
+    // whose only outcome is a deploy that cannot be admitted (§3).
+    const asService = renderToStaticMarkup(
+      <PlacementEditor
+        component={component}
+        targets={jobOnly}
+        onMoveComponent={move}
+        onUnplaceComponent={unplace}
+        onDone={() => undefined}
+      />,
+    );
+    expect(asService).not.toContain('edge/static');
+  });
+
+  test('the demanded keys are a form, not a dead end', () => {
+    // §10: "Place names the keys that will not follow and demands them before
+    // the move commits." The refusal is a question, and this is where it is
+    // answered — one field per key, and core's sentence above them unedited,
+    // because it says the thing the fields cannot.
+    const sentence =
+      'API_KEY, TOKEN are configured through a store vessel-a/cloudrun cannot reach';
+    const markup = renderToStaticMarkup(
+      <SupplyDemand
+        message={sentence}
+        demanded={['API_KEY', 'TOKEN']}
+        onSupply={() => undefined}
+      />,
+    );
+
+    expect(markup).toContain(sentence);
+    expect(markup).toContain('name="supply-API_KEY"');
+    expect(markup).toContain('name="supply-TOKEN"');
+    // The move is one post: the button that submits these is the move itself,
+    // never a config write followed by a second attempt.
+    expect(markup).toContain('Supply and move');
+    expect(markup).not.toContain('Save');
+  });
+});
+
+describe('adding a Component from the App it belongs to (§2)', () => {
+  const view = WORKSPACE_SCENARIOS.service;
+  const form = (kind?: 'service' | 'website' | 'job') =>
+    words(
+      renderToStaticMarkup(
+        <NewComponentForm
+          onCreateComponent={async () => ({ ok: true })}
+          onDone={() => undefined}
+          {...(kind === undefined ? {} : { kind })}
+        />,
+      ),
+    );
+
+  test('the verb is on the section only where an act is wired', () => {
+    // The both-or-neither rule `SectionHeader` enforces, from the side that
+    // made it necessary: "Add Component" shipped for months as a control that
+    // did nothing on press.
+    expect(workspace(view)).not.toContain('Add Component');
+
+    const markup = renderToStaticMarkup(
+      <Workspace view={view} onCreateComponent={async () => ({ ok: true })} />,
+    );
+    expect(markup).toContain('Add Component');
+  });
+
+  test('a schedule is asked for on a job and on nothing else', () => {
+    // §2: "`schedule` is a field on a job, not a kind." The command's input is
+    // a `.strict()` union, so a schedule offered beside a service would be a
+    // field whose only outcome is a validation failure.
+    expect(form()).not.toContain('Schedule');
+    expect(form('website')).not.toContain('Schedule');
+
+    const job = form('job');
+    expect(job).toContain('Schedule');
+    expect(job).toContain('Five cron fields');
+    // An unscheduled job is a state, not an omission — the form says which.
+    expect(job).toContain('placed suspended');
+  });
+
+  test('every kind is offered, and none of them asks for reach or expose', () => {
+    const markup = form();
+    for (const kind of ['service', 'website', 'job']) {
+      expect(markup).toContain(kind);
+    }
+    // No §9 grid here: reach and auth are the command's defaults
+    // (`create.ts:64-65`) and `ReachEditor` is where they are changed, so the
+    // two tiles that would restate them are the ones that must not appear.
+    expect(markup).not.toContain(REACH_NOTE.public);
+    expect(markup).not.toContain(AUTH_NOTE.proxy);
   });
 });
 

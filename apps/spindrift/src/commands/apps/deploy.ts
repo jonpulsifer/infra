@@ -158,6 +158,8 @@ async function sourceForRerun(
     typeof apps.$inferSelect,
     'name' | 'sourceKind' | 'sourceArchiveDigest' | 'repositoryId'
   >,
+  /** Whose Build this is, because an archive's bytes are held per Component. */
+  componentName: string,
   previous: Pick<
     typeof builds.$inferSelect,
     'commit' | 'bundleDigest' | 'bundleLocation'
@@ -173,18 +175,11 @@ async function sourceForRerun(
     previous?.bundleDigest ?? app.sourceArchiveDigest ?? null;
   const inherited = previous?.bundleLocation ?? null;
 
-  if (
-    inherited !== null
-      ? isFetchableBundleLocation(inherited)
-      : app.sourceKind !== 'repo'
-  ) {
-    // Either there is a durable bundle to reuse — a `gs://` object is immutable
-    // and shared, so the same commit wants the same one — or this is an archive
-    // App whose Component never had a bundle, which is a Build dispatch already
-    // refuses for its own reasons rather than a stale handle to retire. A
-    // *repo* Component with no bundle is different: its first Build is exactly
-    // the "stage the exact commit once" act, so it falls through to staging
-    // rather than writing a Build nothing can dispatch.
+  if (inherited !== null && isFetchableBundleLocation(inherited)) {
+    // A durable bundle to reuse: a `gs://` object is immutable and shared, so
+    // the same commit wants the same one. A *repo* Component with no bundle
+    // falls through instead — its first Build is exactly the "stage the exact
+    // commit once" act, rather than a Build nothing can dispatch.
     return ok({
       commit: baseCommit,
       bundleDigest: inheritedDigest,
@@ -196,9 +191,22 @@ async function sourceForRerun(
     // §15: "repo bundles are ephemeral, archives durable." An archive's bytes
     // only ever existed as what a developer uploaded, so there is nothing to
     // fetch again and no honest way to produce this bundle a second time.
+    //
+    // The second sentence is for a Component that never had one at all, which
+    // this command used to answer with `ok` and a null location — correct while
+    // an archive App could only ever have the one Component the create flow
+    // staged bytes for, and wrong the moment the Components card could add a
+    // second (ticket 118). What it produced was a PENDING Build that
+    // `dispatchBuild` closes on sight (`src/commands/builds/dispatch.ts:524`):
+    // a dispatch, a lease and a dead row, spent telling the operator something
+    // that was knowable before the press. So it is refused here, naming the two
+    // acts that would give this Component an artifact — its own uploaded
+    // bundle, or the one a sibling already built.
     return failed(
       'NOT_BUILDABLE',
-      `${app.name}'s uploaded archive was staged at ${inherited}, which no build route can fetch, and an archive cannot be staged again from anything Spindrift holds — upload it again to stage it in the depot`,
+      inherited === null
+        ? `${app.name} is deployed from an uploaded archive and '${componentName}' has no bundle of its own, so there is nothing to build for it — upload an archive for this Component, or adopt the artifact a sibling Component already built`
+        : `${app.name}'s uploaded archive was staged at ${inherited}, which no build route can fetch, and an archive cannot be staged again from anything Spindrift holds — upload it again to stage it in the depot`,
     );
   }
 
@@ -461,7 +469,12 @@ export const deployApp: Command<DeployAppInput, DeployAppResult> = async (
     // returned unchanged, the same way `createDeploy`'s is: it names the App and
     // what would make it buildable, which is worth more than a Build nothing can
     // dispatch.
-    const rerun = await sourceForRerun(app, buildToRun ?? null, context);
+    const rerun = await sourceForRerun(
+      app,
+      component.name,
+      buildToRun ?? null,
+      context,
+    );
     if (!rerun.ok) return rerun;
 
     // `builds_component_commit_shape_unique` makes a rerun of the same commit

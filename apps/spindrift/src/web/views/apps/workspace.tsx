@@ -31,7 +31,11 @@
  */
 import { ChevronRight, ExternalLink } from 'lucide-react';
 import { type ReactNode, useState } from 'react';
-import type { Auth, Reach } from '../../../domain/desired-state.ts';
+import type {
+  Auth,
+  ComponentKind,
+  Reach,
+} from '../../../domain/desired-state.ts';
 import {
   type AppDeletionControls,
   DeleteAppButton,
@@ -45,6 +49,7 @@ import type {
   DatastoreView,
   LogLine,
   PrerequisiteRowView,
+  TargetListItem,
   WorkspaceView,
 } from '../../model.ts';
 import { Badge } from '../../ui/badge.tsx';
@@ -60,6 +65,8 @@ import {
   AUTH_NOTE,
   AUTHS,
   Choice,
+  KIND_NOTE,
+  KINDS,
   REACH_NOTE,
   REACHES,
 } from './new/summary.tsx';
@@ -79,6 +86,86 @@ export type SetReach = (change: {
   readonly auth: Auth;
 }) => Promise<
   | { readonly ok: true; readonly pendingRelease: readonly string[] }
+  | { readonly ok: false; readonly message: string }
+>;
+
+/**
+ * Adding one Component to the App this screen already lists (§2), as the screen
+ * above needs it answered.
+ *
+ * **Three fields, because the command takes three decisions.** `reach` and
+ * `auth` have command-side defaults (`src/commands/components/create.ts:64-65`)
+ * and `expose` is what a kind means rather than a choice (`create.ts:154-163`),
+ * so a form offering any of them would be a second place for a default to be
+ * wrong — and the card this form sits in is already where reach is edited.
+ *
+ * `schedule` travels only for a `job`, and is absent rather than empty for an
+ * unscheduled one: `createComponentInput` is a `.strict()` discriminated union
+ * (`create.ts:68-98`), so a schedule sent on a service is a validation failure
+ * rather than a field nobody reads.
+ *
+ * No `targetId`, deliberately. `createComponent` does not write a placement
+ * (`create.ts:123-138`) and `deployApp` fills it only while it is NULL
+ * (`src/commands/apps/deploy.ts:529-534`) — a form that placed as well would
+ * move that fact out of the one command that owns it.
+ */
+export type CreateComponent = (create: {
+  readonly name: string;
+  readonly kind: ComponentKind;
+  readonly schedule?: string;
+}) => Promise<
+  { readonly ok: true } | { readonly ok: false; readonly message: string }
+>;
+
+/**
+ * Moving a placed Component to another Target (§3, §10), as the screen above
+ * needs it answered.
+ *
+ * **`supply` rides the move.** §10's sentence is "Place names the keys that
+ * will not follow and demands them before the move commits", and
+ * `placeComponent` puts the values on its own input for the reason its comment
+ * states (`src/commands/components/place.ts:54-60`): "demands them before the
+ * move commits" is only true if the move and the supply are one transaction
+ * from the developer's side. So this seam carries them too, and the form above
+ * it re-posts *one* call rather than writing config and trying again.
+ *
+ * **`demanded` is what the refusal names.** It comes back structurally rather
+ * than as prose to be parsed — `placeComponent` attaches the keys as `issues`
+ * — because the whole point of showing this refusal is to render a field per
+ * key. The message stays core's sentence, unedited, because it says the thing
+ * the fields cannot: that the values will not follow and that Spindrift never
+ * reads one back.
+ */
+export type MoveComponent = (move: {
+  readonly componentId: string;
+  readonly targetId: string;
+  readonly supply: readonly { readonly key: string; readonly value: string }[];
+}) => Promise<
+  | { readonly ok: true; readonly carried: readonly string[] }
+  | {
+      readonly ok: false;
+      readonly message: string;
+      readonly demanded: readonly string[];
+    }
+>;
+
+/**
+ * Retiring one (Component, Target) pair that still serves (§6, §13).
+ *
+ * By the pair, never by the Component: a move leaves two rows serving on
+ * purpose, and "unplace this Component" would be a button that cannot say
+ * which of them it means.
+ *
+ * `destroyed` travels because it is the difference between the two honest
+ * sentences this act has — a workload was torn down, or there was never one to
+ * tear down (`src/commands/components/unplace.ts:68-75`). A control that said
+ * the first over the second would be claiming a teardown that never happened.
+ */
+export type UnplaceComponent = (pair: {
+  readonly componentId: string;
+  readonly targetId: string;
+}) => Promise<
+  | { readonly ok: true; readonly destroyed: boolean }
   | { readonly ok: false; readonly message: string }
 >;
 
@@ -173,6 +260,10 @@ export function Workspace({
   onSetReach,
   onSetConfig,
   onSelectComponent,
+  onCreateComponent,
+  onMoveComponent,
+  onUnplaceComponent,
+  targets = [],
   onRunJob,
   onSetAutoDeploy,
   onCreateDatastore,
@@ -224,6 +315,28 @@ export function Workspace({
    * cannot.
    */
   onSelectComponent?: (component: string) => void;
+  /**
+   * Add a Component to this App (§2). Absent where the screen wires no acts,
+   * for the same reason {@link onSetReach} is.
+   */
+  onCreateComponent?: CreateComponent;
+  /**
+   * Move a Component to another Target, and retire a pair it has left (§3,
+   * §10). Absent where the screen wires no acts, for the same reason
+   * {@link onSetReach} is.
+   */
+  onMoveComponent?: MoveComponent;
+  onUnplaceComponent?: UnplaceComponent;
+  /**
+   * The Targets this installation has, as `listTargets` reports them — the
+   * list a move picks from.
+   *
+   * Empty rather than optional-and-absent, and the move control is not offered
+   * over an empty one: a screen that has read no Targets cannot name one to
+   * move to, and a disclosure that opens on nothing is the dead button
+   * `SectionHeader` was hardened against, one level down.
+   */
+  targets?: readonly TargetListItem[];
   /**
    * Start one run of this App's job (§17). Absent where the screen wires no
    * acts, and absent for every Component that is not a job — the runtime card
@@ -387,6 +500,14 @@ export function Workspace({
               {...(onSelectComponent === undefined
                 ? {}
                 : { onSelectComponent })}
+              {...(onCreateComponent === undefined
+                ? {}
+                : { onCreateComponent })}
+              {...(onMoveComponent === undefined ? {} : { onMoveComponent })}
+              {...(onUnplaceComponent === undefined
+                ? {}
+                : { onUnplaceComponent })}
+              targets={targets}
             />
             {/*
               Creating is offered on a `kubernetes` placement and nowhere else,
@@ -896,72 +1017,295 @@ function Components({
   selectedId,
   onSetReach,
   onSelectComponent,
+  onCreateComponent,
+  onMoveComponent,
+  onUnplaceComponent,
+  targets = [],
 }: {
   components: readonly ComponentView[];
   /** The row this screen's runtime, config and placement are about. */
   selectedId?: string;
   onSetReach?: SetReach;
   onSelectComponent?: (component: string) => void;
+  onCreateComponent?: CreateComponent;
+  onMoveComponent?: MoveComponent;
+  onUnplaceComponent?: UnplaceComponent;
+  targets?: readonly TargetListItem[];
 }) {
+  /*
+    Two disclosures rather than one, because they are two acts on the same row
+    and neither is a mode of the other: reach is written on the Component and
+    takes effect on the next release, and a move is written on the placement and
+    takes effect now. One `editing` slot shared between them would make opening
+    Move look like cancelling Reach.
+  */
   const [editing, setEditing] = useState<string | null>(null);
+  const [placing, setPlacing] = useState<string | null>(null);
+  const [adding, setAdding] = useState(false);
+  // Both, or the row shows neither: a Component can be moved and the pair it
+  // left retired, and half of that pair of acts is a screen that can strand a
+  // workload it cannot then tear down.
+  const movable =
+    onMoveComponent && onUnplaceComponent && targets.length > 0
+      ? { onMoveComponent, onUnplaceComponent }
+      : null;
 
   return (
     <Card>
       {/*
-        No action. `SectionHeader` renders the button whether or not an
-        `onAction` was passed, so "Add Component" was a control that did
-        nothing on press — worse than no control, because it reads as a feature
-        that is broken rather than one that is not built. Components are
-        declared in the create flow; when adding one from here exists, the verb
-        comes back with a handler.
+        The verb, with the handler that answers it — the both-or-neither rule
+        `SectionHeader` enforces, satisfied rather than dodged. An App gains its
+        second Component here because this is the list of what it has: §2's "one
+        App to many Components" had exactly one door, the create flow, and a
+        `job` beside a `service` was reachable only by posting to the command
+        endpoint. The form is on this screen rather than behind a route for the
+        same reason `ReachEditor` is: what it writes is a row this card is
+        already showing.
       */}
-      <SectionHeader eyebrow="App structure" title="Components" />
+      <SectionHeader
+        eyebrow="App structure"
+        title="Components"
+        {...(onCreateComponent
+          ? {
+              action: adding ? 'Close' : 'Add Component',
+              onAction: () => setAdding((current) => !current),
+            }
+          : {})}
+      />
       <CardContent className="pt-0">
+        {onCreateComponent && adding ? (
+          <NewComponentForm
+            onCreateComponent={onCreateComponent}
+            onDone={() => setAdding(false)}
+          />
+        ) : null}
         {/* The length guard every sibling card has. A brand-new App rendered
-            an empty card under a dead button. */}
+            an empty card under a dead button. The second sentence follows the
+            verb: where one is offered it is the answer, and where none is —
+            the fixture screens, which wire no acts — the create flow is. */}
         {components.length === 0 ? (
           <EmptyState title="This App has no Components yet.">
-            A Component is what gets built and placed. The create flow declares
-            the first one.
+            A Component is what gets built and placed.{' '}
+            {onCreateComponent
+              ? 'Add Component declares one.'
+              : 'The create flow declares the first one.'}
           </EmptyState>
         ) : null}
-        {components.map((component) => (
-          <div key={component.name}>
-            <Row
-              badge={<Badge tone="accent">{component.kind}</Badge>}
-              title={component.name}
-              detail={componentDetail(component)}
-              selected={component.id === selectedId}
-              {...(onSelectComponent === undefined
-                ? {}
-                : { onSelect: () => onSelectComponent(component.name) })}
-              trailing={
-                onSetReach ? (
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() =>
-                      setEditing((current) =>
-                        current === component.id ? null : component.id,
-                      )
-                    }
-                  >
-                    {editing === component.id ? 'Cancel' : 'Reach'}
-                  </Button>
-                ) : undefined
-              }
-            />
-            {onSetReach && editing === component.id ? (
-              <ReachEditor
-                component={component}
-                onSetReach={onSetReach}
-                onDone={() => setEditing(null)}
+        {components.map((component) => {
+          /*
+            A first placement is not a move. `deployApp` writes `placedTargetId`
+            while it is NULL (`src/commands/apps/deploy.ts:529-534`), which is
+            how a Component the Components card just added gets placed at all —
+            so offering Move on one that has never been placed would be a second
+            answer to which Target it lives on, and `placeComponent` would be
+            the act that decided it. A pair that still serves is the evidence
+            there is a placement to move.
+          */
+          const moves =
+            movable && (component.serving?.length ?? 0) > 0 ? movable : null;
+          return (
+            <div key={component.name}>
+              <Row
+                badge={<Badge tone="accent">{component.kind}</Badge>}
+                title={component.name}
+                detail={componentDetail(component)}
+                selected={component.id === selectedId}
+                {...(onSelectComponent === undefined
+                  ? {}
+                  : { onSelect: () => onSelectComponent(component.name) })}
+                trailing={
+                  onSetReach || moves ? (
+                    <div className="flex shrink-0 items-center gap-2">
+                      {onSetReach ? (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() =>
+                            setEditing((current) =>
+                              current === component.id ? null : component.id,
+                            )
+                          }
+                        >
+                          {editing === component.id ? 'Cancel' : 'Reach'}
+                        </Button>
+                      ) : null}
+                      {moves ? (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() =>
+                            setPlacing((current) =>
+                              current === component.id ? null : component.id,
+                            )
+                          }
+                        >
+                          {placing === component.id ? 'Cancel' : 'Move'}
+                        </Button>
+                      ) : null}
+                    </div>
+                  ) : undefined
+                }
               />
-            ) : null}
-          </div>
-        ))}
+              {onSetReach && editing === component.id ? (
+                <ReachEditor
+                  component={component}
+                  onSetReach={onSetReach}
+                  onDone={() => setEditing(null)}
+                />
+              ) : null}
+              {moves && placing === component.id ? (
+                <PlacementEditor
+                  component={component}
+                  targets={targets}
+                  onMoveComponent={moves.onMoveComponent}
+                  onUnplaceComponent={moves.onUnplaceComponent}
+                  onDone={() => setPlacing(null)}
+                />
+              ) : null}
+            </div>
+          );
+        })}
       </CardContent>
     </Card>
+  );
+}
+
+/**
+ * Declaring one more Component of this App (§2).
+ *
+ * **A name, a kind, and — for a job — a schedule.** Everything else a
+ * `components` row carries either has a command-side default or is decided by
+ * the kind, and {@link CreateComponent} argues that at the seam. The kind tiles
+ * are the creation flow's own, so a developer meets the three kinds once and in
+ * the same words rather than per screen.
+ *
+ * **What it writes is a row, not a release.** `createComponent` inserts the
+ * Component and stops: nothing is built, nothing is placed, and no Target is
+ * serving it — placement is what the first Deploy writes
+ * (`src/commands/apps/deploy.ts:529-534`). So the sentence on success names the
+ * two things that have not happened yet and points at the button that does
+ * them, for the reason {@link ReachEditor}'s does: a screen reading "done" over
+ * an act the platform has not been asked for is the one failure a form of this
+ * shape can produce.
+ *
+ * Exported, and `kind` is the disclosure's opening selection rather than a
+ * fixed one, because `test/harness/dom.ts` cannot press a tile — the job branch
+ * of this form has copy of its own, and a test that could only reach the
+ * default would be asserting that a service renders while the conditional field
+ * goes unread.
+ */
+export function NewComponentForm({
+  onCreateComponent,
+  onDone,
+  kind: initialKind = 'service',
+}: {
+  onCreateComponent: CreateComponent;
+  onDone: () => void;
+  kind?: ComponentKind;
+}) {
+  const [name, setName] = useState('');
+  const [kind, setKind] = useState<ComponentKind>(initialKind);
+  const [schedule, setSchedule] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [outcome, setOutcome] = useState<
+    | { readonly kind: 'created'; readonly name: string }
+    | { readonly kind: 'refused'; readonly message: string }
+    | null
+  >(null);
+
+  const save = async () => {
+    setSaving(true);
+    setOutcome(null);
+    const created = name.trim();
+    try {
+      const result = await onCreateComponent({
+        name: created,
+        kind,
+        // Absent for every other kind, and for a job that names no schedule:
+        // the command's union is `.strict()`, and an unscheduled job is one
+        // that says nothing rather than one that says empty.
+        ...(kind === 'job' && schedule.trim() !== ''
+          ? { schedule: schedule.trim() }
+          : {}),
+      });
+      if (result.ok) {
+        setOutcome({ kind: 'created', name: created });
+        setName('');
+        setSchedule('');
+      } else {
+        setOutcome({ kind: 'refused', message: result.message });
+      }
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="flex flex-col gap-3 border-b border-border-soft pb-3">
+      <Field
+        name="component-name"
+        label="Name"
+        value={name}
+        onChange={(event) => setName(event.target.value)}
+        placeholder="worker"
+        hint="Lowercase DNS label — it appears in this Component's hostname and in its own registry repository."
+      />
+      <div className="grid gap-2 sm:grid-cols-3">
+        {KINDS.map((option) => (
+          <Choice
+            key={option}
+            selected={kind === option}
+            title={option}
+            note={KIND_NOTE[option]}
+            onClick={() => setKind(option)}
+          />
+        ))}
+      </div>
+      {/*
+        §2: "`schedule` is a field on a job, not a kind." Asked only where the
+        kind has an answer for it, which is the same thing `ReachEditor` does
+        with `auth` at `reach: none` — a refusal said by not asking rather than
+        after the press.
+      */}
+      {kind === 'job' ? (
+        <Field
+          name="component-schedule"
+          label="Schedule"
+          value={schedule}
+          onChange={(event) => setSchedule(event.target.value)}
+          placeholder="0 3 * * *"
+          hint="Five cron fields. Leave it empty for a job that only runs when something asks it to — an unscheduled job is placed suspended."
+        />
+      ) : null}
+
+      {outcome?.kind === 'refused' ? (
+        <p className="rounded-md border border-destructive/40 bg-destructive-soft px-3 py-2 text-xs text-destructive">
+          {outcome.message}
+        </p>
+      ) : null}
+      {outcome?.kind === 'created' ? (
+        <p className="rounded-md border border-warning/40 bg-warning-soft px-3 py-2 text-xs">
+          Created. Nothing is built and nothing is placed — select{' '}
+          {outcome.name} and Deploy to build it and write its placement. It is
+          private behind the proxy until Reach says otherwise.
+        </p>
+      ) : null}
+
+      <div className="flex flex-wrap items-center gap-2">
+        <Button
+          size="sm"
+          disabled={saving || name.trim() === ''}
+          onClick={() => {
+            void save();
+          }}
+        >
+          {saving ? 'Adding…' : 'Add Component'}
+        </Button>
+        <Button variant="ghost" size="sm" onClick={onDone} disabled={saving}>
+          {outcome?.kind === 'created' ? 'Close' : 'Cancel'}
+        </Button>
+      </div>
+    </div>
   );
 }
 
@@ -1082,6 +1426,298 @@ export function ReachEditor({
           Reach is rendered into the release, so this takes effect on the next
           Deploy rather than on the one that is serving.
         </p>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Moving this Component to another Target, and retiring what it has left (§3,
+ * §10).
+ *
+ * **The move is one post, never two.** `placeComponent` demands the keys that
+ * will not follow *as part of the act* — its `supply` field exists so that
+ * "demands them before the move commits" is true from the developer's side too
+ * (`src/commands/components/place.ts:54-60`). So a refusal here opens a form
+ * and the press that follows it is the same call again with `supply` filled
+ * in. A `setConfig` pass followed by a retry would write those values at a
+ * placement that does not exist yet, which is the shape core refuses.
+ *
+ * **The old pair keeps serving, and the screen says so.** A move writes the
+ * new placement and leaves the row it moved away from alone, deliberately —
+ * that is why every pair is listed here with its own Unplace. §13's rule is
+ * "never destroy as a side effect of something else", and the move is
+ * something else; retiring the old address is its own act, asked for by name.
+ *
+ * **What it does not do is a release.** Nothing is placed on the new Target
+ * until Deploy runs, which is why the success sentence names Deploy and names
+ * Rebuild: the artifact travels as it is where the shapes match, and where they
+ * do not, `createDeploy` refuses with "this placement needs a rebuild" (§3) and
+ * Rebuild in the header is the answer to it. Neither happens here — a form that
+ * deployed as well would be substituting one act for the other, which
+ * `deployApp`'s own header (`src/commands/apps/deploy.ts:1-43`) forbids.
+ *
+ * Exported for the reason {@link ReachEditor} is: it is behind a disclosure,
+ * and `test/harness/dom.ts` cannot press the button that opens it.
+ */
+export function PlacementEditor({
+  component,
+  targets,
+  onMoveComponent,
+  onUnplaceComponent,
+  onDone,
+}: {
+  component: ComponentView;
+  targets: readonly TargetListItem[];
+  onMoveComponent: MoveComponent;
+  onUnplaceComponent: UnplaceComponent;
+  onDone: () => void;
+}) {
+  const [chosen, setChosen] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [outcome, setOutcome] = useState<
+    | {
+        readonly kind: 'moved';
+        readonly to: string;
+        readonly carried: readonly string[];
+      }
+    | {
+        readonly kind: 'retired';
+        readonly from: string;
+        readonly destroyed: boolean;
+      }
+    | {
+        readonly kind: 'refused';
+        readonly message: string;
+        readonly demanded: readonly string[];
+      }
+    | null
+  >(null);
+
+  /*
+    The Targets that take this kind, and no others. `kinds` is the adapter's own
+    answer (`KINDS_BY_ADAPTER`), so a `static` surface offered for a job would be
+    a tile whose only outcome is a deploy that cannot be admitted — §3 lists a
+    non-candidate with its reason where it is *choosing between* Targets, and
+    this list is one Component's placement rather than that step.
+  */
+  const offered = targets.filter((target) =>
+    target.kinds.includes(component.kind),
+  );
+  const serving = component.serving ?? [];
+  const servingIds = new Set(serving.map((pair) => pair.targetId));
+
+  const move = async (
+    supply: readonly { key: string; value: string }[],
+  ): Promise<void> => {
+    if (chosen === null) return;
+    const to = offered.find((target) => target.id === chosen) ?? null;
+    setSaving(true);
+    setOutcome(null);
+    try {
+      const result = await onMoveComponent({
+        componentId: component.id,
+        targetId: chosen,
+        supply,
+      });
+      setOutcome(
+        result.ok
+          ? {
+              kind: 'moved',
+              to: to === null ? 'the Target' : `${to.vessel}/${to.adapter}`,
+              carried: result.carried,
+            }
+          : {
+              kind: 'refused',
+              message: result.message,
+              demanded: result.demanded,
+            },
+      );
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const retire = async (pair: { targetId: string; label: string }) => {
+    setSaving(true);
+    setOutcome(null);
+    try {
+      const result = await onUnplaceComponent({
+        componentId: component.id,
+        targetId: pair.targetId,
+      });
+      setOutcome(
+        result.ok
+          ? { kind: 'retired', from: pair.label, destroyed: result.destroyed }
+          : { kind: 'refused', message: result.message, demanded: [] },
+      );
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="flex flex-col gap-3 border-b border-border-soft py-3 last:border-b-0">
+      <div className="flex flex-col gap-1.5">
+        <Eyebrow>Still serving</Eyebrow>
+        {/*
+          One control per pair, because that is what the command takes. A move
+          leaves two rows answering and `unplaceComponent` retires one of them
+          by (Component, Target) — a single button could not say which, which is
+          the reason the command has had no control at all until now.
+        */}
+        {serving.map((pair) => (
+          <div key={pair.targetId} className="flex items-center gap-2 text-xs">
+            <span className="font-mono">{pair.label}</span>
+            <Button
+              variant="outline"
+              size="sm"
+              className="ml-auto"
+              disabled={saving}
+              onClick={() => {
+                void retire(pair);
+              }}
+            >
+              Unplace
+            </Button>
+          </div>
+        ))}
+      </div>
+
+      <div className="flex flex-col gap-1.5">
+        <Eyebrow>Move to</Eyebrow>
+        {offered.length === 0 ? (
+          <p className="text-xs text-muted-foreground">
+            No connected Target takes a {component.kind}.
+          </p>
+        ) : (
+          <div className="grid gap-2 sm:grid-cols-2">
+            {offered.map((target) => (
+              <Choice
+                key={target.id}
+                selected={chosen === target.id}
+                title={`${target.vessel}/${target.adapter}`}
+                note={
+                  servingIds.has(target.id)
+                    ? 'already serving this Component'
+                    : `rank ${target.rank} · ${target.health}`
+                }
+                onClick={() => setChosen(target.id)}
+              />
+            ))}
+          </div>
+        )}
+      </div>
+
+      {outcome?.kind === 'refused' ? (
+        outcome.demanded.length === 0 ? (
+          <p className="rounded-md border border-destructive/40 bg-destructive-soft px-3 py-2 text-xs text-destructive">
+            {outcome.message}
+          </p>
+        ) : (
+          <SupplyDemand
+            message={outcome.message}
+            demanded={outcome.demanded}
+            busy={saving}
+            onSupply={(supply) => {
+              void move(supply);
+            }}
+          />
+        )
+      ) : null}
+      {outcome?.kind === 'moved' ? (
+        <p className="rounded-md border border-warning/40 bg-warning-soft px-3 py-2 text-xs">
+          Moved to {outcome.to}. Nothing is running there yet — Deploy places
+          the artifact that is already built, and where that Build was made for
+          a different shape Deploy says so and Rebuild is the answer.
+          {outcome.carried.length === 0
+            ? ''
+            : ` ${outcome.carried.join(', ')} came with it as references; no value was read.`}{' '}
+          Whatever was serving before is still serving until it is unplaced.
+        </p>
+      ) : null}
+      {outcome?.kind === 'retired' ? (
+        <p className="rounded-md border border-warning/40 bg-warning-soft px-3 py-2 text-xs">
+          {outcome.destroyed
+            ? `Torn down on ${outcome.from}. That address answers nothing now.`
+            : `Retired ${outcome.from}. Nothing was running there to tear down.`}
+        </p>
+      ) : null}
+
+      <div className="flex flex-wrap items-center gap-2">
+        <Button
+          size="sm"
+          disabled={saving || chosen === null}
+          onClick={() => {
+            void move([]);
+          }}
+        >
+          {saving ? 'Moving…' : 'Move'}
+        </Button>
+        <Button variant="ghost" size="sm" onClick={onDone} disabled={saving}>
+          {outcome === null || outcome.kind === 'refused' ? 'Cancel' : 'Close'}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * The keys that will not follow, as a form rather than as a dead end (§10).
+ *
+ * §10's carve-out is the boundary: "core never retrieves, therefore core cannot
+ * migrate config between stores", so a move to a Target behind a different
+ * store of record cannot carry the values and `placeComponent` refuses naming
+ * them. That refusal is not an error to be stuck behind — it is a question, and
+ * the only screen that can answer it is the one the operator is on.
+ *
+ * The sentence above the fields is core's own, unedited, because it says what
+ * the fields cannot: which store cannot be reached, and that no value is being
+ * read back to be shown here.
+ *
+ * Its own component, and exported, so that the refusal state is renderable
+ * without pressing anything — the DOM shim cannot press, and this is the arm of
+ * the move that most needs asserting.
+ */
+export function SupplyDemand({
+  message,
+  demanded,
+  busy,
+  onSupply,
+}: {
+  message: string;
+  demanded: readonly string[];
+  busy?: boolean;
+  onSupply: (supply: readonly { key: string; value: string }[]) => void;
+}) {
+  const [values, setValues] = useState<Record<string, string>>({});
+
+  return (
+    <div className="flex flex-col gap-3 rounded-md border border-warning/40 bg-warning-soft px-3 py-3">
+      <p className="text-xs">{message}</p>
+      {demanded.map((key) => (
+        <Field
+          key={key}
+          name={`supply-${key}`}
+          label={key}
+          value={values[key] ?? ''}
+          onChange={(event) =>
+            setValues((current) => ({ ...current, [key]: event.target.value }))
+          }
+          type="password"
+          hint="Written through the ordinary config path — pinned, audited, and never read back."
+        />
+      ))}
+      <div>
+        <Button
+          size="sm"
+          disabled={busy || demanded.some((key) => (values[key] ?? '') === '')}
+          onClick={() =>
+            onSupply(demanded.map((key) => ({ key, value: values[key] ?? '' })))
+          }
+        >
+          {busy ? 'Moving…' : 'Supply and move'}
+        </Button>
       </div>
     </div>
   );
