@@ -40,6 +40,7 @@ import type {
   TargetInspection,
 } from '../../../domain/capabilities.ts';
 import {
+  type Artifact,
   type ArtifactType,
   artifactAddress,
   type DesiredState,
@@ -50,6 +51,8 @@ import {
 } from '../../../domain/target.ts';
 import type { SurfaceProbe } from '../../../domain/vessel.ts';
 import { workloadName } from '../../../domain/workload-name.ts';
+import { fetchableBundleUrl } from '../../../storage/signed-url.ts';
+import type { FederationOptions } from '../cloud/federation.ts';
 import {
   CloudHttp,
   type CloudResponse,
@@ -76,6 +79,7 @@ import type {
   StartedRun,
 } from '../contract.ts';
 import { BundleError, type BundleFile, readBundle } from '../static/bundle.ts';
+import { fetchableStagedAddress, STAGED_SCHEME } from '../static/index.ts';
 import {
   googleRegistryRef,
   OciPullError,
@@ -101,6 +105,18 @@ export interface VercelAdapterOptions {
    * token from being sent to Vercel.
    */
   readonly artifactToken: TokenProvider;
+  /**
+   * How this installation signs for an object in its source depot, or `null`
+   * where it configured none.
+   *
+   * A third thing, and not a third *identity*: a supplied upload was never
+   * built, so its bytes are a `gs://` object rather than a registry reference,
+   * and reading one takes a signature rather than a bearer. Signing is
+   * `signBlob` under the *federated* identity, before impersonation, which is
+   * why this is the federation itself and not a token provider —
+   * `storage/signed-url.ts` is where that distinction is written down.
+   */
+  readonly federation?: FederationOptions | null;
   /** Injected so a test can stand a fake far side behind the real client. */
   readonly fetch?: Fetcher;
   readonly now?: () => number;
@@ -187,27 +203,21 @@ export class VercelDeployAdapter implements DeployAdapter {
       );
     }
 
-    // Same choice the other files backend makes, with a different identity
-    // doing the reading: a staged URL is an upload's own address and is fetched
-    // as it stands, and among registry references only one in the installation's
-    // Google-family artifacts registry is readable with the federated token
-    // this adapter is handed for exactly that.
+    // Same choice the other files backends make — literally, via the same
+    // predicate — with a different identity doing the reading: a staged address
+    // is an upload's own and is fetched as such, and among registry references
+    // only one in the installation's Google-family artifacts registry is
+    // readable with the federated token this adapter is handed for exactly that.
     const staged = artifactAddress(desired.artifact);
-    const location = /^https?:\/\//.test(staged ?? '')
-      ? staged
-      : googleRegistryRef(desired.artifact.refs);
+    const location =
+      fetchableStagedAddress(staged) ??
+      googleRegistryRef(desired.artifact.refs);
     if (location === null) {
       yield this.status('FAILED', { reason: 'ARTIFACT_UNAVAILABLE' });
-      const hosts = desired.artifact.refs
-        .map((ref) => ref.split('/')[0])
-        .join(', ');
       return {
         phase: 'FAILED',
         reason: 'ARTIFACT_UNAVAILABLE',
-        detail:
-          desired.artifact.refs.length === 0
-            ? 'the artifact carries no address to fetch it from'
-            : `Vercel is fed the bytes, and none of the artifact's homes (${hosts}) is a registry this installation's identity can read`,
+        detail: unfetchableArtifact(desired.artifact, staged),
       };
     }
 
@@ -409,13 +419,33 @@ export class VercelDeployAdapter implements DeployAdapter {
 
   // --- apply's steps -------------------------------------------------------
 
-  /** Fetch the bundle and read it into files. Throws; `apply` catches. */
+  /**
+   * Fetch the bundle and read it into files. Throws; `apply` catches.
+   *
+   * What is fetched and what is *named* part company here on purpose: a signed
+   * URL is a bearer capability, so every sentence below names the address the
+   * artifact carries and never the one that was minted from it.
+   */
   private async fetchBundle(
     http: CloudHttp,
     location: string,
   ): Promise<readonly BundleFile[]> {
-    if (/^https?:\/\//.test(location)) {
-      const fetched = await http.bytes(location);
+    let url: string;
+    try {
+      url = await fetchableBundleUrl(
+        location,
+        this.options.federation,
+        this.options.fetch,
+      );
+    } catch (cause) {
+      throw new ArtifactUnavailable(
+        `the artifact at ${location} could not be signed for: ${
+          cause instanceof Error ? cause.message : String(cause)
+        }`,
+      );
+    }
+    if (/^https?:\/\//.test(url)) {
+      const fetched = await http.bytes(url);
       if (!fetched.ok) {
         throw new ArtifactUnavailable(
           `the artifact at ${location} could not be fetched: ${fetched.message}`,
@@ -727,6 +757,29 @@ interface DeploymentFile {
 /** The artifact was addressed and the bytes were not there (§6's platform blame). */
 class ArtifactUnavailable extends Error {
   override readonly name = 'ArtifactUnavailable';
+}
+
+/**
+ * Why nothing here can be fetched, said about the address that failed.
+ *
+ * The other files backends' three cases, worded for this one: no address at
+ * all, a bundle staged somewhere nothing outside one process reaches, and a
+ * built artifact homed only on a registry this identity cannot read. The middle
+ * one used to take the last one's sentence, which sends an operator to IAM over
+ * a bundle sitting on a disk.
+ */
+function unfetchableArtifact(
+  artifact: Artifact,
+  staged: string | null,
+): string {
+  if (artifact.refs.length === 0) {
+    return 'the artifact carries no address to fetch it from';
+  }
+  if (staged !== null && STAGED_SCHEME.test(staged)) {
+    return `the artifact is staged at ${staged}, which names this installation's own disk rather than an address Vercel can be fed from`;
+  }
+  const hosts = artifact.refs.map((ref) => ref.split('/')[0]).join(', ');
+  return `Vercel is fed the bytes, and none of the artifact's homes (${hosts}) is a registry this installation's identity can read`;
 }
 
 /** A step that either produced something or carries the refusal that stopped it. */

@@ -82,8 +82,8 @@ export function isSuppliedArtifact(source: Source): boolean {
 /**
  * What a supplied artifact is, as an artifact type (§6's table).
  *
- * `files`, always. §6 gives exactly one backend that accepts `files` — `static`
- * — and finished output uploaded as a bundle is what that backend serves. An
+ * `files`, always. Every backend §6 gives that accepts `files` is a static one,
+ * and finished output uploaded as a bundle is what each of them serves. An
  * uploaded *image* is not a shape v1 has: it would need a registry push core
  * does not do and a digest core did not compute, which is the custody gap §16
  * closes by digesting what was actually staged.

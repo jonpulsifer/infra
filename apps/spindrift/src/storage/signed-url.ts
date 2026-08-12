@@ -91,6 +91,42 @@ export interface SignedUrlInput {
 }
 
 /**
+ * The address a staged bundle is actually fetched from.
+ *
+ * A depot object is exchanged for a signed URL; anything else — an `https://`
+ * bundle, a registry reference — is already whatever its own fetcher expects
+ * and comes back untouched. Every `files` deploy backend reads the same depot
+ * for the same reason, and one function is what stops three of them from
+ * disagreeing about how a `gs://` address becomes bytes.
+ *
+ * Throws {@link FederationError}, including for an installation that
+ * configured no federation at all: it is the same "this installation cannot
+ * reach its cloud" as every other refusal here, and a caller that turns one
+ * into its own verdict turns them all into it.
+ *
+ * **The caller must keep naming `location`, never what comes back.** A signed
+ * URL is a bearer capability; the object address is the thing an operator can
+ * be told about.
+ */
+export async function fetchableBundleUrl(
+  location: string,
+  federation: FederationOptions | null | undefined,
+  /** The adapter's own transport, so a test's fake far side signs too. */
+  fetch?: FederationOptions['fetch'],
+): Promise<string> {
+  if (parseGcsLocation(location) === null) return location;
+  if (federation === null || federation === undefined) {
+    throw new FederationError(
+      'no cloud federation is configured, so nothing can be signed to fetch it with',
+    );
+  }
+  return signedObjectUrl({
+    location,
+    federation: fetch === undefined ? federation : { ...federation, fetch },
+  });
+}
+
+/**
  * Mint a short-TTL V4 signed URL for one GCS object.
  *
  * Throws {@link FederationError} — the same type every other federated call
