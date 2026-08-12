@@ -1248,7 +1248,11 @@ function SourceRow({
               ) : null}
               <input
                 type="file"
-                accept=".zip,.tar.gz,.tgz,.tar"
+                // Exactly what `storage/archive-format.ts` sniffs — gzip magic
+                // or ZIP magic. A plain `.tar` in this list is an invitation
+                // the boundary answers with `UNKNOWN_FORMAT`, which makes the
+                // chooser the thing that was wrong.
+                accept=".zip,.tar.gz,.tgz"
                 disabled={uploading}
                 onChange={handleFileChange}
                 className="hidden"
