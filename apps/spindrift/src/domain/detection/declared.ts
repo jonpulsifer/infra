@@ -51,6 +51,26 @@ interface Preset {
   readonly dependency: string;
   readonly kind: InferredComponentKind;
   readonly outputDirectory: string | null;
+  /**
+   * The same identity in Vercel's vocabulary, for a Component placed on a
+   * Vercel Target and built through the Build Output API.
+   *
+   * Here rather than in the adapter because it is the *same question this
+   * table already answers* — "what is this project?" — asked in another
+   * dialect, and a second table keyed on the same dependency would be a second
+   * thing to keep in step.
+   *
+   * **Getting it wrong is silent.** `vercel build` does not auto-detect: a
+   * project whose settings name no framework builds as "Other", which copies
+   * the tree to `static/` and emits no functions at all. That is a green build
+   * that serves an SSR app's sources — so an unrecognised project must refuse
+   * to build for Vercel rather than fall back to a default.
+   *
+   * Slugs are `@vercel/frameworks`' own and two of them are easy to get wrong
+   * from memory: modern SvelteKit is `sveltekit-1` (`sveltekit` is v0), and
+   * Docusaurus v2+ is `docusaurus-2` (`docusaurus` is v1).
+   */
+  readonly vercelFramework: string;
 }
 
 /**
@@ -62,67 +82,84 @@ const PRESETS: readonly Preset[] = [
     label: 'Next.js',
     dependency: 'next',
     kind: 'website',
+    vercelFramework: 'nextjs',
     outputDirectory: null,
   },
-  { label: 'Nuxt', dependency: 'nuxt', kind: 'website', outputDirectory: null },
+  {
+    label: 'Nuxt',
+    dependency: 'nuxt',
+    kind: 'website',
+    vercelFramework: 'nuxtjs',
+    outputDirectory: null,
+  },
   {
     label: 'Remix',
     dependency: '@remix-run/dev',
     kind: 'website',
+    vercelFramework: 'remix',
     outputDirectory: null,
   },
   {
     label: 'SvelteKit',
     dependency: '@sveltejs/kit',
     kind: 'website',
+    vercelFramework: 'sveltekit-1',
     outputDirectory: null,
   },
   {
     label: 'Docusaurus',
     dependency: '@docusaurus/core',
     kind: 'website',
+    vercelFramework: 'docusaurus-2',
     outputDirectory: 'build',
   },
   {
     label: 'Gatsby',
     dependency: 'gatsby',
     kind: 'website',
+    vercelFramework: 'gatsby',
     outputDirectory: 'public',
   },
   {
     label: 'Astro',
     dependency: 'astro',
     kind: 'website',
+    vercelFramework: 'astro',
     outputDirectory: 'dist',
   },
   {
     label: 'Angular',
     dependency: '@angular/cli',
     kind: 'website',
+    vercelFramework: 'angular',
     outputDirectory: 'dist',
   },
   {
     label: 'Create React App',
     dependency: 'react-scripts',
     kind: 'website',
+    vercelFramework: 'create-react-app',
     outputDirectory: 'build',
   },
   {
     label: 'Vue CLI',
     dependency: '@vue/cli-service',
     kind: 'website',
+    vercelFramework: 'vue',
     outputDirectory: 'dist',
   },
   {
     label: 'Vite',
     dependency: 'vite',
     kind: 'website',
+    vercelFramework: 'vite',
     outputDirectory: 'dist',
   },
   {
     label: 'Parcel',
     dependency: 'parcel',
     kind: 'website',
+    vercelFramework: 'parcel',
     outputDirectory: 'dist',
   },
 ];
@@ -138,6 +175,45 @@ const PRESETS: readonly Preset[] = [
 export const PRESET_DEPENDENCIES: readonly string[] = PRESETS.map(
   (preset) => preset.dependency,
 );
+
+/**
+ * Every framework slug this table can answer with.
+ *
+ * Exported for the same reason {@link PRESET_DEPENDENCIES} is: these are
+ * `@vercel/frameworks`' own names, identical in every installation, and the
+ * literal scanner reads this list rather than carrying its own copy.
+ */
+export const PRESET_VERCEL_FRAMEWORKS: readonly string[] = PRESETS.map(
+  (preset) => preset.vercelFramework,
+);
+
+/**
+ * The Vercel framework slug a `package.json` implies, or `null` for a project
+ * no preset recognises.
+ *
+ * Reads the manifest rather than a tree because that is the whole of the
+ * question — {@link PRESETS} is keyed on a declared dependency — and because
+ * the one caller that needs this has a single file at a single commit rather
+ * than a checkout. Order is {@link PRESETS}' own, so a SvelteKit app that also
+ * depends on `vite` answers `sveltekit-1`.
+ *
+ * `null` is a refusal, not a default. See {@link Preset.vercelFramework}: a
+ * Vercel build with no framework produces a static copy and no functions, so
+ * the caller must fail rather than build something that looks fine and is not.
+ */
+export function vercelFrameworkOf(packageJson: string): string | null {
+  let manifest: PackageManifest;
+  try {
+    manifest = JSON.parse(packageJson) as PackageManifest;
+  } catch {
+    return null;
+  }
+  const declared = declaredDependencies(manifest);
+  return (
+    PRESETS.find((preset) => declared.has(preset.dependency))
+      ?.vercelFramework ?? null
+  );
+}
 
 /** A manifest file whose mere existence names a long-running process. */
 const SERVICE_MANIFESTS: readonly {

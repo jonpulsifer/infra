@@ -43,6 +43,7 @@ const spec: BuildSpec = {
   tags: ['sha256-bundle', 'latest'],
   buildArgs: { EXAMPLE: 'value' },
   outputDirectory: null,
+  vercelFramework: null,
   registryAuth: [],
 };
 

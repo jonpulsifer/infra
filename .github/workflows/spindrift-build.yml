@@ -153,6 +153,11 @@ jobs:
             # `null` is spelled the same as absent on purpose: core sends the
             # key explicitly and both mean "lift nothing".
             printf 'outputDirectory=%s\n' "$(read_key '.outputDirectory // ""')"
+            # The framework a `vercel-output` build tells Vercel's own builder
+            # it is building. Empty on every other shape, and never empty on
+            # that one — core refuses the dispatch rather than let the platform
+            # build an SSR project as a directory of files.
+            printf 'vercelFramework=%s\n' "$(read_key '.vercelFramework // ""')"
           } >> "$GITHUB_OUTPUT"
 
       # The bundle, not the repository. §15 fetches the exact commit once and
@@ -217,6 +222,7 @@ jobs:
           FRONTEND: ${{ steps.request.outputs.frontend }}
           ARTIFACT_TYPE: ${{ steps.request.outputs.artifactType }}
           OUTPUT_DIRECTORY: ${{ steps.request.outputs.outputDirectory }}
+          VERCEL_FRAMEWORK: ${{ steps.request.outputs.vercelFramework }}
         run: |
           set -euo pipefail
           scope="${ROOT}/${SUBPATH}"
@@ -287,6 +293,28 @@ jobs:
           # `FROM scratch` Dockerfile is written either way, because both paths
           # end by exporting one directory as the single gzipped tar layer a
           # files artifact is.
+          # The edge platform's own function format (§6's table, one row past
+          # the static one). §5's ladder decides nothing here: the platform's
+          # builder *is* the frontend for this shape, it detects the project
+          # itself from the framework core named, and what it leaves behind is a
+          # `.vercel/output` tree. So this arm short-circuits like the plain
+          # files one does, and `Build the site into a directory` runs it.
+          if [ "$ARTIFACT_TYPE" = "vercel-output" ]; then
+            files="${RUNNER_TEMP}/files-artifact"
+            mkdir -p "$files"
+            printf 'FROM scratch\nCOPY . /\n' > "${files}/Dockerfile"
+            if [ -z "${VERCEL_FRAMEWORK:-}" ]; then
+              echo "::error::this build is shaped for a Vercel Target but names no framework — core refuses that dispatch, so reaching this step means the spec was composed by something that does not know this shape." >&2
+              exit 1
+            fi
+            {
+              printf 'scratchfile=%s\n' "${files}/Dockerfile"
+              printf 'vercelscope=%s\n' "$scope"
+              printf 'vercelframework=%s\n' "$VERCEL_FRAMEWORK"
+            } >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
           if [ "$ARTIFACT_TYPE" = "files" ]; then
             files="${RUNNER_TEMP}/files-artifact"
             mkdir -p "$files"
@@ -606,6 +634,90 @@ jobs:
       # an app lives, and a hardcoded `/app` fails on the second one with a
       # `docker cp` error naming a path nobody wrote down. The image config is
       # the one place that knows.
+      # The edge platform's own builder, run here rather than by the platform.
+      #
+      # §4 keeps Build separate from Deploy, and this is what that costs and
+      # buys on a platform whose whole product is building from source: the
+      # build runs on Spindrift's side, its output is pushed to the registry
+      # like every other artifact — signed, attested, retained — and a rollback
+      # re-deploys that tree instead of asking the platform to build the old
+      # commit again and hoping it lands the same.
+      #
+      # **No credential.** The CLI's build reads project settings from
+      # `.vercel/project.json`, which is exactly what `vercel pull` caches "for
+      # offline use of `vercel build`" — so writing one is equivalent to having
+      # pulled, and the identifiers in it are never checked at build time. The
+      # installation's Vercel token stays in the controller (§13), the project
+      # itself is still created by the deploy, and nothing here can reach the
+      # platform at all.
+      #
+      # The build-time configuration goes in as environment variables rather
+      # than `--build-arg`, because that is how this builder passes them to the
+      # framework — and §4 already settled that a website's build-time config is
+      # public, so there is nothing here a store would have held.
+      - name: Build with the platform's own builder
+        id: vercel
+        if: steps.frontend.outputs.vercelscope != ''
+        env:
+          SCOPE: ${{ steps.frontend.outputs.vercelscope }}
+          FRAMEWORK: ${{ steps.frontend.outputs.vercelframework }}
+          REQUEST_ARGS: ${{ steps.request.outputs.buildArgs }}
+          SCRATCHFILE: ${{ steps.frontend.outputs.scratchfile }}
+        run: |
+          set -euo pipefail
+          mkdir -p "${SCOPE}/.vercel"
+          # Identifiers the offline build never resolves, named so as to be
+          # obvious in a stack trace if one ever does.
+          FRAMEWORK="$FRAMEWORK" node -e '
+            const fs = require("node:fs");
+            fs.writeFileSync(process.argv[1], JSON.stringify({
+              projectId: "prj_spindrift_offline_build",
+              orgId: "team_spindrift_offline_build",
+              settings: { framework: process.env.FRAMEWORK },
+            }));
+          ' "${SCOPE}/.vercel/project.json"
+
+          # §4's build-time configuration, into the environment this build reads.
+          while IFS= read -r arg; do
+            [ -n "$arg" ] || continue
+            export "${arg?}"
+          done <<SPINDRIFT_ARGS_EOF
+          ${REQUEST_ARGS}
+          SPINDRIFT_ARGS_EOF
+
+          # `--prod` so production environment variables and production
+          # framework settings are what this tree was built against; a preview
+          # build is a different artifact and would deploy as the wrong one.
+          ( cd "$SCOPE" && npx --yes vercel@latest build --prod --yes )
+
+          output="${SCOPE}/.vercel/output"
+          # A framework that built nothing, or a CLI that changed where it
+          # writes. Either way the push below would export an empty tree and
+          # deploy a site that answers 404 on every path.
+          if [ ! -f "${output}/config.json" ]; then
+            echo "::error::the platform's builder left no ${output}/config.json — nothing was produced for this framework (${FRAMEWORK})." >&2
+            exit 1
+          fi
+          # **Symlinks are resolved here, and they have to be.** A framework
+          # that emits the same function under two routes emits one bundle and
+          # symlinks the other at it — Next.js does exactly this for the RSC
+          # and not-found variants. `bundle.ts` admits regular files only and
+          # deliberately skips everything else, so a symlinked `.func` would be
+          # dropped on the way into the artifact and the deployment would 404
+          # on precisely the routes that shared a bundle, having built and
+          # deployed green. The platform's own file list is flat paths and
+          # content hashes with no notion of a link, so materialising each one
+          # is also what the far side expects.
+          deref="${RUNNER_TEMP}/vercel-output"
+          rm -rf "$deref"
+          mkdir -p "$deref"
+          cp -RL "${output}/." "$deref/"
+
+          {
+            printf 'context=%s\n' "$deref"
+            printf 'file=%s\n' "$SCRATCHFILE"
+          } >> "$GITHUB_OUTPUT"
+
       - name: Lift the site out of the build
         id: lift
         if: steps.frontend.outputs.lift != ''
@@ -661,10 +773,12 @@ jobs:
         id: push
         uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7
         with:
-          # The lifted site when there was one to lift, and the ladder's own
-          # answer otherwise. One step decides; this one only reads.
-          context: ${{ steps.lift.outputs.context || steps.frontend.outputs.context }}
-          file: ${{ steps.lift.outputs.file || steps.frontend.outputs.file }}
+          # Whichever step produced a directory to export — the lifted site, the
+          # platform builder's own tree — and the ladder's answer when neither
+          # did. At most one of them runs, so the order is a fallback and not a
+          # precedence. Those steps decide; this one only reads.
+          context: ${{ steps.lift.outputs.context || steps.vercel.outputs.context || steps.frontend.outputs.context }}
+          file: ${{ steps.lift.outputs.file || steps.vercel.outputs.file || steps.frontend.outputs.file }}
           # The ladder's own argument rides with the request's. `BUILDKIT_SYNTAX`
           # is how the zero-config arm names its frontend, and it is empty on the
           # Dockerfile arm — the action drops the blank line.
@@ -681,8 +795,8 @@ jobs:
           # is falsy — so the branch that must produce nothing has to be the
           # `||` arm, never the `&&` one.
           build-args: |
-            ${{ steps.lift.outputs.context == '' && steps.request.outputs.buildArgs || '' }}
-            ${{ steps.lift.outputs.context == '' && steps.frontend.outputs.buildArgs || '' }}
+            ${{ steps.lift.outputs.context == '' && steps.vercel.outputs.context == '' && steps.request.outputs.buildArgs || '' }}
+            ${{ steps.lift.outputs.context == '' && steps.vercel.outputs.context == '' && steps.frontend.outputs.buildArgs || '' }}
           push: true
           tags: ${{ steps.request.outputs.tags }}
           cache-from: |

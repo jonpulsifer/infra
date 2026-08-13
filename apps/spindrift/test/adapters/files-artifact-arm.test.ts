@@ -35,6 +35,8 @@ async function runArm(input: {
   scopeFiles: Readonly<Record<string, string>>;
   /** What the scope's `spindrift.yaml` named, as core resolved it (§3). */
   outputDirectory?: string;
+  /** The framework a `vercel-output` build declares to the platform (§6). */
+  vercelFramework?: string;
 }): Promise<{ outputs: Record<string, string>; workspace: string }> {
   const workspace = await mkdtemp(join(tmpdir(), 'spindrift-files-arm-'));
   const root = join(workspace, 'bundle');
@@ -55,6 +57,7 @@ async function runArm(input: {
       FRONTEND: 'registry.example.test/zero-config:pinned',
       ARTIFACT_TYPE: input.artifactType,
       OUTPUT_DIRECTORY: input.outputDirectory ?? '',
+      VERCEL_FRAMEWORK: input.vercelFramework ?? '',
       GITHUB_OUTPUT: outputPath,
       RUNNER_TEMP: workspace,
     },
@@ -140,6 +143,40 @@ describe('the files arm of “Choose the frontend”', () => {
     }
   });
 
+  test('the platform’s own build output hands the scope to the platform’s builder', async () => {
+    const { outputs, workspace } = await runArm({
+      artifactType: 'vercel-output',
+      // A Dockerfile in the scope decides nothing here: the platform's builder
+      // is the frontend for this shape, and §5's ladder never runs.
+      scopeFiles: { 'package.json': '{}', Dockerfile: 'FROM nginx' },
+      vercelFramework: 'nextjs',
+    });
+    try {
+      expect(outputs.vercelscope).toBe(join(workspace, 'bundle', 'site'));
+      expect(outputs.vercelframework).toBe('nextjs');
+      // The ladder's outputs are deliberately absent: nothing here is built by
+      // BuildKit until the export, which `Build and push` does from the tree
+      // the platform's builder leaves behind.
+      expect(outputs.context).toBeUndefined();
+      const scratch = await readFile(outputs.scratchfile as string, 'utf8');
+      expect(scratch).toBe('FROM scratch\nCOPY . /\n');
+    } finally {
+      await rm(workspace, { recursive: true, force: true });
+    }
+  });
+
+  test('the platform’s build output refuses to run without a framework', async () => {
+    // Core refuses this dispatch, so reaching the step at all means a spec was
+    // composed by something that does not know the shape. Failing loudly beats
+    // building the project as a directory of files and serving its sources.
+    await expect(
+      runArm({
+        artifactType: 'vercel-output',
+        scopeFiles: { 'package.json': '{}' },
+      }),
+    ).rejects.toThrow('names no framework');
+  });
+
   test('an image with a Dockerfile still builds from the bundle root', async () => {
     const { outputs, workspace } = await runArm({
       artifactType: 'image',
@@ -150,6 +187,108 @@ describe('the files arm of “Choose the frontend”', () => {
       expect(outputs.file).toBe(
         join(workspace, 'bundle', 'site', 'Dockerfile'),
       );
+    } finally {
+      await rm(workspace, { recursive: true, force: true });
+    }
+  });
+});
+
+/**
+ * The platform builder step, run as the file actually ships it.
+ *
+ * The one behaviour worth pinning mechanically is the dereference. A framework
+ * that serves the same function under two routes emits one bundle and symlinks
+ * the other at it, and `bundle.ts` admits regular files only — so a link that
+ * survives into the artifact is a route that 404s on a deployment which built,
+ * signed and deployed green. Nothing about that failure points back here,
+ * which is exactly why it is asserted here.
+ */
+describe('“Build with the platform’s own builder”', () => {
+  const STEP = "Build with the platform's own builder";
+
+  async function stepScript(): Promise<string> {
+    const document = Bun.YAML.parse(await Bun.file(WORKFLOW).text()) as {
+      jobs: { build: { steps: { name?: string; run?: string }[] } };
+    };
+    const step = document.jobs.build.steps.find((s) => s.name === STEP);
+    if (step?.run === undefined) {
+      throw new Error(`${WORKFLOW} has no “${STEP}” step with a script`);
+    }
+    return step.run;
+  }
+
+  test('resolves a symlinked function bundle into the exported tree', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'spindrift-vercel-arm-'));
+    try {
+      const scope = join(workspace, 'scope');
+      const bin = join(workspace, 'bin');
+      await mkdir(join(scope, 'app'), { recursive: true });
+      await mkdir(bin, { recursive: true });
+      await writeFile(join(scope, 'package.json'), '{}');
+
+      // Stands in for the platform's builder: writes the tree it would write,
+      // including the symlinked second copy of one function that is the whole
+      // point of this test.
+      await writeFile(
+        join(bin, 'npx'),
+        [
+          '#!/usr/bin/env bash',
+          'set -euo pipefail',
+          'out="${PWD}/.vercel/output"',
+          'mkdir -p "$out/functions/index.func" "$out/static"',
+          'printf \'{"version":3}\' > "$out/config.json"',
+          'printf launcher > "$out/functions/index.func/index.js"',
+          'printf hello > "$out/static/index.html"',
+          'ln -s index.func "$out/functions/index.rsc.func"',
+          '',
+        ].join('\n'),
+      );
+      await Bun.$`chmod +x ${join(bin, 'npx')}`.quiet();
+
+      const outputPath = join(workspace, 'github-output');
+      await writeFile(outputPath, '');
+      const proc = Bun.spawn(['bash', '-c', await stepScript()], {
+        env: {
+          ...process.env,
+          PATH: `${bin}:${process.env.PATH}`,
+          SCOPE: scope,
+          FRAMEWORK: 'nextjs',
+          REQUEST_ARGS: 'PUBLIC_URL=https://app.example.test',
+          SCRATCHFILE: join(workspace, 'Dockerfile'),
+          RUNNER_TEMP: workspace,
+          GITHUB_OUTPUT: outputPath,
+        },
+        stdout: 'pipe',
+        stderr: 'pipe',
+      });
+      if ((await proc.exited) !== 0) {
+        throw new Error(await new Response(proc.stderr).text());
+      }
+
+      const outputs: Record<string, string> = {};
+      for (const line of (await readFile(outputPath, 'utf8')).split('\n')) {
+        const equals = line.indexOf('=');
+        if (equals > 0) outputs[line.slice(0, equals)] = line.slice(equals + 1);
+      }
+
+      const links =
+        await Bun.$`find ${outputs.context as string} -type l`.text();
+      expect(links.trim()).toBe('');
+      // Present *and* real: a dereference that dropped the link entirely would
+      // pass the assertion above and lose the route just the same.
+      expect(
+        await readFile(
+          join(outputs.context as string, 'functions/index.rsc.func/index.js'),
+          'utf8',
+        ),
+      ).toBe('launcher');
+
+      // The framework core resolved reaches the builder as project settings,
+      // which is what stops it building the project as a directory of files.
+      const link = JSON.parse(
+        await readFile(join(scope, '.vercel/project.json'), 'utf8'),
+      ) as { settings: { framework: string } };
+      expect(link.settings.framework).toBe('nextjs');
     } finally {
       await rm(workspace, { recursive: true, force: true });
     }

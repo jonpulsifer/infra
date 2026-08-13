@@ -178,6 +178,63 @@ describe('§4: build stays separate from deploy', () => {
   });
 });
 
+describe('the platform’s own build output deploys prebuilt', () => {
+  /** The shape a Component built for this Target renders to. */
+  const buildOutput = () =>
+    desired({
+      artifact: {
+        type: 'vercel-output',
+        digest: 'sha256:ssr',
+        refs: [`${DEPOT}/bundles/sha256:ssr`],
+      },
+    });
+
+  test('the deployment is created prebuilt, so the platform serves rather than builds', async () => {
+    const { api, adapter } = adapterFor();
+    const { verdict } = await drain(adapter.apply(TARGET, buildOutput()));
+
+    expect(verdict.phase).toBe('LIVE');
+    // Without this the platform treats the upload as a project to build, and
+    // a Build Output API tree is not one — it would install nothing, find no
+    // framework, and serve the tree's own internals as static files.
+    expect(api.servedPrebuilt(PROJECT)).toBe(true);
+  });
+
+  test('the files are addressed where the platform’s reader looks for them', async () => {
+    const { api, adapter } = adapterFor();
+    await drain(adapter.apply(TARGET, buildOutput()));
+
+    // The artifact carries the directory's *contents*; the platform addresses
+    // them by the path its own builder wrote. Both halves have to agree or the
+    // deployment is a pile of files with no `config.json` to route by.
+    expect(api.servedPaths(PROJECT)).toEqual([
+      '.vercel/output/assets/app.css',
+      '.vercel/output/index.html',
+    ]);
+  });
+
+  test('the project’s settings are left alone, being a build that did not happen', async () => {
+    const { api, adapter } = adapterFor();
+    await drain(adapter.apply(TARGET, buildOutput()));
+
+    // A prebuilt deployment configures no build, and these are the *project's*
+    // standing settings — sending them would reset the framework an operator
+    // sees in the dashboard to "Other" on every deploy.
+    expect(createdBody(api).projectSettings).toBeUndefined();
+  });
+
+  test('a plain files artifact is still deployed the way it always was', async () => {
+    const { api, adapter } = adapterFor();
+    await drain(adapter.apply(TARGET, desired()));
+
+    // §4's supplied artifact is `files` and has no build output to have been
+    // produced by, so it must keep the built-nothing settings and the paths
+    // rooted at the site.
+    expect(api.servedPrebuilt(PROJECT)).toBe(false);
+    expect(api.servedPaths(PROJECT)).toEqual(['assets/app.css', 'index.html']);
+  });
+});
+
 describe('a supplied upload is fetched out of the depot', () => {
   /** Where `stageArchiveBytes` puts an upload when the installation has one. */
   const OBJECT = 'gs://bluenose-spindrift-source/abc123.tgz';

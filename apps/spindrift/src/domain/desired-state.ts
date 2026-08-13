@@ -26,7 +26,9 @@ export type ComponentKind = 'service' | 'website' | 'job';
  * What a Build produced (§4). A deploy adapter declares which of these it
  * accepts; the placement, not the kind, decides which one is built (§6).
  */
-export type ArtifactType = 'image' | 'files';
+export const ARTIFACT_TYPES = ['image', 'files', 'vercel-output'] as const;
+
+export type ArtifactType = (typeof ARTIFACT_TYPES)[number];
 
 /** The thing being deployed, exactly as Build returns it (§4, §6). */
 export interface Artifact {

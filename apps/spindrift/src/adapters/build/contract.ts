@@ -169,6 +169,21 @@ export interface BuildSpec {
    */
   outputDirectory: string | null;
   /**
+   * Which framework a `vercel-output` build tells the platform's own builder it
+   * is building, or `null` for every other shape.
+   *
+   * **Not a hint, and not defaultable.** `vercel build` performs no detection
+   * of its own: a build whose settings name no framework is built as "Other",
+   * which copies the tree into `static/` and emits no functions — a green build
+   * that serves an SSR app's own sources. So a `vercel-output` build with a
+   * `null` framework is refused before dispatch rather than run.
+   *
+   * Core's answer rather than the runner's, for §3's reason: the artifact's
+   * shape is resolution output, and a runner that decided this could produce a
+   * different shape than the one the Build was keyed on.
+   */
+  vercelFramework: string | null;
+  /**
    * Registry logins for the destinations whose host the route's own identity
    * cannot authorize (§16).
    *

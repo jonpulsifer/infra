@@ -55,6 +55,7 @@ import {
   buildRouteCandidates,
   DEFAULT_MINIMUM_BUILD_LEVEL,
 } from '../../domain/build-route.ts';
+import { vercelFrameworkOf } from '../../domain/detection/declared.ts';
 import { parseSpindriftFile } from '../../domain/detection/spindrift-file.ts';
 import { DEFAULT_PLATFORM } from '../../domain/placement.ts';
 import { repositoryRefOf } from '../../domain/repository.ts';
@@ -279,6 +280,54 @@ async function fetchableBundleLocation(
  * omission: a scope that builds itself from a Dockerfile renders a server, and
  * §5 gives it no field to name a directory with.
  */
+/**
+ * Which framework a `vercel-output` build declares, read at this build's commit.
+ *
+ * The same shape as {@link outputDirectoryFor} and one difference that matters:
+ * `null` here is fatal rather than benign. A missing output directory means
+ * "ship the scope", which is a real answer; a missing framework means the
+ * platform's builder would be told nothing, and it does not guess — it builds
+ * the project as "Other", copies the tree to `static/`, and emits no functions.
+ * That is a build that succeeds and serves an SSR app's sources, so
+ * `dispatchBuild` refuses on `null` instead of running one.
+ */
+async function vercelFrameworkFor(
+  context: Pick<CommandContext, 'adapters'>,
+  input: {
+    readonly artifactType: BuildSpec['artifactType'];
+    readonly source: Source;
+    readonly repository: {
+      readonly installationId: string;
+      readonly fullName: string;
+    } | null;
+  },
+): Promise<string | null> {
+  if (input.artifactType !== 'vercel-output') return null;
+  if (input.source.kind !== 'repo') return null;
+  if (input.repository === null) return null;
+  const host = context.adapters.repository();
+  if (host === null) return null;
+
+  const path =
+    input.source.subpath === '.'
+      ? 'package.json'
+      : `${input.source.subpath}/package.json`;
+
+  let manifest: string | null;
+  try {
+    manifest = await host.readFile(
+      repositoryRefOf(input.repository),
+      input.repository.fullName,
+      input.source.commit,
+      path,
+    );
+  } catch {
+    return null;
+  }
+  if (manifest === null) return null;
+  return vercelFrameworkOf(manifest);
+}
+
 async function outputDirectoryFor(
   context: Pick<CommandContext, 'adapters'>,
   input: {
@@ -848,7 +897,28 @@ export const dispatchBuild = async (
       source,
       repository: repository ?? null,
     }),
+    vercelFramework: await vercelFrameworkFor(context, {
+      artifactType: build.artifactType,
+      source,
+      repository: repository ?? null,
+    }),
   };
+
+  // §3: the shape was resolved before this build, and this is the one shape
+  // that cannot be built from the shape alone. Refused here rather than in the
+  // runner because the alternative is not a red build — it is a green one that
+  // served the sources, which nobody reading a successful run would think to
+  // check. `waits` rather than `closes`: adding the missing dependency is a
+  // thing a developer does that makes the next tick work.
+  if (spec.artifactType === 'vercel-output' && spec.vercelFramework === null) {
+    return refuseDispatch(
+      context,
+      subject,
+      'NOT_BUILDABLE',
+      `${component.name} is placed on a Vercel Target, which builds through the platform's own framework builder — and nothing in this scope's package.json names a framework Spindrift recognises. Vercel performs no detection of its own: a build with no framework is built as a plain directory of files and would serve this project's sources with no functions at all, so it is refused instead.`,
+      { kind: 'waits' },
+    );
+  }
 
   const dispatchId = input.dispatchId ?? crypto.randomUUID();
   const now = context.clock?.now() ?? new Date();

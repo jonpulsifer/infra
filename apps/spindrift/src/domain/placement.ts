@@ -275,10 +275,17 @@ export function artifactTypeFor(
   kind: ComponentKind,
   target: { readonly capabilities: Pick<TargetCapabilities, 'artifactTypes'> },
 ): ArtifactType {
-  if (
-    kind === 'website' &&
-    target.capabilities.artifactTypes.includes('files')
-  ) {
+  if (kind !== 'website') return 'image';
+  // Ordered by what the Target can serve rather than by preference: a backend
+  // accepting the edge platform's own format can run functions, so a website
+  // placed there is built to that shape and gets SSR, ISR and API routes. The
+  // same Component on a plain static Target is the files it renders to, and on
+  // anything else a server image — one kind, three renderings, chosen by where
+  // it lands (§3, §28).
+  if (target.capabilities.artifactTypes.includes('vercel-output')) {
+    return 'vercel-output';
+  }
+  if (target.capabilities.artifactTypes.includes('files')) {
     return 'files';
   }
   return 'image';
