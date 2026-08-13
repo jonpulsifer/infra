@@ -1,19 +1,15 @@
 /**
  * `listDatastores` — every Datastore this installation holds, newest first.
  *
- * §11 makes a Datastore "top-level and attached, not a field", and until now
- * that was true of the row and false of the UI: the only read path was
- * `getAppWorkspace`, scoped to one App, which is exactly wrong for the
- * question this command answers — "what storage exists, and what is it
- * doing" has nothing to do with which App a reader happened to open first.
- * `createDatastore`, `attachDatastore`, `detachDatastore` and
- * `destroyDatastore` have all existed with no ledger to act from except that
- * one App's workspace.
+ * §11 makes a Datastore "top-level and attached, not a field", and this is the
+ * read that says so: "what storage exists, and what is it doing" has nothing
+ * to do with which App a reader happened to open first, so it is scoped to the
+ * installation and to no App.
  *
  * **Every field is named on the way out, never spread.** `datastores` carries
  * `connection_ref` — the pointer to a Secret, per `commands/views.ts`'s note on
- * `DatastoreView` — and a `select()` or a spread would ship it to the browser
- * the moment this file forgot to think about it. The command layer's one rule
+ * `DatastoreDetailView` — and a `select()` or a spread would ship it to the
+ * browser the moment this file forgot to think about it. The command layer's one rule
  * for a credential-adjacent column is that nothing reaches across it by
  * accident, so the row is read in full and only named fields leave.
  *

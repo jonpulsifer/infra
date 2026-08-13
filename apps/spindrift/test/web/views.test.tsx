@@ -30,6 +30,7 @@ import {
 } from '../../src/web/views/apps/workspace.tsx';
 import { Gate } from '../../src/web/views/auth/gate.tsx';
 import { CredentialSettingsView } from '../../src/web/views/auth/settings.tsx';
+import { DatastoreLedger } from '../../src/web/views/operations/datastores.tsx';
 import { RepositoryList } from '../../src/web/views/repos/list.tsx';
 import { TargetList } from '../../src/web/views/targets/list.tsx';
 import {
@@ -835,15 +836,6 @@ describe('the App workspace', () => {
     expect(markup).toContain('never a filter');
   });
 
-  test('a website attaches no Datastore', () => {
-    // §11: a `website` cannot attach one, so the section is present and empty
-    // rather than absent — it is a peer section, and hiding it would say the
-    // App has no such concept.
-    const markup = workspace(WORKSPACE_SCENARIOS.website);
-    expect(markup).toContain('Datastores');
-    expect(markup).toContain('No Datastores attached');
-  });
-
   test('a service streams its runtime instead', () => {
     const markup = workspace(WORKSPACE_SCENARIOS.service);
     expect(markup).not.toContain('No runtime exists');
@@ -860,86 +852,118 @@ describe('the App workspace', () => {
     expect(markup).not.toContain('immutable');
   });
 
-  test('Components and Datastores are peer sections', () => {
+  test('Components own the width of the overview', () => {
     const markup = workspace(WORKSPACE_SCENARIOS.service);
     expect(markup).toContain('App structure');
-    expect(markup).toContain('Attached resources');
+    // The card that made a Datastore a peer of the Components is gone: what
+    // is left is one line inside this one, and the lifetime acts are the
+    // ledger's.
+    expect(markup).not.toContain('Attached resources');
+    expect(markup).not.toContain('Create Datastore');
+    expect(markup).not.toContain('>Detach<');
+    expect(markup).not.toContain('>Destroy<');
   });
 
-  test('an unattached Datastore is listed as unattached', () => {
-    // §11: a Datastore is top-level and attached, never a field on an App. One
-    // that exists but is not attached still exists.
-    const markup = workspace(WORKSPACE_SCENARIOS.service);
-    expect(markup).toContain('unattached');
-  });
-
-  describe('the Datastore acts (§11)', () => {
-    // The workspace states the placed Target by its **adapter**, so this is the
-    // one fixture field that has to be the enum rather than the pretty label
-    // the design screens carry.
-    const onKubernetes = {
-      ...WORKSPACE_SCENARIOS.service,
-      target: 'kubernetes',
-    };
-    const acts = {
-      onAttachDatastore: async () => ({ ok: true }) as const,
-      onDetachDatastore: async () => ({ ok: true }) as const,
-    };
-
-    test('offers neither of them when the screen wires none', () => {
-      // The both-or-neither rule: `Attach Datastore` and its per-row twin were
-      // buttons with no handler behind them for the whole life of this card,
-      // and a control that does nothing on press reads as a broken feature
-      // rather than an absent one.
-      const markup = workspace(onKubernetes);
+  describe('the Datastore line (§11)', () => {
+    test('names what this App reads through, and offers no attach unwired', () => {
+      // The both-or-neither rule: no handler, no picker — a select that
+      // cannot be submitted reads as a broken control rather than an absent
+      // one.
+      const markup = workspace(WORKSPACE_SCENARIOS.service);
+      expect(markup).toContain('Datastores');
+      expect(markup).toContain('DATABASE_URL');
       expect(markup).not.toContain('>Attach<');
-      expect(markup).not.toContain('>Detach<');
     });
 
-    test('offers the row acts, and nothing that outlives the App', () => {
-      const markup = renderToStaticMarkup(
-        <Workspace view={onKubernetes} {...acts} />,
-      );
-      // Attach or detach, never both on one row: `primary` is attached and
-      // `cache` is not, so the section shows exactly one of each.
-      expect(markup).toContain('>Attach<');
-      expect(markup).toContain('>Detach<');
-      // Create and destroy take a Target and no App, so they are the ledger's.
-      // A card that offered them was a second place for a Target's refusal to
-      // come back to, and a second place to destroy storage from.
-      expect(markup).not.toContain('Create Datastore');
-      expect(markup).not.toContain('>Destroy<');
-    });
-
-    test('offers the row acts whatever the placement', () => {
-      // They act on rows that already exist, so a Datastore created while the
-      // App sat on another Target — or registered externally — is still one an
-      // operator has to be able to detach here.
+    test('offers the unattached ones, and only those', () => {
+      // `attachDatastore` accepts nothing else, so an attached row in the
+      // picker would be a choice whose only outcome is core's refusal.
       const markup = renderToStaticMarkup(
         <Workspace
-          view={{ ...WORKSPACE_SCENARIOS.service, target: 'cloudrun' }}
+          view={WORKSPACE_SCENARIOS.service}
+          onAttachDatastore={async () => ({ ok: true }) as const}
+        />,
+      );
+      expect(markup).toContain('>Attach<');
+      expect(markup).toContain('attach-datastore');
+      expect(markup).toContain('datastore-beacon-cache');
+      expect(markup).not.toContain('value="datastore-beacon-primary"');
+    });
+
+    test('a website has nothing to say and says nothing', () => {
+      // §11: a `website` attaches none, and the fixture carries none — so the
+      // line is absent rather than an empty row under the Components.
+      const markup = workspace(WORKSPACE_SCENARIOS.website);
+      expect(markup).not.toContain('attach-datastore');
+    });
+  });
+
+  describe('the Datastore ledger attaches, with the App named (§11)', () => {
+    const store = {
+      id: 'datastore-cache',
+      name: 'cache',
+      engine: 'valkey',
+      provenance: 'managed',
+      attachedTo: null,
+      target: 'driftwood / Metal',
+      vesselId: 'vessel-driftwood',
+      appId: null,
+      phase: 'LIVE',
+      provisioned: true,
+      when: '2m ago',
+      at: '2026-07-29T10:00:00.000Z',
+    } as const;
+    const acts = {
+      onNavigate: () => {},
+      onCreate: async () => ({ ok: true }) as const,
+      onAttach: async () => ({ ok: true }) as const,
+      onDetach: async () => ({ ok: true }) as const,
+      onDestroy: async () => ({ ok: true }) as const,
+    };
+
+    test('an unattached row offers Attach and an App to attach it to', () => {
+      const markup = renderToStaticMarkup(
+        <DatastoreLedger
+          datastores={[store]}
+          vessels={[]}
+          apps={[
+            {
+              id: 'app-beacon',
+              name: 'beacon',
+              phase: 'LIVE',
+              target: 'Metal',
+              vessel: 'driftwood',
+              url: 'beacon.apps.example',
+              urlLive: true,
+              kind: 'service',
+              source: 'vcs.example/example/beacon',
+              artifact: 'image · a1b2c3d4e5f6',
+              when: '2m ago',
+              at: '2026-07-29T10:00:00.000Z',
+            },
+          ]}
           {...acts}
         />,
       );
-      expect(markup).toContain('>Detach<');
-      expect(markup).not.toContain('Create Datastore');
+      expect(markup).toContain('Attach');
+      expect(markup).toContain('beacon');
+      // Attach or detach, never both: the row already says which one applies.
+      expect(markup).not.toContain('>Detach<');
     });
 
-    test('states the variable each engine arrives on, and asks for neither', () => {
-      // Fixed by engine, so there is no field for it anywhere and this line is
-      // where a developer finds out what their container will be handed.
+    test('no App exists, so no picker is drawn', () => {
+      // A select with nothing in it is the dead control the both-or-neither
+      // rule exists to prevent — and `attachDatastore` would have nothing to
+      // be pointed at.
       const markup = renderToStaticMarkup(
-        <Workspace view={onKubernetes} {...acts} />,
+        <DatastoreLedger
+          datastores={[store]}
+          vessels={[]}
+          apps={[]}
+          {...acts}
+        />,
       );
-      expect(markup).toContain('DATABASE_URL');
-      expect(markup).toContain('REDIS_URL');
-      expect(markup).not.toContain('datastore-variable');
-    });
-
-    test('a provisioning Datastore reads as provisioning, not as broken', () => {
-      const markup = workspace(WORKSPACE_SCENARIOS.service);
-      expect(markup).toContain('WAITING');
-      expect(markup).toContain('Waiting for 1 shard to report ready');
+      expect(markup).not.toContain('attach-app');
     });
   });
 
