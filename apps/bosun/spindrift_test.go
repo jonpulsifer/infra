@@ -70,18 +70,14 @@ func (f *fakeSpindrift) postedResults() []postedResult {
 // poolBuildSource is the production wiring: a buildSource whose spawns land in
 // a real warm pool, for the tests that assert on what the pool did with them.
 func poolBuildSource(p *pool, sd spindriftClient) *buildSource {
-	return &buildSource{sd: sd, skiffs: p, logger: p.logger, stats: p.stats}
-}
-
-// fakeSpawner is the whole of the pool as a buildSource sees it: one skiff the
-// test owns, whose done channel it closes when it wants the build to end.
-type fakeSpawner struct {
-	s   *skiff
-	err error
-}
-
-func (f *fakeSpawner) spawnBuild(context.Context, *buildClaim) (*skiff, error) {
-	return f.s, f.err
+	return &buildSource{
+		sd: sd,
+		spawn: func(ctx context.Context, claim *buildClaim) (*skiff, error) {
+			return p.spawn(ctx, p.buildBerth(claim))
+		},
+		logger: p.logger,
+		stats:  p.stats,
+	}
 }
 
 // The claim/result choreography with no warm pool behind it at all: the port
@@ -98,7 +94,12 @@ func TestBuildSourcePostsTheResultTheGuestLeftBehind(t *testing.T) {
 
 	s := &skiff{paths: skiffPaths{diagDir: diagDir}, done: make(chan struct{})}
 	sd := &fakeSpindrift{}
-	b := &buildSource{sd: sd, skiffs: &fakeSpawner{s: s}, logger: testLogger(), stats: newMetrics()}
+	b := &buildSource{
+		sd:     sd,
+		spawn:  func(context.Context, *buildClaim) (*skiff, error) { return s, nil },
+		logger: testLogger(),
+		stats:  newMetrics(),
+	}
 
 	done := make(chan struct{})
 	go func() {

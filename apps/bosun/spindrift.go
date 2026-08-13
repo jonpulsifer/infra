@@ -144,20 +144,20 @@ func (c *sdClient) do(ctx context.Context, method, url string, body, out any) (s
 	return resp.StatusCode, nil
 }
 
-// buildSpawner is the one thing a build needs from the warm pool: boot a skiff
-// at a build berth for this claim and hand it back to wait on -- its done
-// channel closes once the skiff is gone and its diag share is safe to read.
-// The pool implements it. Nothing else the pool keeps -- the slot table, the
-// drain flag, the skiff map, GitHub polling -- is a build's business.
-type buildSpawner interface {
-	spawnBuild(ctx context.Context, claim *buildClaim) (*skiff, error)
-}
-
 // buildSource is this bosun host serving a Spindrift outbox: it claims build
 // requests, runs each on a skiff, and posts back what the guest left behind.
+//
+// spawn is the one thing a build needs from the warm pool: boot a skiff at a
+// build berth for this claim and hand it back to wait on -- its done channel
+// closes once the skiff is gone and its diag share is safe to read. Nothing
+// else the pool keeps -- the slot table, the drain flag, the skiff map, GitHub
+// polling -- is a build's business. A field rather than an interface because
+// there is one production answer and it is p.spawn with a build berth; the
+// errDraining contract runBuild depends on is spawn's, so anything substituted
+// here owes it too.
 type buildSource struct {
 	sd     spindriftClient
-	skiffs buildSpawner
+	spawn  func(ctx context.Context, claim *buildClaim) (*skiff, error)
 	logger *slog.Logger
 	stats  *metrics
 }
@@ -202,7 +202,7 @@ func (b *buildSource) buildLoop(ctx context.Context, classes []string, pollInter
 func (b *buildSource) runBuild(ctx context.Context, claim *buildClaim) {
 	logger := b.logger.With("build_id", claim.ID, "class", claim.Class)
 
-	s, err := b.skiffs.spawnBuild(ctx, claim)
+	s, err := b.spawn(ctx, claim)
 	if err != nil {
 		if errors.Is(err, errDraining) {
 			// Never attempted: stay silent so the claim's lease expires and

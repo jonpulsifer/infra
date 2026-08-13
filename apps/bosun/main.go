@@ -79,8 +79,10 @@ func main() {
 			os.Exit(1)
 		}
 		builds := &buildSource{
-			sd:     newSDClient(cfg.Spindrift.URL, strings.TrimSpace(string(sdTokenRaw))),
-			skiffs: p,
+			sd: newSDClient(cfg.Spindrift.URL, strings.TrimSpace(string(sdTokenRaw))),
+			spawn: func(ctx context.Context, claim *buildClaim) (*skiff, error) {
+				return p.spawn(ctx, p.buildBerth(claim))
+			},
 			logger: logger,
 			stats:  p.stats,
 		}

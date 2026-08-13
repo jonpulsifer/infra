@@ -135,7 +135,7 @@ func (s *skiff) verdict(now time.Time, maxLifetime time.Duration) string {
 	switch {
 	case s.busySince.IsZero() && s.everOnline && s.offlineStreak >= wedgeThreshold:
 		return exitWedged
-	case !s.busySince.IsZero() && now.Sub(s.busySince) > maxLifetime:
+	case !s.busySince.IsZero() && maxLifetime > 0 && now.Sub(s.busySince) > maxLifetime:
 		return exitLifetime
 	case s.busySince.IsZero() && now.Sub(s.mintedAt) > jitExpiry:
 		return exitJITExpired
@@ -474,13 +474,6 @@ func (p *pool) buildBerth(claim *buildClaim) berth {
 	}
 }
 
-// spawnBuild is the pool's side of buildSpawner, and the only thing a
-// buildSource asks of it: one spawn at a build berth, handed back for the
-// build to wait on.
-func (p *pool) spawnBuild(ctx context.Context, claim *buildClaim) (*skiff, error) {
-	return p.spawn(ctx, p.buildBerth(claim))
-}
-
 // spawn boots one skiff for berth b and hands its lifetime off to awaitExit.
 // Errors are logged before they are returned, and fill and awaitExit ignore
 // them: a single failed spawn should not take down the rest of the pool.
@@ -507,12 +500,17 @@ func (p *pool) spawn(ctx context.Context, b berth) (*skiff, error) {
 		p.mu.Unlock()
 	}()
 
+	// The berth's own fields first, so an unknown class says which birth path
+	// hit it: a build claim names one bosun no longer boots, a refill names one
+	// removed from the config under a live pool, and they are otherwise the
+	// same line.
+	logger := p.logger.With("class", b.class).With(b.fields...)
+
 	class, ok := p.cfg.Classes[b.class]
 	if !ok {
-		p.logger.Error("spawn: unknown class", "class", b.class)
+		logger.Error("spawn: unknown class")
 		return nil, fmt.Errorf("unknown class %q", b.class)
 	}
-	logger := p.logger.With("class", b.class).With(b.fields...)
 
 	id, err := newSkiffID()
 	if err != nil {
@@ -1001,6 +999,11 @@ func (p *pool) awaitEmpty(limit time.Duration) {
 // maxLifetime is the class's busy-time budget — the only thing that reaps a
 // busy skiff, wedged or working, so LoadConfig guarantees every class carries
 // a non-zero one.
+//
+// A class that is not in the config at all yields zero, which verdict reads as
+// "no budget to exceed" and never reaps on. Zero must not mean "expired the
+// instant it went busy": a class going missing under a running skiff would
+// then kill the job it is in the middle of.
 func (p *pool) maxLifetime(className string) time.Duration {
 	return time.Duration(p.cfg.Classes[className].MaxLifetime)
 }

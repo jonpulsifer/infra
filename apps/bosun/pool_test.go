@@ -1100,6 +1100,18 @@ func TestSkiffVerdict(t *testing.T) {
 	}
 }
 
+// A class missing from the config yields a zero budget from pool.maxLifetime,
+// and zero must not read as "expired the instant it went busy" — a class going
+// missing under a running skiff would then kill the job it is in the middle of.
+func TestAZeroBudgetNeverReaps(t *testing.T) {
+	minted := time.Date(2026, 8, 13, 12, 0, 0, 0, time.UTC)
+	s := &skiff{mintedAt: minted}
+	s.observe(minted, "online", true)
+	if got := s.verdict(minted.Add(72*time.Hour), 0); got != "" {
+		t.Fatalf("verdict = %q, want %q: an absent class has no budget to exceed", got, "")
+	}
+}
+
 // The budget the daemon actually ships with, driven through the poll loop:
 // the clock is the pool's, so an hour of a job passes without the test
 // waiting for one or the class having to declare a millisecond budget.
