@@ -264,14 +264,33 @@ let
     # this env-provided URL survives into jobs and the stock actions/cache
     # talks to the local server instead of GitHub's. No announcement, no
     # override: the skiff behaves exactly as the hosted runner does.
+    buildkit=""
     for tok in $($bb cat /proc/cmdline); do
       case "$tok" in
         bosun.cache=*) echo "export ACTIONS_RESULTS_URL=''${tok#bosun.cache=}" >> /etc/skiff-env ;;
+        bosun.buildkit=*) buildkit="''${tok#bosun.buildkit=}" ;;
       esac
     done
     echo "skiff-mark workspace-ready $($bb cut -d' ' -f1 /proc/uptime)"
     PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
       dockerd >/var/log/dockerd.log 2>&1 &
+
+    # The host's BuildKit, when it runs one. buildx's remote driver talks
+    # straight to a buildkitd endpoint rather than through dockerd, so a
+    # `docker buildx build` in a job reuses the layers the last skiff on this
+    # host left behind instead of starting cold. HOME matches the runner's, or
+    # the builder would be written where no job looks.
+    #
+    # Best effort deliberately: if the builder cannot be created the job still
+    # builds through dockerd's embedded BuildKit, which is exactly what it did
+    # before -- just cold. A skiff that cannot reach a cache is not a skiff
+    # that should refuse the job.
+    if [ -n "$buildkit" ]; then
+      HOME=/home/runner \
+      PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+        docker buildx create --driver remote --name bosun --use "$buildkit" \
+        >/var/log/buildx.log 2>&1 || echo "buildx remote builder unavailable, using embedded" >> /var/log/buildx.log
+    fi
     echo "skiff-mark setup-done $($bb cut -d' ' -f1 /proc/uptime)"
   '';
 

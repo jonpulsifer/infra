@@ -22,10 +22,19 @@ on:
           - infra-offsite
           - infra-folly
           - skiff-ubuntu
-          - skiff-ubuntu-xl
           - skiff-ubuntu-bench
           - ubuntu-latest
         default: all
+      waves:
+        description: 'Identical jobs fired at the chosen label at once. 1 measures a runner; >1 measures the pool — a hosted label queues past its concurrency cap while the fleet answers from warm slots, which is the whole argument for keeping skiffs booted'
+        type: choice
+        options:
+          - '1'
+          - '2'
+          - '4'
+          - '8'
+          - '12'
+        default: '1'
       caches:
         description: 'best = each label uses the fastest cache it has; none = no dependency or build cache anywhere (isolates the runner from the network); gha = actions/cache on every label, exactly as a hosted runner uses it — on a skiff whose host runs the local cache service, this measures that service'
         type: choice
@@ -44,6 +53,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       runners: ${{ steps.set-runners.outputs.runners }}
+      waves: ${{ steps.set-runners.outputs.waves }}
     steps:
       - id: set-runners
         run: |
@@ -52,6 +62,10 @@ jobs:
           else
             echo 'runners=["${{ inputs.target }}"]' >> "$GITHUB_OUTPUT"
           fi
+          # A JSON array [1..waves]. The matrix multiplies it against the label
+          # list, so `waves: 8` on `skiff-ubuntu` fires eight identical jobs at
+          # the fleet's shared pool at once.
+          seq 1 "${{ inputs.waves }}" | jq -cs '.' | sed 's/^/waves=/' >> "$GITHUB_OUTPUT"
 
   # The cheapest job that can exist, on every label, so the Actions timings
   # separate what a runner costs to acquire from what the workload costs to
@@ -92,7 +106,8 @@ jobs:
       fail-fast: false
       matrix:
         runner: ${{ fromJson(needs.configure.outputs.runners) }}
-    name: benchmark (${{ matrix.runner }})
+        wave: ${{ fromJson(needs.configure.outputs.waves) }}
+    name: benchmark (${{ matrix.runner }}${{ inputs.waves != '1' && format(' wave {0}', matrix.wave) || '' }})
     runs-on: ${{ matrix.runner }}
     permissions:
       contents: read
