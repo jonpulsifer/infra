@@ -516,6 +516,57 @@
     .log > div { grid-template-columns: 1fr; }
     .log time { order: -1; }
   }
+
+  /* ---------- the gist, and the argument folded under it ---------- */
+  .gist {
+    font-family: var(--serif);
+    font-size: clamp(1.15rem, 0.95rem + 0.95vw, 1.85rem);
+    line-height: 1.36;
+    max-width: 46ch;
+    color: var(--ink-2);
+    text-wrap: pretty;
+  }
+  .gist b { color: var(--ink); font-weight: 500; }
+
+  details.more {
+    border-top: 1px solid var(--rule);
+    border-bottom: 1px solid var(--rule);
+    max-width: 74rem;
+  }
+  details.more + details.more { border-top: 0; }
+  details.more > summary {
+    cursor: pointer;
+    list-style: none;
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.8rem 0;
+    font-family: var(--mono);
+    font-size: 0.72rem;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--accent);
+  }
+  details.more > summary::-webkit-details-marker { display: none; }
+  details.more > summary::before {
+    content: "+";
+    display: grid;
+    place-items: center;
+    flex: none;
+    width: 1.2rem;
+    height: 1.2rem;
+    border: 1px solid currentColor;
+    border-radius: 2px;
+    font-size: 0.85rem;
+    line-height: 1;
+  }
+  details.more[open] > summary::before { content: "\2013"; }
+  details.more > summary:hover { color: var(--accent-ink); }
+  details.more > .body {
+    display: grid;
+    gap: clamp(0.9rem, 2vh, 1.4rem);
+    padding-bottom: 1.3rem;
+  }
 </style>
 <style>*,*::before,*::after{box-sizing:border-box}*{margin:0}img,svg{display:block;max-width:100%}</style>
 </head>
@@ -523,7 +574,7 @@
 
 <!-- ============================== 01 title ============================== -->
 <section class="slide title-slide">
-  <span class="no"><b>01</b> / 11</span>
+  <span class="no"><b>01</b> / 10</span>
   <div class="title-mark" aria-hidden="true">
     <svg viewBox="0 0 800 620" role="presentation">
       <path class="contour" d="M700 310 C 585 180, 380 92, 40 52"/>
@@ -546,12 +597,12 @@
   <div style="display:flex;flex-direction:column;gap:clamp(1rem,3vh,2rem)">
     <h1>Bosun</h1>
     <p class="lede" style="max-width:33ch">A skiff is already booted before the job exists. It serves exactly one, and then it is scuttled.</p>
-    <p class="small dim" style="max-width:48ch">Nothing dispatches it. That one inversion is why there is no webhook, no queue, no inbound port and no control plane to run.</p>
+    <p class="small dim" style="max-width:52ch">Nothing dispatches it. That one inversion is why there is no webhook, no queue, no inbound port and no control plane to run. Every slide here reads in one line — open a band if you want the argument.</p>
   </div>
 
   <p class="colophon">
     <span><b>4</b> nouns</span>
-    <span><b>2,287</b> lines of Go</span>
+    <span><b>2,518</b> lines of Go</span>
     <span><b>0</b> dependencies</span>
     <span><b>0</b> inbound ports</span>
   </p>
@@ -559,147 +610,160 @@
 
 <!-- ============================== 02 problem ============================== -->
 <section class="slide">
-  <span class="no"><b>02</b> / 11</span>
+  <span class="no"><b>02</b> / 10</span>
   <p class="eyebrow">The problem</p>
   <h2>“I pushed. Now everybody waits.”</h2>
-  <div class="split">
-    <div style="display:flex;flex-direction:column;gap:1rem">
-      <p class="dim">Before a job computes anything it re-acquires a machine, a toolchain and a cache it already had the last time it ran. That tax is fixed, it is paid again on every push, and a bigger runner does not remove it — a faster CPU runs the same six steps.</p>
-      <p class="rule-kicker">None of this is your build. All of it is on the critical path between a push and an answer.</p>
+  <p class="gist">Before a job computes anything it re-acquires a machine, a toolchain and a cache it already had last time. That tax is <b>fixed</b>, it is paid again on every push, and a bigger runner does not remove it — a faster CPU runs the same six steps.</p>
+  <details class="more">
+    <summary>The six steps, and what they cost, measured</summary>
+    <div class="body">
+      <div class="split">
+        <ol class="steps">
+          <li>Wait for a runner — a pod, a VM, a slot</li>
+          <li>Pull the toolchain image</li>
+          <li>Restore the dependency cache over the internet</li>
+          <li>Install a toolchain the last job also installed</li>
+          <li>Run the build you actually wanted</li>
+          <li>Share a kernel with whatever ran before you</li>
+        </ol>
+        <p class="rule-kicker">None of this is your build. All of it is on the critical path between a push and an answer.</p>
+      </div>
+      <p class="verbatim">measured on one real repository's suite — restoring a dependency cache over the internet <b>49–76 s</b> · waiting for a container runner <b>1–59 s</b> · the same cold suite on a hosted runner <b>271–375 s</b>, same commit, different days</p>
+      <p class="small dim" style="max-width:68ch">The lever everyone knows about is to run it somewhere else. Almost nobody pulls it, because CI is welded to the place the code lives: the label, the cache, the queue, the identity and the logs all belong to one vendor, and moving the compute has meant giving up all five.</p>
     </div>
-    <ol class="steps">
-      <li>Wait for a runner — a pod, a VM, a slot</li>
-      <li>Pull the toolchain image</li>
-      <li>Restore the dependency cache over the internet</li>
-      <li>Install a toolchain the last job also installed</li>
-      <li>Run the build you actually wanted</li>
-      <li>Share a kernel with whatever ran before you</li>
-    </ol>
-  </div>
-  <p class="verbatim">measured on one real repository's suite — restoring a dependency cache over the internet <b>49–76 s</b> · waiting for a container runner <b>1–59 s</b> · the same cold suite on a hosted runner <b>271–375 s</b>, same commit, different days</p>
-  <p class="small dim" style="max-width:68ch">The lever everyone knows about is to run it somewhere else. Almost nobody pulls it, because CI is welded to the place the code lives: the label, the cache, the queue, the identity and the logs all belong to one vendor, and moving the compute has meant giving up all five.</p>
+  </details>
 </section>
 
 <!-- ============================== 03 the idea ============================== -->
 <section class="slide">
-  <span class="no"><b>03</b> / 11</span>
+  <span class="no"><b>03</b> / 10</span>
   <p class="eyebrow">The whole idea</p>
   <h2>Nobody dispatches a skiff. It is <em>already there</em>.</h2>
-  <figure>
-    <div class="figwrap">
-      <svg viewBox="0 0 940 380" role="img" aria-label="The warm pool loop: bosun mints a JIT runner configuration and boots a skiff; the skiff registers itself with GitHub; GitHub hands the already-booted skiff a matching job unprompted; the skiff runs exactly one job and powers off; the VMM exit is the completion signal, and a replacement boots two seconds later. GitHub never tells bosun that a job was queued, so there is no webhook and no inbound connection.">
-        <defs>
-          <marker id="bh" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
-            <path d="M0 0 L10 5 L0 10 z" fill="var(--accent)"/>
-          </marker>
-        </defs>
+  <p class="gist">GitHub feeds a job to a runner that is already listening — so the arrow that would carry <b>“a job is waiting”</b> never has to exist. Warm pool, not dispatch.</p>
+  <details class="more">
+    <summary>The loop, and what it deletes</summary>
+    <div class="body">
+      <figure>
+        <div class="figwrap">
+          <svg viewBox="0 0 940 380" role="img" aria-label="The warm pool loop: bosun mints a JIT runner configuration and boots a skiff; the skiff registers itself with GitHub; GitHub hands the already-booted skiff a matching job unprompted; the skiff runs exactly one job and powers off; the VMM exit is the completion signal, and a replacement boots two seconds later. GitHub never tells bosun that a job was queued, so there is no webhook and no inbound connection.">
+            <defs>
+              <marker id="bh" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+                <path d="M0 0 L10 5 L0 10 z" fill="var(--accent)"/>
+              </marker>
+            </defs>
 
-        <!-- github -->
-        <rect class="d-box" x="360" y="20" width="220" height="86" rx="8"/>
-        <text class="d-t b" x="378" y="46">GitHub</text>
-        <text class="d-s" x="378" y="66">hands a matching job to a</text>
-        <text class="d-s" x="378" y="84">runner that is already listening</text>
+            <!-- github -->
+            <rect class="d-box" x="360" y="20" width="220" height="86" rx="8"/>
+            <text class="d-t b" x="378" y="46">GitHub</text>
+            <text class="d-s" x="378" y="66">hands a matching job to a</text>
+            <text class="d-s" x="378" y="84">runner that is already listening</text>
 
-        <!-- bosun -->
-        <rect class="d-box2" x="20" y="170" width="220" height="110" rx="8"/>
-        <text class="d-t b" x="38" y="198">bosun</text>
-        <text class="d-s" x="38" y="220">keeps N skiffs of each class</text>
-        <text class="d-s" x="38" y="238">booted and registered —</text>
-        <text class="d-s" x="38" y="256">N is declared, not derived —</text>
-        <text class="d-m" x="38" y="272">one number, one config file</text>
+            <!-- bosun -->
+            <rect class="d-box2" x="20" y="170" width="220" height="110" rx="8"/>
+            <text class="d-t b" x="38" y="198">bosun</text>
+            <text class="d-s" x="38" y="220">keeps N skiffs of each class</text>
+            <text class="d-s" x="38" y="238">booted and registered —</text>
+            <text class="d-s" x="38" y="256">N is declared, not derived —</text>
+            <text class="d-m" x="38" y="272">one number, one config file</text>
 
-        <!-- skiff -->
-        <rect class="d-acc" x="360" y="170" width="220" height="110" rx="8"/>
-        <text class="d-t b" x="378" y="198">skiff</text>
-        <text class="d-s" x="378" y="220">one cloud-hypervisor microVM</text>
-        <text class="d-s" x="378" y="238">one job, then</text>
-        <text class="d-m" x="378" y="256">poweroff -f</text>
+            <!-- skiff -->
+            <rect class="d-acc" x="360" y="170" width="220" height="110" rx="8"/>
+            <text class="d-t b" x="378" y="198">skiff</text>
+            <text class="d-s" x="378" y="220">one cloud-hypervisor microVM</text>
+            <text class="d-s" x="378" y="238">one job, then</text>
+            <text class="d-m" x="378" y="256">poweroff -f</text>
 
-        <!-- scuttled -->
-        <rect class="d-box" x="700" y="170" width="220" height="110" rx="8"/>
-        <text class="d-t b" x="718" y="198">scuttled</text>
-        <text class="d-s" x="718" y="220">the VMM exits 0, so</text>
-        <text class="d-s" x="718" y="238">“did it finish?” is</text>
-        <text class="d-m" x="718" y="256">wait(2)</text>
-        <text class="d-s" x="718" y="274">on a child process</text>
+            <!-- scuttled -->
+            <rect class="d-box" x="700" y="170" width="220" height="110" rx="8"/>
+            <text class="d-t b" x="718" y="198">scuttled</text>
+            <text class="d-s" x="718" y="220">the VMM exits 0, so</text>
+            <text class="d-s" x="718" y="238">“did it finish?” is</text>
+            <text class="d-m" x="718" y="256">wait(2)</text>
+            <text class="d-s" x="718" y="274">on a child process</text>
 
-        <path class="d-flow" d="M240 225 L352 225" marker-end="url(#bh)"/>
-        <text class="d-lab" x="296" y="215" text-anchor="middle">mint · boot</text>
+            <path class="d-flow" d="M240 225 L352 225" marker-end="url(#bh)"/>
+            <text class="d-lab" x="296" y="215" text-anchor="middle">mint · boot</text>
 
-        <path class="d-flow" d="M440 170 L440 114" marker-end="url(#bh)"/>
-        <text class="d-lab" x="432" y="146" text-anchor="end">registers</text>
+            <path class="d-flow" d="M440 170 L440 114" marker-end="url(#bh)"/>
+            <text class="d-lab" x="432" y="146" text-anchor="end">registers</text>
 
-        <path class="d-flow" d="M500 106 L500 162" marker-end="url(#bh)"/>
-        <text class="d-lab" x="508" y="146">the job</text>
+            <path class="d-flow" d="M500 106 L500 162" marker-end="url(#bh)"/>
+            <text class="d-lab" x="508" y="146">the job</text>
 
-        <path class="d-flow" d="M580 225 L692 225" marker-end="url(#bh)"/>
-        <text class="d-lab" x="636" y="215" text-anchor="middle">one job</text>
+            <path class="d-flow" d="M580 225 L692 225" marker-end="url(#bh)"/>
+            <text class="d-lab" x="636" y="215" text-anchor="middle">one job</text>
 
-        <!-- return rail -->
-        <path class="d-flow" d="M810 280 L810 330 Q810 340 800 340 L140 340 Q130 340 130 330 L130 288" marker-end="url(#bh)"/>
-        <text class="d-lab" x="470" y="332" text-anchor="middle">bosun notices, and boots a replacement — measured at +2 s</text>
+            <!-- return rail -->
+            <path class="d-flow" d="M810 280 L810 330 Q810 340 800 340 L140 340 Q130 340 130 330 L130 288" marker-end="url(#bh)"/>
+            <text class="d-lab" x="470" y="332" text-anchor="middle">bosun notices, and boots a replacement — measured at +2 s</text>
 
-        <!-- barred inbound -->
-        <path class="d-stop" d="M352 66 L146 162"/>
-        <path class="d-stop" d="M241 106 L257 122 M257 106 L241 122" stroke-dasharray="0"/>
-        <text class="d-cau" x="30" y="128">never told a job is queued</text>
-      </svg>
+            <!-- barred inbound -->
+            <path class="d-stop" d="M352 66 L146 162"/>
+            <path class="d-stop" d="M241 106 L257 122 M257 106 L241 122" stroke-dasharray="0"/>
+            <text class="d-cau" x="30" y="128">never told a job is queued</text>
+          </svg>
+        </div>
+        <figcaption>A JIT-registered runner is ephemeral by construction: it takes one job, deregisters itself and exits. That property is doing all the work here — because GitHub feeds a listening runner unprompted, the arrow that would carry “a job is waiting” does not need to exist.</figcaption>
+      </figure>
+      <div class="cols">
+        <div class="card card--flag">
+          <h4>What that deletes</h4>
+          <p>No webhook endpoint. No inbound connectivity. No queue API. Nothing to replay after a restart, because there is no delivery that could have been missed.</p>
+        </div>
+        <div class="card card--cau">
+          <h4>What it costs, said out loud</h4>
+          <p>Idle skiffs hold RAM, and there is no scale-to-zero. A pool is a standing reservation — which is exactly why a class is a declared number and not an autoscaler.</p>
+        </div>
+      </div>
     </div>
-    <figcaption>A JIT-registered runner is ephemeral by construction: it takes one job, deregisters itself and exits. That property is doing all the work here — because GitHub feeds a listening runner unprompted, the arrow that would carry “a job is waiting” does not need to exist.</figcaption>
-  </figure>
-  <p class="rule-kicker">Warm pool, not dispatch.</p>
-  <div class="cols">
-    <div class="card card--flag">
-      <h4>What that deletes</h4>
-      <p>No webhook endpoint. No inbound connectivity. No queue API. Nothing to replay after a restart, because there is no delivery that could have been missed.</p>
-    </div>
-    <div class="card card--cau">
-      <h4>What it costs, said out loud</h4>
-      <p>Idle skiffs hold RAM, and there is no scale-to-zero. A pool is a standing reservation — which is exactly why a class is a declared number and not an autoscaler.</p>
-    </div>
-  </div>
+  </details>
 </section>
 
 <!-- ============================== 04 adoption ============================== -->
 <section class="slide">
-  <span class="no"><b>04</b> / 11</span>
+  <span class="no"><b>04</b> / 10</span>
   <p class="eyebrow">What adoption costs</p>
   <h2>One line moves, and it is the <em>label</em></h2>
-  <div class="split">
-    <div style="display:flex;flex-direction:column;gap:1.1rem">
-      <p class="verbatim" style="border-left-color:var(--good)"><span style="color:var(--caution)">- &nbsp;runs-on: ubuntu-latest</span><br /><span style="color:var(--good)">+ &nbsp;runs-on: skiff-ubuntu</span></p>
-      <p class="dim">The workflow is otherwise untouched. Same steps, same third-party actions, same <code>actions/cache</code> — the stock action, which the hull points at a cache service on the host's own disk instead of one across the internet.</p>
-      <p class="rule-kicker">Nothing about a skiff is visible to the job running inside it. A runner you have to write YAML for is a migration, not a runner.</p>
-    </div>
-    <div style="display:flex;flex-direction:column;gap:1.1rem">
-      <div class="stats">
-        <div class="stat stat--ink"><b>1</b><span>line changed in the workflow</span></div>
-        <div class="stat stat--ink"><b>0</b><span>firewall changes — a pool only ever dials out</span></div>
-        <div class="stat"><b>14 s</b><span>cache restore on-host, against 49–76 s over the internet</span></div>
-        <div class="stat"><b>1 s</b><span>queue to start, on every run</span></div>
+  <p class="gist">The workflow is otherwise untouched — same steps, same third-party actions, same <code>actions/cache</code>. <b>Nothing about a skiff is visible to the job running inside it.</b></p>
+  <details class="more">
+    <summary>The diff, and what it buys on every run</summary>
+    <div class="body">
+      <div class="split">
+        <div style="display:flex;flex-direction:column;gap:1.1rem">
+          <p class="verbatim" style="border-left-color:var(--good)"><span style="color:var(--caution)">- &nbsp;runs-on: ubuntu-latest</span><br /><span style="color:var(--good)">+ &nbsp;runs-on: skiff-ubuntu</span></p>
+          <p class="dim">The stock <code>actions/cache</code> keeps working — the hull points it at a cache service on the host's own disk instead of one across the internet.</p>
+          <p class="rule-kicker">A runner you have to write YAML for is a migration, not a runner.</p>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:1.1rem">
+          <div class="stats">
+            <div class="stat stat--ink"><b>1</b><span>line changed in the workflow</span></div>
+            <div class="stat stat--ink"><b>0</b><span>firewall changes — a pool only ever dials out</span></div>
+            <div class="stat"><b>14 s</b><span>cache restore on-host, against 49–76 s over the internet</span></div>
+            <div class="stat"><b>1 s</b><span>queue to start, on every run</span></div>
+          </div>
+          <p class="small dim" style="max-width:62ch">Two shapes already exist for this. One keeps your workflow and swaps the hardware behind the label. The other keeps a hosted orchestrator and moves the agents onto machines you own. This keeps the label, moves the machines, and then deletes the orchestrator — because a warm pool never needed one.</p>
+        </div>
       </div>
-      <p class="small dim" style="max-width:62ch">Two shapes already exist for this. One keeps your workflow and swaps the hardware behind the label. The other keeps a hosted orchestrator and moves the agents onto machines you own. This keeps the label, moves the machines, and then deletes the orchestrator — because a warm pool never needed one.</p>
     </div>
-  </div>
+  </details>
 </section>
 
 <!-- ============================== 05 the hull contract ============================== -->
 <section class="slide">
-  <span class="no"><b>05</b> / 11</span>
+  <span class="no"><b>05</b> / 10</span>
   <p class="eyebrow">Four nouns, and the seam between them</p>
   <h2>The hull describes itself. bosun never learns <em>why</em>.</h2>
-  <div class="lineage">
-    <div><b>skiff</b><span>one microVM · one job · then scuttled</span></div>
-    <div><b>hull</b><span>the kernel + initrd it boots from</span></div>
-    <div><b>class</b><span>what a runs-on: label resolves to</span></div>
-    <div><b>bosun</b><span>the daemon, and the project</span></div>
-  </div>
-  <div class="split">
-    <div style="display:flex;flex-direction:column;gap:1rem">
-      <p class="dim">A hull is a directory holding a <code>hull.json</code> beside the files it names — a kernel, an initrd, a command line, and a list of devices. bosun translates that manifest into hypervisor arguments and provisions what it asks for.</p>
-      <p class="rule-kicker">There is no per-family branching anywhere in the daemon. Two unrelated operating systems boot through one code path.</p>
-    </div>
-    <div style="display:flex;flex-direction:column;gap:1.1rem">
+  <p class="gist">A hull is a directory holding a <code>hull.json</code> beside the files it names. There is <b>no per-family branching anywhere in the daemon</b> — two unrelated operating systems boot through one code path.</p>
+  <details class="more">
+    <summary>The four nouns, and what each side promises</summary>
+    <div class="body">
+      <p class="dim" style="max-width:76ch">The manifest names a kernel, an initrd, a command line and a list of devices. bosun translates it into hypervisor arguments and provisions what it asks for — nothing more.</p>
+      <div class="lineage">
+        <div><b>skiff</b><span>one microVM · one job · then scuttled</span></div>
+        <div><b>hull</b><span>the kernel + initrd it boots from</span></div>
+        <div><b>class</b><span>what a runs-on: label resolves to</span></div>
+        <div><b>bosun</b><span>the daemon, and the project</span></div>
+      </div>
       <div class="cols">
         <div class="card card--flag">
           <h4>bosun promises every skiff</h4>
@@ -721,47 +785,52 @@
         </div>
       </div>
       <p class="verbatim">the contract names no runner, no version, no operating system and no package manager</p>
-      <p class="small dim" style="max-width:66ch">Two hull families exist today: a NixOS hull that mounts the host's own <code>/nix/store</code> read-only, and an Ubuntu hull that is an ordinary container image flattened into a read-only squashfs. The daemon cannot tell them apart — which is why the shared store is a property of <em>one hull</em> and never of the platform. One implementation would have made this seam hypothetical; two is what makes it real.</p>
+      <p class="small dim" style="max-width:70ch">Two hull families exist today: a NixOS hull that mounts the host's own <code>/nix/store</code> read-only, and an Ubuntu hull that is an ordinary container image flattened into a read-only squashfs. The daemon cannot tell them apart — which is why the shared store is a property of <em>one hull</em> and never of the platform. One implementation would have made this seam hypothetical; two is what makes it real.</p>
     </div>
-  </div>
+  </details>
 </section>
 
 <!-- ============================== 06 delete before you build ============================== -->
 <section class="slide">
-  <span class="no"><b>06</b> / 11</span>
+  <span class="no"><b>06</b> / 10</span>
   <p class="eyebrow">The standing rule</p>
   <h2>If an answer adds a component, it must say what it <em>deletes</em></h2>
-  <div class="split split--wide">
-    <div style="display:flex;flex-direction:column;gap:1.2rem">
-      <div class="stats">
-        <div class="stat"><b>2,287</b><span>lines of Go, in eight files</span></div>
-        <div class="stat"><b>0</b><span>third-party dependencies</span></div>
-        <div class="stat"><b>0</b><span>inbound ports on the daemon</span></div>
-        <div class="stat"><b>0</b><span>databases</span></div>
+  <p class="gist">2,518 lines of Go in eight files, no third-party dependencies, no inbound ports, no database. Every component that got deleted was answering a question <b>the inversion had already removed</b>.</p>
+  <details class="more">
+    <summary>Five things deleted, and why each one stayed deleted</summary>
+    <div class="body">
+      <div class="split split--wide">
+        <div style="display:flex;flex-direction:column;gap:1.2rem">
+          <div class="stats">
+            <div class="stat"><b>2,518</b><span>lines of Go, in eight files</span></div>
+            <div class="stat"><b>0</b><span>third-party dependencies</span></div>
+            <div class="stat"><b>0</b><span>inbound ports on the daemon</span></div>
+            <div class="stat"><b>0</b><span>databases</span></div>
+          </div>
+          <p class="small dim">State lives in <code>/run/bosun/&lt;id&gt;/</code>, which is tmpfs — so a reboot clears it, and that is correct. Desired state is one config file on the host, which is why the daemon has no runtime configuration surface at all: no API that can resize the pool, and so no drift between what is running and what was declared.</p>
+        </div>
+        <ul class="reasons">
+          <li><b>The webhook receiver</b> — a warm pool is never told a job was queued, so there is nothing to receive.</li>
+          <li><b>The queue listener and the control plane</b> — both existed to answer a question the inversion deleted.</li>
+          <li><b>Credential transport over vsock</b> — a kernel module, a CID allocator and a guest listener, for one string delivered once at boot. It is a file in a per-skiff directory instead.</li>
+          <li><b>Snapshot and restore</b> — measured, not assumed: restore is flat at ~1.8 s, and the Ubuntu hull reaches the runner in 0.68–0.97 s. A snapshot cannot pay for itself against a guest that cheap.</li>
+          <li><b>Re-adopting an orphaned hypervisor</b> — systemd SIGKILLs the whole cgroup at the stop timeout, so a VMM cannot outlive the daemon and be found again later. Sweeping stale registrations on start is the entire recovery path.</li>
+        </ul>
       </div>
-      <p class="small dim">State lives in <code>/run/bosun/&lt;id&gt;/</code>, which is tmpfs — so a reboot clears it, and that is correct. Desired state is one config file on the host, which is why the daemon has no runtime configuration surface at all: no API that can resize the pool, and so no drift between what is running and what was declared.</p>
     </div>
-    <ul class="reasons">
-      <li><b>The webhook receiver</b> — a warm pool is never told a job was queued, so there is nothing to receive.</li>
-      <li><b>The queue listener and the control plane</b> — both existed to answer a question the inversion deleted.</li>
-      <li><b>Credential transport over vsock</b> — a kernel module, a CID allocator and a guest listener, for one string delivered once at boot. It is a file in a per-skiff directory instead.</li>
-      <li><b>Snapshot and restore</b> — measured, not assumed: restore is flat at ~1.8 s, and the Ubuntu hull reaches the runner in 0.68–0.97 s. A snapshot cannot pay for itself against a guest that cheap.</li>
-      <li><b>Re-adopting an orphaned hypervisor</b> — systemd SIGKILLs the whole cgroup at the stop timeout, so a VMM cannot outlive the daemon and be found again later. Sweeping stale registrations on start is the entire recovery path.</li>
-    </ul>
-  </div>
+  </details>
 </section>
 
 <!-- ============================== 07 the boundary ============================== -->
 <section class="slide">
-  <span class="no"><b>07</b> / 11</span>
+  <span class="no"><b>07</b> / 10</span>
   <p class="eyebrow">Isolation is the floor, not the feature</p>
   <h2>Deny the LAN. Allow the internet.</h2>
-  <div class="split">
-    <div style="display:flex;flex-direction:column;gap:1rem">
-      <p class="dim">The obvious policy — “reach the CI provider and nothing else” — breaks every real job, which pulls package registries, base images and release binaries from a dozen public hosts. So invert it. One <code>IPAddressDeny</code> on bosun's own unit denies RFC1918 and <code>169.254.0.0/16</code>, and systemd's IP filtering inherits down the cgroup subtree to every skiff underneath it. There is no per-skiff rule anywhere.</p>
-      <p class="rule-kicker">A job reaches the internet and cannot reach anything of yours — including the cloud metadata service, which sits on the wrong side of that same line.</p>
-    </div>
-    <div style="display:flex;flex-direction:column;gap:1.1rem">
+  <p class="gist">One <code>IPAddressDeny</code> on bosun's own unit, inherited down the cgroup subtree to every skiff underneath it. A job reaches the internet and <b>cannot reach anything of yours</b> — the metadata service included.</p>
+  <details class="more">
+    <summary>Why the obvious policy is the wrong way round</summary>
+    <div class="body">
+      <p class="dim" style="max-width:76ch">“Reach the CI provider and nothing else” breaks every real job, which pulls package registries, base images and release binaries from a dozen public hosts. So invert it: one <code>IPAddressDeny</code> on bosun's own unit denies RFC1918 and <code>169.254.0.0/16</code>, systemd's IP filtering inherits down the cgroup subtree to every skiff underneath it, and there is no per-skiff rule anywhere.</p>
       <div class="cols">
         <div class="card card--flag">
           <span class="tag t-acc">The data path</span>
@@ -779,162 +848,177 @@
           <p>Not a scrubbed workspace, and not a fresh container on a kernel the last job also used. A skiff is its own kernel, and it stops existing when the job ends — so there is no residue for the next job to inherit and nothing to scrub correctly.</p>
         </div>
       </div>
-      <p class="small dim" style="max-width:66ch">Denying RFC1918 also breaks DNS, so a public resolver is pinned and the deny stays absolute rather than growing its first exception. An allowlist with one hole in it is an allowlist nobody can reason about a year later.</p>
+      <p class="small dim" style="max-width:70ch">Denying RFC1918 also breaks DNS, so a public resolver is pinned and the deny stays absolute rather than growing its first exception. An allowlist with one hole in it is an allowlist nobody can reason about a year later.</p>
     </div>
-  </div>
+  </details>
 </section>
 
-<!-- ============================== 08 the numbers ============================== -->
+<!-- ============================== 08 evidence ============================== -->
 <section class="slide">
-  <span class="no"><b>08</b> / 11</span>
-  <p class="eyebrow">Measured, spec for spec</p>
-  <h2>A hosted runner is a lottery ticket priced at its <em>best draw</em></h2>
-  <p class="small dim" style="max-width:70ch">Same commit, same workload, same session. <span class="m">skiff-ubuntu-bench</span> is 4 vCPU / 16 GiB / 20 G — a public-repo <span class="m">ubuntu-latest</span> runner's exact specification, so the hardware column reads zero.</p>
-  <div class="tablewrap">
-    <table class="bench">
-      <thead>
-        <tr><th scope="col">Workload</th><th scope="col">skiff, size-matched</th><th scope="col">ubuntu-latest</th></tr>
-      </thead>
-      <tbody>
-        <tr><th scope="row">Cold image build, three runs</th><td class="win">36 · 34 · 32 s</td><td>23 · 25 · 49 s</td></tr>
-        <tr><th scope="row">Suite, no caches anywhere</th><td class="win">243 s</td><td>375 s</td></tr>
-        <tr><th scope="row">Suite, caches populating</th><td class="win">249 s</td><td>271 s</td></tr>
-        <tr><th scope="row">Suite, warm steady state</th><td class="win">54 · 54 s</td><td>74 · 99 s</td></tr>
-        <tr><th scope="row">Queue to start</th><td class="win">1 s</td><td>2–8 s</td></tr>
-      </tbody>
-    </table>
-  </div>
-  <div class="cols">
-    <div class="card card--flag">
-      <h4>The headline is the variance, not the win</h4>
-      <p>Across every table in the record the skiff's spread is a few seconds. Hosted swings 23–49 s on the same cold image build and 271–375 s on the same cold suite. A skiff is the same machine every time.</p>
-    </div>
-    <div class="card card--flag">
-      <h4>The gap that closed was a transfer, not a CPU</h4>
-      <p>The original 99 s deficit was 70 s of <code>actions/cache</code> pulling a dependency store over the internet. The answer was not a faster transfer: a class can persist its workspace disk, so the next skiff finds the store already there.</p>
-    </div>
-  </div>
-</section>
-
-<!-- ============================== 09 what production found ============================== -->
-<section class="slide">
-  <span class="no"><b>09</b> / 11</span>
+  <span class="no"><b>08</b> / 10</span>
   <p class="eyebrow">Evidence, not assertion</p>
-  <h2>Five things no test suite was ever going to find</h2>
-  <ul class="reasons">
-    <li><b>The helpers leaked, and a human found it by hearing a fan.</b> Nine hours of two warm classes cost 1d 6h of CPU. <code>passt</code> daemonizes <em>and</em> <code>setsid</code>s, so the handle bosun held was an already-exited parent — the real process outlived its skiff and spun at 100% waiting for a second client a one-job skiff never sends.</li>
-    <li><b>One failed poll killed a healthy skiff.</b> A transient connection reset, one <span class="m">offline</span> observation a minute later, and the guest was destroyed. It was idle; a busy one would have lost its job. Wedge detection now needs three consecutive observations.</li>
-    <li><b>systemd deletes <code>RuntimeDirectory=</code> on stop</b> — which is exactly the state the start-up sweep reads, so every restart leaked a ghost registration until the directory was told to survive.</li>
-    <li><b>GitHub silently removes an expired registration while the agent keeps running.</b> A skiff aged past its credential was offered a job at its own label and never claimed it; by 89 minutes the runner was a 404 while the VMM was alive and idle. Without recycling, that is a permanent RAM leak wearing the costume of a healthy skiff.</li>
-    <li><b>The suite outgrew its class</b> — restored tests that each stand up a database segfaulted at 3 GiB and passed on hosted from the same commit. Long test durations plus a moving crash site is starvation, not a logic bug.</li>
-  </ul>
-  <p class="small dim" style="max-width:66ch">Every one of these was live behaviour on a real host, and none of them is exotic. The generalisable lesson: a code comment reading “if this becomes a problem in practice” is a prediction with no alarm attached to it. That one came true in nine hours.</p>
+  <h2>A hosted runner is a lottery ticket priced at its <em>best draw</em></h2>
+  <p class="gist">Size-matched against a public-repo <span class="m">ubuntu-latest</span>, a skiff's spread is a few seconds on every table in the record. Hosted swings <b>23–49 s</b> on the same cold image build and <b>271–375 s</b> on the same cold suite.</p>
+  <details class="more">
+    <summary>The numbers, spec for spec</summary>
+    <div class="body">
+      <p class="small dim" style="max-width:70ch">Same commit, same workload, same session. <span class="m">skiff-ubuntu-bench</span> is 4 vCPU / 16 GiB / 20 G — a public-repo <span class="m">ubuntu-latest</span> runner's exact specification, so the hardware column reads zero.</p>
+      <div class="tablewrap">
+        <table class="bench">
+          <thead>
+            <tr><th scope="col">Workload</th><th scope="col">skiff, size-matched</th><th scope="col">ubuntu-latest</th></tr>
+          </thead>
+          <tbody>
+            <tr><th scope="row">Cold image build, three runs</th><td class="win">36 · 34 · 32 s</td><td>23 · 25 · 49 s</td></tr>
+            <tr><th scope="row">Suite, no caches anywhere</th><td class="win">243 s</td><td>375 s</td></tr>
+            <tr><th scope="row">Suite, caches populating</th><td class="win">249 s</td><td>271 s</td></tr>
+            <tr><th scope="row">Suite, warm steady state</th><td class="win">54 · 54 s</td><td>74 · 99 s</td></tr>
+            <tr><th scope="row">Queue to start</th><td class="win">1 s</td><td>2–8 s</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="cols">
+        <div class="card card--flag">
+          <h4>The headline is the variance, not the win</h4>
+          <p>Across every table in the record the skiff's spread is a few seconds. A skiff is the same machine every time.</p>
+        </div>
+        <div class="card card--flag">
+          <h4>The gap that closed was a transfer, not a CPU</h4>
+          <p>The original 99 s deficit was 70 s of <code>actions/cache</code> pulling a dependency store over the internet. The answer was not a faster transfer: a class can persist its workspace disk, so the next skiff finds the store already there.</p>
+        </div>
+      </div>
+    </div>
+  </details>
+  <details class="more">
+    <summary>Five things no test suite was ever going to find</summary>
+    <div class="body">
+      <ul class="reasons">
+        <li><b>The helpers leaked, and a human found it by hearing a fan.</b> Nine hours of two warm classes cost 1d 6h of CPU. <code>passt</code> daemonizes <em>and</em> <code>setsid</code>s, so the handle bosun held was an already-exited parent — the real process outlived its skiff and spun at 100% waiting for a second client a one-job skiff never sends.</li>
+        <li><b>One failed poll killed a healthy skiff.</b> A transient connection reset, one <span class="m">offline</span> observation a minute later, and the guest was destroyed. It was idle; a busy one would have lost its job. Wedge detection now needs three consecutive observations.</li>
+        <li><b>systemd deletes <code>RuntimeDirectory=</code> on stop</b> — which is exactly the state the start-up sweep reads, so every restart leaked a ghost registration until the directory was told to survive.</li>
+        <li><b>GitHub silently removes an expired registration while the agent keeps running.</b> A skiff aged past its credential was offered a job at its own label and never claimed it; by 89 minutes the runner was a 404 while the VMM was alive and idle. Without recycling, that is a permanent RAM leak wearing the costume of a healthy skiff.</li>
+        <li><b>The suite outgrew its class</b> — restored tests that each stand up a database segfaulted at 3 GiB and passed on hosted from the same commit. Long test durations plus a moving crash site is starvation, not a logic bug.</li>
+      </ul>
+      <p class="small dim" style="max-width:70ch">Every one of these was live behaviour on a real host, and none of them is exotic. The generalisable lesson: a code comment reading “if this becomes a problem in practice” is a prediction with no alarm attached to it. That one came true in nine hours.</p>
+    </div>
+  </details>
 </section>
 
-<!-- ============================== 10 the sibling ============================== -->
+<!-- ============================== 09 the sibling ============================== -->
 <section class="slide">
-  <span class="no"><b>10</b> / 11</span>
+  <span class="no"><b>09</b> / 10</span>
   <p class="eyebrow">Beyond CI</p>
   <h2>A producer that cannot reach the pool can still <em>feed</em> it</h2>
-  <p class="dim" style="max-width:72ch">No inbound port is the point of the design, and also the obvious objection: how does anything other than GitHub hand a pool work? By not pushing. A producer writes an intent to a row in its own database, and the pool long-polls in to claim it. Spindrift — a deploy control plane, and a peer project, not an owner — routes container builds this way.</p>
-  <figure>
-    <div class="figwrap">
-      <svg viewBox="0 0 920 400" role="img" aria-label="Spindrift's build routes: the hosted GitHub Actions route, the managed Cloud Build route, and the in-cluster Job route are all dialled outward by the Spindrift process. The bosun route is the mirror image: Spindrift writes an intent to a build outbox row in its own Postgres, and an operator-controlled bosun host that Spindrift cannot reach long-polls in to claim it, heartbeat, and post the result.">
-        <defs>
-          <marker id="bh2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
-            <path d="M0 0 L10 5 L0 10 z" fill="var(--accent)"/>
-          </marker>
-        </defs>
+  <p class="gist">No inbound port is the point of the design, and also the obvious objection. The answer is <b>not to push</b>: a producer writes an intent to a row in its own database, and the pool long-polls in to claim it.</p>
+  <details class="more">
+    <summary>How Spindrift routes a build to a machine it cannot reach</summary>
+    <div class="body">
+      <p class="dim" style="max-width:74ch">Spindrift — a deploy control plane, and a peer project, not an owner — routes container builds this way. Its other three build routes all dial outward; this one is the mirror image.</p>
+      <figure>
+        <div class="figwrap">
+          <svg viewBox="0 0 920 400" role="img" aria-label="Spindrift's build routes: the hosted GitHub Actions route, the managed Cloud Build route, and the in-cluster Job route are all dialled outward by the Spindrift process. The bosun route is the mirror image: Spindrift writes an intent to a build outbox row in its own Postgres, and an operator-controlled bosun host that Spindrift cannot reach long-polls in to claim it, heartbeat, and post the result.">
+            <defs>
+              <marker id="bh2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+                <path d="M0 0 L10 5 L0 10 z" fill="var(--accent)"/>
+              </marker>
+            </defs>
 
-        <!-- spindrift core -->
-        <rect class="d-acc" x="30" y="140" width="220" height="120" rx="8"/>
-        <text class="d-t b" x="48" y="168">Spindrift core</text>
-        <text class="d-s" x="48" y="190">a Build needs an artifact,</text>
-        <text class="d-s" x="48" y="208">by digest, at a known</text>
-        <text class="d-s" x="48" y="226">provenance level</text>
-        <text class="d-m" x="48" y="248">SLSA L2 minimum</text>
+            <!-- spindrift core -->
+            <rect class="d-acc" x="30" y="140" width="220" height="120" rx="8"/>
+            <text class="d-t b" x="48" y="168">Spindrift core</text>
+            <text class="d-s" x="48" y="190">a Build needs an artifact,</text>
+            <text class="d-s" x="48" y="208">by digest, at a known</text>
+            <text class="d-s" x="48" y="226">provenance level</text>
+            <text class="d-m" x="48" y="248">SLSA L2 minimum</text>
 
-        <!-- outward routes -->
-        <rect class="d-zone" x="556" y="18" width="348" height="234" rx="12"/>
-        <text class="d-hd" x="572" y="42">ROUTES THIS PROCESS DIALS</text>
+            <!-- outward routes -->
+            <rect class="d-zone" x="556" y="18" width="348" height="234" rx="12"/>
+            <text class="d-hd" x="572" y="42">ROUTES THIS PROCESS DIALS</text>
 
-        <rect class="d-box" x="576" y="56" width="308" height="52" rx="6"/>
-        <text class="d-t b" x="592" y="78">hosted — GitHub Actions</text>
-        <text class="d-s" x="592" y="96">a workflow dispatch, then poll the run</text>
+            <rect class="d-box" x="576" y="56" width="308" height="52" rx="6"/>
+            <text class="d-t b" x="592" y="78">hosted — GitHub Actions</text>
+            <text class="d-s" x="592" y="96">a workflow dispatch, then poll the run</text>
 
-        <rect class="d-box" x="576" y="124" width="308" height="52" rx="6"/>
-        <text class="d-t b" x="592" y="146">managed — Cloud Build</text>
-        <text class="d-s" x="592" y="164">a cloud API, then poll the operation</text>
+            <rect class="d-box" x="576" y="124" width="308" height="52" rx="6"/>
+            <text class="d-t b" x="592" y="146">managed — Cloud Build</text>
+            <text class="d-s" x="592" y="164">a cloud API, then poll the operation</text>
 
-        <rect class="d-box" x="576" y="192" width="308" height="52" rx="6"/>
-        <text class="d-t b" x="592" y="214">in-cluster — a Job</text>
-        <text class="d-s" x="592" y="232">a cluster it already holds a token for</text>
+            <rect class="d-box" x="576" y="192" width="308" height="52" rx="6"/>
+            <text class="d-t b" x="592" y="214">in-cluster — a Job</text>
+            <text class="d-s" x="592" y="232">a cluster it already holds a token for</text>
 
-        <path class="d-flow" d="M250 176 L568 84" marker-end="url(#bh2)"/>
-        <path class="d-flow" d="M250 196 L568 152" marker-end="url(#bh2)"/>
-        <path class="d-flow" d="M250 216 L568 220" marker-end="url(#bh2)"/>
-        <text class="d-lab" x="412" y="150" text-anchor="middle">reaches out</text>
+            <path class="d-flow" d="M250 176 L568 84" marker-end="url(#bh2)"/>
+            <path class="d-flow" d="M250 196 L568 152" marker-end="url(#bh2)"/>
+            <path class="d-flow" d="M250 216 L568 220" marker-end="url(#bh2)"/>
+            <text class="d-lab" x="412" y="150" text-anchor="middle">reaches out</text>
 
-        <!-- the outbox -->
-        <rect class="d-box2" x="380" y="298" width="250" height="76" rx="6"/>
-        <text class="d-t b" x="396" y="322">the build outbox</text>
-        <text class="d-s" x="396" y="342">one row in Spindrift's own</text>
-        <text class="d-s" x="396" y="360">Postgres — PENDING, CLAIMED, DONE</text>
+            <!-- the outbox -->
+            <rect class="d-box2" x="380" y="298" width="250" height="76" rx="6"/>
+            <text class="d-t b" x="396" y="322">the build outbox</text>
+            <text class="d-s" x="396" y="342">one row in Spindrift's own</text>
+            <text class="d-s" x="396" y="360">Postgres — PENDING, CLAIMED, DONE</text>
 
-        <!-- bosun -->
-        <rect class="d-acc" x="700" y="298" width="200" height="76" rx="6"/>
-        <text class="d-t b" x="716" y="322">a bosun host</text>
-        <text class="d-s" x="716" y="342">an operator's machine this</text>
-        <text class="d-s" x="716" y="360">process cannot reach</text>
+            <!-- bosun -->
+            <rect class="d-acc" x="700" y="298" width="200" height="76" rx="6"/>
+            <text class="d-t b" x="716" y="322">a bosun host</text>
+            <text class="d-s" x="716" y="342">an operator's machine this</text>
+            <text class="d-s" x="716" y="360">process cannot reach</text>
 
-        <path class="d-flow" d="M140 260 L140 328 Q140 336 150 336 L372 336" marker-end="url(#bh2)"/>
-        <text class="d-lab" x="270" y="326" text-anchor="middle">writes an intent, polls the row</text>
+            <path class="d-flow" d="M140 260 L140 328 Q140 336 150 336 L372 336" marker-end="url(#bh2)"/>
+            <text class="d-lab" x="270" y="326" text-anchor="middle">writes an intent, polls the row</text>
 
-        <path class="d-flow" d="M692 336 L638 336" marker-end="url(#bh2)"/>
-        <text class="d-lab" x="665" y="320" text-anchor="middle">claims</text>
-        <text class="d-m" x="30" y="392">claim · heartbeat · result — three shared-secret endpoints, every one of them long-polled inward</text>
-      </svg>
+            <path class="d-flow" d="M692 336 L638 336" marker-end="url(#bh2)"/>
+            <text class="d-lab" x="665" y="320" text-anchor="middle">claims</text>
+            <text class="d-m" x="30" y="392">claim · heartbeat · result — three shared-secret endpoints, every one of them long-polled inward</text>
+          </svg>
+        </div>
+        <figcaption>The route writes an intent to the outbox and polls that row for a verdict, exactly the way the other routes poll a status endpoint — the endpoint just happens to be this installation's own database rather than a far side's API.</figcaption>
+      </figure>
+      <div class="cols">
+        <div class="card card--flag">
+          <h4>Proven end to end</h4>
+          <p>Claim, boot a build skiff, fetch and verify the staged bundle, build, push, report. Spindrift then verified <span class="m">SLSA L2</span> against the hull's own builder identity and signed the digest — the same signature Kyverno and Binary Authorization each re-check at admission.</p>
+        </div>
+        <div class="card card--cau">
+          <h4>Declared, and honestly unserved</h4>
+          <p>The host that served this class is powered down again; answering the benchmark on the previous slide is what it was woken for. The route stays declared and ranked last, so bringing a host back serves it with no configuration change at all — which is the same claim, tested by its absence.</p>
+        </div>
+      </div>
+      <p class="small dim" style="max-width:70ch">Spindrift's deck is a sibling of this one, deployed the same way through the same product: <b>spindrift-slides-web.web.app</b></p>
     </div>
-    <figcaption>Every other build route reaches out to something. Bosun is the mirror image, and the route's own implementation says so: it writes an intent to the outbox and polls that row for a verdict, exactly the way the other routes poll a status endpoint — the endpoint just happens to be this installation's own database rather than a far side's API.</figcaption>
-  </figure>
-  <div class="cols">
-    <div class="card card--flag">
-      <h4>Proven end to end</h4>
-      <p>Claim, boot a build skiff, fetch and verify the staged bundle, build, push, report. Spindrift then verified <span class="m">SLSA L2</span> against the hull's own builder identity and signed the digest — the same signature Kyverno and Binary Authorization each re-check at admission.</p>
-    </div>
-    <div class="card card--cau">
-      <h4>Declared, and honestly unserved</h4>
-      <p>The host that served this class is powered down again; answering the benchmark two slides back is what it was woken for. The route stays declared and ranked last, so bringing a host back serves it with no configuration change at all — which is the same claim, tested by its absence.</p>
-    </div>
-  </div>
+  </details>
 </section>
 
-<!-- ============================== 11 close ============================== -->
+<!-- ============================== 10 close ============================== -->
 <section class="slide">
-  <span class="no"><b>11</b> / 11</span>
+  <span class="no"><b>10</b> / 10</span>
   <p class="eyebrow">Where it stands</p>
   <h2>Two hosts, three warm slots, and an honest open list</h2>
-  <div class="split">
-    <div style="display:flex;flex-direction:column;gap:1rem">
-      <div class="lineage">
-        <div><b>Two hosts</b><span>one on-site, one remote — nothing in common</span></div>
-        <div><b>Three warm slots</b><span>same daemon · same hulls · nothing between them</span></div>
+  <p class="gist">One on-site, one remote, nothing in common and <b>no fleet controller to coordinate them</b> — a pool is per-host by construction, and the only shared fact is a label GitHub already knows how to route on.</p>
+  <details class="more">
+    <summary>How a host joins, how it drains, and what is still open</summary>
+    <div class="body">
+      <div class="split">
+        <div style="display:flex;flex-direction:column;gap:1rem">
+          <div class="lineage">
+            <div><b>Two hosts</b><span>one on-site, one remote — nothing in common</span></div>
+            <div><b>Three warm slots</b><span>same daemon · same hulls · nothing between them</span></div>
+          </div>
+          <p class="small dim">A host joins by importing the module and naming its classes. Nothing coordinates the two, because there is no fleet controller to coordinate with.</p>
+          <p class="small dim" style="border-left:3px solid var(--good);padding-left:0.9rem">Bosun drains on stop rather than dying: idle skiffs are scuttled registration-first — GitHub refuses to delete a busy runner, so a successful delete <b>proves</b> no job can land there — and busy ones get fifteen minutes to finish.</p>
+        </div>
+        <div class="card card--cau">
+          <h4>Open</h4>
+          <ul class="ticks">
+            <li>The production suite is back on hosted while a class grows — the pool's host shares its box with other workloads, so the class's memory bound is an operator's arithmetic and not a workflow's to make.</li>
+            <li>Every decision that reads GitHub — busy or idle, lifetime, pool count — has the same single-source dependency, and none of them has been thought about under a GitHub outage.</li>
+            <li>What a guest breakout would actually cost, given the data path is three unprivileged processes rather than root.</li>
+            <li>arm64. Native arm64 hosts are sitting right there and nobody has asked the question.</li>
+          </ul>
+        </div>
       </div>
-      <p class="small dim">A host joins by importing the module and naming its classes. Nothing coordinates the two, because there is no fleet controller to coordinate with — a pool is per-host by construction, and the only shared fact is a label GitHub already knows how to route on.</p>
-      <p class="small dim" style="border-left:3px solid var(--good);padding-left:0.9rem">Bosun drains on stop rather than dying: idle skiffs are scuttled registration-first — GitHub refuses to delete a busy runner, so a successful delete <b>proves</b> no job can land there — and busy ones get fifteen minutes to finish.</p>
     </div>
-    <div style="display:flex;flex-direction:column;gap:1rem">
-      <div class="card card--cau">
-        <h4>Open</h4>
-        <ul class="ticks">
-          <li>The production suite is back on hosted while a class grows — the pool's host shares its box with other workloads, so the class's memory bound is an operator's arithmetic and not a workflow's to make.</li>
-          <li>Every decision that reads GitHub — busy or idle, lifetime, pool count — has the same single-source dependency, and none of them has been thought about under a GitHub outage.</li>
-          <li>What a guest breakout would actually cost, given the data path is three unprivileged processes rather than root.</li>
-          <li>arm64. Native arm64 hosts are sitting right there and nobody has asked the question.</li>
-        </ul>
-      </div>
-    </div>
-  </div>
+  </details>
   <p class="colophon">
     <span>Booted before the job exists</span>
     <span>One job, then scuttled</span>
