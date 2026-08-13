@@ -46,6 +46,12 @@ import { Page } from './ui/page.tsx';
 import { Skeleton, SkeletonRows } from './ui/skeleton.tsx';
 import { notify } from './ui/toast.tsx';
 import { cn } from './ui/utils.ts';
+import { UPLOAD_PATH } from './upload-path.ts';
+import type {
+  StageArchive,
+  StagedUpload,
+  SubmitUpload,
+} from './views/apps/component-upload.tsx';
 import { DeployDetail } from './views/apps/deploy-detail.tsx';
 import { AppList } from './views/apps/list.tsx';
 import {
@@ -1676,6 +1682,49 @@ function WorkspaceScreen({
     }
   };
 
+  // Bytes to the depot, then a Build row that spends the digest.
+  //
+  // Two calls rather than one because they are two different things: staging is
+  // the only thing that sees the bytes and so the only thing that can digest
+  // them (§16), and `uploadArchive` "never reads the bundle" for exactly that
+  // reason. A staged bundle nobody wrote a Build for is a harmless orphan the
+  // depot sweeps; a Build row naming bytes that never landed would not be.
+  const handleStageArchive: StageArchive = async (file) => {
+    const response = await fetch(UPLOAD_PATH, {
+      method: 'POST',
+      headers: { 'x-filename': file.name },
+      body: file,
+    });
+    const body = (await response.json()) as
+      | { ok: true; value: StagedUpload }
+      | { ok: false; failure: { message: string } };
+    // The boundary's own sentence — it names what arrived, which is the whole
+    // reason the refusal happens there rather than in a runner log.
+    if (!body.ok) throw new Error(body.failure.message);
+    return body.value;
+  };
+
+  const handleUploadArchive: SubmitUpload = async (request) => {
+    try {
+      // §5's scope. The control does not offer it: every archive the browser
+      // sends is the whole bundle, and a subpath is a repo-shaped question.
+      const result = await command('uploadArchive', {
+        ...request,
+        subpath: '.',
+      });
+      if (!result.ok) return { ok: false, message: result.failure.message };
+      // Land on the attempt this started, the way `handleDeploy` does — a press
+      // that produced a durable id should not leave the operator wondering.
+      onNavigate(`/builds/${result.value.buildId}`);
+      return { ok: true };
+    } catch (cause: unknown) {
+      return {
+        ok: false,
+        message: cause instanceof Error ? cause.message : 'The upload failed',
+      };
+    }
+  };
+
   // The pair this workspace is showing (§10) — bound here, once, so `SetConfig`
   // itself does not have to carry it on every call. Re-read on success for the
   // same reason `handleSetReach` is: `configKeys` is a row this act just
@@ -1988,6 +2037,8 @@ function WorkspaceScreen({
         onSetReach={handleSetReach}
         onSetAutoDeploy={handleSetAutoDeploy}
         onSetBuildRoute={handleSetAppBuildRoute}
+        onStageArchive={handleStageArchive}
+        onUploadArchive={handleUploadArchive}
         onSetConfig={handleSetConfig}
         onSelectComponent={handleSelectComponent}
         onCreateComponent={handleCreateComponent}

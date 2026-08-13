@@ -65,6 +65,11 @@ import { Tabs } from '../../ui/tabs.tsx';
 import { Timestamp } from '../../ui/timestamp.tsx';
 import { cn, normaliseUrl } from '../../ui/utils.ts';
 import {
+  ComponentUploadButton,
+  type StageArchive,
+  type SubmitUpload,
+} from './component-upload.tsx';
+import {
   AUTH_NOTE,
   AUTHS,
   Choice,
@@ -294,8 +299,16 @@ export function Workspace({
   onFollowExecution,
   executionLines,
   tab = 'overview',
+  onStageArchive,
+  onUploadArchive,
 }: {
   view: WorkspaceView;
+  /**
+   * Give one Component new bytes. Both or neither — staging without a command
+   * to spend the digest on is a control that cannot finish.
+   */
+  onStageArchive?: StageArchive;
+  onUploadArchive?: SubmitUpload;
   onDeploy?: () => void;
   /**
    * Ask for a Build outright.
@@ -524,6 +537,9 @@ export function Workspace({
           <div className="grid gap-4 md:grid-cols-2">
             <Components
               components={view.components}
+              archiveSourced={view.archiveSourced === true}
+              {...(onStageArchive ? { onStageArchive } : {})}
+              {...(onUploadArchive ? { onUploadArchive } : {})}
               {...(selected === undefined ? {} : { selectedId: selected.id })}
               {...(onSetReach === undefined ? {} : { onSetReach })}
               {...(onSelectComponent === undefined
@@ -1165,8 +1181,15 @@ function Components({
   onMoveComponent,
   onUnplaceComponent,
   targets = [],
+  archiveSourced = false,
+  onStageArchive,
+  onUploadArchive,
 }: {
   components: readonly ComponentView[];
+  /** Whether uploading is this App's only way to a new release. */
+  archiveSourced?: boolean;
+  onStageArchive?: StageArchive;
+  onUploadArchive?: SubmitUpload;
   /** The row this screen's runtime, config and placement are about. */
   selectedId?: string;
   onSetReach?: SetReach;
@@ -1258,8 +1281,16 @@ function Components({
                   ? {}
                   : { onSelect: () => onSelectComponent(component.name) })}
                 trailing={
-                  onSetReach || moves ? (
-                    <div className="flex shrink-0 items-center gap-2">
+                  onSetReach || moves || (onStageArchive && onUploadArchive) ? (
+                    <div className="relative flex shrink-0 items-center gap-2">
+                      {onStageArchive && onUploadArchive ? (
+                        <ComponentUploadButton
+                          component={component}
+                          archiveSourced={archiveSourced}
+                          onStage={onStageArchive}
+                          onSubmit={onUploadArchive}
+                        />
+                      ) : null}
                       {onSetReach ? (
                         <Button
                           variant="outline"
