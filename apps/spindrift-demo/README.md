@@ -1,20 +1,21 @@
 # spindrift-demo
 
-Five scopes, one per shape of App worth demonstrating. Each is a directory you
-can point a Component at, and no scope imports another — railpack builds with
-the *scope* as its context, so a module one directory up is not in the build.
+Four scopes, one per shape of App worth demonstrating. **A scope is an App** —
+`sourceRepoSubpath` is a column on `apps`, not on `components`
+(`apps/spindrift/src/db/schema.ts`) — and no scope imports another, because
+railpack builds with the scope as its context and a module one directory up is
+not in the build.
 
-| Scope | Kind | Built by | What it demonstrates |
+| Scope | Components | Built by | What it demonstrates |
 | --- | --- | --- | --- |
-| `src/` | website | Dockerfile | A site with a real build step. `build.ts` stamps commit, branch and time into the HTML, so a stale deploy is visible on the page. |
-| `plain/` | website | — | Static files with no build at all. The narrowest possible website. |
-| `railpack/` | service | railpack | Detection picking a frontend on its own, because there is no Dockerfile in the scope. |
-| `job/` | job | railpack | A Component that runs once and stops, on either backend. Writes to a `valkey` Datastore when one is attached. |
-| `web/` | service | railpack | Reads back what `job/` wrote. The two are a **pair**, and the only shared thing is a Datastore. |
+| `src/` | one website | Dockerfile | A site with a real build step. `build.ts` stamps commit, branch and time into the HTML, so a stale deploy is visible on the page. |
+| `plain/` | one website | — | Static files with no build at all. The narrowest possible website. |
+| `railpack/` | one service | railpack | Detection picking a frontend on its own, because there is no Dockerfile in the scope. |
+| `pair/` | a service **and** a job | railpack | One App with two Components: one image, two entrypoints, sharing a `valkey` Datastore that neither of them declares. |
 
-Four of them prove something about exactly one path. `job/` and `web/` are the
-exception and the reason is [below](#the-pair) — they share no code and name
-each other nowhere, and that is the thing being demonstrated.
+Three of them prove something about exactly one path. `pair/` is the exception
+and the reason is [below](#the-pair) — it is the only scope here that is more
+than one Component.
 
 ## Runtime identity
 
@@ -54,25 +55,32 @@ configuration, secrets, Firebase config, and the Kubernetes service address
 never reach the page.
 
 `railpack/` reports the same server identity in its `/` JSON and exposes
-`/env` as a names-plus-curated-safe-values inspection endpoint. `job/` logs
-its backend identity and `SPINDRIFT_BUILD` at the start of every execution.
+`/env` as a names-plus-curated-safe-values inspection endpoint. `pair/job.js`
+logs its backend identity and `SPINDRIFT_BUILD` at the start of every
+execution.
 
-## Why two of them carry no `spindrift.yaml` and one does
+## Why only one of them carries a `spindrift.yaml`
 
-`job/` has to declare itself. Detection infers only `service` and `website` —
-`Exclude<ComponentKind, 'job'>` in
-`apps/spindrift/src/domain/detection/ladder.ts` — because nothing about a tree
-of files says whether it should be served or run once. `railpack/` deliberately
-has no such file: it is the demo of detection choosing for itself, and a file
-asserting the answer would remove the thing being demonstrated.
+The root scope declares its Dockerfile frontend. Nothing below it declares
+anything, and each absence says something different.
+
+`railpack/` is the demo of detection choosing for itself, so a file asserting
+the answer would remove the thing being demonstrated. `pair/` has no single
+answer to assert: `component.kind` in that file is one value
+(`apps/spindrift/src/domain/detection/spindrift-file.ts`) and the scope carries
+a service and a job. Detection could not have proposed the job half anyway —
+it infers only `service` and `website`, `Exclude<ComponentKind, 'job'>` in
+`apps/spindrift/src/domain/detection/ladder.ts`, because nothing about a tree
+of files says whether it should be served or run once. So the kind is named per
+Component, at creation, which is where it belonged.
 
 `buildkit.ts` switches frontends on `[ -f Dockerfile ]` **in the scope**, so
-`railpack/` and `job/` staying Dockerfile-free is what routes them through
+`railpack/` and `pair/` staying Dockerfile-free is what routes them through
 railpack. Both are also self-contained — no workspace dependency, no root
 lockfile — because the zero-config arm builds with the scope as its build
 context rather than the repository root.
 
-## `job/`
+## `pair/job.js`
 
 Three optional env vars, so one image covers every case worth looking at:
 
@@ -92,24 +100,35 @@ Component, chosen at Place, not to the directory.
 
 ## The pair
 
-`job/` writes and `web/` reads, and nothing connects them. Put both in **one
-App**, attach one `valkey` Datastore to that App, and deploy: each Component is
-handed the same `REDIS_URL`, because a Datastore attaches to the App and its
-variable name is fixed by the engine — `REDIS_URL` for valkey, `DATABASE_URL`
-for postgres (`apps/spindrift/src/domain/desired-state.ts`). Neither scope
+One App on `pair/`, two Components, and nothing connecting them but a store
+neither one declares.
+
+Create the App on the scope: railpack detects `scripts.start`, so the image's
+own entrypoint is `node server.js` and the **service** Component runs it by
+saying nothing. Then add a second Component from the App workspace — kind
+`job`, entrypoint `node job.js`. That is the whole of the difference between
+them: same scope, same image, same digest, two workloads. An App is one scope
+(`sourceRepoSubpath` is a column on `apps`), so a sibling Component is never a
+second directory — it is a second way of running the first one, which is what
+`components.command` is for.
+
+Attach one `valkey` Datastore to the App and deploy. Both Components are handed
+the same `REDIS_URL`, because a Datastore attaches to the App and its variable
+name is fixed by the engine — `REDIS_URL` for valkey, `DATABASE_URL` for
+postgres (`apps/spindrift/src/domain/desired-state.ts`). Neither entrypoint
 declares a store and neither names the other. There is nothing to wire.
 
 Three things it is worth watching for, in order:
 
-1. **Before an attach**, `web/` says no Datastore is attached, in those words.
-   It is not an error state — it is what every Component looks like until one
-   is attached.
+1. **Before an attach**, the page says no Datastore is attached, in those
+   words. It is not an error state — it is what every Component looks like
+   until one is attached.
 2. **Straight after an attach**, the page has not changed. An attach is
    bookkeeping; the variable reaches a workload on its **next Deploy**, because
    "an attach that silently rolled every Component would be a destructive act
    hiding behind a bookkeeping verb" (`commands/datastores/attach.ts`).
 3. **After deploying**, the counter and the run table appear. Press **Run now**
-   on `job/` and the page picks the new row up within five seconds.
+   on the job Component and the page picks the new row up within five seconds.
 
 One store per engine per App, refused at attach: a second `valkey` would claim
 the same `REDIS_URL` and win by ordering. One valkey *and* one postgres is
@@ -117,33 +136,34 @@ fine, since those are two different variables.
 
 Datastores are provisionable on **Kubernetes** Targets only — the GCP adapter
 claims both engines and throws `UNIMPLEMENTED` from every verb, because a
-Vessel carries no network to place a private endpoint in. The same `job/` image
-on Cloud Run finds no `REDIS_URL` and says so rather than failing, which is why
+Vessel carries no network to place a private endpoint in. The same image on
+Cloud Run finds no `REDIS_URL` and says so rather than failing, which is why
 that path still demonstrates what it is there to demonstrate.
 
-`web/` has to be a `service`. A `website` is static files served by the Target
-— no process, no environment — so no connection string can reach one; `src/`
-and `plain/` are that side of the line.
+The reading half has to be a `service`. A `website` is static files served by
+the Target — no process, no environment — so no connection string can reach
+one; `src/` and `plain/` are that side of the line.
 
 ## Running them locally
 
 ```
-cd railpack && npm run build && npm start     # :3000, JSON on /, /healthz, /env
-cd job && DURATION_SECONDS=3 npm start        # exits 0
-cd job && EXIT_CODE=7 npm start               # exits 7, writes to stderr
-cd web && npm test                            # the RESP reader's own check
+cd railpack && npm run build && npm start          # :3000, JSON on /, /healthz, /env
+cd pair && DURATION_SECONDS=3 npm run job          # exits 0
+cd pair && EXIT_CODE=7 npm run job                 # exits 7, writes to stderr
+cd pair && npm test                                # the RESP reader's own check
 ```
 
-The pair, against a local valkey:
+The pair, against a local valkey — the two `npm` scripts are the two
+entrypoints the two Components run:
 
 ```
 valkey-server --port 16379 --save ''
-cd job && REDIS_URL=redis://127.0.0.1:16379 DURATION_SECONDS=2 npm start
-cd web && REDIS_URL=redis://127.0.0.1:16379 npm start    # :3000
+cd pair && REDIS_URL=redis://127.0.0.1:16379 DURATION_SECONDS=2 npm run job
+cd pair && REDIS_URL=redis://127.0.0.1:16379 npm start    # :3000
 ```
 
-Start `web/` with no `REDIS_URL` to see the unattached state, or point it at a
-port nothing is listening on to see the unreachable one. `/healthz` stays green
+Start it with no `REDIS_URL` to see the unattached state, or point it at a port
+nothing is listening on to see the unreachable one. `/healthz` stays green
 through both — this Component is up whether or not a store is.
 
 `bun run dev` from this directory builds `src/` and serves it hot through

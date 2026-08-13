@@ -1,11 +1,13 @@
 /**
  * A job that finishes, on purpose, and says who ran it.
  *
- * Detection cannot propose `kind: job` — `ladder.ts` types the inferred kind
- * as `Exclude<ComponentKind, 'job'>`, because nothing about a tree of files
- * says "run this once and stop" rather than "serve this". That is why this
- * scope carries a `spindrift.yaml` and the railpack service demo beside it
- * does not: the file is not a convenience here, it is the only way to say it.
+ * **This file is not a scope.** It is one of the two entrypoints of one, and
+ * the Component that runs it is a `job` because somebody said so at creation —
+ * `node job.js`, typed into the entrypoint field — while its sibling runs
+ * `server.js` off the same image. Detection could not have proposed either
+ * fact: `ladder.ts` types the inferred kind as `Exclude<ComponentKind, 'job'>`
+ * because nothing about a tree of files says "run this once and stop", and
+ * nothing about one says which of two entrypoints a Component wanted.
  *
  * Three env vars, all optional, so one image demos every case an operator
  * wants to look at:
@@ -23,17 +25,19 @@
  * that survives the run is the shortest thing that proves the connection was
  * real — a job that merely started is a job that proves the variable parsed.
  *
- * It also leaves a **record** of itself, which the sibling `web/` scope reads
- * back and renders. That is the pair's whole subject: nothing connects these
- * two Components to each other. They are in one App, one `valkey` Datastore is
+ * It also leaves a **record** of itself, which `server.js` reads back and
+ * renders. That is the pair's whole subject: nothing connects the two
+ * Components to each other. They are in one App, one `valkey` Datastore is
  * attached to that App, and so both are handed the same `REDIS_URL` on their
- * next Deploy — neither scope names the other, and neither declares a store.
+ * next Deploy — neither entrypoint names the other, and neither declares a
+ * store.
  *
  * Optional like the rest, and deliberately so: the same image runs on Cloud
  * Run, where there is no Datastore to attach, and a demo that failed there
  * would be demonstrating the wrong thing.
  */
 import { connect } from 'node:net';
+import { talk } from './resp.js';
 
 const duration = Number(process.env.DURATION_SECONDS ?? 15);
 const exitCode = Number(process.env.EXIT_CODE ?? 0);
@@ -57,56 +61,6 @@ function whoAmI() {
 }
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-
-/** One RESP array, which is the only way this speaks. */
-const encode = (args) =>
-  `*${args.length}\r\n${args
-    .map((arg) => `$${Buffer.byteLength(String(arg))}\r\n${arg}\r\n`)
-    .join('')}`;
-
-/**
- * A few commands down one socket, replies in order.
- *
- * No client library, for the same reason nothing else here has a dependency:
- * the demo is read as much as it is run, and the install that would save
- * writing this is an install that can fail for reasons having nothing to do
- * with Spindrift.
- *
- * ponytail: reads **single-line replies only** — `:<n>` from INCR and LPUSH,
- * `+OK` from LTRIM — by counting `\r\n` terminators, so it cannot parse a bulk
- * string or an array and does not pretend to. That is exactly the set this job
- * sends; the sibling `web/` scope reads and therefore carries a real parser.
- * A `-ERR` line rejects rather than resolving, so a wrong assumption reads as
- * one. Reach for a client the moment a reply here stops being one line.
- */
-function talk(url, commands) {
-  const { hostname, port } = new URL(url);
-  return new Promise((resolve, reject) => {
-    const socket = connect({ host: hostname, port: Number(port) || 6379 }, () =>
-      socket.write(commands.map(encode).join('')),
-    );
-    socket.setTimeout(5000);
-
-    let buffer = '';
-    socket.on('data', (chunk) => {
-      buffer += chunk.toString();
-      // Every reply this sends is one line, so a complete response is simply
-      // as many terminators as there were commands.
-      if (buffer.split('\r\n').length - 1 < commands.length) return;
-      socket.end();
-      const replies = buffer.split('\r\n').slice(0, commands.length);
-      const failure = replies.find((reply) => reply.startsWith('-'));
-      if (failure) reject(new Error(failure.slice(1)));
-      else resolve(replies);
-    });
-
-    socket.once('timeout', () => {
-      socket.destroy();
-      reject(new Error('timed out after 5s'));
-    });
-    socket.once('error', reject);
-  });
-}
 
 const log = (message) =>
   console.log(`[${new Date().toISOString()}] ${message}`);
@@ -133,12 +87,14 @@ if (process.env.REDIS_URL) {
       duration,
       exitCode,
     });
-    const [runs] = await talk(process.env.REDIS_URL, [
+    // `resp.js`, the same reader `server.js` uses — one scope, so the parser
+    // that was duplicated while these were two directories is now imported.
+    const [runs] = await talk(connect, process.env.REDIS_URL, [
       ['INCR', 'spindrift-demo:runs'],
       ['LPUSH', 'spindrift-demo:log', record],
       ['LTRIM', 'spindrift-demo:log', 0, 19],
     ]);
-    log(`valkey: run #${runs.slice(1)}, record written`);
+    log(`valkey: run #${runs}, record written`);
   } catch (error) {
     // Reported and survived. The datastore is what this run *uses*, not what
     // it is for, and a job that died because a cache was unreachable would

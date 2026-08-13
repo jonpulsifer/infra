@@ -1,9 +1,0 @@
-{
-  "name": "spindrift-demo-job",
-  "private": true,
-  "type": "module",
-  "description": "A one-shot job demo: runs for a bit, logs progress, exits.",
-  "scripts": {
-    "start": "node job.js"
-  }
-}

@@ -17,6 +17,7 @@ import { describe, expect, test } from 'bun:test';
 import { createComponentInput } from '../../src/commands/components/create.ts';
 import type { WorkspaceView } from '../../src/commands/views.ts';
 import {
+  argvOf,
   componentCreation,
   targetForFirstDeploy,
 } from '../../src/web/views/apps/workspace.tsx';
@@ -76,6 +77,36 @@ describe('what the Components card posts', () => {
     expect(unscheduled).not.toHaveProperty('schedule');
     expect(accepted(unscheduled).success).toBe(true);
     expect(accepted({ ...unscheduled, schedule: '' }).success).toBe(false);
+  });
+
+  test('an entrypoint travels on every kind, and is absent when nothing was typed', () => {
+    // The field a second Component off one image is usually the whole of: the
+    // App is one scope, so the sibling builds the same tree.
+    const worker = componentCreation(APP_ID, {
+      name: 'worker',
+      kind: 'service',
+      command: argvOf('node job.js'),
+    });
+    expect(worker).toMatchObject({ command: ['node', 'job.js'] });
+    expect(accepted(worker).success).toBe(true);
+
+    // Absent rather than null or empty, the same way an unscheduled job omits
+    // `schedule`: `argv` refuses `[]`, so a form that sent one for an empty
+    // field would be refused after the press.
+    const plain = componentCreation(APP_ID, {
+      name: 'worker',
+      kind: 'service',
+    });
+    expect(plain).not.toHaveProperty('command');
+    expect(accepted({ ...plain, command: [] }).success).toBe(false);
+    expect(accepted({ ...plain, command: [''] }).success).toBe(false);
+  });
+
+  test('a typed entrypoint is split on whitespace', () => {
+    expect(argvOf('  node   job.js ')).toEqual(['node', 'job.js']);
+    // ponytail: no shell quoting, so this is four words. Pinned because it is
+    // the ceiling, not an accident.
+    expect(argvOf('sh -c "a b"')).toEqual(['sh', '-c', '"a', 'b"']);
   });
 
   test('the strictness this composition exists for', () => {

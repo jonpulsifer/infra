@@ -18,8 +18,10 @@
  * with until somebody presses Deploy. `pendingRelease` names where that is
  * still true.
  *
- * **Both fields are required, and `null` is how each is removed.** An edit has
- * no creation-time default to fall back to, so an omitted field would read as
+ * **Both fields are required, and `null` is how each is removed.** `createComponent`
+ * states them at creation and may omit either, because a Component that has just
+ * been written has nothing to leave alone. An edit has no such default to fall
+ * back to, so an omitted field here would read as
  * "leave it alone" — and leaving half an entrypoint alone is the dangerous
  * half: `args` written for one binary silently surviving onto another is a
  * process started with flags it never declared. `command` and `args` are one
@@ -47,7 +49,7 @@ import { type Command, failed, ok } from '../types.ts';
  * diff as different from a pinned absence while meaning the same thing. One
  * spelling for "the image's own", and it is `null`.
  */
-const argv = z.array(z.string().min(1)).min(1);
+export const argv = z.array(z.string().min(1)).min(1);
 
 export const setComponentCommandInput = z
   .object({

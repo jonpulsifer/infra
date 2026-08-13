@@ -25,6 +25,7 @@ import {
   authHasARoute,
 } from '../../domain/desired-state.ts';
 import { type Command, failed, ok } from '../types.ts';
+import { argv } from './command.ts';
 
 /** A DNS-safe label: a Component's name appears in canonical hostnames (§9). */
 const componentName = z
@@ -63,6 +64,21 @@ const common = {
    */
   reach: z.enum(['none', 'private', 'public']).default('private'),
   auth: z.enum(['none', 'proxy']).default('proxy'),
+  /**
+   * How this Component runs its image, if not the image's own way.
+   *
+   * The same two fields {@link setComponentCommand} edits, and the same schema
+   * — stated here because a monolith's second Component is *created* to run
+   * differently, and a creation that could not say so would have every such
+   * Component exist for one edit as a duplicate of its sibling. Optional on
+   * both, unlike the edit, which requires both: an omitted field there could
+   * only mean "leave the other half alone", and there is no other half yet.
+   *
+   * Not gated on `kind`, for the reason the edit is not: a service and a job
+   * off one image is exactly the case this exists for.
+   */
+  command: argv.nullable().optional(),
+  args: argv.nullable().optional(),
 };
 
 export const createComponentInput = z
@@ -130,6 +146,8 @@ export const createComponent: Command<
       // the value is not the developer's to set — it is what the kind means.
       expose: exposeFor(input),
       schedule: input.kind === 'job' ? (input.schedule ?? null) : null,
+      command: input.command ?? null,
+      args: input.args ?? null,
       reach: input.reach,
       auth: input.auth,
       createdAt: now,

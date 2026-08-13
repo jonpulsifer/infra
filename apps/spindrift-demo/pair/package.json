@@ -1,0 +1,11 @@
+{
+  "name": "spindrift-demo-pair",
+  "private": true,
+  "type": "module",
+  "description": "One scope, two Components: a job writes and a service reads it back, through a Datastore neither declares.",
+  "scripts": {
+    "start": "node server.js",
+    "job": "node job.js",
+    "test": "node --test"
+  }
+}

@@ -1,5 +1,5 @@
 /**
- * Enough of the Valkey wire protocol to read what `job/` wrote.
+ * Enough of the Valkey wire protocol for both entrypoints of this scope.
  *
  * Its own file so it can be checked without starting a server: `server.js`
  * listens at import, and a parser whose only exercise is "the page looked
@@ -7,11 +7,9 @@
  * someone. `resp.test.js` runs on `node --test` — a built-in, so this scope
  * stays dependency-free like its neighbours.
  *
- * The `job/` scope deliberately does **not** import this. Each scope here is
- * self-contained, because railpack builds with the *scope* as its context and
- * a module one directory up is simply not in the build. The job also needs
- * far less — it sends three commands whose replies are one line each and says
- * so — so the duplication is two different jobs, not one done twice.
+ * `job.js` imports it too, which is the shape of the whole scope: one image,
+ * one module graph, two Components that differ by their entrypoint and by
+ * nothing else.
  */
 
 /** One RESP array, which is the only way a command is sent. */
