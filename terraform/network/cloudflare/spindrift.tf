@@ -30,6 +30,23 @@ module "tunnel_spindrift" {
         hostname = "*.${cloudflare_zone.lolwtf_dev.name}"
         service  = "http://cilium-gateway-spindrift-apps.spindrift-apps.svc.cluster.local"
       },
+      # The other two zones a `reach: public` App can be minted in. A wildcard
+      # ingress rule is routing and nothing else: the module publishes no record
+      # for one (see its `cloudflare_dns_record.cf`), so only a name some other
+      # controller has pointed at this tunnel ever arrives here. That is what
+      # makes a catch-all over the hand-managed zone safe — `wiki`, `tf` and
+      # `folly` are records aimed elsewhere and never reach this tunnel.
+      {
+        hostname = "*.${cloudflare_zone.lolwtf_ca.name}"
+        service  = "http://cilium-gateway-spindrift-apps.spindrift-apps.svc.cluster.local"
+      },
+      {
+        hostname = "*.${cloudflare_zone.wishin_app.name}"
+        service  = "http://cilium-gateway-spindrift-apps.spindrift-apps.svc.cluster.local"
+      },
+      # No rule for embarrassing.ca: the manifest serves that zone off Vercel
+      # and Cloudflare Pages, which are their own edge. A rule here would
+      # forward it to a cluster gateway holding no listener for it.
       {
         service = "http_status:404"
       }

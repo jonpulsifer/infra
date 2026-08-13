@@ -24,6 +24,7 @@ export { listApps } from './apps/list.ts';
 export { resolveComponentPlacement } from './apps/resolve-placement.ts';
 export { uploadArchive } from './apps/upload-archive.ts';
 export { getAppWorkspace } from './apps/workspace.ts';
+export { setAppZone } from './apps/zone.ts';
 export { listArtifacts } from './artifacts/list.ts';
 export { adoptBuild } from './builds/adopt.ts';
 export { dispatchBuild } from './builds/dispatch.ts';

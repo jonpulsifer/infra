@@ -253,6 +253,13 @@
       "when": 1786363272474,
       "tag": "0035_component_entrypoint",
       "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "7",
+      "when": 1786363272475,
+      "tag": "0036_app_zone",
+      "breakpoints": true
     }
   ]
 }

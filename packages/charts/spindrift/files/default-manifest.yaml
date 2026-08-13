@@ -24,8 +24,8 @@ auth:
   gateway: null
 dns:
   zones:
-    private: example.com
-    public: example.com
+    - name: example.com
+      reaches: [private, public]
 sources:
   buckets:
     - bluenose-spindrift-source

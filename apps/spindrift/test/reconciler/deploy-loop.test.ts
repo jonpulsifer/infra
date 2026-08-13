@@ -33,6 +33,7 @@ import {
   deploys,
   targets,
 } from '../../src/db/schema.ts';
+import { zoneFor } from '../../src/domain/naming.ts';
 import { targetLabel } from '../../src/domain/target.ts';
 import {
   claimNextDeploy,
@@ -283,7 +284,9 @@ describe('phases come from the platform, not from core (§6)', () => {
     expect(row?.ref).toBe('hr/apps/web');
     // §9: core minted the canonical name, so the URL is core's and the adapter
     // had nothing to add.
-    expect(row?.url).toBe(`https://shop-web.${manifest.dns.zones.private}`);
+    expect(row?.url).toBe(
+      `https://shop-web.${zoneFor('private', manifest.dns.zones)}`,
+    );
 
     // The whole timeline landed on the one attempt log the UI subscribes to.
     const events = await database()
@@ -316,7 +319,7 @@ describe('phases come from the platform, not from core (§6)', () => {
     // Flat, and the App leads: one label under the zone is what a wildcard
     // certificate binds, and what makes the name resolvable over TLS at all.
     expect(desired.hostname.canonical).toBe(
-      `shop-web.${manifest.dns.zones.private}`,
+      `shop-web.${zoneFor('private', manifest.dns.zones)}`,
     );
   });
 
@@ -462,7 +465,7 @@ describe('§9: one vanity name, and never two claimants', () => {
     await runDeployPass(context(adapter));
 
     expect(adapter.applied[0]?.desired.hostname.vanity).toBe(
-      `shop.${manifest.dns.zones.public}`,
+      `shop.${zoneFor('public', manifest.dns.zones)}`,
     );
   });
 
@@ -518,7 +521,7 @@ describe('§9: one vanity name, and never two claimants', () => {
     await runDeployPass(context(adapter));
 
     expect(adapter.applied[0]?.desired.hostname.vanity).toBe(
-      `shop.${manifest.dns.zones.public}`,
+      `shop.${zoneFor('public', manifest.dns.zones)}`,
     );
   });
 });

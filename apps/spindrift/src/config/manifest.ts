@@ -112,10 +112,7 @@ export const DEFAULT_PLACEHOLDER_MANIFEST: AuthoredManifest = {
     gateway: null,
   },
   dns: {
-    zones: {
-      private: 'example.com',
-      public: 'example.com',
-    },
+    zones: [{ name: 'example.com', reaches: ['private', 'public'] }],
   },
   sources: {
     buckets: ['bluenose-spindrift-source'],

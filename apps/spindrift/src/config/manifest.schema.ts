@@ -494,22 +494,44 @@ export const installationManifestSchema = z
     dns: z
       .object({
         /**
-         * One zone per reach, each dedicated to generated names and disjoint
-         * from any hand-managed flat space (§9).
+         * The zones this installation mints names in, each stating what it is
+         * able to serve (§9).
          *
-         * They are named separately because they are allowed to diverge, and the
-         * choice is the installation's rather than the product's: a homelab
-         * points both at one zone, so flipping a Component's reach is a record
-         * re-point and its hostname is stable; a work installation points them
-         * at different zones — separate trust boundaries, split-horizon
-         * resolvers — and accepts that changing reach is a rename.
+         * **A list rather than a zone named per reach, and the inversion is the
+         * point.** Naming a zone per reach made two the maximum an installation
+         * could have, and made "which zone" a question only reach could answer.
+         * An installation with a domain that exists solely to answer on the
+         * internet had nowhere to say so, and an App had no way to ask for one
+         * domain over another.
+         *
+         * Both readings the old shape had are still expressible, and the choice
+         * is the installation's rather than the product's. Point every zone at
+         * both reaches and flipping a Component's reach is a record re-point
+         * with a stable hostname; state a zone per reach — separate trust
+         * boundaries, split-horizon resolvers — and changing reach is a rename.
+         *
+         * **Order is the default.** An App that pins no zone mints in the first
+         * one here that serves its reach, so the list's head is what an
+         * installation gets by not choosing. Every zone is expected to be
+         * dedicated to generated names and disjoint from any hand-managed flat
+         * space; nothing here can check that, and an installation that mints
+         * into a zone it also hand-manages owns the collision.
          */
         zones: z
-          .object({
-            private: zone,
-            public: zone,
-          })
-          .strict(),
+          .array(
+            z
+              .object({
+                name: zone,
+                /**
+                 * What this zone answers on. `none` is not a member: nothing
+                 * routes to a Component that has it, so there is no record for
+                 * a zone to publish.
+                 */
+                reaches: z.array(z.enum(['private', 'public'])).min(1),
+              })
+              .strict(),
+          )
+          .min(1),
       })
       .strict(),
 

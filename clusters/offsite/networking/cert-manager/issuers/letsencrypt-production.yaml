@@ -21,3 +21,4 @@ spec:
             - ${GATEWAY_ZONE}
             - ${SPINDRIFT_DOMAIN}
             - embarrassing.ca
+            - wishin.app
