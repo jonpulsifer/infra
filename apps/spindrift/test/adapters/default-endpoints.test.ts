@@ -135,7 +135,11 @@ describe('a Target with no stated endpoint reaches the adapter default', () => {
       connection,
     };
     const spy = capture();
-    const adapter = new PagesDeployAdapter({ token: TOKEN, fetch: spy.fetch });
+    const adapter = new PagesDeployAdapter({
+      token: TOKEN,
+      artifactToken: TOKEN,
+      fetch: spy.fetch,
+    });
 
     await adapter.observe(target, 'example-account/pages/site');
 

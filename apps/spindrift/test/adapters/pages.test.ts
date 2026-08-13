@@ -41,6 +41,7 @@ import {
   FakeCloudflarePages,
   type FakeCloudflarePagesOptions,
 } from '../harness/fakes/cloudflare-pages-api.ts';
+import { FakeOciRegistry } from '../harness/fakes/oci-registry.ts';
 import { CLOUDFLARE_ENDPOINT } from '../harness/installation.ts';
 import { bytes, tarball } from '../harness/tar.ts';
 
@@ -98,7 +99,11 @@ function adapterFor(options: FakeCloudflarePagesOptions = {}): {
   });
   return {
     api,
-    adapter: new PagesDeployAdapter({ token: api.token, fetch: api.fetch }),
+    adapter: new PagesDeployAdapter({
+      token: api.token,
+      artifactToken: api.token,
+      fetch: api.fetch,
+    }),
   };
 }
 
@@ -257,6 +262,7 @@ describe('a supplied upload is fetched out of the depot', () => {
     const fetched: string[] = [];
     const adapter = new PagesDeployAdapter({
       token: api.token,
+      artifactToken: api.token,
       federation: { ...FEDERATION, readToken: async () => 'jwt' },
       fetch: async (request) => {
         if (request.url.startsWith(FEDERATION.tokenUrl)) {
@@ -393,31 +399,79 @@ describe('§9: the platform names its own', () => {
   });
 });
 
-describe('what this Target cannot fetch, it says so about', () => {
-  test('a registry reference is an address this credential cannot read', async () => {
-    const { adapter } = adapterFor();
+describe('a built files artifact is pulled out of the registry', () => {
+  const AR_HOST = 'region-docker.pkg.dev';
+  const AR_REPOSITORY = 'example-vessel/i/shop/site';
+  const DIGEST = `sha256:${'a'.repeat(64)}`;
+  const AR_REF = `${AR_HOST}/${AR_REPOSITORY}@${DIGEST}`;
+  const GHCR_REF = `ghcr.io/example/shop/site@${DIGEST}`;
+
+  function ociAdapter(): {
+    registry: FakeOciRegistry;
+    api: FakeCloudflarePages;
+    adapter: PagesDeployAdapter;
+  } {
+    const registry = new FakeOciRegistry({
+      host: AR_HOST,
+      repository: AR_REPOSITORY,
+      digest: DIGEST,
+      layer: SITE,
+    });
+    const api = new FakeCloudflarePages({});
+    // One transport, split by host: the registry answers for itself and the
+    // platform API answers for everything else.
+    const adapter = new PagesDeployAdapter({
+      token: api.token,
+      artifactToken: async () => 'federated-token',
+      fetch: async (request) =>
+        new URL(request.url).host === AR_HOST
+          ? registry.fetch(request)
+          : api.fetch(request),
+    });
+    return { registry, api, adapter };
+  }
+
+  function built(refs: readonly string[]): DesiredState {
+    return desired({ artifact: { type: 'files', digest: DIGEST, refs } });
+  }
+
+  test('the readable reference is chosen even when it is not the first', async () => {
+    const { registry, api, adapter } = ociAdapter();
     const { verdict } = await drain(
-      adapter.apply(
-        TARGET,
-        desired({
-          artifact: {
-            type: 'files',
-            digest: 'sha256:bundle',
-            refs: ['ghcr.io/owner/site@sha256:abc'],
-          },
-        }),
-      ),
+      adapter.apply(TARGET, built([GHCR_REF, AR_REF])),
     );
+
+    expect(verdict.phase).toBe('LIVE');
+    expect(api.servedPaths(PROJECT)).toEqual([
+      '/assets/app.css',
+      '/index.html',
+    ]);
+    // The registry read carried the federated identity, never the account
+    // credential this adapter drives the platform with.
+    expect(registry.requests.length).toBeGreaterThan(0);
+    for (const request of registry.requests) {
+      expect(request.authorization).toBe('Bearer federated-token');
+    }
+  });
+
+  test('an artifact homed only where the identity cannot read is refused by name', async () => {
+    const { registry, adapter } = ociAdapter();
+    const { verdict } = await drain(adapter.apply(TARGET, built([GHCR_REF])));
+
     expect(verdict.phase).toBe('FAILED');
     if (verdict.phase === 'FAILED') {
       // §6 blames the platform: the build is green and the bytes are not
       // reachable in the form this Target serves.
       expect(verdict.reason).toBe('ARTIFACT_UNAVAILABLE');
       expect(blameFor(verdict.reason)).toBe('platform');
-      expect(verdict.detail).toContain('cannot read');
+      expect(verdict.detail).toContain('ghcr.io');
     }
+    // And nothing tried to pull anonymously on the way to refusing.
+    expect(registry.requests).toEqual([]);
   });
+});
 
+describe('what this Target cannot fetch, it says so about', () => {
   test('an artifact with no address at all is named as such', async () => {
     const { adapter } = adapterFor();
     const { verdict } = await drain(
