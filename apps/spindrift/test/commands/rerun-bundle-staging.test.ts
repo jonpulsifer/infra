@@ -38,6 +38,8 @@ const database = withIsolatedDatabase();
 const manifest = await fixtureManifest();
 
 const COMMIT = 'be796d65be796d65be796d65be796d65be796d65';
+/** Where the default branch got to after the Build above was created. */
+const MOVED = 'c0ffee11c0ffee11c0ffee11c0ffee11c0ffee11';
 const STALE_HANDLE =
   'upload://3f5cbbc2ced964573220535fc887677dcb768b9d56b4931c415db44402440b03';
 const DURABLE_LOCATION =
@@ -240,6 +242,34 @@ describe('the bundle a rerun stages', () => {
     // wants the same object. Re-fetching it would cost a tarball to arrive back
     // where it started.
     expect(stager.staged).toHaveLength(0);
+  });
+
+  test('a durable bundle is left behind once the repository has moved past it', async () => {
+    // The hole this closes: `authoritative_commit` moves on every default-branch
+    // push, and a rerun that inherited any still-fetchable bundle rebuilt the
+    // commit the App was created at — forever, reporting success each time.
+    const seeded = await seedFailedBuild({
+      location: DURABLE_LOCATION,
+      connectRepository: true,
+    });
+    await ctx.db
+      .update(repositories)
+      .set({ authoritativeCommit: MOVED })
+      .where(eq(repositories.fullName, `jonpulsifer/${seeded.app.name}`));
+
+    const result = await deployApp({ name: seeded.app.name }, ctx);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    expect(stager.staged).toEqual([
+      { repository: `jonpulsifer/${seeded.app.name}`, commit: MOVED },
+    ]);
+    const [rerun] = await ctx.db
+      .select()
+      .from(builds)
+      .where(eq(builds.id, result.value.buildId));
+    expect(rerun!.commit.split('#')[0]).toBe(MOVED);
+    expect(rerun!.bundleLocation).toBe(FRESH_LOCATION);
   });
 
   test('an archive App is refused rather than rebuilt from bytes nobody holds', async () => {
