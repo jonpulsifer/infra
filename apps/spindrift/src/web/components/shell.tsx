@@ -1,6 +1,7 @@
 import {
   AlertTriangle,
   Boxes,
+  Database,
   Hammer,
   LayoutDashboard,
   LogOut,
@@ -32,6 +33,10 @@ import { CommandPalette } from './command-palette.tsx';
  * users, and §18's "the running app is the product, the pipeline is only how it
  * got there" is the whole reason it does not read as the chain's last stage.
  *
+ * Datastores is not in it either, and for a different reason than Deploy's:
+ * §11 never puts a Datastore on §2's chain at all — it is never a Source, a
+ * Build or an Artifact, so there is no stage to fold it into.
+ *
  * `roots` is what the entry lights up for; the first of them is where it goes.
  */
 const NAVIGATION = [
@@ -44,6 +49,12 @@ const NAVIGATION = [
     roots: ['/builds', '/sources', '/artifacts'],
   },
   { path: '/deploys', label: 'Deploys', icon: Rocket, roots: ['/deploys'] },
+  {
+    path: '/datastores',
+    label: 'Datastores',
+    icon: Database,
+    roots: ['/datastores'],
+  },
   {
     path: '/settings/connections',
     label: 'Settings',
@@ -382,7 +393,7 @@ export function AppShell({
 
       <nav
         aria-label="Primary navigation (compact)"
-        className="fixed inset-x-0 bottom-0 z-40 grid grid-cols-5 border-t border-rail-line bg-rail/95 p-1.5 backdrop-blur md:hidden"
+        className="fixed inset-x-0 bottom-0 z-40 grid grid-cols-6 border-t border-rail-line bg-rail/95 p-1.5 backdrop-blur md:hidden"
       >
         {navigation(true)}
       </nav>

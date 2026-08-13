@@ -1,19 +1,25 @@
 /**
  * Deploying a new App: one screen, already answered.
  *
- * §18 named the creation flow Source → Component → Place → Configure → Review,
- * and this screen still is that, in that order. What went away is the rail.
- * Stories 31 and 32 say what the sequence was *for* — "defaults carrying every
- * step", "corrections and configuration hidden behind progressive disclosure"
- * — and five screens with a Continue button under each turned out to be the
- * rendering that made every default look like a question. Four Continues to
- * accept four answers nobody disagreed with is not a short happy path; it is a
- * long one with the disagreement removed.
+ * §18 named the creation flow Source → Component → Place → Configure → Review.
+ * The rail went away — stories 31 and 32 say what the sequence was *for*,
+ * "defaults carrying every step" and "corrections hidden behind progressive
+ * disclosure", and five screens with a Continue button under each turned out to
+ * be the rendering that made every default look like a question. Four Continues
+ * to accept four answers nobody disagreed with is not a short happy path; it is
+ * a long one with the disagreement removed.
  *
- * So: pick a source, read what it resolved to, press Deploy. Every row states
- * the answer **and why it is the answer**, and every row that can be corrected
- * opens the correction in place, without losing sight of the rows that choice
- * decides.
+ * So: name it, pick a source, read what it resolved to, press Deploy. Every row
+ * states the answer **and why it is the answer**, and every row that can be
+ * corrected opens the correction in place, without losing sight of the rows
+ * that choice decides.
+ *
+ * **The rows are in dependency order**, which is not the order §18 listed them
+ * in and is the order the data actually has. Placement is derived from kind,
+ * reach and auth (§3) — the `listTargets` refetch below *is* that derivation —
+ * so Target and the URL it mints come after the three answers that decide which
+ * Targets are candidates at all, not before them. Name leads because it is the
+ * only row that is nothing else's consequence.
  *
  * The reason this is honest now and would not have been before is
  * `inspectRepository`. The draft has always carried a `detection` block and
@@ -23,7 +29,7 @@
  * the kind, the scope, the build frontend and the ruled-out kinds are what it
  * found.
  */
-import { AlertTriangle, Loader2, Rocket } from 'lucide-react';
+import { AlertTriangle, Loader2, Rocket, Search } from 'lucide-react';
 import { type Dispatch, useEffect, useRef, useState } from 'react';
 import type { ZodType } from 'zod';
 import type {
@@ -56,6 +62,7 @@ import { reportSessionExpired } from '../../../session-events.ts';
 import { Badge } from '../../../ui/badge.tsx';
 import { Button } from '../../../ui/button.tsx';
 import { Card, Eyebrow } from '../../../ui/card.tsx';
+import { Declaration } from '../../../ui/declaration.tsx';
 import { Field } from '../../../ui/field.tsx';
 import { notify } from '../../../ui/toast.tsx';
 import { cn } from '../../../ui/utils.ts';
@@ -65,6 +72,7 @@ import {
   inspection,
   mergeScopes,
   outcomeOf,
+  spindriftFileFor,
 } from './detect.ts';
 import { blockersFor, type Draft, draftReducer, ENTRIES } from './draft.ts';
 import {
@@ -392,6 +400,13 @@ export function NewApp({
   ];
   const target = targets.find((option) => option.targetId === draft.targetId);
   const choices = repositoryChoices(repos, available);
+  // The file the chosen directory will get, from the read that chose it.
+  const spindriftFile = spindriftFileFor(
+    (scopes ?? []).find(
+      (scope) =>
+        draft.source.kind === 'repo' && scope.scope === draft.source.subpath,
+    ),
+  );
   const appNameIssue = issueWith(appNameSchema, draft.appName);
   const componentNameIssue = issueWith(
     componentNameSchema,
@@ -709,7 +724,58 @@ export function NewApp({
         </p>
       </header>
 
+      {/*
+        The order is the dependency order, top to bottom, and it did not used
+        to be. Placement is *derived* from kind, reach and auth (§3) — the
+        `listTargets` refetch in `dispatch` is that derivation, firing whenever
+        one of the three moves — so a reader met the Target, and the URL it
+        mints, several rows before the three answers that decide which Targets
+        are even candidates. Reading down now never asks anybody to accept a
+        consequence before its cause.
+
+        Name is first because it is the only row that is nothing's consequence.
+      */}
       <Card>
+        <Row
+          label="Name"
+          // A name the schema will refuse is an answer nobody has given yet,
+          // so the row that holds it opens rather than hiding the field the
+          // message is attached to behind a pencil.
+          unsettled={appNameIssue !== null || componentNameIssue !== null}
+          value={`${draft.appName} · ${draft.componentName}`}
+          why="The App is the product; the Component is the one workload this creates inside it."
+        >
+          <div className="grid gap-3 sm:grid-cols-2">
+            <Field
+              name="appName"
+              label="App name"
+              value={draft.appName}
+              onChange={(event) =>
+                dispatch({
+                  type: 'field',
+                  field: 'appName',
+                  value: event.target.value,
+                })
+              }
+              issue={appNameIssue}
+              hint="Lowercase DNS label — it appears in the canonical hostname."
+            />
+            <Field
+              name="componentName"
+              label="Component name"
+              value={draft.componentName}
+              onChange={(event) =>
+                dispatch({
+                  type: 'field',
+                  field: 'componentName',
+                  value: event.target.value,
+                })
+              }
+              issue={componentNameIssue}
+            />
+          </div>
+        </Row>
+
         <SourceRow
           draft={draft}
           dispatch={dispatch}
@@ -725,17 +791,8 @@ export function NewApp({
 
         <Row
           label="Component"
-          // A name the schema will refuse is an answer nobody has given yet,
-          // so the row that holds it opens rather than hiding the field the
-          // message is attached to behind a pencil.
-          unsettled={
-            standing !== null ||
-            unchosen.length > 0 ||
-            readElsewhere ||
-            appNameIssue !== null ||
-            componentNameIssue !== null
-          }
-          value={`${draft.componentName} · ${draft.kind}`}
+          unsettled={standing !== null || unchosen.length > 0 || readElsewhere}
+          value={draft.kind}
           why={
             readElsewhere && draft.source.kind === 'repo'
               ? `${draft.detection.reason} — read in ${draft.detection.scope}, and the root directory now names ${draft.source.subpath}.`
@@ -753,53 +810,71 @@ export function NewApp({
             )
           }
         >
-          <div className="flex flex-col gap-3">
-            <div className="grid gap-3 sm:grid-cols-2">
-              <Field
-                name="appName"
-                label="App name"
-                value={draft.appName}
-                onChange={(event) =>
-                  dispatch({
-                    type: 'field',
-                    field: 'appName',
-                    value: event.target.value,
-                  })
-                }
-                issue={appNameIssue}
-                hint="Lowercase DNS label — it appears in the canonical hostname."
-              />
-              <Field
-                name="componentName"
-                label="Component name"
-                value={draft.componentName}
-                onChange={(event) =>
-                  dispatch({
-                    type: 'field',
-                    field: 'componentName',
-                    value: event.target.value,
-                  })
-                }
-                issue={componentNameIssue}
-              />
-            </div>
-            <div className="grid gap-2 sm:grid-cols-3">
-              {KINDS.map((kind) => {
-                const reason = draft.detection.unavailable[kind];
-                return (
-                  <Choice
-                    key={kind}
-                    selected={draft.kind === kind}
-                    disabled={reason !== undefined}
-                    title={kind}
-                    note={reason ?? KIND_NOTE[kind]}
-                    onClick={() => dispatch({ type: 'kind', kind })}
-                  />
-                );
-              })}
-            </div>
+          <div className="grid gap-2 sm:grid-cols-3">
+            {KINDS.map((kind) => {
+              const reason = draft.detection.unavailable[kind];
+              return (
+                <Choice
+                  key={kind}
+                  selected={draft.kind === kind}
+                  disabled={reason !== undefined}
+                  title={kind}
+                  note={reason ?? KIND_NOTE[kind]}
+                  onClick={() => dispatch({ type: 'kind', kind })}
+                />
+              );
+            })}
           </div>
         </Row>
+
+        {/*
+          `Row`'s whole claim is that a stated reason is what separates a
+          default from something somebody typed — and these two notes are
+          dictionary definitions of the value, identical whether the operator
+          chose it or the draft was born with it. Saying which is the reason.
+        */}
+        <Row
+          label="Reach"
+          value={draft.reach}
+          why={`${draft.reach === OPENING_REACH ? 'Default — ' : ''}${REACH_NOTE[draft.reach]}`}
+        >
+          <div className="grid gap-2 sm:grid-cols-3">
+            {REACHES.map((reach) => (
+              <Choice
+                key={reach}
+                selected={draft.reach === reach}
+                title={reach}
+                note={REACH_NOTE[reach]}
+                onClick={() => dispatch({ type: 'reach', reach })}
+              />
+            ))}
+          </div>
+        </Row>
+
+        {/*
+          Offered separately because it is a separate fact, and hidden at
+          `reach: none` because there is no route to put a filter on — the same
+          refusal validation makes, stated by not asking.
+        */}
+        {draft.reach !== 'none' && (
+          <Row
+            label="Auth"
+            value={draft.auth}
+            why={`${draft.auth === OPENING_AUTH ? 'Default — ' : ''}${AUTH_NOTE[draft.auth]}`}
+          >
+            <div className="grid gap-2 sm:grid-cols-2">
+              {AUTHS.map((auth) => (
+                <Choice
+                  key={auth}
+                  selected={draft.auth === auth}
+                  title={auth}
+                  note={AUTH_NOTE[auth]}
+                  onClick={() => dispatch({ type: 'auth', auth })}
+                />
+              ))}
+            </div>
+          </Row>
+        )}
 
         <Row
           label="Target"
@@ -885,55 +960,6 @@ export function NewApp({
           }
         />
 
-        {/*
-          `Row`'s whole claim is that a stated reason is what separates a
-          default from something somebody typed — and these two notes are
-          dictionary definitions of the value, identical whether the operator
-          chose it or the draft was born with it. Saying which is the reason.
-        */}
-        <Row
-          label="Reach"
-          value={draft.reach}
-          why={`${draft.reach === OPENING_REACH ? 'Default — ' : ''}${REACH_NOTE[draft.reach]}`}
-        >
-          <div className="grid gap-2 sm:grid-cols-3">
-            {REACHES.map((reach) => (
-              <Choice
-                key={reach}
-                selected={draft.reach === reach}
-                title={reach}
-                note={REACH_NOTE[reach]}
-                onClick={() => dispatch({ type: 'reach', reach })}
-              />
-            ))}
-          </div>
-        </Row>
-
-        {/*
-          Offered separately because it is a separate fact, and hidden at
-          `reach: none` because there is no route to put a filter on — the same
-          refusal validation makes, stated by not asking.
-        */}
-        {draft.reach !== 'none' && (
-          <Row
-            label="Auth"
-            value={draft.auth}
-            why={`${draft.auth === OPENING_AUTH ? 'Default — ' : ''}${AUTH_NOTE[draft.auth]}`}
-          >
-            <div className="grid gap-2 sm:grid-cols-2">
-              {AUTHS.map((auth) => (
-                <Choice
-                  key={auth}
-                  selected={draft.auth === auth}
-                  title={auth}
-                  note={AUTH_NOTE[auth]}
-                  onClick={() => dispatch({ type: 'auth', auth })}
-                />
-              ))}
-            </div>
-          </Row>
-        )}
-
         <VesselRow
           name={draft.vessel.name}
           note={draft.vessel.note}
@@ -1001,6 +1027,39 @@ export function NewApp({
 
       {refusal ? (
         <Refusal failure={refusal.failure} title={refusal.title} />
+      ) : null}
+
+      {/*
+        Deploy is two acts, and only one of them is visible above. It creates
+        the App — and, for a repository Spindrift holds no row for, it commits
+        this file to that repository in the configuration pull request §15 makes
+        authoritative. Agreeing to the first is not agreeing to the second
+        unless the second is on screen.
+      */}
+      {spindriftFile !== null && draft.source.kind === 'repo' ? (
+        <Declaration
+          title="What lands in the repository"
+          label={
+            draft.source.subpath === '.'
+              ? 'spindrift.yaml'
+              : `${draft.source.subpath}/spindrift.yaml`
+          }
+          note={
+            <>
+              Committed to{' '}
+              <span className="font-mono">{draft.source.repo}</span> on a
+              configuration pull request, alongside one workflow caller.
+              Spindrift adopts it only once that pull request merges into the
+              default branch.
+            </>
+          }
+          caveat={
+            draft.source.connect === true
+              ? undefined
+              : `${draft.source.repo} is already connected, so Deploy commits nothing — this is what its ${draft.source.subpath === '.' ? 'spindrift.yaml' : `${draft.source.subpath}/spindrift.yaml`} would say if it were connected now.`
+          }
+          text={spindriftFile}
+        />
       ) : null}
 
       <div className="flex flex-wrap items-center gap-3">
@@ -1277,6 +1336,9 @@ function SourceRow({
   );
 }
 
+/** Above this many directories, finding one by eye stops being realistic. */
+const SCOPE_FILTER_AT = 6;
+
 /**
  * Every directory the repository was read for, as one control to choose from.
  *
@@ -1285,10 +1347,16 @@ function SourceRow({
  * detection knows how to build is selectable and wears the kind and the
  * sentence behind it; one it does not is here too, disabled, wearing what it
  * found instead — §3's grammar, which only works if the alternatives stay
- * readable. A `<select>` keeps them readable and keeps a monorepo's twenty
- * directories from burying the rows below Source, which a grid of tiles did.
- * The reason rides in each option's own label for the same reason: a dropdown
- * has nowhere else to put a per-option sentence.
+ * readable.
+ *
+ * **Bounded rows, not a tile grid and not a `<select>`.** A grid of tiles put a
+ * monorepo's twenty directories between Source and every row below it. A
+ * `<select>` bounded that, but a native option is one line of plain text, so
+ * the directory, its kind and the sentence behind it were run together into a
+ * single very long line — and the one thing an operator is scanning for, the
+ * path, was the shortest part of it. Rows in a scroller of fixed height keep
+ * §3's grammar legible and keep the section the same size whether the
+ * repository holds two directories or forty.
  *
  * An empty list means nothing has been read yet, which is a different thing
  * from a repository with nothing in it.
@@ -1302,48 +1370,86 @@ function ScopeChooser({
   scopes: readonly InspectedScope[] | null;
   onChoose: (scope: InspectedScope) => void;
 }) {
+  const [filter, setFilter] = useState('');
   if (scopes === null || scopes.length === 0) return null;
 
-  // The directory the draft names is what it is deploying, whatever detection
-  // made of it — story 32 keeps that escape hatch open, and Deploy is not
-  // blocked on it. So the control points at it rather than drawing it as the
-  // one row that cannot be chosen while it is the row in force. Only a subpath
-  // nothing has read at all leaves the placeholder standing.
-  const chosen = scopes.find((scope) => scope.scope === subpath);
+  const needle = filter.trim().toLowerCase();
+  const shown = needle
+    ? scopes.filter((scope) => scope.scope.toLowerCase().includes(needle))
+    : scopes;
 
   return (
     <div className="flex flex-col gap-2">
-      <Eyebrow>Directories Spindrift read</Eyebrow>
-      <select
+      <Eyebrow>Directories Spindrift read · {scopes.length}</Eyebrow>
+      {scopes.length > SCOPE_FILTER_AT ? (
+        <div className="relative">
+          <Search
+            aria-hidden="true"
+            className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground"
+          />
+          <input
+            type="text"
+            aria-label="Filter directories"
+            placeholder="Filter directories…"
+            value={filter}
+            onChange={(event) => setFilter(event.target.value)}
+            className={cn(
+              'w-full rounded-md border border-border bg-card py-2 pl-9 pr-3 font-mono text-sm',
+              'placeholder:text-muted-foreground',
+              'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30',
+            )}
+          />
+        </div>
+      ) : null}
+      <div
+        role="listbox"
         aria-label="Directories Spindrift read"
-        value={chosen?.scope ?? ''}
-        onChange={(event) => {
-          const picked = scopes.find(
-            (scope) => scope.scope === event.currentTarget.value,
-          );
-          if (picked !== undefined) onChoose(picked);
-        }}
-        className={cn(
-          'h-9 w-full rounded-md border border-border bg-card px-3',
-          'font-mono text-sm text-foreground',
-          'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30',
-        )}
+        className="flex max-h-[240px] flex-col gap-1 overflow-y-auto rounded-md border border-border bg-card p-1.5"
       >
-        <option value="" disabled>
-          {`Choose one of ${scopes.length} directories…`}
-        </option>
-        {scopes.map((scope) => (
-          <option
-            key={scope.scope}
-            value={scope.scope}
-            disabled={scope.outcome !== 'detected' && scope.scope !== subpath}
-          >
-            {scope.outcome === 'detected'
-              ? `${scope.scope} — ${scope.kind} — ${scope.reason}`
-              : `${scope.scope} — cannot build: ${scope.detail}`}
-          </option>
-        ))}
-      </select>
+        {shown.length === 0 ? (
+          <p className="px-2 py-4 text-center text-sm text-muted-foreground">
+            No directory read from this repository matches that filter.
+          </p>
+        ) : (
+          shown.map((scope) => {
+            const detected = scope.outcome === 'detected';
+            // The directory the draft names is what it is deploying, whatever
+            // detection made of it — story 32 keeps that escape hatch open and
+            // Deploy is not blocked on it. So it reads as the row in force
+            // rather than as the one row that cannot be chosen.
+            const current = scope.scope === subpath;
+            return (
+              <button
+                key={scope.scope}
+                type="button"
+                role="option"
+                aria-selected={current}
+                disabled={!detected && !current}
+                onClick={() => onChoose(scope)}
+                className={cn(
+                  'flex flex-col gap-0.5 rounded-md px-3 py-2 text-left transition-colors',
+                  current
+                    ? 'border border-primary bg-accent'
+                    : 'border border-transparent hover:bg-secondary',
+                  !detected && !current && 'cursor-not-allowed opacity-60',
+                )}
+              >
+                <span className="flex items-center gap-2">
+                  <span className="min-w-0 flex-1 truncate font-mono text-sm">
+                    {scope.scope}
+                  </span>
+                  <Badge tone={detected ? 'accent' : 'idle'}>
+                    {detected ? scope.kind : 'cannot build'}
+                  </Badge>
+                </span>
+                <span className="text-xs text-muted-foreground">
+                  {detected ? scope.reason : scope.detail}
+                </span>
+              </button>
+            );
+          })
+        )}
+      </div>
       <p className="text-xs text-muted-foreground">
         Choosing one detects that directory and names the Component after it.
         Nothing is picked for you when there is more than one.

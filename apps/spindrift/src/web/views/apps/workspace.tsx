@@ -2269,12 +2269,15 @@ function Activity({
               aria-hidden="true"
               className="absolute left-[5px] top-3 bottom-3 w-px bg-border-soft"
             />
-            {entries.map((entry) => (
-              <ActivityRow
-                key={`${entry.title}-${entry.when}-${entry.deployId ?? entry.buildId}`}
-                entry={entry}
-                onNavigate={onNavigate}
-              />
+            {/*
+              Keyed by position rather than by content. Every part of the old
+              key was displayed text, so two checkpoints that read alike — the
+              ordinary case for one attempt reported twice a minute apart —
+              collided. This list is server-derived, newest-first, read-only and
+              holds no per-row state, so position is a stable identity for it.
+            */}
+            {entries.map((entry, index) => (
+              <ActivityRow key={index} entry={entry} onNavigate={onNavigate} />
             ))}
           </ol>
         )}

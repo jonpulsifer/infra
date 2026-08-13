@@ -220,22 +220,36 @@ export const getAppWorkspace: Command<
       ? await configuredKeys(context.db, selected.id, workspaceTarget.id)
       : [];
 
-  // Status events only — the checkpoints, not the transcript.
+  // Attempt-level status events only — the checkpoints, not the transcript.
   //
   // Every log line an adapter emits lands in `attempt_events` too, and reading
   // the table raw made the timeline the last twenty lines of whatever ran most
   // recently: three screens of BuildKit chatter where a reader wanted "built,
-  // deployed, went red". A checkpoint is a status event by definition — §6's
-  // `{phase, resource?, reason?}` — so the filter is the whole selection, and
-  // the text stays where it belongs, on the attempt screen each entry links to.
+  // deployed, went red".
+  //
+  // `eventType = 'status'` was believed to be the whole of that filter and is
+  // not. §6's shape is `{phase, resource?, reason?}`, and **a status event
+  // carrying a `resource` is one step or one Kubernetes object inside an
+  // attempt**, not a state of the attempt itself: the Actions poller writes one
+  // per (job, step, state), so a single build produced twenty of them and each
+  // one titled itself "Build 23 succeeded", the step name demoted to a grey
+  // subtitle. Ten rows of one build, and every real checkpoint — the deploy,
+  // the build before it — evicted by the limit. The exact sequence this
+  // timeline exists to show was the thing it could no longer show.
+  //
+  // Those rows already have a home: `builds/view.ts` and `deploys/get-detail.ts`
+  // build their per-resource checklists from precisely the events this now
+  // excludes, selecting on the same column from the other side.
+  //
   // Ten, and this is the only bound: the workspace renders what it is given, so
-  // a second limit in the view could only disagree with this one. Three showed
-  // one attempt's worth of checkpoints, and the shape the timeline exists to
-  // make legible — built, deployed, went red — is three attempts, not three
-  // events.
+  // a second limit in the view could only disagree with this one.
   const events = await context.db.query.attemptEvents.findMany({
-    where: (ev, { eq, and }) =>
-      and(eq(ev.appId, app.id), eq(ev.eventType, 'status')),
+    where: (ev, { eq, and, isNull }) =>
+      and(
+        eq(ev.appId, app.id),
+        eq(ev.eventType, 'status'),
+        isNull(ev.resource),
+      ),
     orderBy: (ev, { desc }) => [desc(ev.id)],
     limit: 10,
   });
@@ -257,7 +271,14 @@ export const getAppWorkspace: Command<
         ),
         detail: ev.resource ?? ev.reason ?? '',
         when: elapsedSince(ev.createdAt, now),
-        status: ev.reason ? 'failed' : ev.phase === 'LIVE' ? 'ok' : 'info',
+        // A Build ends at SUCCEEDED and a Deploy ends at LIVE. Reading only the
+        // Deploy's word for it left every finished Build wearing the neutral
+        // marker, so a column of checkpoints showed nothing having gone right.
+        status: ev.reason
+          ? 'failed'
+          : ev.phase === 'LIVE' || ev.phase === 'SUCCEEDED'
+            ? 'ok'
+            : 'info',
         deployId: ev.deployId,
         buildId: ev.buildId,
       });

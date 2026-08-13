@@ -78,6 +78,12 @@ const VERBS: readonly PaletteItem[] = [
   },
   { id: 'go:/deploys', group: 'Go to', label: 'Deploys', path: '/deploys' },
   {
+    id: 'go:/datastores',
+    group: 'Go to',
+    label: 'Datastores',
+    path: '/datastores',
+  },
+  {
     id: 'go:/settings/connections',
     group: 'Go to',
     label: 'Connections',

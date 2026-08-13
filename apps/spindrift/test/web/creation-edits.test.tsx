@@ -275,6 +275,7 @@ const detected = (scope: string): InspectedScope => ({
   reason: 'Go — go.mod is in this directory',
   frontend: 'railpack',
   dockerfile: null,
+  buildCommand: null,
   outputDirectory: null,
   watchPaths: [scope],
   configured: false,
@@ -302,7 +303,7 @@ describe('an edit the server refused as stale', () => {
     );
     expect(called).toContain('getCreationDraft');
     // The server's draft is on screen, and the screen says why it moved.
-    expect(screen.text()).toContain('renamed-elsewhere · service');
+    expect(screen.text()).toContain('almanac · renamed-elsewhere');
     expect(screen.text()).toContain('This draft was edited somewhere else');
     expect(screen.text()).toContain('STALE_EDIT');
     // And no draft of this tab's reached the server, so what is on screen is

@@ -23,6 +23,7 @@ import {
   createDatastore,
   destroyDatastore,
   detachDatastore,
+  listDatastores,
 } from '../../src/commands/index.ts';
 import type {
   AdapterRegistry,
@@ -36,6 +37,7 @@ import {
   type NewTarget,
   targets,
 } from '../../src/db/schema.ts';
+import { targetRowLabel } from '../../src/domain/target.ts';
 import { withIsolatedDatabase } from '../harness/db.ts';
 import { FakeDatastoreAdapter } from '../harness/fakes/datastore-adapter.ts';
 import {
@@ -51,6 +53,14 @@ import {
 const database = withIsolatedDatabase();
 const manifest = await fixtureManifest();
 const clock: Clock = { now: () => new Date('2024-06-01T00:00:00.000Z') };
+
+/** `contextWith`, with the clock overridden — what {@link listDatastores}'s ordering test needs two rows apart in time to prove. */
+function contextAt(
+  datastore: FakeDatastoreAdapter | null,
+  at: string,
+): CommandContext {
+  return { ...contextWith(datastore), clock: { now: () => new Date(at) } };
+}
 
 function contextWith(datastore: FakeDatastoreAdapter | null): CommandContext {
   const deploy = new FakeDeployAdapter();
@@ -534,5 +544,92 @@ describe('destroyDatastore', () => {
       'the finalizer will not release',
     );
     expect(await database().db.select().from(datastores)).toHaveLength(1);
+  });
+});
+
+describe('listDatastores', () => {
+  test('lists every Datastore, newest first, with the App and Target joined', async () => {
+    const target = await aTarget();
+    const backend = new FakeDatastoreAdapter();
+    const app = await anApp();
+    const first = await createDatastore(
+      {
+        name: 'orders',
+        engine: 'postgres',
+        targetId: target.id,
+        storageGiB: 10,
+      },
+      contextAt(backend, '2024-06-01T00:00:00.000Z'),
+    );
+    const firstId = (first as { value: { id: string } }).value.id;
+    await attachDatastore(
+      { datastoreId: firstId, appId: app.id },
+      contextAt(backend, '2024-06-01T00:01:00.000Z'),
+    );
+    const second = await createDatastore(
+      { name: 'cache', engine: 'valkey', targetId: target.id, storageGiB: 1 },
+      contextAt(backend, '2024-06-01T00:05:00.000Z'),
+    );
+    const secondId = (second as { value: { id: string } }).value.id;
+
+    const result = await listDatastores(
+      {},
+      contextAt(backend, '2024-06-01T00:10:00.000Z'),
+    );
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    // Newest first: 'cache' was created after 'orders'.
+    expect(result.value.datastores.map((row) => row.id)).toEqual([
+      secondId,
+      firstId,
+    ]);
+
+    const targetWithVessel = await database().db.query.targets.findFirst({
+      where: (rows, { eq: matches }) => matches(rows.id, target.id),
+      with: { vessel: true },
+    });
+
+    const attached = result.value.datastores.find((row) => row.id === firstId);
+    expect(attached?.attachedTo).toBe(app.name);
+    expect(attached?.appId).toBe(app.id);
+    expect(attached?.targetId).toBe(target.id);
+    expect(attached?.target).toBe(targetRowLabel(targetWithVessel!));
+    expect(attached?.phase).toBe('PENDING');
+    expect(attached?.provisioned).toBe(true);
+    expect(attached?.when).toBe('10m ago');
+
+    const unattached = result.value.datastores.find(
+      (row) => row.id === secondId,
+    );
+    expect(unattached?.attachedTo).toBeNull();
+    expect(unattached?.appId).toBeNull();
+  });
+
+  test('never returns connection_ref, even for an external Datastore', async () => {
+    const target = await aTarget();
+    await database().db.insert(datastores).values({
+      name: 'shared-analytics',
+      engine: 'postgres',
+      provenance: 'external',
+      targetId: target.id,
+      connectionRef: 'secret://elsewhere/analytics',
+    });
+
+    const result = await listDatastores(
+      {},
+      contextWith(new FakeDatastoreAdapter()),
+    );
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const row = result.value.datastores.find(
+      (one) => one.name === 'shared-analytics',
+    );
+    expect(row).toBeDefined();
+    expect(row).not.toHaveProperty('connectionRef');
+    // Belt and braces: the credential-adjacent value itself must not appear
+    // anywhere in the payload, not just under its own field name.
+    expect(JSON.stringify(row)).not.toContain('secret://elsewhere/analytics');
   });
 });

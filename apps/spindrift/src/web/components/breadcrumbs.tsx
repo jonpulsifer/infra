@@ -80,6 +80,12 @@ function trail(path: string): Crumb[] {
     return crumbs;
   }
 
+  // No detail route — `getAppWorkspace` still owns a single Datastore's
+  // detail, so this is one crumb rather than a branch that also names an id.
+  if (head === 'datastores') {
+    return [{ label: 'Datastores', path: '/datastores' }];
+  }
+
   // Everything left names an App, including the bare `/<name>` the route table
   // still answers for a link written before `/apps/` existed.
   const crumbs: Crumb[] = [{ label: 'Apps', path: '/apps' }];

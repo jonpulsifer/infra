@@ -483,6 +483,10 @@ describe('inspecting a repository before connecting it', () => {
         reason: 'Go — go.mod is in this directory',
         frontend: 'railpack',
         dockerfile: null,
+        // Both halves of a zero-config build travel with the proposal, so the
+        // creation screen can render the `spindrift.yaml` this scope will get
+        // rather than compose one from a subset of it.
+        buildCommand: null,
         outputDirectory: null,
         watchPaths: ['.', 'go.mod'],
         configured: false,
