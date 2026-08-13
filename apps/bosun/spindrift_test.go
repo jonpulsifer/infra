@@ -5,8 +5,11 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"sync"
 	"testing"
+	"time"
 )
 
 // fakeSpindrift is an in-memory stand-in for the three bosun-facing
@@ -62,6 +65,62 @@ func (f *fakeSpindrift) postedResults() []postedResult {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return append([]postedResult(nil), f.results...)
+}
+
+// poolBuildSource is the production wiring: a buildSource whose spawns land in
+// a real warm pool, for the tests that assert on what the pool did with them.
+func poolBuildSource(p *pool, sd spindriftClient) *buildSource {
+	return &buildSource{
+		sd: sd,
+		spawn: func(ctx context.Context, claim *buildClaim) (*skiff, error) {
+			return p.spawn(ctx, p.buildBerth(claim))
+		},
+		logger: p.logger,
+		stats:  p.stats,
+	}
+}
+
+// The claim/result choreography with no warm pool behind it at all: the port
+// hands back a skiff, the build waits for it to be gone, and the result comes
+// from the diag share the guest wrote.
+func TestBuildSourcePostsTheResultTheGuestLeftBehind(t *testing.T) {
+	diagDir := t.TempDir()
+	resultDir := filepath.Join(diagDir, "result")
+	if err := os.MkdirAll(resultDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, filepath.Join(resultDir, "status"), "SUCCEEDED")
+	writeFile(t, filepath.Join(resultDir, "build.log"), "build ok\n")
+
+	s := &skiff{paths: skiffPaths{diagDir: diagDir}, done: make(chan struct{})}
+	sd := &fakeSpindrift{}
+	b := &buildSource{
+		sd:     sd,
+		spawn:  func(context.Context, *buildClaim) (*skiff, error) { return s, nil },
+		logger: testLogger(),
+		stats:  newMetrics(),
+	}
+
+	done := make(chan struct{})
+	go func() {
+		b.runBuild(context.Background(), &buildClaim{ID: "build-1", Class: "skiff-test"})
+		close(done)
+	}()
+	close(s.done) // the skiff is gone; its diag share is safe to read
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("runBuild did not return after the skiff was gone")
+	}
+
+	results := sd.postedResults()
+	if len(results) != 1 {
+		t.Fatalf("want 1 posted result, got %d", len(results))
+	}
+	if results[0].id != "build-1" || results[0].res.Status != buildSucceeded || results[0].res.Log != "build ok\n" {
+		t.Fatalf("unexpected posted result: %+v", results[0])
+	}
 }
 
 func TestSDClientClaimBuildDecodes200(t *testing.T) {
