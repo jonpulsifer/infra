@@ -257,7 +257,7 @@ func TestLoadConfigRejectsSpindriftWithNoClasses(t *testing.T) {
 
 // A build class Spindrift is told to claim for must also be a class bosun
 // actually knows how to boot -- otherwise a claim would arrive for a class
-// spawnBuild can never resolve.
+// spawn can never resolve.
 func TestLoadConfigRejectsSpindriftClassNotDeclaredInClasses(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.json")
