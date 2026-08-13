@@ -62,7 +62,6 @@ import {
 } from './views/apps/new/index.tsx';
 import {
   type CreateComponent,
-  type CreateDatastore,
   type DatastoreAct,
   type MoveComponent,
   type RunJob,
@@ -1273,8 +1272,9 @@ export function targetForFirstDeploy(view: WorkspaceView): string | undefined {
  * validation failure, not a field the handler ignores.
  *
  * `reach`, `auth` and `expose` are the schema's own defaults, restated here
- * because `InputOf` reads a command's schema *output* — the same reason
- * `handleCreateDatastore` restates `storageGiB` below, and the same care: no
+ * because `InputOf` reads a command's schema *output* — the same reason the
+ * Datastore ledger's `handleCreate` restates `storageGiB` below, and the same
+ * care: no
  * form offers any of the three, so this is the one place they are named, and
  * naming them here is what keeps the form from having a second opinion.
  *
@@ -1937,58 +1937,6 @@ function WorkspaceScreen({
       ? { appId: state.workspace.appId, targetId: state.workspace.targetId }
       : { appId: undefined, targetId: undefined };
 
-  /**
-   * Create, then attach — two dispatches, because `createDatastore` takes no
-   * App.
-   *
-   * That is the deliberate shape: `attachDatastore` is the single place the
-   * attachment rules live (one store per engine per App, cluster-local
-   * placement), and accepting an App on create would mean a second copy of them
-   * that goes stale. So the failure of the second call is honest rather than
-   * hidden — the Datastore exists, unattached, and the row is on screen saying
-   * so, which is why the reload happens either way.
-   */
-  const handleCreateDatastore: CreateDatastore = async (create) => {
-    const { appId, targetId } = workspaceIds();
-    if (appId === undefined || targetId === undefined) {
-      return {
-        ok: false,
-        message: 'This App has no Component placed on a Target yet',
-      };
-    }
-    try {
-      const created = await command('createDatastore', {
-        name: create.name,
-        engine: create.engine,
-        targetId,
-        // Restated rather than omitted, the way `useBucket`'s `makeDefault` is:
-        // `InputOf` reads a command's schema *output*, so a `.default()` is
-        // still a required property to a typed caller. It is the schema's own
-        // number and there is no field for it — §11 gives a Datastore no size
-        // control, and a form asking a developer for one on the day they
-        // create it is asking a question they cannot answer.
-        storageGiB: 10,
-      });
-      if (!created.ok) return { ok: false, message: created.failure.message };
-      const attached = await command('attachDatastore', {
-        datastoreId: created.value.id,
-        appId,
-      });
-      setReloadToken((token) => token + 1);
-      return attached.ok
-        ? { ok: true }
-        : { ok: false, message: attached.failure.message };
-    } catch (cause: unknown) {
-      return {
-        ok: false,
-        message:
-          cause instanceof Error
-            ? cause.message
-            : 'Creating the Datastore failed',
-      };
-    }
-  };
-
   const handleAttachDatastore: DatastoreAct = async (datastoreId) => {
     const { appId } = workspaceIds();
     if (appId === undefined) {
@@ -2024,20 +1972,6 @@ function WorkspaceScreen({
     }
   };
 
-  const handleDestroyDatastore: DatastoreAct = async (datastoreId) => {
-    try {
-      const result = await command('destroyDatastore', { datastoreId });
-      if (!result.ok) return { ok: false, message: result.failure.message };
-      setReloadToken((token) => token + 1);
-      return { ok: true };
-    } catch (cause: unknown) {
-      return {
-        ok: false,
-        message: cause instanceof Error ? cause.message : 'Destroying failed',
-      };
-    }
-  };
-
   return (
     <>
       <Workspace
@@ -2058,10 +1992,8 @@ function WorkspaceScreen({
         onMoveComponent={handleMoveComponent}
         onUnplaceComponent={handleUnplaceComponent}
         targets={targets}
-        onCreateDatastore={handleCreateDatastore}
         onAttachDatastore={handleAttachDatastore}
         onDetachDatastore={handleDetachDatastore}
-        onDestroyDatastore={handleDestroyDatastore}
         {...(runs === null
           ? {}
           : {
@@ -2668,9 +2600,9 @@ function DatastoresScreen({
         name: create.name,
         engine: create.engine,
         targetId: create.targetId,
-        // Restated rather than omitted for the reason `handleCreateDatastore`
-        // restates it: `InputOf` reads the schema's output, so a `.default()`
-        // is still a required property to a typed caller.
+        // Restated rather than omitted for the reason {@link componentCreation}
+        // restates its defaults: `InputOf` reads the schema's output, so a
+        // `.default()` is still a required property to a typed caller.
         storageGiB: 10,
       });
       // A refusal leaves no row behind — `createDatastore` deletes its insert

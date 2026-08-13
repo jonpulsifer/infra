@@ -882,49 +882,47 @@ describe('the App workspace', () => {
       target: 'kubernetes',
     };
     const acts = {
-      onCreateDatastore: async () => ({ ok: true }) as const,
       onAttachDatastore: async () => ({ ok: true }) as const,
       onDetachDatastore: async () => ({ ok: true }) as const,
-      onDestroyDatastore: async () => ({ ok: true }) as const,
     };
 
-    test('offers none of them when the screen wires none', () => {
+    test('offers neither of them when the screen wires none', () => {
       // The both-or-neither rule: `Attach Datastore` and its per-row twin were
       // buttons with no handler behind them for the whole life of this card,
       // and a control that does nothing on press reads as a broken feature
       // rather than an absent one.
       const markup = workspace(onKubernetes);
-      expect(markup).not.toContain('Create Datastore');
       expect(markup).not.toContain('>Attach<');
       expect(markup).not.toContain('>Detach<');
-      expect(markup).not.toContain('>Destroy<');
     });
 
-    test('offers create on a kubernetes placement, with the row acts', () => {
+    test('offers the row acts, and nothing that outlives the App', () => {
       const markup = renderToStaticMarkup(
         <Workspace view={onKubernetes} {...acts} />,
       );
-      expect(markup).toContain('Create Datastore');
       // Attach or detach, never both on one row: `primary` is attached and
       // `cache` is not, so the section shows exactly one of each.
       expect(markup).toContain('>Attach<');
       expect(markup).toContain('>Detach<');
-      expect(markup).toContain('>Destroy<');
+      // Create and destroy take a Target and no App, so they are the ledger's.
+      // A card that offered them was a second place for a Target's refusal to
+      // come back to, and a second place to destroy storage from.
+      expect(markup).not.toContain('Create Datastore');
+      expect(markup).not.toContain('>Destroy<');
     });
 
-    test('offers no create where the adapter cannot provision one', () => {
-      // By adapter type, never by what the adapter claims to serve: the cloud
-      // adapter advertises both engines and throws UNIMPLEMENTED from every
-      // verb, so asking it by engine would render a form whose every
-      // submission is refused. The row acts stay — those act on rows.
+    test('offers the row acts whatever the placement', () => {
+      // They act on rows that already exist, so a Datastore created while the
+      // App sat on another Target — or registered externally — is still one an
+      // operator has to be able to detach here.
       const markup = renderToStaticMarkup(
         <Workspace
           view={{ ...WORKSPACE_SCENARIOS.service, target: 'cloudrun' }}
           {...acts}
         />,
       );
-      expect(markup).not.toContain('Create Datastore');
       expect(markup).toContain('>Detach<');
+      expect(markup).not.toContain('Create Datastore');
     });
 
     test('states the variable each engine arrives on, and asks for neither', () => {
