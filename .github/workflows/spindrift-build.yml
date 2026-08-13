@@ -311,10 +311,76 @@ jobs:
           # on its own mount so the build context stays the source.
           plan="${RUNNER_TEMP}/railpack-plan"
           mkdir -p "$plan"
+          set -- prepare /scope --plan-out /out/railpack-plan.json
+
+          # §5's authority reaches the builder here, and this is the whole of
+          # what an operator has to know: they state the build command once, in
+          # Spindrift's own file, and never learn the builder's name. Read out
+          # of the tree rather than carried in the request because the plan has
+          # always been derived here — the request pins the frontend *image*,
+          # never the plan, exactly as the Dockerfile arm above reads the tree
+          # for its own decision. What is read is what Spindrift adopted: the
+          # bundle is staged at the App's authoritative commit, and
+          # `reconciler/repo-loop.ts` refuses to advance that past a commit
+          # whose `spindrift.yaml` will not parse, so the runner cannot honour
+          # a declaration core rejected.
+          #
+          # `select` on the frontend rather than reading `.command` outright: a
+          # scope declaring the dockerfile frontend has no railpack command to
+          # state, and `// ""` folds the schema's `command: null` onto the same
+          # "nothing declared" as an absent file. Both leave the invocation
+          # byte-identical to what it was before this block existed.
+          declaration="${scope}/spindrift.yaml"
+          build_command=""
+          if [ -f "$declaration" ]; then
+            build_command="$(
+              yq '.build | select(.frontend == "railpack") | .command // ""' \
+                "$declaration"
+            )"
+          fi
+
+          if [ -n "$build_command" ]; then
+            # A generated config file rather than `--build-cmd`, for one
+            # reason: railpack merges options *under* the config file
+            # (`Merge(optionsConfig, envConfig, fileConfig)`), so a stray
+            # `railpack.json` in the scope silently outranks the flag. That
+            # inverts the ownership this file exists to state. Pointing
+            # `--config-file` elsewhere is also what makes `railpack.json`
+            # unnecessary: railpack reads exactly one config file, and this is
+            # it. The flag hard-fails when the file is absent, which is why it
+            # is only ever passed inside this branch — a scope that declares
+            # nothing keeps its own `railpack.json` and builds as before.
+            #
+            # String form, never `{"cmd": …}`: a string becomes `sh -c '<cmd>'`
+            # and an object is handed to BuildKit's `llb.Shlex` argv-split, so
+            # an operator's `a && b` would pass `&&` as a literal argument.
+            # `jq --arg` is what makes any byte in that string — quotes,
+            # newlines, `$(…)` — a JSON value rather than syntax.
+            case "$build_command" in
+              *"'"*)
+                # railpack's own wrapper is `"sh -c '" + cmd + "'"` with no
+                # escaping, so a single quote silently re-splits the command
+                # instead of failing. Refused loudly here rather than shipped
+                # as a build that ran something else.
+                # ponytail: rejects rather than escapes; emit `'\''` for the
+                # quote if a real command ever needs one.
+                printf '::error::spindrift.yaml: build.command cannot contain a single quote\n' >&2
+                exit 1
+                ;;
+            esac
+            # Relative, and it has to be: railpack resolves the path under the
+            # app source (`filepath.Join(app.Source, configFileName)`), so an
+            # absolute `/out/...` becomes `/scope/out/...` and is not found.
+            # `../out` reaches the plan mount, which is already writable, so
+            # nothing is written into the source tree and the scope stays `:ro`.
+            jq -n --arg cmd "$build_command" '{steps:{build:{commands:[$cmd]}}}' \
+              > "${plan}/railpack-config.json"
+            set -- "$@" --config-file ../out/railpack-config.json
+          fi
+
           docker run --rm \
             -v "${scope}:/scope:ro" -v "${plan}:/out" \
-            --entrypoint /railpack "$FRONTEND" \
-            prepare /scope --plan-out /out/railpack-plan.json
+            --entrypoint /railpack "$FRONTEND" "$@"
 
           # `plan` names the same file as `file`, and is the only arm that sets
           # it. The step below reads the plan as JSON, which is true of this
