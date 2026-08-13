@@ -56,6 +56,20 @@ subjects:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
+  name: spindrift-target-datastores-legacy
+  namespace: spindrift-apps
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: spindrift-target-datastores-legacy
+subjects:
+  - kind: ServiceAccount
+    name: spindrift
+    namespace: spindrift
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
   name: spindrift-target-chart-source
   namespace: flux-system
 roleRef:
