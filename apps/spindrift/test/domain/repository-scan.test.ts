@@ -120,6 +120,38 @@ describe('planning from what a project declares', () => {
     expect(result.outcome).toBe('unsupported');
   });
 
+  test('a directory of pages is a website with nothing to build', async () => {
+    // `outputDirectory: null` is the claim: a `files` build lifts nothing and
+    // ships the scope, which is the site. Naming a directory here would send
+    // this through the zero-config builder, which has nothing to build.
+    expect(
+      await plan({ 'index.html': '<h1>hi</h1>', 'style.css': 'body{}' }),
+    ).toMatchObject({
+      outcome: 'detected',
+      kind: 'website',
+      buildCommand: null,
+      outputDirectory: null,
+    });
+  });
+
+  test('a page beside a library package.json is still a website', async () => {
+    expect(
+      await plan({
+        'package.json': PACKAGE({ dependencies: { zod: '^4.0.0' } }),
+        'index.html': '<h1>hi</h1>',
+      }),
+    ).toMatchObject({ outcome: 'detected', kind: 'website' });
+  });
+
+  test('a framework outranks the index.html it builds from', async () => {
+    expect(
+      await plan({
+        'package.json': PACKAGE({ dependencies: { vite: '^6.0.0' } }),
+        'index.html': '<div id="app"></div>',
+      }),
+    ).toMatchObject({ kind: 'website', outputDirectory: 'dist' });
+  });
+
   test('a start script with no framework is a service', async () => {
     expect(
       await plan({

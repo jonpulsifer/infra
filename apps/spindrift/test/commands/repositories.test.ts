@@ -548,7 +548,7 @@ describe('inspecting a repository before connecting it', () => {
         scope: '.',
         outcome: 'unsupported',
         detail:
-          'no package.json, go.mod, Cargo.toml, pyproject.toml, requirements.txt or Gemfile in this directory.',
+          'no index.html, package.json, go.mod, Cargo.toml, pyproject.toml, requirements.txt or Gemfile in this directory.',
       },
     ]);
   });

@@ -50,8 +50,15 @@ const IGNORED_SEGMENTS = new Set([
   'out',
 ]);
 
-/** A file whose presence in a directory makes that directory a candidate. */
+/**
+ * A file whose presence in a directory makes that directory a candidate.
+ *
+ * `index.html` is not a manifest and is here anyway: a directory of pages is
+ * something detection now has an answer for, and a list that cannot offer what
+ * detection can answer sends a developer to type a path they can see.
+ */
 const CANDIDATE_MANIFESTS = new Set([
+  'index.html',
   'package.json',
   'go.mod',
   'Cargo.toml',
