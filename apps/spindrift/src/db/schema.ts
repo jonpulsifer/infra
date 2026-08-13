@@ -790,6 +790,14 @@ export const deploys = pgTable('deploys', {
    * from current config items would make every rollback come up with *today's*
    * config." The argument was never specific to config.
    *
+   * **What is pinned here and what a rollback replays are two questions**, and
+   * this column only answers the first. Every field is captured, because an
+   * intent has to record what it placed; which of them a *later* rollback
+   * composes a new intent from is {@link DesiredDocument}'s to state, and it
+   * does — a rollback restores how the artifact ran and never where it
+   * answered. The two were conflated once, with this comment claiming the
+   * whole document replays and `rollbackDeploy` replaying only config.
+   *
    * So this column **replaces** `config_document`, `reach` and `auth`, which
    * pinned three fields of one document and left the rest to be re-read. Two
    * places holding one fact is two places for them to disagree.

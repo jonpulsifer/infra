@@ -24,12 +24,12 @@ import { and, desc, eq } from 'drizzle-orm';
 import { z } from 'zod';
 import { deploys } from '../../db/schema.ts';
 import { configVersionOf } from '../../domain/config-version.ts';
-import type { PinnedConfig } from '../config/pinned.ts';
+import type { DesiredDocument } from '../../domain/desired-state.ts';
 import type { Command, CommandContext } from '../types.ts';
 import {
   type CreateDeployResult,
   checkDeployable,
-  deliveringConfig,
+  deliveringRelease,
   placeIntent,
 } from './create.ts';
 
@@ -56,19 +56,24 @@ export const rollbackDeploy: Command<
 
   // §10: "a rollback comes back up with the configuration it originally had."
   // The pin is what makes that possible and the *document* is what makes it
-  // happen: the ordinary path captures config as it is now, which for a
-  // rollback would be the config of the release being rolled *away from*. So
-  // the last Deploy of this Build here is asked what it delivered, and this
-  // intent delivers that.
+  // happen: the ordinary path captures the release as it is now, which for a
+  // rollback would be the release being rolled *away from*. So the last Deploy
+  // of this Build here is asked what it delivered, and this intent delivers
+  // that.
+  //
+  // Which parts of it, and why, is `DesiredDocument`'s to say — the rule is
+  // that a rollback restores how the artifact ran and not where it answered,
+  // and `deliveringRelease` is where that is applied. It lives there rather
+  // than here so this file and the column cannot drift apart again.
   //
   // A Build that has never been deployed to this Target has nothing to say, and
-  // then current config is the only honest answer — the alternative is coming
-  // up unconfigured because history is silent.
+  // then the current Component is the only honest answer — the alternative is
+  // coming up unconfigured because history is silent.
   const previous = await lastDeployOf(context, input);
   const value =
     previous === null
       ? checked.value
-      : deliveringConfig(checked.value, previous);
+      : deliveringRelease(checked.value, previous);
 
   // The "is this actually older" question is asked **under the lock**, against
   // the desired row as it is at the moment the intent is written. Asking it
@@ -100,7 +105,10 @@ export const rollbackDeploy: Command<
 async function lastDeployOf(
   context: CommandContext,
   input: RollbackDeployInput,
-): Promise<PinnedConfig | null> {
+): Promise<{
+  readonly desired: DesiredDocument;
+  readonly configVersion: string;
+} | null> {
   const [previous] = await context.db
     .select({ desired: deploys.desired })
     .from(deploys)
@@ -116,7 +124,7 @@ async function lastDeployOf(
 
   if (previous === undefined) return null;
   return {
-    document: previous.desired.config,
-    version: await configVersionOf(previous.desired.config),
+    desired: previous.desired,
+    configVersion: await configVersionOf(previous.desired.config),
   };
 }
