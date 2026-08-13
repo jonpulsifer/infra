@@ -10,4 +10,6 @@ build:
   frontend: dockerfile
   file: Dockerfile
 watchPaths:
-  - apps/slingshot
+  - apps/spindrift-verifier
+  - package.json
+  - bun.lock

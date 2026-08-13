@@ -7,7 +7,10 @@ version: 1
 component:
   kind: service
 build:
-  frontend: dockerfile
-  file: Dockerfile
+  frontend: railpack
+  command: null
+  outputDirectory: null
 watchPaths:
-  - apps/slingshot
+  - apps/orgpolicyauditor
+  - package.json
+  - bun.lock
