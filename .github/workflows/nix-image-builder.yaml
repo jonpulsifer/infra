@@ -21,7 +21,10 @@ on:
           - blinkypi0
           - wsl
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  # Keyed by image, not just ref: these are independent artifacts going to
+  # independent destinations, so building a second one must not cancel the
+  # first. Building the whole cloud fleet at once is three dispatches.
+  group: ${{ github.workflow }}-${{ github.ref }}-${{ inputs.image }}
   cancel-in-progress: true
 jobs:
   build:
