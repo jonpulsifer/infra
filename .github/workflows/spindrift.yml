@@ -21,6 +21,6 @@ permissions:
   id-token: write
 jobs:
   build:
-    uses: jonpulsifer/infra/.github/workflows/spindrift-build.yml@main
+    uses: jonpulsifer/infra/.github/workflows/spindrift-build.yml@781d64e89944c893e4b964a5cda95da891acdee4 # main
     with:
       spec: ${{ inputs.spec }}
