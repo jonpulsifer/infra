@@ -44,8 +44,16 @@ const STARTUP_WAITING = new Set([
   'StartError',
 ]);
 
-/** Event reasons that mean something refused to admit the workload. */
-const REJECTION_EVENTS = new Set([
+/**
+ * Event reasons that mean something refused to admit the workload.
+ *
+ * Exported because the datastore adapter reads the same warnings for the same
+ * reason — an operator whose children are refused reports that it is still
+ * working, forever. One list, because a refusal is a refusal whichever
+ * controller was owed the pod, and two lists would be two chances to learn
+ * about a new admission verdict in only one of them.
+ */
+export const REJECTION_EVENTS = new Set([
   'FailedCreate',
   'Forbidden',
   'FailedScheduling',
