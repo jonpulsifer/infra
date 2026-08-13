@@ -14,6 +14,7 @@
  * while {@link sourceViewOf} always answers.
  */
 import type { App, AttemptEvent, Build } from '../../db/schema.ts';
+import type { CommandContext } from '../types.ts';
 import type {
   BuildView,
   ChecklistItem,
@@ -21,8 +22,7 @@ import type {
   LogLine,
   SourceView,
   StepStatus,
-} from '../../web/model.ts';
-import type { CommandContext } from '../types.ts';
+} from '../views.ts';
 
 /** How a Build's status reads as a checklist status. */
 export function buildStepStatus(status: Build['status']): StepStatus {

@@ -37,8 +37,8 @@ import {
 } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
+import type { DeployView } from '../../src/commands/views.ts';
 import { Screen } from '../../src/web/app.tsx';
-import type { DeployView } from '../../src/web/model.ts';
 import { DeployDetail } from '../../src/web/views/apps/deploy-detail.tsx';
 import { DEPLOY_SCENARIOS } from '../fixtures/scenarios.ts';
 import {

@@ -20,8 +20,11 @@
 import { beforeEach, describe, expect, test } from 'bun:test';
 import { and, eq } from 'drizzle-orm';
 import type { DeployAdapter } from '../../src/adapters/deploy/contract.ts';
-import { CONCURRENT_BUILDS_PER_APP } from '../../src/commands/builds/dispatch.ts';
-import { dispatchBuild, setConfig } from '../../src/commands/index.ts';
+import {
+  CONCURRENT_BUILDS_PER_APP,
+  dispatchBuild,
+} from '../../src/commands/builds/dispatch.ts';
+import { setConfig } from '../../src/commands/config/set.ts';
 import type {
   AdapterRegistry,
   Clock,

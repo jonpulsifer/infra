@@ -21,8 +21,8 @@
 import { describe, expect, test } from 'bun:test';
 import { listApps } from '../../src/commands/apps/list.ts';
 import { getAppWorkspace } from '../../src/commands/apps/workspace.ts';
+import { createComponent } from '../../src/commands/components/create.ts';
 import { createApp } from '../../src/commands/create-app.ts';
-import { createComponent } from '../../src/commands/index.ts';
 import type {
   AdapterRegistry,
   Clock,

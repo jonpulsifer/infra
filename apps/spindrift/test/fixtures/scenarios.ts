@@ -14,11 +14,7 @@
  * where a previous release is still serving, which is the case §18 says changed
  * the feel of failure more than anything else.
  */
-import type {
-  Auth,
-  ComponentKind,
-  Reach,
-} from '../../src/domain/desired-state.ts';
+
 import type {
   AppListItem,
   ChecklistItem,
@@ -31,7 +27,12 @@ import type {
   TargetOptionView,
   VesselListItem,
   WorkspaceView,
-} from '../../src/web/model.ts';
+} from '../../src/commands/views.ts';
+import type {
+  Auth,
+  ComponentKind,
+  Reach,
+} from '../../src/domain/desired-state.ts';
 import type { Draft } from '../../src/web/views/apps/new/draft.ts';
 
 /** A reserved documentation apex — never a zone anybody serves from. */

@@ -39,13 +39,14 @@ import {
   Timer,
 } from 'lucide-react';
 import { useState } from 'react';
-import type { ComponentKind } from '../../../domain/desired-state.ts';
-import { command, type InputOf, type OutputOf } from '../../client.ts';
 import type {
   GrantedRepositoryView,
   LinkedRepoView,
   RepositoryConnectorView,
-} from '../../model.ts';
+} from '../../../commands/views.ts';
+import type { ComponentKind } from '../../../domain/desired-state.ts';
+import { command, type InputOf, type OutputOf } from '../../client.ts';
+import { useRead } from '../../poll.ts';
 import { Badge, Dot } from '../../ui/badge.tsx';
 import { Button } from '../../ui/button.tsx';
 import { Card, CardContent, Eyebrow } from '../../ui/card.tsx';
@@ -55,8 +56,10 @@ import {
   CollapsibleTrigger,
 } from '../../ui/collapsible.tsx';
 import { CopyButton } from '../../ui/copy.tsx';
+import { ErrorState } from '../../ui/error-state.tsx';
 import { Logo } from '../../ui/logo.tsx';
 import { cn } from '../../ui/utils.ts';
+import { SectionSkeleton } from '../screen.tsx';
 
 export interface OpenedRepositoryPullRequest {
   readonly fullName: string;
@@ -785,5 +788,88 @@ function ErrorMessage({ message }: { message: string }) {
     <div className="rounded-md border border-destructive/40 bg-destructive-soft px-3 py-2 text-sm text-destructive">
       {message}
     </div>
+  );
+}
+
+/**
+ * The repositories screen — the list, and the connect that adds to it.
+ *
+ * Read once and never on a cadence: the far side is GitHub's own listing, and
+ * a background tick every fifteen seconds spends an installation's rate limit
+ * re-asking a question whose answer changes when somebody grants a repository.
+ * The Refresh control is that reader saying they did.
+ *
+ * `refreshing` is the read's own outstanding flag rather than a second piece of
+ * state beside it — the two could disagree, and the one that would be wrong is
+ * the copy.
+ */
+export function RepositoriesScreen({
+  embedded = false,
+}: {
+  embedded?: boolean;
+}) {
+  const read = useRead([['listRepositories', {}]], null);
+  const [connecting, setConnecting] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [openedPullRequest, setOpenedPullRequest] =
+    useState<OpenedRepositoryPullRequest | null>(null);
+
+  if (read.type === 'loading') return <SectionSkeleton rows={2} />;
+  if (read.type === 'error') {
+    return (
+      <div className="py-6">
+        <ErrorState
+          title="Failed to load repositories"
+          message={read.failure.message}
+          onRetry={read.reload}
+        />
+      </div>
+    );
+  }
+
+  const connect = async (input: InputOf<'connectRepository'>) => {
+    setConnecting(true);
+    setActionError(null);
+    setOpenedPullRequest(null);
+    try {
+      const result = await command('connectRepository', input);
+      if (!result.ok) {
+        setActionError(result.failure.message);
+        return;
+      }
+      if (result.value.pullRequest !== null) {
+        setOpenedPullRequest({
+          fullName: result.value.fullName,
+          number: result.value.pullRequest,
+        });
+      } else if (result.value.pullRequestError !== null) {
+        setActionError(
+          `Connected, but the configuration pull request could not be opened: ${result.value.pullRequestError}`,
+        );
+      }
+      read.reload();
+    } catch (cause) {
+      setActionError(
+        cause instanceof Error ? cause.message : 'Repository connection failed',
+      );
+    } finally {
+      setConnecting(false);
+    }
+  };
+
+  const [listed] = read.value;
+  return (
+    <RepositoryList
+      repos={listed.repos}
+      options={listed.available}
+      connector={listed.connector}
+      connecting={connecting}
+      refreshing={read.pending}
+      error={actionError}
+      openedPullRequest={openedPullRequest}
+      onConnect={connect}
+      onRefresh={read.reload}
+      embedded={embedded}
+    />
   );
 }

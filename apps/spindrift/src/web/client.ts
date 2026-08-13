@@ -33,6 +33,38 @@ export type OutputOf<Name extends keyof Registry> = Registry[Name] extends {
   : never;
 
 /**
+ * A command and the input it takes, as one value.
+ *
+ * Distributed over the names rather than written `[CommandName, InputOf<CommandName>]`,
+ * which is the shape that looks equivalent and is not: that one pairs *any*
+ * name with *any* command's input, so `['listBuilds', { name: 'web' }]` type
+ * checks. Written this way the pair is a union of correct pairs, and a name
+ * beside the wrong input has no member to match.
+ *
+ * It exists because {@link useRead} takes a *list* of reads, and a list cannot
+ * carry a type parameter per element any other way.
+ */
+export type Call = {
+  [Name in keyof Registry & string]: readonly [Name, InputOf<Name>];
+}[keyof Registry & string];
+
+/**
+ * What a list of {@link Call}s answers with, position for position.
+ *
+ * A mapped type over the tuple rather than `OutputOf<CommandName>[]`, so a
+ * screen reading four commands destructures four differently-typed values
+ * instead of one union it would have to narrow by hand.
+ */
+export type OutputsOf<Calls extends readonly Call[]> = {
+  [Index in keyof Calls]: Calls[Index] extends readonly [
+    infer Name extends keyof Registry & string,
+    unknown,
+  ]
+    ? OutputOf<Name>
+    : never;
+};
+
+/**
  * The failure a caller sees.
  *
  * `code` is {@link TransportFailureCode} — the command layer's own closed set

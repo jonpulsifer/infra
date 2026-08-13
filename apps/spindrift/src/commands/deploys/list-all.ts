@@ -1,7 +1,7 @@
 /** `listAllDeploys` — the global artifact-placement ledger, newest first. */
 import { z } from 'zod';
-import type { DeployLedgerItem } from '../../web/model.ts';
 import { type Command, ok } from '../types.ts';
+import type { DeployLedgerItem } from '../views.ts';
 import { RELEASE_PAGE, releasesOf } from './list.ts';
 
 export const listAllDeploysInput = z

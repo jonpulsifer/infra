@@ -29,11 +29,16 @@
  */
 import { Database } from 'lucide-react';
 import { useState } from 'react';
+import type {
+  DatastoreListItem,
+  DatastoreVesselOption,
+} from '../../../commands/views.ts';
+import { command } from '../../client.ts';
 import {
   DefinitionGrid,
   LedgerExplorer,
 } from '../../components/object-explorer.tsx';
-import type { DatastoreListItem, DatastoreVesselOption } from '../../model.ts';
+import { useRead } from '../../poll.ts';
 import { Badge } from '../../ui/badge.tsx';
 import { Button } from '../../ui/button.tsx';
 import { Eyebrow } from '../../ui/card.tsx';
@@ -42,6 +47,7 @@ import { EmptyState } from '../../ui/empty-state.tsx';
 import { Field } from '../../ui/field.tsx';
 import { Page, PageHeader } from '../../ui/page.tsx';
 import { Timestamp } from '../../ui/timestamp.tsx';
+import { LedgerSkeleton, ScreenFailure } from '../screen.tsx';
 import { deployTone } from './deploys.tsx';
 
 /**
@@ -530,5 +536,106 @@ export function DatastoreLedger({
         )}
       />
     </Page>
+  );
+}
+
+/**
+ * The top-level Datastores screen — every store this installation holds,
+ * unscoped to any one App's workspace (§11's "top-level and attached, not a
+ * field", read as a screen).
+ *
+ * Detach and Destroy are wired here rather than left to {@link DatastoreLedger}
+ * calling `command` itself, for the same reason the workspace's Datastore
+ * handlers are wired by its screen: the re-read after a successful act belongs
+ * to whoever owns the list being re-read, and only this screen holds it.
+ */
+export function DatastoresScreen({
+  onNavigate,
+}: {
+  onNavigate: (path: string) => void;
+}) {
+  const read = useRead([['listDatastores', {}]], null);
+
+  /**
+   * One dispatch and no attach, which is the whole difference from the
+   * workspace's handler: that one creates and then attaches because it has an
+   * App open to attach to, and this screen has none. The Datastore lands
+   * unattached, which is what §11 says it is until something attaches it.
+   */
+  const handleCreate: CreateLedgerDatastore = async (create) => {
+    try {
+      const result = await command('createDatastore', {
+        name: create.name,
+        engine: create.engine,
+        vesselId: create.vesselId,
+        // Restated rather than omitted for the reason the workspace's handler
+        // restates it: `InputOf` reads the schema's output, so a `.default()`
+        // is still a required property to a typed caller.
+        storageGiB: 10,
+      });
+      // A refusal leaves no row behind — `createDatastore` deletes its insert
+      // when `provision` throws — so there is nothing new to re-read.
+      if (!result.ok) return { ok: false, message: result.failure.message };
+      read.reload();
+      return { ok: true };
+    } catch (cause: unknown) {
+      return {
+        ok: false,
+        message:
+          cause instanceof Error
+            ? cause.message
+            : 'Creating the Datastore failed',
+      };
+    }
+  };
+
+  const handleDetach: DatastoreAct = async (datastoreId) => {
+    try {
+      const result = await command('detachDatastore', { datastoreId });
+      if (!result.ok) return { ok: false, message: result.failure.message };
+      read.reload();
+      return { ok: true };
+    } catch (cause: unknown) {
+      return {
+        ok: false,
+        message: cause instanceof Error ? cause.message : 'Detaching failed',
+      };
+    }
+  };
+
+  const handleDestroy: DatastoreAct = async (datastoreId) => {
+    try {
+      const result = await command('destroyDatastore', { datastoreId });
+      if (!result.ok) return { ok: false, message: result.failure.message };
+      read.reload();
+      return { ok: true };
+    } catch (cause: unknown) {
+      return {
+        ok: false,
+        message: cause instanceof Error ? cause.message : 'Destroying failed',
+      };
+    }
+  };
+
+  if (read.type === 'loading') return <LedgerSkeleton />;
+  if (read.type === 'error') {
+    return (
+      <ScreenFailure
+        title="Failed to load Datastores"
+        message={read.failure.message}
+        onRetry={read.reload}
+      />
+    );
+  }
+  const [listed] = read.value;
+  return (
+    <DatastoreLedger
+      datastores={listed.datastores}
+      vessels={listed.vessels}
+      onNavigate={onNavigate}
+      onCreate={handleCreate}
+      onDetach={handleDetach}
+      onDestroy={handleDestroy}
+    />
   );
 }

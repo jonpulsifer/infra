@@ -8,11 +8,12 @@
  * without reconstructing the domain from UI handlers. This is the primary
  * test seam."
  *
- * Hence the shape here: **one exported function per user act**, taking an
- * explicit input object and a request context, returning a typed result.
- * Nothing in this layer knows it is reached over HTTP, from a page, or from a
- * test — `registry.ts` is the only thing that knows a command can be named,
- * and a route above it may hold no domain logic whatsoever.
+ * Hence the shape here: **one exported function per user act**, in its own
+ * module beside its input schema, taking an explicit input object and a
+ * request context and returning a typed result. Nothing in this layer knows it
+ * is reached over HTTP, from a page, or from a test — `registry.ts` is the only
+ * thing that knows a command can be named, and a route above it may hold no
+ * domain logic whatsoever.
  *
  * The context is the whole of what a command may reach for. Anything absent
  * from it — the wall clock, a connection string, an ambient adapter — is a
@@ -343,9 +344,9 @@ export function failed<Output>(
 /**
  * One user act.
  *
- * Every export of `./index.ts` has this type, and `registry.ts` asserts that
- * at compile time — which is what makes "no route may contain domain logic"
- * enforceable rather than aspirational.
+ * Every handler in `registry.ts` has this type, and the `satisfies` clause on
+ * the registry object asserts that at compile time — which is what makes "no
+ * route may contain domain logic" enforceable rather than aspirational.
  */
 export type Command<Input, Output> = (
   input: Input,

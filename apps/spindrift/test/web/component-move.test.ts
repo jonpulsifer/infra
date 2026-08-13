@@ -14,7 +14,7 @@
  */
 import { describe, expect, test } from 'bun:test';
 import { demandSentence } from '../../src/commands/config/migration.ts';
-import { demandedKeys } from '../../src/web/app.tsx';
+import { demandedKeys } from '../../src/web/views/apps/workspace.tsx';
 
 describe('the keys a refused move demands', () => {
   test('are read off the issues, in the order the refusal named them', () => {

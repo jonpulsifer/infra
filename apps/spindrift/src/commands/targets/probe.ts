@@ -27,8 +27,8 @@
 import { z } from 'zod';
 import type { ClusterProbe } from '../../adapters/deploy/contract.ts';
 import { connectionProposal } from '../../domain/target-onboarding.ts';
-import type { TargetConnectionProposal } from '../../web/model.ts';
 import { type Command, failed, ok } from '../types.ts';
+import type { TargetConnectionProposal } from '../views.ts';
 
 export const probeClusterInput = z
   .object({

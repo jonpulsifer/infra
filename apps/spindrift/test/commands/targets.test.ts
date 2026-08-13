@@ -19,11 +19,9 @@
 import { describe, expect, test } from 'bun:test';
 import { and, eq } from 'drizzle-orm';
 import type { DeployAdapter } from '../../src/adapters/deploy/contract.ts';
-import {
-  connectTarget,
-  disconnectTarget,
-  listTargets,
-} from '../../src/commands/index.ts';
+import { connectTarget } from '../../src/commands/targets/connect.ts';
+import { disconnectTarget } from '../../src/commands/targets/disconnect.ts';
+import { listTargets } from '../../src/commands/targets/list.ts';
 import type {
   AdapterRegistry,
   Clock,

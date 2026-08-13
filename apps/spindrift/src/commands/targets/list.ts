@@ -22,6 +22,7 @@ import {
   type VesselLocation,
   vesselRolesOf,
 } from '../../domain/vessel.ts';
+import { type Command, ok } from '../types.ts';
 import type {
   CloudBoundaryFacts,
   PendingTargetConnection,
@@ -29,8 +30,7 @@ import type {
   TargetListItem,
   TargetOptionView,
   VesselListItem,
-} from '../../web/model.ts';
-import { type Command, ok } from '../types.ts';
+} from '../views.ts';
 import {
   type BoundaryFacts,
   remediationSubject,

@@ -23,7 +23,7 @@
  */
 import { useState } from 'react';
 import { reasonCovers } from '../../adapters/deploy/contract.ts';
-import type { Diagnosis, DriftView } from '../model.ts';
+import type { Diagnosis, DriftView } from '../../commands/views.ts';
 import { Button } from '../ui/button.tsx';
 import {
   Collapsible,

@@ -1,7 +1,16 @@
 /**
- * §13's checklist, as a cloud Target answers it.
+ * §13's checklist, as a cloud Target answers it — in the two shapes a cloud
+ * control plane refuses in.
  *
- * The two cloud adapters are assessed against the same three items
+ * {@link cloudChecklist} is the federated one, below; {@link tokenChecklist} is
+ * the same table asked of a bearer, and they are in one file because they are
+ * one decision made twice. Both fold **one probe** into three items, both read
+ * the shape of the refusal rather than a body, and both answer in §13's closed
+ * vocabulary. What separates them is only which middle item there is to check —
+ * `OIDC_FEDERATION` where an identity is exchanged, `API_TOKEN` where the
+ * platform federates nothing and a configured credential is the whole story.
+ *
+ * The federated adapters are assessed against the same three items
  * (`PREREQUISITES_BY_ADAPTER`), and both learn all three from **one call**: the
  * list of what already exists in the project. That is deliberate. Three separate
  * probes would be three chances to be rate-limited, three latencies on a loop
@@ -80,6 +89,7 @@ export function cloudChecklist(
 
   if (probe.kind === 'transport') {
     return allUnmet(
+      CLOUD_PREREQUISITES,
       `${subject.service} could not be reached: ${probe.message}`,
     );
   }
@@ -91,7 +101,7 @@ export function cloudChecklist(
       probe.consumer !== null && probe.consumer !== subject.project
         ? probe.consumer
         : undefined;
-    return checklist({
+    return checklist(CLOUD_PREREQUISITES, {
       PLATFORM_API: {
         met: false,
         assessed: true,
@@ -107,7 +117,7 @@ export function cloudChecklist(
   }
 
   if (probe.status === 401 || probe.status === 403) {
-    return checklist({
+    return checklist(CLOUD_PREREQUISITES, {
       PLATFORM_API: { met: true },
       OIDC_FEDERATION: {
         met: false,
@@ -122,7 +132,7 @@ export function cloudChecklist(
   }
 
   if (probe.status === 404) {
-    return checklist({
+    return checklist(CLOUD_PREREQUISITES, {
       // It answered, which is more than a disabled service does.
       PLATFORM_API: { met: true },
       OIDC_FEDERATION: notAssessed(subject.service),
@@ -135,6 +145,7 @@ export function cloudChecklist(
   }
 
   return allUnmet(
+    CLOUD_PREREQUISITES,
     `${subject.service} answered ${probe.status}: ${probe.message}`,
   );
 }
@@ -192,6 +203,105 @@ export function cloudSurfaceProbe(
   };
 }
 
+/** The three items a tokened Target is assessed against, in display order. */
+const TOKEN_PREREQUISITES = [
+  'PLATFORM_API',
+  'API_TOKEN',
+  'VESSEL',
+] as const satisfies readonly Prerequisite[];
+
+/** What a tokened probe was asking about, in the sentences an operator reads. */
+export interface TokenChecklistSubject {
+  /** What the product is called where the operator would go to fix a token. */
+  readonly service: string;
+  /** The boundary the probe named — an account id, a team slug (§14). */
+  readonly vessel: string;
+  /** What that boundary is called on this platform: `account`, `team`. */
+  readonly noun: string;
+}
+
+/**
+ * §13's checklist, as a Target reached with a configured bearer answers it.
+ *
+ * The federated table above with its middle question asked of a token instead,
+ * for the reason `API_TOKEN` exists at all: a platform that federates no
+ * identity has no trust relationship to check, and reading `OIDC_FEDERATION:
+ * unmet` there would send an operator to configure one that does not exist on
+ * either side.
+ *
+ * | The probe said | Unmet | Because |
+ * | --- | --- | --- |
+ * | `200` | — | the API answered, the token may act, and the boundary exists |
+ * | `401`/`403` | `API_TOKEN` | the bearer is refused, or is not scoped here |
+ * | `404` | `VESSEL` | there is no such boundary |
+ * | anything else | all three | nothing was established, and saying so beats guessing |
+ */
+export function tokenChecklist(
+  probe: CloudResponse<unknown>,
+  subject: TokenChecklistSubject,
+): readonly PrerequisiteResult[] {
+  if (probe.ok) return TOKEN_PREREQUISITES.map((name) => ({ name, met: true }));
+  if (probe.kind === 'transport') {
+    return allUnmet(
+      TOKEN_PREREQUISITES,
+      `${subject.service} could not be reached: ${probe.message}`,
+    );
+  }
+  if (probe.status === 401 || probe.status === 403) {
+    return checklist(TOKEN_PREREQUISITES, {
+      // It answered, which is more than an unreachable API does.
+      PLATFORM_API: { met: true },
+      API_TOKEN: {
+        met: false,
+        assessed: true,
+        detail: `this installation's ${subject.service} token may not act on ${subject.vessel}: ${probe.message}`,
+      },
+      // Not assessed rather than met: a boundary that refuses to answer has not
+      // told us it exists, and a refusal is what an absent one looks like from
+      // outside.
+      VESSEL: notAssessed(subject.service),
+    });
+  }
+  if (probe.status === 404) {
+    return checklist(TOKEN_PREREQUISITES, {
+      PLATFORM_API: { met: true },
+      API_TOKEN: { met: true },
+      VESSEL: {
+        met: false,
+        assessed: true,
+        detail: `the ${subject.noun} ${subject.vessel} does not exist, and Spindrift never creates a vessel (§14)`,
+      },
+    });
+  }
+  return allUnmet(
+    TOKEN_PREREQUISITES,
+    `${subject.service} answered ${probe.status}: ${probe.message}`,
+  );
+}
+
+/**
+ * Whether that same probe established the boundary carries this surface.
+ *
+ * Never `absent`, and that is the honest answer rather than a gap: neither
+ * tokened platform has a per-boundary switch that can be off, so no refusal
+ * means "this one does not do deployments". A boundary that answers carries it;
+ * one that does not has established nothing, and reading a refusal as an
+ * absence would delete a Target over an expired token.
+ */
+export function tokenSurfaceProbe(
+  probe: CloudResponse<unknown>,
+  subject: TokenChecklistSubject,
+): SurfaceProbe {
+  if (probe.ok) return { kind: 'carried' };
+  return {
+    kind: 'undetermined',
+    detail:
+      probe.kind === 'transport'
+        ? `${subject.service} could not be reached: ${probe.message}`
+        : `${subject.service} answered ${probe.status} for ${subject.vessel}: ${probe.message}`,
+  };
+}
+
 /**
  * The project whose switch the refusal is actually about.
  *
@@ -211,8 +321,11 @@ function disabledProject(
 }
 
 /** Every item unmet, with one sentence — the Target nothing is known about. */
-function allUnmet(detail: string): readonly PrerequisiteResult[] {
-  return CLOUD_PREREQUISITES.map((name) => ({
+function allUnmet(
+  names: readonly Prerequisite[],
+  detail: string,
+): readonly PrerequisiteResult[] {
+  return names.map((name) => ({
     name,
     met: false,
     assessed: false,
@@ -244,8 +357,12 @@ type Unmet = {
 };
 
 /** Assemble the three in their declared order, so the UI never reorders them. */
-function checklist(
-  answers: Record<(typeof CLOUD_PREREQUISITES)[number], { met: true } | Unmet>,
+function checklist<Name extends Prerequisite>(
+  names: readonly Name[],
+  answers: Record<Name, { met: true } | Unmet>,
 ): readonly PrerequisiteResult[] {
-  return CLOUD_PREREQUISITES.map((name) => ({ name, ...answers[name] }));
+  return names.map((name) => {
+    const answer: { met: true } | Unmet = answers[name];
+    return { name, ...answer };
+  });
 }

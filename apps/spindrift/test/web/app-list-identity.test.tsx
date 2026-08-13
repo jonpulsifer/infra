@@ -24,15 +24,17 @@
  */
 import { describe, expect, test } from 'bun:test';
 import { isValidElement, type ReactElement, type ReactNode } from 'react';
+import { deleteApp } from '../../src/commands/apps/delete.ts';
 import { listApps } from '../../src/commands/apps/list.ts';
 import { getAppWorkspace } from '../../src/commands/apps/workspace.ts';
+import { createComponent } from '../../src/commands/components/create.ts';
 import { createApp } from '../../src/commands/create-app.ts';
-import { createComponent, deleteApp } from '../../src/commands/index.ts';
 import type {
   AdapterRegistry,
   Clock,
   CommandContext,
 } from '../../src/commands/types.ts';
+import type { AppListItem, DeployPhase } from '../../src/commands/views.ts';
 import {
   builds,
   componentTargetDesired,
@@ -48,7 +50,6 @@ import {
   type ExplorerItem,
   ObjectExplorer,
 } from '../../src/web/components/object-explorer.tsx';
-import type { AppListItem, DeployPhase } from '../../src/web/model.ts';
 import { AppList, appHref } from '../../src/web/views/apps/list.tsx';
 import { withIsolatedDatabase } from '../harness/db.ts';
 import {

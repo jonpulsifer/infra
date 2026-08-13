@@ -5,23 +5,20 @@
  * This object is the **single source the browser dispatch endpoint is
  * generated from**. §21 declines to declare an external API, and a React
  * client still needs a boundary to call across, so the boundary is one
- * generated dispatch point rather than hand-authored routes: a command added
- * without a route is a compile error, and a route that is not a command cannot
+ * generated dispatch point rather than hand-authored routes: adding an entry
+ * here is the whole of adding a route, and a route that is not a command cannot
  * be written at all, because there is no place to write one. That is the whole
  * reason the registry exists rather than each page importing the command it
  * wants.
  *
- * Two invariants, both mechanical:
- *
- * 1. **No command escapes the registry.** `MissingFromRegistry` below is the
- *    set of commands `./index.ts` exports that are absent here; the assertion
- *    constrains it to `never`, so forgetting an entry fails `tsc`.
- * 2. **No registry entry is not a command.** `ExtraInRegistry` is the mirror
- *    of it, which keeps the dispatch surface from growing a name the command
- *    layer does not back.
- *
- * `test/commands/registry.test.ts` asserts the same two things at run time,
- * because a type-level guarantee that nobody has watched fail is not one.
+ * It is also the **only** list of commands — no barrel beside it re-exporting
+ * the same set. The invariant that has teeth is "no dispatchable name the
+ * command layer does not back", and the `satisfies` clause below is what holds
+ * it: an entry whose `handler` is not a {@link Command} does not type-check.
+ * Its mirror — a handler that exists and is not registered — is unreachable
+ * rather than wrong, and no list can catch it: a second list only ever noticed
+ * the case where you remembered one of the two. `create-app.ts` is the standing
+ * proof, a command that has never been dispatchable and never tripped anything.
  *
  * The HTTP endpoint is not here — Task 38 owns it, and it is deliberately a
  * thin wrapper: read a name and a JSON body, call {@link dispatch}, render the
@@ -92,7 +89,6 @@ import { getDeployDetail, getDeployDetailInput } from './deploys/get-detail.ts';
 import { listDeploys, listDeploysInput } from './deploys/list.ts';
 import { listAllDeploys, listAllDeploysInput } from './deploys/list-all.ts';
 import { rollbackDeploy, rollbackDeployInput } from './deploys/rollback.ts';
-import type * as commands from './index.ts';
 import {
   configureInstallation,
   configureInstallationInput,
@@ -383,30 +379,3 @@ function issuesOf(error: z.ZodError): readonly CommandIssue[] {
     message: issue.message,
   }));
 }
-
-// --- The two invariants, at compile time -----------------------------------
-
-/** The module shape of `./index.ts`, as a type — no runtime import. */
-type CommandModule = typeof commands;
-
-/** Names `./index.ts` exports whose value is a command. */
-type ExportedCommandName = {
-  [Name in keyof CommandModule]: CommandModule[Name] extends Command<any, any>
-    ? Name
-    : never;
-}[keyof CommandModule];
-
-/** Commands that exist but cannot be dispatched — must be empty. */
-export type MissingFromRegistry = Exclude<ExportedCommandName, CommandName>;
-
-/** Dispatchable names the command layer does not back — must be empty. */
-export type ExtraInRegistry = Exclude<CommandName, ExportedCommandName>;
-
-/**
- * The assertions themselves. Both aliases resolve only while their argument is
- * `never`; a command exported without an entry above stops type-checking here,
- * naming itself in the error.
- */
-type Empty<Difference extends never> = Difference;
-export type NoUnregisteredCommand = Empty<MissingFromRegistry>;
-export type NoUnbackedRoute = Empty<ExtraInRegistry>;

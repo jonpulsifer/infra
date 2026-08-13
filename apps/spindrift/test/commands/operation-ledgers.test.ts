@@ -3,10 +3,10 @@ import {
   BUILD_LEDGER_PAGE,
   listBuilds,
 } from '../../src/commands/builds/list.ts';
+import { createComponent } from '../../src/commands/components/create.ts';
 import { createApp } from '../../src/commands/create-app.ts';
 import { RELEASE_PAGE } from '../../src/commands/deploys/list.ts';
 import { listAllDeploys } from '../../src/commands/deploys/list-all.ts';
-import { createComponent } from '../../src/commands/index.ts';
 import type {
   AdapterRegistry,
   Clock,

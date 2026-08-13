@@ -18,14 +18,12 @@
  */
 import { describe, expect, test } from 'bun:test';
 import { eq } from 'drizzle-orm';
-import {
-  attachDatastore,
-  createDatastore,
-  destroyDatastore,
-  detachDatastore,
-  getDatastore,
-  listDatastores,
-} from '../../src/commands/index.ts';
+import { attachDatastore } from '../../src/commands/datastores/attach.ts';
+import { createDatastore } from '../../src/commands/datastores/create.ts';
+import { destroyDatastore } from '../../src/commands/datastores/destroy.ts';
+import { detachDatastore } from '../../src/commands/datastores/detach.ts';
+import { getDatastore } from '../../src/commands/datastores/get.ts';
+import { listDatastores } from '../../src/commands/datastores/list.ts';
 import type {
   AdapterRegistry,
   Clock,

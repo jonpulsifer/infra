@@ -72,13 +72,13 @@
  */
 import { CircleAlert, PartyPopper, Rocket } from 'lucide-react';
 import { type ReactNode, useEffect, useState } from 'react';
+import type { StepStatus } from '../../../commands/views.ts';
 import { command } from '../../client.ts';
 import type { Path } from '../../forms/document.ts';
 import { valueAt } from '../../forms/document.ts';
 import { manifestFieldAt, manifestIssues } from '../../forms/manifest.ts';
 import type { FieldErrors } from '../../forms/render.tsx';
 import { SchemaFields } from '../../forms/render.tsx';
-import type { StepStatus } from '../../model.ts';
 import { Button } from '../../ui/button.tsx';
 import { Card, CardContent, CardHeader, CardTitle } from '../../ui/card.tsx';
 import { DiscoveryPanel } from './discovery.tsx';

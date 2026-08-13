@@ -68,7 +68,6 @@ import type {
   DeployRef,
   DeployTarget,
   DeployVerdict,
-  FailureReason,
   JobExecution,
   JobRuns,
   ObservedState,
@@ -77,6 +76,8 @@ import type {
   RuntimeLogTailOptions,
   StartedRun,
 } from '../contract.ts';
+import { type DeployEvents, deployEvents, internalFailure } from '../events.ts';
+import { parseScopedRef, scopedRef } from '../ref.ts';
 import { cloudRunJob } from './job.ts';
 import { cloudSchedulerJob, jobInvokerPolicy, TIME_ZONE } from './scheduler.ts';
 import {
@@ -238,7 +239,11 @@ export class CloudRunDeployAdapter implements DeployAdapter {
   /** §6's table: `cloudrun` takes an image. */
   readonly artifactTypes: readonly ArtifactType[] = ['image'];
 
-  constructor(private readonly options: CloudRunAdapterOptions) {}
+  private readonly events: DeployEvents;
+
+  constructor(private readonly options: CloudRunAdapterOptions) {
+    this.events = deployEvents(options.now);
+  }
 
   async *apply(
     target: DeployTarget,
@@ -246,11 +251,11 @@ export class CloudRunDeployAdapter implements DeployAdapter {
   ): AsyncGenerator<DeployEvent, DeployVerdict, void> {
     const connection = this.connectionOf(target);
     if (connection === null) {
-      return this.internal('this Target is not a Cloud Run Target');
+      return internalFailure('this Target is not a Cloud Run Target');
     }
     if (!this.artifactTypes.includes(desired.artifact.type)) {
-      yield this.status('FAILED', { reason: 'INTERNAL' });
-      return this.internal(
+      yield this.events.status('FAILED', { reason: 'INTERNAL' });
+      return internalFailure(
         `cloudrun does not accept a ${desired.artifact.type} artifact`,
       );
     }
@@ -259,8 +264,8 @@ export class CloudRunDeployAdapter implements DeployAdapter {
       connection.reachableRegistries ?? [],
     );
     if (image === null) {
-      yield this.status('FAILED', { reason: 'INTERNAL' });
-      return this.internal(
+      yield this.events.status('FAILED', { reason: 'INTERNAL' });
+      return internalFailure(
         'the artifact carries no address this Target can pull it by',
       );
     }
@@ -283,7 +288,7 @@ export class CloudRunDeployAdapter implements DeployAdapter {
     // refusals answered by changing the request: drop the schedule, or place it
     // where an identity is named.
     if (fires !== null && connection.serviceAccount === undefined) {
-      yield this.status('FAILED', { reason: 'REJECTED' });
+      yield this.events.status('FAILED', { reason: 'REJECTED' });
       return {
         phase: 'FAILED',
         reason: 'REJECTED',
@@ -297,7 +302,7 @@ export class CloudRunDeployAdapter implements DeployAdapter {
     const ref = refOf(connection, collection, id);
     const http = this.http(connection);
 
-    yield this.status('APPLYING', { resource: id });
+    yield this.events.status('APPLYING', { resource: id });
 
     // A job that declares no schedule must not keep one a previous deploy
     // asked for, and the removal happens **before** the Job is written for the
@@ -322,7 +327,7 @@ export class CloudRunDeployAdapter implements DeployAdapter {
     if (job && fires === null) {
       const stopped = await this.unschedule(connection, id);
       if (stopped !== null) {
-        yield this.log(
+        yield this.events.log(
           `${stopped.detail ?? `the schedule on job ${id} could not be removed`} — this Component declares none, so the deploy continues and the grant below is what stops it firing`,
           id,
         );
@@ -359,7 +364,10 @@ export class CloudRunDeployAdapter implements DeployAdapter {
         `{reach: ${desired.reach}, auth: ${desired.auth}}`,
       );
       if (tightened !== null) {
-        yield this.status('FAILED', { resource: id, reason: tightened.reason });
+        yield this.events.status('FAILED', {
+          resource: id,
+          reason: tightened.reason,
+        });
         return { ...tightened, ref };
       }
     }
@@ -388,10 +396,13 @@ export class CloudRunDeployAdapter implements DeployAdapter {
     });
     if (!applied.ok) {
       const verdict = cloudWriteFailure(applied, ref);
-      yield this.status('FAILED', { resource: id, reason: verdict.reason });
+      yield this.events.status('FAILED', {
+        resource: id,
+        reason: verdict.reason,
+      });
       return verdict;
     }
-    yield this.log(`applied ${job ? 'job' : 'service'} ${id}`, id);
+    yield this.events.log(`applied ${job ? 'job' : 'service'} ${id}`, id);
 
     const verdict = yield* this.awaitVerdict(
       http,
@@ -420,7 +431,10 @@ export class CloudRunDeployAdapter implements DeployAdapter {
         'this job',
       );
       if (bound !== null) {
-        yield this.status('FAILED', { resource: id, reason: bound.reason });
+        yield this.events.status('FAILED', {
+          resource: id,
+          reason: bound.reason,
+        });
         return { ...bound, ref };
       }
       if (fires === null) return verdict;
@@ -447,10 +461,16 @@ export class CloudRunDeployAdapter implements DeployAdapter {
           jobInvokerPolicy(null),
           'this job',
         );
-        yield this.status('FAILED', { resource: id, reason: scheduled.reason });
+        yield this.events.status('FAILED', {
+          resource: id,
+          reason: scheduled.reason,
+        });
         return { ...scheduled, ref };
       }
-      yield this.log(`firing job ${id} on "${fires}" (${TIME_ZONE})`, id);
+      yield this.events.log(
+        `firing job ${id} on "${fires}" (${TIME_ZONE})`,
+        id,
+      );
       return verdict;
     }
 
@@ -470,7 +490,10 @@ export class CloudRunDeployAdapter implements DeployAdapter {
       `{reach: ${desired.reach}, auth: ${desired.auth}}`,
     );
     if (written !== null) {
-      yield this.status('FAILED', { resource: id, reason: written.reason });
+      yield this.events.status('FAILED', {
+        resource: id,
+        reason: written.reason,
+      });
       return { ...written, ref };
     }
     return verdict;
@@ -802,7 +825,7 @@ export class CloudRunDeployAdapter implements DeployAdapter {
     ref: DeployRef,
   ): AsyncGenerator<DeployEvent, DeployVerdict, void> {
     const deadline =
-      this.clock() + (this.options.timeoutMs ?? DEFAULT_TIMEOUT_MS);
+      this.events.now() + (this.options.timeoutMs ?? DEFAULT_TIMEOUT_MS);
     // `apply` already emitted APPLYING, so treat that as the first reported
     // phase: a Service whose terminal condition has not appeared yet must not
     // put a second identical event on the timeline.
@@ -820,7 +843,7 @@ export class CloudRunDeployAdapter implements DeployAdapter {
 
       if (status.phase !== reported) {
         reported = status.phase;
-        yield this.status(status.phase, {
+        yield this.events.status(status.phase, {
           resource: id,
           ...(status.reason === undefined ? {} : { reason: status.reason }),
           ...(status.detail === undefined ? {} : { detail: status.detail }),
@@ -836,7 +859,7 @@ export class CloudRunDeployAdapter implements DeployAdapter {
         status.phase !== 'FAILED'
       ) {
         said = status.detail;
-        yield this.log(status.detail, id);
+        yield this.events.log(status.detail, id);
       }
 
       if (status.phase === 'LIVE') {
@@ -868,8 +891,8 @@ export class CloudRunDeployAdapter implements DeployAdapter {
         };
       }
 
-      if (this.clock() >= deadline) {
-        yield this.status('FAILED', { resource: id, reason: 'TIMEOUT' });
+      if (this.events.now() >= deadline) {
+        yield this.events.status('FAILED', { resource: id, reason: 'TIMEOUT' });
         return {
           phase: 'FAILED',
           ref,
@@ -1203,30 +1226,6 @@ export class CloudRunDeployAdapter implements DeployAdapter {
     return read.ok ? (read.value ?? null) : null;
   }
 
-  private internal(detail: string): DeployVerdict {
-    return { phase: 'FAILED', reason: 'INTERNAL', detail };
-  }
-
-  private status(
-    phase: DeployPhase,
-    extra: { resource?: string; reason?: FailureReason; detail?: string } = {},
-  ): DeployEvent {
-    return { type: 'status', at: new Date(this.clock()), phase, ...extra };
-  }
-
-  private log(line: string, resource?: string): DeployEvent {
-    return {
-      type: 'log',
-      at: new Date(this.clock()),
-      line,
-      ...(resource === undefined ? {} : { resource }),
-    };
-  }
-
-  private clock(): number {
-    return this.options.now?.() ?? Date.now();
-  }
-
   private async wait(): Promise<void> {
     const interval = this.options.pollIntervalMs ?? DEFAULT_POLL_MS;
     if (this.options.sleep !== undefined) {
@@ -1411,7 +1410,7 @@ function refOf(
   collection: Collection,
   id: string,
 ): DeployRef {
-  return `${parentOf(connection)}/${collection}/${id}`;
+  return scopedRef(parentOf(connection), collection, id);
 }
 
 /** What this ref names on this connection, or `null` if it names another. */
@@ -1419,10 +1418,10 @@ function parseRef(
   connection: CloudRunAdapterConnection,
   ref: DeployRef,
 ): { collection: Collection; id: string } | null {
-  const prefix = `${parentOf(connection)}/`;
-  if (!ref.startsWith(prefix)) return null;
-  const [collection, ...rest] = ref.slice(prefix.length).split('/');
-  if (collection !== SERVICES && collection !== JOBS) return null;
-  const id = rest.join('/');
-  return id.length === 0 || id.includes('/') ? null : { collection, id };
+  const parent = parentOf(connection);
+  for (const collection of [SERVICES, JOBS] as const) {
+    const id = parseScopedRef(parent, collection, ref);
+    if (id !== null) return { collection, id };
+  }
+  return null;
 }

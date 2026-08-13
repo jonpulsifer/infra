@@ -31,9 +31,9 @@
  * the attempt screen's job, and it is one press away from every row here.
  */
 import { useCallback, useEffect, useState } from 'react';
+import type { DeployLedgerItem } from '../../../commands/views.ts';
 import { command } from '../../client.ts';
 import { PhasePill } from '../../components/status.tsx';
-import type { DeployLedgerItem } from '../../model.ts';
 import { Badge } from '../../ui/badge.tsx';
 import { Button } from '../../ui/button.tsx';
 import { Ref } from '../../ui/copy.tsx';

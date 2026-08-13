@@ -37,17 +37,18 @@ import {
   Zap,
 } from 'lucide-react';
 import { useState } from 'react';
-import type { TargetAdapter } from '../../../config/manifest.schema.ts';
-import type { ComponentKind } from '../../../domain/desired-state.ts';
-import { surfacesToProbe, type VesselRole } from '../../../domain/vessel.ts';
-import type { LogoName } from '../../client/logos/index.ts';
-import { command, type InputOf, type OutputOf } from '../../client.ts';
 import type {
   PendingTargetConnection,
   PrerequisiteRowView,
   TargetListItem,
   VesselListItem,
-} from '../../model.ts';
+} from '../../../commands/views.ts';
+import type { TargetAdapter } from '../../../config/manifest.schema.ts';
+import type { ComponentKind } from '../../../domain/desired-state.ts';
+import { surfacesToProbe, type VesselRole } from '../../../domain/vessel.ts';
+import type { LogoName } from '../../client/logos/index.ts';
+import { command, type InputOf, type OutputOf } from '../../client.ts';
+import { useRead } from '../../poll.ts';
 import { Badge, Dot } from '../../ui/badge.tsx';
 import { Button } from '../../ui/button.tsx';
 import { Card, CardContent, Eyebrow } from '../../ui/card.tsx';
@@ -56,9 +57,11 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from '../../ui/collapsible.tsx';
+import { ErrorState } from '../../ui/error-state.tsx';
 import { Logo } from '../../ui/logo.tsx';
 import { Timestamp } from '../../ui/timestamp.tsx';
 import { cn } from '../../ui/utils.ts';
+import { SectionSkeleton } from '../screen.tsx';
 import { ConnectTargetForm } from './connect.tsx';
 
 type ConnectTargetInput = InputOf<'connectTarget'>;
@@ -1185,5 +1188,92 @@ function DisconnectTargetControl({
         </Button>
       ) : null}
     </div>
+  );
+}
+
+/**
+ * The Targets screen — the list, and the connect that rewrites it.
+ *
+ * Read once rather than on a cadence: what a Target *is* changes when somebody
+ * connects one, which happens here and re-reads deliberately. The standing
+ * checklist a connect produces is read back from the list rather than patched
+ * in, because it came from a pass of the inspection loop and this side has no
+ * second opinion about it (§13).
+ *
+ * Rendered inside the Connections stack and, when `embedded`, without a page
+ * of its own — which is why its failure is a bare `ErrorState` in a `py-6`
+ * rather than the centred column `ScreenFailure` gives a screen of its own.
+ */
+export function TargetsScreen({
+  embedded = false,
+  onNavigate,
+}: {
+  embedded?: boolean;
+  onNavigate?: (path: string) => void;
+}) {
+  const read = useRead([['listTargets', {}]], null);
+  const [connecting, setConnecting] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null);
+  /**
+   * Surfaces the last connect established are not on the boundary it probed.
+   *
+   * Not an error — the connect succeeded — and not readable from the reloaded
+   * list either, because what it says is about a Target that deliberately does
+   * not exist. So it is the one part of the act's answer this screen keeps.
+   */
+  const [absent, setAbsent] = useState<readonly string[]>([]);
+
+  const connect = async (input: InputOf<'connectTarget'>) => {
+    setConnecting(true);
+    setActionError(null);
+    setAbsent([]);
+    try {
+      const result = await command('connectTarget', input);
+      if (!result.ok) {
+        setActionError(result.failure.message);
+        return;
+      }
+      setAbsent(
+        result.value.absent.map(
+          (surface) =>
+            `${surface.vessel}/${surface.adapter} was not registered: ${surface.detail}`,
+        ),
+      );
+      read.reload();
+    } catch (cause) {
+      setActionError(
+        cause instanceof Error ? cause.message : 'Connecting the Target failed',
+      );
+    } finally {
+      setConnecting(false);
+    }
+  };
+
+  if (read.type === 'loading') return <SectionSkeleton rows={3} />;
+  if (read.type === 'error') {
+    return (
+      <div className="py-6">
+        <ErrorState
+          title="Failed to load Targets"
+          message={read.failure.message}
+          onRetry={read.reload}
+        />
+      </div>
+    );
+  }
+  const [listed] = read.value;
+  return (
+    <TargetList
+      targets={listed.targets}
+      pending={listed.pending}
+      vessels={listed.vessels}
+      connecting={connecting}
+      error={actionError}
+      absent={absent}
+      onConnect={connect}
+      onChanged={read.reload}
+      onNavigate={onNavigate}
+      embedded={embedded}
+    />
   );
 }

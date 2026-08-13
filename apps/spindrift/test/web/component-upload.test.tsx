@@ -9,7 +9,7 @@
  */
 import { describe, expect, test } from 'bun:test';
 import { renderToStaticMarkup } from 'react-dom/server';
-import type { ComponentView } from '../../src/web/model.ts';
+import type { ComponentView } from '../../src/commands/views.ts';
 import { ComponentUploadButton } from '../../src/web/views/apps/component-upload.tsx';
 
 const COMPONENT: ComponentView = {

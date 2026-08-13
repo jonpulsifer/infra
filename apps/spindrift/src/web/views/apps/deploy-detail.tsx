@@ -44,7 +44,14 @@ import {
 } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { useEffect, useRef, useState } from 'react';
+import {
+  type DeployView,
+  isInFlight,
+  type SourceView,
+  type StepStatus,
+} from '../../../commands/views.ts';
 import { BUILD_ADAPTER } from '../../client/build-adapters.ts';
+import { command } from '../../client.ts';
 import { Checklist } from '../../components/checklist.tsx';
 import { DiagnosisPanel, DriftPanel } from '../../components/diagnosis.tsx';
 import { LogPane, Notice } from '../../components/log-pane.tsx';
@@ -54,12 +61,7 @@ import {
 } from '../../components/progress.tsx';
 import { RunningTime } from '../../components/running-time.tsx';
 import { PhasePill, StepGlyph, statusWord } from '../../components/status.tsx';
-import {
-  type DeployView,
-  isInFlight,
-  type SourceView,
-  type StepStatus,
-} from '../../model.ts';
+import { subscribeAttempt } from '../../stream-client.ts';
 import { Button } from '../../ui/button.tsx';
 import { Card, CardContent, Eyebrow } from '../../ui/card.tsx';
 import {
@@ -70,7 +72,9 @@ import {
 import { CopyButton } from '../../ui/copy.tsx';
 import { Logo } from '../../ui/logo.tsx';
 import { Page } from '../../ui/page.tsx';
+import { notify } from '../../ui/toast.tsx';
 import { cn, normaliseUrl } from '../../ui/utils.ts';
+import { DetailSkeleton, ScreenFailure, ScreenNotFound } from '../screen.tsx';
 
 /**
  * What the operator can do from here, and which one is running.
@@ -917,5 +921,370 @@ function DeployDrawer({ view }: { view: DeployView }) {
         <LogPane lines={view.deployLog} follow={isInFlight(view.phase)} />
       )}
     </Stage>
+  );
+}
+
+/**
+ * One Deploy, live.
+ *
+ * Not a `useRead`: this screen has an edge a cadence would only approximate.
+ * The attempt stream tells it when something happened, and the re-read is the
+ * answer to that event rather than to a timer — so the read is issued from the
+ * subscription, and the subscription is opened from the first read, because the
+ * ids it subscribes on are what that read returns.
+ */
+export function DeployScreen({
+  deployId,
+  onNavigate,
+}: {
+  deployId: string;
+  onNavigate: (path: string) => void;
+}) {
+  const [state, setState] = useState<
+    | { type: 'loading' }
+    | { type: 'not-found'; message: string }
+    | { type: 'error'; message: string }
+    | { type: 'success'; deploy: DeployView }
+  >({ type: 'loading' });
+
+  const [busy, setBusy] = useState<'redeploy' | 'rollback' | null>(null);
+  const [reloadToken, setReloadToken] = useState(0);
+
+  useEffect(() => {
+    let live = true;
+    let stopStream: (() => void) | null = null;
+    if (!deployId) {
+      setState({ type: 'not-found', message: 'No Deploy ID specified' });
+      return;
+    }
+    const parsedId = Number.parseInt(deployId, 10);
+    if (Number.isNaN(parsedId)) {
+      setState({
+        type: 'not-found',
+        message: `Invalid Deploy ID '${deployId}'`,
+      });
+      return;
+    }
+    command('getDeployDetail', { id: parsedId })
+      .then((result) => {
+        if (!live) return;
+        if (result.ok) {
+          setState({ type: 'success', deploy: result.value.deploy });
+          stopStream = subscribeAttempt(
+            {
+              buildId: result.value.deploy.buildId,
+              // Non-null on this screen by construction: `getDeployDetail`
+              // answers about a Deploy, so its view always carries that id.
+              deployId: result.value.deploy.id ?? parsedId,
+            },
+            () => {
+              void command('getDeployDetail', { id: parsedId }).then(
+                (fresh) => {
+                  if (live && fresh.ok) {
+                    setState({
+                      type: 'success',
+                      deploy: fresh.value.deploy,
+                    });
+                  }
+                },
+              );
+            },
+          );
+        } else {
+          if (result.failure.code === 'NOT_FOUND') {
+            setState({ type: 'not-found', message: result.failure.message });
+          } else {
+            setState({ type: 'error', message: result.failure.message });
+          }
+        }
+      })
+      .catch((e: unknown) => {
+        if (!live) return;
+        setState({
+          type: 'error',
+          message: e instanceof Error ? e.message : 'Server failure',
+        });
+      });
+    return () => {
+      live = false;
+      stopStream?.();
+    };
+  }, [deployId, reloadToken]);
+
+  const handleRedeploy = async () => {
+    if (state.type !== 'success') return;
+    setBusy('redeploy');
+    try {
+      // The App's id, not its name: `apps` has no unique constraint on `name`,
+      // so redeploying by name would act on whichever row shares it.
+      const result = await command('deployApp', { name: state.deploy.appId });
+      if (result.ok) {
+        onNavigate(
+          result.value.deployId === null
+            ? `/builds/${result.value.buildId}`
+            : `/deploys/${result.value.deployId}`,
+        );
+      } else {
+        // Surfaced verbatim and acted on no further: a refused redeploy is a
+        // fact about this artifact and this Target, not a cue to build another.
+        notify({
+          tone: 'destructive',
+          title: 'Redeploy refused',
+          detail: result.failure.message,
+        });
+      }
+    } catch (e: unknown) {
+      notify({
+        tone: 'destructive',
+        title: 'Redeploy failed',
+        detail: e instanceof Error ? e.message : 'Server failure',
+      });
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  /**
+   * Make an older release live again (§6).
+   *
+   * An ordinary deploy with an older artifact named, which is what §6 makes it
+   * — there is no rollback path beside the deploy path, and nothing here
+   * retries or substitutes on a refusal.
+   */
+  const handleRollback = async () => {
+    if (state.type !== 'success') return;
+    const view = state.deploy;
+    setBusy('rollback');
+    try {
+      const result = await command('rollbackDeploy', {
+        componentId: view.componentId,
+        targetId: view.targetId,
+        buildId: view.buildId,
+      });
+      if (result.ok) {
+        // The scariest button in the product, and until now the only thing it
+        // said on success was a different id in the URL. The build number is
+        // what makes the sentence checkable against what the operator meant.
+        notify({
+          tone: 'success',
+          title: `Rolled back to build ${view.buildId}`,
+          detail: `Deploy #${result.value.deployId} is the release now serving.`,
+        });
+        onNavigate(`/deploys/${result.value.deployId}`);
+      } else {
+        notify({
+          tone: 'destructive',
+          title: 'Rollback refused',
+          detail: result.failure.message,
+        });
+      }
+    } catch (cause: unknown) {
+      notify({
+        tone: 'destructive',
+        title: 'Rollback refused',
+        detail: cause instanceof Error ? cause.message : 'Rollback failed',
+      });
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  if (state.type === 'loading') return <DetailSkeleton />;
+
+  if (state.type === 'not-found') {
+    return (
+      <ScreenNotFound
+        title={`Deploy #${deployId} not found`}
+        message={state.message}
+        onNavigate={onNavigate}
+      />
+    );
+  }
+
+  if (state.type === 'error') {
+    return (
+      <ScreenFailure
+        title="Failed to load deploy detail"
+        message={state.message}
+        width="reading"
+        onRetry={() => setReloadToken((token) => token + 1)}
+      />
+    );
+  }
+
+  return (
+    <DeployDetail
+      view={state.deploy}
+      actions={{
+        onRedeploy: handleRedeploy,
+        onRollback: handleRollback,
+        busy,
+      }}
+      onNavigate={onNavigate}
+    />
+  );
+}
+
+/**
+ * One Build as an artifact-production attempt (§4).
+ *
+ * It stays a Build after placement: a related Deploy answers a different
+ * question, so this screen links across without replacing artifact evidence.
+ */
+export function BuildScreen({
+  buildId,
+  onNavigate,
+}: {
+  buildId: string;
+  onNavigate: (path: string) => void;
+}) {
+  const [state, setState] = useState<
+    | { type: 'loading' }
+    | { type: 'not-found'; message: string }
+    | { type: 'error'; message: string }
+    | { type: 'success'; attempt: DeployView; deployId: number | null }
+  >({ type: 'loading' });
+  const [busy, setBusy] = useState<'redeploy' | 'deploy' | null>(null);
+  const [reloadToken, setReloadToken] = useState(0);
+
+  useEffect(() => {
+    let live = true;
+    let stopStream: (() => void) | null = null;
+    const parsedId = Number.parseInt(buildId, 10);
+    if (!buildId || Number.isNaN(parsedId)) {
+      setState({ type: 'not-found', message: `Invalid Build ID '${buildId}'` });
+      return;
+    }
+
+    const read = async () => {
+      const result = await command('getBuildDetail', { id: parsedId });
+      if (!live) return;
+      if (!result.ok) {
+        setState({
+          type: result.failure.code === 'NOT_FOUND' ? 'not-found' : 'error',
+          message: result.failure.message,
+        });
+        return;
+      }
+      setState({
+        type: 'success',
+        attempt: result.value.attempt,
+        deployId: result.value.deployId,
+      });
+    };
+
+    read()
+      .then(() => {
+        if (!live) return;
+        // The same authenticated stream the deploy screen uses, subscribed with
+        // no `deployId` because there is not one yet.
+        stopStream = subscribeAttempt({ buildId: parsedId }, () => {
+          void read();
+        });
+      })
+      .catch((cause: unknown) => {
+        if (!live) return;
+        setState({
+          type: 'error',
+          message: cause instanceof Error ? cause.message : 'Server failure',
+        });
+      });
+
+    return () => {
+      live = false;
+      stopStream?.();
+    };
+  }, [buildId, reloadToken]);
+
+  const act = async (kind: 'redeploy' | 'deploy') => {
+    if (state.type !== 'success') return;
+    // The word the button the operator just pressed used — "Build again" on a
+    // failed Build, "Redeploy" otherwise — so a refusal answers in the same
+    // verb the press was made in.
+    const verb =
+      kind === 'deploy'
+        ? 'Deploy'
+        : state.attempt.build?.status === 'failed'
+          ? 'Build'
+          : 'Redeploy';
+    setBusy(kind);
+    try {
+      // One command for both, because §4 gives the workspace button one
+      // meaning: deploy the newest artifact, or start the Build that would
+      // produce one. Pressing "Deploy this build" on a finished Build takes the
+      // first arm; pressing "Build again" on a failed one takes the second.
+      const result = await command('deployApp', { name: state.attempt.appId });
+      if (result.ok) {
+        onNavigate(
+          result.value.deployId === null
+            ? `/builds/${result.value.buildId}`
+            : `/deploys/${result.value.deployId}`,
+        );
+      } else {
+        notify({
+          tone: 'destructive',
+          title: `${verb} refused`,
+          detail: result.failure.message,
+        });
+      }
+    } catch (cause) {
+      notify({
+        tone: 'destructive',
+        title: `${verb} failed`,
+        detail: cause instanceof Error ? cause.message : 'Server failure',
+      });
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  if (state.type === 'loading') return <DetailSkeleton />;
+
+  if (state.type === 'not-found') {
+    return (
+      <ScreenNotFound
+        title={`Build #${buildId} not found`}
+        message={state.message}
+        onNavigate={onNavigate}
+      />
+    );
+  }
+
+  if (state.type === 'error') {
+    return (
+      <ScreenFailure
+        title="Failed to load build"
+        message={state.message}
+        width="reading"
+        onRetry={() => setReloadToken((token) => token + 1)}
+      />
+    );
+  }
+
+  return (
+    <>
+      {state.deployId !== null ? (
+        <div className="mx-auto mt-4 flex w-full max-w-[1040px] items-center justify-between gap-4 px-5">
+          <p className="text-sm text-muted-foreground">
+            This artifact is related to Deploy #{state.deployId}.
+          </p>
+          <Button
+            variant="outline"
+            onClick={() => onNavigate(`/deploys/${state.deployId}`)}
+          >
+            Open related Deploy
+          </Button>
+        </div>
+      ) : null}
+      <DeployDetail
+        view={state.attempt}
+        actions={{
+          onDeployBuild: () => void act('deploy'),
+          onRedeploy: () => void act('redeploy'),
+          busy,
+        }}
+        onNavigate={onNavigate}
+      />
+    </>
   );
 }

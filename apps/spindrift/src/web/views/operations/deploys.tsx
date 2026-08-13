@@ -4,14 +4,14 @@
  * Two facts the server computed and the screen threw away.
  *
  * `current` is the difference between "this release reached LIVE" and "this
- * release is what should be running": `model.ts` says outright that a LIVE
+ * release is what should be running": `views.ts` says outright that a LIVE
  * Deploy a newer intent has superseded is still LIVE, and only the desired row
  * knows. That was one `yes`/`no` cell in the inspector; it is a column now,
  * because the question "which of these seven LIVE rows is the one serving" is
  * the reason an operator opens this screen.
  *
  * `rollbackable` is computed by `commands/deploys/list.ts` under the *same*
- * comparison `rollbackDeploy` makes, and `model.ts` explains why: so the act is
+ * comparison `rollbackDeploy` makes, and `views.ts` explains why: so the act is
  * offered only where it would be accepted, rather than offered everywhere and
  * refused half the time. It appeared nowhere in this area. The inspector now
  * carries the act itself — a rollback is an ordinary deploy naming an older
@@ -25,6 +25,7 @@
  * what happened, and neither pretends the ceremony exists.
  */
 import { useEffect, useState } from 'react';
+import type { DeployLedgerItem, DeployPhase } from '../../../commands/views.ts';
 import deployFlow from '../../client/diagrams/deploy.svg';
 import { command, type OutputOf } from '../../client.ts';
 import { Checklist } from '../../components/checklist.tsx';
@@ -34,7 +35,7 @@ import {
   type ExplorerTone,
   LedgerExplorer,
 } from '../../components/object-explorer.tsx';
-import type { DeployLedgerItem, DeployPhase } from '../../model.ts';
+import { useRead } from '../../poll.ts';
 import { Badge } from '../../ui/badge.tsx';
 import { Button } from '../../ui/button.tsx';
 import { Eyebrow } from '../../ui/card.tsx';
@@ -45,6 +46,7 @@ import { Page, PageHeader } from '../../ui/page.tsx';
 import { SkeletonRows } from '../../ui/skeleton.tsx';
 import { Timestamp } from '../../ui/timestamp.tsx';
 import { notify } from '../../ui/toast.tsx';
+import { LedgerSkeleton, mergeLedger, ScreenFailure } from '../screen.tsx';
 
 export function deployTone(phase: DeployPhase): ExplorerTone {
   if (phase === 'LIVE') return 'success';
@@ -381,5 +383,85 @@ function DeployEvidence({ deployId }: { readonly deployId: number }) {
         </div>
       )}
     </section>
+  );
+}
+
+/**
+ * The Deploys screen — the ledger and its two sources of rows.
+ *
+ * Merged on the tick for the reason the Builds screen is: the cadence owns the
+ * newest page, the reader owns everything paged in below it, and `nextBefore`
+ * belongs to whichever of the two last paged.
+ */
+export function DeploysScreen({
+  onNavigate,
+}: {
+  onNavigate: (path: string) => void;
+}) {
+  const read = useRead(
+    [['listAllDeploys', {}]],
+    15_000,
+    [],
+    ([fresh], [current]) => [
+      {
+        ...fresh,
+        deploys: mergeLedger(fresh.deploys, current.deploys),
+        nextBefore: current.nextBefore,
+      },
+    ],
+  );
+  const [loadingOlder, setLoadingOlder] = useState(false);
+  const [olderError, setOlderError] = useState<string | null>(null);
+
+  const loadOlder = async () => {
+    if (read.type !== 'success') return;
+    const [listed] = read.value;
+    if (listed.nextBefore === null) return;
+    setLoadingOlder(true);
+    setOlderError(null);
+    try {
+      const result = await command('listAllDeploys', {
+        before: listed.nextBefore,
+      });
+      if (!result.ok) {
+        setOlderError(result.failure.message);
+        return;
+      }
+      read.update(([current]) => [
+        {
+          ...current,
+          deploys: mergeLedger(current.deploys, result.value.deploys),
+          nextBefore: result.value.nextBefore,
+        },
+      ]);
+    } catch (cause) {
+      setOlderError(
+        cause instanceof Error ? cause.message : 'Loading older Deploys failed',
+      );
+    } finally {
+      setLoadingOlder(false);
+    }
+  };
+
+  if (read.type === 'loading') return <LedgerSkeleton />;
+  if (read.type === 'error') {
+    return (
+      <ScreenFailure
+        title="Failed to load Deploys"
+        message={read.failure.message}
+        onRetry={read.reload}
+      />
+    );
+  }
+  const [listed] = read.value;
+  return (
+    <DeployLedger
+      deploys={listed.deploys}
+      onNavigate={onNavigate}
+      hasMore={listed.nextBefore !== null}
+      loadingMore={loadingOlder}
+      loadError={olderError}
+      onLoadMore={() => void loadOlder()}
+    />
   );
 }

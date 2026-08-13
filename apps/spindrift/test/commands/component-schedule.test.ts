@@ -20,10 +20,8 @@
  */
 import { describe, expect, test } from 'bun:test';
 import { eq } from 'drizzle-orm';
-import {
-  createDeploy,
-  setComponentSchedule,
-} from '../../src/commands/index.ts';
+import { setComponentSchedule } from '../../src/commands/components/schedule.ts';
+import { createDeploy } from '../../src/commands/deploys/create.ts';
 import { dispatch } from '../../src/commands/registry.ts';
 import type {
   AdapterRegistry,
