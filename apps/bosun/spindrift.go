@@ -9,8 +9,6 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
-	"os"
-	"path/filepath"
 	"strings"
 	"time"
 )
@@ -146,6 +144,24 @@ func (c *sdClient) do(ctx context.Context, method, url string, body, out any) (s
 	return resp.StatusCode, nil
 }
 
+// buildSpawner is the one thing a build needs from the warm pool: boot a skiff
+// at a build berth for this claim and hand it back to wait on -- its done
+// channel closes once the skiff is gone and its diag share is safe to read.
+// The pool implements it. Nothing else the pool keeps -- the slot table, the
+// drain flag, the skiff map, GitHub polling -- is a build's business.
+type buildSpawner interface {
+	spawnBuild(ctx context.Context, claim *buildClaim) (*skiff, error)
+}
+
+// buildSource is this bosun host serving a Spindrift outbox: it claims build
+// requests, runs each on a skiff, and posts back what the guest left behind.
+type buildSource struct {
+	sd     spindriftClient
+	skiffs buildSpawner
+	logger *slog.Logger
+	stats  *metrics
+}
+
 // buildLoop claims and runs one Spindrift build at a time until ctx is
 // cancelled.
 //
@@ -154,17 +170,17 @@ func (c *sdClient) do(ctx context.Context, method, url string, body, out any) (s
 // already has -- is the real limiter on how many builds a host could serve
 // at once, so this leaves spare capacity on the table on a host with more
 // than one build class. It also keeps a bosun restart from ever stranding
-// more than one build mid-heartbeat. A second lane is another goroutine
-// calling this loop, if the capacity ever matters more than that.
-func (p *pool) buildLoop(ctx context.Context, sd spindriftClient, classes []string, pollInterval time.Duration) {
+// more than one build mid-heartbeat. A second lane is a second goroutine on a
+// buildSource, if the capacity ever matters more than that.
+func (b *buildSource) buildLoop(ctx context.Context, classes []string, pollInterval time.Duration) {
 	for ctx.Err() == nil {
-		claim, err := sd.ClaimBuild(ctx, classes)
+		claim, err := b.sd.ClaimBuild(ctx, classes)
 		if err != nil {
 			if ctx.Err() != nil {
 				return
 			}
-			p.stats.spindriftError()
-			p.logger.Warn("claim build", "error", err)
+			b.stats.spindriftError()
+			b.logger.Warn("claim build", "error", err)
 			time.Sleep(pollInterval)
 			continue
 		}
@@ -172,8 +188,8 @@ func (p *pool) buildLoop(ctx context.Context, sd spindriftClient, classes []stri
 			time.Sleep(time.Second) // guard a tight 204 loop; the long-poll IS the wait
 			continue
 		}
-		p.stats.buildClaimed()
-		p.runBuild(ctx, sd, claim)
+		b.stats.buildClaimed()
+		b.runBuild(ctx, claim)
 	}
 }
 
@@ -183,10 +199,10 @@ func (p *pool) buildLoop(ctx context.Context, sd spindriftClient, classes []stri
 // It blocks until the skiff is gone regardless of ctx, so a build in
 // progress at shutdown gets the same drain-then-kill treatment as a busy
 // GitHub runner rather than being abandoned mid-heartbeat.
-func (p *pool) runBuild(ctx context.Context, sd spindriftClient, claim *buildClaim) {
-	logger := p.logger.With("build_id", claim.ID, "class", claim.Class)
+func (b *buildSource) runBuild(ctx context.Context, claim *buildClaim) {
+	logger := b.logger.With("build_id", claim.ID, "class", claim.Class)
 
-	s, err := p.spawn(ctx, p.buildBerth(claim))
+	s, err := b.skiffs.spawnBuild(ctx, claim)
 	if err != nil {
 		if errors.Is(err, errDraining) {
 			// Never attempted: stay silent so the claim's lease expires and
@@ -196,8 +212,8 @@ func (p *pool) runBuild(ctx context.Context, sd spindriftClient, claim *buildCla
 			return
 		}
 		res := buildResult{Status: buildFailed, Detail: fmt.Sprintf("failed to spawn a build skiff: %v", err)}
-		p.stats.buildResult(res.Status)
-		p.postBuildResult(ctx, sd, claim.ID, res, logger)
+		b.stats.buildResult(res.Status)
+		b.postBuildResult(ctx, claim.ID, res, logger)
 		return
 	}
 
@@ -206,44 +222,16 @@ func (p *pool) runBuild(ctx context.Context, sd spindriftClient, claim *buildCla
 	for {
 		select {
 		case <-s.done:
-			res := p.collectBuildResult(s, logger)
-			p.stats.buildResult(res.Status)
-			p.postBuildResult(ctx, sd, claim.ID, res, logger)
+			res := readBuildResult(s.paths.diagDir, s.reason(), logger)
+			b.stats.buildResult(res.Status)
+			b.postBuildResult(ctx, claim.ID, res, logger)
 			return
 		case <-heartbeat.C:
-			if err := sd.Heartbeat(ctx, claim.ID); err != nil {
+			if err := b.sd.Heartbeat(ctx, claim.ID); err != nil {
 				logger.Warn("heartbeat", "error", err)
 			}
 		}
 	}
-}
-
-// collectBuildResult reads whatever the guest left in s's diag share --
-// retire keeps that directory on purpose, the same evidence a wedged GitHub
-// skiff leaves behind -- and composes the result Spindrift gets. A missing
-// status file means the guest never finished the handshake, which is
-// reported as FAILED rather than left for Spindrift's lease to time out on.
-func (p *pool) collectBuildResult(s *skiff, logger *slog.Logger) buildResult {
-	logBytes, _ := os.ReadFile(filepath.Join(s.paths.diagDir, "result", "build.log"))
-	logText := tailString(logBytes, buildResultMaxLog)
-
-	statusRaw, err := os.ReadFile(filepath.Join(s.paths.diagDir, "result", "status"))
-	if err != nil {
-		reason := s.reason()
-		detail := "skiff exited without writing a result"
-		if reason != "" && reason != exitCompleted {
-			detail = fmt.Sprintf("skiff exited without writing a result (%s)", reason)
-		}
-		logger.Warn("build result missing", "error", err, "exit_reason", reason)
-		return buildResult{Status: buildFailed, Log: logText, Detail: detail}
-	}
-
-	status := strings.TrimSpace(string(statusRaw))
-	if status != buildSucceeded && status != buildFailed {
-		logger.Warn("build result status unrecognized", "status", status)
-		return buildResult{Status: buildFailed, Log: logText, Detail: fmt.Sprintf("unrecognized result status %q", status)}
-	}
-	return buildResult{Status: status, Log: logText}
 }
 
 // tailString caps b at max bytes, keeping the end: a build's report marker
@@ -260,7 +248,7 @@ func tailString(b []byte, max int) string {
 // for the same reason: a lost result strands a Spindrift build row until its
 // lease expires, which is worth a little extra time after bosun has
 // otherwise decided to move on.
-func (p *pool) postBuildResult(ctx context.Context, sd spindriftClient, id string, res buildResult, logger *slog.Logger) {
+func (b *buildSource) postBuildResult(ctx context.Context, id string, res buildResult, logger *slog.Logger) {
 	pctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Minute)
 	defer cancel()
 	const attempts = 3
@@ -269,7 +257,7 @@ func (p *pool) postBuildResult(ctx context.Context, sd spindriftClient, id strin
 		if i > 0 {
 			time.Sleep(5 * time.Second)
 		}
-		if err = sd.PostResult(pctx, id, res); err == nil {
+		if err = b.sd.PostResult(pctx, id, res); err == nil {
 			logger.Info("build result posted", "status", res.Status)
 			return
 		}

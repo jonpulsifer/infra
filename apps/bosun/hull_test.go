@@ -503,6 +503,69 @@ func TestEnsureWorkspaceKeepsAPersistedImageAndTruncatesAnEphemeralOne(t *testin
 	}
 }
 
+// The guest's half of the contract, read straight off a directory: a status
+// file it wrote, or the absence of one because it never finished.
+func TestReadBuildResult(t *testing.T) {
+	tests := []struct {
+		name       string
+		status     string // written to result/status; "" writes no file at all
+		exitReason string
+		wantStatus string
+		wantDetail string
+	}{
+		{
+			name:       "the guest wrote SUCCEEDED",
+			status:     "SUCCEEDED\n",
+			wantStatus: buildSucceeded,
+		},
+		{
+			name:       "no status file and the guest halted itself",
+			exitReason: "",
+			wantStatus: buildFailed,
+			wantDetail: "skiff exited without writing a result",
+		},
+		{
+			name:       "no status file because bosun killed the skiff, which the detail names",
+			exitReason: exitLifetime,
+			wantStatus: buildFailed,
+			wantDetail: "skiff exited without writing a result (lifetime)",
+		},
+		{
+			name:       "a status bosun does not recognize is a failure, not a passthrough",
+			status:     "MAYBE",
+			wantStatus: buildFailed,
+			wantDetail: `unrecognized result status "MAYBE"`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			diagDir := t.TempDir()
+			resultDir := filepath.Join(diagDir, "result")
+			if err := os.MkdirAll(resultDir, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			writeFile(t, filepath.Join(resultDir, "build.log"), "build output\n")
+			if tt.status != "" {
+				writeFile(t, filepath.Join(resultDir, "status"), tt.status)
+			}
+
+			got := readBuildResult(diagDir, tt.exitReason, testLogger())
+			if got.Status != tt.wantStatus {
+				t.Errorf("status = %q, want %q", got.Status, tt.wantStatus)
+			}
+			if got.Detail != tt.wantDetail {
+				t.Errorf("detail = %q, want %q", got.Detail, tt.wantDetail)
+			}
+			// The log always comes back, whatever the status: it is the only
+			// evidence of a build that never wrote one.
+			if got.Log != "build output\n" {
+				t.Errorf("log = %q, want the guest's build.log", got.Log)
+			}
+		})
+	}
+}
+
 func TestLoadHullRejectsMoreDisksThanGuestDeviceNames(t *testing.T) {
 	dir := t.TempDir()
 	devices := make([]hullDevice, maxHullDisks+1)

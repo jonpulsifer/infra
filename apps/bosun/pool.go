@@ -474,6 +474,13 @@ func (p *pool) buildBerth(claim *buildClaim) berth {
 	}
 }
 
+// spawnBuild is the pool's side of buildSpawner, and the only thing a
+// buildSource asks of it: one spawn at a build berth, handed back for the
+// build to wait on.
+func (p *pool) spawnBuild(ctx context.Context, claim *buildClaim) (*skiff, error) {
+	return p.spawn(ctx, p.buildBerth(claim))
+}
+
 // spawn boots one skiff for berth b and hands its lifetime off to awaitExit.
 // Errors are logged before they are returned, and fill and awaitExit ignore
 // them: a single failed spawn should not take down the rest of the pool.

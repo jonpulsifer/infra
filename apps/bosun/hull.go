@@ -6,8 +6,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"syscall"
 )
 
@@ -121,6 +123,39 @@ const maxHullDisks = 25
 // name handed over on the cmdline does not.
 func guestDiskName(n int) string {
 	return "/dev/vd" + string(rune('a'+n))
+}
+
+// readBuildResult is the other half of the bosun<->hull contract hull.json
+// declares: what a build skiff's guest leaves behind. The guest writes
+// result/status and result/build.log into its diag share -- the one writable
+// path it has -- and this reads them back.
+//
+// diagDir is kept on purpose by retire, the same evidence a wedged GitHub
+// skiff leaves behind. A missing status file means the guest never finished
+// the handshake, which is reported as FAILED rather than left for Spindrift's
+// lease to time out on. exitReason is why bosun ended the skiff, empty when
+// the guest halted itself; logger carries only the two warnings for a guest
+// that did not hold up its end.
+func readBuildResult(diagDir, exitReason string, logger *slog.Logger) buildResult {
+	logBytes, _ := os.ReadFile(filepath.Join(diagDir, "result", "build.log"))
+	logText := tailString(logBytes, buildResultMaxLog)
+
+	statusRaw, err := os.ReadFile(filepath.Join(diagDir, "result", "status"))
+	if err != nil {
+		detail := "skiff exited without writing a result"
+		if exitReason != "" && exitReason != exitCompleted {
+			detail = fmt.Sprintf("skiff exited without writing a result (%s)", exitReason)
+		}
+		logger.Warn("build result missing", "error", err, "exit_reason", exitReason)
+		return buildResult{Status: buildFailed, Log: logText, Detail: detail}
+	}
+
+	status := strings.TrimSpace(string(statusRaw))
+	if status != buildSucceeded && status != buildFailed {
+		logger.Warn("build result status unrecognized", "status", status)
+		return buildResult{Status: buildFailed, Log: logText, Detail: fmt.Sprintf("unrecognized result status %q", status)}
+	}
+	return buildResult{Status: status, Log: logText}
 }
 
 // maxSockPathLen is Linux's sockaddr_un.sun_path capacity minus its NUL

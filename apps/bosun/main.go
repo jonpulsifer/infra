@@ -78,11 +78,16 @@ func main() {
 			logger.Error("read spindrift token file", "path", cfg.Spindrift.TokenFile, "error", err)
 			os.Exit(1)
 		}
-		sd := newSDClient(cfg.Spindrift.URL, strings.TrimSpace(string(sdTokenRaw)))
+		builds := &buildSource{
+			sd:     newSDClient(cfg.Spindrift.URL, strings.TrimSpace(string(sdTokenRaw))),
+			skiffs: p,
+			logger: logger,
+			stats:  p.stats,
+		}
 		buildDone = make(chan struct{})
 		go func() {
 			defer close(buildDone)
-			p.buildLoop(ctx, sd, cfg.Spindrift.Classes, time.Duration(cfg.Spindrift.PollInterval))
+			builds.buildLoop(ctx, cfg.Spindrift.Classes, time.Duration(cfg.Spindrift.PollInterval))
 		}()
 		logger.Info("spindrift build source enabled", "classes", cfg.Spindrift.Classes)
 	}

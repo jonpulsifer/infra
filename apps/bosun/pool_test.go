@@ -849,7 +849,7 @@ func TestBuildSkiffExitPostsResultFromDiagFiles(t *testing.T) {
 
 	done := make(chan struct{})
 	go func() {
-		p.runBuild(ctx, sd, claim)
+		poolBuildSource(p, sd).runBuild(ctx, claim)
 		close(done)
 	}()
 
@@ -896,7 +896,7 @@ func TestBuildSkiffExitWithNoResultFilesPostsFailed(t *testing.T) {
 
 	done := make(chan struct{})
 	go func() {
-		p.runBuild(ctx, sd, claim)
+		poolBuildSource(p, sd).runBuild(ctx, claim)
 		close(done)
 	}()
 
@@ -927,7 +927,7 @@ func TestBuildSkiffExitDoesNotRefillTheClass(t *testing.T) {
 	claim := &buildClaim{ID: "build-3", Class: "skiff-test", Request: json.RawMessage(`{}`)}
 	sd := &fakeSpindrift{}
 
-	go p.runBuild(ctx, sd, claim)
+	go poolBuildSource(p, sd).runBuild(ctx, claim)
 	waitFor(t, "cloud-hypervisor launched for the build skiff", func() bool {
 		_, ok := fl.last("cloud-hypervisor")
 		return ok
@@ -1146,7 +1146,7 @@ func TestDrainRefusedClaimPostsNoResult(t *testing.T) {
 	p.draining = true
 	p.mu.Unlock()
 
-	p.runBuild(ctx, sd, claim)
+	poolBuildSource(p, sd).runBuild(ctx, claim)
 
 	if results := sd.postedResults(); len(results) != 0 {
 		t.Fatalf("drain-refused claim posted a result: %+v", results)
