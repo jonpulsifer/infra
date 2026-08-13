@@ -34,6 +34,7 @@ import type {
   WorkspaceView,
 } from './model.ts';
 import { isInFlight } from './model.ts';
+import { usePoll } from './poll.ts';
 import { useRoute } from './router.ts';
 import { SESSION_EXPIRED_EVENT } from './session-events.ts';
 import { subscribeAttempt, subscribeRuntime } from './stream-client.ts';
@@ -530,6 +531,34 @@ function ConnectionsSettings({
   );
 }
 
+/** A thrown cause as a sentence, for the screens that put one on the page. */
+function serverFailure(cause: unknown): string {
+  return cause instanceof Error ? cause.message : 'Server failure';
+}
+
+/**
+ * What a *thrown* read leaves behind, for a screen that re-reads on a cadence.
+ *
+ * `client.ts` draws the line this depends on: a refusal is an answer the server
+ * gave, and only a response that was not the server answering — a dropped
+ * connection, a proxy serving HTML — throws. So the two are not handled alike
+ * here. A refusal is rendered, on the tick as much as on the first read, which
+ * is how an App deleted from another window stops being shown as though it were
+ * still there. A throw is a gap: a screen with something readable on it keeps
+ * what it has and the next tick closes the gap, because replacing a live view
+ * with an error page over one lost request takes away more than it explains.
+ *
+ * Each screen used to answer this twice and differently — the mount read
+ * replaced the screen for either, the interval beside it dropped both — which
+ * is the drift {@link usePoll}'s single read removes.
+ */
+function failedRead<T extends { readonly type: string }>(
+  current: T,
+  message: string,
+): T | { readonly type: 'error'; readonly message: string } {
+  return current.type === 'success' ? current : { type: 'error', message };
+}
+
 function OverviewScreen({
   onNavigate,
 }: {
@@ -560,56 +589,49 @@ function OverviewScreen({
   >({ type: 'loading' });
   const [reloadToken, setReloadToken] = useState(0);
 
-  useEffect(() => {
-    let live = true;
-    const read = () =>
+  usePoll(
+    (signal) =>
       Promise.all([
         command('listApps', {}),
         command('listBuilds', { limit: 12 }),
         command('listAllDeploys', { limit: 12 }),
         command('listTargets', {}),
-      ]).then(([apps, builds, deploys, targets]) => {
-        if (!live) return;
-        if (!apps.ok) {
-          setState({ type: 'error', message: apps.failure.message });
-          return;
-        }
-        if (!builds.ok) {
-          setState({ type: 'error', message: builds.failure.message });
-          return;
-        }
-        if (!deploys.ok) {
-          setState({ type: 'error', message: deploys.failure.message });
-          return;
-        }
-        if (!targets.ok) {
-          setState({ type: 'error', message: targets.failure.message });
-          return;
-        }
-        setState({
-          type: 'success',
-          apps: apps.value.apps,
-          builds: builds.value.builds,
-          deploys: deploys.value.deploys,
-          targets: targets.value.targets,
-          buildsHasMore: builds.value.nextBefore !== null,
-          deploysHasMore: deploys.value.nextBefore !== null,
-        });
-      });
-    const fail = (cause: unknown) => {
-      if (!live) return;
-      setState({
-        type: 'error',
-        message: cause instanceof Error ? cause.message : 'Server failure',
-      });
-    };
-    void read().catch(fail);
-    const refresh = setInterval(() => void read().catch(fail), 15_000);
-    return () => {
-      live = false;
-      clearInterval(refresh);
-    };
-  }, [reloadToken]);
+      ])
+        .then(([apps, builds, deploys, targets]) => {
+          if (signal.aborted) return;
+          if (!apps.ok) {
+            setState({ type: 'error', message: apps.failure.message });
+            return;
+          }
+          if (!builds.ok) {
+            setState({ type: 'error', message: builds.failure.message });
+            return;
+          }
+          if (!deploys.ok) {
+            setState({ type: 'error', message: deploys.failure.message });
+            return;
+          }
+          if (!targets.ok) {
+            setState({ type: 'error', message: targets.failure.message });
+            return;
+          }
+          setState({
+            type: 'success',
+            apps: apps.value.apps,
+            builds: builds.value.builds,
+            deploys: deploys.value.deploys,
+            targets: targets.value.targets,
+            buildsHasMore: builds.value.nextBefore !== null,
+            deploysHasMore: deploys.value.nextBefore !== null,
+          });
+        })
+        .catch((cause: unknown) => {
+          if (signal.aborted) return;
+          setState((current) => failedRead(current, serverFailure(cause)));
+        }),
+    15_000,
+    [reloadToken],
+  );
 
   if (state.type === 'loading') return <OverviewSkeleton />;
   if (state.type === 'error') {
@@ -641,44 +663,36 @@ function BuildsScreen({ onNavigate }: { onNavigate: (path: string) => void }) {
   const [olderError, setOlderError] = useState<string | null>(null);
   const [reloadToken, setReloadToken] = useState(0);
 
-  useEffect(() => {
-    let live = true;
-    const readNewest = () =>
-      command('listBuilds', {}).then((result) => {
-        if (!live) return;
-        if (!result.ok) {
-          setState({ type: 'error', message: result.failure.message });
-          return;
-        }
-        setState((current) =>
-          current.type === 'success'
-            ? {
-                type: 'success',
-                builds: mergeLedger(result.value.builds, current.builds),
-                nextBefore: current.nextBefore,
-              }
-            : {
-                type: 'success',
-                builds: result.value.builds,
-                nextBefore: result.value.nextBefore,
-              },
-        );
-      });
-    const fail = (cause: unknown) => {
-      if (live) {
-        setState({
-          type: 'error',
-          message: cause instanceof Error ? cause.message : 'Server failure',
-        });
-      }
-    };
-    void readNewest().catch(fail);
-    const refresh = setInterval(() => void readNewest().catch(fail), 15_000);
-    return () => {
-      live = false;
-      clearInterval(refresh);
-    };
-  }, [reloadToken]);
+  usePoll(
+    (signal) =>
+      command('listBuilds', {})
+        .then((result) => {
+          if (signal.aborted) return;
+          if (!result.ok) {
+            setState({ type: 'error', message: result.failure.message });
+            return;
+          }
+          setState((current) =>
+            current.type === 'success'
+              ? {
+                  type: 'success',
+                  builds: mergeLedger(result.value.builds, current.builds),
+                  nextBefore: current.nextBefore,
+                }
+              : {
+                  type: 'success',
+                  builds: result.value.builds,
+                  nextBefore: result.value.nextBefore,
+                },
+          );
+        })
+        .catch((cause: unknown) => {
+          if (signal.aborted) return;
+          setState((current) => failedRead(current, serverFailure(cause)));
+        }),
+    15_000,
+    [reloadToken],
+  );
 
   const loadOlder = async () => {
     if (state.type !== 'success' || state.nextBefore === null) return;
@@ -746,44 +760,36 @@ function DeploysScreen({ onNavigate }: { onNavigate: (path: string) => void }) {
   const [olderError, setOlderError] = useState<string | null>(null);
   const [reloadToken, setReloadToken] = useState(0);
 
-  useEffect(() => {
-    let live = true;
-    const readNewest = () =>
-      command('listAllDeploys', {}).then((result) => {
-        if (!live) return;
-        if (!result.ok) {
-          setState({ type: 'error', message: result.failure.message });
-          return;
-        }
-        setState((current) =>
-          current.type === 'success'
-            ? {
-                type: 'success',
-                deploys: mergeLedger(result.value.deploys, current.deploys),
-                nextBefore: current.nextBefore,
-              }
-            : {
-                type: 'success',
-                deploys: result.value.deploys,
-                nextBefore: result.value.nextBefore,
-              },
-        );
-      });
-    const fail = (cause: unknown) => {
-      if (live) {
-        setState({
-          type: 'error',
-          message: cause instanceof Error ? cause.message : 'Server failure',
-        });
-      }
-    };
-    void readNewest().catch(fail);
-    const refresh = setInterval(() => void readNewest().catch(fail), 15_000);
-    return () => {
-      live = false;
-      clearInterval(refresh);
-    };
-  }, [reloadToken]);
+  usePoll(
+    (signal) =>
+      command('listAllDeploys', {})
+        .then((result) => {
+          if (signal.aborted) return;
+          if (!result.ok) {
+            setState({ type: 'error', message: result.failure.message });
+            return;
+          }
+          setState((current) =>
+            current.type === 'success'
+              ? {
+                  type: 'success',
+                  deploys: mergeLedger(result.value.deploys, current.deploys),
+                  nextBefore: current.nextBefore,
+                }
+              : {
+                  type: 'success',
+                  deploys: result.value.deploys,
+                  nextBefore: result.value.nextBefore,
+                },
+          );
+        })
+        .catch((cause: unknown) => {
+          if (signal.aborted) return;
+          setState((current) => failedRead(current, serverFailure(cause)));
+        }),
+    15_000,
+    [reloadToken],
+  );
 
   const loadOlder = async () => {
     if (state.type !== 'success' || state.nextBefore === null) return;
@@ -1035,29 +1041,6 @@ function AppsScreen({ onNavigate }: { onNavigate: (path: string) => void }) {
     notify({ tone: 'success', title: `Deleted ${name}` });
   });
 
-  useEffect(() => {
-    let live = true;
-    command('listApps', {})
-      .then((result) => {
-        if (!live) return;
-        if (result.ok) {
-          setState({ type: 'success', apps: result.value.apps });
-        } else {
-          setState({ type: 'error', message: result.failure.message });
-        }
-      })
-      .catch((e: unknown) => {
-        if (!live) return;
-        setState({
-          type: 'error',
-          message: e instanceof Error ? e.message : 'Server failure',
-        });
-      });
-    return () => {
-      live = false;
-    };
-  }, [reloadToken]);
-
   /**
    * Keep the list current, at the two cadences the workspace already uses.
    *
@@ -1066,30 +1049,27 @@ function AppsScreen({ onNavigate }: { onNavigate: (path: string) => void }) {
    * dot the explorer pulses forever, which reads as "still moving" about a
    * release that finished minutes ago. The workspace worked this out already;
    * this is the same argument for the screen an operator watches a fleet from.
-   *
-   * A failed refresh is dropped rather than replacing a readable list with an
-   * error page. The next tick tries again.
    */
   const inFlight =
     state.type === 'success' && state.apps.some((app) => isInFlight(app.phase));
-  useEffect(() => {
-    let live = true;
-    const timer = setInterval(
-      () => {
-        void command('listApps', {})
-          .then((result) => {
-            if (!live || !result.ok) return;
-            setState({ type: 'success', apps: result.value.apps });
-          })
-          .catch(() => {});
-      },
-      inFlight ? 3_000 : 20_000,
-    );
-    return () => {
-      live = false;
-      clearInterval(timer);
-    };
-  }, [inFlight]);
+  usePoll(
+    (signal) =>
+      command('listApps', {})
+        .then((result) => {
+          if (signal.aborted) return;
+          if (!result.ok) {
+            setState({ type: 'error', message: result.failure.message });
+            return;
+          }
+          setState({ type: 'success', apps: result.value.apps });
+        })
+        .catch((cause: unknown) => {
+          if (signal.aborted) return;
+          setState((current) => failedRead(current, serverFailure(cause)));
+        }),
+    inFlight ? 3_000 : 20_000,
+    [reloadToken],
+  );
 
   if (state.type === 'loading') return <LedgerSkeleton width="reading" />;
 
@@ -1113,16 +1093,37 @@ function AppsScreen({ onNavigate }: { onNavigate: (path: string) => void }) {
 }
 
 /**
- * A refreshed workspace, keeping the log lines the socket has accumulated.
+ * A refreshed workspace, keeping what the socket knows and the read does not.
  *
- * A read carries only the server's first page of a runtime tail — every line
- * after it arrived over a socket and lives in this screen's state — so taking
- * `runtime` wholesale would wipe the log on every refresh.
+ * Two things, for one reason: `getAppWorkspace` never asks the adapter. It
+ * answers `stream` for any placed Component and hands back an empty first page,
+ * because tailing at read time is the socket's whole job — so on both counts
+ * the read is the weaker source about the same pair, and taking `runtime`
+ * wholesale lets it win every tick.
  *
- * The lines are kept only where both reads are about the same Component on the
+ * The lines are the obvious half: every line after the first arrived over the
+ * socket and lives in this screen's state, so a refresh that took `runtime`
+ * whole would wipe the log every few seconds.
+ *
+ * A `none` is the other. It is the answer for a Component that is placed and
+ * not running — no pods, a Target that runs nothing — and it can only come from
+ * the socket, so a refresh used to put `stream` back and the effect resubscribe
+ * to be told `none` again. The card swapped its title and its body, from the
+ * reason to an empty log and back, for as long as the screen was open.
+ *
+ * Both are kept only where the two reads are about the same Component on the
  * same Target. The selection can move while a refresh is in flight, and a
  * Component's output rendered under another Component's name is a worse answer
- * than the empty card the next socket page fills.
+ * than the empty card the next socket page fills. A `none` is held to more than
+ * that — the release has to be the same one, in the same phase — because it is
+ * a claim about what is running, and a Deploy is what changes that.
+ *
+ * ponytail: a runtime that recovers without moving either — pods coming back on
+ * a release that stayed LIVE — keeps saying `none` until the selection changes
+ * or the page is re-opened. Closing that means the pane subscribing on the
+ * Component and Target it is about rather than on the read's own answer to the
+ * question the socket exists to answer, and the server holding the socket open
+ * through a `none` instead of closing it.
  *
  * Exported for `test/web/workspace-refresh.test.ts`: this is where the
  * selection and the socket meet, and reaching it through the mounted screen
@@ -1132,6 +1133,18 @@ export function refreshedWorkspace(
   current: WorkspaceView,
   fresh: WorkspaceView,
 ): WorkspaceView {
+  const sameSubject =
+    current.componentId === fresh.componentId &&
+    current.targetId === fresh.targetId;
+  if (
+    sameSubject &&
+    current.runtime.kind === 'none' &&
+    fresh.runtime.kind === 'stream' &&
+    current.latestDeployId === fresh.latestDeployId &&
+    current.phase === fresh.phase
+  ) {
+    return { ...fresh, runtime: current.runtime };
+  }
   const accumulated = current.runtime;
   if (
     accumulated.kind !== 'stream' ||
@@ -1298,38 +1311,9 @@ function WorkspaceScreen({
   const deletion = useAppDeletion(() => onNavigate('/apps'));
 
   useEffect(() => {
-    let live = true;
-    if (!appName) {
+    if (!appName)
       setState({ type: 'not-found', message: 'No App name provided' });
-      return;
-    }
-    command('getAppWorkspace', {
-      name: appName,
-      ...(component === null ? {} : { component }),
-    })
-      .then((result) => {
-        if (!live) return;
-        if (result.ok) {
-          setState({ type: 'success', workspace: result.value.workspace });
-        } else {
-          if (result.failure.code === 'NOT_FOUND') {
-            setState({ type: 'not-found', message: result.failure.message });
-          } else {
-            setState({ type: 'error', message: result.failure.message });
-          }
-        }
-      })
-      .catch((e: unknown) => {
-        if (!live) return;
-        setState({
-          type: 'error',
-          message: e instanceof Error ? e.message : 'Server failure',
-        });
-      });
-    return () => {
-      live = false;
-    };
-  }, [appName, component, reloadToken]);
+  }, [appName]);
 
   // Once, on mount. Connecting a Target happens on another screen, and a move
   // does not change what Targets exist — so this list has nothing to re-read
@@ -1362,46 +1346,48 @@ function WorkspaceScreen({
    * Two cadences for the same reason the reconciler has two: while a release is
    * in flight the reader is watching, and once it settles the read is only
    * catching acts from elsewhere.
+   *
+   * The selection is named on every read, or it would put the App's first
+   * Component back on screen every few seconds — and `signal.aborted` is what
+   * drops the response still in flight when the selection moves, which is about
+   * a Component this screen has left.
    */
   const inFlight =
     state.type === 'success' && isInFlight(state.workspace.phase);
-  useEffect(() => {
-    if (!appName) return;
-    // Dropped by the cleanup, the same way the read above drops its own: the
-    // interval is re-armed whenever the selection moves, so a response still in
-    // flight across that press is about a Component this screen has left, and
-    // writing it would put that Component back on screen until the next tick.
-    let live = true;
-    const timer = setInterval(
-      () => {
-        // With the selection, or the refresh would put the App's first
-        // Component back on screen every few seconds.
-        void command('getAppWorkspace', {
-          name: appName,
-          ...(component === null ? {} : { component }),
+  usePoll(
+    (signal) => {
+      if (!appName) return Promise.resolve();
+      return command('getAppWorkspace', {
+        name: appName,
+        ...(component === null ? {} : { component }),
+      })
+        .then((result) => {
+          if (signal.aborted) return;
+          if (!result.ok) {
+            setState(
+              result.failure.code === 'NOT_FOUND'
+                ? { type: 'not-found', message: result.failure.message }
+                : { type: 'error', message: result.failure.message },
+            );
+            return;
+          }
+          const fresh = result.value.workspace;
+          setState((current) => ({
+            type: 'success',
+            workspace:
+              current.type === 'success'
+                ? refreshedWorkspace(current.workspace, fresh)
+                : fresh,
+          }));
         })
-          .then((result) => {
-            if (!live || !result.ok) return;
-            const fresh = result.value.workspace;
-            setState((current) => ({
-              type: 'success',
-              workspace:
-                current.type === 'success'
-                  ? refreshedWorkspace(current.workspace, fresh)
-                  : fresh,
-            }));
-          })
-          // A failed refresh is not a reason to replace a workspace that is on
-          // screen and readable with an error page. The next tick tries again.
-          .catch(() => {});
-      },
-      inFlight ? 2_000 : 20_000,
-    );
-    return () => {
-      live = false;
-      clearInterval(timer);
-    };
-  }, [appName, component, inFlight]);
+        .catch((cause: unknown) => {
+          if (signal.aborted) return;
+          setState((current) => failedRead(current, serverFailure(cause)));
+        });
+    },
+    inFlight ? 2_000 : 20_000,
+    [appName, component, reloadToken],
+  );
 
   const runtime =
     state.type === 'success' && state.workspace.runtime.kind === 'stream'

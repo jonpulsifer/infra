@@ -20,6 +20,17 @@
  * {@link reportSessionExpired}; every other case backs off and keeps trying,
  * which is also what turns the retry from a flat interval into one that
  * actually eases off rather than hammering a link that is not coming back.
+ *
+ * Not every close is a drop, though, and treating them alike is what made the
+ * banner strobe. `streams.ts`'s `pump` ends the socket itself after a `none` or
+ * an `error` page, so a runtime tail with nothing to tail used to settle on the
+ * message, drop, mark, reconnect, and settle again every few hundred
+ * milliseconds — the backoff never engaged, because a frame had arrived. Two
+ * rules keep that apart from a network blip: only a `stream` page is evidence
+ * the socket is healthy, so only that one resets the count, and `none` is an
+ * answer rather than a drop, so it ends the subscription instead of re-asking.
+ * The banner itself waits for the second consecutive drop — a reconnect that
+ * lands inside one backoff is not worth telling anyone about.
  */
 import { readSession } from './auth-client.ts';
 import { markReconnecting, markSettled } from './connection-status.ts';
@@ -87,7 +98,10 @@ function scheduleReconnect(params: {
   readonly setRetry: (handle: ReturnType<typeof setTimeout>) => void;
 }): void {
   const { id, options, attempt, reconnect, giveUp, setRetry } = params;
-  markReconnecting(id);
+  // From the second consecutive drop, not the first: one drop that reconnects
+  // inside its own backoff is a blip, and a banner that appears and clears
+  // within half a second is noise standing where information should be.
+  if (attempt > 1) markReconnecting(id);
   const delay = backoff(attempt, options.retryMs ?? 500);
   if (attempt < CONSECUTIVE_DROPS_BEFORE_SESSION_CHECK) {
     setRetry(setTimeout(reconnect, delay));
@@ -198,9 +212,21 @@ export function subscribeRuntime(
     socket = createSocket(streamUrl(`${RUNTIME_STREAM_PATH}?${query}`));
     socket.onmessage = (event) => {
       const message = JSON.parse(event.data) as RuntimeStreamMessage;
-      if (message.kind === 'stream') cursor = message.cursor;
-      attempts = 0;
-      markSettled(id);
+      // Only a page of output says the socket is working. `pump` closes after
+      // either of the other two, so resetting the count on those is what kept
+      // a closed-on-purpose stream reconnecting at full speed forever.
+      if (message.kind === 'stream') {
+        cursor = message.cursor;
+        attempts = 0;
+        markSettled(id);
+      }
+      // Nothing runs on that Target and the frame says why. Re-asking cannot
+      // change the answer within this socket's lifetime; the screen's own
+      // re-read is what notices when it does.
+      if (message.kind === 'none') {
+        stopped = true;
+        markSettled(id);
+      }
       onMessage(message);
     };
     socket.onerror = () => socket?.close();

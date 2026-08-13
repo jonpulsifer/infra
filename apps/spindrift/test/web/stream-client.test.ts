@@ -50,14 +50,22 @@ describe('resumable browser stream', () => {
       terminal: false,
     });
     sockets[0]!.drop();
-    // A drop marks the shared "any stream is retrying" flag `shell.tsx`
-    // reads through `connection-status.ts` — before the reconnect resolves,
-    // not after, since that is the window a banner exists to cover.
-    expect(isReconnecting()).toBe(true);
+    // Not on the first drop: a reconnect that lands inside one backoff is a
+    // blip, and a banner that appears and clears within it is noise.
+    expect(isReconnecting()).toBe(false);
     await Bun.sleep(1);
     expect(urls[1]).toContain('after=41');
 
-    sockets[1]!.message({
+    // The second consecutive drop is what marks the shared "any stream is
+    // retrying" flag `shell.tsx` reads through `connection-status.ts` — before
+    // the reconnect resolves, not after, since that is the window a banner
+    // exists to cover.
+    sockets[1]!.drop();
+    expect(isReconnecting()).toBe(true);
+    await Bun.sleep(1);
+    expect(urls[2]).toContain('after=41');
+
+    sockets[2]!.message({
       kind: 'attempt',
       entries: [],
       cursor: 42,
@@ -66,9 +74,9 @@ describe('resumable browser stream', () => {
     // A message is what clears it — a reconnect that opened but has not yet
     // heard back is not yet "connected" again.
     expect(isReconnecting()).toBe(false);
-    sockets[1]!.drop();
+    sockets[2]!.drop();
     await Bun.sleep(1);
-    expect(urls).toHaveLength(2);
+    expect(urls).toHaveLength(3);
     expect(messages).toHaveLength(2);
     stop();
   });
@@ -107,6 +115,77 @@ describe('resumable browser stream', () => {
     });
     expect(urls[1]).toContain('after=opaque');
     stop();
+  });
+
+  test('a socket the server closed on purpose is not retried as a drop', async () => {
+    const urls: string[] = [];
+    const sockets: FakeSocket[] = [];
+    const messages: unknown[] = [];
+    const stop = subscribeRuntime(
+      { componentId: 'component', targetId: 'target' },
+      (message) => messages.push(message),
+      {
+        createSocket: (url) => {
+          urls.push(url);
+          const socket = new FakeSocket();
+          sockets.push(socket);
+          return socket;
+        },
+        retryMs: 0,
+      },
+    );
+
+    // What `pump` does when the adapter has nothing to tail: send the reason,
+    // then close. Reconnecting re-asks a question the frame already answered,
+    // and the workspace's own re-read is what notices if it changes.
+    sockets[0]!.message({
+      kind: 'none',
+      because: 'Nothing runs on that Target',
+    });
+    sockets[0]!.drop();
+    await Bun.sleep(1);
+
+    expect(urls).toHaveLength(1);
+    expect(messages).toEqual([
+      { kind: 'none', because: 'Nothing runs on that Target' },
+    ]);
+    expect(isReconnecting()).toBe(false);
+    stop();
+  });
+
+  test('an error frame does not reset the backoff it just earned', async () => {
+    const sockets: FakeSocket[] = [];
+    let opened = 0;
+    const stop = subscribeRuntime(
+      { componentId: 'component', targetId: 'target' },
+      () => {},
+      {
+        createSocket: () => {
+          opened += 1;
+          const socket = new FakeSocket();
+          sockets.push(socket);
+          return socket;
+        },
+        retryMs: 0,
+        checkSession: async () => true,
+      },
+    );
+
+    // A stream that fails to read, closes, reconnects, and fails again is the
+    // shape that used to strobe: every frame reset the count, so the socket
+    // reopened at full speed forever and the banner marked and settled with
+    // it. Only a `stream` page counts as reaching the server, so this run of
+    // three reaches the session check rather than looping under it.
+    for (let i = 0; i < 3; i++) {
+      sockets.at(-1)!.message({ kind: 'error', message: 'read failed' });
+      sockets.at(-1)!.drop();
+      await Bun.sleep(1);
+    }
+
+    expect(opened).toBe(4);
+    expect(isReconnecting()).toBe(true);
+    stop();
+    expect(isReconnecting()).toBe(false);
   });
 });
 
