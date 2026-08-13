@@ -67,6 +67,7 @@ import { Badge } from '../../ui/badge.tsx';
 import { Button } from '../../ui/button.tsx';
 import { Card, CardContent, CardHeader, Eyebrow } from '../../ui/card.tsx';
 import { Ref } from '../../ui/copy.tsx';
+import { Declaration } from '../../ui/declaration.tsx';
 import { Field } from '../../ui/field.tsx';
 import { Logo } from '../../ui/logo.tsx';
 import { Page, PageHeader } from '../../ui/page.tsx';
@@ -593,11 +594,21 @@ export function Workspace({
       ) : null}
 
       {current === 'config' ? (
-        <ConfigSection
-          configKeys={view.configKeys}
-          {...(selected === undefined ? {} : { component: selected.name })}
-          {...(onSetConfig === undefined ? {} : { onSetConfig })}
-        />
+        <>
+          {/*
+            Above the variables, because it is the configuration that decides
+            what gets built at all — §5's scope and its `spindrift.yaml` — and
+            §10's keys only decide what the result runs with. Keyed by id, not
+            by name, for the reason `getAppWorkspace` resolves by id: two Apps
+            may wear one name.
+          */}
+          {view.appId === undefined ? null : <SourceSection app={view.appId} />}
+          <ConfigSection
+            configKeys={view.configKeys}
+            {...(selected === undefined ? {} : { component: selected.name })}
+            {...(onSetConfig === undefined ? {} : { onSetConfig })}
+          />
+        </>
       ) : null}
     </Page>
   );
@@ -2022,6 +2033,119 @@ export function SupplyDemand({
         </Button>
       </div>
     </div>
+  );
+}
+
+/**
+ * Where this App is built from (§5, §15) — the repository, the scope inside it,
+ * and the `spindrift.yaml` that governs the build.
+ *
+ * **It reads its own row.** `getAppSource` asks the repository host for one
+ * file, and the workspace re-reads itself every two seconds while a release is
+ * in flight; folding this into that read would spend a rate limit on an answer
+ * nobody asked for again. `null` cadence — once per visit to this tab, the same
+ * trade `Releases` makes for its rows.
+ *
+ * **A failed read takes nothing off the screen.** The card is rendered on what
+ * came back and nothing else: an App with no source (an uploaded archive) and
+ * a read still in flight both render nothing, and a repository host that would
+ * not answer renders the two facts Spindrift holds itself with the reason
+ * beside the third.
+ */
+function SourceSection({ app }: { app: string }) {
+  const read = useRead([['getAppSource', { app }]], null, [app]);
+  const source = read.type === 'success' ? read.value[0].source : null;
+  if (source === null) return null;
+
+  const { manifest } = source;
+  // The file at the commit that is governing, never at the branch tip: it is
+  // the revision `getAppSource` read, and a link to `main` would open a
+  // different document the day after somebody pushes.
+  const manifestUrl =
+    source.url === null || source.commit === null
+      ? null
+      : `${source.url}/blob/${source.commit}/${manifest.path}`;
+
+  return (
+    <Card>
+      <SectionHeader eyebrow="Where this App is built from" title="Source" />
+      <CardContent className="pt-0">
+        <Row
+          badge={<Badge tone="idle">repo</Badge>}
+          title={source.repo}
+          detail={
+            source.branch === null
+              ? 'no repository connected — §15 integration is off for this App'
+              : `${source.branch}${source.commit === null ? ', nothing adopted yet' : ` at ${source.commit.slice(0, 7)}`}`
+          }
+          trailing={
+            source.url === null ? undefined : (
+              <Button variant="outline" size="sm" asChild>
+                <a
+                  href={normaliseUrl(source.url)}
+                  target="_blank"
+                  rel="noreferrer noopener"
+                >
+                  Open
+                </a>
+              </Button>
+            )
+          }
+        />
+        <Row
+          badge={<Badge tone="idle">folder</Badge>}
+          title={
+            source.subpath === '.' ? '. (repository root)' : source.subpath
+          }
+          detail="the one directory this App is built from (§5)"
+        />
+        <Row
+          badge={
+            /*
+              Three words for three states, because two of them would make the
+              unread one a claim. A file that is there means this App is
+              declared; a scope without one means detection decides; a read that
+              could not happen means neither is known, and saying "detected"
+              there would be this screen guessing on somebody's behalf.
+            */
+            <Badge tone={manifest.state === 'present' ? 'accent' : 'idle'}>
+              {manifest.state === 'present'
+                ? 'declared'
+                : manifest.state === 'absent'
+                  ? 'detected'
+                  : 'unknown'}
+            </Badge>
+          }
+          title={manifest.path}
+          detail={
+            manifest.state === 'present'
+              ? 'on the default branch, so it wins over detection'
+              : manifest.state === 'absent'
+                ? 'not in this scope — detection decides how this builds'
+                : manifest.because
+          }
+          trailing={
+            manifest.state === 'present' && manifestUrl !== null ? (
+              <Button variant="outline" size="sm" asChild>
+                <a href={manifestUrl} target="_blank" rel="noreferrer noopener">
+                  Open
+                </a>
+              </Button>
+            ) : undefined
+          }
+        />
+        {manifest.state === 'present' ? (
+          <div className="pt-2">
+            <Declaration
+              title="What it says"
+              label={manifest.path}
+              text={manifest.text}
+              note="The adopted file itself, as Spindrift read it. Editing it is a pull request against the repository — nothing here writes to it."
+            />
+          </div>
+        ) : null}
+      </CardContent>
+    </Card>
   );
 }
 

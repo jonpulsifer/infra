@@ -35,6 +35,7 @@ import {
   resolveComponentPlacement,
   resolveComponentPlacementInput,
 } from './apps/resolve-placement.ts';
+import { getAppSource, getAppSourceInput } from './apps/source.ts';
 import { uploadArchive, uploadArchiveInput } from './apps/upload-archive.ts';
 import { getAppWorkspace, getAppWorkspaceInput } from './apps/workspace.ts';
 import { setAppZone, setAppZoneInput } from './apps/zone.ts';
@@ -183,6 +184,7 @@ export const commandRegistry = {
   setAppBuildRoute: { input: setAppBuildRouteInput, handler: setAppBuildRoute },
   setAppZone: { input: setAppZoneInput, handler: setAppZone },
   getAppWorkspace: { input: getAppWorkspaceInput, handler: getAppWorkspace },
+  getAppSource: { input: getAppSourceInput, handler: getAppSource },
   getDeployDetail: { input: getDeployDetailInput, handler: getDeployDetail },
   getBuildDetail: { input: getBuildDetailInput, handler: getBuildDetail },
   listBuilds: { input: listBuildsInput, handler: listBuilds },
