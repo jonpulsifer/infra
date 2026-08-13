@@ -238,6 +238,46 @@ rules:
       - get
       - list
 ---
+# The same two operators in `spindrift-apps`, read-and-remove only.
+#
+# A Datastore provisioned before `spindrift-datastores` existed carries that
+# older namespace in its own ref, and the adapter observes and destroys it
+# where its ref says it is rather than pretending it moved. Without this the
+# rows are unreadable *and* undestroyable — there is no path to clean one up
+# through the product, which is what makes the narrow grant worth having.
+#
+# No `create`, no `patch`: `provision` always resolves the namespace from the
+# Target's `datastoreNamespace`, so nothing new is ever written here. `services`
+# is the Valkey address confirmation; `events` is already cluster-wide on the
+# delivery role above. Delete this Role and its bindings once no `ref` names
+# `spindrift-apps`.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: spindrift-target-datastores-legacy
+  namespace: spindrift-apps
+rules:
+  - apiGroups:
+      - postgresql.cnpg.io
+    resources:
+      - clusters
+    verbs:
+      - delete
+      - get
+  - apiGroups:
+      - valkey.io
+    resources:
+      - valkeyclusters
+    verbs:
+      - delete
+      - get
+  - apiGroups:
+      - ""
+    resources:
+      - services
+    verbs:
+      - get
+---
 # `CHART_SOURCE`, for the repository form — a Target whose installation names
 # `charts.app` as a path rather than as an artifact reads the source object here
 # instead. Kept beside the artifact grant above because either kind can be the

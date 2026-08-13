@@ -53,6 +53,20 @@ subjects:
     kind: User
     name: federated:system:serviceaccount:spindrift:spindrift
 ---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: spindrift-target-datastores-legacy
+  namespace: spindrift-apps
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: spindrift-target-datastores-legacy
+subjects:
+  - apiGroup: rbac.authorization.k8s.io
+    kind: User
+    name: federated:system:serviceaccount:spindrift:spindrift
+---
 # The Argo flavour's delivery grant, which only this cluster can carry: the
 # `Application` is created beside Argo rather than beside the workloads it
 # renders, so the grant is in `argo` and not in the `spindrift-apps` Role the
