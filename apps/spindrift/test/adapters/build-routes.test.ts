@@ -193,7 +193,8 @@ function hostedRoute(
       name: 'hosted',
       host: new GitHubApp({
         baseUrl: host.baseUrl,
-        authorization: () => 'Bearer test-user-token',
+        authorization: () => 'Bearer test-installation-token',
+        appAuthorization: () => 'Bearer test-app-jwt',
         fetch: host.fetch,
       }),
       buildWorkflow: WORKFLOW_REF,

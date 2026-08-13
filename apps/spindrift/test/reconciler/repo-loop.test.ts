@@ -82,7 +82,8 @@ const SPINDRIFT_YAML = [
 function host(fake: FakeGitHub): GitHubApp {
   return new GitHubApp({
     baseUrl: fake.baseUrl,
-    authorization: () => 'Bearer test-user-token',
+    authorization: () => 'Bearer test-installation-token',
+    appAuthorization: () => 'Bearer test-app-jwt',
     fetch: fake.fetch,
   });
 }

@@ -62,7 +62,8 @@ async function context(fake: FakeGitHub): Promise<CommandContext> {
     .returning();
   const host = new GitHubApp({
     baseUrl: fake.baseUrl,
-    authorization: () => 'Bearer test-user-token',
+    authorization: () => 'Bearer test-installation-token',
+    appAuthorization: () => 'Bearer test-app-jwt',
     fetch: fake.fetch,
   });
   const adapters: AdapterRegistry = {

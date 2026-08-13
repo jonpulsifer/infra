@@ -395,6 +395,27 @@ spec:
           kind: vercel-team
           location:
             team: jonpulsifer
+        # The other edge platform, and the same bearer posture one vendor over:
+        # Cloudflare has no inbound OIDC either, so this boundary is reached
+        # with `SPINDRIFT_CLOUDFLARE_TOKEN` from `secret.sops.yaml`.
+        #
+        # **That token is scoped to Pages and nothing else.** It is not the
+        # `cloudflare-api-token` the network root drives DNS with: core reaches
+        # no zone with a Target credential, and
+        # `apps/spindrift/test/extraction/no-dns-credential.test.ts` is what
+        # keeps that true of the code. Handing this the DNS-capable one would
+        # leave that test passing and the posture gone.
+        #
+        # The account is the one every zone in `terraform/network/cloudflare/`
+        # already sits under (`account.tf`'s `fml_account_id`) — an id rather
+        # than a name because the API path is `/accounts/<id>/pages/projects`.
+        #
+        # No `terraformRoot`, no `reachableRegistries`: the same two absences
+        # the Vercel boundary above documents, for the same two reasons.
+        - name: fml
+          kind: cloudflare-account
+          location:
+            account: d7f641bb9f4b9de593f721ad06989dbe
       targets:
         - vessel: offsite
           # Every reach: this cluster has a load-balancer address on the lab net
@@ -566,6 +587,23 @@ spec:
           adapter: vercel
           connection:
             endpoint: https://api.vercel.com
+        # The second static edge, last on the list and so last in §16's admin
+        # rank: a website that names no Target still lands on Vercel, exactly
+        # where it landed before this Target existed.
+        #
+        # `embarrassing.ca` is already declared above as the zone an App pinned
+        # to one of these two takes a name in, so this adds a Target and no
+        # zone. The endpoint is the API root the adapter hangs
+        # `/accounts/<id>/pages/projects` off; the account is on the vessel,
+        # because it is a property of the boundary rather than of this surface.
+        #
+        # No production branch here, deliberately: a Pages project has one and
+        # the adapter reads it back off the project it ensures, so an operator
+        # who stated it here could only state it wrong.
+        - vessel: fml
+          adapter: cloudflare-pages
+          connection:
+            endpoint: https://api.cloudflare.com/client/v4
       # §10's one store of record, and the only one every Target here reaches.
       #
       # A Cloud Run revision resolves a pinned secret reference out of its own

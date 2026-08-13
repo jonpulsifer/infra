@@ -18,6 +18,7 @@ type Config struct {
 	WorkspaceDir string       `json:"workspaceDir"` // real storage, not tmpfs: it holds whole filesystem images
 	MetricsFile  string       `json:"metricsFile"`  // empty disables; a node-exporter textfile, not a listener
 	CacheURL     string       `json:"cacheUrl"`     // empty disables; announced to every skiff as bosun.cache on the cmdline
+	BuildkitURL  string       `json:"buildkitUrl"`  // empty disables; announced to every skiff as bosun.buildkit on the cmdline
 	PollInterval Duration     `json:"pollInterval"`
 	// DrainTimeout bounds how long a stop waits for busy skiffs to finish
 	// their jobs. Idle skiffs are scuttled immediately; what this buys is a

@@ -1071,7 +1071,7 @@ describe('the repository the boundaries are declared in', () => {
   });
 
   test('the rest of the block stays the row’s', async () => {
-    // The App id, its endpoints and the pinned workflow are configured through
+    // The host's endpoints and the pinned workflow are configured through
     // the settings screen; only the repository the roots live in is governed.
     await loadStoredManifest(database().db, {
       [MANIFEST_INLINE_VAR]: declaredAt('example/first'),
@@ -1081,14 +1081,14 @@ describe('the repository the boundaries are declared in', () => {
       ...(row!.manifest as AuthoredManifest),
       github: {
         ...(row!.manifest as AuthoredManifest).github,
-        clientId: 'Iv1.configured-here',
+        webBaseUrl: 'https://git.configured.example',
       },
     });
 
     const manifest = await loadStoredManifest(database().db, {
       [MANIFEST_INLINE_VAR]: declaredAt('example/first'),
     });
-    expect(manifest.github.clientId).toBe('Iv1.configured-here');
+    expect(manifest.github.webBaseUrl).toBe('https://git.configured.example');
   });
 });
 

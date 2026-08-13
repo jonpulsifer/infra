@@ -295,9 +295,10 @@ describe('the vessels a pre-declaration document is upgraded into', () => {
 
   test('is a no-op on a document that already declares them', () => {
     // `04` now upgrades too — it states `dns.zones` as the object naming one
-    // zone per reach. `09` is the shape with none of the gaps, so this is where
-    // "already current" moved.
-    const current = snapshot('09-dns-zone-list.yaml');
+    // zone per reach, and `09` still carries the Device Flow `github` pair.
+    // `10` is the shape with none of the gaps, so this is where "already
+    // current" moved.
+    const current = snapshot('10-github-app-identity.yaml');
     expect(upgradeManifestDocument(current)).toEqual(current);
   });
 });

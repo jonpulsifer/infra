@@ -112,8 +112,21 @@ export interface FakeGitHubOptions {
   defaultBranch?: string;
   /** The installation the App must present a token for. */
   installationId?: string;
+  /** The account that installation sits on, as `/app/installations` reports it. */
+  accountLogin?: string;
+  /**
+   * The clock installation-token expiry is measured from.
+   *
+   * Shared with the client under test on purpose: a token's lifetime is the
+   * one fact both sides have to agree about for the refresh-margin tests to
+   * mean anything.
+   */
+  now?: () => Date;
   actions?: FakeActionsOptions;
 }
+
+/** How long a minted installation token lives, as the real host defines it. */
+const TOKEN_LIFETIME_MS = 60 * 60 * 1000;
 
 /**
  * Object ids are a counter in hex, not a hash.
@@ -150,6 +163,7 @@ function acceptsJson(accept: string | null): boolean {
 export class FakeGitHub {
   readonly fullName: string;
   readonly installationId: string;
+  readonly accountLogin: string;
   readonly requests: RecordedRequest[] = [];
   readonly pulls: RecordedPullRequest[] = [];
   /** Every commit whose archive was downloaded — "fetch once" is checkable. */
@@ -177,6 +191,8 @@ export class FakeGitHub {
   private runNumber = 0;
   private listCalls = 0;
   private statusCalls = 0;
+  private tokenCounter = 0;
+  private readonly now: () => Date;
   private readonly runs: FakeRun[] = [];
   private readonly actions: Required<FakeActionsOptions>;
 
@@ -184,6 +200,8 @@ export class FakeGitHub {
     this.fullName = options.fullName ?? 'example/app';
     this.defaultBranch = options.defaultBranch ?? 'main';
     this.installationId = options.installationId ?? '4242';
+    this.accountLogin = options.accountLogin ?? 'example';
+    this.now = options.now ?? (() => new Date());
     this.actions = {
       discoveryDelay: options.actions?.discoveryDelay ?? 1,
       duration: options.actions?.duration ?? 1,
@@ -286,17 +304,42 @@ export class FakeGitHub {
       });
     }
 
+    // Minting an installation token is the one call that presents the App JWT
+    // rather than a token, so it is answered before the access check: an App
+    // that lost a repository can still mint — the loss shows on the reads.
+    const minting = url.pathname.match(
+      /^\/app\/installations\/([^/]+)\/access_tokens$/,
+    );
+    if (minting && request.method === 'POST') {
+      if (minting[1] !== this.installationId) return this.notFound();
+      this.tokenCounter += 1;
+      return this.json(
+        {
+          token: `installation-token-${this.tokenCounter}`,
+          expires_at: new Date(
+            this.now().getTime() + TOKEN_LIFETIME_MS,
+          ).toISOString(),
+        },
+        201,
+      );
+    }
+
     if (this.accessLost) return this.notFound();
 
-    if (url.pathname === '/user/installations' && request.method === 'GET') {
-      return this.json({
-        installations: [{ id: Number(this.installationId) }],
-      });
+    // The JWT-side enumeration answers a bare array, exactly as the real
+    // endpoint does — not the `{installations: []}` envelope the retired
+    // user-to-server endpoint wrapped it in.
+    if (url.pathname === '/app/installations' && request.method === 'GET') {
+      return this.json([
+        {
+          id: Number(this.installationId),
+          account: { login: this.accountLogin },
+        },
+      ]);
     }
 
     if (
-      url.pathname ===
-        `/user/installations/${this.installationId}/repositories` &&
+      url.pathname === '/installation/repositories' &&
       request.method === 'GET'
     ) {
       return this.json({
@@ -346,7 +389,10 @@ export class FakeGitHub {
     accept: string | null,
   ): Response | null {
     if (rest === '/installation' && method === 'GET') {
-      return this.json({ id: Number(this.installationId) });
+      return this.json({
+        id: Number(this.installationId),
+        account: { login: this.accountLogin },
+      });
     }
 
     const dispatch = rest.match(/^\/actions\/workflows\/([^/]+)\/dispatches$/);
@@ -628,6 +674,41 @@ export class FakeGitHub {
 
     return null;
   }
+}
+
+/**
+ * A fresh RSA keypair in the two shapes the tests need: the private half as a
+ * PEM (PKCS#8 by default; PKCS#1 is what GitHub's conversion endpoint actually
+ * hands out, and `pkcs1` asks for that), the public half as a WebCrypto key a
+ * test can verify a JWT signature against.
+ */
+export async function testAppKey(
+  format: 'pkcs8' | 'pkcs1' = 'pkcs8',
+): Promise<{ pem: string; publicKey: CryptoKey }> {
+  const pair = await crypto.subtle.generateKey(
+    {
+      name: 'RSASSA-PKCS1-v1_5',
+      modulusLength: 2048,
+      publicExponent: new Uint8Array([1, 0, 1]),
+      hash: 'SHA-256',
+    },
+    true,
+    ['sign', 'verify'],
+  );
+  const pkcs8 = new Uint8Array(
+    await crypto.subtle.exportKey('pkcs8', pair.privateKey),
+  );
+  const base64 = btoa(String.fromCharCode(...pkcs8));
+  const lines = base64.match(/.{1,64}/g) ?? [];
+  const pkcs8Pem = `-----BEGIN PRIVATE KEY-----\n${lines.join('\n')}\n-----END PRIVATE KEY-----\n`;
+  if (format === 'pkcs8') return { pem: pkcs8Pem, publicKey: pair.publicKey };
+  const { createPrivateKey } = await import('node:crypto');
+  return {
+    pem: createPrivateKey(pkcs8Pem)
+      .export({ type: 'pkcs1', format: 'pem' })
+      .toString(),
+    publicKey: pair.publicKey,
+  };
 }
 
 /**

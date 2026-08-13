@@ -26,7 +26,6 @@ on:
         options:
           - both
           - ubuntu-latest
-          - skiff-ubuntu-xl
           - skiff-ubuntu-bench
         default: both
 
@@ -41,8 +40,11 @@ jobs:
     steps:
       - id: set
         run: |
+          # skiff-ubuntu-bench is 4 vCPU / 16 GiB with a 20 G workspace -- a cold
+          # docker build does not fit in the 6 G the shared skiff-ubuntu slots
+          # carry, which is what this label is sized for.
           if [ "${{ inputs.target }}" = "both" ]; then
-            echo 'runners=["ubuntu-latest", "skiff-ubuntu-xl"]' >> "$GITHUB_OUTPUT"
+            echo 'runners=["ubuntu-latest", "skiff-ubuntu-bench"]' >> "$GITHUB_OUTPUT"
           else
             echo 'runners=["${{ inputs.target }}"]' >> "$GITHUB_OUTPUT"
           fi

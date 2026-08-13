@@ -49,7 +49,7 @@ function noWebhook(db: Database): WebhookRouteDeps {
   return {
     db,
     clock: { now: () => new Date('2026-01-01T00:00:00Z') },
-    secret: null,
+    secret: async () => null,
     current: () => {
       throw new Error('a readiness test read installation state');
     },
@@ -72,6 +72,14 @@ async function readyz(db: Database): Promise<Response> {
     authDeps(db),
     noWebhook(db),
     noBosun(db),
+    {
+      authenticate: () => {
+        throw new Error('a readiness test authenticated a request');
+      },
+      auth: () => {
+        throw new Error('a readiness test reached the GitHub App identity');
+      },
+    },
   );
   const handler = routes[READY_PATH] as () => Promise<Response>;
   return handler();

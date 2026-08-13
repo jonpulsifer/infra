@@ -744,7 +744,8 @@ func TestPersistingClassGivesEachLiveSkiffItsOwnSlotAndHandsItBack(t *testing.T)
 	class.Persist = true
 	class.Warm = 2
 	p.cfg.Classes["skiff-test"] = class
-	ctx := context.Background()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 
 	p.fill(ctx)
 
@@ -773,6 +774,17 @@ func TestPersistingClassGivesEachLiveSkiffItsOwnSlotAndHandsItBack(t *testing.T)
 
 	// Retire releases the slot rather than deleting the image: what the last
 	// job left on it is the cache the next one is here for.
+	//
+	// Cancelled first, and it is load-bearing. Retiring kills the guest's
+	// process, which wakes that skiff's own awaitExit goroutine -- and
+	// awaitExit replaces a halted skiff 1:1, so its replacement claims the
+	// slot this retire just released. That is the production behaviour and it
+	// is correct; it also races the claim below for the same slot, which made
+	// this test fail roughly one run in two hundred. awaitExit already skips
+	// the replacement once ctx is done, so cancelling is what lets the claim
+	// observe the released slot rather than the replacement's.
+	cancel()
+
 	victim := skiffs[0]
 	p.retire(ctx, victim, testLogger())
 	if _, err := os.Stat(victim.paths.workspace); err != nil {

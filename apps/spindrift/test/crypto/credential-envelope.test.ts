@@ -43,17 +43,15 @@ describe('credential keyring', () => {
     )!;
     const sealed = await ring.seal(
       '{"accessToken":"not-printed"}',
-      'spindrift-github-oauth-credential',
+      'spindrift-github-app-key',
     );
 
-    expect(
-      await ring.open(sealed, 'spindrift-github-oauth-credential'),
-    ).toEqual({
+    expect(await ring.open(sealed, 'spindrift-github-app-key')).toEqual({
       plaintext: '{"accessToken":"not-printed"}',
       needsRotation: false,
     });
     await expect(
-      ring.open(sealed, 'spindrift-github-device-code'),
+      ring.open(sealed, 'spindrift-github-webhook-secret'),
     ).rejects.toBeInstanceOf(CredentialDecryptError);
   });
 
@@ -62,7 +60,7 @@ describe('credential keyring', () => {
       env('current', { current: key(2) }),
     )!;
     const sealed = JSON.parse(
-      await ring.seal('credential', 'spindrift-github-oauth-credential'),
+      await ring.seal('credential', 'spindrift-github-app-key'),
     ) as { ciphertext: string };
     const middle = Math.floor(sealed.ciphertext.length / 2);
     sealed.ciphertext = `${sealed.ciphertext.slice(0, middle)}${
@@ -70,33 +68,26 @@ describe('credential keyring', () => {
     }${sealed.ciphertext.slice(middle + 1)}`;
 
     await expect(
-      ring.open(JSON.stringify(sealed), 'spindrift-github-oauth-credential'),
+      ring.open(JSON.stringify(sealed), 'spindrift-github-app-key'),
     ).rejects.toBeInstanceOf(CredentialDecryptError);
   });
 
   test('opens a legacy envelope and requests lazy rotation', async () => {
     const old = CredentialKeyring.fromEnvironment(env('old', { old: key(3) }))!;
-    const sealed = await old.seal(
-      'credential',
-      'spindrift-github-oauth-credential',
-    );
+    const sealed = await old.seal('credential', 'spindrift-github-app-key');
     const rotated = CredentialKeyring.fromEnvironment(
       env('new', { new: key(4), old: key(3) }),
     )!;
 
-    expect(
-      await rotated.open(sealed, 'spindrift-github-oauth-credential'),
-    ).toEqual({
+    expect(await rotated.open(sealed, 'spindrift-github-app-key')).toEqual({
       plaintext: 'credential',
       needsRotation: true,
     });
     const rewritten = await rotated.seal(
       'credential',
-      'spindrift-github-oauth-credential',
+      'spindrift-github-app-key',
     );
-    expect(
-      await rotated.open(rewritten, 'spindrift-github-oauth-credential'),
-    ).toEqual({
+    expect(await rotated.open(rewritten, 'spindrift-github-app-key')).toEqual({
       plaintext: 'credential',
       needsRotation: false,
     });

@@ -25,7 +25,8 @@ async function makeContext(
       ? null
       : new GitHubApp({
           baseUrl: fakeGithub.baseUrl,
-          authorization: () => 'Bearer test-user-token',
+          authorization: () => 'Bearer test-installation-token',
+          appAuthorization: () => 'Bearer test-app-jwt',
           fetch: fakeGithub.fetch,
         });
 

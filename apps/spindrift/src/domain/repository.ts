@@ -39,55 +39,50 @@ export interface AvailableRepository {
   readonly installationId: string;
 }
 
-/** The browser-safe state of the installation's repository authorization. */
+/**
+ * The browser-safe state of the installation's repository authorization.
+ *
+ * `authorized` means an App identity exists — the manifest-flow conversion
+ * has written the singleton row — and names the App rather than a user,
+ * because installation tokens act as the App's bot identity.
+ */
 export type RepositoryAuthorizationStatus =
   | { readonly state: 'unauthorized' }
   | {
       readonly state: 'authorized';
-      readonly login: string;
-      readonly githubUserId: string;
+      readonly slug: string;
+      readonly appId: string;
     };
 
-/** The durable repository connector needs the operator to authorize again. */
+/** The durable repository connector has no App identity to mint from. */
 export class RepositoryAuthorizationRequiredError extends Error {
   override readonly name = 'RepositoryAuthorizationRequiredError';
 }
 
-/** What beginning a user-mediated repository authorization returns. */
-export interface RepositoryAuthorizationChallenge {
-  readonly attemptId: string;
-  readonly userCode: string;
-  readonly verificationUri: string;
-  readonly expiresAt: Date;
-  readonly intervalSeconds: number;
+/**
+ * The manifest-flow form that creates the App identity (§A of the migration
+ * design): one POST, straight from the operator's browser to the repository
+ * host, carrying the manifest document and returning to the setup route with
+ * a conversion code.
+ */
+export interface RepositoryAuthorizationSetup {
+  /** Where the form POSTs — the host's create-from-manifest page, `state` included. */
+  readonly action: string;
+  /** The manifest document, as the `manifest` form field's value. */
+  readonly manifest: string;
 }
 
-/** What polling that challenge may conclude. */
-export type RepositoryAuthorizationPoll =
-  | {
-      readonly state: 'pending';
-      readonly retryAfterSeconds: number;
-      readonly expiresAt: Date;
-    }
-  | {
-      readonly state: 'authorized';
-      readonly login: string;
-    }
-  | {
-      readonly state: 'expired' | 'denied';
-    };
-
 /**
- * The optional user-authorization half of a repository integration.
+ * The optional identity half of a repository integration.
  *
  * Kept beside, not inside, {@link RepositoryHost}: reconciliation only needs
- * repository operations and should not gain browser ceremony methods merely
+ * repository operations and should not gain identity ceremony methods merely
  * because the concrete GitHub adapter implements both.
  */
 export interface RepositoryAuthorization {
   status(): Promise<RepositoryAuthorizationStatus>;
-  begin(userId: string): Promise<RepositoryAuthorizationChallenge>;
-  poll(userId: string, attemptId: string): Promise<RepositoryAuthorizationPoll>;
+  /** The create-the-App form, bound to the acting operator for CSRF. */
+  setup(userId: string): Promise<RepositoryAuthorizationSetup>;
   repositories(): Promise<readonly AvailableRepository[]>;
   installationFor(fullName: string): Promise<RepositoryRef>;
 }

@@ -1,5 +1,5 @@
 /**
- * The first four questions, for an installation nobody has configured (§20).
+ * The first three questions, for an installation nobody has configured (§20).
  *
  * `loadStoredManifest` seeds an unseeded row with a placeholder document, and
  * every value in it is a stand-in — the registry is somebody else's namespace,
@@ -104,23 +104,19 @@ export type OnboardingAsk = {
 );
 
 /**
- * The four questions, in the order they are asked.
+ * The three questions, in the order they are asked.
  *
  * The order is not cosmetic. The name comes first because it is the only answer
  * that needs nothing — no credential, no cloud, no prior step — so the first
- * thing an operator does is succeed. GitHub is second because the artifacts
- * step below it is about publishing what GitHub's repositories produce, and
- * confirming the client id here is what makes the authorization on the far side
- * of this screen able to run at all. Discovery is third because it is the only
+ * thing an operator does is succeed. Discovery is second because it is the only
  * step that reads the world, and a step that can be slow or refuse belongs after
  * the ones that cannot. The registry is last because it is the answer most
  * likely to be a considered choice rather than a confirmation.
  *
- * `github.clientId` is the value, not the authorization ceremony:
- * `beginRepositoryAuthorization` reads the client id off the *stored* manifest,
- * so a device flow started here would run against the placeholder's. The
- * ceremony is offered when the document has landed — see {@link OnboardingDone}
- * — which is also where it already exists, tested, on the connections screen.
+ * GitHub is deliberately not a question. The App identity is not authored —
+ * it is created through GitHub's manifest flow from the Repositories screen,
+ * against the *stored* manifest — so the ceremony is offered when the
+ * document has landed; see {@link OnboardingDone}.
  */
 export const ONBOARDING_ASKS: readonly OnboardingAsk[] = [
   {
@@ -129,13 +125,6 @@ export const ONBOARDING_ASKS: readonly OnboardingAsk[] = [
     title: 'Name this installation',
     blurb:
       'A label for this control plane. It appears in the UI and in logs and carries no behaviour, so it is yours to pick.',
-  },
-  {
-    kind: 'field',
-    at: ['github', 'clientId'],
-    title: 'Connect GitHub',
-    blurb:
-      'The GitHub App this installation speaks as. Nothing is authorized yet — that ceremony needs this value stored first, and it is offered as soon as it is.',
   },
   {
     kind: 'discovery',
@@ -180,7 +169,7 @@ export function stepAsking(path: string): number {
  *
  * The machinery for this has existed since the screen did and was consulted
  * exactly once, after the final write — so an empty installation name walked
- * through all four questions, and the commit press threw the operator back to
+ * through all three questions, and the commit press threw the operator back to
  * step one reading a sentence of dotted schema paths. The same map, filtered by
  * {@link stepAsking}, is a gate on `Continue`: an answer is checked where it is
  * given, by the schema that will refuse it, and the reason is on screen beside
@@ -270,14 +259,14 @@ const HELD = 'spindrift.setup';
  *
  * `sessionStorage` rather than `localStorage`, and it is the one-write design
  * that decides which: nothing is stored server-side until the last press, so
- * four answers live only here — but they are answers about *this* tab's visit
+ * three answers live only here — but they are answers about *this* tab's visit
  * to *this* installation, and a document surviving until next week would be a
  * document proposed against an installation somebody else has since configured.
  *
  * Every failure answers "start fresh". Storage a browser refuses, a body
  * another version of this screen wrote, a private window that throws on read —
  * none of them are worth a screen of their own, and all of them are survivable
- * by asking the four questions again.
+ * by asking the three questions again.
  */
 function restored(): unknown {
   try {
@@ -660,10 +649,9 @@ function AskedField({
 /**
  * Configuration landed, and the one thing that could not happen until it did.
  *
- * GitHub's device flow reads `github.clientId` off the stored manifest, so this
- * is the first moment the authorization an operator was promised on step two
- * can actually run — and it runs on the connections screen, which already owns
- * that ceremony and its polling.
+ * The manifest flow that creates the GitHub App renders its redirect URLs off
+ * the stored manifest, so this is the first moment that creation can actually
+ * run — and it runs on the connections screen, which owns that ceremony.
  */
 function OnboardingDone({
   targets,
@@ -693,7 +681,7 @@ function OnboardingDone({
         </p>
         <div className="flex flex-wrap items-center gap-3">
           <Button type="button" onClick={() => onDone('/settings/connections')}>
-            Authorize GitHub
+            Connect GitHub
           </Button>
           <Button type="button" variant="outline" onClick={() => onDone(null)}>
             Open this installation
@@ -721,7 +709,7 @@ function OnboardingShell({
   rail,
   children,
 }: {
-  /** The four questions, when there are four questions to show. */
+  /** The three questions, when there are three questions to show. */
   readonly rail?: ReactNode;
   readonly children: ReactNode;
 }) {
@@ -732,7 +720,7 @@ function OnboardingShell({
           SPINDRIFT
         </span>
         <p className="text-xs text-muted-foreground">
-          Nothing here is configured yet. Four answers and it is.
+          Nothing here is configured yet. Three answers and it is.
         </p>
       </div>
       {rail === undefined ? (

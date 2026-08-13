@@ -32,11 +32,15 @@ import {
   diffManifestPaths,
   loadStoredManifest,
 } from '../config/manifest-store.ts';
+import { CredentialKeyring } from '../crypto/credential-envelope.ts';
 import { createDb } from '../db/client.ts';
+import {
+  GitHubAppAuth,
+  githubAppWebhookSecret,
+} from '../integrations/github/app-auth.ts';
 import { BOSUN_SECRET_VAR } from './bosun-route.ts';
 import { type ClientRoute, webRoutes } from './routes.ts';
 import { type StreamSocketData, streamWebSocket } from './streams.ts';
-import { WEBHOOK_SECRET_VAR } from './webhook-route.ts';
 
 /**
  * Where the enrolment token arrives.
@@ -222,6 +226,14 @@ export async function start(
     gateway: manifest.auth.gateway,
   };
 
+  /**
+   * The keyring that opens the sealed `github_app` row. Resolved once — it is
+   * an installation-Secret value, not a row — but everything opened *with* it
+   * is read per delivery / per request, because the row itself is written
+   * mid-flight by the setup route.
+   */
+  const keyring = CredentialKeyring.fromEnvironment(Bun.env);
+
   const rawRoutes = webRoutes(
     client,
     {
@@ -243,7 +255,7 @@ export async function start(
     {
       db,
       clock: systemClock,
-      secret: Bun.env[WEBHOOK_SECRET_VAR]?.trim() || null,
+      secret: () => githubAppWebhookSecret(db, keyring),
       // Same accessor `context` above reads through: current as of this
       // request, rebuilt only when `configureInstallation` actually changed
       // something.
@@ -253,6 +265,24 @@ export async function start(
       db,
       clock: systemClock,
       secret: Bun.env[BOSUN_SECRET_VAR]?.trim() || null,
+    },
+    {
+      authenticate: (request) => authenticateRequest(request, auth),
+      auth: async () => {
+        const installation = await installationNow();
+        return new GitHubAppAuth({
+          db,
+          clock: systemClock,
+          keyring,
+          env: Bun.env,
+          apiBaseUrl: installation.manifest.github.apiBaseUrl,
+          webBaseUrl: installation.manifest.github.webBaseUrl,
+          controlPlaneHostname: installation.manifest.controlPlane.hostname,
+          installationName: installation.manifest.installation.name,
+          appSlug: installation.manifest.github.appSlug ?? null,
+          webhookUrl: installation.manifest.github.webhookUrl ?? null,
+        });
+      },
     },
   );
 

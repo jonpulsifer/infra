@@ -86,6 +86,11 @@
     artifact = "googleComputeImage";
   };
 
+  tender = {
+    tags = [ "gcp" ];
+    artifact = "googleComputeImage";
+  };
+
   # ── images ─────────────────────────────────────────────────────────────────
   # rackpi5 is the image-only source for spore's native-boot publisher. Forge's
   # EEPROM keeps this signed HTTP/RAM artifact as its fallback path, so the full

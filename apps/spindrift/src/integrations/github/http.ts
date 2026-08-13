@@ -37,11 +37,16 @@ export interface GitHubEndpoint {
   readonly baseUrl: string;
   readonly authorization: AuthorizationProvider;
   /**
-   * User OAuth can distinguish a rejected bearer from lost repository access.
-   * App-installation authentication omits this and keeps the ordinary
-   * ACCESS_LOST classification.
+   * A cached installation token can be rejected without repository access
+   * being lost — the mint is an hour-lived value and the far side may
+   * invalidate it early. Answering `'retry'` drops whatever the provider
+   * cached and re-sends the request exactly once with a fresh authorization;
+   * a second `401` — and any `401` where this hook is absent — keeps the
+   * ordinary `ACCESS_LOST` classification. Answering an `Error` throws it.
    */
-  readonly onUnauthorized?: (authorization: string) => Error | Promise<Error>;
+  readonly onUnauthorized?: (
+    authorization: string,
+  ) => 'retry' | Error | Promise<'retry' | Error>;
   /** Injected so a test can stand a fake far side behind the real client. */
   readonly fetch?: Fetcher;
 }
@@ -150,39 +155,50 @@ export class GitHubHttp {
   /** Send one request. `null` when the status was tolerated by the caller. */
   async send(options: RequestOptions): Promise<Response | null> {
     const url = `${this.endpoint.baseUrl}${options.path}`;
-    const authorization = await this.endpoint.authorization();
-    const headers: Record<string, string> = {
-      Accept: options.accept ?? 'application/vnd.github+json',
-      Authorization: authorization,
-      // Pinning the API version is what keeps a far-side default from changing
-      // the shape of a response this client parses.
-      'X-GitHub-Api-Version': API_VERSION,
-    };
-    if (options.body !== undefined) {
-      headers['Content-Type'] = 'application/json';
+    // At most two attempts, and only when `onUnauthorized` says the first
+    // `401` was a stale mint rather than lost access. The second attempt's
+    // `401` never consults the hook again, so the loop is bounded by shape.
+    for (let attempt = 0; ; attempt += 1) {
+      const authorization = await this.endpoint.authorization();
+      const headers: Record<string, string> = {
+        Accept: options.accept ?? 'application/vnd.github+json',
+        Authorization: authorization,
+        // Pinning the API version is what keeps a far-side default from
+        // changing the shape of a response this client parses.
+        'X-GitHub-Api-Version': API_VERSION,
+      };
+      if (options.body !== undefined) {
+        headers['Content-Type'] = 'application/json';
+      }
+
+      const request = new Request(url, {
+        method: options.method,
+        headers,
+        body:
+          options.body === undefined ? undefined : JSON.stringify(options.body),
+      });
+
+      const send = this.endpoint.fetch ?? ((input: Request) => fetch(input));
+      const response = await send(request);
+
+      if (response.ok) return response;
+      if (options.tolerate?.includes(response.status)) return null;
+      if (
+        response.status === 401 &&
+        this.endpoint.onUnauthorized !== undefined &&
+        attempt === 0
+      ) {
+        const outcome = await this.endpoint.onUnauthorized(authorization);
+        if (outcome === 'retry') continue;
+        throw outcome;
+      }
+      throw new GitHubAccessError(
+        classify(response),
+        options.method,
+        url,
+        response.status,
+        await response.text(),
+      );
     }
-
-    const request = new Request(url, {
-      method: options.method,
-      headers,
-      body:
-        options.body === undefined ? undefined : JSON.stringify(options.body),
-    });
-
-    const send = this.endpoint.fetch ?? ((input: Request) => fetch(input));
-    const response = await send(request);
-
-    if (response.ok) return response;
-    if (options.tolerate?.includes(response.status)) return null;
-    if (response.status === 401 && this.endpoint.onUnauthorized !== undefined) {
-      throw await this.endpoint.onUnauthorized(authorization);
-    }
-    throw new GitHubAccessError(
-      classify(response),
-      options.method,
-      url,
-      response.status,
-      await response.text(),
-    );
   }
 }

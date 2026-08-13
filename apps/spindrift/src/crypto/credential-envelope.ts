@@ -13,8 +13,12 @@ import { base64urlDecode, base64urlEncode } from '../auth/bytes.ts';
 export const CREDENTIAL_KEYRING_VAR = 'SPINDRIFT_CREDENTIAL_KEYRING';
 
 export type CredentialPurpose =
-  | 'spindrift-github-device-code'
-  | 'spindrift-github-oauth-credential'
+  /** The GitHub App's private key — see `integrations/github/app-auth.ts`. */
+  | 'spindrift-github-app-key'
+  /** The App-level webhook secret from the same conversion response. */
+  | 'spindrift-github-webhook-secret'
+  /** The manifest-flow CSRF state — sealed rather than stored, see the setup route. */
+  | 'spindrift-github-setup-state'
   /** A registry push credential — see `storage/registry-credentials.ts`. */
   | 'spindrift-registry-credential';
 

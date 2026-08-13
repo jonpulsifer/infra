@@ -127,8 +127,7 @@ export const DEFAULT_PLACEHOLDER_MANIFEST: AuthoredManifest = {
       'gcpkms://projects/spindrift-artifacts/locations/us-central1/keyRings/keys/cryptoKeys/signer',
   },
   github: {
-    clientId: 'Iv1.918d699f36ee7afc',
-    oauthBaseUrl: 'https://github.com',
+    webBaseUrl: 'https://github.com',
     apiBaseUrl: 'https://api.github.com',
     /**
      * Null, never a placeholder ref. `connectRepository` writes this value
@@ -221,11 +220,11 @@ export const DEFAULT_PLACEHOLDER_MANIFEST: AuthoredManifest = {
  * copy of a fact the row already carries whole, and it would go stale the first
  * time somebody edited the row by hand or restored a database.
  *
- * **The four values below and not the whole document**, which is the difference
+ * **The three values below and not the whole document**, which is the difference
  * between a predicate with a reachable `true` and one without. The manifest is
  * three kinds of value: deployment facts the chart already knows, cloud facts
  * discovery can ask for, and the genuine choices — what this installation is
- * called, whose GitHub App it speaks as, where its artifacts are published, and
+ * called, where its artifacts are published, and
  * which store it delivers config through. Comparing the *whole* document made
  * `true` reachable for exactly one document, the placeholder verbatim, and that
  * document names `spindrift.example.com` as its control plane. `serve.ts` binds
@@ -235,13 +234,13 @@ export const DEFAULT_PLACEHOLDER_MANIFEST: AuthoredManifest = {
  * open is a wizard nobody can be shown.
  *
  * **What that actually makes reachable, and it is now the ordinary case.** A
- * declaration carrying a real `controlPlane.hostname` with these four left at
+ * declaration carrying a real `controlPlane.hostname` with these three left at
  * their stand-ins answers `true` and *can* enrol somebody, so the reachable set
  * is no longer empty. It is not a document anybody writes by accident: nothing
  * in `installationManifestSchema` is optional, so an operator cannot **leave**
  * the genuine choices — every key must be authored — and the values one would
- * have to type to stay unconfigured are `installation: default`, this
- * repository's own production GitHub App id, somebody else's GHCR namespace and
+ * have to type to stay unconfigured are `installation: default`,
+ * somebody else's GHCR namespace and
  * `onepassword`. What makes the wizard ordinarily reachable is the chart seeding
  * the deployment facts it already holds, `controlPlane.hostname` above all, so
  * that the *placeholder* — what an installation with no declaration at all is
@@ -255,20 +254,19 @@ export const DEFAULT_PLACEHOLDER_MANIFEST: AuthoredManifest = {
  * neither a declaration nor a `hostname` — in-cluster-only, nothing to bind a
  * relying party to — still cannot.
  *
- * **All four, not any**, and a false positive here replaces the whole product
- * with a wizard, so the direction matters. Two of the four are legitimately the
- * stand-in on a configured installation — this repo's own deployment speaks as
- * the same GitHub App the placeholder names, and `onepassword` is one of two
+ * **All three, not any**, and a false positive here replaces the whole product
+ * with a wizard, so the direction matters. One of the three is legitimately the
+ * stand-in on a configured installation — `onepassword` is one of two
  * adapters — so "any is a stand-in" would answer unconfigured for a live
  * installation. `test/config/installation-configured.test.ts` pins the live
  * document against this.
  *
- * **A mounted declaration that answers all four therefore configures an
+ * **A mounted declaration that answers all three therefore configures an
  * installation**, which is right: an operator who chose them has configured this
  * installation by definition, and offering them onboarding would be offering to
  * redo work they already did.
  *
- * The named cost: an operator who confirms all four unchanged is still
+ * The named cost: an operator who confirms all three unchanged is still
  * unconfigured, and will be shown onboarding again on the next load. That is
  * honest — they chose nothing — but it does mean "configured" is a record of a
  * document, not of a ceremony.
@@ -293,7 +291,7 @@ export const DEFAULT_PLACEHOLDER_MANIFEST: AuthoredManifest = {
  * chart mounts it at all — see `files/default-manifest.yaml` — so the document
  * has to stay mounted and stop governing, rather than not be mounted.
  *
- * The same four keys as {@link isUnconfiguredInstallation}, and deliberately
+ * The same three keys as {@link isUnconfiguredInstallation}, and deliberately
  * the same function: "this document is the stand-in" is one fact, and a second
  * spelling of it is a second thing to keep in step with the chart's copy.
  */
@@ -308,9 +306,12 @@ export function isUnconfiguredInstallation(
   manifest: AuthoredManifest,
 ): boolean {
   const stand = DEFAULT_PLACEHOLDER_MANIFEST;
+  // Three genuine choices, not four: the GitHub App identity used to be one of
+  // them (`github.clientId`), but it now lives in the `github_app` row, written
+  // by the manifest-flow conversion rather than authored here — so the manifest
+  // carries no key that could answer it.
   return (
     manifest.installation.name === stand.installation.name &&
-    manifest.github.clientId === stand.github.clientId &&
     manifest.secretStore.adapter === stand.secretStore.adapter &&
     // The one that is a list. A bare string is the same document as a
     // one-element list by the time it is parsed (`manifest.schema.ts`), so both

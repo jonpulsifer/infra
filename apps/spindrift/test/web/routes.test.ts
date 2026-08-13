@@ -21,6 +21,7 @@ import type { Database } from '../../src/db/client.ts';
 import { BOSUN_PATHS, type BosunRouteDeps } from '../../src/web/bosun-route.ts';
 import { BundleMissingError, bundleRoutes } from '../../src/web/bundle.ts';
 import { pathFor } from '../../src/web/dispatch.ts';
+import { GITHUB_SETUP_PATH } from '../../src/web/github-setup-route.ts';
 import { HEALTH_PATH, READY_PATH, webRoutes } from '../../src/web/routes.ts';
 import { STREAM_PATHS } from '../../src/web/streams.ts';
 import { UPLOAD_PATH } from '../../src/web/upload.ts';
@@ -85,7 +86,7 @@ const noWebhook: WebhookRouteDeps = {
       throw new Error('a route-table test read the clock');
     },
   },
-  secret: null,
+  secret: async () => null,
   current: () => {
     throw new Error('a route-table test read installation state');
   },
@@ -116,7 +117,24 @@ const noBosun: BosunRouteDeps = {
 /** A stand-in for the client, so this file never depends on a build having run. */
 const CLIENT = { '/': new Response('the client document') };
 
-const served = webRoutes(CLIENT, noSession, noAuth, noWebhook, noBosun);
+/** Inert like the rest: the setup route's deps are reached only by a request. */
+const noGitHubSetup = {
+  authenticate: () => {
+    throw new Error('a route-table test authenticated a request');
+  },
+  auth: () => {
+    throw new Error('a route-table test reached the GitHub App identity');
+  },
+};
+
+const served = webRoutes(
+  CLIENT,
+  noSession,
+  noAuth,
+  noWebhook,
+  noBosun,
+  noGitHubSetup,
+);
 
 const AUTH_PATHS = AUTH_ACTS.map(authPathFor);
 
@@ -133,6 +151,7 @@ describe('what the web process serves', () => {
         UPLOAD_PATH,
         WEBHOOK_PATH,
         ...BOSUN_PATHS,
+        GITHUB_SETUP_PATH,
       ].sort(),
     );
   });
@@ -156,6 +175,7 @@ describe('what the web process serves', () => {
         UPLOAD_PATH,
         WEBHOOK_PATH,
         ...BOSUN_PATHS,
+        GITHUB_SETUP_PATH,
       ].sort(),
     );
   });

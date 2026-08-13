@@ -37,8 +37,7 @@ supplyChain:
   verifier: ghcr.io/spindrift/spindrift-verifier
   signer: gcpkms://projects/spindrift-artifacts/locations/us-central1/keyRings/keys/cryptoKeys/signer
 github:
-  clientId: Iv1.918d699f36ee7afc
-  oauthBaseUrl: https://github.com
+  webBaseUrl: https://github.com
   apiBaseUrl: https://api.github.com
   # Null, never a placeholder ref: this value is written into a caller
   # workflow inside connected repositories, so a stand-in owner/repo@sha would

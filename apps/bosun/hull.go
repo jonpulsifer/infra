@@ -226,7 +226,15 @@ func resolvePaths(runtimeDir, logDir, id string, devices []hullDevice) (skiffPat
 // so a hull's disks are declared raw because the hull contract says a disk is a
 // raw file the hull ships. A hull wanting qcow2 wants a manifest field, and a
 // failing test to go with it.
-func chArgs(h *hull, class Class, id string, p skiffPaths, cacheURL string, build bool) []string {
+// hostServices are the host-local endpoints a skiff may be told about on its
+// cmdline. A zero value means this host runs none of them and the guest sees
+// no token at all, which is what makes them optional to the hull.
+type hostServices struct {
+	cacheURL    string
+	buildkitURL string
+}
+
+func chArgs(h *hull, class Class, id string, p skiffPaths, svc hostServices, build bool) []string {
 	args := []string{
 		"--kernel", filepath.Join(h.dir, h.manifest.Kernel),
 		"--initramfs", filepath.Join(h.dir, h.manifest.Initrd),
@@ -254,10 +262,13 @@ func chArgs(h *hull, class Class, id string, p skiffPaths, cacheURL string, buil
 		args = append(args, "--disk", fmt.Sprintf("path=%s,readonly=off,image_type=raw", p.workspace))
 		cmdline += " bosun.workspace=" + guestDiskName(disks)
 	}
-	// A location an admin connected, not machinery bosun owns: the hull
-	// decides whether and how to consume it, like every other cmdline fact.
-	if cacheURL != "" {
-		cmdline += " bosun.cache=" + cacheURL
+	// Locations an admin connected, not machinery bosun owns: the hull decides
+	// whether and how to consume them, like every other cmdline fact.
+	if svc.cacheURL != "" {
+		cmdline += " bosun.cache=" + svc.cacheURL
+	}
+	if svc.buildkitURL != "" {
+		cmdline += " bosun.buildkit=" + svc.buildkitURL
 	}
 	if build {
 		cmdline += " bosun.mode=build"
