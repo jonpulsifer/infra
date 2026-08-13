@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -997,6 +998,137 @@ func TestBuildSkiffIsReapedByMaxLifetime(t *testing.T) {
 
 	if r := s.reason(); r != exitLifetime {
 		t.Fatalf("want exitLifetime, got %q", r)
+	}
+}
+
+// fakeClock drives the pool's now seam. Guarded because a skiff's own
+// awaitExit goroutine reads it while the test advances it.
+type fakeClock struct {
+	mu sync.Mutex
+	t  time.Time
+}
+
+func (c *fakeClock) now() time.Time {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.t
+}
+
+func (c *fakeClock) advance(d time.Duration) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.t = c.t.Add(d)
+}
+
+// TestSkiffVerdict is the reaper at the constants the daemon ships with --
+// jitExpiry and a class maxLifetime of an hour, wedgeThreshold of 3 -- rather
+// than at the millisecond budgets the pool-level tests have to use to stay
+// fast. Each case feeds the skiff its GitHub readings through observe, the
+// way pollSkiff does, and then asks for the verdict some time later.
+func TestSkiffVerdict(t *testing.T) {
+	const maxLifetime = time.Hour
+	minted := time.Date(2026, 8, 13, 12, 0, 0, 0, time.UTC)
+
+	type reading struct {
+		status string
+		busy   bool
+	}
+	offline := func(n int, busy bool) []reading {
+		out := make([]reading, 0, n)
+		for i := 0; i < n; i++ {
+			out = append(out, reading{"offline", busy})
+		}
+		return out
+	}
+
+	tests := []struct {
+		name     string
+		readings []reading
+		after    time.Duration // when the verdict is taken, measured from the mint
+		want     string
+	}{
+		{
+			name:     "an offline streak short of the threshold is a network hiccup",
+			readings: append([]reading{{"online", false}}, offline(wedgeThreshold-1, false)...),
+			after:    time.Minute,
+			want:     "",
+		},
+		{
+			name:     "offline at the threshold, idle, after having been online, is wedged",
+			readings: append([]reading{{"online", false}}, offline(wedgeThreshold, false)...),
+			after:    time.Minute,
+			want:     exitWedged,
+		},
+		{
+			// The same signal on a running job cannot be told from a job whose
+			// runner is merely quiet, so the wedge rule spares it.
+			name:     "the same signal on a busy skiff is spared",
+			readings: append([]reading{{"online", true}}, offline(wedgeThreshold*3, true)...),
+			after:    time.Minute,
+			want:     "",
+		},
+		{
+			name:     "busy past maxLifetime is over budget",
+			readings: []reading{{"online", true}},
+			after:    maxLifetime + time.Minute,
+			want:     exitLifetime,
+		},
+		{
+			name:     "idle past jitExpiry, never online, is holding a dead credential",
+			readings: nil,
+			after:    jitExpiry + time.Minute,
+			want:     exitJITExpired,
+		},
+		{
+			name:     "never online but still inside jitExpiry is just warm",
+			readings: nil,
+			after:    jitExpiry - time.Minute,
+			want:     "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := &skiff{mintedAt: minted}
+			for _, r := range tt.readings {
+				s.observe(minted, r.status, r.busy)
+			}
+			if got := s.verdict(minted.Add(tt.after), maxLifetime); got != tt.want {
+				t.Fatalf("verdict = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+// The budget the daemon actually ships with, driven through the poll loop:
+// the clock is the pool's, so an hour of a job passes without the test
+// waiting for one or the class having to declare a millisecond budget.
+func TestPollSkiffReapsAtTheShippedLifetime(t *testing.T) {
+	p, gh, _ := testPool(t)
+	clock := &fakeClock{t: time.Date(2026, 8, 13, 12, 0, 0, 0, time.UTC)}
+	p.now = clock.now
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	p.fill(ctx)
+	first := onlySkiff(t, p)
+	if got := p.maxLifetime(first.class); got != time.Hour {
+		t.Fatalf("test class budget is %s, want the shipped hour", got)
+	}
+
+	gh.setStatus(first.runnerID, "online", true)
+	p.pollOnce(ctx) // the job starts; the budget runs from here
+
+	clock.advance(59 * time.Minute)
+	p.pollOnce(ctx)
+	if r := first.reason(); r != "" {
+		t.Fatalf("a skiff inside its budget was condemned: %q", r)
+	}
+
+	clock.advance(2 * time.Minute)
+	p.pollOnce(ctx)
+	if r := first.reason(); r != exitLifetime {
+		t.Fatalf("reason = %q, want %q", r, exitLifetime)
 	}
 }
 
