@@ -26,6 +26,47 @@ subjects:
     kind: User
     name: federated:system:serviceaccount:spindrift:spindrift
 ---
+# The Argo flavour's delivery grant, which only this cluster can carry: the
+# `Application` is created beside Argo rather than beside the workloads it
+# renders, so the grant is in `argo` and not in the `spindrift-apps` Role the
+# binding above names. That is also why it is here and not in
+# `clusters/base/platform/spindrift-target` — offsite runs no Argo and has no
+# such namespace, and a Role in a namespace that does not exist does not apply.
+#
+# Four verbs rather than the six `helmreleases` carries beside it: an apply is a
+# create-or-patch, `observe` is a `get` by the name core already stored, and
+# `destroy` is a `delete`. The adapter polls the object through `get` and never
+# watches or lists it.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: spindrift-target-delivery-argo
+  namespace: argo
+rules:
+  - apiGroups:
+      - argoproj.io
+    resources:
+      - applications
+    verbs:
+      - create
+      - delete
+      - get
+      - patch
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: spindrift-target-delivery-argo
+  namespace: argo
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: spindrift-target-delivery-argo
+subjects:
+  - apiGroup: rbac.authorization.k8s.io
+    kind: User
+    name: federated:system:serviceaccount:spindrift:spindrift
+---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:

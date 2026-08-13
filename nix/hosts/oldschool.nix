@@ -42,7 +42,7 @@
     enable = true;
     repo = "jonpulsifer/infra";
     github = {
-      # The shared Spindrift+bosun GitHub App ("spindrift-lolwtf").
+      # The shared Spindrift+bosun GitHub App ("spindrift-bot").
       appId = 4576122;
       privateKeyFile = config.sops.secrets."bosun-github-app-key".path;
     };

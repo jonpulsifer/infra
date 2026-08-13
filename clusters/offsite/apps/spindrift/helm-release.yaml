@@ -36,7 +36,7 @@ spec:
     # Renovate pins the digest on this line and Flux rolls it out. The image's
     # manifest schema and the chart must agree on which keys a declaration may
     # carry — the manifest below has to satisfy both.
-    image: ghcr.io/jonpulsifer/spindrift:latest@sha256:60bb478c1ff2f4155f6b9aa942ea8c8f85a8ab854011c0152a4f5c0406e1dcd6
+    image: ghcr.io/jonpulsifer/spindrift:latest@sha256:eb52bdd2d8a4216866434dbeed473031e257bbb55c88394b649ca43f982aa1db
     # Substituted by the apps Kustomization from the cluster-secrets Secret, so
     # the zone is read rather than restated. external-dns publishes the record
     # from the HTTPRoute and cert-manager issues the certificate, so this line
@@ -261,7 +261,7 @@ spec:
         # install link. The identity's private half arrives through the
         # installation Secret — SPINDRIFT_GITHUB_APP_ID and
         # SPINDRIFT_GITHUB_APP_PRIVATE_KEY — never this document.
-        appSlug: spindrift-lolwtf
+        appSlug: spindrift-bot
         # The App is public so it also installs on `homelab-ng`, which means
         # strangers can install it too. These are the installation accounts
         # the Repositories screen renders as connectable and

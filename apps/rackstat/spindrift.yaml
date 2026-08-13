@@ -10,4 +10,6 @@ build:
   frontend: dockerfile
   file: Dockerfile
 watchPaths:
-  - apps/slingshot
+  - apps/rackstat
+  - package.json
+  - bun.lock

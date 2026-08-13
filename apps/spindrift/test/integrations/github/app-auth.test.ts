@@ -544,7 +544,7 @@ describe('an adopted App, from the installation Secret', () => {
       webBaseUrl: 'https://git.example.test',
       controlPlaneHostname: 'spindrift.example.test',
       installationName: 'example',
-      appSlug: 'spindrift-lolwtf',
+      appSlug: 'spindrift-bot',
       webhookUrl: null,
       fetch: fake.fetch,
     });
@@ -559,7 +559,7 @@ describe('an adopted App, from the installation Secret', () => {
 
     await expect(auth.status()).resolves.toEqual({
       state: 'authorized',
-      slug: 'spindrift-lolwtf',
+      slug: 'spindrift-bot',
       appId: '4576122',
     });
 
@@ -592,7 +592,7 @@ describe('an adopted App, from the installation Secret', () => {
 
     await expect(auth.status()).resolves.toEqual({
       state: 'authorized',
-      slug: 'spindrift-lolwtf',
+      slug: 'spindrift-bot',
       appId: '4576122',
     });
   });
