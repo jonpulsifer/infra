@@ -255,29 +255,12 @@ export type SetConfig = (change: {
 >;
 
 /**
- * Creating one managed Datastore in the Vessel this workspace's placed Target
- * sits on (§11), as the screen above needs it answered.
+ * Attaching or detaching one Datastore, by id.
  *
- * No Vessel on the shape, for the reason {@link SetConfig} carries no pair: the
- * workspace has exactly one placement on screen and the screen above binds its
- * boundary once. No variable name either, ever — the name a connection is read
- * through is fixed by engine (`DATABASE_URL`, `REDIS_URL`), so offering a field
- * for it would be offering a choice that core does not accept.
- */
-export type CreateDatastore = (create: {
-  readonly name: string;
-  readonly engine: 'postgres' | 'valkey';
-}) => Promise<
-  { readonly ok: true } | { readonly ok: false; readonly message: string }
->;
-
-/**
- * Attaching, detaching or destroying one Datastore, by id.
- *
- * One shape for the three because they take the same argument and answer the
- * same question — the App is bound by the screen above, exactly as it is for
- * {@link SetConfig}, and every refusal these three carry is a sentence core
- * composed. Three separate types would differ only in their name.
+ * One shape for both because they take the same argument and answer the same
+ * question — the App is bound by the screen above, exactly as it is for
+ * {@link SetConfig}, and every refusal either carries is a sentence core
+ * composed. Two separate types would differ only in their name.
  */
 export type DatastoreAct = (
   datastoreId: string,
@@ -302,10 +285,8 @@ export function Workspace({
   onRunJob,
   onSetAutoDeploy,
   onSetBuildRoute,
-  onCreateDatastore,
   onAttachDatastore,
   onDetachDatastore,
-  onDestroyDatastore,
   onFollowExecution,
   executionLines,
   tab = 'overview',
@@ -403,17 +384,17 @@ export function Workspace({
    */
   onSetBuildRoute?: SetBuildRoute;
   /**
-   * The four acts a Datastore has (§11). Absent where the screen wires no acts,
-   * for the same reason {@link onSetReach} is.
+   * The two acts a Datastore has *that need an App* (§11). Absent where the
+   * screen wires no acts, for the same reason {@link onSetReach} is.
    *
-   * `onCreateDatastore` is additionally absent where the placed Target's
-   * adapter cannot provision one — see the call site below, which decides it on
-   * the **adapter type** rather than on what the adapter claims to serve.
+   * Create and destroy are not among them and are not offered here. Both take a
+   * Target and no App — storage exists before anything reads it, which is the
+   * whole of what "top-level, not a field" means — so the ledger is where they
+   * belong, and a second place to create one was a second place for a Target's
+   * refusal to come back to.
    */
-  onCreateDatastore?: CreateDatastore;
   onAttachDatastore?: DatastoreAct;
   onDetachDatastore?: DatastoreAct;
-  onDestroyDatastore?: DatastoreAct;
   /** Follow one run's output, or nothing when the name is `null`. */
   onFollowExecution?: (execution: string | null) => void;
   /** The lines of whichever run is being followed. */
@@ -565,26 +546,19 @@ export function Workspace({
               targets={targets}
             />
             {/*
-              Creating is offered on a `kubernetes` placement and nowhere else,
-              and the test is the **adapter type**, not what the adapter says it
-              serves: the cloud adapter claims both engines deliberately and
-              throws `UNIMPLEMENTED` from every verb, because a Vessel carries
-              no network to place a private endpoint in. Asking by engine would
-              render a form whose every submission is refused. The other three
-              stay offered whatever the placement: they act on rows that already
-              exist, and a Datastore that got created somehow — externally
-              registered, or created while the App sat on another Target — is
-              still one an operator has to be able to detach.
+              Both acts are offered whatever the placement, because both act on
+              rows that already exist: a Datastore that got created somehow —
+              externally registered, or created while the App sat on another
+              Target — is still one an operator has to be able to detach. The
+              placement test that used to guard the Create form went with it,
+              to the ledger, which asks the same question of every Target at
+              once and answers it with the picker `listDatastores` sends.
             */}
             <Datastores
               datastores={view.datastores}
               {...(onNavigate ? { onNavigate } : {})}
-              {...(onCreateDatastore && view.target === 'kubernetes'
-                ? { onCreateDatastore }
-                : {})}
               {...(onAttachDatastore ? { onAttachDatastore } : {})}
               {...(onDetachDatastore ? { onDetachDatastore } : {})}
-              {...(onDestroyDatastore ? { onDestroyDatastore } : {})}
             />
           </div>
           {/*
@@ -1939,18 +1913,22 @@ function datastoreDetail(datastore: DatastoreView): string {
  *
  * **Every act is a command, and every refusal is core's sentence.** Attaching
  * carries the rules — one store per engine per App, cluster-local placement —
- * and destroying refuses while attached, so nothing here guesses at whether a
- * button will be accepted; it presses, and reports what came back. The one
- * refusal composed on this side is the absence of a handler, which is the
- * both-or-neither rule the section header already enforces.
+ * so nothing here guesses at whether a button will be accepted; it presses, and
+ * reports what came back. The one refusal composed on this side is the absence
+ * of a handler.
+ *
+ * **Attach and detach, and nothing that outlives the App.** Creating storage
+ * and destroying it take a Target and no App, so they live on the ledger where
+ * a reader can see every Datastore this installation holds; this card is what
+ * *this* App reads, plus the way in to each. The row leads to the Datastore's
+ * own screen, which is where its backend object and the acts that own its
+ * lifetime both are.
  */
 function Datastores({
   datastores,
   onNavigate,
-  onCreateDatastore,
   onAttachDatastore,
   onDetachDatastore,
-  onDestroyDatastore,
 }: {
   datastores: readonly DatastoreView[];
   /**
@@ -1963,19 +1941,16 @@ function Datastores({
    * both-or-neither rule the acts below follow.
    */
   onNavigate?: (path: string) => void;
-  onCreateDatastore?: CreateDatastore;
   onAttachDatastore?: DatastoreAct;
   onDetachDatastore?: DatastoreAct;
-  onDestroyDatastore?: DatastoreAct;
 }) {
-  const [adding, setAdding] = useState(false);
   const [refusal, setRefusal] = useState<string | null>(null);
 
   /*
     One refusal line for the whole section, the way `ConfigSection` keeps one
-    for its deletes: a row has nowhere to put a sentence, and three buttons that
-    each swallowed their own would lose the only thing a press produces when it
-    is refused.
+    for its deletes: a row has nowhere to put a sentence, and a button that
+    swallowed its own would lose the only thing a press produces when it is
+    refused.
   */
   const act = (run: DatastoreAct, id: string) => {
     setRefusal(null);
@@ -1986,23 +1961,8 @@ function Datastores({
 
   return (
     <Card>
-      <SectionHeader
-        eyebrow="Attached resources"
-        title="Datastores"
-        {...(onCreateDatastore
-          ? {
-              action: adding ? 'Close' : 'Create Datastore',
-              onAction: () => setAdding((current) => !current),
-            }
-          : {})}
-      />
+      <SectionHeader eyebrow="Attached resources" title="Datastores" />
       <CardContent className="pt-0">
-        {onCreateDatastore && adding ? (
-          <NewDatastoreForm
-            onCreateDatastore={onCreateDatastore}
-            onDone={() => setAdding(false)}
-          />
-        ) : null}
         {refusal ? (
           <p className="mb-2 rounded-md border border-destructive/40 bg-destructive-soft px-3 py-2 text-xs text-destructive">
             {refusal}
@@ -2010,8 +1970,8 @@ function Datastores({
         ) : null}
         {datastores.length === 0 ? (
           <EmptyState title="No Datastores attached.">
-            Attach an existing Postgres or Redis Datastore, or create a managed
-            one. A website cannot attach one.
+            Create one on the Datastores screen and it can be attached here. A
+            website cannot attach one.
           </EmptyState>
         ) : (
           datastores.map((datastore) => (
@@ -2054,15 +2014,6 @@ function Datastores({
                       Detach
                     </Button>
                   ) : null}
-                  {onDestroyDatastore ? (
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => act(onDestroyDatastore, datastore.id)}
-                    >
-                      Destroy
-                    </Button>
-                  ) : null}
                 </div>
               }
             />
@@ -2081,103 +2032,6 @@ function Datastores({
         </p>
       </CardContent>
     </Card>
-  );
-}
-
-/**
- * Creating one managed Datastore — a name and an engine, and nothing else.
- *
- * **No variable-name field, and there never will be one.** The connection is
- * read through a name fixed by engine, pinned into the release by
- * `createDeploy` and rendered by the chart; a field here could only disagree
- * with all three. Size is the same decision made the other way: `storageGiB` is
- * a defaulted command input, reachable over the API, because a developer has no
- * basis on day one for a number that a resize command would own.
- */
-function NewDatastoreForm({
-  onCreateDatastore,
-  onDone,
-}: {
-  onCreateDatastore: CreateDatastore;
-  onDone: () => void;
-}) {
-  const [name, setName] = useState('');
-  const [engine, setEngine] = useState<'postgres' | 'valkey'>('postgres');
-  const [saving, setSaving] = useState(false);
-  const [outcome, setOutcome] = useState<
-    | { readonly kind: 'created' }
-    | { readonly kind: 'refused'; readonly message: string }
-    | null
-  >(null);
-
-  const save = async () => {
-    setSaving(true);
-    setOutcome(null);
-    try {
-      const result = await onCreateDatastore({ name: name.trim(), engine });
-      if (result.ok) {
-        setOutcome({ kind: 'created' });
-        setName('');
-      } else {
-        setOutcome({ kind: 'refused', message: result.message });
-      }
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  return (
-    <div className="flex flex-col gap-3 border-b border-border-soft pb-3">
-      <Field
-        name="datastore-name"
-        label="Name"
-        value={name}
-        onChange={(event) => setName(event.target.value)}
-        placeholder="primary"
-      />
-      <div className="grid gap-2 sm:grid-cols-2">
-        {/* The same tiles the creation flow states reach and auth with, so a
-            developer meets the choice grid once rather than per screen. */}
-        <Choice
-          selected={engine === 'postgres'}
-          title="postgres"
-          note="Arrives as DATABASE_URL"
-          onClick={() => setEngine('postgres')}
-        />
-        <Choice
-          selected={engine === 'valkey'}
-          title="valkey"
-          note="Arrives as REDIS_URL"
-          onClick={() => setEngine('valkey')}
-        />
-      </div>
-      {outcome?.kind === 'refused' ? (
-        <p className="rounded-md border border-destructive/40 bg-destructive-soft px-3 py-2 text-xs text-destructive">
-          {outcome.message}
-        </p>
-      ) : null}
-      {outcome?.kind === 'created' ? (
-        <p className="rounded-md border border-warning/40 bg-warning-soft px-3 py-2 text-xs">
-          Created and attached. It provisions in the background — the row says
-          how far it has got, and the connection reaches a container on the next
-          Deploy.
-        </p>
-      ) : null}
-      <div className="flex flex-wrap items-center gap-2">
-        <Button
-          size="sm"
-          disabled={saving || name.trim() === ''}
-          onClick={() => {
-            void save();
-          }}
-        >
-          {saving ? 'Creating…' : 'Create Datastore'}
-        </Button>
-        <Button variant="ghost" size="sm" onClick={onDone} disabled={saving}>
-          {outcome?.kind === 'created' ? 'Close' : 'Cancel'}
-        </Button>
-      </div>
-    </div>
   );
 }
 
@@ -2909,9 +2763,9 @@ export function targetForFirstDeploy(view: WorkspaceView): string | undefined {
  * validation failure, not a field the handler ignores.
  *
  * `reach`, `auth` and `expose` are the schema's own defaults, restated here
- * because `InputOf` reads a command's schema *output* — the same reason
- * `handleCreateDatastore` restates `storageGiB` below, and the same care: no
- * form offers any of the three, so this is the one place they are named, and
+ * because `InputOf` reads a command's schema *output* — the same reason the
+ * Datastore ledger's `handleCreate` restates `storageGiB`, and the same care:
+ * no form offers any of the three, so this is the one place they are named, and
  * naming them here is what keeps the form from having a second opinion.
  *
  * Exported for `test/web/component-create.test.ts`, for the reason
@@ -3532,58 +3386,6 @@ function AppWorkspace({
     write did is the one thing that can disagree with the reconcile loop.
   */
 
-  /**
-   * Create, then attach — two dispatches, because `createDatastore` takes no
-   * App.
-   *
-   * That is the deliberate shape: `attachDatastore` is the single place the
-   * attachment rules live (one store per engine per App, cluster-local
-   * placement), and accepting an App on create would mean a second copy of them
-   * that goes stale. So the failure of the second call is honest rather than
-   * hidden — the Datastore exists, unattached, and the row is on screen saying
-   * so, which is why the reload happens either way.
-   */
-  const handleCreateDatastore: CreateDatastore = async (create) => {
-    const { appId, vesselId } = workspace;
-    if (appId === undefined || vesselId === undefined) {
-      return {
-        ok: false,
-        message: 'This App has no Component placed on a Target yet',
-      };
-    }
-    try {
-      const created = await command('createDatastore', {
-        name: create.name,
-        engine: create.engine,
-        vesselId,
-        // Restated rather than omitted, the way `useBucket`'s `makeDefault` is:
-        // `InputOf` reads a command's schema *output*, so a `.default()` is
-        // still a required property to a typed caller. It is the schema's own
-        // number and there is no field for it — §11 gives a Datastore no size
-        // control, and a form asking a developer for one on the day they
-        // create it is asking a question they cannot answer.
-        storageGiB: 10,
-      });
-      if (!created.ok) return { ok: false, message: created.failure.message };
-      const attached = await command('attachDatastore', {
-        datastoreId: created.value.id,
-        appId,
-      });
-      read.reload();
-      return attached.ok
-        ? { ok: true }
-        : { ok: false, message: attached.failure.message };
-    } catch (cause: unknown) {
-      return {
-        ok: false,
-        message:
-          cause instanceof Error
-            ? cause.message
-            : 'Creating the Datastore failed',
-      };
-    }
-  };
-
   const handleAttachDatastore: DatastoreAct = async (datastoreId) => {
     const appId = workspace.appId;
     if (appId === undefined) {
@@ -3619,20 +3421,6 @@ function AppWorkspace({
     }
   };
 
-  const handleDestroyDatastore: DatastoreAct = async (datastoreId) => {
-    try {
-      const result = await command('destroyDatastore', { datastoreId });
-      if (!result.ok) return { ok: false, message: result.failure.message };
-      read.reload();
-      return { ok: true };
-    } catch (cause: unknown) {
-      return {
-        ok: false,
-        message: cause instanceof Error ? cause.message : 'Destroying failed',
-      };
-    }
-  };
-
   return (
     <>
       <Workspace
@@ -3653,10 +3441,8 @@ function AppWorkspace({
         onMoveComponent={handleMoveComponent}
         onUnplaceComponent={handleUnplaceComponent}
         targets={targets}
-        onCreateDatastore={handleCreateDatastore}
         onAttachDatastore={handleAttachDatastore}
         onDetachDatastore={handleDetachDatastore}
-        onDestroyDatastore={handleDestroyDatastore}
         {...(runs === null
           ? {}
           : {
