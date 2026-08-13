@@ -103,13 +103,13 @@
     # removes it. `jonpulsifer/infra` runs no code from forks, which is the
     # condition that makes the trade sound; the option's own documentation is
     # where the reasoning lives.
-    # Parked, and now also mis-shaped for its name: `skiff-ubuntu` means a
-    # hosted-shaped runner, 4 vCPU / 16 GiB, which is what tender serves and
-    # what a workflow targeting the label is promised. Un-parking this at
-    # 3072M would put a third of that machine behind the same label and make
-    # the benchmark a coin toss again -- resize it before raising `warm`, not
-    # after.
-    classes.skiff-ubuntu = {
+    # `skiff-folly`, not `skiff-ubuntu`, for the same reason oldschool serves
+    # `skiff-offsite`: `skiff-ubuntu` promises a hosted-shaped runner, 4 vCPU /
+    # 16 GiB, and this is 3072M on a box shared with kubelet. Parking it at
+    # `warm = 0` hid that -- a class that serves nothing cannot mis-serve
+    # anything -- but the trap was one edit away, and a name is a better guard
+    # than a comment saying "resize before un-parking".
+    classes.skiff-folly = {
       hull = "${inputs.self.packages.x86_64-linux.hull-ubuntu}";
       vcpus = 4;
       memory = "3072M";
