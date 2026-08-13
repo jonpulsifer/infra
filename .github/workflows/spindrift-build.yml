@@ -311,16 +311,145 @@ jobs:
           # on its own mount so the build context stays the source.
           plan="${RUNNER_TEMP}/railpack-plan"
           mkdir -p "$plan"
+          set -- prepare /scope --plan-out /out/railpack-plan.json
+
+          # §5's authority reaches the builder here, and this is the whole of
+          # what an operator has to know: they state the build command once, in
+          # Spindrift's own file, and never learn the builder's name. Read out
+          # of the tree rather than carried in the request because the plan has
+          # always been derived here — the request pins the frontend *image*,
+          # never the plan, exactly as the Dockerfile arm above reads the tree
+          # for its own decision. What is read is what Spindrift adopted: the
+          # bundle is staged at the App's authoritative commit, and
+          # `reconciler/repo-loop.ts` refuses to advance that past a commit
+          # whose `spindrift.yaml` will not parse, so the runner cannot honour
+          # a declaration core rejected.
+          #
+          # `select` on the frontend rather than reading `.command` outright: a
+          # scope declaring the dockerfile frontend has no railpack command to
+          # state, and `// ""` folds the schema's `command: null` onto the same
+          # "nothing declared" as an absent file. Both leave the invocation
+          # byte-identical to what it was before this block existed.
+          declaration="${scope}/spindrift.yaml"
+          build_command=""
+          if [ -f "$declaration" ]; then
+            build_command="$(
+              yq '.build | select(.frontend == "railpack") | .command // ""' \
+                "$declaration"
+            )"
+          fi
+
+          if [ -n "$build_command" ]; then
+            # A generated config file rather than `--build-cmd`, for one
+            # reason: railpack merges options *under* the config file
+            # (`Merge(optionsConfig, envConfig, fileConfig)`), so a stray
+            # `railpack.json` in the scope silently outranks the flag. That
+            # inverts the ownership this file exists to state. Pointing
+            # `--config-file` elsewhere is also what makes `railpack.json`
+            # unnecessary: railpack reads exactly one config file, and this is
+            # it. The flag hard-fails when the file is absent, which is why it
+            # is only ever passed inside this branch — a scope that declares
+            # nothing keeps its own `railpack.json` and builds as before.
+            #
+            # String form, never `{"cmd": …}`: a string becomes `sh -c '<cmd>'`
+            # and an object is handed to BuildKit's `llb.Shlex` argv-split, so
+            # an operator's `a && b` would pass `&&` as a literal argument.
+            # `jq --arg` is what makes any byte in that string — quotes,
+            # newlines, `$(…)` — a JSON value rather than syntax.
+            case "$build_command" in
+              *"'"*)
+                # railpack's own wrapper is `"sh -c '" + cmd + "'"` with no
+                # escaping, so a single quote silently re-splits the command
+                # instead of failing. Refused loudly here rather than shipped
+                # as a build that ran something else.
+                # ponytail: rejects rather than escapes; emit `'\''` for the
+                # quote if a real command ever needs one.
+                #
+                # On stdout, not stderr: Actions reads workflow commands from a
+                # step's stdout, and an annotation is the only part of this a
+                # reader sees without opening the log.
+                printf '::error::spindrift.yaml: build.command cannot contain a single quote\n'
+                exit 1
+                ;;
+            esac
+            # Relative, and it has to be: railpack resolves the path under the
+            # app source (`filepath.Join(app.Source, configFileName)`), so an
+            # absolute `/out/...` becomes `/scope/out/...` and is not found.
+            # `../out` reaches the plan mount, which is already writable, so
+            # nothing is written into the source tree and the scope stays `:ro`.
+            jq -n --arg cmd "$build_command" '{steps:{build:{commands:[$cmd]}}}' \
+              > "${plan}/railpack-config.json"
+            set -- "$@" --config-file ../out/railpack-config.json
+          fi
+
           docker run --rm \
             -v "${scope}:/scope:ro" -v "${plan}:/out" \
-            --entrypoint /railpack "$FRONTEND" \
-            prepare /scope --plan-out /out/railpack-plan.json
+            --entrypoint /railpack "$FRONTEND" "$@"
 
+          # `plan` names the same file as `file`, and is the only arm that sets
+          # it. The step below reads the plan as JSON, which is true of this
+          # arm's `file` and of neither other arm's Dockerfile, so it asks for
+          # the output that only exists when there is a plan rather than
+          # inferring the arm from one that happens to be empty elsewhere.
           {
             printf 'context=%s\n' "$scope"
             printf 'file=%s\n' "${plan}/railpack-plan.json"
+            printf 'plan=%s\n' "${plan}/railpack-plan.json"
             printf 'buildArgs=BUILDKIT_SYNTAX=%s\n' "$FRONTEND"
           } >> "$GITHUB_OUTPUT"
+
+      # The zero-config arm's silent failure: a Build that goes green having
+      # pushed an image nothing can start.
+      #
+      # railpack's Go provider emits `go build -ldflags="…" -o out` with **no
+      # package argument** whenever the module root holds any `.go` file, and
+      # pairs it with `startCommand: ./out`. When that root package is a library
+      # rather than `main` — the Functions Framework layout, where the root
+      # exports the handler and the only `package main` sits under `cmd/` — the
+      # command does not fail. `go build -o` against a non-main package writes
+      # the compiled *package archive* (ar, magic `!<arch>`) to `out` at mode
+      # 0644 and exits 0. Nothing downstream disagrees: the build, the push, the
+      # signature and the attestation all report success on an artifact whose
+      # declared start command cannot be executed by anyone, root included,
+      # because no execute bit is set. The first component to notice is the
+      # container, which dies `./out: Permission denied` — a CrashLoopBackOff
+      # whose Build says SUCCEEDED.
+      #
+      # Refused here for the reason the signing step below is ordered before the
+      # report: a green Build whose Deploy cannot run is the shape this sequence
+      # exists to avoid. The check is railpack's own postcondition, the one it
+      # states and never verifies — it chose the output name, it chose `./out`
+      # as the start command, so `out` has to be executable when the build step
+      # ends. Asserting it *inside the plan* keeps this free. `test -x` runs in
+      # a builder layer that is already running, so no image is pulled and no
+      # time is added to a build that was going to succeed; a build that was
+      # going to ship a broken image stops at the step that broke it.
+      #
+      # Only a bare `./path` start command is testable this way. Anything
+      # carrying arguments or naming an interpreter (`node server.js`, `npm
+      # start`) is not a file, and those shapes fail loudly at exec in any case.
+      # Silence belongs to the compiled one, which is the only one where a
+      # toolchain writes a non-executable and calls it a success.
+      - name: Make the plan check its own start command
+        if: steps.frontend.outputs.plan != ''
+        env:
+          PLAN: ${{ steps.frontend.outputs.plan }}
+        run: |
+          set -euo pipefail
+          # `customName` is what BuildKit prints for the layer, so the red build
+          # names the defect rather than making the operator infer it from a
+          # bare `test -x` and an exit code.
+          jq '
+            (.deploy.startCommand // "") as $start
+            | if ($start | test("^\\./\\S+$"))
+              then (.steps[] | select(.name == "build") | .commands)
+                     += [{
+                       cmd: "test -x \($start)",
+                       customName: "check the build produced an executable \($start)"
+                     }]
+              else . end
+          ' "$PLAN" > "${PLAN}.checked"
+          mv "${PLAN}.checked" "$PLAN"
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4

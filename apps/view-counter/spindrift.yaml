@@ -1,0 +1,21 @@
+# Managed by Spindrift, and yours to edit.
+#
+# This file is what Spindrift knows about this directory. Once it is on the
+# default branch it is authoritative: what is written here wins over what
+# detection would otherwise guess.
+#
+# `command` is here because detection guesses this one wrong, and quietly. The
+# module root is a library — the Functions Framework entrypoint — and the only
+# `package main` is under `cmd/`, so a zero-config `go build -o out` compiles a
+# *package archive* named `out` and exits 0. Naming the package is the whole
+# fix, and it is stated here rather than in a builder's own config file so the
+# builder stays something Spindrift chooses and not something this app knows.
+version: 1
+component:
+  kind: service
+build:
+  frontend: railpack
+  command: go build -o out ./cmd
+  outputDirectory: null
+watchPaths:
+  - apps/view-counter

@@ -12,6 +12,10 @@ SVG image, so it can be embedded directly in a README or web page with an
   Framework as the `ViewCounter` HTTP entrypoint.
 - `cmd/` — a local entrypoint for running the function outside GCP.
 - `view_counter_test.go` — unit tests.
+- `spindrift.yaml` — what Spindrift knows about this directory, including the
+  build command. The module root is a library, so a zero-config build compiles
+  a package archive rather than a program; the declared command names `./cmd`
+  so the build produces the binary its start command expects.
 
 ## Deploy
 
