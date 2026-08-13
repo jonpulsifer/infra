@@ -8,7 +8,7 @@
  * to be inline in `server.ts` next to a top-level `Bun.serve` no test can
  * import. So the table moved here and the entries call it.
  *
- * Nine kinds of route exist, and three of the nine are generated:
+ * Ten kinds of route exist, and three of the ten are generated:
  *
  * 1. **Commands**, from the registry (`dispatch.ts`).
  * 2. **The client**, from whatever built it — `bundle.ts` reading a directory in
@@ -29,6 +29,10 @@
  *    Secret bearer token the same way the webhook carries a signature.
  * 8. **{@link HEALTH_PATH}**, a liveness probe that consults nothing.
  * 9. **{@link READY_PATH}**, a readiness probe that does — see below.
+ * 10. **GitHub setup** (`github-setup-route.ts`), where the App-creation and
+ *     installation flows land. Session-authenticated like a command, but it is
+ *     a redirect target GitHub reaches with GET and a query string, so it
+ *     cannot be one.
  *
  * A further hand-authored route is a decision somebody has to make on purpose,
  * in this file, against a test that names it.
@@ -41,6 +45,10 @@ import { authRoutes } from '../auth/routes.ts';
 import type { Database } from '../db/client.ts';
 import { type BosunRouteDeps, bosunRoutes } from './bosun-route.ts';
 import { commandRoutes, type DispatchDeps } from './dispatch.ts';
+import {
+  type GitHubSetupRouteDeps,
+  githubSetupRoutes,
+} from './github-setup-route.ts';
 import { streamRoutes } from './streams.ts';
 import { uploadRoutes } from './upload.ts';
 import { type WebhookRouteDeps, webhookRoutes } from './webhook-route.ts';
@@ -104,6 +112,7 @@ export function webRoutes<Client extends Record<string, ClientRoute>>(
   auth: EnrolmentDeps & GatewayDeps,
   webhook: WebhookRouteDeps,
   bosun: BosunRouteDeps,
+  githubSetup: GitHubSetupRouteDeps,
 ) {
   return {
     ...client,
@@ -115,5 +124,6 @@ export function webRoutes<Client extends Record<string, ClientRoute>>(
     ...uploadRoutes(deps),
     ...webhookRoutes(webhook),
     ...bosunRoutes(bosun),
+    ...githubSetupRoutes(githubSetup),
   };
 }

@@ -48,10 +48,14 @@ function asDocument(value: unknown): Document | null {
  * what is wrong with it rather than reporting what this function made of it.
  */
 export function upgradeManifestDocument(document: unknown): unknown {
-  return listDnsZones(
-    movePinnedBuildWorkflowToMain(
-      scrubPlaceholderBuildWorkflow(
-        nameInstallationVessels(dropTargetNames(addDeclaredVessels(document))),
+  return dropDeviceFlowIdentity(
+    listDnsZones(
+      movePinnedBuildWorkflowToMain(
+        scrubPlaceholderBuildWorkflow(
+          nameInstallationVessels(
+            dropTargetNames(addDeclaredVessels(document)),
+          ),
+        ),
       ),
     ),
   );
@@ -103,6 +107,44 @@ function listDnsZones(document: unknown): unknown {
               { name: privateZone, reaches: ['private'] },
               { name: publicZone, reaches: ['public'] },
             ],
+    },
+  };
+}
+
+/**
+ * Retire the Device Flow keys from the `github` block.
+ *
+ * `clientId` named the App identity when Device Flow was the ceremony; the
+ * identity now lives sealed in the `github_app` row, written by the
+ * manifest-flow conversion, so the key describes nothing and is dropped.
+ * `oauthBaseUrl` named the web origin the OAuth endpoints lived on — the
+ * endpoints have no caller left, but the origin itself is still the web host
+ * clone URLs and install links are composed from, so it becomes `webBaseUrl`
+ * unless the document already states one.
+ *
+ * This step is what makes the rollout order between the clusters declaration
+ * and the image advisory rather than load-bearing: whichever lands first,
+ * neither a stored row still carrying the legacy keys nor a declaration
+ * missing them can fail a parse.
+ */
+function dropDeviceFlowIdentity(document: unknown): unknown {
+  const manifest = asDocument(document);
+  const github = asDocument(manifest?.github);
+  if (
+    manifest === null ||
+    github === null ||
+    !('clientId' in github || 'oauthBaseUrl' in github)
+  ) {
+    return document;
+  }
+  const { clientId: _retired, oauthBaseUrl, ...rest } = github;
+  return {
+    ...manifest,
+    github: {
+      ...rest,
+      ...(typeof rest.webBaseUrl === 'string' || oauthBaseUrl === undefined
+        ? {}
+        : { webBaseUrl: oauthBaseUrl }),
     },
   };
 }

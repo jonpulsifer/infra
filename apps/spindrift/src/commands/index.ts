@@ -59,10 +59,6 @@ export { rollbackDeploy } from './deploys/rollback.ts';
 export { configureInstallation } from './installation/configure.ts';
 export { discoverInstallationFacts } from './installation/discover.ts';
 export { getInstallationManifest } from './installation/get.ts';
-export {
-  beginRepositoryAuthorization,
-  pollRepositoryAuthorization,
-} from './repositories/authorize.ts';
 export { connectRepository } from './repositories/connect.ts';
 export { inspectRepository } from './repositories/inspect.ts';
 export { listRepositories } from './repositories/list.ts';

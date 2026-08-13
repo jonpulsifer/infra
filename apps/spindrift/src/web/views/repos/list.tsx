@@ -38,10 +38,9 @@ import {
   Server,
   Timer,
 } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import type { ComponentKind } from '../../../domain/desired-state.ts';
 import { command, type InputOf, type OutputOf } from '../../client.ts';
-import { formatDuration } from '../../components/running-time.tsx';
 import type {
   GrantedRepositoryView,
   LinkedRepoView,
@@ -58,23 +57,6 @@ import {
 import { CopyButton } from '../../ui/copy.tsx';
 import { Logo } from '../../ui/logo.tsx';
 import { cn } from '../../ui/utils.ts';
-
-export interface RepositoryAuthorizationView {
-  readonly userCode: string;
-  readonly verificationUri: string;
-  readonly state: 'waiting' | 'expired' | 'denied' | 'error';
-  readonly message?: string;
-  /**
-   * When GitHub stops accepting this code.
-   *
-   * Optional because the caller holding this state is free to omit it and every
-   * test builds the view by hand — but the server has always sent it, on the
-   * first call and on every poll, and the screen spent that whole time telling
-   * an operator to type a code with no hint that it dies in fifteen minutes.
-   * Absent, the panel simply says nothing about time rather than guessing.
-   */
-  readonly expiresAt?: string;
-}
 
 export interface OpenedRepositoryPullRequest {
   readonly fullName: string;
@@ -95,12 +77,10 @@ export function RepositoryList({
   repos,
   options,
   connector,
-  authorization,
   connecting,
   refreshing,
   error,
   openedPullRequest,
-  onAuthorize,
   onConnect,
   onRefresh,
   embedded = false,
@@ -108,12 +88,10 @@ export function RepositoryList({
   repos: readonly LinkedRepoView[];
   options: readonly GrantedRepositoryView[];
   connector: RepositoryConnectorView;
-  authorization: RepositoryAuthorizationView | null;
   connecting: boolean;
   refreshing?: boolean;
   error: string | null;
   openedPullRequest: OpenedRepositoryPullRequest | null;
-  onAuthorize: () => void;
   onConnect: (input: ConnectRepositoryInput) => void;
   onRefresh: () => void;
   embedded?: boolean;
@@ -127,27 +105,24 @@ export function RepositoryList({
         />{' '}
         {refreshing ? 'Refreshing...' : 'Refresh'}
       </Button>
-      <Button variant="outline" asChild>
-        <a
-          href="https://github.com/settings/installations"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          Manage installation{' '}
-          <ExternalLink aria-hidden="true" className="size-3.5" />
-        </a>
-      </Button>
+      {connector.state === 'authorized' ? (
+        <Button variant="outline" asChild>
+          <a
+            href={connector.installUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            Manage installation{' '}
+            <ExternalLink aria-hidden="true" className="size-3.5" />
+          </a>
+        </Button>
+      ) : null}
     </div>
   );
   const workflow = (
     <>
       {controls}
-      <ConnectorCard
-        connector={connector}
-        authorization={authorization}
-        onAuthorize={onAuthorize}
-        error={error}
-      />
+      <ConnectorCard connector={connector} error={error} />
 
       {connector.state === 'authorized' ? (
         <AvailableRepositories
@@ -213,12 +188,7 @@ export function RepositoryList({
         </div>
         <div className="ml-auto">{controls}</div>
       </header>
-      <ConnectorCard
-        connector={connector}
-        authorization={authorization}
-        onAuthorize={onAuthorize}
-        error={error}
-      />
+      <ConnectorCard connector={connector} error={error} />
       {connector.state === 'authorized' ? (
         <AvailableRepositories
           options={options}
@@ -251,10 +221,10 @@ export function RepositoryList({
  * The badge used to print the union member — an operator read the literal word
  * `unauthorized`, which is a name for a case in a type and not something anyone
  * says — and it wore the same amber as `unavailable`. Those two are the furthest
- * apart of the three: `unauthorized` is one button press from done and nothing
- * is wrong, while `unavailable` means this installation holds no keyring and the
- * fix is not on this screen or any other. Same colour for both told the reader
- * that the fixable one was as stuck as the unfixable one.
+ * apart of the three: `unauthorized` is one create-and-install away from done
+ * and nothing is wrong, while `unavailable` means this installation holds no
+ * keyring and the fix is not on this screen or any other. Same colour for both
+ * told the reader that the fixable one was as stuck as the unfixable one.
  */
 function connectorStanding(connector: RepositoryConnectorView): {
   readonly label: string;
@@ -262,32 +232,30 @@ function connectorStanding(connector: RepositoryConnectorView): {
 } {
   switch (connector.state) {
     case 'authorized':
-      return { label: `connected as @${connector.login}`, tone: 'success' };
+      return { label: `speaking as ${connector.slug}`, tone: 'success' };
     case 'unauthorized':
       // Idle, not warning: nothing has gone wrong, this is simply the step
       // before the first one.
-      return { label: 'not authorized yet', tone: 'idle' };
+      return { label: 'no App yet', tone: 'idle' };
     default:
       return { label: 'no keyring', tone: 'destructive' };
   }
 }
 
 /**
- * Authorization, which is a different act from connecting anything.
+ * The App identity, which is a different act from connecting anything.
  *
- * Once authorized this collapses to one line. It is a prerequisite, not a
- * destination, and a card that stayed the size of the ceremony would keep
- * spending the top of the screen on a thing that is already done.
+ * Creating it is one form POST straight to GitHub — the manifest flow —
+ * whose confirmation page GitHub insists a human clicks. The redirect lands
+ * on the setup route, which seals the returned key and sends the operator
+ * back here. Once the identity exists this collapses to one line; it is a
+ * prerequisite, not a destination.
  */
 function ConnectorCard({
   connector,
-  authorization,
-  onAuthorize,
   error,
 }: {
   connector: RepositoryConnectorView;
-  authorization: RepositoryAuthorizationView | null;
-  onAuthorize: () => void;
   error: string | null;
 }) {
   if (connector.state === 'unavailable') {
@@ -297,7 +265,8 @@ function ConnectorCard({
           <p className="font-semibold">GitHub connector unavailable</p>
           <p className="mt-1 text-sm text-muted-foreground">
             This installation has no credential keyring. Add the encrypted
-            keyring through the installation Secret before authorizing GitHub.
+            keyring through the installation Secret before creating the GitHub
+            App.
           </p>
         </CardContent>
       </Card>
@@ -311,24 +280,26 @@ function ConnectorCard({
           <div className="flex items-start gap-3">
             <Logo name="github" className="mt-0.5" />
             <div>
-              <p className="font-semibold">Authorize the GitHub App</p>
+              <p className="font-semibold">Create the GitHub App</p>
               <p className="mt-1 text-sm text-muted-foreground">
-                GitHub will show the repositories selected for this App.
-                Spindrift stores the resulting credential encrypted and never
-                asks for an installation ID or private-key file.
+                One click on GitHub&apos;s confirmation page registers the App
+                this installation speaks as; its key comes back sealed and is
+                never shown to anyone. If the suggested name is taken, pick
+                another on that page and create again. Installing it on your
+                account is the step after, offered here once the App exists.
               </p>
             </div>
           </div>
-          {authorization === null ? (
-            <Button className="self-start" onClick={onAuthorize}>
-              <Logo name="github" className="size-4" /> Authorize GitHub
-            </Button>
-          ) : (
-            <DeviceAuthorization
-              authorization={authorization}
-              onAuthorize={onAuthorize}
+          <form action={connector.setup.action} method="post">
+            <input
+              type="hidden"
+              name="manifest"
+              value={connector.setup.manifest}
             />
-          )}
+            <Button type="submit">
+              <Logo name="github" className="size-4" /> Create the App on GitHub
+            </Button>
+          </form>
           {error ? <ErrorMessage message={error} /> : null}
         </CardContent>
       </Card>
@@ -340,163 +311,21 @@ function ConnectorCard({
       <CardContent className="flex flex-col gap-3">
         <div className="flex flex-wrap items-center gap-2">
           <CheckCircle2 aria-hidden="true" className="size-4 text-success" />
-          <p className="text-sm font-semibold">
-            Authorized as @{connector.login}
-          </p>
-          <Button
-            variant="ghost"
-            size="sm"
-            className="ml-auto"
-            onClick={onAuthorize}
-          >
-            Reauthorize
+          <p className="text-sm font-semibold">Speaking as {connector.slug}</p>
+          <Button variant="ghost" size="sm" className="ml-auto" asChild>
+            <a
+              href={connector.installUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              Install on GitHub{' '}
+              <ExternalLink aria-hidden="true" className="size-3.5" />
+            </a>
           </Button>
         </div>
-        {authorization !== null ? (
-          <DeviceAuthorization
-            authorization={authorization}
-            onAuthorize={onAuthorize}
-          />
-        ) : null}
         {error ? <ErrorMessage message={error} /> : null}
       </CardContent>
     </Card>
-  );
-}
-
-/**
- * How much of the code's life is left, ticking.
- *
- * Counting down rather than up, so `RunningTime` is the wrong component and
- * only its formatter is borrowed. The clock is the browser's and the deadline is
- * the server's, which is normally a reason not to compute a duration here — but
- * a device code is a fifteen-minute window and a second of skew inside it is
- * invisible, while showing nothing at all is what leaves an operator typing a
- * code GitHub stopped accepting four minutes ago.
- *
- * `null` when there is no deadline to count, which is the honest answer and not
- * a zero: a panel with no `expiresAt` says nothing about time.
- */
-function useRemaining(expiresAt: string | undefined): number | null {
-  const ends = expiresAt === undefined ? Number.NaN : Date.parse(expiresAt);
-  const [now, setNow] = useState(() => Date.now());
-
-  useEffect(() => {
-    if (Number.isNaN(ends)) return;
-    // Re-read from the wall clock each tick rather than decrementing, so a
-    // throttled background tab comes back with the truth instead of with
-    // however many ticks it was allowed.
-    const timer = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(timer);
-  }, [ends]);
-
-  return Number.isNaN(ends) ? null : Math.max(0, ends - now);
-}
-
-/**
- * The device ceremony, in the four different things it can be doing.
- *
- * All four used to be one red box with a swapped sentence, which made a denial
- * (someone said no, and will have to say yes) look identical to a transport
- * failure (nobody said anything, try again) and to an expiry (nothing is wrong,
- * the code is just old). They fail for different reasons and the reader's next
- * move differs, so they get different words, different tone, and — the part the
- * red box never had — the button that resolves them, in place.
- */
-function DeviceAuthorization({
-  authorization,
-  onAuthorize,
-}: {
-  authorization: RepositoryAuthorizationView;
-  onAuthorize: () => void;
-}) {
-  const remaining = useRemaining(authorization.expiresAt);
-
-  if (authorization.state !== 'waiting' || remaining === 0) {
-    const state = remaining === 0 ? 'expired' : authorization.state;
-    const outcome =
-      state === 'denied'
-        ? {
-            tone: 'destructive' as const,
-            title: 'GitHub declined the authorization',
-            detail:
-              'The account that opened the code refused it. A new code will ask again.',
-          }
-        : state === 'expired'
-          ? {
-              tone: 'warning' as const,
-              title: 'That code expired',
-              detail:
-                'Device codes are short-lived. Nothing is wrong — take a new one and enter it while the countdown runs.',
-            }
-          : {
-              tone: 'destructive' as const,
-              title: 'GitHub did not answer the authorization',
-              detail:
-                'The ceremony stopped before GitHub said yes or no. Nothing was stored.',
-            };
-    return (
-      <div
-        className={cn(
-          'rounded-md border px-3 py-2.5',
-          outcome.tone === 'warning'
-            ? 'border-warning/40 bg-warning-soft'
-            : 'border-destructive/40 bg-destructive-soft',
-        )}
-      >
-        <p className="text-sm font-semibold">{outcome.title}</p>
-        <p className="mt-1 text-xs text-muted-foreground">
-          {authorization.message ?? outcome.detail}
-        </p>
-        <Button
-          size="sm"
-          variant="outline"
-          className="mt-3"
-          onClick={onAuthorize}
-        >
-          Get a new code
-        </Button>
-      </div>
-    );
-  }
-
-  return (
-    <div className="rounded-md border border-primary/40 bg-accent px-4 py-3">
-      <p className="text-sm font-semibold">Enter this code in GitHub</p>
-      <div className="mt-2 flex flex-wrap items-center gap-3">
-        <p className="font-mono text-2xl font-semibold tracking-[0.2em]">
-          {authorization.userCode}
-        </p>
-        <CopyButton value={authorization.userCode} label="device code" />
-        {remaining === null ? null : (
-          <span className="text-xs tabular-nums text-muted-foreground">
-            expires in {formatDuration(remaining)}
-          </span>
-        )}
-      </div>
-      <Button asChild className="mt-3">
-        <a
-          href={authorization.verificationUri}
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          Continue in GitHub <ExternalLink aria-hidden="true" />
-        </a>
-      </Button>
-      {/* The poll is real and silent; a reader watching a static panel has no
-          way to tell it apart from a page that gave up. */}
-      <p
-        role="status"
-        className="mt-2 flex items-center gap-1.5 text-xs text-muted-foreground"
-      >
-        <Loader2
-          aria-hidden="true"
-          className="size-3 motion-safe:animate-spin"
-        />
-        checking with GitHub… this page continues on its own once the App is
-        approved.
-      </p>
-    </div>
   );
 }
 

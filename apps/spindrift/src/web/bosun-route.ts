@@ -47,8 +47,8 @@ export const BOSUN_PATHS = [
 ] as const;
 
 /**
- * Where the shared secret arrives — mirrors `webhook-route.ts`'s
- * `WEBHOOK_SECRET_VAR`: an installation Secret key, read once at boot, never
+ * Where the shared secret arrives — mirrors `serve.ts`'s
+ * `ENROLMENT_TOKEN_VAR`: an installation Secret key, read once at boot, never
  * from the manifest an operator authors and hands around.
  */
 export const BOSUN_SECRET_VAR = 'SPINDRIFT_BOSUN_SECRET';

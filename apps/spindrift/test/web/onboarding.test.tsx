@@ -8,7 +8,7 @@
  *
  * Four claims, and they are not the same claim:
  *
- * 1. **The four questions are four questions this build can answer.** Onboarding
+ * 1. **The three questions are three questions this build can answer.** Onboarding
  *    is the one screen allowed to name manifest keys, and the price of that
  *    permission is a test that walks every named key through the schema. A key
  *    that leaves the schema has to fail here rather than become a step that
@@ -18,8 +18,8 @@
  *    also rendered the rest of the document would be the settings form with a
  *    progress bar, which is what this is not.
  * 3. **One write, at the end.** Only the last step offers to configure, because
- *    `writeStoredManifest` reconciles Targets in the same transaction and four
- *    saves would be four reconciliations of four incomplete documents.
+ *    `writeStoredManifest` reconciles Targets in the same transaction and three
+ *    saves would be three reconciliations of three incomplete documents.
  * 4. **A refusal is the same three things it is on the settings screen.** The
  *    two surfaces write through the same command and meet the same refusals, so
  *    they render them through the same component rather than through two
@@ -78,14 +78,13 @@ function screen({
 /** Every control this build could render for the manifest, by its own name. */
 const CONTROLS = {
   installation: 'name="installation.name"',
-  clientId: 'name="github.clientId"',
   registry: 'name="supplyChain.registry.0"',
   // Not asked by any step, and the check that step 2 is a step rather than the
   // whole form: it is a key on the same document that onboarding never offers.
   frontend: 'name="build.zeroConfigFrontend"',
 } as const;
 
-describe('the four questions are questions this build can answer', () => {
+describe('the three questions are questions this build can answer', () => {
   test('every key onboarding names resolves in the schema', () => {
     // The permission this screen has and `installation.tsx` does not, paid for
     // mechanically. Deployment facts are being taken out of this schema as the
@@ -108,33 +107,32 @@ describe('each step asks its own question and nothing else', () => {
   test('the first asks what this installation is called', () => {
     const markup = screen({ step: 0 });
     expect(markup).toContain(CONTROLS.installation);
-    expect(markup).not.toContain(CONTROLS.clientId);
     expect(markup).not.toContain(CONTROLS.registry);
     expect(markup).not.toContain(CONTROLS.frontend);
   });
 
-  test('the second asks which GitHub App this installation speaks as', () => {
-    const markup = screen({ step: 1 });
-    expect(markup).toContain(CONTROLS.clientId);
-    expect(markup).not.toContain(CONTROLS.registry);
-    expect(markup).not.toContain(CONTROLS.frontend);
-  });
-
-  test('the third asks the cloud rather than the operator', () => {
+  test('the second asks the cloud rather than the operator', () => {
     // The settings screen's own discovery panel, mounted here rather than
     // reimplemented: its narrowing inputs are the fingerprint that this is the
     // real one and not a second ask that could answer differently.
-    const markup = screen({ step: 2 });
+    const markup = screen({ step: 1 });
     expect(markup).toContain('name="discovery.project"');
     expect(markup).toContain('name="discovery.kmsLocation"');
     expect(markup).not.toContain(CONTROLS.frontend);
   });
 
-  test('the fourth asks where artifacts are published', () => {
-    const markup = screen({ step: 3 });
+  test('the third asks where artifacts are published', () => {
+    const markup = screen({ step: 2 });
     expect(markup).toContain(CONTROLS.registry);
     expect(markup).not.toContain(CONTROLS.installation);
     expect(markup).not.toContain(CONTROLS.frontend);
+  });
+
+  test('GitHub is not a question: the App identity is created, not authored', () => {
+    // The manifest carries no App identity key at all — the identity lives in
+    // the `github_app` row, written by the manifest flow on the Repositories
+    // screen — so no step may ask for one.
+    expect(stepAsking('github.webBaseUrl')).toBe(-1);
   });
 
   test('what an operator confirms is what this installation already holds', () => {
@@ -159,17 +157,16 @@ describe('one write, at the end', () => {
     );
   });
 
-  test('a written document ends the wizard with the ceremony step two deferred', () => {
-    // Step two says the GitHub authorization needs this value stored first.
-    // This is that promise kept: `beginRepositoryAuthorization` reads the
-    // client id off the stored manifest, so the offer appears exactly when the
-    // document has landed and not before.
+  test('a written document ends the wizard with the GitHub ceremony deferred', () => {
+    // The manifest flow that creates the App renders its redirect URLs off the
+    // stored manifest, so the offer appears exactly when the document has
+    // landed and not before.
     const markup = screen({
       step: 0,
       outcome: { kind: 'saved', targets: ['primary'] },
     });
     expect(markup).toContain('This installation is configured.');
-    expect(markup).toContain('Authorize GitHub');
+    expect(markup).toContain('Connect GitHub');
     // And the questions are gone — a saved document is the end of this screen's
     // job whatever step the save was pressed from.
     expect(markup).not.toContain(CONTROLS.installation);
@@ -179,7 +176,7 @@ describe('one write, at the end', () => {
 describe('a refusal is the same three things it is on the settings screen', () => {
   test('a document this installation cannot take is a fact, not a field', () => {
     const markup = screen({
-      step: 3,
+      step: 2,
       outcome: {
         kind: 'refused',
         message: 'manifest Target primary uses cloudrun, but the stored Target',
@@ -206,17 +203,16 @@ describe('a refusal is the same three things it is on the settings screen', () =
     // control three steps back — the operator is told the manifest was refused
     // and shown nothing that says what to do. `finish` navigates on this.
     expect(stepAsking('installation.name')).toBe(0);
-    expect(stepAsking('github.clientId')).toBe(1);
     // By prefix: an issue names the value that is wrong, a step names the key it
     // asks for, and an array control's elements are neither of the other's.
-    expect(stepAsking('supplyChain.registry.0')).toBe(3);
+    expect(stepAsking('supplyChain.registry.0')).toBe(2);
     // And a value no step asks about is not forced onto one. Discovery writes
     // cloud facts this screen never offers a control for.
     expect(stepAsking('secretStore.endpoint')).toBe(-1);
   });
 });
 
-describe('the four questions are all visible while one is being answered', () => {
+describe('the three questions are all visible while one is being answered', () => {
   test('the rail names every step from the first step', () => {
     // The titles have existed since the day `ONBOARDING_ASKS` did and an
     // operator met each one only on arrival — so the step that reads the cloud,
@@ -226,12 +222,12 @@ describe('the four questions are all visible while one is being answered', () =>
     expect(markup).toContain('aria-label="Setup steps"');
   });
 
-  test('the progress sentence is still there, and there is no fifth screen', () => {
-    // `Step 1 of 4` is what the shell asserts against. The rail is beside it,
-    // not instead of it, and it adds no question: four asks, one write, and the
-    // write is still on the last of them.
-    expect(screen({ step: 0 })).toContain('Step 1 of 4');
-    expect(ONBOARDING_ASKS).toHaveLength(4);
+  test('the progress sentence is still there, and there is no fourth screen', () => {
+    // `Step 1 of 3` is what the shell asserts against. The rail is beside it,
+    // not instead of it, and it adds no question: three asks, one write, and
+    // the write is still on the last of them.
+    expect(screen({ step: 0 })).toContain('Step 1 of 3');
+    expect(ONBOARDING_ASKS).toHaveLength(3);
   });
 });
 
@@ -258,7 +254,7 @@ describe('an answer is refused where it is given', () => {
   });
 
   test('the step that asks refuses to advance, and says why', () => {
-    // Before this, an empty name walked through all four questions and the
+    // Before this, an empty name walked through all three questions and the
     // commit press threw the operator back here reading a sentence of dotted
     // schema paths.
     const markup = screen({ step: 0, document: nameless });
@@ -276,7 +272,7 @@ describe('an answer is refused where it is given', () => {
     // The discovery step is the one the wizard does not wrap in a form, because
     // the panel it mounts already is one. A `type="submit"` there is a button
     // outside any form, which is a button that does nothing.
-    const markup = screen({ step: 2 });
+    const markup = screen({ step: 1 });
     expect(control(markup, 'Continue')).toContain('type="button"');
     expect(control(screen({ step: 0 }), 'Continue')).toContain('type="submit"');
   });
@@ -287,7 +283,7 @@ describe('an answer is refused where it is given', () => {
     // own reason: its panel already submits, and a form inside a form is not a
     // thing a browser keeps.
     expect(screen({ step: 0 })).toContain('<form');
-    expect(screen({ step: 3 })).toContain('<form');
+    expect(screen({ step: 2 })).toContain('<form');
   });
 
   test('the backstop names the questions, not the schema paths', () => {
@@ -331,7 +327,7 @@ describe('an unconfigured installation is shown onboarding, not the product', ()
       state: 'unconfigured',
       manifest: UNCONFIGURED,
     });
-    expect(markup).toContain('Step 1 of 4');
+    expect(markup).toContain('Step 1 of 3');
     expect(markup).toContain(CONTROLS.installation);
   });
 
@@ -354,6 +350,6 @@ describe('an unconfigured installation is shown onboarding, not the product', ()
   test('a configured installation never sees it', () => {
     expect(
       signedIn({ state: 'configured', declarationDivergence: [] }),
-    ).not.toContain('Step 1 of 4');
+    ).not.toContain('Step 1 of 3');
   });
 });

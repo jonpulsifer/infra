@@ -128,7 +128,7 @@ export const startCreationDraft: Command<
             : {
                 fullName: repository.fullName,
                 cloneUrl: cloneUrlFor(
-                  context.manifest.github.oauthBaseUrl,
+                  context.manifest.github.webBaseUrl,
                   repository.fullName,
                 ),
               },

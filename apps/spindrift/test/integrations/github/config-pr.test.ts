@@ -56,7 +56,8 @@ const dockerfile: DetectionProposal = {
 function app(fake: FakeGitHub, customFetch?: typeof fetch): GitHubApp {
   return new GitHubApp({
     baseUrl: fake.baseUrl,
-    authorization: () => 'Bearer test-user-token',
+    authorization: () => 'Bearer test-installation-token',
+    appAuthorization: () => 'Bearer test-app-jwt',
     fetch: customFetch ?? fake.fetch,
   });
 }
@@ -352,12 +353,12 @@ describe('opening it against the repository API', () => {
     expect(second.opened.number).toBe(first.opened.number);
   });
 
-  test('presents the user authorization without exposing it to callers', async () => {
+  test('presents the installation authorization without exposing it to callers', async () => {
     const fake = new FakeGitHub();
     await open(fake);
 
     for (const request of fake.requests) {
-      expect(request.authorization).toBe('Bearer test-user-token');
+      expect(request.authorization).toBe('Bearer test-installation-token');
     }
   });
 });

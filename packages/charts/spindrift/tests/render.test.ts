@@ -534,8 +534,8 @@ describe('a chart-only install seeds its own relying party', () => {
     );
     expect(declared).toContain(installation.controlPlaneVessel ?? '');
     expect(declared).toContain(installation.homeVessel ?? '');
-    expect((seeded.github as { clientId?: string }).clientId).toBe(
-      'Iv1.918d699f36ee7afc',
+    expect((seeded.github as { webBaseUrl?: string }).webBaseUrl).toBe(
+      'https://github.com',
     );
     expect((seeded.secretStore as { adapter?: string }).adapter).toBe(
       'onepassword',

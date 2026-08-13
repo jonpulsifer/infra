@@ -1,0 +1,114 @@
+# A stored manifest as this build writes one: `09` after
+# `dropDeviceFlowIdentity` — the `github` block carries `webBaseUrl` in place
+# of the Device Flow pair (`clientId` is dropped outright, `oauthBaseUrl`
+# becomes the web origin), because the App identity now lives sealed in the
+# `github_app` row rather than in any authored document.
+#
+# **The newest file in this corpus, and the test asserts this build needs no
+# upgrade to read it.** That is the forcing function: change the manifest schema
+# in any way that stops accepting this document, and the assertion fails. The
+# fix is never to edit this file — it is to copy it to the next number, edit
+# *that* to the new shape, and teach `manifest-upgrade.ts` how to get from here
+# to there. Doing it the other way round is exactly how a schema change reaches
+# production able to discard a configured installation.
+#
+# `installation.name` differs from every declaration this suite mounts, for the
+# reason `01` gives.
+installation:
+  name: stored-with-github-app-identity
+  controlPlaneVessel: cluster
+  homeVessel: cloud
+
+controlPlane:
+  hostname: spindrift.example.test
+
+auth:
+  gateway: null
+
+dns:
+  zones:
+    - name: apps.example.test
+      reaches: [private]
+    - name: example.test
+      reaches: [public]
+
+sources:
+  buckets:
+    - example-source-bucket
+
+charts:
+  app: example/spindrift-app
+
+supplyChain:
+  registry: registry.example.test/artifacts
+  verifier: verifier.example.test
+  signer: gcpkms://projects/example-artifacts/locations/example-region/keyRings/keys/cryptoKeys/signer
+
+github:
+  webBaseUrl: https://git.example.test
+  apiBaseUrl: https://api.git.example.test
+  buildWorkflow: jonpulsifer/infra/.github/workflows/spindrift-build.yml@main
+
+build:
+  routes:
+    - name: hosted
+      adapter: github-actions
+  zeroConfigFrontend: registry.example.test/zero-config:pinned
+
+secretStore:
+  adapter: gcp-secret-manager
+  endpoint: https://secrets.example.test
+
+vessels:
+  - name: cluster
+    kind: cluster
+    location:
+      apiServer: https://cluster.example.test
+    reachableRegistries:
+      - registry.example.test
+    servedHosts:
+      - apps.example.test
+  - name: cloud
+    kind: gcp-project
+    location:
+      project: example-vessel
+    reachableRegistries:
+      - mirror.example.test
+    servedHosts:
+      - hosting.example.test
+      - run.example.test
+    # The shared services, on the one vessel that holds them. Only the vessel
+    # `installation.homeVessel` names may carry this block, and it must.
+    shared:
+      sourceBucket: example-source-bucket
+      artifactsProject: example-artifacts
+      secretStoreContainer: example-secrets
+
+targets:
+  - vessel: cluster
+    adapter: kubernetes
+    reaches: [none, private]
+    authReaches: [private]
+    connection:
+      namespace: apps
+      delivery:
+        flavour: flux-helmrelease
+        namespace: apps
+        sourceRef:
+          name: infra
+          namespace: flux-system
+      chartValues:
+        platform:
+          gateway:
+            name: cluster-gateway
+            namespace: gateway
+  - vessel: cloud
+    adapter: cloudrun
+    connection:
+      region: example-region
+      endpoint: https://run.example.test
+      serviceAccount: runtime@example-vessel.iam.gserviceaccount.com
+  - vessel: cloud
+    adapter: static
+    connection:
+      endpoint: https://hosting.example.test
