@@ -322,12 +322,14 @@ export function createAdapterRegistry(
       federation: options.manifest.cloud.federation,
       ...(options.fetch ? { fetch: options.fetch } : {}),
     }),
-    // The simpler of the two edge backends: it fetches its own artifact with the
-    // same bearer it deploys with, because a staged bundle is a plain GET. The
-    // federation is not a second bearer — it is the signature the one address
-    // that is *not* a plain GET takes, a supplied upload's `gs://` object.
+    // The other edge backend, with the same two identities as the one above:
+    // the platform is driven with the installation's own bearer, and the
+    // artifact is read out of the artifacts registry with the federated token.
+    // The federation is neither of those — it is the signature a supplied
+    // upload's `gs://` object takes.
     'cloudflare-pages': new PagesDeployAdapter({
       token: options.cloudflareToken ?? cloudflareToken(options.env ?? Bun.env),
+      artifactToken: cloud,
       federation: options.manifest.cloud.federation,
       ...(options.fetch ? { fetch: options.fetch } : {}),
     }),

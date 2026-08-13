@@ -89,6 +89,11 @@ import type {
 import { BundleError, type BundleFile, readBundle } from '../static/bundle.ts';
 import { fetchableStagedAddress, STAGED_SCHEME } from '../static/index.ts';
 import {
+  googleRegistryRef,
+  OciPullError,
+  pullFilesLayer,
+} from '../static/oci.ts';
+import {
   type AssetManifest,
   type Envelope,
   hashFiles,
@@ -107,6 +112,16 @@ export interface PagesAdapterOptions {
    * type here would push that difference into every call site.
    */
   readonly token: TokenProvider;
+  /**
+   * What authorizes reading the artifact, which is not the same far side.
+   *
+   * The bytes live in the installation's artifacts registry (§14), so this is
+   * the federated cloud token every other adapter already holds — the same
+   * split the Vercel backend makes, and for the same reason: it keeps a
+   * Cloudflare bearer from being sent to a registry and a cloud token from
+   * being sent to Cloudflare.
+   */
+  readonly artifactToken: TokenProvider;
   /**
    * How this installation signs for an object in its source depot, or `null`
    * where it configured none.
@@ -214,21 +229,19 @@ export class PagesDeployAdapter implements DeployAdapter {
       );
     }
 
-    // **ponytail:** a staged address only. This adapter fetches the bytes with
-    // its own identity, and that identity is an account credential for *this*
-    // platform — it authorizes nothing at a container registry, so a registry
-    // reference is an address this Target genuinely cannot read rather than one
-    // it has not got around to. The cloud static Target's OCI arm works because
-    // its federated token is also its registry token; there is no equivalent
-    // here until the build route can stage a `files` artifact somewhere this
-    // can GET, which is what `depot`-shaped addresses already are. Give it the
-    // registry arm when a credential-free pull path exists, not before.
-    //
-    // A depot object is one of those addresses: `gs://` is not a URL, but a
-    // signature turns it into one, and that is what a supplied upload's bytes
-    // are — the same predicate the other two files backends choose by.
+    // Same choice the other files backends make — literally, via the same
+    // predicate — with two identities doing the reading: a staged address is a
+    // supplied upload's own and is fetched as such (a `gs://` object is not a
+    // URL, but a signature turns it into one), and among registry references
+    // only one in the installation's Google-family artifacts registry is
+    // readable, with the federated token this adapter is handed for exactly
+    // that. The account credential is for this platform and authorizes nothing
+    // at a registry, which is why the registry arm is a second token rather
+    // than the deploy one reused.
     const staged = artifactAddress(desired.artifact);
-    const location = fetchableStagedAddress(staged);
+    const location =
+      fetchableStagedAddress(staged) ??
+      googleRegistryRef(desired.artifact.refs);
     if (location === null) {
       yield this.status('FAILED', { reason: 'ARTIFACT_UNAVAILABLE' });
       return {
@@ -508,15 +521,37 @@ export class PagesDeployAdapter implements DeployAdapter {
         }`,
       );
     }
-    const fetched = await http.bytes(url);
-    if (!fetched.ok) {
-      // §6 blames the **platform** for an artifact that cannot be fetched, and
-      // this is exactly that: the build is green and the bytes are not there.
+    if (/^https?:\/\//.test(url)) {
+      const fetched = await http.bytes(url);
+      if (!fetched.ok) {
+        // §6 blames the **platform** for an artifact that cannot be fetched,
+        // and this is exactly that: the build is green and the bytes are not
+        // there.
+        throw new ArtifactUnavailable(
+          `the artifact at ${location} could not be fetched: ${fetched.message}`,
+        );
+      }
+      return readBundle(fetched.value);
+    }
+    // Anything else is a registry reference — the shape every built artifact's
+    // ref has — and the bytes are the artifact's one layer, read with the
+    // federated identity rather than the account credential.
+    let layer: Uint8Array<ArrayBuffer>;
+    try {
+      layer = await pullFilesLayer({
+        ref: location,
+        token: this.options.artifactToken,
+        ...(this.options.fetch === undefined
+          ? {}
+          : { fetch: this.options.fetch }),
+      });
+    } catch (cause) {
+      if (!(cause instanceof OciPullError)) throw cause;
       throw new ArtifactUnavailable(
-        `the artifact at ${location} could not be fetched: ${fetched.message}`,
+        `the artifact at ${location} could not be fetched: ${cause.message}`,
       );
     }
-    return readBundle(fetched.value);
+    return readBundle(layer);
   }
 
   /**
@@ -840,9 +875,10 @@ class ArtifactUnavailable extends Error {
  *
  * The three cases the other files backends distinguish, worded for this one: no
  * address at all, a bundle staged somewhere nothing outside one process
- * reaches, and an artifact addressed only as a registry reference. Telling the
- * middle one apart is the point — it used to take the registry sentence, which
- * sends an operator to a credential problem over a bundle sitting on a disk.
+ * reaches, and a built artifact homed only on a registry this identity cannot
+ * read. Telling the middle one apart is the point — it used to take the
+ * registry sentence, which sends an operator to a credential problem over a
+ * bundle sitting on a disk.
  */
 function unfetchableArtifact(
   artifact: Artifact,
@@ -854,7 +890,8 @@ function unfetchableArtifact(
   if (staged !== null && STAGED_SCHEME.test(staged)) {
     return `the artifact is staged at ${staged}, which names this installation's own disk rather than an address Cloudflare Pages can fetch`;
   }
-  return `Cloudflare Pages fetches the bytes itself, and this artifact is addressed as ${staged} — a registry reference its account credential cannot read`;
+  const hosts = artifact.refs.map((ref) => ref.split('/')[0]).join(', ');
+  return `Cloudflare Pages is fed the bytes, and none of the artifact's homes (${hosts}) is a registry this installation's identity can read`;
 }
 
 /**

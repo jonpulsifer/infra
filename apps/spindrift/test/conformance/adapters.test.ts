@@ -195,7 +195,11 @@ deployAdapterSuite(
         ]),
       },
     });
-    return new PagesDeployAdapter({ token: api.token, fetch: api.fetch });
+    return new PagesDeployAdapter({
+      token: api.token,
+      artifactToken: api.token,
+      fetch: api.fetch,
+    });
   },
   'image',
 );
