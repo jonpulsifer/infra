@@ -73,6 +73,13 @@ import {
   REACH_NOTE,
   REACHES,
 } from './new/summary.tsx';
+// PROTOTYPE — remove this import with `prototype-new-build.tsx`.
+import {
+  type PrototypeNewBuild,
+  VariantARebuild,
+  VariantBReleasesBand,
+  VariantCComponentAction,
+} from './prototype-new-build.tsx';
 import { Releases } from './releases.tsx';
 
 /**
@@ -294,8 +301,11 @@ export function Workspace({
   onFollowExecution,
   executionLines,
   tab = 'overview',
+  prototype,
 }: {
   view: WorkspaceView;
+  /** PROTOTYPE — remove with `prototype-new-build.tsx`. */
+  prototype?: PrototypeNewBuild;
   onDeploy?: () => void;
   /**
    * Ask for a Build outright.
@@ -453,7 +463,15 @@ export function Workspace({
                 </a>
               </Button>
             )}
-            {onRebuild ? (
+            {/* PROTOTYPE slot A — see `prototype-new-build.tsx`. */}
+            {prototype?.variant === 'A' ? (
+              <VariantARebuild
+                prototype={prototype}
+                component={selected?.name ?? view.app}
+                deploying={deploying}
+                {...(onRebuild ? { onRebuild } : {})}
+              />
+            ) : onRebuild ? (
               <Button
                 variant="outline"
                 onClick={onRebuild}
@@ -524,6 +542,7 @@ export function Workspace({
           <div className="grid gap-4 md:grid-cols-2">
             <Components
               components={view.components}
+              {...(prototype ? { prototype } : {})}
               {...(selected === undefined ? {} : { selectedId: selected.id })}
               {...(onSetReach === undefined ? {} : { onSetReach })}
               {...(onSelectComponent === undefined
@@ -592,6 +611,14 @@ export function Workspace({
             />
           </div>
         </>
+      ) : null}
+
+      {/* PROTOTYPE slot B — see `prototype-new-build.tsx`. */}
+      {current === 'releases' && prototype?.variant === 'B' ? (
+        <VariantBReleasesBand
+          prototype={prototype}
+          component={selected?.name ?? view.app}
+        />
       ) : null}
 
       {current === 'releases' ? (
@@ -1165,8 +1192,11 @@ function Components({
   onMoveComponent,
   onUnplaceComponent,
   targets = [],
+  prototype,
 }: {
   components: readonly ComponentView[];
+  /** PROTOTYPE — remove with `prototype-new-build.tsx`. */
+  prototype?: PrototypeNewBuild;
   /** The row this screen's runtime, config and placement are about. */
   selectedId?: string;
   onSetReach?: SetReach;
@@ -1258,8 +1288,15 @@ function Components({
                   ? {}
                   : { onSelect: () => onSelectComponent(component.name) })}
                 trailing={
-                  onSetReach || moves ? (
-                    <div className="flex shrink-0 items-center gap-2">
+                  onSetReach || moves || prototype?.variant === 'C' ? (
+                    <div className="relative flex shrink-0 items-center gap-2">
+                      {/* PROTOTYPE slot C — see `prototype-new-build.tsx`. */}
+                      {prototype?.variant === 'C' ? (
+                        <VariantCComponentAction
+                          prototype={prototype}
+                          component={component}
+                        />
+                      ) : null}
                       {onSetReach ? (
                         <Button
                           variant="outline"
