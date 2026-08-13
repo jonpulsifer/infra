@@ -53,7 +53,8 @@ async function frontendScript(): Promise<string> {
 type ArmRun = {
   /** Exit status of the shipped step. */
   code: number;
-  stderr: string;
+  /** Everything the step said, on either stream. */
+  output: string;
   /** Every argument the step handed `docker`, one per element. */
   dockerArgv: string[];
   /** The generated railpack config, or null when the step wrote none. */
@@ -103,7 +104,9 @@ async function runArm(
       stderr: 'pipe',
     });
     const code = await proc.exited;
-    const stderr = await new Response(proc.stderr).text();
+    const output =
+      (await new Response(proc.stdout).text()) +
+      (await new Response(proc.stderr).text());
 
     const argv = await readFile(argvPath, 'utf8').catch(() => '');
     const configPath = join(workspace, 'railpack-plan', 'railpack-config.json');
@@ -113,7 +116,7 @@ async function runArm(
 
     return {
       code,
-      stderr,
+      output,
       // A trailing newline from `printf '%s\n'`, not an empty argument.
       dockerArgv: argv === '' ? [] : argv.replace(/\n$/, '').split('\n'),
       config,
@@ -287,7 +290,10 @@ describe('the zero-config arm of “Choose the frontend”', () => {
     // else. Red build, named reason.
     const { run } = await declared(RAILPACK("echo it's fine"));
     expect(run.code).not.toBe(0);
-    expect(run.stderr).toContain('single quote');
+    // An `::error::` annotation, on stdout, which is where Actions reads them.
+    expect(run.output).toContain(
+      '::error::spindrift.yaml: build.command cannot contain a single quote',
+    );
     expect(run.dockerArgv).toEqual([]);
   });
 });

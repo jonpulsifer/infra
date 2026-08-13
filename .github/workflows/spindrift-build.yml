@@ -364,7 +364,11 @@ jobs:
                 # as a build that ran something else.
                 # ponytail: rejects rather than escapes; emit `'\''` for the
                 # quote if a real command ever needs one.
-                printf '::error::spindrift.yaml: build.command cannot contain a single quote\n' >&2
+                #
+                # On stdout, not stderr: Actions reads workflow commands from a
+                # step's stdout, and an annotation is the only part of this a
+                # reader sees without opening the log.
+                printf '::error::spindrift.yaml: build.command cannot contain a single quote\n'
                 exit 1
                 ;;
             esac
