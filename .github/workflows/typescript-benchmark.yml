@@ -15,17 +15,29 @@ on:
   workflow_dispatch:
     inputs:
       target:
-        description: 'Runner target to test (all runs every label below in a parallel matrix)'
+        description: 'Runner target to test. all = every label in a parallel matrix; silicon = one hosted-shaped skiff per cloud host, against ubuntu-latest'
         type: choice
         options:
           - all
+          - silicon
           - infra-offsite
           - infra-folly
           - skiff-ubuntu
-          - skiff-ubuntu-xl
-          - skiff-ubuntu-bench
+          - skiff-tender
+          - skiff-dinghy
+          - skiff-launch
           - ubuntu-latest
         default: all
+      waves:
+        description: 'Identical jobs fired at the chosen label at once. 1 measures a runner; >1 measures the pool — a hosted label queues past its concurrency cap while the fleet answers from warm slots, which is the whole argument for keeping skiffs booted'
+        type: choice
+        options:
+          - '1'
+          - '2'
+          - '4'
+          - '8'
+          - '12'
+        default: '1'
       caches:
         description: 'best = each label uses the fastest cache it has; none = no dependency or build cache anywhere (isolates the runner from the network); gha = actions/cache on every label, exactly as a hosted runner uses it — on a skiff whose host runs the local cache service, this measures that service'
         type: choice
@@ -44,14 +56,30 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       runners: ${{ steps.set-runners.outputs.runners }}
+      waves: ${{ steps.set-runners.outputs.waves }}
     steps:
       - id: set-runners
         run: |
-          if [ "${{ inputs.target }}" = "all" ]; then
-            echo 'runners=["infra-offsite", "infra-folly", "skiff-ubuntu", "ubuntu-latest"]' >> "$GITHUB_OUTPUT"
-          else
-            echo 'runners=["${{ inputs.target }}"]' >> "$GITHUB_OUTPUT"
-          fi
+          case "${{ inputs.target }}" in
+            all)
+              echo 'runners=["infra-offsite", "infra-folly", "skiff-ubuntu", "ubuntu-latest"]' >> "$GITHUB_OUTPUT"
+              ;;
+            # One hosted-shaped skiff per cloud host. Each of these labels is a
+            # 4 vCPU / 16 GiB class -- a public-repo ubuntu-latest runner's exact
+            # spec -- served by exactly one machine, so the row difference is the
+            # silicon and nothing else: tender is Granite Rapids at 3.9 GHz,
+            # dinghy Sapphire Rapids at 3.0, launch whatever N2 the zone hands out.
+            silicon)
+              echo 'runners=["skiff-tender", "skiff-dinghy", "skiff-launch", "ubuntu-latest"]' >> "$GITHUB_OUTPUT"
+              ;;
+            *)
+              echo 'runners=["${{ inputs.target }}"]' >> "$GITHUB_OUTPUT"
+              ;;
+          esac
+          # A JSON array [1..waves]. The matrix multiplies it against the label
+          # list, so `waves: 8` on `skiff-ubuntu` fires eight identical jobs at
+          # the fleet's shared pool at once.
+          seq 1 "${{ inputs.waves }}" | jq -cs '.' | sed 's/^/waves=/' >> "$GITHUB_OUTPUT"
 
   # The cheapest job that can exist, on every label, so the Actions timings
   # separate what a runner costs to acquire from what the workload costs to
@@ -92,7 +120,8 @@ jobs:
       fail-fast: false
       matrix:
         runner: ${{ fromJson(needs.configure.outputs.runners) }}
-    name: benchmark (${{ matrix.runner }})
+        wave: ${{ fromJson(needs.configure.outputs.waves) }}
+    name: benchmark (${{ matrix.runner }}${{ inputs.waves != '1' && format(' wave {0}', matrix.wave) || '' }})
     runs-on: ${{ matrix.runner }}
     permissions:
       contents: read
