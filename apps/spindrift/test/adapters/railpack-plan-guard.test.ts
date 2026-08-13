@@ -44,7 +44,7 @@ async function step(name: string): Promise<WorkflowStep> {
 
 type Plan = {
   deploy: { startCommand?: string };
-  steps: { name: string; commands?: { cmd: string }[] }[];
+  steps: { name: string; commands?: { cmd: string; customName?: string }[] }[];
 };
 
 /** The `run:` script of the guard step, straight out of the shipped file. */
@@ -140,6 +140,18 @@ describe('“Make the plan check its own start command”', () => {
     const plan = viewCounterPlan();
     plan.steps = plan.steps.filter((s) => s.name !== 'build');
     expect((await guard(plan)).steps.map((s) => s.name)).toEqual(['install']);
+  });
+
+  test('the failing layer names the defect rather than showing a bare test', async () => {
+    // BuildKit prints `customName` as the layer, and this one only ever appears
+    // when it has just failed. `test -x ./out: exit code 1` on its own leaves
+    // the operator to work out what `out` was supposed to be.
+    const build = (await guard(viewCounterPlan())).steps.find(
+      (s) => s.name === 'build',
+    );
+    expect(build?.commands?.at(-1)?.customName).toBe(
+      'check the build produced an executable ./out',
+    );
   });
 
   test('the guard runs on the arm that writes the plan it reads', async () => {

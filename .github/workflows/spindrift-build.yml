@@ -366,11 +366,17 @@ jobs:
           PLAN: ${{ steps.frontend.outputs.plan }}
         run: |
           set -euo pipefail
+          # `customName` is what BuildKit prints for the layer, so the red build
+          # names the defect rather than making the operator infer it from a
+          # bare `test -x` and an exit code.
           jq '
             (.deploy.startCommand // "") as $start
             | if ($start | test("^\\./\\S+$"))
               then (.steps[] | select(.name == "build") | .commands)
-                     += [{cmd: "test -x \($start)"}]
+                     += [{
+                       cmd: "test -x \($start)",
+                       customName: "check the build produced an executable \($start)"
+                     }]
               else . end
           ' "$PLAN" > "${PLAN}.checked"
           mv "${PLAN}.checked" "$PLAN"
