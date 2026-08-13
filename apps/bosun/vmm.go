@@ -1,0 +1,238 @@
+package main
+
+import (
+	"fmt"
+	"os"
+	"path/filepath"
+	"syscall"
+)
+
+// This file is the VMM side of a skiff: where its files and sockets live, the
+// cloud-hypervisor/virtiofsd/passt argv bosun builds from a hull, and the
+// workspace disk it reserves. The hull contract those translate is in hull.go.
+
+// maxSockPathLen is Linux's sockaddr_un.sun_path capacity minus its NUL
+// terminator (108 bytes total). A longer path truncates silently and the
+// VMM that tries to connect never starts.
+const maxSockPathLen = 107
+
+func sockPath(dir, name string) (string, error) {
+	p := filepath.Join(dir, name)
+	if len(p) > maxSockPathLen {
+		return "", fmt.Errorf("socket path exceeds %d bytes (AF_UNIX limit): %s", maxSockPathLen, p)
+	}
+	return p, nil
+}
+
+// skiffPaths are every filesystem and socket path bosun uses for one skiff,
+// computed once so the cloud-hypervisor argv and the virtiofsd/passt
+// processes it depends on always agree, and so the SUN_LEN check happens in
+// exactly one place.
+type skiffPaths struct {
+	dir         string   // runtimeDir/<id> — the credential share and bosun's entire state for this skiff
+	workspace   string   // workspaceDir/<id>.img — empty unless the class sizes a scratch disk
+	credSock    string   // runtimeDir/<id>.fs
+	diagDir     string   // logDir/<id>.diag — the guest's runner _diag, written through to the host
+	diagSock    string   // runtimeDir/<id>.diag.fs
+	netSock     string   // runtimeDir/<id>.net
+	apiSock     string   // runtimeDir/<id>.api
+	logFile     string   // logDir/<id>.log — the guest's serial console, via cloud-hypervisor's --serial
+	deviceSocks []string // parallel to the hull manifest's Devices
+}
+
+// sockets is every vhost-user/virtiofs socket bosun creates for one skiff.
+// Cleanup iterates this rather than naming each field, so a socket added to
+// skiffPaths cannot be forgotten on the teardown path.
+func (p skiffPaths) sockets() []string {
+	socks := []string{p.credSock, p.diagSock, p.netSock, p.apiSock}
+	for _, sock := range p.deviceSocks {
+		if sock != "" {
+			socks = append(socks, sock)
+		}
+	}
+	return socks
+}
+
+func resolvePaths(runtimeDir, logDir, id string, devices []hullDevice) (skiffPaths, error) {
+	var p skiffPaths
+	var err error
+	p.dir = filepath.Join(runtimeDir, id)
+	p.logFile = filepath.Join(logDir, id+".log")
+	// Under logDir, not runtimeDir: this is the one thing about a skiff that
+	// must outlive it, and runtimeDir is tmpfs that retire empties anyway.
+	p.diagDir = filepath.Join(logDir, id+".diag")
+	if p.credSock, err = sockPath(runtimeDir, id+".fs"); err != nil {
+		return skiffPaths{}, err
+	}
+	if p.diagSock, err = sockPath(runtimeDir, id+".diag.fs"); err != nil {
+		return skiffPaths{}, err
+	}
+	if p.netSock, err = sockPath(runtimeDir, id+".net"); err != nil {
+		return skiffPaths{}, err
+	}
+	if p.apiSock, err = sockPath(runtimeDir, id+".api"); err != nil {
+		return skiffPaths{}, err
+	}
+	// Parallel to devices; a disk needs no helper daemon, so its slot stays
+	// empty.
+	p.deviceSocks = make([]string, len(devices))
+	for i, dev := range devices {
+		if dev.Share == nil {
+			continue
+		}
+		if p.deviceSocks[i], err = sockPath(runtimeDir, id+"."+dev.Share.Tag+".fs"); err != nil {
+			return skiffPaths{}, err
+		}
+	}
+	return p, nil
+}
+
+// chArgs builds cloud-hypervisor's argv for one skiff. Two shares are
+// injected unconditionally ahead of any hull-declared devices — the
+// credential (tag "bosun", read-only in-guest) and the diagnostic drop box
+// (tag "bosun-diag", the only writable path a guest has). Both tags are fixed
+// by contract with the guest, and both are present even when the hull
+// declares no devices at all.
+//
+// A workspace disk, when the class sizes one, goes *after* every hull device,
+// so the hull's own disks keep the indices it built around. It carries no
+// filesystem: what a workspace holds is the hull's business, the same way its
+// rootfs is, and bosun never learns what was put there.
+//
+// build marks a skiff spawned for a Spindrift build request rather than a
+// GitHub runner: the guest finds request.json instead of a jitconfig in the
+// same "bosun" share, and bosun.mode=build on the cmdline is what tells it
+// which one to expect.
+//
+// image_type=raw is not optional and not cosmetic. cloud-hypervisor 52 refuses
+// sector-0 writes on a disk whose type it had to auto-detect -- it logs
+// "Autodetected raw image type. Disabling sector 0 writes", then answers the
+// guest's first write with ReadOnly. The guest sees an I/O error at sector 0,
+// mkfs dies, and the mount that follows fails on a device that looks broken
+// rather than protected. Measured on riptide 2026-08-08: every workspace disk
+// since it was introduced had been silently unusable for exactly this reason,
+// so a hull's disks are declared raw because the hull contract says a disk is a
+// raw file the hull ships. A hull wanting qcow2 wants a manifest field, and a
+// failing test to go with it.
+// hostServices are the host-local endpoints a skiff may be told about on its
+// cmdline. A zero value means this host runs none of them and the guest sees
+// no token at all, which is what makes them optional to the hull.
+type hostServices struct {
+	cacheURL    string
+	buildkitURL string
+}
+
+func chArgs(h *hull, class Class, id string, p skiffPaths, svc hostServices, build bool) []string {
+	args := []string{
+		"--kernel", filepath.Join(h.dir, h.manifest.Kernel),
+		"--initramfs", filepath.Join(h.dir, h.manifest.Initrd),
+		"--cpus", fmt.Sprintf("boot=%d", class.VCPUs),
+		"--memory", fmt.Sprintf("size=%s,shared=on", class.Memory),
+		"--fs", fmt.Sprintf("tag=bosun,socket=%s", p.credSock),
+		"--fs", fmt.Sprintf("tag=bosun-diag,socket=%s", p.diagSock),
+	}
+	disks := 0
+	for i, dev := range h.manifest.Devices {
+		switch {
+		case dev.Share != nil:
+			args = append(args, "--fs", fmt.Sprintf("tag=%s,socket=%s", dev.Share.Tag, p.deviceSocks[i]))
+		case dev.Disk != nil:
+			ro := "off"
+			if dev.Disk.RO {
+				ro = "on"
+			}
+			args = append(args, "--disk", fmt.Sprintf("path=%s,readonly=%s,image_type=raw", filepath.Join(h.dir, dev.Disk.Path), ro))
+			disks++
+		}
+	}
+	cmdline := h.manifest.Cmdline
+	if p.workspace != "" {
+		args = append(args, "--disk", fmt.Sprintf("path=%s,readonly=off,image_type=raw", p.workspace))
+		cmdline += " bosun.workspace=" + guestDiskName(disks)
+	}
+	// Locations an admin connected, not machinery bosun owns: the hull decides
+	// whether and how to consume them, like every other cmdline fact.
+	if svc.cacheURL != "" {
+		cmdline += " bosun.cache=" + svc.cacheURL
+	}
+	if svc.buildkitURL != "" {
+		cmdline += " bosun.buildkit=" + svc.buildkitURL
+	}
+	if build {
+		cmdline += " bosun.mode=build"
+	}
+	args = append(args,
+		"--net", fmt.Sprintf("vhost_user=on,socket=%s", p.netSock),
+		"--api-socket", p.apiSock,
+		"--console", "off",
+		"--serial", fmt.Sprintf("file=%s", p.logFile),
+		"--cmdline", fmt.Sprintf("%s bosun.skiff=%s bosun.hull=sha256:%s", cmdline, id, h.digest),
+	)
+	return args
+}
+
+// ensureWorkspace reserves one skiff's scratch disk. Reserved rather than
+// sparse on purpose: taking the workspace off the class's memory is the whole
+// point, and a sparse file would move the overcommit onto the host filesystem
+// instead of removing it. A pool that cannot fit fails a spawn, which is
+// visible, rather than a build mid-run, which is not.
+//
+// keep leaves an image the right size exactly as it is, which is how a
+// persisting class hands the last skiff's caches to the next one. bosun still
+// learns nothing about what is on it — the guest decides whether what it finds
+// is usable, the same seam that lets the rootfs be a squashfs. An image of the
+// wrong size is recreated regardless: a class whose `workspace` changed cannot
+// keep a filesystem sized for the old figure, and growing one in place would
+// hand the guest a disk its superblock disagrees with.
+func ensureWorkspace(path, size string, keep bool) error {
+	n, err := parseSize(size)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return err
+	}
+	if keep {
+		if info, err := os.Stat(path); err == nil && info.Size() == n {
+			return nil
+		}
+	}
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR|os.O_TRUNC, 0o600)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	return syscall.Fallocate(int(f.Fd()), 0, 0, n)
+}
+
+// virtiofsdArgs builds one virtiofsd instance's argv, shared by the
+// credential share and every hull-declared device share.
+func virtiofsdArgs(sock, sharedDir string, ro bool) []string {
+	args := []string{
+		"--socket-path=" + sock,
+		"--shared-dir=" + sharedDir,
+		"--sandbox", "namespace", // unprivileged; --sandbox chroot requires root
+		"--cache", "auto",
+	}
+	if ro {
+		args = append(args, "--readonly")
+	}
+	return args
+}
+
+// passtArgs builds one skiff's network backend. --foreground keeps passt as
+// bosun's own child so Kill() reaches it, and --one-off makes it quit when
+// its VMM disconnects instead of waiting — and spinning — for a second
+// client that a one-job skiff will never send.
+func passtArgs(sock string) []string {
+	return []string{
+		"--vhost-user",
+		"--foreground",
+		"--one-off",
+		"-s", sock,
+		"--map-host-loopback", "none",
+		"--map-guest-addr", "none",
+		"-4",
+		"-D", "1.1.1.1",
+	}
+}

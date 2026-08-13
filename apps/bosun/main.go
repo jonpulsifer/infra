@@ -7,8 +7,8 @@
 // job was queued. There is no webhook, no queue listener, and no inbound
 // connectivity — bosun boots the configured warm count per class and
 // replaces each skiff after it halts. See pool.go for the mint/boot, poll,
-// and recycle halves of that loop; hull.go for how a hull manifest becomes
-// cloud-hypervisor argv.
+// and recycle halves of that loop; hull.go for the contract a hull declares,
+// and vmm.go for how that becomes cloud-hypervisor argv.
 package main
 
 import (
