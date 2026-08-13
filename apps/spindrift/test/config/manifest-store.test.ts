@@ -56,7 +56,12 @@ const connectedManifest = {
     {
       name: 'cloud',
       kind: 'gcp-project',
-      location: { project: 'example-vessel' },
+      // With the optional network, so the round-trip below proves the strict
+      // location schema accepts one and the store carries it onto the row.
+      location: {
+        project: 'example-vessel',
+        network: { name: 'example-network', region: 'example-region' },
+      },
       // Carried from the fixture rather than restated: the home vessel is the
       // one that must declare these, and which vessel that is comes from the
       // fixture's own `installation.homeVessel`.
@@ -217,7 +222,11 @@ describe('the stored installation manifest', () => {
       {
         name: 'cloud',
         kind: 'gcp-project',
-        location: { kind: 'gcp-project', project: 'example-vessel' },
+        location: {
+          kind: 'gcp-project',
+          project: 'example-vessel',
+          network: { name: 'example-network', region: 'example-region' },
+        },
       },
       {
         name: 'cluster',

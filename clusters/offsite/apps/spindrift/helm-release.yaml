@@ -345,6 +345,16 @@ spec:
           kind: gcp-project
           location:
             project: bluenose
+            # The consumer side of a cloud Datastore's reachability: the
+            # vessel network the PSC service connection policies draw
+            # endpoints from, and the region they are in. Hand-carried from
+            # `tofu output vessel_network_block` in the root below, the same
+            # route supplyChain travels from trusted-builds. Absent would
+            # also be valid — it would say this vessel cannot host a
+            # Datastore.
+            network:
+              name: spindrift-vessel
+              region: northamerica-northeast1
           # The root that declares this project. It is what gives a generated
           # remediation somewhere to land: the stanza names
           # `<root>/services.tf` or `<root>/iam.tf` rather than a directory

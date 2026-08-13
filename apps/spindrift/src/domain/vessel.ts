@@ -329,6 +329,34 @@ export interface GcpProjectLocation {
   kind: 'gcp-project';
   /** The project every surface on this vessel deploys into (§14). */
   project: string;
+  /**
+   * The network a Datastore on this vessel is reached over, when it has one.
+   *
+   * Absent is valid and is not an unmet prerequisite: a project serving only
+   * Cloud Run and Firebase Hosting needs no network at all — what absence
+   * means is that this vessel cannot host a Datastore, which is a capability
+   * (§20: "Capabilities are things a Target may lack, shown and explained").
+   *
+   * Seeded from the installation manifest like every other boundary fact
+   * (§20), never probed: which network a datastore belongs on is a choice the
+   * operator makes in Terraform, and a probe would guess it.
+   */
+  network?: GcpProjectNetwork;
+}
+
+/**
+ * The consumer side of a cloud Datastore's reachability, as two facts.
+ *
+ * **No subnet, deliberately.** The service connection policies Terraform
+ * creates name their subnets, and the producer draws endpoints from them;
+ * a subnet here would be a second place to state the same fact and the only
+ * place it could be wrong.
+ */
+export interface GcpProjectNetwork {
+  /** The consumer network a PSC endpoint is created in. */
+  name: string;
+  /** Where the service connection policies are, so where an instance can go. */
+  region: string;
 }
 
 export interface VercelTeamLocation {

@@ -567,7 +567,9 @@ describe('the cloud adapter', () => {
     };
 
     // The sentence is the deliverable: an operator reading it learns that the
-    // gap is the vessel's network, not that "cloud datastores do not work".
+    // gap is an unwritten provisioning path, not that "cloud datastores do
+    // not work" — the vessel's network fact exists, this adapter's verbs
+    // against Cloud SQL and Memorystore do not.
     await expect(
       adapter.provision(target, {
         name: 'orders',

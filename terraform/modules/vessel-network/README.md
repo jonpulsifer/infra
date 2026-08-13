@@ -1,13 +1,13 @@
 # vessel-network
 
-A vessel's private network boundary: VPC, subnet, and a Private Service
-Access connection for Cloud SQL and Memorystore. Optional per vessel — a
-vessel serving only Cloud Run and Firebase Hosting needs none of this.
+A vessel's private network boundary: VPC, subnet, and Private Service
+Connect — two service connection policies (Cloud SQL, Memorystore for
+Valkey) that authorize each producer to create its endpoint in the vessel
+subnet. Optional per vessel — a vessel serving only Cloud Run and Firebase
+Hosting needs none of this.
 
-The caller must pass `google.quota` as a provider aliased to the vessel with
-`user_project_override` and `billing_project` set, or Service Networking
-charges its API request to the project owning the impersonated service
-account.
+The outputs are the two facts the installation manifest's
+`location.network` block carries for the vessel (§20's hand-copy route).
 
 <!-- BEGIN_TF_DOCS -->
 ## Requirements
@@ -22,7 +22,6 @@ account.
 | Name | Version |
 | ---- | ------- |
 | <a name="provider_google"></a> [google](#provider\_google) | >= 7.0.0 |
-| <a name="provider_google.quota"></a> [google.quota](#provider\_google.quota) | >= 7.0.0 |
 
 ## Modules
 
@@ -32,10 +31,10 @@ No modules.
 
 | Name | Type |
 | ---- | ---- |
-| [google_compute_global_address.private_services](https://registry.terraform.io/providers/hashicorp/google/latest/docs/resources/compute_global_address) | resource |
 | [google_compute_network.vessel](https://registry.terraform.io/providers/hashicorp/google/latest/docs/resources/compute_network) | resource |
 | [google_compute_subnetwork.vessel](https://registry.terraform.io/providers/hashicorp/google/latest/docs/resources/compute_subnetwork) | resource |
-| [google_service_networking_connection.private_services](https://registry.terraform.io/providers/hashicorp/google/latest/docs/resources/service_networking_connection) | resource |
+| [google_network_connectivity_service_connection_policy.cloudsql](https://registry.terraform.io/providers/hashicorp/google/latest/docs/resources/network_connectivity_service_connection_policy) | resource |
+| [google_network_connectivity_service_connection_policy.memorystore](https://registry.terraform.io/providers/hashicorp/google/latest/docs/resources/network_connectivity_service_connection_policy) | resource |
 
 ## Inputs
 
@@ -48,5 +47,8 @@ No modules.
 
 ## Outputs
 
-No outputs.
+| Name | Description |
+| ---- | ----------- |
+| <a name="output_network_name"></a> [network\_name](#output\_network\_name) | The consumer network a PSC endpoint is created in — the vessel's location.network.name in the installation manifest. |
+| <a name="output_region"></a> [region](#output\_region) | Where the service connection policies and subnet are — the vessel's location.network.region in the installation manifest. |
 <!-- END_TF_DOCS -->
