@@ -209,6 +209,43 @@ describe('a Component added to an App that already has one', () => {
     expect(web?.placedTargetId).toBe(app.target.id);
   });
 
+  test('states its own entrypoint, because the sibling it joins shares its image', async () => {
+    const ctx = context();
+    const app = await appWithOneComponent(ctx);
+
+    // An App is one scope (`apps.sourceRepoSubpath`), so this Component builds
+    // the same tree its sibling does and the entrypoint is the whole of what
+    // makes it a different workload. Said at creation rather than by a second
+    // `setComponentCommand` afterwards: between the two acts the row would be a
+    // duplicate of its sibling, and a Deploy pressed in that window places one.
+    const added = await createComponent(
+      createComponentInput.parse({
+        appId: app.appId,
+        name: 'nightly',
+        kind: 'job',
+        command: ['node', 'job.js'],
+      }),
+      ctx,
+    );
+    expect(added.ok).toBe(true);
+    if (!added.ok) return;
+
+    const rows = await ctx.db
+      .select()
+      .from(components)
+      .where(eq(components.appId, app.appId));
+
+    const nightly = rows.find((row) => row.id === added.value.componentId);
+    expect(nightly?.command).toEqual(['node', 'job.js']);
+    // Absent means the image's own, and `args` was never mentioned — the two
+    // are independent here, unlike the edit, which takes both or neither.
+    expect(nightly?.args).toBeNull();
+
+    // And the sibling that said nothing still says nothing: an entrypoint on
+    // one Component is not an entrypoint on the App.
+    expect(rows.find((row) => row.id === app.webId)?.command).toBeNull();
+  });
+
   test('its first Deploy names a Target, builds its own artifact, and places it', async () => {
     const ctx = context();
     const app = await appWithOneComponent(ctx);

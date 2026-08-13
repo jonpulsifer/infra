@@ -114,7 +114,7 @@ export type SetReach = (change: {
  * Adding one Component to the App this screen already lists (§2), as the screen
  * above needs it answered.
  *
- * **Three fields, because the command takes three decisions.** `reach` and
+ * **Four fields, because the command takes four decisions.** `reach` and
  * `auth` have command-side defaults (`src/commands/components/create.ts:64-65`)
  * and `expose` is what a kind means rather than a choice (`create.ts:154-163`),
  * so a form offering any of them would be a second place for a default to be
@@ -125,6 +125,12 @@ export type SetReach = (change: {
  * (`create.ts:68-98`), so a schedule sent on a service is a validation failure
  * rather than a field nobody reads.
  *
+ * `command` travels for every kind, and is the field that makes a second
+ * Component worth adding at all: an App is one scope, so a sibling builds the
+ * same image, and the entrypoint is the whole of what makes it a different
+ * workload. Absent is the image's own, which is what every Component that says
+ * nothing already means.
+ *
  * No `targetId`, deliberately. `createComponent` does not write a placement
  * (`create.ts:123-138`) and `deployApp` fills it only while it is NULL
  * (`src/commands/apps/deploy.ts:529-534`) — a form that placed as well would
@@ -134,6 +140,7 @@ export type CreateComponent = (create: {
   readonly name: string;
   readonly kind: ComponentKind;
   readonly schedule?: string;
+  readonly command?: string[];
 }) => Promise<
   { readonly ok: true } | { readonly ok: false; readonly message: string }
 >;
@@ -1482,6 +1489,7 @@ export function NewComponentForm({
   const [name, setName] = useState('');
   const [kind, setKind] = useState<ComponentKind>(initialKind);
   const [schedule, setSchedule] = useState('');
+  const [entrypoint, setEntrypoint] = useState('');
   const [saving, setSaving] = useState(false);
   const [outcome, setOutcome] = useState<
     | { readonly kind: 'created'; readonly name: string }
@@ -1503,11 +1511,13 @@ export function NewComponentForm({
         ...(kind === 'job' && schedule.trim() !== ''
           ? { schedule: schedule.trim() }
           : {}),
+        ...(entrypoint.trim() === '' ? {} : { command: argvOf(entrypoint) }),
       });
       if (result.ok) {
         setOutcome({ kind: 'created', name: created });
         setName('');
         setSchedule('');
+        setEntrypoint('');
       } else {
         setOutcome({ kind: 'refused', message: result.message });
       }
@@ -1553,6 +1563,22 @@ export function NewComponentForm({
           hint="Five cron fields. Leave it empty for a job that only runs when something asks it to — an unscheduled job is placed suspended."
         />
       ) : null}
+      {/*
+        The other half of "one App to many Components": an App is one scope, so
+        a second Component builds the same image as its sibling, and the
+        entrypoint is what makes it a different workload. Asked at creation
+        rather than only after it, because a Component created to run
+        differently that cannot say so exists as a duplicate of its sibling
+        until somebody edits it.
+      */}
+      <Field
+        name="component-entrypoint"
+        label="Entrypoint"
+        value={entrypoint}
+        onChange={(event) => setEntrypoint(event.target.value)}
+        placeholder="node job.js"
+        hint="How this Component runs the image. Leave it empty for the image's own — a second Component off one image is usually this field and nothing else."
+      />
 
       {outcome?.kind === 'refused' ? (
         <p className="rounded-md border border-destructive/40 bg-destructive-soft px-3 py-2 text-xs text-destructive">
@@ -2719,6 +2745,24 @@ export function targetForFirstDeploy(view: WorkspaceView): string | undefined {
 }
 
 /**
+ * One typed entrypoint, as an argv.
+ *
+ * ponytail: splits on whitespace and nothing else, so `sh -c "a b"` arrives as
+ * four words rather than three. The case this field exists for is `node
+ * job.js` — a monolith's second Component naming its own entrypoint — and a
+ * shell-quoting parser here would be a second, worse `shlex` in front of a
+ * command that stores whatever list it is given. Give it a real argv editor the
+ * day somebody needs a quoted argument.
+ *
+ * Exported for `test/web/component-create.test.ts`, which is where the split is
+ * pinned: the schema refuses an empty string inside the list, so a form that
+ * produced one would be refused after the press rather than before it.
+ */
+export function argvOf(entrypoint: string): string[] {
+  return entrypoint.trim().split(/\s+/);
+}
+
+/**
  * What the Components card's form posts, composed per kind.
  *
  * `createComponentInput` is a `.strict()` discriminated union
@@ -2739,13 +2783,23 @@ export function targetForFirstDeploy(view: WorkspaceView): string | undefined {
  */
 export function componentCreation(
   appId: string,
-  create: { name: string; kind: ComponentKind; schedule?: string },
+  create: {
+    name: string;
+    kind: ComponentKind;
+    schedule?: string;
+    command?: string[];
+  },
 ): InputOf<'createComponent'> {
   const common = {
     appId,
     name: create.name,
     reach: 'private',
     auth: 'proxy',
+    // Absent rather than null for the image's own entrypoint, the same way an
+    // unscheduled job omits `schedule`: the command reads both as "nothing was
+    // said", and only one of the two spellings survives a `.strict()` union
+    // gaining a field this form does not offer.
+    ...(create.command === undefined ? {} : { command: create.command }),
   } as const;
   switch (create.kind) {
     case 'service':
