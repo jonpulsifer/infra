@@ -60,11 +60,27 @@ rules:
     verbs:
       - create
 ---
+# A ClusterRole, because an App's workloads are in a namespace named for the
+# App and there is no longer one namespace to bind in.
+#
+# **This is a real widening and it is stated rather than left to be noticed.**
+# Every rule below now applies in every namespace of the cluster, not in
+# `spindrift-apps` alone. Two things make it tolerable, and both are load-
+# bearing rather than reassurance:
+#
+#   - **There is still no `secrets` rule**, and that matters more here, not
+#     less. The whole credential design has the kubelet resolve a `secretKeyRef`
+#     on the App's behalf and ESO mirror what crosses a namespace; Spindrift
+#     never reads a Secret, which is what makes a cluster-wide binding something
+#     other than "read every credential in the cluster".
+#   - **The datastore rules did not come with it.** They stay a namespaced Role
+#     in `spindrift-datastores` below, because Datastores no longer land in App
+#     namespaces. Splitting the two is a smaller total grant than moving all of
+#     it up would have been.
 apiVersion: rbac.authorization.k8s.io/v1
-kind: Role
+kind: ClusterRole
 metadata:
   name: spindrift-target-delivery
-  namespace: spindrift-apps
 rules:
   - apiGroups:
       - helm.toolkit.fluxcd.io
@@ -77,6 +93,27 @@ rules:
       - list
       - patch
       - watch
+  # An App's namespace, created with its first release and carrying the
+  # admission labels copied off `spindrift-apps`.
+  #
+  # `create` cannot be scoped by name — RBAC matches `resourceNames` literally
+  # and an App's name is typed at runtime — so this is the one grant here that
+  # could not have been narrower whatever shape was chosen. `patch` beside it
+  # because the write is a server-side apply, which converges an existing
+  # namespace rather than failing on it. No `delete`: nothing removes an App
+  # namespace, deliberately, since deleting one would take every workload in it
+  # including whatever an operator put there by hand.
+  #
+  # `get` is what the admission labels are read through, on the Target's
+  # declared namespace.
+  - apiGroups:
+      - ""
+    resources:
+      - namespaces
+    verbs:
+      - create
+      - get
+      - patch
   - apiGroups:
       - ""
     resources:
@@ -116,10 +153,17 @@ rules:
       - jobs
     verbs:
       - create
-  # `CHART_SOURCE`, for the artifact form. The App chart's `OCIRepository` is
-  # this namespace's own object (`oci-repository.yaml`), so the grant to read it
-  # belongs to the Role this namespace already binds rather than to a second one
-  # that would need a second RoleBinding in every cluster overlay.
+---
+# `CHART_SOURCE`, for the artifact form. The App chart's `OCIRepository` is
+# `spindrift-apps`'s own object (`oci-repository.yaml`), so reading it stays a
+# namespaced grant naming that one object rather than riding up into the
+# cluster-wide Role above.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: spindrift-target-chart-artifact
+  namespace: spindrift-apps
+rules:
   - apiGroups:
       - source.toolkit.fluxcd.io
     resources:
@@ -128,12 +172,26 @@ rules:
       - spindrift-app
     verbs:
       - get
-  # Datastores. Both operators are reached the way the delivery path reaches
-  # Flux: a server-side apply and a poll. `create` beside `patch` for the same
-  # reason the HelmRelease rule above pairs them — an apply is a PATCH, and an
-  # apply that has to create the object is authorized as a create too.
-  # `get` is the observe poll; `delete` is destroy. No `list`, no `watch`:
-  # every read here is by the name core already stored on the row.
+---
+# Datastores, in the namespace they are provisioned into and nowhere else.
+#
+# Kept a `Role` while delivery became a `ClusterRole`, because a Datastore no
+# longer lands in an App's namespace: there is exactly one namespace these
+# verbs are needed in, so granting them cluster-wide would buy nothing and cost
+# `create` and `delete` on every database object in the cluster.
+#
+# Both operators are reached the way the delivery path reaches Flux: a
+# server-side apply and a poll. `create` beside `patch` for the same reason the
+# HelmRelease rule pairs them — an apply is a PATCH, and an apply that has to
+# create the object is authorized as a create too. `get` is the observe poll;
+# `delete` is destroy. No `list`, no `watch`: every read here is by the name
+# core already stored on the row.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: spindrift-target-datastores
+  namespace: spindrift-datastores
+rules:
   - apiGroups:
       - postgresql.cnpg.io
     resources:
@@ -152,22 +210,33 @@ rules:
       - delete
       - get
       - patch
-  # The Valkey operator fronts a cluster with a Service of the same name, which
-  # is a convention rather than an API field, so it is confirmed rather than
-  # asserted before a Datastore is reported LIVE.
+  # The Valkey operator fronts a cluster with a Service named `valkey-<name>` —
+  # its `resourcePrefix`, a convention rather than an API field — so the address
+  # is confirmed against the cluster before a Datastore is reported LIVE rather
+  # than asserted.
   #
   # No `secrets` rule, deliberately, and this Role still names no Secret:
-  # CloudNativePG's `<cluster>-app` is read by the kubelet on the App's behalf
-  # through a `secretKeyRef`, never by Spindrift. RBAC matches resourceNames
-  # literally, so a Secret grant here could not have been narrower than "every
-  # Secret in spindrift-apps" — which is exactly what the direct-secretKeyRef
-  # design exists to avoid needing.
+  # CloudNativePG's `<cluster>-app` is read by ESO on the App's behalf, or by
+  # the kubelet through a `secretKeyRef` where the two namespaces coincide —
+  # never by Spindrift. RBAC matches resourceNames literally, so a Secret grant
+  # here could not have been narrower than "every Secret in this namespace",
+  # which is exactly what that design exists to avoid needing.
   - apiGroups:
       - ""
     resources:
       - services
     verbs:
       - get
+  # A stuck Datastore's diagnosis: the admission refusal underneath an operator
+  # that reports it is still working. Read-only, and no wider than the namespace
+  # the datastores are in.
+  - apiGroups:
+      - ""
+    resources:
+      - events
+    verbs:
+      - get
+      - list
 ---
 # `CHART_SOURCE`, for the repository form — a Target whose installation names
 # `charts.app` as a path rather than as an artifact reads the source object here

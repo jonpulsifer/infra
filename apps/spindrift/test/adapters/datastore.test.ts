@@ -41,6 +41,9 @@ function targetOn(fake: FakeKubernetes): DeployTarget {
       adapter: 'kubernetes',
       apiServer: fake.apiServer,
       namespace: 'spindrift-apps',
+      // Where this Target's Datastores go, which is no App's namespace: a
+      // Datastore outlives every App attached to it.
+      datastoreNamespace: 'spindrift-datastores',
       delivery: {
         flavour: 'flux-helmrelease',
         namespace: 'delivery',
@@ -76,8 +79,8 @@ describe('provision', () => {
       storageGiB: 4,
     });
 
-    expect(ref).toBe('postgres/spindrift-apps/orders');
-    const object = fake.get('clusters/spindrift-apps/orders');
+    expect(ref).toBe('postgres/spindrift-datastores/orders');
+    const object = fake.get('clusters/spindrift-datastores/orders');
     expect(object?.apiVersion).toBe(ENGINE_KINDS.postgres.apiVersion);
     expect(object?.kind).toBe('Cluster');
     expect(object?.spec).toMatchObject({
@@ -101,8 +104,8 @@ describe('provision', () => {
       storageGiB: 1,
     });
 
-    expect(ref).toBe('valkey/spindrift-apps/sessions');
-    const object = fake.get('valkeyclusters/spindrift-apps/sessions');
+    expect(ref).toBe('valkey/spindrift-datastores/sessions');
+    const object = fake.get('valkeyclusters/spindrift-datastores/sessions');
     expect(object?.apiVersion).toBe('valkey.io/v1alpha1');
     // Persistence is set rather than left to the operator's ephemeral default:
     // a Datastore that empties on a reschedule is a cache with the wrong name.
@@ -125,7 +128,7 @@ describe('provision', () => {
     // rather than as one blob: the operator supplies none of these, so a
     // regression here is not a wrong value but an object admission refuses —
     // and the refusal lands on a StatefulSet the adapter never reads.
-    const spec = fake.get('valkeyclusters/spindrift-apps/sessions')
+    const spec = fake.get('valkeyclusters/spindrift-datastores/sessions')
       ?.spec as Record<string, any>;
     expect(spec.podSecurityContext).toMatchObject({
       runAsNonRoot: true,
@@ -165,7 +168,8 @@ describe('provision', () => {
       storageGiB: 1,
     });
 
-    const spec = fake.get('clusters/spindrift-apps/order-history')?.spec as {
+    const spec = fake.get('clusters/spindrift-datastores/order-history')
+      ?.spec as {
       bootstrap: { initdb: { database: string; owner: string } };
     };
     expect(spec.bootstrap.initdb).toEqual({
@@ -210,14 +214,14 @@ describe('observe', () => {
 
     const first = await adapter.observe(
       target,
-      'postgres/spindrift-apps/orders',
+      'postgres/spindrift-datastores/orders',
     );
     expect(first?.phase).toBe('WAITING');
     // No reference while it is coming up, even though the object exists.
     expect(first?.connection).toBeNull();
   });
 
-  // Nothing is placed at `secrets/spindrift-apps/orders-app`, deliberately: a
+  // Nothing is placed at `secrets/spindrift-datastores/orders-app`, deliberately: a
   // Ready CloudNativePG cluster is the statement that its `-app` Secret exists,
   // so the reference is named without reading it and this adapter needs no
   // grant on Secrets at all.
@@ -231,11 +235,11 @@ describe('observe', () => {
 
     const state = await adapter.observe(
       target,
-      'postgres/spindrift-apps/orders',
+      'postgres/spindrift-datastores/orders',
     );
     expect(state?.phase).toBe('LIVE');
     // §11: a reference, never the credential.
-    expect(state?.connection).toBe('secret://spindrift-apps/orders-app');
+    expect(state?.connection).toBe('secret://spindrift-datastores/orders-app');
   });
 
   test('a live Valkey with no Service yet reports no connection', async () => {
@@ -250,7 +254,7 @@ describe('observe', () => {
 
     const state = await adapter.observe(
       target,
-      'valkey/spindrift-apps/sessions',
+      'valkey/spindrift-datastores/sessions',
     );
     expect(state?.phase).toBe('LIVE');
     expect(state?.connection).toBeNull();
@@ -267,22 +271,22 @@ describe('observe', () => {
     });
     // `valkey-`, the prefix the operator gives everything it creates. A
     // Service placed under the bare name is the cluster as it is *not*.
-    fake.place('services/spindrift-apps/valkey-sessions', {
+    fake.place('services/spindrift-datastores/valkey-sessions', {
       apiVersion: 'v1',
       kind: 'Service',
-      metadata: { name: 'valkey-sessions', namespace: 'spindrift-apps' },
+      metadata: { name: 'valkey-sessions', namespace: 'spindrift-datastores' },
     });
 
     const state = await adapter.observe(
       target,
-      'valkey/spindrift-apps/sessions',
+      'valkey/spindrift-datastores/sessions',
     );
     // No credential to reference: the operator authenticates nobody unless an
     // ACL user is declared, so the address is the whole of it. `redis://`
     // because this lands in `REDIS_URL` and no mainstream client parses a
     // `valkey://` scheme.
     expect(state?.connection).toBe(
-      'redis://valkey-sessions.spindrift-apps.svc:6379',
+      'redis://valkey-sessions.spindrift-datastores.svc:6379',
     );
   });
 
@@ -298,7 +302,7 @@ describe('observe', () => {
 
     const state = await adapter.observe(
       target,
-      'valkey/spindrift-apps/sessions',
+      'valkey/spindrift-datastores/sessions',
     );
     expect(state?.phase).toBe('FAILED');
     expect(state?.reason).toBe('UNHEALTHY');
@@ -307,9 +311,9 @@ describe('observe', () => {
 
   test('is null for a datastore that is not there', async () => {
     const { adapter, target } = adapterOn();
-    expect(await adapter.observe(target, 'postgres/spindrift-apps/gone')).toBe(
-      null,
-    );
+    expect(
+      await adapter.observe(target, 'postgres/spindrift-datastores/gone'),
+    ).toBe(null);
   });
 });
 
@@ -337,7 +341,7 @@ describe('a refusal underneath a stuck datastore', () => {
     return {
       apiVersion: 'v1',
       kind: 'Event',
-      metadata: { name: 'e', namespace: 'spindrift-apps' },
+      metadata: { name: 'e', namespace: 'spindrift-datastores' },
       ...fields,
     };
   }
@@ -367,7 +371,7 @@ describe('a refusal underneath a stuck datastore', () => {
 
     const state = await adapter.observe(
       target,
-      'valkey/spindrift-apps/sessions',
+      'valkey/spindrift-datastores/sessions',
     );
     expect(state?.detail).toBe(INADMISSIBLE);
     // The whole point of the issue: `WAITING` is still correct. A pod refused
@@ -417,7 +421,7 @@ describe('a refusal underneath a stuck datastore', () => {
 
     const state = await adapter.observe(
       target,
-      'postgres/spindrift-apps/orders',
+      'postgres/spindrift-datastores/orders',
     );
     expect(state?.phase).toBe('WAITING');
     expect(state?.detail).toBe('Waiting for the PVC to bind');
@@ -446,7 +450,7 @@ describe('a refusal underneath a stuck datastore', () => {
 
     const state = await adapter.observe(
       target,
-      'valkey/spindrift-apps/sessions',
+      'valkey/spindrift-datastores/sessions',
     );
     expect(state?.detail).toBe('Updating ValkeyNodes');
   });
@@ -484,7 +488,7 @@ describe('a refusal underneath a stuck datastore', () => {
 
     const state = await adapter.observe(
       target,
-      'valkey/spindrift-apps/sessions',
+      'valkey/spindrift-datastores/sessions',
     );
     expect(state?.detail).toBe('the one that is still true');
   });
@@ -505,7 +509,7 @@ describe('a refusal underneath a stuck datastore', () => {
 
     const state = await adapter.observe(
       target,
-      'valkey/spindrift-apps/sessions',
+      'valkey/spindrift-datastores/sessions',
     );
     expect(state?.phase).toBe('WAITING');
     expect(state?.detail).toBe('Updating ValkeyNodes');
@@ -522,7 +526,7 @@ describe('a refusal underneath a stuck datastore', () => {
     });
     const before = fake.requests.length;
 
-    await adapter.observe(target, 'valkey/spindrift-apps/sessions');
+    await adapter.observe(target, 'valkey/spindrift-datastores/sessions');
 
     expect(
       fake.requests
@@ -542,7 +546,7 @@ describe('destroy', () => {
     });
 
     await adapter.destroy(target, ref);
-    expect(fake.get('clusters/spindrift-apps/orders')).toBeUndefined();
+    expect(fake.get('clusters/spindrift-datastores/orders')).toBeUndefined();
     // Idempotent (§6): the second call is not an error.
     await adapter.destroy(target, ref);
   });

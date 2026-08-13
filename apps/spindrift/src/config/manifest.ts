@@ -184,6 +184,8 @@ export const DEFAULT_PLACEHOLDER_MANIFEST: AuthoredManifest = {
       adapter: 'kubernetes',
       connection: {
         namespace: 'spindrift-apps',
+        appNamespace: 'app-{app}',
+        datastoreNamespace: 'spindrift-datastores',
         delivery: {
           flavour: 'flux-helmrelease',
           namespace: 'spindrift-apps',

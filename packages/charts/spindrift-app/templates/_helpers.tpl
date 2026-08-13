@@ -141,6 +141,17 @@ has no port to probe.
         secretKeyRef:
           name: {{ .secretName }}
           key: {{ .secretKey }}
+      {{- else if .remoteSecretName }}
+      # The operator's Secret is in the Datastore's own namespace, which a
+      # `secretKeyRef` cannot reach, so `externalsecret.yaml` mirrors it here
+      # and this reads the mirror. Still the operator's value and still its
+      # rotation — ESO reconciles it continuously, so the next pod gets the
+      # current credential with no Deploy. The key is unchanged: what crossed
+      # the boundary is the Secret, not the layout of it.
+      valueFrom:
+        secretKeyRef:
+          name: {{ include "spindrift-app.fullname" $ }}-datastores
+          key: {{ .secretKey }}
       {{- else }}
       # No credential to reference: this engine, as this platform runs it,
       # authenticates nobody and the address is not a secret. Writing a hostname

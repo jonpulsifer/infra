@@ -281,6 +281,7 @@ describe('a Component edited mid-attempt does not change what is being placed', 
     const placing = appValues(
       adapter.applied[0]!.desired,
       'ghcr.io/x@sha256:1',
+      'app-shop',
     );
     expect(placing.reach).toBe('private');
     expect(placing.auth).toBe('proxy');
@@ -302,7 +303,11 @@ describe('a Component edited mid-attempt does not change what is being placed', 
     await runDeployPass(loopContext(adapter));
 
     expect(adapter.applied).toHaveLength(2);
-    const placed = appValues(adapter.applied[1]!.desired, 'ghcr.io/x@sha256:1');
+    const placed = appValues(
+      adapter.applied[1]!.desired,
+      'ghcr.io/x@sha256:1',
+      'app-shop',
+    );
     expect(placed.reach).toBe('public');
     expect(placed.auth).toBe('none');
     expect(placed.hostnames).toContain(

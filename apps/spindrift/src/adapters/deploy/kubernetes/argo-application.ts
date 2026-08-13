@@ -77,6 +77,12 @@ export interface ApplicationSpec {
   chart: string;
   labels: Record<string, string>;
   values: Record<string, unknown>;
+  /**
+   * The admission labels the destination namespace must carry, which Argo puts
+   * there itself. Empty leaves `CreateNamespace` off, so a namespace is never
+   * created without them.
+   */
+  namespaceMetadata: Record<string, string>;
 }
 
 /**
@@ -88,8 +94,17 @@ export interface ApplicationSpec {
  * renders: an object the chart stopped producing is not something a later
  * deploy should have to know about.
  *
- * `CreateNamespace` is deliberately **not** set: the namespace is vessel (§7),
- * and a sync that created it would make `destroy()` able to remove it.
+ * `CreateNamespace` is set, with the destination namespace's admission labels
+ * in `managedNamespaceMetadata` (113). This is the flavour where the delivery
+ * mechanism can carry them — Flux's `createNamespace` takes no metadata at all
+ * — so on Argo the namespace arrives through Argo's own authority and
+ * Spindrift writes no `Namespace` object.
+ *
+ * **No tracking annotation goes in that metadata**, deliberately. Argo does not
+ * track a namespace it creates unless one is added, and adding it would let a
+ * sync delete the namespace — every neighbouring workload in it included. That
+ * matches what Flux does on the other flavour, so a namespace outlives its
+ * App's last placement on both, and removing one stays an operator's act.
  */
 export function argoApplication(spec: ApplicationSpec): KubernetesObject {
   return {
@@ -125,6 +140,15 @@ export function argoApplication(spec: ApplicationSpec): KubernetesObject {
       },
       syncPolicy: {
         automated: { prune: true, selfHeal: true },
+        // Guarded on the labels being there: a `CreateNamespace` with nothing
+        // to put on the namespace would create an unprotected one, which is
+        // the failure mode this whole arm exists to avoid.
+        ...(Object.keys(spec.namespaceMetadata).length === 0
+          ? {}
+          : {
+              syncOptions: ['CreateNamespace=true'],
+              managedNamespaceMetadata: { labels: spec.namespaceMetadata },
+            }),
       },
     },
   };
