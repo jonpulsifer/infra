@@ -14,7 +14,14 @@
  * core never adopted, or drop one it did.
  */
 import { describe, expect, test } from 'bun:test';
-import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import {
+  chmod,
+  mkdir,
+  mkdtemp,
+  readFile,
+  rm,
+  writeFile,
+} from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { parseSpindriftFile } from '../../src/domain/detection/spindrift-file.ts';
@@ -126,7 +133,9 @@ async function declared(document: string): Promise<{
   return {
     run,
     parsed:
-      proposal.build.frontend === 'railpack' ? proposal.build.buildCommand : null,
+      proposal.build.frontend === 'railpack'
+        ? proposal.build.buildCommand
+        : null,
   };
 }
 
@@ -173,7 +182,9 @@ describe('the zero-config arm of “Choose the frontend”', () => {
     // Not a fixture. If `apps/view-counter/spindrift.yaml` stops carrying the
     // command, the zero-config build goes back to compiling a package archive
     // and calling it a success — the defect this whole arm exists to refuse.
-    const { run, parsed } = await declared(await readFile(VIEW_COUNTER, 'utf8'));
+    const { run, parsed } = await declared(
+      await readFile(VIEW_COUNTER, 'utf8'),
+    );
     expect(run.code).toBe(0);
     expect(configuredCommand(run)).toBe('go build -o out ./cmd');
     expect(configuredCommand(run)).toBe(parsed);
@@ -226,7 +237,8 @@ describe('the zero-config arm of “Choose the frontend”', () => {
     // must be loud if it ever happens rather than silently building the shape
     // the operator wrote the file to correct.
     const run = await runArm({
-      [`${SUBPATH}/spindrift.yaml`]: 'build:\n  frontend: railpack\n   nope: [\n',
+      [`${SUBPATH}/spindrift.yaml`]:
+        'build:\n  frontend: railpack\n   nope: [\n',
     });
     expect(run.code).not.toBe(0);
     expect(run.dockerArgv).toEqual([]);
@@ -237,7 +249,7 @@ describe('the zero-config arm of “Choose the frontend”', () => {
     // syntax. `$(…)` has to arrive at the builder unexpanded and unevaluated:
     // this step runs on the runner, and nothing the declaration says may run
     // here.
-    const hostile = 'go build -o out ./cmd # "x" $(id) ${HOME}';
+    const hostile = 'go build -o out ./cmd # "x" $(id) `id` $HOME';
     // A YAML double-quoted scalar, which is what JSON.stringify produces.
     const { run, parsed } = await declared(RAILPACK(JSON.stringify(hostile)));
     expect(run.code).toBe(0);
