@@ -1,15 +1,20 @@
 # spindrift-demo
 
-Four scopes, one per shape of App worth demonstrating. Each is a directory you
-can point a Component at; nothing here shares code with anything else here, so
-deploying one proves something about exactly one path.
+Five scopes, one per shape of App worth demonstrating. Each is a directory you
+can point a Component at, and no scope imports another — railpack builds with
+the *scope* as its context, so a module one directory up is not in the build.
 
 | Scope | Kind | Built by | What it demonstrates |
 | --- | --- | --- | --- |
 | `src/` | website | Dockerfile | A site with a real build step. `build.ts` stamps commit, branch and time into the HTML, so a stale deploy is visible on the page. |
 | `plain/` | website | — | Static files with no build at all. The narrowest possible website. |
 | `railpack/` | service | railpack | Detection picking a frontend on its own, because there is no Dockerfile in the scope. |
-| `job/` | job | railpack | A Component that runs once and stops, on either backend. |
+| `job/` | job | railpack | A Component that runs once and stops, on either backend. Writes to a `valkey` Datastore when one is attached. |
+| `web/` | service | railpack | Reads back what `job/` wrote. The two are a **pair**, and the only shared thing is a Datastore. |
+
+Four of them prove something about exactly one path. `job/` and `web/` are the
+exception and the reason is [below](#the-pair) — they share no code and name
+each other nowhere, and that is the thing being demonstrated.
 
 ## Runtime identity
 
@@ -85,13 +90,61 @@ A cadence is not declared here. The same code is a job you press **Run now** on
 and a job that fires every five minutes; which one it is belongs to the
 Component, chosen at Place, not to the directory.
 
+## The pair
+
+`job/` writes and `web/` reads, and nothing connects them. Put both in **one
+App**, attach one `valkey` Datastore to that App, and deploy: each Component is
+handed the same `REDIS_URL`, because a Datastore attaches to the App and its
+variable name is fixed by the engine — `REDIS_URL` for valkey, `DATABASE_URL`
+for postgres (`apps/spindrift/src/domain/desired-state.ts`). Neither scope
+declares a store and neither names the other. There is nothing to wire.
+
+Three things it is worth watching for, in order:
+
+1. **Before an attach**, `web/` says no Datastore is attached, in those words.
+   It is not an error state — it is what every Component looks like until one
+   is attached.
+2. **Straight after an attach**, the page has not changed. An attach is
+   bookkeeping; the variable reaches a workload on its **next Deploy**, because
+   "an attach that silently rolled every Component would be a destructive act
+   hiding behind a bookkeeping verb" (`commands/datastores/attach.ts`).
+3. **After deploying**, the counter and the run table appear. Press **Run now**
+   on `job/` and the page picks the new row up within five seconds.
+
+One store per engine per App, refused at attach: a second `valkey` would claim
+the same `REDIS_URL` and win by ordering. One valkey *and* one postgres is
+fine, since those are two different variables.
+
+Datastores are provisionable on **Kubernetes** Targets only — the GCP adapter
+claims both engines and throws `UNIMPLEMENTED` from every verb, because a
+Vessel carries no network to place a private endpoint in. The same `job/` image
+on Cloud Run finds no `REDIS_URL` and says so rather than failing, which is why
+that path still demonstrates what it is there to demonstrate.
+
+`web/` has to be a `service`. A `website` is static files served by the Target
+— no process, no environment — so no connection string can reach one; `src/`
+and `plain/` are that side of the line.
+
 ## Running them locally
 
 ```
 cd railpack && npm run build && npm start     # :3000, JSON on /, /healthz, /env
 cd job && DURATION_SECONDS=3 npm start        # exits 0
 cd job && EXIT_CODE=7 npm start               # exits 7, writes to stderr
+cd web && npm test                            # the RESP reader's own check
 ```
+
+The pair, against a local valkey:
+
+```
+valkey-server --port 16379 --save ''
+cd job && REDIS_URL=redis://127.0.0.1:16379 DURATION_SECONDS=2 npm start
+cd web && REDIS_URL=redis://127.0.0.1:16379 npm start    # :3000
+```
+
+Start `web/` with no `REDIS_URL` to see the unattached state, or point it at a
+port nothing is listening on to see the unreachable one. `/healthz` stays green
+through both — this Component is up whether or not a store is.
 
 `bun run dev` from this directory builds `src/` and serves it hot through
 `serve.ts`. `plain/` is a static directory; point a static-file host at it to
