@@ -46,7 +46,18 @@
       appId = 4576122;
       privateKeyFile = config.sops.secrets."bosun-github-app-key".path;
     };
-    classes.skiff-ubuntu = {
+    # `skiff-offsite`, not `skiff-ubuntu`, because this is not that machine.
+    # `skiff-ubuntu` means a hosted-shaped runner -- 4 vCPU / 16 GiB, what
+    # tender serves -- and one label spanning two very different boxes made
+    # every measurement on it a coin toss: an eight-wide benchmark put eight
+    # jobs on tender at 289-328 s and the ninth here at 620 s, which read as a
+    # variance problem in the pool and was really a job on a quarter of the
+    # machine, across a satellite link.
+    #
+    # The capacity is still worth having, and a workflow that wants it can name
+    # it. What it must not do is arrive by accident at a label that promises
+    # something else.
+    classes.skiff-offsite = {
       hull = "${inputs.self.packages.x86_64-linux.hull-ubuntu}";
       # 2, not 4: this box has 4 cores shared with kubelet, yarr and
       # harmonia, and a skiff that can contend for all of them is how the
