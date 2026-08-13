@@ -55,9 +55,12 @@ import {
   buildRouteCandidates,
   DEFAULT_MINIMUM_BUILD_LEVEL,
 } from '../../domain/build-route.ts';
+import { parseSpindriftFile } from '../../domain/detection/spindrift-file.ts';
 import { DEFAULT_PLATFORM } from '../../domain/placement.ts';
+import { repositoryRefOf } from '../../domain/repository.ts';
 import { buildOriginOf, type Source } from '../../domain/source.ts';
 import { targetLabel } from '../../domain/target.ts';
+import { SPINDRIFT_FILE } from '../../integrations/github/config-pr.ts';
 import { isFetchableBundleLocation } from '../../storage/archives.ts';
 import { parseGcsLocation, signedObjectUrl } from '../../storage/signed-url.ts';
 import { isBuildTimeConfig, readBuildArgs } from '../config/build-args.ts';
@@ -257,6 +260,76 @@ async function fetchableBundleLocation(
 }
 
 /**
+ * Where a `files` build lifts its site out of, at this build's own commit.
+ *
+ * §5 makes a scope's `spindrift.yaml` the home of record — "once it is on the
+ * default branch it wins over detection" — and the repo loop parses one per
+ * commit without storing what it read. So this asks the same file the same
+ * question at the commit being built, rather than reading a column that would
+ * describe whichever commit last wrote it.
+ *
+ * **Every unknown answers `null`, and `null` ships the scope as it stands** —
+ * which is exactly what a `files` build did before this field existed. A scope
+ * with no Spindrift file, a file that no longer parses, an installation with no
+ * repository integration, an uploaded archive, a repository the host would not
+ * answer for: none of them is a reason to fail a build that would otherwise
+ * have succeeded, and all of them are reasons to lift nothing.
+ *
+ * The Dockerfile arm has no output directory *by construction* rather than by
+ * omission: a scope that builds itself from a Dockerfile renders a server, and
+ * §5 gives it no field to name a directory with.
+ */
+async function outputDirectoryFor(
+  context: Pick<CommandContext, 'adapters'>,
+  input: {
+    readonly artifactType: BuildSpec['artifactType'];
+    readonly source: Source;
+    readonly repository: {
+      readonly installationId: string;
+      readonly fullName: string;
+    } | null;
+  },
+): Promise<string | null> {
+  // An image is the tree's own build product, so there is nothing to lift out
+  // of it and the question does not arise.
+  if (input.artifactType !== 'files') return null;
+  // An upload carries no repository to read a file out of. A supplied artifact
+  // is finished output already (§4), and an uploaded *source* archive has no
+  // default branch for §5's file to have won on.
+  if (input.source.kind !== 'repo') return null;
+  if (input.repository === null) return null;
+  const host = context.adapters.repository();
+  if (host === null) return null;
+
+  const path =
+    input.source.subpath === '.'
+      ? SPINDRIFT_FILE
+      : `${input.source.subpath}/${SPINDRIFT_FILE}`;
+
+  let document: string | null;
+  try {
+    document = await host.readFile(
+      repositoryRefOf(input.repository),
+      input.repository.fullName,
+      input.source.commit,
+      path,
+    );
+  } catch {
+    return null;
+  }
+  if (document === null) return null;
+
+  try {
+    const proposal = parseSpindriftFile(document, path);
+    return proposal.build.frontend === 'railpack'
+      ? proposal.build.outputDirectory
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * How a dispatch refusal is recorded, and why there are exactly two ways.
  *
  * Everything below the Build row's own existence is refused *before* the claim
@@ -401,7 +474,12 @@ export const dispatchBuild = async (
     app.repositoryId === null
       ? []
       : await context.db
-          .select({ fullName: repositories.fullName })
+          // `installationId` rides along for `outputDirectoryFor`, which reads
+          // this build's commit as the installation that owns the repository.
+          .select({
+            fullName: repositories.fullName,
+            installationId: repositories.installationId,
+          })
           .from(repositories)
           .where(eq(repositories.id, app.repositoryId))
           .limit(1);
@@ -756,6 +834,20 @@ export const dispatchBuild = async (
       effectiveTargetId === undefined || !isBuildTimeConfig(component.kind)
         ? {}
         : await readBuildArgs(context.db, component.id, effectiveTargetId),
+    /**
+     * §3, story 42: a website placed on a static Target is the files its build
+     * leaves behind, not the tree that produced them.
+     *
+     * Read here, from this build's own commit, for the reason the field's
+     * documentation gives: the answer lives in the scope's `spindrift.yaml`
+     * and moves with the tree, so the only correct time to ask is while
+     * composing the spec for one commit.
+     */
+    outputDirectory: await outputDirectoryFor(context, {
+      artifactType: build.artifactType,
+      source,
+      repository: repository ?? null,
+    }),
   };
 
   const dispatchId = input.dispatchId ?? crypto.randomUUID();

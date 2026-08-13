@@ -154,6 +154,7 @@ describe('the cloud build route', () => {
         ],
         tags: ['latest'],
         buildArgs: {},
+        outputDirectory: null,
         registryAuth,
       },
     )) {
@@ -265,6 +266,7 @@ describe('the in-cluster route', () => {
           destinations: ['registry-1.docker.io/an-owner/web'],
           tags: ['latest'],
           buildArgs: {},
+          outputDirectory: null,
           registryAuth,
         },
       )

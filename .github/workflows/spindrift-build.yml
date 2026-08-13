@@ -147,6 +147,12 @@ jobs:
             printf 'buildArgs<<SPINDRIFT_EOF\n'
             read_key '.buildArgs | to_entries[] | "\(.key)=\(.value)"'
             printf 'SPINDRIFT_EOF\n'
+            # Where a `files` build lifts its site out of (§3, story 42). `// ""`
+            # for the reason every default here exists — a spec composed before
+            # this field existed shipped the scope as it stood, and still does.
+            # `null` is spelled the same as absent on purpose: core sends the
+            # key explicitly and both mean "lift nothing".
+            printf 'outputDirectory=%s\n' "$(read_key '.outputDirectory // ""')"
           } >> "$GITHUB_OUTPUT"
 
       # The bundle, not the repository. §15 fetches the exact commit once and
@@ -210,6 +216,7 @@ jobs:
           SUBPATH: ${{ steps.request.outputs.subpath }}
           FRONTEND: ${{ steps.request.outputs.frontend }}
           ARTIFACT_TYPE: ${{ steps.request.outputs.artifactType }}
+          OUTPUT_DIRECTORY: ${{ steps.request.outputs.outputDirectory }}
         run: |
           set -euo pipefail
           scope="${ROOT}/${SUBPATH}"
@@ -267,19 +274,33 @@ jobs:
           # This arm is checked before the Dockerfile one on purpose: the
           # artifact type decides what the thing *is*, and a Dockerfile in the
           # scope only ever decided how to build one.
-          # ponytail: a site whose files need a build step first (an
-          # outputDirectory) ships its sources today; grow that arm when a
-          # built site reaches a files Target.
+          # A scope that declares no output directory *is* the site: there is
+          # nothing to run first, and the tree is already what a static Target
+          # serves. That is the whole of this arm for a hand-written site, an
+          # uploaded artifact, and anything whose `spindrift.yaml` names no
+          # directory.
+          #
+          # A scope that declares one is the sources of a site rather than the
+          # site, so this arm falls through to the ladder below, the ordinary
+          # build runs, and `Lift the site out of the build` takes the declared
+          # directory back out of the image and makes *that* the context. The
+          # `FROM scratch` Dockerfile is written either way, because both paths
+          # end by exporting one directory as the single gzipped tar layer a
+          # files artifact is.
           if [ "$ARTIFACT_TYPE" = "files" ]; then
             files="${RUNNER_TEMP}/files-artifact"
             mkdir -p "$files"
             printf 'FROM scratch\nCOPY . /\n' > "${files}/Dockerfile"
-            {
-              printf 'context=%s\n' "$scope"
-              printf 'file=%s\n' "${files}/Dockerfile"
-              printf 'buildArgs=\n'
-            } >> "$GITHUB_OUTPUT"
-            exit 0
+            printf 'scratchfile=%s\n' "${files}/Dockerfile" >> "$GITHUB_OUTPUT"
+            if [ -z "${OUTPUT_DIRECTORY:-}" ]; then
+              {
+                printf 'context=%s\n' "$scope"
+                printf 'file=%s\n' "${files}/Dockerfile"
+                printf 'buildArgs=\n'
+              } >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            printf 'lift=%s\n' "$OUTPUT_DIRECTORY" >> "$GITHUB_OUTPUT"
           fi
 
           # The scope names the Dockerfile; the Dockerfile names its context.
@@ -567,18 +588,101 @@ jobs:
           }
           SPINDRIFT_SEAL_SCRIPT
 
+      # §3, story 42: a website placed on a static Target is the files its build
+      # leaves behind. The ladder above already resolved how to build this scope
+      # — its own Dockerfile, or the zero-config frontend — so the site is made
+      # exactly the way the same commit's server image would have been, and only
+      # then is one directory taken back out of it. Building it a second, static
+      # way here would be a second build system to operate, which is the thing
+      # §4's "one engine, two frontends" exists to avoid.
+      #
+      # `--load` rather than a registry round trip: this image is scaffolding.
+      # What gets pushed is the `FROM scratch` export below it, so the built
+      # image never leaves the runner and is never tagged with anything core
+      # would record.
+      #
+      # **The working directory is read off the image, never assumed.** The
+      # zero-config frontend and a hand-written Dockerfile disagree about where
+      # an app lives, and a hardcoded `/app` fails on the second one with a
+      # `docker cp` error naming a path nobody wrote down. The image config is
+      # the one place that knows.
+      - name: Lift the site out of the build
+        id: lift
+        if: steps.frontend.outputs.lift != ''
+        env:
+          CONTEXT: ${{ steps.frontend.outputs.context }}
+          FILE: ${{ steps.frontend.outputs.file }}
+          REQUEST_ARGS: ${{ steps.request.outputs.buildArgs }}
+          LADDER_ARGS: ${{ steps.frontend.outputs.buildArgs }}
+          SCRATCHFILE: ${{ steps.frontend.outputs.scratchfile }}
+          LIFT: ${{ steps.frontend.outputs.lift }}
+        run: |
+          set -euo pipefail
+          # The same two argument sets `Build and push` concatenates, in the
+          # same order, because this is the build that would have been pushed.
+          set --
+          while IFS= read -r arg; do
+            [ -n "$arg" ] || continue
+            set -- "$@" --build-arg "$arg"
+          done <<SPINDRIFT_ARGS_EOF
+          ${REQUEST_ARGS}
+          ${LADDER_ARGS}
+          SPINDRIFT_ARGS_EOF
+
+          docker buildx build --load --tag spindrift-lift:local \
+            --file "$FILE" "$@" "$CONTEXT"
+
+          workdir="$(docker image inspect --format '{{.Config.WorkingDir}}' spindrift-lift:local)"
+          case "$LIFT" in
+            # An absolute directory is already the answer; anything else is
+            # relative to where the build left the app.
+            /*) from="$LIFT" ;;
+            *)  from="${workdir:-/}" ; from="${from%/}/$LIFT" ;;
+          esac
+
+          site="${RUNNER_TEMP}/site"
+          mkdir -p "$site"
+          cid="$(docker create spindrift-lift:local)"
+          trap 'docker rm -f "$cid" >/dev/null 2>&1 || true' EXIT
+          # A build that ran and produced nothing at the declared directory is
+          # the failure worth naming here rather than three steps later as an
+          # empty site that deployed green.
+          if ! docker cp "${cid}:${from}/." "$site" 2>/dev/null; then
+            echo "::error::the build left nothing at ${from} — ${LIFT} is what this scope's spindrift.yaml names as its output directory, and the build did not create it. Correct outputDirectory, or remove it if this scope is already the site." >&2
+            exit 1
+          fi
+
+          {
+            printf 'context=%s\n' "$site"
+            printf 'file=%s\n' "$SCRATCHFILE"
+          } >> "$GITHUB_OUTPUT"
+
       - name: Build and push
         id: push
         uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7
         with:
-          context: ${{ steps.frontend.outputs.context }}
-          file: ${{ steps.frontend.outputs.file }}
+          # The lifted site when there was one to lift, and the ladder's own
+          # answer otherwise. One step decides; this one only reads.
+          context: ${{ steps.lift.outputs.context || steps.frontend.outputs.context }}
+          file: ${{ steps.lift.outputs.file || steps.frontend.outputs.file }}
           # The ladder's own argument rides with the request's. `BUILDKIT_SYNTAX`
           # is how the zero-config arm names its frontend, and it is empty on the
           # Dockerfile arm — the action drops the blank line.
+          #
+          # **Both are dropped when a site was lifted**, because then this build
+          # is the `FROM scratch` export of a directory that already exists and
+          # not the app's build at all. The app's build consumed these in `Lift
+          # the site out of the build`; sending `BUILDKIT_SYNTAX` on to a two
+          # line Dockerfile would hand it to the zero-config frontend, which
+          # would try to build the finished site as if it were a project.
+          #
+          # Written as `empty && value || ''` rather than the other way round
+          # because a GitHub expression's `a && b || c` yields `c` whenever `b`
+          # is falsy — so the branch that must produce nothing has to be the
+          # `||` arm, never the `&&` one.
           build-args: |
-            ${{ steps.request.outputs.buildArgs }}
-            ${{ steps.frontend.outputs.buildArgs }}
+            ${{ steps.lift.outputs.context == '' && steps.request.outputs.buildArgs || '' }}
+            ${{ steps.lift.outputs.context == '' && steps.frontend.outputs.buildArgs || '' }}
           push: true
           tags: ${{ steps.request.outputs.tags }}
           cache-from: |

@@ -146,6 +146,29 @@ export interface BuildSpec {
    */
   buildArgs: Readonly<Record<string, string>>;
   /**
+   * Where a `files` build lifts the site out of, or `null` to ship the scope
+   * as it stands (§3, story 42).
+   *
+   * `domain/detection/declared.ts` calls this "where *Spindrift* lifts files
+   * from when a website is placed on a static Target", and this is the field
+   * that carries the answer to the one place that can act on it. Without it a
+   * `files` build has no way to know that `dist/` is the site and the rest of
+   * the tree is the sources that produced it, so it ships both — which is what
+   * a static Target then serves.
+   *
+   * **Per commit, not per Component**, which is why it is composed here rather
+   * than read from a column. The value's home of record is the scope's
+   * `spindrift.yaml` (§5: "once it is on the default branch it wins over
+   * detection"), a file that moves with the tree — so a Component whose site
+   * moved from `build/` to `dist/` is described correctly by each commit and
+   * incorrectly by any single stored answer.
+   *
+   * `null` is not "unknown": it is the honest state for a scope that declares
+   * no output directory and for one built from its own Dockerfile, and both
+   * mean the tree already is the artifact. An `image` build ignores this.
+   */
+  outputDirectory: string | null;
+  /**
    * Registry logins for the destinations whose host the route's own identity
    * cannot authorize (§16).
    *

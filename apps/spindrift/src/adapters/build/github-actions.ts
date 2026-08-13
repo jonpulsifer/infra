@@ -213,6 +213,16 @@ export interface BuildRequestSpec {
   /** What to push it as (§12); the workflow tags with these and no others. */
   readonly tags: readonly string[];
   readonly buildArgs: Readonly<Record<string, string>>;
+  /**
+   * Where a `files` build lifts the site out of, or `null` for the scope as it
+   * stands. See {@link BuildSpec.outputDirectory}.
+   *
+   * Sent as `null` rather than omitted, because the workflow defaults a missing
+   * field to "lift nothing" for the version-skew reason every other field here
+   * carries one for — and an explicit `null` and an absent key must therefore
+   * mean the same thing on the far side.
+   */
+  readonly outputDirectory: string | null;
   /** Pinned by the installation, never chosen by the runner. */
   readonly zeroConfigFrontend: string;
   /**
@@ -394,6 +404,7 @@ export class GitHubActionsBuildRoute implements BuildAdapter {
       destinations: spec.destinations,
       tags: spec.tags,
       buildArgs: spec.buildArgs,
+      outputDirectory: spec.outputDirectory,
       zeroConfigFrontend: this.options.zeroConfigFrontend,
       signer: this.options.signer,
       attestor: this.options.attestor,

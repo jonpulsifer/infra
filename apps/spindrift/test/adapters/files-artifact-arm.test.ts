@@ -33,6 +33,8 @@ async function frontendScript(): Promise<string> {
 async function runArm(input: {
   artifactType: string;
   scopeFiles: Readonly<Record<string, string>>;
+  /** What the scope's `spindrift.yaml` named, as core resolved it (§3). */
+  outputDirectory?: string;
 }): Promise<{ outputs: Record<string, string>; workspace: string }> {
   const workspace = await mkdtemp(join(tmpdir(), 'spindrift-files-arm-'));
   const root = join(workspace, 'bundle');
@@ -52,6 +54,7 @@ async function runArm(input: {
       SUBPATH: 'site',
       FRONTEND: 'registry.example.test/zero-config:pinned',
       ARTIFACT_TYPE: input.artifactType,
+      OUTPUT_DIRECTORY: input.outputDirectory ?? '',
       GITHUB_OUTPUT: outputPath,
       RUNNER_TEMP: workspace,
     },
@@ -93,6 +96,45 @@ describe('the files arm of “Choose the frontend”', () => {
       );
       const dockerfile = await readFile(outputs.file as string, 'utf8');
       expect(dockerfile).toBe('FROM scratch\nCOPY . /\n');
+    } finally {
+      await rm(workspace, { recursive: true, force: true });
+    }
+  });
+
+  test('a declared output directory builds the scope first and lifts from it', async () => {
+    const { outputs, workspace } = await runArm({
+      artifactType: 'files',
+      // A scope that declares an output directory is the *sources* of a site,
+      // so its own Dockerfile is how the site gets made — the arm must fall
+      // through to the ladder rather than shipping the tree as it stands.
+      scopeFiles: { Dockerfile: 'FROM node', 'package.json': '{}' },
+      outputDirectory: 'dist',
+    });
+    try {
+      expect(outputs.lift).toBe('dist');
+      // The ladder's answer, not the files short-circuit: this is the build
+      // that produces the site, and `Lift the site out of the build` runs it.
+      expect(outputs.context).toBe(join(workspace, 'bundle'));
+      expect(outputs.file).toBe(
+        join(workspace, 'bundle', 'site', 'Dockerfile'),
+      );
+      // Written either way, because both paths end by exporting one directory
+      // as the single gzipped tar layer `static/oci.ts` reads back.
+      const scratch = await readFile(outputs.scratchfile as string, 'utf8');
+      expect(scratch).toBe('FROM scratch\nCOPY . /\n');
+    } finally {
+      await rm(workspace, { recursive: true, force: true });
+    }
+  });
+
+  test('no declared output directory still ships the scope, and lifts nothing', async () => {
+    const { outputs, workspace } = await runArm({
+      artifactType: 'files',
+      scopeFiles: { 'index.html': '<!doctype html>' },
+    });
+    try {
+      expect(outputs.lift).toBeUndefined();
+      expect(outputs.context).toBe(join(workspace, 'bundle', 'site'));
     } finally {
       await rm(workspace, { recursive: true, force: true });
     }
