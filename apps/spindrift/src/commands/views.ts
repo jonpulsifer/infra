@@ -870,6 +870,55 @@ export interface WorkspaceView {
 }
 
 /**
+ * Where an App's code comes from, and what governs how it is built (§5, §15).
+ *
+ * Read by `getAppSource` on the Config tab's own request, never folded into
+ * {@link WorkspaceView}: the `manifest` arm is a live read of somebody else's
+ * API, and the workspace re-reads itself every two seconds while a release is
+ * in flight. `Releases` fetches its own rows for the same reason.
+ *
+ * `null` from that command for an App deployed from an uploaded archive: it has
+ * no repository, no scope and no `spindrift.yaml`, and every field here would
+ * be an absence dressed as an answer.
+ */
+export interface AppSourceView {
+  /** `owner/name` for a connected repository, else the URL the App was authored with. */
+  readonly repo: string;
+  /** Where to go and read it, when this installation knows a web origin. */
+  readonly url: string | null;
+  /** The branch §15 adopts from. `null` where no repository is connected. */
+  readonly branch: string | null;
+  /** §5's named scope, repository-relative. `.` is the root. */
+  readonly subpath: string;
+  /** The adopted commit {@link manifest} was read at (§15). */
+  readonly commit: string | null;
+  readonly manifest: AppManifestView;
+}
+
+/**
+ * The scope's `spindrift.yaml` at the adopted commit (§5).
+ *
+ * `unread` is its own arm rather than a spelling of `absent`, because the two
+ * are different news: "no file here" is a fact about the repository that
+ * detection acts on, and "nobody could look" is a fact about this installation.
+ * Rendering the second as the first tells an operator their file is missing
+ * when what expired was a token.
+ *
+ * The text is carried whole. It is the document that wins over detection once
+ * it is on the default branch, so the honest way to show which one governs is
+ * to show it — not a summary this view would have to keep in step with the
+ * parser.
+ */
+export type AppManifestView =
+  | { readonly path: string; readonly state: 'present'; readonly text: string }
+  | { readonly path: string; readonly state: 'absent' }
+  | {
+      readonly path: string;
+      readonly state: 'unread';
+      readonly because: string;
+    };
+
+/**
  * One build route, as the workspace's picker offers it (§16).
  *
  * `level` is what the route's *profile* guarantees, never a verified Build's —
