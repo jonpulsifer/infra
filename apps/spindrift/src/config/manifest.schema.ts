@@ -8,8 +8,18 @@
  * installation-specific literals, so nothing in this file may carry an example
  * value from the installation that happens to run it.
  *
- * There are no defaults. A missing key fails the boot rather than falling back
- * to whatever the first operator happened to use.
+ * There are no defaults for anything that names *this* installation. A missing
+ * key fails the boot rather than falling back to whatever the first operator
+ * happened to use.
+ *
+ * **One class of key is the deliberate exception: a vendor's own API root.**
+ * `cloudrun`, `static`, `vercel`, `cloudflare-pages` and `gcp-secret-manager`
+ * each connect to a single control plane the vendor runs, identical for every
+ * installation — it is not a fact about this deployment the way `apiServer` or
+ * `project` is, so treating it as one meant every operator retyped the same
+ * constant. Each `endpoint` below is optional for exactly that reason, and the
+ * default an absent one resolves to lives with the adapter that owns the API,
+ * not here — see `DEFAULT_ENDPOINT` beside each adapter's implementation.
  *
  * **What names the installation and what names its deployment are not the same
  * set.** A value the installer chart already renders is read from the
@@ -349,7 +359,8 @@ export const targetSeedSchema = z.discriminatedUnion('adapter', [
       connection: z
         .object({
           region: nonEmptyString,
-          endpoint: z.url(),
+          /** The runtime's API root. Optional; defaults to the vendor's own. */
+          endpoint: z.url().optional(),
           policyEndpoint: z.url().optional(),
           /** The identity a revision runs as. See `CloudRunConnection`. */
           serviceAccount: nonEmptyString.optional(),
@@ -365,7 +376,8 @@ export const targetSeedSchema = z.discriminatedUnion('adapter', [
       adapter: z.literal('static'),
       connection: z
         .object({
-          endpoint: z.url(),
+          /** The hosting product's API root. Optional; defaults to the vendor's own. */
+          endpoint: z.url().optional(),
         })
         .strict()
         .optional(),
@@ -377,7 +389,8 @@ export const targetSeedSchema = z.discriminatedUnion('adapter', [
       adapter: z.literal('vercel'),
       connection: z
         .object({
-          endpoint: z.url(),
+          /** The platform's API root. Optional; defaults to the vendor's own. */
+          endpoint: z.url().optional(),
         })
         .strict()
         .optional(),
@@ -389,7 +402,8 @@ export const targetSeedSchema = z.discriminatedUnion('adapter', [
       adapter: z.literal('cloudflare-pages'),
       connection: z
         .object({
-          endpoint: z.url(),
+          /** The platform's API root. Optional; defaults to the vendor's own. */
+          endpoint: z.url().optional(),
         })
         .strict()
         .optional(),
@@ -806,8 +820,17 @@ export const installationManifestSchema = z
          * Core's path, not a Target's: the platform's own secret operator
          * fetches from the same store of record over its own path, and neither
          * needs to know the other's.
+         *
+         * Optional for `gcp-secret-manager`, whose API root is the same
+         * hostname for every project rather than an installation fact —
+         * `createSecretStore` in `adapters/registry.ts` applies its default
+         * when this is absent. `onepassword` gets no such default: a Connect
+         * server is self-hosted, so that adapter still requires a real value
+         * here, enforced where the store is constructed rather than by the
+         * schema, because which adapter needs it is a fact this object's
+         * sibling key carries, not the type of this one.
          */
-        endpoint: z.string().url(),
+        endpoint: z.string().url().optional(),
         /**
          * **No `container` here.** What holds the items is a property of the
          * boundary they live in, so it is `shared.secretStoreContainer` on the

@@ -1184,8 +1184,6 @@ describe('the Targets surface', () => {
         proposal: {
           carriedFrom: 'other/cloudrun',
           region: 'somewhere',
-          runEndpoint: 'https://run.example.test',
-          hostingEndpoint: 'https://hosting.example.test',
         },
       },
     ]);
