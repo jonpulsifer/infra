@@ -1,10 +1,23 @@
-# Managed by Spindrift.
+# Spindrift's build caller for this repository (spec §4, §15).
 #
-# Spindrift dispatches this workflow when it needs a build. The run happens
-# here, on this repository’s own Actions minutes; everything it does lives in
-# the reusable workflow below, which the platform versions.
+# The same thin caller Spindrift writes into every connected repository, except
+# that this one is committed by hand — because an uploaded archive has no
+# repository of its own and builds here, where the reusable workflow lives.
+#
+# **It is a caller and not the reusable workflow itself, deliberately.** The
+# dispatch API only accepts a ref a workflow file can be read from, so
+# dispatching the reusable workflow directly would run whatever is on the
+# default branch and quietly discard the commit pin §15 requires. A caller keeps
+# the pin where a caller always keeps it: in the `uses:`.
+#
+# The pin here is `./` rather than a SHA, and that is stronger rather than
+# weaker — a local reference resolves to the same commit as this file, so the
+# machinery that runs is by construction the machinery that was reviewed
+# alongside it. A connected repository cannot do that, which is why its caller
+# carries a SHA.
 name: spindrift
 run-name: spindrift ${{ inputs.correlation }}
+
 on:
   workflow_dispatch:
     inputs:
@@ -16,11 +29,23 @@ on:
         description: How Spindrift finds this run again. Not a build input.
         required: true
         type: string
+
 permissions:
   contents: read
+  packages: write
   id-token: write
+
 jobs:
   build:
-    uses: jonpulsifer/infra/.github/workflows/spindrift-build.yml@781d64e89944c893e4b964a5cda95da891acdee4 # main
+    uses: ./.github/workflows/spindrift-build.yml
+    # A `workflow_call` passes no secret it is not told to, even locally — so
+    # without this, `SPINDRIFT_BUILD_SEAL_KEY` set on this repository would sit
+    # unreachable one `uses:` away from the step that needs it. `inherit`
+    # rather than naming it: this repository is the only caller of its own
+    # build workflow that can hold the key at all (a connected repository's
+    # generated caller passes no secrets — see `buildWorkflowCaller`), so there
+    # is nothing here `inherit` could leak that this repository does not
+    # already hold.
+    secrets: inherit
     with:
       spec: ${{ inputs.spec }}
