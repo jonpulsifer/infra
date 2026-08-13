@@ -67,6 +67,14 @@ interface FakeDeployment {
   url: string;
   meta: Record<string, string>;
   files: string[];
+  /**
+   * Whether this deployment was created as prebuilt.
+   *
+   * On the query rather than the body, which is where the real API takes it —
+   * so a fake that read it from the body would let an adapter that never sent
+   * it pass.
+   */
+  prebuilt: boolean;
   /** Polls remaining before it reaches {@link FakeVercelOptions.settlesOn}. */
   pending: number;
 }
@@ -109,6 +117,11 @@ export class FakeVercel {
   /** The file paths the serving deployment holds, sorted. */
   servedPaths(project: string): string[] {
     return [...(this.serving(project)?.files ?? [])].sort();
+  }
+
+  /** Whether the serving deployment was created as a prebuilt one. */
+  servedPrebuilt(project: string): boolean {
+    return this.serving(project)?.prebuilt ?? false;
   }
 
   /** Digests actually uploaded — what proves the upload step ran. */
@@ -199,7 +212,7 @@ export class FakeVercel {
     }
 
     if (path === '/v13/deployments' && method === 'POST') {
-      return this.create(body);
+      return this.create(body, url);
     }
 
     const deploymentMatch = path.match(/^\/v13\/deployments\/([^/]+)$/);
@@ -259,7 +272,7 @@ export class FakeVercel {
     return json(404, notFound('no such path'));
   }
 
-  private create(body: unknown): Response {
+  private create(body: unknown, url: URL): Response {
     if (this.options.refuseCreate !== undefined) {
       return json(
         this.options.refuseCreate.status,
@@ -297,6 +310,7 @@ export class FakeVercel {
       url: `${project}.vercel.app`,
       meta: input.meta ?? {},
       files: files.map((file) => file.file),
+      prebuilt: url.searchParams.get('prebuilt') === '1',
       pending: this.options.pollsBeforeSettling ?? 1,
     };
     this.deployments.set(id, deployment);

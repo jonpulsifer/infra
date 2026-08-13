@@ -1,0 +1,19 @@
+-- The artifact shape an edge platform's own function format is (§2, §3, §6).
+--
+-- A `.vercel/output` tree is a Build Output API directory — static assets, a
+-- routing `config.json`, and one bundle per serverless function — and it is
+-- what makes SSR, ISR and functions possible on a Vercel Target at all. It is
+-- not a flavour of `files`: both are a single tar in a registry, and handing
+-- one to the backend that expected the other serves the wrong thing rather
+-- than failing, so the shape has to be distinguishable before a Build is
+-- keyed.
+--
+-- Adding a value is the whole migration. §2 keys a Build on
+-- `(component, commit, target-shape)`, so an existing `files` Build stays
+-- exactly what it was and a Component moving onto a Vercel Target rebuilds
+-- under the new shape — which is §3's "changing placement across shapes forces
+-- a rebuild" doing its job rather than a data change to arrange.
+--
+-- `IF NOT EXISTS` because this migration is the kind that gets re-run against a
+-- database somebody already opened by hand.
+ALTER TYPE "public"."artifact_type" ADD VALUE IF NOT EXISTS 'vercel-output';

@@ -267,6 +267,13 @@
       "when": 1786363272476,
       "tag": "0037_github_app_identity",
       "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "7",
+      "when": 1786968000000,
+      "tag": "0038_vercel_output_artifact",
+      "breakpoints": true
     }
   ]
 }

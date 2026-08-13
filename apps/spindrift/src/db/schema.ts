@@ -147,8 +147,21 @@ export const reachState = pgEnum('reach_state', ['none', 'private', 'public']);
 /** Whether the Target's native authenticated edge stands in front (§9). */
 export const authMode = pgEnum('auth_mode', ['none', 'proxy']);
 
-/** §6 `DesiredState.artifact.type`: "image | files". */
-export const artifactType = pgEnum('artifact_type', ['image', 'files']);
+/**
+ * §6 `DesiredState.artifact.type`, plus the shape an edge platform's own
+ * function format is.
+ *
+ * `vercel-output` is a third *shape* rather than a flavour of `files` because
+ * §2 keys a Build on the target shape: a `.vercel/output` tree and a directory
+ * of static files are both "a tar in a registry" and are not interchangeable,
+ * and a Component moving between a static Target and a Vercel one has to
+ * rebuild rather than deploy the other's artifact as though it fit.
+ */
+export const artifactType = pgEnum('artifact_type', [
+  'image',
+  'files',
+  'vercel-output',
+]);
 
 /**
  * §4: "Concurrency: no ordinal... a build records an artifact rather than

@@ -142,6 +142,17 @@ const SERVICE_NAME = 'Vercel';
  */
 export const DEFAULT_ENDPOINT = 'https://api.vercel.com';
 
+/**
+ * Where a prebuilt deployment's files are addressed from.
+ *
+ * The platform's builder writes into `.vercel/output` and its reader expects
+ * that path on the deployment, so the two have to agree. The artifact carries
+ * the directory's contents rather than the directory, which is what keeps a
+ * `vercel-output` artifact readable as the ordinary single-layer tar every
+ * other files-shaped artifact is.
+ */
+const BUILD_OUTPUT_PREFIX = '.vercel/output/';
+
 /** A project name is capped at 100 characters of `[a-z0-9._-]`. */
 const PROJECT_NAME_LIMIT = 100;
 
@@ -183,8 +194,16 @@ interface DeploymentList {
 
 export class VercelDeployAdapter implements DeployAdapter {
   readonly adapter: TargetAdapter = 'vercel';
-  /** §6's table, one row further down: an edge site takes files. */
-  readonly artifactTypes: readonly ArtifactType[] = ['files'];
+  /**
+   * §6's table, one row further down: an edge site takes files — and this one
+   * also takes the platform's own build output.
+   *
+   * Both, not one. `vercel-output` is what a Component built for this Target
+   * renders to, and it is the shape that carries functions; `files` is still
+   * accepted because §4's supplied artifact — a finished site somebody uploaded
+   * — is that shape and has no build to have produced anything richer.
+   */
+  readonly artifactTypes: readonly ArtifactType[] = ['vercel-output', 'files'];
 
   constructor(private readonly options: VercelAdapterOptions) {}
 
@@ -252,7 +271,12 @@ export class VercelDeployAdapter implements DeployAdapter {
     }
     yield this.log(`the bundle holds ${files.length} files`, project);
 
-    const uploaded = await this.upload(http, connection, files);
+    const uploaded = await this.upload(
+      http,
+      connection,
+      files,
+      desired.artifact.type === 'vercel-output' ? BUILD_OUTPUT_PREFIX : '',
+    );
     if (uploaded.ok === false) {
       const failure = cloudWriteFailure(uploaded.failure, ref);
       yield this.status('FAILED', {
@@ -496,6 +520,7 @@ export class VercelDeployAdapter implements DeployAdapter {
     http: CloudHttp,
     connection: VercelAdapterConnection,
     files: readonly BundleFile[],
+    prefix: string,
   ): Promise<Outcome<readonly DeploymentFile[]>> {
     const referenced: DeploymentFile[] = [];
     for (const file of files) {
@@ -513,8 +538,15 @@ export class VercelDeployAdapter implements DeployAdapter {
       // Rooted at the site with a leading slash is what the bundle reader
       // produces and what the other files backend wants; a deployment path is
       // relative to the deployment root, so the slash comes off here.
+      //
+      // The prefix is what tells the two shapes apart, and it is the whole of
+      // the difference on this side. A prebuilt deployment is addressed by the
+      // paths the platform's own builder wrote — `.vercel/output/config.json`,
+      // `.vercel/output/functions/…` — because that is where its reader looks
+      // for them; the artifact holds that tree's *contents*, so the prefix goes
+      // back on here rather than being carried through the registry.
       referenced.push({
-        file: file.path.replace(/^\/+/, ''),
+        file: prefix + file.path.replace(/^\/+/, ''),
         sha,
         size: file.bytes.byteLength,
       });
@@ -540,6 +572,17 @@ export class VercelDeployAdapter implements DeployAdapter {
         // is there to give. What is being deployed is a finished tree, so there
         // is nothing here for detection to be right or wrong about.
         skipAutoDetectionConfirmation: '1',
+        // What `vercel deploy --prebuilt` is, on the wire: the uploaded files
+        // are a Build Output API tree rather than a project, so the platform
+        // serves them as the build it would otherwise have produced —
+        // functions, routing and caching included — instead of trying to build
+        // them.
+        //
+        // A query parameter, and not one the public REST reference documents:
+        // it is what the first-party client sends
+        // (`packages/client/src/utils/query-string.ts`), which is the contract
+        // that actually holds.
+        ...(desired.artifact.type === 'vercel-output' ? { prebuilt: '1' } : {}),
       },
       body: {
         name: project,
@@ -557,13 +600,25 @@ export class VercelDeployAdapter implements DeployAdapter {
         // §4's separation, in the platform's own vocabulary: nothing to detect,
         // nothing to install, nothing to build, and the uploaded tree served as
         // it is. A build here would be the second build §4 forbids.
-        projectSettings: {
-          framework: null,
-          buildCommand: null,
-          installCommand: null,
-          devCommand: null,
-          outputDirectory: null,
-        },
+        //
+        // **Only for a plain files artifact.** A prebuilt deployment already
+        // says all of this by being prebuilt — the platform runs no build to
+        // configure — and these are the *project's* persistent settings rather
+        // than this deployment's. Sending them on every prebuilt deploy would
+        // keep resetting the project's framework to "Other", which is the one
+        // setting an operator opening the dashboard would most reasonably
+        // expect to describe what is deployed.
+        ...(desired.artifact.type === 'vercel-output'
+          ? {}
+          : {
+              projectSettings: {
+                framework: null,
+                buildCommand: null,
+                installCommand: null,
+                devCommand: null,
+                outputDirectory: null,
+              },
+            }),
       },
     });
     if (!created.ok) return { ok: false, failure: created };

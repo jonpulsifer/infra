@@ -223,6 +223,13 @@ export interface BuildRequestSpec {
    * mean the same thing on the far side.
    */
   readonly outputDirectory: string | null;
+  /**
+   * The framework a `vercel-output` build declares to the platform's own
+   * builder. See {@link BuildSpec.vercelFramework}; `dispatchBuild` refuses the
+   * shape without one, so a spec that reaches here carrying `vercel-output`
+   * always names it.
+   */
+  readonly vercelFramework: string | null;
   /** Pinned by the installation, never chosen by the runner. */
   readonly zeroConfigFrontend: string;
   /**
@@ -405,6 +412,7 @@ export class GitHubActionsBuildRoute implements BuildAdapter {
       tags: spec.tags,
       buildArgs: spec.buildArgs,
       outputDirectory: spec.outputDirectory,
+      vercelFramework: spec.vercelFramework,
       zeroConfigFrontend: this.options.zeroConfigFrontend,
       signer: this.options.signer,
       attestor: this.options.attestor,
