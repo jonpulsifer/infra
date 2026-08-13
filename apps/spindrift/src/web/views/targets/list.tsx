@@ -57,6 +57,7 @@ import {
   CollapsibleTrigger,
 } from '../../ui/collapsible.tsx';
 import { Logo } from '../../ui/logo.tsx';
+import { Timestamp } from '../../ui/timestamp.tsx';
 import { cn } from '../../ui/utils.ts';
 import { ConnectTargetForm } from './connect.tsx';
 
@@ -699,9 +700,13 @@ function VesselChecklists({
               rather than reading as four questions that passed.
             */}
             <p className="text-[11px] text-subtle">
-              {vessel.inspectedAt === null
-                ? 'never inspected'
-                : `last checked ${new Date(vessel.inspectedAt).toLocaleString()}`}
+              {vessel.inspectedAt === null ? (
+                'never inspected'
+              ) : (
+                <>
+                  last checked <Timestamp at={vessel.inspectedAt} />
+                </>
+              )}
             </p>
           </div>
         ))}
@@ -1025,9 +1030,13 @@ function TargetCard({
                 as now.
               */}
               <p className="mt-1 text-[11px] text-subtle">
-                {target.inspectedAt === null
-                  ? 'never inspected'
-                  : `last checked ${new Date(target.inspectedAt).toLocaleString()}`}
+                {target.inspectedAt === null ? (
+                  'never inspected'
+                ) : (
+                  <>
+                    last checked <Timestamp at={target.inspectedAt} />
+                  </>
+                )}
               </p>
             </CollapsibleContent>
           </Collapsible>

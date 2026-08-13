@@ -166,8 +166,8 @@ export function CredentialSettingsView({
                     {shortCredential(passkey.credentialId)}
                   </p>
                   <p className="mt-1 flex flex-wrap items-center gap-x-2 text-xs text-muted-foreground">
-                    <span>
-                      Added {new Date(passkey.createdAt).toLocaleDateString()}
+                    <span className="flex items-center gap-1">
+                      Added <Timestamp at={passkey.createdAt} />
                     </span>
                     <span aria-hidden="true">·</span>
                     {/* The half of the row that makes `Remove` a decision

@@ -451,7 +451,9 @@ function Actions({
           className={cn('size-3.5', busy === 'redeploy' && 'animate-spin')}
         />
         {busy === 'redeploy'
-          ? 'Working…'
+          ? view.build?.status === 'failed'
+            ? 'Building…'
+            : 'Redeploying…'
           : view.build?.status === 'failed'
             ? 'Build again'
             : 'Redeploy'}

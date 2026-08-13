@@ -367,9 +367,13 @@ export async function dispatch(
   const descriptor: AnyCommandDescriptor = commandRegistry[name];
   const parsed = descriptor.input.safeParse(input);
   if (!parsed.success) {
+    // Screens surface this sentence verbatim to an operator mid-flow, so the
+    // command's camelCase name stays out of it — unlike the refusal above,
+    // whose only reader is the programmer who typed the name. The issues
+    // carry the fields that failed.
     return failed(
       'INVALID_INPUT',
-      `the input given to ${name} is not valid`,
+      'the input given to this command is not valid',
       issuesOf(parsed.error),
     );
   }
