@@ -44,23 +44,7 @@ import {
 } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { useEffect, useRef, useState } from 'react';
-/**
- * The mark and the name for a build route's platform.
- *
- * The same shape `targets/list.tsx` uses for a Target's adapter, and here for
- * the same reason: an installation names its own routes ("hosted", "cloud"),
- * so the route's *name* identifies nothing to somebody who did not configure
- * it. The adapter does, and it is a closed vocabulary
- * (`manifest.schema.ts`'s `buildRouteAdapterSchema`).
- *
- * `in-cluster` gets the Kubernetes mark because that is literally where it
- * runs — §4's build Job — not because the App is going to Kubernetes.
- *
- * Keyed by a `string` rather than the enum, so a route this build grew and
- * this table has not is a missing key rather than a crash: the runner's name
- * is still rendered, only unaccompanied.
- */
-import type { LogoName } from '../../client/logos/index.ts';
+import { BUILD_ADAPTER } from '../../client/build-adapters.ts';
 import { Checklist } from '../../components/checklist.tsx';
 import { DiagnosisPanel, DriftPanel } from '../../components/diagnosis.tsx';
 import { LogPane, Notice } from '../../components/log-pane.tsx';
@@ -87,13 +71,6 @@ import { CopyButton } from '../../ui/copy.tsx';
 import { Logo } from '../../ui/logo.tsx';
 import { Page } from '../../ui/page.tsx';
 import { cn, normaliseUrl } from '../../ui/utils.ts';
-
-const BUILD_ADAPTER: Record<string, { logo: LogoName; label: string }> = {
-  'github-actions': { logo: 'github', label: 'GitHub Actions' },
-  'cloud-build': { logo: 'google-cloud', label: 'Cloud Build' },
-  'in-cluster': { logo: 'kubernetes', label: 'in-cluster' },
-  bosun: { logo: 'nixos', label: 'bosun' },
-};
 
 /**
  * What the operator can do from here, and which one is running.

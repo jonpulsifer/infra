@@ -61,6 +61,7 @@ import {
   type MoveComponent,
   type RunJob,
   type SetAutoDeploy,
+  type SetBuildRoute,
   type SetConfig,
   type SetReach,
   type UnplaceComponent,
@@ -1610,6 +1611,28 @@ function WorkspaceScreen({
     }
   };
 
+  // Which route this App builds on (§4, §16). No re-read, for the same reason
+  // `handleSetAutoDeploy` needs none: the picker already holds the answer it
+  // just wrote, and this changes exactly the field it is showing.
+  const handleSetAppBuildRoute: SetBuildRoute = async (route) => {
+    const appId = state.type === 'success' ? state.workspace.appId : undefined;
+    if (appId === undefined) {
+      return { ok: false, message: 'This App has no id to set a builder on' };
+    }
+    try {
+      const result = await command('setAppBuildRoute', { appId, route });
+      return result.ok
+        ? { ok: true }
+        : { ok: false, message: result.failure.message };
+    } catch (cause: unknown) {
+      return {
+        ok: false,
+        message:
+          cause instanceof Error ? cause.message : 'Saving the builder failed',
+      };
+    }
+  };
+
   // The pair this workspace is showing (§10) — bound here, once, so `SetConfig`
   // itself does not have to carry it on every call. Re-read on success for the
   // same reason `handleSetReach` is: `configKeys` is a row this act just
@@ -1921,6 +1944,7 @@ function WorkspaceScreen({
         deletion={deletion}
         onSetReach={handleSetReach}
         onSetAutoDeploy={handleSetAutoDeploy}
+        onSetBuildRoute={handleSetAppBuildRoute}
         onSetConfig={handleSetConfig}
         onSelectComponent={handleSelectComponent}
         onCreateComponent={handleCreateComponent}

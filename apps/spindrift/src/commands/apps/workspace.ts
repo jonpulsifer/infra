@@ -19,6 +19,7 @@ import {
 import type { VesselLocation } from '../../domain/vessel.ts';
 import type {
   ActivityEntry,
+  BuildRouteOptionView,
   ComponentView,
   DatastoreView,
   DeployPhase,
@@ -28,6 +29,7 @@ import type {
   Runtime,
   WorkspaceView,
 } from '../../web/model.ts';
+import { buildRouteFor } from '../builds/route.ts';
 import { configuredKeys } from '../config/set.ts';
 import { type Command, type CommandContext, failed, ok } from '../types.ts';
 
@@ -391,6 +393,43 @@ export const getAppWorkspace: Command<
       ...(row.detail === undefined ? {} : { detail: row.detail }),
     }));
 
+  // The App's own opinion (§4, §16) — never asked of an archive App, for the
+  // same reason `autoDeploy` below is not: §4's supplied artifact "consults no
+  // route at all", so there is nothing here to choose.
+  const buildRoute = app.sourceKind === 'repo' ? app.buildRoute : null;
+
+  /*
+    Every configured route, judged against the placed Target's minimum level
+    alone. `buildRouteFor` runs with no App id, exactly as `setAppBuildRoute`
+    itself calls it to validate a route before writing one
+    (`commands/apps/build-route.ts:127`) — so an option this screen offers as
+    eligible is one that call would not refuse on the level threshold. Passing
+    the App's id here instead would narrow the candidates to whichever route it
+    has already chosen (`buildRouteFor`'s own `demand.routes`), which is right
+    for dispatch and wrong for a picker whose whole job is offering the other
+    routes to switch to.
+
+    The registry half `setAppBuildRoute` also checks is a live round trip this
+    read does not repeat; an option eligible here can still be refused on
+    submit for that reason, exactly as the level threshold is a necessary but
+    not sufficient check for `buildRouteFor` itself.
+  */
+  const buildRouteOptions: readonly BuildRouteOptionView[] =
+    app.sourceKind === 'repo' && workspaceTarget
+      ? (await buildRouteFor(workspaceTarget.id, context)).candidates.map(
+          (candidate) => ({
+            name: candidate.route,
+            adapter:
+              context.manifest.build.routes.find(
+                (route) => route.name === candidate.route,
+              )?.adapter ?? null,
+            level: candidate.level,
+            eligible: candidate.eligible,
+            reason: candidate.reason,
+          }),
+        )
+      : [];
+
   const workspace: WorkspaceView = {
     app: app.name,
     appId: app.id,
@@ -420,6 +459,8 @@ export const getAppWorkspace: Command<
     activity,
     runtime,
     autoDeploy: app.sourceKind === 'repo' ? app.autoDeploy : null,
+    buildRoute,
+    buildRouteOptions,
     // What the release delivered and when, so `LIVE` stops being a word with
     // no date on it. Absent rather than empty for an App that has never
     // deployed: there is no commit and no instant, and a blank line where a
