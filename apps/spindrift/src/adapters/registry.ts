@@ -72,7 +72,10 @@ import { PagesDeployAdapter } from './deploy/pages/index.ts';
 import { StaticDeployAdapter } from './deploy/static/index.ts';
 import { VercelDeployAdapter } from './deploy/vercel/index.ts';
 import type { SecretStore } from './store/contract.ts';
-import { SecretManagerStore } from './store/gcp-secret-manager.ts';
+import {
+  DEFAULT_ENDPOINT as SECRET_MANAGER_DEFAULT_ENDPOINT,
+  SecretManagerStore,
+} from './store/gcp-secret-manager.ts';
 import { OnePasswordStore } from './store/onepassword.ts';
 
 /**
@@ -697,21 +700,38 @@ export function storeTokenFor(
   }
 }
 
-/** The store this installation's manifest selects, over the path it names. */
+/**
+ * The store this installation's manifest selects, over the path it names.
+ *
+ * `manifest.secretStore.endpoint` is optional for the reason every deploy
+ * adapter's own is now: Secret Manager's API root is the same hostname for
+ * every project, not an installation fact, so an absent value defaults to it
+ * rather than refusing. The 1Password store gets no such default — a Connect
+ * server is self-hosted, and there is no universal address to guess — so an
+ * installation on that adapter still has to state one, and the refusal below
+ * is what makes the missing case loud instead of a `baseUrl: undefined` that
+ * fails three calls later inside `StoreHttp`.
+ */
 export function createSecretStore(
   manifest: InstallationManifest,
   token: () => string | Promise<string> = storeToken(),
   fetch?: Fetcher,
 ): SecretStore {
-  const endpoint = {
-    baseUrl: manifest.secretStore.endpoint,
-    token,
-    ...(fetch ? { fetch } : {}),
-  };
   // The container is the home vessel's, because that is the boundary the store
   // of record lives in — one place, whatever reaches it.
   const { secretStoreContainer } = sharedServicesOf(manifest);
   const adapter = manifest.secretStore.adapter satisfies StoreAdapter;
+  const baseUrl =
+    manifest.secretStore.endpoint ??
+    (adapter === 'gcp-secret-manager' ? SECRET_MANAGER_DEFAULT_ENDPOINT : null);
+  if (baseUrl === null) {
+    throw new Error(
+      'this installation’s secretStore has no endpoint, and the onepassword ' +
+        'adapter has no default for it — a self-hosted Connect server has no ' +
+        'universal address to assume',
+    );
+  }
+  const endpoint = { baseUrl, token, ...(fetch ? { fetch } : {}) };
   switch (adapter) {
     case 'onepassword':
       return new OnePasswordStore({ ...endpoint, vault: secretStoreContainer });

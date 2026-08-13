@@ -33,6 +33,16 @@ import type {
 } from './contract.ts';
 import { type StoreEndpoint, StoreHttp, StoreRequestError } from './http.ts';
 
+/**
+ * Secret Manager's own API root — one hostname for every project, because
+ * Google runs a single control plane rather than one per customer. Unlike
+ * the 1Password Connect server this store's sibling reaches — a self-hosted
+ * address that genuinely differs per installation — nothing here ever varied,
+ * so this is the default `registry.ts` applies when `manifest.secretStore.endpoint`
+ * is absent and the configured adapter is this one.
+ */
+export const DEFAULT_ENDPOINT = 'https://secretmanager.googleapis.com';
+
 /** Which project's Secret Manager this adapter writes to. */
 export interface SecretManagerStoreConfig extends StoreEndpoint {
   /** The vessel's project holding this installation's App secrets (§14). */

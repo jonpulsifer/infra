@@ -31,19 +31,51 @@
  * a zone — so banning the bare brand would have refused a Target on the grounds
  * that it is spelled like a DNS provider. What is banned is what actually holds
  * a zone: a provider SDK, a zone API root written as a literal, and a
- * credential-shaped name. The API root matters twice over — every adapter here
- * reaches its far side through connection material (`StaticConnection.endpoint`
- * and its siblings), so a hostname compiled into core is a bug on its own terms
- * before it is a §9 question.
+ * credential-shaped name.
  *
- * One exemption survives, and it is about naming rather than holding — see
- * {@link NAMES_A_BRAND}.
+ * **A vendor's *default* API root is not, on its own, the same claim.** Every
+ * cloud deploy adapter now compiles one in — `cloudrun/index.ts`,
+ * `vercel/index.ts`, `static/index.ts` and `pages/index.ts` each own a
+ * `DEFAULT_ENDPOINT`, applied when a Target's `connection.endpoint` does not
+ * override it (`domain/target.ts` says why: none of these ever varied per
+ * installation, so treating every one as connection material meant an operator
+ * retyped the same constant per project). That is still not license to compile
+ * in a *zone* root: `api.cloudflare.com` is banned everywhere except
+ * `pages/index.ts`, and the exemption is scoped to that one literal in that one
+ * file — see {@link OWNS_CLOUDFLARE_DEFAULT_ENDPOINT} for why naming Cloudflare's
+ * shared REST root there is not the same thing as reaching for its zone API.
+ *
+ * Two exemptions survive: one about naming rather than holding, at
+ * {@link NAMES_A_BRAND}, and the one just described.
  */
 import { describe, expect, test } from 'bun:test';
 import { readdir } from 'node:fs/promises';
 import { join, relative } from 'node:path';
 
 const APP = join(import.meta.dir, '../..');
+
+/**
+ * The one file allowed to compile in Cloudflare's REST API root.
+ *
+ * A narrower exemption than {@link NAMES_A_BRAND}: only the
+ * `api.cloudflare.com` pattern is lifted here, and only for this exact path —
+ * every other pattern in {@link FORBIDDEN} still polices this file, and this
+ * pattern still polices every other one.
+ *
+ * **Why this is not the hole §9 exists to close.** `pages/index.ts` is the
+ * Cloudflare Pages deploy adapter, and its `DEFAULT_ENDPOINT` is the same kind
+ * of value `cloudrun/index.ts` and `vercel/index.ts` each compile in beside
+ * it: a vendor's API root, identical for every account, not connection
+ * material. Cloudflare happens to put every product — Pages, and separately
+ * the zone API §9 is actually about — behind one REST root, so the literal
+ * this adapter needs is spelled the same way a zone client's would be. What
+ * distinguishes them is not the hostname but the path and the credential: this
+ * adapter only ever calls `/accounts/…/pages/…`, never `/zones`, and the
+ * bearer it sends (`SPINDRIFT_CLOUDFLARE_TOKEN`) is an operator-scoped Pages
+ * token, not a zone-editing one — §9's own line, "between naming a host and
+ * holding the key to a zone", drawn again here at the file level.
+ */
+const OWNS_CLOUDFLARE_DEFAULT_ENDPOINT = 'src/adapters/deploy/pages/index.ts';
 
 /**
  * Ways a DNS provider credential shows up.
@@ -57,7 +89,15 @@ const APP = join(import.meta.dir, '../..');
  *   importing an SDK — a raw `fetch` and an environment variable is enough — so
  *   the names such a value would travel under are matched too.
  */
-const FORBIDDEN: readonly { pattern: RegExp; why: string }[] = [
+const FORBIDDEN: readonly {
+  pattern: RegExp;
+  why: string;
+  /**
+   * Paths this pattern does not police. Reserved for `api.cloudflare.com`
+   * below — see the comment on {@link OWNS_CLOUDFLARE_DEFAULT_ENDPOINT}.
+   */
+  exempt?: readonly string[];
+}[] = [
   {
     pattern: /from\s+['"]cloudflare['"]|\bcloudflare-sdk\b|\bcloudflare4\b/i,
     why: 'a provider SDK is the credential §9 removed',
@@ -65,6 +105,7 @@ const FORBIDDEN: readonly { pattern: RegExp; why: string }[] = [
   {
     pattern: /api\.cloudflare\.com/i,
     why: 'an API root is connection material, never a literal in core',
+    exempt: [OWNS_CLOUDFLARE_DEFAULT_ENDPOINT],
   },
   {
     pattern: /\broute53\b|\bgoogle-?clouddns\b/i,
@@ -118,7 +159,8 @@ function findCredentials(files: readonly SourceFile[]): string[] {
   const offenders: string[] = [];
   for (const file of files) {
     if (file.path.startsWith(NAMES_A_BRAND)) continue;
-    for (const { pattern, why } of FORBIDDEN) {
+    for (const { pattern, why, exempt } of FORBIDDEN) {
+      if (exempt?.includes(file.path)) continue;
       if (pattern.test(file.source)) {
         offenders.push(`${file.path}: ${pattern} — ${why}`);
       }
@@ -177,6 +219,37 @@ describe('the scanner catches a deliberately dirty file', () => {
       {
         path: 'src/config/manifest.schema.ts',
         source: 'const dnsApiToken = process.env.DNS_API_TOKEN;\n',
+      },
+    ];
+    expect(findCredentials(dirty)).not.toEqual([]);
+  });
+
+  test('the Cloudflare API root is legal in the one file that owns the default', () => {
+    const clean: SourceFile[] = [
+      {
+        path: OWNS_CLOUDFLARE_DEFAULT_ENDPOINT,
+        source:
+          "const DEFAULT_ENDPOINT = 'https://api.cloudflare.com/client/v4';\n",
+      },
+    ];
+    expect(findCredentials(clean)).toEqual([]);
+  });
+
+  test('and the exemption is that one file, not any file next to it', () => {
+    const dirty: SourceFile[] = [
+      {
+        path: 'src/adapters/deploy/pages/assets.ts',
+        source: "const root = 'https://api.cloudflare.com/client/v4';\n",
+      },
+    ];
+    expect(findCredentials(dirty)).not.toEqual([]);
+  });
+
+  test('and the exemption is that one pattern, not every pattern for that file', () => {
+    const dirty: SourceFile[] = [
+      {
+        path: OWNS_CLOUDFLARE_DEFAULT_ENDPOINT,
+        source: "import Cloudflare from 'cloudflare';\n",
       },
     ];
     expect(findCredentials(dirty)).not.toEqual([]);

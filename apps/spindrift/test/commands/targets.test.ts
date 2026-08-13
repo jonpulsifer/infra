@@ -490,16 +490,18 @@ describe('the act is credential-shaped though the noun is flat', () => {
       throw new Error('the surface that answered offers no edit');
     }
     // This boundary's own id, which a fresh connect refuses to propose and an
-    // edit must not make the operator retype. The endpoints and the region are
-    // installation-wide, so the project that does run Cloud Run supplies them.
+    // edit must not make the operator retype. The region is installation-wide,
+    // so the project that does run Cloud Run supplies it — the two endpoints are
+    // not proposed at all any more, because `cloudrun`/`static` each apply their
+    // own default rather than an operator (or this screen) stating one.
     expect(edit.project).toBe('p');
-    expect(edit.proposal.runEndpoint).toBe(CLOUD_ENDPOINTS.run);
     expect(edit.proposal.region).toBe(cloudInput().region);
     // And what one act writes that the form has no field to ask for again:
     // sending the form back without these is the edit deleting them.
     expect(edit.carried.servedHosts).toEqual(['hosting.example.test']);
 
-    // The same act, from exactly what the screen is holding.
+    // The same act, from exactly what the screen is holding. Neither endpoint
+    // is sent — the adapter default applies, same as a fresh connect.
     const on = fakes();
     const again = await connectTarget(
       {
@@ -507,8 +509,6 @@ describe('the act is credential-shaped though the noun is flat', () => {
         vessel: 'vessel',
         project: edit.project,
         region: edit.proposal.region!,
-        runEndpoint: edit.proposal.runEndpoint!,
-        hostingEndpoint: edit.proposal.hostingEndpoint!,
         ...edit.carried,
       },
       context(on.registry),

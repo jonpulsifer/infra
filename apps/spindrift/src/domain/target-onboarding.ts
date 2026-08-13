@@ -118,55 +118,46 @@ function cloudProposal(
   }
   // `project` is absent for the same reason `apiServer` is: connecting a second
   // cloud project and being handed the first project's id is the one mistake
-  // this screen could make that nobody would catch by reading.
+  // this screen could make that nobody would catch by reading. Neither
+  // surface's `endpoint` is carried either, for the opposite reason: it is not
+  // per-instance at all, so `cloudrun/index.ts` and `static/index.ts` each
+  // apply their own default rather than this screen proposing one.
   return {
     carriedFrom: labelOf(run ?? hosting),
     ...(runConnection === null
       ? {}
       : {
           region: runConnection.region,
-          runEndpoint: runConnection.endpoint,
           ...(runConnection.policyEndpoint === undefined
             ? {}
             : { policyEndpoint: runConnection.policyEndpoint }),
         }),
-    ...(hostingConnection === null
-      ? {}
-      : { hostingEndpoint: hostingConnection.endpoint }),
   };
 }
 
 /**
  * What a fresh connect of a Vercel team would be prefilled with.
  *
- * One field, and the team is deliberately not it — same reason `apiServer` and
- * `project` are absent above: it is the value that names *this* boundary, and a
+ * Nothing, always. The one field a working Vercel Target used to lend a fresh
+ * one — its API root — is no longer typed anywhere: `vercel/index.ts` applies
+ * its own default. `team` was never carried either, for the reason `apiServer`
+ * is not on the cluster form: it is the value that names *this* boundary, and a
  * second team prefilled with the first one's slug would read as correct and
- * deploy into somebody else's account.
+ * deploy into somebody else's account. So there is no donor left to read.
  */
-function vercelProposal(
-  rows: readonly OnboardingTargetRow[],
-): TargetConnectionProposal {
-  const from = donor(rows, 'vercel');
-  const connection = from?.connection;
-  if (connection?.adapter !== 'vercel') return { carriedFrom: null };
-  return { carriedFrom: labelOf(from), vercelEndpoint: connection.endpoint };
+function vercelProposal(): TargetConnectionProposal {
+  return { carriedFrom: null };
 }
 
 /**
- * The same one field for a Cloudflare account, with the same omission.
+ * The same nothing for a Cloudflare account, with the same reason.
  *
- * The account id is not carried, for the reason every other boundary's address
- * is not: it names *which* one, and a second account prefilled with the first
- * one's would read as correct and deploy someone else's site.
+ * `account` is not carried for the reason every other boundary's address is
+ * not, and `endpoint` is not carried because `pages/index.ts` now owns its
+ * own default.
  */
-function pagesProposal(
-  rows: readonly OnboardingTargetRow[],
-): TargetConnectionProposal {
-  const from = donor(rows, 'cloudflare-pages');
-  const connection = from?.connection;
-  if (connection?.adapter !== 'cloudflare-pages') return { carriedFrom: null };
-  return { carriedFrom: labelOf(from), pagesEndpoint: connection.endpoint };
+function pagesProposal(): TargetConnectionProposal {
+  return { carriedFrom: null };
 }
 
 /** What a screen would propose for a fresh connect of this shape. */
@@ -180,9 +171,9 @@ export function connectionProposal(
     case 'gcp-project':
       return cloudProposal(rows);
     case 'vercel-team':
-      return vercelProposal(rows);
+      return vercelProposal();
     case 'cloudflare-account':
-      return pagesProposal(rows);
+      return pagesProposal();
   }
 }
 

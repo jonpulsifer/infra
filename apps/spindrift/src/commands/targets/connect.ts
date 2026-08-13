@@ -151,17 +151,19 @@ export const connectTargetInput = z.discriminatedUnion('kind', [
       project: z.string().trim().min(1),
       region: z.string().trim().min(1),
       /**
-       * The two control APIs this act registers a Target against — the runtime's
-       * and the hosting product's.
+       * The two control APIs this act could register a Target against — the
+       * runtime's and the hosting product's.
        *
-       * Two values for one act, which reads like a leak of the split §13 says
-       * the operator should not have to think about. It is the opposite: the
-       * operator connects one project, and the fact that doing so produces two
-       * Targets is precisely why both endpoints are asked for here rather than
-       * in two separate connect flows.
+       * Optional, and ordinarily absent: both are one hostname for every GCP
+       * project, so `cloudrun/index.ts` and `static/index.ts` each apply their
+       * own default the same way every other cloud Target's endpoint now does.
+       * Kept here, not typed into the connect screen, for the installation
+       * genuinely behind a perimeter or a mirror — the manifest is where that
+       * kind of override belongs (§20), and this command has to accept what the
+       * manifest can declare.
        */
-      runEndpoint: z.url(),
-      hostingEndpoint: z.url(),
+      runEndpoint: z.url().optional(),
+      hostingEndpoint: z.url().optional(),
       /** Where this project's admission policy is read from (§16). */
       policyEndpoint: z.url().optional(),
       /**
@@ -190,8 +192,13 @@ export const connectTargetInput = z.discriminatedUnion('kind', [
       vessel: targetNameSchema,
       /** The team or account slug, or its `team_…` id. Both address the API. */
       team: z.string().trim().min(1),
-      /** The platform's API root. Asked for rather than assumed (§20). */
-      endpoint: z.url(),
+      /**
+       * The platform's API root. Optional, and ordinarily absent: it is one
+       * hostname for every team, so `vercel/index.ts` applies its own default.
+       * Kept for the same override reason `runEndpoint` above is — a genuine
+       * perimeter or mirror, declared in the manifest rather than typed here.
+       */
+      endpoint: z.url().optional(),
       /**
        * §33's static reachability input.
        *
@@ -209,8 +216,12 @@ export const connectTargetInput = z.discriminatedUnion('kind', [
       vessel: targetNameSchema,
       /** The account id every project on this boundary is created under. */
       account: z.string().trim().min(1),
-      /** The platform's API root. Asked for rather than assumed (§20). */
-      pagesEndpoint: z.url(),
+      /**
+       * The platform's API root. Optional, and ordinarily absent: it is one
+       * hostname for every account, so `pages/index.ts` applies its own
+       * default. Kept for the same override reason `runEndpoint` above is.
+       */
+      pagesEndpoint: z.url().optional(),
       /** §33's static reachability input, on the same terms as above. */
       servedHosts: z.array(z.string().trim().min(1)).optional(),
     })
@@ -294,13 +305,25 @@ function connectionFor(
     if (input.kind !== 'vercel-team') {
       throw new Error('only a Vercel team registers a Vercel Target');
     }
-    return { adapter, endpoint: input.endpoint };
+    return {
+      adapter,
+      // Written only when the operator actually stated an override — an
+      // absent key is what tells `vercel/index.ts` to apply its own default,
+      // and storing `undefined` explicitly would mean the same thing but say
+      // it less clearly to the next reader of a stored row.
+      ...(input.endpoint === undefined ? {} : { endpoint: input.endpoint }),
+    };
   }
   if (adapter === 'cloudflare-pages') {
     if (input.kind !== 'cloudflare-account') {
       throw new Error('only a Cloudflare account registers a Pages Target');
     }
-    return { adapter, endpoint: input.pagesEndpoint };
+    return {
+      adapter,
+      ...(input.pagesEndpoint === undefined
+        ? {}
+        : { endpoint: input.pagesEndpoint }),
+    };
   }
   if (input.kind !== 'gcp-project') {
     throw new Error('a cluster does not register a cloud Target');
@@ -309,7 +332,9 @@ function connectionFor(
     return {
       adapter,
       region: input.region,
-      endpoint: input.runEndpoint,
+      ...(input.runEndpoint === undefined
+        ? {}
+        : { endpoint: input.runEndpoint }),
       ...(input.policyEndpoint === undefined
         ? {}
         : { policyEndpoint: input.policyEndpoint }),
@@ -325,7 +350,12 @@ function connectionFor(
         : { logHistorySeconds: input.logHistorySeconds }),
     };
   }
-  return { adapter, endpoint: input.hostingEndpoint };
+  return {
+    adapter,
+    ...(input.hostingEndpoint === undefined
+      ? {}
+      : { endpoint: input.hostingEndpoint }),
+  };
 }
 
 /** The boundary this act connects, as a row to create or update. */
