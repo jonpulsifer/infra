@@ -742,6 +742,20 @@ export interface WorkspaceView {
    */
   readonly buildRoute: string | null;
   /**
+   * Whether this App's source is an uploaded archive rather than a repo.
+   *
+   * Not derivable from what is already here: `buildRoute` and `autoDeploy` are
+   * both null for an archive App and for a repo App that has set neither, so a
+   * screen reading them cannot tell "there is nothing to choose" from "nothing
+   * has been chosen". The Component upload control needs the distinction —
+   * an archive App's bytes cannot be fetched again, so uploading is the only
+   * way to give it a new release, which is a different sentence from the
+   * escape hatch a repo App gets.
+   *
+   * Optional because every fixture in the tree builds this row literally.
+   */
+  readonly archiveSourced?: boolean;
+  /**
    * Every build route this installation configures, in rank order, judged
    * against the placed Target's minimum level alone.
    *

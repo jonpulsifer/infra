@@ -65,6 +65,11 @@ import { Tabs } from '../../ui/tabs.tsx';
 import { Timestamp } from '../../ui/timestamp.tsx';
 import { cn, normaliseUrl } from '../../ui/utils.ts';
 import {
+  ComponentUploadButton,
+  type StageArchive,
+  type SubmitUpload,
+} from './component-upload.tsx';
+import {
   AUTH_NOTE,
   AUTHS,
   Choice,
@@ -73,13 +78,6 @@ import {
   REACH_NOTE,
   REACHES,
 } from './new/summary.tsx';
-// PROTOTYPE — remove this import with `prototype-new-build.tsx`.
-import {
-  type PrototypeNewBuild,
-  VariantARebuild,
-  VariantBReleasesBand,
-  VariantCComponentAction,
-} from './prototype-new-build.tsx';
 import { Releases } from './releases.tsx';
 
 /**
@@ -301,11 +299,16 @@ export function Workspace({
   onFollowExecution,
   executionLines,
   tab = 'overview',
-  prototype,
+  onStageArchive,
+  onUploadArchive,
 }: {
   view: WorkspaceView;
-  /** PROTOTYPE — remove with `prototype-new-build.tsx`. */
-  prototype?: PrototypeNewBuild;
+  /**
+   * Give one Component new bytes. Both or neither — staging without a command
+   * to spend the digest on is a control that cannot finish.
+   */
+  onStageArchive?: StageArchive;
+  onUploadArchive?: SubmitUpload;
   onDeploy?: () => void;
   /**
    * Ask for a Build outright.
@@ -463,15 +466,7 @@ export function Workspace({
                 </a>
               </Button>
             )}
-            {/* PROTOTYPE slot A — see `prototype-new-build.tsx`. */}
-            {prototype?.variant === 'A' ? (
-              <VariantARebuild
-                prototype={prototype}
-                component={selected?.name ?? view.app}
-                deploying={deploying}
-                {...(onRebuild ? { onRebuild } : {})}
-              />
-            ) : onRebuild ? (
+            {onRebuild ? (
               <Button
                 variant="outline"
                 onClick={onRebuild}
@@ -542,7 +537,9 @@ export function Workspace({
           <div className="grid gap-4 md:grid-cols-2">
             <Components
               components={view.components}
-              {...(prototype ? { prototype } : {})}
+              archiveSourced={view.archiveSourced === true}
+              {...(onStageArchive ? { onStageArchive } : {})}
+              {...(onUploadArchive ? { onUploadArchive } : {})}
               {...(selected === undefined ? {} : { selectedId: selected.id })}
               {...(onSetReach === undefined ? {} : { onSetReach })}
               {...(onSelectComponent === undefined
@@ -611,14 +608,6 @@ export function Workspace({
             />
           </div>
         </>
-      ) : null}
-
-      {/* PROTOTYPE slot B — see `prototype-new-build.tsx`. */}
-      {current === 'releases' && prototype?.variant === 'B' ? (
-        <VariantBReleasesBand
-          prototype={prototype}
-          component={selected?.name ?? view.app}
-        />
       ) : null}
 
       {current === 'releases' ? (
@@ -1192,11 +1181,15 @@ function Components({
   onMoveComponent,
   onUnplaceComponent,
   targets = [],
-  prototype,
+  archiveSourced = false,
+  onStageArchive,
+  onUploadArchive,
 }: {
   components: readonly ComponentView[];
-  /** PROTOTYPE — remove with `prototype-new-build.tsx`. */
-  prototype?: PrototypeNewBuild;
+  /** Whether uploading is this App's only way to a new release. */
+  archiveSourced?: boolean;
+  onStageArchive?: StageArchive;
+  onUploadArchive?: SubmitUpload;
   /** The row this screen's runtime, config and placement are about. */
   selectedId?: string;
   onSetReach?: SetReach;
@@ -1288,13 +1281,14 @@ function Components({
                   ? {}
                   : { onSelect: () => onSelectComponent(component.name) })}
                 trailing={
-                  onSetReach || moves || prototype?.variant === 'C' ? (
+                  onSetReach || moves || (onStageArchive && onUploadArchive) ? (
                     <div className="relative flex shrink-0 items-center gap-2">
-                      {/* PROTOTYPE slot C — see `prototype-new-build.tsx`. */}
-                      {prototype?.variant === 'C' ? (
-                        <VariantCComponentAction
-                          prototype={prototype}
+                      {onStageArchive && onUploadArchive ? (
+                        <ComponentUploadButton
                           component={component}
+                          archiveSourced={archiveSourced}
+                          onStage={onStageArchive}
+                          onSubmit={onUploadArchive}
                         />
                       ) : null}
                       {onSetReach ? (

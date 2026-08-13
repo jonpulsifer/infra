@@ -459,6 +459,13 @@ export const getAppWorkspace: Command<
     activity,
     runtime,
     autoDeploy: app.sourceKind === 'repo' ? app.autoDeploy : null,
+    // Stated rather than inferred from the two nulls above. Both are null for
+    // an archive App *and* for a repo App whose route is unset, so a screen
+    // reading them cannot tell the cases apart — which is why the archive App's
+    // missing route picker and missing auto-deploy toggle had no explanation on
+    // them, and why `deployApp`'s "upload an archive for this Component" named
+    // an act nothing offered.
+    archiveSourced: app.sourceKind !== 'repo',
     buildRoute,
     buildRouteOptions,
     // What the release delivered and when, so `LIVE` stops being a word with
