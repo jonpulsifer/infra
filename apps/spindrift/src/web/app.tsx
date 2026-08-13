@@ -2593,17 +2593,17 @@ function DatastoresScreen({
   }, [reloadToken]);
 
   /**
-   * One dispatch and no attach, which is the whole difference from the
-   * workspace's handler: that one creates and then attaches because it has an
-   * App open to attach to, and this screen has none. The Datastore lands
-   * unattached, which is what §11 says it is until something attaches it.
+   * One dispatch and no attach: this is the only screen that creates storage,
+   * and it has no App open to attach the result to. The Datastore lands
+   * unattached, which is what §11 says it is until something attaches it —
+   * the workspace card's Attach is that something.
    */
   const handleCreate: CreateLedgerDatastore = async (create) => {
     try {
       const result = await command('createDatastore', {
         name: create.name,
         engine: create.engine,
-        targetId: create.targetId,
+        vesselId: create.vesselId,
         // Restated rather than omitted for the reason {@link componentCreation}
         // restates its defaults: `InputOf` reads the schema's output, so a
         // `.default()` is still a required property to a typed caller.

@@ -62,10 +62,8 @@ export type DatastoreAct = (
  * Creating one managed Datastore from the ledger.
  *
  * Three fields and no App, which is `createDatastore`'s own input minus the
- * size it defaults — the workspace's `CreateDatastore` is this shape with the
- * Vessel implied by the App that screen already has open, and the two stay
- * separate rather than one shared alias because the implied Vessel is exactly
- * the difference.
+ * size it defaults. The Vessel is named rather than implied because this is
+ * the ledger, where no App is open to imply one.
  */
 export type CreateLedgerDatastore = (create: {
   readonly name: string;
@@ -257,9 +255,8 @@ function Select({
  * effect, so switching Vessel can never leave a stale engine selected for the
  * length of a render.
  *
- * No size field, the same decision `NewDatastoreForm` makes on the workspace:
- * `storageGiB` is a defaulted command input because a developer has no basis on
- * day one for a number a resize command would own.
+ * No size field: `storageGiB` is a defaulted command input because a developer
+ * has no basis on day one for a number a resize command would own.
  */
 function NewDatastoreForm({
   vessels,
