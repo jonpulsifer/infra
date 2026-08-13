@@ -62,6 +62,7 @@ import { Card, CardContent } from '../../ui/card.tsx';
 import { Field } from '../../ui/field.tsx';
 import { Logo } from '../../ui/logo.tsx';
 import { Skeleton, SkeletonRows, SkeletonText } from '../../ui/skeleton.tsx';
+import { Timestamp } from '../../ui/timestamp.tsx';
 import { cn } from '../../ui/utils.ts';
 
 type Verification = OutputOf<'testBucketPermissions'>;
@@ -809,8 +810,8 @@ function RegistryCredentialForm({
       </div>
       {registry.credentialUpdatedAt !== null ? (
         <p className="text-[11px] text-subtle">
-          Set {new Date(registry.credentialUpdatedAt).toLocaleString()}.
-          Forgetting it here does not revoke it at the registry.
+          Set <Timestamp at={registry.credentialUpdatedAt} />. Forgetting it
+          here does not revoke it at the registry.
         </p>
       ) : null}
     </form>

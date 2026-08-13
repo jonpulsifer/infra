@@ -63,6 +63,7 @@ import { Badge } from '../../../ui/badge.tsx';
 import { Button } from '../../../ui/button.tsx';
 import { Card, Eyebrow } from '../../../ui/card.tsx';
 import { Declaration } from '../../../ui/declaration.tsx';
+import { ErrorState } from '../../../ui/error-state.tsx';
 import { Field } from '../../../ui/field.tsx';
 import { notify } from '../../../ui/toast.tsx';
 import { cn } from '../../../ui/utils.ts';
@@ -306,16 +307,12 @@ export function CreationLoadFailure({
   onRetry: () => void;
 }) {
   return (
-    <div className="mx-auto flex w-full max-w-[760px] flex-col gap-3 px-5 py-6">
-      <div className="rounded-sm border border-destructive/50 bg-destructive/10 p-4 text-destructive">
-        <p className="text-sm font-medium">Failed to load creation options</p>
-        <p className="mt-1 text-sm">{message}</p>
-      </div>
-      <div>
-        <Button variant="outline" onClick={onRetry}>
-          Try again
-        </Button>
-      </div>
+    <div className="mx-auto w-full max-w-[760px] px-5 py-6">
+      <ErrorState
+        title="Failed to load creation options"
+        message={message}
+        onRetry={onRetry}
+      />
     </div>
   );
 }
@@ -892,7 +889,11 @@ export function NewApp({
               ? 'No Target is selected.'
               : target.candidate
                 ? `${target.adapter} · ${target.artifactType ?? 'no artifact shape'} · rank ${target.rank}`
-                : target.reasons.join(', ')
+                : // The sentences the picker below prints, not the bare
+                  // Exclusion codes they translate.
+                  target.reasons
+                    .map((reason, index) => target.detail[index] ?? reason)
+                    .join('; ')
           }
         >
           <div className="flex flex-col gap-2">

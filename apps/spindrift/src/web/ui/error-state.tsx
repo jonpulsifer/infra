@@ -11,8 +11,9 @@
  * nothing on it — no rows, no filter, no navigation of its own — so a sentence
  * with no retry leaves the reader with the browser's reload button as the only
  * affordance, and reloading a hash-routed app is a heavier act than re-running
- * one query. `CreationLoadFailure` in the create flow had already worked this
- * out and grown the button; this is that argument applied to the other nine.
+ * one query. `CreationLoadFailure` in the create flow worked this argument
+ * out first and grew the button; now every screen, that one included, renders
+ * the shape through here.
  *
  * `code` is rendered rather than swallowed. A transport failure code is not
  * operator prose, but it is the string that makes a support conversation short,

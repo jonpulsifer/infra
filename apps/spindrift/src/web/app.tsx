@@ -155,6 +155,11 @@ export function App() {
     state: 'asking',
   });
 
+  // The tab bar is where an operator holding three Deploys tells them apart.
+  useEffect(() => {
+    document.title = titleOf(route.path);
+  }, [route.path]);
+
   useEffect(() => {
     let live = true;
     readSession()
@@ -355,6 +360,43 @@ export function SignedIn({
       <Screen path={path} onNavigate={onNavigate} />
     </AppShell>
   );
+}
+
+/**
+ * The document title for a path — the tab's answer to "which one is this?".
+ *
+ * Derived from the path alone, mirroring `Screen` below branch for branch,
+ * because the path already carries the human name: Apps route by name, Deploys
+ * and Builds by the id their screens render as `#42`. Waiting for loaded data
+ * would say the same words later, and leave every tab reading "Spindrift"
+ * until its fetch returned.
+ *
+ * Exported for `test/web/screen-titles.test.ts`, which pins the mapping.
+ */
+export function titleOf(path: string): string {
+  if (path.startsWith('/settings')) return 'Settings · Spindrift';
+  if (
+    path.startsWith('/targets') ||
+    path.startsWith('/repos') ||
+    path.startsWith('/storage')
+  )
+    return 'Settings · Spindrift';
+  if (path.startsWith('/sources')) return 'Sources · Spindrift';
+  if (path.startsWith('/artifacts')) return 'Artifacts · Spindrift';
+  if (path.startsWith('/datastores')) return 'Datastores · Spindrift';
+  if (path.startsWith('/apps/new')) return 'New App · Spindrift';
+  if (path.startsWith('/deploys')) {
+    const deployId = path.replace(/^\/deploys\/?/, '');
+    return deployId ? `Deploy #${deployId} · Spindrift` : 'Deploys · Spindrift';
+  }
+  if (path.startsWith('/builds')) {
+    const buildId = path.replace(/^\/builds\/?/, '');
+    return buildId ? `Build #${buildId} · Spindrift` : 'Builds · Spindrift';
+  }
+  if (path === '/' || path === '') return 'Spindrift';
+  if (path === '/apps') return 'Apps · Spindrift';
+  const appName = path.replace(/^\/apps\//, '').replace(/^\//, '');
+  return `${appName} · Spindrift`;
 }
 
 /**
@@ -2246,6 +2288,15 @@ function BuildScreen({
 
   const act = async (kind: 'redeploy' | 'deploy') => {
     if (state.type !== 'success') return;
+    // The word the button the operator just pressed used — "Build again" on a
+    // failed Build, "Redeploy" otherwise — so a refusal answers in the same
+    // verb the press was made in.
+    const verb =
+      kind === 'deploy'
+        ? 'Deploy'
+        : state.attempt.build?.status === 'failed'
+          ? 'Build'
+          : 'Redeploy';
     setBusy(kind);
     try {
       // One command for both, because §4 gives the workspace button one
@@ -2262,14 +2313,14 @@ function BuildScreen({
       } else {
         notify({
           tone: 'destructive',
-          title: 'That act was refused',
+          title: `${verb} refused`,
           detail: result.failure.message,
         });
       }
     } catch (cause) {
       notify({
         tone: 'destructive',
-        title: 'Deploy failed',
+        title: `${verb} failed`,
         detail: cause instanceof Error ? cause.message : 'Server failure',
       });
     } finally {
