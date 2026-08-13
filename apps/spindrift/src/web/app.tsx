@@ -72,6 +72,7 @@ import { InstallationSettings } from './views/auth/installation.tsx';
 import { Onboarding } from './views/auth/onboarding.tsx';
 import { IdentitySettings } from './views/auth/settings.tsx';
 import {
+  type CreateLedgerDatastore,
   DatastoreLedger,
   type DatastoreAct as DatastoreLedgerAct,
 } from './views/operations/datastores.tsx';
@@ -2594,6 +2595,39 @@ function DatastoresScreen({
     };
   }, [reloadToken]);
 
+  /**
+   * One dispatch and no attach, which is the whole difference from the
+   * workspace's handler: that one creates and then attaches because it has an
+   * App open to attach to, and this screen has none. The Datastore lands
+   * unattached, which is what §11 says it is until something attaches it.
+   */
+  const handleCreate: CreateLedgerDatastore = async (create) => {
+    try {
+      const result = await command('createDatastore', {
+        name: create.name,
+        engine: create.engine,
+        targetId: create.targetId,
+        // Restated rather than omitted for the reason `handleCreateDatastore`
+        // restates it: `InputOf` reads the schema's output, so a `.default()`
+        // is still a required property to a typed caller.
+        storageGiB: 10,
+      });
+      // A refusal leaves no row behind — `createDatastore` deletes its insert
+      // when `provision` throws — so there is nothing new to re-read.
+      if (!result.ok) return { ok: false, message: result.failure.message };
+      setReloadToken((token) => token + 1);
+      return { ok: true };
+    } catch (cause: unknown) {
+      return {
+        ok: false,
+        message:
+          cause instanceof Error
+            ? cause.message
+            : 'Creating the Datastore failed',
+      };
+    }
+  };
+
   const handleDetach: DatastoreLedgerAct = async (datastoreId) => {
     try {
       const result = await command('detachDatastore', { datastoreId });
@@ -2635,7 +2669,9 @@ function DatastoresScreen({
   return (
     <DatastoreLedger
       datastores={state.result.datastores}
+      targets={state.result.targets}
       onNavigate={onNavigate}
+      onCreate={handleCreate}
       onDetach={handleDetach}
       onDestroy={handleDestroy}
     />

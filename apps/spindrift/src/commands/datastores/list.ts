@@ -20,11 +20,27 @@
  * No pagination. Datastores are created by hand, one at a time, through a
  * form with a name field — there will be tens of them for the lifetime of an
  * installation, not the thousands a Build or a Deploy accumulates.
+ *
+ * **The pickable Targets ride along.** `createDatastore` takes a Target and no
+ * App, so the ledger can create — and the one thing its form needs that the
+ * rows do not carry is where a new one could go. It is answered here rather
+ * than by a second call to `listTargets` because that command answers a
+ * different question (placement candidacy for a Component being created) and
+ * carries none of §3's storage capabilities; a screen that asked it would be
+ * offering Targets on a fact it never read.
  */
 import { z } from 'zod';
+import { capabilitiesOfRow } from '../../domain/capabilities.ts';
 import { elapsedSince } from '../../domain/elapsed.ts';
-import { targetRowLabel } from '../../domain/target.ts';
-import type { DatastoreListItem } from '../../web/model.ts';
+import {
+  hasTargetConnection,
+  hasVesselLocation,
+  targetRowLabel,
+} from '../../domain/target.ts';
+import type {
+  DatastoreListItem,
+  DatastoreTargetOption,
+} from '../../web/model.ts';
 import { type Command, ok } from '../types.ts';
 
 export const listDatastoresInput = z.object({}).strict();
@@ -33,6 +49,8 @@ export type ListDatastoresInput = z.infer<typeof listDatastoresInput>;
 
 export interface ListDatastoresResult {
   readonly datastores: readonly DatastoreListItem[];
+  /** Where a new managed Datastore could be created — see the file note. */
+  readonly targets: readonly DatastoreTargetOption[];
 }
 
 export const listDatastores: Command<
@@ -45,7 +63,40 @@ export const listDatastores: Command<
     orderBy: (row, { desc }) => [desc(row.createdAt)],
   });
 
+  const targetRows = await context.db.query.targets.findMany({
+    with: { vessel: true },
+    orderBy: (row, { asc }) => [asc(row.rank)],
+  });
+  const targets: DatastoreTargetOption[] = [];
+  for (const target of targetRows) {
+    // Every check `createDatastore` makes before it inserts, in its order. A
+    // Target that fails any of them is one whose only answer is that command's
+    // refusal, and an option whose sole outcome is a refusal is worth less
+    // than not offering it.
+    if (!hasTargetConnection(target) || !hasVesselLocation(target.vessel)) {
+      continue;
+    }
+    if ((context.adapters.datastore?.(target.adapter) ?? null) === null) {
+      continue;
+    }
+    const capabilities = capabilitiesOfRow(target, {
+      artifactTypes:
+        context.adapters.deploy(target.adapter)?.artifactTypes ?? null,
+      manifest: context.manifest,
+    });
+    const engines = (['postgres', 'valkey'] as const).filter(
+      (engine) => capabilities[engine],
+    );
+    if (engines.length === 0) continue;
+    targets.push({
+      targetId: target.id,
+      label: targetRowLabel(target),
+      engines,
+    });
+  }
+
   return ok({
+    targets,
     datastores: rows.map((row) => ({
       id: row.id,
       name: row.name,

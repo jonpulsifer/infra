@@ -632,4 +632,72 @@ describe('listDatastores', () => {
     // anywhere in the payload, not just under its own field name.
     expect(JSON.stringify(row)).not.toContain('secret://elsewhere/analytics');
   });
+
+  /*
+    The ledger's Create picker. Every case here is a Target `createDatastore`
+    would refuse, offered or not offered accordingly — the picker and the
+    command have to agree, because a Target on the list whose only answer is a
+    refusal is the bug this list exists to avoid.
+  */
+  test('offers only the engines the Target serves', async () => {
+    const both = await aTarget();
+    const cacheOnly = await aTarget({
+      discovery: { ...CAPABLE_DISCOVERY, postgres: false },
+    });
+
+    const result = await listDatastores(
+      {},
+      contextWith(new FakeDatastoreAdapter()),
+    );
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const offered = new Map(
+      result.value.targets.map((row) => [row.targetId, row.engines]),
+    );
+    expect(offered.get(both.id)).toEqual(['postgres', 'valkey']);
+    expect(offered.get(cacheOnly.id)).toEqual(['valkey']);
+  });
+
+  test('offers no Target serving neither engine', async () => {
+    const bare = await aTarget({
+      discovery: { ...CAPABLE_DISCOVERY, postgres: false, valkey: false },
+    });
+
+    const result = await listDatastores(
+      {},
+      contextWith(new FakeDatastoreAdapter()),
+    );
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(
+      result.value.targets.some((row) => row.targetId === bare.id),
+    ).toBeFalse();
+  });
+
+  test('offers nothing when this installation ships no datastore adapter', async () => {
+    await aTarget();
+
+    const result = await listDatastores({}, contextWith(null));
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.targets).toEqual([]);
+  });
+
+  test('offers no unconnected Target', async () => {
+    const unconnected = await aTarget({ connection: null });
+
+    const result = await listDatastores(
+      {},
+      contextWith(new FakeDatastoreAdapter()),
+    );
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(
+      result.value.targets.some((row) => row.targetId === unconnected.id),
+    ).toBeFalse();
+  });
 });

@@ -8,17 +8,19 @@
  * (§11: "attached, not a field"), and this is the screen a top-level noun
  * gets: one ledger, independent of which App a reader opened first.
  *
- * **No create or attach here.** Both need an App-and-Target picker this
- * screen has no home for — `createDatastore` binds to a placed Target and
- * `attachDatastore` binds to an App, and a global ledger has neither selected.
- * They stay exactly where §11 put them, on the workspace of the App they
- * would attach to. What lives here are the two acts that take only a
- * Datastore id: Detach and Destroy, one at a time and never both, because the
- * row already says which one core would accept — `destroyDatastore` refuses
- * while attached. That is stricter than the workspace's section, which offers
- * Destroy on every row and lets the refusal come back as a sentence; here the
- * reader has no App open to detach from first, so a button whose only outcome
- * is that refusal is worth less than the one act that works.
+ * **Create lives here; attach does not.** `createDatastore` takes a name, an
+ * engine and a Target, and no App — storage exists before anything reads it,
+ * which is the whole of what "top-level, not a field" means — so the only
+ * picker this form needs is the one `listDatastores` sends with the rows.
+ * `attachDatastore` genuinely does bind to an App, and a global ledger has
+ * none selected, so it stays on the workspace of the App it would attach to.
+ * Alongside it are the two acts that take only a Datastore id: Detach and
+ * Destroy, one at a time and never both, because the row already says which
+ * one core would accept — `destroyDatastore` refuses while attached. That is
+ * stricter than the workspace's section, which offers Destroy on every row and
+ * lets the refusal come back as a sentence; here the reader has no App open to
+ * detach from first, so a button whose only outcome is that refusal is worth
+ * less than the one act that works.
  *
  * Not a `SupplyChainTabs` member. §2's chain is Source + Build = Artifact;
  * a Datastore is never an input to that chain or an output of it, so tabbing
@@ -31,12 +33,13 @@ import {
   DefinitionGrid,
   LedgerExplorer,
 } from '../../components/object-explorer.tsx';
-import type { DatastoreListItem } from '../../model.ts';
+import type { DatastoreListItem, DatastoreTargetOption } from '../../model.ts';
 import { Badge } from '../../ui/badge.tsx';
 import { Button } from '../../ui/button.tsx';
 import { Eyebrow } from '../../ui/card.tsx';
 import type { Column } from '../../ui/data-table.tsx';
 import { EmptyState } from '../../ui/empty-state.tsx';
+import { Field } from '../../ui/field.tsx';
 import { Page, PageHeader } from '../../ui/page.tsx';
 import { Timestamp } from '../../ui/timestamp.tsx';
 import { deployTone } from './deploys.tsx';
@@ -52,6 +55,23 @@ import { deployTone } from './deploys.tsx';
 export type DatastoreAct = (
   datastoreId: string,
 ) => Promise<
+  { readonly ok: true } | { readonly ok: false; readonly message: string }
+>;
+
+/**
+ * Creating one managed Datastore from the ledger.
+ *
+ * Three fields and no App, which is `createDatastore`'s own input minus the
+ * size it defaults — the workspace's `CreateDatastore` is this shape with the
+ * Target implied by the App that screen already has open, and the two stay
+ * separate rather than one shared alias because the implied Target is exactly
+ * the difference.
+ */
+export type CreateLedgerDatastore = (create: {
+  readonly name: string;
+  readonly engine: 'postgres' | 'valkey';
+  readonly targetId: string;
+}) => Promise<
   { readonly ok: true } | { readonly ok: false; readonly message: string }
 >;
 
@@ -191,24 +211,225 @@ function DatastoreRowActions({
   );
 }
 
+/** A `<select>` styled like the `Input` beside it, so the two do not diverge. */
+function Select({
+  id,
+  value,
+  options,
+  disabled,
+  onChange,
+}: {
+  readonly id: string;
+  readonly value: string;
+  readonly options: readonly {
+    readonly value: string;
+    readonly label: string;
+  }[];
+  readonly disabled?: boolean;
+  readonly onChange: (value: string) => void;
+}) {
+  return (
+    <select
+      id={id}
+      name={id}
+      value={value}
+      disabled={disabled}
+      onChange={(event) => onChange(event.currentTarget.value)}
+      className="h-9 w-full rounded-sm border border-input bg-background px-3 font-mono text-body text-foreground disabled:cursor-not-allowed disabled:opacity-60"
+    >
+      {options.map((option) => (
+        <option key={option.value} value={option.value}>
+          {option.label}
+        </option>
+      ))}
+    </select>
+  );
+}
+
+/**
+ * Creating one managed Datastore — a name, a Target and an engine.
+ *
+ * **The engine list is the selected Target's, not the two the schema accepts.**
+ * §3 makes Postgres and Valkey independent capabilities, so a cluster that
+ * serves one and not the other is ordinary; offering both everywhere would put
+ * a choice on screen whose only outcome on half the Targets is core's "does not
+ * serve" refusal. It is derived from the selection rather than corrected by an
+ * effect, so switching Target can never leave a stale engine selected for the
+ * length of a render.
+ *
+ * No size field, the same decision `NewDatastoreForm` makes on the workspace:
+ * `storageGiB` is a defaulted command input because a developer has no basis on
+ * day one for a number a resize command would own.
+ */
+function NewDatastoreForm({
+  targets,
+  onCreate,
+  onDone,
+}: {
+  readonly targets: readonly DatastoreTargetOption[];
+  readonly onCreate: CreateLedgerDatastore;
+  readonly onDone: () => void;
+}) {
+  const [name, setName] = useState('');
+  const [targetId, setTargetId] = useState(targets[0]?.targetId ?? '');
+  const [chosenEngine, setChosenEngine] = useState<'postgres' | 'valkey'>(
+    'postgres',
+  );
+  const [saving, setSaving] = useState(false);
+  const [outcome, setOutcome] = useState<
+    | { readonly kind: 'created' }
+    | { readonly kind: 'refused'; readonly message: string }
+    | null
+  >(null);
+
+  const target = targets.find((row) => row.targetId === targetId) ?? targets[0];
+  const engines = target?.engines ?? [];
+  const engine = engines.includes(chosenEngine) ? chosenEngine : engines[0];
+
+  const save = async () => {
+    if (target === undefined || engine === undefined) return;
+    setSaving(true);
+    setOutcome(null);
+    try {
+      const result = await onCreate({
+        name: name.trim(),
+        engine,
+        targetId: target.targetId,
+      });
+      if (result.ok) {
+        setOutcome({ kind: 'created' });
+        setName('');
+      } else {
+        setOutcome({ kind: 'refused', message: result.message });
+      }
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="flex flex-col gap-3 rounded-md border border-border-soft p-4">
+      <div className="grid gap-3 sm:grid-cols-3">
+        <Field
+          name="datastore-name"
+          label="Name"
+          value={name}
+          onChange={(event) => setName(event.target.value)}
+          placeholder="primary"
+        />
+        <Field name="datastore-target" label="Target">
+          <Select
+            id="datastore-target"
+            value={target?.targetId ?? ''}
+            disabled={saving}
+            options={targets.map((row) => ({
+              value: row.targetId,
+              label: row.label,
+            }))}
+            onChange={setTargetId}
+          />
+        </Field>
+        <Field
+          name="datastore-engine"
+          label="Engine"
+          hint={
+            engine === 'postgres'
+              ? 'Arrives as DATABASE_URL'
+              : 'Arrives as REDIS_URL'
+          }
+        >
+          <Select
+            id="datastore-engine"
+            value={engine ?? ''}
+            disabled={saving}
+            options={engines.map((served) => ({
+              value: served,
+              label: served,
+            }))}
+            onChange={(value) =>
+              setChosenEngine(value === 'valkey' ? 'valkey' : 'postgres')
+            }
+          />
+        </Field>
+      </div>
+      {outcome?.kind === 'refused' ? (
+        <p className="rounded-md border border-destructive/40 bg-destructive-soft px-3 py-2 text-xs text-destructive">
+          {outcome.message}
+        </p>
+      ) : null}
+      {outcome?.kind === 'created' ? (
+        <p className="rounded-md border border-warning/40 bg-warning-soft px-3 py-2 text-xs">
+          Created, unattached. It provisions in the background — the row says
+          how far it has got — and attaching it to an App is done from that
+          App's workspace.
+        </p>
+      ) : null}
+      <div className="flex flex-wrap items-center gap-2">
+        <Button
+          size="sm"
+          disabled={saving || name.trim() === '' || engine === undefined}
+          onClick={() => {
+            void save();
+          }}
+        >
+          {saving ? 'Creating…' : 'Create Datastore'}
+        </Button>
+        <Button variant="ghost" size="sm" onClick={onDone} disabled={saving}>
+          {outcome?.kind === 'created' ? 'Close' : 'Cancel'}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
 export function DatastoreLedger({
   datastores,
+  targets,
   onNavigate,
+  onCreate,
   onDetach,
   onDestroy,
 }: {
   readonly datastores: readonly DatastoreListItem[];
+  readonly targets: readonly DatastoreTargetOption[];
   readonly onNavigate: (path: string) => void;
+  readonly onCreate: CreateLedgerDatastore;
   readonly onDetach: DatastoreAct;
   readonly onDestroy: DatastoreAct;
 }) {
+  const [adding, setAdding] = useState(false);
+  // No Target serves an engine, so there is nothing a form here could be
+  // pointed at. The button is withheld rather than shown and refused: the
+  // sentence below already says what is missing, and it is a Target-connection
+  // fact, not something a retry of this form fixes.
+  const canCreate = targets.length > 0;
+
   return (
     <Page>
       <PageHeader
         eyebrow="Attached resources"
         title="Datastores"
-        description="Every Postgres and Valkey Datastore this installation holds, attached or not. Creating one and attaching it to an App both stay on that App's workspace — this is where the rest of the lifecycle is read."
+        description="Every Postgres and Valkey Datastore this installation holds, attached or not. Create one here against any Target that serves the engine; attaching it to an App stays on that App's workspace."
+        {...(canCreate
+          ? {
+              actions: (
+                <Button
+                  variant="outline"
+                  onClick={() => setAdding((current) => !current)}
+                >
+                  {adding ? 'Close' : 'Create Datastore'}
+                </Button>
+              ),
+            }
+          : {})}
       />
+      {canCreate && adding ? (
+        <NewDatastoreForm
+          targets={targets}
+          onCreate={onCreate}
+          onDone={() => setAdding(false)}
+        />
+      ) : null}
       <LedgerExplorer
         columns={COLUMNS}
         rows={datastores}
@@ -221,8 +442,9 @@ export function DatastoreLedger({
         inspectorLabel={(datastore) => `Datastore ${datastore.name}`}
         empty={
           <EmptyState icon={<Database />} title="No Datastores exist yet.">
-            Creating one and attaching it to an App is done from that App's
-            workspace.
+            {canCreate
+              ? 'Create one against any Target that serves the engine — attaching it to an App is done from that App’s workspace.'
+              : 'No connected Target serves Postgres or Valkey, so there is nowhere to create one yet.'}
           </EmptyState>
         }
         renderInspector={(datastore) => (
