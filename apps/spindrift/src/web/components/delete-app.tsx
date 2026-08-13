@@ -11,13 +11,18 @@
  * Two things are stated rather than hidden, both because the row that recorded
  * them is about to stop existing:
  *
- * - **Stranded workloads.** Nothing is torn down (§13) — after the delete, this
- *   list is the only record that those workloads are there, so the flow does not
- *   close on its own when there is one. The operator dismisses it. One on static
- *   hosting says so twice over, because the hand clean-up it points at spends
- *   the site id permanently and that is worth reading before confirming.
+ * - **Live workloads.** Confirming tears them down, so they are named first —
+ *   this is the screen where an operator finds out that deleting the App stops
+ *   the thing serving traffic. One on static hosting says so twice over, because
+ *   the teardown spends the site id permanently and no amount of going back
+ *   undoes it.
  * - **Retained secrets.** §10's store items are reaped with the App; the ones a
  *   store refused are named, because nothing will reach them again.
+ *
+ * The flow only stops on the way out when something outlived the delete — a
+ * teardown the platform refused, or a store item it would not destroy. Those are
+ * the manual jobs, and the operator dismisses the list rather than the list
+ * closing itself.
  *
  * Both calls go by `appId`, never by the name on the button: `apps` has no
  * unique constraint on `name`, so a name is a label rather than an identifier.
@@ -68,7 +73,7 @@ export type AppDeletion =
       /** Carried so `dismiss` can report *which* App went, not just its label. */
       readonly id: string;
       readonly name: string;
-      readonly stranded: readonly StrandedWorkload[];
+      readonly retainedWorkloads: readonly string[];
       readonly retainedSecrets: readonly string[];
     }
   | {
@@ -147,7 +152,8 @@ export function useAppDeletion(
           }
           const value = result.value;
           const retained = value.deleted ? value.retainedSecrets : [];
-          if (value.stranded.length === 0 && retained.length === 0) {
+          const workloads = value.deleted ? value.retainedWorkloads : [];
+          if (workloads.length === 0 && retained.length === 0) {
             setState({ kind: 'idle' });
             deleted.current({ id, name });
             return;
@@ -156,7 +162,7 @@ export function useAppDeletion(
             kind: 'aftermath',
             id,
             name,
-            stranded: value.stranded,
+            retainedWorkloads: workloads,
             retainedSecrets: retained,
           });
         })
@@ -299,13 +305,20 @@ function Body({ state }: { state: AppDeletion }) {
         <h2 className="mt-1 text-lg font-semibold tracking-tight">
           {state.name} is gone, and this is not
         </h2>
-        {state.stranded.length > 0 ? (
+        {state.retainedWorkloads.length > 0 ? (
           <>
             <p className="mt-2 text-sm text-muted-foreground">
-              These workloads are still running. Nothing manages them now, so
-              removing them is a manual job on the Target.
+              These workloads could not be torn down and are still running.
+              Nothing manages them now, so removing them is a manual job on the
+              Target.
             </p>
-            <Stranded stranded={state.stranded} />
+            <ul className="mt-1.5 flex flex-col gap-1">
+              {state.retainedWorkloads.map((workload) => (
+                <li key={workload} className="font-mono text-xs text-subtle">
+                  {workload}
+                </li>
+              ))}
+            </ul>
           </>
         ) : null}
         {state.retainedSecrets.length > 0 ? (
@@ -343,12 +356,12 @@ function Body({ state }: { state: AppDeletion }) {
           <p className="flex items-center gap-2 text-sm font-medium text-destructive">
             <AlertTriangle aria-hidden="true" className="size-4" />
             {effects.stranded.length === 1
-              ? 'One workload is live and will keep running'
-              : `${effects.stranded.length} workloads are live and will keep running`}
+              ? 'One workload is live and will be torn down'
+              : `${effects.stranded.length} workloads are live and will be torn down`}
           </p>
           <p className="mt-1 text-sm text-muted-foreground">
-            Deleting the App does not stop them. You will have to remove them on
-            the Target by hand.
+            Deleting the App stops them. Anything the Target refuses to tear
+            down is named afterwards, to remove by hand.
           </p>
           <Stranded stranded={effects.stranded} />
         </div>
@@ -385,16 +398,16 @@ function Stranded({ stranded }: { stranded: readonly StrandedWorkload[] }) {
           </li>
         ))}
       </ul>
-      {/* The half of "remove it on the Target by hand" that cannot be undone
-          by doing it again: a static hosting site id is global and permanent,
-          so the manual clean-up spends the address forever. */}
+      {/* The half of the teardown that cannot be undone by deploying again: a
+          static hosting site id is global and permanent, so removing the site
+          spends the address forever. */}
       {spent.length > 0 ? (
         <p className="mt-2 text-sm text-destructive">
           {spent.length === 1
             ? `${spent[0]?.component} is on static hosting, and its site id is spent permanently`
             : `${spent.map((workload) => workload.component).join(', ')} are on static hosting, and their site ids are spent permanently`}{' '}
-          — removing the site does not give the name back, and nothing can ever
-          be deployed under it again.
+          — tearing the site down does not give the name back, and nothing can
+          ever be deployed under it again.
         </p>
       ) : null}
     </>

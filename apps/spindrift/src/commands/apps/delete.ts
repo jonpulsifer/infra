@@ -11,24 +11,35 @@
  * **It is review-then-confirm, like `replaceConfig`.** The first call writes
  * nothing and returns what the delete would do: the Components that go, the
  * Datastores that survive detached, and — the half that matters — the live
- * workloads it would strand. The second call, with `confirm`, does it. An act
+ * workloads it tears down. The second call, with `confirm`, does it. An act
  * that removes a Component's whole build and deploy history on the first call is
  * one nobody can look at before it happens, which is the same argument §10 makes
  * about a bulk paste.
  *
- * **It never calls the deploy adapter.** This is `disconnectTarget`'s rule (§13)
- * and it is here for the same reason: destroying a workload is not what "delete
- * this record" says, and a delete that tore down a running service because its
- * bookkeeping was being tidied would be the most destructive possible reading of
- * the request. What the operator gets instead is the list, before they confirm
- * and again afterwards, because after the rows are gone that list is the only
- * record that those workloads exist — and each entry says whether it keeps
- * *acting*, not merely sitting: a stranded service is inert, but a stranded
- * `kind: job` Component with a `schedule` bills on every tick, forever, in a
- * vessel project nobody is watching (`StrandedWorkload.firing`). An entry also
- * says whether the address it holds is spent for good, because on static
- * hosting it is (`StrandedWorkload.nameSpent`) and that is not recoverable by
- * going and tidying up afterwards.
+ * **It tears the workloads down**, and that is `unplaceComponent`'s exception to
+ * §13 rather than a violation of it: §13's rule is "never destroy as a side
+ * effect of *something else*", and an operator who confirms a delete having just
+ * been shown the running workloads by name has asked for those workloads to go.
+ * The alternative is a `kind: job` Component with a `schedule` firing on every
+ * tick, forever, billed in a vessel project nobody is watching, whose only
+ * record is a dialog somebody has to act on by hand. So the review names every
+ * live workload before anything happens, and each entry says whether it keeps
+ * *acting* (`StrandedWorkload.firing`) and whether tearing it down spends its
+ * address for good (`StrandedWorkload.nameSpent`, true on static hosting) —
+ * those sentences are what the confirmation is for.
+ *
+ * **What it tears down is not what it names.** The review names the phases in
+ * which something is up there answering; the teardown addresses the newest
+ * non-orphaned Deploy per placement that carries a `ref` at all, which is
+ * `unplaceComponent`'s rule and the reason a FAILED Deploy's half-made resource
+ * is not left behind billing.
+ *
+ * **A teardown the platform refuses does not fail the delete.** Same argument as
+ * `retainedSecrets` below: the operator asked for the App to be gone, an
+ * unreachable Target is not a reason to keep the rows, and `destroy` is
+ * contracted idempotent so nothing is lost by having tried. Those workloads are
+ * named in `retainedWorkloads` — genuinely stranded, and now the short list of
+ * what is left to do by hand rather than all of it.
  *
  * **It does reap the config store**, and that is not the same thing. §10's
  * store items are per-key material this App put there and nothing else will ever
@@ -38,8 +49,9 @@
  * are already gone by then, and a refusal at that point would report a delete
  * that happened as one that did not.
  */
-import { and, eq, inArray, isNull, or } from 'drizzle-orm';
+import { and, desc, eq, inArray, isNull, or } from 'drizzle-orm';
 import { z } from 'zod';
+import type { TargetAdapter } from '../../config/manifest.schema.ts';
 import {
   apps,
   builds,
@@ -51,7 +63,15 @@ import {
   targets,
   vessels,
 } from '../../db/schema.ts';
-import { STRANDABLE_PHASES, targetLabel } from '../../domain/target.ts';
+import {
+  deployTargetOf,
+  hasTargetConnection,
+  hasVesselLocation,
+  STRANDABLE_PHASES,
+  type TargetConnection,
+  targetLabel,
+} from '../../domain/target.ts';
+import type { VesselLocation } from '../../domain/vessel.ts';
 import { type ConfigSubject, configSubject, reapKey } from '../config/set.ts';
 import { type Command, type CommandContext, failed, ok } from '../types.ts';
 
@@ -63,9 +83,9 @@ export const deleteAppInput = z
      * False — the default — reviews and deletes nothing.
      *
      * The two calls are independent: the second re-reads the App and recomputes
-     * what it is about to strand, so a deploy that went live between them is
-     * named in the confirmation rather than quietly deleted under a review that
-     * said there was nothing running.
+     * what it is about to tear down, so a deploy that went live between them is
+     * torn down and named rather than left behind under a review that said
+     * there was nothing running.
      */
     confirm: z.boolean().default(false),
   })
@@ -73,23 +93,23 @@ export const deleteAppInput = z
 
 export type DeleteAppInput = z.infer<typeof deleteAppInput>;
 
-/** One workload that keeps running with nothing managing it (§13's grammar). */
+/** One live workload — what confirming this delete tears down (§13's grammar). */
 export interface StrandedWorkload {
   readonly deployId: string;
   readonly component: string;
-  /** Where it is still running — the operator has to go there by hand. */
+  /** Where it is running, and where the teardown is addressed. */
   readonly target: string;
   readonly url: string | null;
   /**
-   * Whether this stranded workload keeps *acting* rather than merely sitting.
+   * Whether this workload keeps *acting* rather than merely sitting.
    *
-   * A stranded service is inert until something calls it; a stranded
-   * `kind: job` Component with a `schedule` has a Cloud Scheduler job in front
-   * of it that fires on every tick forever, billed in a vessel project nobody
-   * is watching — the cost this review exists to make visible before the rows
-   * that name it are gone. Derived from the Component, not the Deploy: the
-   * cadence lives on `components.schedule`, and it is what fires regardless of
-   * which Build is live.
+   * A service left running is inert until something calls it; a `kind: job`
+   * Component with a `schedule` has a Cloud Scheduler job in front of it that
+   * fires on every tick forever, billed in a vessel project nobody is watching
+   * — the cost that makes tearing it down the right default, and the one a
+   * refused teardown leaves behind. Derived from the Component, not the Deploy:
+   * the cadence lives on `components.schedule`, and it is what fires regardless
+   * of which Build is live.
    */
   readonly firing: boolean;
   /**
@@ -98,11 +118,10 @@ export interface StrandedWorkload {
    * Static hosting site ids are global and never given back: "Deleting a site
    * is a permanent action. If you delete a site, Firebase doesn't maintain
    * records of deployed files or deployment history, and the `SITE_ID` cannot
-   * be reactivated by you or anyone else." So the tidy-up this review sends
-   * the operator to do — remove it on the Target by hand — costs that name
-   * for good, and neither this App nor any other can ever deploy under it
-   * again. Said before the confirmation rather than after, because the row
-   * that names which address was spent is one of the rows about to go.
+   * be reactivated by you or anyone else." So the teardown this delete performs
+   * costs that name for good, and neither this App nor any other can ever
+   * deploy under it again. Said in the review rather than after, because it is
+   * the one consequence of confirming that undoing the delete does not answer.
    *
    * Derived from the Target's adapter: it is a fact about the platform the
    * workload sits on, not about the Deploy.
@@ -118,7 +137,7 @@ export interface DeleteAppEffects {
   readonly components: readonly string[];
   readonly builds: number;
   readonly deploys: number;
-  /** Named, per §13 — this list is the whole point of the confirmation. */
+  /** Live workloads, torn down on confirm — the point of the confirmation. */
   readonly stranded: readonly StrandedWorkload[];
   /** §11: these survive, detached. The App owned the attachment, not the data. */
   readonly detachedDatastores: readonly string[];
@@ -136,6 +155,13 @@ export type DeleteAppResult =
        * material somebody has to remove in the store's own console.
        */
       readonly retainedSecrets: readonly string[];
+      /**
+       * Workloads that outlived their rows because the teardown was refused —
+       * `<component> on <target> — <why>`. Empty is the ordinary answer; a
+       * non-empty list is what is genuinely stranded and has to be removed on
+       * the Target by hand.
+       */
+      readonly retainedWorkloads: readonly string[];
     } & DeleteAppEffects);
 
 export const deleteApp: Command<DeleteAppInput, DeleteAppResult> = async (
@@ -199,19 +225,24 @@ export const deleteApp: Command<DeleteAppInput, DeleteAppResult> = async (
 
   // Read before write, for the same reason `disconnectTarget` does: the rows to
   // name are exactly the rows about to stop being observable, and reading them
-  // afterwards would return nothing at all.
-  const strandable =
+  // afterwards would return nothing at all. Whole Target and vessel rows,
+  // because what is read here is also what the teardown is addressed with.
+  const live =
     componentIds.length === 0
       ? []
       : await context.db
           .select({
             deployId: deploys.id,
+            componentId: deploys.componentId,
+            targetId: deploys.targetId,
+            phase: deploys.phase,
+            ref: deploys.ref,
             url: deploys.url,
             component: components.name,
-            vessel: vessels.name,
-            adapter: targets.adapter,
             componentKind: components.kind,
             schedule: components.schedule,
+            target: targets,
+            vessel: vessels,
           })
           .from(deploys)
           .innerJoin(components, eq(deploys.componentId, components.id))
@@ -221,9 +252,28 @@ export const deleteApp: Command<DeleteAppInput, DeleteAppResult> = async (
             and(
               inArray(deploys.componentId, componentIds),
               isNull(deploys.orphanedAt),
-              inArray(deploys.phase, [...STRANDABLE_PHASES]),
             ),
-          );
+          )
+          .orderBy(desc(deploys.id));
+
+  // What the review names: the phases in which something is actually up there
+  // answering (§13's grammar).
+  const strandable = live.filter((deploy) =>
+    STRANDABLE_PHASES.some((phase) => phase === deploy.phase),
+  );
+
+  // What the teardown addresses, which is not the same list. `ref` persists
+  // through a failed re-attempt (`settle`, `deploy-loop.ts`), so the newest
+  // non-orphaned Deploy that ever recorded one is the pair's current address
+  // whatever its own terminal phase says — the same rule `unplaceComponent`
+  // reads it by, and the reason a FAILED Deploy's half-made resource is not
+  // left behind. Newest first, so the first row per pair wins.
+  const addresses = new Map<string, (typeof live)[number]>();
+  for (const deploy of live) {
+    if (deploy.ref === null) continue;
+    const pair = `${deploy.componentId} ${deploy.targetId}`;
+    if (!addresses.has(pair)) addresses.set(pair, deploy);
+  }
 
   const attached = await context.db
     .select({ name: datastores.name })
@@ -260,10 +310,13 @@ export const deleteApp: Command<DeleteAppInput, DeleteAppResult> = async (
     stranded: strandable.map((deploy) => ({
       deployId: String(deploy.deployId),
       component: deploy.component,
-      target: targetLabel(deploy),
+      target: targetLabel({
+        vessel: deploy.vessel.name,
+        adapter: deploy.target.adapter,
+      }),
       url: deploy.url,
       firing: deploy.componentKind === 'job' && deploy.schedule !== null,
-      nameSpent: deploy.adapter === 'static',
+      nameSpent: deploy.target.adapter === 'static',
     })),
     detachedDatastores: attached.map((datastore) => datastore.name),
     configKeys: pinned.map(
@@ -279,6 +332,22 @@ export const deleteApp: Command<DeleteAppInput, DeleteAppResult> = async (
   // Resolved before the rows go, used after they have: `configSubject` reads the
   // Component and Target this scope is named from.
   const scopes = await reapableScopes(context, pinned, nameOf);
+
+  // Torn down before the rows go, so a crash between the two leaves a retryable
+  // delete rather than an orphan nothing names any more. `destroy` is contracted
+  // idempotent, so the retry costs nothing.
+  const retainedWorkloads: string[] = [];
+  for (const deploy of addresses.values()) {
+    const refusal = await teardown(context, deploy);
+    if (refusal !== null) {
+      retainedWorkloads.push(
+        `${deploy.component} on ${targetLabel({
+          vessel: deploy.vessel.name,
+          adapter: deploy.target.adapter,
+        })} — ${refusal}`,
+      );
+    }
+  }
 
   // Ordered rather than left to the cascade. Two of these foreign keys are
   // `restrict` — `deploys.build_id` and `component_target_desired.desired_*` —
@@ -317,8 +386,42 @@ export const deleteApp: Command<DeleteAppInput, DeleteAppResult> = async (
     }
   }
 
-  return ok({ deleted: true, retainedSecrets, ...effects });
+  return ok({ deleted: true, retainedSecrets, retainedWorkloads, ...effects });
 };
+
+/**
+ * Tear one workload down, answering with why not rather than throwing.
+ *
+ * §6 contracts `apply` not to throw and says nothing of the kind about
+ * `destroy`, so the fault is the far side's to report — but here it is reported
+ * *and the delete continues*, unlike `unplaceComponent` where the refusal is the
+ * whole answer. The App is going either way; an unreachable Target is a thing to
+ * name, not a veto on a delete the operator confirmed.
+ */
+async function teardown(
+  context: CommandContext,
+  deploy: {
+    ref: string | null;
+    target: { adapter: TargetAdapter; connection: TargetConnection | null };
+    vessel: { location: VesselLocation | null };
+  },
+): Promise<string | null> {
+  const { ref, target, vessel } = deploy;
+  if (ref === null) return null;
+  if (!hasTargetConnection(target) || !hasVesselLocation(vessel)) {
+    return 'the Target is not connected, so nothing could be torn down there';
+  }
+  const adapter = context.adapters.deploy(target.adapter);
+  if (adapter === null) {
+    return `this installation has no ${target.adapter} adapter`;
+  }
+  try {
+    await adapter.destroy(deployTargetOf(target, vessel), ref);
+    return null;
+  } catch (cause) {
+    return cause instanceof Error ? cause.message : String(cause);
+  }
+}
 
 /** One (Component, Target) scope's keys, with the store to reap them from. */
 interface ReapableScope {
