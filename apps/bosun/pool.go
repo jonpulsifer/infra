@@ -556,7 +556,7 @@ func (p *pool) boot(s *skiff, h *hull, class Class, logger *slog.Logger) error {
 		return fmt.Errorf("start passt: %w", err)
 	}
 
-	chProc, err := p.launch.Start(binPath(p.cfg.Bin.CloudHypervisor, "cloud-hypervisor"), chArgs(h, class, s.id, s.paths, p.cfg.CacheURL, s.build), helpersLog, helpersLog)
+	chProc, err := p.launch.Start(binPath(p.cfg.Bin.CloudHypervisor, "cloud-hypervisor"), chArgs(h, class, s.id, s.paths, hostServices{cacheURL: p.cfg.CacheURL, buildkitURL: p.cfg.BuildkitURL}, s.build), helpersLog, helpersLog)
 	if err != nil {
 		return fmt.Errorf("start cloud-hypervisor: %w", err)
 	}

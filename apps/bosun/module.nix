@@ -20,6 +20,29 @@ let
     ;
   cfg = config.services.bosun;
 
+  # buildkitd's own config. The GC policy is the point: this cache shares a
+  # boot disk with every workspace image, and BuildKit's default keeps a
+  # fraction of the whole filesystem, which is not a number this host can
+  # afford to discover mid-build. `all = true` sweeps every cache record
+  # rather than only the unshared ones, so keepBytes is a real ceiling.
+  buildkitConfig = (pkgs.formats.toml { }).generate "buildkitd.toml" {
+    worker.oci = {
+      enabled = true;
+      gc = true;
+    }
+    // lib.optionalAttrs (cfg.buildkit.maxSizeBytes != null) {
+      gcpolicy = [
+        {
+          all = true;
+          keepBytes = cfg.buildkit.maxSizeBytes;
+        }
+      ];
+    };
+    # containerd's worker would need a containerd to talk to; this host runs
+    # podman for the cache service and nothing else.
+    worker.containerd.enabled = false;
+  };
+
   configFile = (pkgs.formats.json { }).generate "bosun.json" {
     inherit (cfg)
       repo
@@ -35,6 +58,8 @@ let
     drainTimeout = "${toString cfg.drainTimeout}s";
     cacheUrl =
       if cfg.cache.enable then "http://${cfg.cache.address}:${toString cfg.cache.port}/" else "";
+    buildkitUrl =
+      if cfg.buildkit.enable then "tcp://${cfg.buildkit.address}:${toString cfg.buildkit.port}" else "";
     classes = lib.mapAttrs (_: c: {
       inherit (c)
         hull
@@ -413,6 +438,61 @@ in
         '';
       };
     };
+
+    # A BuildKit daemon on this host's own disk, announced to every skiff as
+    # `bosun.buildkit=<url>` on the cmdline. The Ubuntu hull points buildx's
+    # remote driver at it, so a `docker buildx build` in a job gets a layer
+    # cache that outlives the skiff running it.
+    #
+    # This is the one benchmark row the pool lost: a cold image build measured
+    # 34 s against a hosted runner's 25 s, and it was cold every time because
+    # an ephemeral guest starts with no layers. The cache service already makes
+    # exactly this trade for actions/cache.
+    #
+    # Same containment as the cache service: a dummy interface that exists only
+    # for this, and one /32 in the skiffs' egress filter.
+    #
+    # ponytail: the builder is shared by every skiff on this host, so its cache
+    # is a channel between jobs that are otherwise one-job-per-VM. That is the
+    # same boundary `persist = true` already crosses per slot, widened to the
+    # host. Fine for this repo's own CI; if untrusted fork PRs are ever served
+    # here, this wants a per-class builder or turning off.
+    buildkit = {
+      enable = mkEnableOption "a host-local BuildKit the skiffs build through";
+
+      address = mkOption {
+        type = types.str;
+        default = "10.113.113.2";
+        description = ''
+          Host-local dummy address buildkitd binds. Deliberately inside
+          RFC1918 so it stays unroutable beyond this host, and adjacent to
+          the cache service's address for the same reason.
+        '';
+      };
+
+      port = mkOption {
+        type = types.port;
+        default = 1234;
+        description = "buildkitd's own default port, kept.";
+      };
+
+      storageDir = mkOption {
+        type = types.path;
+        default = "/var/lib/bosun-buildkit";
+        description = "The layer cache and BuildKit's own state live here.";
+      };
+
+      maxSizeBytes = mkOption {
+        type = types.nullOr types.int;
+        default = null;
+        description = ''
+          Cap on the layer cache, as a BuildKit GC keepBytes policy. null
+          leaves BuildKit's own default, which is a fraction of the disk and
+          not something a boot disk sized for workspaces should discover the
+          hard way.
+        '';
+      };
+    };
   };
 
   config = mkIf cfg.enable {
@@ -449,7 +529,8 @@ in
       "e ${cfg.logDir} - - - ${cfg.logRetention}"
       "d ${cfg.workspaceDir} 0700 bosun bosun -"
     ]
-    ++ lib.optional cfg.cache.enable "d ${cfg.cache.storageDir} 0700 root root -";
+    ++ lib.optional cfg.cache.enable "d ${cfg.cache.storageDir} 0700 root root -"
+    ++ lib.optional cfg.buildkit.enable "d ${cfg.buildkit.storageDir} 0700 root root -";
 
     # The dummy interface the cache service binds. A netdev with no carrier
     # and no routes beyond the host: the address exists so the skiffs' egress
@@ -464,6 +545,47 @@ in
       matchConfig.Name = "bosun-cache0";
       address = [ "${cfg.cache.address}/32" ];
       linkConfig.ActivationPolicy = "always-up";
+    };
+
+    # The dummy interface buildkitd binds, for the same reason the cache
+    # service has one: the address exists so the skiffs' egress exception can
+    # name exactly one /32 that serves nothing but the builder.
+    systemd.network.netdevs."20-bosun-buildkit" = mkIf cfg.buildkit.enable {
+      netdevConfig = {
+        Name = "bosun-buildkit0";
+        Kind = "dummy";
+      };
+    };
+    systemd.network.networks."20-bosun-buildkit" = mkIf cfg.buildkit.enable {
+      matchConfig.Name = "bosun-buildkit0";
+      address = [ "${cfg.buildkit.address}/32" ];
+      linkConfig.ActivationPolicy = "always-up";
+    };
+
+    # buildkitd runs as root with the OCI worker: it unshares namespaces and
+    # mounts overlayfs per build step, which rootless mode only manages with a
+    # slower snapshotter. It is reachable on one host-local /32 and nowhere
+    # else, so the exposure is the skiffs, which are already running the job
+    # code that would drive it.
+    systemd.services.bosun-buildkit = mkIf cfg.buildkit.enable {
+      description = "BuildKit the skiffs build through, with a cache that outlives them";
+      wantedBy = [ "multi-user.target" ];
+      # The address it binds belongs to the dummy netdev above, and binding
+      # before the interface is configured fails the unit rather than waiting.
+      after = [ "network-online.target" ];
+      wants = [ "network-online.target" ];
+      path = [ pkgs.runc ];
+      serviceConfig = {
+        ExecStart = lib.concatStringsSep " " [
+          "${pkgs.buildkit}/bin/buildkitd"
+          "--addr tcp://${cfg.buildkit.address}:${toString cfg.buildkit.port}"
+          "--root ${cfg.buildkit.storageDir}"
+          "--config ${buildkitConfig}"
+        ];
+        Restart = "on-failure";
+        RestartSec = 5;
+        StateDirectory = "bosun-buildkit";
+      };
     };
 
     virtualisation.oci-containers = mkIf cfg.cache.enable {
@@ -555,7 +677,11 @@ in
         # "any" is /0 and systemd's most-specific-match rule means the deny
         # prefixes below still bite; the cache /32, when enabled, is more
         # specific than 10.0.0.0/8 and punches exactly one host-local hole.
-        IPAddressAllow = [ "any" ] ++ lib.optional cfg.cache.enable "${cfg.cache.address}/32";
+        IPAddressAllow = [
+          "any"
+        ]
+        ++ lib.optional cfg.cache.enable "${cfg.cache.address}/32"
+        ++ lib.optional cfg.buildkit.enable "${cfg.buildkit.address}/32";
         IPAddressDeny = [
           "10.0.0.0/8"
           "172.16.0.0/12"

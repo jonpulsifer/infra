@@ -54,7 +54,7 @@ func TestChArgsNoDevices(t *testing.T) {
 		t.Fatalf("resolvePaths: %v", err)
 	}
 
-	got := chArgs(h, class, "sk01", paths, "", false)
+	got := chArgs(h, class, "sk01", paths, hostServices{}, false)
 	want := []string{
 		"--kernel", "/hulls/nixos/vmlinux",
 		"--initramfs", "/hulls/nixos/initrd",
@@ -85,7 +85,7 @@ func TestChArgsAppendsBuildModeForABuildSkiff(t *testing.T) {
 		t.Fatalf("resolvePaths: %v", err)
 	}
 
-	got := chArgs(h, class, "sk01", paths, "", true)
+	got := chArgs(h, class, "sk01", paths, hostServices{}, true)
 	want := "console=ttyS0 bosun.mode=build bosun.skiff=sk01 bosun.hull=sha256:deadbeef"
 	if !slices.Contains(got, want) {
 		t.Fatalf("cmdline missing bosun.mode=build:\n got:  %v\n want cmdline: %q", got, want)
@@ -107,7 +107,7 @@ func TestChArgsWithDevices(t *testing.T) {
 		t.Fatalf("resolvePaths: %v", err)
 	}
 
-	got := chArgs(h, class, "sk02", paths, "", false)
+	got := chArgs(h, class, "sk02", paths, hostServices{}, false)
 	want := []string{
 		"--kernel", "/hulls/nixos/vmlinux",
 		"--initramfs", "/hulls/nixos/initrd",
@@ -142,7 +142,7 @@ func TestChArgsWithDisk(t *testing.T) {
 		t.Fatalf("resolvePaths: %v", err)
 	}
 
-	got := chArgs(h, class, "sk03", paths, "", false)
+	got := chArgs(h, class, "sk03", paths, hostServices{}, false)
 	want := []string{
 		"--kernel", "/hulls/ubuntu/vmlinux",
 		"--initramfs", "/hulls/ubuntu/initrd",
@@ -336,7 +336,7 @@ func TestChArgsWorkspaceDiskComesLastAndIsNamedOnTheCmdline(t *testing.T) {
 	}
 	paths.workspace = "/var/lib/bosun/workspace/sk09.img"
 
-	got := chArgs(h, class, "sk09", paths, "", false)
+	got := chArgs(h, class, "sk09", paths, hostServices{}, false)
 	want := []string{
 		"--kernel", "/hulls/ubuntu/vmlinux",
 		"--initramfs", "/hulls/ubuntu/initrd",
@@ -370,7 +370,7 @@ func TestChArgsNoWorkspaceLeavesCmdlineAlone(t *testing.T) {
 	if err != nil {
 		t.Fatalf("resolvePaths: %v", err)
 	}
-	got := chArgs(h, Class{VCPUs: 1, Memory: "512M"}, "sk10", paths, "", false)
+	got := chArgs(h, Class{VCPUs: 1, Memory: "512M"}, "sk10", paths, hostServices{}, false)
 	if slices.Contains(got, "--disk") {
 		t.Fatalf("workspace-less class got a disk: %v", got)
 	}
@@ -389,9 +389,36 @@ func TestChArgsAnnouncesCacheURLOnCmdline(t *testing.T) {
 	if err != nil {
 		t.Fatalf("resolvePaths: %v", err)
 	}
-	got := chArgs(h, Class{VCPUs: 1, Memory: "512M"}, "sk12", paths, "http://10.113.113.1:3000/", false)
+	got := chArgs(h, Class{VCPUs: 1, Memory: "512M"}, "sk12", paths, hostServices{cacheURL: "http://10.113.113.1:3000/"}, false)
 	if !slices.Contains(got, "console=ttyS0 bosun.cache=http://10.113.113.1:3000/ bosun.skiff=sk12 bosun.hull=sha256:deadbeef") {
 		t.Fatalf("cache URL missing from cmdline: %v", got)
+	}
+}
+
+// Both host services are optional and independent: a host may run either, and
+// a hull that understands neither still boots, because what it does not
+// recognise on the cmdline it ignores.
+func TestBuildkitURLReachesTheCmdlineAndOnlyWhenSet(t *testing.T) {
+	h := &hull{
+		dir:      "/hulls/nixos",
+		manifest: hullManifest{Kernel: "vmlinux", Initrd: "initrd", Cmdline: "console=ttyS0"},
+		digest:   "deadbeef",
+	}
+	paths, err := resolvePaths("/run/bosun", "/var/log/bosun", "sk13", nil)
+	if err != nil {
+		t.Fatalf("resolvePaths: %v", err)
+	}
+
+	got := chArgs(h, Class{VCPUs: 1, Memory: "512M"}, "sk13", paths, hostServices{buildkitURL: "tcp://10.113.113.2:1234"}, false)
+	if !slices.Contains(got, "console=ttyS0 bosun.buildkit=tcp://10.113.113.2:1234 bosun.skiff=sk13 bosun.hull=sha256:deadbeef") {
+		t.Fatalf("buildkit URL missing from cmdline: %v", got)
+	}
+
+	got = chArgs(h, Class{VCPUs: 1, Memory: "512M"}, "sk13", paths, hostServices{}, false)
+	for _, arg := range got {
+		if strings.Contains(arg, "bosun.buildkit=") {
+			t.Fatalf("buildkit announced on a host that runs none: %v", got)
+		}
 	}
 }
 
