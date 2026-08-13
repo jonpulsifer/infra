@@ -25,6 +25,30 @@ import type { CloudResponse } from './http.ts';
 export type CloudFailure = Extract<CloudResponse<unknown>, { ok: false }>;
 
 /**
+ * A step that produced something, or the refusal that stopped it.
+ *
+ * `apply` on an HTTP control plane is a sequence of calls, and any of them may
+ * be the one that ends the attempt — so each step answers in this shape rather
+ * than throwing, and the caller yields a status and returns
+ * {@link cloudWriteFailure} of the failure it carries. Throwing would lose the
+ * refusal's status and reason, which is precisely what decides the blame.
+ */
+export type Outcome<Value> =
+  | { readonly ok: true; readonly value: Value }
+  | { readonly ok: false; readonly failure: CloudFailure };
+
+/**
+ * A far side that answered successfully and left out what was asked for.
+ *
+ * `transport` rather than a status, because there is no status to reason about:
+ * the call succeeded and the body is not what the API documents, which is as
+ * un-actionable to the person deploying as a socket that died.
+ */
+export function missing(message: string): CloudFailure {
+  return { ok: false, kind: 'transport', message };
+}
+
+/**
  * A call that never landed, in §6's vocabulary.
  *
  * Two lines separate three quite different situations, and the split is §6's

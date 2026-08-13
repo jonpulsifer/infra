@@ -62,25 +62,31 @@ import { cloudChecklist, cloudSurfaceProbe } from '../cloud/checklist.ts';
 import type { FederationOptions } from '../cloud/federation.ts';
 import { CloudHttp, type Fetcher, type TokenProvider } from '../cloud/http.ts';
 import {
-  type CloudFailure,
   cloudWriteFailure,
+  missing,
+  type Outcome,
   orderedChecklist,
 } from '../cloud/verdict.ts';
 import type {
   DeployAdapter,
   DeployEvent,
-  DeployPhase,
   DeployRef,
   DeployTarget,
   DeployVerdict,
-  FailureReason,
   JobRuns,
   ObservedState,
   RuntimeLogPage,
   RuntimeLogSubject,
   StartedRun,
 } from '../contract.ts';
-import { BundleError, type BundleFile, readBundle } from './bundle.ts';
+import { type DeployEvents, deployEvents, internalFailure } from '../events.ts';
+import { parseScopedRef, scopedRef } from '../ref.ts';
+import {
+  ArtifactUnavailable,
+  type BundleFile,
+  bundleFailure,
+  readBundle,
+} from './bundle.ts';
 import { googleRegistryRef, OciPullError, pullFilesLayer } from './oci.ts';
 
 export interface StaticAdapterOptions {
@@ -179,7 +185,11 @@ export class StaticDeployAdapter implements DeployAdapter {
   /** §6's table: `static` takes files. */
   readonly artifactTypes: readonly ArtifactType[] = ['files'];
 
-  constructor(private readonly options: StaticAdapterOptions) {}
+  private readonly events: DeployEvents;
+
+  constructor(private readonly options: StaticAdapterOptions) {
+    this.events = deployEvents(options.now);
+  }
 
   async *apply(
     target: DeployTarget,
@@ -187,11 +197,11 @@ export class StaticDeployAdapter implements DeployAdapter {
   ): AsyncGenerator<DeployEvent, DeployVerdict, void> {
     const connection = this.connectionOf(target);
     if (connection === null) {
-      return this.internal('this Target is not a static hosting Target');
+      return internalFailure('this Target is not a static hosting Target');
     }
     if (!this.artifactTypes.includes(desired.artifact.type)) {
-      yield this.status('FAILED', { reason: 'INTERNAL' });
-      return this.internal(
+      yield this.events.status('FAILED', { reason: 'INTERNAL' });
+      return internalFailure(
         `static hosting does not accept a ${desired.artifact.type} artifact`,
       );
     }
@@ -199,16 +209,16 @@ export class StaticDeployAdapter implements DeployAdapter {
       // §9, and see the file header: this backend has no non-bypassable origin
       // to put a boundary in front of, so the rendering is disqualified rather
       // than shipped with a caveat.
-      yield this.status('FAILED', { reason: 'INTERNAL' });
-      return this.internal(
+      yield this.events.status('FAILED', { reason: 'INTERNAL' });
+      return internalFailure(
         `static hosting serves a public reach only, and this Component asks for ${desired.reach} (§9)`,
       );
     }
     if (desired.auth === 'proxy') {
       // Same shape, other axis: there is no edge here to authenticate at, so
       // claiming one would be the caveat this backend refuses to ship with.
-      yield this.status('FAILED', { reason: 'INTERNAL' });
-      return this.internal(
+      yield this.events.status('FAILED', { reason: 'INTERNAL' });
+      return internalFailure(
         'static hosting has no authenticated edge to put in front of a Component (§9)',
       );
     }
@@ -225,7 +235,7 @@ export class StaticDeployAdapter implements DeployAdapter {
       fetchableStagedAddress(staged) ??
       googleRegistryRef(desired.artifact.refs);
     if (location === null) {
-      yield this.status('FAILED', { reason: 'ARTIFACT_UNAVAILABLE' });
+      yield this.events.status('FAILED', { reason: 'ARTIFACT_UNAVAILABLE' });
       return {
         phase: 'FAILED',
         reason: 'ARTIFACT_UNAVAILABLE',
@@ -237,32 +247,41 @@ export class StaticDeployAdapter implements DeployAdapter {
     const ref = refOf(connection, site);
     const http = this.http(connection);
 
-    yield this.status('APPLYING', { resource: site });
+    yield this.events.status('APPLYING', { resource: site });
 
     let files: readonly BundleFile[];
     try {
       files = await this.fetchBundle(http, location);
     } catch (cause) {
       const failure = bundleFailure(cause, ref);
-      yield this.status('FAILED', { resource: site, reason: failure.reason });
+      yield this.events.status('FAILED', {
+        resource: site,
+        reason: failure.reason,
+      });
       return failure;
     }
-    yield this.log(`the bundle holds ${files.length} files`, site);
+    yield this.events.log(`the bundle holds ${files.length} files`, site);
 
     const created = await this.ensureSite(http, connection, site);
     if (created.ok === false) {
       const failure = cloudWriteFailure(created.failure, ref);
-      yield this.status('FAILED', { resource: site, reason: failure.reason });
+      yield this.events.status('FAILED', {
+        resource: site,
+        reason: failure.reason,
+      });
       return failure;
     }
 
     const released = await this.release(http, site, desired, files);
     if (released.ok === false) {
       const failure = cloudWriteFailure(released.failure, ref);
-      yield this.status('FAILED', { resource: site, reason: failure.reason });
+      yield this.events.status('FAILED', {
+        resource: site,
+        reason: failure.reason,
+      });
       return failure;
     }
-    yield this.log(`released ${released.value}`, site);
+    yield this.events.log(`released ${released.value}`, site);
 
     // §9's one record re-point, made real for this backend: the vanity name is
     // a domain on the site that is already serving, so moving an App here from
@@ -275,17 +294,20 @@ export class StaticDeployAdapter implements DeployAdapter {
       );
       if (attached.ok === false) {
         const failure = cloudWriteFailure(attached.failure, ref);
-        yield this.status('FAILED', { resource: site, reason: failure.reason });
+        yield this.events.status('FAILED', {
+          resource: site,
+          reason: failure.reason,
+        });
         return failure;
       }
-      yield this.log(
+      yield this.events.log(
         `the vanity name ${desired.hostname.vanity} is on this site`,
         site,
       );
     }
 
     const address = created.value.defaultUrl;
-    yield this.status('LIVE', { resource: site });
+    yield this.events.status('LIVE', { resource: site });
     return {
       phase: 'LIVE',
       ref,
@@ -755,35 +777,6 @@ export class StaticDeployAdapter implements DeployAdapter {
   private connectionOf(target: DeployTarget): StaticAdapterConnection | null {
     return target.connection.adapter === 'static' ? target.connection : null;
   }
-
-  private internal(detail: string): DeployVerdict {
-    return { phase: 'FAILED', reason: 'INTERNAL', detail };
-  }
-
-  private status(
-    phase: DeployPhase,
-    extra: { resource?: string; reason?: FailureReason; detail?: string } = {},
-  ): DeployEvent {
-    return { type: 'status', at: new Date(this.clock()), phase, ...extra };
-  }
-
-  private log(line: string, resource?: string): DeployEvent {
-    return {
-      type: 'log',
-      at: new Date(this.clock()),
-      line,
-      ...(resource === undefined ? {} : { resource }),
-    };
-  }
-
-  private clock(): number {
-    return this.options.now?.() ?? Date.now();
-  }
-}
-
-/** The artifact was addressed and the bytes were not there (§6's platform blame). */
-class ArtifactUnavailable extends Error {
-  override readonly name = 'ArtifactUnavailable';
 }
 
 /**
@@ -840,19 +833,6 @@ function unfetchableArtifact(
   return `static hosting fetches the bytes itself, and none of the artifact's homes (${hosts}) is a registry its identity can read`;
 }
 
-/** A step that either produced something or carries the refusal that stopped it. */
-type Outcome<Value> =
-  | { readonly ok: true; readonly value: Value }
-  | {
-      readonly ok: false;
-      readonly failure: CloudFailure;
-    };
-
-/** A far side that answered successfully and left out what was asked for. */
-function missing(message: string): CloudFailure {
-  return { ok: false, kind: 'transport', message };
-}
-
 /** One site per (App, Component), within the length the product allows. */
 export function siteId(desired: DesiredState): string {
   return workloadName(desired, SITE_ID_LIMIT);
@@ -860,7 +840,7 @@ export function siteId(desired: DesiredState): string {
 
 /** The adapter's own handle on what `apply` placed — opaque to core (§6). */
 function refOf(connection: StaticAdapterConnection, site: string): DeployRef {
-  return `${connection.project}/sites/${site}`;
+  return scopedRef(connection.project, 'sites', site);
 }
 
 /** The site this ref names on this connection, or `null` if it names another. */
@@ -868,10 +848,7 @@ function parseRef(
   connection: StaticAdapterConnection,
   ref: DeployRef,
 ): string | null {
-  const prefix = `${connection.project}/sites/`;
-  if (!ref.startsWith(prefix)) return null;
-  const site = ref.slice(prefix.length);
-  return site.length === 0 || site.includes('/') ? null : site;
+  return parseScopedRef(connection.project, 'sites', ref);
 }
 
 /**
@@ -893,38 +870,4 @@ function chunksOf<Item>(items: readonly Item[], size: number): Item[][] {
 /** The sha256 of some bytes, hex — what the product deduplicates files on. */
 function sha256Hex(bytes: Uint8Array<ArrayBuffer>): string {
   return new Bun.CryptoHasher('sha256').update(bytes).digest('hex');
-}
-
-/** A bundle that could not be read, in §6's vocabulary. */
-function bundleFailure(
-  cause: unknown,
-  ref: DeployRef,
-): Extract<DeployVerdict, { phase: 'FAILED' }> {
-  if (cause instanceof ArtifactUnavailable) {
-    return {
-      phase: 'FAILED',
-      ref,
-      reason: 'ARTIFACT_UNAVAILABLE',
-      detail: cause.message,
-    };
-  }
-  if (cause instanceof BundleError) {
-    // The bytes arrived and are not what a `files` artifact is. That is the
-    // build having produced something unusable, which §6 blames on the
-    // developer under `BUILD_FAILED` — the one reason that crosses contracts,
-    // and the reason §22 put in the shared vocabulary for exactly this.
-    return {
-      phase: 'FAILED',
-      ref,
-      reason: 'BUILD_FAILED',
-      detail: cause.message,
-      debug: { code: cause.code },
-    };
-  }
-  return {
-    phase: 'FAILED',
-    ref,
-    reason: 'INTERNAL',
-    detail: cause instanceof Error ? cause.message : String(cause),
-  };
 }

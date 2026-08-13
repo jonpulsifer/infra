@@ -54,7 +54,6 @@ import type {
   DeployRef,
   DeployTarget,
   DeployVerdict,
-  FailureReason,
   JobExecution,
   JobRuns,
   ObservedState,
@@ -64,6 +63,7 @@ import type {
   RuntimeLogTailOptions,
   StartedRun,
 } from '../contract.ts';
+import { type DeployEvents, deployEvents, internalFailure } from '../events.ts';
 import {
   type Fetcher,
   KubernetesApi,
@@ -225,7 +225,11 @@ export class KubernetesDeployAdapter implements DeployAdapter {
   /** §6's table: `kubernetes` takes an image. */
   readonly artifactTypes: readonly ArtifactType[] = ['image'];
 
-  constructor(private readonly options: KubernetesAdapterOptions) {}
+  private readonly events: DeployEvents;
+
+  constructor(private readonly options: KubernetesAdapterOptions) {
+    this.events = deployEvents(options.now);
+  }
 
   async *apply(
     target: DeployTarget,
@@ -233,20 +237,20 @@ export class KubernetesDeployAdapter implements DeployAdapter {
   ): AsyncGenerator<DeployEvent, DeployVerdict, void> {
     const connection = this.connectionOf(target);
     if (connection === null) {
-      return this.internal('this Target is not a Kubernetes Target');
+      return internalFailure('this Target is not a Kubernetes Target');
     }
     if (!this.artifactTypes.includes(desired.artifact.type)) {
       // A foreign artifact reaching `apply` is a core bug, and §6 says so in
       // the adapter's own vocabulary rather than by throwing.
-      yield this.status('FAILED', { reason: 'INTERNAL' });
-      return this.internal(
+      yield this.events.status('FAILED', { reason: 'INTERNAL' });
+      return internalFailure(
         `kubernetes does not accept a ${desired.artifact.type} artifact`,
       );
     }
     const image = imageReference(desired, connection.reachableRegistries ?? []);
     if (image === null) {
-      yield this.status('FAILED', { reason: 'INTERNAL' });
-      return this.internal('the artifact carries no address to pull it by');
+      yield this.events.status('FAILED', { reason: 'INTERNAL' });
+      return internalFailure('the artifact carries no address to pull it by');
     }
 
     // Both halves of the name are things a human chose, so a combination that
@@ -254,8 +258,8 @@ export class KubernetesDeployAdapter implements DeployAdapter {
     // truncated into one the operator will not find with `kubectl`.
     const refusal = namespaceRefusal(connection, desired.app);
     if (refusal !== null) {
-      yield this.status('FAILED', { reason: 'INTERNAL' });
-      return this.internal(refusal);
+      yield this.events.status('FAILED', { reason: 'INTERNAL' });
+      return internalFailure(refusal);
     }
 
     const api = this.api(connection);
@@ -263,7 +267,7 @@ export class KubernetesDeployAdapter implements DeployAdapter {
     const object = this.deliveryObject(connection, desired, image, admission);
     const ref = refOf(connection.delivery.flavour, object);
 
-    yield this.status('APPLYING', { resource: resourceLabel(object) });
+    yield this.events.status('APPLYING', { resource: resourceLabel(object) });
     try {
       // Before the release, and only where the delivery mechanism cannot carry
       // the admission labels itself (113). A namespace that already exists is
@@ -278,10 +282,13 @@ export class KubernetesDeployAdapter implements DeployAdapter {
       await api.apply(object, pluralOf(connection.delivery.flavour));
     } catch (cause) {
       const verdict = writeFailure(cause, ref);
-      yield this.status('FAILED', { reason: verdict.reason });
+      yield this.events.status('FAILED', { reason: verdict.reason });
       return verdict;
     }
-    yield this.log(`applied ${resourceLabel(object)}`, resourceLabel(object));
+    yield this.events.log(
+      `applied ${resourceLabel(object)}`,
+      resourceLabel(object),
+    );
 
     return yield* this.awaitVerdict(api, connection, desired, object, ref);
   }
@@ -503,7 +510,7 @@ export class KubernetesDeployAdapter implements DeployAdapter {
     const name = workloadName(
       {
         app: owner.metadata.name,
-        component: String(Math.floor(this.clock() / 1_000)),
+        component: String(Math.floor(this.events.now() / 1_000)),
       },
       RUN_NAME_LIMIT,
     );
@@ -813,7 +820,7 @@ export class KubernetesDeployAdapter implements DeployAdapter {
   ): AsyncGenerator<DeployEvent, DeployVerdict, void> {
     const resource = resourceLabel(object);
     const deadline =
-      this.clock() + (this.options.timeoutMs ?? DEFAULT_TIMEOUT_MS);
+      this.events.now() + (this.options.timeoutMs ?? DEFAULT_TIMEOUT_MS);
     // `apply` emitted APPLYING before the write. Treat that as the first
     // reported controller phase too, so an object whose status has not caught
     // up to its generation does not duplicate the event on the timeline.
@@ -834,7 +841,7 @@ export class KubernetesDeployAdapter implements DeployAdapter {
 
       if (status.phase !== reported) {
         reported = status.phase;
-        yield this.status(status.phase, {
+        yield this.events.status(status.phase, {
           resource,
           ...(status.reason === undefined ? {} : { reason: status.reason }),
           ...(status.detail === undefined ? {} : { detail: status.detail }),
@@ -852,7 +859,7 @@ export class KubernetesDeployAdapter implements DeployAdapter {
         status.phase !== 'FAILED'
       ) {
         said = status.detail;
-        yield this.log(status.detail, resource);
+        yield this.events.log(status.detail, resource);
       }
 
       if (status.phase === 'LIVE') {
@@ -865,8 +872,8 @@ export class KubernetesDeployAdapter implements DeployAdapter {
         return yield* this.failed(api, connection, desired, status, ref);
       }
 
-      if (this.clock() >= deadline) {
-        yield this.status('FAILED', { resource, reason: 'TIMEOUT' });
+      if (this.events.now() >= deadline) {
+        yield this.events.status('FAILED', { resource, reason: 'TIMEOUT' });
         return {
           phase: 'FAILED',
           ref,
@@ -918,7 +925,7 @@ export class KubernetesDeployAdapter implements DeployAdapter {
     ]);
 
     const diagnosis = diagnose(pods ?? [], events ?? [], status.detail);
-    yield this.log(diagnosis.detail);
+    yield this.events.log(diagnosis.detail);
     return {
       phase: 'FAILED',
       ref,
@@ -1448,31 +1455,6 @@ export class KubernetesDeployAdapter implements DeployAdapter {
       'namespaces',
     );
   }
-
-  private internal(detail: string): DeployVerdict {
-    return { phase: 'FAILED', reason: 'INTERNAL', detail };
-  }
-
-  private status(
-    phase: DeployPhase,
-    extra: { resource?: string; reason?: FailureReason; detail?: string } = {},
-  ): DeployEvent {
-    return { type: 'status', at: new Date(this.clock()), phase, ...extra };
-  }
-
-  private log(line: string, resource?: string): DeployEvent {
-    return {
-      type: 'log',
-      at: new Date(this.clock()),
-      line,
-      ...(resource === undefined ? {} : { resource }),
-    };
-  }
-
-  private clock(): number {
-    return this.options.now?.() ?? Date.now();
-  }
-
   private async wait(): Promise<void> {
     const interval = this.options.pollIntervalMs ?? DEFAULT_POLL_MS;
     if (this.options.sleep !== undefined) {
