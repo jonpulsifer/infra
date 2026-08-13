@@ -6,21 +6,25 @@
 # which is why C4D's 384 cores of Turin cannot serve a skiff as a VM at any
 # size.
 #
-# The clock claim that used to sit here -- Granite Rapids at 3.9 GHz sustained
-# all-core against C3's 3.0 -- is not what this shape gets, and it is worth
-# saying plainly rather than leaving as an aspiration. Which generation a C4
-# lands on is decided by the shape: the `-lssd` and `-metal` variants and the
-# 144- and 288-vCPU sizes get Granite Rapids, and every other C4 gets Emerald
-# Rapids. `c4-standard-48` is none of those, so this host runs Emerald -- a
-# Xeon 8581C at 2.30 GHz base -- and `min_cpu_platform` cannot argue with it:
-# C4 rejects the field outright.
+# Which Intel generation a C4 lands on is decided by the shape, not by a
+# request: the `-lssd` and `-metal` variants and the 144- and 288-vCPU sizes
+# get Granite Rapids, and every other C4 gets Emerald. `min_cpu_platform`
+# cannot argue with it -- C4 rejects the field outright, and trying it stopped
+# the instance and left it TERMINATED.
 #
-# So the honest standing of this choice: C4 buys nested virt on Intel, not the
-# fastest Intel clock. `c4-standard-48-lssd` is the same 48 vCPU and the same
-# quota footprint and does get Granite (with ~3 TB of bundled NVMe), which is
-# the upgrade to weigh if the clock is ever measured to matter. It has not
-# been, and swapping shapes is a stop/start on a Spot instance nothing
-# restarts by itself.
+# Plain `c4-standard-48` therefore ran Emerald: a Xeon 8581C at 2.30 GHz base.
+# `-lssd` is the same 48 vCPU and the same quota footprint and does get
+# Granite, so the clock is bought by asking for the disk.
+#
+# It was worth buying because the profile said so rather than because the
+# datasheet did. Sampling the host through an eight-wide run: the boot disk
+# saturates for one ~60 s window during eight simultaneous checkouts and
+# installs (419 of 440 MB/s, 91% utilisation) and then sits at **2-3%** for the
+# five minutes the suite actually runs, while load holds near 10-12 against 48
+# threads. Neither disk nor cores are the constraint in the phase that costs
+# the time; it is single-threaded latency, per-test schema create/drop against
+# a `fsync=off` database. Clock is the only hardware lever that touches that,
+# and the bundled NVMe takes the burst that is left.
 #
 # Nested virt itself is a plain boolean on the instance. It needs no custom
 # image and no `enable-vmx` license, so nix/images/gce.nix is unchanged from
@@ -41,14 +45,20 @@ locals {
   # The one knob worth turning while measuring. Changing family means
   # re-checking the nested-virt column, not just the price.
   #
-  # 48 of the 50 C4 vCPU this project has in us-east1. Spot rates here are
-  # $0.02079/core and $0.002363/GB, so this is ~$1.42/hr -- and it is what
-  # makes the warm pool ten jobs wide, which is the number that beats a hosted
-  # runner. `CPUS-PER-VM-FAMILY-per-project-region` is dimensioned by region;
-  # Montreal sells C4 and would be closer, but its quota here is 0, and a zero
-  # is a support request rather than a terraform change.
-  tender_machine_type = "c4-standard-48" # 48 vCPU / 180 GB
-  tender_disk_size    = 200              # closure + hull + 30G cache + 40G buildkit + 10x6G and 1x20G workspace
+  # 48 of the 50 C4 vCPU this project has in us-east1, which is what makes the
+  # warm pool eight jobs wide. Spot rates here are $0.02079/core and
+  # $0.002363/GB -- ~$1.42/hr -- and the `-lssd` variant adds eight bundled
+  # NVMe partitions (~3 TB) at roughly $0.05/GB-month Spot, so call the host
+  # ~$1.65/hr. `CPUS-PER-VM-FAMILY-per-project-region` is dimensioned by
+  # region; Montreal sells C4 and would be closer, but its quota here is 0, and
+  # a zero is a support request rather than a terraform change.
+  #
+  # The local SSDs are bundled by the machine type rather than attached here:
+  # the shape reports `bundledLocalSsds`, so GCE provides them and no
+  # `scratch_disk` block declares them. Nothing mounts them yet -- that is a
+  # host-config change, and until it lands this shape is bought for the clock.
+  tender_machine_type = "c4-standard-48-lssd" # 48 vCPU / 180 GB + ~3 TB NVMe
+  tender_disk_size    = 200                   # closure + hull + 30G cache + 40G buildkit + 8x6G and 1x20G workspace
 
   # GCS lists objects lexicographically, so element zero is the *oldest* name
   # the moment the prefix holds more than one build -- not a race, just
