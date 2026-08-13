@@ -588,6 +588,83 @@ describe('a rollback comes up with the configuration it originally had', () => {
     expect(restored?.desired.config).toEqual(original!.desired.config);
     expect(restored?.desired.config).not.toEqual([]);
   });
+
+  test('a release pinned to a reaped version is refused, not deployed bare', async () => {
+    const { component, target } = await fixture();
+    const commands = await context(
+      registryOf(new FakeDeployAdapter({ adapter: 'kubernetes' })),
+    );
+    const older = await succeededBuild(component.id, 1);
+    const newer = await succeededBuild(component.id, 2);
+
+    await setConfig(
+      {
+        componentId: component.id,
+        targetId: target.id,
+        entries: [{ key: 'TOKEN', value: 'first' }],
+      },
+      commands,
+    );
+    const first = await createDeploy(
+      { componentId: component.id, targetId: target.id, buildId: older.id },
+      commands,
+    );
+    expect(first.ok).toBe(true);
+    if (!first.ok) return;
+    await createDeploy(
+      { componentId: component.id, targetId: target.id, buildId: newer.id },
+      commands,
+    );
+    // Reconfigured only once both are shipped: `setConfig` redeploys whatever
+    // is live, so changing it before the second deploy would re-stamp the
+    // older release with the new version and leave nothing pinned to the old
+    // one — which is the state this test needs to exist.
+    await setConfig(
+      {
+        componentId: component.id,
+        targetId: target.id,
+        entries: [{ key: 'TOKEN', value: 'second' }],
+      },
+      commands,
+    );
+
+    // The reference the older release is pinned to, read off the document it
+    // was deployed with rather than from the store — which is the same place
+    // the deploy path reads it, so reaping exactly this one is what the
+    // rollback will actually trip over.
+    const [original] = await database()
+      .db.select()
+      .from(deploys)
+      .where(eq(deploys.id, first.value.deployId));
+    const pinned = original?.desired.config[0]?.secret;
+    expect(pinned).toBeDefined();
+
+    // §10 keeps N versions and core reaps the rest on a loop. Reaping the one
+    // an older release is pinned to is the ordinary end of that, not damage.
+    await store.destroy(pinned!);
+
+    const rolled = await rollbackDeploy(
+      { componentId: component.id, targetId: target.id, buildId: older.id },
+      commands,
+    );
+
+    // The claim: refused, and refused *naming the key*. Deploying it would
+    // bring the Component up without TOKEN — green, and missing the one thing
+    // the release needed — which is the failure §10 sets a retention depth to
+    // prevent rather than to hide.
+    expect(rolled.ok).toBe(false);
+    if (rolled.ok) return;
+    expect(rolled.failure.code).toBe('NOT_DEPLOYABLE');
+    expect(rolled.failure.message).toContain('TOKEN');
+    expect(rolled.failure.message).toContain('no longer exist');
+
+    // And nothing was written: a refused intent is not a Deploy.
+    const rows = await database()
+      .db.select()
+      .from(deploys)
+      .where(eq(deploys.buildId, older.id));
+    expect(rows).toHaveLength(1);
+  });
 });
 
 describe('a cross-store re-placement is blocked until the keys are supplied', () => {

@@ -58,6 +58,7 @@ import {
 import { targetRowLabel } from '../../domain/target.ts';
 import { demandSentence, migrationFor } from '../config/migration.ts';
 import { type PinnedConfig, readPinnedConfig } from '../config/pinned.ts';
+import { storeOfRecordOf } from '../config/set.ts';
 import {
   type Command,
   type CommandContext,
@@ -207,6 +208,70 @@ export const createDeploy: Command<
  *    `desiredBuildId` is exactly what a rollback is; nothing here needs to know
  *    which of the two happened.
  */
+/**
+ * Which of this document's pinned config references no longer resolve, as one
+ * sentence — or `null` when every one of them still does.
+ *
+ * §10 pins a config version so that "a rollback comes back up with the
+ * configuration it originally had", and the store contract names the verb that
+ * makes the promise checkable: `describe` is "the read-back… core uses it to
+ * prove a Deploy's pinned document still resolves before it deploys against
+ * it." Nothing called it. So the guarantee held for as long as nothing had
+ * reaped a version, and the moment something had — §10's own N = 10 retention
+ * does exactly that on a loop — a rollback past it deployed **green and
+ * unconfigured**, which is the failure §10 names retention depth to avoid.
+ *
+ * Checked here rather than in either caller because both reach it: an ordinary
+ * deploy delivers config as it is now, a rollback delivers the document the
+ * older release carried, and it is the second one whose pins have had time to
+ * go. Before the transaction, not inside it — this asks a far side, and a
+ * network call holding a row lock is a different bug.
+ *
+ * **Fails closed, and says which keys.** A developer told "some config is
+ * missing" has been told a fact rather than the problem; the keys are what they
+ * act on, and re-setting any one of them mints a new version and a new Deploy.
+ */
+async function unresolvedPins(
+  context: CommandContext,
+  checked: DeployPreconditions,
+): Promise<string | null> {
+  const config = checked.desired.config;
+  if (config.length === 0) return null;
+
+  // With the boundary, for the same reason `checkDeployable` reads it that way:
+  // half of what names a Target in a refusal lives there.
+  const target = await context.db.query.targets.findFirst({
+    where: (targets, { eq }) => eq(targets.id, checked.targetId),
+    with: { vessel: true },
+  });
+  if (target === undefined) return null;
+
+  const adapter = storeOfRecordOf(context, target);
+  // No store of record is not an unresolved pin: it is a Target that cannot
+  // hold config at all, and a document on one is core's bug rather than a
+  // reaped version. `checkDeployable` is where that is refused.
+  if (adapter === null) return null;
+  const store = context.adapters.store(adapter);
+  if (store === null) return null;
+
+  const gone: string[] = [];
+  for (const entry of config) {
+    // One at a time and in order, so the sentence lists keys the way the
+    // document does. A store that refuses the read is not a version that is
+    // gone — it is a store that cannot answer — and turning an outage into
+    // "your config was deleted" would send somebody looking for the wrong
+    // thing, so it propagates rather than being folded in here.
+    if ((await store.describe(entry.secret)) === null) gone.push(entry.name);
+  }
+  if (gone.length === 0) return null;
+
+  return (
+    `this release is pinned to config versions that no longer exist in ${targetRowLabel(target)}: ` +
+    `${gone.join(', ')}. Deploying it would bring the Component up without them, so it is refused — ` +
+    'set each one again to mint a new version, which deploys as an ordinary change.'
+  );
+}
+
 export async function placeIntent(
   context: CommandContext,
   checked: DeployPreconditions,
@@ -227,6 +292,9 @@ export async function placeIntent(
     desiredBuildId: number | null,
   ) => string | null | Promise<string | null>,
 ): Promise<CommandResult<CreateDeployResult>> {
+  const unresolved = await unresolvedPins(context, checked);
+  if (unresolved !== null) return failed('NOT_DEPLOYABLE', unresolved);
+
   const now = context.clock.now();
 
   const placed = await context.db.transaction(async (tx) => {
