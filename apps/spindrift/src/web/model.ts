@@ -585,6 +585,27 @@ export interface DatastoreListItem {
   readonly at: string;
 }
 
+/**
+ * A Target a managed Datastore can actually be created on — the ledger's Create
+ * picker (§11).
+ *
+ * `createDatastore` takes a Target and no App, so this is the whole of what the
+ * form needs to pick: creating storage has never required knowing which App
+ * will read it. The list is what core would accept, not every Target that
+ * exists — a Target with no connection, no datastore adapter, or no served
+ * engine is one whose only answer is a refusal, so it is not offered.
+ *
+ * `engines` is per-Target because the two capabilities are independent (§3): a
+ * cluster that serves Postgres and not Valkey is the ordinary case, and a
+ * picker that showed one list for both would offer a choice core refuses.
+ */
+export interface DatastoreTargetOption {
+  readonly targetId: string;
+  /** `targetRowLabel` — the vessel-and-surface pair the ledger's rows use. */
+  readonly label: string;
+  readonly engines: readonly ('postgres' | 'valkey')[];
+}
+
 /** One Component as the workspace lists it. */
 export interface ComponentView {
   /**
