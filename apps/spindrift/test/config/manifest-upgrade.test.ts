@@ -294,10 +294,10 @@ describe('the vessels a pre-declaration document is upgraded into', () => {
   });
 
   test('is a no-op on a document that already declares them', () => {
-    // `03` now upgrades too — it still states the home vessel's properties as
-    // four loose keys. `04` is the shape with none of the three gaps, so this
-    // is where "already current" moved.
-    const current = snapshot('04-installation-home-vessel.yaml');
+    // `04` now upgrades too — it states `dns.zones` as the object naming one
+    // zone per reach. `09` is the shape with none of the gaps, so this is where
+    // "already current" moved.
+    const current = snapshot('09-dns-zone-list.yaml');
     expect(upgradeManifestDocument(current)).toEqual(current);
   });
 });
@@ -390,5 +390,54 @@ describe('the two vessels an installation is built on, recovered once', () => {
       upgraded.vessels.find((vessel) => vessel.name === 'cloud')?.shared
         ?.sourceBucket,
     ).toBe('example-source-bucket');
+  });
+});
+
+describe('the zones a reach-keyed document is upgraded into', () => {
+  const zonesOf = (document: unknown): unknown =>
+    (upgradeManifestDocument(document) as { dns: { zones: unknown } }).dns
+      .zones;
+
+  test('one zone at both reaches becomes one entry serving both', () => {
+    // The reading that keeps §9's "flipping a Component's reach is a record
+    // re-point and its hostname is stable" true across the upgrade. Two entries
+    // of one reach each would make the same flip a rename by accident.
+    expect(
+      zonesOf({
+        dns: {
+          zones: { private: 'one.example.test', public: 'one.example.test' },
+        },
+      }),
+    ).toEqual([{ name: 'one.example.test', reaches: ['private', 'public'] }]);
+  });
+
+  test('two zones become two entries of one reach each', () => {
+    // The split-horizon reading: separate trust boundaries, and changing reach
+    // was always a rename here.
+    expect(
+      zonesOf({
+        dns: {
+          zones: { private: 'lan.example.test', public: 'www.example.test' },
+        },
+      }),
+    ).toEqual([
+      { name: 'lan.example.test', reaches: ['private'] },
+      { name: 'www.example.test', reaches: ['public'] },
+    ]);
+  });
+
+  test('a document already holding the list is left exactly as it arrived', () => {
+    // The no-op that keeps this from running on every boot forever, and the one
+    // that matters most: a third zone an operator added through the UI must not
+    // be collapsed back into two by a step that thinks it knows better.
+    const current = {
+      dns: {
+        zones: [
+          { name: 'one.example.test', reaches: ['private', 'public'] },
+          { name: 'shop.example.test', reaches: ['public'] },
+        ],
+      },
+    };
+    expect(upgradeManifestDocument(current)).toEqual(current);
   });
 });

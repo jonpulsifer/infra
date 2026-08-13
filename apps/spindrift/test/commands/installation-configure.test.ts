@@ -102,7 +102,7 @@ describe('configuring an installation', () => {
     const invalid = {
       ...manifest,
       installation: '',
-      dns: { zones: { ...manifest.dns.zones, private: '' } },
+      dns: { zones: [{ name: '', reaches: ['private', 'public'] }] },
     };
 
     const result = await configureInstallation(
@@ -114,7 +114,7 @@ describe('configuring an installation', () => {
     if (!result.ok) {
       expect(result.failure.code).toBe('INVALID_INPUT');
       expect(result.failure.message).toContain('installation');
-      expect(result.failure.message).toContain('zones.private');
+      expect(result.failure.message).toContain('zones.0.name');
     }
   });
 

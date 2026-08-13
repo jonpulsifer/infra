@@ -93,9 +93,11 @@ spec:
     # What this document is for is bringing a torn-down installation back
     # configured without anyone opening a browser.
     #
-    # Both zones are substituted by the apps Kustomization — `SPINDRIFT_DOMAIN`
-    # from cluster-settings, `SECRET_DOMAIN` from cluster-secrets — so the zone
-    # is read rather than restated, the same way `hostname` above reads it.
+    # The two zones this repository already names are substituted by the apps
+    # Kustomization — `SPINDRIFT_DOMAIN` from cluster-settings, `SECRET_DOMAIN`
+    # from cluster-secrets — so each is read rather than restated, the same way
+    # `hostname` above reads it. The other two are spelled out because no
+    # cluster variable names them.
     manifest:
       # What this installation is, and the two vessels it is built on. Both
       # pointers name a vessel declared below: `offsite` is where this control
@@ -108,11 +110,53 @@ spec:
       controlPlane:
         hostname: spindrift.${SECRET_DOMAIN}
       dns:
-        # One zone for both reaches: flipping a Component between private and
-        # public is a record re-point here, and its hostname does not change.
+        # The zones this installation mints App names in. Order is the default:
+        # an App that pins none takes the first entry that serves its reach.
+        #
+        # The two that serve both reaches are the two an App can flip between
+        # private and public without being renamed — a record re-point, which is
+        # what §9 asks for. The other two answer only on the internet, so an App
+        # pinned to one is a public App by construction and the manifest is
+        # where that is said rather than in a policy somewhere else.
+        #
+        # A zone here is a promise the edge has to keep. Each of the first three
+        # is a listener with a wildcard certificate on the Apps gateway
+        # (`gateway.yaml`, and folly's own in
+        # `clusters/folly/apps/spindrift-target/`), a `domainFilters` entry on
+        # external-dns, and — for a `reach: public` name — an ingress rule on
+        # the tunnel in `terraform/network/cloudflare/spindrift.tf`. Adding a
+        # fifth zone is those three edits plus this list.
         zones:
-          private: ${SPINDRIFT_DOMAIN}
-          public: ${SPINDRIFT_DOMAIN}
+          # The zone dedicated to generated names, disjoint from the
+          # hand-managed flat space below it. First, so it is what an App gets
+          # by not choosing.
+          - name: ${SPINDRIFT_DOMAIN}
+            reaches: [private, public]
+          # The hand-managed zone, minted into on purpose. A canonical name is
+          # hyphen-joined (`<app>-<component>`) and so does not collide with the
+          # flat names declared in `terraform/network/cloudflare/lolwtf.ca.tf`,
+          # but a **vanity label** is a bare label in this zone and can: one
+          # named `wiki` or `tf` would publish a record against a name Terraform
+          # owns. Nothing here checks that — the zones are the installation's to
+          # choose and Spindrift cannot read the hand-managed half — so an App
+          # pinned here takes its vanity label from the same namespace the wiki
+          # and Atlantis take theirs from.
+          - name: ${SECRET_DOMAIN}
+            reaches: [private, public]
+          # Public only, and served off this cluster's edge by nothing: an App
+          # pinned here goes on the `vercel` Target or a Cloudflare Pages one,
+          # both of which name their own workload and take the vanity label as a
+          # domain on the project. That is why neither has a listener on the
+          # Apps gateway — there is no in-cluster origin for the name to reach.
+          - name: embarrassing.ca
+            reaches: [public]
+          # Public only, and reachable both ways: the Apps gateway carries a
+          # listener for it and the tunnel forwards it, so an App here can be a
+          # cluster workload, and the `vercel` Target serves it as readily. The
+          # apex is Vercel's already (`terraform/network/cloudflare/wishin.app.tf`)
+          # and stays hand-managed — every name minted here is a label under it.
+          - name: wishin.app
+            reaches: [public]
       auth:
         gateway: null
       build:

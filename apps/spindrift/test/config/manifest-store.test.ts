@@ -18,6 +18,7 @@ import {
 } from '../../src/config/manifest-store.ts';
 import { createDb } from '../../src/db/client.ts';
 import { installation, targets, vessels } from '../../src/db/schema.ts';
+import { zoneFor } from '../../src/domain/naming.ts';
 import { withIsolatedDatabase } from '../harness/db.ts';
 import {
   connectionFor,
@@ -537,7 +538,7 @@ describe('the stored installation manifest', () => {
     const booted = await loadStoredManifest(database().db, {
       [MANIFEST_INLINE_VAR]: fixtureText,
     });
-    expect(booted.dns.zones.private).toBe('apps.example.test');
+    expect(zoneFor('private', booted.dns.zones)).toBe('apps.example.test');
 
     // Nothing honest to boot as without one, so the error stands.
     await database()

@@ -631,10 +631,10 @@ describe('every path discovery proposes is a path the manifest has', () => {
 
   test('the walk rejects a key the schema no longer has', () => {
     // The exact staleness this test exists to catch: `dns.apexZone` was the
-    // key when discovery was first specified, and `dns.zones.private` is the
+    // key when discovery was first specified, and `dns.zones` is the
     // key now. A detector nobody has seen fail is not a detector.
     expect(resolves(['dns', 'apexZone'])).toBe(false);
-    expect(resolves(['dns', 'zones', 'private'])).toBe(true);
+    expect(resolves(['dns', 'zones', 0, 'name'])).toBe(true);
   });
 
   test('each answered path resolves to a real field', async () => {

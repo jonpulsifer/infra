@@ -86,3 +86,56 @@ spec:
                   - oauth2-proxy
         kinds:
           - kind: HTTPRoute
+    # The second zone the installation manifest mints in, and the one that is
+    # also the hand-managed flat space. A listener here serves only the names
+    # that route to it: `cluster-gateway` keeps its own `*.${SECRET_DOMAIN}`
+    # listener on its own address, and which of the two a name reaches is
+    # decided per record by the App chart's DNSEndpoint, never by this wildcard.
+    #
+    # `oauth2-proxy` is admitted for the reason it is above: a `reach: private`
+    # App here redirects to an authenticated edge that answers in this same
+    # zone, and a redirect off this listener would land on a 404.
+    - name: spindrift-apps-tls-secret-domain
+      protocol: HTTPS
+      port: 443
+      hostname: "*.${SECRET_DOMAIN}"
+      tls:
+        certificateRefs:
+          - kind: Secret
+            name: wildcard-apps-${SECRET_DOMAIN}
+      allowedRoutes:
+        namespaces:
+          from: Selector
+          selector:
+            matchExpressions:
+              - key: kubernetes.io/metadata.name
+                operator: In
+                values:
+                  - spindrift-apps
+                  - oauth2-proxy
+        kinds:
+          - kind: HTTPRoute
+    # A public-only zone (`reaches: [public]` in the manifest), so every name on
+    # this listener arrives through the tunnel and none of them is ever an
+    # RFC1918 A record. `oauth2-proxy` is deliberately absent: the authenticated
+    # edge answers in `${SECRET_DOMAIN}`, and `auth: proxy` on a public App is
+    # the cell §9 already refuses.
+    - name: spindrift-apps-tls-wishin
+      protocol: HTTPS
+      port: 443
+      hostname: "*.wishin.app"
+      tls:
+        certificateRefs:
+          - kind: Secret
+            name: wildcard-wishin-app
+      allowedRoutes:
+        namespaces:
+          from: Selector
+          selector:
+            matchExpressions:
+              - key: kubernetes.io/metadata.name
+                operator: In
+                values:
+                  - spindrift-apps
+        kinds:
+          - kind: HTTPRoute

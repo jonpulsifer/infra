@@ -73,7 +73,7 @@ describe('every manifest value is reachable', () => {
     // Dotted paths are what let a Zod issue be rendered against the input that
     // caused it. `targets.0.vessel` names one row of one array — a Target has
     // no name of its own, so `vessel` is the field this now pins.
-    expect(markup).toContain('name="dns.zones.private"');
+    expect(markup).toContain('name="dns.zones.0.name"');
     expect(markup).toContain('name="targets.0.vessel"');
   });
 
@@ -128,9 +128,7 @@ describe('every manifest value is reachable', () => {
 describe('a refusal reads as what it is', () => {
   test('an invalid document is reported against the field that is wrong', () => {
     const markup = screen({
-      errors: new Map([
-        ['dns.zones.private', ['must be a lowercase DNS name']],
-      ]),
+      errors: new Map([['dns.zones.0.name', ['must be a lowercase DNS name']]]),
       outcome: {
         kind: 'invalid',
         message: 'This manifest is not valid, so nothing was written.',

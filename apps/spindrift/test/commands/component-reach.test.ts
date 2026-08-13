@@ -33,6 +33,7 @@ import {
   targets,
 } from '../../src/db/schema.ts';
 import { AUTH_NEEDS_A_ROUTE } from '../../src/domain/desired-state.ts';
+import { zoneFor } from '../../src/domain/naming.ts';
 import { targetLabel } from '../../src/domain/target.ts';
 import {
   type DeployLoopContext,
@@ -287,7 +288,7 @@ describe('a Component edited mid-attempt does not change what is being placed', 
     // the zone chosen *per reach*, so an attempt whose reach moved under it
     // would place a route for a hostname in the wrong zone.
     expect(placing.hostnames).toContain(
-      `shop-web.${manifest.dns.zones.private}`,
+      `shop-web.${zoneFor('private', manifest.dns.zones)}`,
     );
 
     // Now press Deploy. The same Build, the same Target, and a release that
@@ -304,7 +305,9 @@ describe('a Component edited mid-attempt does not change what is being placed', 
     const placed = appValues(adapter.applied[1]!.desired, 'ghcr.io/x@sha256:1');
     expect(placed.reach).toBe('public');
     expect(placed.auth).toBe('none');
-    expect(placed.hostnames).toContain(`shop-web.${manifest.dns.zones.public}`);
+    expect(placed.hostnames).toContain(
+      `shop-web.${zoneFor('public', manifest.dns.zones)}`,
+    );
 
     // And the pin is on the row, so a rollback to the first release comes back
     // up as private rather than as whatever the Component says today.

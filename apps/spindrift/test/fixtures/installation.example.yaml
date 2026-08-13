@@ -24,8 +24,10 @@ auth:
 
 dns:
   zones:
-    private: apps.example.test
-    public: example.test
+    - name: apps.example.test
+      reaches: [private]
+    - name: example.test
+      reaches: [public]
 
 sources:
   buckets:

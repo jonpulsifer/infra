@@ -19,3 +19,4 @@ spec:
           dnsZones:
             - ${SECRET_DOMAIN}
             - embarrassing.ca
+            - wishin.app

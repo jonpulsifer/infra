@@ -317,6 +317,7 @@ export function desiredStateFor(
       adapter: target.adapter,
       reach: deploy.desired.reach,
       zones: manifest.dns.zones,
+      zone: app.zone,
       vanityLabel: vanityIsUnambiguous ? app.vanityDomain : null,
     }),
   };
