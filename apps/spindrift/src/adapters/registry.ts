@@ -70,13 +70,17 @@ import type { TokenProvider } from './deploy/kubernetes/api.ts';
 import { KubernetesDeployAdapter } from './deploy/kubernetes/index.ts';
 import { PagesDeployAdapter } from './deploy/pages/index.ts';
 import { StaticDeployAdapter } from './deploy/static/index.ts';
-import { VercelDeployAdapter } from './deploy/vercel/index.ts';
+import {
+  DEFAULT_ENDPOINT as VERCEL_DEFAULT_ENDPOINT,
+  VercelDeployAdapter,
+} from './deploy/vercel/index.ts';
 import type { SecretStore } from './store/contract.ts';
 import {
   DEFAULT_ENDPOINT as SECRET_MANAGER_DEFAULT_ENDPOINT,
   SecretManagerStore,
 } from './store/gcp-secret-manager.ts';
 import { OnePasswordStore } from './store/onepassword.ts';
+import { VercelSecretStore } from './store/vercel.ts';
 
 /**
  * Where Kubernetes projects a pod's service account token.
@@ -235,6 +239,22 @@ export function createAdapterRegistry(
     options.storeToken ?? storeTokenFor(options.manifest, cloud, options.env),
     options.fetch,
   );
+
+  // Built beside the manifest's store rather than instead of it, because §10
+  // makes the store a *Target* property: an installation can hold both, and a
+  // Component's own placement decides which one its config travels through.
+  // `null` where no team is named, which is what makes an installation with no
+  // Vercel Targets carry no Vercel store.
+  const team = vercelTeam(options.env ?? Bun.env);
+  const vercelStore =
+    team === null
+      ? null
+      : new VercelSecretStore({
+          baseUrl: VERCEL_DEFAULT_ENDPOINT,
+          token: options.vercelToken ?? vercelToken(options.env ?? Bun.env),
+          team,
+          ...(options.fetch ? { fetch: options.fetch } : {}),
+        });
   const supplyChain = new CoreSupplyChain(
     new SlsaVerifier(),
     new CosignSigner({ key: options.manifest.supplyChain.signer }),
@@ -364,6 +384,12 @@ export function createAdapterRegistry(
      * rather than a value captured here.
      */
     store(adapter: StoreAdapter): SecretStore | null {
+      // The edge platform's own environment, which is a store this
+      // installation has whether or not its manifest selected one: §10 makes
+      // the store a Target property, and a Vercel Target reaches exactly this
+      // one and nothing else — its functions read no reference, so no other
+      // store could deliver to them.
+      if (adapter === 'vercel') return vercelStore;
       return adapter === options.manifest.secretStore.adapter ? store : null;
     },
 
@@ -624,6 +650,29 @@ export function storeToken(env: Record<string, string | undefined> = Bun.env) {
  * federation.
  */
 export const VERCEL_TOKEN_VARIABLE = 'SPINDRIFT_VERCEL_TOKEN';
+
+/**
+ * The team a Vercel config store writes projects' environments in.
+ *
+ * Installation-wide, and stated as an environment variable beside the bearer
+ * for the reason the bearer is one: a team is the boundary that one credential
+ * acts in, so an installation holding a single Vercel token effectively has a
+ * single team. A Target's connection still carries its own `team` — the deploy
+ * adapter reads that, because a deploy *is* addressed per Target — and an
+ * installation whose Vercel Targets sit on two different teams can therefore
+ * deploy to both and configure only the one named here.
+ *
+ * **Absent is a legitimate installation**, not a fault: `store('vercel')`
+ * answers `null`, the Target reaches no store, and a Component placed there
+ * simply cannot hold config — which placement already models and says.
+ */
+export const VERCEL_TEAM_VARIABLE = 'SPINDRIFT_VERCEL_TEAM';
+
+export function vercelTeam(
+  env: Record<string, string | undefined> = Bun.env,
+): string | null {
+  return env[VERCEL_TEAM_VARIABLE]?.trim() || null;
+}
 
 export function vercelToken(
   env: Record<string, string | undefined> = Bun.env,

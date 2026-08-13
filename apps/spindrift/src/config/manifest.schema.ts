@@ -109,7 +109,11 @@ export const targetAdapterSchema = z.enum([
  * The secret store this installation resolves the reach rule with (§10, §20).
  * v1 ships two so the pluggability claim is falsifiable.
  */
-export const storeAdapterSchema = z.enum(['onepassword', 'gcp-secret-manager']);
+export const storeAdapterSchema = z.enum([
+  'onepassword',
+  'gcp-secret-manager',
+  'vercel',
+]);
 
 /**
  * Which of §4's three build routes a configured route is one of.
@@ -849,8 +853,18 @@ export const installationManifestSchema = z
 
     secretStore: z
       .object({
-        /** Which store adapter this installation delivers config through. */
-        adapter: storeAdapterSchema,
+        /**
+         * Which store adapter this installation delivers config through.
+         *
+         * **Not every store in the vocabulary is selectable here**, and the
+         * exclusion is §10's own shape rather than a restriction: this field
+         * names the installation's *store of record*, the one a Kubernetes or
+         * cloud Target writes through. The edge platform's environment is a
+         * store too, but it belongs to the Target that runs the functions
+         * reading it — an installation cannot choose it for everything else,
+         * and a Vercel Target reaches it whether or not this field says so.
+         */
+        adapter: storeAdapterSchema.exclude(['vercel']),
         /**
          * The access path core writes over — §10's "store of record plus one or
          * more access paths", named as the one this process reaches.

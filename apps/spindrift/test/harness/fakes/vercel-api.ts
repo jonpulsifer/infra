@@ -90,6 +90,23 @@ export class FakeVercel {
   /** Domains attached, by project — the assertion surface for §9's re-point. */
   private readonly domains = new Map<string, string[]>();
   private readonly uploaded = new Set<string>();
+  /**
+   * Environment variables per project, in insertion order.
+   *
+   * The platform's own constraint modelled rather than assumed: one variable
+   * per `key` per target, so a create whose key is already there is refused —
+   * which is what makes `put`'s delete-then-create the only thing that works.
+   */
+  private readonly env = new Map<
+    string,
+    {
+      id: string;
+      key: string;
+      value: string;
+      type: string;
+      createdAt: number;
+    }[]
+  >();
   private next = 1;
 
   constructor(private readonly options: FakeVercelOptions = {}) {
@@ -122,6 +139,14 @@ export class FakeVercel {
   /** Whether the serving deployment was created as a prebuilt one. */
   servedPrebuilt(project: string): boolean {
     return this.serving(project)?.prebuilt ?? false;
+  }
+
+  /** The environment variables one project holds, for a test to assert on. */
+  environment(project: string): { key: string; type: string }[] {
+    return (this.env.get(project) ?? []).map(({ key, type }) => ({
+      key,
+      type,
+    }));
   }
 
   /** Digests actually uploaded — what proves the upload step ran. */
@@ -222,6 +247,68 @@ export class FakeVercel {
 
     if (path === '/v7/deployments' && method === 'GET') {
       return this.list(url);
+    }
+
+    const envList = path.match(/^\/v9\/projects\/([^/]+)\/env$/);
+    if (envList !== null && method === 'GET') {
+      const project = decodeURIComponent(envList[1] as string);
+      if (!this.projects.has(project)) return json(404, notFound('no project'));
+      return json(200, { envs: this.env.get(project) ?? [] });
+    }
+
+    const envCreate = path.match(/^\/v10\/projects\/([^/]+)\/env$/);
+    if (envCreate !== null && method === 'POST') {
+      const project = decodeURIComponent(envCreate[1] as string);
+      if (!this.projects.has(project)) return json(404, notFound('no project'));
+      const input = body as { key?: string; value?: string; type?: string };
+      const held = this.env.get(project) ?? [];
+      // The platform's own refusal, which is the whole reason a put deletes
+      // first: an existing key is a `403`, not an overwrite.
+      if (held.some((one) => one.key === input.key)) {
+        return json(403, {
+          error: {
+            code: 'ENV_ALREADY_EXISTS',
+            message: `${input.key} already exists`,
+          },
+        });
+      }
+      const created = {
+        id: `env_${this.next++}`,
+        key: input.key ?? '',
+        value: input.value ?? '',
+        type: input.type ?? 'plain',
+        createdAt: this.next,
+      };
+      this.env.set(project, [...held, created]);
+      return json(201, { created, failed: [] });
+    }
+
+    const envDelete = path.match(/^\/v9\/projects\/([^/]+)\/env\/([^/]+)$/);
+    if (envDelete !== null && method === 'DELETE') {
+      const project = decodeURIComponent(envDelete[1] as string);
+      const id = decodeURIComponent(envDelete[2] as string);
+      const held = this.env.get(project) ?? [];
+      if (!held.some((one) => one.id === id)) {
+        return json(404, notFound('no such environment variable'));
+      }
+      this.env.set(
+        project,
+        held.filter((one) => one.id !== id),
+      );
+      return json(200, {});
+    }
+
+    const projectRead = path.match(/^\/v9\/projects\/([^/]+)$/);
+    if (projectRead !== null && method === 'GET') {
+      const project = decodeURIComponent(projectRead[1] as string);
+      if (!this.projects.has(project)) return json(404, notFound('no project'));
+      return json(200, { id: project, name: project });
+    }
+
+    if (path === '/v9/projects' && method === 'POST') {
+      const name = (body as { name?: string }).name ?? '';
+      this.projects.add(name);
+      return json(200, { id: name, name });
     }
 
     const projectMatch = path.match(/^\/v9\/projects\/([^/]+)$/);

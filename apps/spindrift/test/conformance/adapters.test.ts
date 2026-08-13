@@ -29,6 +29,7 @@ import { StaticDeployAdapter } from '../../src/adapters/deploy/static/index.ts';
 import { VercelDeployAdapter } from '../../src/adapters/deploy/vercel/index.ts';
 import { SecretManagerStore } from '../../src/adapters/store/gcp-secret-manager.ts';
 import { OnePasswordStore } from '../../src/adapters/store/onepassword.ts';
+import { VercelSecretStore } from '../../src/adapters/store/vercel.ts';
 import { GitHubApp } from '../../src/integrations/github/app.ts';
 import { FakeBosunOutbox } from '../harness/fakes/bosun-outbox.ts';
 import { FakeBuildAdapter } from '../harness/fakes/build-adapter.ts';
@@ -340,6 +341,28 @@ storeAdapterSuite(
   'fake immutable item per version, standing for onepassword',
   () => new FakeSecretStore({ pinning: 'IMMUTABLE_ITEM_PER_VERSION' }),
 );
+// The third strategy, standing for the edge platform's own environment. It is
+// in the same suite as the other two rather than beside it: the only
+// assertions it answers differently are the two the suite branches on, and
+// every other term of §10 — write-only, a new reference per put, an idempotent
+// destroy — has to hold here exactly as it does for a vault.
+storeAdapterSuite(
+  'fake current only, standing for vercel',
+  () => new FakeSecretStore({ pinning: 'CURRENT_ONLY' }),
+);
+
+// The real edge-platform store, against the real fake API — so `put`'s
+// delete-then-create runs against the platform's actual refusal (a `403` for a
+// key that already exists) rather than against an assumption about it.
+storeAdapterSuite('vercel', () => {
+  const api = new FakeVercel({ projects: [] });
+  return new VercelSecretStore({
+    baseUrl: api.endpoint,
+    token: api.token,
+    team: api.team,
+    fetch: api.fetch,
+  });
+});
 
 storeAdapterSuite('onepassword', () => {
   const connect = new FakeOnePasswordConnect();

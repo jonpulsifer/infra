@@ -49,8 +49,8 @@ import {
   targetLabel,
   type VercelAdapterConnection,
 } from '../../../domain/target.ts';
+import { vercelProjectName } from '../../../domain/vercel-project.ts';
 import type { SurfaceProbe } from '../../../domain/vessel.ts';
-import { workloadName } from '../../../domain/workload-name.ts';
 import { fetchableBundleUrl } from '../../../storage/signed-url.ts';
 import type { FederationOptions } from '../cloud/federation.ts';
 import {
@@ -152,9 +152,6 @@ export const DEFAULT_ENDPOINT = 'https://api.vercel.com';
  * other files-shaped artifact is.
  */
 const BUILD_OUTPUT_PREFIX = '.vercel/output/';
-
-/** A project name is capped at 100 characters of `[a-z0-9._-]`. */
-const PROJECT_NAME_LIMIT = 100;
 
 /**
  * The `meta` keys `observe` reads what is serving back out of.
@@ -758,9 +755,23 @@ export class VercelDeployAdapter implements DeployAdapter {
       servedHosts: connection.servedHosts ?? [],
       // Nothing is pulled — the bytes were uploaded, and the edge holds them.
       reachableRegistries: [],
-      // §10's reach rule from the other side: no runtime, so no store is
-      // reachable, which is why §10's website exception exists.
-      reachableSecretStores: [] as readonly StoreAdapter[],
+      // §10's reach rule from the other side, and the one store this Target
+      // reaches is the platform itself.
+      //
+      // The old answer here was the empty list, on the ground that nothing
+      // runs so nothing could resolve a reference. That was true of a site
+      // rendered to static files and false of one rendered to functions: a
+      // function is a runtime, and it reads its configuration out of the
+      // project's own environment. `store/vercel.ts` is that environment as a
+      // store of record — which is also the only shape config can take here,
+      // because the platform resolves no references and an environment
+      // variable is a literal.
+      //
+      // A Target property rather than a Component one, which is why this is
+      // unconditional: a Vercel Target can run functions, and whether a
+      // particular Component does is settled by its artifact shape long after
+      // discovery.
+      reachableSecretStores: ['vercel'] as readonly StoreAdapter[],
     };
   }
 
@@ -1000,9 +1011,16 @@ function notAssessed() {
   };
 }
 
-/** One project per (App, Component), within the length the platform allows. */
+/**
+ * One project per (App, Component).
+ *
+ * The rule itself is `domain/vercel-project.ts`, because the store adapter has
+ * to derive the identical name — it writes the environment variables the
+ * deployment this creates will read, and two different answers would be config
+ * on a project nothing deploys to.
+ */
 export function projectName(desired: DesiredState): string {
-  return workloadName(desired, PROJECT_NAME_LIMIT);
+  return vercelProjectName(desired);
 }
 
 /** The adapter's own handle on what `apply` placed — opaque to core (§6). */

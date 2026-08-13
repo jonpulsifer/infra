@@ -342,19 +342,53 @@ export function storeAdapterSuite(
       const store = make();
       const first = await store.put(scope, 'TOKEN', 'one');
       const second = await store.put(scope, 'TOKEN', 'two');
+      // True of every strategy, and the whole of what §10 means by pinned: a
+      // reference that stayed equal across two values would be a floating
+      // latest, and a Deploy carrying it would silently change what it
+      // delivers.
       expect(second).not.toEqual(first);
-      // The older pin still resolves — that is what makes a Deploy pinned to it
-      // still deployable (§10).
-      expect(await store.describe(first)).not.toBeNull();
     });
 
-    test('lists every version of a key, newest first', async () => {
-      const store = make();
-      const first = await store.put(scope, 'TOKEN', 'one');
-      const second = await store.put(scope, 'TOKEN', 'two');
-      const versions = await store.versions(scope, 'TOKEN');
-      expect(versions.map((v) => v.reference)).toEqual([second, first]);
-    });
+    // What happens to the version that was superseded is the one thing the
+    // strategies genuinely disagree about, so it is asserted per strategy
+    // rather than skipped for the one that cannot. Both arms are positive
+    // claims: a store that quietly changed its mind fails whichever it
+    // declared.
+    if (make().pinning === 'CURRENT_ONLY') {
+      test('the superseded version stops resolving, and says so', async () => {
+        const store = make();
+        const first = await store.put(scope, 'TOKEN', 'one');
+        await store.put(scope, 'TOKEN', 'two');
+        // The name is the runtime's own, so there is nowhere for the old value
+        // to live. `placeIntent` is what turns this into a refusal instead of
+        // a Component that comes up without its config.
+        expect(await store.describe(first)).toBeNull();
+      });
+
+      test('lists the one version there can be', async () => {
+        const store = make();
+        await store.put(scope, 'TOKEN', 'one');
+        const second = await store.put(scope, 'TOKEN', 'two');
+        const versions = await store.versions(scope, 'TOKEN');
+        expect(versions.map((v) => v.reference)).toEqual([second]);
+      });
+    } else {
+      test('the older pin still resolves', async () => {
+        const store = make();
+        const first = await store.put(scope, 'TOKEN', 'one');
+        await store.put(scope, 'TOKEN', 'two');
+        // That is what makes a Deploy pinned to it still deployable (§10).
+        expect(await store.describe(first)).not.toBeNull();
+      });
+
+      test('lists every version of a key, newest first', async () => {
+        const store = make();
+        const first = await store.put(scope, 'TOKEN', 'one');
+        const second = await store.put(scope, 'TOKEN', 'two');
+        const versions = await store.versions(scope, 'TOKEN');
+        expect(versions.map((v) => v.reference)).toEqual([second, first]);
+      });
+    }
 
     test('describe reports null for a reference that is gone', async () => {
       const store = make();
