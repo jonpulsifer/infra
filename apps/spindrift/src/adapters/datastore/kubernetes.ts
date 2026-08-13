@@ -37,6 +37,7 @@ import {
   type KubernetesObject,
   type TokenProvider,
 } from '../deploy/kubernetes/api.ts';
+import { REJECTION_EVENTS } from '../deploy/kubernetes/diagnose.ts';
 import type {
   DatastoreAdapter,
   DatastoreConnection,
@@ -170,12 +171,29 @@ export class KubernetesDatastoreAdapter implements DatastoreAdapter {
     const connectionRef =
       status.phase === 'LIVE' ? await this.connectionFor(api, parsed) : null;
 
+    // The read on red, for a datastore (§6). Both operators report their own
+    // reconcile, and an operator whose StatefulSet is being refused by
+    // admission does not consider that its own failure — it says it is still
+    // working, forever, while the only useful sentence in the cluster sits on
+    // an object neither status read looks at. So a warning refusing one of this
+    // datastore's own objects outranks the operator's status line.
+    //
+    // Read only when the phase is not `LIVE`, so a healthy installation pays
+    // nothing; the loop already selects unsettled rows only. And it changes
+    // nothing but the sentence: a pod refused admission is not terminal — fix
+    // the manifest and the next apply admits it — so `WAITING` stays `WAITING`
+    // and no new verdict is invented here.
+    const detail =
+      status.phase === 'LIVE'
+        ? status.detail
+        : ((await this.refusal(api, parsed)) ?? status.detail);
+
     return {
       ref,
       phase: status.phase,
       connection: connectionRef,
       ...(status.reason === undefined ? {} : { reason: status.reason }),
-      ...(status.detail === undefined ? {} : { detail: status.detail }),
+      ...(detail === undefined ? {} : { detail }),
     };
   }
 
@@ -193,6 +211,67 @@ export class KubernetesDatastoreAdapter implements DatastoreAdapter {
       namespace: parsed.namespace,
       name: parsed.name,
     });
+  }
+
+  /**
+   * The most recent warning refusing one of this datastore's own objects.
+   *
+   * **Events rather than the child workload's status**, which was the other
+   * candidate. Events are one mechanism for both engines and for the failure
+   * modes neither operator models — a quota, a policy engine, a scheduler with
+   * nowhere to put the pod — and they are what a human runs `kubectl describe`
+   * for. Reading each operator's child workload instead would need a table of
+   * child kinds and names per operator, which is wrong the first time an
+   * operator renames one. `events: list` in this namespace is already granted
+   * for the delivery path's own read on red.
+   *
+   * The words are the cluster's. Nothing here maps a reason onto a sentence
+   * Spindrift wrote: {@link REJECTION_EVENTS} decides *which* event is a
+   * refusal, and the event's own `message` is what an operator reads.
+   *
+   * **Never throws.** This runs on a datastore that is already not `LIVE`, and
+   * a diagnosis that could not be loaded is not a reason to lose the operator's
+   * status line as well.
+   */
+  private async refusal(
+    api: KubernetesApi,
+    parsed: ParsedRef,
+  ): Promise<string | undefined> {
+    const events = await api
+      .list({ apiVersion: 'v1', plural: 'events', namespace: parsed.namespace })
+      .catch(() => null);
+    if (events === null) return undefined;
+
+    // Both operators name what they create after the custom resource — CNPG
+    // suffixes the cluster's own name, the Valkey operator prefixes it first
+    // (`VALKEY_RESOURCE_PREFIX`). Matching on that is what keeps a neighbour's
+    // refusal in a shared namespace out of this datastore's `detail`; it is a
+    // narrower claim than knowing each operator's child *kinds*, because it
+    // survives an operator adding one.
+    const stems = [parsed.name, `${VALKEY_RESOURCE_PREFIX}${parsed.name}`];
+    const refusals = (events as readonly RefusalEvent[]).filter((event) => {
+      const involved = event.involvedObject?.name;
+      return (
+        event.type === 'Warning' &&
+        event.reason !== undefined &&
+        REJECTION_EVENTS.has(event.reason) &&
+        involved !== undefined &&
+        stems.some(
+          (stem) => involved === stem || involved.startsWith(`${stem}-`),
+        )
+      );
+    });
+    if (refusals.length === 0) return undefined;
+
+    // Most recent wins. A refusal that repeats — the fourteen `FailedCreate`s a
+    // StatefulSet reported while its pods were inadmissible — is the same
+    // sentence every time, and where two differ the newest is the one still
+    // true. Both timestamp fields are RFC 3339 in UTC, so they order as strings.
+    let latest = refusals[0]!;
+    for (const event of refusals) {
+      if (timeOf(event) > timeOf(latest)) latest = event;
+    }
+    return latest.message ?? latest.reason;
   }
 
   // --- plumbing ------------------------------------------------------------
@@ -367,6 +446,29 @@ export class KubernetesDatastoreAdapter implements DatastoreAdapter {
       ? null
       : `redis://${service}.${parsed.namespace}.svc:6379`;
   }
+}
+
+/** The fields a refusal is recognised and ordered by, off a core v1 `Event`. */
+interface RefusalEvent {
+  type?: string;
+  reason?: string;
+  message?: string;
+  /** Set by controllers writing core v1 events, which is both operators. */
+  lastTimestamp?: string;
+  /** Set instead by anything writing through `events.k8s.io`. */
+  eventTime?: string;
+  involvedObject?: { name?: string };
+}
+
+/**
+ * When an event last happened.
+ *
+ * Empty for an event carrying neither stamp, which sorts below every event that
+ * carries one — the honest order, since an event with no time cannot be shown
+ * to be the newest.
+ */
+function timeOf(event: RefusalEvent): string {
+  return event.lastTimestamp ?? event.eventTime ?? '';
 }
 
 /** What a status read concluded, in §6's shared vocabulary. */
