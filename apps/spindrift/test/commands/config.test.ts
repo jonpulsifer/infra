@@ -20,13 +20,11 @@ import { beforeEach, describe, expect, test } from 'bun:test';
 import { and, eq } from 'drizzle-orm';
 import type { DeployAdapter } from '../../src/adapters/deploy/contract.ts';
 import type { SecretStore } from '../../src/adapters/store/contract.ts';
-import {
-  createDeploy,
-  placeComponent,
-  replaceConfig,
-  rollbackDeploy,
-  setConfig,
-} from '../../src/commands/index.ts';
+import { placeComponent } from '../../src/commands/components/place.ts';
+import { replaceConfig } from '../../src/commands/config/replace.ts';
+import { setConfig } from '../../src/commands/config/set.ts';
+import { createDeploy } from '../../src/commands/deploys/create.ts';
+import { rollbackDeploy } from '../../src/commands/deploys/rollback.ts';
 import type {
   AdapterRegistry,
   Clock,

@@ -19,10 +19,8 @@
  */
 import { describe, expect, test } from 'bun:test';
 import { eq } from 'drizzle-orm';
-import {
-  listTargets,
-  openPrerequisiteRemediation,
-} from '../../src/commands/index.ts';
+import { listTargets } from '../../src/commands/targets/list.ts';
+import { openPrerequisiteRemediation } from '../../src/commands/targets/remediate.ts';
 import type {
   AdapterRegistry,
   CommandContext,

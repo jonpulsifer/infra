@@ -12,7 +12,7 @@
  * where it places a workload with a key missing.
  */
 import { describe, expect, test } from 'bun:test';
-import { configureInstallation } from '../../src/commands/index.ts';
+import { configureInstallation } from '../../src/commands/installation/configure.ts';
 import type { Clock, CommandContext } from '../../src/commands/types.ts';
 import type { AuthoredManifest } from '../../src/config/manifest.schema.ts';
 import { loadStoredManifest } from '../../src/config/manifest-store.ts';

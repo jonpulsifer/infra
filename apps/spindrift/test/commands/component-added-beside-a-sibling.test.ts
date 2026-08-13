@@ -18,12 +18,12 @@
  */
 import { describe, expect, test } from 'bun:test';
 import { eq } from 'drizzle-orm';
+import { deployApp } from '../../src/commands/apps/deploy.ts';
 import {
   createComponent,
   createComponentInput,
 } from '../../src/commands/components/create.ts';
 import { createApp } from '../../src/commands/create-app.ts';
-import { deployApp } from '../../src/commands/index.ts';
 import type {
   AdapterRegistry,
   Clock,

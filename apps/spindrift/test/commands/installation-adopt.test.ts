@@ -21,10 +21,8 @@
  *    reach that installation, and the ticket says so.
  */
 import { describe, expect, test } from 'bun:test';
-import {
-  configureInstallation,
-  getInstallationManifest,
-} from '../../src/commands/index.ts';
+import { configureInstallation } from '../../src/commands/installation/configure.ts';
+import { getInstallationManifest } from '../../src/commands/installation/get.ts';
 import type { Clock, CommandContext } from '../../src/commands/types.ts';
 import type { AuthoredManifest } from '../../src/config/manifest.schema.ts';
 import { diffManifestPaths } from '../../src/config/manifest-store.ts';

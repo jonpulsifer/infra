@@ -42,13 +42,13 @@
 import { describe, expect, test } from 'bun:test';
 import { gzipSync } from 'node:zlib';
 import { asc, eq } from 'drizzle-orm';
+import { deployApp } from '../../src/commands/apps/deploy.ts';
 import {
   completeCreationDraft,
   getCreationDraft,
   saveCreationDraft,
   startCreationDraft,
 } from '../../src/commands/creation-drafts/lifecycle.ts';
-import { deployApp } from '../../src/commands/index.ts';
 import type {
   AdapterRegistry,
   CommandContext,

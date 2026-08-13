@@ -1,80 +1,23 @@
 /**
- * The registry is the dispatch surface, so this file asserts the two things
- * that make it one (§21, and the plan's "one dispatch endpoint generated from
- * the command registry"):
+ * What `dispatch` does with a name and a body before any handler runs (§21).
  *
- * 1. **Every exported command is registered.** An export absent from the
- *    registry is a command the browser could never call, and the generated
- *    endpoint would silently not have it. `registry.ts` also refuses to
- *    type-check in that case; this test is the version that fails loudly
- *    without reading the compiler's output.
- * 2. **Every registered name is an exported command.** A route that is not a
- *    command is exactly what §21 refuses to grow, and the only way one could
- *    appear is an entry here pointing at something else.
+ * The registry is the only list of commands, so "every command is registered"
+ * and "every registered name is a command" are no longer two sets to compare:
+ * the first is a handler nobody imported into `registry.ts`, and the second
+ * cannot be written, because the registry's `satisfies` clause refuses an entry
+ * whose handler is not a `Command`. What is left to assert at run time is the
+ * part the type system cannot reach — an untrusted string arriving from a
+ * browser, and what the surface does with one it does not recognise.
  *
- * Neither assertion needs a database: the failure paths under test refuse
- * before a handler runs, and `unreachableContext` proves it by throwing if
- * anything reaches for the connection.
+ * No database anywhere: every path under test refuses before a handler runs,
+ * and `unreachableContext` proves it by throwing if anything reaches for the
+ * connection.
  */
 import { describe, expect, test } from 'bun:test';
-import * as commandModule from '../../src/commands/index.ts';
-import {
-  commandNames,
-  commandRegistry,
-  dispatch,
-  isCommandName,
-} from '../../src/commands/registry.ts';
+import { dispatch, isCommandName } from '../../src/commands/registry.ts';
 import { unreachableContext } from '../harness/context.ts';
 
 const context = await unreachableContext();
-
-/**
- * Every value `src/commands/index.ts` exports. That file's contract is that
- * each of them is a command — which is why this needs no allowlist, and why a
- * newly exported command cannot slip past by not being mentioned here.
- */
-const exported = Object.entries(commandModule);
-
-describe('the command surface and the registry are the same set', () => {
-  test('index.ts exports commands and nothing else', () => {
-    expect(exported.length).toBeGreaterThan(0);
-    for (const [name, value] of exported) {
-      expect(typeof value).toBe('function');
-      expect(name).not.toBe('');
-    }
-  });
-
-  test('every exported command is registered under its own name', () => {
-    const exportedNames = exported.map(([name]) => name).sort();
-    const registeredNames = Object.keys(commandRegistry).sort();
-    expect(registeredNames).toEqual(exportedNames);
-  });
-
-  test('each registry entry points at the command it names', () => {
-    for (const [name, value] of exported) {
-      const descriptor = (
-        commandRegistry as Record<string, { handler: unknown } | undefined>
-      )[name];
-      expect(descriptor).toBeDefined();
-      expect(descriptor?.handler).toBe(value);
-    }
-  });
-
-  test('each registry entry carries an input schema', () => {
-    for (const descriptor of Object.values(commandRegistry)) {
-      expect(typeof descriptor.input.safeParse).toBe('function');
-    }
-  });
-
-  test('the generated name list is the registry keys', () => {
-    expect(Object.keys(commandRegistry).sort()).toEqual(
-      [...commandNames].sort(),
-    );
-    for (const name of commandNames) {
-      expect(isCommandName(name)).toBe(true);
-    }
-  });
-});
 
 describe('dispatch refuses what the registry does not back', () => {
   test('an unknown name is a refusal, not a thrown error', async () => {

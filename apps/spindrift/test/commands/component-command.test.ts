@@ -30,7 +30,8 @@ import {
   setComponentCommand,
   setComponentCommandInput,
 } from '../../src/commands/components/command.ts';
-import { createDeploy, rollbackDeploy } from '../../src/commands/index.ts';
+import { createDeploy } from '../../src/commands/deploys/create.ts';
+import { rollbackDeploy } from '../../src/commands/deploys/rollback.ts';
 import type {
   AdapterRegistry,
   Clock,

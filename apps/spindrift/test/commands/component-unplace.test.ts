@@ -13,7 +13,8 @@
  */
 import { describe, expect, test } from 'bun:test';
 import { and, eq } from 'drizzle-orm';
-import { createDeploy, unplaceComponent } from '../../src/commands/index.ts';
+import { unplaceComponent } from '../../src/commands/components/unplace.ts';
+import { createDeploy } from '../../src/commands/deploys/create.ts';
 import { dispatch } from '../../src/commands/registry.ts';
 import type {
   AdapterRegistry,

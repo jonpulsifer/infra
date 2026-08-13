@@ -23,7 +23,7 @@
  */
 import { describe, expect, test } from 'bun:test';
 import { eq } from 'drizzle-orm';
-import { deleteApp } from '../../src/commands/index.ts';
+import { deleteApp } from '../../src/commands/apps/delete.ts';
 import type {
   AdapterRegistry,
   Clock,

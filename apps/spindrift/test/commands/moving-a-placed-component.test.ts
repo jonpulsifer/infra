@@ -28,11 +28,9 @@ import { beforeEach, describe, expect, test } from 'bun:test';
 import { and, eq } from 'drizzle-orm';
 import { deployApp } from '../../src/commands/apps/deploy.ts';
 import { getAppWorkspace } from '../../src/commands/apps/workspace.ts';
-import {
-  createDeploy,
-  placeComponent,
-  unplaceComponent,
-} from '../../src/commands/index.ts';
+import { placeComponent } from '../../src/commands/components/place.ts';
+import { unplaceComponent } from '../../src/commands/components/unplace.ts';
+import { createDeploy } from '../../src/commands/deploys/create.ts';
 import type {
   AdapterRegistry,
   Clock,

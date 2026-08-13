@@ -1,15 +1,13 @@
 import { describe, expect, test } from 'bun:test';
 import { eq } from 'drizzle-orm';
+import { deployApp } from '../../src/commands/apps/deploy.ts';
+import { uploadArchive } from '../../src/commands/apps/upload-archive.ts';
+import { getAppWorkspace } from '../../src/commands/apps/workspace.ts';
+import { getBuildDetail } from '../../src/commands/builds/get-detail.ts';
+import { createComponent } from '../../src/commands/components/create.ts';
 import { createApp } from '../../src/commands/create-app.ts';
-import {
-  createComponent,
-  deployApp,
-  getAppWorkspace,
-  getBuildDetail,
-  getDeployDetail,
-  listDeploys,
-  uploadArchive,
-} from '../../src/commands/index.ts';
+import { getDeployDetail } from '../../src/commands/deploys/get-detail.ts';
+import { listDeploys } from '../../src/commands/deploys/list.ts';
 import type {
   AdapterRegistry,
   Clock,
