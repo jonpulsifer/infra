@@ -56,6 +56,10 @@ const STANDS_FOR: Record<
 > = {
   NATIVE: { adapter: 'gcp-secret-manager', name: secretIdFor },
   IMMUTABLE_ITEM_PER_VERSION: { adapter: 'onepassword', name: itemTitleFor },
+  // The edge platform's environment, whose item name *is* the variable the
+  // runtime reads — which is exactly why it cannot hold a second version of
+  // one, and why this strategy exists.
+  CURRENT_ONLY: { adapter: 'vercel', name: itemTitleFor },
 };
 
 export class FakeSecretStore implements SecretStore {
@@ -89,14 +93,25 @@ export class FakeSecretStore implements SecretStore {
     this.counter += 1;
     const item = this.name(scope, key);
 
-    // The two strategies differ in where the version lives, and in nothing
-    // else a caller can observe: NATIVE addresses a numbered version of one
-    // item, and IMMUTABLE_ITEM_PER_VERSION mints a fresh item under the same
-    // name and reports the id it was given as the version.
+    // The strategies differ in where the version lives, and — for the third
+    // one — in whether the version before it survives at all. NATIVE addresses
+    // a numbered version of one item; IMMUTABLE_ITEM_PER_VERSION mints a fresh
+    // item under the same name and reports the id it was given as the version.
     const reference: SecretReference =
       this.pinning === 'NATIVE'
         ? { key: item, version: String(this.counter) }
         : { key: item, version: `item-${this.counter}` };
+
+    // CURRENT_ONLY holds one value per name because the name is the runtime's
+    // own — so writing a new one is what *removes* the old, not something that
+    // happens beside it. Modelled here rather than left to the real adapter,
+    // because the conformance suite asserts this difference and a fake that
+    // accumulated would let it pass against a store that cannot.
+    if (this.pinning === 'CURRENT_ONLY') {
+      for (const [id, held] of this.stored) {
+        if (held.version.key === key) this.stored.delete(id);
+      }
+    }
 
     this.stored.set(referenceId(reference), {
       value,

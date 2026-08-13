@@ -45,8 +45,31 @@ export interface ConfigScope {
  *   version. §10 records this as making the contract *more* portable, not less:
  *   the reference {@link SecretStore.put} returns has the same shape either way,
  *   and nothing above this seam can tell which strategy produced it.
+ * - `CURRENT_ONLY` — the store holds exactly one value per name and there is no
+ *   Spindrift-side name that would let a second one exist, because the name
+ *   *is* what the workload reads. A put still mints a new reference, so a
+ *   config change still produces a new Deploy; what does not survive is the
+ *   version it superseded.
+ *
+ * **The third one costs something the other two do not, and it is stated here
+ * rather than hidden in an adapter.** §10 pins a version so "a rollback comes
+ * back up with the configuration it originally had" — under `CURRENT_ONLY` a
+ * rollback past a config change cannot do that, because the document it is
+ * pinned to no longer resolves. It is therefore **refused** rather than
+ * deployed bare: `placeIntent` describes every pinned reference before writing
+ * an intent, and a store of this strategy is exactly the case that check exists
+ * for. Retention (§10's N = 10) is a no-op here — there is never more than one
+ * version to reap.
+ *
+ * A property of the far side, never a preference. A store gets this strategy
+ * because its API cannot express a second version of a live name, which is true
+ * of an edge platform whose environment variables *are* the runtime's own
+ * namespace.
  */
-export type PinningStrategy = 'NATIVE' | 'IMMUTABLE_ITEM_PER_VERSION';
+export type PinningStrategy =
+  | 'NATIVE'
+  | 'IMMUTABLE_ITEM_PER_VERSION'
+  | 'CURRENT_ONLY';
 
 /** Metadata about one pinned version. Never the value (§10). */
 export interface SecretVersion {
