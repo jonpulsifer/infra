@@ -1934,8 +1934,12 @@ function WorkspaceScreen({
   */
   const workspaceIds = () =>
     state.type === 'success'
-      ? { appId: state.workspace.appId, targetId: state.workspace.targetId }
-      : { appId: undefined, targetId: undefined };
+      ? {
+          appId: state.workspace.appId,
+          targetId: state.workspace.targetId,
+          vesselId: state.workspace.vesselId,
+        }
+      : { appId: undefined, targetId: undefined, vesselId: undefined };
 
   /**
    * Create, then attach — two dispatches, because `createDatastore` takes no
@@ -1949,8 +1953,8 @@ function WorkspaceScreen({
    * so, which is why the reload happens either way.
    */
   const handleCreateDatastore: CreateDatastore = async (create) => {
-    const { appId, targetId } = workspaceIds();
-    if (appId === undefined || targetId === undefined) {
+    const { appId, vesselId } = workspaceIds();
+    if (appId === undefined || vesselId === undefined) {
       return {
         ok: false,
         message: 'This App has no Component placed on a Target yet',
@@ -1960,7 +1964,7 @@ function WorkspaceScreen({
       const created = await command('createDatastore', {
         name: create.name,
         engine: create.engine,
-        targetId,
+        vesselId,
         // Restated rather than omitted, the way `useBucket`'s `makeDefault` is:
         // `InputOf` reads a command's schema *output*, so a `.default()` is
         // still a required property to a typed caller. It is the schema's own
@@ -2667,7 +2671,7 @@ function DatastoresScreen({
       const result = await command('createDatastore', {
         name: create.name,
         engine: create.engine,
-        targetId: create.targetId,
+        vesselId: create.vesselId,
         // Restated rather than omitted for the reason `handleCreateDatastore`
         // restates it: `InputOf` reads the schema's output, so a `.default()`
         // is still a required property to a typed caller.
@@ -2730,7 +2734,7 @@ function DatastoresScreen({
   return (
     <DatastoreLedger
       datastores={state.result.datastores}
-      targets={state.result.targets}
+      vessels={state.result.vessels}
       onNavigate={onNavigate}
       onCreate={handleCreate}
       onDetach={handleDetach}

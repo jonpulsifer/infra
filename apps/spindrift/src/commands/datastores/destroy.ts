@@ -30,12 +30,13 @@ import { eq } from 'drizzle-orm';
 import { z } from 'zod';
 import { datastores } from '../../db/schema.ts';
 import {
+  datastoreVesselLabel,
   deployTargetOf,
   hasTargetConnection,
   hasVesselLocation,
-  targetRowLabel,
 } from '../../domain/target.ts';
 import { type Command, failed, ok } from '../types.ts';
+import { datastoreSurfaceTargetOf } from './vessel-surface.ts';
 
 export const destroyDatastoreInput = z
   .object({
@@ -63,7 +64,7 @@ export const destroyDatastore: Command<
 > = async (input, context) => {
   const datastore = await context.db.query.datastores.findFirst({
     where: (rows, { eq }) => eq(rows.id, input.datastoreId),
-    with: { target: { with: { vessel: true } } },
+    with: { vessel: true },
   });
   if (datastore === undefined) {
     return failed(
@@ -81,11 +82,21 @@ export const destroyDatastore: Command<
 
   const ref = datastore.provenance === 'external' ? null : datastore.ref;
   if (ref !== null) {
-    const target = datastore.target;
-    if (!hasTargetConnection(target) || !hasVesselLocation(target.vessel)) {
+    // The vessel's hosting surface, because a teardown is an adapter call and
+    // the adapter addresses a Target's connection. A vessel with no such
+    // surface has nothing to tear down *through* — the same refusal a missing
+    // connection earns, because both mean the far side is unreachable.
+    const target = await datastoreSurfaceTargetOf(context.db, datastore.vessel);
+    if (target === undefined) {
       return failed(
         'NOT_REMOVABLE',
-        `${targetRowLabel(target)} is not connected, so nothing can be torn down there`,
+        `${datastoreVesselLabel(datastore.vessel)} has no surface Spindrift can tear a Datastore down through`,
+      );
+    }
+    if (!hasTargetConnection(target) || !hasVesselLocation(datastore.vessel)) {
+      return failed(
+        'NOT_REMOVABLE',
+        `${datastoreVesselLabel(datastore.vessel)} is not connected, so nothing can be torn down there`,
       );
     }
     const adapter = context.adapters.datastore?.(target.adapter) ?? null;
@@ -96,7 +107,7 @@ export const destroyDatastore: Command<
       );
     }
     try {
-      await adapter.destroy(deployTargetOf(target, target.vessel), ref);
+      await adapter.destroy(deployTargetOf(target, datastore.vessel), ref);
     } catch (cause) {
       return failed(
         'NOT_REMOVABLE',

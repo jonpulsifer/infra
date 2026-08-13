@@ -571,7 +571,7 @@ export async function checkDeployable(
       name: datastores.name,
       engine: datastores.engine,
       connectionRef: datastores.connectionRef,
-      targetId: datastores.targetId,
+      vesselId: datastores.vesselId,
     })
     .from(datastores)
     .where(eq(datastores.appId, app.id));
@@ -580,18 +580,20 @@ export async function checkDeployable(
   // as a `secretKeyRef` at the operator's own Secret — a reference that cannot
   // leave the namespace it is rendered in, let alone the cluster. Released
   // anyway, the pod sits in `CreateContainerConfigError` and the Deploy reports
-  // a timeout rather than the cause.
+  // a timeout rather than the cause. The comparison is boundary to boundary:
+  // the Datastore lives in a vessel, and a release onto any surface of that
+  // same vessel can reach it.
   //
   // `checkDeployable` runs `reachExclusions` only, deliberately (above), so
   // `placement.ts`'s `DATASTORE_IS_CLUSTER_LOCAL` — the same fact, asked where a
   // Target is *offered* — does not cover this path. Asked again here for the
   // reason the reach gate is: a boundary enforced only where a placement is
   // offered is advisory.
-  const elsewhere = attached.filter((row) => row.targetId !== target.id);
+  const elsewhere = attached.filter((row) => row.vesselId !== target.vesselId);
   if (elsewhere.length > 0) {
     return refuse(
       'NOT_DEPLOYABLE',
-      `${targetRowLabel(target)} cannot reach ${names(elsewhere)} — a Datastore is delivered only to the Target it lives on`,
+      `${targetRowLabel(target)} cannot reach ${names(elsewhere)} — a Datastore is delivered only into the vessel it lives in`,
     );
   }
 

@@ -28,7 +28,11 @@
  */
 import type { TargetAdapter } from '../config/manifest.schema.ts';
 import { isLabel } from './naming.ts';
-import type { VesselLocation } from './vessel.ts';
+import {
+  DATASTORE_SURFACE_BY_VESSEL_KIND,
+  type VesselKind,
+  type VesselLocation,
+} from './vessel.ts';
 
 /**
  * How to reach one Target, in whatever terms its adapter needs.
@@ -641,4 +645,29 @@ export function targetRowLabel(
   return target == null
     ? 'none'
     : targetLabel({ vessel: target.vessel.name, adapter: target.adapter });
+}
+
+/**
+ * Where a Datastore lives, spelled for a human.
+ *
+ * A Datastore is anchored to its vessel, but the sentence a reader knows is
+ * still `<vessel>/<adapter>` — the boundary plus the one surface on it that
+ * hosts databases, resolved through the same two-row table every adapter
+ * lookup reads. For every installation that exists this is byte-identical to
+ * labelling the Target the row used to reference.
+ *
+ * The bare-name fallback should be unreachable: `createDatastore` refuses a
+ * vessel whose kind has no hosting surface before any row exists to label.
+ * If it is ever hit, the label quietly loses its `/adapter` suffix — a
+ * display degradation, deliberately not a throw, because a labelling helper
+ * that crashes a screen over one malformed row hides every other row with it.
+ */
+export function datastoreVesselLabel(vessel: {
+  readonly name: string;
+  readonly kind: VesselKind;
+}): string {
+  const adapter = DATASTORE_SURFACE_BY_VESSEL_KIND[vessel.kind];
+  return adapter === undefined
+    ? vessel.name
+    : targetLabel({ vessel: vessel.name, adapter });
 }

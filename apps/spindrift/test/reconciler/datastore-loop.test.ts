@@ -61,7 +61,7 @@ async function aProvisionedRow(
       name: 'orders',
       engine: 'postgres',
       provenance: 'managed',
-      targetId: target.id,
+      vesselId: target.vesselId,
       ref: 'postgres/fixture/orders',
       phase: 'PENDING',
       ...overrides,

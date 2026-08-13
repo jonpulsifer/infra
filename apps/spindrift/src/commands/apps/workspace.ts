@@ -9,6 +9,7 @@ import { artifactSummary } from '../../domain/artifact-name.ts';
 import { runsNothingOn } from '../../domain/capabilities.ts';
 import { elapsedSince } from '../../domain/elapsed.ts';
 import {
+  datastoreVesselLabel,
   deployTargetOf,
   hasTargetConnection,
   hasVesselLocation,
@@ -101,7 +102,7 @@ export const getAppWorkspace: Command<
       },
       datastores: {
         with: {
-          target: { with: { vessel: true } },
+          vessel: true,
         },
       },
     },
@@ -114,7 +115,7 @@ export const getAppWorkspace: Command<
   const unattachedDatastores = await context.db.query.datastores.findMany({
     where: (ds, { isNull }) => isNull(ds.appId),
     with: {
-      target: { with: { vessel: true } },
+      vessel: true,
     },
   });
 
@@ -181,7 +182,7 @@ export const getAppWorkspace: Command<
   });
 
   // Keyed on the id, never the name. The unique key on `datastores` is
-  // (target_id, name), so two Targets may each legitimately hold a `primary` —
+  // (vessel_id, name), so two Vessels may each legitimately hold a `primary` —
   // a name-keyed map dropped the second one silently, and the row that
   // vanished would be exactly the one an operator came here to find. The id is
   // what every act on this row resolves on, so it is carried regardless, and
@@ -201,7 +202,7 @@ export const getAppWorkspace: Command<
       // a question that has one.
       attachedTo:
         ds.appId === null ? null : (app.components[0]?.name ?? app.name),
-      target: targetRowLabel(ds.target),
+      target: datastoreVesselLabel(ds.vessel),
       // What it is doing, and why it is doing it. A managed store converges
       // like a Deploy does, so a row without these read as finished the
       // instant it was asked for and as broken while it was bootstrapping.
@@ -435,6 +436,7 @@ export const getAppWorkspace: Command<
     appId: app.id,
     componentId: selected?.id,
     targetId: workspaceTarget?.id,
+    vesselId: workspaceTarget?.vessel.id,
     latestDeployId: latestDeploy?.id,
     latestBuildId: selected?.builds[0]?.id,
     target: workspaceTarget?.adapter ?? 'none',

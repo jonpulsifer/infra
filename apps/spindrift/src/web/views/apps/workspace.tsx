@@ -245,14 +245,14 @@ export type SetConfig = (change: {
 >;
 
 /**
- * Creating one managed Datastore on the Target this workspace is placed on
- * (§11), as the screen above needs it answered.
+ * Creating one managed Datastore in the Vessel this workspace's placed Target
+ * sits on (§11), as the screen above needs it answered.
  *
- * No Target on the shape, for the reason {@link SetConfig} carries no pair: the
- * workspace has exactly one placement on screen and the screen above binds it
- * once. No variable name either, ever — the name a connection is read through
- * is fixed by engine (`DATABASE_URL`, `REDIS_URL`), so offering a field for it
- * would be offering a choice that core does not accept.
+ * No Vessel on the shape, for the reason {@link SetConfig} carries no pair: the
+ * workspace has exactly one placement on screen and the screen above binds its
+ * boundary once. No variable name either, ever — the name a connection is read
+ * through is fixed by engine (`DATABASE_URL`, `REDIS_URL`), so offering a field
+ * for it would be offering a choice that core does not accept.
  */
 export type CreateDatastore = (create: {
   readonly name: string;
