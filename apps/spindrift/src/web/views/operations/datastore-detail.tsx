@@ -22,12 +22,14 @@
 import { Database } from 'lucide-react';
 import type { DatastoreDetailView } from '../../../commands/views.ts';
 import { DefinitionGrid } from '../../components/object-explorer.tsx';
+import { useRead } from '../../poll.ts';
 import { Badge } from '../../ui/badge.tsx';
 import { Button } from '../../ui/button.tsx';
 import { Declaration } from '../../ui/declaration.tsx';
 import { EmptyState } from '../../ui/empty-state.tsx';
 import { Page, PageHeader } from '../../ui/page.tsx';
 import { Timestamp } from '../../ui/timestamp.tsx';
+import { DetailSkeleton, ScreenFailure, ScreenNotFound } from '../screen.tsx';
 import { deployTone } from './deploys.tsx';
 
 /**
@@ -155,4 +157,48 @@ export function DatastoreDetail({
       )}
     </Page>
   );
+}
+
+/**
+ * One Datastore, by id (§11).
+ *
+ * A `null` cadence rather than a poll: every act on a Datastore is on another
+ * screen — the ledger's, or the workspace of the App it attaches to — so
+ * nothing this one does can invalidate what it is showing. The far-side object
+ * is read once with the row, and the retry is for the load that failed.
+ */
+export function DatastoreScreen({
+  datastoreId,
+  onNavigate,
+}: {
+  datastoreId: string;
+  onNavigate: (path: string) => void;
+}) {
+  const read = useRead([['getDatastore', { datastoreId }]] as const, null, [
+    datastoreId,
+  ]);
+
+  if (read.type === 'loading') return <DetailSkeleton />;
+  if (read.type === 'error') {
+    // A malformed id fails input validation rather than the lookup, and "there
+    // is no Datastore with that id" is what both mean to a reader who followed
+    // a stale link.
+    return read.failure.code === 'NOT_FOUND' ||
+      read.failure.code === 'INVALID_INPUT' ? (
+      <ScreenNotFound
+        title="Datastore not found"
+        message={read.failure.message}
+        onNavigate={onNavigate}
+      />
+    ) : (
+      <ScreenFailure
+        title="Failed to load Datastore"
+        message={read.failure.message}
+        width="reading"
+        onRetry={read.reload}
+      />
+    );
+  }
+  const [{ datastore }] = read.value;
+  return <DatastoreDetail datastore={datastore} onNavigate={onNavigate} />;
 }

@@ -16,7 +16,10 @@
 import { describe, expect, test } from 'bun:test';
 import { createComponentInput } from '../../src/commands/components/create.ts';
 import type { WorkspaceView } from '../../src/commands/views.ts';
-import { componentCreation, targetForFirstDeploy } from '../../src/web/app.tsx';
+import {
+  componentCreation,
+  targetForFirstDeploy,
+} from '../../src/web/views/apps/workspace.tsx';
 import { WORKSPACE_SCENARIOS } from '../fixtures/scenarios.ts';
 
 const APP_ID = '3f0f2f2a-6d2a-4a1a-9f3e-2a5b1c0d4e6f';

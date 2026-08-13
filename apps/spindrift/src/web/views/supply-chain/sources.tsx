@@ -32,6 +32,7 @@ import {
   DefinitionGrid,
   LedgerExplorer,
 } from '../../components/object-explorer.tsx';
+import { useRead } from '../../poll.ts';
 import { Badge } from '../../ui/badge.tsx';
 import { Button } from '../../ui/button.tsx';
 import { Eyebrow } from '../../ui/card.tsx';
@@ -40,6 +41,7 @@ import type { Column } from '../../ui/data-table.tsx';
 import { EmptyState } from '../../ui/empty-state.tsx';
 import { Page, PageHeader } from '../../ui/page.tsx';
 import { Timestamp } from '../../ui/timestamp.tsx';
+import { LedgerSkeleton, ScreenFailure } from '../screen.tsx';
 import { SupplyChainTabs } from './tabs.tsx';
 
 export type SourceListItem = OutputOf<'listSources'>['sources'][number];
@@ -262,5 +264,41 @@ export function SourceLedger({
         </p>
       ) : null}
     </Page>
+  );
+}
+
+/**
+ * The Sources screen — the ledger, and the read that fills it.
+ *
+ * Read once rather than on a cadence: a Source is written by a build that
+ * finished, and nothing about an existing row changes afterwards, so a tick
+ * would re-ask the same question of the same immutable rows. The reader who
+ * wants a newer list has the retry the failure state offers and the navigation
+ * that remounts this.
+ */
+export function SourcesScreen({
+  onNavigate,
+}: {
+  onNavigate: (path: string) => void;
+}) {
+  const read = useRead([['listSources', {}]], null);
+
+  if (read.type === 'loading') return <LedgerSkeleton />;
+  if (read.type === 'error') {
+    return (
+      <ScreenFailure
+        title="Failed to load Sources"
+        message={read.failure.message}
+        onRetry={read.reload}
+      />
+    );
+  }
+  const [listed] = read.value;
+  return (
+    <SourceLedger
+      sources={listed.sources}
+      limit={listed.limit}
+      onNavigate={onNavigate}
+    />
   );
 }

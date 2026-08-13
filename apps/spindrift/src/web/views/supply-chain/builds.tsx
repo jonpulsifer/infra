@@ -31,6 +31,7 @@ import {
   type ExplorerTone,
   LedgerExplorer,
 } from '../../components/object-explorer.tsx';
+import { useRead } from '../../poll.ts';
 import { Badge } from '../../ui/badge.tsx';
 import { Button } from '../../ui/button.tsx';
 import { Eyebrow } from '../../ui/card.tsx';
@@ -40,6 +41,7 @@ import { EmptyState } from '../../ui/empty-state.tsx';
 import { Page, PageHeader } from '../../ui/page.tsx';
 import { SkeletonRows } from '../../ui/skeleton.tsx';
 import { Timestamp } from '../../ui/timestamp.tsx';
+import { LedgerSkeleton, mergeLedger, ScreenFailure } from '../screen.tsx';
 import { SupplyChainFlow, SupplyChainTabs } from './tabs.tsx';
 
 /**
@@ -330,5 +332,87 @@ function BuildEvidence({ buildId }: { readonly buildId: number }) {
         </div>
       )}
     </section>
+  );
+}
+
+/**
+ * The Builds screen — the ledger, the cadence it re-reads on, and the page the
+ * reader can add below it.
+ *
+ * The two are why this screen merges rather than replaces: the tick asks for
+ * the newest page and is authoritative about those rows, and everything the
+ * reader paged in below it is older than anything the tick can answer with. So
+ * the fresh page wins per id and `nextBefore` stays where paging left it —
+ * taking the tick's cursor would put the reader back at the top of a list they
+ * had scrolled through.
+ */
+export function BuildsScreen({
+  onNavigate,
+}: {
+  onNavigate: (path: string) => void;
+}) {
+  const read = useRead(
+    [['listBuilds', {}]],
+    15_000,
+    [],
+    ([fresh], [current]) => [
+      {
+        ...fresh,
+        builds: mergeLedger(fresh.builds, current.builds),
+        nextBefore: current.nextBefore,
+      },
+    ],
+  );
+  const [loadingOlder, setLoadingOlder] = useState(false);
+  const [olderError, setOlderError] = useState<string | null>(null);
+
+  const loadOlder = async () => {
+    if (read.type !== 'success') return;
+    const [listed] = read.value;
+    if (listed.nextBefore === null) return;
+    setLoadingOlder(true);
+    setOlderError(null);
+    try {
+      const result = await command('listBuilds', { before: listed.nextBefore });
+      if (!result.ok) {
+        setOlderError(result.failure.message);
+        return;
+      }
+      read.update(([current]) => [
+        {
+          ...current,
+          builds: mergeLedger(current.builds, result.value.builds),
+          nextBefore: result.value.nextBefore,
+        },
+      ]);
+    } catch (cause) {
+      setOlderError(
+        cause instanceof Error ? cause.message : 'Loading older Builds failed',
+      );
+    } finally {
+      setLoadingOlder(false);
+    }
+  };
+
+  if (read.type === 'loading') return <LedgerSkeleton />;
+  if (read.type === 'error') {
+    return (
+      <ScreenFailure
+        title="Failed to load Builds"
+        message={read.failure.message}
+        onRetry={read.reload}
+      />
+    );
+  }
+  const [listed] = read.value;
+  return (
+    <BuildLedger
+      builds={listed.builds}
+      onNavigate={onNavigate}
+      hasMore={listed.nextBefore !== null}
+      loadingMore={loadingOlder}
+      loadError={olderError}
+      onLoadMore={() => void loadOlder()}
+    />
   );
 }

@@ -24,9 +24,12 @@
  */
 import { ExternalLink, Globe, Plus, Server, Zap } from 'lucide-react';
 import type { AppListItem, DeployPhase } from '../../../commands/views.ts';
+import { isInFlight } from '../../../commands/views.ts';
 import {
   type AppDeletionControls,
   DeleteAppButton,
+  DeleteAppDialog,
+  useAppDeletion,
 } from '../../components/delete-app.tsx';
 import {
   DefinitionGrid,
@@ -34,12 +37,15 @@ import {
   ExplorerPageHeader,
   ObjectExplorer,
 } from '../../components/object-explorer.tsx';
+import { useRead } from '../../poll.ts';
 import { Badge } from '../../ui/badge.tsx';
 import { Button } from '../../ui/button.tsx';
 import { Eyebrow } from '../../ui/card.tsx';
 import { Ref } from '../../ui/copy.tsx';
 import { Page } from '../../ui/page.tsx';
 import { Timestamp } from '../../ui/timestamp.tsx';
+import { notify } from '../../ui/toast.tsx';
+import { LedgerSkeleton, ScreenFailure } from '../screen.tsx';
 
 function kindIcon(kind: string) {
   switch (kind) {
@@ -263,5 +269,61 @@ export function AppList({
         }}
       />
     </Page>
+  );
+}
+
+/**
+ * The Apps screen — the list, the two cadences it re-reads on, and the delete
+ * it answers locally.
+ *
+ * **Two cadences, the same argument the workspace makes.** This screen read
+ * once at mount and never again, so a row whose App was mid-release sat on the
+ * phase it happened to have at that instant — under a dot the explorer pulses
+ * forever, which reads as "still moving" about a release that finished minutes
+ * ago. This is that fix for the screen an operator watches a fleet from.
+ *
+ * **The row goes when the App does**, without a re-read: that would be a second
+ * round trip to learn something this screen was just told. By id, because
+ * `apps` has no unique constraint on `name` — filtering on the name drops every
+ * row sharing it, so deleting one of two same-named Apps would hide the other
+ * until a reload, and reaching the other one is the whole point of giving this
+ * list an identity.
+ */
+export function AppsScreen({
+  onNavigate,
+}: {
+  onNavigate: (path: string) => void;
+}) {
+  const read = useRead([['listApps', {}]], (listed) =>
+    listed?.[0].apps.some((app) => isInFlight(app.phase)) ? 3_000 : 20_000,
+  );
+
+  const deletion = useAppDeletion(({ id, name }) => {
+    read.update(([listed]) => [
+      { ...listed, apps: listed.apps.filter((app) => app.id !== id) },
+    ]);
+    // The dialog that confirmed this closes with the press, so without this the
+    // only evidence the act happened is a row that is no longer there — which
+    // is indistinguishable from having deleted the wrong one.
+    notify({ tone: 'success', title: `Deleted ${name}` });
+  });
+
+  if (read.type === 'loading') return <LedgerSkeleton width="reading" />;
+  if (read.type === 'error') {
+    return (
+      <ScreenFailure
+        title="Failed to load Apps"
+        message={read.failure.message}
+        width="reading"
+        onRetry={read.reload}
+      />
+    );
+  }
+  const [listed] = read.value;
+  return (
+    <>
+      <AppList apps={listed.apps} onNavigate={onNavigate} deletion={deletion} />
+      <DeleteAppDialog deletion={deletion} />
+    </>
   );
 }

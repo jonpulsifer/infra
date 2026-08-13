@@ -30,7 +30,7 @@
  * answer to "is my App up" is not a tab you can be on the wrong one of.
  */
 import { ChevronRight, ExternalLink } from 'lucide-react';
-import { type ReactNode, useState } from 'react';
+import { type ReactNode, useEffect, useState } from 'react';
 import type {
   ActivityEntry,
   BuildRouteOptionView,
@@ -41,19 +41,25 @@ import type {
   TargetListItem,
   WorkspaceView,
 } from '../../../commands/views.ts';
+import { isInFlight } from '../../../commands/views.ts';
 import type {
   Auth,
   ComponentKind,
   Reach,
 } from '../../../domain/desired-state.ts';
 import { BUILD_ADAPTER } from '../../client/build-adapters.ts';
+import { command, type InputOf, type TransportFailure } from '../../client.ts';
 import {
   type AppDeletionControls,
   DeleteAppButton,
+  DeleteAppDialog,
+  useAppDeletion,
 } from '../../components/delete-app.tsx';
 import { DiagnosisPanel, DriftPanel } from '../../components/diagnosis.tsx';
 import { EmptyState, LogPane } from '../../components/log-pane.tsx';
 import { PhasePill } from '../../components/status.tsx';
+import { useRead } from '../../poll.ts';
+import { subscribeRuntime } from '../../stream-client.ts';
 import { Badge } from '../../ui/badge.tsx';
 import { Button } from '../../ui/button.tsx';
 import { Card, CardContent, CardHeader, Eyebrow } from '../../ui/card.tsx';
@@ -63,10 +69,14 @@ import { Logo } from '../../ui/logo.tsx';
 import { Page, PageHeader } from '../../ui/page.tsx';
 import { Tabs } from '../../ui/tabs.tsx';
 import { Timestamp } from '../../ui/timestamp.tsx';
+import { notify } from '../../ui/toast.tsx';
 import { cn, normaliseUrl } from '../../ui/utils.ts';
+import { UPLOAD_PATH } from '../../upload-path.ts';
+import { DetailSkeleton, ScreenFailure, ScreenNotFound } from '../screen.tsx';
 import {
   ComponentUploadButton,
   type StageArchive,
+  type StagedUpload,
   type SubmitUpload,
 } from './component-upload.tsx';
 import {
@@ -2789,3 +2799,873 @@ const EXECUTION_TONE = {
   failed: 'destructive',
   running: 'warning',
 } as const;
+
+/**
+ * A refreshed workspace, keeping what the socket knows and the read does not.
+ *
+ * Two things, for one reason: `getAppWorkspace` never asks the adapter. It
+ * answers `stream` for any placed Component and hands back an empty first page,
+ * because tailing at read time is the socket's whole job — so on both counts
+ * the read is the weaker source about the same pair, and taking `runtime`
+ * wholesale lets it win every tick.
+ *
+ * The lines are the obvious half: every line after the first arrived over the
+ * socket and lives in this screen's state, so a refresh that took `runtime`
+ * whole would wipe the log every few seconds.
+ *
+ * A `none` is the other. It is the answer for a Component that is placed and
+ * not running — no pods, a Target that runs nothing — and it can only come from
+ * the socket, so a refresh used to put `stream` back and the effect resubscribe
+ * to be told `none` again. The card swapped its title and its body, from the
+ * reason to an empty log and back, for as long as the screen was open.
+ *
+ * Both are kept only where the two reads are about the same Component on the
+ * same Target. The selection can move while a refresh is in flight, and a
+ * Component's output rendered under another Component's name is a worse answer
+ * than the empty card the next socket page fills. A `none` is held to more than
+ * that — the release has to be the same one, in the same phase — because it is
+ * a claim about what is running, and a Deploy is what changes that.
+ *
+ * ponytail: a runtime that recovers without moving either — pods coming back on
+ * a release that stayed LIVE — keeps saying `none` until the selection changes
+ * or the page is re-opened. Closing that means the pane subscribing on the
+ * Component and Target it is about rather than on the read's own answer to the
+ * question the socket exists to answer, and the server holding the socket open
+ * through a `none` instead of closing it.
+ *
+ * Exported for `test/web/workspace-refresh.test.ts`: this is where the
+ * selection and the socket meet, and reaching it through the mounted screen
+ * means pressing a row, which the DOM shim does not simulate.
+ */
+export function refreshedWorkspace(
+  current: WorkspaceView,
+  fresh: WorkspaceView,
+): WorkspaceView {
+  const sameSubject =
+    current.componentId === fresh.componentId &&
+    current.targetId === fresh.targetId;
+  if (
+    sameSubject &&
+    current.runtime.kind === 'none' &&
+    fresh.runtime.kind === 'stream' &&
+    current.latestDeployId === fresh.latestDeployId &&
+    current.phase === fresh.phase
+  ) {
+    return { ...fresh, runtime: current.runtime };
+  }
+  const accumulated = current.runtime;
+  if (
+    accumulated.kind !== 'stream' ||
+    fresh.runtime.kind !== 'stream' ||
+    accumulated.componentId !== fresh.runtime.componentId ||
+    accumulated.targetId !== fresh.runtime.targetId
+  ) {
+    return fresh;
+  }
+  return {
+    ...fresh,
+    runtime: { ...fresh.runtime, lines: accumulated.lines },
+  };
+}
+
+/**
+ * The Target a press on Deploy has to name, or nothing where it must not.
+ *
+ * Placement is a fact `placeComponent` or a first deploy writes, so a Component
+ * that has done neither has none to read back and `deployApp` refuses rather
+ * than guessing (`src/commands/apps/deploy.ts:390-395`). That never mattered
+ * while every Component was declared by the create flow, which places as it
+ * creates — and it matters for every Component the Components card adds, because
+ * `createComponent` deliberately writes no placement.
+ *
+ * `targetId` is the *selected* Component's placement of record
+ * (`src/commands/apps/workspace.ts:129`), so its absence is the whole test, and
+ * a sibling's row is where the answer comes from: an App's Components are placed
+ * one Target apiece and a `job` added beside a `service` joins the Target that
+ * service is on. What travels is the `<vessel>/<adapter>` spelling the row
+ * already states, which `deployApp` resolves (`deploy.ts:352-362`).
+ *
+ * **Never for a Component that has a placement.** A Target named against one is
+ * a move, and moves go through `placeComponent` — `deployApp` refuses the
+ * disagreement (`deploy.ts:379-386`) rather than landing somewhere new, and this
+ * side does not put it in the position of having to.
+ *
+ * Exported for `test/web/component-create.test.ts`, for the reason
+ * {@link refreshedWorkspace} is: reaching it through the mounted screen means
+ * pressing Deploy, which the DOM shim does not simulate.
+ */
+export function targetForFirstDeploy(view: WorkspaceView): string | undefined {
+  if (view.targetId !== undefined) return undefined;
+  return view.components.find((component) => component.target !== undefined)
+    ?.target;
+}
+
+/**
+ * What the Components card's form posts, composed per kind.
+ *
+ * `createComponentInput` is a `.strict()` discriminated union
+ * (`src/commands/components/create.ts:68-98`), so this is a branch rather than
+ * one object with optional fields: `schedule` reaching a service is a
+ * validation failure, not a field the handler ignores.
+ *
+ * `reach`, `auth` and `expose` are the schema's own defaults, restated here
+ * because `InputOf` reads a command's schema *output* — the same reason
+ * `handleCreateDatastore` restates `storageGiB` below, and the same care: no
+ * form offers any of the three, so this is the one place they are named, and
+ * naming them here is what keeps the form from having a second opinion.
+ *
+ * Exported for `test/web/component-create.test.ts`, for the reason
+ * {@link refreshedWorkspace} is: what is under test is which fields a kind
+ * sends, and reaching it through the mounted screen means pressing a tile,
+ * which the DOM shim does not simulate.
+ */
+export function componentCreation(
+  appId: string,
+  create: { name: string; kind: ComponentKind; schedule?: string },
+): InputOf<'createComponent'> {
+  const common = {
+    appId,
+    name: create.name,
+    reach: 'private',
+    auth: 'proxy',
+  } as const;
+  switch (create.kind) {
+    case 'service':
+      return { ...common, kind: 'service', expose: true };
+    case 'website':
+      return { ...common, kind: 'website' };
+    case 'job':
+      return {
+        ...common,
+        kind: 'job',
+        // Absent rather than empty for an unscheduled job — §7 renders that as
+        // a suspended CronJob, and `''` is not a five-field cron expression.
+        ...(create.schedule === undefined ? {} : { schedule: create.schedule }),
+      };
+  }
+}
+
+/**
+ * The keys a refused move demands, read off the refusal rather than out of it.
+ *
+ * `placeComponent` names them twice: in §10's sentence, which is written for a
+ * person, and as `issues` at `supply.<KEY>`, which is written for this. Only
+ * the second is safe to build a form from — the first is prose, and a form
+ * assembled by splitting prose breaks the day somebody improves the wording.
+ *
+ * Every other refusal answers `[]`, which is what makes the empty case the
+ * test: a move refused for a reason that is not a demand is a sentence to
+ * read, not a form to fill.
+ *
+ * Exported for `test/web/component-move.test.ts`, for the reason
+ * {@link refreshedWorkspace} is: reaching it through the mounted screen means
+ * pressing Move, which the DOM shim does not simulate.
+ */
+export function demandedKeys(failure: TransportFailure): readonly string[] {
+  return (failure.issues ?? [])
+    .filter((issue) => issue.path.startsWith('supply.'))
+    .map((issue) => issue.path.slice('supply.'.length));
+}
+/**
+ * The workspace screen (§18) — one App, the Component of it being looked at,
+ * and everything an operator can do to either.
+ *
+ * `appName` empty is its own answer rather than a read: `/apps/` names no App,
+ * and asking the server about the empty name would be a round trip to be told
+ * what the path already says. It is split off around the read so the read's
+ * hooks are unconditional.
+ */
+export function WorkspaceScreen({
+  appName,
+  onNavigate,
+}: {
+  appName: string;
+  onNavigate: (path: string) => void;
+}) {
+  if (!appName) {
+    return (
+      <ScreenNotFound
+        title={'No App named ""'}
+        message="No App name provided"
+        onNavigate={onNavigate}
+      />
+    );
+  }
+  return <AppWorkspace appName={appName} onNavigate={onNavigate} />;
+}
+
+function AppWorkspace({
+  appName,
+  onNavigate,
+}: {
+  appName: string;
+  onNavigate: (path: string) => void;
+}) {
+  const [deploying, setDeploying] = useState(false);
+  /**
+   * Which Component the screen is showing, or `null` for the App's first.
+   *
+   * Held here rather than in the URL: picking a Component is inspection within
+   * one screen, the same call the object explorers make. It is `null` rather
+   * than the first Component's name because the server answers that question —
+   * a client that named a default would be a second answer to it, wrong for
+   * every App whose Components are not in the order this guessed.
+   */
+  const [component, setComponent] = useState<string | null>(null);
+  /**
+   * Which run's output is open, and the lines read so far (§17).
+   *
+   * Held here rather than in the card because the socket is: a job's tail is
+   * one run's, so switching runs is a different subscription and the lines
+   * start again — which is why they are cleared when the name changes rather
+   * than appended to whatever the last run said.
+   */
+  const [following, setFollowing] = useState<string | null>(null);
+  const [runLines, setRunLines] = useState<readonly LogLine[]>([]);
+
+  // There is no workspace left to stand on once the App is gone.
+  const deletion = useAppDeletion(() => onNavigate('/apps'));
+
+  /**
+   * The Targets a move can name (§3).
+   *
+   * Read once beside the workspace rather than folded into it: `getAppWorkspace`
+   * answers about one App, and the installation's Targets are not one App's
+   * fact — the Targets screen reads the same list. A failure is left where it
+   * lands and never rendered, and the consequence is stated where it shows: the
+   * Move control is not offered over a list this screen has not got, rather
+   * than offered over an empty one.
+   */
+  const targetList = useRead([['listTargets', {}]], null);
+  const targets =
+    targetList.type === 'success' ? targetList.value[0].targets : [];
+
+  /**
+   * Keep the workspace current while something is moving.
+   *
+   * The attempt screen has the event stream; this screen has no such edge — it
+   * read once at mount and then sat on whatever the phase was at that instant,
+   * so a deploy started from here converged entirely off-screen. §18 puts the
+   * running App first, and an App-first screen that cannot notice its App
+   * coming up is the one that most needs to.
+   *
+   * Two cadences for the same reason the reconciler has two: while a release is
+   * in flight the reader is watching, and once it settles the read is only
+   * catching acts from elsewhere.
+   *
+   * The selection is named on every read, or it would put the App's first
+   * Component back on screen every few seconds — and it is in `deps`, so a
+   * response still in flight when the selection moves is dropped rather than
+   * put on screen under a Component this screen has left.
+   */
+  const read = useRead(
+    [
+      [
+        'getAppWorkspace',
+        { name: appName, ...(component === null ? {} : { component }) },
+      ],
+    ],
+    (current) =>
+      current !== null && isInFlight(current[0].workspace.phase)
+        ? 2_000
+        : 20_000,
+    [appName, component],
+    ([fresh], [current]) => [
+      {
+        ...fresh,
+        workspace: refreshedWorkspace(current.workspace, fresh.workspace),
+      },
+    ],
+  );
+
+  const view = read.type === 'success' ? read.value[0].workspace : null;
+  const runtime = view?.runtime.kind === 'stream' ? view.runtime : null;
+  useEffect(() => {
+    if (runtime === null) return;
+    return subscribeRuntime(
+      {
+        componentId: runtime.componentId,
+        targetId: runtime.targetId,
+      },
+      (page) => {
+        read.update((current) => {
+          const [{ workspace }] = current;
+          if (workspace.runtime.kind !== 'stream') return current;
+          if (page.kind === 'error') return current;
+          if (page.kind === 'none') {
+            return [
+              {
+                ...current[0],
+                workspace: {
+                  ...workspace,
+                  runtime: { kind: 'none', because: page.because },
+                },
+              },
+            ];
+          }
+          if (page.entries.length === 0) return current;
+          return [
+            {
+              ...current[0],
+              workspace: {
+                ...workspace,
+                runtime: {
+                  ...workspace.runtime,
+                  lines: [
+                    ...workspace.runtime.lines,
+                    ...page.entries.map((entry) => ({
+                      text: `${entry.replica}  ${entry.line}`,
+                    })),
+                  ],
+                },
+              },
+            },
+          ];
+        });
+      },
+    );
+  }, [runtime?.componentId, runtime?.targetId]);
+
+  // A job's runs are read the same way a service's output is — one socket, one
+  // cursor — with the run named. §17's two surfaces stay distinct in what they
+  // are subscribed to, not in how they are transported.
+  const runs = view?.runtime.kind === 'executions' ? view.runtime : null;
+  useEffect(() => {
+    setRunLines([]);
+    if (runs === null || following === null) return;
+    if (runs.componentId === undefined || runs.targetId === undefined) return;
+    return subscribeRuntime(
+      {
+        componentId: runs.componentId,
+        targetId: runs.targetId,
+        execution: following,
+      },
+      (page) => {
+        // The two non-stream frames are exactly the cases criterion 4 fails in
+        // — `pods/log` not granted, the pods garbage collected, Cloud Logging
+        // refusing — and dropping them made those look identical to a run that
+        // printed nothing. They are the only thing this pane has to say, so
+        // they replace it rather than being appended to it.
+        if (page.kind === 'none') {
+          setRunLines([{ text: page.because }]);
+          return;
+        }
+        if (page.kind === 'error') {
+          setRunLines([{ text: page.message }]);
+          return;
+        }
+        if (page.entries.length === 0) return;
+        setRunLines((lines) => [
+          ...lines,
+          ...page.entries.map((entry) => ({
+            text: `${entry.replica}  ${entry.line}`,
+          })),
+        ]);
+      },
+    );
+  }, [runs?.componentId, runs?.targetId, following]);
+
+  if (read.type === 'loading') return <DetailSkeleton />;
+
+  if (read.type === 'error') {
+    return read.failure.code === 'NOT_FOUND' ? (
+      <ScreenNotFound
+        title={`No App named "${appName}"`}
+        message={read.failure.message}
+        onNavigate={onNavigate}
+      />
+    ) : (
+      <ScreenFailure
+        title="Failed to load workspace"
+        message={read.failure.message}
+        width="reading"
+        onRetry={read.reload}
+      />
+    );
+  }
+
+  const workspace = read.value[0].workspace;
+
+  // `rebuild` is passed explicitly rather than defaulted from a bare click
+  // handler: a click hands its event to the first parameter, and an event is
+  // truthy, so `onClick={handleDeploy}` would silently rebuild every press.
+  const handleDeploy = async (rebuild: boolean) => {
+    const firstPlacement = targetForFirstDeploy(workspace);
+    setDeploying(true);
+    try {
+      // By id where the workspace knows one: `apps` does not constrain `name`,
+      // and the command refuses a name two Apps answer to rather than guessing.
+      const result = await command('deployApp', {
+        name: workspace.appId ?? appName,
+        rebuild,
+        // A deploy is a press on one Component, and the header these buttons
+        // sit in reads the selected Component's kind, phase and placement — so
+        // it is that Component's release they start, not the App's first one's.
+        ...(workspace.componentId === undefined
+          ? {}
+          : { component: workspace.componentId }),
+        // The Target a Component deploying for the first time is placed on, and
+        // nothing at all for one that is already placed. See
+        // {@link targetForFirstDeploy}.
+        ...(firstPlacement === undefined ? {} : { target: firstPlacement }),
+      });
+      if (result.ok) {
+        // Both arms navigate. §4 makes "a Build started" a different act from
+        // "an intent was written", not a lesser one — it has a durable id and a
+        // live event stream — so the press lands on the attempt it started
+        // rather than leaving the operator on the screen they pressed from,
+        // wondering whether anything happened.
+        onNavigate(
+          result.value.deployId === null
+            ? `/builds/${result.value.buildId}`
+            : `/deploys/${result.value.deployId}`,
+        );
+      } else {
+        // The sentence the command refused with, unedited — a disconnected
+        // Target, a signature that did not verify. Nothing is retried behind it.
+        notify({
+          tone: 'destructive',
+          title: 'Deploy refused',
+          detail: result.failure.message,
+        });
+      }
+    } catch (e: unknown) {
+      notify({
+        tone: 'destructive',
+        title: 'Deploy failed',
+        detail: e instanceof Error ? e.message : 'Server failure',
+      });
+    } finally {
+      setDeploying(false);
+    }
+  };
+
+  // §9: the row is written and the release is not, so the workspace is re-read
+  // rather than patched in place — `Deploy` next to a Component whose reach
+  // just changed has to be reading the same row the next intent will pin.
+  const handleSetReach: SetReach = async (change) => {
+    try {
+      const result = await command('setComponentReach', change);
+      if (!result.ok) return { ok: false, message: result.failure.message };
+      read.reload();
+      return { ok: true, pendingRelease: result.value.pendingRelease };
+    } catch (cause: unknown) {
+      return {
+        ok: false,
+        message: cause instanceof Error ? cause.message : 'Saving reach failed',
+      };
+    }
+  };
+
+  // Deploy on push (§15). No re-read of the workspace: the toggle already
+  // holds the answer it just wrote, and the reload `handleSetReach` needs is
+  // because reach changes a *derived* row. This changes exactly the field the
+  // control is showing.
+  const handleSetAutoDeploy: SetAutoDeploy = async (autoDeploy) => {
+    const appId = workspace.appId;
+    if (appId === undefined) {
+      return { ok: false, message: 'This App has no id to set the switch on' };
+    }
+    try {
+      const result = await command('setAppAutoDeploy', { appId, autoDeploy });
+      return result.ok
+        ? { ok: true }
+        : { ok: false, message: result.failure.message };
+    } catch (cause: unknown) {
+      return {
+        ok: false,
+        message:
+          cause instanceof Error
+            ? cause.message
+            : 'Saving deploy-on-push failed',
+      };
+    }
+  };
+
+  // Which route this App builds on (§4, §16). No re-read, for the same reason
+  // `handleSetAutoDeploy` needs none: the picker already holds the answer it
+  // just wrote, and this changes exactly the field it is showing.
+  const handleSetAppBuildRoute: SetBuildRoute = async (route) => {
+    const appId = workspace.appId;
+    if (appId === undefined) {
+      return { ok: false, message: 'This App has no id to set a builder on' };
+    }
+    try {
+      const result = await command('setAppBuildRoute', { appId, route });
+      return result.ok
+        ? { ok: true }
+        : { ok: false, message: result.failure.message };
+    } catch (cause: unknown) {
+      return {
+        ok: false,
+        message:
+          cause instanceof Error ? cause.message : 'Saving the builder failed',
+      };
+    }
+  };
+
+  // Bytes to the depot, then a Build row that spends the digest.
+  //
+  // Two calls rather than one because they are two different things: staging is
+  // the only thing that sees the bytes and so the only thing that can digest
+  // them (§16), and `uploadArchive` "never reads the bundle" for exactly that
+  // reason. A staged bundle nobody wrote a Build for is a harmless orphan the
+  // depot sweeps; a Build row naming bytes that never landed would not be.
+  const handleStageArchive: StageArchive = async (file) => {
+    const response = await fetch(UPLOAD_PATH, {
+      method: 'POST',
+      headers: { 'x-filename': file.name },
+      body: file,
+    });
+    const body = (await response.json()) as
+      | { ok: true; value: StagedUpload }
+      | { ok: false; failure: { message: string } };
+    // The boundary's own sentence — it names what arrived, which is the whole
+    // reason the refusal happens there rather than in a runner log.
+    if (!body.ok) throw new Error(body.failure.message);
+    return body.value;
+  };
+
+  const handleUploadArchive: SubmitUpload = async (request) => {
+    try {
+      // §5's scope. The control does not offer it: every archive the browser
+      // sends is the whole bundle, and a subpath is a repo-shaped question.
+      const result = await command('uploadArchive', {
+        ...request,
+        subpath: '.',
+      });
+      if (!result.ok) return { ok: false, message: result.failure.message };
+      // Land on the attempt this started, the way `handleDeploy` does — a press
+      // that produced a durable id should not leave the operator wondering.
+      onNavigate(`/builds/${result.value.buildId}`);
+      return { ok: true };
+    } catch (cause: unknown) {
+      return {
+        ok: false,
+        message: cause instanceof Error ? cause.message : 'The upload failed',
+      };
+    }
+  };
+
+  // The pair this workspace is showing (§10) — bound here, once, so `SetConfig`
+  // itself does not have to carry it on every call. Re-read on success for the
+  // same reason `handleSetReach` is: `configKeys` is a row this act just
+  // changed, and a key that was just deleted has to actually leave the list
+  // rather than being patched out by a guess about what the write did.
+  const handleSetConfig: SetConfig = async (change) => {
+    const { componentId, targetId } = workspace;
+    if (componentId === undefined || targetId === undefined) {
+      return {
+        ok: false,
+        message: 'This App has no Component placed on a Target yet',
+      };
+    }
+    try {
+      const result = await command('setConfig', {
+        componentId,
+        targetId,
+        entries: [...change.entries],
+        removals: [...change.removals],
+      });
+      if (!result.ok) return { ok: false, message: result.failure.message };
+      read.reload();
+      return {
+        ok: true,
+        written: result.value.written,
+        removed: result.value.removed,
+        notDeployed: result.value.notDeployed,
+      };
+    } catch (cause: unknown) {
+      return {
+        ok: false,
+        message:
+          cause instanceof Error ? cause.message : 'Saving config failed',
+      };
+    }
+  };
+
+  /**
+   * Show another Component of this App.
+   *
+   * The open run tail is dropped with the same press: an execution name belongs
+   * to the Component that produced it, so carrying one across the selection
+   * would subscribe to a run the newly selected Component has never had.
+   */
+  const handleSelectComponent = (name: string) => {
+    setFollowing(null);
+    setComponent(name);
+  };
+
+  /**
+   * Add a Component to this App (§2), then re-read: the card that opened this
+   * form is the list the new row belongs in, and a Component that does not
+   * appear reads as a press that did nothing.
+   *
+   * Nothing else is written. `createComponent` leaves `placedTargetId` NULL and
+   * the first Deploy fills it (`src/commands/apps/deploy.ts:529-534`), which is
+   * why this handler does not follow up with a placement of its own — two acts
+   * would be two answers to which Target this Component lives on.
+   */
+  const handleCreateComponent: CreateComponent = async (create) => {
+    const appId = workspace.appId;
+    if (appId === undefined) {
+      return { ok: false, message: 'This App has no id to add a Component to' };
+    }
+    try {
+      const result = await command(
+        'createComponent',
+        componentCreation(appId, create),
+      );
+      if (!result.ok) return { ok: false, message: result.failure.message };
+      read.reload();
+      return { ok: true };
+    } catch (cause: unknown) {
+      return {
+        ok: false,
+        message:
+          cause instanceof Error
+            ? cause.message
+            : 'Creating the Component failed',
+      };
+    }
+  };
+
+  /**
+   * Move a Component to another Target (§3, §10), then re-read: the placement
+   * this screen states, the pairs still serving and the config keys are all
+   * rows this act just changed.
+   *
+   * **One post, with whatever the form supplied on it.** The retry after a
+   * demand is this same call again, not a `setConfig` pass followed by a second
+   * attempt — `placeComponent` takes `supply` precisely so the move and the
+   * values it demands commit together, and a two-step version would write those
+   * values at a placement that does not exist yet.
+   *
+   * No deploy follows. The artifact travels on the next press of Deploy and on
+   * nothing else: §3 makes a cross-shape move a rebuild, and deciding that here
+   * would be the substitution `deployApp` refuses to make on the operator's
+   * behalf.
+   */
+  const handleMoveComponent: MoveComponent = async (move) => {
+    try {
+      const result = await command('placeComponent', {
+        componentId: move.componentId,
+        targetId: move.targetId,
+        supply: move.supply.map((entry) => ({
+          key: entry.key,
+          value: entry.value,
+        })),
+      });
+      if (!result.ok) {
+        return {
+          ok: false,
+          message: result.failure.message,
+          demanded: demandedKeys(result.failure),
+        };
+      }
+      read.reload();
+      return { ok: true, carried: result.value.carried };
+    } catch (cause: unknown) {
+      return {
+        ok: false,
+        message: cause instanceof Error ? cause.message : 'The move failed',
+        demanded: [],
+      };
+    }
+  };
+
+  /**
+   * Retire one pair that still serves (§6, §13), then re-read.
+   *
+   * The teardown is the thing being asked for by name — `unplaceComponent`'s
+   * own header argues why that is §13's exception rather than a violation of
+   * it — so there is no confirmation here that the command does not have:
+   * pressing Unplace on a named pair is the confirmation.
+   */
+  const handleUnplaceComponent: UnplaceComponent = async (pair) => {
+    try {
+      const result = await command('unplaceComponent', pair);
+      if (!result.ok) return { ok: false, message: result.failure.message };
+      read.reload();
+      return { ok: true, destroyed: result.value.destroyed };
+    } catch (cause: unknown) {
+      return {
+        ok: false,
+        message:
+          cause instanceof Error ? cause.message : 'Retiring the pair failed',
+      };
+    }
+  };
+
+  /**
+   * Start one run (§17), then re-read: the list on the screen was written
+   * before the run existed, and a run that does not appear reads as a press
+   * that did nothing.
+   */
+  const handleRunJob: RunJob = async () => {
+    if (runs?.componentId === undefined || runs.targetId === undefined) {
+      return { ok: false, message: 'This job has not been placed on a Target' };
+    }
+    try {
+      const result = await command('runComponent', {
+        componentId: runs.componentId,
+        targetId: runs.targetId,
+      });
+      if (!result.ok) return { ok: false, message: result.failure.message };
+      read.reload();
+      return { ok: true };
+    } catch (cause: unknown) {
+      return {
+        ok: false,
+        message:
+          cause instanceof Error ? cause.message : 'Starting the run failed',
+      };
+    }
+  };
+
+  /*
+    The four Datastore acts (§11). Every one of them is `handleSetConfig`'s
+    shape: the pair the screen is showing is bound here so the card does not
+    restate it, the command's own refusal is passed through unedited, and the
+    workspace is re-read on success rather than patched — `phase` and
+    `attachedTo` are rows this act just changed, and a guess about what the
+    write did is the one thing that can disagree with the reconcile loop.
+  */
+
+  /**
+   * Create, then attach — two dispatches, because `createDatastore` takes no
+   * App.
+   *
+   * That is the deliberate shape: `attachDatastore` is the single place the
+   * attachment rules live (one store per engine per App, cluster-local
+   * placement), and accepting an App on create would mean a second copy of them
+   * that goes stale. So the failure of the second call is honest rather than
+   * hidden — the Datastore exists, unattached, and the row is on screen saying
+   * so, which is why the reload happens either way.
+   */
+  const handleCreateDatastore: CreateDatastore = async (create) => {
+    const { appId, vesselId } = workspace;
+    if (appId === undefined || vesselId === undefined) {
+      return {
+        ok: false,
+        message: 'This App has no Component placed on a Target yet',
+      };
+    }
+    try {
+      const created = await command('createDatastore', {
+        name: create.name,
+        engine: create.engine,
+        vesselId,
+        // Restated rather than omitted, the way `useBucket`'s `makeDefault` is:
+        // `InputOf` reads a command's schema *output*, so a `.default()` is
+        // still a required property to a typed caller. It is the schema's own
+        // number and there is no field for it — §11 gives a Datastore no size
+        // control, and a form asking a developer for one on the day they
+        // create it is asking a question they cannot answer.
+        storageGiB: 10,
+      });
+      if (!created.ok) return { ok: false, message: created.failure.message };
+      const attached = await command('attachDatastore', {
+        datastoreId: created.value.id,
+        appId,
+      });
+      read.reload();
+      return attached.ok
+        ? { ok: true }
+        : { ok: false, message: attached.failure.message };
+    } catch (cause: unknown) {
+      return {
+        ok: false,
+        message:
+          cause instanceof Error
+            ? cause.message
+            : 'Creating the Datastore failed',
+      };
+    }
+  };
+
+  const handleAttachDatastore: DatastoreAct = async (datastoreId) => {
+    const appId = workspace.appId;
+    if (appId === undefined) {
+      return {
+        ok: false,
+        message: 'This App has no id to attach a Datastore to',
+      };
+    }
+    try {
+      const result = await command('attachDatastore', { datastoreId, appId });
+      if (!result.ok) return { ok: false, message: result.failure.message };
+      read.reload();
+      return { ok: true };
+    } catch (cause: unknown) {
+      return {
+        ok: false,
+        message: cause instanceof Error ? cause.message : 'Attaching failed',
+      };
+    }
+  };
+
+  const handleDetachDatastore: DatastoreAct = async (datastoreId) => {
+    try {
+      const result = await command('detachDatastore', { datastoreId });
+      if (!result.ok) return { ok: false, message: result.failure.message };
+      read.reload();
+      return { ok: true };
+    } catch (cause: unknown) {
+      return {
+        ok: false,
+        message: cause instanceof Error ? cause.message : 'Detaching failed',
+      };
+    }
+  };
+
+  const handleDestroyDatastore: DatastoreAct = async (datastoreId) => {
+    try {
+      const result = await command('destroyDatastore', { datastoreId });
+      if (!result.ok) return { ok: false, message: result.failure.message };
+      read.reload();
+      return { ok: true };
+    } catch (cause: unknown) {
+      return {
+        ok: false,
+        message: cause instanceof Error ? cause.message : 'Destroying failed',
+      };
+    }
+  };
+
+  return (
+    <>
+      <Workspace
+        view={workspace}
+        onDeploy={() => handleDeploy(false)}
+        onRebuild={() => handleDeploy(true)}
+        deploying={deploying}
+        onNavigate={onNavigate}
+        deletion={deletion}
+        onSetReach={handleSetReach}
+        onSetAutoDeploy={handleSetAutoDeploy}
+        onSetBuildRoute={handleSetAppBuildRoute}
+        onStageArchive={handleStageArchive}
+        onUploadArchive={handleUploadArchive}
+        onSetConfig={handleSetConfig}
+        onSelectComponent={handleSelectComponent}
+        onCreateComponent={handleCreateComponent}
+        onMoveComponent={handleMoveComponent}
+        onUnplaceComponent={handleUnplaceComponent}
+        targets={targets}
+        onCreateDatastore={handleCreateDatastore}
+        onAttachDatastore={handleAttachDatastore}
+        onDetachDatastore={handleDetachDatastore}
+        onDestroyDatastore={handleDestroyDatastore}
+        {...(runs === null
+          ? {}
+          : {
+              onRunJob: handleRunJob,
+              onFollowExecution: setFollowing,
+              executionLines: runLines,
+            })}
+      />
+      <DeleteAppDialog deletion={deletion} />
+    </>
+  );
+}

@@ -35,6 +35,7 @@ import {
   type ExplorerTone,
   LedgerExplorer,
 } from '../../components/object-explorer.tsx';
+import { useRead } from '../../poll.ts';
 import { Badge } from '../../ui/badge.tsx';
 import { Button } from '../../ui/button.tsx';
 import { Eyebrow } from '../../ui/card.tsx';
@@ -45,6 +46,7 @@ import { Page, PageHeader } from '../../ui/page.tsx';
 import { SkeletonRows } from '../../ui/skeleton.tsx';
 import { Timestamp } from '../../ui/timestamp.tsx';
 import { notify } from '../../ui/toast.tsx';
+import { LedgerSkeleton, mergeLedger, ScreenFailure } from '../screen.tsx';
 
 export function deployTone(phase: DeployPhase): ExplorerTone {
   if (phase === 'LIVE') return 'success';
@@ -381,5 +383,85 @@ function DeployEvidence({ deployId }: { readonly deployId: number }) {
         </div>
       )}
     </section>
+  );
+}
+
+/**
+ * The Deploys screen — the ledger and its two sources of rows.
+ *
+ * Merged on the tick for the reason the Builds screen is: the cadence owns the
+ * newest page, the reader owns everything paged in below it, and `nextBefore`
+ * belongs to whichever of the two last paged.
+ */
+export function DeploysScreen({
+  onNavigate,
+}: {
+  onNavigate: (path: string) => void;
+}) {
+  const read = useRead(
+    [['listAllDeploys', {}]],
+    15_000,
+    [],
+    ([fresh], [current]) => [
+      {
+        ...fresh,
+        deploys: mergeLedger(fresh.deploys, current.deploys),
+        nextBefore: current.nextBefore,
+      },
+    ],
+  );
+  const [loadingOlder, setLoadingOlder] = useState(false);
+  const [olderError, setOlderError] = useState<string | null>(null);
+
+  const loadOlder = async () => {
+    if (read.type !== 'success') return;
+    const [listed] = read.value;
+    if (listed.nextBefore === null) return;
+    setLoadingOlder(true);
+    setOlderError(null);
+    try {
+      const result = await command('listAllDeploys', {
+        before: listed.nextBefore,
+      });
+      if (!result.ok) {
+        setOlderError(result.failure.message);
+        return;
+      }
+      read.update(([current]) => [
+        {
+          ...current,
+          deploys: mergeLedger(current.deploys, result.value.deploys),
+          nextBefore: result.value.nextBefore,
+        },
+      ]);
+    } catch (cause) {
+      setOlderError(
+        cause instanceof Error ? cause.message : 'Loading older Deploys failed',
+      );
+    } finally {
+      setLoadingOlder(false);
+    }
+  };
+
+  if (read.type === 'loading') return <LedgerSkeleton />;
+  if (read.type === 'error') {
+    return (
+      <ScreenFailure
+        title="Failed to load Deploys"
+        message={read.failure.message}
+        onRetry={read.reload}
+      />
+    );
+  }
+  const [listed] = read.value;
+  return (
+    <DeployLedger
+      deploys={listed.deploys}
+      onNavigate={onNavigate}
+      hasMore={listed.nextBefore !== null}
+      loadingMore={loadingOlder}
+      loadError={olderError}
+      onLoadMore={() => void loadOlder()}
+    />
   );
 }
