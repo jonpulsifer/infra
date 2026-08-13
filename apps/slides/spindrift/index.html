@@ -597,7 +597,7 @@
 
 <!-- ============================== 01 title ============================== -->
 <section class="slide title-slide">
-  <span class="no"><b>01</b> / 09</span>
+  <span class="no"><b>01</b> / 10</span>
   <div class="title-mark" aria-hidden="true">
     <svg viewBox="0 0 800 620" role="presentation">
       <path class="contour" d="M40 560 C 180 520, 250 430, 300 330 C 350 230, 430 150, 590 108 C 690 82, 760 78, 800 76"/>
@@ -615,20 +615,20 @@
   <div style="display:flex;flex-direction:column;gap:clamp(1rem,3vh,2rem)">
     <h1>Spindrift</h1>
     <p class="lede" style="max-width:32ch">A deployment is an artifact, a place, and a version of its config.</p>
-    <p class="small dim" style="max-width:50ch">Pin those three and almost everything people build deploy tooling for stops being a feature. Every slide here reads in one line — open a band if you want the argument.</p>
+    <p class="small dim" style="max-width:52ch">Four contracts, each small enough to state in a sentence. Hold them tight enough internally and the far side stops mattering: any builder, any runtime, any operator, any config store becomes an interface narrow enough that nothing above it branches.</p>
   </div>
 
   <p class="colophon">
-    <span>Four contracts</span>
-    <span><b>3</b> parts to the first</span>
-    <span><b>5</b> adapter seams</span>
-    <span>Skim in <b>90</b> seconds</span>
+    <span><b>4</b> contracts</span>
+    <span><b>5</b> seams, two or more adapters each</span>
+    <span><b>7</b> verbs behind “deploy anything, anywhere”</span>
+    <span>Nothing above them branches</span>
   </p>
 </section>
 
 <!-- ============================== 02 problem ============================== -->
 <section class="slide">
-  <span class="no"><b>02</b> / 09</span>
+  <span class="no"><b>02</b> / 10</span>
   <p class="eyebrow">The problem</p>
   <h2>“I wrote a thing. Put it somewhere with a URL.”</h2>
   <p class="gist">Nothing on that list is unsolved — clusters, registries, GitOps engines and free certificates all exist. What nobody hands you is <b>the assembly</b>, and the assembly is the work, in full, every single time.</p>
@@ -654,7 +654,7 @@
 
 <!-- ============================== 03 contract one ============================== -->
 <section class="slide">
-  <span class="no"><b>03</b> / 09</span>
+  <span class="no"><b>03</b> / 10</span>
   <p class="eyebrow">Contract one · what a deployment is</p>
   <h2>A deploy is three things, <em>pinned</em></h2>
   <p class="gist"><b>Artifact, Target, Config</b> — each named by value rather than by reference, so no part of a deployment is allowed to mean “latest”.</p>
@@ -690,7 +690,7 @@
 
 <!-- ============================== 04 what falls out ============================== -->
 <section class="slide">
-  <span class="no"><b>04</b> / 09</span>
+  <span class="no"><b>04</b> / 10</span>
   <p class="eyebrow">Consequences, not features</p>
   <h2>Four things nobody had to build</h2>
   <p class="gist">Rollback, two runtimes, safe concurrency and config that cannot drift are not features here. Each one <b>falls out</b> of having named the three parts by value.</p>
@@ -725,7 +725,7 @@
 
 <!-- ============================== 05 contract two ============================== -->
 <section class="slide">
-  <span class="no"><b>05</b> / 09</span>
+  <span class="no"><b>05</b> / 10</span>
   <p class="eyebrow">Contract two · where the far sides plug in</p>
   <h2>Five seams, and <em>none of them</em> is the architecture</h2>
   <p class="gist">Every outside thing is swappable without editing at the place it is used — and the proof one is real arrived unannounced: a build route that <b>dials in</b> rather than out landed as one row in a list.</p>
@@ -782,7 +782,7 @@
 
 <!-- ============================== 06 contract three ============================== -->
 <section class="slide">
-  <span class="no"><b>06</b> / 09</span>
+  <span class="no"><b>06</b> / 10</span>
   <p class="eyebrow">Contract three · who may reach it</p>
   <h2>Reach and auth are <em>fields</em>, not policy</h2>
   <p class="gist">They sit in desired state beside the image and the config, so they are pinned into the deploy like everything else — and a Target that cannot <b>authenticate</b> a reach is excluded before a build is ever dispatched.</p>
@@ -821,7 +821,7 @@
 
 <!-- ============================== 07 contract four ============================== -->
 <section class="slide">
-  <span class="no"><b>07</b> / 09</span>
+  <span class="no"><b>07</b> / 10</span>
   <p class="eyebrow">Contract four · where authority stops</p>
   <h2>It cannot create what it deploys into — so it opens a <em>pull request</em></h2>
   <p class="gist">Spindrift holds delegated write access to <b>contents</b> and nothing that can create a cluster, a project, a VPC, a tunnel or a signing key. A missing prerequisite becomes infrastructure code on a pull request, not a resource.</p>
@@ -916,7 +916,7 @@
 
 <!-- ============================== 08 supply chain ============================== -->
 <section class="slide">
-  <span class="no"><b>08</b> / 09</span>
+  <span class="no"><b>08</b> / 10</span>
   <p class="eyebrow">Making the artifact half checkable</p>
   <h2>One signature, <em>two verifiers</em></h2>
   <p class="gist">Because the artifact is named by digest, it is a thing a signature can be <b>about</b>. Four build routes converge on one digest, one key signs it, and two independent policy engines re-check it at admission.</p>
@@ -1042,9 +1042,48 @@
   </details>
 </section>
 
-<!-- ============================== 09 evidence + close ============================== -->
+<!-- ============================== 09 how it was built ============================== -->
 <section class="slide">
-  <span class="no"><b>09</b> / 09</span>
+  <span class="no"><b>09</b> / 10</span>
+  <p class="eyebrow">How it was built</p>
+  <h2>Seventeen days, and the <em>writing</em> was most of it</h2>
+  <p class="gist">Every contract on the previous slides was settled in prose before it was code — <b>364,000 words</b> of tickets, handoffs and maps against 86,000 lines of TypeScript. Roughly four words of argument per line shipped.</p>
+  <details class="more">
+    <summary>The ledger, counted off the tree</summary>
+    <div class="body">
+      <div class="stats">
+        <div class="stat"><b>128</b><span>tickets — 96 done, 5 refused outright</span></div>
+        <div class="stat"><b>213</b><span>pull requests merged to main</span></div>
+        <div class="stat"><b>248</b><span>agent sessions, across 116 worktrees</span></div>
+        <div class="stat stat--ink"><b>364k</b><span>words of planning markdown, 209 files</span></div>
+        <div class="stat stat--ink"><b>86k</b><span>lines of TypeScript, 172 test files</span></div>
+        <div class="stat stat--cau"><b>17</b><span>days, first commit to this revision</span></div>
+      </div>
+      <div class="split">
+        <div style="display:flex;flex-direction:column;gap:1rem">
+          <p class="rule-kicker">The planning surface is private and the code is public. Nothing in it is a status report — it is where the four contracts were argued down to a sentence each.</p>
+          <p class="small dim">Counted on 2026-08-13 against <code>apps/spindrift</code> and the local tracker. The five refusals matter as much as the ninety-six: a ticket closed <span class="m">wontfix</span> is a contract that held.</p>
+        </div>
+        <ul class="ticks">
+          <li><b>Wayfinder map</b> — one document per effort, holding the destination and every decision made toward it. Thirty-six open questions were resolved on it before a line of Spindrift existed.</li>
+          <li><b>Tickets</b> — one file each, carrying a status, a blocked-by, and acceptance criteria that name a live observation rather than a test.</li>
+          <li><b>Handoffs</b> — twelve dated documents, one per working session that ended mid-flight, so the next one starts from state rather than from re-reading.</li>
+          <li><b>Worktrees</b> — one isolated checkout per writing agent. The count is high because concurrency is the point, not because anything was retried.</li>
+        </ul>
+      </div>
+    </div>
+  </details>
+  <p class="colophon">
+    <span><b>96</b> done</span>
+    <span><b>7</b> in review</span>
+    <span><b>16</b> ready to claim</span>
+    <span><b>5</b> refused</span>
+  </p>
+</section>
+
+<!-- ============================== 10 evidence + close ============================== -->
+<section class="slide">
+  <span class="no"><b>10</b> / 10</span>
   <p class="eyebrow">Evidence, not assertion</p>
   <h2>This page is its own acceptance evidence</h2>
   <p class="gist">Uploaded as an archive, built on the hosted route into a <span class="m">files</span> artifact, served at a URL by the thing it describes — and every clause above was proven on a <b>live installation</b> rather than a fixture.</p>
