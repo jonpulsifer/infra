@@ -90,3 +90,33 @@ spec:
                   - oauth2-proxy
         kinds:
           - kind: HTTPRoute
+    # The second zone the installation mints in, so an App placed here can be
+    # named in either. This cluster serves it privately and only privately: the
+    # Target declares `reaches: [none, private]` and publishes no tunnel, so
+    # every name on this listener is an A record at the address above.
+    #
+    # `cluster-gateway` in this cluster carries its own `*.${SECRET_DOMAIN}`
+    # listener on its own address. Two Gateways may both hold the wildcard —
+    # they are separate Envoy listener sets — and which one a name reaches is
+    # decided per record by the App chart's DNSEndpoint. This one answers for
+    # the names Spindrift publishes at `10.3.0.80` and for nothing else.
+    - name: spindrift-apps-tls-secret-domain
+      protocol: HTTPS
+      port: 443
+      hostname: "*.${SECRET_DOMAIN}"
+      tls:
+        certificateRefs:
+          - kind: Secret
+            name: wildcard-apps-${SECRET_DOMAIN}
+      allowedRoutes:
+        namespaces:
+          from: Selector
+          selector:
+            matchExpressions:
+              - key: kubernetes.io/metadata.name
+                operator: In
+                values:
+                  - spindrift-apps
+                  - oauth2-proxy
+        kinds:
+          - kind: HTTPRoute

@@ -23,12 +23,17 @@ import {
   isLabel,
   VANITY_LEG_LOSSES,
   vanity,
-  zoneForReach,
+  zoneFor,
 } from '../../src/domain/naming.ts';
 
 const APEX = 'apps.example.test';
 const VANITY_ZONE = 'sh.example.test';
-const ZONES = { private: APEX, public: APEX } as const;
+const ZONES = [{ name: APEX, reaches: ['private', 'public'] }] as const;
+/** An installation that split its reaches across two zones (§9). */
+const SPLIT = [
+  { name: APEX, reaches: ['private'] },
+  { name: VANITY_ZONE, reaches: ['public'] },
+] as const;
 
 describe('§9: one label under the zone, both layers', () => {
   test('a minted name is flat, and leads with the App', () => {
@@ -59,6 +64,7 @@ describe('§9: core mints a name only where the platform gives none', () => {
       adapter: 'kubernetes',
       reach: 'private',
       zones: ZONES,
+      zone: null,
       vanityLabel: null,
     });
     expect(hostname.canonical).toBe('shop-web.apps.example.test');
@@ -68,7 +74,7 @@ describe('§9: core mints a name only where the platform gives none', () => {
   test('a Component with no reach gets no name at all', () => {
     // Nothing routes to it, so every name core could mint would resolve to
     // something unreachable. The absence is the answer, not a gap.
-    expect(zoneForReach('none', ZONES)).toBeNull();
+    expect(zoneFor('none', ZONES)).toBeNull();
     for (const adapter of ['kubernetes', 'cloudrun', 'static'] as const) {
       const hostname = hostnameFor({
         app: 'shop',
@@ -76,6 +82,7 @@ describe('§9: core mints a name only where the platform gives none', () => {
         adapter,
         reach: 'none',
         zones: ZONES,
+        zone: null,
         vanityLabel: 'shop',
       });
       expect(hostname.canonical).toBe('');
@@ -85,9 +92,66 @@ describe('§9: core mints a name only where the platform gives none', () => {
   });
 
   test('each reach picks its own zone', () => {
-    const split = { private: 'lan.example.test', public: 'www.example.test' };
-    expect(zoneForReach('private', split)).toBe('lan.example.test');
-    expect(zoneForReach('public', split)).toBe('www.example.test');
+    const split = [
+      { name: 'lan.example.test', reaches: ['private'] },
+      { name: 'www.example.test', reaches: ['public'] },
+    ] as const;
+    expect(zoneFor('private', split)).toBe('lan.example.test');
+    expect(zoneFor('public', split)).toBe('www.example.test');
+  });
+
+  test('an App pins a zone, and the pin wins over the default', () => {
+    // The reason `dns.zones` is a list: an installation with more than one
+    // public zone has no way to say which one an App answers on unless the App
+    // can name it. Unpinned takes the head of the list, which is what every
+    // App got when reach alone named the zone.
+    const many = [
+      { name: 'first.example.test', reaches: ['private', 'public'] },
+      { name: 'second.example.test', reaches: ['private', 'public'] },
+      { name: 'shop.example.test', reaches: ['public'] },
+    ] as const;
+    expect(zoneFor('public', many)).toBe('first.example.test');
+    expect(zoneFor('public', many, 'shop.example.test')).toBe(
+      'shop.example.test',
+    );
+    expect(zoneFor('private', many, 'second.example.test')).toBe(
+      'second.example.test',
+    );
+  });
+
+  test('a pin that cannot serve the reach falls through rather than lying', () => {
+    // A public-only zone has no private boundary to publish on, so minting
+    // there would put a record on an address the operator said that zone does
+    // not answer at. The fall-through is §9's rename, and it is visible: the
+    // name this returns is the name the UI shows.
+    const many = [
+      { name: 'first.example.test', reaches: ['private', 'public'] },
+      { name: 'shop.example.test', reaches: ['public'] },
+    ] as const;
+    expect(zoneFor('private', many, 'shop.example.test')).toBe(
+      'first.example.test',
+    );
+    // And a reach no zone serves has no name at all, for the same reason
+    // `reach: none` does not: there is nothing honest to call it.
+    expect(
+      zoneFor('private', [{ name: 'shop.example.test', reaches: ['public'] }]),
+    ).toBeNull();
+  });
+
+  test('a pin follows the App onto a minted name', () => {
+    const hostname = hostnameFor({
+      app: 'shop',
+      component: 'web',
+      adapter: 'kubernetes',
+      reach: 'public',
+      zones: [
+        { name: 'first.example.test', reaches: ['private', 'public'] },
+        { name: 'shop.example.test', reaches: ['public'] },
+      ],
+      zone: 'shop.example.test',
+      vanityLabel: null,
+    });
+    expect(hostname.canonical).toBe('shop-web.shop.example.test');
   });
 
   test('the backends that name their own workloads get none from core', () => {
@@ -102,6 +166,7 @@ describe('§9: core mints a name only where the platform gives none', () => {
         adapter,
         reach: 'public',
         zones: ZONES,
+        zone: null,
         vanityLabel: null,
       });
       expect(hostname.canonical).toBe('');
@@ -114,7 +179,8 @@ describe('§9: core mints a name only where the platform gives none', () => {
       component: 'web',
       adapter: 'cloudrun',
       reach: 'public',
-      zones: { private: APEX, public: VANITY_ZONE },
+      zones: SPLIT,
+      zone: null,
       vanityLabel: 'shop',
     });
     // Vanity is backend-agnostic on purpose: moving an App between backends is
@@ -131,6 +197,7 @@ describe('§9: core mints a name only where the platform gives none', () => {
       adapter: 'kubernetes',
       reach: 'private',
       zones: ZONES,
+      zone: null,
       vanityLabel: 'shop',
     });
     expect(hostname.vanity).toBeUndefined();
@@ -186,7 +253,8 @@ describe('§9: the vanity layer, and what it costs', () => {
         component: 'web',
         adapter,
         reach: 'public',
-        zones: { private: APEX, public: VANITY_ZONE },
+        zones: SPLIT,
+        zone: null,
         vanityLabel: 'shop',
       });
       expect(hostname.vanity).toBe(shared);

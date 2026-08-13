@@ -133,10 +133,9 @@ describe('an installation nobody has configured says so', () => {
       ...DEFAULT_PLACEHOLDER_MANIFEST,
       controlPlane: { hostname: 'spindrift.substituted.example' },
       dns: {
-        zones: {
-          private: 'substituted.example',
-          public: 'substituted.example',
-        },
+        zones: [
+          { name: 'substituted.example', reaches: ['private', 'public'] },
+        ],
       },
       charts: { app: 'oci://ghcr.io/example/charts/spindrift-app' },
     };

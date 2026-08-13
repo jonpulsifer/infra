@@ -45,6 +45,7 @@ import {
   targets,
   vessels,
 } from '../../src/db/schema.ts';
+import { zoneFor } from '../../src/domain/naming.ts';
 import { deployState } from '../../src/domain/target.ts';
 import {
   surfacesToProbe,
@@ -1065,7 +1066,7 @@ describe('listTargets', () => {
     // nowhere in the repo, which is the defect this pins.
     const k8s = result.value.targets.find((t) => t.adapter === 'kubernetes');
     expect(k8s?.canonical).toBe(
-      `*.${manifest.dns.zones.private} (private) · *.${manifest.dns.zones.public} (public)`,
+      `*.${zoneFor('private', manifest.dns.zones)} (private) · *.${zoneFor('public', manifest.dns.zones)} (public)`,
     );
     expect(k8s?.canonical).not.toContain('apps.internal');
 
@@ -1100,7 +1101,12 @@ describe('listTargets', () => {
     const oneZoneManifest = {
       ...manifest,
       dns: {
-        zones: { private: 'apps.example.test', public: 'apps.example.test' },
+        zones: [
+          {
+            name: 'apps.example.test',
+            reaches: ['private' as const, 'public' as const],
+          },
+        ],
       },
     };
     const result = await listTargets(

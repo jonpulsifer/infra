@@ -3,7 +3,7 @@ import type { TargetAdapter } from '../../config/manifest.schema.ts';
 import { targetConnectionDivergence } from '../../config/manifest-store.ts';
 import { KINDS_BY_ADAPTER } from '../../domain/capabilities.ts';
 import { auth, componentKind, reach } from '../../domain/creation-draft.ts';
-import type { ComponentKind } from '../../domain/desired-state.ts';
+import type { ComponentKind, Reach } from '../../domain/desired-state.ts';
 import { coreMintsCanonical, type DnsZones } from '../../domain/naming.ts';
 import {
   DEFAULT_PLATFORM,
@@ -75,16 +75,27 @@ export type ListTargetsInput = z.infer<typeof listTargetsInput>;
 function canonicalBoundary(
   adapter: TargetAdapter,
   zones: DnsZones,
+  reaches: readonly Reach[] | null,
 ): string | null {
   if (!coreMintsCanonical(adapter)) return null;
-  // One zone per reach (§9's `DnsZones`): an installation may point both at
-  // the same name, so collapsing to one pattern is both honest and the common
-  // case; an installation that split them gets both, because a Target minting
-  // into `public` as readily as `private` is not represented by naming only
-  // one.
-  return zones.private === zones.public
-    ? `*.${zones.private}`
-    : `*.${zones.private} (private) · *.${zones.public} (public)`;
+  // Only the zones this Target could actually mint into. A zone serving a reach
+  // this Target does not is not a boundary a name here will ever land on, and
+  // naming it would promise an address no Deploy on this Target can produce —
+  // which is the same lie the fallback suffix above was.
+  const served = zones.filter((zone) =>
+    zone.reaches.some((reach) => reaches?.includes(reach) ?? true),
+  );
+  if (served.length === 0) return null;
+  // The reach is stated only where the zone narrows it. A zone serving every
+  // reach this Target has adds nothing by saying so, and an installation that
+  // points one zone at both is the common case.
+  return served
+    .map((zone) =>
+      zone.reaches.length === 1
+        ? `*.${zone.name} (${zone.reaches[0]})`
+        : `*.${zone.name}`,
+    )
+    .join(' · ');
 }
 
 /** A Target row with the boundary it sits on, as {@link editStart} reads it. */
@@ -285,6 +296,7 @@ export const listTargets: Command<ListTargetsInput, ListTargetsResult> = async (
     const canonical = canonicalBoundary(
       target.adapter,
       context.manifest.dns.zones,
+      target.reaches,
     );
 
     const prereqFailures = target.prerequisites

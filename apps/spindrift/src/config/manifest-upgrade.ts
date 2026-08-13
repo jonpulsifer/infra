@@ -48,11 +48,63 @@ function asDocument(value: unknown): Document | null {
  * what is wrong with it rather than reporting what this function made of it.
  */
 export function upgradeManifestDocument(document: unknown): unknown {
-  return movePinnedBuildWorkflowToMain(
-    scrubPlaceholderBuildWorkflow(
-      nameInstallationVessels(dropTargetNames(addDeclaredVessels(document))),
+  return listDnsZones(
+    movePinnedBuildWorkflowToMain(
+      scrubPlaceholderBuildWorkflow(
+        nameInstallationVessels(dropTargetNames(addDeclaredVessels(document))),
+      ),
     ),
   );
+}
+
+/**
+ * Turn the zone-named-per-reach object into the list of zones that replaced it.
+ *
+ * `dns.zones` was `{private, public}`: two names, one per reach, which made two
+ * the most zones an installation could have. It is now a list, and each entry
+ * states the reaches it serves — so the same two facts are still sayable and a
+ * third zone is as well.
+ *
+ * **The two shapes the old object had become different lists, because they meant
+ * different things.** Both names equal was an installation pointing one zone at
+ * both reaches, and that is one entry serving both — which is what keeps §9's
+ * "flipping a Component's reach is a record re-point" true across this upgrade.
+ * Two different names was a split-horizon installation, and that is two entries
+ * of one reach each. Collapsing the first into two entries would leave a
+ * `private` Component that flips to `public` minting in the entry that happens
+ * to be first, which is the same zone by luck rather than by the document
+ * saying so.
+ *
+ * Private leads in the split case for the same reason `reach: private` was the
+ * old column default: it is the narrower boundary, and the head of this list is
+ * what an App that pins nothing gets.
+ *
+ * A current document holds an array here, and `asDocument` returns null for one,
+ * so this is a no-op on everything written since.
+ */
+function listDnsZones(document: unknown): unknown {
+  const manifest = asDocument(document);
+  const dns = asDocument(manifest?.dns);
+  const zones = asDocument(dns?.zones);
+  if (manifest === null || dns === null || zones === null) return document;
+
+  const privateZone = firstString(zones.private);
+  const publicZone = firstString(zones.public);
+  if (privateZone === null || publicZone === null) return document;
+
+  return {
+    ...manifest,
+    dns: {
+      ...dns,
+      zones:
+        privateZone === publicZone
+          ? [{ name: privateZone, reaches: ['private', 'public'] }]
+          : [
+              { name: privateZone, reaches: ['private'] },
+              { name: publicZone, reaches: ['public'] },
+            ],
+    },
+  };
 }
 
 /**

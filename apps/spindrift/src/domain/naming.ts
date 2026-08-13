@@ -63,17 +63,35 @@ export function coreMintsCanonical(adapter: TargetAdapter): boolean {
 }
 
 /**
- * The zone per reach (§9).
+ * A reach a zone is able to serve.
  *
- * An installation may point both at one zone, so flipping a Component's reach is
- * a record re-point and its hostname is stable; or at two, for separate trust
- * boundaries and split-horizon resolvers, accepting that changing reach is a
- * rename. The product ships neither policy.
+ * `none` is absent because it is not a reach a zone could serve: nothing routes
+ * to a Component that has it, so there is no record to publish anywhere.
  */
-export interface DnsZones {
-  readonly private: string;
-  readonly public: string;
+export type RoutedReach = Exclude<Reach, 'none'>;
+
+/**
+ * One zone this installation mints names in, and what it is able to serve (§9).
+ *
+ * A zone states its own reaches rather than a reach naming its zone, because
+ * which way round that goes is what decides whether an installation may have
+ * more than one. Under the old shape — one zone named per reach — two zones were
+ * the maximum expressible, and an installation with a zone that only ever
+ * answers on the internet had nowhere to say so.
+ *
+ * Both readings the old shape had survive. An installation that points every
+ * zone at both reaches keeps §9's "flipping a Component's reach is a record
+ * re-point and its hostname is stable". One that splits them — separate trust
+ * boundaries, split-horizon resolvers — states a zone per reach and accepts, as
+ * it always did, that changing reach is a rename.
+ */
+export interface DnsZone {
+  readonly name: string;
+  readonly reaches: readonly RoutedReach[];
 }
+
+/** Every zone this installation mints in, in the order an unpinned App takes. */
+export type DnsZones = readonly DnsZone[];
 
 /**
  * The zone a Component's name is minted in, or `null` when nothing routes to it.
@@ -81,9 +99,31 @@ export interface DnsZones {
  * `reach: none` has no zone rather than a zone it declines to use, because the
  * absence is the point: a name that resolves to a Component nothing can reach is
  * a name that lies.
+ *
+ * `preferred` is the App's own pin, and it is a **preference rather than a
+ * demand**. A pin that cannot serve this reach falls through to the first zone
+ * that can, because the alternative is worse in both directions: minting in the
+ * pinned zone anyway publishes a record on a boundary the operator said that
+ * zone does not answer on, and refusing outright turns flipping a Component to
+ * `private` into a deploy that fails at apply time rather than into §9's rename.
+ * The name the fall-through produces is the name the UI shows, so the rename is
+ * visible rather than silent.
+ *
+ * `null` also when no zone serves the reach at all — an installation whose zones
+ * are all `public` has nothing honest to call a private Component.
  */
-export function zoneForReach(reach: Reach, zones: DnsZones): string | null {
-  return reach === 'none' ? null : zones[reach];
+export function zoneFor(
+  reach: Reach,
+  zones: DnsZones,
+  preferred: string | null = null,
+): string | null {
+  if (reach === 'none') return null;
+  const serving = zones.filter((zone) => zone.reaches.includes(reach));
+  return (
+    serving.find((zone) => zone.name === preferred)?.name ??
+    serving[0]?.name ??
+    null
+  );
 }
 
 /** What a minted name is assembled from. */
@@ -143,9 +183,11 @@ export interface HostnameContext {
   readonly app: string;
   readonly component: string;
   readonly adapter: TargetAdapter;
-  /** Where this Component can be reached from, which picks the zone. */
+  /** Where this Component can be reached from, which narrows the zones. */
   readonly reach: Reach;
   readonly zones: DnsZones;
+  /** The zone this App is pinned to, if any — {@link zoneFor}'s `preferred`. */
+  readonly zone: string | null;
   /** The flat label the developer chose, if any. */
   readonly vanityLabel: string | null;
 }
@@ -164,7 +206,7 @@ export interface HostnameContext {
  * vanity layer is layered on only there, for the reason in this module's header.
  */
 export function hostnameFor(context: HostnameContext): Hostname {
-  const zone = zoneForReach(context.reach, context.zones);
+  const zone = zoneFor(context.reach, context.zones, context.zone);
   if (zone === null) return { canonical: '' };
 
   if (coreMintsCanonical(context.adapter)) {

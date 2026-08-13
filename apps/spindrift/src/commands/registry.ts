@@ -40,6 +40,7 @@ import {
 } from './apps/resolve-placement.ts';
 import { uploadArchive, uploadArchiveInput } from './apps/upload-archive.ts';
 import { getAppWorkspace, getAppWorkspaceInput } from './apps/workspace.ts';
+import { setAppZone, setAppZoneInput } from './apps/zone.ts';
 import { listArtifacts, listArtifactsInput } from './artifacts/list.ts';
 import { adoptBuild, adoptBuildInput } from './builds/adopt.ts';
 import { dispatchBuild, dispatchBuildInput } from './builds/dispatch.ts';
@@ -188,6 +189,7 @@ export const commandRegistry = {
     handler: setAppAutoDeploy,
   },
   setAppBuildRoute: { input: setAppBuildRouteInput, handler: setAppBuildRoute },
+  setAppZone: { input: setAppZoneInput, handler: setAppZone },
   getAppWorkspace: { input: getAppWorkspaceInput, handler: getAppWorkspace },
   getDeployDetail: { input: getDeployDetailInput, handler: getDeployDetail },
   getBuildDetail: { input: getBuildDetailInput, handler: getBuildDetail },

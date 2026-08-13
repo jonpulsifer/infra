@@ -15,6 +15,7 @@ import {
   ManifestError,
   parseManifest,
 } from '../../src/config/manifest.ts';
+import { zoneFor } from '../../src/domain/naming.ts';
 
 const FIXTURE = join(import.meta.dir, '../fixtures/installation.example.yaml');
 
@@ -25,7 +26,7 @@ describe('the fixture installation', () => {
     const manifest = await loadManifest({ [MANIFEST_PATH_VAR]: FIXTURE });
     expect(manifest.installation.name).toBe('example');
     expect(manifest.auth.gateway).toBeNull();
-    expect(manifest.dns.zones.private).toBe('apps.example.test');
+    expect(zoneFor('private', manifest.dns.zones)).toBe('apps.example.test');
     expect(manifest.secretStore.adapter).toBe('gcp-secret-manager');
     expect(manifest.targets.map((t) => t.adapter)).toEqual([
       'kubernetes',

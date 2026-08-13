@@ -513,6 +513,28 @@ export const apps = pgTable('apps', {
    */
   autoDeploy: boolean('auto_deploy').notNull().default(false),
   /**
+   * The zone from `dns.zones` this App's names are minted in, or null for the
+   * installation's default (§9).
+   *
+   * Null is not "no zone". It is the state every App is in until someone says
+   * otherwise, and it means the first zone serving the Component's reach wins —
+   * which is the whole of the behaviour before this column existed, when reach
+   * named the zone directly.
+   *
+   * A plain string and not a reference, for the same reason `buildRoute` above
+   * is one: the set of zones is the installation's configuration, so a name here
+   * may name a zone that has since been retired or one that no longer serves
+   * this Component's reach. `zoneFor` treats it as a preference and falls
+   * through to a zone that can serve the reach, so a retired pin degrades to the
+   * default rather than to a Component with no address.
+   *
+   * On the App and not on the Component, because §9 makes a hostname a property
+   * of the App — "moving an App between backends is one record re-point" only
+   * holds if the name outlives the releases under it, and a Component-level zone
+   * would let one App answer on two domains with no name that covers it.
+   */
+  zone: text('zone'),
+  /**
    * **No vessel column, deliberately.** An App has placements, and each
    * placement's Target is a surface on a vessel — that is the boundary the App
    * is in, and it is derivable. A column here could only be a second, unchecked
