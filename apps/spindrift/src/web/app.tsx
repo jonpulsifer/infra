@@ -77,6 +77,7 @@ import { Gate } from './views/auth/gate.tsx';
 import { InstallationSettings } from './views/auth/installation.tsx';
 import { Onboarding } from './views/auth/onboarding.tsx';
 import { IdentitySettings } from './views/auth/settings.tsx';
+import { DatastoreDetail } from './views/operations/datastore-detail.tsx';
 import {
   type CreateLedgerDatastore,
   DatastoreLedger,
@@ -388,6 +389,8 @@ export function titleOf(path: string): string {
     return 'Settings · Spindrift';
   if (path.startsWith('/sources')) return 'Sources · Spindrift';
   if (path.startsWith('/artifacts')) return 'Artifacts · Spindrift';
+  // No name in the path, so the tab says the noun. The id is a uuid: a title
+  // holding one would be a title nobody can read a Datastore's name out of.
   if (path.startsWith('/datastores')) return 'Datastores · Spindrift';
   if (path.startsWith('/apps/new')) return 'New App · Spindrift';
   if (path.startsWith('/deploys')) {
@@ -458,8 +461,18 @@ export function Screen({
   // Must land before the catch-all below, which otherwise reads any
   // unmatched single segment as an App name — `/datastores` would render a
   // `WorkspaceScreen` for an App called "datastores" that does not exist.
-  if (path.startsWith('/datastores'))
-    return <DatastoresScreen onNavigate={onNavigate} />;
+  if (path.startsWith('/datastores')) {
+    const datastoreId = path.replace(/^\/datastores\/?/, '');
+    return datastoreId ? (
+      <DatastoreScreen
+        key={datastoreId}
+        datastoreId={datastoreId}
+        onNavigate={onNavigate}
+      />
+    ) : (
+      <DatastoresScreen onNavigate={onNavigate} />
+    );
+  }
   // The one screen keyed on the route rather than on the object in it, because
   // it is the one screen that *names* its object partway through: a draft
   // starts, the path is rewritten to `/apps/new/<id>`, and a key reading that
@@ -2722,6 +2735,90 @@ function DatastoresScreen({
       onCreate={handleCreate}
       onDetach={handleDetach}
       onDestroy={handleDestroy}
+    />
+  );
+}
+
+/**
+ * One Datastore, by id (§11).
+ *
+ * No stream. Every act on a Datastore is on another screen — the ledger's, or
+ * the workspace of the App it attaches to — so nothing this one does can
+ * invalidate what it is showing. The far-side object is read once with the
+ * row; the retry is for the load that failed, not for a poll.
+ */
+function DatastoreScreen({
+  datastoreId,
+  onNavigate,
+}: {
+  datastoreId: string;
+  onNavigate: (path: string) => void;
+}) {
+  const [state, setState] = useState<
+    | { type: 'loading' }
+    | { type: 'not-found'; message: string }
+    | { type: 'error'; message: string }
+    | { type: 'success'; result: OutputOf<'getDatastore'> }
+  >({ type: 'loading' });
+  const [reloadToken, setReloadToken] = useState(0);
+
+  useEffect(() => {
+    let live = true;
+    command('getDatastore', { datastoreId })
+      .then((result) => {
+        if (!live) return;
+        if (result.ok) {
+          setState({ type: 'success', result: result.value });
+        } else {
+          setState({
+            // A malformed id fails input validation rather than the lookup, and
+            // "there is no Datastore with that id" is what both mean to a
+            // reader who followed a stale link.
+            type:
+              result.failure.code === 'NOT_FOUND' ||
+              result.failure.code === 'INVALID_INPUT'
+                ? 'not-found'
+                : 'error',
+            message: result.failure.message,
+          });
+        }
+      })
+      .catch((cause: unknown) => {
+        if (!live) return;
+        setState({
+          type: 'error',
+          message: cause instanceof Error ? cause.message : 'Server failure',
+        });
+      });
+    return () => {
+      live = false;
+    };
+  }, [datastoreId, reloadToken]);
+
+  if (state.type === 'loading') return <DetailSkeleton />;
+  if (state.type === 'not-found') {
+    return (
+      <ScreenNotFound
+        title="Datastore not found"
+        message={state.message}
+        onNavigate={onNavigate}
+      />
+    );
+  }
+  if (state.type === 'error') {
+    return (
+      <ScreenFailure
+        title="Failed to load Datastore"
+        message={state.message}
+        width="reading"
+        onRetry={() => setReloadToken((token) => token + 1)}
+      />
+    );
+  }
+  return (
+    <DatastoreDetail
+      datastore={state.result.datastore}
+      onNavigate={onNavigate}
     />
   );
 }

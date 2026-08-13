@@ -197,6 +197,32 @@ export class KubernetesDatastoreAdapter implements DatastoreAdapter {
     };
   }
 
+  /**
+   * The CR as the API server holds it — spec, status and all.
+   *
+   * Unfiltered on purpose. The operator's `status` is where the answer to
+   * "why is this WAITING" actually lives, and the spec beside it is what
+   * `provision` wrote plus every default the operator filled in. Neither
+   * carries a credential: CloudNativePG puts the password in a Secret and
+   * names it here, which is the reference §11 already says core may hold.
+   */
+  async describe(
+    target: DeployTarget,
+    ref: DatastoreRef,
+  ): Promise<KubernetesObject | null> {
+    const connection = connectionOf(target);
+    const parsed = parseRef(ref);
+    if (connection === null || parsed === null) return null;
+
+    const kind = ENGINE_KINDS[parsed.engine];
+    return await this.api(connection).get({
+      apiVersion: kind.apiVersion,
+      plural: kind.plural,
+      namespace: parsed.namespace,
+      name: parsed.name,
+    });
+  }
+
   async destroy(target: DeployTarget, ref: DatastoreRef): Promise<void> {
     const connection = connectionOf(target);
     const parsed = parseRef(ref);

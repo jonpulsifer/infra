@@ -30,6 +30,10 @@ export interface FakeDatastoreAdapterOptions {
   destroyThrows?: string;
   /** When set, `observe` throws — the Target that cannot be reached at all. */
   observeThrows?: string;
+  /** What `describe` answers with. Absent means the far side holds no object. */
+  describes?: unknown;
+  /** When set, `describe` throws — the same unreachable Target, on the read path. */
+  describeThrows?: string;
 }
 
 export class FakeDatastoreAdapter implements DatastoreAdapter {
@@ -97,6 +101,17 @@ export class FakeDatastoreAdapter implements DatastoreAdapter {
     // The last scripted state repeats: a test that cares about the first two
     // passes should not have to script the rest.
     return queue.length === 1 ? queue[0]! : queue.shift()!;
+  }
+
+  /** Every `describe`, so a test can prove the read path asked at all. */
+  readonly described: DatastoreRef[] = [];
+
+  async describe(_target: DeployTarget, ref: DatastoreRef): Promise<unknown> {
+    this.described.push(ref);
+    if (this.options.describeThrows !== undefined) {
+      throw new Error(this.options.describeThrows);
+    }
+    return this.options.describes ?? null;
   }
 
   async destroy(_target: DeployTarget, ref: DatastoreRef): Promise<void> {
