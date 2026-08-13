@@ -130,12 +130,13 @@ export interface DeployPreconditions {
 /**
  * The same preconditions, delivering a different config document.
  *
- * Two callers replace exactly this one leg and nothing else: a config change
+ * One caller replaces exactly this leg and nothing else: a config change
  * deploys what was *just written* rather than what `checkDeployable` read a
- * moment earlier, and a rollback deploys what the release being rolled back to
- * originally had. Both leave the rest of the shape alone, because the shape a
- * rollback wants is the Component as it is now — rolling an artifact back is
- * not a request to undo unrelated edits.
+ * moment earlier. It leaves the rest of the shape alone, because setting a
+ * variable is not a request to undo unrelated edits.
+ *
+ * A rollback wants more than this and uses {@link deliveringRelease}, which is
+ * built on it.
  *
  * A function rather than the spread written twice, because the spread is
  * nested: `{ ...value, config: pinned }` type-checks against nothing and
@@ -150,6 +151,42 @@ export function deliveringConfig(
     ...value,
     configVersion: config.version,
     desired: { ...value.desired, config: config.document },
+  };
+}
+
+/**
+ * The same preconditions, delivering the release a rollback is going back to.
+ *
+ * {@link DesiredDocument} states the rule this implements and the argument for
+ * it: a rollback restores how yesterday's artifact **ran** — its entrypoint,
+ * its arguments, its schedule, its config — and never where it **answered**.
+ * `expose`, `reach` and `auth` stay as the Component has them today, because
+ * they are the `hostname` exclusion one layer down, and `datastores` stays
+ * because attaching and detaching are deliberate acts this must not undo.
+ *
+ * Each replayed field is spread conditionally rather than assigned, because
+ * they are optional: writing `schedule: previous.schedule` onto a document
+ * whose previous release had none would set the key to `undefined` rather than
+ * leave it absent, and an unscheduled job is the absence.
+ */
+export function deliveringRelease(
+  value: DeployPreconditions,
+  previous: {
+    readonly desired: DesiredDocument;
+    readonly configVersion: string;
+  },
+): DeployPreconditions {
+  const was = previous.desired;
+  return {
+    ...value,
+    configVersion: previous.configVersion,
+    desired: {
+      ...value.desired,
+      config: was.config,
+      ...(was.schedule === undefined ? {} : { schedule: was.schedule }),
+      ...(was.command === undefined ? {} : { command: was.command }),
+      ...(was.args === undefined ? {} : { args: was.args }),
+    },
   };
 }
 
@@ -571,7 +608,7 @@ export async function checkDeployable(
       name: datastores.name,
       engine: datastores.engine,
       connectionRef: datastores.connectionRef,
-      targetId: datastores.targetId,
+      vesselId: datastores.vesselId,
     })
     .from(datastores)
     .where(eq(datastores.appId, app.id));
@@ -580,18 +617,20 @@ export async function checkDeployable(
   // as a `secretKeyRef` at the operator's own Secret — a reference that cannot
   // leave the namespace it is rendered in, let alone the cluster. Released
   // anyway, the pod sits in `CreateContainerConfigError` and the Deploy reports
-  // a timeout rather than the cause.
+  // a timeout rather than the cause. The comparison is boundary to boundary:
+  // the Datastore lives in a vessel, and a release onto any surface of that
+  // same vessel can reach it.
   //
   // `checkDeployable` runs `reachExclusions` only, deliberately (above), so
   // `placement.ts`'s `DATASTORE_IS_CLUSTER_LOCAL` — the same fact, asked where a
   // Target is *offered* — does not cover this path. Asked again here for the
   // reason the reach gate is: a boundary enforced only where a placement is
   // offered is advisory.
-  const elsewhere = attached.filter((row) => row.targetId !== target.id);
+  const elsewhere = attached.filter((row) => row.vesselId !== target.vesselId);
   if (elsewhere.length > 0) {
     return refuse(
       'NOT_DEPLOYABLE',
-      `${targetRowLabel(target)} cannot reach ${names(elsewhere)} — a Datastore is delivered only to the Target it lives on`,
+      `${targetRowLabel(target)} cannot reach ${names(elsewhere)} — a Datastore is delivered only into the vessel it lives in`,
     );
   }
 

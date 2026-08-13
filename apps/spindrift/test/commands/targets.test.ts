@@ -296,6 +296,45 @@ describe('the act is credential-shaped though the noun is flat', () => {
     expect(row?.authReaches).toEqual(['private']);
   });
 
+  test('a reconnect keeps the network the manifest seeded', async () => {
+    // `network` is a §20 boundary fact the connect screen never asks for: it
+    // arrives on the vessel from the installation manifest. A reconnect that
+    // rebuilt the location from its own input alone would null it silently —
+    // and with it the postgres/valkey capability the fact carries.
+    const { registry } = fakes();
+    const input = cloudInput({ vessel: 'vessel', project: 'p', region: 'r' });
+    await connectTarget(input, context(registry));
+
+    const db = database().db;
+    const [seeded] = await db
+      .select()
+      .from(vessels)
+      .where(eq(vessels.name, 'vessel'));
+    await db
+      .update(vessels)
+      .set({
+        location: {
+          kind: 'gcp-project',
+          project: 'p',
+          network: { name: 'spindrift-vessel', region: 'r' },
+        },
+      })
+      .where(eq(vessels.id, seeded!.id));
+
+    const again = await connectTarget(input, context(registry));
+    expect(again.ok).toBe(true);
+
+    const [after] = await db
+      .select()
+      .from(vessels)
+      .where(eq(vessels.id, seeded!.id));
+    expect(after?.location).toEqual({
+      kind: 'gcp-project',
+      project: 'p',
+      network: { name: 'spindrift-vessel', region: 'r' },
+    });
+  });
+
   test('connect fills a manifest-seeded Target without changing its rank', async () => {
     const { registry } = fakes();
     // The vessel a manifest seed already declared, by name — connect must

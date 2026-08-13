@@ -29,7 +29,11 @@ permissions:
 jobs:
   skiff:
     # The NixOS family's assertions; the Ubuntu family has its own job below.
-    if: ${{ !startsWith(inputs.label, 'skiff-ubuntu') }}
+    # Keyed on the NixOS family rather than on "not skiff-ubuntu": every other
+    # class boots the Ubuntu hull, and naming one of them something that does
+    # not start with `skiff-ubuntu` -- `skiff-offsite` did -- silently sent it
+    # here, to assertions about a /nix/store its guest does not have.
+    if: ${{ startsWith(inputs.label, 'skiff-nixos') }}
     runs-on: ${{ inputs.label }}
     timeout-minutes: 10
     steps:
@@ -64,7 +68,7 @@ jobs:
   # worth asserting is exactly that fidelity — plus the same docker and
   # identity guarantees every skiff makes.
   skiff-ubuntu:
-    if: ${{ startsWith(inputs.label, 'skiff-ubuntu') }}
+    if: ${{ !startsWith(inputs.label, 'skiff-nixos') }}
     runs-on: ${{ inputs.label }}
     timeout-minutes: 10
     steps:

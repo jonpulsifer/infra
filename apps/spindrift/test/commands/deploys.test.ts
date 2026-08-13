@@ -1646,10 +1646,10 @@ describe('§16: verify → sign → record is fail-closed', () => {
 });
 
 describe('§11: an attached Datastore is pinned into the intent', () => {
-  /** A managed Datastore on a Target, with or without a connection yet. */
+  /** A managed Datastore in a Vessel, with or without a connection yet. */
   async function attach(
     appId: string,
-    targetId: string,
+    vesselId: string,
     engine: 'postgres' | 'valkey',
     connectionRef: string | null,
   ) {
@@ -1660,7 +1660,7 @@ describe('§11: an attached Datastore is pinned into the intent', () => {
         engine,
         provenance: 'managed',
         appId,
-        targetId,
+        vesselId,
         connectionRef,
       })
       .returning();
@@ -1673,7 +1673,7 @@ describe('§11: an attached Datastore is pinned into the intent', () => {
     // was configured with missing — which is the state §10's config demand rule
     // exists to prevent, read for datastores.
     const { app, component, target } = await fixture();
-    await attach(app.id, target.id, 'postgres', null);
+    await attach(app.id, target.vesselId, 'postgres', null);
     const build = await succeededBuild(component.id, 80);
 
     const result = await createDeploy(
@@ -1690,7 +1690,7 @@ describe('§11: an attached Datastore is pinned into the intent', () => {
     expect(await desiredRow(component.id, target.id)).toBeUndefined();
   });
 
-  test('a Datastore on another Target refuses the release, and says which', async () => {
+  test('a Datastore in another Vessel refuses the release, and says which', async () => {
     // A `secretKeyRef` cannot leave the namespace it renders in, let alone the
     // cluster. Released anyway, the pod sits in CreateContainerConfigError and
     // the Deploy reports a timeout rather than the cause.
@@ -1710,7 +1710,7 @@ describe('§11: an attached Datastore is pinned into the intent', () => {
       .returning();
     await attach(
       app.id,
-      elsewhere!.id,
+      elsewhere!.vesselId,
       'postgres',
       'secret://spindrift-apps/postgres-store-app',
     );
@@ -1728,6 +1728,66 @@ describe('§11: an attached Datastore is pinned into the intent', () => {
     expect(result.failure.message).toContain('postgres-store');
   });
 
+  test('a Datastore is reachable from every surface of its vessel', async () => {
+    // The comparison above is boundary to boundary, and this is the case that
+    // proves it: a gcp-project vessel with two surfaces holds its Datastore
+    // once, and a release onto the *other* surface can still reach it. Keyed
+    // on a Target instead, this same release refuses — the drift §11's
+    // boundary reading exists to prevent.
+    const { app, component, target } = await fixture({
+      kind: 'website',
+      adapter: 'static',
+      reach: 'public',
+      auth: 'none',
+    });
+    // The vessel's second surface, where the engine actually runs. The
+    // Datastore lives on the vessel either way, so this row is scenery — but
+    // it is the scenery a surface-keyed comparison trips over.
+    await database()
+      .db.insert(targets)
+      .values(
+        targetValues({
+          adapter: 'cloudrun',
+          vesselId: target.vesselId,
+          discovery: null,
+        }),
+      );
+    await attach(
+      app.id,
+      target.vesselId,
+      'postgres',
+      'secret://spindrift-apps/postgres-store-app',
+    );
+    const deployAdapter = new FakeDeployAdapter({
+      adapter: 'static',
+      artifactTypes: ['files'],
+    });
+    const ctx = context(registryOf(deployAdapter));
+    const uploaded = await uploadArchive(
+      {
+        componentId: component.id,
+        targetId: target.id,
+        bundleDigest: digest(83),
+        location: 'https://depot.lolwtf.ca/bundles/shop/site.zip',
+        contents: 'artifact',
+        subpath: '.',
+      },
+      ctx,
+    );
+    expect(uploaded.ok).toBe(true);
+    if (!uploaded.ok) return;
+
+    const result = await createDeploy(
+      {
+        componentId: component.id,
+        targetId: target.id,
+        buildId: uploaded.value.buildId,
+      },
+      ctx,
+    );
+    expect(result.ok).toBe(true);
+  });
+
   test('the variable each engine is read through is fixed, and pinned resolved', async () => {
     // This is the assertion that fails if anyone renames the variables, makes
     // them settable, or routes a datastore back through `ConfigEntry` — which
@@ -1736,13 +1796,13 @@ describe('§11: an attached Datastore is pinned into the intent', () => {
     const { app, component, target } = await fixture();
     await attach(
       app.id,
-      target.id,
+      target.vesselId,
       'postgres',
       'secret://spindrift-apps/postgres-store-app',
     );
     await attach(
       app.id,
-      target.id,
+      target.vesselId,
       'valkey',
       'redis://valkey-store.spindrift-apps.svc.cluster.local:6379',
     );

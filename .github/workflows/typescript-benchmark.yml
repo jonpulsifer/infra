@@ -23,6 +23,8 @@ on:
           - infra-folly
           - skiff-ubuntu
           - skiff-ubuntu-bench
+          - skiff-offsite
+          - skiff-folly
           - ubuntu-latest
         default: all
       waves:

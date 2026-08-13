@@ -36,7 +36,7 @@ spec:
     # Renovate pins the digest on this line and Flux rolls it out. The image's
     # manifest schema and the chart must agree on which keys a declaration may
     # carry — the manifest below has to satisfy both.
-    image: ghcr.io/jonpulsifer/spindrift:latest@sha256:b312df17e25510bbc04024fc8a358c1ec5384e0f802a588d16da94eb11bae01c
+    image: ghcr.io/jonpulsifer/spindrift:latest@sha256:aebec96a97f1a25638c413d1f1c6b7ea8478ba2e63dedd93ae3655eee8f92747
     # Substituted by the apps Kustomization from the cluster-secrets Secret, so
     # the zone is read rather than restated. external-dns publishes the record
     # from the HTTPRoute and cert-manager issues the certificate, so this line
@@ -345,6 +345,16 @@ spec:
           kind: gcp-project
           location:
             project: bluenose
+            # The consumer side of a cloud Datastore's reachability: the
+            # vessel network the PSC service connection policies draw
+            # endpoints from, and the region they are in. Hand-carried from
+            # `tofu output vessel_network_block` in the root below, the same
+            # route supplyChain travels from trusted-builds. Absent would
+            # also be valid — it would say this vessel cannot host a
+            # Datastore.
+            network:
+              name: spindrift-vessel
+              region: northamerica-northeast1
           # The root that declares this project. It is what gives a generated
           # remediation somewhere to land: the stanza names
           # `<root>/services.tf` or `<root>/iam.tf` rather than a directory

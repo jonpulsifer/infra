@@ -92,6 +92,28 @@ export function surfacesToProbe(kind: VesselKind): readonly TargetAdapter[] {
 }
 
 /**
+ * The surface on a vessel of this kind that can host a database (§11).
+ *
+ * A Datastore is anchored to its vessel, but the adapter that provisions and
+ * observes it is still keyed by `TargetAdapter` — a Target has exactly one
+ * adapter type, and that reasoning holds (`adapters/datastore/contract.ts`).
+ * This two-row table beside the one above is the whole bridge: every consumer
+ * that must go from "the boundary a Datastore lives in" to "the Target row
+ * whose connection an adapter call needs" reads it here, so the mapping cannot
+ * drift between them.
+ *
+ * `Partial` because it is a fact that some vessel kinds host no database at
+ * all: an edge platform's account has nowhere to put a volume, and an absent
+ * entry is `createDatastore`'s refusal rather than a lookup error.
+ */
+export const DATASTORE_SURFACE_BY_VESSEL_KIND: Partial<
+  Record<VesselKind, TargetAdapter>
+> = {
+  cluster: 'kubernetes',
+  'gcp-project': 'cloudrun',
+};
+
+/**
  * What one vessel is to this installation, as opposed to what it is made of.
  *
  * The second axis of the prerequisite catalogue below. `kind` says what shape a
@@ -307,6 +329,34 @@ export interface GcpProjectLocation {
   kind: 'gcp-project';
   /** The project every surface on this vessel deploys into (§14). */
   project: string;
+  /**
+   * The network a Datastore on this vessel is reached over, when it has one.
+   *
+   * Absent is valid and is not an unmet prerequisite: a project serving only
+   * Cloud Run and Firebase Hosting needs no network at all — what absence
+   * means is that this vessel cannot host a Datastore, which is a capability
+   * (§20: "Capabilities are things a Target may lack, shown and explained").
+   *
+   * Seeded from the installation manifest like every other boundary fact
+   * (§20), never probed: which network a datastore belongs on is a choice the
+   * operator makes in Terraform, and a probe would guess it.
+   */
+  network?: GcpProjectNetwork;
+}
+
+/**
+ * The consumer side of a cloud Datastore's reachability, as two facts.
+ *
+ * **No subnet, deliberately.** The service connection policies Terraform
+ * creates name their subnets, and the producer draws endpoints from them;
+ * a subnet here would be a second place to state the same fact and the only
+ * place it could be wrong.
+ */
+export interface GcpProjectNetwork {
+  /** The consumer network a PSC endpoint is created in. */
+  name: string;
+  /** Where the service connection policies are, so where an instance can go. */
+  region: string;
 }
 
 export interface VercelTeamLocation {

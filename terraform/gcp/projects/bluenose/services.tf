@@ -28,10 +28,12 @@ locals {
     "iam.googleapis.com",
     "iamcredentials.googleapis.com",
     "iap.googleapis.com",
+    # The service connection policies in the vessel network module — the
+    # consumer half of PSC service connectivity automation.
+    "networkconnectivity.googleapis.com",
     "redis.googleapis.com",
     "run.googleapis.com",
     "secretmanager.googleapis.com",
-    "servicenetworking.googleapis.com",
     "serviceusage.googleapis.com",
     "sqladmin.googleapis.com",
     "storage.googleapis.com",

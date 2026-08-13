@@ -374,6 +374,35 @@ export interface DesiredState {
  *   name would take away the address somebody bookmarked. It is derived at apply
  *   time from the App's names, the Target's adapter, and the installation's
  *   zones, and that is correct.
+ *
+ * **What a rollback replays out of this document is a narrower question, and
+ * this is where it is answered.** Every field here is pinned, because an intent
+ * has to record what it placed. But `rollbackDeploy` composes a *new* intent,
+ * and the rule for that one is:
+ *
+ * > A rollback restores how yesterday's artifact **ran**. It never restores
+ * > where it **answered**, or who could reach it.
+ *
+ * - Replayed: `schedule`, `command`, `args`, `config`. These say how the
+ *   artifact runs, and bringing one back under today's entrypoint would run a
+ *   binary in a way it was never released — the same class of surprise §10
+ *   wrote `configVersion` to prevent, and worse, because an entrypoint decides
+ *   what the process is.
+ * - Not replayed: `expose`, `reach`, `auth`. These are the `hostname` argument
+ *   above, one layer down — `reach` decides whether an address exists and how
+ *   far it carries, `auth` decides who gets past it, `expose` decides whether
+ *   anything answers at all. An operator who made a Component private did that
+ *   to the Component, not to a release, and a rollback during an incident is
+ *   the worst moment to silently republish it. The failure is asymmetric too: a
+ *   rollback running the old entrypoint under today's reach is fixed by a
+ *   redeploy, and one that publishes a private Component is not.
+ * - Not replayed: `datastores`, which looks like a run field and is not. §11
+ *   makes attach and detach deliberate acts on a top-level noun, so replaying
+ *   an attachment would undo an unrelated decision — what `deliveringConfig`
+ *   already refuses to do. The pin still records what the release ran with.
+ *
+ * `app`, `component` and `target` are neither: a rollback is on the same three
+ * by construction.
  */
 export type DesiredDocument = Omit<
   DesiredState,

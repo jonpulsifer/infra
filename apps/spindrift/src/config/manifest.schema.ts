@@ -285,6 +285,22 @@ export const vesselSeedSchema = z.discriminatedUnion('kind', [
         .object({
           /** The project every surface on this vessel deploys into (§14). */
           project: nonEmptyString,
+          /**
+           * The network a Datastore on this vessel is reached over, when it
+           * has one — `GcpProjectNetwork` in `domain/vessel.ts`. Optional for
+           * the reason that type gives: a project serving only Cloud Run and
+           * Firebase Hosting needs none, and absence is a capability rather
+           * than an unmet prerequisite. The values are Terraform's
+           * `vessel-network` outputs, hand-carried here like every other
+           * installation fact (§20).
+           */
+          network: z
+            .object({
+              name: nonEmptyString,
+              region: nonEmptyString,
+            })
+            .strict()
+            .optional(),
         })
         .strict()
         .optional(),

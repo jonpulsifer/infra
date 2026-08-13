@@ -584,6 +584,16 @@ describe('an adopted App, from the installation Secret', () => {
     ).resolves.toStartWith('Bearer ');
   });
 
+  test('names its principal on a source receipt', async () => {
+    // The receipt is written after the tarball is already in hand, so reading
+    // the id from the row alone failed a staging fetch that had succeeded.
+    const { auth, fake } = await adoptedAgent();
+
+    await expect(
+      auth.principalSubject({ installationId: fake.installationId }),
+    ).resolves.toBe(`installation:${fake.installationId}/app:4576122`);
+  });
+
   test('takes precedence over a sealed row', async () => {
     const keyring = ring();
     const { pem } = await testAppKey();

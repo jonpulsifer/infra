@@ -17,11 +17,10 @@
  * - **A non-null entrypoint round-trips through `deploys.desired`.** The
  *   document is what `desiredStateFor` replays, so the pin is what an attempt
  *   actually applies, not the Component row.
- * - **The pin survives a later edit, and a rollback does not yet read it.**
- *   Both halves asserted, because 119 claims the second and core does not do
- *   it: `rollbackDeploy` restores `config` from history and composes the rest
- *   of the document from the Component as it is today. The last describe block
- *   states which one is true and where a fix would show up.
+ * - **The pin survives a later edit, and a rollback reads it.** Both halves
+ *   asserted. 119 claimed the second and core did not do it; 122 decided it
+ *   and this is the shape it settled on — a rollback restores how the artifact
+ *   ran, so the entrypoint comes back with it, while reach and auth do not.
  */
 import { describe, expect, test } from 'bun:test';
 import { desc, eq } from 'drizzle-orm';
@@ -500,27 +499,25 @@ describe('the entrypoint round-trips through the pinned document', () => {
 
 describe('a rollback and the entrypoint the older release ran with', () => {
   /**
-   * **What the pin guarantees, and what it does not.**
+   * **The pin, and the rollback that now reads it.**
    *
-   * 119 says a rollback "restores the entrypoint that release ran with", on the
-   * grounds that `DesiredDocument` pins it. The pin is real and this test
-   * asserts it: the older Deploy row still names the entrypoint it shipped, and
-   * `desiredStateFor` replays that document rather than re-reading `components`
-   * — so re-running that intent applies the old entrypoint, forever.
+   * 119 claimed a rollback "restores the entrypoint that release ran with" and
+   * core did not do it: `rollbackDeploy` overrode exactly one field from
+   * history, `config`. This test recorded that gap rather than papering over
+   * it, and said a future change should make it go red here. 122 is that
+   * change.
    *
-   * What a rollback does is a different act. `rollbackDeploy` writes a **new**
-   * intent through the ordinary `checkDeployable` path and overrides exactly one
-   * field of it from history — `config`, because §10 states that claim
-   * explicitly (`src/commands/deploys/rollback.ts:57-71`). Everything else in
-   * the new document is composed from the Component as it is today, which is
-   * equally true of `reach`, `auth`, `expose` and `schedule`.
+   * An entrypoint is how the artifact **runs**, so it replays — bringing a
+   * binary back under an entrypoint it was never released with runs a different
+   * process wearing the old digest. `reach`, `auth` and `expose` do not replay,
+   * because they say where it **answers**, and a rollback during an incident
+   * must not republish something an operator made private.
    *
-   * So the honest statement is that the entrypoint is pinned per release and a
-   * rollback does not yet read the pin. Both halves are asserted below, because
-   * the second is the one a future change would flip and this is where it
-   * should go red when somebody makes rollback replay the whole document.
+   * Both halves are still asserted: the older row still names what it shipped
+   * (nothing rewrote history), and the new intent the rollback wrote carries
+   * that entrypoint forward.
    */
-  test('the older release keeps its entrypoint; the rollback places today’s', async () => {
+  test('the older release keeps its entrypoint, and the rollback runs it', async () => {
     const { app, target } = await fixture();
     const worker = await component(app.id, 'worker', {
       command: ['/app/bin/worker'],
@@ -552,17 +549,125 @@ describe('a rollback and the entrypoint the older release ran with', () => {
       .where(eq(deploys.componentId, worker.id))
       .orderBy(deploys.id);
     // The pin: the release that ran `/app/bin/worker` still says so, and no
-    // later edit rewrote it.
+    // later edit rewrote it. The third row is the rollback's own new intent,
+    // which carries that entrypoint rather than the Component's current one.
     expect(rows.map(({ desired }) => desired.command)).toEqual([
       ['/app/bin/worker'],
       ['/app/bin/worker-v2'],
-      ['/app/bin/worker-v2'],
+      ['/app/bin/worker'],
     ]);
-    // The gap: the rollback carried the older Build's config forward from
-    // history but composed its entrypoint from the Component. Change
-    // `rollbackDeploy` to replay the pinned document and this expectation is
-    // what says so.
+    // And it is what actually reached the adapter: the older Build, running
+    // the way it ran.
     expect(rows[2]?.buildId).toBe(older.id);
-    expect(adapter.applied[2]?.desired.command).toEqual(['/app/bin/worker-v2']);
+    expect(adapter.applied[2]?.desired.command).toEqual(['/app/bin/worker']);
+  });
+
+  /**
+   * The entrypoint is not alone on its side of 122's line.
+   *
+   * A schedule says how the artifact runs — a nightly job brought back on
+   * whatever cadence the Component carries today is running on a clock it was
+   * never released with. It replays for the same reason `command` does, and
+   * this asserts they moved together rather than one field at a time, which is
+   * what 122 refused to accept.
+   *
+   * The other side of the line — that `reach` does *not* come back — is
+   * asserted in `component-reach.test.ts`, where the Target is set up to serve
+   * a public reach in the first place.
+   */
+  test('a rollback restores the cadence the release ran on', async () => {
+    const { app, target } = await fixture();
+    const nightly = await component(app.id, 'nightly');
+    await database()
+      .db.update(components)
+      .set({ kind: 'job', schedule: '0 3 * * *' })
+      .where(eq(components.id, nightly.id));
+
+    const adapter = new FakeDeployAdapter({ adapter: 'kubernetes' });
+    const adapters = registryOf(adapter);
+    const older = await build(nightly.id, 'abcdef0');
+    const newer = await build(nightly.id, 'bcdef01');
+
+    await ship(adapters, adapter, nightly.id, target.id, older.id);
+    // Edited between the two releases, so today's Component disagrees with the
+    // pinned document.
+    await database()
+      .db.update(components)
+      .set({ schedule: '0 5 * * *' })
+      .where(eq(components.id, nightly.id));
+    await ship(adapters, adapter, nightly.id, target.id, newer.id);
+
+    const rolled = await rollbackDeploy(
+      { componentId: nightly.id, targetId: target.id, buildId: older.id },
+      context(adapters),
+    );
+    expect(rolled.ok).toBe(true);
+    if (!rolled.ok) return;
+
+    const [placed] = await database()
+      .db.select()
+      .from(deploys)
+      .where(eq(deploys.componentId, nightly.id))
+      .orderBy(desc(deploys.id))
+      .limit(1);
+
+    expect(placed?.desired.schedule).toBe('0 3 * * *');
+  });
+
+  /**
+   * The other side of 122's line, and the one that protects an operator.
+   *
+   * `reach` says where the artifact answers, not how it runs, so a rollback
+   * leaves it as the Component has it today. The scenario is the one that makes
+   * the rule worth having: something was published, it went wrong, somebody
+   * pulled it off the public internet, and *then* the bad release is rolled
+   * back. Replaying the pinned reach would republish it — during an incident,
+   * as a side effect of an unrelated act.
+   */
+  test('a rollback does not put back a reach somebody withdrew', async () => {
+    const { app, target } = await fixture();
+    // The Target has to be able to serve a public reach for one to be placed;
+    // `fixture` leaves discovery unset, which makes every Component private.
+    await database()
+      .db.update(targets)
+      .set({ reaches: ['none', 'private', 'public'] })
+      .where(eq(targets.id, target.id));
+    const web = await component(app.id, 'web');
+    await database()
+      .db.update(components)
+      .set({ reach: 'public' })
+      .where(eq(components.id, web.id));
+
+    const adapter = new FakeDeployAdapter({ adapter: 'kubernetes' });
+    const adapters = registryOf(adapter);
+    const older = await build(web.id, 'abcdef0');
+    const newer = await build(web.id, 'bcdef01');
+
+    await ship(adapters, adapter, web.id, target.id, older.id);
+    // Taken down off the public internet, deliberately, between the releases.
+    await database()
+      .db.update(components)
+      .set({ reach: 'none' })
+      .where(eq(components.id, web.id));
+    await ship(adapters, adapter, web.id, target.id, newer.id);
+
+    const rolled = await rollbackDeploy(
+      { componentId: web.id, targetId: target.id, buildId: older.id },
+      context(adapters),
+    );
+    expect(rolled.ok).toBe(true);
+    if (!rolled.ok) return;
+
+    const [placed] = await database()
+      .db.select()
+      .from(deploys)
+      .where(eq(deploys.componentId, web.id))
+      .orderBy(desc(deploys.id))
+      .limit(1);
+
+    // The older release was public and the row still says so; the rollback's
+    // own intent is not.
+    expect(placed?.buildId).toBe(older.id);
+    expect(placed?.desired.reach).toBe('none');
   });
 });

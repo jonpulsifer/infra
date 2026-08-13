@@ -60,6 +60,11 @@ export async function runDatastorePass(
   //
   // ponytail: unsettled rows only — no drift re-observe of a LIVE datastore.
   // Add a slow second cadence if a dropped Cluster object needs noticing.
+  // The Datastore anchors to its vessel; the surface an `observe` addresses
+  // is derived from the vessel's kind. The join condition is the SQL spelling
+  // of `DATASTORE_SURFACE_BY_VESSEL_KIND`'s two rows — one batched query
+  // rather than the point lookup per row, because a pass over many datastores
+  // must not be many queries.
   const rows = await context.db
     .select({
       id: datastores.id,
@@ -69,8 +74,17 @@ export async function runDatastorePass(
       vessel: vessels,
     })
     .from(datastores)
-    .innerJoin(targets, eq(datastores.targetId, targets.id))
-    .innerJoin(vessels, eq(targets.vesselId, vessels.id))
+    .innerJoin(vessels, eq(datastores.vesselId, vessels.id))
+    .innerJoin(
+      targets,
+      and(
+        eq(targets.vesselId, vessels.id),
+        or(
+          and(eq(vessels.kind, 'cluster'), eq(targets.adapter, 'kubernetes')),
+          and(eq(vessels.kind, 'gcp-project'), eq(targets.adapter, 'cloudrun')),
+        ),
+      ),
+    )
     .where(
       and(
         eq(datastores.provenance, 'managed'),

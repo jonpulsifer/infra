@@ -314,8 +314,15 @@ describe('a Component edited mid-attempt does not change what is being placed', 
       `shop-web.${zoneFor('public', manifest.dns.zones)}`,
     );
 
-    // And the pin is on the row, so a rollback to the first release comes back
-    // up as private rather than as whatever the Component says today.
+    // And the pin is on the row: each Deploy records the reach it was placed
+    // with, so the history says what was published when.
+    //
+    // It does **not** mean a rollback republishes it. `DesiredDocument` states
+    // the rule — a rollback restores how the artifact ran, never where it
+    // answered — so `reach` and `auth` come from the Component as it is today.
+    // Restoring an older reach would be a rollback quietly re-exposing a
+    // Component somebody made private, during an incident. What this asserts is
+    // the record, not a replay.
     const rows = await database()
       .db.select()
       .from(deploys)

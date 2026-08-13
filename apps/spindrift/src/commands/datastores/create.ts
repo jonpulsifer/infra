@@ -1,16 +1,24 @@
 /**
- * `createDatastore` — provision a managed Datastore on a Target (§11).
+ * `createDatastore` — provision a managed Datastore in a Vessel (§11).
  *
  * The caller of `DatastoreAdapter.provision`, which until now had none: the
  * contract, both backends and the capability discovery were all complete and
  * nothing ever asked them for a database.
  *
+ * **The input is the boundary, not a surface on it.** What a database lives in
+ * is the vessel — the project and its VPC, the cluster — and the surface the
+ * adapter drives is derivable: a vessel's kind maps to the one surface that
+ * can host a database, and `(vessel_id, adapter)` resolves the Target row
+ * whose connection the adapter call needs. Every check below still runs
+ * against that resolved Target, exactly as it did when the Target was the
+ * input.
+ *
  * **The row is inserted before the adapter is called**, which is the one
  * ordering decision in this file. Every other create-then-call command in this
  * layer does it the other way round — `unplaceComponent` calls `destroy`
  * first so a refusal leaves nothing to unwind — and the reason this one is
- * inverted is the unique key on (target_id, name). Two Datastores of one name
- * on one Target are one object on the far side: the adapter names what it
+ * inverted is the unique key on (vessel_id, name). Two Datastores of one name
+ * in one vessel are one object on the far side: the adapter names what it
  * provisions after the Datastore, so a server-side apply of the second adopts
  * the first, and a later destroy of either takes the other's storage. Only the
  * database can decide that race. Inserting first makes a colliding name a
@@ -38,18 +46,19 @@ import type { DatastoreEngine } from '../../adapters/datastore/contract.ts';
 import { datastores } from '../../db/schema.ts';
 import { capabilitiesOfRow } from '../../domain/capabilities.ts';
 import {
+  datastoreVesselLabel,
   deployTargetOf,
   hasTargetConnection,
   hasVesselLocation,
-  targetRowLabel,
 } from '../../domain/target.ts';
 import { type Command, failed, ok } from '../types.ts';
+import { datastoreSurfaceTargetOf } from './vessel-surface.ts';
 
 export const createDatastoreInput = z
   .object({
     name: z.string().min(1),
     engine: z.enum(['postgres', 'valkey']),
-    targetId: z.uuid(),
+    vesselId: z.uuid(),
     /**
      * Reachable over the API and absent from every screen, deliberately. §11
      * gives a Datastore no size control, and a form field for one would be a
@@ -65,7 +74,7 @@ export interface CreateDatastoreResult {
   readonly id: string;
   readonly name: string;
   readonly engine: DatastoreEngine;
-  readonly targetId: string;
+  readonly vesselId: string;
   /** The adapter's handle, which the reconcile loop polls from here on. */
   readonly ref: string;
 }
@@ -74,18 +83,29 @@ export const createDatastore: Command<
   CreateDatastoreInput,
   CreateDatastoreResult
 > = async (input, context) => {
-  const target = await context.db.query.targets.findFirst({
-    where: (targets, { eq }) => eq(targets.id, input.targetId),
-    with: { vessel: true },
+  const vessel = await context.db.query.vessels.findFirst({
+    where: (vessels, { eq }) => eq(vessels.id, input.vesselId),
   });
-  if (target === undefined) {
-    return failed('NOT_FOUND', `there is no Target with id ${input.targetId}`);
+  if (vessel === undefined) {
+    return failed('NOT_FOUND', `there is no Vessel with id ${input.vesselId}`);
   }
 
-  if (!hasTargetConnection(target) || !hasVesselLocation(target.vessel)) {
+  // The boundary's hosting surface, because the adapter call still needs a
+  // Target: its connection is how the surface is addressed. Absent for a
+  // vessel kind that never hosts a database, and for one whose hosting
+  // surface was never probed into existence — both are the same refusal.
+  const target = await datastoreSurfaceTargetOf(context.db, vessel);
+  if (target === undefined) {
     return failed(
       'NOT_DEPLOYABLE',
-      `${targetRowLabel(target)} is not connected, so nothing can be provisioned there`,
+      `${vessel.name} has no surface Spindrift can host a Datastore on`,
+    );
+  }
+
+  if (!hasTargetConnection(target) || !hasVesselLocation(vessel)) {
+    return failed(
+      'NOT_DEPLOYABLE',
+      `${datastoreVesselLabel(vessel)} is not connected, so nothing can be provisioned there`,
     );
   }
 
@@ -104,7 +124,7 @@ export const createDatastore: Command<
   if (!served) {
     return failed(
       'NOT_DEPLOYABLE',
-      `${targetRowLabel(target)} does not serve ${input.engine}`,
+      `${datastoreVesselLabel(vessel)} does not serve ${input.engine}`,
     );
   }
 
@@ -128,7 +148,7 @@ export const createDatastore: Command<
         name: input.name,
         engine: input.engine,
         provenance: 'managed',
-        targetId: target.id,
+        vesselId: vessel.id,
         phase: 'PENDING',
         ref: null,
         createdAt: now,
@@ -142,7 +162,7 @@ export const createDatastore: Command<
     // constraint name.
     return failed(
       'NOT_DEPLOYABLE',
-      `${targetRowLabel(target)} already has a Datastore called '${input.name}'`,
+      `${datastoreVesselLabel(vessel)} already has a Datastore called '${input.name}'`,
     );
   }
   const id = inserted[0]?.id;
@@ -155,7 +175,7 @@ export const createDatastore: Command<
 
   let ref: string;
   try {
-    ref = await adapter.provision(deployTargetOf(target, target.vessel), {
+    ref = await adapter.provision(deployTargetOf(target, vessel), {
       name: input.name,
       engine: input.engine,
       storageGiB: input.storageGiB,
@@ -180,7 +200,7 @@ export const createDatastore: Command<
     id,
     name: input.name,
     engine: input.engine,
-    targetId: target.id,
+    vesselId: vessel.id,
     ref,
   });
 };

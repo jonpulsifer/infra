@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -388,7 +389,7 @@ func TestSpawnRefusesDuringDrain(t *testing.T) {
 		return p.draining
 	})
 
-	p.spawn(ctx, "skiff-test") // the racing refill
+	p.spawn(ctx, p.runnerBerth("skiff-test")) // the racing refill
 	gh.mu.Lock()
 	mints := len(gh.generated)
 	gh.mu.Unlock()
@@ -803,9 +804,9 @@ func TestSpawnBuildBootsSkiffWithRequestJSONAndNoJITConfig(t *testing.T) {
 	ctx := context.Background()
 	claim := &buildClaim{ID: "build-1", Class: "skiff-test", Request: json.RawMessage(`{"repo":"acme/widgets"}`)}
 
-	s, err := p.spawnBuild(ctx, claim)
+	s, err := p.spawn(ctx, p.buildBerth(claim))
 	if err != nil || s == nil {
-		t.Fatalf("spawnBuild: %v", err)
+		t.Fatalf("spawn: %v", err)
 	}
 	if !s.build || s.buildID != "build-1" {
 		t.Fatalf("skiff not marked as a build skiff: %+v", s)
@@ -848,7 +849,7 @@ func TestBuildSkiffExitPostsResultFromDiagFiles(t *testing.T) {
 
 	done := make(chan struct{})
 	go func() {
-		p.runBuild(ctx, sd, claim)
+		poolBuildSource(p, sd).runBuild(ctx, claim)
 		close(done)
 	}()
 
@@ -895,7 +896,7 @@ func TestBuildSkiffExitWithNoResultFilesPostsFailed(t *testing.T) {
 
 	done := make(chan struct{})
 	go func() {
-		p.runBuild(ctx, sd, claim)
+		poolBuildSource(p, sd).runBuild(ctx, claim)
 		close(done)
 	}()
 
@@ -926,7 +927,7 @@ func TestBuildSkiffExitDoesNotRefillTheClass(t *testing.T) {
 	claim := &buildClaim{ID: "build-3", Class: "skiff-test", Request: json.RawMessage(`{}`)}
 	sd := &fakeSpindrift{}
 
-	go p.runBuild(ctx, sd, claim)
+	go poolBuildSource(p, sd).runBuild(ctx, claim)
 	waitFor(t, "cloud-hypervisor launched for the build skiff", func() bool {
 		_, ok := fl.last("cloud-hypervisor")
 		return ok
@@ -956,9 +957,9 @@ func TestDrainDoesNotScuttleAnInFlightBuildSkiffViaScuttleIdle(t *testing.T) {
 	ctx := context.Background()
 	claim := &buildClaim{ID: "build-4", Class: "skiff-test", Request: json.RawMessage(`{}`)}
 
-	s, err := p.spawnBuild(ctx, claim)
+	s, err := p.spawn(ctx, p.buildBerth(claim))
 	if err != nil || s == nil {
-		t.Fatalf("spawnBuild: %v", err)
+		t.Fatalf("spawn: %v", err)
 	}
 
 	p.scuttleIdle(context.Background())
@@ -987,9 +988,9 @@ func TestBuildSkiffIsReapedByMaxLifetime(t *testing.T) {
 	ctx := context.Background()
 	claim := &buildClaim{ID: "build-5", Class: "skiff-test", Request: json.RawMessage(`{}`)}
 
-	s, err := p.spawnBuild(ctx, claim)
+	s, err := p.spawn(ctx, p.buildBerth(claim))
 	if err != nil || s == nil {
-		t.Fatalf("spawnBuild: %v", err)
+		t.Fatalf("spawn: %v", err)
 	}
 	time.Sleep(5 * time.Millisecond)
 
@@ -1000,7 +1001,150 @@ func TestBuildSkiffIsReapedByMaxLifetime(t *testing.T) {
 	}
 }
 
-// A claim that lands just as a stop begins is refused by spawnBuild -- and
+// fakeClock drives the pool's now seam. Guarded because a skiff's own
+// awaitExit goroutine reads it while the test advances it.
+type fakeClock struct {
+	mu sync.Mutex
+	t  time.Time
+}
+
+func (c *fakeClock) now() time.Time {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.t
+}
+
+func (c *fakeClock) advance(d time.Duration) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.t = c.t.Add(d)
+}
+
+// TestSkiffVerdict is the reaper at the constants the daemon ships with --
+// jitExpiry and a class maxLifetime of an hour, wedgeThreshold of 3 -- rather
+// than at the millisecond budgets the pool-level tests have to use to stay
+// fast. Each case feeds the skiff its GitHub readings through observe, the
+// way pollSkiff does, and then asks for the verdict some time later.
+func TestSkiffVerdict(t *testing.T) {
+	const maxLifetime = time.Hour
+	minted := time.Date(2026, 8, 13, 12, 0, 0, 0, time.UTC)
+
+	type reading struct {
+		status string
+		busy   bool
+	}
+	offline := func(n int, busy bool) []reading {
+		out := make([]reading, 0, n)
+		for i := 0; i < n; i++ {
+			out = append(out, reading{"offline", busy})
+		}
+		return out
+	}
+
+	tests := []struct {
+		name     string
+		readings []reading
+		after    time.Duration // when the verdict is taken, measured from the mint
+		want     string
+	}{
+		{
+			name:     "an offline streak short of the threshold is a network hiccup",
+			readings: append([]reading{{"online", false}}, offline(wedgeThreshold-1, false)...),
+			after:    time.Minute,
+			want:     "",
+		},
+		{
+			name:     "offline at the threshold, idle, after having been online, is wedged",
+			readings: append([]reading{{"online", false}}, offline(wedgeThreshold, false)...),
+			after:    time.Minute,
+			want:     exitWedged,
+		},
+		{
+			// The same signal on a running job cannot be told from a job whose
+			// runner is merely quiet, so the wedge rule spares it.
+			name:     "the same signal on a busy skiff is spared",
+			readings: append([]reading{{"online", true}}, offline(wedgeThreshold*3, true)...),
+			after:    time.Minute,
+			want:     "",
+		},
+		{
+			name:     "busy past maxLifetime is over budget",
+			readings: []reading{{"online", true}},
+			after:    maxLifetime + time.Minute,
+			want:     exitLifetime,
+		},
+		{
+			name:     "idle past jitExpiry, never online, is holding a dead credential",
+			readings: nil,
+			after:    jitExpiry + time.Minute,
+			want:     exitJITExpired,
+		},
+		{
+			name:     "never online but still inside jitExpiry is just warm",
+			readings: nil,
+			after:    jitExpiry - time.Minute,
+			want:     "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := &skiff{mintedAt: minted}
+			for _, r := range tt.readings {
+				s.observe(minted, r.status, r.busy)
+			}
+			if got := s.verdict(minted.Add(tt.after), maxLifetime); got != tt.want {
+				t.Fatalf("verdict = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+// A class missing from the config yields a zero budget from pool.maxLifetime,
+// and zero must not read as "expired the instant it went busy" — a class going
+// missing under a running skiff would then kill the job it is in the middle of.
+func TestAZeroBudgetNeverReaps(t *testing.T) {
+	minted := time.Date(2026, 8, 13, 12, 0, 0, 0, time.UTC)
+	s := &skiff{mintedAt: minted}
+	s.observe(minted, "online", true)
+	if got := s.verdict(minted.Add(72*time.Hour), 0); got != "" {
+		t.Fatalf("verdict = %q, want %q: an absent class has no budget to exceed", got, "")
+	}
+}
+
+// The budget the daemon actually ships with, driven through the poll loop:
+// the clock is the pool's, so an hour of a job passes without the test
+// waiting for one or the class having to declare a millisecond budget.
+func TestPollSkiffReapsAtTheShippedLifetime(t *testing.T) {
+	p, gh, _ := testPool(t)
+	clock := &fakeClock{t: time.Date(2026, 8, 13, 12, 0, 0, 0, time.UTC)}
+	p.now = clock.now
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	p.fill(ctx)
+	first := onlySkiff(t, p)
+	if got := p.maxLifetime(first.class); got != time.Hour {
+		t.Fatalf("test class budget is %s, want the shipped hour", got)
+	}
+
+	gh.setStatus(first.runnerID, "online", true)
+	p.pollOnce(ctx) // the job starts; the budget runs from here
+
+	clock.advance(59 * time.Minute)
+	p.pollOnce(ctx)
+	if r := first.reason(); r != "" {
+		t.Fatalf("a skiff inside its budget was condemned: %q", r)
+	}
+
+	clock.advance(2 * time.Minute)
+	p.pollOnce(ctx)
+	if r := first.reason(); r != exitLifetime {
+		t.Fatalf("reason = %q, want %q", r, exitLifetime)
+	}
+}
+
+// A claim that lands just as a stop begins is refused by spawn -- and
 // runBuild must post nothing for it: the build was never attempted, so
 // staying silent lets Spindrift's lease expire and another host claim the
 // request, where a FAILED post would close the build permanently.
@@ -1014,7 +1158,7 @@ func TestDrainRefusedClaimPostsNoResult(t *testing.T) {
 	p.draining = true
 	p.mu.Unlock()
 
-	p.runBuild(ctx, sd, claim)
+	poolBuildSource(p, sd).runBuild(ctx, claim)
 
 	if results := sd.postedResults(); len(results) != 0 {
 		t.Fatalf("drain-refused claim posted a result: %+v", results)

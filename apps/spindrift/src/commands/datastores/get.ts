@@ -21,16 +21,17 @@
  * facts — rather than as this command's refusal.
  */
 import { z } from 'zod';
-import type { Datastore, Target, Vessel } from '../../db/schema.ts';
+import type { Datastore, Vessel } from '../../db/schema.ts';
 import { elapsedSince } from '../../domain/elapsed.ts';
 import {
+  datastoreVesselLabel,
   deployTargetOf,
   hasTargetConnection,
   hasVesselLocation,
-  targetRowLabel,
 } from '../../domain/target.ts';
 import type { DatastoreDetailView } from '../../web/model.ts';
 import { type Command, type CommandContext, failed, ok } from '../types.ts';
+import { datastoreSurfaceTargetOf } from './vessel-surface.ts';
 
 export const getDatastoreInput = z
   .object({
@@ -50,7 +51,7 @@ export const getDatastore: Command<
 > = async (input, context) => {
   const row = await context.db.query.datastores.findFirst({
     where: (datastores, { eq }) => eq(datastores.id, input.datastoreId),
-    with: { app: true, target: { with: { vessel: true } } },
+    with: { app: true, vessel: true },
   });
   if (row === undefined) {
     return failed(
@@ -70,8 +71,8 @@ export const getDatastore: Command<
       engine: row.engine,
       provenance: row.provenance,
       attachedTo: row.app === null ? null : row.app.name,
-      target: targetRowLabel(row.target),
-      targetId: row.targetId,
+      target: datastoreVesselLabel(row.vessel),
+      vesselId: row.vesselId,
       appId: row.appId,
       phase: row.phase,
       provisioned: row.ref !== null,
@@ -95,12 +96,16 @@ type Described = Pick<DatastoreDetailView, 'object' | 'objectError'>;
  * all. Only a call that threw produces `objectError`.
  */
 async function describeDatastore(
-  row: Datastore & { readonly target: Target & { readonly vessel: Vessel } },
+  row: Datastore & { readonly vessel: Vessel },
   context: CommandContext,
 ): Promise<Described> {
   if (row.ref === null) return { object: null };
-  const target = row.target;
-  if (!hasTargetConnection(target) || !hasVesselLocation(target.vessel)) {
+  // The boundary holds the Datastore; the surface is what an adapter call is
+  // addressed through. One hop, the same one `listDatastores` and
+  // `destroyDatastore` make.
+  const target = await datastoreSurfaceTargetOf(context.db, row.vessel);
+  if (target === undefined) return { object: null };
+  if (!hasTargetConnection(target) || !hasVesselLocation(row.vessel)) {
     return { object: null };
   }
 
@@ -109,7 +114,7 @@ async function describeDatastore(
 
   try {
     const object = await adapter.describe(
-      deployTargetOf(target, target.vessel),
+      deployTargetOf(target, row.vessel),
       row.ref,
     );
     if (object === null || object === undefined) return { object: null };

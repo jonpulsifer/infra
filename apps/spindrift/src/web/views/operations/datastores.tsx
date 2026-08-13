@@ -9,7 +9,7 @@
  * gets: one ledger, independent of which App a reader opened first.
  *
  * **Create lives here; attach does not.** `createDatastore` takes a name, an
- * engine and a Target, and no App — storage exists before anything reads it,
+ * engine and a Vessel, and no App — storage exists before anything reads it,
  * which is the whole of what "top-level, not a field" means — so the only
  * picker this form needs is the one `listDatastores` sends with the rows.
  * `attachDatastore` genuinely does bind to an App, and a global ledger has
@@ -33,7 +33,7 @@ import {
   DefinitionGrid,
   LedgerExplorer,
 } from '../../components/object-explorer.tsx';
-import type { DatastoreListItem, DatastoreTargetOption } from '../../model.ts';
+import type { DatastoreListItem, DatastoreVesselOption } from '../../model.ts';
 import { Badge } from '../../ui/badge.tsx';
 import { Button } from '../../ui/button.tsx';
 import { Eyebrow } from '../../ui/card.tsx';
@@ -63,14 +63,14 @@ export type DatastoreAct = (
  *
  * Three fields and no App, which is `createDatastore`'s own input minus the
  * size it defaults — the workspace's `CreateDatastore` is this shape with the
- * Target implied by the App that screen already has open, and the two stay
- * separate rather than one shared alias because the implied Target is exactly
+ * Vessel implied by the App that screen already has open, and the two stay
+ * separate rather than one shared alias because the implied Vessel is exactly
  * the difference.
  */
 export type CreateLedgerDatastore = (create: {
   readonly name: string;
   readonly engine: 'postgres' | 'valkey';
-  readonly targetId: string;
+  readonly vesselId: string;
 }) => Promise<
   { readonly ok: true } | { readonly ok: false; readonly message: string }
 >;
@@ -105,7 +105,7 @@ const COLUMNS: readonly Column<DatastoreListItem>[] = [
   },
   {
     id: 'target',
-    header: 'Target',
+    header: 'Vessel',
     sortable: true,
     sortValue: (datastore) => datastore.target,
     cell: (datastore) => datastore.target,
@@ -247,14 +247,14 @@ function Select({
 }
 
 /**
- * Creating one managed Datastore — a name, a Target and an engine.
+ * Creating one managed Datastore — a name, a Vessel and an engine.
  *
- * **The engine list is the selected Target's, not the two the schema accepts.**
+ * **The engine list is the selected Vessel's, not the two the schema accepts.**
  * §3 makes Postgres and Valkey independent capabilities, so a cluster that
  * serves one and not the other is ordinary; offering both everywhere would put
- * a choice on screen whose only outcome on half the Targets is core's "does not
+ * a choice on screen whose only outcome on half the Vessels is core's "does not
  * serve" refusal. It is derived from the selection rather than corrected by an
- * effect, so switching Target can never leave a stale engine selected for the
+ * effect, so switching Vessel can never leave a stale engine selected for the
  * length of a render.
  *
  * No size field, the same decision `NewDatastoreForm` makes on the workspace:
@@ -262,16 +262,16 @@ function Select({
  * day one for a number a resize command would own.
  */
 function NewDatastoreForm({
-  targets,
+  vessels,
   onCreate,
   onDone,
 }: {
-  readonly targets: readonly DatastoreTargetOption[];
+  readonly vessels: readonly DatastoreVesselOption[];
   readonly onCreate: CreateLedgerDatastore;
   readonly onDone: () => void;
 }) {
   const [name, setName] = useState('');
-  const [targetId, setTargetId] = useState(targets[0]?.targetId ?? '');
+  const [vesselId, setVesselId] = useState(vessels[0]?.vesselId ?? '');
   const [chosenEngine, setChosenEngine] = useState<'postgres' | 'valkey'>(
     'postgres',
   );
@@ -282,19 +282,19 @@ function NewDatastoreForm({
     | null
   >(null);
 
-  const target = targets.find((row) => row.targetId === targetId) ?? targets[0];
-  const engines = target?.engines ?? [];
+  const vessel = vessels.find((row) => row.vesselId === vesselId) ?? vessels[0];
+  const engines = vessel?.engines ?? [];
   const engine = engines.includes(chosenEngine) ? chosenEngine : engines[0];
 
   const save = async () => {
-    if (target === undefined || engine === undefined) return;
+    if (vessel === undefined || engine === undefined) return;
     setSaving(true);
     setOutcome(null);
     try {
       const result = await onCreate({
         name: name.trim(),
         engine,
-        targetId: target.targetId,
+        vesselId: vessel.vesselId,
       });
       if (result.ok) {
         setOutcome({ kind: 'created' });
@@ -317,16 +317,16 @@ function NewDatastoreForm({
           onChange={(event) => setName(event.target.value)}
           placeholder="primary"
         />
-        <Field name="datastore-target" label="Target">
+        <Field name="datastore-vessel" label="Vessel">
           <Select
-            id="datastore-target"
-            value={target?.targetId ?? ''}
+            id="datastore-vessel"
+            value={vessel?.vesselId ?? ''}
             disabled={saving}
-            options={targets.map((row) => ({
-              value: row.targetId,
+            options={vessels.map((row) => ({
+              value: row.vesselId,
               label: row.label,
             }))}
-            onChange={setTargetId}
+            onChange={setVesselId}
           />
         </Field>
         <Field
@@ -384,32 +384,33 @@ function NewDatastoreForm({
 
 export function DatastoreLedger({
   datastores,
-  targets,
+  vessels,
   onNavigate,
   onCreate,
   onDetach,
   onDestroy,
 }: {
   readonly datastores: readonly DatastoreListItem[];
-  readonly targets: readonly DatastoreTargetOption[];
+  readonly vessels: readonly DatastoreVesselOption[];
   readonly onNavigate: (path: string) => void;
   readonly onCreate: CreateLedgerDatastore;
   readonly onDetach: DatastoreAct;
   readonly onDestroy: DatastoreAct;
 }) {
   const [adding, setAdding] = useState(false);
-  // No Target serves an engine, so there is nothing a form here could be
+  // No Vessel serves an engine, so there is nothing a form here could be
   // pointed at. The button is withheld rather than shown and refused: the
-  // sentence below already says what is missing, and it is a Target-connection
-  // fact, not something a retry of this form fixes.
-  const canCreate = targets.length > 0;
+  // sentence below already says what is missing, and it is a connection fact
+  // about the boundary's hosting surface, not something a retry of this form
+  // fixes.
+  const canCreate = vessels.length > 0;
 
   return (
     <Page>
       <PageHeader
         eyebrow="Attached resources"
         title="Datastores"
-        description="Every Postgres and Valkey Datastore this installation holds, attached or not. Create one here against any Target that serves the engine; attaching it to an App stays on that App's workspace."
+        description="Every Postgres and Valkey Datastore this installation holds, attached or not. Create one here in any Vessel that serves the engine; attaching it to an App stays on that App's workspace."
         {...(canCreate
           ? {
               actions: (
@@ -425,7 +426,7 @@ export function DatastoreLedger({
       />
       {canCreate && adding ? (
         <NewDatastoreForm
-          targets={targets}
+          vessels={vessels}
           onCreate={onCreate}
           onDone={() => setAdding(false)}
         />
@@ -443,8 +444,8 @@ export function DatastoreLedger({
         empty={
           <EmptyState icon={<Database />} title="No Datastores exist yet.">
             {canCreate
-              ? 'Create one against any Target that serves the engine — attaching it to an App is done from that App’s workspace.'
-              : 'No connected Target serves Postgres or Valkey, so there is nowhere to create one yet.'}
+              ? 'Create one in any Vessel that serves the engine — attaching it to an App is done from that App’s workspace.'
+              : 'No connected Vessel serves Postgres or Valkey, so there is nowhere to create one yet.'}
           </EmptyState>
         }
         renderInspector={(datastore) => (
@@ -473,7 +474,7 @@ export function DatastoreLedger({
               entries={[
                 { label: 'Engine', value: datastore.engine },
                 { label: 'Provenance', value: datastore.provenance },
-                { label: 'Target', value: datastore.target },
+                { label: 'Vessel', value: datastore.target },
                 { label: 'App', value: datastore.attachedTo ?? 'unattached' },
                 { label: 'Phase', value: datastore.phase.toLowerCase() },
                 {

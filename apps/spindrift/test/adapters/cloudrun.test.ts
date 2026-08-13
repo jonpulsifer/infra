@@ -646,6 +646,28 @@ describe('§8 and §32: what this Target is honest about', () => {
   });
 });
 
+describe('§20: the Datastore capability follows the vessel network', () => {
+  // Derived from one boundary fact rather than probed: both engines sit
+  // behind PSC endpoints in the same vessel network, so its presence gates
+  // both, and its absence is the honest answer for a project serving only
+  // Cloud Run and Firebase Hosting.
+  test('a vessel with no network cannot host a Datastore', async () => {
+    const { adapter } = adapterFor();
+    const { discovery } = await adapter.inspect(target());
+    expect(discovery.postgres).toBe(false);
+    expect(discovery.valkey).toBe(false);
+  });
+
+  test('a vessel with a network hosts both engines', async () => {
+    const { adapter } = adapterFor();
+    const { discovery } = await adapter.inspect(
+      target({ network: { name: 'spindrift-vessel', region: 'somewhere' } }),
+    );
+    expect(discovery.postgres).toBe(true);
+    expect(discovery.valkey).toBe(true);
+  });
+});
+
 describe('§10: config crosses as a pinned reference and never as a value', () => {
   test('every variable is a reference into the vessel’s own store', () => {
     const document = cloudRunService(

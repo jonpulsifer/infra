@@ -16,7 +16,13 @@
  */
 import { and, eq, isNotNull } from 'drizzle-orm';
 import { z } from 'zod';
-import { apps, components, datastores, targets } from '../../db/schema.ts';
+import {
+  apps,
+  components,
+  datastores,
+  targets,
+  vessels,
+} from '../../db/schema.ts';
 import type { ArtifactType, Auth, Reach } from '../../domain/desired-state.ts';
 import {
   DEFAULT_PLATFORM,
@@ -84,16 +90,24 @@ export const resolveComponentPlacement: Command<
     with: { vessel: true },
   });
 
+  // The datastore anchors to its vessel, and placement compares Target ids —
+  // a developer picks a Target, not a boundary — so the derivation gains a
+  // hop: vessel → its kubernetes surface → that Target's id. A left join on
+  // the literal adapter, because only the cluster-local case ever reads it.
   const attached = await context.db
     .select({
       name: datastores.name,
       engine: datastores.engine,
-      targetId: datastores.targetId,
-      targetAdapter: targets.adapter,
+      vesselKind: vessels.kind,
+      clusterTargetId: targets.id,
     })
     .from(datastores)
     .innerJoin(apps, eq(datastores.appId, apps.id))
-    .innerJoin(targets, eq(datastores.targetId, targets.id))
+    .innerJoin(vessels, eq(datastores.vesselId, vessels.id))
+    .leftJoin(
+      targets,
+      and(eq(targets.vesselId, vessels.id), eq(targets.adapter, 'kubernetes')),
+    )
     .where(and(eq(apps.id, component.appId), isNotNull(datastores.appId)));
 
   const requirements = derive(
@@ -108,11 +122,13 @@ export const resolveComponentPlacement: Command<
           name: datastore.name,
           engine: datastore.engine,
           // §11: "In-cluster datastores stay cluster-local in v1." A managed
-          // cloud database is reachable from anywhere its Target's project is;
-          // one running in a cluster is reachable from that cluster only.
+          // cloud database is reachable from anywhere its vessel's project is;
+          // one running in a cluster is reachable from that cluster only —
+          // and a cluster vessel has exactly one kubernetes surface, so the
+          // joined id is never null on this arm.
           clusterLocalTargetId:
-            datastore.targetAdapter === 'kubernetes'
-              ? datastore.targetId
+            datastore.vesselKind === 'cluster'
+              ? datastore.clusterTargetId
               : null,
         }),
       ),

@@ -1934,8 +1934,12 @@ function WorkspaceScreen({
   */
   const workspaceIds = () =>
     state.type === 'success'
-      ? { appId: state.workspace.appId, targetId: state.workspace.targetId }
-      : { appId: undefined, targetId: undefined };
+      ? {
+          appId: state.workspace.appId,
+          targetId: state.workspace.targetId,
+          vesselId: state.workspace.vesselId,
+        }
+      : { appId: undefined, targetId: undefined, vesselId: undefined };
 
   const handleAttachDatastore: DatastoreAct = async (datastoreId) => {
     const { appId } = workspaceIds();
@@ -2662,7 +2666,7 @@ function DatastoresScreen({
   return (
     <DatastoreLedger
       datastores={state.result.datastores}
-      targets={state.result.targets}
+      vessels={state.result.vessels}
       onNavigate={onNavigate}
       onCreate={handleCreate}
       onDetach={handleDetach}

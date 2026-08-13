@@ -103,7 +103,13 @@
     # removes it. `jonpulsifer/infra` runs no code from forks, which is the
     # condition that makes the trade sound; the option's own documentation is
     # where the reasoning lives.
-    classes.skiff-ubuntu = {
+    # `skiff-folly`, not `skiff-ubuntu`, for the same reason oldschool serves
+    # `skiff-offsite`: `skiff-ubuntu` promises a hosted-shaped runner, 4 vCPU /
+    # 16 GiB, and this is 3072M on a box shared with kubelet. Parking it at
+    # `warm = 0` hid that -- a class that serves nothing cannot mis-serve
+    # anything -- but the trap was one edit away, and a name is a better guard
+    # than a comment saying "resize before un-parking".
+    classes.skiff-folly = {
       hull = "${inputs.self.packages.x86_64-linux.hull-ubuntu}";
       vcpus = 4;
       memory = "3072M";

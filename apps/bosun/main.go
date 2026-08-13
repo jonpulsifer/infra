@@ -7,8 +7,8 @@
 // job was queued. There is no webhook, no queue listener, and no inbound
 // connectivity — bosun boots the configured warm count per class and
 // replaces each skiff after it halts. See pool.go for the mint/boot, poll,
-// and recycle halves of that loop; hull.go for how a hull manifest becomes
-// cloud-hypervisor argv.
+// and recycle halves of that loop; hull.go for the contract a hull declares,
+// and vmm.go for how that becomes cloud-hypervisor argv.
 package main
 
 import (
@@ -78,11 +78,18 @@ func main() {
 			logger.Error("read spindrift token file", "path", cfg.Spindrift.TokenFile, "error", err)
 			os.Exit(1)
 		}
-		sd := newSDClient(cfg.Spindrift.URL, strings.TrimSpace(string(sdTokenRaw)))
+		builds := &buildSource{
+			sd: newSDClient(cfg.Spindrift.URL, strings.TrimSpace(string(sdTokenRaw))),
+			spawn: func(ctx context.Context, claim *buildClaim) (*skiff, error) {
+				return p.spawn(ctx, p.buildBerth(claim))
+			},
+			logger: logger,
+			stats:  p.stats,
+		}
 		buildDone = make(chan struct{})
 		go func() {
 			defer close(buildDone)
-			p.buildLoop(ctx, sd, cfg.Spindrift.Classes, time.Duration(cfg.Spindrift.PollInterval))
+			builds.buildLoop(ctx, cfg.Spindrift.Classes, time.Duration(cfg.Spindrift.PollInterval))
 		}()
 		logger.Info("spindrift build source enabled", "classes", cfg.Spindrift.Classes)
 	}
