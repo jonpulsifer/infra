@@ -10,9 +10,11 @@
  *   Components, Builds and Deploys go (§2); a Datastore survives with
  *   `app_id = null` (§11), because reattachment to a different App is the whole
  *   reason it is a top-level noun.
- * - **A live workload is named and left running** (§13). No `destroy` is ever
- *   called, and the confirmation names what keeps running — after the rows are
- *   gone, that list is the only record they exist.
+ * - **A live workload is named, and then torn down.** The review names it before
+ *   anything happens — that sentence is what the confirmation is for — and
+ *   confirming calls `DeployAdapter.destroy` on the ref, including the ref a
+ *   FAILED Deploy left behind. A teardown the platform refuses is reported
+ *   rather than failing a delete the operator confirmed.
  * - **The `restrict` foreign keys do not block it.** `deploys.build_id` and
  *   `component_target_desired.desired_*` are `restrict`, and Postgres enforces
  *   one the moment its referenced row is deleted. A delete that leaned on the
@@ -54,13 +56,13 @@ const FROZEN = new Date('2024-06-01T00:00:00.000Z');
 const clock: Clock = { now: () => FROZEN };
 
 /** One fake per adapter type, so a test can ask whether it was ever called. */
-function fakes() {
+function fakes(options: { destroyThrows?: string } = {}) {
   const made = new Map<string, FakeDeployAdapter>();
   const registry: AdapterRegistry = {
     deploy(adapter) {
       let fake = made.get(adapter);
       if (!fake) {
-        fake = new FakeDeployAdapter({ adapter });
+        fake = new FakeDeployAdapter({ adapter, ...options });
         made.set(adapter, fake);
       }
       return fake;
@@ -84,7 +86,6 @@ function fakes() {
         throw new Error(`no ${adapter} adapter was built`);
       return fake;
     },
-    built: () => made,
   };
 }
 
@@ -278,11 +279,11 @@ describe('confirm deletes', () => {
   });
 });
 
-describe('a live workload is named and left running', () => {
-  test('the review names it, and confirming never calls destroy', async () => {
+describe('a live workload is named and torn down', () => {
+  test('the review names it, and confirming destroys the ref', async () => {
     const target = await seedTarget('folly', 'kubernetes');
     const seeded = await seedApp('is-live', { targetId: target.id });
-    const { registry, built } = fakes();
+    const { registry, of } = fakes();
 
     const review = await deleteApp(
       { name: 'is-live', confirm: false },
@@ -308,12 +309,58 @@ describe('a live workload is named and left running', () => {
 
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    // Named again after the fact: the rows are gone, so this is the only record
-    // that the workload is still there.
-    expect(result.value.stranded).toHaveLength(1);
-    // §13's rule, verbatim: no adapter was ever constructed, so nothing was
-    // torn down.
-    expect(built().size).toBe(0);
+    // The ref reached the adapter — the whole point of the change, and the
+    // thing a test of return values alone would not notice.
+    expect(of('kubernetes').destroyed).toEqual(['apps/web']);
+    expect(result.value.deleted && result.value.retainedWorkloads).toEqual([]);
+  });
+
+  test('a refused teardown is reported, and the App still goes', async () => {
+    // The operator asked for the App to be gone. An unreachable Target is a
+    // thing to name, not a veto — and `destroy` is idempotent, so having tried
+    // costs nothing.
+    const target = await seedTarget('folly', 'kubernetes');
+    const seeded = await seedApp('wont-tear-down', { targetId: target.id });
+    const { registry } = fakes({ destroyThrows: 'the cluster said no' });
+
+    const result = await deleteApp(
+      { name: 'wont-tear-down', confirm: true },
+      context(registry),
+    );
+
+    expect(result.ok).toBe(true);
+    if (!result.ok || !result.value.deleted) return;
+    expect(result.value.retainedWorkloads).toEqual([
+      'web on folly/kubernetes — the cluster said no',
+    ]);
+    expect(
+      await database().db.select().from(apps).where(eq(apps.id, seeded.app.id)),
+    ).toHaveLength(0);
+  });
+
+  test('a FAILED Deploy that left a ref is still torn down', async () => {
+    // `ref` persists through a failed re-attempt, so the resource it names is
+    // up there whatever the row's terminal phase says. Not stranded — nothing
+    // is serving — but very much still billing.
+    const target = await seedTarget('folly', 'kubernetes');
+    await seedApp('half-made', { targetId: target.id, phase: 'FAILED' });
+    const { registry, of } = fakes();
+
+    const review = await deleteApp(
+      { name: 'half-made', confirm: false },
+      context(registry),
+    );
+    expect(review.ok).toBe(true);
+    if (!review.ok) return;
+    expect(review.value.stranded).toEqual([]);
+
+    const result = await deleteApp(
+      { name: 'half-made', confirm: true },
+      context(registry),
+    );
+
+    expect(result.ok).toBe(true);
+    expect(of('kubernetes').destroyed).toEqual(['apps/web']);
   });
 
   test('a scheduled job is named as one that keeps firing', async () => {

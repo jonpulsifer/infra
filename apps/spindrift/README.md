@@ -186,12 +186,14 @@ Build), and the affordance appears only where that comparison would be accepted.
 workspace header (`components/delete-app.tsx`). `deleteApp` called without
 `confirm` writes nothing and answers with what the delete would do — the
 Components, Builds, Deploys and config keys that go, the Datastores that survive
-detached (§11), and the live workloads it would strand. The confirm call goes by
-the id the review resolved. **Nothing is torn down**: as with disconnect, a
-running workload keeps running and is named again afterwards, because once the
-rows are gone that list is the only record it is there. §10 store items are
-reaped with the App, and a key the store refuses to destroy is named rather than
-failing a delete that already happened.
+detached (§11), and the live workloads it will tear down. The confirm call goes
+by the id the review resolved. **The workloads go with the App**: confirming
+calls `DeployAdapter.destroy` for every placement's live ref, which is
+`unplaceComponent`'s exception to §13 rather than a violation of it — the review
+named them, so the teardown is what was asked for. A teardown the platform
+refuses does not fail the delete; it is named afterwards as the manual job it is.
+§10 store items are reaped the same way, and a key the store refuses to destroy
+is named rather than failing a delete that already happened.
 
 Authenticated product operations reach the server through a dispatch surface
 generated from the command registry (`src/web/dispatch.ts`): one route per
