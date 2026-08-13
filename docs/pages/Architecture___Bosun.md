@@ -14,6 +14,11 @@ tags:: architecture
 	- A JIT-registered runner is ephemeral by construction: it runs one job, deregisters itself, and exits. So bosun keeps N skiffs booted and registered, and **GitHub hands one a matching job unprompted**.
 	- The consequence is what makes this small: **bosun never learns that a job was queued.** There is no webhook endpoint, no queue listener, no inbound connectivity, and nothing to replay. It notices a skiff halted — the VMM exits 0, which is a `wait(2)` on a child — and boots a replacement.
 	- Named cost: idle skiffs hold RAM, and there is no scale-to-zero.
+- ## The Spindrift build source
+	- `services.bosun.spindrift` turns a host into a second, independent work source alongside its GitHub warm pool: bosun long-polls [[Architecture/Spindrift]]'s outbox instead of waiting for GitHub to hand a registered skiff a job.
+	- `apps/bosun/spindrift.go` claims, heartbeats, and posts results against `apps/spindrift/src/web/bosun-route.ts`'s three bearer-authed `/internal/bosun/` endpoints — the same shared secret authenticates all three, because a bosun host cannot hold a browser session the way every other caller of that process does.
+	- A claim boots a build-hull skiff (`nix/images/hull-build-ubuntu.nix`) with the opaque request document written into its share where a JIT config would otherwise go, instead of registering it against GitHub. A class serving builds sets `warm = 0`: a build skiff boots on claim rather than ahead of time, so keeping one warm buys nothing.
+	- This is one of Spindrift's own build routes — see [[Architecture/Spindrift]] for the other three and how rank among them is decided.
 - ## The hull contract is the seam
 	- A hull is a directory holding a `hull.json` beside its artifacts, declaring `kernel`, `initrd`, `cmdline`, and an optional `devices[]` list. bosun reads the manifest and translates it to cloud-hypervisor arguments; it carries **no per-hull-family branching** and never learns what any device means.
 	- bosun promises every skiff the same four things regardless of hull — a credential at a contract-fixed location, a writable workspace, outbound network, and a writable diagnostic share on the host — plus its own identity appended to the cmdline as `bosun.skiff` and `bosun.hull`. Those are correlation facts, never claims: a guest reporting its own hull digest proves nothing to anyone.

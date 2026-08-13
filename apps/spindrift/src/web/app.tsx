@@ -83,6 +83,7 @@ import {
 } from './views/repos/list.tsx';
 import {
   ArtifactRegistries,
+  Builders,
   SourceBuckets,
 } from './views/settings/connections.tsx';
 import {
@@ -571,11 +572,13 @@ function ConnectionsSettings({
         Every system outside Spindrift that Spindrift holds an address for. Each
         provider keeps its concrete state and actions in one ruled row, and the
         order is the supply chain: where code comes from, where a Source is
-        staged, where an Artifact is pushed, and where it runs.
+        staged, where a Source becomes an Artifact, where an Artifact is pushed,
+        and where it runs.
       </p>
       <div className="mt-6 divide-y divide-border border-y border-border">
         <RepositoriesScreen embedded />
         <SourceBuckets />
+        <Builders />
         <ArtifactRegistries />
         <TargetsScreen embedded onNavigate={onNavigate} />
       </div>
