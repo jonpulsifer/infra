@@ -33,12 +33,20 @@
  * concurrent completions of the same id resolve to exactly one `'done'` and
  * one `'conflict'` rather than both believing they won.
  */
-import { and, asc, eq, inArray, lt, ne } from 'drizzle-orm';
+import { and, asc, count, eq, inArray, lt, min, ne } from 'drizzle-orm';
 import type { Database } from '../db/client.ts';
 import { type BuildRequest, buildRequests } from '../db/schema.ts';
 
 /** How long a claim holds before it is eligible for reclamation. */
 export const BUILD_REQUEST_LEASE_MS = 5 * 60_000;
+
+/** What one class's queue looks like right now — the pool-health read. */
+export interface OutboxClassStats {
+  readonly pending: number;
+  readonly claimed: number;
+  /** The oldest still-`PENDING` row's `createdAt`, or `null` with none waiting. */
+  readonly oldestPendingAt: Date | null;
+}
 
 /** What a claim hands the poller: enough to run the build, nothing more. */
 export interface ClaimedBuildRequest {
@@ -86,6 +94,15 @@ export interface BuildOutbox {
   ): Promise<'done' | 'conflict' | 'missing'>;
   /** The row as it stands, or `null` when no such request exists. */
   get(id: string): Promise<BuildRequest | null>;
+  /**
+   * Pending/claimed depth and the oldest still-waiting row, per class.
+   *
+   * The whole of what distinguishes "declared but nothing is polling" from
+   * "serving" from inside Spindrift — every class not present in `classes`
+   * answers zeroed rather than omitted, so a caller mapping one route per
+   * class never has to guess at a missing key.
+   */
+  stats(classes: readonly string[]): Promise<Record<string, OutboxClassStats>>;
   /**
    * Mark a row `DONE` with no result — the adapter's move when it gives up on
    * a request, so a dead request can never be claimed later. A no-op against
@@ -202,6 +219,47 @@ export function buildOutbox(
         .from(buildRequests)
         .where(eq(buildRequests.id, id));
       return row ?? null;
+    },
+
+    async stats(classes) {
+      const empty: OutboxClassStats = {
+        pending: 0,
+        claimed: 0,
+        oldestPendingAt: null,
+      };
+      const byClass: Record<string, OutboxClassStats> = Object.fromEntries(
+        classes.map((requestClass) => [requestClass, empty]),
+      );
+      if (classes.length === 0) return byClass;
+
+      const rows = await db
+        .select({
+          class: buildRequests.class,
+          state: buildRequests.state,
+          count: count(),
+          oldestPendingAt: min(buildRequests.createdAt),
+        })
+        .from(buildRequests)
+        .where(
+          and(
+            inArray(buildRequests.class, [...classes]),
+            ne(buildRequests.state, 'DONE'),
+          ),
+        )
+        .groupBy(buildRequests.class, buildRequests.state);
+
+      for (const row of rows) {
+        const current = byClass[row.class] ?? empty;
+        byClass[row.class] =
+          row.state === 'PENDING'
+            ? {
+                ...current,
+                pending: row.count,
+                oldestPendingAt: row.oldestPendingAt,
+              }
+            : { ...current, claimed: row.count };
+      }
+      return byClass;
     },
 
     async cancel(id) {

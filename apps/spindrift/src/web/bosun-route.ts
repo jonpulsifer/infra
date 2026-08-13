@@ -32,6 +32,7 @@ import { z } from 'zod';
 import { deadlineFrom, type Sleeper } from '../adapters/build/route.ts';
 import type { Clock } from '../commands/types.ts';
 import type { Database } from '../db/client.ts';
+import { recordClaimPoll } from '../storage/bosun-poll.ts';
 import { buildOutbox } from '../storage/build-outbox.ts';
 
 export const BOSUN_CLAIM_PATH = '/internal/bosun/claim';
@@ -155,6 +156,10 @@ async function handleClaim(
   }
   const denied = checkAuth(request, deps);
   if (denied) return denied;
+  // A live bosun host asking is the fact worth recording, independent of
+  // whether this particular poll finds anything to hand out — that is what
+  // lets Settings→Connections tell "declared but unserved" from "serving".
+  recordClaimPoll(deps.clock.now());
 
   const parsed = claimBodySchema.safeParse(await readJsonBody(request));
   if (!parsed.success) {

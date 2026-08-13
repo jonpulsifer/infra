@@ -202,3 +202,56 @@ describe('get and cancel', () => {
     expect((await store.get(id))?.result).toEqual(result);
   });
 });
+
+describe('stats', () => {
+  test('pending count, claimed count, and oldest-pending age, per class', async () => {
+    const store = buildOutbox(database().db);
+
+    // skiff-a ends with one DONE (excluded entirely), one CLAIMED, and one
+    // still PENDING — enqueued and claimed in that order, so `claim`'s own
+    // oldest-first rule (proved above) never has two pending rows to choose
+    // between and there is nothing timing-sensitive left to assert.
+    const { id: toComplete } = await store.enqueue({
+      class: 'skiff-a',
+      request: {},
+    });
+    await store.claim(['skiff-a']);
+    await store.complete(toComplete, { status: 'SUCCEEDED', log: 'ok' });
+
+    await store.enqueue({ class: 'skiff-a', request: {} });
+    await store.claim(['skiff-a']); // leaves nothing PENDING for skiff-a yet
+
+    const { id: stillPendingA } = await store.enqueue({
+      class: 'skiff-a',
+      request: {},
+    });
+    const { id: stillPendingB } = await store.enqueue({
+      class: 'skiff-b',
+      request: {},
+    });
+
+    const stats = await store.stats(['skiff-a', 'skiff-b', 'skiff-c']);
+
+    expect(stats['skiff-a']).toEqual({
+      pending: 1,
+      claimed: 1,
+      oldestPendingAt: (await store.get(stillPendingA))?.createdAt ?? null,
+    });
+    expect(stats['skiff-b']).toEqual({
+      pending: 1,
+      claimed: 0,
+      oldestPendingAt: (await store.get(stillPendingB))?.createdAt ?? null,
+    });
+    // A class with nothing enqueued answers zeroed, not omitted.
+    expect(stats['skiff-c']).toEqual({
+      pending: 0,
+      claimed: 0,
+      oldestPendingAt: null,
+    });
+  });
+
+  test('an empty class list answers with nothing to look up', async () => {
+    const store = buildOutbox(database().db);
+    expect(await store.stats([])).toEqual({});
+  });
+});

@@ -47,6 +47,7 @@ import {
   AlertTriangle,
   Check,
   Database,
+  Hammer,
   KeyRound,
   Loader2,
   Package,
@@ -55,6 +56,7 @@ import {
   X,
 } from 'lucide-react';
 import { type ReactNode, useEffect, useState } from 'react';
+import { BUILD_ADAPTER } from '../../client/build-adapters.ts';
 import { command, type OutputOf } from '../../client.ts';
 import { Badge, Dot } from '../../ui/badge.tsx';
 import { Button } from '../../ui/button.tsx';
@@ -68,6 +70,8 @@ type Verification = OutputOf<'testBucketPermissions'>;
 type RegistryProbe = OutputOf<'testRegistryReachability'>;
 type RegistryRow = OutputOf<'listArtifactRegistries'>['registries'][number];
 type SourceStorageView = OutputOf<'listSourceBuckets'>;
+type BuildRoutesView = OutputOf<'listBuildRoutes'>;
+type BuildRouteRow = BuildRoutesView['routes'][number];
 
 /** What is known about one destination's reachability, right now. */
 type Reachability<Result> =
@@ -398,6 +402,101 @@ function BucketRow({
         <p className="pl-6 text-xs text-destructive">{check.message}</p>
       ) : null}
     </div>
+  );
+}
+
+// --- Build routes -------------------------------------------------------
+
+/**
+ * Every configured build route — where a staged Source becomes an Artifact
+ * (§4, §16).
+ *
+ * Read-only, unlike the two sections either side of it: rank is the
+ * manifest's declared order and per-App narrowing is the Builder picker on
+ * the App workspace, so there is nothing here for a press to do.
+ *
+ * **The one row this screen cannot otherwise see: bosun.** Every other route
+ * is dialed — core reaches its API directly, so a broken one shows up the
+ * moment a Build is dispatched to it. Bosun is polled *in*, over
+ * `/internal/bosun/claim`, so a route can be declared, secreted, and ranked
+ * and still have nothing on the other end — indistinguishable, from the rest
+ * of this screen, from one that is merely quiet. The health line is what
+ * tells the two apart without waiting for a Build to time out and find out.
+ */
+export function Builders() {
+  const loaded = useConnection<BuildRoutesView>(
+    () => command('listBuildRoutes', {}),
+    0,
+  );
+
+  if (loaded.state === 'loading') return <LoadingSection rows={2} />;
+  if (loaded.state === 'error' || loaded.value === undefined) {
+    return (
+      <SectionShell>
+        <Failure>{loaded.message ?? 'the build routes did not answer'}</Failure>
+      </SectionShell>
+    );
+  }
+
+  const routes = loaded.value.routes;
+  return (
+    <ConnectionSection
+      name="Builders"
+      mark={<Hammer aria-hidden="true" className="size-5 text-foreground" />}
+      status={`${routes.length} configured`}
+      tone={routes.length > 0 ? 'success' : 'idle'}
+      description="Where a staged Source becomes an Artifact. Rank and per-App narrowing live in the manifest and the Builder picker on the App workspace — this is a read, not a control."
+    >
+      <Card className="divide-y divide-border">
+        {routes.map((route) => (
+          <BuildRouteRowView key={route.name} route={route} />
+        ))}
+      </Card>
+    </ConnectionSection>
+  );
+}
+
+function BuildRouteRowView({ route }: { route: BuildRouteRow }) {
+  const platform = BUILD_ADAPTER[route.adapter];
+  return (
+    <div className="flex flex-col gap-2 px-4 py-3">
+      <div className="flex flex-wrap items-center gap-2">
+        {platform ? <Logo name={platform.logo} className="size-4" /> : null}
+        <span className="text-sm font-medium">
+          {route.name}
+          {platform ? ` · ${platform.label}` : ''}
+        </span>
+        <Badge tone="idle">{`SLSA L${route.level}`}</Badge>
+      </div>
+      {route.bosun ? <BosunPoolHealth health={route.bosun} /> : null}
+    </div>
+  );
+}
+
+/** The claim-poll pulse and outbox depth — everything this process knows about the pool on the other end of one bosun route. */
+function BosunPoolHealth({
+  health,
+}: {
+  health: NonNullable<BuildRouteRow['bosun']>;
+}) {
+  if (health.lastClaimPollAgo === null) {
+    return (
+      <p className="pl-6 text-xs text-warning">
+        no bosun host has polled (this process)
+      </p>
+    );
+  }
+  const oldest =
+    health.oldestPendingAgo === null
+      ? ''
+      : ` (oldest ${health.oldestPendingAgo})`;
+  const claimed = health.claimed > 0 ? ` · ${health.claimed} claimed` : '';
+  return (
+    <p className="pl-6 text-[11px] text-subtle">
+      last claim poll {health.lastClaimPollAgo} · {health.pending} pending
+      {oldest}
+      {claimed}
+    </p>
   );
 }
 
