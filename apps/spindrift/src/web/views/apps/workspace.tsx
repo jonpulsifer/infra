@@ -654,6 +654,15 @@ function Hero({
   onNavigate?: (path: string) => void;
   onSetAutoDeploy?: SetAutoDeploy;
 }) {
+  // What `release` names: the Deploy where there is one, the Build that is
+  // still the whole of the attempt where there is not.
+  const releasePath =
+    view.latestDeployId !== undefined
+      ? `/deploys/${view.latestDeployId}`
+      : view.latestBuildId !== undefined
+        ? `/builds/${view.latestBuildId}`
+        : null;
+
   return (
     <Card className="flex flex-wrap items-start gap-6 px-5 py-5">
       <div className="flex flex-col gap-2">
@@ -680,11 +689,15 @@ function Hero({
           The release is a link because it is a thing, not a label: §2's Deploy
           is Heroku's Release, and the attempt that produced what is running is
           one press away from the screen that says how it went.
+
+          Before there is a Deploy the same is true of the Build: the create
+          flow starts one, `release` names it, and it was the one word on this
+          screen that stated a running attempt and led nowhere.
         */}
-        {view.latestDeployId !== undefined && onNavigate ? (
+        {releasePath && onNavigate ? (
           <button
             type="button"
-            onClick={() => onNavigate(`/deploys/${view.latestDeployId}`)}
+            onClick={() => onNavigate(releasePath)}
             className="self-start text-xs text-subtle hover:text-foreground"
           >
             {view.release} →

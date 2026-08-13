@@ -848,6 +848,43 @@ describe('the workspace as a way into the system', () => {
       expect(entry.when).not.toBe('recently');
     }
   });
+
+  test('states the first Build while it is still the whole attempt', async () => {
+    // A freshly created App: the create flow started a Build, no Deploy exists,
+    // and every status event a running build writes carries a `resource` — so
+    // the checkpoint filter has nothing to show and the deploy fallback has no
+    // row to fall back to. The timeline said "Nothing has happened yet" over
+    // the build that was running, with no way into it from this screen.
+    const ctx = context();
+    const { appName, componentId } = await scaffold(ctx, { prefix: 'fresh' });
+
+    const [build] = await ctx.db
+      .insert(builds)
+      .values({
+        componentId,
+        commit: 'f00dcaf',
+        targetShape: 'image',
+        artifactType: 'image',
+        status: 'RUNNING',
+      })
+      .returning();
+
+    const result = await getAppWorkspace({ name: appName }, ctx);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    const { workspace } = result.value;
+    expect(workspace.latestBuildId).toBe(build!.id);
+    expect(workspace.activity).toHaveLength(1);
+    expect(workspace.activity[0]).toMatchObject({
+      kind: 'build',
+      title: `Build ${build!.id} running`,
+      detail: 'f00dcaf',
+      status: 'info',
+      deployId: null,
+      buildId: build!.id,
+    });
+  });
 });
 
 describe('getDeployDetail command', () => {
