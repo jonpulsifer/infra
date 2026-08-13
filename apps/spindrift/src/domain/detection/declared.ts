@@ -195,6 +195,35 @@ function joinPath(scope: string, file: string): string {
   return scope === '.' ? file : `${scope}/${file}`;
 }
 
+/**
+ * A directory that already **is** a website: pages a browser opens, with
+ * nothing to build first (§3, story 42).
+ *
+ * Asked last, and it has to be last: a Vite app has an `index.html` at its root
+ * too, and what separates it from a hand-written page is the `package.json`
+ * above this. Only a directory nothing else could account for gets here.
+ *
+ * `outputDirectory: null` is the load-bearing part rather than an omission. A
+ * `files` build with no output directory ships the scope as it stands, which
+ * is exactly what this is; naming one would mean the scope is the *sources* of
+ * a site, sending it through the zero-config builder first — and there is
+ * nothing here for that builder to build.
+ */
+async function planStaticFiles(
+  tree: SourceTree,
+  scope: string,
+): Promise<ZeroConfigPlan | null> {
+  if (!(await exists(tree, joinPath(scope, 'index.html')))) return null;
+  return {
+    outcome: 'detected',
+    kind: 'website',
+    reason: 'index.html — this directory already is the site',
+    kinds: kindOptions('website', 'this directory is a page, not a program'),
+    buildCommand: null,
+    outputDirectory: null,
+  };
+}
+
 async function readPackageManifest(
   tree: SourceTree,
   scope: string,
@@ -212,9 +241,9 @@ async function readPackageManifest(
  * Plan one scope from what it declares.
  *
  * The order is: a recognized framework, then a language manifest, then a
- * package that at least starts something, then the honest unknown §5 insists
- * on — "I do not know how to build this" is a first-class outcome and never a
- * silent fallback to `service`.
+ * package that at least starts something, then a directory that is already a
+ * site, then the honest unknown §5 insists on — "I do not know how to build
+ * this" is a first-class outcome and never a silent fallback to `service`.
  */
 export async function planFromDeclarations(
   tree: SourceTree,
@@ -257,11 +286,13 @@ export async function planFromDeclarations(
       };
     }
 
-    return {
-      outcome: 'unsupported',
-      detail:
-        'package.json declares no framework Spindrift recognizes and no start script. Add a `spindrift.yaml` naming the kind, or a Dockerfile.',
-    };
+    return (
+      (await planStaticFiles(tree, scope)) ?? {
+        outcome: 'unsupported',
+        detail:
+          'package.json declares no framework Spindrift recognizes and no start script. Add a `spindrift.yaml` naming the kind, or a Dockerfile.',
+      }
+    );
   }
 
   for (const { file, label } of SERVICE_MANIFESTS) {
@@ -280,11 +311,13 @@ export async function planFromDeclarations(
     }
   }
 
-  return {
-    outcome: 'unsupported',
-    detail:
-      'no package.json, go.mod, Cargo.toml, pyproject.toml, requirements.txt or Gemfile in this directory.',
-  };
+  return (
+    (await planStaticFiles(tree, scope)) ?? {
+      outcome: 'unsupported',
+      detail:
+        'no index.html, package.json, go.mod, Cargo.toml, pyproject.toml, requirements.txt or Gemfile in this directory.',
+    }
+  );
 }
 
 /** {@link planFromDeclarations}, as the seam the ladder takes. */
