@@ -13,6 +13,11 @@ They are one chart series printed with two plates: identical tokens, layout and
 components, and a different accent per project. A change to one deck's shared
 CSS belongs in the other.
 
+Both read the same way. Every slide carries a heading and one `.gist` line, and
+the argument behind it sits in a `<details class="more">` band underneath — so
+the deck skims in about ninety seconds closed, and is the long version open.
+A slide that cannot state its point in one line is a slide making two points.
+
 ## How they ship
 
 Through Spindrift, as `website` Apps whose source is an uploaded archive: `POST`

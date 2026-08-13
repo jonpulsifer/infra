@@ -539,6 +539,57 @@
     .log > div { grid-template-columns: 1fr; }
     .log time { order: -1; }
   }
+
+  /* ---------- the gist, and the argument folded under it ---------- */
+  .gist {
+    font-family: var(--serif);
+    font-size: clamp(1.15rem, 0.95rem + 0.95vw, 1.85rem);
+    line-height: 1.36;
+    max-width: 46ch;
+    color: var(--ink-2);
+    text-wrap: pretty;
+  }
+  .gist b { color: var(--ink); font-weight: 500; }
+
+  details.more {
+    border-top: 1px solid var(--rule);
+    border-bottom: 1px solid var(--rule);
+    max-width: 74rem;
+  }
+  details.more + details.more { border-top: 0; }
+  details.more > summary {
+    cursor: pointer;
+    list-style: none;
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.8rem 0;
+    font-family: var(--mono);
+    font-size: 0.72rem;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--accent);
+  }
+  details.more > summary::-webkit-details-marker { display: none; }
+  details.more > summary::before {
+    content: "+";
+    display: grid;
+    place-items: center;
+    flex: none;
+    width: 1.2rem;
+    height: 1.2rem;
+    border: 1px solid currentColor;
+    border-radius: 2px;
+    font-size: 0.85rem;
+    line-height: 1;
+  }
+  details.more[open] > summary::before { content: "\2013"; }
+  details.more > summary:hover { color: var(--accent-ink); }
+  details.more > .body {
+    display: grid;
+    gap: clamp(0.9rem, 2vh, 1.4rem);
+    padding-bottom: 1.3rem;
+  }
 </style>
 <style>*,*::before,*::after{box-sizing:border-box}*{margin:0}img,svg{display:block;max-width:100%}</style>
 </head>
@@ -546,7 +597,7 @@
 
 <!-- ============================== 01 title ============================== -->
 <section class="slide title-slide">
-  <span class="no"><b>01</b> / 12</span>
+  <span class="no"><b>01</b> / 09</span>
   <div class="title-mark" aria-hidden="true">
     <svg viewBox="0 0 800 620" role="presentation">
       <path class="contour" d="M40 560 C 180 520, 250 430, 300 330 C 350 230, 430 150, 590 108 C 690 82, 760 78, 800 76"/>
@@ -564,147 +615,181 @@
   <div style="display:flex;flex-direction:column;gap:clamp(1rem,3vh,2rem)">
     <h1>Spindrift</h1>
     <p class="lede" style="max-width:32ch">A deployment is an artifact, a place, and a version of its config.</p>
-    <p class="small dim" style="max-width:46ch">Pin those three and almost everything people build deploy tooling for stops being a feature.</p>
+    <p class="small dim" style="max-width:50ch">Pin those three and almost everything people build deploy tooling for stops being a feature. Every slide here reads in one line — open a band if you want the argument.</p>
   </div>
 
   <p class="colophon">
-    <span>One contract</span>
-    <span><b>3</b> parts</span>
+    <span>Four contracts</span>
+    <span><b>3</b> parts to the first</span>
     <span><b>5</b> adapter seams</span>
-    <span>Auth <b>in the contract</b></span>
+    <span>Skim in <b>90</b> seconds</span>
   </p>
 </section>
 
 <!-- ============================== 02 problem ============================== -->
 <section class="slide">
-  <span class="no"><b>02</b> / 12</span>
+  <span class="no"><b>02</b> / 09</span>
   <p class="eyebrow">The problem</p>
   <h2>“I wrote a thing. Put it somewhere with a URL.”</h2>
-  <div class="split">
-    <div style="display:flex;flex-direction:column;gap:1rem">
-      <p class="dim">Nothing on that list is unsolved. Clusters exist, registries exist, GitOps engines exist, certificates are free. What nobody hands you is the assembly — and the assembly is the work, in full, every single time, no matter how much infrastructure you already own.</p>
-      <p class="rule-kicker">Seven decisions, made by hand, by whoever is holding it. Each one is a place to be quietly wrong for a month.</p>
+  <p class="gist">Nothing on that list is unsolved — clusters, registries, GitOps engines and free certificates all exist. What nobody hands you is <b>the assembly</b>, and the assembly is the work, in full, every single time.</p>
+  <details class="more">
+    <summary>The seven decisions, made by hand</summary>
+    <div class="body">
+      <div class="split">
+        <ol class="steps">
+          <li>Write a Dockerfile</li>
+          <li>Author a Helm release or a Kustomization</li>
+          <li>Find a hostname</li>
+          <li>Wire a route</li>
+          <li>Add a secret</li>
+          <li>Open a PR, wait for CI, wait for Flux</li>
+          <li>Read pod logs to find out why it did not come up</li>
+        </ol>
+        <p class="rule-kicker">Seven decisions, made by whoever is holding it. Each one is a place to be quietly wrong for a month.</p>
+      </div>
+      <p class="small dim" style="max-width:70ch">No amount of infrastructure you already own removes any of it. Owning the cluster is what makes the assembly your problem rather than somebody's product.</p>
     </div>
-    <ol class="steps">
-      <li>Write a Dockerfile</li>
-      <li>Author a Helm release or a Kustomization</li>
-      <li>Find a hostname</li>
-      <li>Wire a route</li>
-      <li>Add a secret</li>
-      <li>Open a PR, wait for CI, wait for Flux</li>
-      <li>Read pod logs to find out why it did not come up</li>
-    </ol>
-  </div>
+  </details>
 </section>
 
-<!-- ============================== 03 the contract ============================== -->
+<!-- ============================== 03 contract one ============================== -->
 <section class="slide">
-  <span class="no"><b>03</b> / 12</span>
-  <p class="eyebrow">The whole idea</p>
+  <span class="no"><b>03</b> / 09</span>
+  <p class="eyebrow">Contract one · what a deployment is</p>
   <h2>A deploy is three things, <em>pinned</em></h2>
-  <div class="lineage" style="margin-block:0.5rem">
-    <div><b>Artifact</b><span>what runs — by digest</span></div>
-    <div><b>Target</b><span>where it runs</span></div>
-    <div><b>configVersion</b><span>what it reads — by digest</span></div>
-  </div>
-  <p class="rule-kicker">Every part is named by <em>value</em>, not by reference. Nothing in the triple means “latest”.</p>
-  <p class="verbatim">deploy 2 · artifact files·sha256:1d7ea… · target bluenose/static · configVersion sha256:4f53cda1…</p>
-  <p class="small dim" style="max-width:60ch">A real row off the running installation. That line is the deployment — not a description of one, not a pointer to one. Reproducing it needs nothing that could have moved since.</p>
+  <p class="gist"><b>Artifact, Target, Config</b> — each named by value rather than by reference, so no part of a deployment is allowed to mean “latest”.</p>
+  <details class="more">
+    <summary>The triple, and the lineage that makes it possible</summary>
+    <div class="body">
+      <div class="lineage">
+        <div><b>Artifact</b><span>what runs — by digest</span></div>
+        <div><b>Target</b><span>where it runs</span></div>
+        <div><b>Config</b><span>what it reads — by digest</span></div>
+      </div>
+      <p class="verbatim">deploy 2 · artifact files·sha256:1d7ea… · target bluenose/static · configVersion sha256:4f53cda1…</p>
+      <p class="small dim" style="max-width:64ch">A real row off the running installation — <code>config_version</code> is the column the digest is stored in. That line <em>is</em> the deployment, not a description of one and not a pointer to one. Reproducing it needs nothing that could have moved since.</p>
+      <div class="lineage">
+        <div><b>Source</b><span>one staged bundle, by digest</span></div>
+        <div><b>Build</b><span>component · commit · target-shape</span></div>
+        <div><b>Artifact</b><span>image | files, by digest</span></div>
+        <div><b>Deploy</b><span>the triple</span></div>
+      </div>
+      <div class="cols">
+        <div class="card card--flag">
+          <h4>One Build → one Artifact → many Deploys</h4>
+          <p>Identity is kept separate from placement. What was built never learns where it went — and that one separation is what the rest of this deck is downstream of.</p>
+        </div>
+        <div class="card">
+          <h4>Two authored nouns</h4>
+          <p>A human writes an <b>App</b> and a <b>Component</b>. Build, Artifact and Deploy are produced, never typed.</p>
+        </div>
+      </div>
+    </div>
+  </details>
 </section>
 
-<!-- ============================== 04 lineage ============================== -->
+<!-- ============================== 04 what falls out ============================== -->
 <section class="slide">
-  <span class="no"><b>04</b> / 12</span>
-  <p class="eyebrow">What makes the triple possible</p>
-  <h2>Identity is kept separate from placement</h2>
-  <div class="lineage">
-    <div><b>Source</b><span>one staged bundle, by digest</span></div>
-    <div><b>Build</b><span>component · commit · target-shape</span></div>
-    <div><b>Artifact</b><span>image | files, by digest</span></div>
-    <div><b>Deploy</b><span>the triple</span></div>
-  </div>
-  <div class="cols">
-    <div class="card card--flag">
-      <h4>One Build → one Artifact → many Deploys</h4>
-      <p>What was built never learns where it went. That one separation is what the rest of this deck is downstream of.</p>
-    </div>
-    <div class="card">
-      <h4>Two authored nouns</h4>
-      <p>A human writes an <b>App</b> and a <b>Component</b>. Build, Artifact and Deploy are produced, never typed.</p>
-    </div>
-  </div>
-</section>
-
-<!-- ============================== 05 the seams ============================== -->
-<section class="slide">
-  <span class="no"><b>05</b> / 12</span>
-  <p class="eyebrow">Where the far sides plug in</p>
-  <h2>Every outside thing sits behind a contract, and <em>none of them</em> is the architecture</h2>
-  <p class="dim" style="max-width:74ch">A seam is a place behaviour can be swapped without editing at that place. One implementation would leave a seam hypothetical; every one of these has at least two.</p>
-  <div class="tablewrap">
-    <table class="bench">
-      <thead>
-        <tr><th scope="col">Seam</th><th scope="col">What varies across it</th><th scope="col">Adapters today</th></tr>
-      </thead>
-      <tbody>
-        <tr><th scope="row">Build</th><td>where the artifact is produced</td><td>GitHub Actions · Cloud Build · microVM pool · in-cluster Job</td></tr>
-        <tr><th scope="row">Deploy</th><td>what runtime receives it</td><td>Kubernetes · Cloud Run · static hosting</td></tr>
-        <tr><th scope="row">Delivery</th><td>which operator drives it</td><td>Flux HelmRelease · Argo Application</td></tr>
-        <tr><th scope="row">Config store</th><td>where the value of record lives</td><td>Secret Manager · 1Password · HTTP</td></tr>
-        <tr><th scope="row">Datastore</th><td>where a Target's state lives</td><td>cloud project · cluster</td></tr>
-      </tbody>
-    </table>
-  </div>
-  <div class="cols">
-    <div class="card card--flag">
-      <h4>Flux is an adapter, not the architecture</h4>
-      <p>A Target declares which operator drives it, and Spindrift writes that operator's own object. Both flavours end at the same status type and nothing above them branches — so the GitOps engine is a choice a Target makes, never a thing the platform is built out of.</p>
-    </div>
-    <div class="card card--flag">
-      <h4>What a seam is worth, measured once</h4>
-      <p>A whole fourth way of building — a microVM pool on a machine this process cannot reach, calling in the opposite direction — arrived as one row in a list. Everything above the seam was already written.</p>
-    </div>
-  </div>
-  <p class="verbatim">apply · observe · destroy · run · executions · tail · inspect   →   seven verbs, and “deploy anything, anywhere” is behind them</p>
-</section>
-
-<!-- ============================== 06 what it buys ============================== -->
-<section class="slide">
-  <span class="no"><b>06</b> / 12</span>
+  <span class="no"><b>04</b> / 09</span>
   <p class="eyebrow">Consequences, not features</p>
   <h2>Four things nobody had to build</h2>
-  <div class="cols">
-    <div class="card card--flag">
-      <span class="tag t-acc">Rollback</span>
-      <h4>An older triple</h4>
-      <p>Not a rebuild. Retention depth is 10, which is therefore also rollback depth.</p>
+  <p class="gist">Rollback, two runtimes, safe concurrency and config that cannot drift are not features here. Each one <b>falls out</b> of having named the three parts by value.</p>
+  <details class="more">
+    <summary>What each one costs, which is nothing</summary>
+    <div class="body">
+      <div class="cols">
+        <div class="card card--flag">
+          <span class="tag t-acc">Rollback</span>
+          <h4>An older triple</h4>
+          <p>Not a rebuild. Retention depth is 10, which is therefore also rollback depth.</p>
+        </div>
+        <div class="card card--flag">
+          <span class="tag t-acc">Two runtimes</span>
+          <h4>No new concept</h4>
+          <p>An artifact is <code>image</code> or <code>files</code>. Kubernetes, Cloud Run and static hosting are the same triple with a different <em>where</em>.</p>
+        </div>
+        <div class="card card--flag">
+          <span class="tag t-acc">Concurrency</span>
+          <h4>Impossible, not racy</h4>
+          <p>The triple is taken under a locking read against the transactional <code>Component@Target.desired</code> row.</p>
+        </div>
+        <div class="card card--flag">
+          <span class="tag t-acc">Config</span>
+          <h4>Cannot drift underneath</h4>
+          <p>Scoped to (Component, Target) and pinned by digest into the deploy — so a running deployment reads what it was deployed with.</p>
+        </div>
+      </div>
     </div>
-    <div class="card card--flag">
-      <span class="tag t-acc">Two runtimes</span>
-      <h4>No new concept</h4>
-      <p>An artifact is <code>image</code> or <code>files</code>. Kubernetes, Cloud Run and static hosting are the same triple with a different <em>where</em>.</p>
-    </div>
-    <div class="card card--flag">
-      <span class="tag t-acc">Concurrency</span>
-      <h4>Impossible, not racy</h4>
-      <p>The triple is taken under a locking read against the transactional <code>Component@Target.desired</code> row.</p>
-    </div>
-    <div class="card card--flag">
-      <span class="tag t-acc">Config</span>
-      <h4>Cannot drift underneath</h4>
-      <p>Scoped to (Component, Target) and pinned by digest into the deploy — so a running deployment reads what it was deployed with.</p>
-    </div>
-  </div>
+  </details>
 </section>
 
-<!-- ============================== 07 auth ============================== -->
+<!-- ============================== 05 contract two ============================== -->
 <section class="slide">
-  <span class="no"><b>07</b> / 12</span>
-  <p class="eyebrow">Auth, first-class</p>
-  <h2>Who may reach it is <em>part of the contract</em></h2>
-  <div class="split">
-    <div style="display:flex;flex-direction:column;gap:1rem">
-      <p class="dim"><code>reach</code> and <code>auth</code> are fields on the Component, sitting in desired state beside the image and the config — not a policy bolted on afterwards, and not a wiki page about which ingress to copy. So they are pinned into the deploy like everything else, and a deployment records who could reach it, as a fact, at that version.</p>
+  <span class="no"><b>05</b> / 09</span>
+  <p class="eyebrow">Contract two · where the far sides plug in</p>
+  <h2>Five seams, and <em>none of them</em> is the architecture</h2>
+  <p class="gist">Every outside thing is swappable without editing at the place it is used — and the proof one is real arrived unannounced: a build route that <b>dials in</b> rather than out landed as one row in a list.</p>
+  <details class="more">
+    <summary>The five seams, and their adapters today</summary>
+    <div class="body">
+      <p class="dim" style="max-width:74ch">A seam is a place behaviour can be swapped without editing at that place. One implementation would leave a seam hypothetical; every one of these has at least two.</p>
+      <div class="tablewrap">
+        <table class="bench">
+          <thead>
+            <tr><th scope="col">Seam</th><th scope="col">What varies across it</th><th scope="col">Adapters today</th></tr>
+          </thead>
+          <tbody>
+            <tr><th scope="row">Build</th><td>where the artifact is produced</td><td>GitHub Actions · Cloud Build · microVM pool · in-cluster Job</td></tr>
+            <tr><th scope="row">Deploy</th><td>what runtime receives it</td><td>Kubernetes · Cloud Run · static hosting</td></tr>
+            <tr><th scope="row">Delivery</th><td>which operator drives it</td><td>Flux HelmRelease · Argo Application</td></tr>
+            <tr><th scope="row">Config store</th><td>where the value of record lives</td><td>Secret Manager · 1Password · HTTP</td></tr>
+            <tr><th scope="row">Datastore</th><td>where a Target's state lives</td><td>cloud project · cluster</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="card card--flag">
+        <h4>Flux is an adapter, not the architecture</h4>
+        <p>A Target declares which operator drives it, and Spindrift writes that operator's own object. Both flavours end at the same status type and nothing above them branches — so the GitOps engine is a choice a Target makes, never a thing the platform is built out of.</p>
+      </div>
+      <p class="verbatim">apply · observe · destroy · run · executions · tail · inspect   →   seven verbs, and “deploy anything, anywhere” is behind them</p>
+    </div>
+  </details>
+  <details class="more">
+    <summary>The seam that runs backwards</summary>
+    <div class="body">
+      <div class="split">
+        <div style="display:flex;flex-direction:column;gap:1rem">
+          <p class="dim">Three build adapters reach outward — a workflow dispatch, a cloud API, a Job on a cluster this process already holds a token for. The fourth is a pool of microVMs on a machine Spindrift cannot open a connection to at all. Every instinct says that needs a new concept.</p>
+          <p class="rule-kicker">It needed a row in a list. The route writes an intent to an outbox row and polls that row for a verdict — exactly the way the other three poll a status endpoint. The endpoint just happens to be its own database.</p>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:1.1rem">
+          <div class="card card--flag">
+            <span class="tag t-acc">The far side</span>
+            <h4>A peer project, not a subsystem</h4>
+            <p><b>Bosun</b> keeps a warm pool of ephemeral microVMs, each serving exactly one CI job before it is destroyed. Spindrift does not run it, install it, or know anything about it beyond a label — the host long-polls in over three shared-secret endpoints and claims what it finds.</p>
+          </div>
+          <div class="card card--flag">
+            <span class="tag t-acc">Why it earns its place</span>
+            <h4>Proven, and honestly unserved</h4>
+            <p>Two of the three original routes are somebody else's service; this one owes them nothing, and it clears the same <span class="m">SLSA L2</span> bar — verified against the build hull's own builder identity before core signs the digest. No host serves the class today: the route stays declared and ranked last, so bringing a host back serves it with no configuration change, and a build that falls through to it times out at the build budget rather than hanging.</p>
+          </div>
+        </div>
+      </div>
+      <p class="small dim" style="max-width:70ch">That is the test a contract passes or fails, and it is not a test you can run on paper. An interface that only admits far sides you are able to dial was never a seam; it was the shape of the three things that happened to exist when it was written. Its deck is a sibling of this one, deployed the same way through the same product: <b>bosun-slides-web.web.app</b></p>
+    </div>
+  </details>
+</section>
+
+<!-- ============================== 06 contract three ============================== -->
+<section class="slide">
+  <span class="no"><b>06</b> / 09</span>
+  <p class="eyebrow">Contract three · who may reach it</p>
+  <h2>Reach and auth are <em>fields</em>, not policy</h2>
+  <p class="gist">They sit in desired state beside the image and the config, so they are pinned into the deploy like everything else — and a Target that cannot <b>authenticate</b> a reach is excluded before a build is ever dispatched.</p>
+  <details class="more">
+    <summary>The three reaches, the edge, and the refusal</summary>
+    <div class="body">
+      <p class="dim" style="max-width:76ch">Not a policy bolted on afterwards, and not a wiki page about which ingress to copy. A deployment therefore records who could reach it, as a fact, at that version.</p>
       <div class="lineage">
         <div><b>Internal</b><span>cluster only</span></div>
         <div><b>Private</b><span>an RFC1918 address — the record type <em>is</em> the boundary</span></div>
@@ -712,8 +797,6 @@
       </div>
       <p class="small dim">Private is the default. Nothing becomes reachable because somebody forgot a field.</p>
       <p class="rule-kicker">A Target declares which reaches it can <em>authenticate</em>, not merely which it can serve. So auth decides where you are allowed to deploy.</p>
-    </div>
-    <div style="display:flex;flex-direction:column;gap:1.1rem">
       <div class="cols">
         <div class="card card--flag">
           <span class="tag t-acc">The App edge</span>
@@ -733,299 +816,282 @@
       </div>
       <p class="verbatim">reach: private · auth: proxy   →   AUTH_UNSUPPORTED excludes every Target that cannot authenticate at that reach, before a build is ever dispatched</p>
     </div>
-  </div>
+  </details>
 </section>
 
-<!-- ============================== 06 ownership ============================== -->
+<!-- ============================== 07 contract four ============================== -->
 <section class="slide">
-  <span class="no"><b>08</b> / 12</span>
-  <p class="eyebrow">Where the contract stops</p>
+  <span class="no"><b>07</b> / 09</span>
+  <p class="eyebrow">Contract four · where authority stops</p>
   <h2>It cannot create what it deploys into — so it opens a <em>pull request</em></h2>
-  <p class="dim" style="max-width:76ch">Spindrift holds delegated write access to contents: a release object in one namespace, an App inside one pre-provisioned project. It holds nothing that can create a cluster, a project, a VPC, a tunnel, a signing key or a policy engine. When a prerequisite is missing it writes the infrastructure code that would clear it and opens that as a pull request — a human merges, the apply bot applies, and a standing check turns the row green.</p>
-    <figure>
-    <div class="figwrap">
-      <svg viewBox="0 0 920 560" role="img" aria-label="Ownership boundary: Flux and Terraform provision vessel prerequisites; Spindrift writes only into the contents through delegated APIs, and clears missing prerequisites by opening a pull request that Atlantis applies.">
-        <defs>
-          <marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
-            <path d="M0 0 L10 5 L0 10 z" fill="var(--accent)"/>
-          </marker>
-          <marker id="ahg" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
-            <path d="M0 0 L10 5 L0 10 z" fill="var(--diag-line)"/>
-          </marker>
-        </defs>
+  <p class="gist">Spindrift holds delegated write access to <b>contents</b> and nothing that can create a cluster, a project, a VPC, a tunnel or a signing key. A missing prerequisite becomes infrastructure code on a pull request, not a resource.</p>
+  <details class="more">
+    <summary>The ownership boundary, drawn</summary>
+    <div class="body">
+      <p class="dim" style="max-width:76ch">A release object in one namespace, an App inside one pre-provisioned project — that is the whole of its write access. When a prerequisite is missing it writes the infrastructure code that would clear it and opens that as a pull request: a human merges, the apply bot applies, and a standing check turns the row green.</p>
+      <figure>
+        <div class="figwrap">
+          <svg viewBox="0 0 920 560" role="img" aria-label="Ownership boundary: Flux and Terraform provision vessel prerequisites; Spindrift writes only into the contents through delegated APIs, and clears missing prerequisites by opening a pull request that Atlantis applies.">
+            <defs>
+              <marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+                <path d="M0 0 L10 5 L0 10 z" fill="var(--accent)"/>
+              </marker>
+              <marker id="ahg" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+                <path d="M0 0 L10 5 L0 10 z" fill="var(--diag-line)"/>
+              </marker>
+            </defs>
 
-        <!-- vessel zone -->
-        <rect class="d-zone" x="340" y="40" width="560" height="336" rx="14"/>
-        <text class="d-hd" x="356" y="64">VESSEL — A CLUSTER OR A CLOUD PROJECT</text>
+            <!-- vessel zone -->
+            <rect class="d-zone" x="340" y="40" width="560" height="336" rx="14"/>
+            <text class="d-hd" x="356" y="64">VESSEL — A CLUSTER OR A CLOUD PROJECT</text>
 
-        <!-- prerequisites -->
-        <rect class="d-box2" x="360" y="80" width="520" height="112" rx="8"/>
-        <text class="d-t b" x="378" y="106">Prerequisites — provisioned by whatever GitOps owns that platform</text>
-        <text class="d-s" x="378" y="132">Kubernetes: control-plane namespace · admission policy · target namespace + RBAC · edge workload</text>
-        <text class="d-s" x="378" y="152">GCP: project · VPC · tunnel · signing key · attestor · policy engine</text>
-        <text class="d-s" x="378" y="176">Shared operators · the authentication proxy · CA bundle · SOPS Secret · OCIRepository</text>
+            <!-- prerequisites -->
+            <rect class="d-box2" x="360" y="80" width="520" height="112" rx="8"/>
+            <text class="d-t b" x="378" y="106">Prerequisites — provisioned by whatever GitOps owns that platform</text>
+            <text class="d-s" x="378" y="132">Kubernetes: control-plane namespace · admission policy · target namespace + RBAC · edge workload</text>
+            <text class="d-s" x="378" y="152">GCP: project · VPC · tunnel · signing key · attestor · policy engine</text>
+            <text class="d-s" x="378" y="176">Shared operators · the authentication proxy · CA bundle · SOPS Secret · OCIRepository</text>
 
-        <!-- contents -->
-        <rect class="d-acc" x="360" y="222" width="520" height="132" rx="8"/>
-        <text class="d-t b" x="378" y="248">Contents — Spindrift owns these, through delegated APIs</text>
-        <text class="d-m" x="378" y="274">HelmRelease resources in `spindrift-apps`</text>
-        <text class="d-m" x="378" y="296">App resources inside the pre-provisioned vessel project</text>
-        <text class="d-s" x="378" y="324">It places workloads and never removes one: deleting an App or</text>
-        <text class="d-s" x="378" y="342">disconnecting a Target strands what is running, deliberately.</text>
+            <!-- contents -->
+            <rect class="d-acc" x="360" y="222" width="520" height="132" rx="8"/>
+            <text class="d-t b" x="378" y="248">Contents — Spindrift owns these, through delegated APIs</text>
+            <text class="d-m" x="378" y="274">HelmRelease resources in `spindrift-apps`</text>
+            <text class="d-m" x="378" y="296">App resources inside the pre-provisioned vessel project</text>
+            <text class="d-s" x="378" y="324">It places workloads and never removes one: deleting an App or</text>
+            <text class="d-s" x="378" y="342">disconnecting a Target strands what is running, deliberately.</text>
 
-        <!-- left actors -->
-        <rect class="d-box" x="30" y="80" width="250" height="46" rx="6"/>
-        <text class="d-t b" x="46" y="102">Platform GitOps</text>
-        <text class="d-s" x="46" y="118">Flux, on a Kubernetes Target</text>
+            <!-- left actors -->
+            <rect class="d-box" x="30" y="80" width="250" height="46" rx="6"/>
+            <text class="d-t b" x="46" y="102">Platform GitOps</text>
+            <text class="d-s" x="46" y="118">Flux, on a Kubernetes Target</text>
 
-        <rect class="d-box" x="30" y="138" width="250" height="46" rx="6"/>
-        <text class="d-t b" x="46" y="160">Infrastructure as code</text>
-        <text class="d-s" x="46" y="176">Terraform, in the cloud project</text>
+            <rect class="d-box" x="30" y="138" width="250" height="46" rx="6"/>
+            <text class="d-t b" x="46" y="160">Infrastructure as code</text>
+            <text class="d-s" x="46" y="176">Terraform, in the cloud project</text>
 
-        <path class="d-line" d="M280 103 L352 116" marker-end="url(#ahg)"/>
-        <path class="d-line" d="M280 161 L352 148" marker-end="url(#ahg)"/>
+            <path class="d-line" d="M280 103 L352 116" marker-end="url(#ahg)"/>
+            <path class="d-line" d="M280 161 L352 148" marker-end="url(#ahg)"/>
 
-        <!-- spindrift -->
-        <rect class="d-acc" x="30" y="250" width="250" height="88" rx="8"/>
-        <text class="d-t b" x="46" y="278">Spindrift</text>
-        <text class="d-s" x="46" y="298">the running controller —</text>
-        <text class="d-s" x="46" y="316">authority granted to it, not to a human</text>
+            <!-- spindrift -->
+            <rect class="d-acc" x="30" y="250" width="250" height="88" rx="8"/>
+            <text class="d-t b" x="46" y="278">Spindrift</text>
+            <text class="d-s" x="46" y="298">the running controller —</text>
+            <text class="d-s" x="46" y="316">authority granted to it, not to a human</text>
 
-        <path class="d-flow" d="M280 300 L352 290" marker-end="url(#ah)"/>
-        <text class="d-lab" x="316" y="324" text-anchor="middle">writes</text>
+            <path class="d-flow" d="M280 300 L352 290" marker-end="url(#ah)"/>
+            <text class="d-lab" x="316" y="324" text-anchor="middle">writes</text>
 
-        <!-- barred: never creates -->
-        <path class="d-stop" d="M204 250 L300 202"/>
-        <path class="d-stop" d="M244 216 L262 236 M262 216 L244 236" stroke-dasharray="0"/>
-        <text class="d-cau" x="252" y="196" text-anchor="middle">never creates</text>
+            <!-- barred: never creates -->
+            <path class="d-stop" d="M204 250 L300 202"/>
+            <path class="d-stop" d="M244 216 L262 236 M262 216 L244 236" stroke-dasharray="0"/>
+            <text class="d-cau" x="252" y="196" text-anchor="middle">never creates</text>
 
-        <text class="d-s" x="360" y="396">A cluster, namespace, project, VPC, tunnel, signing key or policy engine is never created by Spindrift.</text>
+            <text class="d-s" x="360" y="396">A cluster, namespace, project, VPC, tunnel, signing key or policy engine is never created by Spindrift.</text>
 
-        <!-- propose loop -->
-        <rect class="d-box" x="30" y="432" width="250" height="58" rx="6"/>
-        <text class="d-t b" x="46" y="456">Pull request</text>
-        <text class="d-s" x="46" y="474">the Terraform stanza + the root it belongs in</text>
+            <!-- propose loop -->
+            <rect class="d-box" x="30" y="432" width="250" height="58" rx="6"/>
+            <text class="d-t b" x="46" y="456">Pull request</text>
+            <text class="d-s" x="46" y="474">the Terraform stanza + the root it belongs in</text>
 
-        <rect class="d-box" x="330" y="432" width="190" height="58" rx="6"/>
-        <text class="d-t b" x="346" y="456">The apply bot</text>
-        <text class="d-s" x="346" y="474">Atlantis, on the pull request</text>
+            <rect class="d-box" x="330" y="432" width="190" height="58" rx="6"/>
+            <text class="d-t b" x="346" y="456">The apply bot</text>
+            <text class="d-s" x="346" y="474">Atlantis, on the pull request</text>
 
-        <rect class="d-box" x="570" y="432" width="310" height="58" rx="6"/>
-        <text class="d-t b" x="586" y="456">The standing check turns the row green</text>
-        <text class="d-s" x="586" y="474">cleared outside Terraform? the row says so instead</text>
+            <rect class="d-box" x="570" y="432" width="310" height="58" rx="6"/>
+            <text class="d-t b" x="586" y="456">The standing check turns the row green</text>
+            <text class="d-s" x="586" y="474">cleared outside Terraform? the row says so instead</text>
 
-        <path class="d-flow" d="M155 338 L155 424" marker-end="url(#ah)"/>
-        <text class="d-lab" x="166" y="392">unmet prerequisite</text>
-        <path class="d-flow" d="M280 461 L322 461" marker-end="url(#ah)"/>
-        <path class="d-flow" d="M520 461 L562 461" marker-end="url(#ah)"/>
-        <path class="d-flow" d="M725 432 L725 384" marker-end="url(#ah)"/>
-      </svg>
+            <path class="d-flow" d="M155 338 L155 424" marker-end="url(#ah)"/>
+            <text class="d-lab" x="166" y="392">unmet prerequisite</text>
+            <path class="d-flow" d="M280 461 L322 461" marker-end="url(#ah)"/>
+            <path class="d-flow" d="M520 461 L562 461" marker-end="url(#ah)"/>
+            <path class="d-flow" d="M725 432 L725 384" marker-end="url(#ah)"/>
+          </svg>
+        </div>
+        <figcaption>The contract governs contents, never the container. Spindrift places a triple inside a vessel somebody else provisioned — which is also why the authentication proxy enforcing an App edge is one Flux owns and Spindrift only routes to.</figcaption>
+      </figure>
     </div>
-    <figcaption>The contract governs contents, never the container. Spindrift places a triple inside a vessel somebody else provisioned, and when a prerequisite is missing it writes a pull request rather than the resource — which is also why the authentication proxy enforcing an App edge is one Flux owns and Spindrift only routes to.</figcaption>
-  </figure>
-
+  </details>
 </section>
 
-<!-- ============================== 07 supply chain ============================== -->
+<!-- ============================== 08 supply chain ============================== -->
 <section class="slide">
-  <span class="no"><b>09</b> / 12</span>
+  <span class="no"><b>08</b> / 09</span>
   <p class="eyebrow">Making the artifact half checkable</p>
   <h2>One signature, <em>two verifiers</em></h2>
-    <figure>
-    <div class="figwrap">
-      <svg viewBox="0 0 940 530" role="img" aria-label="Supply chain: a source is staged to a bundle digest, built by one of four routes, producing one artifact digest; core verifies backend provenance against the target minimum SLSA level before signing with the KMS key, and two verifiers — Kyverno on clusters, Binary Authorization in the cloud — admit the deploy.">
-        <defs>
-          <marker id="ah2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
-            <path d="M0 0 L10 5 L0 10 z" fill="var(--accent)"/>
-          </marker>
-        </defs>
+  <p class="gist">Because the artifact is named by digest, it is a thing a signature can be <b>about</b>. Four build routes converge on one digest, one key signs it, and two independent policy engines re-check it at admission.</p>
+  <details class="more">
+    <summary>Source to admission, end to end</summary>
+    <div class="body">
+      <figure>
+        <div class="figwrap">
+          <svg viewBox="0 0 940 530" role="img" aria-label="Supply chain: a source is staged to a bundle digest, built by one of four routes, producing one artifact digest; core verifies backend provenance against the target minimum SLSA level before signing with the KMS key, and two verifiers — Kyverno on clusters, Binary Authorization in the cloud — admit the deploy.">
+            <defs>
+              <marker id="ah2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+                <path d="M0 0 L10 5 L0 10 z" fill="var(--accent)"/>
+              </marker>
+            </defs>
 
-        <!-- source -->
-        <rect class="d-box" x="20" y="128" width="160" height="84" rx="6"/>
-        <text class="d-t b" x="36" y="152">Source</text>
-        <text class="d-s" x="36" y="172">repo at a commit</text>
-        <text class="d-s" x="36" y="190">or a ZIP upload</text>
-        <text class="d-s" x="36" y="206">— immutable, staged</text>
+            <!-- source -->
+            <rect class="d-box" x="20" y="128" width="160" height="84" rx="6"/>
+            <text class="d-t b" x="36" y="152">Source</text>
+            <text class="d-s" x="36" y="172">repo at a commit</text>
+            <text class="d-s" x="36" y="190">or a ZIP upload</text>
+            <text class="d-s" x="36" y="206">— immutable, staged</text>
 
-        <rect class="d-box2" x="20" y="244" width="160" height="60" rx="6"/>
-        <text class="d-t b" x="36" y="266">Source receipt</text>
-        <text class="d-s" x="36" y="284">what was fetched or</text>
-        <text class="d-s" x="36" y="298">uploaded, by which principal</text>
-        <path class="d-flow" d="M100 212 L100 236" marker-end="url(#ah2)"/>
-        <text class="d-lab" x="112" y="230">signed</text>
+            <rect class="d-box2" x="20" y="244" width="160" height="60" rx="6"/>
+            <text class="d-t b" x="36" y="266">Source receipt</text>
+            <text class="d-s" x="36" y="284">what was fetched or</text>
+            <text class="d-s" x="36" y="298">uploaded, by which principal</text>
+            <path class="d-flow" d="M100 212 L100 236" marker-end="url(#ah2)"/>
+            <text class="d-lab" x="112" y="230">signed</text>
 
-        <!-- bundle -->
-        <rect class="d-box" x="212" y="128" width="150" height="84" rx="6"/>
-        <text class="d-t b" x="228" y="152">Bundle digest</text>
-        <text class="d-m" x="228" y="174">sha256:…</text>
-        <text class="d-s" x="228" y="194">a required build</text>
-        <text class="d-s" x="228" y="208">parameter on every route</text>
-        <path class="d-flow" d="M180 170 L204 170" marker-end="url(#ah2)"/>
+            <!-- bundle -->
+            <rect class="d-box" x="212" y="128" width="150" height="84" rx="6"/>
+            <text class="d-t b" x="228" y="152">Bundle digest</text>
+            <text class="d-m" x="228" y="174">sha256:…</text>
+            <text class="d-s" x="228" y="194">a required build</text>
+            <text class="d-s" x="228" y="208">parameter on every route</text>
+            <path class="d-flow" d="M180 170 L204 170" marker-end="url(#ah2)"/>
 
-        <!-- routes -->
-        <rect class="d-box" x="404" y="30" width="210" height="58" rx="6"/>
-        <text class="d-t b" x="420" y="52">Hosted CI</text>
-        <text class="d-s" x="420" y="72">GitHub Actions, SHA-pinned</text>
-        <text class="d-lab" x="598" y="52" text-anchor="end">SLSA L2</text>
+            <!-- routes -->
+            <rect class="d-box" x="404" y="30" width="210" height="58" rx="6"/>
+            <text class="d-t b" x="420" y="52">Hosted CI</text>
+            <text class="d-s" x="420" y="72">GitHub Actions, SHA-pinned</text>
+            <text class="d-lab" x="598" y="52" text-anchor="end">SLSA L2</text>
 
-        <rect class="d-box" x="404" y="100" width="210" height="58" rx="6"/>
-        <text class="d-t b" x="420" y="122">Cloud builder</text>
-        <text class="d-s" x="420" y="142">Cloud Build</text>
-        <text class="d-lab" x="598" y="122" text-anchor="end">SLSA L3</text>
+            <rect class="d-box" x="404" y="100" width="210" height="58" rx="6"/>
+            <text class="d-t b" x="420" y="122">Cloud builder</text>
+            <text class="d-s" x="420" y="142">Cloud Build</text>
+            <text class="d-lab" x="598" y="122" text-anchor="end">SLSA L3</text>
 
-        <rect class="d-box" x="404" y="170" width="210" height="58" rx="6"/>
-        <text class="d-t b" x="420" y="192">Pool — a bosun skiff</text>
-        <text class="d-s" x="420" y="212">a microVM host, dialling in</text>
-        <text class="d-lab" x="598" y="192" text-anchor="end">SLSA L2</text>
+            <rect class="d-box" x="404" y="170" width="210" height="58" rx="6"/>
+            <text class="d-t b" x="420" y="192">Pool — a bosun skiff</text>
+            <text class="d-s" x="420" y="212">a microVM host, dialling in</text>
+            <text class="d-lab" x="598" y="192" text-anchor="end">SLSA L2</text>
 
-        <rect class="d-box" x="404" y="240" width="210" height="58" rx="6"/>
-        <text class="d-t b" x="420" y="262">In-cluster Job</text>
-        <text class="d-s" x="420" y="282">offline-capable</text>
-        <text class="d-cau" x="598" y="262" text-anchor="end">SLSA L1</text>
+            <rect class="d-box" x="404" y="240" width="210" height="58" rx="6"/>
+            <text class="d-t b" x="420" y="262">In-cluster Job</text>
+            <text class="d-s" x="420" y="282">offline-capable</text>
+            <text class="d-cau" x="598" y="262" text-anchor="end">SLSA L1</text>
 
-        <path class="d-flow" d="M362 158 L396 62" marker-end="url(#ah2)"/>
-        <path class="d-flow" d="M362 166 L396 132" marker-end="url(#ah2)"/>
-        <path class="d-flow" d="M362 174 L396 202" marker-end="url(#ah2)"/>
-        <path class="d-flow" d="M362 182 L396 272" marker-end="url(#ah2)"/>
+            <path class="d-flow" d="M362 158 L396 62" marker-end="url(#ah2)"/>
+            <path class="d-flow" d="M362 166 L396 132" marker-end="url(#ah2)"/>
+            <path class="d-flow" d="M362 174 L396 202" marker-end="url(#ah2)"/>
+            <path class="d-flow" d="M362 182 L396 272" marker-end="url(#ah2)"/>
 
-        <text class="d-s" x="404" y="322">Admin-ranked routes, chosen after placement. The same BuildKit program over the same staged bundle —</text>
-        <text class="d-s" x="404" y="338">so which route ran is a property of a Build, not a different pipeline.</text>
+            <text class="d-s" x="404" y="322">Admin-ranked routes, chosen after placement. The same BuildKit program over the same staged bundle —</text>
+            <text class="d-s" x="404" y="338">so which route ran is a property of a Build, not a different pipeline.</text>
 
-        <!-- artifact -->
-        <rect class="d-box" x="660" y="128" width="200" height="84" rx="6"/>
-        <text class="d-t b" x="676" y="152">Artifact</text>
-        <text class="d-s" x="676" y="172">one digest, type image or files</text>
-        <text class="d-s" x="676" y="190">staged in a build project,</text>
-        <text class="d-s" x="676" y="206">swept at 24 h by design</text>
-        <path class="d-flow" d="M614 60 L652 150" marker-end="url(#ah2)"/>
-        <path class="d-flow" d="M614 130 L652 162" marker-end="url(#ah2)"/>
-        <path class="d-flow" d="M614 200 L652 182" marker-end="url(#ah2)"/>
-        <path class="d-stop" d="M614 272 L652 196"/>
-        <path class="d-stop" d="M625 226 L641 242 M641 226 L625 242" stroke-dasharray="0"/>
-        <text class="d-cau" x="752" y="246" text-anchor="end">an L2+ Target</text>
-        <text class="d-cau" x="752" y="262" text-anchor="end">refuses L1</text>
+            <!-- artifact -->
+            <rect class="d-box" x="660" y="128" width="200" height="84" rx="6"/>
+            <text class="d-t b" x="676" y="152">Artifact</text>
+            <text class="d-s" x="676" y="172">one digest, type image or files</text>
+            <text class="d-s" x="676" y="190">staged in a build project,</text>
+            <text class="d-s" x="676" y="206">swept at 24 h by design</text>
+            <path class="d-flow" d="M614 60 L652 150" marker-end="url(#ah2)"/>
+            <path class="d-flow" d="M614 130 L652 162" marker-end="url(#ah2)"/>
+            <path class="d-flow" d="M614 200 L652 182" marker-end="url(#ah2)"/>
+            <path class="d-stop" d="M614 272 L652 196"/>
+            <path class="d-stop" d="M625 226 L641 242 M641 226 L625 242" stroke-dasharray="0"/>
+            <text class="d-cau" x="752" y="246" text-anchor="end">an L2+ Target</text>
+            <text class="d-cau" x="752" y="262" text-anchor="end">refuses L1</text>
 
-        <!-- return rail -->
-        <path class="d-flow" d="M760 212 L760 352 Q760 362 750 362 L110 362 Q100 362 100 372 L100 388" marker-end="url(#ah2)"/>
-        <text class="d-lab" x="430" y="356" text-anchor="middle">the one artifact digest</text>
+            <!-- return rail -->
+            <path class="d-flow" d="M760 212 L760 352 Q760 362 750 362 L110 362 Q100 362 100 372 L100 388" marker-end="url(#ah2)"/>
+            <text class="d-lab" x="430" y="356" text-anchor="middle">the one artifact digest</text>
 
-        <!-- row two -->
-        <rect class="d-box2" x="20" y="392" width="196" height="92" rx="6"/>
-        <text class="d-t b" x="36" y="416">Verify</text>
-        <text class="d-s" x="36" y="436">the build backend's provenance</text>
-        <text class="d-s" x="36" y="452">against the Target minimum</text>
-        <text class="d-s" x="36" y="468">(default L2) — before signing</text>
+            <!-- row two -->
+            <rect class="d-box2" x="20" y="392" width="196" height="92" rx="6"/>
+            <text class="d-t b" x="36" y="416">Verify</text>
+            <text class="d-s" x="36" y="436">the build backend's provenance</text>
+            <text class="d-s" x="36" y="452">against the Target minimum</text>
+            <text class="d-s" x="36" y="468">(default L2) — before signing</text>
 
-        <rect class="d-acc" x="248" y="392" width="196" height="92" rx="6"/>
-        <text class="d-t b" x="264" y="416">Sign &amp; attest</text>
-        <text class="d-s" x="264" y="436">KMS signer key in</text>
-        <text class="d-m" x="264" y="454">trusted-builds</text>
-        <text class="d-s" x="264" y="472">via the `provenance` attestor</text>
-        <path class="d-flow" d="M216 438 L240 438" marker-end="url(#ah2)"/>
+            <rect class="d-acc" x="248" y="392" width="196" height="92" rx="6"/>
+            <text class="d-t b" x="264" y="416">Sign &amp; attest</text>
+            <text class="d-s" x="264" y="436">KMS signer key in</text>
+            <text class="d-m" x="264" y="454">trusted-builds</text>
+            <text class="d-s" x="264" y="472">via the `provenance` attestor</text>
+            <path class="d-flow" d="M216 438 L240 438" marker-end="url(#ah2)"/>
 
-        <rect class="d-box" x="478" y="376" width="200" height="52" rx="6"/>
-        <text class="d-t b" x="494" y="398">Kyverno ClusterPolicy</text>
-        <text class="d-s" x="494" y="416">on the clusters, at admission</text>
+            <rect class="d-box" x="478" y="376" width="200" height="52" rx="6"/>
+            <text class="d-t b" x="494" y="398">Kyverno ClusterPolicy</text>
+            <text class="d-s" x="494" y="416">on the clusters, at admission</text>
 
-        <rect class="d-box" x="478" y="448" width="200" height="52" rx="6"/>
-        <text class="d-t b" x="494" y="470">Binary Authorization</text>
-        <text class="d-s" x="494" y="488">the vessel's own enforcing policy</text>
+            <rect class="d-box" x="478" y="448" width="200" height="52" rx="6"/>
+            <text class="d-t b" x="494" y="470">Binary Authorization</text>
+            <text class="d-s" x="494" y="488">the vessel's own enforcing policy</text>
 
-        <path class="d-flow" d="M444 428 L470 404" marker-end="url(#ah2)"/>
-        <path class="d-flow" d="M444 450 L470 470" marker-end="url(#ah2)"/>
-        <text class="d-lab" x="478" y="444">one signature, two verifiers</text>
+            <path class="d-flow" d="M444 428 L470 404" marker-end="url(#ah2)"/>
+            <path class="d-flow" d="M444 450 L470 470" marker-end="url(#ah2)"/>
+            <text class="d-lab" x="478" y="444">one signature, two verifiers</text>
 
-        <rect class="d-acc" x="714" y="396" width="200" height="84" rx="6"/>
-        <text class="d-t b" x="730" y="422">Deploy — admitted</text>
-        <text class="d-s" x="730" y="442">an unsigned digest is rejected;</text>
-        <text class="d-s" x="730" y="460">a failed check is red, with no</text>
-        <text class="d-s" x="730" y="476">silent fallback</text>
-        <path class="d-flow" d="M678 402 L706 424" marker-end="url(#ah2)"/>
-        <path class="d-flow" d="M678 474 L706 452" marker-end="url(#ah2)"/>
-      </svg>
+            <rect class="d-acc" x="714" y="396" width="200" height="84" rx="6"/>
+            <text class="d-t b" x="730" y="422">Deploy — admitted</text>
+            <text class="d-s" x="730" y="442">an unsigned digest is rejected;</text>
+            <text class="d-s" x="730" y="460">a failed check is red, with no</text>
+            <text class="d-s" x="730" y="476">silent fallback</text>
+            <path class="d-flow" d="M678 402 L706 424" marker-end="url(#ah2)"/>
+            <path class="d-flow" d="M678 474 L706 452" marker-end="url(#ah2)"/>
+          </svg>
+        </div>
+        <figcaption>Four build routes converge on one digest; one key signs it; Kyverno on the clusters and Binary Authorization in the cloud each re-check it at admission. An L2+ Target refuses an L1 artifact rather than admitting it with a note.</figcaption>
+      </figure>
     </div>
-    <figcaption>Because the artifact is named by digest, it is a thing a signature can be about. Four build routes converge on one digest; one key signs it; Kyverno on the clusters and Binary Authorization in the cloud each re-check it at admission.</figcaption>
-  </figure>
-
+  </details>
 </section>
 
-<!-- ============================== 10 the sibling ============================== -->
+<!-- ============================== 09 evidence + close ============================== -->
 <section class="slide">
-  <span class="no"><b>10</b> / 12</span>
-  <p class="eyebrow">The seam that runs backwards</p>
-  <h2>One adapter dials <em>in</em>, and the interface never noticed</h2>
-  <div class="split">
-    <div style="display:flex;flex-direction:column;gap:1rem">
-      <p class="dim">Three build adapters reach outward — a workflow dispatch, a cloud API, a Job on a cluster this process already holds a token for. The fourth is a pool of microVMs on a machine Spindrift cannot open a connection to at all. Every instinct says that needs a new concept.</p>
-      <p class="rule-kicker">It needed a row in a list. The route writes an intent to an outbox row and polls that row for a verdict — exactly the way the other three poll a status endpoint. The endpoint just happens to be its own database.</p>
-      <p class="small dim">That is the test a contract passes or fails, and it is not a test you can run on paper. An interface that only admits far sides you are able to dial was never a seam; it was the shape of the three things that happened to exist when it was written.</p>
+  <span class="no"><b>09</b> / 09</span>
+  <p class="eyebrow">Evidence, not assertion</p>
+  <h2>This page is its own acceptance evidence</h2>
+  <p class="gist">Uploaded as an archive, built on the hosted route into a <span class="m">files</span> artifact, served at a URL by the thing it describes — and every clause above was proven on a <b>live installation</b> rather than a fixture.</p>
+  <details class="more">
+    <summary>What a live installation found that 2,283 green tests could not</summary>
+    <div class="body">
+      <div class="split">
+        <div style="display:flex;flex-direction:column;gap:1rem">
+          <p class="rule-kicker">Enrolment. Target connection. Archive to URL. Repository to signed artifact. Admission on a second Target.</p>
+          <p class="small dim">Not fixtures — a running installation, with the digests, build numbers and response codes written down each time. An independent confirmer re-observed the last of them from scratch.</p>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:1.1rem">
+          <div class="stats">
+            <div class="stat"><b>2,283</b><span>tests green at 6f0d870c</span></div>
+            <div class="stat"><b>5</b><span>clauses proven live</span></div>
+            <div class="stat"><b>3/4</b><span>Targets healthy on first probe</span></div>
+            <div class="stat stat--cau"><b>4</b><span>defects only a live install found</span></div>
+          </div>
+          <ul class="ticks">
+            <li>Two Terraform roots that each need the other applied first — the runbook stated one direction.</li>
+            <li>A derived string carries no dependency edge, so grants ran before the account they named existed.</li>
+            <li>Six prerequisite rows failing with one byte-identical certificate-trust sentence.</li>
+            <li>A read on a URL the API does not serve, which made a second deploy collide with the site the first one created — so a static App could be published exactly once.</li>
+          </ul>
+          <p class="small dim" style="border-left:3px solid var(--good);padding-left:0.9rem">That last one is fixed, and <b>this revision is the proof</b>: these words reached you as a second deploy onto the site the first one made.</p>
+          <p class="small dim">Three of the four are wrong <em>sentences</em> shown to an operator. No passing suite would ever have caught them.</p>
+        </div>
+      </div>
     </div>
-    <div style="display:flex;flex-direction:column;gap:1.1rem">
+  </details>
+  <details class="more">
+    <summary>What the contract cost, and what is still open</summary>
+    <div class="body">
       <div class="cols">
         <div class="card card--flag">
-          <span class="tag t-acc">The far side</span>
-          <h4>A peer project, not a subsystem</h4>
-          <p><b>Bosun</b> keeps a warm pool of ephemeral microVMs, each serving exactly one CI job before it is destroyed. Spindrift does not run it, install it, or know anything about it beyond a label — the host long-polls in over three shared-secret endpoints and claims what it finds.</p>
+          <h4>What the contract cost</h4>
+          <p>Three fields on a row. Everything in this deck — rollback, two runtimes, safe concurrency, an auth boundary that cannot be opted out of — is downstream of deciding to name things by value.</p>
         </div>
-        <div class="card card--flag">
-          <span class="tag t-acc">Why it earns its place</span>
-          <h4>Proven, and honestly unserved</h4>
-          <p>Two of the three original routes are somebody else's service; this one owes them nothing, and it clears the same <span class="m">SLSA L2</span> bar — verified against the build hull's own builder identity before core signs the digest. No host serves the class today: the route stays declared and ranked last, so bringing a host back serves it with no configuration change, and a build that falls through to it times out at the build budget rather than hanging.</p>
+        <div class="card card--cau">
+          <h4>Open</h4>
+          <p>The work left before a v1 is known and unglamorous. What is still outstanding is mostly wrong <em>sentences</em> shown to an operator — the failure mode a green suite is worst at catching, and the one the band above is entirely about.</p>
         </div>
       </div>
-      <p class="verbatim">claim · heartbeat · result   →   the endpoint just happens to be this installation's own database</p>
-      <p class="small dim" style="max-width:64ch">Its deck is a sibling of this one, deployed the same way through the same product: <b>bosun-slides-web.web.app</b></p>
     </div>
-  </div>
-</section>
-
-<!-- ============================== 10 proven ============================== -->
-<section class="slide">
-  <span class="no"><b>11</b> / 12</span>
-  <p class="eyebrow">Evidence, not assertion</p>
-  <h2>Every clause proven on a <em>live</em> installation</h2>
-  <div class="split">
-    <div style="display:flex;flex-direction:column;gap:1rem">
-      <p class="rule-kicker">Enrolment. Target connection. Archive to URL. Repository to signed artifact. Admission on a second Target.</p>
-      <p class="small dim">Not fixtures — a running installation, with the digests, build numbers and response codes written down each time. An independent confirmer re-observed the last of them from scratch.</p>
-    </div>
-    <div style="display:flex;flex-direction:column;gap:1.1rem">
-      <div class="stats">
-        <div class="stat"><b>2,283</b><span>tests green at 6f0d870c</span></div>
-        <div class="stat"><b>5</b><span>clauses proven live</span></div>
-        <div class="stat"><b>3/4</b><span>Targets healthy on first probe</span></div>
-        <div class="stat stat--cau"><b>4</b><span>defects only a live install found</span></div>
-      </div>
-      <ul class="ticks">
-        <li>Two Terraform roots that each need the other applied first — the runbook stated one direction.</li>
-        <li>A derived string carries no dependency edge, so grants ran before the account they named existed.</li>
-        <li>Six prerequisite rows failing with one byte-identical certificate-trust sentence.</li>
-        <li>A read on a URL the API does not serve, which made a second deploy collide with the site the first one created — so a static App could be published exactly once.</li>
-      </ul>
-      <p class="small dim" style="border-left:3px solid var(--good);padding-left:0.9rem">That last one is fixed, and <b>this revision is the proof</b>: these words reached you as a second deploy onto the site the first one made.</p>
-      <p class="small dim">Three of the four are wrong <em>sentences</em> shown to an operator. No passing suite would ever have caught them.</p>
-    </div>
-  </div>
-</section>
-
-<!-- ============================== 09 close ============================== -->
-<section class="slide">
-  <span class="no"><b>12</b> / 12</span>
-  <p class="eyebrow">Where it stands</p>
-  <h2>This page is its own acceptance evidence</h2>
-  <p class="lede" style="max-width:44ch">Uploaded as an archive. Built on the hosted route into a <span class="m">files</span> artifact. Served at a URL by the thing it describes.</p>
-  <div class="cols">
-    <div class="card card--flag">
-      <h4>What the contract cost</h4>
-      <p>Three fields on a row. Everything else in this deck — rollback, two runtimes, safe concurrency, an auth boundary that cannot be opted out of — is downstream of deciding to name things by value.</p>
-    </div>
-    <div class="card card--cau">
-      <h4>Open</h4>
-      <p>The work left before a v1 is known and unglamorous. What is still outstanding is mostly wrong <em>sentences</em> shown to an operator — the failure mode a green suite is worst at catching, and the one the previous slide is entirely about.</p>
-    </div>
-  </div>
+  </details>
   <p class="colophon">
-    <span>Artifact <b>+</b> Target <b>+</b> configVersion</span>
+    <span>Artifact <b>+</b> Target <b>+</b> Config</span>
     <span><b>5</b> seams, every one of them real</span>
     <span>Everything else is bookkeeping</span>
   </p>
