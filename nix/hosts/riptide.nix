@@ -58,11 +58,8 @@
     enable = true;
     repo = "jonpulsifer/infra";
     github = {
-      # TODO(operator): the shared Spindrift+bosun GitHub App is created by
-      # hand during the design's cutover step (Manifest flow, off Spindrift's
-      # Repositories screen); this placeholder id is not real. Replace it
-      # once that App exists -- see the PR body.
-      appId = 1;
+      # The shared Spindrift+bosun GitHub App ("spindrift-lolwtf").
+      appId = 4576122;
       privateKeyFile = config.sops.secrets."bosun-github-app-key".path;
     };
     classes.skiff-nixos = {
