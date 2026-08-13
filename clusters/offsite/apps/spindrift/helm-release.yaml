@@ -439,7 +439,18 @@ spec:
               sourceRef:
                 name: spindrift-app
                 namespace: spindrift-apps
+            # Where releases placed before per-App namespaces still live, and
+            # the namespace whose Pod Security labels every App namespace is
+            # stamped from. No new release lands here.
             namespace: spindrift-apps
+            # One namespace per App, created with its first release carrying
+            # the labels above. §20's pattern, so a second operator can name
+            # them their own way.
+            appNamespace: app-{app}
+            # Datastores outlive the Apps attached to them, so they are not in
+            # any App's namespace. Declared in
+            # `clusters/base/platform/spindrift-target/namespace.yaml`.
+            datastoreNamespace: spindrift-datastores
             # §7's operator class: what the App chart needs about *this*
             # cluster. Spindrift never renders into it.
             chartValues:
@@ -472,6 +483,14 @@ spec:
                 secretStore:
                   kind: ClusterSecretStore
                   name: gcp-secret-manager
+                # How an attached Datastore's credential crosses out of
+                # `spindrift-datastores` into the App's own namespace, which a
+                # `secretKeyRef` cannot do. A different store from the one
+                # above and scoped to that one namespace; declared in
+                # `clusters/base/platform/spindrift-datastore-store`.
+                datastoreSecretStore:
+                  kind: ClusterSecretStore
+                  name: spindrift-datastores
                 dns:
                   # That gateway's pinned LoadBalancer address. RFC1918, so
                   # publishing it is the private boundary rather than a hole in
@@ -505,7 +524,18 @@ spec:
               sourceRef:
                 name: spindrift-app
                 namespace: spindrift-apps
+            # Where releases placed before per-App namespaces still live, and
+            # the namespace whose Pod Security labels every App namespace is
+            # stamped from. No new release lands here.
             namespace: spindrift-apps
+            # One namespace per App, created with its first release carrying
+            # the labels above. §20's pattern, so a second operator can name
+            # them their own way.
+            appNamespace: app-{app}
+            # Datastores outlive the Apps attached to them, so they are not in
+            # any App's namespace. Declared in
+            # `clusters/base/platform/spindrift-target/namespace.yaml`.
+            datastoreNamespace: spindrift-datastores
             chartValues:
               platform:
                 # This cluster's own Apps gateway
@@ -542,6 +572,14 @@ spec:
                 secretStore:
                   kind: ClusterSecretStore
                   name: gcp-secret-manager
+                # How an attached Datastore's credential crosses out of
+                # `spindrift-datastores` into the App's own namespace, which a
+                # `secretKeyRef` cannot do. A different store from the one
+                # above and scoped to that one namespace; declared in
+                # `clusters/base/platform/spindrift-datastore-store`.
+                datastoreSecretStore:
+                  kind: ClusterSecretStore
+                  name: spindrift-datastores
                 dns:
                   # That gateway's pinned address, free in this cluster's
                   # `LB_RANGE`. The connect screen reads it off the Gateway's

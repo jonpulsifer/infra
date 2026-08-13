@@ -1,0 +1,22 @@
+---
+# Its own Kustomization rather than a directory added to the operator's, for the
+# reason `gcp-secret-manager` and `onepassword-connect` each have one: the
+# operator installs the CRDs, and a `ClusterSecretStore` in the same apply is
+# dry-run against a kind that does not exist yet.
+#
+# It also depends on `spindrift-target`, which declares the namespace this
+# store's RoleBinding lives in.
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: spindrift-datastore-store
+  namespace: flux-system
+spec:
+  interval: 1h0m0s
+  path: ./clusters/base/platform/spindrift-datastore-store
+  prune: true
+  sourceRef:
+    kind: GitRepository
+    name: infra
+  dependsOn:
+    - name: external-secrets-operator

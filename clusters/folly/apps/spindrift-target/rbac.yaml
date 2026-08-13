@@ -13,14 +13,41 @@ subjects:
     name: federated:system:serviceaccount:spindrift:spindrift
 ---
 apiVersion: rbac.authorization.k8s.io/v1
-kind: RoleBinding
+kind: ClusterRoleBinding
 metadata:
   name: spindrift-target-delivery
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: spindrift-target-delivery
+subjects:
+  - apiGroup: rbac.authorization.k8s.io
+    kind: User
+    name: federated:system:serviceaccount:spindrift:spindrift
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: spindrift-target-chart-artifact
   namespace: spindrift-apps
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role
-  name: spindrift-target-delivery
+  name: spindrift-target-chart-artifact
+subjects:
+  - apiGroup: rbac.authorization.k8s.io
+    kind: User
+    name: federated:system:serviceaccount:spindrift:spindrift
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: spindrift-target-datastores
+  namespace: spindrift-datastores
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: spindrift-target-datastores
 subjects:
   - apiGroup: rbac.authorization.k8s.io
     kind: User
