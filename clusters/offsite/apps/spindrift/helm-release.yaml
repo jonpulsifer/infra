@@ -261,7 +261,7 @@ spec:
         # install link. The identity's private half arrives through the
         # installation Secret — SPINDRIFT_GITHUB_APP_ID and
         # SPINDRIFT_GITHUB_APP_PRIVATE_KEY — never this document.
-        appSlug: spindrift-lolwtf
+        appSlug: spindrift-bot
         # The App is public so it also installs on `homelab-ng`, which means
         # strangers can install it too. These are the installation accounts
         # the Repositories screen renders as connectable and
