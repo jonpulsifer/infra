@@ -493,12 +493,22 @@ carries a correlation input it stamps into `run-name` and the route finds its
 run by that name; the correlation stays out of the spec because no part of the
 build depends on it.
 
-Repository authorization begins in `/repos` with the GitHub App Device Flow.
-The installation manifest names the public client and API origins; it carries
-neither a connected repository nor a GitHub credential. The resulting user
-access and refresh token are one encrypted Postgres row, shared by the web and
-reconciler processes. Repository rows retain only the installation identity
-GitHub reports when the authorized operator selects a repository.
+Repository identity is a GitHub App, arriving one of two ways. An App that
+already exists is **adopted**: the installation Secret carries
+`SPINDRIFT_GITHUB_APP_ID` and `SPINDRIFT_GITHUB_APP_PRIVATE_KEY` (the PEM as
+GitHub exports it — PKCS#1 accepted), the manifest declares its public
+`github.appSlug` for the install links, and the pair takes precedence over
+anything stored. Otherwise `/repos` offers GitHub's App manifest flow: one
+form POST creates the App, and the conversion response's private key and
+webhook secret come back sealed into the singleton `github_app` row. Either
+way the identity is read per mint — never captured at boot, so an identity
+arriving mid-flight works without a restart. The webhook secret follows the
+same order per delivery: `SPINDRIFT_GITHUB_WEBHOOK_SECRET` from the
+installation Secret, then the sealed row, and absent refuses every delivery.
+Installation tokens are minted from the key per use and live an hour; commits
+and pull requests are attributed to the App's bot user. Repository rows retain
+only the installation identity GitHub reports when the operator installs the
+App and selects a repository.
 
 `SPINDRIFT_CREDENTIAL_KEYRING` is a JSON document in the installation Secret:
 
@@ -615,9 +625,12 @@ that sentence when it is missing.
 The cloud build route reads a second variable, `SPINDRIFT_BUILD_TOKEN`, for the
 same reason and with the same posture: two access paths to two services, each
 read per call so a rotated Secret takes effect without a restart. Hosted CI
-uses the GitHub authorization created in the Repositories UI and encrypted in
-Postgres by `SPINDRIFT_CREDENTIAL_KEYRING`; the in-cluster Job authorizes with
-the projected service account token.
+uses installation tokens minted from the GitHub App key created in the
+Repositories UI and sealed in Postgres by `SPINDRIFT_CREDENTIAL_KEYRING`; the
+in-cluster Job authorizes with the projected service account token. Pushing to
+ghcr.io from any route but hosted Actions needs a stored classic PAT
+(`write:packages`) via `setRegistryCredential`: GitHub's registry accepts no
+App token.
 
 **An edge hosting Target needs `SPINDRIFT_CLOUDFLARE_TOKEN`**, and it is the one
 Target that does. That platform's API trades no tokens, so there is no

@@ -23,7 +23,8 @@ async function app(fake: FakeGitHub) {
   return {
     app: new GitHubApp({
       baseUrl: fake.baseUrl,
-      authorization: () => 'Bearer test-user-token',
+      authorization: () => 'Bearer test-installation-token',
+      appAuthorization: () => 'Bearer test-app-jwt',
       fetch: fake.fetch,
     }),
   };
@@ -268,5 +269,81 @@ describe('the media types this host serves', () => {
     // override would parse a JSON envelope as if it were the file.
     const envelope = await get(fake, path, 'application/vnd.github+json');
     expect(await envelope.json()).toMatchObject({ encoding: 'base64' });
+  });
+});
+
+describe('which installations this App operates for', () => {
+  test('installationFor asks the host exactly, with the App JWT', async () => {
+    const fake = new FakeGitHub({ installationId: '37547020' });
+    const { app: github } = await app(fake);
+
+    await expect(github.installationFor(fake.fullName)).resolves.toEqual({
+      installationId: '37547020',
+    });
+    const asked = fake.requests.find((request) =>
+      request.path.endsWith('/installation'),
+    );
+    expect(asked?.authorization).toBe('Bearer test-app-jwt');
+  });
+
+  test('a stranger account is refused, never operated on', async () => {
+    // A public App can be installed by anyone. Naming the accounts this
+    // installation recognises turns everyone else's grant into the same
+    // refusal a missing repository gets — filtered, not merely unrendered.
+    const fake = new FakeGitHub({ accountLogin: 'a-stranger' });
+    const github = new GitHubApp({
+      baseUrl: fake.baseUrl,
+      authorization: () => 'Bearer test-installation-token',
+      appAuthorization: () => 'Bearer test-app-jwt',
+      recognizedAccounts: ['example'],
+      fetch: fake.fetch,
+    });
+
+    await expect(github.installationFor(fake.fullName)).rejects.toMatchObject({
+      code: 'ACCESS_LOST',
+    });
+  });
+
+  test('enumeration walks the App installations and each grant', async () => {
+    const fake = new FakeGitHub({ installationId: '37547020' });
+    const { app: github } = await app(fake);
+
+    await expect(github.availableRepositories()).resolves.toEqual([
+      {
+        repositoryId: '1',
+        fullName: fake.fullName,
+        defaultBranch: 'main',
+        installationId: '37547020',
+      },
+    ]);
+    // The enumeration is JWT-side; the grant read is installation-side.
+    expect(
+      fake.requests.find((request) =>
+        request.path.startsWith('/app/installations?'),
+      )?.authorization,
+    ).toBe('Bearer test-app-jwt');
+    expect(
+      fake.requests.find((request) =>
+        request.path.startsWith('/installation/repositories'),
+      )?.authorization,
+    ).toBe('Bearer test-installation-token');
+  });
+
+  test('a stranger installation never reaches the grant read at all', async () => {
+    const fake = new FakeGitHub({ accountLogin: 'a-stranger' });
+    const github = new GitHubApp({
+      baseUrl: fake.baseUrl,
+      authorization: () => 'Bearer test-installation-token',
+      appAuthorization: () => 'Bearer test-app-jwt',
+      recognizedAccounts: ['example'],
+      fetch: fake.fetch,
+    });
+
+    await expect(github.availableRepositories()).resolves.toEqual([]);
+    expect(
+      fake.requests.some((request) =>
+        request.path.startsWith('/installation/repositories'),
+      ),
+    ).toBe(false);
   });
 });

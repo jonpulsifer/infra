@@ -78,10 +78,7 @@ import {
 } from './views/operations/datastores.tsx';
 import { DeployLedger } from './views/operations/deploys.tsx';
 import { Overview } from './views/operations/overview.tsx';
-import {
-  type RepositoryAuthorizationView,
-  RepositoryList,
-} from './views/repos/list.tsx';
+import { RepositoryList } from './views/repos/list.tsx';
 import {
   ArtifactRegistries,
   Builders,
@@ -2746,13 +2743,6 @@ function RepositoriesScreen({ embedded = false }: { embedded?: boolean }) {
   >({ type: 'loading' });
   const [refresh, setRefresh] = useState(0);
   const [refreshing, setRefreshing] = useState(false);
-  const [authorization, setAuthorization] = useState<
-    | (RepositoryAuthorizationView & {
-        readonly attemptId: string;
-        readonly intervalSeconds: number;
-      })
-    | null
-  >(null);
   const [connecting, setConnecting] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const [openedPullRequest, setOpenedPullRequest] = useState<{
@@ -2791,60 +2781,6 @@ function RepositoriesScreen({ embedded = false }: { embedded?: boolean }) {
     };
   }, [refresh]);
 
-  useEffect(() => {
-    if (authorization?.state !== 'waiting') return;
-    let live = true;
-    let timer: ReturnType<typeof setTimeout> | null = null;
-    const poll = (seconds: number) => {
-      timer = setTimeout(async () => {
-        const result = await command('pollRepositoryAuthorization', {
-          attemptId: authorization.attemptId,
-        }).catch((cause: unknown) => ({
-          ok: false as const,
-          failure: {
-            code: 'MALFORMED_REQUEST' as const,
-            message:
-              cause instanceof Error ? cause.message : 'GitHub poll failed',
-          },
-        }));
-        if (!live) return;
-        if (!result.ok) {
-          setAuthorization((current) =>
-            current === null
-              ? null
-              : {
-                  ...current,
-                  state: 'error',
-                  message: result.failure.message,
-                },
-          );
-          return;
-        }
-        if (result.value.state === 'pending') {
-          poll(result.value.retryAfterSeconds);
-        } else if (result.value.state === 'authorized') {
-          setAuthorization(null);
-          setRefresh((value) => value + 1);
-        } else {
-          const terminalState =
-            result.value.state === 'denied' ? 'denied' : 'expired';
-          setAuthorization((current) =>
-            current === null ? null : { ...current, state: terminalState },
-          );
-        }
-      }, seconds * 1000);
-    };
-    poll(authorization.intervalSeconds);
-    return () => {
-      live = false;
-      if (timer !== null) clearTimeout(timer);
-    };
-  }, [
-    authorization?.attemptId,
-    authorization?.intervalSeconds,
-    authorization?.state,
-  ]);
-
   if (state.type === 'loading') return <SectionSkeleton rows={2} />;
 
   if (state.type === 'error') {
@@ -2858,25 +2794,6 @@ function RepositoriesScreen({ embedded = false }: { embedded?: boolean }) {
       </div>
     );
   }
-
-  const authorize = async () => {
-    setActionError(null);
-    try {
-      const result = await command('beginRepositoryAuthorization', {});
-      if (!result.ok) {
-        setActionError(result.failure.message);
-        return;
-      }
-      setAuthorization({
-        ...result.value,
-        state: 'waiting',
-      });
-    } catch (cause) {
-      setActionError(
-        cause instanceof Error ? cause.message : 'GitHub authorization failed',
-      );
-    }
-  };
 
   const connect = async (input: InputOf<'connectRepository'>) => {
     setConnecting(true);
@@ -2913,12 +2830,10 @@ function RepositoriesScreen({ embedded = false }: { embedded?: boolean }) {
       repos={state.repos}
       options={state.available}
       connector={state.connector}
-      authorization={authorization}
       connecting={connecting}
       refreshing={refreshing}
       error={actionError}
       openedPullRequest={openedPullRequest}
-      onAuthorize={authorize}
       onConnect={connect}
       onRefresh={handleRefresh}
       embedded={embedded}

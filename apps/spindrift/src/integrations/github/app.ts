@@ -1,10 +1,11 @@
 /**
  * Repository, Git data, source archive, and Actions operations for GitHub.
  *
- * The Device OAuth lifecycle supplies the authorization value. The thing core
- * passes around is an {@link InstallationRef}, which is a number in a database
- * column and grants nothing on its own. The bearer value remains behind the
- * per-request authorization provider.
+ * `app-auth.ts` supplies the authorization values — an installation token per
+ * ref, an App JWT for the endpoints that identify the App itself. The thing
+ * core passes around is an {@link InstallationRef}, which is a number in a
+ * database column and grants nothing on its own. The bearer values remain
+ * behind the per-request providers.
  *
  * Two consequences run through this whole file:
  *
@@ -42,12 +43,31 @@ export interface InstallationRef {
   readonly installationId: string;
 }
 
-/** A GitHub App user token supplied by the Device OAuth lifecycle. */
+/** How this App authorizes, per installation and as itself. */
 export interface GitHubAppConfig {
   readonly baseUrl: string;
-  readonly authorization: AuthorizationProvider;
-  readonly onUnauthorized?: (authorization: string) => Error | Promise<Error>;
-  /** Combined App/user identity recorded on source receipts. */
+  /** An installation-token `Authorization` value for one installation. */
+  readonly authorization: (ref: InstallationRef) => string | Promise<string>;
+  /**
+   * An App-JWT `Authorization` value, for the two endpoints that identify
+   * the App rather than an installation: enumerating installations and
+   * resolving which installation covers a repository.
+   */
+  readonly appAuthorization: AuthorizationProvider;
+  /**
+   * Installation accounts the operator recognises as this installation's own.
+   * A public App can be installed by strangers; stated, this filters their
+   * installations out of {@link GitHubApp.availableRepositories} and refuses
+   * them in {@link GitHubApp.installationFor} — never operated on, not merely
+   * not rendered. Absent means no filter.
+   */
+  readonly recognizedAccounts?: readonly string[];
+  /** See `GitHubEndpoint.onUnauthorized` — threaded per ref so the provider can drop its cache. */
+  readonly onUnauthorized?: (
+    ref: InstallationRef,
+    authorization: string,
+  ) => 'retry' | Error | Promise<'retry' | Error>;
+  /** Combined App/installation identity recorded on source receipts. */
   readonly principalSubject?: (
     ref: InstallationRef,
   ) => string | Promise<string>;
@@ -93,19 +113,32 @@ export class GitHubApp implements ExactCommitFetcher<InstallationRef> {
    * no caller has to know the scheme — and so that grepping this package for a
    * token-shaped string finds this method rather than a dozen call sites.
    */
-  private authorizationFor(): () => Promise<string> {
+  private authorizationFor(ref: InstallationRef): () => Promise<string> {
     const { authorization } = this.config;
-    return async () => await authorization();
+    return async () => await authorization(ref);
   }
 
-  /** A client authorized for repository operations. */
-  private http(_ref: InstallationRef): GitHubHttp {
+  /** A client authorized for one installation's repository operations. */
+  private http(ref: InstallationRef): GitHubHttp {
+    const { onUnauthorized } = this.config;
     return new GitHubHttp({
       baseUrl: this.config.baseUrl,
-      authorization: this.authorizationFor(),
-      ...(this.config.onUnauthorized
-        ? { onUnauthorized: this.config.onUnauthorized }
+      authorization: this.authorizationFor(ref),
+      ...(onUnauthorized
+        ? {
+            onUnauthorized: (authorization: string) =>
+              onUnauthorized(ref, authorization),
+          }
         : {}),
+      ...(this.config.fetch ? { fetch: this.config.fetch } : {}),
+    });
+  }
+
+  /** A client authorized as the App itself, for the JWT-side endpoints. */
+  private appHttp(): GitHubHttp {
+    return new GitHubHttp({
+      baseUrl: this.config.baseUrl,
+      authorization: this.config.appAuthorization,
       ...(this.config.fetch ? { fetch: this.config.fetch } : {}),
     });
   }
@@ -437,60 +470,80 @@ export class GitHubApp implements ExactCommitFetcher<InstallationRef> {
   // here, and that is the point: logs are read, not pushed (§4).
 
   /**
-   * Which installation covers a repository.
+   * Which installation covers a repository, asked exactly.
    *
-   * Derived from the repositories GitHub grants the authorized user through
-   * this App. This is why neither the browser nor the manifest supplies an
-   * installation id.
+   * `GET /repos/{owner}/{repo}/installation` with the App JWT — one call,
+   * answered by the host rather than filtered from an enumeration. A
+   * repository no installation selects answers `404`, which the transport
+   * already classifies as `ACCESS_LOST`; an installation on an account the
+   * operator does not recognise is refused the same way, because a stranger's
+   * repository must never be operated on however plainly it exists.
    */
   async installationFor(fullName: string): Promise<InstallationRef> {
-    const repository = (await this.availableRepositories()).find(
-      (candidate) => candidate.fullName === fullName,
-    );
-    if (repository === undefined) {
+    const installation = await this.appHttp().json<{
+      id: number;
+      account?: { login?: string } | null;
+    }>({
+      method: 'GET',
+      path: `/repos/${fullName}/installation`,
+    });
+    if (installation === null) {
+      throw new TypeError('the installation endpoint tolerates no status');
+    }
+    const account = installation.account?.login;
+    if (
+      this.config.recognizedAccounts !== undefined &&
+      (account === undefined ||
+        !this.config.recognizedAccounts.includes(account))
+    ) {
       throw new GitHubAccessError(
         'ACCESS_LOST',
         'GET',
-        `${this.config.baseUrl}/user/installations`,
+        `${this.config.baseUrl}/repos/${fullName}/installation`,
         404,
-        `the authorized GitHub user has no installation selecting ${fullName}`,
+        `${fullName} is granted through an installation on ${account ?? 'an unknown account'}, which this installation does not recognise`,
       );
     }
-    return { installationId: repository.installationId };
+    return { installationId: String(installation.id) };
   }
 
   /**
-   * Repositories granted to the authorized user through this GitHub App.
+   * Repositories granted through this App's installations.
    *
-   * GitHub paginates installations and each installation's repositories
-   * independently. Walk both dimensions so the UI never silently hides the
-   * 101st repository.
+   * Installations are enumerated with the App JWT; each installation's grant
+   * is then read with that installation's own token, which is the shape the
+   * host requires. GitHub paginates both dimensions independently — both are
+   * walked so the UI never silently hides the 101st repository. Installations
+   * on unrecognised accounts are filtered before their repositories are read
+   * at all: a public App collects stranger installs, and a stranger's grant
+   * must not flatten into anything connectable.
    */
   async availableRepositories(): Promise<readonly AvailableRepository[]> {
-    const http = new GitHubHttp({
-      baseUrl: this.config.baseUrl,
-      authorization: this.config.authorization,
-      ...(this.config.onUnauthorized
-        ? { onUnauthorized: this.config.onUnauthorized }
-        : {}),
-      ...(this.config.fetch ? { fetch: this.config.fetch } : {}),
-    });
-    const installations = await paged<{ id: number }>(http, (page) => ({
-      path: `/user/installations?per_page=100&page=${page}`,
-      values: (body) =>
-        (body as { installations?: { id: number }[] }).installations ?? [],
+    const installations = await paged<{
+      id: number;
+      account?: { login?: string } | null;
+    }>(this.appHttp(), (page) => ({
+      path: `/app/installations?per_page=100&page=${page}`,
+      values: (body) => (Array.isArray(body) ? body : []),
     }));
+    const recognized = this.config.recognizedAccounts;
+    const own =
+      recognized === undefined
+        ? installations
+        : installations.filter((installation) => {
+            const account = installation.account?.login;
+            return account !== undefined && recognized.includes(account);
+          });
 
     const repositories: AvailableRepository[] = [];
-    for (const installation of installations) {
+    for (const installation of own) {
+      const ref = { installationId: String(installation.id) };
       const selected = await paged<{
         id: number;
         full_name: string;
         default_branch: string;
-      }>(http, (page) => ({
-        path:
-          `/user/installations/${installation.id}/repositories` +
-          `?per_page=100&page=${page}`,
+      }>(this.http(ref), (page) => ({
+        path: `/installation/repositories?per_page=100&page=${page}`,
         values: (body) =>
           (
             body as {
@@ -507,7 +560,7 @@ export class GitHubApp implements ExactCommitFetcher<InstallationRef> {
           repositoryId: String(repository.id),
           fullName: repository.full_name,
           defaultBranch: repository.default_branch,
-          installationId: String(installation.id),
+          installationId: ref.installationId,
         });
       }
     }

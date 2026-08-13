@@ -45,11 +45,13 @@ import {
   stageSourceBundle,
 } from '../domain/source-bundle.ts';
 import { GitHubApp } from '../integrations/github/app.ts';
+import {
+  GitHubAppAuth,
+  hasGitHubAppEnvIdentity,
+} from '../integrations/github/app-auth.ts';
 import type { Fetcher } from '../integrations/github/http.ts';
-import { GitHubDeviceOAuth } from '../integrations/github/oauth.ts';
 import { sourceDepotFor, stageArchiveBytes } from '../storage/archives.ts';
 import { buildOutbox } from '../storage/build-outbox.ts';
-import { withGitHubRegistryCredential } from '../storage/github-registry-credential.ts';
 import { registryCredentialStore } from '../storage/registry-credentials.ts';
 import { CoreSupplyChain, CosignSigner } from '../supply-chain/sign.ts';
 import { SpindriftSignatureVerifier } from '../supply-chain/signature.ts';
@@ -123,7 +125,7 @@ export function installationServiceAccountToken(
 
 export interface RegistryOptions {
   readonly manifest: InstallationManifest;
-  /** Required for the durable OAuth credential and Device Flow attempts. */
+  /** Required for the sealed GitHub App identity and registry credentials. */
   readonly db?: Database;
   /** Shared with commands so token expiry and rows agree on one time source. */
   readonly clock?: import('../commands/types.ts').Clock;
@@ -163,44 +165,57 @@ export function createAdapterRegistry(
       options.token ?? installationServiceAccountToken(options.env ?? Bun.env),
   });
 
-  // The connector exists only where both halves of its durable boundary exist:
-  // Postgres for ciphertext and an installation-Secret keyring to open it.
-  // The GitHub App's public client id stays in the manifest; no App private key
-  // or client secret is present in this process.
-  const keyring = CredentialKeyring.fromEnvironment(options.env ?? Bun.env);
-  const oauth =
-    keyring !== null && options.db !== undefined
-      ? new GitHubDeviceOAuth({
+  // The connector exists where an identity can: an adopted App pasted into
+  // the installation Secret (`SPINDRIFT_GITHUB_APP_ID` + its key), or the
+  // sealed `github_app` row — Postgres for the ciphertext and an
+  // installation-Secret keyring to open it. Either way the identity and
+  // signing key are read **per mint**, never captured here: the row starts
+  // empty and is written mid-flight by the setup route while this registry
+  // keeps running, so a construction-time capture would answer "no App
+  // identity" until a restart nobody was told to run.
+  const env = options.env ?? Bun.env;
+  const keyring = CredentialKeyring.fromEnvironment(env);
+  const appAuth =
+    options.db !== undefined &&
+    (keyring !== null || hasGitHubAppEnvIdentity(env))
+      ? new GitHubAppAuth({
           db: options.db,
           clock: options.clock ?? { now: () => new Date() },
           keyring,
-          clientId: options.manifest.github.clientId,
-          oauthBaseUrl: options.manifest.github.oauthBaseUrl,
+          env,
           apiBaseUrl: options.manifest.github.apiBaseUrl,
+          webBaseUrl: options.manifest.github.webBaseUrl,
+          controlPlaneHostname: options.manifest.controlPlane.hostname,
+          installationName: options.manifest.installation.name,
+          appSlug: options.manifest.github.appSlug ?? null,
+          webhookUrl: options.manifest.github.webhookUrl ?? null,
           ...(options.fetch ? { fetch: options.fetch } : {}),
         })
       : null;
   // Held as its concrete type because the hosted build route needs Actions
-  // calls beyond `RepositoryHost`; all calls share the same refresh provider.
+  // calls beyond `RepositoryHost`; all calls share the same minting provider.
   const app =
-    oauth === null
+    appAuth === null
       ? null
       : new GitHubApp({
           baseUrl: options.manifest.github.apiBaseUrl,
-          authorization: () => oauth.authorization(),
-          onUnauthorized: (authorization) =>
-            oauth.rejectedAuthorization(authorization),
-          principalSubject: (ref) => oauth.principalSubject(ref.installationId),
+          authorization: (ref) => appAuth.authorization(ref),
+          appAuthorization: () => appAuth.appAuthorization(),
+          ...(options.manifest.github.accounts
+            ? { recognizedAccounts: options.manifest.github.accounts }
+            : {}),
+          onUnauthorized: (ref, authorization) =>
+            appAuth.rejectedAuthorization(ref, authorization),
+          principalSubject: (ref) => appAuth.principalSubject(ref),
           ...(options.fetch ? { fetch: options.fetch } : {}),
         });
   const repositoryHost: RepositoryHost | null = app;
   const repositoryAuthorization: RepositoryAuthorization | null =
-    oauth === null || app === null
+    appAuth === null || app === null
       ? null
       : {
-          status: () => oauth.status(),
-          begin: (userId) => oauth.begin(userId),
-          poll: (userId, attemptId) => oauth.poll(userId, attemptId),
+          status: () => appAuth.status(),
+          setup: (userId) => appAuth.setup(userId),
           repositories: () => app.availableRepositories(),
           installationFor: (fullName) => app.installationFor(fullName),
         };
@@ -378,16 +393,14 @@ export function createAdapterRegistry(
      */
     registryCredentials() {
       const now = () => (options.clock ?? { now: () => new Date() }).now();
-      const stored =
-        keyring === null || options.db === undefined
-          ? null
-          : registryCredentialStore(options.db, keyring, now);
-      // GHCR is minted from the credential this installation already refreshes
-      // rather than pasted in and owned forever — see
-      // `storage/github-registry-credential.ts`. A stored row for the same host
-      // still wins, and an installation with no connector gets `stored` back
-      // unchanged.
-      return withGitHubRegistryCredential(stored, oauth, now);
+      // Stored rows only. GHCR accepts no App installation token — it
+      // authenticates classic PATs, plus each Actions run's own
+      // `GITHUB_TOKEN`, which is why the hosted route self-authorizes `ghcr`
+      // and every other route needs a stored credential an operator pasted.
+      // A mint that can never be accepted would be a lie kept wired.
+      return keyring === null || options.db === undefined
+        ? null
+        : registryCredentialStore(options.db, keyring, now);
     },
 
     source() {

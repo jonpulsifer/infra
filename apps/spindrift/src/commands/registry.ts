@@ -105,12 +105,6 @@ import {
   getInstallationManifestInput,
 } from './installation/get.ts';
 import {
-  beginRepositoryAuthorization,
-  beginRepositoryAuthorizationInput,
-  pollRepositoryAuthorization,
-  pollRepositoryAuthorizationInput,
-} from './repositories/authorize.ts';
-import {
   connectRepository,
   connectRepositoryInput,
 } from './repositories/connect.ts';
@@ -206,14 +200,6 @@ export const commandRegistry = {
   listRepositories: {
     input: listRepositoriesInput,
     handler: listRepositories,
-  },
-  beginRepositoryAuthorization: {
-    input: beginRepositoryAuthorizationInput,
-    handler: beginRepositoryAuthorization,
-  },
-  pollRepositoryAuthorization: {
-    input: pollRepositoryAuthorizationInput,
-    handler: pollRepositoryAuthorization,
   },
   startCreationDraft: {
     input: startCreationDraftInput,

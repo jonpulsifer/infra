@@ -85,7 +85,7 @@ function serve() {
       // No secret configured: this file is about the auth surface, not the
       // webhook, and an unconfigured secret is what keeps the route from
       // reaching `current` if a test here ever hit it by mistake.
-      secret: null,
+      secret: async () => null,
       current: () => {
         throw new Error('an auth-route test reached installation state');
       },
@@ -95,6 +95,14 @@ function serve() {
       clock: auth.clock,
       // Likewise: this file is about the auth surface, not bosun.
       secret: null,
+    },
+    {
+      authenticate: () => {
+        throw new Error('an auth-route test reached the setup route');
+      },
+      auth: () => {
+        throw new Error('an auth-route test reached the GitHub App identity');
+      },
     },
   );
 

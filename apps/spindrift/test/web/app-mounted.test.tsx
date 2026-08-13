@@ -139,7 +139,7 @@ describe('the installation decides which application is rendered', () => {
 
     const screen = await mount();
 
-    expect(screen.text()).toContain('Step 1 of 4');
+    expect(screen.text()).toContain('Step 1 of 3');
     // And not underneath it: the shell's navigation is the fingerprint of the
     // product this replaces.
     expect(screen.text()).not.toContain('Overview');

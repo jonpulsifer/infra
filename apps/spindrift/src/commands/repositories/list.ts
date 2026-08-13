@@ -117,6 +117,7 @@ export const listRepositories: Command<
   }
 
   const authorization = context.adapters.repositoryAuthorization?.() ?? null;
+  const webBaseUrl = context.manifest.github.webBaseUrl;
   let connector: RepositoryConnectorView = { state: 'unavailable' };
   let available: readonly {
     readonly repositoryId: string;
@@ -129,13 +130,22 @@ export const listRepositories: Command<
   }));
   if (authorization !== null) {
     const status = await authorization.status();
-    connector = status;
     if (status.state === 'authorized') {
+      connector = {
+        ...status,
+        installUrl: `${webBaseUrl}/apps/${status.slug}/installations/new`,
+      };
       try {
         available = await authorization.repositories();
       } catch (cause) {
+        // The identity vanished between the status read and the enumeration —
+        // the row was discarded mid-request. Rendered as the create-one state,
+        // which is what the next load would say anyway.
         if (cause instanceof RepositoryAuthorizationRequiredError) {
-          connector = { state: 'unauthorized' };
+          connector = {
+            state: 'unauthorized',
+            setup: await authorization.setup(context.principal.id),
+          };
           available = allRepos.map((repo) => ({
             repositoryId: repo.id,
             fullName: repo.fullName,
@@ -145,12 +155,16 @@ export const listRepositories: Command<
           throw cause;
         }
       }
+    } else {
+      connector = {
+        state: 'unauthorized',
+        setup: await authorization.setup(context.principal.id),
+      };
     }
   }
   const connectedByName = new Map(
     reposList.map((repo) => [repo.fullName, repo] as const),
   );
-  const webBaseUrl = context.manifest.github.oauthBaseUrl;
   const availableList: GrantedRepositoryView[] = available.map((repo) => ({
     repositoryId: repo.repositoryId,
     fullName: repo.fullName,

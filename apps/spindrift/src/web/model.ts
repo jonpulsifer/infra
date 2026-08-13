@@ -894,14 +894,32 @@ export interface GrantedRepositoryView extends RepositoryIdentityView {
   readonly rowExists: boolean;
 }
 
-/** Whether the repository connector can currently call GitHub for this user. */
+/**
+ * Whether this installation has a GitHub App identity to speak as.
+ *
+ * `unauthorized` carries the manifest-flow form that creates one: a POST
+ * straight from the operator's browser to the repository host, whose redirect
+ * lands on the setup route with a conversion code. `authorized` names the App
+ * and links where installations are added — the two acts GitHub requires a
+ * human click for.
+ */
 export type RepositoryConnectorView =
   | { readonly state: 'unavailable' }
-  | { readonly state: 'unauthorized' }
+  | {
+      readonly state: 'unauthorized';
+      readonly setup: {
+        /** Where the create-the-App form POSTs, `state` included. */
+        readonly action: string;
+        /** The manifest document, as the `manifest` form field's value. */
+        readonly manifest: string;
+      };
+    }
   | {
       readonly state: 'authorized';
-      readonly login: string;
-      readonly githubUserId: string;
+      readonly slug: string;
+      readonly appId: string;
+      /** `…/apps/<slug>/installations/new` on the host's web origin. */
+      readonly installUrl: string;
     };
 
 /** The connection health of a linked repository (§20). */

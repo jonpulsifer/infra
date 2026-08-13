@@ -645,22 +645,60 @@ export const installationManifestSchema = z
     github: z
       .object({
         /**
-         * Public OAuth client id of that App.
-         *
-         * Device Flow needs no client secret or App signing key. This value is
-         * safe to render into the installation ConfigMap and is what binds the
-         * browser-mediated authorization to the selected-repository App.
-         */
-        clientId: nonEmptyString,
-        /**
-         * Web host carrying GitHub's Device Flow and token endpoints.
+         * The repository host's web origin — where the manifest-flow form
+         * that creates the GitHub App POSTs, where `…/installations/new`
+         * links point, and what clone URLs are composed from.
          *
          * Separate from `apiBaseUrl` for GitHub Enterprise installations,
-         * whose web and REST origins differ.
+         * whose web and REST origins differ. The App's identity itself —
+         * id, slug, client id, signing key — is **not** here: it lives
+         * sealed in the `github_app` row, written once by the manifest-flow
+         * conversion, because a signing key has no business in a ConfigMap.
+         *
+         * A document authored for the previous schema carries `clientId`
+         * and `oauthBaseUrl` instead; `manifest-upgrade.ts` moves
+         * `oauthBaseUrl` here and drops `clientId`, so neither an old
+         * stored row nor an old declaration can fail a parse whichever of
+         * the image and the declaration rolls out first.
          */
-        oauthBaseUrl: z
+        webBaseUrl: z
           .url()
           .refine((value) => !value.endsWith('/'), 'must not end with a slash'),
+        /**
+         * Installation accounts this installation recognises as its own.
+         *
+         * A public App can be installed by strangers, and their
+         * installations arrive in the same `GET /app/installations`
+         * enumeration as the operator's. When this list is stated, the
+         * Repositories screen filters to it and `installationFor` refuses
+         * repositories owned by anyone else — filtered, not merely listed
+         * and inert. Absent means no filter, which is the honest state of a
+         * fresh installation whose App has not been installed anywhere yet.
+         */
+        accounts: z.array(nonEmptyString).min(1).optional(),
+        /**
+         * The App's slug on the repository host — public, and only ever
+         * display-and-links material (`…/apps/<slug>/installations/new`).
+         *
+         * Declared for an **adopted** App, whose identity arrives through the
+         * installation Secret (`SPINDRIFT_GITHUB_APP_ID` and the private-key
+         * variable beside it) and therefore carries no slug of its own. The
+         * manifest-flow conversion stores its own slug and needs no
+         * declaration here.
+         */
+        appSlug: nonEmptyString.optional(),
+        /**
+         * Where GitHub delivers this App's webhooks, as a full URL.
+         *
+         * Stated rather than derived from the control-plane hostname because
+         * the two are different names on purpose: the control plane is a LAN
+         * record GitHub's delivery servers cannot reach, and this is the
+         * path-scoped tunnel hostname that exists precisely so one route can
+         * be reached from outside. Absent means the created App declares no
+         * webhook and every delivery posture stays refuse-all — degraded,
+         * stated, and not a crash.
+         */
+        webhookUrl: z.url().optional(),
         /**
          * Base URL of the repository host's REST API, without a trailing
          * slash.

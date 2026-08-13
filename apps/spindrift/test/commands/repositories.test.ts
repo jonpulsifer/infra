@@ -62,7 +62,8 @@ async function context(
       ? null
       : new GitHubApp({
           baseUrl: fake.baseUrl,
-          authorization: () => 'Bearer test-user-token',
+          authorization: () => 'Bearer test-installation-token',
+          appAuthorization: () => 'Bearer test-app-jwt',
           fetch: customFetch ?? fake.fetch,
         });
 
@@ -710,13 +711,12 @@ describe('listRepositories', () => {
           repositoryAuthorization: () => ({
             status: async () => ({
               state: 'authorized' as const,
-              login: 'operator',
-              githubUserId: '42',
+              slug: 'spindrift-example',
+              appId: '1234567',
             }),
-            begin: async () => {
+            setup: async () => {
               throw new Error('not reached');
             },
-            poll: async () => ({ state: 'expired' as const }),
             repositories: async () => [
               {
                 repositoryId: '99',

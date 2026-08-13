@@ -5,11 +5,13 @@
  * this is the one route that reaches it, following `upload.ts`'s shape rather
  * than `dispatch.ts`'s — a delivery carries no session, so there is no
  * `deps.authenticate` here at all. **The signature is the only
- * authentication this route has**, which is why {@link WEBHOOK_SECRET_VAR}
- * absent refuses every delivery before `handleWebhookDelivery` ever runs,
- * the same posture `ENROLMENT_TOKEN_VAR` takes in `serve.ts` for the same
- * reason: an installation nobody has configured a secret for cannot have
- * signed anything, so there is nothing here for a delivery to prove.
+ * authentication this route has**, and the secret behind it is the App-level
+ * webhook secret sealed in the `github_app` row, read **per delivery** —
+ * never captured at boot, because the row is written mid-flight by the setup
+ * route while this process keeps running. An installation with no App, or
+ * one whose conversion response carried no secret, refuses every delivery
+ * before `handleWebhookDelivery` ever runs: nothing could have signed
+ * anything, so there is nothing here for a delivery to prove.
  *
  * A verified delivery is classified and handed to `repo-loop.ts`'s
  * `applyWebhookDelivery` — the loop's own latency optimization, not a second
@@ -35,18 +37,11 @@ import { applyWebhookDelivery } from '../reconciler/repo-loop.ts';
 
 export const WEBHOOK_PATH = '/internal/github/webhook';
 
-/**
- * Where the webhook secret arrives — mirrors `serve.ts`'s
- * `ENROLMENT_TOKEN_VAR`: an installation Secret key, read once at boot, never
- * from the manifest an operator authors and hands around.
- */
-export const WEBHOOK_SECRET_VAR = 'SPINDRIFT_GITHUB_WEBHOOK_SECRET';
-
 export interface WebhookRouteDeps {
   readonly db: Database;
   readonly clock: Clock;
-  /** `null` when this installation has no secret configured. */
-  readonly secret: string | null;
+  /** The sealed App webhook secret, per delivery; `null` refuses them all. */
+  secret(): Promise<string | null>;
   /**
    * Current as of this request — mirrors `DispatchDeps.context`'s reasoning:
    * `configureInstallation` writes the row this route would otherwise never
@@ -86,7 +81,8 @@ async function handleWebhook(
   if (request.method !== 'POST') {
     return refuse(405, 'METHOD_NOT_ALLOWED', 'a delivery is a POST');
   }
-  if (deps.secret === null) {
+  const secret = await deps.secret();
+  if (secret === null) {
     return refuse(
       503,
       'NOT_CONFIGURED',
@@ -102,7 +98,7 @@ async function handleWebhook(
         signature: request.headers.get(SIGNATURE_HEADER),
         body: new Uint8Array(await request.arrayBuffer()),
       },
-      deps.secret,
+      secret,
     );
   } catch (cause) {
     if (cause instanceof WebhookRejected) {

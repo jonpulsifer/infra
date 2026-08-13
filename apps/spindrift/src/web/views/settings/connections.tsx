@@ -774,6 +774,16 @@ function RegistryRowView({
         </div>
       </div>
 
+      {/* GHCR authenticates classic PATs and each Actions run's own token,
+          and nothing else — an App installation token is refused outright. The
+          hosted route rides its run's token; every other route needs the PAT
+          stored here, so the prerequisite is said where the fix is. */}
+      {registry.flavour === 'ghcr' && registry.credentialUsername === null ? (
+        <p className="pl-6 text-xs text-muted-foreground">
+          Pushing here from any route but hosted Actions needs a stored classic
+          PAT (write:packages): GitHub&apos;s registry accepts no App token.
+        </p>
+      ) : null}
       {check.state === 'reachable' ? (
         <p className="pl-6 text-[11px] text-subtle">{check.result.detail}</p>
       ) : null}
