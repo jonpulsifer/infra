@@ -18,11 +18,17 @@
     ../../apps/bosun/module.nix
   ];
 
-  sops.defaultSopsFile = ../secrets/tender.sops.yaml;
-  # bosun reads this once at startup, so a rotated token needs the unit
-  # bounced -- which is what restartUnits does on the activation that
-  # rewrites the secret.
-  sops.secrets."bosun-github-token" = {
+  # No defaultSopsFile: bosun's App key is the only secret this host holds and
+  # it names its own file, which is shared with riptide and oldschool rather
+  # than per-host. tender's own age recipient still has to be added to that
+  # file after first boot -- the two-stage in
+  # [[Runbooks/SOPS Secrets and Age Keys]] -- because the key it decrypts with
+  # does not exist until the instance has booted once.
+  #
+  # bosun reads this once at startup, so a rotated key needs the unit bounced,
+  # which is what restartUnits does on the activation that rewrites it.
+  sops.secrets."bosun-github-app-key" = {
+    sopsFile = ../secrets/bosun.sops.yaml;
     owner = "bosun";
     group = "bosun";
     mode = "0400";
@@ -36,7 +42,14 @@
   services.bosun = {
     enable = true;
     repo = "jonpulsifer/infra";
-    tokenFile = config.sops.secrets."bosun-github-token".path;
+    github = {
+      # TODO(operator): the shared Spindrift+bosun GitHub App is created by
+      # hand during the design's cutover step (Manifest flow, off Spindrift's
+      # Repositories screen); this placeholder id is not real. Replace it
+      # once that App exists -- riptide and oldschool carry the same one.
+      appId = 1;
+      privateKeyFile = config.sops.secrets."bosun-github-app-key".path;
+    };
 
     # Ten warm slots against 48 vCPU: 10 x 4 vCPU plus the bench class's 4 is
     # 44, so ten jobs can run at once and each still gets four real cores.
