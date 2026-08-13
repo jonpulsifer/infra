@@ -25,4 +25,12 @@ RUN curl -fsSL -o /usr/local/bin/argocd "https://github.com/argoproj/argo-cd/rel
     && chmod +x /usr/local/bin/argocd
 # Install helm (often needed for ArgoCD app diffs)
 RUN curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+# Install yq. Deliberately mikefarah's Go yq from its release rather than the
+# apt package of the same name, which is a Python jq wrapper with different
+# semantics -- and it is mise's yq that scripts in this repo are written
+# against, so the two have to be the same program. `yq --version` is the
+# assertion: a yq that cannot start fails the image build rather than a job.
+RUN curl -fsSL -o /usr/local/bin/yq "https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64" \
+    && chmod +x /usr/local/bin/yq \
+    && yq --version
 USER 1001:1001
