@@ -2,7 +2,7 @@
  * Which application an operator is shown, decided by one predicate.
  *
  * `isUnconfiguredInstallation` is the whole of that decision: false renders the
- * product, true replaces it with a four-question wizard. The two directions are
+ * product, true replaces it with a three-question wizard. The two directions are
  * not symmetric and neither is what a test owes them.
  *
  * **A false positive replaces a working installation with a wizard**, which is
@@ -10,7 +10,7 @@
  * `clusters/offsite/apps/spindrift/helm-release.yaml` rather than a fixture. A
  * fixture asserting the right thing while the repository says something else is
  * exactly the false positive this file exists to refuse, and the predicate reads
- * four specific values — two of which this installation legitimately leaves at
+ * three specific values — any of which an installation may legitimately leave at
  * the stand-in — so "obviously configured" is not obvious enough to assert from
  * memory.
  *
@@ -26,7 +26,7 @@
  * to restate every stand-in by hand. See `isUnconfiguredInstallation`.
  *
  * **Each conjunct gets its own claim**, because dropping one from an `&&` is the
- * false-positive direction and the four-value assertion below cannot see it: it
+ * false-positive direction and the three-value assertion below cannot see it: it
  * reads the values, never the predicate. One claim per genuine choice, each
  * answering that choice alone and asserting configured, is what makes a conjunct
  * that stops being read a red build rather than a silent widening.
@@ -82,7 +82,7 @@ async function liveDeclaration() {
  *
  * That divergence is what this file cannot see and does not claim to. The
  * predicate below reads the declaration, and the assertion is about which of
- * its four genuine choices are answered — not about which document is live.
+ * its three genuine choices are answered — not about which document is live.
  */
 describe('the declaration this repository deploys is configured', () => {
   test('it is not a document that would replace the product with a wizard', async () => {
@@ -91,19 +91,13 @@ describe('the declaration this repository deploys is configured', () => {
     expect(isUnconfiguredInstallation(manifest)).toBe(false);
   });
 
-  test('one of its four genuine choices really is the stand-in', async () => {
-    // The reason the claim above is worth a test rather than a glance, and the
-    // reason the predicate is "all four" rather than "any": this installation
-    // speaks as the same GitHub App the placeholder names. A predicate that
-    // asked whether *any* genuine choice was still a stand-in would answer
-    // unconfigured here, and an operator signing in to a working installation
-    // would be handed a wizard.
+  test('its genuine choices are all answered, which is what makes it configured', async () => {
+    // Worth a test rather than a glance because the predicate is "all three"
+    // rather than "any": a live installation is free to leave one at the
+    // stand-in, and a predicate that asked whether *any* genuine choice was
+    // still a stand-in would hand an operator a wizard over it.
     const manifest = await liveDeclaration();
 
-    expect(manifest.github.clientId).toBe(
-      DEFAULT_PLACEHOLDER_MANIFEST.github.clientId,
-    );
-    // And the three it answers, which are what make it configured.
     expect(manifest.secretStore.adapter).not.toBe(
       DEFAULT_PLACEHOLDER_MANIFEST.secretStore.adapter,
     );
@@ -127,7 +121,7 @@ describe('an installation nobody has configured says so', () => {
     // a fact the chart knows — the hostname above all, which is what makes a
     // passkey ceremony possible at all — and every genuine choice is left at its
     // stand-in. "Left" is generous: the schema has no optional keys, so this
-    // document restates all four stand-ins by hand, which is why the case is
+    // document restates all three stand-ins by hand, which is why the case is
     // reachable rather than ordinary.
     const seeded = {
       ...DEFAULT_PLACEHOLDER_MANIFEST,
@@ -145,9 +139,9 @@ describe('an installation nobody has configured says so', () => {
     );
   });
 
-  // One row per conjunct, and four rows rather than one assertion because
+  // One row per conjunct, and three rows rather than one assertion because
   // dropping a single `&&` is invisible to everything else in this file: the
-  // claim above reads the four values but never routes them through the
+  // claim above reads the three values but never routes them through the
   // predicate, so it cannot watch the predicate stop reading one. Each row
   // answers exactly one genuine choice and asserts configured — the smallest act
   // that ends onboarding, which for the first row is an operator pressing
@@ -160,16 +154,6 @@ describe('an installation nobody has configured says so', () => {
         installation: {
           ...DEFAULT_PLACEHOLDER_MANIFEST.installation,
           name: 'offsite',
-        },
-      },
-    ],
-    [
-      'github.clientId',
-      {
-        ...DEFAULT_PLACEHOLDER_MANIFEST,
-        github: {
-          ...DEFAULT_PLACEHOLDER_MANIFEST.github,
-          clientId: 'Iv1.0000000000000000',
         },
       },
     ],

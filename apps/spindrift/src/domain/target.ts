@@ -64,11 +64,19 @@ export function hasTargetConnection<
 /**
  * How a Cloud Run Target is reached (§13, §14).
  *
- * `endpoint` is the exact analogue of {@link KubernetesConnection.apiServer}:
- * the control API this Target is driven through. It is connection material
- * rather than an installation-wide manifest value for the same reason a cluster's
- * is — two connected projects may sit behind different regional or
- * perimeter-fronted endpoints, and neither is more correct than the other.
+ * **`endpoint` is not the analogue of {@link KubernetesConnection.apiServer}
+ * it first looks like, and that took a wrong shape shipping to notice.** A
+ * cluster's `apiServer` genuinely varies per installation — two clusters are
+ * two different control planes. `run.googleapis.com` is not: every connected
+ * project sits behind the *same* control API, because Google runs one of it.
+ * What looked like connection material was a vendor constant wearing a
+ * manifest field's clothes. So this stays optional rather than required, for
+ * exactly the reason `apiServer` must not: an installation behind a perimeter
+ * or a mirror is real and needs to say so, but the ordinary installation has
+ * nothing to say here at all. Absent means the adapter's own default applies
+ * — see `DEFAULT_ENDPOINT` in `adapters/deploy/cloudrun/index.ts`, resolved
+ * there rather than in this file because `src/domain/` is backend-neutral and
+ * a vendor's own hostname is exactly the kind of fact it must not know.
  *
  * **No credential here either** (§13). What authorizes a call is minted per
  * request by whatever federates.
@@ -76,8 +84,12 @@ export function hasTargetConnection<
 export interface CloudRunConnection {
   adapter: 'cloudrun';
   region: string;
-  /** The runtime's API root, without a trailing slash. */
-  endpoint: string;
+  /**
+   * The runtime's API root, without a trailing slash. Optional override; see
+   * the interface doc above for why this is a vendor constant rather than an
+   * installation fact.
+   */
+  endpoint?: string;
   /**
    * The binary-authorization API root, where this project's admission policy is
    * read from (§16: "one signature, two verifiers").
@@ -85,6 +97,15 @@ export interface CloudRunConnection {
    * Optional, and absent means **not known** rather than absent-so-fine: with
    * nowhere to look, `verifiedDeploy` derives `false`, which is the direction a
    * claim about verification has to fail in.
+   *
+   * **Deliberately carries no default, unlike {@link endpoint} above.** The two
+   * look alike — both name a Google API root — but presence here is a second
+   * signal doing double duty: `useProjectAdmissionPolicy` in the deploy
+   * adapter reads `policyEndpoint !== undefined` to decide whether this
+   * project's admission policy applies at all. A compiled-in default would
+   * make every Cloud Run Target start submitting to binary authorization
+   * whether the operator installed it or not, which is the opposite of
+   * "not known".
    */
   policyEndpoint?: string;
   /**
@@ -115,11 +136,16 @@ export interface CloudRunConnection {
  * from a location an operator picks, so there is nothing here for a region to
  * name. No log history either — §17 gives static hosting an honest empty state
  * rather than a duration, because there is no runtime to have produced output.
+ *
+ * `endpoint` is optional for the same reason {@link CloudRunConnection.endpoint}
+ * is: Firebase Hosting's API root is one hostname for every project, not a
+ * per-installation fact, so the adapter's own default applies when this is
+ * absent — see `DEFAULT_ENDPOINT` in `adapters/deploy/static/index.ts`.
  */
 export interface StaticConnection {
   adapter: 'static';
-  /** The hosting product's API root, without a trailing slash. */
-  endpoint: string;
+  /** The hosting product's API root, without a trailing slash. Optional override. */
+  endpoint?: string;
 }
 
 /**
@@ -136,11 +162,16 @@ export interface StaticConnection {
  * exactly where the 1Password Connect token already lives. A field for it here
  * would put one copy per Target in the database, which is the thing the rule is
  * actually about.
+ *
+ * `endpoint` is optional for the same reason {@link CloudRunConnection.endpoint}
+ * is: Vercel's API root is one hostname for every team, not a per-installation
+ * fact, so the adapter's own default applies when this is absent — see
+ * `DEFAULT_ENDPOINT` in `adapters/deploy/vercel/index.ts`.
  */
 export interface VercelConnection {
   adapter: 'vercel';
-  /** The platform's API root, without a trailing slash. */
-  endpoint: string;
+  /** The platform's API root, without a trailing slash. Optional override. */
+  endpoint?: string;
 }
 
 /**
@@ -158,11 +189,16 @@ export interface VercelConnection {
  * **The production branch is not here.** A project has one, and the adapter
  * reads it back off the project it ensures rather than being told — an operator
  * who states it can state it wrong, and the API already knows the answer.
+ *
+ * `endpoint` is optional for the same reason {@link CloudRunConnection.endpoint}
+ * is: Cloudflare's API root is one hostname for every account, not a
+ * per-installation fact, so the adapter's own default applies when this is
+ * absent — see `DEFAULT_ENDPOINT` in `adapters/deploy/pages/index.ts`.
  */
 export interface CloudflarePagesConnection {
   adapter: 'cloudflare-pages';
-  /** The platform's API root, without a trailing slash. */
-  endpoint: string;
+  /** The platform's API root, without a trailing slash. Optional override. */
+  endpoint?: string;
 }
 
 /**

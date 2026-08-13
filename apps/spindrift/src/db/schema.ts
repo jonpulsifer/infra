@@ -390,29 +390,33 @@ export const repositories = pgTable(
 );
 
 /**
- * The installation's GitHub user authorization.
+ * The GitHub App this installation speaks as.
  *
  * One row because a Spindrift installation has one repository connector, just
- * as it has one installation manifest. The credential is recoverable by
- * design—background reconciliation and hosted builds need it after the browser
- * ceremony ends—so unlike a session token it cannot be hashed. It is instead an
- * AES-GCM envelope whose key lives in the installation Secret. The key id in
- * that envelope supports additive rotation; `github/oauth.ts` rewrites a value
- * encrypted by a legacy key when it next reads it.
+ * as it has one installation manifest. Written once by the manifest-flow
+ * conversion (`web/github-setup-route.ts`); replacing it is a deliberate act,
+ * never a side effect of re-running the create flow.
  *
- * Access and refresh tokens remain inside `encryptedCredential`. Keeping them
- * in one envelope makes GitHub's refresh-token rotation atomic: nobody can
- * observe a new access token paired with the refresh token it invalidated.
+ * The private key is recoverable by design — every installation token is
+ * minted from it — so unlike a session token it cannot be hashed. It is an
+ * AES-GCM envelope whose key lives in the installation Secret, exactly the
+ * posture the OAuth credential row had. It is read **per mint**, never
+ * captured at registry construction: the row starts empty and is populated
+ * mid-flight by the setup flow while the pod keeps running.
+ *
+ * `encryptedWebhookSecret` is nullable because the conversion response types
+ * `webhook_secret` as `string | null`; a null keeps the refuse-all-deliveries
+ * posture rather than sealing a null and crashing signature verification.
  */
-export const githubOAuthCredentials = pgTable(
-  'github_oauth_credentials',
+export const githubApp = pgTable(
+  'github_app',
   {
     id: integer('id').primaryKey().default(1),
-    githubUserId: text('github_user_id').notNull(),
-    githubLogin: text('github_login').notNull(),
-    encryptedCredential: text('encrypted_credential').notNull(),
-    accessExpiresAt: timestamp('access_expires_at', { withTimezone: true }),
-    refreshExpiresAt: timestamp('refresh_expires_at', { withTimezone: true }),
+    appId: text('app_id').notNull(),
+    slug: text('slug').notNull(),
+    clientId: text('client_id').notNull(),
+    encryptedPrivateKey: text('encrypted_private_key').notNull(),
+    encryptedWebhookSecret: text('encrypted_webhook_secret'),
     createdAt: timestamp('created_at', { withTimezone: true })
       .notNull()
       .defaultNow(),
@@ -420,36 +424,7 @@ export const githubOAuthCredentials = pgTable(
       .notNull()
       .defaultNow(),
   },
-  (table) => [
-    check('github_oauth_credentials_singleton', sql`${table.id} = 1`),
-  ],
-);
-
-/**
- * One in-progress GitHub Device Flow ceremony.
- *
- * The device code can be exchanged for the operator's credential after they
- * approve the user code, so it is encrypted with a distinct purpose from the
- * durable credential. The browser receives only the user code and this row's
- * opaque id. Binding the row to a Spindrift user prevents another authenticated
- * browser from polling or consuming somebody else's ceremony.
- */
-export const githubDeviceAuthorizations = pgTable(
-  'github_device_authorizations',
-  {
-    id: uuid('id').primaryKey().defaultRandom(),
-    userId: uuid('user_id')
-      .notNull()
-      .references(() => users.id, { onDelete: 'cascade' }),
-    encryptedDeviceCode: text('encrypted_device_code').notNull(),
-    verificationUri: text('verification_uri').notNull(),
-    intervalSeconds: integer('interval_seconds').notNull(),
-    nextPollAt: timestamp('next_poll_at', { withTimezone: true }).notNull(),
-    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
-    createdAt: timestamp('created_at', { withTimezone: true })
-      .notNull()
-      .defaultNow(),
-  },
+  (table) => [check('github_app_singleton', sql`${table.id} = 1`)],
 );
 
 // --- App and Component -------------------------------------------------

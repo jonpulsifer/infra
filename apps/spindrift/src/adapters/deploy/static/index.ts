@@ -106,6 +106,17 @@ export interface StaticAdapterOptions {
 /** How the operator would name the product in the sentence about enabling it. */
 const SERVICE_NAME = 'static hosting';
 
+/**
+ * Firebase Hosting's own API root — one hostname for every project, because
+ * the product runs a single control plane rather than one per customer.
+ * `StaticConnection.endpoint` used to be required on the theory that it was
+ * connection material the way a cluster's `apiServer` is; it never varied
+ * between installations, so this is now the default applied wherever
+ * `connection.endpoint` is read, with the Target's own value kept only as an
+ * override for a perimeter or a mirror in front of the real API.
+ */
+export const DEFAULT_ENDPOINT = 'https://firebasehosting.googleapis.com';
+
 /** The API version every call below hangs off. */
 const API_VERSION = '/v1beta1';
 
@@ -733,7 +744,7 @@ export class StaticDeployAdapter implements DeployAdapter {
 
   private http(connection: StaticAdapterConnection): CloudHttp {
     return new CloudHttp({
-      baseUrl: connection.endpoint,
+      baseUrl: connection.endpoint ?? DEFAULT_ENDPOINT,
       token: this.options.token,
       ...(this.options.fetch === undefined
         ? {}

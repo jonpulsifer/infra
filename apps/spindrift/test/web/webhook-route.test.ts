@@ -96,7 +96,7 @@ const unreachable: WebhookRouteDeps = {
       throw new Error('read the clock');
     },
   },
-  secret: SECRET,
+  secret: async () => SECRET,
   current: () => {
     throw new Error('read installation state');
   },
@@ -117,7 +117,7 @@ describe('the route the earlier handler had nowhere to be reached from', () => {
 
   test('refuses every delivery when no secret is configured, before touching anything', async () => {
     const response = await post(
-      { ...unreachable, secret: null },
+      { ...unreachable, secret: async () => null },
       await delivery('push', { ref: 'refs/heads/main' }),
     );
     expect(response.status).toBe(503);
@@ -138,7 +138,7 @@ describe('the route the earlier handler had nowhere to be reached from', () => {
       {
         db: database().db,
         clock,
-        secret: SECRET,
+        secret: async () => SECRET,
         current: async () => ({
           adapters: {
             deploy: () => null,
@@ -232,7 +232,8 @@ describe('a push that reaches an opted-in App', () => {
 
     const host = new GitHubApp({
       baseUrl: fake.baseUrl,
-      authorization: () => 'Bearer test-user-token',
+      authorization: () => 'Bearer test-installation-token',
+      appAuthorization: () => 'Bearer test-app-jwt',
       fetch: fake.fetch,
     });
     const supplyChain = new SupplyChainHarness();
@@ -240,7 +241,7 @@ describe('a push that reaches an opted-in App', () => {
       {
         db,
         clock,
-        secret: SECRET,
+        secret: async () => SECRET,
         current: async () => ({
           adapters: {
             deploy: (adapter) =>

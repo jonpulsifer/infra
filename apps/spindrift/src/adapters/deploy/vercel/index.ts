@@ -130,6 +130,18 @@ export interface VercelAdapterOptions {
 /** How the operator would name the platform in a sentence about it. */
 const SERVICE_NAME = 'Vercel';
 
+/**
+ * The platform's own API root — one hostname for every team, because Vercel
+ * runs a single control plane rather than one per customer.
+ * `VercelConnection.endpoint` used to be required and typed into the connect
+ * form on the theory that it was connection material the way a cluster's
+ * `apiServer` is; it never varied between installations, so this is now the
+ * default applied wherever `connection.endpoint` is read, with the Target's
+ * own value kept only as an override for a perimeter or a mirror in front of
+ * the real API.
+ */
+export const DEFAULT_ENDPOINT = 'https://api.vercel.com';
+
 /** A project name is capped at 100 characters of `[a-z0-9._-]`. */
 const PROJECT_NAME_LIMIT = 100;
 
@@ -489,7 +501,7 @@ export class VercelDeployAdapter implements DeployAdapter {
     for (const file of files) {
       const sha = sha1Hex(file.bytes);
       const uploaded = await http.upload({
-        url: `${connection.endpoint}/v2/files?teamId=${encodeURIComponent(connection.team)}`,
+        url: `${this.endpointOf(connection)}/v2/files?teamId=${encodeURIComponent(connection.team)}`,
         bytes: file.bytes,
         contentType: 'application/octet-stream',
         headers: {
@@ -699,9 +711,14 @@ export class VercelDeployAdapter implements DeployAdapter {
 
   // --- plumbing ------------------------------------------------------------
 
+  /** The API root this Target actually reaches, override or default. */
+  private endpointOf(connection: VercelAdapterConnection): string {
+    return connection.endpoint ?? DEFAULT_ENDPOINT;
+  }
+
   private http(connection: VercelAdapterConnection): CloudHttp {
     return new CloudHttp({
-      baseUrl: connection.endpoint,
+      baseUrl: this.endpointOf(connection),
       token: this.options.token,
       ...(this.options.fetch === undefined
         ? {}

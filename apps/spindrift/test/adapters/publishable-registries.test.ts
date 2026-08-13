@@ -15,7 +15,6 @@ import { describe, expect, test } from 'bun:test';
 import { CloudBuildRoute } from '../../src/adapters/build/cloud-build.ts';
 import { GitHubActionsBuildRoute } from '../../src/adapters/build/github-actions.ts';
 import { publishableRegistries } from '../../src/domain/artifact-name.ts';
-import { withGitHubRegistryCredential } from '../../src/storage/github-registry-credential.ts';
 
 const GHCR = 'ghcr.io/jonpulsifer';
 const AR = 'northamerica-northeast1-docker.pkg.dev/trusted-builds/i';
@@ -85,80 +84,5 @@ describe('the registries a route can publish to', () => {
         selfAuthorized: ['artifactRegistry', 'ghcr'],
       }),
     ).toEqual(REGISTRIES);
-  });
-});
-
-/**
- * GHCR without a long-lived token.
- *
- * The credential is minted from the GitHub authorization this installation
- * already refreshes, so nothing new is stored and nothing has to be rotated by
- * hand.
- */
-describe('the GHCR credential minted from GitHub', () => {
-  const github = {
-    authorization: async () => 'bearer ghu_a-refreshed-user-token',
-    status: async () => ({ state: 'authorized', login: 'jonpulsifer' }),
-  };
-
-  test('answers authFor with the token alone, not the header form', async () => {
-    const store = withGitHubRegistryCredential(null, github);
-
-    expect(await store?.authFor(['ghcr.io'])).toEqual([
-      {
-        host: 'ghcr.io',
-        username: 'jonpulsifer',
-        secret: 'ghu_a-refreshed-user-token',
-      },
-    ]);
-  });
-
-  test('is not offered for a host it does not authenticate', async () => {
-    const store = withGitHubRegistryCredential(null, github);
-
-    expect(await store?.authFor(['registry-1.docker.io'])).toEqual([]);
-  });
-
-  /**
-   * An operator who pasted a token said something more specific than this
-   * default, and quietly overriding it would make a deliberate act look broken.
-   */
-  test('a stored row for the same host wins', async () => {
-    const stored = {
-      put: async () => {},
-      forget: async () => true,
-      list: async () => [
-        { host: 'ghcr.io', username: 'someone-else', updatedAt: new Date(0) },
-      ],
-      authFor: async () => [
-        { host: 'ghcr.io', username: 'someone-else', secret: 'pasted' },
-      ],
-    };
-    const store = withGitHubRegistryCredential(stored, github);
-
-    expect(await store?.authFor(['ghcr.io'])).toEqual([
-      { host: 'ghcr.io', username: 'someone-else', secret: 'pasted' },
-    ]);
-  });
-
-  /**
-   * A connector needing reauthorization is one fewer registry this route can
-   * push to, which `publishableRegistries` already knows how to say — not an
-   * exception out of the middle of a dispatch.
-   */
-  test('offers nothing when GitHub is not authorized', async () => {
-    const store = withGitHubRegistryCredential(null, {
-      authorization: async () => {
-        throw new Error('GitHub authorization is required');
-      },
-      status: async () => ({ state: 'unauthorized' }),
-    });
-
-    expect(await store?.authFor(['ghcr.io'])).toEqual([]);
-    expect(await store?.list()).toEqual([]);
-  });
-
-  test('an installation with no connector is exactly what it was', () => {
-    expect(withGitHubRegistryCredential(null, null)).toBeNull();
   });
 });

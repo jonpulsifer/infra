@@ -122,6 +122,18 @@ const DEFAULT_POLL_MS = 1_000;
 const DEFAULT_TIMEOUT_MS = 10 * 60 * 1_000;
 const DEFAULT_LOGS_ENDPOINT = 'https://logging.googleapis.com';
 const DEFAULT_SCHEDULER_ENDPOINT = 'https://cloudscheduler.googleapis.com';
+/**
+ * The runtime's own API root — one hostname for every connected project,
+ * because Google runs a single Cloud Run control plane rather than one per
+ * customer. `CloudRunConnection.endpoint` used to be required for exactly the
+ * reason `DEFAULT_LOGS_ENDPOINT` above is not on the connection at all: it read
+ * as connection material analogous to a cluster's `apiServer`. It never was —
+ * an operator was retyping this same string on every project — so it is now
+ * this adapter's default, applied wherever `connection.endpoint` is read,
+ * with the Target's own value kept only as an override for a perimeter or a
+ * mirror in front of the real API.
+ */
+export const DEFAULT_ENDPOINT = 'https://run.googleapis.com';
 const SERVICE_ID_LIMIT = 63;
 
 /**
@@ -940,7 +952,10 @@ export class CloudRunDeployAdapter implements DeployAdapter {
     name: DeployRef,
   ): Promise<Omit<Extract<DeployVerdict, { phase: 'FAILED' }>, 'ref'> | null> {
     const document = cloudSchedulerJob(schedule, {
-      connection,
+      // `cloudSchedulerJob` reads `connection.endpoint` straight off what it is
+      // given, so the default has to be resolved before it gets there — the
+      // fired URL would otherwise carry the literal string `undefined`.
+      connection: { ...connection, endpoint: this.endpointOf(connection) },
       name,
       // Refused before anything was written when the Target names none —
       // see `apply`. The fallback is unreachable and is here because the
@@ -1131,9 +1146,14 @@ export class CloudRunDeployAdapter implements DeployAdapter {
 
   // --- plumbing ------------------------------------------------------------
 
+  /** The runtime API root this Target actually reaches, override or default. */
+  private endpointOf(connection: CloudRunAdapterConnection): string {
+    return connection.endpoint ?? DEFAULT_ENDPOINT;
+  }
+
   private http(connection: CloudRunAdapterConnection): CloudHttp {
     return new CloudHttp({
-      baseUrl: connection.endpoint,
+      baseUrl: this.endpointOf(connection),
       token: this.options.token,
       ...(this.options.fetch === undefined
         ? {}

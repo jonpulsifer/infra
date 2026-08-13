@@ -18,8 +18,9 @@ import {
   stageArchiveBytes,
 } from '../storage/archives.ts';
 import type { DispatchDeps } from './dispatch.ts';
+import { UPLOAD_PATH } from './upload-path.ts';
 
-export const UPLOAD_PATH = '/internal/upload';
+export { UPLOAD_PATH } from './upload-path.ts';
 
 export function uploadRoutes(deps: DispatchDeps) {
   return {

@@ -46,6 +46,12 @@ import { Page } from './ui/page.tsx';
 import { Skeleton, SkeletonRows } from './ui/skeleton.tsx';
 import { notify } from './ui/toast.tsx';
 import { cn } from './ui/utils.ts';
+import { UPLOAD_PATH } from './upload-path.ts';
+import type {
+  StageArchive,
+  StagedUpload,
+  SubmitUpload,
+} from './views/apps/component-upload.tsx';
 import { DeployDetail } from './views/apps/deploy-detail.tsx';
 import { AppList } from './views/apps/list.tsx';
 import {
@@ -78,10 +84,7 @@ import {
 } from './views/operations/datastores.tsx';
 import { DeployLedger } from './views/operations/deploys.tsx';
 import { Overview } from './views/operations/overview.tsx';
-import {
-  type RepositoryAuthorizationView,
-  RepositoryList,
-} from './views/repos/list.tsx';
+import { RepositoryList } from './views/repos/list.tsx';
 import {
   ArtifactRegistries,
   Builders,
@@ -1679,6 +1682,49 @@ function WorkspaceScreen({
     }
   };
 
+  // Bytes to the depot, then a Build row that spends the digest.
+  //
+  // Two calls rather than one because they are two different things: staging is
+  // the only thing that sees the bytes and so the only thing that can digest
+  // them (§16), and `uploadArchive` "never reads the bundle" for exactly that
+  // reason. A staged bundle nobody wrote a Build for is a harmless orphan the
+  // depot sweeps; a Build row naming bytes that never landed would not be.
+  const handleStageArchive: StageArchive = async (file) => {
+    const response = await fetch(UPLOAD_PATH, {
+      method: 'POST',
+      headers: { 'x-filename': file.name },
+      body: file,
+    });
+    const body = (await response.json()) as
+      | { ok: true; value: StagedUpload }
+      | { ok: false; failure: { message: string } };
+    // The boundary's own sentence — it names what arrived, which is the whole
+    // reason the refusal happens there rather than in a runner log.
+    if (!body.ok) throw new Error(body.failure.message);
+    return body.value;
+  };
+
+  const handleUploadArchive: SubmitUpload = async (request) => {
+    try {
+      // §5's scope. The control does not offer it: every archive the browser
+      // sends is the whole bundle, and a subpath is a repo-shaped question.
+      const result = await command('uploadArchive', {
+        ...request,
+        subpath: '.',
+      });
+      if (!result.ok) return { ok: false, message: result.failure.message };
+      // Land on the attempt this started, the way `handleDeploy` does — a press
+      // that produced a durable id should not leave the operator wondering.
+      onNavigate(`/builds/${result.value.buildId}`);
+      return { ok: true };
+    } catch (cause: unknown) {
+      return {
+        ok: false,
+        message: cause instanceof Error ? cause.message : 'The upload failed',
+      };
+    }
+  };
+
   // The pair this workspace is showing (§10) — bound here, once, so `SetConfig`
   // itself does not have to carry it on every call. Re-read on success for the
   // same reason `handleSetReach` is: `configKeys` is a row this act just
@@ -1991,6 +2037,8 @@ function WorkspaceScreen({
         onSetReach={handleSetReach}
         onSetAutoDeploy={handleSetAutoDeploy}
         onSetBuildRoute={handleSetAppBuildRoute}
+        onStageArchive={handleStageArchive}
+        onUploadArchive={handleUploadArchive}
         onSetConfig={handleSetConfig}
         onSelectComponent={handleSelectComponent}
         onCreateComponent={handleCreateComponent}
@@ -2746,13 +2794,6 @@ function RepositoriesScreen({ embedded = false }: { embedded?: boolean }) {
   >({ type: 'loading' });
   const [refresh, setRefresh] = useState(0);
   const [refreshing, setRefreshing] = useState(false);
-  const [authorization, setAuthorization] = useState<
-    | (RepositoryAuthorizationView & {
-        readonly attemptId: string;
-        readonly intervalSeconds: number;
-      })
-    | null
-  >(null);
   const [connecting, setConnecting] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const [openedPullRequest, setOpenedPullRequest] = useState<{
@@ -2791,60 +2832,6 @@ function RepositoriesScreen({ embedded = false }: { embedded?: boolean }) {
     };
   }, [refresh]);
 
-  useEffect(() => {
-    if (authorization?.state !== 'waiting') return;
-    let live = true;
-    let timer: ReturnType<typeof setTimeout> | null = null;
-    const poll = (seconds: number) => {
-      timer = setTimeout(async () => {
-        const result = await command('pollRepositoryAuthorization', {
-          attemptId: authorization.attemptId,
-        }).catch((cause: unknown) => ({
-          ok: false as const,
-          failure: {
-            code: 'MALFORMED_REQUEST' as const,
-            message:
-              cause instanceof Error ? cause.message : 'GitHub poll failed',
-          },
-        }));
-        if (!live) return;
-        if (!result.ok) {
-          setAuthorization((current) =>
-            current === null
-              ? null
-              : {
-                  ...current,
-                  state: 'error',
-                  message: result.failure.message,
-                },
-          );
-          return;
-        }
-        if (result.value.state === 'pending') {
-          poll(result.value.retryAfterSeconds);
-        } else if (result.value.state === 'authorized') {
-          setAuthorization(null);
-          setRefresh((value) => value + 1);
-        } else {
-          const terminalState =
-            result.value.state === 'denied' ? 'denied' : 'expired';
-          setAuthorization((current) =>
-            current === null ? null : { ...current, state: terminalState },
-          );
-        }
-      }, seconds * 1000);
-    };
-    poll(authorization.intervalSeconds);
-    return () => {
-      live = false;
-      if (timer !== null) clearTimeout(timer);
-    };
-  }, [
-    authorization?.attemptId,
-    authorization?.intervalSeconds,
-    authorization?.state,
-  ]);
-
   if (state.type === 'loading') return <SectionSkeleton rows={2} />;
 
   if (state.type === 'error') {
@@ -2858,25 +2845,6 @@ function RepositoriesScreen({ embedded = false }: { embedded?: boolean }) {
       </div>
     );
   }
-
-  const authorize = async () => {
-    setActionError(null);
-    try {
-      const result = await command('beginRepositoryAuthorization', {});
-      if (!result.ok) {
-        setActionError(result.failure.message);
-        return;
-      }
-      setAuthorization({
-        ...result.value,
-        state: 'waiting',
-      });
-    } catch (cause) {
-      setActionError(
-        cause instanceof Error ? cause.message : 'GitHub authorization failed',
-      );
-    }
-  };
 
   const connect = async (input: InputOf<'connectRepository'>) => {
     setConnecting(true);
@@ -2913,12 +2881,10 @@ function RepositoriesScreen({ embedded = false }: { embedded?: boolean }) {
       repos={state.repos}
       options={state.available}
       connector={state.connector}
-      authorization={authorization}
       connecting={connecting}
       refreshing={refreshing}
       error={actionError}
       openedPullRequest={openedPullRequest}
-      onAuthorize={authorize}
       onConnect={connect}
       onRefresh={handleRefresh}
       embedded={embedded}

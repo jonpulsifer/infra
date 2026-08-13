@@ -125,9 +125,12 @@ describe('authentication Settings', () => {
 
 describe('the GitHub repository connector', () => {
   const actions = {
-    onAuthorize: () => undefined,
     onConnect: () => undefined,
     onRefresh: () => undefined,
+  };
+  const setup = {
+    action: 'https://github.example.test/settings/apps/new?state=sealed-state',
+    manifest: '{"name":"spindrift-example"}',
   };
 
   test('uses a provider row and no second page heading inside Settings', () => {
@@ -135,8 +138,7 @@ describe('the GitHub repository connector', () => {
       <RepositoryList
         repos={[]}
         options={[]}
-        connector={{ state: 'unauthorized' }}
-        authorization={null}
+        connector={{ state: 'unauthorized', setup }}
         connecting={false}
         error={null}
         openedPullRequest={null}
@@ -149,44 +151,26 @@ describe('the GitHub repository connector', () => {
     expect(markup).not.toContain('<h1');
   });
 
-  test('starts with user authorization and names no private key', () => {
+  test('starts with the create-the-App form and renders no key material', () => {
     const markup = renderToStaticMarkup(
       <RepositoryList
         repos={[]}
         options={[]}
-        connector={{ state: 'unauthorized' }}
-        authorization={null}
+        connector={{ state: 'unauthorized', setup }}
         connecting={false}
         error={null}
         openedPullRequest={null}
         {...actions}
       />,
     );
-    expect(markup).toContain('Authorize GitHub');
-    expect(markup).toContain('never asks for an installation ID');
-    expect(markup).not.toContain('App private key');
-  });
-
-  test('shows the device code while GitHub authorization is pending', () => {
-    const markup = renderToStaticMarkup(
-      <RepositoryList
-        repos={[]}
-        options={[]}
-        connector={{ state: 'unauthorized' }}
-        authorization={{
-          userCode: 'ABCD-EFGH',
-          verificationUri: 'https://github.example.test/login/device',
-          state: 'waiting',
-        }}
-        connecting={false}
-        error={null}
-        openedPullRequest={null}
-        {...actions}
-      />,
+    // The form POSTs straight to the repository host with the manifest as its
+    // one field; nothing else is collected here and no PEM is ever shown.
+    expect(markup).toContain('Create the App on');
+    expect(markup).toContain(
+      'action="https://github.example.test/settings/apps/new?state=sealed-state"',
     );
-    expect(markup).toContain('ABCD-EFGH');
-    expect(markup).toContain('Continue in GitHub');
-    expect(markup).not.toContain('device-code-secret');
+    expect(markup).toContain('name="manifest"');
+    expect(markup).not.toContain('PRIVATE KEY');
   });
 
   /**
@@ -213,17 +197,18 @@ describe('the GitHub repository connector', () => {
         ]}
         connector={{
           state: 'authorized',
-          login: 'operator',
-          githubUserId: '42',
+          slug: 'spindrift-example',
+          appId: '1234567',
+          installUrl:
+            'https://github.example.test/apps/spindrift-example/installations/new',
         }}
-        authorization={null}
         connecting={false}
         error={null}
         openedPullRequest={null}
         {...actions}
       />,
     );
-    expect(markup).toContain('Authorized as @operator');
+    expect(markup).toContain('Speaking as spindrift-example');
     expect(markup).toContain('example/app');
     expect(markup).toContain('>Connect<');
     for (const field of [
@@ -1199,8 +1184,6 @@ describe('the Targets surface', () => {
         proposal: {
           carriedFrom: 'other/cloudrun',
           region: 'somewhere',
-          runEndpoint: 'https://run.example.test',
-          hostingEndpoint: 'https://hosting.example.test',
         },
       },
     ]);

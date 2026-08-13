@@ -8,8 +8,18 @@
  * installation-specific literals, so nothing in this file may carry an example
  * value from the installation that happens to run it.
  *
- * There are no defaults. A missing key fails the boot rather than falling back
- * to whatever the first operator happened to use.
+ * There are no defaults for anything that names *this* installation. A missing
+ * key fails the boot rather than falling back to whatever the first operator
+ * happened to use.
+ *
+ * **One class of key is the deliberate exception: a vendor's own API root.**
+ * `cloudrun`, `static`, `vercel`, `cloudflare-pages` and `gcp-secret-manager`
+ * each connect to a single control plane the vendor runs, identical for every
+ * installation — it is not a fact about this deployment the way `apiServer` or
+ * `project` is, so treating it as one meant every operator retyped the same
+ * constant. Each `endpoint` below is optional for exactly that reason, and the
+ * default an absent one resolves to lives with the adapter that owns the API,
+ * not here — see `DEFAULT_ENDPOINT` beside each adapter's implementation.
  *
  * **What names the installation and what names its deployment are not the same
  * set.** A value the installer chart already renders is read from the
@@ -349,7 +359,8 @@ export const targetSeedSchema = z.discriminatedUnion('adapter', [
       connection: z
         .object({
           region: nonEmptyString,
-          endpoint: z.url(),
+          /** The runtime's API root. Optional; defaults to the vendor's own. */
+          endpoint: z.url().optional(),
           policyEndpoint: z.url().optional(),
           /** The identity a revision runs as. See `CloudRunConnection`. */
           serviceAccount: nonEmptyString.optional(),
@@ -365,7 +376,8 @@ export const targetSeedSchema = z.discriminatedUnion('adapter', [
       adapter: z.literal('static'),
       connection: z
         .object({
-          endpoint: z.url(),
+          /** The hosting product's API root. Optional; defaults to the vendor's own. */
+          endpoint: z.url().optional(),
         })
         .strict()
         .optional(),
@@ -377,7 +389,8 @@ export const targetSeedSchema = z.discriminatedUnion('adapter', [
       adapter: z.literal('vercel'),
       connection: z
         .object({
-          endpoint: z.url(),
+          /** The platform's API root. Optional; defaults to the vendor's own. */
+          endpoint: z.url().optional(),
         })
         .strict()
         .optional(),
@@ -389,7 +402,8 @@ export const targetSeedSchema = z.discriminatedUnion('adapter', [
       adapter: z.literal('cloudflare-pages'),
       connection: z
         .object({
-          endpoint: z.url(),
+          /** The platform's API root. Optional; defaults to the vendor's own. */
+          endpoint: z.url().optional(),
         })
         .strict()
         .optional(),
@@ -645,22 +659,60 @@ export const installationManifestSchema = z
     github: z
       .object({
         /**
-         * Public OAuth client id of that App.
-         *
-         * Device Flow needs no client secret or App signing key. This value is
-         * safe to render into the installation ConfigMap and is what binds the
-         * browser-mediated authorization to the selected-repository App.
-         */
-        clientId: nonEmptyString,
-        /**
-         * Web host carrying GitHub's Device Flow and token endpoints.
+         * The repository host's web origin — where the manifest-flow form
+         * that creates the GitHub App POSTs, where `…/installations/new`
+         * links point, and what clone URLs are composed from.
          *
          * Separate from `apiBaseUrl` for GitHub Enterprise installations,
-         * whose web and REST origins differ.
+         * whose web and REST origins differ. The App's identity itself —
+         * id, slug, client id, signing key — is **not** here: it lives
+         * sealed in the `github_app` row, written once by the manifest-flow
+         * conversion, because a signing key has no business in a ConfigMap.
+         *
+         * A document authored for the previous schema carries `clientId`
+         * and `oauthBaseUrl` instead; `manifest-upgrade.ts` moves
+         * `oauthBaseUrl` here and drops `clientId`, so neither an old
+         * stored row nor an old declaration can fail a parse whichever of
+         * the image and the declaration rolls out first.
          */
-        oauthBaseUrl: z
+        webBaseUrl: z
           .url()
           .refine((value) => !value.endsWith('/'), 'must not end with a slash'),
+        /**
+         * Installation accounts this installation recognises as its own.
+         *
+         * A public App can be installed by strangers, and their
+         * installations arrive in the same `GET /app/installations`
+         * enumeration as the operator's. When this list is stated, the
+         * Repositories screen filters to it and `installationFor` refuses
+         * repositories owned by anyone else — filtered, not merely listed
+         * and inert. Absent means no filter, which is the honest state of a
+         * fresh installation whose App has not been installed anywhere yet.
+         */
+        accounts: z.array(nonEmptyString).min(1).optional(),
+        /**
+         * The App's slug on the repository host — public, and only ever
+         * display-and-links material (`…/apps/<slug>/installations/new`).
+         *
+         * Declared for an **adopted** App, whose identity arrives through the
+         * installation Secret (`SPINDRIFT_GITHUB_APP_ID` and the private-key
+         * variable beside it) and therefore carries no slug of its own. The
+         * manifest-flow conversion stores its own slug and needs no
+         * declaration here.
+         */
+        appSlug: nonEmptyString.optional(),
+        /**
+         * Where GitHub delivers this App's webhooks, as a full URL.
+         *
+         * Stated rather than derived from the control-plane hostname because
+         * the two are different names on purpose: the control plane is a LAN
+         * record GitHub's delivery servers cannot reach, and this is the
+         * path-scoped tunnel hostname that exists precisely so one route can
+         * be reached from outside. Absent means the created App declares no
+         * webhook and every delivery posture stays refuse-all — degraded,
+         * stated, and not a crash.
+         */
+        webhookUrl: z.url().optional(),
         /**
          * Base URL of the repository host's REST API, without a trailing
          * slash.
@@ -768,8 +820,17 @@ export const installationManifestSchema = z
          * Core's path, not a Target's: the platform's own secret operator
          * fetches from the same store of record over its own path, and neither
          * needs to know the other's.
+         *
+         * Optional for `gcp-secret-manager`, whose API root is the same
+         * hostname for every project rather than an installation fact —
+         * `createSecretStore` in `adapters/registry.ts` applies its default
+         * when this is absent. `onepassword` gets no such default: a Connect
+         * server is self-hosted, so that adapter still requires a real value
+         * here, enforced where the store is constructed rather than by the
+         * schema, because which adapter needs it is a fact this object's
+         * sibling key carries, not the type of this one.
          */
-        endpoint: z.string().url(),
+        endpoint: z.string().url().optional(),
         /**
          * **No `container` here.** What holds the items is a property of the
          * boundary they live in, so it is `shared.secretStoreContainer` on the

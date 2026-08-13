@@ -126,6 +126,18 @@ export interface PagesAdapterOptions {
 const SERVICE_NAME = 'Cloudflare Pages';
 
 /**
+ * The platform's own API root — one hostname for every account, because
+ * Cloudflare runs a single control plane rather than one per customer.
+ * `CloudflarePagesConnection.endpoint` used to be required and typed into the
+ * connect form on the theory that it was connection material the way a
+ * cluster's `apiServer` is; it never varied between installations, so this is
+ * now the default applied wherever `connection.endpoint` is read, with the
+ * Target's own value kept only as an override for a perimeter or a mirror in
+ * front of the real API.
+ */
+export const DEFAULT_ENDPOINT = 'https://api.cloudflare.com/client/v4';
+
+/**
  * The branch a project is created with, and the one a deployment names.
  *
  * A constant rather than a connection field, because it decides one thing —
@@ -262,7 +274,7 @@ export class PagesDeployAdapter implements DeployAdapter {
     const uploaded = await uploadAssets({
       client: http,
       account: connection.account,
-      endpoint: connection.endpoint,
+      endpoint: this.endpointOf(connection),
       ...(this.options.fetch === undefined
         ? {}
         : { fetch: this.options.fetch }),
@@ -663,9 +675,14 @@ export class PagesDeployAdapter implements DeployAdapter {
     return `/accounts/${encodeURIComponent(connection.account)}/pages/projects/${encodeURIComponent(project)}`;
   }
 
+  /** The API root this Target actually reaches, override or default. */
+  private endpointOf(connection: CloudflarePagesAdapterConnection): string {
+    return connection.endpoint ?? DEFAULT_ENDPOINT;
+  }
+
   private http(connection: CloudflarePagesAdapterConnection): CloudHttp {
     return new CloudHttp({
-      baseUrl: connection.endpoint,
+      baseUrl: this.endpointOf(connection),
       token: this.options.token,
       ...(this.options.fetch === undefined
         ? {}

@@ -742,6 +742,20 @@ export interface WorkspaceView {
    */
   readonly buildRoute: string | null;
   /**
+   * Whether this App's source is an uploaded archive rather than a repo.
+   *
+   * Not derivable from what is already here: `buildRoute` and `autoDeploy` are
+   * both null for an archive App and for a repo App that has set neither, so a
+   * screen reading them cannot tell "there is nothing to choose" from "nothing
+   * has been chosen". The Component upload control needs the distinction —
+   * an archive App's bytes cannot be fetched again, so uploading is the only
+   * way to give it a new release, which is a different sentence from the
+   * escape hatch a repo App gets.
+   *
+   * Optional because every fixture in the tree builds this row literally.
+   */
+  readonly archiveSourced?: boolean;
+  /**
    * Every build route this installation configures, in rank order, judged
    * against the placed Target's minimum level alone.
    *
@@ -894,14 +908,32 @@ export interface GrantedRepositoryView extends RepositoryIdentityView {
   readonly rowExists: boolean;
 }
 
-/** Whether the repository connector can currently call GitHub for this user. */
+/**
+ * Whether this installation has a GitHub App identity to speak as.
+ *
+ * `unauthorized` carries the manifest-flow form that creates one: a POST
+ * straight from the operator's browser to the repository host, whose redirect
+ * lands on the setup route with a conversion code. `authorized` names the App
+ * and links where installations are added — the two acts GitHub requires a
+ * human click for.
+ */
 export type RepositoryConnectorView =
   | { readonly state: 'unavailable' }
-  | { readonly state: 'unauthorized' }
+  | {
+      readonly state: 'unauthorized';
+      readonly setup: {
+        /** Where the create-the-App form POSTs, `state` included. */
+        readonly action: string;
+        /** The manifest document, as the `manifest` form field's value. */
+        readonly manifest: string;
+      };
+    }
   | {
       readonly state: 'authorized';
-      readonly login: string;
-      readonly githubUserId: string;
+      readonly slug: string;
+      readonly appId: string;
+      /** `…/apps/<slug>/installations/new` on the host's web origin. */
+      readonly installUrl: string;
     };
 
 /** The connection health of a linked repository (§20). */
@@ -1232,15 +1264,25 @@ export interface PendingTargetConnection {
  *
  * Carried from a Target of the same adapter this installation has **already**
  * configured, never from a literal in this repository. §20 puts every value
- * naming a far side in the manifest, and a default compiled into `src/` would
- * be that contract broken quietly — so the only thing that can teach Spindrift
- * what a Cloud Run endpoint looks like here is a Cloud Run Target that is
- * already working here.
+ * naming a far side in the manifest, and a value that genuinely differs per
+ * project or team is only safe to propose because a working Target already
+ * proved it.
  *
  * What is **not** carried matters as much: an `apiServer`, a `project`, and a
  * Target's name are per-instance facts, and a plausible wrong default for one
  * of those is worse than an empty field. A second cluster prefilled with the
  * first one's in-cluster address would look right and be wrong.
+ *
+ * **No `runEndpoint`, `hostingEndpoint`, `vercelEndpoint` or `pagesEndpoint`
+ * here.** Those four were never a proposal in the sense the rest of this type
+ * is — they were the one value every cloud Target of a given adapter shares,
+ * carried forward only because the connect screen used to make an operator
+ * type it. Each adapter now applies its own default (`DEFAULT_ENDPOINT`
+ * beside its implementation) when a Target's `connection.endpoint` is absent,
+ * so there is nothing left here to propose. An installation that genuinely
+ * needs a non-default endpoint — a perimeter, a mirror — still has one: the
+ * manifest declares `targets[].connection.endpoint` directly (§20), which
+ * this screen never mediates.
  */
 export interface TargetConnectionProposal {
   /** The Target these values were read off, or null when there was none. */
@@ -1265,11 +1307,12 @@ export interface TargetConnectionProposal {
    */
   readonly chartValues?: Record<string, unknown>;
   readonly region?: string;
-  readonly runEndpoint?: string;
-  readonly hostingEndpoint?: string;
+  /**
+   * Where this project's admission policy is read from, as an already-working
+   * Cloud Run Target states it. Unlike the endpoints above, this genuinely has
+   * no default (`domain/target.ts`'s `CloudRunConnection.policyEndpoint`
+   * explains why), so it stays a real proposal — carried whole, with no visible
+   * control, the same way `chartValues` is.
+   */
   readonly policyEndpoint?: string;
-  /** The edge platform's API root, as an already-connected team states it. */
-  readonly vercelEndpoint?: string;
-  /** The same fact for a `cloudflare-account` boundary's one surface. */
-  readonly pagesEndpoint?: string;
 }

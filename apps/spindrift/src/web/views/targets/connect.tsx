@@ -741,11 +741,18 @@ function Declaration({
  *
  * Still a flat form, and not because nobody got to it: a project has no
  * discovery API to enumerate itself through before it is named, so there is
- * nothing here for a probe to read. The two endpoints and the region are
- * carried from a working cloud Target; the project id never is — except on an
- * edit, where the id is this boundary's own rather than somebody else's, and
- * pressing the button again is how a surface the last probe did not find gets
- * asked about a second time.
+ * nothing here for a probe to read. The region is carried from a working cloud
+ * Target; the project id never is — except on an edit, where the id is this
+ * boundary's own rather than somebody else's, and pressing the button again is
+ * how a surface the last probe did not find gets asked about a second time.
+ *
+ * **No control for either endpoint.** Both used to be typed here on the theory
+ * that they were connection material the way `apiServer` is; they are not —
+ * `run.googleapis.com` and `firebasehosting.googleapis.com` answer for every
+ * project, so `cloudrun/index.ts` and `static/index.ts` each apply their own
+ * default and this form asks nothing about either. An installation behind a
+ * perimeter or a mirror still has the override; it is declared in the manifest
+ * (§20), which this screen never mediates.
  */
 function ConnectCloud({
   vessel,
@@ -766,16 +773,8 @@ function ConnectCloud({
 }) {
   const [project, setProject] = useState(knownProject);
   const [region, setRegion] = useState(proposal.region ?? '');
-  const [runEndpoint, setRunEndpoint] = useState(proposal.runEndpoint ?? '');
-  const [hostingEndpoint, setHostingEndpoint] = useState(
-    proposal.hostingEndpoint ?? '',
-  );
 
-  const ready =
-    project.trim() !== '' &&
-    region.trim() !== '' &&
-    runEndpoint.trim() !== '' &&
-    hostingEndpoint.trim() !== '';
+  const ready = project.trim() !== '' && region.trim() !== '';
 
   return (
     <div className="flex flex-col gap-4">
@@ -797,18 +796,6 @@ function ConnectCloud({
           value={region}
           onChange={(event) => setRegion(event.target.value)}
         />
-        <Field
-          name="run-endpoint"
-          label="Cloud Run API"
-          value={runEndpoint}
-          onChange={(event) => setRunEndpoint(event.target.value)}
-        />
-        <Field
-          name="hosting-endpoint"
-          label="Hosting API"
-          value={hostingEndpoint}
-          onChange={(event) => setHostingEndpoint(event.target.value)}
-        />
       </div>
       <div className="flex flex-wrap items-center gap-3">
         <Button
@@ -819,8 +806,6 @@ function ConnectCloud({
               vessel,
               project: project.trim(),
               region: region.trim(),
-              runEndpoint: runEndpoint.trim(),
-              hostingEndpoint: hostingEndpoint.trim(),
               ...(proposal.policyEndpoint === undefined
                 ? {}
                 : { policyEndpoint: proposal.policyEndpoint }),
@@ -847,9 +832,12 @@ function ConnectCloud({
  * A Vercel team's one surface, in one act.
  *
  * Flat for the reason the cloud form above it is: a team has no discovery API
- * to enumerate itself through before it is named. Two fields rather than four —
- * there is no region to pick and no second control plane, because the platform
- * serves one network and one API.
+ * to enumerate itself through before it is named. One field, not two — there is
+ * no region to pick, because the platform serves one network from one place,
+ * and no control for the API root either: `api.vercel.com` answers for every
+ * team, so `vercel/index.ts` applies it without asking. The only thing this
+ * boundary can tell Spindrift that Spindrift could not already assume is which
+ * team it is.
  *
  * **No field for the token**, and that is the point rather than an omission:
  * the bearer this Target is driven with is the installation's, read from its
@@ -861,7 +849,6 @@ function ConnectCloud({
 function ConnectVercel({
   vessel,
   team: knownTeam = '',
-  proposal,
   connecting,
   onConnect,
   onCancel,
@@ -874,8 +861,7 @@ function ConnectVercel({
   onCancel: () => void;
 }) {
   const [team, setTeam] = useState(knownTeam);
-  const [endpoint, setEndpoint] = useState(proposal.vercelEndpoint ?? '');
-  const ready = team.trim() !== '' && endpoint.trim() !== '';
+  const ready = team.trim() !== '';
 
   return (
     <div className="flex flex-col gap-4">
@@ -891,12 +877,6 @@ function ConnectVercel({
               : 'This boundary’s own slug or team_… id.'
           }
         />
-        <Field
-          name="vercel-endpoint"
-          label="API"
-          value={endpoint}
-          onChange={(event) => setEndpoint(event.target.value)}
-        />
       </div>
       <div className="flex flex-wrap items-center gap-3">
         <Button
@@ -906,7 +886,6 @@ function ConnectVercel({
               kind: 'vercel-team',
               vessel,
               team: team.trim(),
-              endpoint: endpoint.trim(),
             })
           }
         >
@@ -923,10 +902,11 @@ function ConnectVercel({
 /**
  * A Cloudflare account's one surface, in one act.
  *
- * The same two fields {@link ConnectVercel} takes, one vendor over and for the
- * same reasons — an account has no discovery API to enumerate itself through
- * before it is named, and it carries one surface, so there is neither a probe
- * to read nor a second endpoint to keep in step with this one.
+ * The same one field {@link ConnectVercel} takes, one vendor over and for the
+ * same reason — an account has no discovery API to enumerate itself through
+ * before it is named — plus the same omission: the platform's REST root
+ * answers for every account, so `pages/index.ts` applies it without asking,
+ * and the only thing left for this form to ask about is which account.
  *
  * **No field for the token here either**, and the same sentence applies: the
  * bearer is the installation's, read from its Secret per request, so a form
@@ -936,7 +916,6 @@ function ConnectVercel({
 function ConnectCloudflareAccount({
   vessel,
   account: knownAccount = '',
-  proposal,
   connecting,
   onConnect,
   onCancel,
@@ -949,8 +928,7 @@ function ConnectCloudflareAccount({
   onCancel: () => void;
 }) {
   const [account, setAccount] = useState(knownAccount);
-  const [endpoint, setEndpoint] = useState(proposal.pagesEndpoint ?? '');
-  const ready = account.trim() !== '' && endpoint.trim() !== '';
+  const ready = account.trim() !== '';
 
   return (
     <div className="flex flex-col gap-4">
@@ -966,12 +944,6 @@ function ConnectCloudflareAccount({
               : 'This boundary’s own account id.'
           }
         />
-        <Field
-          name="cloudflare-endpoint"
-          label="API"
-          value={endpoint}
-          onChange={(event) => setEndpoint(event.target.value)}
-        />
       </div>
       <div className="flex flex-wrap items-center gap-3">
         <Button
@@ -981,7 +953,6 @@ function ConnectCloudflareAccount({
               kind: 'cloudflare-account',
               vessel,
               account: account.trim(),
-              pagesEndpoint: endpoint.trim(),
             })
           }
         >

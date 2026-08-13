@@ -36,7 +36,7 @@ spec:
     # Renovate pins the digest on this line and Flux rolls it out. The image's
     # manifest schema and the chart must agree on which keys a declaration may
     # carry — the manifest below has to satisfy both.
-    image: ghcr.io/jonpulsifer/spindrift:latest@sha256:27c6d11d134b4cab181d5670f3a325f3c58aabd6dd8ba3d25a3ae687ab14aae5
+    image: ghcr.io/jonpulsifer/spindrift:latest@sha256:3384ffd7960c94cfd6c35d91c9ae58e4d5dcf209aaf70cfc27d2fa4e9424c2b1
     # Substituted by the apps Kustomization from the cluster-secrets Secret, so
     # the zone is read rather than restated. external-dns publishes the record
     # from the HTTPRoute and cert-manager issues the certificate, so this line
@@ -249,8 +249,38 @@ spec:
         # below name that object. Flipping this back to a path flips both.
         app: oci://ghcr.io/jonpulsifer/charts/spindrift-app
       github:
-        clientId: Iv1.918d699f36ee7afc
+        # The web origin the manifest-flow form POSTs to, the
+        # `…/installations/new` links target, and clone URLs are composed
+        # from. The App's identity itself — id, slug, client id, signing key —
+        # is not declared anywhere: it lives sealed in the `github_app` row,
+        # written once by the manifest-flow conversion on the Repositories
+        # screen.
+        webBaseUrl: https://github.com
         apiBaseUrl: https://api.github.com
+        # The adopted App's public slug (App ID 4576122), composing the
+        # install link. The identity's private half arrives through the
+        # installation Secret — SPINDRIFT_GITHUB_APP_ID and
+        # SPINDRIFT_GITHUB_APP_PRIVATE_KEY — never this document.
+        appSlug: spindrift-lolwtf
+        # The App is public so it also installs on `homelab-ng`, which means
+        # strangers can install it too. These are the installation accounts
+        # the Repositories screen renders as connectable and
+        # `installationFor` will operate for; every other installation is
+        # filtered, not merely left unclicked.
+        accounts:
+          - jonpulsifer
+          - homelab-ng
+        # Where GitHub delivers the App-level webhook: the path-scoped tunnel
+        # hostname (terraform/network/cloudflare/spindrift.tf exposes exactly
+        # `^/internal/github/webhook$` on it), never this installation's own
+        # `spindrift.${SECRET_DOMAIN}` — that is a LAN record GitHub's
+        # delivery servers cannot reach.
+        webhookUrl: https://spindrift-control.lolwtf.dev/internal/github/webhook
+        # The two Device Flow keys. The image that reads them is the one this
+        # release's pinned digest still names; the App-auth image accepts and
+        # drops them, so they hold no behaviour there and leave with the next
+        # edit after that digest lands.
+        clientId: Iv1.918d699f36ee7afc
         oauthBaseUrl: https://github.com
         # `@main` on purpose: every caller written into a configuration PR
         # copies this ref, and a branch keeps them all current — this
@@ -529,7 +559,6 @@ spec:
           adapter: cloudrun
           connection:
             region: northamerica-northeast1
-            endpoint: https://run.googleapis.com
             # Where this project's admission policy is read from. Naming it is
             # also what makes the Service declare `binaryAuthorization.
             # useDefault` — Cloud Run treats admission as a property of the
@@ -545,8 +574,11 @@ spec:
             serviceAccount: spindrift-runtime@bluenose.iam.gserviceaccount.com
         - vessel: bluenose
           adapter: static
-          connection:
-            endpoint: https://firebasehosting.googleapis.com
+          # Empty rather than absent: this surface is connected, and the only
+          # fact it used to carry was Firebase Hosting's API root, which
+          # `static/index.ts` now defaults on its own (`DEFAULT_ENDPOINT`) —
+          # one hostname for every project, not an installation fact.
+          connection: {}
         # A website placed here is served from the platform's own edge, so this
         # Target serves `public` and no other reach by construction — there is
         # nothing to assert. The build stays where it already runs: what crosses
@@ -555,25 +587,27 @@ spec:
         # rather than building it a second time.
         - vessel: jonpulsifer
           adapter: vercel
-          connection:
-            endpoint: https://api.vercel.com
+          # Empty rather than absent, for the same reason the `static` surface
+          # above is: `api.vercel.com` is one hostname for every team, and
+          # `vercel/index.ts` now applies it without being told.
+          connection: {}
         # The second static edge, last on the list and so last in §16's admin
         # rank: a website that names no Target still lands on Vercel, exactly
         # where it landed before this Target existed.
         #
         # `embarrassing.ca` is already declared above as the zone an App pinned
         # to one of these two takes a name in, so this adds a Target and no
-        # zone. The endpoint is the API root the adapter hangs
-        # `/accounts/<id>/pages/projects` off; the account is on the vessel,
-        # because it is a property of the boundary rather than of this surface.
+        # zone. Empty for the third time here, and the account is the reason it
+        # is not empty of everything: `api.cloudflare.com/client/v4` is one
+        # hostname for every account and `pages/index.ts` supplies it, while the
+        # account itself is a property of the boundary and sits on the vessel.
         #
         # No production branch here, deliberately: a Pages project has one and
         # the adapter reads it back off the project it ensures, so an operator
         # who stated it here could only state it wrong.
         - vessel: fml
           adapter: cloudflare-pages
-          connection:
-            endpoint: https://api.cloudflare.com/client/v4
+          connection: {}
       # §10's one store of record, and the only one every Target here reaches.
       #
       # A Cloud Run revision resolves a pinned secret reference out of its own
@@ -592,9 +626,11 @@ spec:
       # Target already goes through (`storeTokenFor` in
       # `apps/spindrift/src/adapters/registry.ts`), so this installation stores
       # no secret-store bearer at all.
+      # No endpoint: Secret Manager's API root is one hostname for every
+      # project, not an installation fact, so `createSecretStore` in
+      # `apps/spindrift/src/adapters/registry.ts` applies its own default.
       secretStore:
         adapter: gcp-secret-manager
-        endpoint: https://secretmanager.googleapis.com
       supplyChain:
         # northamerica-northeast1, which is where the key is:
         # `google_kms_crypto_key.signer` takes `local.region`, and

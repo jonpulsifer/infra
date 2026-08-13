@@ -141,18 +141,21 @@ describe('what a connect may be prefilled with', () => {
     expect(proposal).not.toHaveProperty('apiServer');
   });
 
-  test('a cloud project carries its endpoints and region, never its project id', () => {
+  test('a cloud project carries its region and policy endpoint, never its project id or either API root', () => {
     const proposal = connectionProposal(
       [CLOUD_RUN, CLOUD_STATIC],
       'gcp-project',
     );
 
+    // Neither `endpoint` is here: both are one hostname for every project, so
+    // `cloudrun/index.ts` and `static/index.ts` each apply their own default
+    // rather than this being a value a donor Target teaches. `policyEndpoint`
+    // stays, because its presence is a real operator choice with no default —
+    // see `CloudRunConnection.policyEndpoint`.
     expect(proposal).toEqual({
       carriedFrom: 'bluenose/cloudrun',
       region: 'northamerica-northeast1',
-      runEndpoint: 'https://run.googleapis.example',
       policyEndpoint: 'https://binaryauthorization.googleapis.example',
-      hostingEndpoint: 'https://firebasehosting.googleapis.example',
     });
     expect(proposal).not.toHaveProperty('project');
   });
