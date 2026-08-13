@@ -92,6 +92,28 @@ export function surfacesToProbe(kind: VesselKind): readonly TargetAdapter[] {
 }
 
 /**
+ * The surface on a vessel of this kind that can host a database (§11).
+ *
+ * A Datastore is anchored to its vessel, but the adapter that provisions and
+ * observes it is still keyed by `TargetAdapter` — a Target has exactly one
+ * adapter type, and that reasoning holds (`adapters/datastore/contract.ts`).
+ * This two-row table beside the one above is the whole bridge: every consumer
+ * that must go from "the boundary a Datastore lives in" to "the Target row
+ * whose connection an adapter call needs" reads it here, so the mapping cannot
+ * drift between them.
+ *
+ * `Partial` because it is a fact that some vessel kinds host no database at
+ * all: an edge platform's account has nowhere to put a volume, and an absent
+ * entry is `createDatastore`'s refusal rather than a lookup error.
+ */
+export const DATASTORE_SURFACE_BY_VESSEL_KIND: Partial<
+  Record<VesselKind, TargetAdapter>
+> = {
+  cluster: 'kubernetes',
+  'gcp-project': 'cloudrun',
+};
+
+/**
  * What one vessel is to this installation, as opposed to what it is made of.
  *
  * The second axis of the prerequisite catalogue below. `kind` says what shape a

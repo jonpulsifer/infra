@@ -21,27 +21,28 @@
  * form with a name field — there will be tens of them for the lifetime of an
  * installation, not the thousands a Build or a Deploy accumulates.
  *
- * **The pickable Targets ride along.** `createDatastore` takes a Target and no
+ * **The pickable Vessels ride along.** `createDatastore` takes a Vessel and no
  * App, so the ledger can create — and the one thing its form needs that the
  * rows do not carry is where a new one could go. It is answered here rather
  * than by a second call to `listTargets` because that command answers a
  * different question (placement candidacy for a Component being created) and
  * carries none of §3's storage capabilities; a screen that asked it would be
- * offering Targets on a fact it never read.
+ * offering placements on a fact it never read.
  */
 import { z } from 'zod';
 import { capabilitiesOfRow } from '../../domain/capabilities.ts';
 import { elapsedSince } from '../../domain/elapsed.ts';
 import {
+  datastoreVesselLabel,
   hasTargetConnection,
   hasVesselLocation,
-  targetRowLabel,
 } from '../../domain/target.ts';
 import type {
   DatastoreListItem,
-  DatastoreTargetOption,
+  DatastoreVesselOption,
 } from '../../web/model.ts';
 import { type Command, ok } from '../types.ts';
+import { datastoreSurfaceTargetOf } from './vessel-surface.ts';
 
 export const listDatastoresInput = z.object({}).strict();
 
@@ -50,7 +51,7 @@ export type ListDatastoresInput = z.infer<typeof listDatastoresInput>;
 export interface ListDatastoresResult {
   readonly datastores: readonly DatastoreListItem[];
   /** Where a new managed Datastore could be created — see the file note. */
-  readonly targets: readonly DatastoreTargetOption[];
+  readonly vessels: readonly DatastoreVesselOption[];
 }
 
 export const listDatastores: Command<
@@ -59,21 +60,25 @@ export const listDatastores: Command<
 > = async (_input, context) => {
   const now = context.clock.now();
   const rows = await context.db.query.datastores.findMany({
-    with: { app: true, target: { with: { vessel: true } } },
+    with: { app: true, vessel: true },
     orderBy: (row, { desc }) => [desc(row.createdAt)],
   });
 
-  const targetRows = await context.db.query.targets.findMany({
-    with: { vessel: true },
-    orderBy: (row, { asc }) => [asc(row.rank)],
+  // By name because a vessel carries no rank — rank is a placement fact and
+  // lives on the surfaces.
+  const vesselRows = await context.db.query.vessels.findMany({
+    orderBy: (row, { asc }) => [asc(row.name)],
   });
-  const targets: DatastoreTargetOption[] = [];
-  for (const target of targetRows) {
-    // Every check `createDatastore` makes before it inserts, in its order. A
-    // Target that fails any of them is one whose only answer is that command's
-    // refusal, and an option whose sole outcome is a refusal is worth less
-    // than not offering it.
-    if (!hasTargetConnection(target) || !hasVesselLocation(target.vessel)) {
+  const vessels: DatastoreVesselOption[] = [];
+  for (const vessel of vesselRows) {
+    // Every check `createDatastore` makes before it inserts, in its order: the
+    // hosting surface resolved from the vessel's kind, then that surface's
+    // connection, adapter and capabilities. A vessel that fails any of them is
+    // one whose only answer is that command's refusal, and an option whose
+    // sole outcome is a refusal is worth less than not offering it.
+    const target = await datastoreSurfaceTargetOf(context.db, vessel);
+    if (target === undefined) continue;
+    if (!hasTargetConnection(target) || !hasVesselLocation(vessel)) {
       continue;
     }
     if ((context.adapters.datastore?.(target.adapter) ?? null) === null) {
@@ -88,23 +93,23 @@ export const listDatastores: Command<
       (engine) => capabilities[engine],
     );
     if (engines.length === 0) continue;
-    targets.push({
-      targetId: target.id,
-      label: targetRowLabel(target),
+    vessels.push({
+      vesselId: vessel.id,
+      label: datastoreVesselLabel(vessel),
       engines,
     });
   }
 
   return ok({
-    targets,
+    vessels,
     datastores: rows.map((row) => ({
       id: row.id,
       name: row.name,
       engine: row.engine,
       provenance: row.provenance,
       attachedTo: row.app === null ? null : row.app.name,
-      target: targetRowLabel(row.target),
-      targetId: row.targetId,
+      target: datastoreVesselLabel(row.vessel),
+      vesselId: row.vesselId,
       appId: row.appId,
       phase: row.phase,
       // §11's `ref` is the adapter's own handle, opaque here — this only ever

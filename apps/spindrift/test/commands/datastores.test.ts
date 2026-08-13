@@ -121,7 +121,7 @@ describe('createDatastore', () => {
       {
         name: 'orders',
         engine: 'postgres',
-        targetId: target.id,
+        vesselId: target.vesselId,
         storageGiB: 10,
       },
       contextWith(backend),
@@ -144,13 +144,13 @@ describe('createDatastore', () => {
     expect(row?.appId).toBeNull();
   });
 
-  test('a duplicate name on one Target is refused before the adapter is called', async () => {
+  test('a duplicate name in one Vessel is refused before the adapter is called', async () => {
     const target = await aTarget();
     const backend = new FakeDatastoreAdapter();
     const input = {
       name: 'orders',
       engine: 'postgres' as const,
-      targetId: target.id,
+      vesselId: target.vesselId,
       storageGiB: 10,
     };
     await createDatastore(input, contextWith(backend));
@@ -164,17 +164,27 @@ describe('createDatastore', () => {
     expect(backend.provisioned).toHaveLength(1);
   });
 
-  test('the same name on a second Target is two Datastores', async () => {
+  test('the same name in a second Vessel is two Datastores', async () => {
     const backend = new FakeDatastoreAdapter();
     const here = await aTarget();
     const there = await aTarget({ rank: 1 });
 
     const first = await createDatastore(
-      { name: 'primary', engine: 'valkey', targetId: here.id, storageGiB: 1 },
+      {
+        name: 'primary',
+        engine: 'valkey',
+        vesselId: here.vesselId,
+        storageGiB: 1,
+      },
       contextWith(backend),
     );
     const second = await createDatastore(
-      { name: 'primary', engine: 'valkey', targetId: there.id, storageGiB: 1 },
+      {
+        name: 'primary',
+        engine: 'valkey',
+        vesselId: there.vesselId,
+        storageGiB: 1,
+      },
       contextWith(backend),
     );
 
@@ -192,7 +202,7 @@ describe('createDatastore', () => {
       {
         name: 'orders',
         engine: 'postgres',
-        targetId: target.id,
+        vesselId: target.vesselId,
         storageGiB: 10,
       },
       contextWith(backend),
@@ -215,7 +225,7 @@ describe('createDatastore', () => {
       {
         name: 'orders',
         engine: 'postgres',
-        targetId: target.id,
+        vesselId: target.vesselId,
         storageGiB: 10,
       },
       contextWith(backend),
@@ -235,7 +245,7 @@ describe('createDatastore', () => {
       {
         name: 'orders',
         engine: 'postgres',
-        targetId: target.id,
+        vesselId: target.vesselId,
         storageGiB: 10,
       },
       contextWith(null),
@@ -255,7 +265,7 @@ describe('attachDatastore', () => {
       {
         name: 'orders',
         engine: 'postgres',
-        targetId: target.id,
+        vesselId: target.vesselId,
         storageGiB: 10,
       },
       contextWith(backend),
@@ -289,7 +299,7 @@ describe('attachDatastore', () => {
       {
         name: 'orders',
         engine: 'postgres',
-        targetId: target.id,
+        vesselId: target.vesselId,
         storageGiB: 10,
       },
       contextWith(backend),
@@ -317,7 +327,7 @@ describe('attachDatastore', () => {
     const app = await anApp();
     for (const name of ['orders', 'ledger']) {
       await createDatastore(
-        { name, engine: 'postgres', targetId: target.id, storageGiB: 10 },
+        { name, engine: 'postgres', vesselId: target.vesselId, storageGiB: 10 },
         contextWith(backend),
       );
     }
@@ -346,7 +356,7 @@ describe('attachDatastore', () => {
       {
         name: 'orders',
         engine: 'postgres',
-        targetId: target.id,
+        vesselId: target.vesselId,
         storageGiB: 10,
       },
       contextWith(backend),
@@ -355,7 +365,7 @@ describe('attachDatastore', () => {
       {
         name: 'sessions',
         engine: 'valkey',
-        targetId: target.id,
+        vesselId: target.vesselId,
         storageGiB: 1,
       },
       contextWith(backend),
@@ -391,7 +401,12 @@ describe('attachDatastore', () => {
       placedTargetId: elsewhere.id,
     });
     const created = await createDatastore(
-      { name: 'orders', engine: 'postgres', targetId: here.id, storageGiB: 10 },
+      {
+        name: 'orders',
+        engine: 'postgres',
+        vesselId: here.vesselId,
+        storageGiB: 10,
+      },
       contextWith(backend),
     );
 
@@ -420,7 +435,7 @@ describe('detachDatastore', () => {
       {
         name: 'orders',
         engine: 'postgres',
-        targetId: target.id,
+        vesselId: target.vesselId,
         storageGiB: 10,
       },
       contextWith(backend),
@@ -449,7 +464,7 @@ describe('destroyDatastore', () => {
       {
         name: 'orders',
         engine: 'postgres',
-        targetId: target.id,
+        vesselId: target.vesselId,
         storageGiB: 10,
       },
       contextWith(backend),
@@ -474,7 +489,7 @@ describe('destroyDatastore', () => {
       {
         name: 'orders',
         engine: 'postgres',
-        targetId: target.id,
+        vesselId: target.vesselId,
         storageGiB: 10,
       },
       contextWith(backend),
@@ -501,7 +516,7 @@ describe('destroyDatastore', () => {
         name: 'shared-analytics',
         engine: 'postgres',
         provenance: 'external',
-        targetId: target.id,
+        vesselId: target.vesselId,
         connectionRef: 'secret://elsewhere/analytics',
       })
       .returning();
@@ -527,7 +542,7 @@ describe('destroyDatastore', () => {
       {
         name: 'orders',
         engine: 'postgres',
-        targetId: target.id,
+        vesselId: target.vesselId,
         storageGiB: 10,
       },
       contextWith(new FakeDatastoreAdapter()),
@@ -556,7 +571,7 @@ describe('listDatastores', () => {
       {
         name: 'orders',
         engine: 'postgres',
-        targetId: target.id,
+        vesselId: target.vesselId,
         storageGiB: 10,
       },
       contextAt(backend, '2024-06-01T00:00:00.000Z'),
@@ -567,7 +582,12 @@ describe('listDatastores', () => {
       contextAt(backend, '2024-06-01T00:01:00.000Z'),
     );
     const second = await createDatastore(
-      { name: 'cache', engine: 'valkey', targetId: target.id, storageGiB: 1 },
+      {
+        name: 'cache',
+        engine: 'valkey',
+        vesselId: target.vesselId,
+        storageGiB: 1,
+      },
       contextAt(backend, '2024-06-01T00:05:00.000Z'),
     );
     const secondId = (second as { value: { id: string } }).value.id;
@@ -593,7 +613,7 @@ describe('listDatastores', () => {
     const attached = result.value.datastores.find((row) => row.id === firstId);
     expect(attached?.attachedTo).toBe(app.name);
     expect(attached?.appId).toBe(app.id);
-    expect(attached?.targetId).toBe(target.id);
+    expect(attached?.vesselId).toBe(target.vesselId);
     expect(attached?.target).toBe(targetRowLabel(targetWithVessel!));
     expect(attached?.phase).toBe('PENDING');
     expect(attached?.provisioned).toBe(true);
@@ -612,7 +632,7 @@ describe('listDatastores', () => {
       name: 'shared-analytics',
       engine: 'postgres',
       provenance: 'external',
-      targetId: target.id,
+      vesselId: target.vesselId,
       connectionRef: 'secret://elsewhere/analytics',
     });
 
@@ -653,10 +673,10 @@ describe('listDatastores', () => {
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     const offered = new Map(
-      result.value.targets.map((row) => [row.targetId, row.engines]),
+      result.value.vessels.map((row) => [row.vesselId, row.engines]),
     );
-    expect(offered.get(both.id)).toEqual(['postgres', 'valkey']);
-    expect(offered.get(cacheOnly.id)).toEqual(['valkey']);
+    expect(offered.get(both.vesselId)).toEqual(['postgres', 'valkey']);
+    expect(offered.get(cacheOnly.vesselId)).toEqual(['valkey']);
   });
 
   test('offers no Target serving neither engine', async () => {
@@ -672,7 +692,7 @@ describe('listDatastores', () => {
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(
-      result.value.targets.some((row) => row.targetId === bare.id),
+      result.value.vessels.some((row) => row.vesselId === bare.vesselId),
     ).toBeFalse();
   });
 
@@ -683,7 +703,7 @@ describe('listDatastores', () => {
 
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    expect(result.value.targets).toEqual([]);
+    expect(result.value.vessels).toEqual([]);
   });
 
   test('offers no unconnected Target', async () => {
@@ -697,7 +717,7 @@ describe('listDatastores', () => {
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(
-      result.value.targets.some((row) => row.targetId === unconnected.id),
+      result.value.vessels.some((row) => row.vesselId === unconnected.vesselId),
     ).toBeFalse();
   });
 });

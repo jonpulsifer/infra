@@ -388,7 +388,7 @@ describe('a Datastore survives the App it was attached to', () => {
         engine: 'postgres',
         provenance: 'managed',
         appId: seeded.app.id,
-        targetId: target.id,
+        vesselId: target.vesselId,
       })
       .returning();
     const { registry } = fakes();

@@ -177,7 +177,11 @@ export function imageReference(
  * diagnosis select only the pods created by this rollout (§7); the digest lets
  * core compare what the delivery object still carries with desired state (§6).
  */
-export function appValues(desired: DesiredState, image: string): AppValues {
+export function appValues(
+  desired: DesiredState,
+  image: string,
+  releaseNamespace: string,
+): AppValues {
   return {
     name: desired.app,
     component: desired.component,
@@ -216,7 +220,9 @@ export function appValues(desired: DesiredState, image: string): AppValues {
     })),
     // Absent on every document pinned before §11's delivery existed, and on
     // every App with nothing attached.
-    datastores: (desired.datastores ?? []).map(datastoreValue),
+    datastores: (desired.datastores ?? []).map((attachment) =>
+      datastoreValue(attachment, releaseNamespace),
+    ),
   };
 }
 
@@ -234,20 +240,30 @@ export function appValues(desired: DesiredState, image: string): AppValues {
  * a Valkey connection is `redis://host:port`, which is an address. Writing it
  * into a Secret would make it look like a secret without making it one.
  */
-function datastoreValue(attachment: DatastoreAttachment): DatastoreValue {
+function datastoreValue(
+  attachment: DatastoreAttachment,
+  releaseNamespace: string,
+): DatastoreValue {
   const SECRET = 'secret://';
   if (!attachment.connection.startsWith(SECRET)) {
     return { name: attachment.name, value: attachment.connection };
   }
-  // ponytail: the `<container>` segment is dropped unchecked. A `secretKeyRef`
-  // cannot cross a namespace, and it does not have to: a Datastore is
-  // provisioned into its Target's `connection.namespace`, which is the release's
-  // own `targetNamespace`. Nothing here holds that namespace to compare against,
-  // so a Target renamespaced after a Datastore was provisioned would render a
-  // reference to a Secret that is not there and leave the pod in
-  // `CreateContainerConfigError`. Thread the release namespace in and refuse on
-  // a mismatch if a Target ever becomes renamespaceable.
+  // The `<container>` segment is checked, not dropped. A `secretKeyRef`
+  // cannot cross a namespace, so a reference into any namespace other than
+  // the release's own would render a pointer to a Secret that is not there
+  // and leave the pod in `CreateContainerConfigError` with the Deploy
+  // reporting a timeout rather than the cause. Today the two are the same
+  // field by construction — a Datastore is provisioned into its vessel's
+  // `connection.namespace`, which is the release's `targetNamespace` — so the
+  // throw is an assertion that the construction still holds, and the one
+  // honest answer the moment something renamespaces one side of it.
   const path = attachment.connection.slice(SECRET.length);
+  const container = path.slice(0, path.indexOf('/'));
+  if (container !== releaseNamespace) {
+    throw new Error(
+      `Datastore '${attachment.name}' has its credential in namespace '${container}', and this release renders into '${releaseNamespace}' — a secretKeyRef cannot cross that boundary`,
+    );
+  }
   return {
     name: attachment.name,
     secretName: path.slice(path.indexOf('/') + 1),
@@ -277,7 +293,7 @@ export function chartValues(
 
   return {
     ...operator,
-    app: appValues(desired, image),
+    app: appValues(desired, image, connection.namespace),
     shared,
   };
 }

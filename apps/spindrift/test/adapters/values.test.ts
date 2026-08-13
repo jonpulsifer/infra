@@ -86,11 +86,32 @@ describe('a connection reference becomes an env entry (§11)', () => {
         },
       ]),
       'registry.example.test/shop/web@sha256:feed',
+      'spindrift-apps',
     );
 
     expect(values.datastores).toEqual([
       { name: 'DATABASE_URL', secretName: 'orders-app', secretKey: 'uri' },
     ]);
+  });
+
+  test('a secret reference into another namespace refuses to render', () => {
+    // A `secretKeyRef` cannot cross a namespace, so rendering one into a
+    // release elsewhere would leave the pod in `CreateContainerConfigError`
+    // with the Deploy reporting a timeout rather than the cause. The throw is
+    // the one honest answer while the two namespaces are the same field by
+    // construction.
+    expect(() =>
+      appValues(
+        desiredWith([
+          {
+            name: 'DATABASE_URL',
+            connection: 'secret://somewhere-else/orders-app',
+          },
+        ]),
+        'registry.example.test/shop/web@sha256:feed',
+        'spindrift-apps',
+      ),
+    ).toThrow(/somewhere-else.*spindrift-apps/);
   });
 
   test('an address carries no credential, so it is a plain value', () => {
@@ -102,6 +123,7 @@ describe('a connection reference becomes an env entry (§11)', () => {
         },
       ]),
       'registry.example.test/shop/web@sha256:feed',
+      'spindrift-apps',
     );
 
     expect(values.datastores).toEqual([
@@ -116,8 +138,11 @@ describe('a connection reference becomes an env entry (§11)', () => {
     const { datastores: _pinned, ...before } = desiredWith([]);
 
     expect(
-      appValues(before, 'registry.example.test/shop/web@sha256:feed')
-        .datastores,
+      appValues(
+        before,
+        'registry.example.test/shop/web@sha256:feed',
+        'spindrift-apps',
+      ).datastores,
     ).toEqual([]);
   });
 });

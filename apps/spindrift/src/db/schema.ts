@@ -912,10 +912,18 @@ export const datastores = pgTable(
     engine: datastoreEngine('engine').notNull(),
     provenance: datastoreProvenance('provenance').notNull(),
     appId: uuid('app_id').references(() => apps.id, { onDelete: 'set null' }),
-    /** §11: "Delivery follows the Datastore's placement." */
-    targetId: uuid('target_id')
+    /**
+     * The boundary the Datastore lives in, not the surface it was asked for
+     * through. What a database actually occupies is the vessel — the cluster,
+     * or the project and its VPC — and two surfaces of one boundary would each
+     * provision into the same place. §11's "delivery follows the Datastore's
+     * placement" still holds: delivery resolves the vessel's hosting surface
+     * at read time. `restrict` because removing a boundary must never be a way
+     * to delete the Datastores in it.
+     */
+    vesselId: uuid('vessel_id')
       .notNull()
-      .references(() => targets.id, { onDelete: 'restrict' }),
+      .references(() => vessels.id, { onDelete: 'restrict' }),
     /**
      * The adapter's own handle on what it provisioned, opaque to core exactly
      * like `deploys.ref` (`adapters/datastore/contract.ts`: `DatastoreRef`).
@@ -967,7 +975,7 @@ export const datastores = pgTable(
       .defaultNow(),
   },
   (table) => [
-    // Two Datastores named `primary` on one Target are one object on the far
+    // Two Datastores named `primary` in one vessel are one object on the far
     // side: every adapter names what it provisions after the Datastore, and a
     // server-side apply of the second silently adopts the first. Destroying
     // either then deletes the other's storage. The constraint is here rather
@@ -975,10 +983,12 @@ export const datastores = pgTable(
     // concurrent creates is exactly what an application-level check cannot
     // win.
     //
-    // Scoped to the Target, not the installation: §11 puts a Datastore on a
-    // Target, so two clusters each holding a `primary` are two objects that
-    // never meet.
-    unique('datastores_target_name_unique').on(table.targetId, table.name),
+    // Scoped to the vessel, not the installation: two clusters each holding a
+    // `primary` are two objects that never meet. And to the vessel rather than
+    // one of its surfaces, because the object lives in the boundary — two
+    // Datastores of one name are refused even across two surfaces of one
+    // vessel, which would otherwise be two rows for one database.
+    unique('datastores_vessel_name_unique').on(table.vesselId, table.name),
   ],
 );
 
@@ -1633,9 +1643,9 @@ export const componentTargetDesiredRelations = relations(
 
 export const datastoresRelations = relations(datastores, ({ one }) => ({
   app: one(apps, { fields: [datastores.appId], references: [apps.id] }),
-  target: one(targets, {
-    fields: [datastores.targetId],
-    references: [targets.id],
+  vessel: one(vessels, {
+    fields: [datastores.vesselId],
+    references: [vessels.id],
   }),
 }));
 
@@ -1645,11 +1655,11 @@ export const targetsRelations = relations(targets, ({ one, many }) => ({
     references: [vessels.id],
   }),
   deploys: many(deploys),
-  datastores: many(datastores),
 }));
 
 export const vesselsRelations = relations(vessels, ({ many }) => ({
   targets: many(targets),
+  datastores: many(datastores),
 }));
 
 export const configItemsRelations = relations(configItems, ({ one }) => ({

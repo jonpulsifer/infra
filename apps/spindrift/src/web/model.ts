@@ -514,7 +514,7 @@ export interface DatastoreView {
    *
    * `attachDatastore`, `detachDatastore` and `destroyDatastore` all resolve on
    * it. A row carrying only a name could not name one of them: the unique key
-   * is (target_id, name), so two Targets may legitimately hold a `primary` and
+   * is (vessel_id, name), so two Vessels may legitimately hold a `primary` and
    * the name is enough to read and not enough to write.
    */
   readonly id: string;
@@ -556,7 +556,7 @@ export interface DatastoreView {
  * `attachedTo` is the App's own name, which is what §11 actually attaches a
  * Datastore to.
  *
- * `targetId` and `appId` travel here and not on `DatastoreView` because this
+ * `vesselId` and `appId` travel here and not on `DatastoreView` because this
  * is the one screen that can Detach or Destroy a Datastore without an App
  * workspace already open to supply them.
  */
@@ -568,7 +568,7 @@ export interface DatastoreListItem {
   /** The App it is attached to, by name, or `null` while it is unattached. */
   readonly attachedTo: string | null;
   readonly target: string;
-  readonly targetId: string;
+  readonly vesselId: string;
   readonly appId: string | null;
   readonly phase: DeployPhase;
   /**
@@ -586,22 +586,22 @@ export interface DatastoreListItem {
 }
 
 /**
- * A Target a managed Datastore can actually be created on — the ledger's Create
- * picker (§11).
+ * A Vessel a managed Datastore can actually be created in — the ledger's
+ * Create picker (§11).
  *
- * `createDatastore` takes a Target and no App, so this is the whole of what the
- * form needs to pick: creating storage has never required knowing which App
- * will read it. The list is what core would accept, not every Target that
- * exists — a Target with no connection, no datastore adapter, or no served
- * engine is one whose only answer is a refusal, so it is not offered.
+ * `createDatastore` takes a Vessel and no App, so this is the whole of what
+ * the form needs to pick: creating storage has never required knowing which
+ * App will read it. The list is what core would accept, not every Vessel that
+ * exists — one whose hosting surface is missing or unconnected, or serves
+ * neither engine, is one whose only answer is a refusal, so it is not offered.
  *
- * `engines` is per-Target because the two capabilities are independent (§3): a
+ * `engines` is per-Vessel because the two capabilities are independent (§3): a
  * cluster that serves Postgres and not Valkey is the ordinary case, and a
  * picker that showed one list for both would offer a choice core refuses.
  */
-export interface DatastoreTargetOption {
-  readonly targetId: string;
-  /** `targetRowLabel` — the vessel-and-surface pair the ledger's rows use. */
+export interface DatastoreVesselOption {
+  readonly vesselId: string;
+  /** `datastoreVesselLabel` — the boundary-and-surface pair the rows use. */
   readonly label: string;
   readonly engines: readonly ('postgres' | 'valkey')[];
 }
@@ -690,6 +690,12 @@ export interface WorkspaceView {
    */
   readonly componentId?: string;
   readonly targetId?: string;
+  /**
+   * The boundary the placed Target is a surface on, by id — what the inline
+   * Create-Datastore form submits, since `createDatastore` takes a Vessel and
+   * this screen binds the choice rather than offering a picker.
+   */
+  readonly vesselId?: string;
   readonly latestDeployId?: number;
   readonly latestBuildId?: number;
   /** The runtime surface the placed Target is — the boundary is {@link vessel}. */

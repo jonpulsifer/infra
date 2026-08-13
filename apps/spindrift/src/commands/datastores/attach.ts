@@ -32,9 +32,9 @@
  */
 import { and, eq, ne } from 'drizzle-orm';
 import { z } from 'zod';
-import { apps, components, datastores } from '../../db/schema.ts';
+import { apps, components, datastores, targets } from '../../db/schema.ts';
 import { DEFAULT_PLATFORM, sentence } from '../../domain/placement.ts';
-import { targetRowLabel } from '../../domain/target.ts';
+import { datastoreVesselLabel } from '../../domain/target.ts';
 import { type Command, failed, ok } from '../types.ts';
 
 export const attachDatastoreInput = z
@@ -74,7 +74,7 @@ export const attachDatastore: Command<
 > = async (input, context) => {
   const datastore = await context.db.query.datastores.findFirst({
     where: (rows, { eq }) => eq(rows.id, input.datastoreId),
-    with: { target: { with: { vessel: true } } },
+    with: { vessel: true },
   });
   if (datastore === undefined) {
     return failed(
@@ -127,24 +127,29 @@ export const attachDatastore: Command<
   // Cluster-local is a property of where the Datastore sits, derived exactly
   // as `resolveComponentPlacement` derives it: a managed cloud database is
   // reachable from anywhere its project is, one running in a cluster is
-  // reachable from that cluster only.
-  if (datastore.target.adapter === 'kubernetes') {
+  // reachable from that cluster only. "This boundary is a cluster" is the
+  // vessel's kind, stated directly rather than inferred back off a surface's
+  // adapter. The join compares boundaries, not surface rows — the conceptually
+  // right test, and an inner join so an unplaced Component (NULL
+  // placedTargetId) constrains nothing, exactly as before.
+  if (datastore.vessel.kind === 'cluster') {
     const [elsewhere] = await context.db
       .select({
         name: components.name,
         placedTargetId: components.placedTargetId,
       })
       .from(components)
+      .innerJoin(targets, eq(components.placedTargetId, targets.id))
       .where(
         and(
           eq(components.appId, app.id),
-          ne(components.placedTargetId, datastore.targetId),
+          ne(targets.vesselId, datastore.vesselId),
         ),
       );
     if (elsewhere !== undefined) {
       return failed(
         'NOT_DEPLOYABLE',
-        `${CLUSTER_LOCAL}: '${datastore.name}' is on ${targetRowLabel(datastore.target)} and '${elsewhere.name}' is not`,
+        `${CLUSTER_LOCAL}: '${datastore.name}' is on ${datastoreVesselLabel(datastore.vessel)} and '${elsewhere.name}' is not`,
       );
     }
   }

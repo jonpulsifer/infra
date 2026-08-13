@@ -244,7 +244,7 @@ describe('resolution is derived, and it is a query', () => {
         engine: 'postgres',
         provenance: 'managed',
         appId: app.id,
-        targetId: connected.get('cluster/kubernetes')!.id,
+        vesselId: connected.get('cluster/kubernetes')!.vesselId,
       });
 
     const placement = await place(registry, component.id);
@@ -304,7 +304,7 @@ describe('an attached cluster-local Datastore constrains the App', () => {
         engine: 'postgres',
         provenance: 'managed',
         appId: app.id,
-        targetId: connected.get('cluster/kubernetes')!.id,
+        vesselId: connected.get('cluster/kubernetes')!.vesselId,
       });
 
     const placement = await place(registry, component.id);
@@ -329,7 +329,7 @@ describe('an attached cluster-local Datastore constrains the App', () => {
         engine: 'postgres',
         provenance: 'managed',
         appId: null,
-        targetId: connected.get('cluster/kubernetes')!.id,
+        vesselId: connected.get('cluster/kubernetes')!.vesselId,
       });
 
     const placement = await place(registry, component.id);

@@ -59,6 +59,7 @@ describe('the surfaces a connect probes for', () => {
     // needed it comes from the Target rows — see
     // `test/commands/targets.test.ts`, "the surfaces on a vessel are its rows".
     expect(Object.keys(exports).sort()).toEqual([
+      'DATASTORE_SURFACE_BY_VESSEL_KIND',
       'PROBED_SURFACES_BY_VESSEL_KIND',
       'VESSEL_KINDS',
       'VESSEL_PREREQUISITES',
