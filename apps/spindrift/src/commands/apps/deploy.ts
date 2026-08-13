@@ -129,11 +129,13 @@ interface RerunSource {
 /**
  * Stage the bundle the new Build will be dispatched from (§15).
  *
- * **A Build inherits a bundle only while that bundle is still fetchable.**
- * Copying the previous Build's `bundleLocation` forward unconditionally would
- * carry an unfetchable handle — an `upload://` from an installation with no
- * depot — into a Build that then dies at `curl` naming a download rather than
- * the staging that never happened.
+ * **A Build inherits a bundle only while that bundle is still fetchable and
+ * still names the commit the repository is at.** Copying the previous Build's
+ * `bundleLocation` forward unconditionally would carry an unfetchable handle —
+ * an `upload://` from an installation with no depot — into a Build that then
+ * dies at `curl` naming a download rather than the staging that never happened;
+ * and where it *was* fetchable it made a rerun mean "the same commit, forever",
+ * which is not what anyone presses Rebuild for after a push.
  *
  * **Why here and not at dispatch.** §15 has Spindrift "fetch the exact commit
  * *once* and stage an immutable source bundle for either builder", and the
@@ -175,7 +177,33 @@ async function sourceForRerun(
     previous?.bundleDigest ?? app.sourceArchiveDigest ?? null;
   const inherited = previous?.bundleLocation ?? null;
 
-  if (inherited !== null && isFetchableBundleLocation(inherited)) {
+  // **A repo App's rerun follows its repository, not its own last Build.** The
+  // commit to build is `repositories.authoritative_commit` — the one §15's loop
+  // adopted from the default branch — and the predecessor's only when there is
+  // no repository to ask. Deciding it from `previous.commit` and inheriting any
+  // still-fetchable bundle pinned every Build after the first to the commit the
+  // App was created at: a push moved `authoritative_commit`, nothing staged it,
+  // and Rebuild rebuilt bytes from weeks ago while reporting success. Config
+  // adoption is what this reads rather than the branch head, so source and the
+  // Spindrift file a Build is governed by stay the same commit.
+  const [repository] =
+    app.sourceKind === 'repo' && app.repositoryId !== null
+      ? await context.db
+          .select()
+          .from(repositories)
+          .where(eq(repositories.id, app.repositoryId))
+          .limit(1)
+      : [];
+  const wanted =
+    repository?.access === 'active'
+      ? (repository.authoritativeCommit ?? baseCommit)
+      : baseCommit;
+
+  if (
+    wanted === baseCommit &&
+    inherited !== null &&
+    isFetchableBundleLocation(inherited)
+  ) {
     // A durable bundle to reuse: a `gs://` object is immutable and shared, so
     // the same commit wants the same one. A *repo* Component with no bundle
     // falls through instead — its first Build is exactly the "stage the exact
@@ -210,12 +238,15 @@ async function sourceForRerun(
     );
   }
 
-  // On this path `inherited` is a stale unfetchable handle — or, for a
-  // Component's first Build, nothing at all. The refusals below say which.
+  // On this path `inherited` is a stale unfetchable handle, nothing at all for
+  // a Component's first Build, or a perfectly good bundle for a commit the
+  // repository has moved past. The refusals below say which.
   const was =
-    inherited === null
-      ? 'never staged for this Component'
-      : `staged at ${inherited}, which no build route can fetch`;
+    wanted !== baseCommit
+      ? `staged at ${baseCommit}, which ${wanted} has moved past`
+      : inherited === null
+        ? 'never staged for this Component'
+        : `staged at ${inherited}, which no build route can fetch`;
 
   const stager = context.adapters.source?.() ?? null;
   if (stager === null) {
@@ -225,14 +256,6 @@ async function sourceForRerun(
     );
   }
 
-  const [repository] =
-    app.repositoryId === null
-      ? []
-      : await context.db
-          .select()
-          .from(repositories)
-          .where(eq(repositories.id, app.repositoryId))
-          .limit(1);
   if (repository === undefined) {
     return failed(
       'NOT_BUILDABLE',
@@ -250,8 +273,7 @@ async function sourceForRerun(
   // commit", and it is not a commit anyone can be asked to fetch exactly. The
   // repository's authoritative commit is (§15: only a default-branch merge push
   // becomes authoritative).
-  const commit =
-    baseCommit === 'HEAD' ? repository.authoritativeCommit : baseCommit;
+  const commit = wanted === 'HEAD' ? repository.authoritativeCommit : wanted;
   if (commit === null) {
     return failed(
       'NOT_BUILDABLE',
