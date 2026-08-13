@@ -568,6 +568,7 @@ export function Workspace({
             */}
             <Datastores
               datastores={view.datastores}
+              {...(onNavigate ? { onNavigate } : {})}
               {...(onCreateDatastore && view.target === 'kubernetes'
                 ? { onCreateDatastore }
                 : {})}
@@ -1935,12 +1936,23 @@ function datastoreDetail(datastore: DatastoreView): string {
  */
 function Datastores({
   datastores,
+  onNavigate,
   onCreateDatastore,
   onAttachDatastore,
   onDetachDatastore,
   onDestroyDatastore,
 }: {
   datastores: readonly DatastoreView[];
+  /**
+   * Where the row goes when it is pressed — the Datastore's own screen, which
+   * is the only place its backend object is readable.
+   *
+   * A row is a summary of six fields and there is nowhere on it for a spec, a
+   * status or the operator's own document, so the row is a way in rather than
+   * the whole of what Spindrift knows. Absent leaves the row inert, the same
+   * both-or-neither rule the acts below follow.
+   */
+  onNavigate?: (path: string) => void;
   onCreateDatastore?: CreateDatastore;
   onAttachDatastore?: DatastoreAct;
   onDetachDatastore?: DatastoreAct;
@@ -2002,6 +2014,11 @@ function Datastores({
               }
               title={datastore.name}
               detail={datastoreDetail(datastore)}
+              {...(onNavigate
+                ? {
+                    onSelect: () => onNavigate(`/datastores/${datastore.id}`),
+                  }
+                : {})}
               trailing={
                 <div className="flex shrink-0 items-center gap-1">
                   {/*

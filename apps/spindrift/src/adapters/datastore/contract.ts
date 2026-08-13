@@ -150,4 +150,27 @@ export interface DatastoreAdapter {
 
   /** Idempotent: destroying what is already gone succeeds (§6). */
   destroy(target: DeployTarget, ref: DatastoreRef): Promise<void>;
+
+  /**
+   * The backend's own object, verbatim, for a reader — or `null` where there is
+   * nothing to read.
+   *
+   * **The far side's document, never core's memory of it.** `observe` already
+   * answers "is it up" and deliberately reduces a whole resource to a phase and
+   * a sentence; this is the resource. The two are separate because reducing is
+   * what the loop wants and the whole document is what a person diagnosing one
+   * wants, and a screen that re-derived the second from the first would be
+   * showing a manifest Spindrift composed rather than the one the operator is
+   * reconciling. `storageGiB` is not even stored (`createDatastore`: "no size
+   * on the row"), so core could not compose an honest one if it tried.
+   *
+   * Optional, and absent is a real answer: the cloud backend provisions through
+   * an API that hands back no document of this kind, and `null` from a backend
+   * that has one means the object is gone. A caller renders both as "nothing to
+   * show" and neither as an error.
+   *
+   * `unknown` because core never predicates on it — it is serialized and shown,
+   * exactly like `deploys.debug`.
+   */
+  describe?(target: DeployTarget, ref: DatastoreRef): Promise<unknown>;
 }

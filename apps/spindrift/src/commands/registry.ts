@@ -85,6 +85,7 @@ import {
   destroyDatastoreInput,
 } from './datastores/destroy.ts';
 import { detachDatastore, detachDatastoreInput } from './datastores/detach.ts';
+import { getDatastore, getDatastoreInput } from './datastores/get.ts';
 import { listDatastores, listDatastoresInput } from './datastores/list.ts';
 import { createDeploy, createDeployInput } from './deploys/create.ts';
 import { getDeployDetail, getDeployDetailInput } from './deploys/get-detail.ts';
@@ -244,6 +245,7 @@ export const commandRegistry = {
     handler: destroyDatastore,
   },
   listDatastores: { input: listDatastoresInput, handler: listDatastores },
+  getDatastore: { input: getDatastoreInput, handler: getDatastore },
   setConfig: { input: setConfigInput, handler: setConfig },
   configureInstallation: {
     input: configureInstallationInput,
