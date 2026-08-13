@@ -110,6 +110,34 @@
     };
   };
 
+  # The workspace disks live on bundled local NVMe rather than the boot disk.
+  # Sampling an eight-wide run found exactly one window where storage is the
+  # constraint: while eight jobs check out and install at once, the boot disk
+  # holds 419 of its provisioned 440 MB/s at 91% utilisation for ~60 s, then
+  # falls to 2-3% for the five minutes the suite actually runs. A local SSD has
+  # no provisioned ceiling to hit, and `-lssd` bundles eight of them; one 375 G
+  # card is five times what `8 x 6G + 20G` of workspace needs.
+  #
+  # Ephemeral by construction, and only this directory can afford to be: local
+  # SSD is wiped on every stop and preemption, so `autoFormat` remakes the
+  # filesystem and bosun reserves fresh images on the next boot. What lives
+  # here is a cache a job rebuilds, and bosun already treats a missing image as
+  # one to create. `nofail` so a host that somehow lacks the card still boots
+  # and simply writes to the boot disk as before.
+  #
+  # The cache service and BuildKit still keep their state on the boot disk.
+  # They were not the thing that saturated, and moving them is a separate
+  # measurement rather than a freebie.
+  fileSystems."/var/lib/bosun/workspace" = {
+    device = "/dev/disk/by-id/google-nvme_card0";
+    fsType = "ext4";
+    autoFormat = true;
+    options = [
+      "nofail"
+      "noatime"
+    ];
+  };
+
   # 180 GB total and nothing else on the box, so the bound is generous rather
   # than tight -- but it still exists, because without one the *host* OOM
   # killer picks the victim and on a spot instance that is a job either way.

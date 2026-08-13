@@ -1,8 +1,39 @@
+# Two namespaces, and only one of them holds Apps.
+#
+# `spindrift-apps` is no longer where an App's workloads land — each App gets a
+# namespace of its own, created with the release. What it still does is carry
+# the admission policy: Spindrift reads the `pod-security.kubernetes.io/*`
+# labels off this namespace and stamps them onto every App namespace it
+# creates, so Flux still owns what admission means on this cluster and one edit
+# here reaches every App. It also still holds the chart's `OCIRepository` and
+# the releases placed before per-App namespaces, which drain as each is
+# redeployed.
 ---
 apiVersion: v1
 kind: Namespace
 metadata:
   name: spindrift-apps
+  labels:
+    app.kubernetes.io/managed-by: flux
+    app.kubernetes.io/part-of: spindrift
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/warn: restricted
+# Where Datastores are provisioned, which is no App's namespace.
+#
+# A Datastore outlives every App attached to it — that is the whole reason it is
+# a top-level noun — so it cannot live in a namespace named for one of them. A
+# `Cluster` sitting in `app-foo` after detaching from `foo` is a backend object
+# named for a relationship that has ended.
+#
+# The same admission policy, deliberately: the Valkey operator's pods were
+# refused by `restricted` twice during live driving, and both fixes are in the
+# adapter's rendering. Relaxing it here would make those fixes unverifiable.
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: spindrift-datastores
   labels:
     app.kubernetes.io/managed-by: flux
     app.kubernetes.io/part-of: spindrift

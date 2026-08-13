@@ -36,7 +36,7 @@ spec:
     # Renovate pins the digest on this line and Flux rolls it out. The image's
     # manifest schema and the chart must agree on which keys a declaration may
     # carry — the manifest below has to satisfy both.
-    image: ghcr.io/jonpulsifer/spindrift:latest@sha256:746b849d2ab3b4581c00da4393b71f94c830db1cb7bbd2a07ef8b99dd23c1f4c
+    image: ghcr.io/jonpulsifer/spindrift:latest@sha256:87ee4dca0840efbb5b92f0e7e5ba9e58df7bac1d236cad871761da949a6b696b
     # Substituted by the apps Kustomization from the cluster-secrets Secret, so
     # the zone is read rather than restated. external-dns publishes the record
     # from the HTTPRoute and cert-manager issues the certificate, so this line
@@ -439,7 +439,18 @@ spec:
               sourceRef:
                 name: spindrift-app
                 namespace: spindrift-apps
+            # Where releases placed before per-App namespaces still live, and
+            # the namespace whose Pod Security labels every App namespace is
+            # stamped from. No new release lands here.
             namespace: spindrift-apps
+            # One namespace per App, created with its first release carrying
+            # the labels above. §20's pattern, so a second operator can name
+            # them their own way.
+            appNamespace: app-{app}
+            # Datastores outlive the Apps attached to them, so they are not in
+            # any App's namespace. Declared in
+            # `clusters/base/platform/spindrift-target/namespace.yaml`.
+            datastoreNamespace: spindrift-datastores
             # §7's operator class: what the App chart needs about *this*
             # cluster. Spindrift never renders into it.
             chartValues:
@@ -472,6 +483,14 @@ spec:
                 secretStore:
                   kind: ClusterSecretStore
                   name: gcp-secret-manager
+                # How an attached Datastore's credential crosses out of
+                # `spindrift-datastores` into the App's own namespace, which a
+                # `secretKeyRef` cannot do. A different store from the one
+                # above and scoped to that one namespace; declared in
+                # `clusters/base/platform/spindrift-datastore-store`.
+                datastoreSecretStore:
+                  kind: ClusterSecretStore
+                  name: spindrift-datastores
                 dns:
                   # That gateway's pinned LoadBalancer address. RFC1918, so
                   # publishing it is the private boundary rather than a hole in
@@ -505,7 +524,18 @@ spec:
               sourceRef:
                 name: spindrift-app
                 namespace: spindrift-apps
+            # Where releases placed before per-App namespaces still live, and
+            # the namespace whose Pod Security labels every App namespace is
+            # stamped from. No new release lands here.
             namespace: spindrift-apps
+            # One namespace per App, created with its first release carrying
+            # the labels above. §20's pattern, so a second operator can name
+            # them their own way.
+            appNamespace: app-{app}
+            # Datastores outlive the Apps attached to them, so they are not in
+            # any App's namespace. Declared in
+            # `clusters/base/platform/spindrift-target/namespace.yaml`.
+            datastoreNamespace: spindrift-datastores
             chartValues:
               platform:
                 # This cluster's own Apps gateway
@@ -542,6 +572,14 @@ spec:
                 secretStore:
                   kind: ClusterSecretStore
                   name: gcp-secret-manager
+                # How an attached Datastore's credential crosses out of
+                # `spindrift-datastores` into the App's own namespace, which a
+                # `secretKeyRef` cannot do. A different store from the one
+                # above and scoped to that one namespace; declared in
+                # `clusters/base/platform/spindrift-datastore-store`.
+                datastoreSecretStore:
+                  kind: ClusterSecretStore
+                  name: spindrift-datastores
                 dns:
                   # That gateway's pinned address, free in this cluster's
                   # `LB_RANGE`. The connect screen reads it off the Gateway's

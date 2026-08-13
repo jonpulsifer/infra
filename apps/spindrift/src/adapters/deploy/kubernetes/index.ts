@@ -38,8 +38,10 @@ import type {
   DesiredState,
 } from '../../../domain/desired-state.ts';
 import {
+  appNamespaceFor,
   type KubernetesAdapterConnection,
   type KubernetesDelivery,
+  namespaceRefusal,
   targetLabel,
 } from '../../../domain/target.ts';
 import { workloadName } from '../../../domain/workload-name.ts';
@@ -203,6 +205,15 @@ const RUN_NAME_LIMIT = 57;
  * adapter's only interest in one is telling an operator which exist and where
  * each answers.
  */
+/**
+ * What a namespace's admission labels are spelled with.
+ *
+ * `enforce`, `audit` and `warn` all share it, and copying by prefix rather than
+ * by a list of three keeps a vessel that adds a `*-version` pin working without
+ * this file learning the name of it.
+ */
+const POD_SECURITY_PREFIX = 'pod-security.kubernetes.io/';
+
 const GATEWAY = {
   apiVersion: 'gateway.networking.k8s.io/v1',
   kind: 'Gateway',
@@ -238,12 +249,32 @@ export class KubernetesDeployAdapter implements DeployAdapter {
       return this.internal('the artifact carries no address to pull it by');
     }
 
-    const object = this.deliveryObject(connection, desired, image);
-    const ref = refOf(connection.delivery.flavour, object);
+    // Both halves of the name are things a human chose, so a combination that
+    // is not a legal namespace is refused with both named rather than
+    // truncated into one the operator will not find with `kubectl`.
+    const refusal = namespaceRefusal(connection, desired.app);
+    if (refusal !== null) {
+      yield this.status('FAILED', { reason: 'INTERNAL' });
+      return this.internal(refusal);
+    }
+
     const api = this.api(connection);
+    const admission = await this.admissionLabels(api, connection);
+    const object = this.deliveryObject(connection, desired, image, admission);
+    const ref = refOf(connection.delivery.flavour, object);
 
     yield this.status('APPLYING', { resource: resourceLabel(object) });
     try {
+      // Before the release, and only where the delivery mechanism cannot carry
+      // the admission labels itself (113). A namespace that already exists is
+      // converged on rather than recreated — this is a server-side apply.
+      if (connection.delivery.flavour === 'flux-helmrelease') {
+        await this.ensureNamespace(
+          api,
+          appNamespaceFor(connection, desired.app),
+          admission,
+        );
+      }
       await api.apply(object, pluralOf(connection.delivery.flavour));
     } catch (cause) {
       const verdict = writeFailure(cause, ref);
@@ -321,9 +352,14 @@ export class KubernetesDeployAdapter implements DeployAdapter {
         ? []
         : [`${JOB_NAME_LABEL}=${subject.execution}`]),
     ].join(',');
+    // Not namespaced. The selector names one Component of one App, which is
+    // already narrower than a namespace, and a tail has only the subject to go
+    // on — no ref, so nothing here can say which namespace this Component's
+    // release chose. Searching by the labels finds it whether it is in the
+    // App's own namespace or still in the shared one it was placed in before.
     const pods =
       (await api.list(
-        { apiVersion: 'v1', plural: 'pods', namespace: connection.namespace },
+        { apiVersion: 'v1', plural: 'pods' },
         { labelSelector: selector },
       )) ?? [];
     const consumed = runtimeCursor(options.after);
@@ -340,14 +376,19 @@ export class KubernetesDeployAdapter implements DeployAdapter {
       if (entries.length >= limit) break;
       const identity = runtimePodIdentity(pod);
       const prior = consumed[identity];
-      const text = await api.logs(connection.namespace, pod.metadata.name, {
-        container: 'app',
-        timestamps: true,
-        ...(prior === undefined
-          ? { tailLines: limit }
-          : { sinceTime: prior.at }),
-        limitBytes: RUNTIME_LOG_LIMIT_BYTES,
-      });
+      // The pod's own namespace, because the list above was not namespaced.
+      const text = await api.logs(
+        pod.metadata.namespace ?? '',
+        pod.metadata.name,
+        {
+          container: 'app',
+          timestamps: true,
+          ...(prior === undefined
+            ? { tailLines: limit }
+            : { sinceTime: prior.at }),
+          limitBytes: RUNTIME_LOG_LIMIT_BYTES,
+        },
+      );
       if (text === null) continue;
       const lines = text.split('\n').filter((line) => line.length > 0);
       const occurrences = new Map<string, number>();
@@ -438,7 +479,7 @@ export class KubernetesDeployAdapter implements DeployAdapter {
         {
           apiVersion: CRON_JOB.apiVersion,
           plural: CRON_JOB.plural,
-          namespace: connection.namespace,
+          namespace: placed.namespace,
         },
         { labelSelector: placed.selector },
       )) ?? [];
@@ -472,7 +513,7 @@ export class KubernetesDeployAdapter implements DeployAdapter {
       kind: JOB.kind,
       metadata: {
         name,
-        namespace: connection.namespace,
+        namespace: placed.namespace,
         ...(template.metadata?.labels === undefined
           ? {}
           : { labels: template.metadata.labels }),
@@ -503,7 +544,7 @@ export class KubernetesDeployAdapter implements DeployAdapter {
         {
           apiVersion: JOB.apiVersion,
           plural: JOB.plural,
-          namespace: connection.namespace,
+          namespace: placed.namespace,
         },
         run,
       );
@@ -549,7 +590,7 @@ export class KubernetesDeployAdapter implements DeployAdapter {
       {
         apiVersion: JOB.apiVersion,
         plural: JOB.plural,
-        namespace: connection.namespace,
+        namespace: placed.namespace,
       },
       { labelSelector: placed.selector },
     );
@@ -562,7 +603,7 @@ export class KubernetesDeployAdapter implements DeployAdapter {
     // `because` arm: the runs could not be read, and the Run now button stays.
     if (jobs === null) {
       throw new Error(
-        `the API server answered 404 listing ${JOB.plural} in ${connection.namespace} — that namespace or ${JOB.apiVersion} is not there`,
+        `the API server answered 404 listing ${JOB.plural} in ${placed.namespace} — that namespace or ${JOB.apiVersion} is not there`,
       );
     }
 
@@ -595,6 +636,8 @@ export class KubernetesDeployAdapter implements DeployAdapter {
         readonly app: string;
         readonly component: string;
         readonly selector: string;
+        /** Where this release's runs are, as the release itself states it. */
+        readonly namespace: string;
       }
     | Extract<JobRuns, { kind: 'none' }>
   > {
@@ -620,6 +663,12 @@ export class KubernetesDeployAdapter implements DeployAdapter {
     if (typeof app.name !== 'string' || typeof app.component !== 'string') {
       return refuse(`${parsed.name} does not say which Component it renders`);
     }
+    const namespace = workloadNamespace(parsed.flavour, object);
+    if (namespace === null) {
+      return refuse(
+        `${parsed.name} does not say which namespace it renders in`,
+      );
+    }
     return {
       kind: 'job',
       app: app.name,
@@ -627,6 +676,7 @@ export class KubernetesDeployAdapter implements DeployAdapter {
       // `spindrift-app.selectorLabels`, which is on every object the chart
       // renders and on every pod a run of it creates.
       selector: `app.kubernetes.io/name=${app.component},app.kubernetes.io/part-of=${app.name}`,
+      namespace,
     };
   }
 
@@ -850,7 +900,10 @@ export class KubernetesDeployAdapter implements DeployAdapter {
       };
     }
 
-    const namespace = connection.namespace;
+    // The namespace this apply just used, which is the App's own — a read on
+    // red follows the release that failed, and this one was placed by the
+    // call that is now diagnosing it.
+    const namespace = appNamespaceFor(connection, desired.app);
     const selector = `app.kubernetes.io/name=${desired.component},app.kubernetes.io/part-of=${desired.app}`;
     const [pods, events] = await Promise.all([
       api
@@ -913,18 +966,21 @@ export class KubernetesDeployAdapter implements DeployAdapter {
       `the federated identity may not create ${kind.kind}s in ${delivery.namespace}`,
     );
 
-    const namespace = await api.get({
-      apiVersion: 'v1',
-      plural: 'namespaces',
-      name: connection.namespace,
-    });
+    // What this asserts changed with per-App namespaces (113). The old check
+    // was that the one shared namespace exists, because Spindrift would not
+    // create it. Now an App's namespace arrives with the release — so what can
+    // still be wrong, and what an operator can still act on, is the vessel
+    // failing to declare the admission policy every App namespace is stamped
+    // from. A Target whose declared namespace is absent or carries no Pod
+    // Security labels cannot have an App namespace built from it.
+    const admission = await this.admissionLabels(api, connection);
     set(
       'VESSEL',
-      namespace !== null,
-      `namespace ${connection.namespace} does not exist, and Spindrift does not create it (§7)`,
+      Object.keys(admission).length > 0,
+      `namespace ${connection.namespace} is absent or carries no ${POD_SECURITY_PREFIX} labels, and it is what every App namespace's admission policy is copied from (§7)`,
     );
 
-    set('CHART_CONTRACT', ...(await this.chartContract(api, connection)));
+    set('CHART_CONTRACT', ...(await this.chartContract(api)));
 
     return prerequisitesFor(this.adapter).map(
       (name) =>
@@ -971,10 +1027,7 @@ export class KubernetesDeployAdapter implements DeployAdapter {
    * `argo-application` flavour has no artifact at all. Upgrade path: pull the
    * `charts.app` artifact from the registry here and read its annotations.
    */
-  private async chartContract(
-    api: KubernetesApi,
-    connection: KubernetesAdapterConnection,
-  ): Promise<[boolean, string?]> {
+  private async chartContract(api: KubernetesApi): Promise<[boolean, string?]> {
     // "Nothing is rendered here yet" and "I was not allowed to look" are
     // different facts and only the first one is zero skew. Collapsing them —
     // an empty array standing in for a refusal, `every` over it vacuously
@@ -985,15 +1038,19 @@ export class KubernetesDeployAdapter implements DeployAdapter {
     // fine.
     const unreadable = (why: string): [boolean, string] => [
       false,
-      `Spindrift could not read the pods in ${connection.namespace} (${why}), so the value contract this Target renders under is unknown`,
+      `Spindrift could not read this cluster's pods (${why}), so the value contract this Target renders under is unknown`,
     ];
 
     let pods: KubernetesObject[] | null;
     try {
+      // Not namespaced, because there is no longer one namespace holding every
+      // App: skew is a fact about this Target's releases wherever they landed,
+      // and reading only the shared namespace would go quietly green as it
+      // drains. Pods carrying no chart annotation are ignored below, which is
+      // what keeps a cluster-wide read to a verdict about chart output.
       pods = await api.list({
         apiVersion: 'v1',
         plural: 'pods',
-        namespace: connection.namespace,
       });
     } catch (cause) {
       return unreadable(
@@ -1272,6 +1329,7 @@ export class KubernetesDeployAdapter implements DeployAdapter {
     connection: KubernetesAdapterConnection,
     desired: DesiredState,
     image: string,
+    admission: Record<string, string>,
   ): KubernetesObject {
     const name = releaseName(desired);
     const values = chartValues(desired, connection, image);
@@ -1285,7 +1343,7 @@ export class KubernetesDeployAdapter implements DeployAdapter {
       return argoApplication({
         name,
         namespace: connection.delivery.namespace,
-        destinationNamespace: connection.namespace,
+        destinationNamespace: appNamespaceFor(connection, desired.app),
         server: connection.delivery.server,
         project: connection.delivery.project,
         repoUrl: connection.delivery.repoUrl,
@@ -1293,18 +1351,102 @@ export class KubernetesDeployAdapter implements DeployAdapter {
         chart: this.options.chart,
         labels,
         values,
+        // Argo carries the admission labels itself, so Spindrift writes no
+        // Namespace on this flavour at all (§7, 113).
+        namespaceMetadata: admission,
       });
     }
 
     return helmRelease({
       name,
       namespace: connection.delivery.namespace,
-      targetNamespace: connection.namespace,
+      targetNamespace: appNamespaceFor(connection, desired.app),
       chart: this.options.chart,
       sourceRef: connection.delivery.sourceRef,
       labels,
       values,
     });
+  }
+
+  /**
+   * The admission labels this vessel enforces, read off the namespace Flux
+   * declared.
+   *
+   * **Flux still owns admission policy** — that is the ownership boundary, and
+   * this is what keeps it literally true rather than nearly true. The labels
+   * are not a table in `src/` and not a manifest field: they are whatever the
+   * operator put on the Target's declared namespace, copied onto each App's.
+   * Change the policy in one Flux-declared object and every App namespace
+   * Spindrift goes on to create carries the new one.
+   *
+   * Empty when the namespace cannot be read, which is not silently permissive:
+   * on the Flux path {@link ensureNamespace} refuses to create a namespace with
+   * no admission labels rather than create an unprotected one.
+   */
+  private async admissionLabels(
+    api: KubernetesApi,
+    connection: KubernetesAdapterConnection,
+  ): Promise<Record<string, string>> {
+    const namespace = await api
+      .get({
+        apiVersion: 'v1',
+        plural: 'namespaces',
+        name: connection.namespace,
+      })
+      .catch(() => null);
+    const labels = (namespace?.metadata?.labels ?? {}) as Record<
+      string,
+      string
+    >;
+    return Object.fromEntries(
+      Object.entries(labels).filter(([key]) =>
+        key.startsWith(POD_SECURITY_PREFIX),
+      ),
+    );
+  }
+
+  /**
+   * Make sure the App's namespace exists, carrying this vessel's admission
+   * labels.
+   *
+   * **Only on the Flux path.** `HelmRelease.spec.install.createNamespace` takes
+   * no metadata — there is no field to put a label in — and Flux's own
+   * documentation says the namespace it creates "will not be garbage
+   * collected". A namespace arriving that way would carry none of the Pod
+   * Security labels, and live driving proved that admission load-bearing twice.
+   * Argo can express it (`managedNamespaceMetadata`), so on that flavour the
+   * delivery mechanism does it and this is never called: Spindrift creates a
+   * namespace only where the mechanism cannot (113).
+   *
+   * **Refuses rather than creating an unlabelled namespace.** A namespace with
+   * no admission labels is one where a pod that should be refused is admitted,
+   * which is a worse outcome than a deploy that failed and said why.
+   */
+  private async ensureNamespace(
+    api: KubernetesApi,
+    name: string,
+    admission: Record<string, string>,
+  ): Promise<void> {
+    if (Object.keys(admission).length === 0) {
+      throw new Error(
+        `no ${POD_SECURITY_PREFIX} labels could be read from the Target's declared namespace, so an App namespace created now would admit pods this vessel refuses`,
+      );
+    }
+    await api.apply(
+      {
+        apiVersion: 'v1',
+        kind: 'Namespace',
+        metadata: {
+          name,
+          labels: {
+            ...admission,
+            'app.kubernetes.io/managed-by': 'spindrift',
+            'app.kubernetes.io/part-of': 'spindrift',
+          },
+        },
+      },
+      'namespaces',
+    );
   }
 
   private internal(detail: string): DeployVerdict {
@@ -1528,6 +1670,32 @@ function valuesOf(
   return flavour === 'argo-application'
     ? applicationValues(object)
     : helmReleaseValues(object);
+}
+
+/**
+ * The namespace a delivery object's workloads land in, as it states itself.
+ *
+ * Read off the object rather than derived from the App, because the two
+ * disagree for exactly as long as the migration to per-App namespaces takes: a
+ * release placed before it still says the shared namespace, and its pods and
+ * runs are still there. Deriving would send every read for those releases to a
+ * namespace they were never in.
+ */
+function workloadNamespace(
+  flavour: Flavour,
+  object: KubernetesObject,
+): string | null {
+  const spec = object.spec as
+    | {
+        targetNamespace?: unknown;
+        destination?: { namespace?: unknown };
+      }
+    | undefined;
+  const stated =
+    flavour === 'argo-application'
+      ? spec?.destination?.namespace
+      : spec?.targetNamespace;
+  return typeof stated === 'string' && stated.length > 0 ? stated : null;
 }
 
 /** The digest the delivery object was applied with — what is serving. */

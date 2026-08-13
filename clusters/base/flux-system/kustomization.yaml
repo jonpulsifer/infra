@@ -9,5 +9,6 @@ resources:
   - kyverno.yaml
   - onepassword-connect.yaml
   - sandbox.yaml
+  - spindrift-datastore-store.yaml
   - spindrift-policy.yaml
   - valkey-operator.yaml

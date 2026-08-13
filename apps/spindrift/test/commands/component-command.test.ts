@@ -237,11 +237,7 @@ describe('one image, two Components, two entrypoints', () => {
     // The claim: the entrypoint is what the two releases disagree about, and it
     // survives all the way into the values the chart is applied with.
     const rendered = adapter.applied.map(({ desired }) =>
-      appValues(
-        desired,
-        `ghcr.io/example/monolith@${DIGEST}`,
-        'spindrift-apps',
-      ),
+      appValues(desired, `ghcr.io/example/monolith@${DIGEST}`, 'app-shop'),
     );
     expect(rendered.map((values) => values.command)).toEqual([
       ['/app/bin/server'],
@@ -283,7 +279,7 @@ describe('one image, two Components, two entrypoints', () => {
     const values = appValues(
       desired,
       `ghcr.io/example/monolith@${DIGEST}`,
-      'spindrift-apps',
+      'app-shop',
     );
     expect(values.command).toEqual([]);
     expect(values.args).toEqual([]);
@@ -497,8 +493,7 @@ describe('the entrypoint round-trips through the pinned document', () => {
     expect(adapter.applied[1]?.desired.command).toBeUndefined();
     expect(adapter.applied[1]?.desired.args).toBeUndefined();
     expect(
-      appValues(adapter.applied[1]!.desired, 'x@sha256:1', 'spindrift-apps')
-        .command,
+      appValues(adapter.applied[1]!.desired, 'x@sha256:1', 'app-shop').command,
     ).toEqual([]);
   });
 });

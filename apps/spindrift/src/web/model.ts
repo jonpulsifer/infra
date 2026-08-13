@@ -606,6 +606,43 @@ export interface DatastoreVesselOption {
   readonly engines: readonly ('postgres' | 'valkey')[];
 }
 
+/**
+ * One Datastore's own screen — the ledger row plus what the backend says about
+ * it right now.
+ *
+ * The row's facts are `DatastoreListItem`'s, restated rather than extended
+ * because this shape is reached by id and that one arrives in a list: a reader
+ * of either should not have to know which. What is only here is `object` — the
+ * far side's document, which no list would carry a copy of per row.
+ *
+ * No `connectionRef`, for `DatastoreView`'s reason. An `external` Datastore's
+ * is human-authored into the same column a managed one's reference lands in,
+ * and a human authoring a connection string writes the credential in it. The
+ * variable it arrives on is a fact of the engine and is stated by the screen.
+ */
+export interface DatastoreDetailView extends DatastoreListItem {
+  /**
+   * The backend's own object, serialized, or `null` where there is none to
+   * read — a `managed` row still provisioning, an `external` one nothing ever
+   * created, a cloud backend whose API hands back no such document.
+   *
+   * JSON, because JSON is valid YAML and `Declaration` already renders it (its
+   * note: "an emitter would be a thing to maintain for output nobody parses
+   * back").
+   */
+  readonly object: string | null;
+  /**
+   * Why there is no object, when the reason is that reading it failed.
+   *
+   * Separate from `object: null` because the two are different answers and the
+   * screen says different things about them: an unreachable cluster is a
+   * sentence an operator acts on, and "nothing provisioned here" is not. The
+   * rest of the screen renders either way — a Datastore whose Target is down is
+   * exactly when its stored facts are worth reading.
+   */
+  readonly objectError?: string;
+}
+
 /** One Component as the workspace lists it. */
 export interface ComponentView {
   /**

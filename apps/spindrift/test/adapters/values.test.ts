@@ -94,24 +94,37 @@ describe('a connection reference becomes an env entry (§11)', () => {
     ]);
   });
 
-  test('a secret reference into another namespace refuses to render', () => {
-    // A `secretKeyRef` cannot cross a namespace, so rendering one into a
-    // release elsewhere would leave the pod in `CreateContainerConfigError`
-    // with the Deploy reporting a timeout rather than the cause. The throw is
-    // the one honest answer while the two namespaces are the same field by
-    // construction.
-    expect(() =>
-      appValues(
-        desiredWith([
-          {
-            name: 'DATABASE_URL',
-            connection: 'secret://somewhere-else/orders-app',
-          },
-        ]),
-        'registry.example.test/shop/web@sha256:feed',
-        'spindrift-apps',
-      ),
-    ).toThrow(/somewhere-else.*spindrift-apps/);
+  test('a secret reference into another namespace is mirrored, not refused', () => {
+    // This refused to render while a Datastore lived in the release's own
+    // namespace by construction, and a mismatch could only be a Target
+    // renamespaced underneath one. Per-App namespaces make the mismatch the
+    // *ordinary* case — the Datastore is in the vessel's datastore namespace
+    // and the release is in the App's — so a throw here would refuse every
+    // attached Datastore there is.
+    //
+    // A `secretKeyRef` still cannot cross a namespace. What crosses instead is
+    // an ExternalSecret the chart renders against the store scoped to the
+    // datastore namespace, which is what `remoteSecretName` selects. The
+    // segment is still read rather than dropped; what changed is that reading
+    // it now picks a shape instead of deciding whether to fail.
+    const values = appValues(
+      desiredWith([
+        {
+          name: 'DATABASE_URL',
+          connection: 'secret://spindrift-datastores/orders-app',
+        },
+      ]),
+      'registry.example.test/shop/web@sha256:feed',
+      'app-shop',
+    );
+
+    expect(values.datastores).toEqual([
+      {
+        name: 'DATABASE_URL',
+        remoteSecretName: 'orders-app',
+        secretKey: 'uri',
+      },
+    ]);
   });
 
   test('an address carries no credential, so it is a plain value', () => {
@@ -123,7 +136,7 @@ describe('a connection reference becomes an env entry (§11)', () => {
         },
       ]),
       'registry.example.test/shop/web@sha256:feed',
-      'spindrift-apps',
+      'app-shop',
     );
 
     expect(values.datastores).toEqual([
@@ -141,7 +154,7 @@ describe('a connection reference becomes an env entry (§11)', () => {
       appValues(
         before,
         'registry.example.test/shop/web@sha256:feed',
-        'spindrift-apps',
+        'app-shop',
       ).datastores,
     ).toEqual([]);
   });

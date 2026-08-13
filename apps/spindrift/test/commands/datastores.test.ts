@@ -23,6 +23,7 @@ import {
   createDatastore,
   destroyDatastore,
   detachDatastore,
+  getDatastore,
   listDatastores,
 } from '../../src/commands/index.ts';
 import type {
@@ -719,5 +720,116 @@ describe('listDatastores', () => {
     expect(
       result.value.vessels.some((row) => row.vesselId === unconnected.vesselId),
     ).toBeFalse();
+  });
+});
+
+/**
+ * The read path §11's top-level noun did not have: one Datastore, by id, with
+ * the far side's own object beside its stored facts.
+ *
+ * What is asserted here is the half the row cannot answer — that the document
+ * comes from the backend rather than from core, and that every way of not
+ * having one is distinguishable by a reader. An unreachable Target is the case
+ * worth protecting: the object is what fails, and the facts are exactly what an
+ * operator diagnosing that failure is reading.
+ */
+describe('getDatastore', () => {
+  async function aDatastore(backend: FakeDatastoreAdapter) {
+    const target = await aTarget();
+    const created = await createDatastore(
+      {
+        name: 'orders',
+        engine: 'postgres',
+        vesselId: target.vesselId,
+        storageGiB: 10,
+      },
+      contextWith(backend),
+    );
+    if (!created.ok) throw new Error(created.failure.message);
+    return created.value;
+  }
+
+  test('answers the backend’s object, verbatim', async () => {
+    const object = {
+      apiVersion: 'postgresql.cnpg.io/v1',
+      kind: 'Cluster',
+      spec: { instances: 1, storage: { size: '10Gi' } },
+      status: { readyInstances: 1 },
+    };
+    const backend = new FakeDatastoreAdapter({ describes: object });
+    const created = await aDatastore(backend);
+
+    const result = await getDatastore(
+      { datastoreId: created.id },
+      contextWith(backend),
+    );
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    // Asked for by the handle `provision` returned, not by the name beside it.
+    expect(backend.described).toEqual([created.ref]);
+    expect(JSON.parse(result.value.datastore.object ?? 'null')).toEqual(object);
+    expect(result.value.datastore.objectError).toBeUndefined();
+    expect(result.value.datastore.name).toBe('orders');
+    expect(result.value.datastore.provisioned).toBeTrue();
+    // Never, for the reason `listDatastores` never does: an `external` row's
+    // is whatever a human pasted into the column.
+    expect(result.value.datastore).not.toHaveProperty('connectionRef');
+  });
+
+  test('a Target that cannot be read keeps its facts and says why', async () => {
+    const backend = new FakeDatastoreAdapter({
+      describeThrows: 'connect ECONNREFUSED 10.0.0.1:6443',
+    });
+    const created = await aDatastore(backend);
+
+    const result = await getDatastore(
+      { datastoreId: created.id },
+      contextWith(backend),
+    );
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.datastore.object).toBeNull();
+    expect(result.value.datastore.objectError).toBe(
+      'connect ECONNREFUSED 10.0.0.1:6443',
+    );
+    expect(result.value.datastore.name).toBe('orders');
+  });
+
+  test('a row with no handle is never asked about', async () => {
+    const backend = new FakeDatastoreAdapter();
+    const target = await aTarget();
+    const [row] = await database()
+      .db.insert(datastores)
+      .values({
+        name: 'somebody-elses',
+        engine: 'postgres',
+        provenance: 'external',
+        vesselId: target.vesselId,
+        connectionRef: 'secret://apps/somebody-elses',
+      })
+      .returning();
+
+    const result = await getDatastore(
+      { datastoreId: row!.id },
+      contextWith(backend),
+    );
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.datastore.object).toBeNull();
+    expect(result.value.datastore.objectError).toBeUndefined();
+    expect(backend.described).toEqual([]);
+  });
+
+  test('an id that names nothing is NOT_FOUND', async () => {
+    const result = await getDatastore(
+      { datastoreId: crypto.randomUUID() },
+      contextWith(new FakeDatastoreAdapter()),
+    );
+
+    expect(result.ok).toBe(false);
+    expect(result.ok === false && result.failure.code).toBe('NOT_FOUND');
   });
 });

@@ -27,6 +27,7 @@
  *   `observe`, and the confirmation names what it strands."
  */
 import type { TargetAdapter } from '../config/manifest.schema.ts';
+import { isLabel } from './naming.ts';
 import {
   DATASTORE_SURFACE_BY_VESSEL_KIND,
   type VesselKind,
@@ -221,8 +222,19 @@ export interface CloudflarePagesConnection {
  */
 export interface KubernetesConnection {
   adapter: 'kubernetes';
-  /** The namespace an App's workloads land in. Never created by Spindrift (§7). */
+  /**
+   * Where releases placed before per-App namespaces still live, and the
+   * namespace the connect probe reads this cluster's prerequisites in.
+   *
+   * No new release lands here. A Deploy carries its own namespace in its ref,
+   * so the ones already placed keep resolving to this one until each is
+   * redeployed into {@link appNamespaceFor}'s answer.
+   */
   namespace: string;
+  /** §20's pattern for an App's own namespace, containing `{app}`. */
+  appNamespace?: string;
+  /** Where Datastores are provisioned. Never an App's namespace (§11). */
+  datastoreNamespace?: string;
   delivery: KubernetesDelivery;
   /**
    * §18: "how far back a tail can honestly reach", in seconds. Stated rather
@@ -346,6 +358,68 @@ export type CloudflarePagesAdapterConnection = Extract<
   AdapterConnection,
   { adapter: 'cloudflare-pages' }
 >;
+
+/**
+ * The pattern an App's namespace is named by when the installation states none.
+ *
+ * A default rather than a required field, because making it required would
+ * invalidate every stored manifest and re-seed the installation from its
+ * mounted declaration — losing whatever was configured through the UI, which on
+ * a live installation is its connected Targets.
+ */
+const DEFAULT_APP_NAMESPACE = 'app-{app}';
+
+/** Where Datastores go when the installation states nothing, for that reason. */
+const DEFAULT_DATASTORE_NAMESPACE = 'spindrift-datastores';
+
+/**
+ * The namespace one App's resources live in.
+ *
+ * Named for the App rather than shared, which is what makes the chart's
+ * `NetworkPolicy` isolate something: its `podSelector: {}` allow means "the
+ * siblings in my namespace", and with every App in one namespace that was every
+ * App on the cluster.
+ *
+ * **Not validated here.** An App name is already a DNS label by the time it
+ * reaches a Target, and the pattern is refused at the manifest boundary if it
+ * cannot vary by App. What this cannot check is a pattern whose *result* is too
+ * long, which is why {@link appNamespaceFor} is used through
+ * {@link namespaceRefusal} on the write path.
+ */
+export function appNamespaceFor(
+  connection: Pick<KubernetesConnection, 'appNamespace'>,
+  app: string,
+): string {
+  return (connection.appNamespace ?? DEFAULT_APP_NAMESPACE).replaceAll(
+    '{app}',
+    app,
+  );
+}
+
+/** Where this Target's Datastores are provisioned — never an App's namespace. */
+export function datastoreNamespaceFor(
+  connection: Pick<KubernetesConnection, 'datastoreNamespace'>,
+): string {
+  return connection.datastoreNamespace ?? DEFAULT_DATASTORE_NAMESPACE;
+}
+
+/**
+ * Why this App cannot have a namespace, or `null` when it can.
+ *
+ * A namespace is one DNS label capped at 63 characters, and both halves of the
+ * name are things a human chose — an installation's pattern and an App's name —
+ * so a combination that is not legal is refused with both of them named rather
+ * than truncated into something the operator will not find with `kubectl`.
+ */
+export function namespaceRefusal(
+  connection: Pick<KubernetesConnection, 'appNamespace'>,
+  app: string,
+): string | null {
+  const namespace = appNamespaceFor(connection, app);
+  return isLabel(namespace)
+    ? null
+    : `App '${app}' under this installation's namespace pattern is '${namespace}', which is not one DNS label of at most 63 characters`;
+}
 
 /** The Vessel columns {@link deployTargetOf} reads, without importing the row. */
 export interface VesselRef {

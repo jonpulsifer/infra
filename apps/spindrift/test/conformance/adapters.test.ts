@@ -98,7 +98,16 @@ deployAdapterSuite(
         'namespaces//apps': {
           apiVersion: 'v1',
           kind: 'Namespace',
-          metadata: { name: 'apps' },
+          metadata: {
+            name: 'apps',
+            // What this vessel declares admission to mean. Every App namespace
+            // the adapter creates is stamped from these.
+            labels: {
+              'pod-security.kubernetes.io/enforce': 'restricted',
+              'pod-security.kubernetes.io/audit': 'restricted',
+              'pod-security.kubernetes.io/warn': 'restricted',
+            },
+          },
         },
       },
       lists: {

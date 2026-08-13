@@ -18,7 +18,10 @@ import {
   type DatastoreAttachment,
   type DesiredState,
 } from '../../../domain/desired-state.ts';
-import type { KubernetesConnection } from '../../../domain/target.ts';
+import {
+  appNamespaceFor,
+  type KubernetesConnection,
+} from '../../../domain/target.ts';
 
 /**
  * The value-contract version this adapter renders for.
@@ -30,7 +33,7 @@ import type { KubernetesConnection } from '../../../domain/target.ts';
  * the values believes the contract to be — and `packages/charts/spindrift-app`
  * declares the same number in its own `Chart.yaml`.
  */
-export const VALUES_CONTRACT = '4';
+export const VALUES_CONTRACT = '5';
 
 /** The three classes §7 names, as the chart's three top-level keys. */
 export const VALUE_CLASSES = {
@@ -101,17 +104,29 @@ interface SecretEnvValue {
 /**
  * One attached Datastore, as the chart takes it (§11).
  *
- * Two shapes, told apart by which key is present rather than by an engine
- * field: the chart must not learn the engine vocabulary, and there is nothing
- * it could do with the engine that the shape does not already say.
+ * Told apart by which key is present rather than by an engine field: the chart
+ * must not learn the engine vocabulary, and there is nothing it could do with
+ * the engine that the shape does not already say.
  *
- * The reference names the Secret the engine's *operator* generated, not one the
- * chart materializes, so the credential is never read by Spindrift and never
- * copied. That is also why this is not a {@link SecretEnvValue}: there is no
- * pinned remote and no ExternalSecret in this path at all.
+ * Three shapes, and which one is rendered is decided by where the Datastore
+ * actually is rather than by what engine it runs:
+ *
+ * - `value` — no credential at all. A Valkey as this platform runs it
+ *   authenticates nobody, so the reference is an address, and writing an
+ *   address into a Secret would make it look like one without making it one.
+ * - `secretName` — the operator's Secret is in this release's own namespace, so
+ *   a `secretKeyRef` reaches it directly and the credential never transits
+ *   Spindrift.
+ * - `remoteSecretName` — it is not, because a Datastore lives in a namespace of
+ *   its own (§11) and a `secretKeyRef` cannot cross one. The chart renders an
+ *   `ExternalSecret` against the store scoped to the datastore namespace, which
+ *   is still not a copy Spindrift holds: ESO reconciles it continuously, so the
+ *   operator's rotation reaches the next pod on ESO's own interval with no
+ *   Deploy.
  */
 export type DatastoreValue =
   | { name: string; secretName: string; secretKey: string }
+  | { name: string; remoteSecretName: string; secretKey: string }
   | { name: string; value: string };
 
 /** Spindrift's class, rendered from what core described. */
@@ -248,27 +263,20 @@ function datastoreValue(
   if (!attachment.connection.startsWith(SECRET)) {
     return { name: attachment.name, value: attachment.connection };
   }
-  // The `<container>` segment is checked, not dropped. A `secretKeyRef`
-  // cannot cross a namespace, so a reference into any namespace other than
-  // the release's own would render a pointer to a Secret that is not there
-  // and leave the pod in `CreateContainerConfigError` with the Deploy
-  // reporting a timeout rather than the cause. Today the two are the same
-  // field by construction — a Datastore is provisioned into its vessel's
-  // `connection.namespace`, which is the release's `targetNamespace` — so the
-  // throw is an assertion that the construction still holds, and the one
-  // honest answer the moment something renamespaces one side of it.
+  // The `<container>` segment is the namespace, and it is now read rather than
+  // dropped — this is what the `ponytail:` ceiling here was waiting for. A
+  // Datastore lives in a namespace of its own, so the two disagree in the
+  // ordinary case and a `secretKeyRef` cannot cross one. They still agree for
+  // every Datastore provisioned before per-App namespaces, whose Secret is
+  // beside the release that was placed with it, and that case keeps the direct
+  // reference rather than growing an ESO hop it does not need.
   const path = attachment.connection.slice(SECRET.length);
-  const container = path.slice(0, path.indexOf('/'));
-  if (container !== releaseNamespace) {
-    throw new Error(
-      `Datastore '${attachment.name}' has its credential in namespace '${container}', and this release renders into '${releaseNamespace}' — a secretKeyRef cannot cross that boundary`,
-    );
-  }
-  return {
-    name: attachment.name,
-    secretName: path.slice(path.indexOf('/') + 1),
-    secretKey: 'uri',
-  };
+  const separator = path.indexOf('/');
+  const namespace = path.slice(0, separator);
+  const secretName = path.slice(separator + 1);
+  return namespace === releaseNamespace
+    ? { name: attachment.name, secretName, secretKey: 'uri' }
+    : { name: attachment.name, remoteSecretName: secretName, secretKey: 'uri' };
 }
 
 /**
@@ -293,7 +301,7 @@ export function chartValues(
 
   return {
     ...operator,
-    app: appValues(desired, image, connection.namespace),
+    app: appValues(desired, image, appNamespaceFor(connection, desired.app)),
     shared,
   };
 }

@@ -50,6 +50,7 @@ export { attachDatastore } from './datastores/attach.ts';
 export { createDatastore } from './datastores/create.ts';
 export { destroyDatastore } from './datastores/destroy.ts';
 export { detachDatastore } from './datastores/detach.ts';
+export { getDatastore } from './datastores/get.ts';
 export { listDatastores } from './datastores/list.ts';
 export { createDeploy } from './deploys/create.ts';
 export { getDeployDetail } from './deploys/get-detail.ts';

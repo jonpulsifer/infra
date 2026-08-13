@@ -494,6 +494,16 @@ export function DatastoreLedger({
             />
             <div className="mt-6 flex flex-wrap gap-2">
               {/*
+                The durable route this list's selection deliberately is not —
+                `ObjectExplorer`'s note: "picking an object is inspection, not
+                navigation; callers put the durable detail route behind an
+                explicit action in the inspector." It is where the far-side
+                object lives, which is the one thing no row here can carry.
+              */}
+              <Button onClick={() => onNavigate(`/datastores/${datastore.id}`)}>
+                Open Datastore
+              </Button>
+              {/*
                 By id, never by the name beside it. `getAppWorkspace` resolves
                 either — `or(eq(apps.name, …), eq(apps.id, …))` — so a name
                 works right up until two Apps share one, and this installation
