@@ -711,6 +711,30 @@ export interface WorkspaceView {
    */
   readonly autoDeploy: boolean | null;
   /**
+   * Which route this App builds on, or `null` for rank order (§4, §16) — the
+   * App's own opinion, narrower than but never overriding the installation's
+   * rank (`setAppBuildRoute`).
+   *
+   * `null` for an archive App too, for the same reason {@link autoDeploy} is:
+   * §4's supplied artifact "consults no route at all", so there is nothing
+   * here to choose.
+   */
+  readonly buildRoute: string | null;
+  /**
+   * Every build route this installation configures, in rank order, judged
+   * against the placed Target's minimum level alone.
+   *
+   * That is the same half `setAppBuildRoute` checks before it ever looks at a
+   * registry — so a route this screen offers as eligible is one the command
+   * will not refuse on the level threshold. It is not the whole of what the
+   * command checks: the registry half is a live round trip made at submit
+   * time, not repeated by this read.
+   *
+   * Empty for the same two absences {@link buildRoute} answers with `null`,
+   * plus a third: no Target placed yet to judge a level against.
+   */
+  readonly buildRouteOptions: readonly BuildRouteOptionView[];
+  /**
    * What the release named by {@link release} delivered, and when.
    *
    * The workspace held a phase pill and a release id and nothing that could
@@ -753,6 +777,24 @@ export interface WorkspaceView {
    * be a second answer to a question §13 already answers once.
    */
   readonly unmetPrerequisites?: readonly PrerequisiteRowView[];
+}
+
+/**
+ * One build route, as the workspace's picker offers it (§16).
+ *
+ * `level` is what the route's *profile* guarantees, never a verified Build's —
+ * `domain/build-route.ts`'s `BuildRouteProfile.level` is the type this comes
+ * from, and that field's own note draws the same line. `adapter` is `null`
+ * only where this route's manifest entry could not be found, which the picker
+ * renders as a name with no mark rather than a missing tile.
+ */
+export interface BuildRouteOptionView {
+  readonly name: string;
+  readonly adapter: string | null;
+  readonly level: 1 | 2 | 3;
+  readonly eligible: boolean;
+  /** The sentence `buildRouteCandidates` composed. Empty exactly when `eligible`. */
+  readonly reason: string;
 }
 
 /**

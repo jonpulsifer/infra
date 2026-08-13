@@ -435,6 +435,8 @@ export const WORKSPACE_SCENARIOS = {
     urlLive: true,
     release: 'Deploy 42',
     autoDeploy: false,
+    buildRoute: null,
+    buildRouteOptions: [],
     components: [
       {
         id: 'component-beacon-web',
@@ -540,6 +542,8 @@ export const WORKSPACE_SCENARIOS = {
     urlLive: true,
     release: 'Deploy 17',
     autoDeploy: false,
+    buildRoute: null,
+    buildRouteOptions: [],
     components: [
       {
         id: 'component-almanac-web',
@@ -594,6 +598,8 @@ export const WORKSPACE_SCENARIOS = {
     urlLive: false,
     release: 'Execution 118',
     autoDeploy: false,
+    buildRoute: null,
+    buildRouteOptions: [],
     components: [
       {
         id: 'component-ledger-nightly',
@@ -693,6 +699,8 @@ export const WORKSPACE_SCENARIOS = {
     urlLive: false,
     release: 'Deploy 61',
     autoDeploy: true,
+    buildRoute: null,
+    buildRouteOptions: [],
     components: [
       {
         id: 'component-quay-web',

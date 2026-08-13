@@ -36,6 +36,7 @@ import type {
   ComponentKind,
   Reach,
 } from '../../../domain/desired-state.ts';
+import { BUILD_ADAPTER } from '../../client/build-adapters.ts';
 import {
   type AppDeletionControls,
   DeleteAppButton,
@@ -45,6 +46,7 @@ import { EmptyState, LogPane } from '../../components/log-pane.tsx';
 import { PhasePill } from '../../components/status.tsx';
 import type {
   ActivityEntry,
+  BuildRouteOptionView,
   ComponentView,
   DatastoreView,
   LogLine,
@@ -57,6 +59,7 @@ import { Button } from '../../ui/button.tsx';
 import { Card, CardContent, CardHeader, Eyebrow } from '../../ui/card.tsx';
 import { Ref } from '../../ui/copy.tsx';
 import { Field } from '../../ui/field.tsx';
+import { Logo } from '../../ui/logo.tsx';
 import { Page, PageHeader } from '../../ui/page.tsx';
 import { Tabs } from '../../ui/tabs.tsx';
 import { Timestamp } from '../../ui/timestamp.tsx';
@@ -184,6 +187,23 @@ export type SetAutoDeploy = (
 >;
 
 /**
+ * An App naming the build route it builds on, or clearing that choice back to
+ * rank order (§4, §16), as the screen above needs it answered.
+ *
+ * The same shape {@link SetAutoDeploy} takes and for the same reason: the App
+ * is bound by the screen above, and sending the value to set rather than a
+ * flip means two presses racing a set do not disagree about where they left
+ * it. `null` clears the choice — `setAppBuildRoute`'s own "leave it as it is
+ * vs. clear it" distinction, carried through as a value this screen can send
+ * rather than a second act.
+ */
+export type SetBuildRoute = (
+  route: string | null,
+) => Promise<
+  { readonly ok: true } | { readonly ok: false; readonly message: string }
+>;
+
+/**
  * Starting one run of a job, as the screen above needs it answered (§17).
  *
  * The same shape {@link SetReach} takes and for the same reason: the press has
@@ -266,6 +286,7 @@ export function Workspace({
   targets = [],
   onRunJob,
   onSetAutoDeploy,
+  onSetBuildRoute,
   onCreateDatastore,
   onAttachDatastore,
   onDetachDatastore,
@@ -350,6 +371,14 @@ export function Workspace({
    * at all rather than rendered dead.
    */
   onSetAutoDeploy?: SetAutoDeploy;
+  /**
+   * Absent where the build route is not editable from here, for the same
+   * reason {@link onSetReach} is. Also absent for an archive App — the view
+   * says so with `buildRouteOptions: []`, so the picker is not rendered at
+   * all rather than rendered on a Target it has nothing to check a level
+   * against.
+   */
+  onSetBuildRoute?: SetBuildRoute;
   /**
    * The four acts a Datastore has (§11). Absent where the screen wires no acts,
    * for the same reason {@link onSetReach} is.
@@ -531,6 +560,20 @@ export function Workspace({
               {...(onDestroyDatastore ? { onDestroyDatastore } : {})}
             />
           </div>
+          {/*
+            Empty rather than optional-and-absent for an archive App and for
+            one with no Target placed yet — `getAppWorkspace` says so with
+            `buildRouteOptions: []`, and the card is not rendered on nothing
+            to pick from rather than rendered with a lone "Rank order" tile
+            that has no other routes to rank against.
+          */}
+          {view.buildRouteOptions.length > 0 && onSetBuildRoute ? (
+            <BuildRoutePicker
+              buildRoute={view.buildRoute}
+              options={view.buildRouteOptions}
+              onSetBuildRoute={onSetBuildRoute}
+            />
+          ) : null}
           <div className="grid gap-4 md:grid-cols-2">
             {/*
               Every entry the view carries, un-sliced. `getAppWorkspace` bounds
@@ -862,6 +905,107 @@ function AutoDeployToggle({
         </p>
       ) : null}
     </div>
+  );
+}
+
+/**
+ * Which route this App builds on (§4, §16).
+ *
+ * A grid of `Choice` tiles rather than a dropdown — the same primitive the
+ * Target picker in the create flow uses for "pick one of a few rich options",
+ * because a native `<select>` cannot wear a logo, a level badge, and a
+ * refusal sentence the way a disabled tile can. One extra tile, "Rank order",
+ * answers `route: null` — the App's default, back to the installation's own
+ * arrangement.
+ *
+ * **Optimistic, and it says so when it was wrong** — the same posture
+ * {@link AutoDeployToggle} takes: the press selects its tile immediately and
+ * reverts if `setAppBuildRoute` refuses, with its sentence shown beneath the
+ * grid.
+ */
+function BuildRoutePicker({
+  buildRoute,
+  options,
+  onSetBuildRoute,
+}: {
+  buildRoute: string | null;
+  options: readonly BuildRouteOptionView[];
+  onSetBuildRoute: SetBuildRoute;
+}) {
+  const [current, setCurrent] = useState(buildRoute);
+  const [saving, setSaving] = useState(false);
+  const [refusal, setRefusal] = useState<string | null>(null);
+
+  const choose = async (route: string | null) => {
+    const previous = current;
+    setCurrent(route);
+    setSaving(true);
+    setRefusal(null);
+    try {
+      const result = await onSetBuildRoute(route);
+      if (!result.ok) {
+        setCurrent(previous);
+        setRefusal(result.message);
+      }
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Card>
+      <SectionHeader eyebrow="Build" title="Builder" />
+      <CardContent className="flex flex-col gap-3 pt-0">
+        <div className="grid gap-2 sm:grid-cols-2">
+          <Choice
+            selected={current === null}
+            disabled={saving}
+            title="Rank order"
+            note="No preference — the installation's own arrangement decides."
+            onClick={() => choose(null)}
+          />
+          {options.map((option) => {
+            const platform = option.adapter
+              ? BUILD_ADAPTER[option.adapter]
+              : undefined;
+            return (
+              <Choice
+                key={option.name}
+                selected={current === option.name}
+                disabled={saving || !option.eligible}
+                onClick={() => choose(option.name)}
+              >
+                <div className="flex flex-wrap items-center gap-2">
+                  {platform ? (
+                    <Logo name={platform.logo} className="size-4" />
+                  ) : null}
+                  <span className="text-sm font-semibold">
+                    {platform?.label ?? option.name}
+                  </span>
+                  <Badge tone="idle" className="ml-auto">
+                    {`SLSA L${option.level}`}
+                  </Badge>
+                </div>
+                <span
+                  className={
+                    option.eligible
+                      ? 'font-mono text-xs text-muted-foreground'
+                      : 'text-xs text-destructive'
+                  }
+                >
+                  {option.eligible ? option.name : option.reason}
+                </span>
+              </Choice>
+            );
+          })}
+        </div>
+        {refusal ? (
+          <p className="rounded-md border border-destructive/40 bg-destructive-soft px-3 py-2 text-xs text-destructive">
+            {refusal}
+          </p>
+        ) : null}
+      </CardContent>
+    </Card>
   );
 }
 
