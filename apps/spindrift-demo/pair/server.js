@@ -1,11 +1,15 @@
 /**
- * The other half of a pair, and the only scope here that reads what another
- * one wrote.
+ * One scope's default entrypoint, and the half of the pair that reads.
  *
- * Every other scope in this directory proves something about exactly one path
- * and shares nothing with its neighbours. This one shares a **Datastore** with
- * `job/` — and shares no code with it, names it nowhere, and declares no store
- * of its own. That absence is the subject:
+ * Every other scope in this directory is one Component. This one is **two**:
+ * railpack's detected start command is this file, so the `service` Component
+ * runs it by saying nothing, and the `job` Component beside it runs `job.js`
+ * because somebody typed that into the entrypoint field at creation. Same
+ * image, same digest, two workloads — which is what "one App to many
+ * Components" is, an App being one scope.
+ *
+ * What passes between them is a **Datastore**, and nothing else: no import,
+ * no name, no declared store on either side. That absence is the subject:
  *
  *   A Datastore attaches to the **App**, never to a Component
  *   (`attachDatastore({datastoreId, appId})`). Its connection arrives as a
@@ -21,17 +25,18 @@
  * unattached state is half of what the demo demonstrates, because an attach
  * does not roll anything and the data appears on the *next* Deploy.
  *
- * It must be a `service` rather than a `website`, and that is not a preference:
- * a website is static files served by the Target, with no process and no
- * environment, so no connection string can reach one. The `src/` and `plain/`
- * scopes are that side of the line.
+ * Its Component must be a `service` rather than a `website`, and that is not a
+ * preference: a website is static files served by the Target, with no process
+ * and no environment, so no connection string can reach one. The `src/` and
+ * `plain/` scopes are that side of the line.
  *
  * Node built-ins only, like its neighbours — a dependency here would prove
  * railpack can install one and would also make the demo fail, the first time a
  * registry is slow, for a reason that has nothing to do with Spindrift. No
  * Dockerfile either, so `buildkit.ts`'s `[ -f Dockerfile ]` switch routes this
- * scope through railpack; and no `spindrift.yaml`, because detection infers
- * `service` on its own and a file asserting it would remove the inference.
+ * scope through railpack; and no `spindrift.yaml`, because a scope carrying two
+ * Components of two kinds has no single kind to declare — the kind and the
+ * entrypoint are each Component's, chosen at creation.
  */
 
 import { createServer } from 'node:http';
