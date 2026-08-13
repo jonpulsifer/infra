@@ -29,6 +29,9 @@ tags:: architecture
 	- It carries **no rootfs**: `/` is tmpfs, and the host's `/nix/store` arrives read-only over virtiofs with a tmpfs overlay on top, so `nix build` still works in the guest. Everything the skiff runs is already on the host.
 	- That store arrives with no Nix database — the host's is unreadable by an unprivileged virtiofsd — so the closure's registration rides the kernel cmdline and is loaded before `sysinit.target`. The warm-store benefit is bounded by what the hull declares in its closure; paths outside it are visible but unregistered, so Nix substitutes them as it would anywhere.
 	- A skiff runs its job as root. The VM boundary is the isolation, not the user boundary inside it.
+- ## Authenticating to GitHub
+	- bosun mints its own JIT configs and skiff registrations as an installation of the shared Spindrift+bosun GitHub App — see [[Architecture/Spindrift]]. `services.bosun.github.appId` and `.privateKeyFile` (`apps/bosun/module.nix`) name the App id and bosun's own private key; `apps/bosun/github.go` signs the JWT and narrows every mint to `administration:write`, resolving the installation per repository.
+	- bosun's key is distinct from Spindrift's key on the same App — GitHub Apps hold multiple keys concurrently, so the two consumers rotate independently. bosun's lives in `nix/secrets/bosun.sops.yaml`, shared by every bosun host rather than duplicated per host; see [[Architecture/Secrets and PKI]].
 - ## Credential handling
 	- bosun mints a JIT config **immediately before boot** and never stockpiles: an unused one expires about an hour after it is minted.
 	- It arrives on a per-skiff virtiofs share rather than the kernel cmdline, which is world-readable inside the guest. bosun **deletes it host-side** the moment GitHub reports the runner online — virtiofs passes through to the host filesystem, so it vanishes in-guest with no cooperation from the guest, and untrusted job code never sees a live credential.
