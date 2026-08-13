@@ -59,7 +59,13 @@ afterEach(() => {
   shim.restore();
 });
 
-function Poller({ read, ms }: { read: () => Promise<unknown>; ms: number }) {
+function Poller({
+  read,
+  ms,
+}: {
+  read: () => Promise<unknown>;
+  ms: number | null;
+}) {
   usePoll(read, ms);
   return null;
 }
@@ -113,6 +119,30 @@ describe('a read on a cadence', () => {
       await Bun.sleep(20);
     });
     expect(started).toBeGreaterThan(0);
+  });
+
+  test('a null cadence does not spend a read on a tab coming back', async () => {
+    let started = 0;
+    const read = () => {
+      started += 1;
+      return Promise.resolve();
+    };
+
+    act(() => root.render(<Poller read={read} ms={null} />));
+    await act(async () => {
+      await Bun.sleep(20);
+    });
+    expect(started).toBe(1);
+
+    // `null` asked for one read per change of `deps`, and returning to the tab
+    // is not one. The screens that choose it — repositories, buckets,
+    // registries — sit in front of a rate limit, which is the whole reason
+    // they are not on a cadence.
+    await act(async () => {
+      shim.document.dispatch('visibilitychange');
+      await Bun.sleep(20);
+    });
+    expect(started).toBe(1);
   });
 
   test('a read that throws does not end the chain', async () => {

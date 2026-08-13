@@ -102,6 +102,12 @@ export function usePoll(
     };
 
     const onVisibility = () => {
+      // A null cadence asked for one read per change of `deps`, and a tab
+      // coming back is not one of those. Without this, the screens that chose
+      // `null` precisely because their far side is rate-limited — the
+      // repository, bucket and registry lists — spend a call every time
+      // someone alt-tabs back to a page they are not even looking at.
+      if (ms === null) return;
       if (hidden()) return;
       if (timer !== null) {
         clearTimeout(timer);

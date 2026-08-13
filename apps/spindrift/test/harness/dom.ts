@@ -196,10 +196,28 @@ export class FakeDocument {
   readonly body: null = null;
 
   // React registers a handful of document-level listeners (selection,
-  // composition) alongside the per-root ones. Nothing here simulates input, so
-  // these only need to not throw.
-  addEventListener(): void {}
-  removeEventListener(): void {}
+  // composition) alongside the per-root ones, and none of those is ever fired
+  // here. They are recorded rather than dropped because one listener the
+  // product registers *is* worth firing: `usePoll` re-reads on
+  // `visibilitychange`, and a no-op registry made that path untestable — the
+  // existing hidden-tab case passes on the timer re-arming instead, which is a
+  // different mechanism. Only {@link dispatch} fires anything.
+  private readonly listeners = new Map<string, Set<() => void>>();
+
+  addEventListener(type: string, listener: () => void): void {
+    const forType = this.listeners.get(type) ?? new Set();
+    forType.add(listener);
+    this.listeners.set(type, forType);
+  }
+
+  removeEventListener(type: string, listener: () => void): void {
+    this.listeners.get(type)?.delete(listener);
+  }
+
+  /** Fire what is registered for one event type. Tests only. */
+  dispatch(type: string): void {
+    for (const listener of [...(this.listeners.get(type) ?? [])]) listener();
+  }
 
   createElement(tag: string): FakeNode {
     return new FakeNode(ELEMENT_NODE, this, '', undefined, tag);

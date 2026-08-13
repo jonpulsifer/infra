@@ -6,18 +6,40 @@
  * the first is a handler nobody imported into `registry.ts`, and the second
  * cannot be written, because the registry's `satisfies` clause refuses an entry
  * whose handler is not a `Command`. What is left to assert at run time is the
- * part the type system cannot reach — an untrusted string arriving from a
- * browser, and what the surface does with one it does not recognise.
+ * part the type system cannot reach — that the handler under a name is the
+ * command of *that* name, an untrusted string arriving from a browser, and
+ * what the surface does with one it does not recognise.
  *
  * No database anywhere: every path under test refuses before a handler runs,
  * and `unreachableContext` proves it by throwing if anything reaches for the
  * connection.
  */
 import { describe, expect, test } from 'bun:test';
-import { dispatch, isCommandName } from '../../src/commands/registry.ts';
+import {
+  commandRegistry,
+  dispatch,
+  isCommandName,
+} from '../../src/commands/registry.ts';
 import { unreachableContext } from '../harness/context.ts';
 
 const context = await unreachableContext();
+
+/**
+ * The one thing collapsing to a single list gave up, put back.
+ *
+ * `AnyCommandDescriptor` is `CommandDescriptor<any, any>`, so the `satisfies`
+ * clause on the registry constrains an entry to *a* command and says nothing
+ * about *which* — `setAppZone: { input: setAppZoneInput, handler: setAppBuildRoute }`
+ * type-checks. Every handler is `export const <name>: Command<…>`, so the
+ * binding's own name is the assertable identity the types cannot carry, and a
+ * mis-wired entry names itself here instead of quietly running the wrong act
+ * for a browser that asked for the right one.
+ */
+test('the handler under each name is the command of that name', () => {
+  for (const [name, descriptor] of Object.entries(commandRegistry)) {
+    expect(descriptor.handler.name).toBe(name);
+  }
+});
 
 describe('dispatch refuses what the registry does not back', () => {
   test('an unknown name is a refusal, not a thrown error', async () => {
