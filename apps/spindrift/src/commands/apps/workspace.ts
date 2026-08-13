@@ -301,6 +301,28 @@ export const getAppWorkspace: Command<
       deployId: latestDeploy.id,
       buildId: latestDeploy.buildId,
     });
+  } else if (selected?.builds[0]) {
+    // A freshly created App's first Build, before it has emitted an
+    // attempt-level checkpoint of its own. Every status event a running build
+    // writes carries a `resource` — one per step — so the filter above sees
+    // nothing until the build ends, and the deploy arm has no Deploy to fall
+    // back to: the timeline said "Nothing has happened yet" over the build the
+    // create flow had just started, with no way in to it from this screen.
+    const build = selected.builds[0];
+    activity.push({
+      kind: 'build',
+      title: `Build ${build.id} ${build.status.toLowerCase()}`,
+      detail: build.commit,
+      when: elapsedSince(build.createdAt, now),
+      status:
+        build.status === 'SUCCEEDED'
+          ? 'ok'
+          : build.status === 'FAILED'
+            ? 'failed'
+            : 'info',
+      deployId: null,
+      buildId: build.id,
+    });
   }
 
   // The address the selected Component answers on. A job answers on none — no
