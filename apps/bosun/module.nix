@@ -130,10 +130,10 @@ in
           privateKeyFile = mkOption {
             type = types.path;
             description = ''
-              File holding bosun's own private key for the shared App --
-              distinct from Spindrift's key on the same App; GitHub Apps
-              hold multiple keys concurrently, so the two are rotated
-              independently. Read once at startup and never logged.
+              File holding the shared App's private key -- the same PEM
+              Spindrift's installation Secret carries, by operator choice
+              (GitHub Apps support per-consumer keys, but this fleet rotates
+              one key for both). Read once at startup and never logged.
             '';
           };
         };
