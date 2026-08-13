@@ -46,6 +46,7 @@ import { adoptBuild, adoptBuildInput } from './builds/adopt.ts';
 import { dispatchBuild, dispatchBuildInput } from './builds/dispatch.ts';
 import { getBuildDetail, getBuildDetailInput } from './builds/get-detail.ts';
 import { listBuilds, listBuildsInput } from './builds/list.ts';
+import { listBuildRoutes, listBuildRoutesInput } from './builds/list-routes.ts';
 import {
   setComponentCommand,
   setComponentCommandInput,
@@ -194,6 +195,10 @@ export const commandRegistry = {
   getDeployDetail: { input: getDeployDetailInput, handler: getDeployDetail },
   getBuildDetail: { input: getBuildDetailInput, handler: getBuildDetail },
   listBuilds: { input: listBuildsInput, handler: listBuilds },
+  listBuildRoutes: {
+    input: listBuildRoutesInput,
+    handler: listBuildRoutes,
+  },
   listAllDeploys: { input: listAllDeploysInput, handler: listAllDeploys },
   listApps: { input: listAppsInput, handler: listApps },
   listDeploys: { input: listDeploysInput, handler: listDeploys },

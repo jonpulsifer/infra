@@ -30,6 +30,7 @@ export { adoptBuild } from './builds/adopt.ts';
 export { dispatchBuild } from './builds/dispatch.ts';
 export { getBuildDetail } from './builds/get-detail.ts';
 export { listBuilds } from './builds/list.ts';
+export { listBuildRoutes } from './builds/list-routes.ts';
 export { setComponentCommand } from './components/command.ts';
 export { createComponent } from './components/create.ts';
 export { placeComponent } from './components/place.ts';
