@@ -1,26 +1,23 @@
 /**
  * Datastores — every store this installation holds, attached or not.
  *
- * §11 gives a Datastore four commands, a table, an adapter contract and two
- * backends, and until now no read path except one App's workspace — which
- * only ever showed the rows touching that App, plus every unattached one
- * repeated on every other App's workspace beside it. A Datastore is top-level
- * (§11: "attached, not a field"), and this is the screen a top-level noun
- * gets: one ledger, independent of which App a reader opened first.
+ * A Datastore is top-level (§11: "attached, not a field"), and this is the
+ * screen a top-level noun gets: one ledger, independent of which App a reader
+ * opened first.
  *
- * **Create lives here; attach does not.** `createDatastore` takes a name, an
- * engine and a Vessel, and no App — storage exists before anything reads it,
- * which is the whole of what "top-level, not a field" means — so the only
- * picker this form needs is the one `listDatastores` sends with the rows.
- * `attachDatastore` genuinely does bind to an App, and a global ledger has
- * none selected, so it stays on the workspace of the App it would attach to.
- * Alongside it are the two acts that take only a Datastore id: Detach and
- * Destroy, one at a time and never both, because the row already says which
- * one core would accept — `destroyDatastore` refuses while attached. That is
- * stricter than the workspace's section, which offers Destroy on every row and
- * lets the refusal come back as a sentence; here the reader has no App open to
- * detach from first, so a button whose only outcome is that refusal is worth
- * less than the one act that works.
+ * **Create lives here, and so does the rest of a Datastore's lifetime.**
+ * `createDatastore` takes a name, an engine and a Vessel, and no App — storage
+ * exists before anything reads it, which is the whole of what "top-level, not
+ * a field" means — so the only picker this form needs is the one
+ * `listDatastores` sends with the rows. Beside it are the acts that take only
+ * a Datastore id: Detach and Destroy, one at a time and never both, because
+ * the row already says which one core would accept — `destroyDatastore`
+ * refuses while attached.
+ *
+ * **Attach has no control yet.** `attachDatastore` binds a store to an App and
+ * this ledger has none selected, so it stays an API call until it lands on the
+ * surface it belongs to — a Component's, since a Component is what reads the
+ * connection.
  *
  * Not a `SupplyChainTabs` member. §2's chain is Source + Build = Artifact;
  * a Datastore is never an input to that chain or an output of it, so tabbing
@@ -53,10 +50,9 @@ import { deployTone } from './deploys.tsx';
 /**
  * Detaching or destroying one Datastore, by id.
  *
- * One shape for both, the same reason `workspace.tsx`'s `DatastoreAct` is:
- * they take the same argument and answer the same question, and every
- * refusal either can carry is a sentence core composed rather than one
- * guessed at here.
+ * One shape for both: they take the same argument and answer the same
+ * question, and every refusal either can carry is a sentence core composed
+ * rather than one guessed at here.
  */
 export type DatastoreAct = (
   datastoreId: string,
@@ -363,8 +359,8 @@ function NewDatastoreForm({
       {outcome?.kind === 'created' ? (
         <p className="rounded-md border border-warning/40 bg-warning-soft px-3 py-2 text-xs">
           Created, unattached. It provisions in the background — the row says
-          how far it has got — and attaching it to an App is done from that
-          App's workspace.
+          how far it has got — and attaching it to an App is `attachDatastore`
+          over the API.
         </p>
       ) : null}
       <div className="flex flex-wrap items-center gap-2">
@@ -413,7 +409,7 @@ export function DatastoreLedger({
       <PageHeader
         eyebrow="Attached resources"
         title="Datastores"
-        description="Every Postgres and Valkey Datastore this installation holds, attached or not. Create one here in any Vessel that serves the engine; attaching it to an App stays on that App's workspace."
+        description="Every Postgres and Valkey Datastore this installation holds, attached or not. Create one here in any Vessel that serves the engine."
         {...(canCreate
           ? {
               actions: (
@@ -447,7 +443,7 @@ export function DatastoreLedger({
         empty={
           <EmptyState icon={<Database />} title="No Datastores exist yet.">
             {canCreate
-              ? 'Create one in any Vessel that serves the engine — attaching it to an App is done from that App’s workspace.'
+              ? 'Create one in any Vessel that serves the engine.'
               : 'No connected Vessel serves Postgres or Valkey, so there is nowhere to create one yet.'}
           </EmptyState>
         }
@@ -538,13 +534,12 @@ export function DatastoreLedger({
 
 /**
  * The top-level Datastores screen — every store this installation holds,
- * unscoped to any one App's workspace (§11's "top-level and attached, not a
- * field", read as a screen).
+ * unscoped to any one App (§11's "top-level and attached, not a field", read
+ * as a screen).
  *
  * Detach and Destroy are wired here rather than left to {@link DatastoreLedger}
- * calling `command` itself, for the same reason the workspace's Datastore
- * handlers are wired by its screen: the re-read after a successful act belongs
- * to whoever owns the list being re-read, and only this screen holds it.
+ * calling `command` itself: the re-read after a successful act belongs to
+ * whoever owns the list being re-read, and only this screen holds it.
  */
 export function DatastoresScreen({
   onNavigate,
@@ -554,10 +549,8 @@ export function DatastoresScreen({
   const read = useRead([['listDatastores', {}]], null);
 
   /**
-   * One dispatch and no attach, which is the whole difference from the
-   * workspace's handler: that one creates and then attaches because it has an
-   * App open to attach to, and this screen has none. The Datastore lands
-   * unattached, which is what §11 says it is until something attaches it.
+   * One dispatch and no attach: the Datastore lands unattached, which is what
+   * §11 says it is until something attaches it.
    */
   const handleCreate: CreateLedgerDatastore = async (create) => {
     try {
@@ -565,9 +558,8 @@ export function DatastoresScreen({
         name: create.name,
         engine: create.engine,
         vesselId: create.vesselId,
-        // Restated rather than omitted for the reason the workspace's handler
-        // restates it: `InputOf` reads the schema's output, so a `.default()`
-        // is still a required property to a typed caller.
+        // Restated rather than omitted: `InputOf` reads the schema's output,
+        // so a `.default()` is still a required property to a typed caller.
         storageGiB: 10,
       });
       // A refusal leaves no row behind — `createDatastore` deletes its insert

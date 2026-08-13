@@ -2,11 +2,13 @@
  * The App workspace (Task 40, §18).
  *
  * **Live state and URL lead**, then the placement — Target and the vessel it
- * is a surface on — then Components and Datastores as **peer actionable
- * sections**, then a dense activity timeline. The peering is the decision worth
- * protecting: a Datastore is a top-level noun that an App attaches (§11), never
- * a field on the App, and a layout that nests it under Components would quietly
- * say the opposite.
+ * is a surface on — then the Components this App is made of, then a dense
+ * activity timeline. Components own the full width: they are what this screen
+ * is a list of, and every act it offers is about one of them.
+ *
+ * A Datastore is a top-level noun (§11) with its own screens under
+ * `/datastores`, which is where its whole lifetime lives — attachment
+ * included.
  *
  * Two things are stated here rather than hidden:
  *
@@ -17,9 +19,9 @@
  *   served by the Target, so there is no process output — an honest empty state,
  *   not a disabled tab.
  * - **Config shows keys, never values** (§10). Core's store is write-only, so
- *   the section below Components and Datastores is a list of names and a form
- *   that writes — there is nothing here that could show a secret it was handed
- *   by accident, because nothing here is ever handed one.
+ *   the section below Components is a list of names and a form that writes —
+ *   there is nothing here that could show a secret it was handed by accident,
+ *   because nothing here is ever handed one.
  *
  * **The hero is the running App, and the tabs are everything else.** §18 is
  * explicit that "the running App is the product, the pipeline is only how it got
@@ -35,7 +37,6 @@ import type {
   ActivityEntry,
   BuildRouteOptionView,
   ComponentView,
-  DatastoreView,
   LogLine,
   PrerequisiteRowView,
   TargetListItem,
@@ -254,20 +255,6 @@ export type SetConfig = (change: {
   | { readonly ok: false; readonly message: string }
 >;
 
-/**
- * Attaching or detaching one Datastore, by id.
- *
- * One shape for both because they take the same argument and answer the same
- * question — the App is bound by the screen above, exactly as it is for
- * {@link SetConfig}, and every refusal either carries is a sentence core
- * composed. Two separate types would differ only in their name.
- */
-export type DatastoreAct = (
-  datastoreId: string,
-) => Promise<
-  { readonly ok: true } | { readonly ok: false; readonly message: string }
->;
-
 export function Workspace({
   view,
   onDeploy,
@@ -285,8 +272,6 @@ export function Workspace({
   onRunJob,
   onSetAutoDeploy,
   onSetBuildRoute,
-  onAttachDatastore,
-  onDetachDatastore,
   onFollowExecution,
   executionLines,
   tab = 'overview',
@@ -383,18 +368,6 @@ export function Workspace({
    * against.
    */
   onSetBuildRoute?: SetBuildRoute;
-  /**
-   * The two acts a Datastore has *that need an App* (§11). Absent where the
-   * screen wires no acts, for the same reason {@link onSetReach} is.
-   *
-   * Create and destroy are not among them and are not offered here. Both take a
-   * Target and no App — storage exists before anything reads it, which is the
-   * whole of what "top-level, not a field" means — so the ledger is where they
-   * belong, and a second place to create one was a second place for a Target's
-   * refusal to come back to.
-   */
-  onAttachDatastore?: DatastoreAct;
-  onDetachDatastore?: DatastoreAct;
   /** Follow one run's output, or nothing when the name is `null`. */
   onFollowExecution?: (execution: string | null) => void;
   /** The lines of whichever run is being followed. */
@@ -525,42 +498,21 @@ export function Workspace({
 
       {current === 'overview' ? (
         <>
-          <div className="grid gap-4 md:grid-cols-2">
-            <Components
-              components={view.components}
-              archiveSourced={view.archiveSourced === true}
-              {...(onStageArchive ? { onStageArchive } : {})}
-              {...(onUploadArchive ? { onUploadArchive } : {})}
-              {...(selected === undefined ? {} : { selectedId: selected.id })}
-              {...(onSetReach === undefined ? {} : { onSetReach })}
-              {...(onSelectComponent === undefined
-                ? {}
-                : { onSelectComponent })}
-              {...(onCreateComponent === undefined
-                ? {}
-                : { onCreateComponent })}
-              {...(onMoveComponent === undefined ? {} : { onMoveComponent })}
-              {...(onUnplaceComponent === undefined
-                ? {}
-                : { onUnplaceComponent })}
-              targets={targets}
-            />
-            {/*
-              Both acts are offered whatever the placement, because both act on
-              rows that already exist: a Datastore that got created somehow —
-              externally registered, or created while the App sat on another
-              Target — is still one an operator has to be able to detach. The
-              placement test that used to guard the Create form went with it,
-              to the ledger, which asks the same question of every Target at
-              once and answers it with the picker `listDatastores` sends.
-            */}
-            <Datastores
-              datastores={view.datastores}
-              {...(onNavigate ? { onNavigate } : {})}
-              {...(onAttachDatastore ? { onAttachDatastore } : {})}
-              {...(onDetachDatastore ? { onDetachDatastore } : {})}
-            />
-          </div>
+          <Components
+            components={view.components}
+            archiveSourced={view.archiveSourced === true}
+            {...(onStageArchive ? { onStageArchive } : {})}
+            {...(onUploadArchive ? { onUploadArchive } : {})}
+            {...(selected === undefined ? {} : { selectedId: selected.id })}
+            {...(onSetReach === undefined ? {} : { onSetReach })}
+            {...(onSelectComponent === undefined ? {} : { onSelectComponent })}
+            {...(onCreateComponent === undefined ? {} : { onCreateComponent })}
+            {...(onMoveComponent === undefined ? {} : { onMoveComponent })}
+            {...(onUnplaceComponent === undefined
+              ? {}
+              : { onUnplaceComponent })}
+            targets={targets}
+          />
           {/*
             Empty rather than optional-and-absent for an archive App and for
             one with no Target placed yet — `getAppWorkspace` says so with
@@ -624,9 +576,9 @@ export function Workspace({
  * click where the thing behind it is a *different question*. Releases is one
  * (`listDeploys`, which nothing in the browser had ever called) and Config is
  * one (§10's write-only store, which has no business sitting above the
- * timeline). Logs, Components and Datastores are all answers to "what is this
- * App doing right now", which is Overview, and splitting them would make the
- * common visit three clicks instead of none.
+ * timeline). Logs and Components are both answers to "what is this App doing
+ * right now", which is Overview, and splitting them would make the common
+ * visit three clicks instead of none.
  */
 export type WorkspaceTab = 'overview' | 'releases' | 'config';
 
@@ -1036,10 +988,10 @@ function SectionHeader({
       </div>
       {/*
         Both, or neither. Rendering the verb on `action` alone is what made
-        four buttons on this screen do nothing when pressed: `Add Component`
-        and `Attach Datastore` never had a handler at all, and the runtime
-        card's own verb loses one whenever the Component has no release to open.
-        A section that cannot answer its verb does not offer it.
+        buttons on this screen do nothing when pressed: `Add Component` never
+        had a handler at all, and the runtime card's own verb loses one
+        whenever the Component has no release to open. A section that cannot
+        answer its verb does not offer it.
       */}
       {action && onAction ? (
         <Button
@@ -1111,8 +1063,8 @@ function Row({
       {/*
         The chevron is a claim that pressing the row goes somewhere, so it is
         drawn only where the row can be pressed. It used to be the default on
-        every row with no trailing control — config keys, attached Datastores,
-        job runs — each of which advertised a navigation it did not have.
+        every row with no trailing control — config keys, job runs — each of
+        which advertised a navigation it did not have.
       */}
       {trailing ??
         (onSelect ? (
@@ -1880,158 +1832,6 @@ export function SupplyDemand({
         </Button>
       </div>
     </div>
-  );
-}
-
-/**
- * What one Datastore's row says.
- *
- * The phase is in the line rather than in the badge, which stays the engine —
- * the engine is what a reader scans this column for, and it is the fact that
- * decides which variable the connection arrives on. Without the phase the row
- * read as finished the instant it was asked for: a CloudNativePG cluster takes
- * minutes to bootstrap, and `postgres · managed · Metal` said nothing about
- * which of those minutes this is. `detail` is the operator's own sentence and
- * is stated only where there is one, so an ordinary row is not padded with an
- * empty segment.
- */
-function datastoreDetail(datastore: DatastoreView): string {
-  const parts = [
-    datastore.provenance,
-    datastore.target,
-    datastore.phase,
-    datastore.attachedTo ? `attached to ${datastore.attachedTo}` : 'unattached',
-  ];
-  if (datastore.detail) parts.push(datastore.detail);
-  return parts.join(' · ');
-}
-
-/**
- * §11: Datastores are top-level and attached, never a field. An unattached one
- * is still listed — it exists whether or not this App uses it, and attaching it
- * is an act with placement consequences (§3), not a toggle.
- *
- * **Every act is a command, and every refusal is core's sentence.** Attaching
- * carries the rules — one store per engine per App, cluster-local placement —
- * so nothing here guesses at whether a button will be accepted; it presses, and
- * reports what came back. The one refusal composed on this side is the absence
- * of a handler.
- *
- * **Attach and detach, and nothing that outlives the App.** Creating storage
- * and destroying it take a Target and no App, so they live on the ledger where
- * a reader can see every Datastore this installation holds; this card is what
- * *this* App reads, plus the way in to each. The row leads to the Datastore's
- * own screen, which is where its backend object and the acts that own its
- * lifetime both are.
- */
-function Datastores({
-  datastores,
-  onNavigate,
-  onAttachDatastore,
-  onDetachDatastore,
-}: {
-  datastores: readonly DatastoreView[];
-  /**
-   * Where the row goes when it is pressed — the Datastore's own screen, which
-   * is the only place its backend object is readable.
-   *
-   * A row is a summary of six fields and there is nowhere on it for a spec, a
-   * status or the operator's own document, so the row is a way in rather than
-   * the whole of what Spindrift knows. Absent leaves the row inert, the same
-   * both-or-neither rule the acts below follow.
-   */
-  onNavigate?: (path: string) => void;
-  onAttachDatastore?: DatastoreAct;
-  onDetachDatastore?: DatastoreAct;
-}) {
-  const [refusal, setRefusal] = useState<string | null>(null);
-
-  /*
-    One refusal line for the whole section, the way `ConfigSection` keeps one
-    for its deletes: a row has nowhere to put a sentence, and a button that
-    swallowed its own would lose the only thing a press produces when it is
-    refused.
-  */
-  const act = (run: DatastoreAct, id: string) => {
-    setRefusal(null);
-    void run(id).then((result) => {
-      if (!result.ok) setRefusal(result.message);
-    });
-  };
-
-  return (
-    <Card>
-      <SectionHeader eyebrow="Attached resources" title="Datastores" />
-      <CardContent className="pt-0">
-        {refusal ? (
-          <p className="mb-2 rounded-md border border-destructive/40 bg-destructive-soft px-3 py-2 text-xs text-destructive">
-            {refusal}
-          </p>
-        ) : null}
-        {datastores.length === 0 ? (
-          <EmptyState title="No Datastores attached.">
-            Create one on the Datastores screen and it can be attached here. A
-            website cannot attach one.
-          </EmptyState>
-        ) : (
-          datastores.map((datastore) => (
-            <Row
-              key={datastore.id}
-              badge={
-                <Badge tone={datastore.attachedTo ? 'success' : 'idle'}>
-                  {datastore.engine}
-                </Badge>
-              }
-              title={datastore.name}
-              detail={datastoreDetail(datastore)}
-              {...(onNavigate
-                ? {
-                    onSelect: () => onNavigate(`/datastores/${datastore.id}`),
-                  }
-                : {})}
-              trailing={
-                <div className="flex shrink-0 items-center gap-1">
-                  {/*
-                    Attach or detach, never both: the row already says which it
-                    is, and offering the act it is not in would be a button
-                    whose only outcome is core's refusal.
-                  */}
-                  {datastore.attachedTo === null && onAttachDatastore ? (
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => act(onAttachDatastore, datastore.id)}
-                    >
-                      Attach
-                    </Button>
-                  ) : null}
-                  {datastore.attachedTo !== null && onDetachDatastore ? (
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => act(onDetachDatastore, datastore.id)}
-                    >
-                      Detach
-                    </Button>
-                  ) : null}
-                </div>
-              }
-            />
-          ))
-        )}
-        {/*
-          Which variable it arrives on, said once for the section rather than
-          per row. It is fixed by engine and there is no form field for it
-          anywhere, so this line is the only place a developer finds out what
-          their container will be handed.
-        */}
-        <p className="pt-2 text-xs text-muted-foreground">
-          A Postgres connection arrives as DATABASE_URL and a Valkey one as
-          REDIS_URL, on the next Deploy — attaching writes a row, it does not
-          restart what is running.
-        </p>
-      </CardContent>
-    </Card>
   );
 }
 
@@ -3377,50 +3177,6 @@ function AppWorkspace({
     }
   };
 
-  /*
-    The four Datastore acts (§11). Every one of them is `handleSetConfig`'s
-    shape: the pair the screen is showing is bound here so the card does not
-    restate it, the command's own refusal is passed through unedited, and the
-    workspace is re-read on success rather than patched — `phase` and
-    `attachedTo` are rows this act just changed, and a guess about what the
-    write did is the one thing that can disagree with the reconcile loop.
-  */
-
-  const handleAttachDatastore: DatastoreAct = async (datastoreId) => {
-    const appId = workspace.appId;
-    if (appId === undefined) {
-      return {
-        ok: false,
-        message: 'This App has no id to attach a Datastore to',
-      };
-    }
-    try {
-      const result = await command('attachDatastore', { datastoreId, appId });
-      if (!result.ok) return { ok: false, message: result.failure.message };
-      read.reload();
-      return { ok: true };
-    } catch (cause: unknown) {
-      return {
-        ok: false,
-        message: cause instanceof Error ? cause.message : 'Attaching failed',
-      };
-    }
-  };
-
-  const handleDetachDatastore: DatastoreAct = async (datastoreId) => {
-    try {
-      const result = await command('detachDatastore', { datastoreId });
-      if (!result.ok) return { ok: false, message: result.failure.message };
-      read.reload();
-      return { ok: true };
-    } catch (cause: unknown) {
-      return {
-        ok: false,
-        message: cause instanceof Error ? cause.message : 'Detaching failed',
-      };
-    }
-  };
-
   return (
     <>
       <Workspace
@@ -3441,8 +3197,6 @@ function AppWorkspace({
         onMoveComponent={handleMoveComponent}
         onUnplaceComponent={handleUnplaceComponent}
         targets={targets}
-        onAttachDatastore={handleAttachDatastore}
-        onDetachDatastore={handleDetachDatastore}
         {...(runs === null
           ? {}
           : {

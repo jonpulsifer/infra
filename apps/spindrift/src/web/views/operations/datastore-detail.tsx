@@ -2,10 +2,9 @@
  * One Datastore's screen — where a row goes when it is pressed.
  *
  * §11 makes a Datastore top-level and the ledger gave it a list; this is the
- * other half. Every screen that names a Datastore — the ledger's inspector,
- * the App workspace's attached-resources card — held the same six stored facts
- * and nothing about the thing itself, so the only way to answer "what is this
- * cluster actually configured as" was `kubectl`.
+ * other half. The ledger's row holds six stored facts and nothing about the
+ * thing itself, so without this screen the only way to answer "what is this
+ * cluster actually configured as" is `kubectl`.
  *
  * **The object is the far side's, and the page says so.** It is the API
  * server's document, read at load: spec, the defaults the operator filled in,
@@ -14,10 +13,9 @@
  * compose an honest one — so what is on screen is what is running, drift and
  * all.
  *
- * **Read, not act.** Attach lives on the workspace of the App it binds to, and
- * Create, Detach and Destroy live on the ledger, which is where a reader who
- * came to act already is. A second set of buttons here would be a second place
- * for a refusal to come back to.
+ * **Read, not act.** Create, Attach, Detach and Destroy live on the ledger,
+ * which is where a reader who came to act already is. A second set of buttons
+ * here would be a second place for a refusal to come back to.
  */
 import { Database } from 'lucide-react';
 import type { DatastoreDetailView } from '../../../commands/views.ts';
@@ -33,9 +31,8 @@ import { DetailSkeleton, ScreenFailure, ScreenNotFound } from '../screen.tsx';
 import { deployTone } from './deploys.tsx';
 
 /**
- * Which variable the connection arrives on, as `Datastores` on the workspace
- * states it for its whole section. Fixed by engine, chosen by nothing, and the
- * one runtime fact a developer reading this page came for.
+ * Which variable the connection arrives on. Fixed by engine, chosen by
+ * nothing, and the one runtime fact a developer reading this page came for.
  */
 const CONNECTION_VARIABLE = {
   postgres: 'DATABASE_URL',
@@ -83,7 +80,7 @@ export function DatastoreDetail({
               : `An externally authored connection, recorded against ${datastore.target}.`}{' '}
             {datastore.attachedTo
               ? `Attached to ${datastore.attachedTo} — the connection arrives as ${CONNECTION_VARIABLE[datastore.engine]} on its next Deploy.`
-              : 'Unattached: nothing reads through it yet. Attaching is done from the App’s workspace.'}
+              : 'Unattached: nothing reads through it yet.'}
           </>
         }
         actions={
@@ -162,9 +159,8 @@ export function DatastoreDetail({
 /**
  * One Datastore, by id (§11).
  *
- * A `null` cadence rather than a poll: every act on a Datastore is on another
- * screen — the ledger's, or the workspace of the App it attaches to — so
- * nothing this one does can invalidate what it is showing. The far-side object
+ * A `null` cadence rather than a poll: every act on a Datastore is on the
+ * ledger, so nothing this one does can invalidate what it is showing. The far-side object
  * is read once with the row, and the retry is for the load that failed.
  */
 export function DatastoreScreen({
