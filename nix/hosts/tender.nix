@@ -48,19 +48,33 @@
       privateKeyFile = config.sops.secrets."bosun-github-app-key".path;
     };
 
-    # Ten warm slots against 48 vCPU: 10 x 4 vCPU plus the bench class's 4 is
-    # 44, so ten jobs can run at once and each still gets four real cores.
-    # Deliberately not deeper -- warm skiffs are idle and would oversubscribe
-    # happily, but a benchmark whose jobs contend for cores measures the
-    # contention rather than the runner. RAM is the other budget: 10 x 3 GiB
-    # plus 16 GiB is 46 of 180 GB.
+    # 4 vCPU / 16 GiB: a public-repo ubuntu-latest runner's exact spec, because
+    # a pool that is not the same shape as the thing it replaces cannot be
+    # compared to it. 3072M was riptide's number -- a folly worker sharing its
+    # RAM with kubelet under a 9G ceiling -- and typescript.yml already carries
+    # the note that the suite outgrew it. This host has 180 GB and no kubelet to
+    # protect, so it inherits the constraint for no reason.
+    #
+    # Eight warm, which is what the budgets allow: 8 x 16 GiB plus the bench
+    # slot's 16 is 144 of the unit's 150G ceiling, and 8 x 6G of workspace plus
+    # the bench slot's 20G, the cache's 30G and the closure is ~123 GB of the
+    # 200 GB disk. Eight busy jobs is 32 vCPU against 24 physical cores, so they
+    # share hyperthreads at full tilt -- measured as costing nothing on this
+    # suite, which is bound by its database rather than by cores.
+    #
+    # Standing caveat, widened rather than introduced here: `skiff-ubuntu` is
+    # one label across hosts that are not one machine -- oldschool serves it at
+    # 2 vCPU / 3 GiB, guarding a box it shares with kubelet. A job takes
+    # whichever slot is free, so a measurement on this label has to read the
+    # runner name to know what it landed on; the benchmark's `overhead` job
+    # prints cores and memory for exactly that reason.
     classes.skiff-ubuntu = {
       hull = "${inputs.self.packages.x86_64-linux.hull-ubuntu}";
       vcpus = 4;
-      memory = "3072M";
+      memory = "16384M";
       workspace = "6G";
       persist = true;
-      warm = 10;
+      warm = 8;
     };
 
     # The hosted-shaped bench class: 4 vCPU / 16 GiB, the exact spec of a
