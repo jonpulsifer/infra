@@ -80,6 +80,12 @@ async function readyz(db: Database): Promise<Response> {
         throw new Error('a readiness test reached the GitHub App identity');
       },
     },
+    {
+      db,
+      current: () => {
+        throw new Error('a readiness test read the installation');
+      },
+    },
   );
   const handler = routes[READY_PATH] as () => Promise<Response>;
   return handler();

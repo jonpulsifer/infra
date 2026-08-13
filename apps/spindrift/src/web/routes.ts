@@ -8,7 +8,7 @@
  * to be inline in `server.ts` next to a top-level `Bun.serve` no test can
  * import. So the table moved here and the entries call it.
  *
- * Ten kinds of route exist, and three of the ten are generated:
+ * Eleven kinds of route exist, and three of the eleven are generated:
  *
  * 1. **Commands**, from the registry (`dispatch.ts`).
  * 2. **The client**, from whatever built it — `bundle.ts` reading a directory in
@@ -33,6 +33,11 @@
  *     installation flows land. Session-authenticated like a command, but it is
  *     a redirect target GitHub reaches with GET and a query string, so it
  *     cannot be one.
+ * 11. **The status page** (`status-route.ts`), the lowest-precedence entry in
+ *     the table and the only one that reads the `Host` header rather than the
+ *     path — §9's page for an App address that nothing is serving yet. It is
+ *     last here as well as least specific, so the file reads in the order
+ *     `Bun.serve` matches in.
  *
  * A further hand-authored route is a decision somebody has to make on purpose,
  * in this file, against a test that names it.
@@ -49,6 +54,7 @@ import {
   type GitHubSetupRouteDeps,
   githubSetupRoutes,
 } from './github-setup-route.ts';
+import { type StatusRouteDeps, statusRoutes } from './status-route.ts';
 import { streamRoutes } from './streams.ts';
 import { uploadRoutes } from './upload.ts';
 import { type WebhookRouteDeps, webhookRoutes } from './webhook-route.ts';
@@ -113,6 +119,7 @@ export function webRoutes<Client extends Record<string, ClientRoute>>(
   webhook: WebhookRouteDeps,
   bosun: BosunRouteDeps,
   githubSetup: GitHubSetupRouteDeps,
+  status: StatusRouteDeps,
 ) {
   return {
     ...client,
@@ -125,5 +132,6 @@ export function webRoutes<Client extends Record<string, ClientRoute>>(
     ...webhookRoutes(webhook),
     ...bosunRoutes(bosun),
     ...githubSetupRoutes(githubSetup),
+    ...statusRoutes(status),
   };
 }

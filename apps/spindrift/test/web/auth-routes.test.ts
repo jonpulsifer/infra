@@ -104,6 +104,12 @@ function serve() {
         throw new Error('an auth-route test reached the GitHub App identity');
       },
     },
+    {
+      db: auth.db,
+      current: () => {
+        throw new Error('an auth-route test read the installation');
+      },
+    },
   );
 
   return { auth, routes };

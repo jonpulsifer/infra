@@ -54,6 +54,34 @@ module "tunnel_spindrift" {
   }
 }
 
+# Every name in the zone dedicated to generated App names, pointed at the
+# tunnel.
+#
+# The module publishes no record for a wildcard ingress rule and is right not
+# to for the zones it shares with hand-managed names — see its
+# `cloudflare_dns_record.cf`. This zone is the one exception, and the reason is
+# that the objection does not hold here: the control plane holds a
+# lowest-precedence route over `*.lolwtf.dev`
+# (`clusters/offsite/apps/spindrift/status-route.yaml`), so a name nothing
+# serves reaches a page that says so rather than a bare 404, and an App's
+# address answers from the moment the App exists rather than from its first
+# successful deploy. A Component that is serving takes the name back at the
+# gateway, where its own exact-hostname route outranks the wildcard.
+#
+# Nothing in this zone is hand-managed, so a catch-all here can only ever
+# answer for a name Spindrift itself would mint. `spindrift-control` keeps its
+# own record above it: an exact name outranks a wildcard in DNS as it does at
+# the gateway.
+resource "cloudflare_dns_record" "spindrift_apps_wildcard" {
+  zone_id = cloudflare_zone.lolwtf_dev.id
+  comment = "terraform managed"
+  name    = "*.${cloudflare_zone.lolwtf_dev.name}"
+  content = module.tunnel_spindrift.cloudflare_tunnel_url
+  type    = "CNAME"
+  proxied = true
+  ttl     = 1
+}
+
 # Atlantis already authenticates this root to 1Password. Escrow the generated
 # tunnel credential directly into the homelab vault so External Secrets can
 # deliver it to offsite without a decrypted value entering git.
