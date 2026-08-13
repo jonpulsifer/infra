@@ -24,7 +24,10 @@
   # services.harmonia in the deploy-harmonia ticket.
   sops.secrets."harmonia-cache-key" = { };
 
-  sops.secrets."bosun-github-token" = {
+  # Shared with riptide: both are bosun hosts on the same Spindrift+bosun
+  # GitHub App, each holding this same key.
+  sops.secrets."bosun-github-app-key" = {
+    sopsFile = ../secrets/bosun.sops.yaml;
     owner = "bosun";
     group = "bosun";
     mode = "0400";
@@ -38,7 +41,14 @@
   services.bosun = {
     enable = true;
     repo = "jonpulsifer/infra";
-    tokenFile = config.sops.secrets."bosun-github-token".path;
+    github = {
+      # TODO(operator): the shared Spindrift+bosun GitHub App is created by
+      # hand during the design's cutover step (Manifest flow, off Spindrift's
+      # Repositories screen); this placeholder id is not real. Replace it
+      # once that App exists -- see the PR body.
+      appId = 1;
+      privateKeyFile = config.sops.secrets."bosun-github-app-key".path;
+    };
     classes.skiff-ubuntu = {
       hull = "${inputs.self.packages.x86_64-linux.hull-ubuntu}";
       # 2, not 4: this box has 4 cores shared with kubelet, yarr and

@@ -11,14 +11,14 @@ import (
 
 // Config is bosun's on-disk JSON configuration. A NixOS module generates it.
 type Config struct {
-	Repo         string   `json:"repo"`
-	TokenFile    string   `json:"tokenFile"`
-	RuntimeDir   string   `json:"runtimeDir"`
-	LogDir       string   `json:"logDir"`
-	WorkspaceDir string   `json:"workspaceDir"` // real storage, not tmpfs: it holds whole filesystem images
-	MetricsFile  string   `json:"metricsFile"`  // empty disables; a node-exporter textfile, not a listener
-	CacheURL     string   `json:"cacheUrl"`     // empty disables; announced to every skiff as bosun.cache on the cmdline
-	PollInterval Duration `json:"pollInterval"`
+	Repo         string       `json:"repo"`
+	GitHub       GitHubConfig `json:"github"`
+	RuntimeDir   string       `json:"runtimeDir"`
+	LogDir       string       `json:"logDir"`
+	WorkspaceDir string       `json:"workspaceDir"` // real storage, not tmpfs: it holds whole filesystem images
+	MetricsFile  string       `json:"metricsFile"`  // empty disables; a node-exporter textfile, not a listener
+	CacheURL     string       `json:"cacheUrl"`     // empty disables; announced to every skiff as bosun.cache on the cmdline
+	PollInterval Duration     `json:"pollInterval"`
 	// DrainTimeout bounds how long a stop waits for busy skiffs to finish
 	// their jobs. Idle skiffs are scuttled immediately; what this buys is a
 	// deploy that no longer fails every in-flight job, and what it costs is
@@ -29,6 +29,15 @@ type Config struct {
 	// Spindrift turns this host into a build source alongside its GitHub warm
 	// pool. nil (the default) means bosun never talks to Spindrift.
 	Spindrift *SpindriftConfig `json:"spindrift,omitempty"`
+}
+
+// GitHubConfig is bosun's identity on GitHub: an installation of the shared
+// Spindrift+bosun GitHub App, not a personal access token. Minting a JIT
+// runner config needs Administration: write on Config.Repo, which the
+// installation must grant.
+type GitHubConfig struct {
+	AppID          int64  `json:"appId"`
+	PrivateKeyFile string `json:"privateKeyFile"`
 }
 
 // SpindriftConfig is how a bosun host long-polls a Spindrift outbox for
@@ -140,8 +149,11 @@ func LoadConfig(path string) (*Config, error) {
 	if owner, name, ok := strings.Cut(cfg.Repo, "/"); !ok || owner == "" || name == "" {
 		return nil, fmt.Errorf("config: repo must be \"owner/repo\", got %q", cfg.Repo)
 	}
-	if cfg.TokenFile == "" {
-		return nil, fmt.Errorf("config: tokenFile is required")
+	if cfg.GitHub.AppID <= 0 {
+		return nil, fmt.Errorf("config: github.appId is required")
+	}
+	if cfg.GitHub.PrivateKeyFile == "" {
+		return nil, fmt.Errorf("config: github.privateKeyFile is required")
 	}
 	if len(cfg.Classes) == 0 {
 		return nil, fmt.Errorf("config: at least one class is required")

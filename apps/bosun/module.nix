@@ -23,15 +23,18 @@ let
   configFile = (pkgs.formats.json { }).generate "bosun.json" {
     inherit (cfg)
       repo
-      tokenFile
       runtimeDir
       logDir
       workspaceDir
       metricsFile
       ;
+    github = {
+      inherit (cfg.github) appId privateKeyFile;
+    };
     pollInterval = cfg.pollInterval;
     drainTimeout = "${toString cfg.drainTimeout}s";
-    cacheUrl = if cfg.cache.enable then "http://${cfg.cache.address}:${toString cfg.cache.port}/" else "";
+    cacheUrl =
+      if cfg.cache.enable then "http://${cfg.cache.address}:${toString cfg.cache.port}/" else "";
     classes = lib.mapAttrs (_: c: {
       inherit (c)
         hull
@@ -83,13 +86,33 @@ in
       description = "owner/name of the repository skiffs register against.";
     };
 
-    tokenFile = mkOption {
-      type = types.path;
+    github = mkOption {
       description = ''
-        File holding a GitHub token with `Administration: write` on
-        {option}`services.bosun.repo`, which is what minting a JIT config
-        requires. Read once at startup and never logged.
+        Identity bosun authenticates to GitHub with: an installation of the
+        shared Spindrift+bosun GitHub App, rather than a personal access
+        token. Minting a JIT config needs `Administration: write` on
+        {option}`services.bosun.repo`, which this installation must grant.
       '';
+      type = types.submodule {
+        options = {
+          appId = mkOption {
+            type = types.ints.positive;
+            description = ''
+              ID of the shared Spindrift+bosun GitHub App. Public -- fine in
+              the Nix store, unlike the key below.
+            '';
+          };
+          privateKeyFile = mkOption {
+            type = types.path;
+            description = ''
+              File holding bosun's own private key for the shared App --
+              distinct from Spindrift's key on the same App; GitHub Apps
+              hold multiple keys concurrently, so the two are rotated
+              independently. Read once at startup and never logged.
+            '';
+          };
+        };
+      };
     };
 
     runtimeDir = mkOption {

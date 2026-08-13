@@ -19,6 +19,17 @@ creation_rules:
           - age1lpfxcn6qwrgtxzymzcxqu20cppsrhmgcpma59sc8ahq9t0w67d3sj8e3e6
           # riptide (ssh-to-age of its ed25519 host key)
           - age15ylde96ar2x0q5gzqrxhkheh5puwtqf0rkuv6khgsv3xfhqu35hquw70ym
+  # Shared across bosun's two hosts, unlike the rest of this section: it
+  # holds bosun's own key on the Spindrift+bosun GitHub App, and both
+  # riptide and oldschool read it directly.
+  - path_regex: nix/secrets/bosun\.sops\.ya?ml
+    key_groups:
+      - age:
+          - age1lpfxcn6qwrgtxzymzcxqu20cppsrhmgcpma59sc8ahq9t0w67d3sj8e3e6
+          # riptide (ssh-to-age of its ed25519 host key)
+          - age15ylde96ar2x0q5gzqrxhkheh5puwtqf0rkuv6khgsv3xfhqu35hquw70ym
+          # oldschool (ssh-to-age of its ed25519 host key)
+          - age1apj76svz7gq7uk9w702fv589s2vcu2vfrayx0uucrkrjwl7xcqaqv6g50c
   - path_regex: nix/secrets/optiplex\.sops\.ya?ml
     key_groups:
       - age:

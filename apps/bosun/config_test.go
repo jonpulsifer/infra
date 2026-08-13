@@ -12,7 +12,7 @@ func TestLoadConfigDefaults(t *testing.T) {
 	path := filepath.Join(dir, "config.json")
 	writeFile(t, path, `{
 		"repo": "acme/widgets",
-		"tokenFile": "/run/secrets/token",
+		"github": {"appId": 1, "privateKeyFile": "/run/secrets/key"},
 		"classes": {"skiff-nixos": {"hull": "/hulls/nixos", "vcpus": 4, "memory": "4096M", "warm": 1}}
 	}`)
 
@@ -41,7 +41,7 @@ func TestLoadConfigRejectsSelfHostedClassName(t *testing.T) {
 	path := filepath.Join(dir, "config.json")
 	writeFile(t, path, `{
 		"repo": "acme/widgets",
-		"tokenFile": "/run/secrets/token",
+		"github": {"appId": 1, "privateKeyFile": "/run/secrets/key"},
 		"classes": {"self-hosted": {"hull": "/hulls/nixos", "vcpus": 4, "memory": "4096M", "warm": 1}}
 	}`)
 	if _, err := LoadConfig(path); err == nil {
@@ -52,7 +52,7 @@ func TestLoadConfigRejectsSelfHostedClassName(t *testing.T) {
 func TestLoadConfigValidatesRepoShape(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.json")
-	writeFile(t, path, `{"repo": "not-a-repo", "tokenFile": "/x", "classes": {"c": {"hull":"/h","vcpus":1,"memory":"1G","warm":1}}}`)
+	writeFile(t, path, `{"repo": "not-a-repo", "github": {"appId": 1, "privateKeyFile": "/x"}, "classes": {"c": {"hull":"/h","vcpus":1,"memory":"1G","warm":1}}}`)
 	if _, err := LoadConfig(path); err == nil {
 		t.Fatal("expected error for malformed repo")
 	}
@@ -61,16 +61,34 @@ func TestLoadConfigValidatesRepoShape(t *testing.T) {
 func TestLoadConfigRequiresAtLeastOneClass(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.json")
-	writeFile(t, path, `{"repo": "acme/widgets", "tokenFile": "/x", "classes": {}}`)
+	writeFile(t, path, `{"repo": "acme/widgets", "github": {"appId": 1, "privateKeyFile": "/x"}, "classes": {}}`)
 	if _, err := LoadConfig(path); err == nil {
 		t.Fatal("expected error for no classes")
+	}
+}
+
+func TestLoadConfigRequiresGithubAppID(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.json")
+	writeFile(t, path, `{"repo": "acme/widgets", "github": {"privateKeyFile": "/x"}, "classes": {"c": {"hull":"/h","vcpus":1,"memory":"1G","warm":1}}}`)
+	if _, err := LoadConfig(path); err == nil {
+		t.Fatal("expected error for missing github.appId")
+	}
+}
+
+func TestLoadConfigRequiresGithubPrivateKeyFile(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.json")
+	writeFile(t, path, `{"repo": "acme/widgets", "github": {"appId": 1}, "classes": {"c": {"hull":"/h","vcpus":1,"memory":"1G","warm":1}}}`)
+	if _, err := LoadConfig(path); err == nil {
+		t.Fatal("expected error for missing github.privateKeyFile")
 	}
 }
 
 func TestLoadConfigAllowsParkedClass(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.json")
-	writeFile(t, path, `{"repo": "acme/widgets", "tokenFile": "/x", "classes": {"c": {"hull":"/h","vcpus":1,"memory":"1G","warm":0}}}`)
+	writeFile(t, path, `{"repo": "acme/widgets", "github": {"appId": 1, "privateKeyFile": "/x"}, "classes": {"c": {"hull":"/h","vcpus":1,"memory":"1G","warm":0}}}`)
 	if _, err := LoadConfig(path); err != nil {
 		t.Fatalf("warm = 0 is a parked class, not an error: %v", err)
 	}
@@ -116,7 +134,7 @@ func TestParseSize(t *testing.T) {
 func TestLoadConfigRejectsUnparseableWorkspaceSize(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.json")
-	writeFile(t, path, `{"repo":"acme/widgets","tokenFile":"/x","classes":{"skiff-test":{"hull":"/h","vcpus":1,"memory":"512M","workspace":"lots","warm":1}}}`)
+	writeFile(t, path, `{"repo":"acme/widgets","github":{"appId":1,"privateKeyFile":"/x"},"classes":{"skiff-test":{"hull":"/h","vcpus":1,"memory":"512M","workspace":"lots","warm":1}}}`)
 	if _, err := LoadConfig(path); err == nil {
 		t.Fatal("expected an error for an unparseable workspace size")
 	}
@@ -130,7 +148,7 @@ func TestLoadConfigRejectsPersistWithoutAWorkspace(t *testing.T) {
 	path := filepath.Join(dir, "config.json")
 	writeFile(t, path, `{
 		"repo": "acme/widgets",
-		"tokenFile": "/run/secrets/token",
+		"github": {"appId": 1, "privateKeyFile": "/run/secrets/key"},
 		"classes": {"skiff-ubuntu": {"hull": "/hulls/ubuntu", "vcpus": 4, "memory": "3072M", "warm": 2, "persist": true}}
 	}`)
 	if _, err := LoadConfig(path); err == nil {
@@ -146,7 +164,7 @@ func TestLoadConfigRejectsAPersistingClassNameThatWouldEscapeItsImageName(t *tes
 		path := filepath.Join(dir, "config.json")
 		writeFile(t, path, `{
 			"repo": "acme/widgets",
-			"tokenFile": "/run/secrets/token",
+			"github": {"appId": 1, "privateKeyFile": "/run/secrets/key"},
 			"classes": {"`+name+`": {"hull": "/h", "vcpus": 1, "memory": "512M", "warm": 1, "workspace": "1G", "persist": true}}
 		}`)
 		if _, err := LoadConfig(path); err == nil {
@@ -160,7 +178,7 @@ func TestLoadConfigDefaultsSpindriftPollInterval(t *testing.T) {
 	path := filepath.Join(dir, "config.json")
 	writeFile(t, path, `{
 		"repo": "acme/widgets",
-		"tokenFile": "/run/secrets/token",
+		"github": {"appId": 1, "privateKeyFile": "/run/secrets/key"},
 		"classes": {"skiff-build": {"hull": "/hulls/nixos", "vcpus": 4, "memory": "4096M", "warm": 0}},
 		"spindrift": {"url": "https://spindrift.example", "tokenFile": "/run/secrets/spindrift", "classes": ["skiff-build"]}
 	}`)
@@ -182,7 +200,7 @@ func TestLoadConfigOmittedSpindriftIsNil(t *testing.T) {
 	path := filepath.Join(dir, "config.json")
 	writeFile(t, path, `{
 		"repo": "acme/widgets",
-		"tokenFile": "/run/secrets/token",
+		"github": {"appId": 1, "privateKeyFile": "/run/secrets/key"},
 		"classes": {"skiff-nixos": {"hull": "/hulls/nixos", "vcpus": 4, "memory": "4096M", "warm": 1}}
 	}`)
 
@@ -200,7 +218,7 @@ func TestLoadConfigRejectsSpindriftMissingURL(t *testing.T) {
 	path := filepath.Join(dir, "config.json")
 	writeFile(t, path, `{
 		"repo": "acme/widgets",
-		"tokenFile": "/run/secrets/token",
+		"github": {"appId": 1, "privateKeyFile": "/run/secrets/key"},
 		"classes": {"skiff-build": {"hull": "/h", "vcpus": 1, "memory": "1G", "warm": 0}},
 		"spindrift": {"tokenFile": "/x", "classes": ["skiff-build"]}
 	}`)
@@ -214,7 +232,7 @@ func TestLoadConfigRejectsSpindriftMissingTokenFile(t *testing.T) {
 	path := filepath.Join(dir, "config.json")
 	writeFile(t, path, `{
 		"repo": "acme/widgets",
-		"tokenFile": "/run/secrets/token",
+		"github": {"appId": 1, "privateKeyFile": "/run/secrets/key"},
 		"classes": {"skiff-build": {"hull": "/h", "vcpus": 1, "memory": "1G", "warm": 0}},
 		"spindrift": {"url": "https://spindrift.example", "classes": ["skiff-build"]}
 	}`)
@@ -228,7 +246,7 @@ func TestLoadConfigRejectsSpindriftWithNoClasses(t *testing.T) {
 	path := filepath.Join(dir, "config.json")
 	writeFile(t, path, `{
 		"repo": "acme/widgets",
-		"tokenFile": "/run/secrets/token",
+		"github": {"appId": 1, "privateKeyFile": "/run/secrets/key"},
 		"classes": {"skiff-build": {"hull": "/h", "vcpus": 1, "memory": "1G", "warm": 0}},
 		"spindrift": {"url": "https://spindrift.example", "tokenFile": "/x", "classes": []}
 	}`)
@@ -245,7 +263,7 @@ func TestLoadConfigRejectsSpindriftClassNotDeclaredInClasses(t *testing.T) {
 	path := filepath.Join(dir, "config.json")
 	writeFile(t, path, `{
 		"repo": "acme/widgets",
-		"tokenFile": "/run/secrets/token",
+		"github": {"appId": 1, "privateKeyFile": "/run/secrets/key"},
 		"classes": {"skiff-nixos": {"hull": "/h", "vcpus": 1, "memory": "1G", "warm": 1}},
 		"spindrift": {"url": "https://spindrift.example", "tokenFile": "/x", "classes": ["skiff-build"]}
 	}`)
@@ -261,7 +279,7 @@ func TestLoadConfigAllowsADottedClassNameThatDoesNotPersist(t *testing.T) {
 	path := filepath.Join(dir, "config.json")
 	writeFile(t, path, `{
 		"repo": "acme/widgets",
-		"tokenFile": "/run/secrets/token",
+		"github": {"appId": 1, "privateKeyFile": "/run/secrets/key"},
 		"classes": {"skiff.ubuntu": {"hull": "/h", "vcpus": 1, "memory": "512M", "warm": 1}}
 	}`)
 	if _, err := LoadConfig(path); err != nil {

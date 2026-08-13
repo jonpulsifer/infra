@@ -44,12 +44,11 @@ func main() {
 		os.Exit(1)
 	}
 
-	tokenRaw, err := os.ReadFile(cfg.TokenFile)
+	auth, err := newAppAuth(cfg.GitHub.AppID, cfg.GitHub.PrivateKeyFile)
 	if err != nil {
-		logger.Error("read token file", "path", cfg.TokenFile, "error", err)
+		logger.Error("init github app auth", "path", cfg.GitHub.PrivateKeyFile, "error", err)
 		os.Exit(1)
 	}
-	token := strings.TrimSpace(string(tokenRaw))
 
 	if err := os.MkdirAll(cfg.LogDir, 0o755); err != nil {
 		logger.Error("create log dir", "error", err)
@@ -59,7 +58,7 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	p := newPool(cfg, newGHClient(token), execLauncher{}, logger)
+	p := newPool(cfg, newGHClient(auth), execLauncher{}, logger)
 
 	if err := p.sweep(ctx); err != nil {
 		logger.Error("sweep", "error", err)

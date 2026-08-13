@@ -44,7 +44,7 @@ Path given via `-config`. Example:
 ```json
 {
   "repo": "jonpulsifer/infra",
-  "tokenFile": "/run/secrets/bosun-github-token",
+  "github": {"appId": 12345, "privateKeyFile": "/run/secrets/bosun-github-app-key"},
   "runtimeDir": "/run/bosun",
   "logDir": "/var/log/bosun",
   "workspaceDir": "/var/lib/bosun/workspace",
