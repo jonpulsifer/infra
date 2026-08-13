@@ -21,7 +21,10 @@ resource "cloudflare_zero_trust_tunnel_cloudflared_config" "this" {
 # published. A wildcard proxied CNAME is a claim over every name in the zone,
 # which answers for names nothing serves: the caller authenticates and then
 # meets a 404 at the gateway, and a deleted App keeps resolving. Apps publish
-# their own records now, so the record half of the wildcard has no work left.
+# their own records now, so the record half of the wildcard has no work left
+# here. A caller whose zone holds nothing hand-managed, and something that
+# answers for a name no App has claimed, can declare one beside its module
+# block — `spindrift.tf` is the zone that does.
 # Several path-scoped ingress rules can share a hostname (Cloudflare routes on
 # path within it), so key on the hostname itself and de-dupe with toset rather
 # than one record per ingress entry.

@@ -23,6 +23,10 @@ import { BundleMissingError, bundleRoutes } from '../../src/web/bundle.ts';
 import { pathFor } from '../../src/web/dispatch.ts';
 import { GITHUB_SETUP_PATH } from '../../src/web/github-setup-route.ts';
 import { HEALTH_PATH, READY_PATH, webRoutes } from '../../src/web/routes.ts';
+import {
+  STATUS_PATH,
+  type StatusRouteDeps,
+} from '../../src/web/status-route.ts';
 import { STREAM_PATHS } from '../../src/web/streams.ts';
 import { UPLOAD_PATH } from '../../src/web/upload.ts';
 import {
@@ -127,6 +131,14 @@ const noGitHubSetup = {
   },
 };
 
+/** Inert like the rest: the status page reads the manifest only per request. */
+const noStatus: StatusRouteDeps = {
+  db: noAuth.db,
+  current: () => {
+    throw new Error('a route-table test read the installation');
+  },
+};
+
 const served = webRoutes(
   CLIENT,
   noSession,
@@ -134,6 +146,7 @@ const served = webRoutes(
   noWebhook,
   noBosun,
   noGitHubSetup,
+  noStatus,
 );
 
 const AUTH_PATHS = AUTH_ACTS.map(authPathFor);
@@ -152,6 +165,7 @@ describe('what the web process serves', () => {
         WEBHOOK_PATH,
         ...BOSUN_PATHS,
         GITHUB_SETUP_PATH,
+        STATUS_PATH,
       ].sort(),
     );
   });
@@ -176,6 +190,7 @@ describe('what the web process serves', () => {
         WEBHOOK_PATH,
         ...BOSUN_PATHS,
         GITHUB_SETUP_PATH,
+        STATUS_PATH,
       ].sort(),
     );
   });
@@ -199,9 +214,12 @@ describe('what the web process serves', () => {
 
   test('the client is served at the root and nowhere else', () => {
     // The client owns navigation (a hash router), so there is no per-screen
-    // route and no catch-all. A second document route would mean the server had
-    // started routing screens.
+    // route. A second document route would mean the server had started routing
+    // screens — which is what makes {@link STATUS_PATH} safe to add: it is a
+    // catch-all that serves an App's status page, never this client, and it is
+    // reached only by a path the table does not hold.
     expect(served['/']).toBe(CLIENT['/']);
+    expect(served[STATUS_PATH]).not.toBe(CLIENT['/']);
   });
 });
 

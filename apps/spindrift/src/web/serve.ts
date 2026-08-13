@@ -284,6 +284,7 @@ export async function start(
         });
       },
     },
+    { db, current: installationNow },
   );
 
   const server = Bun.serve<StreamSocketData>({

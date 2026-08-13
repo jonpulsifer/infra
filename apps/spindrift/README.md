@@ -43,9 +43,10 @@ separation holds here as everywhere, so the deployment carries a finished
 `files` tree with no framework and no build command, and a rollback re-deploys
 rather than rebuilding.
 
-Datastore provisioning has no command yet: the App workspace lists what the
-`datastores` table and each adapter already know (`src/adapters/datastore/`),
-but nothing creates or attaches one. Jobs run end to end on `kubernetes` and
+A Datastore is created, attached, detached and destroyed from the Datastores
+ledger (`src/commands/datastores/`), which is where its lifetime lives — the App
+workspace lists the ones an App is attached to and the adapters
+(`src/adapters/datastore/`) provision them. Jobs run end to end on `kubernetes` and
 `cloudrun` — `runComponent` presses one and the App workspace reads its
 executions back from the platform, never from a core-side guess. The App
 workspace and Deploy screen query command-owned state; authenticated
@@ -53,13 +54,18 @@ WebSockets carry durable build and deploy attempt events separately from
 adapter-owned runtime output. `test/fixtures/scenarios.ts` remains as an
 explicit standalone scenario for developing the views without a database.
 
-One named gap is deliberate:
-
-- **The status page is not served yet.** §9 wants a URL that resolves from the
-  moment an App exists, on a lowest-precedence wildcard route. Naming is here and
-  a deployed Component's names resolve through its route; the wildcard route and
-  the page it points at are not, so an App's address stays dark until something
-  has actually been deployed to it.
+**An App's address answers from the moment the App exists.** §9 asks for a URL
+that resolves before anything has been deployed to it, on a lowest-precedence
+wildcard route, and `src/web/status-route.ts` is the page it lands on: one
+process serves both surfaces and tells them apart by the `Host` header, which is
+what `controlPlane.hostname` is authored for. It answers 503 rather than 200 —
+every state it reports is an address that is not serving — and says only which
+name was asked for and whether a release has reached it. The two halves outside
+this app are the wildcard route on the Apps gateway
+(`clusters/offsite/apps/spindrift/status-route.yaml`) and the wildcard record
+pointed at the tunnel (`terraform/network/cloudflare/spindrift.tf`); a Component
+that is serving takes its own name back at the gateway, where an exact hostname
+outranks a wildcard.
 
 ## Shape
 
