@@ -450,6 +450,31 @@ export const WORKSPACE_SCENARIOS = {
       },
     ],
     configKeys: ['DATABASE_URL', 'PORT'],
+    datastores: [
+      {
+        id: 'datastore-beacon-primary',
+        name: 'primary',
+        engine: 'postgres',
+        provenance: 'managed',
+        attachedTo: 'web',
+        target: 'Metal',
+        phase: 'LIVE',
+      },
+      // Still converging, and saying why. A managed store is created and then
+      // reconciled exactly as a Deploy is, so the fixture screens have to show
+      // one mid-flight — that is the state a row without a phase used to render
+      // as finished.
+      {
+        id: 'datastore-beacon-cache',
+        name: 'cache',
+        engine: 'valkey',
+        provenance: 'managed',
+        attachedTo: null,
+        target: 'Metal',
+        phase: 'WAITING',
+        detail: 'Waiting for 1 shard to report ready',
+      },
+    ],
     activity: [
       {
         kind: 'deploy',
@@ -536,6 +561,7 @@ export const WORKSPACE_SCENARIOS = {
     // wrong.
     configKeys: [],
     // §11: a website cannot attach a Datastore.
+    datastores: [],
     activity: [
       {
         kind: 'deploy',
@@ -587,6 +613,20 @@ export const WORKSPACE_SCENARIOS = {
       },
     ],
     configKeys: ['BUCKET'],
+    datastores: [
+      {
+        id: 'datastore-ledger-archive',
+        name: 'archive',
+        engine: 'postgres',
+        provenance: 'external',
+        attachedTo: 'nightly',
+        target: 'Cloud Run',
+        // An `external` row is never provisioned by Spindrift, so the loop
+        // never polls it and the phase it was inserted with is the one it
+        // keeps. LIVE is the honest reading: the thing exists.
+        phase: 'LIVE',
+      },
+    ],
     activity: [
       {
         kind: 'deploy',
@@ -685,6 +725,7 @@ export const WORKSPACE_SCENARIOS = {
     // The job's, not the service's — the pair a `Set variable` on this screen
     // would write to is the pair the screen is showing.
     configKeys: ['RETENTION_DAYS'],
+    datastores: [],
     activity: [
       {
         kind: 'deploy',

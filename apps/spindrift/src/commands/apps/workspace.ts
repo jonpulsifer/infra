@@ -9,6 +9,7 @@ import { artifactSummary } from '../../domain/artifact-name.ts';
 import { runsNothingOn } from '../../domain/capabilities.ts';
 import { elapsedSince } from '../../domain/elapsed.ts';
 import {
+  datastoreVesselLabel,
   deployTargetOf,
   hasTargetConnection,
   hasVesselLocation,
@@ -24,6 +25,7 @@ import type {
   ActivityEntry,
   BuildRouteOptionView,
   ComponentView,
+  DatastoreView,
   DeployPhase,
   Diagnosis,
   DriftView,
@@ -98,12 +100,24 @@ export const getAppWorkspace: Command<
           desiredTargets: { with: { target: { with: { vessel: true } } } },
         },
       },
+      datastores: {
+        with: {
+          vessel: true,
+        },
+      },
     },
   });
 
   if (!app) {
     return failed('NOT_FOUND', `App '${input.name}' not found`);
   }
+
+  const unattachedDatastores = await context.db.query.datastores.findMany({
+    where: (ds, { isNull }) => isNull(ds.appId),
+    with: {
+      vessel: true,
+    },
+  });
 
   // The Component the screen is showing. Every per-Component read below hangs
   // off this one — its runtime, the Target it is placed on, its config — so a
@@ -166,6 +180,36 @@ export const getAppWorkspace: Command<
         : { when: elapsedSince(deploy.createdAt, now) }),
     };
   });
+
+  // Keyed on the id, never the name. The unique key on `datastores` is
+  // (vessel_id, name), so two Vessels may each legitimately hold a `primary` —
+  // a name-keyed map dropped the second one silently, and the row that
+  // vanished would be exactly the one an operator came here to find. The id is
+  // what every act on this row resolves on, so it is carried regardless, and
+  // with it on the row the two lists are disjoint by construction: `appId` is
+  // this App's or it is null.
+  const datastoresMap = new Map<string, DatastoreView>();
+
+  for (const ds of [...app.datastores, ...unattachedDatastores]) {
+    datastoresMap.set(ds.id, {
+      id: ds.id,
+      name: ds.name,
+      engine: ds.engine,
+      provenance: ds.provenance,
+      // A Datastore is attached to the App (§11), so the Component named here
+      // is the App's first and never the selection: the same store reporting
+      // two different attachments as the selection moves is a second answer to
+      // a question that has one.
+      attachedTo:
+        ds.appId === null ? null : (app.components[0]?.name ?? app.name),
+      target: datastoreVesselLabel(ds.vessel),
+      // What it is doing, and why it is doing it. A managed store converges
+      // like a Deploy does, so a row without these read as finished the
+      // instant it was asked for and as broken while it was bootstrapping.
+      phase: ds.phase,
+      ...(ds.detail === null ? {} : { detail: ds.detail }),
+    });
+  }
 
   // Keys only, never values (§10) — `configuredKeys` is the same read
   // `setConfig` itself uses to know what is already there, and it is the
@@ -413,6 +457,7 @@ export const getAppWorkspace: Command<
         : 'none',
     components,
     configKeys,
+    datastores: Array.from(datastoresMap.values()),
     activity,
     runtime,
     autoDeploy: app.sourceKind === 'repo' ? app.autoDeploy : null,

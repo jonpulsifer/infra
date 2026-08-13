@@ -14,10 +14,11 @@
  * the row already says which one core would accept — `destroyDatastore`
  * refuses while attached.
  *
- * **Attach has no control yet.** `attachDatastore` binds a store to an App and
- * this ledger has none selected, so it stays an API call until it lands on the
- * surface it belongs to — a Component's, since a Component is what reads the
- * connection.
+ * **Attach is here too, with the App named rather than implied.** The ledger
+ * has no App open, so the one thing `attachDatastore` needs that a row does not
+ * carry is a picker — `listApps` supplies it. The App workspace attaches from
+ * the other end, where the App is the one that is implied; both press the same
+ * command, and every rule it enforces stays in it.
  *
  * Not a `SupplyChainTabs` member. §2's chain is Source + Build = Artifact;
  * a Datastore is never an input to that chain or an output of it, so tabbing
@@ -27,6 +28,7 @@
 import { Database } from 'lucide-react';
 import { useState } from 'react';
 import type {
+  AppListItem,
   DatastoreListItem,
   DatastoreVesselOption,
 } from '../../../commands/views.ts';
@@ -56,6 +58,16 @@ import { deployTone } from './deploys.tsx';
  */
 export type DatastoreAct = (
   datastoreId: string,
+) => Promise<
+  { readonly ok: true } | { readonly ok: false; readonly message: string }
+>;
+
+/**
+ * Attaching one Datastore to one App, both named — the ledger implies neither.
+ */
+export type AttachLedgerDatastore = (
+  datastoreId: string,
+  appId: string,
 ) => Promise<
   { readonly ok: true } | { readonly ok: false; readonly message: string }
 >;
@@ -161,15 +173,22 @@ const COLUMNS: readonly Column<DatastoreListItem>[] = [
  */
 function DatastoreRowActions({
   datastore,
+  apps,
+  onAttach,
   onDetach,
   onDestroy,
 }: {
   readonly datastore: DatastoreListItem;
+  /** The Apps `attachDatastore` could be pointed at — the picker's whole list. */
+  readonly apps: readonly AppListItem[];
+  readonly onAttach: AttachLedgerDatastore;
   readonly onDetach: DatastoreAct;
   readonly onDestroy: DatastoreAct;
 }) {
   const [busy, setBusy] = useState(false);
   const [refusal, setRefusal] = useState<string | null>(null);
+  const [appId, setAppId] = useState('');
+  const chosen = appId === '' ? apps[0]?.id : appId;
 
   const act = (run: DatastoreAct) => {
     setBusy(true);
@@ -187,7 +206,38 @@ function DatastoreRowActions({
           {refusal}
         </p>
       ) : null}
-      <div className="flex flex-wrap gap-2">
+      <div className="flex flex-wrap items-center gap-2">
+        {/*
+          Attach or detach, never both: `appId` already says which one applies,
+          and the picker travels with the act rather than above it, because an
+          App is the one thing this act needs that the row does not carry.
+        */}
+        {datastore.appId === null && apps.length > 0 ? (
+          <>
+            <Select
+              id="attach-app"
+              value={chosen ?? ''}
+              disabled={busy}
+              options={apps.map((app) => ({ value: app.id, label: app.name }))}
+              onChange={setAppId}
+            />
+            <Button
+              variant="outline"
+              disabled={busy || chosen === undefined}
+              onClick={() => {
+                if (chosen === undefined) return;
+                setBusy(true);
+                setRefusal(null);
+                void onAttach(datastore.id, chosen).then((result) => {
+                  setBusy(false);
+                  if (!result.ok) setRefusal(result.message);
+                });
+              }}
+            >
+              Attach
+            </Button>
+          </>
+        ) : null}
         {datastore.appId !== null ? (
           <Button
             variant="outline"
@@ -384,15 +434,20 @@ function NewDatastoreForm({
 export function DatastoreLedger({
   datastores,
   vessels,
+  apps = [],
   onNavigate,
   onCreate,
+  onAttach,
   onDetach,
   onDestroy,
 }: {
   readonly datastores: readonly DatastoreListItem[];
   readonly vessels: readonly DatastoreVesselOption[];
+  /** The Apps an unattached row can be attached to. */
+  readonly apps?: readonly AppListItem[];
   readonly onNavigate: (path: string) => void;
   readonly onCreate: CreateLedgerDatastore;
+  readonly onAttach: AttachLedgerDatastore;
   readonly onDetach: DatastoreAct;
   readonly onDestroy: DatastoreAct;
 }) {
@@ -522,6 +577,8 @@ export function DatastoreLedger({
             <DatastoreRowActions
               key={datastore.id}
               datastore={datastore}
+              apps={apps}
+              onAttach={onAttach}
               onDetach={onDetach}
               onDestroy={onDestroy}
             />
@@ -537,16 +594,25 @@ export function DatastoreLedger({
  * unscoped to any one App (§11's "top-level and attached, not a field", read
  * as a screen).
  *
- * Detach and Destroy are wired here rather than left to {@link DatastoreLedger}
- * calling `command` itself: the re-read after a successful act belongs to
- * whoever owns the list being re-read, and only this screen holds it.
+ * Attach, Detach and Destroy are wired here rather than left to
+ * {@link DatastoreLedger} calling `command` itself: the re-read after a
+ * successful act belongs to whoever owns the list being re-read, and only this
+ * screen holds it.
  */
 export function DatastoresScreen({
   onNavigate,
 }: {
   onNavigate: (path: string) => void;
 }) {
-  const read = useRead([['listDatastores', {}]], null);
+  const read = useRead(
+    [
+      ['listDatastores', {}],
+      // The picker's list, read here rather than on the row: an App is what
+      // `attachDatastore` needs and a Datastore row does not carry one.
+      ['listApps', {}],
+    ],
+    null,
+  );
 
   /**
    * One dispatch and no attach: the Datastore lands unattached, which is what
@@ -574,6 +640,20 @@ export function DatastoresScreen({
           cause instanceof Error
             ? cause.message
             : 'Creating the Datastore failed',
+      };
+    }
+  };
+
+  const handleAttach: AttachLedgerDatastore = async (datastoreId, appId) => {
+    try {
+      const result = await command('attachDatastore', { datastoreId, appId });
+      if (!result.ok) return { ok: false, message: result.failure.message };
+      read.reload();
+      return { ok: true };
+    } catch (cause: unknown) {
+      return {
+        ok: false,
+        message: cause instanceof Error ? cause.message : 'Attaching failed',
       };
     }
   };
@@ -616,13 +696,15 @@ export function DatastoresScreen({
       />
     );
   }
-  const [listed] = read.value;
+  const [listed, apps] = read.value;
   return (
     <DatastoreLedger
       datastores={listed.datastores}
       vessels={listed.vessels}
+      apps={apps.apps}
       onNavigate={onNavigate}
       onCreate={handleCreate}
+      onAttach={handleAttach}
       onDetach={handleDetach}
       onDestroy={handleDestroy}
     />

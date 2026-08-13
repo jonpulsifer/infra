@@ -7,8 +7,9 @@
  * is a list of, and every act it offers is about one of them.
  *
  * A Datastore is a top-level noun (§11) with its own screens under
- * `/datastores`, which is where its whole lifetime lives — attachment
- * included.
+ * `/datastores`, which is where its lifetime lives. What this screen keeps is
+ * the one line of it an App owns: which stores it reads through, and a picker
+ * that attaches one more.
  *
  * Two things are stated here rather than hidden:
  *
@@ -37,6 +38,7 @@ import type {
   ActivityEntry,
   BuildRouteOptionView,
   ComponentView,
+  DatastoreView,
   LogLine,
   PrerequisiteRowView,
   TargetListItem,
@@ -255,6 +257,22 @@ export type SetConfig = (change: {
   | { readonly ok: false; readonly message: string }
 >;
 
+/**
+ * Attaching one Datastore to the App this screen is showing (§11).
+ *
+ * The App is bound by the screen above, exactly as it is for {@link SetConfig},
+ * and every refusal is a sentence core composed — the attachment rules (one
+ * store per engine per App, cluster-local placement) live in `attachDatastore`
+ * and are not restated here. Detach and destroy are the ledger's: they need no
+ * App, and a second place to end a Datastore's life is a second place for a
+ * refusal to come back to.
+ */
+export type AttachDatastore = (
+  datastoreId: string,
+) => Promise<
+  { readonly ok: true } | { readonly ok: false; readonly message: string }
+>;
+
 export function Workspace({
   view,
   onDeploy,
@@ -272,6 +290,7 @@ export function Workspace({
   onRunJob,
   onSetAutoDeploy,
   onSetBuildRoute,
+  onAttachDatastore,
   onFollowExecution,
   executionLines,
   tab = 'overview',
@@ -368,6 +387,11 @@ export function Workspace({
    * against.
    */
   onSetBuildRoute?: SetBuildRoute;
+  /**
+   * Attach a Datastore to this App (§11). Absent where the screen wires no
+   * acts, for the same reason {@link onSetReach} is.
+   */
+  onAttachDatastore?: AttachDatastore;
   /** Follow one run's output, or nothing when the name is `null`. */
   onFollowExecution?: (execution: string | null) => void;
   /** The lines of whichever run is being followed. */
@@ -512,6 +536,9 @@ export function Workspace({
               ? {}
               : { onUnplaceComponent })}
             targets={targets}
+            datastores={view.datastores}
+            {...(onNavigate ? { onNavigate } : {})}
+            {...(onAttachDatastore ? { onAttachDatastore } : {})}
           />
           {/*
             Empty rather than optional-and-absent for an archive App and for
@@ -1121,6 +1148,9 @@ function Components({
   archiveSourced = false,
   onStageArchive,
   onUploadArchive,
+  datastores = [],
+  onNavigate,
+  onAttachDatastore,
 }: {
   components: readonly ComponentView[];
   /** Whether uploading is this App's only way to a new release. */
@@ -1135,6 +1165,17 @@ function Components({
   onMoveComponent?: MoveComponent;
   onUnplaceComponent?: UnplaceComponent;
   targets?: readonly TargetListItem[];
+  /**
+   * Every Datastore this App reads through, plus the unattached ones it could
+   * (§11). One line under the Components rather than a card beside them: a
+   * Datastore is not a peer of the thing this screen is a list of, and the
+   * card that said it was took half the width to state at most a handful of
+   * names.
+   */
+  datastores?: readonly DatastoreView[];
+  /** Where a Datastore's name goes when it is pressed — its own screen. */
+  onNavigate?: (path: string) => void;
+  onAttachDatastore?: AttachDatastore;
 }) {
   /*
     Two disclosures rather than one, because they are two acts on the same row
@@ -1277,8 +1318,118 @@ function Components({
             </div>
           );
         })}
+        <DatastoreLine
+          datastores={datastores}
+          {...(onNavigate ? { onNavigate } : {})}
+          {...(onAttachDatastore ? { onAttachDatastore } : {})}
+        />
       </CardContent>
     </Card>
+  );
+}
+
+/**
+ * The Datastores this App reads through, and the picker that attaches one more.
+ *
+ * One line, not a section. What an App owns of a Datastore is the attachment;
+ * everything else — creating, detaching, destroying, and the object itself —
+ * is the ledger's, one press away through the name.
+ *
+ * The picker lists only unattached stores because those are the only ones
+ * `attachDatastore` accepts, and it is withheld entirely where there are none
+ * to pick: a select with nothing in it is the dead control the both-or-neither
+ * rule exists to prevent. Every other refusal is core's — placement and the
+ * one-per-engine rule are its to state, not this screen's to predict.
+ */
+function DatastoreLine({
+  datastores,
+  onNavigate,
+  onAttachDatastore,
+}: {
+  datastores: readonly DatastoreView[];
+  onNavigate?: (path: string) => void;
+  onAttachDatastore?: AttachDatastore;
+}) {
+  const [chosen, setChosen] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [refusal, setRefusal] = useState<string | null>(null);
+
+  const attached = datastores.filter((row) => row.attachedTo !== null);
+  const free = datastores.filter((row) => row.attachedTo === null);
+  const pick = chosen === '' ? free[0]?.id : chosen;
+
+  if (attached.length === 0 && (free.length === 0 || !onAttachDatastore)) {
+    return null;
+  }
+
+  const attach = () => {
+    if (!onAttachDatastore || pick === undefined) return;
+    setBusy(true);
+    setRefusal(null);
+    void onAttachDatastore(pick).then((result) => {
+      setBusy(false);
+      if (!result.ok) setRefusal(result.message);
+    });
+  };
+
+  return (
+    <div className="mt-3 border-t border-border-soft pt-3">
+      <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+        <span className="font-medium text-foreground">Datastores</span>
+        {attached.length === 0 ? (
+          <span>none attached</span>
+        ) : (
+          attached.map((datastore) => (
+            <button
+              key={datastore.id}
+              type="button"
+              disabled={!onNavigate}
+              onClick={() => onNavigate?.(`/datastores/${datastore.id}`)}
+              className="rounded-full border border-border-soft px-2 py-0.5 font-mono text-foreground enabled:hover:border-input disabled:cursor-default"
+            >
+              {datastore.name} · {datastore.engine}
+              {datastore.phase === 'LIVE' ? '' : ` · ${datastore.phase}`}
+            </button>
+          ))
+        )}
+        {onAttachDatastore && free.length > 0 ? (
+          <span className="ml-auto flex items-center gap-2">
+            <select
+              name="attach-datastore"
+              aria-label="Datastore to attach"
+              value={pick ?? ''}
+              disabled={busy}
+              onChange={(event) => setChosen(event.currentTarget.value)}
+              className="h-8 rounded-sm border border-input bg-background px-2 font-mono text-xs text-foreground"
+            >
+              {free.map((datastore) => (
+                <option key={datastore.id} value={datastore.id}>
+                  {datastore.name} · {datastore.engine}
+                </option>
+              ))}
+            </select>
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={busy}
+              onClick={attach}
+            >
+              {busy ? 'Attaching…' : 'Attach'}
+            </Button>
+          </span>
+        ) : null}
+      </div>
+      {refusal ? (
+        <p className="mt-2 rounded-md border border-destructive/40 bg-destructive-soft px-3 py-2 text-xs text-destructive">
+          {refusal}
+        </p>
+      ) : null}
+      <p className="pt-2 text-xs text-muted-foreground">
+        A Postgres connection arrives as DATABASE_URL and a Valkey one as
+        REDIS_URL, on the next Deploy — attaching writes a row, it does not
+        restart what is running.
+      </p>
+    </div>
   );
 }
 
@@ -3177,6 +3328,34 @@ function AppWorkspace({
     }
   };
 
+  /*
+    The one Datastore act an App has (§11). `handleSetConfig`'s shape: the App
+    the screen is showing is bound here so the card does not restate it, the
+    command's own refusal is passed through unedited, and the workspace is
+    re-read on success rather than patched — `attachedTo` is a row this act
+    just changed.
+  */
+  const handleAttachDatastore: AttachDatastore = async (datastoreId) => {
+    const appId = workspace.appId;
+    if (appId === undefined) {
+      return {
+        ok: false,
+        message: 'This App has no id to attach a Datastore to',
+      };
+    }
+    try {
+      const result = await command('attachDatastore', { datastoreId, appId });
+      if (!result.ok) return { ok: false, message: result.failure.message };
+      read.reload();
+      return { ok: true };
+    } catch (cause: unknown) {
+      return {
+        ok: false,
+        message: cause instanceof Error ? cause.message : 'Attaching failed',
+      };
+    }
+  };
+
   return (
     <>
       <Workspace
@@ -3197,6 +3376,7 @@ function AppWorkspace({
         onMoveComponent={handleMoveComponent}
         onUnplaceComponent={handleUnplaceComponent}
         targets={targets}
+        onAttachDatastore={handleAttachDatastore}
         {...(runs === null
           ? {}
           : {

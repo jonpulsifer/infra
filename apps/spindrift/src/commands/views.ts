@@ -519,13 +519,58 @@ export type Runtime =
     }
   | { readonly kind: 'none'; readonly because: string };
 
+/** One Datastore as the workspace lists it (§11). */
+export interface DatastoreView {
+  /**
+   * The Datastore's id, and the only thing on this row an act can be aimed at.
+   *
+   * `attachDatastore`, `detachDatastore` and `destroyDatastore` all resolve on
+   * it. A row carrying only a name could not name one of them: the unique key
+   * is (vessel_id, name), so two Vessels may legitimately hold a `primary` and
+   * the name is enough to read and not enough to write.
+   */
+  readonly id: string;
+  readonly name: string;
+  readonly engine: 'postgres' | 'valkey';
+  readonly provenance: 'managed' | 'external';
+  /** The Component it is attached to, or `null` while it is unattached. */
+  readonly attachedTo: string | null;
+  /** Where it lives — a cluster-local one pins its App to that Target (§11). */
+  readonly target: string;
+  /**
+   * How far provisioning has got (§11).
+   *
+   * A managed Datastore is created and then converged, exactly like a Deploy,
+   * so a row without this said `postgres · managed · Metal` for the several
+   * minutes a CloudNativePG cluster takes to bootstrap and read as finished
+   * the instant it was asked for.
+   */
+  readonly phase: DeployPhase;
+  /** The operator's own sentence, which is what a stuck Datastore is read from. */
+  readonly detail?: string;
+  /*
+    No `connectionRef`, deliberately. It names a Secret, and every screen in
+    this file states references and never credentials — the same posture
+    `getAppWorkspace` takes for config, where keys travel and values never do.
+    Nothing on this row acts on it either: the connection reaches a container
+    through the chart's `secretKeyRef`, never through the browser.
+  */
+}
+
 /**
  * One Datastore as the global ledger lists it — every one this installation
  * holds, not one App's attached subset.
  *
- * `attachedTo` is the App's own name, which is what §11 attaches a Datastore
- * to. `vesselId` and `appId` travel with it because this is the screen that
- * Detaches and Destroys, and both acts resolve on an id.
+ * `attachedTo` differs from {@link DatastoreView}'s field of the same name on
+ * purpose: the workspace's row names the App's first Component, because that
+ * screen is already a Component-shaped list and has nowhere else to point.
+ * This ledger has no Component selected — it has no App selected — so
+ * `attachedTo` is the App's own name, which is what §11 actually attaches a
+ * Datastore to.
+ *
+ * `vesselId` and `appId` travel here and not on `DatastoreView` because this
+ * is the one screen that can Detach or Destroy a Datastore without an App
+ * workspace already open to supply them.
  */
 export interface DatastoreListItem {
   readonly id: string;
@@ -582,9 +627,8 @@ export interface DatastoreVesselOption {
  * of either should not have to know which. What is only here is `object` — the
  * far side's document, which no list would carry a copy of per row.
  *
- * No `connectionRef`. It names a Secret, and every screen states references
- * and never credentials: an `external` Datastore's is human-authored into the
- * same column a managed one's reference lands in,
+ * No `connectionRef`, for `DatastoreView`'s reason. An `external` Datastore's
+ * is human-authored into the same column a managed one's reference lands in,
  * and a human authoring a connection string writes the credential in it. The
  * variable it arrives on is a fact of the engine and is stated by the screen.
  */
@@ -724,6 +768,7 @@ export interface WorkspaceView {
    * allowed to render.
    */
   readonly configKeys: readonly string[];
+  readonly datastores: readonly DatastoreView[];
   readonly activity: readonly ActivityEntry[];
   /**
    * The Component's output surface (§17) — one of three, never a nullable log.
