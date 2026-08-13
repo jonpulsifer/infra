@@ -29,9 +29,11 @@ provider "google-beta" {
   impersonate_service_account = "terraform@homelab-ng.iam.gserviceaccount.com"
 }
 
-# Service Networking otherwise charges its API request to the project that
-# owns the impersonated service account, even though the consumer network and
-# enabled API both belong to this vessel.
+# Nothing in configuration uses this alias any more — it exists so the state
+# can destroy the Private Service Access connection that was created through
+# it, which Terraform refuses to do once the provider configuration is gone.
+# Remove this block after the apply that destroys
+# module.network.google_service_networking_connection.private_services.
 provider "google" {
   alias                       = "bluenose_quota"
   project                     = local.project

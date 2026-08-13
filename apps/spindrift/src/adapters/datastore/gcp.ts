@@ -22,10 +22,12 @@
  *    reach. On a cluster the two nouns coincide and the distinction stayed
  *    invisible.
  *
- * What is missing is one fact, and it is missing from the model rather than from
- * this file: **the vessel's network.** Both products are reached over Private
- * Service Connect, and a PSC endpoint is a forwarding rule in a consumer subnet
- * pointing at the producer's service attachment:
+ * The fact this file used to be short of exists now: a `gcp-project` vessel
+ * carries its `network` on `GcpProjectLocation` (`domain/vessel.ts`), seeded
+ * from the installation manifest like every other boundary fact (§20), and
+ * Terraform's two service connection policies authorize each producer to
+ * create its endpoint in it. Both products are reached over Private Service
+ * Connect:
  *
  * - **Cloud SQL** — `sqladmin.googleapis.com`, `POST /v1/projects/{project}/
  *   instances` with `settings.ipConfiguration.pscConfig.pscEnabled` and no
@@ -36,15 +38,12 @@
  *   `pscAutoConnections` naming the consumer network. PSC-native: the producer
  *   creates the endpoint, so this half is one call rather than two.
  *
- * `CloudRunConnection` carries `region`, `endpoint` and a service account;
- * `VesselFacts` carries served hosts and reachable registries. Neither carries a
- * network, a subnet, or a PSC connection policy, and none of them should be
- * invented here — the network is a boundary fact, so it belongs on the Vessel
- * beside the project, seeded from the manifest like every other one (§20).
- *
- * Until that fact exists, every verb answers with the sentence above rather than
- * half-provisioning an instance nothing on the VPC could dial. §13's grammar for
- * a Target that cannot do a thing: a stated reason, never a silent failure.
+ * What remains missing is this file's own implementation: `provision`,
+ * `observe` and `destroy` written against those two APIs — a separate decision
+ * about whether the capability is wanted, which this file is not making. Until
+ * it is, every verb answers with one sentence rather than half-provisioning an
+ * instance nothing on the VPC could dial. §13's grammar for a Target that
+ * cannot do a thing: a stated reason, never a silent failure.
  */
 import type { TargetAdapter } from '../../config/manifest.schema.ts';
 import { targetLabel } from '../../domain/target.ts';
@@ -84,7 +83,7 @@ export const GCP_DATASTORE_PRODUCTS = {
 >;
 
 /**
- * The one fact this adapter is short of, as the sentence an operator reads.
+ * The gap this adapter refuses over, as the sentence an operator reads.
  *
  * A constant so the three verbs cannot drift into three different explanations
  * of the same gap — and so a test can assert that the refusal names what is
@@ -92,7 +91,8 @@ export const GCP_DATASTORE_PRODUCTS = {
  */
 export const UNIMPLEMENTED =
   'a cloud Datastore is reached over a Private Service Connect endpoint in the ' +
-  "vessel's VPC, and a Vessel does not yet carry a network to place one in";
+  "vessel's network, and provisioning one against Cloud SQL or Memorystore is " +
+  'not written yet';
 
 /** Raised by every verb, with {@link UNIMPLEMENTED} as its message. */
 export class CloudDatastoreUnavailableError extends Error {

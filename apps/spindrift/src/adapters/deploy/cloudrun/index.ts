@@ -1084,8 +1084,13 @@ export class CloudRunDeployAdapter implements DeployAdapter {
       // this adapter drives hosts one, and a managed database beside it is
       // `external` provenance rather than something discovered here.
       persistence: false,
-      postgres: false,
-      valkey: false,
+      // Derived from the vessel's network rather than probed: both engines
+      // sit behind PSC endpoints in the same vessel network, so one fact
+      // gates both, and absence is the honest answer for a project serving
+      // only Cloud Run and Firebase Hosting — a vessel with no network is a
+      // vessel that cannot host a Datastore, which is a capability (§20).
+      postgres: connection.network !== undefined,
+      valkey: connection.network !== undefined,
       // §8: advertised as absent, deliberately. See the file's header.
       egressFiltering: false,
       policyEngine: await this.admissionPolicy(connection),

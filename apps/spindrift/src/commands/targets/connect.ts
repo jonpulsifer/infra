@@ -359,7 +359,10 @@ function connectionFor(
 }
 
 /** The boundary this act connects, as a row to create or update. */
-function vesselFor(input: ConnectTargetInput): {
+function vesselFor(
+  input: ConnectTargetInput,
+  existingLocation: VesselLocation | null,
+): {
   kind: VesselKind;
   location: VesselLocation;
   servedHosts: string[] | null;
@@ -367,7 +370,7 @@ function vesselFor(input: ConnectTargetInput): {
 } {
   return {
     kind: input.kind,
-    location: locationOf(input),
+    location: locationOf(input, existingLocation),
     servedHosts:
       input.servedHosts === undefined ? null : [...input.servedHosts],
     // Neither edge boundary states one: nothing on either pulls an image, so
@@ -382,12 +385,25 @@ function vesselFor(input: ConnectTargetInput): {
 }
 
 /** Where the boundary is, in the terms its own kind states it in. */
-function locationOf(input: ConnectTargetInput): VesselLocation {
+function locationOf(
+  input: ConnectTargetInput,
+  existing: VesselLocation | null,
+): VesselLocation {
   switch (input.kind) {
     case 'cluster':
       return { kind: 'cluster', apiServer: input.apiServer };
     case 'gcp-project':
-      return { kind: 'gcp-project', project: input.project };
+      // The network survives a reconnect rather than being restated by it:
+      // it is a manifest-seeded fact (§20) the connect act never asks for, so
+      // rebuilding the location from this input alone would silently null a
+      // fact the operator declared elsewhere every time a project reconnects.
+      return {
+        kind: 'gcp-project',
+        project: input.project,
+        ...(existing?.kind === 'gcp-project' && existing.network !== undefined
+          ? { network: existing.network }
+          : {}),
+      };
     case 'vercel-team':
       return { kind: 'vercel-team', team: input.team };
     case 'cloudflare-account':
@@ -426,13 +442,13 @@ export const connectTarget: Command<
   // it. Idempotent by name for the same reason connect is: reconnecting a
   // project must reuse its vessel rather than mint a second one that its two
   // surfaces would then be split across.
-  const desiredVessel = vesselFor(input);
   const existingVessel = (
     await context.db
       .select()
       .from(vessels)
       .where(eq(vessels.name, input.vessel))
   )[0];
+  const desiredVessel = vesselFor(input, existingVessel?.location ?? null);
   const vessel =
     existingVessel === undefined
       ? (

@@ -43,10 +43,5 @@ module "network" {
   region      = local.region
   subnet_cidr = local.vessel_topology.subnet_cidr
 
-  providers = {
-    google       = google
-    google.quota = google.bluenose_quota
-  }
-
   depends_on = [module.vessel]
 }

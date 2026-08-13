@@ -30,6 +30,7 @@ import type { TargetAdapter } from '../config/manifest.schema.ts';
 import { isLabel } from './naming.ts';
 import {
   DATASTORE_SURFACE_BY_VESSEL_KIND,
+  type GcpProjectNetwork,
   type VesselKind,
   type VesselLocation,
 } from './vessel.ts';
@@ -318,9 +319,14 @@ export interface DeployTargetRef extends TargetIdentity {
  * is what made normalizing the storage affordable.
  */
 export type AdapterConnection =
+  // Both surfaces on a gcp-project boundary receive the vessel's network from
+  // the same {@link addressOf} spread; only `cloudrun` reads it, but typing
+  // both keeps the type honest about what the composition puts there.
   | (KubernetesConnection & VesselFacts & { apiServer: string })
-  | (CloudRunConnection & VesselFacts & { project: string })
-  | (StaticConnection & VesselFacts & { project: string })
+  | (CloudRunConnection &
+      VesselFacts & { project: string; network?: GcpProjectNetwork })
+  | (StaticConnection &
+      VesselFacts & { project: string; network?: GcpProjectNetwork })
   | (VercelConnection & VesselFacts & { team: string })
   | (CloudflarePagesConnection & VesselFacts & { account: string });
 
@@ -484,12 +490,22 @@ export function deployTargetOf(
 }
 
 /** The one address a boundary of this kind states, in its own kind's terms. */
-function addressOf(location: VesselLocation): Record<string, string> {
+function addressOf(
+  location: VesselLocation,
+): Record<string, string | GcpProjectNetwork> {
   switch (location.kind) {
     case 'cluster':
       return { apiServer: location.apiServer };
     case 'gcp-project':
-      return { project: location.project };
+      // The network rides along with the address: it is the same kind of
+      // boundary fact, and the surface that reads it (`cloudrun`'s discover)
+      // derives a capability from its presence rather than probing for one.
+      return {
+        project: location.project,
+        ...(location.network === undefined
+          ? {}
+          : { network: location.network }),
+      };
     case 'vercel-team':
       return { team: location.team };
     case 'cloudflare-account':
