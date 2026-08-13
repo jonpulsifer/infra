@@ -76,6 +76,7 @@ const ADAPTER_LOGO: Record<string, LogoName> = {
   kubernetes: 'kubernetes',
   cloudrun: 'google-cloud',
   static: 'google-cloud',
+  vercel: 'vercel',
   'cloudflare-pages': 'cloudflare',
 };
 
@@ -353,11 +354,21 @@ export function TargetList({
       (target) => target.adapter === 'kubernetes',
     );
     const cloud = configured.filter(
-      (target) => target.adapter !== 'kubernetes',
+      (target) => target.adapter === 'cloudrun' || target.adapter === 'static',
+    );
+    const vercel = configured.filter((target) => target.adapter === 'vercel');
+    const cloudflarePages = configured.filter(
+      (target) => target.adapter === 'cloudflare-pages',
     );
     const clusterPending = pending.filter((entry) => entry.kind === 'cluster');
     const cloudPending = pending.filter(
       (entry) => entry.kind === 'gcp-project',
+    );
+    const vercelPending = pending.filter(
+      (entry) => entry.kind === 'vercel-team',
+    );
+    const cloudflarePagesPending = pending.filter(
+      (entry) => entry.kind === 'cloudflare-account',
     );
 
     return (
@@ -381,6 +392,28 @@ export function TargetList({
           onConnect={onConnect}
           onChanged={onChanged}
           empty="Declare a cloud project in Installation to make its real connection workflow available here."
+        />
+        <ProviderTargets
+          name="Vercel"
+          logo="vercel"
+          description="Declared teams become explicit Vercel Targets, addressed directly — a team has no discovery API to enumerate itself through."
+          targets={vercel}
+          pending={vercelPending}
+          connecting={connecting}
+          onConnect={onConnect}
+          onChanged={onChanged}
+          empty="Declare a Vercel team in Installation to make its real connection workflow available here."
+        />
+        <ProviderTargets
+          name="Cloudflare Pages"
+          logo="cloudflare"
+          description="Declared accounts become explicit Cloudflare Pages Targets, addressed directly — an account has no discovery API to enumerate itself through."
+          targets={cloudflarePages}
+          pending={cloudflarePagesPending}
+          connecting={connecting}
+          onConnect={onConnect}
+          onChanged={onChanged}
+          empty="Declare a Cloudflare account in Installation to make its real connection workflow available here."
         />
         <ProviderTargets
           name="Kubernetes"
