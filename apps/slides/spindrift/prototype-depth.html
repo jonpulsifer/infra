@@ -1,0 +1,1015 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Spindrift deck — depth prototype</title>
+
+<style>
+  /* ---------- tokens: light (chart paper) ---------- */
+  :root {
+    --paper:      #eceff0;
+    --surface:    #f7f9f9;
+    --surface-2:  #e2e8e8;
+    --ink:        #0c1d23;
+    --ink-2:      #3d565e;
+    --muted:      #64808a;
+    --rule:       #c3d0d2;
+    --rule-soft:  #d6dfe0;
+    --accent:     #0e6e78;   /* isobath teal */
+    --accent-ink: #0a545c;
+    --accent-wash:#dbe9ea;
+    --caution:    #a81b5f;   /* chart magenta: cautionary marks */
+    --caution-wash:#f3dfe9;
+    --good:       #1c7a52;
+    --good-wash:  #dceae2;
+    --grid:       rgba(14, 110, 120, 0.055);
+
+    --diag-box:   #f7f9f9;
+    --diag-box-2: #e6eeee;
+    --diag-line:  #93a9ad;
+
+    --measure: 60ch;
+    --pad-x: clamp(1.5rem, 6vw, 7rem);
+    --pad-y: clamp(2.5rem, 7vh, 5.5rem);
+
+    --serif: "Iowan Old Style", "Palatino Linotype", Palatino, "Book Antiqua", "Hoefler Text", Georgia, serif;
+    --sans: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+  }
+
+  /* ---------- tokens: dark (night bridge) ---------- */
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --paper:      #08161b;
+      --surface:    #0e2229;
+      --surface-2:  #14303a;
+      --ink:        #dbe8e9;
+      --ink-2:      #a6c0c5;
+      --muted:      #7d989f;
+      --rule:       #21414c;
+      --rule-soft:  #183440;
+      --accent:     #59c6d0;
+      --accent-ink: #8fdde4;
+      --accent-wash:#0f2f36;
+      --caution:    #f27baa;
+      --caution-wash:#341a27;
+      --good:       #5fc292;
+      --good-wash:  #102e24;
+      --grid:       rgba(89, 198, 208, 0.05);
+
+      --diag-box:   #0e2229;
+      --diag-box-2: #14303a;
+      --diag-line:  #4c6e78;
+    }
+  }
+  :root[data-theme="dark"] {
+    --paper:      #08161b;
+    --surface:    #0e2229;
+    --surface-2:  #14303a;
+    --ink:        #dbe8e9;
+    --ink-2:      #a6c0c5;
+    --muted:      #7d989f;
+    --rule:       #21414c;
+    --rule-soft:  #183440;
+    --accent:     #59c6d0;
+    --accent-ink: #8fdde4;
+    --accent-wash:#0f2f36;
+    --caution:    #f27baa;
+    --caution-wash:#341a27;
+    --good:       #5fc292;
+    --good-wash:  #102e24;
+    --grid:       rgba(89, 198, 208, 0.05);
+
+    --diag-box:   #0e2229;
+    --diag-box-2: #14303a;
+    --diag-line:  #4c6e78;
+  }
+
+  /* ---------- page ---------- */
+  html {
+    scroll-snap-type: y proximity;
+    scroll-behavior: smooth;
+    -webkit-text-size-adjust: 100%;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    html { scroll-behavior: auto; }
+    * { animation: none !important; transition: none !important; }
+  }
+
+  body {
+    background: var(--paper);
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: clamp(1rem, 0.94rem + 0.28vw, 1.125rem);
+    line-height: 1.55;
+    overflow-x: hidden;
+    position: relative;
+  }
+  /* graticule */
+  body::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    z-index: 0;
+    background-image:
+      repeating-linear-gradient(to right, var(--grid) 0 1px, transparent 1px 88px),
+      repeating-linear-gradient(to bottom, var(--grid) 0 1px, transparent 1px 88px);
+  }
+
+  ::selection { background: var(--accent); color: var(--paper); }
+  a { color: var(--accent-ink); }
+  a:focus-visible, [tabindex]:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 3px;
+  }
+
+  /* ---------- slide shell ---------- */
+  .slide {
+    position: relative;
+    z-index: 1;
+    scroll-snap-align: start;
+    min-height: 100svh;
+    padding: var(--pad-y) var(--pad-x) calc(var(--pad-y) + 1.5rem);
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: clamp(1.1rem, 2.4vh, 2rem);
+    border-top: 1px solid var(--rule-soft);
+  }
+  .slide:first-of-type { border-top: 0; }
+  .slide > * { position: relative; }
+
+  .no {
+    position: absolute;
+    top: calc(var(--pad-y) * 0.55);
+    right: var(--pad-x);
+    font-family: var(--mono);
+    font-size: 0.72rem;
+    letter-spacing: 0.1em;
+    color: var(--muted);
+    font-variant-numeric: tabular-nums;
+    z-index: 2;
+  }
+  .no b { color: var(--accent); font-weight: 600; }
+  .no::before {
+    content: "";
+    position: absolute;
+    right: 0;
+    top: -0.85rem;
+    width: 2.4rem;
+    height: 1px;
+    background: var(--accent);
+    opacity: 0.6;
+  }
+
+  /* ---------- type ---------- */
+  .eyebrow {
+    font-family: var(--mono);
+    font-size: 0.72rem;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--accent);
+    display: flex;
+    align-items: center;
+    gap: 0.85rem;
+  }
+  .eyebrow::after {
+    content: "";
+    flex: 0 1 5rem;
+    height: 1px;
+    background: currentColor;
+    opacity: 0.45;
+  }
+
+  h1, h2 {
+    font-family: var(--serif);
+    font-weight: 400;
+    text-wrap: balance;
+    letter-spacing: -0.015em;
+    line-height: 1.04;
+  }
+  h1 {
+    font-size: clamp(3.4rem, 13vw, 9.5rem);
+    line-height: 0.92;
+    letter-spacing: -0.035em;
+  }
+  h2 {
+    font-size: clamp(1.9rem, 1.1rem + 3.1vw, 3.6rem);
+    max-width: 20ch;
+  }
+  h2 em { font-style: italic; color: var(--accent); }
+  h3 {
+    font-family: var(--sans);
+    font-size: 0.78rem;
+    font-weight: 650;
+    letter-spacing: 0.13em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+
+  .lede {
+    font-family: var(--serif);
+    font-size: clamp(1.15rem, 0.95rem + 0.85vw, 1.7rem);
+    line-height: 1.4;
+    color: var(--ink-2);
+    max-width: 34ch;
+    text-wrap: pretty;
+  }
+  p { max-width: var(--measure); text-wrap: pretty; }
+  .dim { color: var(--ink-2); }
+  .small { font-size: 0.9rem; }
+  code, .m { font-family: var(--mono); font-size: 0.88em; }
+  code {
+    background: var(--surface-2);
+    padding: 0.08em 0.34em;
+    border-radius: 3px;
+  }
+  .tag {
+    font-family: var(--mono);
+    font-size: 0.66rem;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    padding: 0.2em 0.5em;
+    border: 1px solid currentColor;
+    border-radius: 2px;
+    white-space: nowrap;
+  }
+  .t-good { color: var(--good); }
+  .t-cau  { color: var(--caution); }
+  .t-acc  { color: var(--accent); }
+
+  /* ---------- shared blocks ---------- */
+  .cols {
+    display: grid;
+    gap: clamp(1rem, 2.2vw, 2.2rem);
+    grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr));
+  }
+  .cols--2 { grid-template-columns: repeat(auto-fit, minmax(19rem, 1fr)); }
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--rule);
+    border-radius: 2px;
+    padding: clamp(0.95rem, 1.6vw, 1.4rem);
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+  .card h4 {
+    font-family: var(--serif);
+    font-size: 1.22rem;
+    font-weight: 400;
+  }
+  .card p { font-size: 0.94rem; color: var(--ink-2); max-width: 42ch; }
+  .card--flag { border-top: 3px solid var(--accent); }
+  .card--cau  { border-top: 3px solid var(--caution); }
+
+  /* stepped sequence */
+  ol.steps {
+    list-style: none;
+    counter-reset: s;
+    display: grid;
+    gap: 0;
+    max-width: 46rem;
+    border-top: 1px solid var(--rule-soft);
+  }
+  ol.steps li {
+    counter-increment: s;
+    display: grid;
+    grid-template-columns: 3.4rem 1fr;
+    align-items: baseline;
+    gap: 0.75rem;
+    padding: clamp(0.4rem, 1vh, 0.7rem) 0;
+    border-bottom: 1px solid var(--rule-soft);
+    font-size: clamp(1rem, 0.9rem + 0.5vw, 1.3rem);
+  }
+  ol.steps li::before {
+    content: counter(s, decimal-leading-zero);
+    font-family: var(--mono);
+    font-size: 0.72rem;
+    color: var(--muted);
+    font-variant-numeric: tabular-nums;
+  }
+  ol.steps li:last-child { color: var(--caution); }
+
+  /* plain reasoned list */
+  ul.reasons {
+    list-style: none;
+    display: grid;
+    gap: clamp(0.7rem, 1.8vh, 1.15rem);
+    max-width: 52rem;
+  }
+  ul.reasons li {
+    display: grid;
+    grid-template-columns: 1.6rem 1fr;
+    gap: 0.9rem;
+    font-size: clamp(1rem, 0.92rem + 0.42vw, 1.28rem);
+    line-height: 1.42;
+    text-wrap: pretty;
+  }
+  ul.reasons li::before {
+    content: "";
+    margin-top: 0.62em;
+    height: 1px;
+    background: var(--caution);
+    opacity: 0.75;
+  }
+  ul.reasons li b { font-weight: 620; color: var(--ink); }
+
+  ul.ticks { list-style: none; display: grid; gap: 0.45rem; }
+  ul.ticks li {
+    display: grid; grid-template-columns: 1rem 1fr; gap: 0.6rem;
+    font-size: 0.96rem; color: var(--ink-2);
+  }
+  ul.ticks li::before {
+    content: "·"; color: var(--accent); font-weight: 700; text-align: center;
+  }
+
+  /* noun chips */
+  .nouns { display: flex; flex-wrap: wrap; gap: 0.55rem 0.7rem; align-items: stretch; }
+  .noun {
+    font-family: var(--serif);
+    font-size: clamp(1.25rem, 0.9rem + 1.5vw, 2.5rem);
+    padding: 0.3em 0.6em;
+    border: 1px solid var(--rule);
+    border-radius: 2px;
+    color: var(--muted);
+    background: var(--surface);
+    white-space: nowrap;
+  }
+  .noun--authored {
+    color: var(--paper);
+    background: var(--accent);
+    border-color: var(--accent);
+  }
+  .noun--admin { border-style: dashed; }
+
+  /* lineage strip */
+  .lineage {
+    display: flex;
+    align-items: stretch;
+    gap: 0;
+    overflow-x: auto;
+    padding-bottom: 0.5rem;
+  }
+  .lineage > div {
+    flex: 1 0 9rem;
+    padding: 0.85rem 1rem;
+    border: 1px solid var(--rule);
+    border-right: 0;
+    background: var(--surface);
+  }
+  .lineage > div:last-child {
+    border-right: 1px solid var(--rule);
+    background: var(--accent-wash);
+  }
+  .lineage b {
+    display: block;
+    font-family: var(--serif);
+    font-weight: 400;
+    font-size: 1.35rem;
+  }
+  .lineage span {
+    font-family: var(--mono);
+    font-size: 0.68rem;
+    letter-spacing: 0.06em;
+    color: var(--muted);
+  }
+
+  /* quote / verbatim */
+  .verbatim {
+    font-family: var(--mono);
+    font-size: clamp(0.85rem, 0.78rem + 0.4vw, 1.05rem);
+    line-height: 1.5;
+    background: var(--surface);
+    border-left: 3px solid var(--caution);
+    padding: 1rem 1.2rem;
+    max-width: 54rem;
+    overflow-x: auto;
+  }
+
+  /* stat tiles */
+  .stats {
+    display: grid;
+    gap: 1px;
+    background: var(--rule);
+    border: 1px solid var(--rule);
+    grid-template-columns: repeat(auto-fit, minmax(9.5rem, 1fr));
+  }
+  .stat {
+    background: var(--surface);
+    padding: clamp(0.8rem, 1.6vw, 1.25rem);
+    display: flex;
+    flex-direction: column;
+    gap: 0.3rem;
+  }
+  .stat b {
+    font-family: var(--mono);
+    font-variant-numeric: tabular-nums;
+    font-size: clamp(1.5rem, 1.1rem + 1.5vw, 2.5rem);
+    font-weight: 500;
+    line-height: 1;
+    letter-spacing: -0.02em;
+    color: var(--accent);
+  }
+  .stat span { font-size: 0.8rem; color: var(--ink-2); line-height: 1.3; }
+  .stat--cau b { color: var(--caution); }
+  .stat--ink b { color: var(--ink); }
+
+  /* measurement table */
+  .tablewrap { overflow-x: auto; border: 1px solid var(--rule); background: var(--surface); }
+  table.bench {
+    border-collapse: collapse;
+    width: 100%;
+    min-width: 34rem;
+    font-size: clamp(0.85rem, 0.8rem + 0.3vw, 1rem);
+  }
+  table.bench th, table.bench td {
+    text-align: left;
+    padding: 0.6rem 1rem;
+    border-bottom: 1px solid var(--rule-soft);
+  }
+  table.bench thead th {
+    font-family: var(--mono);
+    font-size: 0.68rem;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--muted);
+    font-weight: 500;
+  }
+  table.bench tbody tr:last-child th,
+  table.bench tbody tr:last-child td { border-bottom: 0; }
+  table.bench tbody th { font-weight: 500; color: var(--ink-2); }
+  table.bench td { font-variant-numeric: tabular-nums; }
+
+  /* timeline */
+  .log {
+    display: grid;
+    gap: 0;
+    max-width: 58rem;
+    border-top: 1px solid var(--rule-soft);
+  }
+  .log > div {
+    display: grid;
+    grid-template-columns: 6.5rem 1fr auto;
+    gap: 0.4rem 1.1rem;
+    align-items: baseline;
+    padding: clamp(0.45rem, 1.1vh, 0.8rem) 0;
+    border-bottom: 1px solid var(--rule-soft);
+  }
+  .log time {
+    font-family: var(--mono);
+    font-size: 0.74rem;
+    color: var(--muted);
+    font-variant-numeric: tabular-nums;
+  }
+  .log b { font-family: var(--serif); font-weight: 400; font-size: clamp(1.05rem, 0.95rem + 0.5vw, 1.35rem); }
+  .log p { grid-column: 2 / -1; font-size: 0.9rem; color: var(--ink-2); max-width: 58ch; margin-top: 0.15rem; }
+
+  /* figure */
+  figure { display: flex; flex-direction: column; gap: 0.7rem; }
+  .figwrap {
+    overflow-x: auto;
+    border: 1px solid var(--rule);
+    background: var(--surface);
+    padding: clamp(0.6rem, 1.5vw, 1.1rem);
+  }
+  .figwrap svg { display: block; width: 100%; min-width: 44rem; height: auto; }
+  figcaption { font-size: 0.85rem; color: var(--muted); max-width: 62ch; }
+
+  /* svg diagram styling */
+  .d-box  { fill: var(--diag-box);  stroke: var(--diag-line); stroke-width: 1; }
+  .d-box2 { fill: var(--diag-box-2); stroke: var(--diag-line); stroke-width: 1; }
+  .d-acc  { fill: var(--accent-wash); stroke: var(--accent); stroke-width: 1.4; }
+  .d-zone { fill: none; stroke: var(--accent); stroke-width: 1.2; stroke-dasharray: 6 5; opacity: 0.8; }
+  .d-line { stroke: var(--diag-line); stroke-width: 1.4; fill: none; }
+  .d-flow { stroke: var(--accent); stroke-width: 1.6; fill: none; }
+  .d-stop { stroke: var(--caution); stroke-width: 1.6; fill: none; stroke-dasharray: 5 4; }
+  .d-t    { fill: var(--ink); font-family: var(--sans); font-size: 13px; }
+  .d-t.b  { font-weight: 640; }
+  .d-s    { fill: var(--ink-2); font-family: var(--sans); font-size: 11.5px; }
+  .d-m    { fill: var(--ink-2); font-family: var(--mono); font-size: 11px; }
+  .d-lab  { fill: var(--accent); font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.06em; }
+  .d-cau  { fill: var(--caution); font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.06em; }
+  .d-hd   { fill: var(--accent); font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.14em; }
+
+  /* title slide */
+  .title-slide { justify-content: space-between; }
+  .title-mark { position: absolute; inset: 0; overflow: hidden; pointer-events: none; opacity: 0.5; }
+  .title-mark svg { position: absolute; right: -6%; top: 50%; transform: translateY(-50%); width: min(70vw, 60rem); height: auto; }
+  .contour { fill: none; stroke: var(--accent); stroke-width: 1.1; opacity: 0.35; }
+  .contour:nth-child(even) { opacity: 0.2; }
+  .colophon {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem 1.6rem;
+    font-family: var(--mono);
+    font-size: 0.7rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--muted);
+    border-top: 1px solid var(--rule);
+    padding-top: 0.9rem;
+  }
+  .colophon b { color: var(--accent); font-weight: 500; }
+
+  .rule-kicker {
+    font-family: var(--serif);
+    font-size: clamp(1.25rem, 1rem + 1.1vw, 2.1rem);
+    line-height: 1.3;
+    max-width: 30ch;
+    border-left: 3px solid var(--accent);
+    padding-left: 1.1rem;
+    text-wrap: pretty;
+  }
+
+  .split {
+    display: grid;
+    gap: clamp(1.2rem, 3vw, 3rem);
+    grid-template-columns: minmax(0, 1fr);
+    align-items: start;
+  }
+  @media (min-width: 60rem) {
+    .split { grid-template-columns: minmax(16rem, 0.85fr) minmax(0, 1.15fr); }
+    .split--wide { grid-template-columns: minmax(14rem, 0.6fr) minmax(0, 1.4fr); }
+  }
+
+  @media (max-width: 34rem) {
+    .log > div { grid-template-columns: 1fr; }
+    .log time { order: -1; }
+  }
+</style>
+<style>*,*::before,*::after{box-sizing:border-box}*{margin:0}img,svg{display:block;max-width:100%}</style>
+<style>
+  /* ---------- prototype chrome — not part of any design being judged ---------- */
+  .variant { display: none; }
+  .variant:target { display: block; }
+  body:not(:has(.variant:target)) #a { display: block; }
+  .variant .slide { padding-bottom: calc(var(--pad-y) + 3.5rem); }
+
+  .pbar {
+    position: fixed; left: 50%; bottom: 1rem; transform: translateX(-50%);
+    z-index: 50; display: flex; align-items: center; gap: 0.1rem;
+    background: var(--ink); color: var(--paper);
+    border-radius: 999px; padding: 0.3rem 0.4rem;
+    box-shadow: 0 6px 24px rgba(0,0,0,0.3);
+    font-family: var(--mono); font-size: 0.72rem; letter-spacing: 0.05em;
+    max-width: calc(100vw - 2rem);
+  }
+  .pbar a { color: var(--paper); text-decoration: none; padding: 0.32rem 0.72rem; border-radius: 999px; line-height: 1; }
+  .pbar a:hover { background: rgba(128,128,128,0.28); }
+  .pbar b { background: var(--accent); color: var(--paper); border-radius: 999px; padding: 0.26rem 0.55rem; font-weight: 600; }
+  .pbar span { padding: 0 0.55rem; opacity: 0.85; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .pstamp {
+    position: fixed; left: 0.85rem; bottom: 0.9rem; z-index: 50;
+    font-family: var(--mono); font-size: 0.6rem; letter-spacing: 0.14em;
+    text-transform: uppercase; color: var(--caution); opacity: 0.75;
+  }
+  @media (max-width: 40rem) { .pstamp { display: none; } }
+
+  /* ---------- variant C only: depth folded under a disclosure ---------- */
+  details.more { border-top: 1px solid var(--rule); max-width: 64rem; }
+  details.more > summary {
+    cursor: pointer; list-style: none; display: flex; align-items: center; gap: 0.7rem;
+    padding: 0.85rem 0; font-family: var(--mono); font-size: 0.72rem;
+    letter-spacing: 0.14em; text-transform: uppercase; color: var(--accent);
+  }
+  details.more > summary::-webkit-details-marker { display: none; }
+  details.more > summary::before {
+    content: "+"; display: grid; place-items: center;
+    width: 1.15rem; height: 1.15rem; border: 1px solid currentColor; border-radius: 2px;
+    font-size: 0.8rem; line-height: 1;
+  }
+  details.more[open] > summary::before { content: "–"; }
+  details.more > .body { display: grid; gap: 1.1rem; padding-bottom: 1.2rem; }
+
+  .oneline {
+    font-family: var(--serif);
+    font-size: clamp(1.2rem, 0.95rem + 1.1vw, 2rem);
+    line-height: 1.35; max-width: 40ch; color: var(--ink-2); text-wrap: pretty;
+  }
+</style>
+</head>
+<body>
+
+<!-- =====================================================================
+     PROTOTYPE — three depths of the Spindrift deck, on one page.
+     Switch with the bar at the bottom. Question: how deep should this go?
+       A  six beats     — a short deck, contract-first
+       B  one page      — the whole system as a single map, no navigation
+       C  layered       — overview copy with the current deck's depth folded under
+     Throwaway. Must not ship inside the deck directory.
+     ===================================================================== -->
+
+<p class="pstamp">Prototype — not shipped</p>
+
+<!-- ###################################################################
+     VARIANT A — six beats
+     ################################################################### -->
+<div class="variant" id="a">
+
+<section class="slide title-slide">
+  <span class="no"><b>01</b> / 06</span>
+  <div class="title-mark" aria-hidden="true">
+    <svg viewBox="0 0 800 620" role="presentation">
+      <path class="contour" d="M40 560 C 180 520, 250 430, 300 330 C 350 230, 430 150, 590 108 C 690 82, 760 78, 800 76"/>
+      <path class="contour" d="M40 500 C 190 462, 268 380, 322 288 C 380 190, 462 120, 610 84 C 700 62, 762 58, 800 56"/>
+      <path class="contour" d="M60 448 C 210 410, 292 330, 350 246 C 412 158, 496 96, 636 62"/>
+      <path class="contour" d="M110 400 C 250 360, 330 286, 392 208 C 452 132, 534 78, 660 46"/>
+      <path class="contour" d="M180 356 C 300 316, 378 246, 440 174 C 496 110, 570 62, 676 30"/>
+      <circle cx="486" cy="146" r="3.5" fill="var(--accent)" stroke="none" opacity="0.7"/>
+    </svg>
+  </div>
+  <p class="eyebrow">Adapter-based deploy control plane · <span class="m" style="text-transform:none;letter-spacing:0">apps/spindrift</span></p>
+  <div style="display:flex;flex-direction:column;gap:clamp(1rem,3vh,2rem)">
+    <h1>Spindrift</h1>
+    <p class="lede" style="max-width:32ch">A deployment is an artifact, a place, and a version of its config.</p>
+    <p class="small dim" style="max-width:46ch">Pin those three and almost everything people build deploy tooling for stops being a feature.</p>
+  </div>
+  <p class="colophon">
+    <span>One contract</span><span><b>3</b> parts</span><span><b>5</b> seams</span><span>Six slides</span>
+  </p>
+</section>
+
+<section class="slide">
+  <span class="no"><b>02</b> / 06</span>
+  <p class="eyebrow">The problem</p>
+  <h2>“I wrote a thing. Put it somewhere with a URL.”</h2>
+  <div class="split">
+    <div style="display:flex;flex-direction:column;gap:1rem">
+      <p class="dim">Nothing on that list is unsolved. Clusters exist, registries exist, GitOps engines exist, certificates are free. What nobody hands you is the assembly — and the assembly is the work, in full, every single time.</p>
+      <p class="rule-kicker">Seven decisions, made by hand, by whoever is holding it. Each one is a place to be quietly wrong for a month.</p>
+    </div>
+    <ol class="steps">
+      <li>Write a Dockerfile</li>
+      <li>Author a Helm release or a Kustomization</li>
+      <li>Find a hostname</li>
+      <li>Wire a route</li>
+      <li>Add a secret</li>
+      <li>Open a PR, wait for CI, wait for Flux</li>
+      <li>Read pod logs to find out why it did not come up</li>
+    </ol>
+  </div>
+</section>
+
+<section class="slide">
+  <span class="no"><b>03</b> / 06</span>
+  <p class="eyebrow">The contract</p>
+  <h2>A deploy is three things, <em>pinned</em></h2>
+  <div class="lineage">
+    <div><b>Artifact</b><span>what runs — by digest</span></div>
+    <div><b>Target</b><span>where it runs</span></div>
+    <div><b>configVersion</b><span>what it reads — by digest</span></div>
+  </div>
+  <p class="rule-kicker">Every part is named by <em>value</em>, not by reference. Nothing in the triple means “latest”.</p>
+  <p class="verbatim">deploy 2 · artifact files·sha256:1d7ea… · target bluenose/static · configVersion sha256:4f53cda1…</p>
+  <div class="cols">
+    <div class="card card--flag">
+      <h4>Identity, kept separate from placement</h4>
+      <p><b>Source → Build → Artifact → Deploy.</b> One Build makes one Artifact; one Artifact goes to many Deploys. What was built never learns where it went — and that one separation is what the rest of this deck is downstream of.</p>
+    </div>
+    <div class="card">
+      <h4>Two authored nouns</h4>
+      <p>A human writes an <b>App</b> and a <b>Component</b>. Build, Artifact and Deploy are produced, never typed.</p>
+    </div>
+  </div>
+</section>
+
+<section class="slide">
+  <span class="no"><b>04</b> / 06</span>
+  <p class="eyebrow">The second contract</p>
+  <h2>Every outside thing sits behind a seam, and <em>none of them</em> is the architecture</h2>
+  <p class="dim" style="max-width:74ch">A seam is a place behaviour can be swapped without editing at that place. One implementation would leave a seam hypothetical; every one of these has at least two.</p>
+  <div class="tablewrap">
+    <table class="bench">
+      <thead><tr><th scope="col">Seam</th><th scope="col">Adapters today</th></tr></thead>
+      <tbody>
+        <tr><th scope="row">Build</th><td>GitHub Actions · Cloud Build · microVM pool · in-cluster Job</td></tr>
+        <tr><th scope="row">Deploy</th><td>Kubernetes · Cloud Run · static hosting</td></tr>
+        <tr><th scope="row">Delivery</th><td>Flux HelmRelease · Argo Application</td></tr>
+        <tr><th scope="row">Config store</th><td>Secret Manager · 1Password · HTTP</td></tr>
+        <tr><th scope="row">Datastore</th><td>cloud project · cluster</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="cols">
+    <div class="card card--flag">
+      <h4>Flux is an adapter, not the architecture</h4>
+      <p>A Target declares which operator drives it, and Spindrift writes that operator's own object. Both flavours end at the same status type and nothing above them branches.</p>
+    </div>
+    <div class="card card--flag">
+      <h4>What a seam is worth, measured once</h4>
+      <p>A whole fourth way of building — a microVM pool on a machine this process cannot reach, calling in the opposite direction — arrived as one row in a list. Everything above the seam was already written.</p>
+    </div>
+  </div>
+</section>
+
+<section class="slide">
+  <span class="no"><b>05</b> / 06</span>
+  <p class="eyebrow">Two more boundaries, drawn the same way</p>
+  <h2>Who may reach it, and where authority <em>stops</em></h2>
+  <div class="split">
+    <div style="display:flex;flex-direction:column;gap:1rem">
+      <h3>Reach and auth are fields, not policy</h3>
+      <p class="dim"><code>reach</code> and <code>auth</code> sit in desired state beside the image and the config, so they are pinned into the deploy like everything else. A Target declares which reaches it can <em>authenticate</em> — so auth decides where you are allowed to deploy, before a build is dispatched.</p>
+      <div class="lineage">
+        <div><b>Internal</b><span>cluster only</span></div>
+        <div><b>Private</b><span>an RFC1918 address</span></div>
+        <div><b>Public</b><span>through the tunnel</span></div>
+      </div>
+      <p class="small dim">Private is the default. Nothing becomes reachable because somebody forgot a field.</p>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:1.1rem">
+      <h3>It cannot create what it deploys into</h3>
+      <p class="dim">Spindrift holds delegated write access to <b>contents</b> — a release object in one namespace, an App inside one pre-provisioned project. It holds nothing that can create a cluster, a project, a VPC, a tunnel or a signing key. When a prerequisite is missing it writes the infrastructure code that would clear it and opens that as a <b>pull request</b>.</p>
+      <div class="card card--cau">
+        <span class="tag t-cau">The refusal</span>
+        <h4>A contract is allowed to disqualify a backend</h4>
+        <p>Static hosting refuses <code>auth: proxy</code> outright — there is no non-bypassable origin to put a boundary in front of, so the placement is rejected rather than shipped with a caveat. A guarantee that quietly degrades is not a guarantee.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="slide">
+  <span class="no"><b>06</b> / 06</span>
+  <p class="eyebrow">Consequences, not features</p>
+  <h2>Four things nobody had to build</h2>
+  <div class="cols">
+    <div class="card card--flag"><span class="tag t-acc">Rollback</span><h4>An older triple</h4><p>Not a rebuild. Retention depth is 10, which is therefore also rollback depth.</p></div>
+    <div class="card card--flag"><span class="tag t-acc">Two runtimes</span><h4>No new concept</h4><p>An artifact is <code>image</code> or <code>files</code>. Kubernetes, Cloud Run and static hosting are the same triple with a different <em>where</em>.</p></div>
+    <div class="card card--flag"><span class="tag t-acc">Concurrency</span><h4>Impossible, not racy</h4><p>The triple is taken under a locking read against the transactional <code>Component@Target.desired</code> row.</p></div>
+    <div class="card card--flag"><span class="tag t-acc">Config</span><h4>Cannot drift underneath</h4><p>Pinned by digest into the deploy — so a running deployment reads what it was deployed with.</p></div>
+  </div>
+  <p class="lede" style="max-width:44ch">This page is its own acceptance evidence: uploaded as an archive, built into a <span class="m">files</span> artifact, served at a URL by the thing it describes.</p>
+  <p class="colophon">
+    <span>Artifact <b>+</b> Target <b>+</b> configVersion</span>
+    <span><b>5</b> seams, every one of them real</span>
+    <span>Everything else is bookkeeping</span>
+  </p>
+</section>
+
+<nav class="pbar"><a href="#c" aria-label="Previous variant">←</a><b>A</b><span>Six beats — a short deck</span><a href="#b" aria-label="Next variant">→</a></nav>
+</div>
+
+<!-- ###################################################################
+     VARIANT B — one page, one map
+     ################################################################### -->
+<div class="variant" id="b">
+
+<section class="slide">
+  <p class="eyebrow">Spindrift · the whole thing on one page</p>
+  <h2 style="max-width:26ch">Name it by <em>value</em>, put the rest behind a <em>seam</em></h2>
+  <figure>
+    <div class="figwrap">
+      <svg viewBox="0 0 980 500" role="img" aria-label="One map: a source is staged and built through the build seam into an artifact named by digest; the deploy contract pins artifact, target and configVersion by value; the deploy lands as contents inside a vessel somebody else provisioned, driven by a delivery adapter, and missing prerequisites become a pull request. Five seams are listed at the right.">
+        <defs>
+          <marker id="m1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M0 0 L10 5 L0 10 z" fill="var(--accent)"/>
+          </marker>
+        </defs>
+
+        <!-- band 1: produce -->
+        <text class="d-hd" x="24" y="26">PRODUCE — IDENTITY, NEVER PLACEMENT</text>
+        <rect class="d-box" x="24" y="40" width="150" height="62" rx="6"/>
+        <text class="d-t b" x="38" y="62">Source</text>
+        <text class="d-s" x="38" y="80">repo@commit, or an upload</text>
+        <text class="d-s" x="38" y="95">staged, immutable</text>
+
+        <rect class="d-box2" x="206" y="40" width="140" height="62" rx="6"/>
+        <text class="d-t b" x="220" y="62">Bundle digest</text>
+        <text class="d-m" x="220" y="80">sha256:…</text>
+        <text class="d-s" x="220" y="95">a build parameter</text>
+
+        <rect class="d-box" x="378" y="40" width="196" height="62" rx="6"/>
+        <text class="d-t b" x="392" y="62">Build</text>
+        <text class="d-s" x="392" y="80">one of four routes</text>
+        <text class="d-lab" x="392" y="95">↑ the build seam</text>
+
+        <rect class="d-acc" x="606" y="40" width="170" height="62" rx="6"/>
+        <text class="d-t b" x="620" y="62">Artifact</text>
+        <text class="d-s" x="620" y="80">image | files</text>
+        <text class="d-m" x="620" y="96">by digest · signed</text>
+
+        <path class="d-flow" d="M174 71 L200 71" marker-end="url(#m1)"/>
+        <path class="d-flow" d="M346 71 L372 71" marker-end="url(#m1)"/>
+        <path class="d-flow" d="M574 71 L600 71" marker-end="url(#m1)"/>
+
+        <!-- band 2: the contract -->
+        <text class="d-hd" x="24" y="150">THE CONTRACT — ONE ROW, EVERY PART BY VALUE</text>
+        <rect class="d-acc" x="24" y="164" width="752" height="104" rx="8"/>
+        <text class="d-t b" x="42" y="190" style="font-size:15px">Deploy</text>
+        <text class="d-s" x="42" y="209">the row <tspan font-style="italic">is</tspan> the deployment — not a pointer to one</text>
+
+        <rect class="d-box" x="42" y="220" width="222" height="34" rx="4"/>
+        <text class="d-t b" x="56" y="235">Artifact</text>
+        <text class="d-m" x="56" y="249">what runs — by digest</text>
+
+        <rect class="d-box" x="278" y="220" width="222" height="34" rx="4"/>
+        <text class="d-t b" x="292" y="235">Target</text>
+        <text class="d-m" x="292" y="249">where it runs</text>
+
+        <rect class="d-box" x="514" y="220" width="248" height="34" rx="4"/>
+        <text class="d-t b" x="528" y="235">configVersion</text>
+        <text class="d-m" x="528" y="249">what it reads — by digest</text>
+
+        <path class="d-flow" d="M691 102 L691 158" marker-end="url(#m1)"/>
+        <text class="d-cau" x="150" y="288">Nothing in the triple means “latest”. Rollback is an older row; concurrency is a locking read on it.</text>
+
+        <!-- band 3: place -->
+        <text class="d-hd" x="24" y="330">PLACE — INSIDE SOMEBODY ELSE'S CONTAINER</text>
+        <rect class="d-acc" x="24" y="346" width="180" height="76" rx="8"/>
+        <text class="d-t b" x="38" y="370">Spindrift</text>
+        <text class="d-s" x="38" y="388">writes contents only</text>
+        <text class="d-s" x="38" y="404">authority granted to it,</text>
+        <text class="d-s" x="38" y="418">not to a human</text>
+        <path class="d-flow" d="M120 268 L120 340" marker-end="url(#m1)"/>
+
+        <rect class="d-zone" x="248" y="322" width="528" height="118" rx="12"/>
+        <text class="d-hd" x="264" y="342">VESSEL — A CLUSTER OR A CLOUD PROJECT</text>
+        <rect class="d-box2" x="266" y="352" width="240" height="72" rx="6"/>
+        <text class="d-t b" x="280" y="374">Prerequisites</text>
+        <text class="d-s" x="280" y="392">namespace · policy · tunnel · keys</text>
+        <text class="d-s" x="280" y="410">provisioned by Flux or Terraform</text>
+
+        <rect class="d-acc" x="522" y="352" width="238" height="72" rx="6"/>
+        <text class="d-t b" x="536" y="374">Contents</text>
+        <text class="d-s" x="536" y="392">a release object, or a project App</text>
+        <text class="d-s" x="536" y="410">delivery operator is an adapter</text>
+
+        <path class="d-flow" d="M204 384 L516 384" marker-end="url(#m1)"/>
+        <text class="d-lab" x="360" y="378" text-anchor="middle">writes</text>
+        <path class="d-stop" d="M204 366 L260 356"/>
+        <text class="d-cau" x="212" y="348">never creates</text>
+
+        <rect class="d-box" x="248" y="458" width="528" height="30" rx="6"/>
+        <text class="d-s" x="264" y="477">Prerequisite missing? It writes the Terraform and opens a <tspan class="d-t b">pull request</tspan> — a human merges, the apply bot applies.</text>
+        <path class="d-flow" d="M114 422 L114 473 L242 473" marker-end="url(#m1)"/>
+
+        <!-- right rail: the seams -->
+        <rect class="d-box" x="806" y="40" width="150" height="448" rx="8"/>
+        <text class="d-hd" x="820" y="64">FIVE SEAMS</text>
+        <text class="d-s" x="820" y="86">each with ≥2 adapters —</text>
+        <text class="d-s" x="820" y="101">one would be hypothetical</text>
+
+        <text class="d-t b" x="820" y="136">Build</text>
+        <text class="d-s" x="820" y="152">Actions · Cloud Build</text>
+        <text class="d-s" x="820" y="166">microVM pool · Job</text>
+
+        <text class="d-t b" x="820" y="200">Deploy</text>
+        <text class="d-s" x="820" y="216">Kubernetes · Cloud Run</text>
+        <text class="d-s" x="820" y="230">static hosting</text>
+
+        <text class="d-t b" x="820" y="264">Delivery</text>
+        <text class="d-s" x="820" y="280">Flux · Argo</text>
+
+        <text class="d-t b" x="820" y="314">Config store</text>
+        <text class="d-s" x="820" y="330">Secret Manager</text>
+        <text class="d-s" x="820" y="344">1Password · HTTP</text>
+
+        <text class="d-t b" x="820" y="378">Datastore</text>
+        <text class="d-s" x="820" y="394">cloud project · cluster</text>
+
+        <text class="d-cau" x="820" y="434">Flux is an adapter,</text>
+        <text class="d-cau" x="820" y="450">not the architecture.</text>
+        <text class="d-lab" x="820" y="474">reach + auth are fields</text>
+      </svg>
+    </div>
+    <figcaption>Two moves, applied four times. <b>Name it by value</b> — the artifact, the config and the source are digests, so a deployment is reproducible and a signature has something to be about. <b>Put the variable part behind a declared interface</b> — how it builds, what runtime receives it, which operator drives it, where config lives, who may reach it, and where Spindrift's authority stops. Everything else in the long deck is a consequence of those two.</figcaption>
+  </figure>
+</section>
+
+<nav class="pbar"><a href="#a" aria-label="Previous variant">←</a><b>B</b><span>One page — the whole system as a map</span><a href="#c" aria-label="Next variant">→</a></nav>
+</div>
+
+<!-- ###################################################################
+     VARIANT C — layered: overview on top, depth folded under
+     ################################################################### -->
+<div class="variant" id="c">
+
+<section class="slide title-slide">
+  <span class="no"><b>01</b> / 05</span>
+  <div class="title-mark" aria-hidden="true">
+    <svg viewBox="0 0 800 620" role="presentation">
+      <path class="contour" d="M40 560 C 180 520, 250 430, 300 330 C 350 230, 430 150, 590 108 C 690 82, 760 78, 800 76"/>
+      <path class="contour" d="M40 500 C 190 462, 268 380, 322 288 C 380 190, 462 120, 610 84 C 700 62, 762 58, 800 56"/>
+      <path class="contour" d="M60 448 C 210 410, 292 330, 350 246 C 412 158, 496 96, 636 62"/>
+      <path class="contour" d="M110 400 C 250 360, 330 286, 392 208 C 452 132, 534 78, 660 46"/>
+      <circle cx="486" cy="146" r="3.5" fill="var(--accent)" stroke="none" opacity="0.7"/>
+    </svg>
+  </div>
+  <p class="eyebrow">Adapter-based deploy control plane · <span class="m" style="text-transform:none;letter-spacing:0">apps/spindrift</span></p>
+  <div style="display:flex;flex-direction:column;gap:clamp(1rem,3vh,2rem)">
+    <h1>Spindrift</h1>
+    <p class="lede" style="max-width:34ch">Four slides, one line each. Open a band if you want the argument.</p>
+  </div>
+  <p class="colophon"><span>Skim it in <b>90</b> seconds</span><span>Or open every band and it is the long deck</span></p>
+</section>
+
+<section class="slide">
+  <span class="no"><b>02</b> / 05</span>
+  <p class="eyebrow">Contract one · what a deployment is</p>
+  <h2>A deploy is three things, <em>pinned</em></h2>
+  <p class="oneline">Artifact, Target, configVersion — every part named by value, so nothing in a deployment can mean “latest”.</p>
+  <details class="more">
+    <summary>Why by value, and what it buys</summary>
+    <div class="body">
+      <div class="lineage">
+        <div><b>Artifact</b><span>what runs — by digest</span></div>
+        <div><b>Target</b><span>where it runs</span></div>
+        <div><b>configVersion</b><span>what it reads — by digest</span></div>
+      </div>
+      <p class="verbatim">deploy 2 · artifact files·sha256:1d7ea… · target bluenose/static · configVersion sha256:4f53cda1…</p>
+      <p class="small dim" style="max-width:64ch">A real row off the running installation. That line <em>is</em> the deployment — reproducing it needs nothing that could have moved since. Rollback is therefore an older row rather than a rebuild; concurrency is a locking read against <code>Component@Target.desired</code>, so a racing deploy is impossible rather than unlikely; and config cannot drift underneath a running workload.</p>
+      <div class="cols">
+        <div class="card card--flag"><h4>One Build → one Artifact → many Deploys</h4><p>Identity is kept separate from placement. What was built never learns where it went — everything below is downstream of that one separation.</p></div>
+        <div class="card"><h4>Two authored nouns</h4><p>A human writes an <b>App</b> and a <b>Component</b>. Build, Artifact and Deploy are produced, never typed.</p></div>
+      </div>
+    </div>
+  </details>
+</section>
+
+<section class="slide">
+  <span class="no"><b>03</b> / 05</span>
+  <p class="eyebrow">Contract two · where the outside plugs in</p>
+  <h2>Five seams, and <em>none of them</em> is the architecture</h2>
+  <p class="oneline">Build, deploy, delivery, config store, datastore — each swappable without editing at the place it is used, and each already has at least two implementations.</p>
+  <details class="more">
+    <summary>The seams, and what one is worth</summary>
+    <div class="body">
+      <div class="tablewrap">
+        <table class="bench">
+          <thead><tr><th scope="col">Seam</th><th scope="col">What varies across it</th><th scope="col">Adapters today</th></tr></thead>
+          <tbody>
+            <tr><th scope="row">Build</th><td>where the artifact is produced</td><td>GitHub Actions · Cloud Build · microVM pool · in-cluster Job</td></tr>
+            <tr><th scope="row">Deploy</th><td>what runtime receives it</td><td>Kubernetes · Cloud Run · static hosting</td></tr>
+            <tr><th scope="row">Delivery</th><td>which operator drives it</td><td>Flux HelmRelease · Argo Application</td></tr>
+            <tr><th scope="row">Config store</th><td>where the value of record lives</td><td>Secret Manager · 1Password · HTTP</td></tr>
+            <tr><th scope="row">Datastore</th><td>where a Target's state lives</td><td>cloud project · cluster</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="cols">
+        <div class="card card--flag"><h4>Flux is an adapter, not the architecture</h4><p>A Target declares which operator drives it, and Spindrift writes that operator's own object. Both flavours end at the same status type and nothing above them branches.</p></div>
+        <div class="card card--flag"><h4>The seam that runs backwards</h4><p>A microVM pool on a machine this process cannot open a connection to at all — the far side long-polls <em>in</em>. Every instinct says that needs a new concept; it needed a row in a list. That is the test a contract passes or fails.</p></div>
+      </div>
+    </div>
+  </details>
+</section>
+
+<section class="slide">
+  <span class="no"><b>04</b> / 05</span>
+  <p class="eyebrow">Contract three · reach, and the edge of authority</p>
+  <h2>Who may reach it is <em>part of the contract</em></h2>
+  <p class="oneline">Reach and auth are fields in desired state, so a Target that cannot authenticate a reach is excluded before a build is dispatched — and Spindrift cannot create the thing it deploys into, so it opens a pull request instead.</p>
+  <details class="more">
+    <summary>The three reaches, the refusal, and the boundary</summary>
+    <div class="body">
+      <div class="lineage">
+        <div><b>Internal</b><span>cluster only</span></div>
+        <div><b>Private</b><span>an RFC1918 address — the record type <em>is</em> the boundary</span></div>
+        <div><b>Public</b><span>through the tunnel</span></div>
+      </div>
+      <p class="small dim">Private is the default. Nothing becomes reachable because somebody forgot a field.</p>
+      <div class="cols">
+        <div class="card card--flag"><h4>A filter on the route, not a library in the app</h4><p>An <code>auth: proxy</code> Component gets an ExternalAuth filter on its HTTPRoute, enforced by a proxy the platform owns and <b>Spindrift never installs</b>. An App cannot opt itself out of its own edge.</p></div>
+        <div class="card card--cau"><span class="tag t-cau">The refusal</span><h4>It is allowed to disqualify a backend</h4><p>Static hosting refuses <code>auth: proxy</code> outright — no non-bypassable origin exists to put a boundary in front of. A guarantee that quietly degrades is not a guarantee.</p></div>
+        <div class="card card--flag"><h4>Contents, never the container</h4><p>It holds nothing that can create a cluster, project, VPC, tunnel or signing key. Missing prerequisite → it writes the Terraform and opens a PR; a human merges, the apply bot applies, a standing check turns the row green.</p></div>
+      </div>
+      <p class="verbatim">reach: private · auth: proxy   →   AUTH_UNSUPPORTED excludes every Target that cannot authenticate at that reach, before a build is ever dispatched</p>
+    </div>
+  </details>
+</section>
+
+<section class="slide">
+  <span class="no"><b>05</b> / 05</span>
+  <p class="eyebrow">Evidence, not assertion</p>
+  <h2>This page is its own acceptance evidence</h2>
+  <p class="oneline">Uploaded as an archive, built on the hosted route into a <span class="m">files</span> artifact, served at a URL by the thing it describes — and every clause above was proven on a live installation, not a fixture.</p>
+  <details class="more">
+    <summary>What a live installation found that the suite could not</summary>
+    <div class="body">
+      <div class="stats">
+        <div class="stat"><b>2,283</b><span>tests green at 6f0d870c</span></div>
+        <div class="stat"><b>5</b><span>clauses proven live</span></div>
+        <div class="stat"><b>3/4</b><span>Targets healthy on first probe</span></div>
+        <div class="stat stat--cau"><b>4</b><span>defects only a live install found</span></div>
+      </div>
+      <ul class="ticks">
+        <li>Two Terraform roots that each need the other applied first — the runbook stated one direction.</li>
+        <li>A derived string carries no dependency edge, so grants ran before the account they named existed.</li>
+        <li>Six prerequisite rows failing with one byte-identical certificate-trust sentence.</li>
+        <li>A read on a URL the API does not serve, which made a second deploy collide with the site the first one created.</li>
+      </ul>
+      <p class="small dim">Three of the four are wrong <em>sentences</em> shown to an operator. No passing suite would ever have caught them.</p>
+    </div>
+  </details>
+  <p class="colophon"><span>Artifact <b>+</b> Target <b>+</b> configVersion</span><span><b>5</b> seams, every one of them real</span><span>Everything else is bookkeeping</span></p>
+</section>
+
+<nav class="pbar"><a href="#b" aria-label="Previous variant">←</a><b>C</b><span>Layered — one line a slide, depth folded under</span><a href="#a" aria-label="Next variant">→</a></nav>
+</div>
+
+</body>
+</html>
