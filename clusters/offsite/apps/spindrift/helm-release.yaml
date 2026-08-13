@@ -249,8 +249,38 @@ spec:
         # below name that object. Flipping this back to a path flips both.
         app: oci://ghcr.io/jonpulsifer/charts/spindrift-app
       github:
-        clientId: Iv1.918d699f36ee7afc
+        # The web origin the manifest-flow form POSTs to, the
+        # `…/installations/new` links target, and clone URLs are composed
+        # from. The App's identity itself — id, slug, client id, signing key —
+        # is not declared anywhere: it lives sealed in the `github_app` row,
+        # written once by the manifest-flow conversion on the Repositories
+        # screen.
+        webBaseUrl: https://github.com
         apiBaseUrl: https://api.github.com
+        # The adopted App's public slug (App ID 4576122), composing the
+        # install link. The identity's private half arrives through the
+        # installation Secret — SPINDRIFT_GITHUB_APP_ID and
+        # SPINDRIFT_GITHUB_APP_PRIVATE_KEY — never this document.
+        appSlug: spindrift-lolwtf
+        # The App is public so it also installs on `homelab-ng`, which means
+        # strangers can install it too. These are the installation accounts
+        # the Repositories screen renders as connectable and
+        # `installationFor` will operate for; every other installation is
+        # filtered, not merely left unclicked.
+        accounts:
+          - jonpulsifer
+          - homelab-ng
+        # Where GitHub delivers the App-level webhook: the path-scoped tunnel
+        # hostname (terraform/network/cloudflare/spindrift.tf exposes exactly
+        # `^/internal/github/webhook$` on it), never this installation's own
+        # `spindrift.${SECRET_DOMAIN}` — that is a LAN record GitHub's
+        # delivery servers cannot reach.
+        webhookUrl: https://spindrift-control.lolwtf.dev/internal/github/webhook
+        # The two Device Flow keys. The image that reads them is the one this
+        # release's pinned digest still names; the App-auth image accepts and
+        # drops them, so they hold no behaviour there and leave with the next
+        # edit after that digest lands.
+        clientId: Iv1.918d699f36ee7afc
         oauthBaseUrl: https://github.com
         # `@main` on purpose: every caller written into a configuration PR
         # copies this ref, and a branch keeps them all current — this
