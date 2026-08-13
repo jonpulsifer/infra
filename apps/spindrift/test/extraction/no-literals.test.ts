@@ -23,7 +23,11 @@ import {
   targetAdapterSchema,
 } from '../../src/config/manifest.schema.ts';
 import { BUILD_ROUTE_REFUSALS } from '../../src/domain/build-route.ts';
-import { PRESET_DEPENDENCIES } from '../../src/domain/detection/declared.ts';
+import { ARTIFACT_TYPES } from '../../src/domain/desired-state.ts';
+import {
+  PRESET_DEPENDENCIES,
+  PRESET_VERCEL_FRAMEWORKS,
+} from '../../src/domain/detection/declared.ts';
 import { KUBERNETES_DELIVERY_FLAVOURS } from '../../src/domain/target.ts';
 import { VESSEL_KINDS } from '../../src/domain/vessel.ts';
 
@@ -82,6 +86,15 @@ const PROJECT_ID_ALLOWLIST = new Set<string>([
   // wears the project-id shape and names no installation: it is the same
   // package on npm for everybody, which is exactly why detection can key on it.
   ...PRESET_DEPENDENCIES,
+  // The same table's other half: the framework each preset is called in the
+  // edge platform's vocabulary. `create-react-app` and `sveltekit-1` wear the
+  // project-id shape and name nothing — they are `@vercel/frameworks`' own
+  // slugs, the same for everybody, which is the whole reason a build can be
+  // told which one it is building.
+  ...PRESET_VERCEL_FRAMEWORKS,
+  // The shapes a Build can produce. Vocabulary read from the domain rather
+  // than restated, so adding a shape does not break a test here.
+  ...ARTIFACT_TYPES,
   // An encoding, a digest algorithm, and a key in a workflow file. None of the
   // three names anything; all wear the shape because they are lowercase words
   // carrying a digit or a hyphen, which is the whole of what this scanner can

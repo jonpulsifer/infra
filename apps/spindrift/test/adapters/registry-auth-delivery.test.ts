@@ -155,6 +155,7 @@ describe('the cloud build route', () => {
         tags: ['latest'],
         buildArgs: {},
         outputDirectory: null,
+        vercelFramework: null,
         registryAuth,
       },
     )) {
@@ -267,6 +268,7 @@ describe('the in-cluster route', () => {
           tags: ['latest'],
           buildArgs: {},
           outputDirectory: null,
+          vercelFramework: null,
           registryAuth,
         },
       )

@@ -56,7 +56,13 @@ export function desiredState(
     app: 'conformance',
     component: 'web',
     target: 'target',
-    kind: artifactType === 'files' ? 'website' : 'service',
+    // Every shape that is not an image is a bundle a static backend serves,
+    // and the platform's own build output is one of those — so the branch is
+    // "is this an image", which is the distinction the addresses below and the
+    // reach further down are both really about. Asking `=== 'files'` made a
+    // third shape silently take the image arm and get refused for a reach its
+    // backend does not serve.
+    kind: artifactType === 'image' ? 'service' : 'website',
     // A real address, because an adapter that has to pull one cannot place
     // anything without it — and "the artifact carries no address" is a core
     // bug, not a shape the contract's own suite should exercise. The two shapes
@@ -66,9 +72,9 @@ export function desiredState(
       type: artifactType,
       digest,
       refs: [
-        artifactType === 'files'
-          ? `${BUNDLE_DEPOT}/bundles/${digest}`
-          : `registry.example.test/conformance@${digest}`,
+        artifactType === 'image'
+          ? `registry.example.test/conformance@${digest}`
+          : `${BUNDLE_DEPOT}/bundles/${digest}`,
       ],
     },
     // Reach follows the shape rather than being fixed, because §9 ties the
@@ -76,8 +82,8 @@ export function desiredState(
     // `Public` only — so a private one is a state no Target accepts, and a
     // suite that asked for one would be asserting against a placement core
     // would never make.
-    reach: artifactType === 'files' ? 'public' : 'private',
-    auth: artifactType === 'files' ? 'none' : 'proxy',
+    reach: artifactType === 'image' ? 'private' : 'public',
+    auth: artifactType === 'image' ? 'proxy' : 'none',
     config: [],
     requirements: {
       platform: { os: 'linux', arch: 'amd64' },
@@ -276,6 +282,7 @@ export function buildAdapterSuite(
       tags: ['sha256-bundle', 'latest'],
       buildArgs: {},
       outputDirectory: null,
+      vercelFramework: null,
       registryAuth: [],
     } as const;
 

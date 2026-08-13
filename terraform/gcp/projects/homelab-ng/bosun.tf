@@ -4,9 +4,23 @@
 # C4 is the machine family because nested virtualization on Compute Engine is
 # Intel-only -- every AMD (`D`) and Arm (`A`/Axion) family is excluded outright,
 # which is why C4D's 384 cores of Turin cannot serve a skiff as a VM at any
-# size -- and among the Intel families C4 is the highest clocked: Granite
-# Rapids at a 3.9 GHz sustained all-core turbo against C3's 3.0. That is the
-# whole reason to run CI here rather than on a cheaper C3 or N2.
+# size.
+#
+# The clock claim that used to sit here -- Granite Rapids at 3.9 GHz sustained
+# all-core against C3's 3.0 -- is not what this shape gets, and it is worth
+# saying plainly rather than leaving as an aspiration. Which generation a C4
+# lands on is decided by the shape: the `-lssd` and `-metal` variants and the
+# 144- and 288-vCPU sizes get Granite Rapids, and every other C4 gets Emerald
+# Rapids. `c4-standard-48` is none of those, so this host runs Emerald -- a
+# Xeon 8581C at 2.30 GHz base -- and `min_cpu_platform` cannot argue with it:
+# C4 rejects the field outright.
+#
+# So the honest standing of this choice: C4 buys nested virt on Intel, not the
+# fastest Intel clock. `c4-standard-48-lssd` is the same 48 vCPU and the same
+# quota footprint and does get Granite (with ~3 TB of bundled NVMe), which is
+# the upgrade to weigh if the clock is ever measured to matter. It has not
+# been, and swapping shapes is a stop/start on a Spot instance nothing
+# restarts by itself.
 #
 # Nested virt itself is a plain boolean on the instance. It needs no custom
 # image and no `enable-vmx` license, so nix/images/gce.nix is unchanged from
@@ -118,6 +132,11 @@ resource "google_compute_instance" "tender" {
   description               = "Cloud bosun host: a warm pool of microVM Actions runners"
   machine_type              = local.tender_machine_type
   allow_stopping_for_update = true
+
+  # No min_cpu_platform: C4 rejects it outright ("C4 VM does not support
+  # minCpuPlatform Intel Granite Rapids", HTTP 400). Which generation a C4
+  # lands on is a property of the shape, not a request -- see the note above
+  # the machine type.
 
   # The point of the whole exercise: a skiff is a KVM guest inside this guest.
   advanced_machine_features {

@@ -13,6 +13,7 @@
  */
 import { describe, expect, test } from 'bun:test';
 import { join } from 'node:path';
+import { vercelFrameworkOf } from '../../src/domain/detection/declared.ts';
 import {
   detectScope,
   type InferredComponentKind,
@@ -343,5 +344,56 @@ describe('the detection ladder', () => {
       'build.file: path must stay inside its scope',
     );
     expect(plannerCalls).toBe(0);
+  });
+});
+
+/**
+ * The framework a project declares, in the edge platform's vocabulary.
+ *
+ * This mapping is load-bearing in a way most detection is not: `vercel build`
+ * performs no detection of its own, so a wrong or missing slug does not fail
+ * the build — it builds the project as "Other", which copies the tree into
+ * `static/` and emits no functions at all. The failure is a green build
+ * serving an SSR app's own sources, so the cases below are about the answers
+ * being *exactly* right rather than merely present.
+ */
+describe('the Vercel framework a package.json implies', () => {
+  const of = (dependencies: Record<string, string>) =>
+    vercelFrameworkOf(JSON.stringify({ dependencies }));
+
+  test('names the platform’s own slug, not the framework’s common name', () => {
+    expect(of({ next: '15.0.0' })).toBe('nextjs');
+    expect(of({ nuxt: '3.0.0' })).toBe('nuxtjs');
+    expect(of({ '@vue/cli-service': '5.0.0' })).toBe('vue');
+  });
+
+  test('takes the current major’s slug where the platform kept the old one', () => {
+    // `sveltekit` and `docusaurus` are both still live slugs naming the
+    // *previous* major. Answering either would build the wrong way round, and
+    // would do it silently.
+    expect(of({ '@sveltejs/kit': '2.0.0' })).toBe('sveltekit-1');
+    expect(of({ '@docusaurus/core': '3.0.0' })).toBe('docusaurus-2');
+  });
+
+  test('keeps the preset table’s order, so the specific framework wins', () => {
+    // A SvelteKit app depends on Vite too, and answering `vite` would drop
+    // every server route the app has.
+    expect(of({ '@sveltejs/kit': '2.0.0', vite: '5.0.0' })).toBe('sveltekit-1');
+  });
+
+  test('reads a framework declared as a devDependency', () => {
+    expect(
+      vercelFrameworkOf(
+        JSON.stringify({ devDependencies: { astro: '4.0.0' } }),
+      ),
+    ).toBe('astro');
+  });
+
+  test('refuses rather than defaulting when nothing is recognised', () => {
+    // The whole point: no fallback. A project with no recognised framework has
+    // to stop the dispatch, because the build that would run instead succeeds.
+    expect(of({ express: '4.0.0' })).toBeNull();
+    expect(vercelFrameworkOf('{}')).toBeNull();
+    expect(vercelFrameworkOf('not json at all')).toBeNull();
   });
 });
