@@ -39,10 +39,12 @@
   homelab.disko.device = "/dev/nvme0n1";
 
   sops.defaultSopsFile = ../secrets/riptide.sops.yaml;
-  # bosun reads this once at startup, so a rotated token needs the unit
+  # bosun reads this once at startup, so a rotated key needs the unit
   # bounced -- which is what restartUnits does on the activation that
-  # rewrites the secret.
-  sops.secrets."bosun-github-token" = {
+  # rewrites the secret. Shared with oldschool: both are bosun hosts on the
+  # same Spindrift+bosun GitHub App, each holding this same key.
+  sops.secrets."bosun-github-app-key" = {
+    sopsFile = ../secrets/bosun.sops.yaml;
     owner = "bosun";
     group = "bosun";
     mode = "0400";
@@ -55,7 +57,14 @@
   services.bosun = {
     enable = true;
     repo = "jonpulsifer/infra";
-    tokenFile = config.sops.secrets."bosun-github-token".path;
+    github = {
+      # TODO(operator): the shared Spindrift+bosun GitHub App is created by
+      # hand during the design's cutover step (Manifest flow, off Spindrift's
+      # Repositories screen); this placeholder id is not real. Replace it
+      # once that App exists -- see the PR body.
+      appId = 1;
+      privateKeyFile = config.sops.secrets."bosun-github-app-key".path;
+    };
     classes.skiff-nixos = {
       hull = "${inputs.self.packages.x86_64-linux.hull-nixos}";
       vcpus = 4;
