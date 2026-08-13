@@ -21,7 +21,8 @@
  * **Each section reads its own state.** Two independent far sides answering one
  * `Promise.all` meant a slow bucket check was a slow registry list, and either
  * refusal blanked both. A connection that is down should read as one row that
- * is down.
+ * is down. An act re-reads rather than patching what it wrote, so what is on
+ * screen is what the manifest now says and not a guess about it.
  *
  * **Verification is per row and on request**, in both sections that have any.
  * A screen that checked N destinations on load would be a screen slow in
@@ -58,6 +59,7 @@ import {
 import { type ReactNode, useEffect, useState } from 'react';
 import { BUILD_ADAPTER } from '../../client/build-adapters.ts';
 import { command, type OutputOf } from '../../client.ts';
+import { useRead } from '../../poll.ts';
 import { Badge, Dot } from '../../ui/badge.tsx';
 import { Button } from '../../ui/button.tsx';
 import { Card, CardContent } from '../../ui/card.tsx';
@@ -81,73 +83,21 @@ type Reachability<Result> =
   | { readonly state: 'reachable'; readonly result: Result }
   | { readonly state: 'unreachable'; readonly message: string };
 
-/**
- * One section's own read of one far side.
- *
- * Reload is a token rather than a refetch call so that an act which changed the
- * manifest re-reads what the manifest now says, instead of patching a local
- * copy of it and hoping the two agree.
- */
-function useConnection<Value>(
-  read: () => Promise<
-    { ok: true; value: Value } | { ok: false; failure: { message: string } }
-  >,
-  reloadToken: number,
-): { state: 'loading' | 'error' | 'ready'; value?: Value; message?: string } {
-  const [state, setState] = useState<{
-    state: 'loading' | 'error' | 'ready';
-    value?: Value;
-    message?: string;
-  }>({ state: 'loading' });
-
-  useEffect(() => {
-    let live = true;
-    read()
-      .then((result) => {
-        if (!live) return;
-        setState(
-          result.ok
-            ? { state: 'ready', value: result.value }
-            : { state: 'error', message: result.failure.message },
-        );
-      })
-      .catch((cause: unknown) => {
-        if (!live) return;
-        setState({
-          state: 'error',
-          message:
-            cause instanceof Error ? cause.message : 'the read did not answer',
-        });
-      });
-    return () => {
-      live = false;
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [reloadToken]);
-
-  return state;
-}
-
 // --- Source buckets ---------------------------------------------------------
 
 /** Where a Source is staged before any build route can fetch it (§4, §15). */
 export function SourceBuckets() {
-  const [reloadToken, setReloadToken] = useState(0);
-  const loaded = useConnection<SourceStorageView>(
-    () => command('listSourceBuckets', {}),
-    reloadToken,
-  );
-  const onChanged = () => setReloadToken((token) => token + 1);
+  const read = useRead([['listSourceBuckets', {}]], null);
 
-  if (loaded.state === 'loading') return <LoadingSection rows={3} />;
-  if (loaded.state === 'error' || loaded.value === undefined) {
+  if (read.type === 'loading') return <LoadingSection rows={3} />;
+  if (read.type === 'error') {
     return (
       <SectionShell>
-        <Failure>{loaded.message ?? 'source storage did not answer'}</Failure>
+        <Failure>{read.failure.message}</Failure>
       </SectionShell>
     );
   }
-  return <SourceBucketList view={loaded.value} onChanged={onChanged} />;
+  return <SourceBucketList view={read.value[0]} onChanged={read.reload} />;
 }
 
 function SourceBucketList({
@@ -425,21 +375,18 @@ function BucketRow({
  * tells the two apart without waiting for a Build to time out and find out.
  */
 export function Builders() {
-  const loaded = useConnection<BuildRoutesView>(
-    () => command('listBuildRoutes', {}),
-    0,
-  );
+  const read = useRead([['listBuildRoutes', {}]], null);
 
-  if (loaded.state === 'loading') return <LoadingSection rows={2} />;
-  if (loaded.state === 'error' || loaded.value === undefined) {
+  if (read.type === 'loading') return <LoadingSection rows={2} />;
+  if (read.type === 'error') {
     return (
       <SectionShell>
-        <Failure>{loaded.message ?? 'the build routes did not answer'}</Failure>
+        <Failure>{read.failure.message}</Failure>
       </SectionShell>
     );
   }
 
-  const routes = loaded.value.routes;
+  const routes = read.value[0].routes;
   return (
     <ConnectionSection
       name="Builders"
@@ -518,28 +465,22 @@ const FLAVOUR_LABEL: Record<RegistryRow['flavour'], string> = {
 
 /** Where every Artifact is pushed, and where a Target pulls it from (§16). */
 export function ArtifactRegistries() {
-  const [reloadToken, setReloadToken] = useState(0);
-  const loaded = useConnection<OutputOf<'listArtifactRegistries'>>(
-    () => command('listArtifactRegistries', {}),
-    reloadToken,
-  );
-  const onChanged = () => setReloadToken((token) => token + 1);
+  const read = useRead([['listArtifactRegistries', {}]], null);
 
-  if (loaded.state === 'loading') return <LoadingSection rows={2} />;
-  if (loaded.state === 'error' || loaded.value === undefined) {
+  if (read.type === 'loading') return <LoadingSection rows={2} />;
+  if (read.type === 'error') {
     return (
       <SectionShell>
-        <Failure>
-          {loaded.message ?? 'the registry list did not answer'}
-        </Failure>
+        <Failure>{read.failure.message}</Failure>
       </SectionShell>
     );
   }
+  const [listed] = read.value;
   return (
     <ArtifactRegistryList
-      registries={loaded.value.registries}
-      canHoldCredentials={loaded.value.canHoldCredentials}
-      onChanged={onChanged}
+      registries={listed.registries}
+      canHoldCredentials={listed.canHoldCredentials}
+      onChanged={read.reload}
     />
   );
 }

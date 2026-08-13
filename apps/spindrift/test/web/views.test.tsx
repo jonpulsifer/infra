@@ -13,8 +13,8 @@
  */
 import { describe, expect, test } from 'bun:test';
 import { renderToStaticMarkup } from 'react-dom/server';
+import type { DeployView, WorkspaceView } from '../../src/commands/views.ts';
 import { logos } from '../../src/web/client/logos/index.ts';
-import type { DeployView, WorkspaceView } from '../../src/web/model.ts';
 import { DeployDetail } from '../../src/web/views/apps/deploy-detail.tsx';
 import {
   AUTH_NOTE,

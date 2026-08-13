@@ -21,10 +21,8 @@
  * schema but not the form would still fail here.
  */
 import { describe, expect, test } from 'bun:test';
-import {
-  configureInstallation,
-  getInstallationManifest,
-} from '../../src/commands/index.ts';
+import { configureInstallation } from '../../src/commands/installation/configure.ts';
+import { getInstallationManifest } from '../../src/commands/installation/get.ts';
 import type { Clock, CommandContext } from '../../src/commands/types.ts';
 import {
   installationManifestSchema,

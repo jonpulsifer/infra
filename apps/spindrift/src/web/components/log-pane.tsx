@@ -12,7 +12,7 @@
  */
 import type { ReactNode } from 'react';
 import { useEffect, useRef } from 'react';
-import type { LogLine } from '../model.ts';
+import type { LogLine } from '../../commands/views.ts';
 import { cn } from '../ui/utils.ts';
 
 const TONE = {

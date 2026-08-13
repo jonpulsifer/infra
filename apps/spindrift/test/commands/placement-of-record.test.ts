@@ -16,13 +16,11 @@ import type { DeployAdapter } from '../../src/adapters/deploy/contract.ts';
 import { deployApp } from '../../src/commands/apps/deploy.ts';
 import { listApps } from '../../src/commands/apps/list.ts';
 import { getAppWorkspace } from '../../src/commands/apps/workspace.ts';
-import {
-  createDeploy,
-  placeComponent,
-  rollbackDeploy,
-  setConfig,
-  unplaceComponent,
-} from '../../src/commands/index.ts';
+import { placeComponent } from '../../src/commands/components/place.ts';
+import { unplaceComponent } from '../../src/commands/components/unplace.ts';
+import { setConfig } from '../../src/commands/config/set.ts';
+import { createDeploy } from '../../src/commands/deploys/create.ts';
+import { rollbackDeploy } from '../../src/commands/deploys/rollback.ts';
 import type {
   AdapterRegistry,
   Clock,

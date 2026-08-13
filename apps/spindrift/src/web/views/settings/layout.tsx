@@ -19,6 +19,11 @@
 import type { ReactNode } from 'react';
 import { Eyebrow } from '../../ui/card.tsx';
 import { Tabs } from '../../ui/tabs.tsx';
+import { InstallationSettings } from '../auth/installation.tsx';
+import { IdentitySettings } from '../auth/settings.tsx';
+import { RepositoriesScreen } from '../repos/list.tsx';
+import { TargetsScreen } from '../targets/list.tsx';
+import { ArtifactRegistries, Builders, SourceBuckets } from './connections.tsx';
 
 export type SettingsSection =
   | 'connections'
@@ -90,6 +95,101 @@ export function EmptySettingsSection({
       <p className="mt-2 max-w-prose text-sm leading-6 text-muted-foreground">
         {children}
       </p>
+    </section>
+  );
+}
+
+/**
+ * The Settings screen — which section the path names, and the one it falls back
+ * to.
+ *
+ * The section is read off the path rather than held in state, so a settings
+ * URL is a link somebody can send. An unrecognised section resolves to
+ * connections rather than to a not-found: every route that lands here is
+ * `/settings`-prefixed and the reader asked for settings, so the answer is the
+ * section they most likely meant, not an error page.
+ */
+export function SettingsScreen({
+  path,
+  onNavigate,
+}: {
+  path: string;
+  onNavigate: (path: string) => void;
+}) {
+  const requested = path.replace(/^\/settings\/?/, '').split('/')[0] ?? '';
+  const section: SettingsSection = [
+    'connections',
+    'identity',
+    'installation',
+    'notifications',
+    'danger',
+  ].includes(requested)
+    ? (requested as SettingsSection)
+    : 'connections';
+
+  return (
+    <SettingsLayout section={section} onNavigate={onNavigate}>
+      {section === 'connections' ? (
+        <ConnectionsSettings onNavigate={onNavigate} />
+      ) : section === 'identity' ? (
+        <IdentitySettings />
+      ) : section === 'installation' ? (
+        <InstallationSettings />
+      ) : section === 'notifications' ? (
+        <EmptySettingsSection
+          eyebrow="Settings / notifications"
+          title="Notifications"
+        >
+          No notification destinations are configured. Operational state stays
+          visible in Overview until this installation gains a delivery command.
+        </EmptySettingsSection>
+      ) : (
+        <EmptySettingsSection
+          eyebrow="Settings / danger zone"
+          title="Destructive controls"
+        >
+          Destructive acts remain beside the objects they affect, where their
+          impact can be named precisely. There is no installation-wide delete.
+        </EmptySettingsSection>
+      )}
+    </SettingsLayout>
+  );
+}
+
+/**
+ * Every system outside Spindrift that Spindrift holds an address for, in the
+ * order of the supply chain.
+ *
+ * Five sections in one ruled stack rather than five screens, because they are
+ * all the same kind of thing and the order is the argument: where code comes
+ * from, where a Source is staged, where a Source becomes an Artifact, where an
+ * Artifact is pushed, and where it runs.
+ */
+function ConnectionsSettings({
+  onNavigate,
+}: {
+  readonly onNavigate: (path: string) => void;
+}) {
+  return (
+    <section>
+      <Eyebrow>Settings / connections</Eyebrow>
+      <h2 className="mt-1 text-2xl font-semibold tracking-tight">
+        Connected systems
+      </h2>
+      <p className="mt-1 max-w-2xl text-sm leading-6 text-muted-foreground">
+        Every system outside Spindrift that Spindrift holds an address for. Each
+        provider keeps its concrete state and actions in one ruled row, and the
+        order is the supply chain: where code comes from, where a Source is
+        staged, where a Source becomes an Artifact, where an Artifact is pushed,
+        and where it runs.
+      </p>
+      <div className="mt-6 divide-y divide-border border-y border-border">
+        <RepositoriesScreen embedded />
+        <SourceBuckets />
+        <Builders />
+        <ArtifactRegistries />
+        <TargetsScreen embedded onNavigate={onNavigate} />
+      </div>
     </section>
   );
 }

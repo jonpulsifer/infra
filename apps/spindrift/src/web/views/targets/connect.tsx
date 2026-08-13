@@ -46,6 +46,10 @@ import {
   Waypoints,
 } from 'lucide-react';
 import { type ReactNode, useState } from 'react';
+import type {
+  CloudBoundaryFacts,
+  TargetConnectionProposal,
+} from '../../../commands/views.ts';
 import {
   KUBERNETES_DELIVERY_FLAVOURS,
   type KubernetesDelivery,
@@ -59,10 +63,6 @@ import {
 } from '../../../domain/target-onboarding.ts';
 import type { VesselKind } from '../../../domain/vessel.ts';
 import { command, type InputOf, type OutputOf } from '../../client.ts';
-import type {
-  CloudBoundaryFacts,
-  TargetConnectionProposal,
-} from '../../model.ts';
 import { Badge } from '../../ui/badge.tsx';
 import { Button } from '../../ui/button.tsx';
 import { Declaration as SharedDeclaration } from '../../ui/declaration.tsx';

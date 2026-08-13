@@ -12,10 +12,8 @@
  */
 import { describe, expect, test } from 'bun:test';
 import { and, eq } from 'drizzle-orm';
-import {
-  connectTarget,
-  resolveComponentPlacement,
-} from '../../src/commands/index.ts';
+import { resolveComponentPlacement } from '../../src/commands/apps/resolve-placement.ts';
+import { connectTarget } from '../../src/commands/targets/connect.ts';
 import type {
   AdapterRegistry,
   Clock,

@@ -23,7 +23,10 @@
  */
 import { GitBranch, Search } from 'lucide-react';
 import { useState } from 'react';
-import type { GrantedRepositoryView, RepositoryOptionView } from '../model.ts';
+import type {
+  GrantedRepositoryView,
+  RepositoryOptionView,
+} from '../../commands/views.ts';
 import { Badge } from '../ui/badge.tsx';
 import { cn } from '../ui/utils.ts';
 

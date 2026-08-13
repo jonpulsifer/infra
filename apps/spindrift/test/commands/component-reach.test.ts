@@ -18,7 +18,8 @@
 import { describe, expect, test } from 'bun:test';
 import { eq } from 'drizzle-orm';
 import { appValues } from '../../src/adapters/deploy/kubernetes/values.ts';
-import { createDeploy, setComponentReach } from '../../src/commands/index.ts';
+import { setComponentReach } from '../../src/commands/components/reach.ts';
+import { createDeploy } from '../../src/commands/deploys/create.ts';
 import { dispatch } from '../../src/commands/registry.ts';
 import type {
   AdapterRegistry,

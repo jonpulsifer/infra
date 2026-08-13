@@ -30,6 +30,7 @@ import {
   DefinitionGrid,
   LedgerExplorer,
 } from '../../components/object-explorer.tsx';
+import { useRead } from '../../poll.ts';
 import { Badge } from '../../ui/badge.tsx';
 import { Button } from '../../ui/button.tsx';
 import { Eyebrow } from '../../ui/card.tsx';
@@ -38,6 +39,7 @@ import type { Column } from '../../ui/data-table.tsx';
 import { EmptyState } from '../../ui/empty-state.tsx';
 import { Page, PageHeader } from '../../ui/page.tsx';
 import { Timestamp } from '../../ui/timestamp.tsx';
+import { LedgerSkeleton, ScreenFailure } from '../screen.tsx';
 import { shortDigest } from './sources.tsx';
 import { SupplyChainTabs } from './tabs.tsx';
 
@@ -255,5 +257,39 @@ export function ArtifactLedger({
         </p>
       ) : null}
     </Page>
+  );
+}
+
+/**
+ * The Artifacts screen — the ledger, and the read that fills it.
+ *
+ * Read once for the reason the Sources screen is: an Artifact is immutable and
+ * outlives the attempt that made it, so a cadence would re-ask about rows that
+ * cannot have changed.
+ */
+export function ArtifactsScreen({
+  onNavigate,
+}: {
+  onNavigate: (path: string) => void;
+}) {
+  const read = useRead([['listArtifacts', {}]], null);
+
+  if (read.type === 'loading') return <LedgerSkeleton />;
+  if (read.type === 'error') {
+    return (
+      <ScreenFailure
+        title="Failed to load Artifacts"
+        message={read.failure.message}
+        onRetry={read.reload}
+      />
+    );
+  }
+  const [listed] = read.value;
+  return (
+    <ArtifactLedger
+      artifacts={listed.artifacts}
+      limit={listed.limit}
+      onNavigate={onNavigate}
+    />
   );
 }

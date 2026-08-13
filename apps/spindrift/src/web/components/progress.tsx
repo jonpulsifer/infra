@@ -21,7 +21,7 @@
  * that crept toward 90% and waited there would be inventing a number the
  * controller never gave.
  */
-import type { StepStatus } from '../model.ts';
+import type { StepStatus } from '../../commands/views.ts';
 import { cn } from '../ui/utils.ts';
 import { StepGlyph, statusWord } from './status.tsx';
 

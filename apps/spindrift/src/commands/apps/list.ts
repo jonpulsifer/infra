@@ -1,8 +1,8 @@
 import { z } from 'zod';
 import { artifactSummary } from '../../domain/artifact-name.ts';
 import { elapsedSince } from '../../domain/elapsed.ts';
-import type { AppListItem, DeployPhase } from '../../web/model.ts';
 import { type Command, ok } from '../types.ts';
+import type { AppListItem, DeployPhase } from '../views.ts';
 
 /**
  * How bad each phase is, worst first.

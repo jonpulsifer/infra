@@ -13,17 +13,17 @@
  *   (`src/commands/apps/deploy.ts:529-534`) and a form that placed as well
  *   would be a second answer to which Target this Component lives on;
  * - its first Deploy therefore has to be told a Target, which is the one
- *   conditional the screen adds (`src/web/app.tsx`'s `handleDeploy`), and the
+ *   conditional the screen adds (`src/web/views/apps/workspace.tsx`'s `handleDeploy`), and the
  *   Build that press starts is the new Component's own.
  */
 import { describe, expect, test } from 'bun:test';
 import { eq } from 'drizzle-orm';
+import { deployApp } from '../../src/commands/apps/deploy.ts';
 import {
   createComponent,
   createComponentInput,
 } from '../../src/commands/components/create.ts';
 import { createApp } from '../../src/commands/create-app.ts';
-import { deployApp } from '../../src/commands/index.ts';
 import type {
   AdapterRegistry,
   Clock,

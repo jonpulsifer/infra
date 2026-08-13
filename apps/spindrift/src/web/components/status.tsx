@@ -9,7 +9,11 @@
 import { Check, CircleDashed, Loader2, X } from 'lucide-react';
 import type { ReactNode } from 'react';
 import type { Blame } from '../../adapters/deploy/contract.ts';
-import { type DeployPhase, isInFlight, type StepStatus } from '../model.ts';
+import {
+  type DeployPhase,
+  isInFlight,
+  type StepStatus,
+} from '../../commands/views.ts';
 import { Badge, Dot } from '../ui/badge.tsx';
 import { cn } from '../ui/utils.ts';
 

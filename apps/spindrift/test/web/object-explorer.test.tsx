@@ -1,8 +1,11 @@
 import { describe, expect, test } from 'bun:test';
 import { renderToStaticMarkup } from 'react-dom/server';
+import type {
+  BuildListItem,
+  DeployLedgerItem,
+} from '../../src/commands/views.ts';
 import { ObjectExplorer } from '../../src/web/components/object-explorer.tsx';
 import { AppShell } from '../../src/web/components/shell.tsx';
-import type { BuildListItem, DeployLedgerItem } from '../../src/web/model.ts';
 import { DeployLedger } from '../../src/web/views/operations/deploys.tsx';
 import { Overview } from '../../src/web/views/operations/overview.tsx';
 import { SettingsLayout } from '../../src/web/views/settings/layout.tsx';

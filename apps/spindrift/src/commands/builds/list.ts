@@ -8,8 +8,8 @@
  */
 import { z } from 'zod';
 import { elapsedSince } from '../../domain/elapsed.ts';
-import type { BuildListItem } from '../../web/model.ts';
 import { type Command, ok } from '../types.ts';
+import type { BuildListItem } from '../views.ts';
 
 export const BUILD_LEDGER_PAGE = 50;
 

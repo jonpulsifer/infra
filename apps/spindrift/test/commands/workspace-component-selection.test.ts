@@ -14,13 +14,11 @@
  */
 import { describe, expect, test } from 'bun:test';
 import { eq } from 'drizzle-orm';
+import { deployApp } from '../../src/commands/apps/deploy.ts';
+import { getAppWorkspace } from '../../src/commands/apps/workspace.ts';
+import { createComponent } from '../../src/commands/components/create.ts';
+import { runComponent } from '../../src/commands/components/run.ts';
 import { createApp } from '../../src/commands/create-app.ts';
-import {
-  createComponent,
-  deployApp,
-  getAppWorkspace,
-  runComponent,
-} from '../../src/commands/index.ts';
 import type {
   AdapterRegistry,
   Clock,

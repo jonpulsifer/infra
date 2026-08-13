@@ -38,17 +38,18 @@
  */
 import { Radio } from 'lucide-react';
 import { useMemo, useState } from 'react';
-import {
-  DefinitionGrid,
-  type ExplorerItem,
-  ObjectExplorer,
-} from '../../components/object-explorer.tsx';
 import type {
   AppListItem,
   BuildListItem,
   DeployLedgerItem,
   TargetListItem,
-} from '../../model.ts';
+} from '../../../commands/views.ts';
+import {
+  DefinitionGrid,
+  type ExplorerItem,
+  ObjectExplorer,
+} from '../../components/object-explorer.tsx';
+import { useRead } from '../../poll.ts';
 import { Badge } from '../../ui/badge.tsx';
 import { Button } from '../../ui/button.tsx';
 import { Eyebrow } from '../../ui/card.tsx';
@@ -57,9 +58,11 @@ import { type Column, DataTable } from '../../ui/data-table.tsx';
 import { EmptyState } from '../../ui/empty-state.tsx';
 import { Metric, type MetricTone } from '../../ui/metric.tsx';
 import { Page, PageHeader } from '../../ui/page.tsx';
+import { Skeleton, SkeletonRows } from '../../ui/skeleton.tsx';
 import { Tabs } from '../../ui/tabs.tsx';
 import { Timestamp } from '../../ui/timestamp.tsx';
 import { appHref } from '../apps/list.tsx';
+import { ScreenFailure } from '../screen.tsx';
 import { buildTone } from '../supply-chain/builds.tsx';
 import { deployTone } from './deploys.tsx';
 
@@ -84,7 +87,7 @@ type Lane = 'all' | 'attention' | 'inflight' | 'builds' | 'deploys';
 /**
  * A Target's name is both halves of it.
  *
- * `model.ts` is explicit that neither the boundary nor the surface identifies a
+ * `views.ts` is explicit that neither the boundary nor the surface identifies a
  * Target alone, and two clusters both running `kubernetes` were the same word
  * twice on this screen. An unplaced App has no boundary yet, and says the
  * surface alone rather than inventing a `/`.
@@ -700,5 +703,84 @@ function StandingState({
         />
       </div>
     </section>
+  );
+}
+
+/**
+ * The landing screen, loading.
+ *
+ * Its own shape rather than the shared `LedgerSkeleton` with more rows, because
+ * the tile strip is the tallest thing above the fold: standing in for it with
+ * rows moves the feed up by a hundred pixels and then drops it back down, which
+ * is the jump a skeleton exists to prevent.
+ */
+function OverviewSkeleton() {
+  return (
+    <Page>
+      <div className="flex flex-col gap-2.5">
+        <Skeleton className="h-3 w-24" />
+        <Skeleton className="h-7 w-56" />
+      </div>
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <Skeleton className="h-24" />
+        <Skeleton className="h-24" />
+        <Skeleton className="h-24" />
+        <Skeleton className="h-24" />
+      </div>
+      <SkeletonRows rows={8} />
+    </Page>
+  );
+}
+
+/**
+ * The landing screen — four reads, one answer.
+ *
+ * Four commands in one read rather than four screens' worth of independent
+ * ones: the tiles are a single claim about the installation, and letting each
+ * land on its own would draw a fleet that is four different ages across one
+ * row of numbers.
+ *
+ * Both paged reads ask for twelve and answer with the cursor for the
+ * thirteenth, which this screen used to drop on the floor — and then counted
+ * the twelve it kept as if they were the fleet. Keeping the cursor is the whole
+ * fix: nothing here pages, it only needs to know that "3 running" is three of
+ * the newest twelve and not three in the installation.
+ */
+export function OverviewScreen({
+  onNavigate,
+}: {
+  onNavigate: (path: string) => void;
+}) {
+  const read = useRead(
+    [
+      ['listApps', {}],
+      ['listBuilds', { limit: 12 }],
+      ['listAllDeploys', { limit: 12 }],
+      ['listTargets', {}],
+    ],
+    15_000,
+  );
+
+  if (read.type === 'loading') return <OverviewSkeleton />;
+  if (read.type === 'error') {
+    return (
+      <ScreenFailure
+        title="Failed to load Overview"
+        message={read.failure.message}
+        onRetry={read.reload}
+      />
+    );
+  }
+  const [apps, builds, deploys, targets] = read.value;
+  return (
+    <Overview
+      apps={apps.apps}
+      builds={builds.builds}
+      deploys={deploys.deploys}
+      targets={targets.targets}
+      buildsHasMore={builds.nextBefore !== null}
+      deploysHasMore={deploys.nextBefore !== null}
+      onNavigate={onNavigate}
+    />
   );
 }

@@ -33,6 +33,11 @@ import { AlertTriangle, Loader2, Rocket, Search } from 'lucide-react';
 import { type Dispatch, useEffect, useRef, useState } from 'react';
 import type { ZodType } from 'zod';
 import type {
+  GrantedRepositoryView,
+  RepositoryOptionView,
+  TargetOptionView,
+} from '../../../../commands/views.ts';
+import type {
   Blocker,
   CreationDraftView,
   DraftAction,
@@ -53,11 +58,6 @@ import {
   type RepositoryChoice,
   repositoryChoices,
 } from '../../../components/repo-picker.tsx';
-import type {
-  GrantedRepositoryView,
-  RepositoryOptionView,
-  TargetOptionView,
-} from '../../../model.ts';
 import { reportSessionExpired } from '../../../session-events.ts';
 import { Badge } from '../../../ui/badge.tsx';
 import { Button } from '../../../ui/button.tsx';
@@ -1496,5 +1496,135 @@ function Refusal({
         </ul>
       ) : null}
     </div>
+  );
+}
+
+/**
+ * The creation screen — the two reads the flow opens with, and the draft they
+ * resolve.
+ *
+ * **The draft first, the options after it.** Placement is derived from what is
+ * being created (§3), so asking which Targets will take this workload before
+ * the draft exists is asking about a different workload. Repositories load
+ * alongside the Targets rather than behind them — that read depends on
+ * nothing.
+ *
+ * **The path this screen rewrites is not navigation.** Starting a draft names
+ * it, the URL becomes `/apps/new/<id>`, and that arrives back through the
+ * router as a changed prop. Reloading for it would re-run both reads and throw
+ * away everything typed since, which is the whole of what remounting on the id
+ * used to cost — so the screen keeps its own record of which draft is loaded
+ * and compares.
+ *
+ * Not a `useRead`: the two reads are sequential rather than parallel, the
+ * second is composed from the first's answer, and the load has two phases the
+ * skeleton names. One cadence over four commands is the wrong shape for all
+ * three.
+ */
+export function NewAppScreen({
+  draftId,
+  onNavigate,
+}: {
+  draftId: string | null;
+  onNavigate: (path: string) => void;
+}) {
+  const [state, setState] = useState<
+    | { type: 'loading'; phase: CreationLoad }
+    | { type: 'error'; message: string }
+    | {
+        type: 'success';
+        targetOptions: readonly TargetOptionView[];
+        repoOptions: readonly RepositoryOptionView[];
+        repoGrant: readonly GrantedRepositoryView[];
+        draft: CreationDraftView;
+      }
+  >({ type: 'loading', phase: 'draft' });
+  const [attempt, setAttempt] = useState(0);
+  // React Strict Mode replays effects in development. Supplying the identity
+  // makes both starts the same authenticated act instead of leaving an orphan.
+  const startId = useRef(crypto.randomUUID());
+  /** The draft on screen, so this screen's own URL rewrite is not navigation. */
+  const loaded = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (draftId !== null && draftId === loaded.current) return;
+    if (draftId === null && loaded.current !== null) {
+      // `New App` pressed while a draft is open: a genuinely new one needs an
+      // identity of its own, or `startCreationDraft` idempotently answers with
+      // the draft already on screen.
+      startId.current = crypto.randomUUID();
+      loaded.current = null;
+    }
+    let live = true;
+    setState({ type: 'loading', phase: 'draft' });
+    const draftRequest =
+      draftId === null
+        ? command('startCreationDraft', { id: startId.current })
+        : command('getCreationDraft', { id: draftId });
+    (async () => {
+      const draftRes = await draftRequest;
+      if (!live) return;
+      if (!draftRes.ok) {
+        setState({ type: 'error', message: draftRes.failure.message });
+        return;
+      }
+      setState({ type: 'loading', phase: 'options' });
+      const { kind, reach, auth } = draftRes.value.draft;
+      const [targetRes, repoRes] = await Promise.all([
+        command('listTargets', { kind, reach, auth }),
+        command('listRepositories', {}),
+      ]);
+      if (!live) return;
+      if (!targetRes.ok) {
+        setState({ type: 'error', message: targetRes.failure.message });
+        return;
+      }
+      if (!repoRes.ok) {
+        setState({ type: 'error', message: repoRes.failure.message });
+        return;
+      }
+      loaded.current = draftRes.value.id;
+      setState({
+        type: 'success',
+        targetOptions: targetRes.value.options,
+        repoOptions: repoRes.value.options,
+        repoGrant: repoRes.value.available,
+        draft: draftRes.value,
+      });
+      if (draftId === null) {
+        onNavigate(`/apps/new/${draftRes.value.id}`);
+      }
+    })().catch((e: unknown) => {
+      if (!live) return;
+      setState({
+        type: 'error',
+        message: e instanceof Error ? e.message : 'Server failure',
+      });
+    });
+    return () => {
+      live = false;
+    };
+  }, [draftId, onNavigate, attempt]);
+
+  if (state.type === 'loading') return <CreationSkeleton phase={state.phase} />;
+
+  if (state.type === 'error') {
+    return (
+      <CreationLoadFailure
+        message={state.message}
+        onRetry={() => setAttempt((value) => value + 1)}
+      />
+    );
+  }
+
+  return (
+    <NewApp
+      key={state.draft.id}
+      initial={state.draft}
+      targets={state.targetOptions}
+      repos={state.repoOptions}
+      available={state.repoGrant}
+      onCreated={(app) => onNavigate(`/apps/${app.id}`)}
+    />
   );
 }

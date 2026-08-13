@@ -21,14 +21,14 @@ import { describe, expect, test } from 'bun:test';
 import { and, eq } from 'drizzle-orm';
 import type { DeployAdapter } from '../../src/adapters/deploy/contract.ts';
 import { deployApp } from '../../src/commands/apps/deploy.ts';
-import { placeIntent } from '../../src/commands/deploys/create.ts';
+import { uploadArchive } from '../../src/commands/apps/upload-archive.ts';
+import { dispatchBuild } from '../../src/commands/builds/dispatch.ts';
+import { placeComponent } from '../../src/commands/components/place.ts';
 import {
   createDeploy,
-  dispatchBuild,
-  placeComponent,
-  rollbackDeploy,
-  uploadArchive,
-} from '../../src/commands/index.ts';
+  placeIntent,
+} from '../../src/commands/deploys/create.ts';
+import { rollbackDeploy } from '../../src/commands/deploys/rollback.ts';
 import type {
   AdapterRegistry,
   Clock,

@@ -31,7 +31,7 @@
 import { blake3 } from '@noble/hashes/blake3.js';
 import { bytesToHex } from '@noble/hashes/utils.js';
 import { CloudHttp, type CloudResponse, type Fetcher } from '../cloud/http.ts';
-import type { CloudFailure } from '../cloud/verdict.ts';
+import { missing, type Outcome } from '../cloud/verdict.ts';
 import type { BundleFile } from '../static/bundle.ts';
 
 /**
@@ -110,11 +110,6 @@ export function hashFiles(files: readonly BundleFile[]): HashedFile[] {
   }));
 }
 
-/** A step that produced something, or the refusal that stopped it. */
-export type Outcome<Value> =
-  | { readonly ok: true; readonly value: Value }
-  | { readonly ok: false; readonly failure: CloudFailure };
-
 /**
  * The platform's envelope. Every call answers in it, success included, and a
  * `200` carrying `success: false` is a real answer shape rather than a
@@ -153,11 +148,6 @@ export function unwrap<Result>(
     };
   }
   return { ok: true, value: envelope?.result };
-}
-
-/** A far side that answered successfully and left out what was asked for. */
-export function missing(message: string): CloudFailure {
-  return { ok: false, kind: 'transport', message };
 }
 
 export interface UploadInput {

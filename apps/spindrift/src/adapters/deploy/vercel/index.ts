@@ -52,6 +52,11 @@ import {
 import { vercelProjectName } from '../../../domain/vercel-project.ts';
 import type { SurfaceProbe } from '../../../domain/vessel.ts';
 import { fetchableBundleUrl } from '../../../storage/signed-url.ts';
+import {
+  type TokenChecklistSubject,
+  tokenChecklist,
+  tokenSurfaceProbe,
+} from '../cloud/checklist.ts';
 import type { FederationOptions } from '../cloud/federation.ts';
 import {
   CloudHttp,
@@ -60,8 +65,9 @@ import {
   type TokenProvider,
 } from '../cloud/http.ts';
 import {
-  type CloudFailure,
   cloudWriteFailure,
+  missing,
+  type Outcome,
   orderedChecklist,
 } from '../cloud/verdict.ts';
 import type {
@@ -78,7 +84,14 @@ import type {
   RuntimeLogSubject,
   StartedRun,
 } from '../contract.ts';
-import { BundleError, type BundleFile, readBundle } from '../static/bundle.ts';
+import { type DeployEvents, deployEvents, internalFailure } from '../events.ts';
+import { parseScopedRef, scopedRef } from '../ref.ts';
+import {
+  ArtifactUnavailable,
+  type BundleFile,
+  bundleFailure,
+  readBundle,
+} from '../static/bundle.ts';
 import { fetchableStagedAddress, STAGED_SCHEME } from '../static/index.ts';
 import {
   googleRegistryRef,
@@ -202,7 +215,11 @@ export class VercelDeployAdapter implements DeployAdapter {
    */
   readonly artifactTypes: readonly ArtifactType[] = ['vercel-output', 'files'];
 
-  constructor(private readonly options: VercelAdapterOptions) {}
+  private readonly events: DeployEvents;
+
+  constructor(private readonly options: VercelAdapterOptions) {
+    this.events = deployEvents(options.now);
+  }
 
   async *apply(
     target: DeployTarget,
@@ -210,23 +227,23 @@ export class VercelDeployAdapter implements DeployAdapter {
   ): AsyncGenerator<DeployEvent, DeployVerdict, void> {
     const connection = this.connectionOf(target);
     if (connection === null) {
-      return this.internal('this Target is not a Vercel Target');
+      return internalFailure('this Target is not a Vercel Target');
     }
     if (!this.artifactTypes.includes(desired.artifact.type)) {
-      yield this.status('FAILED', { reason: 'INTERNAL' });
-      return this.internal(
+      yield this.events.status('FAILED', { reason: 'INTERNAL' });
+      return internalFailure(
         `Vercel does not accept a ${desired.artifact.type} artifact`,
       );
     }
     if (desired.reach !== 'public') {
-      yield this.status('FAILED', { reason: 'INTERNAL' });
-      return this.internal(
+      yield this.events.status('FAILED', { reason: 'INTERNAL' });
+      return internalFailure(
         `Vercel serves a public reach only, and this Component asks for ${desired.reach} (§9)`,
       );
     }
     if (desired.auth === 'proxy') {
-      yield this.status('FAILED', { reason: 'INTERNAL' });
-      return this.internal(
+      yield this.events.status('FAILED', { reason: 'INTERNAL' });
+      return internalFailure(
         'Vercel has no authenticated edge Spindrift can put in front of a Component (§9)',
       );
     }
@@ -241,7 +258,7 @@ export class VercelDeployAdapter implements DeployAdapter {
       fetchableStagedAddress(staged) ??
       googleRegistryRef(desired.artifact.refs);
     if (location === null) {
-      yield this.status('FAILED', { reason: 'ARTIFACT_UNAVAILABLE' });
+      yield this.events.status('FAILED', { reason: 'ARTIFACT_UNAVAILABLE' });
       return {
         phase: 'FAILED',
         reason: 'ARTIFACT_UNAVAILABLE',
@@ -253,20 +270,20 @@ export class VercelDeployAdapter implements DeployAdapter {
     const ref = refOf(connection, project);
     const http = this.http(connection);
 
-    yield this.status('APPLYING', { resource: project });
+    yield this.events.status('APPLYING', { resource: project });
 
     let files: readonly BundleFile[];
     try {
       files = await this.fetchBundle(http, location);
     } catch (cause) {
       const failure = bundleFailure(cause, ref);
-      yield this.status('FAILED', {
+      yield this.events.status('FAILED', {
         resource: project,
         reason: failure.reason,
       });
       return failure;
     }
-    yield this.log(`the bundle holds ${files.length} files`, project);
+    yield this.events.log(`the bundle holds ${files.length} files`, project);
 
     const uploaded = await this.upload(
       http,
@@ -276,7 +293,7 @@ export class VercelDeployAdapter implements DeployAdapter {
     );
     if (uploaded.ok === false) {
       const failure = cloudWriteFailure(uploaded.failure, ref);
-      yield this.status('FAILED', {
+      yield this.events.status('FAILED', {
         resource: project,
         reason: failure.reason,
       });
@@ -292,7 +309,7 @@ export class VercelDeployAdapter implements DeployAdapter {
     );
     if (created.ok === false) {
       const failure = cloudWriteFailure(created.failure, ref);
-      yield this.status('FAILED', {
+      yield this.events.status('FAILED', {
         resource: project,
         reason: failure.reason,
       });
@@ -304,13 +321,13 @@ export class VercelDeployAdapter implements DeployAdapter {
         missing('the API created no deployment'),
         ref,
       );
-      yield this.status('FAILED', {
+      yield this.events.status('FAILED', {
         resource: project,
         reason: failure.reason,
       });
       return failure;
     }
-    yield this.log(`created deployment ${id}`, project);
+    yield this.events.log(`created deployment ${id}`, project);
 
     // §9's one record re-point: the vanity name is a domain on the project that
     // is already serving, so moving an App here moves one name.
@@ -323,13 +340,13 @@ export class VercelDeployAdapter implements DeployAdapter {
       );
       if (attached.ok === false) {
         const failure = cloudWriteFailure(attached.failure, ref);
-        yield this.status('FAILED', {
+        yield this.events.status('FAILED', {
           resource: project,
           reason: failure.reason,
         });
         return failure;
       }
-      yield this.log(
+      yield this.events.log(
         `the vanity name ${desired.hostname.vanity} is on this project`,
         project,
       );
@@ -666,7 +683,7 @@ export class VercelDeployAdapter implements DeployAdapter {
     ref: DeployRef,
   ): AsyncGenerator<DeployEvent, DeployVerdict, void> {
     const deadline =
-      this.clock() + (this.options.timeoutMs ?? DEFAULT_TIMEOUT_MS);
+      this.events.now() + (this.options.timeoutMs ?? DEFAULT_TIMEOUT_MS);
     let reported: DeployPhase = 'APPLYING';
     let said: string | undefined;
 
@@ -685,7 +702,7 @@ export class VercelDeployAdapter implements DeployAdapter {
 
       if (status.phase !== reported) {
         reported = status.phase;
-        yield this.status(status.phase, {
+        yield this.events.status(status.phase, {
           resource: project,
           ...(status.reason === undefined ? {} : { reason: status.reason }),
           ...(status.detail === undefined ? {} : { detail: status.detail }),
@@ -698,7 +715,7 @@ export class VercelDeployAdapter implements DeployAdapter {
         status.phase !== 'FAILED'
       ) {
         said = status.detail;
-        yield this.log(status.detail, project);
+        yield this.events.log(status.detail, project);
       }
 
       if (status.phase === 'LIVE') {
@@ -720,8 +737,11 @@ export class VercelDeployAdapter implements DeployAdapter {
           debug: read.ok ? read.value : undefined,
         };
       }
-      if (this.clock() >= deadline) {
-        yield this.status('FAILED', { resource: project, reason: 'TIMEOUT' });
+      if (this.events.now() >= deadline) {
+        yield this.events.status('FAILED', {
+          resource: project,
+          reason: 'TIMEOUT',
+        });
         return {
           phase: 'FAILED',
           ref,
@@ -796,30 +816,6 @@ export class VercelDeployAdapter implements DeployAdapter {
     return target.connection.adapter === 'vercel' ? target.connection : null;
   }
 
-  private internal(detail: string): DeployVerdict {
-    return { phase: 'FAILED', reason: 'INTERNAL', detail };
-  }
-
-  private status(
-    phase: DeployPhase,
-    extra: { resource?: string; reason?: FailureReason; detail?: string } = {},
-  ): DeployEvent {
-    return { type: 'status', at: new Date(this.clock()), phase, ...extra };
-  }
-
-  private log(line: string, resource?: string): DeployEvent {
-    return {
-      type: 'log',
-      at: new Date(this.clock()),
-      line,
-      ...(resource === undefined ? {} : { resource }),
-    };
-  }
-
-  private clock(): number {
-    return this.options.now?.() ?? Date.now();
-  }
-
   private async wait(): Promise<void> {
     const interval = this.options.pollIntervalMs ?? DEFAULT_POLL_MS;
     if (this.options.sleep !== undefined) {
@@ -835,11 +831,6 @@ interface DeploymentFile {
   readonly file: string;
   readonly sha: string;
   readonly size: number;
-}
-
-/** The artifact was addressed and the bytes were not there (§6's platform blame). */
-class ArtifactUnavailable extends Error {
-  override readonly name = 'ArtifactUnavailable';
 }
 
 /**
@@ -863,16 +854,6 @@ function unfetchableArtifact(
   }
   const hosts = artifact.refs.map((ref) => ref.split('/')[0]).join(', ');
   return `Vercel is fed the bytes, and none of the artifact's homes (${hosts}) is a registry this installation's identity can read`;
-}
-
-/** A step that either produced something or carries the refusal that stopped it. */
-type Outcome<Value> =
-  | { readonly ok: true; readonly value: Value }
-  | { readonly ok: false; readonly failure: CloudFailure };
-
-/** A far side that answered successfully and left out what was asked for. */
-function missing(message: string): CloudFailure {
-  return { ok: false, kind: 'transport', message };
 }
 
 /**
@@ -934,41 +915,7 @@ export function vercelChecklist(
   probe: CloudResponse<unknown>,
   team: string,
 ): readonly PrerequisiteResult[] {
-  if (probe.ok) {
-    return [
-      { name: 'PLATFORM_API', met: true },
-      { name: 'API_TOKEN', met: true },
-      { name: 'VESSEL', met: true },
-    ];
-  }
-  if (probe.kind === 'transport') {
-    return allUnmet(`${SERVICE_NAME} could not be reached: ${probe.message}`);
-  }
-  if (probe.status === 401 || probe.status === 403) {
-    return [
-      { name: 'PLATFORM_API', met: true },
-      {
-        name: 'API_TOKEN',
-        met: false,
-        assessed: true,
-        detail: `this installation's ${SERVICE_NAME} token may not act on ${team}: ${probe.message}`,
-      },
-      { name: 'VESSEL', ...notAssessed() },
-    ];
-  }
-  if (probe.status === 404) {
-    return [
-      { name: 'PLATFORM_API', met: true },
-      { name: 'API_TOKEN', met: true },
-      {
-        name: 'VESSEL',
-        met: false,
-        assessed: true,
-        detail: `the team ${team} does not exist, and Spindrift never creates a vessel (§14)`,
-      },
-    ];
-  }
-  return allUnmet(`${SERVICE_NAME} answered ${probe.status}: ${probe.message}`);
+  return tokenChecklist(probe, subjectOf(team));
 }
 
 /**
@@ -984,31 +931,12 @@ export function vercelSurfaceProbe(
   probe: CloudResponse<unknown>,
   team: string,
 ): SurfaceProbe {
-  if (probe.ok) return { kind: 'carried' };
-  return {
-    kind: 'undetermined',
-    detail:
-      probe.kind === 'transport'
-        ? `${SERVICE_NAME} could not be reached: ${probe.message}`
-        : `${SERVICE_NAME} answered ${probe.status} for ${team}: ${probe.message}`,
-  };
+  return tokenSurfaceProbe(probe, subjectOf(team));
 }
 
-function allUnmet(detail: string) {
-  return (['PLATFORM_API', 'API_TOKEN', 'VESSEL'] as const).map((name) => ({
-    name,
-    met: false,
-    assessed: false,
-    detail,
-  }));
-}
-
-function notAssessed() {
-  return {
-    met: false,
-    assessed: false,
-    detail: `not assessed: the ${SERVICE_NAME} probe did not get far enough to check this`,
-  };
+/** What both answers above are said about — the product and the boundary. */
+function subjectOf(team: string): TokenChecklistSubject {
+  return { service: SERVICE_NAME, vessel: team, noun: 'team' };
 }
 
 /**
@@ -1028,7 +956,7 @@ function refOf(
   connection: VercelAdapterConnection,
   project: string,
 ): DeployRef {
-  return `${connection.team}/projects/${project}`;
+  return scopedRef(connection.team, 'projects', project);
 }
 
 /** The project this ref names on this connection, or `null` for another's. */
@@ -1036,45 +964,10 @@ function parseRef(
   connection: VercelAdapterConnection,
   ref: DeployRef,
 ): string | null {
-  const prefix = `${connection.team}/projects/`;
-  if (!ref.startsWith(prefix)) return null;
-  const project = ref.slice(prefix.length);
-  return project.length === 0 || project.includes('/') ? null : project;
+  return parseScopedRef(connection.team, 'projects', ref);
 }
 
 /** The sha1 of some bytes, hex — what the platform keys uploaded files by. */
 function sha1Hex(bytes: Uint8Array<ArrayBuffer>): string {
   return new Bun.CryptoHasher('sha1').update(bytes).digest('hex');
-}
-
-/** A bundle that could not be read, in §6's vocabulary. */
-function bundleFailure(
-  cause: unknown,
-  ref: DeployRef,
-): Extract<DeployVerdict, { phase: 'FAILED' }> {
-  if (cause instanceof ArtifactUnavailable) {
-    return {
-      phase: 'FAILED',
-      ref,
-      reason: 'ARTIFACT_UNAVAILABLE',
-      detail: cause.message,
-    };
-  }
-  if (cause instanceof BundleError) {
-    // The bytes arrived and are not what a `files` artifact is: the build
-    // produced something unusable, which §6 blames on the developer.
-    return {
-      phase: 'FAILED',
-      ref,
-      reason: 'BUILD_FAILED',
-      detail: cause.message,
-      debug: { code: cause.code },
-    };
-  }
-  return {
-    phase: 'FAILED',
-    ref,
-    reason: 'INTERNAL',
-    detail: cause instanceof Error ? cause.message : String(cause),
-  };
 }

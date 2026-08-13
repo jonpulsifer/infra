@@ -19,12 +19,10 @@ import { join } from 'node:path';
 import { eq } from 'drizzle-orm';
 import type { DeployAdapter } from '../../src/adapters/deploy/contract.ts';
 import { helmRelease } from '../../src/adapters/deploy/kubernetes/flux-helmrelease.ts';
-import {
-  connectTarget,
-  createDeploy,
-  listTargets,
-  uploadArchive,
-} from '../../src/commands/index.ts';
+import { uploadArchive } from '../../src/commands/apps/upload-archive.ts';
+import { createDeploy } from '../../src/commands/deploys/create.ts';
+import { connectTarget } from '../../src/commands/targets/connect.ts';
+import { listTargets } from '../../src/commands/targets/list.ts';
 import type {
   AdapterRegistry,
   Clock,

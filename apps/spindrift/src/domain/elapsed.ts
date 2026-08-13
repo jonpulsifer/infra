@@ -2,7 +2,7 @@
  * How long ago something happened, in the words a screen uses.
  *
  * It lives in the domain rather than in a view because the views are rendered
- * from immutable read models projected by commands (`src/web/model.ts`), and a
+ * from immutable read models projected by commands (`src/commands/views.ts`), and a
  * relative time computed in the browser would be computed against the browser's
  * clock. Every command already carries a {@link Clock}; this is what turns it
  * into the one string a timeline entry needs.

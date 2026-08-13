@@ -60,6 +60,11 @@ import {
 import type { SurfaceProbe } from '../../../domain/vessel.ts';
 import { workloadName } from '../../../domain/workload-name.ts';
 import { fetchableBundleUrl } from '../../../storage/signed-url.ts';
+import {
+  type TokenChecklistSubject,
+  tokenChecklist,
+  tokenSurfaceProbe,
+} from '../cloud/checklist.ts';
 import type { FederationOptions } from '../cloud/federation.ts';
 import {
   CloudHttp,
@@ -70,6 +75,8 @@ import {
 import {
   type CloudFailure,
   cloudWriteFailure,
+  missing,
+  type Outcome,
   orderedChecklist,
 } from '../cloud/verdict.ts';
 import type {
@@ -86,7 +93,14 @@ import type {
   RuntimeLogSubject,
   StartedRun,
 } from '../contract.ts';
-import { BundleError, type BundleFile, readBundle } from '../static/bundle.ts';
+import { type DeployEvents, deployEvents, internalFailure } from '../events.ts';
+import { parseScopedRef, scopedRef } from '../ref.ts';
+import {
+  ArtifactUnavailable,
+  type BundleFile,
+  bundleFailure,
+  readBundle,
+} from '../static/bundle.ts';
 import { fetchableStagedAddress, STAGED_SCHEME } from '../static/index.ts';
 import {
   googleRegistryRef,
@@ -97,8 +111,6 @@ import {
   type AssetManifest,
   type Envelope,
   hashFiles,
-  missing,
-  type Outcome,
   unwrap,
   uploadAssets,
 } from './assets.ts';
@@ -200,7 +212,11 @@ export class PagesDeployAdapter implements DeployAdapter {
   /** §6's table: static hosting takes files. */
   readonly artifactTypes: readonly ArtifactType[] = ['files'];
 
-  constructor(private readonly options: PagesAdapterOptions) {}
+  private readonly events: DeployEvents;
+
+  constructor(private readonly options: PagesAdapterOptions) {
+    this.events = deployEvents(options.now);
+  }
 
   async *apply(
     target: DeployTarget,
@@ -208,23 +224,23 @@ export class PagesDeployAdapter implements DeployAdapter {
   ): AsyncGenerator<DeployEvent, DeployVerdict, void> {
     const connection = this.connectionOf(target);
     if (connection === null) {
-      return this.internal('this Target is not a Cloudflare Pages Target');
+      return internalFailure('this Target is not a Cloudflare Pages Target');
     }
     if (!this.artifactTypes.includes(desired.artifact.type)) {
-      yield this.status('FAILED', { reason: 'INTERNAL' });
-      return this.internal(
+      yield this.events.status('FAILED', { reason: 'INTERNAL' });
+      return internalFailure(
         `Cloudflare Pages does not accept a ${desired.artifact.type} artifact`,
       );
     }
     if (desired.reach !== 'public') {
-      yield this.status('FAILED', { reason: 'INTERNAL' });
-      return this.internal(
+      yield this.events.status('FAILED', { reason: 'INTERNAL' });
+      return internalFailure(
         `Cloudflare Pages serves a public reach only, and this Component asks for ${desired.reach} (§9)`,
       );
     }
     if (desired.auth === 'proxy') {
-      yield this.status('FAILED', { reason: 'INTERNAL' });
-      return this.internal(
+      yield this.events.status('FAILED', { reason: 'INTERNAL' });
+      return internalFailure(
         'Cloudflare Pages has no authenticated edge to put in front of a Component (§9)',
       );
     }
@@ -243,7 +259,7 @@ export class PagesDeployAdapter implements DeployAdapter {
       fetchableStagedAddress(staged) ??
       googleRegistryRef(desired.artifact.refs);
     if (location === null) {
-      yield this.status('FAILED', { reason: 'ARTIFACT_UNAVAILABLE' });
+      yield this.events.status('FAILED', { reason: 'ARTIFACT_UNAVAILABLE' });
       return {
         phase: 'FAILED',
         reason: 'ARTIFACT_UNAVAILABLE',
@@ -255,25 +271,25 @@ export class PagesDeployAdapter implements DeployAdapter {
     const ref = refOf(connection, project);
     const http = this.http(connection);
 
-    yield this.status('APPLYING', { resource: project });
+    yield this.events.status('APPLYING', { resource: project });
 
     let files: readonly BundleFile[];
     try {
       files = await this.fetchBundle(http, location);
     } catch (cause) {
       const failure = bundleFailure(cause, ref);
-      yield this.status('FAILED', {
+      yield this.events.status('FAILED', {
         resource: project,
         reason: failure.reason,
       });
       return failure;
     }
-    yield this.log(`the bundle holds ${files.length} files`, project);
+    yield this.events.log(`the bundle holds ${files.length} files`, project);
 
     const ensured = await this.ensureProject(http, connection, project);
     if (ensured.ok === false) {
       const failure = cloudWriteFailure(ensured.failure, ref);
-      yield this.status('FAILED', {
+      yield this.events.status('FAILED', {
         resource: project,
         reason: failure.reason,
       });
@@ -295,10 +311,10 @@ export class PagesDeployAdapter implements DeployAdapter {
       files: hashFiles(files),
       onProgress: (line) => lines.push(line),
     });
-    for (const line of lines) yield this.log(line, project);
+    for (const line of lines) yield this.events.log(line, project);
     if (uploaded.ok === false) {
       const failure = cloudWriteFailure(uploaded.failure, ref);
-      yield this.status('FAILED', {
+      yield this.events.status('FAILED', {
         resource: project,
         reason: failure.reason,
       });
@@ -315,13 +331,13 @@ export class PagesDeployAdapter implements DeployAdapter {
     );
     if (released.ok === false) {
       const failure = cloudWriteFailure(released.failure, ref);
-      yield this.status('FAILED', {
+      yield this.events.status('FAILED', {
         resource: project,
         reason: failure.reason,
       });
       return failure;
     }
-    yield this.log(`deployed ${released.value.id ?? project}`, project);
+    yield this.events.log(`deployed ${released.value.id ?? project}`, project);
 
     // §9's one record re-point: the vanity name is a domain on the project that
     // is already serving, so moving an App here moves one name.
@@ -334,13 +350,13 @@ export class PagesDeployAdapter implements DeployAdapter {
       );
       if (attached.ok === false) {
         const failure = cloudWriteFailure(attached.failure, ref);
-        yield this.status('FAILED', {
+        yield this.events.status('FAILED', {
           resource: project,
           reason: failure.reason,
         });
         return failure;
       }
-      yield this.log(
+      yield this.events.log(
         `the vanity name ${desired.hostname.vanity} is on this project`,
         project,
       );
@@ -353,7 +369,7 @@ export class PagesDeployAdapter implements DeployAdapter {
       ensured.value.subdomain === undefined
         ? released.value.url
         : `https://${ensured.value.subdomain}`;
-    yield this.status('LIVE', { resource: project });
+    yield this.events.status('LIVE', { resource: project });
     return {
       phase: 'LIVE',
       ref,
@@ -732,30 +748,6 @@ export class PagesDeployAdapter implements DeployAdapter {
       ? target.connection
       : null;
   }
-
-  private internal(detail: string): DeployVerdict {
-    return { phase: 'FAILED', reason: 'INTERNAL', detail };
-  }
-
-  private status(
-    phase: DeployPhase,
-    extra: { resource?: string; reason?: FailureReason; detail?: string } = {},
-  ): DeployEvent {
-    return { type: 'status', at: new Date(this.clock()), phase, ...extra };
-  }
-
-  private log(line: string, resource?: string): DeployEvent {
-    return {
-      type: 'log',
-      at: new Date(this.clock()),
-      line,
-      ...(resource === undefined ? {} : { resource }),
-    };
-  }
-
-  private clock(): number {
-    return this.options.now?.() ?? Date.now();
-  }
 }
 
 /**
@@ -782,45 +774,7 @@ export function pagesChecklist(
   probe: CloudResponse<unknown>,
   account: string,
 ): readonly PrerequisiteResult[] {
-  if (probe.ok) {
-    return [
-      { name: 'PLATFORM_API', met: true },
-      { name: 'API_TOKEN', met: true },
-      { name: 'VESSEL', met: true },
-    ];
-  }
-  if (probe.kind === 'transport') {
-    return allUnmet(`${SERVICE_NAME} could not be reached: ${probe.message}`);
-  }
-  if (probe.status === 401 || probe.status === 403) {
-    return [
-      // It answered, which is more than an unreachable API does.
-      { name: 'PLATFORM_API', met: true },
-      {
-        name: 'API_TOKEN',
-        met: false,
-        assessed: true,
-        detail: `this installation's ${SERVICE_NAME} token may not act on ${account}: ${probe.message}`,
-      },
-      // Not assessed rather than met: an account that refuses to answer has not
-      // told us it exists, and a refusal is what an absent one looks like from
-      // outside.
-      { name: 'VESSEL', ...notAssessed() },
-    ];
-  }
-  if (probe.status === 404) {
-    return [
-      { name: 'PLATFORM_API', met: true },
-      { name: 'API_TOKEN', met: true },
-      {
-        name: 'VESSEL',
-        met: false,
-        assessed: true,
-        detail: `the account ${account} does not exist, and Spindrift never creates a vessel (§14)`,
-      },
-    ];
-  }
-  return allUnmet(`${SERVICE_NAME} answered ${probe.status}: ${probe.message}`);
+  return tokenChecklist(probe, subjectOf(account));
 }
 
 /**
@@ -836,38 +790,12 @@ export function pagesSurfaceProbe(
   probe: CloudResponse<unknown>,
   account: string,
 ): SurfaceProbe {
-  if (probe.ok) return { kind: 'carried' };
-  return {
-    kind: 'undetermined',
-    detail:
-      probe.kind === 'transport'
-        ? `${SERVICE_NAME} could not be reached: ${probe.message}`
-        : `${SERVICE_NAME} answered ${probe.status} for ${account}: ${probe.message}`,
-  };
+  return tokenSurfaceProbe(probe, subjectOf(account));
 }
 
-/** Every row unmet with one sentence — the Target nothing is known about. */
-function allUnmet(detail: string): readonly PrerequisiteResult[] {
-  return (['PLATFORM_API', 'API_TOKEN', 'VESSEL'] as const).map((name) => ({
-    name,
-    met: false,
-    assessed: false,
-    detail,
-  }));
-}
-
-/** A row the probe did not get far enough to reach a verdict on. */
-function notAssessed(): { met: false; assessed: false; detail: string } {
-  return {
-    met: false,
-    assessed: false,
-    detail: `not assessed: the ${SERVICE_NAME} probe did not get far enough to check this`,
-  };
-}
-
-/** The artifact was addressed and the bytes were not there (§6's platform blame). */
-class ArtifactUnavailable extends Error {
-  override readonly name = 'ArtifactUnavailable';
+/** What both answers above are said about — the product and the boundary. */
+function subjectOf(account: string): TokenChecklistSubject {
+  return { service: SERVICE_NAME, vessel: account, noun: 'account' };
 }
 
 /**
@@ -910,7 +838,7 @@ function refOf(
   connection: CloudflarePagesAdapterConnection,
   project: string,
 ): DeployRef {
-  return `${connection.account}/pages/${project}`;
+  return scopedRef(connection.account, 'pages', project);
 }
 
 /** The project this ref names on this connection, or `null` for another's. */
@@ -918,10 +846,7 @@ function parseRef(
   connection: CloudflarePagesAdapterConnection,
   ref: DeployRef,
 ): string | null {
-  const prefix = `${connection.account}/pages/`;
-  if (!ref.startsWith(prefix)) return null;
-  const project = ref.slice(prefix.length);
-  return project.length === 0 || project.includes('/') ? null : project;
+  return parseScopedRef(connection.account, 'pages', ref);
 }
 
 /**
@@ -948,39 +873,6 @@ function markerIn(message: string | undefined, marker: string): string {
     .split(/\s+/)
     .find((word) => word.startsWith(marker));
   return found === undefined ? '' : found.slice(marker.length);
-}
-
-/** A bundle that could not be read, in §6's vocabulary. */
-function bundleFailure(
-  cause: unknown,
-  ref: DeployRef,
-): Extract<DeployVerdict, { phase: 'FAILED' }> {
-  if (cause instanceof ArtifactUnavailable) {
-    return {
-      phase: 'FAILED',
-      ref,
-      reason: 'ARTIFACT_UNAVAILABLE',
-      detail: cause.message,
-    };
-  }
-  if (cause instanceof BundleError) {
-    // The bytes arrived and are not what a `files` artifact is. That is the
-    // build having produced something unusable, which §6 blames on the
-    // developer under `BUILD_FAILED`.
-    return {
-      phase: 'FAILED',
-      ref,
-      reason: 'BUILD_FAILED',
-      detail: cause.message,
-      debug: { code: cause.code },
-    };
-  }
-  return {
-    phase: 'FAILED',
-    ref,
-    reason: 'INTERNAL',
-    detail: cause instanceof Error ? cause.message : String(cause),
-  };
 }
 
 /** Re-exported so a caller need not know which file the refusal shape lives in. */
