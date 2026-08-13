@@ -25,11 +25,8 @@ on:
         type: choice
         options:
           - both
-          - silicon
           - ubuntu-latest
-          - skiff-tender
-          - skiff-dinghy
-          - skiff-launch
+          - skiff-ubuntu-bench
         default: both
 
 permissions:
@@ -43,14 +40,14 @@ jobs:
     steps:
       - id: set
         run: |
-          # Every skiff-<host> class is 4 vCPU / 16 GiB with a 20 G workspace --
-          # a cold docker build does not fit in the 6 G the shared skiff-ubuntu
-          # slots carry, which is what these labels are sized for.
-          case "${{ inputs.target }}" in
-            both)    echo 'runners=["ubuntu-latest", "skiff-tender"]' >> "$GITHUB_OUTPUT" ;;
-            silicon) echo 'runners=["skiff-tender", "skiff-dinghy", "skiff-launch", "ubuntu-latest"]' >> "$GITHUB_OUTPUT" ;;
-            *)       echo 'runners=["${{ inputs.target }}"]' >> "$GITHUB_OUTPUT" ;;
-          esac
+          # skiff-ubuntu-bench is 4 vCPU / 16 GiB with a 20 G workspace -- a cold
+          # docker build does not fit in the 6 G the shared skiff-ubuntu slots
+          # carry, which is what this label is sized for.
+          if [ "${{ inputs.target }}" = "both" ]; then
+            echo 'runners=["ubuntu-latest", "skiff-ubuntu-bench"]' >> "$GITHUB_OUTPUT"
+          else
+            echo 'runners=["${{ inputs.target }}"]' >> "$GITHUB_OUTPUT"
+          fi
 
   build:
     needs: configure

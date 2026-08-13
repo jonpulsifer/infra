@@ -12,8 +12,6 @@ on:
           - iso
           - oldboy
           - tender
-          - dinghy
-          - launch
           - cloudpi4
           - homepi4
           - weatherpi4
@@ -22,8 +20,8 @@ on:
           - wsl
 concurrency:
   # Keyed by image, not just ref: these are independent artifacts going to
-  # independent destinations, so building a second one must not cancel the
-  # first. Building the whole cloud fleet at once is three dispatches.
+  # independent destinations, so dispatching a second one must not cancel the
+  # first.
   group: ${{ github.workflow }}-${{ github.ref }}-${{ inputs.image }}
   cancel-in-progress: true
 jobs:
@@ -35,12 +33,12 @@ jobs:
       contents: read
       id-token: write
     steps:
-      # A cloud bosun host's closure carries the Ubuntu hull: an OCI runner
-      # image pulled, flattened to squashfs, and then written into a raw GCE
-      # disk alongside the system closure. That does not fit in the ~14 GB a
-      # hosted runner leaves free on /, and /nix is on /.
+      # tender's closure carries the Ubuntu hull: an OCI runner image pulled,
+      # flattened to squashfs, and then written into a raw GCE disk alongside
+      # the system closure. That does not fit in the ~14 GB a hosted runner
+      # leaves free on /, and /nix is on /.
       - name: Reclaim runner disk
-        if: ${{ contains(fromJson('["tender","dinghy","launch"]'), inputs.image) }}
+        if: ${{ inputs.image == 'tender' }}
         run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -70,21 +68,21 @@ jobs:
         run: sudo ./result/bin/nixos-wsl-tarball-builder ./nixos.wsl
 
       - uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
-        if: ${{ inputs.image == 'gce' || inputs.image == 'oldboy' || inputs.image == 'wsl' || contains(fromJson('["tender","dinghy","launch"]'), inputs.image) }}
+        if: ${{ inputs.image == 'gce' || inputs.image == 'oldboy' || inputs.image == 'wsl' || inputs.image == 'tender' }}
         with:
           workload_identity_provider: 'projects/629296473058/locations/global/workloadIdentityPools/homelab/providers/github'
           project_id: homelab-ng
 
       - uses: google-github-actions/upload-cloud-storage@6397bd7208e18d13ba2619ee21b9873edc94427a # v3
-        if: ${{ inputs.image == 'gce' || inputs.image == 'oldboy' || contains(fromJson('["tender","dinghy","launch"]'), inputs.image) }}
+        if: ${{ inputs.image == 'gce' || inputs.image == 'oldboy' || inputs.image == 'tender' }}
         with:
           path: result
           glob: "*.raw.tar.gz"
           # nixpkgs names every googleComputeImage tarball the same thing, so
-          # anything sharing a prefix clobbers its siblings. Each cloud bosun
-          # host gets its own prefix, which is also what bosun.tf's per-host
-          # data source globs; gce and oldboy keep the root they already share.
-          destination: ${{ contains(fromJson('["tender","dinghy","launch"]'), inputs.image) && format('homelab-ng-free/{0}', inputs.image) || 'homelab-ng-free' }}
+          # anything sharing a prefix clobbers its siblings. tender gets its
+          # own, which is the prefix bosun.tf's data source globs; gce and
+          # oldboy keep the root they already share.
+          destination: ${{ inputs.image == 'tender' && format('homelab-ng-free/{0}', inputs.image) || 'homelab-ng-free' }}
           parent: false
           gzip: false
           process_gcloudignore: false

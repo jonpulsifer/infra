@@ -30,19 +30,11 @@ creation_rules:
           - age15ylde96ar2x0q5gzqrxhkheh5puwtqf0rkuv6khgsv3xfhqu35hquw70ym
           # oldschool (ssh-to-age of its ed25519 host key)
           - age1apj76svz7gq7uk9w702fv589s2vcu2vfrayx0uucrkrjwl7xcqaqv6g50c
-  # The cloud bosun fleet. Stage one: operator key only, because a host's age
-  # recipient is derived from an ed25519 host key that does not exist until the
-  # instance has booted once. Stage two adds each recipient below and
-  # re-encrypts -- see [[Runbooks/SOPS Secrets and Age Keys]].
+  # Stage one: operator key only, because tender's age recipient is derived
+  # from an ed25519 host key that does not exist until the instance has booted
+  # once. Stage two adds that recipient here and re-encrypts -- see
+  # [[Runbooks/SOPS Secrets and Age Keys]].
   - path_regex: nix/secrets/tender\.sops\.ya?ml
-    key_groups:
-      - age:
-          - age1lpfxcn6qwrgtxzymzcxqu20cppsrhmgcpma59sc8ahq9t0w67d3sj8e3e6
-  - path_regex: nix/secrets/dinghy\.sops\.ya?ml
-    key_groups:
-      - age:
-          - age1lpfxcn6qwrgtxzymzcxqu20cppsrhmgcpma59sc8ahq9t0w67d3sj8e3e6
-  - path_regex: nix/secrets/launch\.sops\.ya?ml
     key_groups:
       - age:
           - age1lpfxcn6qwrgtxzymzcxqu20cppsrhmgcpma59sc8ahq9t0w67d3sj8e3e6

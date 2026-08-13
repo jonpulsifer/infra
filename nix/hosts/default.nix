@@ -86,21 +86,7 @@
     artifact = "googleComputeImage";
   };
 
-  # The cloud bosun fleet: one host per silicon generation, each keeping a
-  # warm pool of skiffs. They differ only in how much machine they bought --
-  # see nix/profiles/bosun-cloud.nix and the fleet map in
-  # terraform/gcp/projects/homelab-ng/bosun.tf.
   tender = {
-    tags = [ "gcp" ];
-    artifact = "googleComputeImage";
-  };
-
-  dinghy = {
-    tags = [ "gcp" ];
-    artifact = "googleComputeImage";
-  };
-
-  launch = {
     tags = [ "gcp" ];
     artifact = "googleComputeImage";
   };
