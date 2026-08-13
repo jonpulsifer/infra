@@ -80,14 +80,19 @@ app:
   # here, which is why there is no engine field: the chart would have nothing
   # to do with one that the shape does not already say.
   #
-  # The reference points **directly** at the Secret the engine's operator owns,
-  # not at one this chart materializes. So the credential never transits
-  # Spindrift and never travels the `secretEnv` pinned-store path — which also
-  # means a rotation the operator performs is picked up by the next pod with no
-  # Deploy, and that an attached Datastore renders no ExternalSecret and so
-  # demands no `platform.secretStore.name`. Same namespace by construction: a
-  # Datastore is provisioned into its Target's namespace, which is the release's,
-  # and a `secretKeyRef` cannot cross one.
+  # The reference names the Secret the engine's operator owns, not one this
+  # chart materializes, so the credential never transits Spindrift and never
+  # travels the `secretEnv` pinned-store path — a rotation the operator performs
+  # is picked up with no Deploy either way.
+  #
+  # Which of the two secret shapes is rendered depends on where the Datastore
+  # is. A Datastore lives in a namespace of its own, because it outlives every
+  # App attached to it, and a `secretKeyRef` cannot cross one — so `secretName`
+  # is the direct reference used when the two namespaces coincide, and
+  # `remoteSecretName` is the one that does not, mirrored in by
+  # `templates/externalsecret.yaml` through `platform.datastoreSecretStore`.
+  # ESO reconciling that mirror is what keeps the rotation property true across
+  # the boundary; it is a delivery hop, not a copy Spindrift holds.
   datastores: []
 
   # Entrypoint overrides. Empty means the image's own.
@@ -129,6 +134,19 @@ platform:
   secretStore:
     kind: ClusterSecretStore
     name: ""
+
+  # The store an attached Datastore's credential crosses namespaces through,
+  # scoped to the namespace Datastores are provisioned into. A different store
+  # from the one above and required only when something is attached from
+  # another namespace, which since per-App namespaces is the ordinary case.
+  #
+  # `refreshInterval` is not "0" here, unlike the pinned config path: this
+  # tracks a credential the datastore operator rotates underneath the release,
+  # with no Deploy to re-render on, so it has to poll.
+  datastoreSecretStore:
+    kind: ClusterSecretStore
+    name: ""
+    refreshInterval: 1h
 
   networkPolicy:
     # Ingress is default-deny with a fixed exception shape whose **names are

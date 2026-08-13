@@ -95,7 +95,16 @@ const ARGO_CLUSTER: FakeKubernetesOptions = {
     'namespaces//apps': {
       apiVersion: 'v1',
       kind: 'Namespace',
-      metadata: { name: 'apps' },
+      metadata: {
+        name: 'apps',
+        // What the vessel declares admission to mean, and what every App
+        // namespace is stamped from.
+        labels: {
+          'pod-security.kubernetes.io/enforce': 'restricted',
+          'pod-security.kubernetes.io/audit': 'restricted',
+          'pod-security.kubernetes.io/warn': 'restricted',
+        },
+      },
     },
   },
   lists: {
@@ -357,13 +366,51 @@ describe('the delivery object', () => {
     const { adapter, cluster } = adapterFor();
     await drain(adapter.apply(target(), desiredState()));
 
-    const write = cluster.requests.find(
+    const writes = cluster.requests.filter(
       (request) => request.method === 'PATCH',
     );
-    expect(write?.contentType).toBe('application/apply-patch+yaml');
-    expect(write?.path).toBe(
+    // Both writes are applies, which is what makes each converge on an object
+    // that is already there rather than fail on it — a second deploy of the
+    // same App must not trip over its own namespace.
+    expect(writes.map((write) => write.contentType)).toEqual([
+      'application/apply-patch+yaml',
+      'application/apply-patch+yaml',
+    ]);
+    // The App's namespace first, then the release into it. The order is the
+    // point: a release applied first would land in a namespace that is not
+    // there yet.
+    expect(writes.map((write) => write.path)).toEqual([
+      '/api/v1/namespaces/app-blog',
       '/apis/helm.toolkit.fluxcd.io/v2/namespaces/delivery/helmreleases/blog-web',
-    );
+    ]);
+  });
+
+  test('the App namespace carries the admission labels the vessel declares', async () => {
+    const { adapter, cluster } = adapterFor();
+    await drain(adapter.apply(target(), desiredState()));
+
+    // Copied off the Target's declared namespace rather than written from a
+    // table here, so an operator who changes what `restricted` means on their
+    // cluster changes it for every App without touching Spindrift.
+    const namespace = cluster.get('namespaces//app-blog');
+    expect(namespace?.metadata.labels).toMatchObject({
+      'pod-security.kubernetes.io/enforce': 'restricted',
+      'pod-security.kubernetes.io/audit': 'restricted',
+      'pod-security.kubernetes.io/warn': 'restricted',
+    });
+  });
+
+  test('a vessel declaring no admission policy gets no App namespace', async () => {
+    // The refusal that matters: a namespace created without Pod Security
+    // labels admits pods this vessel refuses, which is worse than a deploy
+    // that failed and said why. Live driving proved that admission
+    // load-bearing twice.
+    const { adapter, cluster } = adapterFor({ namespaceLabels: {} });
+    const { verdict } = await drain(adapter.apply(target(), desiredState()));
+
+    expect(verdict.phase).toBe('FAILED');
+    expect(cluster.get('namespaces//app-blog')).toBeUndefined();
+    expect(cluster.get('helmreleases/delivery/blog-web')).toBeUndefined();
   });
 
   test('the Target declares the flavour: the same state, an Argo Application', async () => {
@@ -377,15 +424,31 @@ describe('the delivery object', () => {
     expect(applied?.kind).toBe('Application');
     const spec = applied?.spec as any;
     expect(spec.source.helm.valuesObject.app.component).toBe('web');
-    expect(spec.destination.namespace).toBe('apps');
+    expect(spec.destination.namespace).toBe('app-blog');
     // A path is a directory only a checkout of the repository resolves, which
     // is the form a non-artifact chart reference has here too.
     expect(spec.source.repoURL).toBe('https://git.example.test/infra');
     expect(spec.source.path).toBe(CHART);
     expect(spec.source.chart).toBeUndefined();
-    // The namespace is vessel (§7): a sync that created it would let a
-    // `destroy()` remove it.
-    expect(spec.syncPolicy.syncOptions).toBeUndefined();
+    // Argo makes the namespace itself, because Argo is the mechanism that can
+    // carry the admission labels — Flux's `createNamespace` takes no metadata
+    // at all, which is why Spindrift applies the Namespace on that flavour and
+    // not on this one.
+    expect(spec.syncPolicy.syncOptions).toEqual(['CreateNamespace=true']);
+    expect(spec.syncPolicy.managedNamespaceMetadata.labels).toMatchObject({
+      'pod-security.kubernetes.io/enforce': 'restricted',
+    });
+    // No tracking annotation, deliberately: tracking it would let a sync
+    // delete the namespace and every neighbouring workload in it.
+    expect(
+      spec.syncPolicy.managedNamespaceMetadata.annotations,
+    ).toBeUndefined();
+    // And Spindrift wrote no Namespace of its own on this flavour.
+    expect(
+      cluster.requests.filter((request) =>
+        request.path.startsWith('/api/v1/namespaces/app-blog'),
+      ),
+    ).toEqual([]);
   });
 
   test('an oci:// chart is an Argo chart reference, never a path', async () => {
@@ -803,7 +866,16 @@ describe('the checklist', () => {
         'namespaces//apps': {
           apiVersion: 'v1',
           kind: 'Namespace',
-          metadata: { name: 'apps' },
+          metadata: {
+            name: 'apps',
+            // What the vessel declares admission to mean, and what every App
+            // namespace is stamped from.
+            labels: {
+              'pod-security.kubernetes.io/enforce': 'restricted',
+              'pod-security.kubernetes.io/audit': 'restricted',
+              'pod-security.kubernetes.io/warn': 'restricted',
+            },
+          },
         },
       },
       lists: {
@@ -831,7 +903,16 @@ describe('the checklist', () => {
         'namespaces//apps': {
           apiVersion: 'v1',
           kind: 'Namespace',
-          metadata: { name: 'apps' },
+          metadata: {
+            name: 'apps',
+            // What the vessel declares admission to mean, and what every App
+            // namespace is stamped from.
+            labels: {
+              'pod-security.kubernetes.io/enforce': 'restricted',
+              'pod-security.kubernetes.io/audit': 'restricted',
+              'pod-security.kubernetes.io/warn': 'restricted',
+            },
+          },
         },
       },
     });
@@ -860,7 +941,16 @@ describe('the checklist', () => {
         'namespaces//apps': {
           apiVersion: 'v1',
           kind: 'Namespace',
-          metadata: { name: 'apps' },
+          metadata: {
+            name: 'apps',
+            // What the vessel declares admission to mean, and what every App
+            // namespace is stamped from.
+            labels: {
+              'pod-security.kubernetes.io/enforce': 'restricted',
+              'pod-security.kubernetes.io/audit': 'restricted',
+              'pod-security.kubernetes.io/warn': 'restricted',
+            },
+          },
         },
       },
     };
@@ -912,7 +1002,16 @@ describe('the checklist', () => {
           'namespaces//apps': {
             apiVersion: 'v1',
             kind: 'Namespace',
-            metadata: { name: 'apps' },
+            metadata: {
+              name: 'apps',
+              // What the vessel declares admission to mean, and what every App
+              // namespace is stamped from.
+              labels: {
+                'pod-security.kubernetes.io/enforce': 'restricted',
+                'pod-security.kubernetes.io/audit': 'restricted',
+                'pod-security.kubernetes.io/warn': 'restricted',
+              },
+            },
           },
         },
       },
@@ -1654,12 +1753,19 @@ describe('a job is run, and its runs are read', () => {
   };
   const REF = 'flux-helmrelease:delivery/blog-nightly';
 
-  /** The release the chart rendered from, as the adapter reads it back. */
+  /**
+   * The release the chart rendered from, as the adapter reads it back.
+   *
+   * `targetNamespace` is where its runs are, and it is read rather than derived
+   * — a release placed before per-App namespaces still says the shared one, and
+   * its Jobs are still there. Every release this adapter writes states it.
+   */
   const release: FakeObject = {
     apiVersion: 'helm.toolkit.fluxcd.io/v2',
     kind: 'HelmRelease',
     metadata: { name: 'blog-nightly', namespace: 'delivery' },
     spec: {
+      targetNamespace: 'apps',
       values: {
         app: { name: 'blog', component: 'nightly', kind: 'job' },
       },

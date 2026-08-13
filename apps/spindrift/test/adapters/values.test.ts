@@ -86,6 +86,7 @@ describe('a connection reference becomes an env entry (§11)', () => {
         },
       ]),
       'registry.example.test/shop/web@sha256:feed',
+      'spindrift-apps',
     );
 
     expect(values.datastores).toEqual([
@@ -102,6 +103,7 @@ describe('a connection reference becomes an env entry (§11)', () => {
         },
       ]),
       'registry.example.test/shop/web@sha256:feed',
+      'app-shop',
     );
 
     expect(values.datastores).toEqual([
@@ -116,8 +118,11 @@ describe('a connection reference becomes an env entry (§11)', () => {
     const { datastores: _pinned, ...before } = desiredWith([]);
 
     expect(
-      appValues(before, 'registry.example.test/shop/web@sha256:feed')
-        .datastores,
+      appValues(
+        before,
+        'registry.example.test/shop/web@sha256:feed',
+        'app-shop',
+      ).datastores,
     ).toEqual([]);
   });
 });

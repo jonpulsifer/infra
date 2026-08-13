@@ -728,6 +728,62 @@ describe('datastore delivery', () => {
     expect(kinds(objects)).not.toContain('ExternalSecret');
   });
 
+  /**
+   * The ordinary case since Apps got namespaces of their own: the Datastore is
+   * in `spindrift-datastores` and the release is in `app-<name>`, which a
+   * `secretKeyRef` cannot cross.
+   */
+  const ACROSS = {
+    app: {
+      datastores: [
+        {
+          name: 'DATABASE_URL',
+          remoteSecretName: 'orders-app',
+          secretKey: 'uri',
+        },
+      ],
+    },
+    platform: {
+      datastoreSecretStore: {
+        kind: 'ClusterSecretStore',
+        name: 'spindrift-datastores',
+        refreshInterval: '1h',
+      },
+    },
+  };
+
+  test('a credential in another namespace is mirrored in, not reached across', async () => {
+    const objects = await render(ACROSS);
+
+    // The mirror, against the store scoped to the datastore namespace — a
+    // different store from the config one, which this fixture leaves unset.
+    const mirror = objects.find(
+      (object: any) =>
+        object.kind === 'ExternalSecret' &&
+        object.metadata.name.endsWith('-datastores'),
+    ) as any;
+    expect(mirror.spec.secretStoreRef.name).toBe('spindrift-datastores');
+    expect(mirror.spec.dataFrom).toEqual([{ extract: { key: 'orders-app' } }]);
+    // Not "0", unlike the pinned-config path: this tracks a credential the
+    // datastore operator rotates with no Deploy to re-render on, so it polls.
+    expect(mirror.spec.refreshInterval).toBe('1h');
+
+    // And the container reads the mirror under the operator's own key. What
+    // crossed the boundary is the Secret, not the layout of it.
+    const variables = env(one(objects, 'Deployment'));
+    expect(variables.DATABASE_URL?.valueFrom.secretKeyRef).toEqual({
+      name: `${mirror.metadata.name}`,
+      key: 'uri',
+    });
+  });
+
+  test('a same-namespace credential still grows no mirror', async () => {
+    // The direct reference is kept where the two namespaces coincide, which is
+    // every Datastore provisioned before per-App namespaces. Rendering an
+    // ExternalSecret for those would add a hop they do not need.
+    expect(kinds(await render(ATTACHED))).not.toContain('ExternalSecret');
+  });
+
   test('a job gets its connections too', async () => {
     // Both workloads reach the container through `spindrift-app.podSpec`, so
     // this is a claim that nothing branched on kind on the way — a scheduled

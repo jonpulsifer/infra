@@ -58,6 +58,13 @@ export interface FakeKubernetesOptions {
   /** Collections a list call returns, keyed by plural. */
   lists?: Record<string, FakeObject[]>;
   /**
+   * The labels an unseeded namespace answers with, defaulting to the three Pod
+   * Security labels a Target's declared namespace carries. `{}` models the
+   * cluster whose namespace is absent or carries no admission policy, which is
+   * the one case an App namespace cannot be created from.
+   */
+  namespaceLabels?: Record<string, string>;
+  /**
    * Plurals this identity may not list, answered `403`.
    *
    * A cluster that serves a kind and refuses to show it is the ordinary state
@@ -165,6 +172,19 @@ const READY: StatusScript = () => ({
   ],
 });
 
+/**
+ * What `spindrift-target/namespace.yaml` puts on a Target's declared namespace.
+ *
+ * The same three labels, because what the adapter copies onto an App namespace
+ * has to be the thing the cluster actually declares — a fake carrying a
+ * different set would let a rendering bug pass here and fail live.
+ */
+const DECLARED_NAMESPACE_LABELS: Record<string, string> = {
+  'pod-security.kubernetes.io/enforce': 'restricted',
+  'pod-security.kubernetes.io/audit': 'restricted',
+  'pod-security.kubernetes.io/warn': 'restricted',
+};
+
 export class FakeKubernetes {
   readonly apiServer = HOST;
   readonly requests: RecordedRequest[] = [];
@@ -186,6 +206,30 @@ export class FakeKubernetes {
   /** Put an object where the adapter will find it. */
   place(key: string, object: FakeObject): void {
     this.objects.set(key, object);
+  }
+
+  /**
+   * A namespace nobody seeded, as a real Target cluster has one.
+   *
+   * Every cluster a Target is configured against has its declared namespace
+   * already there, carrying the Pod Security labels Flux put on it — the
+   * adapter reads them to stamp each App namespace, so a fake that answered
+   * `404` would model a cluster no Target is ever connected to and turn a
+   * fixture omission into a refusal every test had to opt out of.
+   *
+   * `namespaceLabels: {}` is how a test models the cluster this does *not*
+   * describe: a namespace absent, or declared without an admission policy.
+   */
+  private declaredNamespace(key: string): FakeObject | undefined {
+    if (!key.startsWith('namespaces/')) return undefined;
+    const labels = this.options.namespaceLabels ?? DECLARED_NAMESPACE_LABELS;
+    if (Object.keys(labels).length === 0) return undefined;
+    const name = key.slice('namespaces/'.length);
+    return {
+      apiVersion: 'v1',
+      kind: 'Namespace',
+      metadata: { name, labels },
+    };
   }
 
   /** What the cluster holds now — the assertion surface for a write. */
@@ -389,7 +433,7 @@ export class FakeKubernetes {
   }
 
   private getResponse(key: string): Response {
-    const object = this.objects.get(key);
+    const object = this.objects.get(key) ?? this.declaredNamespace(key);
     if (object === undefined) return json(404, { message: 'not found' });
 
     // The controller writes status *after* the object exists, which is what

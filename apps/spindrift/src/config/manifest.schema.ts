@@ -36,6 +36,20 @@ import type { FederationConfig } from '../adapters/deploy/cloud/federation.ts';
 const nonEmptyString = z.string().trim().min(1);
 
 /**
+ * The pattern an App's namespace is named by, which must contain `{app}`.
+ *
+ * Refused rather than defaulted when it does not: a pattern with no placeholder
+ * names one namespace for every App, which is the shared namespace this exists
+ * to stop being — and it would fail silently, as one App's release quietly
+ * landing on another's. The rest of the string is checked where the name is
+ * built, because what makes a namespace name legal is the *result*.
+ */
+const appNamespaceSchema = nonEmptyString.refine(
+  (pattern) => pattern.includes('{app}'),
+  { message: 'must contain {app}, or every App shares one namespace' },
+);
+
+/**
  * A Target or Vessel identifier accepted by both the manifest and the connect
  * act.
  *
@@ -337,7 +351,31 @@ export const targetSeedSchema = z.discriminatedUnion('adapter', [
       authReaches: z.array(reachSchema).optional(),
       connection: z
         .object({
+          /**
+           * Where releases placed before per-App namespaces still live.
+           *
+           * No new release lands here — {@link appNamespaceSchema} decides
+           * that — but a Deploy carries its namespace in its own ref, so the
+           * ones already placed keep resolving to it until each is redeployed.
+           * It is also the namespace the connect probe reads a cluster's
+           * prerequisites in.
+           */
           namespace: nonEmptyString,
+          /**
+           * The pattern an App's own namespace is named by (§20).
+           *
+           * A literal in `src/` would make a second operator's installation
+           * this fleet's, so the pattern is a manifest value like every other
+           * fact that names an installation. `{app}` is the only placeholder.
+           */
+          appNamespace: appNamespaceSchema.optional(),
+          /**
+           * Where Datastores are provisioned, which is no App's namespace.
+           *
+           * A Datastore outlives every App attached to it (§11), so it cannot
+           * live in a namespace named for one of them.
+           */
+          datastoreNamespace: nonEmptyString.optional(),
           delivery: kubernetesDeliverySchema,
           logHistorySeconds: z.number().int().nonnegative().optional(),
           /**
