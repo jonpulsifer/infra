@@ -4,14 +4,14 @@
  * Two facts the server computed and the screen threw away.
  *
  * `current` is the difference between "this release reached LIVE" and "this
- * release is what should be running": `model.ts` says outright that a LIVE
+ * release is what should be running": `views.ts` says outright that a LIVE
  * Deploy a newer intent has superseded is still LIVE, and only the desired row
  * knows. That was one `yes`/`no` cell in the inspector; it is a column now,
  * because the question "which of these seven LIVE rows is the one serving" is
  * the reason an operator opens this screen.
  *
  * `rollbackable` is computed by `commands/deploys/list.ts` under the *same*
- * comparison `rollbackDeploy` makes, and `model.ts` explains why: so the act is
+ * comparison `rollbackDeploy` makes, and `views.ts` explains why: so the act is
  * offered only where it would be accepted, rather than offered everywhere and
  * refused half the time. It appeared nowhere in this area. The inspector now
  * carries the act itself — a rollback is an ordinary deploy naming an older
@@ -25,6 +25,7 @@
  * what happened, and neither pretends the ceremony exists.
  */
 import { useEffect, useState } from 'react';
+import type { DeployLedgerItem, DeployPhase } from '../../../commands/views.ts';
 import deployFlow from '../../client/diagrams/deploy.svg';
 import { command, type OutputOf } from '../../client.ts';
 import { Checklist } from '../../components/checklist.tsx';
@@ -34,7 +35,6 @@ import {
   type ExplorerTone,
   LedgerExplorer,
 } from '../../components/object-explorer.tsx';
-import type { DeployLedgerItem, DeployPhase } from '../../model.ts';
 import { Badge } from '../../ui/badge.tsx';
 import { Button } from '../../ui/button.tsx';
 import { Eyebrow } from '../../ui/card.tsx';

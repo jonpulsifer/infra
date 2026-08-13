@@ -23,11 +23,12 @@
  *    same adapter, never from a literal, and never for a value that is
  *    per-instance.
  */
-import type { TargetAdapter } from '../config/manifest.schema.ts';
+
 import type {
   PendingTargetConnection,
   TargetConnectionProposal,
-} from '../web/model.ts';
+} from '../commands/views.ts';
+import type { TargetAdapter } from '../config/manifest.schema.ts';
 import {
   type KubernetesDelivery,
   type TargetConnection,

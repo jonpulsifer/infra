@@ -29,11 +29,14 @@
  */
 import { Database } from 'lucide-react';
 import { useState } from 'react';
+import type {
+  DatastoreListItem,
+  DatastoreVesselOption,
+} from '../../../commands/views.ts';
 import {
   DefinitionGrid,
   LedgerExplorer,
 } from '../../components/object-explorer.tsx';
-import type { DatastoreListItem, DatastoreVesselOption } from '../../model.ts';
 import { Badge } from '../../ui/badge.tsx';
 import { Button } from '../../ui/button.tsx';
 import { Eyebrow } from '../../ui/card.tsx';

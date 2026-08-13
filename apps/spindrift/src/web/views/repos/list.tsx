@@ -39,13 +39,13 @@ import {
   Timer,
 } from 'lucide-react';
 import { useState } from 'react';
-import type { ComponentKind } from '../../../domain/desired-state.ts';
-import { command, type InputOf, type OutputOf } from '../../client.ts';
 import type {
   GrantedRepositoryView,
   LinkedRepoView,
   RepositoryConnectorView,
-} from '../../model.ts';
+} from '../../../commands/views.ts';
+import type { ComponentKind } from '../../../domain/desired-state.ts';
+import { command, type InputOf, type OutputOf } from '../../client.ts';
 import { Badge, Dot } from '../../ui/badge.tsx';
 import { Button } from '../../ui/button.tsx';
 import { Card, CardContent, Eyebrow } from '../../ui/card.tsx';

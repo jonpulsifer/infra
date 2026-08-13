@@ -19,8 +19,8 @@ import { inArray } from 'drizzle-orm';
 import { z } from 'zod';
 import { elapsedSince } from '../../domain/elapsed.ts';
 import { targetRowLabel } from '../../domain/target.ts';
-import type { DeployLedgerItem, DeployPhase } from '../../web/model.ts';
 import { type Command, type CommandContext, failed, ok } from '../types.ts';
+import type { DeployLedgerItem, DeployPhase } from '../views.ts';
 
 /** How many releases a list answers with before it is a data-export problem. */
 export const RELEASE_PAGE = 25;

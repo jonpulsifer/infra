@@ -32,6 +32,16 @@
 import { ChevronRight, ExternalLink } from 'lucide-react';
 import { type ReactNode, useState } from 'react';
 import type {
+  ActivityEntry,
+  BuildRouteOptionView,
+  ComponentView,
+  DatastoreView,
+  LogLine,
+  PrerequisiteRowView,
+  TargetListItem,
+  WorkspaceView,
+} from '../../../commands/views.ts';
+import type {
   Auth,
   ComponentKind,
   Reach,
@@ -44,16 +54,6 @@ import {
 import { DiagnosisPanel, DriftPanel } from '../../components/diagnosis.tsx';
 import { EmptyState, LogPane } from '../../components/log-pane.tsx';
 import { PhasePill } from '../../components/status.tsx';
-import type {
-  ActivityEntry,
-  BuildRouteOptionView,
-  ComponentView,
-  DatastoreView,
-  LogLine,
-  PrerequisiteRowView,
-  TargetListItem,
-  WorkspaceView,
-} from '../../model.ts';
 import { Badge } from '../../ui/badge.tsx';
 import { Button } from '../../ui/button.tsx';
 import { Card, CardContent, CardHeader, Eyebrow } from '../../ui/card.tsx';

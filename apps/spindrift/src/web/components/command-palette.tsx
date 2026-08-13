@@ -27,13 +27,13 @@
  */
 import { Boxes, Hammer, Rocket, Search, Server } from 'lucide-react';
 import { useEffect, useState } from 'react';
-import { command } from '../client.ts';
 import type {
   AppListItem,
   BuildListItem,
   DeployLedgerItem,
   TargetListItem,
-} from '../model.ts';
+} from '../../commands/views.ts';
+import { command } from '../client.ts';
 import { Kbd } from '../ui/kbd.tsx';
 import { cn } from '../ui/utils.ts';
 
@@ -100,7 +100,7 @@ const VERBS: readonly PaletteItem[] = [
 ];
 
 /**
- * A Target is `vessel/adapter` and never one of them alone — `model.ts:744` is
+ * A Target is `vessel/adapter` and never one of them alone — `views.ts`'s `TargetListItem` is
  * explicit about it, and two clusters both running `kubernetes` are otherwise
  * the same row twice.
  */

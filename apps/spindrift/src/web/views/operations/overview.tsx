@@ -38,17 +38,17 @@
  */
 import { Radio } from 'lucide-react';
 import { useMemo, useState } from 'react';
-import {
-  DefinitionGrid,
-  type ExplorerItem,
-  ObjectExplorer,
-} from '../../components/object-explorer.tsx';
 import type {
   AppListItem,
   BuildListItem,
   DeployLedgerItem,
   TargetListItem,
-} from '../../model.ts';
+} from '../../../commands/views.ts';
+import {
+  DefinitionGrid,
+  type ExplorerItem,
+  ObjectExplorer,
+} from '../../components/object-explorer.tsx';
 import { Badge } from '../../ui/badge.tsx';
 import { Button } from '../../ui/button.tsx';
 import { Eyebrow } from '../../ui/card.tsx';
@@ -84,7 +84,7 @@ type Lane = 'all' | 'attention' | 'inflight' | 'builds' | 'deploys';
 /**
  * A Target's name is both halves of it.
  *
- * `model.ts` is explicit that neither the boundary nor the surface identifies a
+ * `views.ts` is explicit that neither the boundary nor the surface identifies a
  * Target alone, and two clusters both running `kubernetes` were the same word
  * twice on this screen. An unplaced App has no boundary yet, and says the
  * surface alone rather than inventing a `/`.

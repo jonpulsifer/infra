@@ -8,7 +8,7 @@
  * — and `artifactDigest`, the thing the whole act exists to produce, reached
  * only the inspector.
  *
- * `dispatchWaitingOn` is the one that mattered. `model.ts` calls it "what a
+ * `dispatchWaitingOn` is the one that mattered. `views.ts` calls it "what a
  * PENDING Build is stuck on, in the operator's own words", the Overview
  * rendered it, and the screen named after Builds did not — so a Build
  * permanently refused because no configured route meets its Target's threshold
@@ -23,6 +23,7 @@
  * and it wants the attempt stream, not an interval.
  */
 import { useEffect, useState } from 'react';
+import type { BuildListItem } from '../../../commands/views.ts';
 import { command, type OutputOf } from '../../client.ts';
 import { Checklist } from '../../components/checklist.tsx';
 import {
@@ -30,7 +31,6 @@ import {
   type ExplorerTone,
   LedgerExplorer,
 } from '../../components/object-explorer.tsx';
-import type { BuildListItem } from '../../model.ts';
 import { Badge } from '../../ui/badge.tsx';
 import { Button } from '../../ui/button.tsx';
 import { Eyebrow } from '../../ui/card.tsx';

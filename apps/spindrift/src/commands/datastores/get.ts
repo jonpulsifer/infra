@@ -29,8 +29,8 @@ import {
   hasTargetConnection,
   hasVesselLocation,
 } from '../../domain/target.ts';
-import type { DatastoreDetailView } from '../../web/model.ts';
 import { type Command, type CommandContext, failed, ok } from '../types.ts';
+import type { DatastoreDetailView } from '../views.ts';
 import { datastoreSurfaceTargetOf } from './vessel-surface.ts';
 
 export const getDatastoreInput = z

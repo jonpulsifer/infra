@@ -20,8 +20,8 @@
  * for a refusal to come back to.
  */
 import { Database } from 'lucide-react';
+import type { DatastoreDetailView } from '../../../commands/views.ts';
 import { DefinitionGrid } from '../../components/object-explorer.tsx';
-import type { DatastoreDetailView } from '../../model.ts';
 import { Badge } from '../../ui/badge.tsx';
 import { Button } from '../../ui/button.tsx';
 import { Declaration } from '../../ui/declaration.tsx';

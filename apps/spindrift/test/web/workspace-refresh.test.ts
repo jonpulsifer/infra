@@ -13,8 +13,8 @@
  * it simulates no clicks.
  */
 import { describe, expect, test } from 'bun:test';
+import type { WorkspaceView } from '../../src/commands/views.ts';
 import { refreshedWorkspace } from '../../src/web/app.tsx';
-import type { WorkspaceView } from '../../src/web/model.ts';
 import { WORKSPACE_SCENARIOS } from '../fixtures/scenarios.ts';
 
 const SERVICE: WorkspaceView = WORKSPACE_SCENARIOS.service;

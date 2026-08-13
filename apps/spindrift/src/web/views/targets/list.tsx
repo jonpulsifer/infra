@@ -37,17 +37,17 @@ import {
   Zap,
 } from 'lucide-react';
 import { useState } from 'react';
-import type { TargetAdapter } from '../../../config/manifest.schema.ts';
-import type { ComponentKind } from '../../../domain/desired-state.ts';
-import { surfacesToProbe, type VesselRole } from '../../../domain/vessel.ts';
-import type { LogoName } from '../../client/logos/index.ts';
-import { command, type InputOf, type OutputOf } from '../../client.ts';
 import type {
   PendingTargetConnection,
   PrerequisiteRowView,
   TargetListItem,
   VesselListItem,
-} from '../../model.ts';
+} from '../../../commands/views.ts';
+import type { TargetAdapter } from '../../../config/manifest.schema.ts';
+import type { ComponentKind } from '../../../domain/desired-state.ts';
+import { surfacesToProbe, type VesselRole } from '../../../domain/vessel.ts';
+import type { LogoName } from '../../client/logos/index.ts';
+import { command, type InputOf, type OutputOf } from '../../client.ts';
 import { Badge, Dot } from '../../ui/badge.tsx';
 import { Button } from '../../ui/button.tsx';
 import { Card, CardContent, Eyebrow } from '../../ui/card.tsx';

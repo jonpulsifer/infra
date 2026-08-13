@@ -33,6 +33,11 @@ import { AlertTriangle, Loader2, Rocket, Search } from 'lucide-react';
 import { type Dispatch, useEffect, useRef, useState } from 'react';
 import type { ZodType } from 'zod';
 import type {
+  GrantedRepositoryView,
+  RepositoryOptionView,
+  TargetOptionView,
+} from '../../../../commands/views.ts';
+import type {
   Blocker,
   CreationDraftView,
   DraftAction,
@@ -53,11 +58,6 @@ import {
   type RepositoryChoice,
   repositoryChoices,
 } from '../../../components/repo-picker.tsx';
-import type {
-  GrantedRepositoryView,
-  RepositoryOptionView,
-  TargetOptionView,
-} from '../../../model.ts';
 import { reportSessionExpired } from '../../../session-events.ts';
 import { Badge } from '../../../ui/badge.tsx';
 import { Button } from '../../../ui/button.tsx';

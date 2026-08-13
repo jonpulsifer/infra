@@ -4,13 +4,13 @@ import {
   RepositoryAuthorizationRequiredError,
 } from '../../domain/repository.ts';
 import { reconcileRepository } from '../../reconciler/repo-loop.ts';
+import { type Command, ok } from '../types.ts';
 import type {
   GrantedRepositoryView,
   LinkedRepoView,
   RepositoryConnectorView,
   RepositoryOptionView,
-} from '../../web/model.ts';
-import { type Command, ok } from '../types.ts';
+} from '../views.ts';
 
 export const listRepositoriesInput = z.object({});
 export type ListRepositoriesInput = z.infer<typeof listRepositoriesInput>;

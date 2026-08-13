@@ -7,16 +7,6 @@
 import { Monitor, Moon, Sun } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import type { Principal } from '../commands/types.ts';
-import type { ComponentKind } from '../domain/desired-state.ts';
-import { readSession, signOut } from './auth-client.ts';
-import {
-  command,
-  type InputOf,
-  type OutputOf,
-  type TransportFailure,
-} from './client.ts';
-import { DeleteAppDialog, useAppDeletion } from './components/delete-app.tsx';
-import { AppShell } from './components/shell.tsx';
 import type {
   AppListItem,
   BuildListItem,
@@ -32,8 +22,18 @@ import type {
   TargetOptionView,
   VesselListItem,
   WorkspaceView,
-} from './model.ts';
-import { isInFlight } from './model.ts';
+} from '../commands/views.ts';
+import { isInFlight } from '../commands/views.ts';
+import type { ComponentKind } from '../domain/desired-state.ts';
+import { readSession, signOut } from './auth-client.ts';
+import {
+  command,
+  type InputOf,
+  type OutputOf,
+  type TransportFailure,
+} from './client.ts';
+import { DeleteAppDialog, useAppDeletion } from './components/delete-app.tsx';
+import { AppShell } from './components/shell.tsx';
 import { usePoll } from './poll.ts';
 import { useRoute } from './router.ts';
 import { SESSION_EXPIRED_EVENT } from './session-events.ts';

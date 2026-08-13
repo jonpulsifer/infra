@@ -34,6 +34,7 @@ import type {
   Clock,
   CommandContext,
 } from '../../src/commands/types.ts';
+import type { AppListItem, DeployPhase } from '../../src/commands/views.ts';
 import {
   builds,
   componentTargetDesired,
@@ -49,7 +50,6 @@ import {
   type ExplorerItem,
   ObjectExplorer,
 } from '../../src/web/components/object-explorer.tsx';
-import type { AppListItem, DeployPhase } from '../../src/web/model.ts';
 import { AppList, appHref } from '../../src/web/views/apps/list.tsx';
 import { withIsolatedDatabase } from '../harness/db.ts';
 import {

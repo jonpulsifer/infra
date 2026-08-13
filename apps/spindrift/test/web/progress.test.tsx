@@ -13,9 +13,9 @@
  */
 import { describe, expect, test } from 'bun:test';
 import { renderToStaticMarkup } from 'react-dom/server';
+import type { DeployView } from '../../src/commands/views.ts';
 import { StageProgress } from '../../src/web/components/progress.tsx';
 import { formatDuration } from '../../src/web/components/running-time.tsx';
-import type { DeployView } from '../../src/web/model.ts';
 import { DeployDetail } from '../../src/web/views/apps/deploy-detail.tsx';
 import { DEPLOY_SCENARIOS } from '../fixtures/scenarios.ts';
 

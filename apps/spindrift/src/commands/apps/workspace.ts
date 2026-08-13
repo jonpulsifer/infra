@@ -18,6 +18,9 @@ import {
   targetRowLabel,
 } from '../../domain/target.ts';
 import type { VesselLocation } from '../../domain/vessel.ts';
+import { buildRouteFor } from '../builds/route.ts';
+import { configuredKeys } from '../config/set.ts';
+import { type Command, type CommandContext, failed, ok } from '../types.ts';
 import type {
   ActivityEntry,
   BuildRouteOptionView,
@@ -29,10 +32,7 @@ import type {
   PrerequisiteRowView,
   Runtime,
   WorkspaceView,
-} from '../../web/model.ts';
-import { buildRouteFor } from '../builds/route.ts';
-import { configuredKeys } from '../config/set.ts';
-import { type Command, type CommandContext, failed, ok } from '../types.ts';
+} from '../views.ts';
 
 export const getAppWorkspaceInput = z.object({
   name: z.string().min(1),

@@ -11,7 +11,7 @@
  * one App's workspace.
  *
  * **Every field is named on the way out, never spread.** `datastores` carries
- * `connection_ref` — the pointer to a Secret, per `web/model.ts`'s note on
+ * `connection_ref` — the pointer to a Secret, per `commands/views.ts`'s note on
  * `DatastoreView` — and a `select()` or a spread would ship it to the browser
  * the moment this file forgot to think about it. The command layer's one rule
  * for a credential-adjacent column is that nothing reaches across it by
@@ -37,11 +37,8 @@ import {
   hasTargetConnection,
   hasVesselLocation,
 } from '../../domain/target.ts';
-import type {
-  DatastoreListItem,
-  DatastoreVesselOption,
-} from '../../web/model.ts';
 import { type Command, ok } from '../types.ts';
+import type { DatastoreListItem, DatastoreVesselOption } from '../views.ts';
 import { datastoreSurfaceTargetOf } from './vessel-surface.ts';
 
 export const listDatastoresInput = z.object({}).strict();

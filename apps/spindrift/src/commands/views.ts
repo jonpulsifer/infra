@@ -1,25 +1,35 @@
 /**
- * The read models the UI renders.
+ * The read models the commands project and the UI renders.
  *
- * Every command in `src/commands/` is an *act*. None of them is a query for a
+ * Every command in this directory is an *act*. None of them is a query for a
  * screen, because §21 makes a command "one exported function per user act" and
- * a screen is not an act. So the shapes a view consumes live here, stated once,
+ * a screen is not an act. So the shapes a view consumes are stated here, once,
  * and the views are written against them rather than against whatever a query
  * happens to return today.
  *
+ * They live beside the commands and not under `src/web/` because they are the
+ * contract *between* the two: §21's "nothing in this layer knows it is reached
+ * over HTTP, from a page, or from a test" cannot hold while a command's return
+ * type is imported out of the views' own tree. A command returns one of these;
+ * a page renders one; neither owns the other's tree.
+ *
  * That ordering is deliberate. These types are built out of the domain's own
  * closed vocabularies — {@link FailureReason}, {@link Blame},
- * {@link ComponentKind}, {@link Reach}, {@link Exclusion} — so a view cannot
- * render a phase, a blame, or an exclusion the domain does not have. When the
- * query commands land they will be typed to return these, and the compiler,
- * not a reviewer, is what will say whether they match.
+ * {@link DeployPhase}, {@link ComponentKind}, {@link Reach},
+ * {@link Exclusion} — so a view cannot render a phase, a blame, or an
+ * exclusion the domain does not have, and the compiler rather than a reviewer
+ * is what says whether a projection matches.
  *
  * What is **not** here is any string a human reads that the domain could have
  * decided. `reasonCovers` already says what a failure reason covers; a view
  * that restated it in its own words would be a second vocabulary to keep in
  * step with the first.
  */
-import type { Blame, FailureReason } from '../adapters/deploy/contract.ts';
+import type {
+  Blame,
+  DeployPhase,
+  FailureReason,
+} from '../adapters/deploy/contract.ts';
 import type { TargetAdapter } from '../config/manifest.schema.ts';
 import type {
   ArtifactType,
@@ -59,18 +69,20 @@ export interface PrerequisiteRowView {
 }
 
 /**
- * §6's phases, verbatim: `PENDING → APPLYING → WAITING → LIVE | FAILED`.
+ * §6's phases, re-exported from the deploy contract that declares them.
  *
- * The UI collapses these into three tones and never into a stage rail — §18
+ * One vocabulary and not a second spelling of it: a projection's phase is the
+ * phase an adapter reported, and two identical unions declared apart would
+ * typecheck while drifting the moment §6 gains a phase. Re-exported rather
+ * than made an import site's problem because every screen that renders a phase
+ * already reads this module and none of them has any other business with an
+ * adapter contract.
+ *
+ * The UI collapses them into three tones and never into a stage rail — §18
  * rejects the rail explicitly, because the running App is the product and the
  * pipeline is only how it got there.
  */
-export type DeployPhase =
-  | 'PENDING'
-  | 'APPLYING'
-  | 'WAITING'
-  | 'LIVE'
-  | 'FAILED';
+export type { DeployPhase };
 
 /** Whether a phase is still moving. Drives the pulsing dot and nothing else. */
 export function isInFlight(phase: DeployPhase): boolean {

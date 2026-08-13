@@ -44,6 +44,12 @@ import {
 } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { useEffect, useRef, useState } from 'react';
+import {
+  type DeployView,
+  isInFlight,
+  type SourceView,
+  type StepStatus,
+} from '../../../commands/views.ts';
 import { BUILD_ADAPTER } from '../../client/build-adapters.ts';
 import { Checklist } from '../../components/checklist.tsx';
 import { DiagnosisPanel, DriftPanel } from '../../components/diagnosis.tsx';
@@ -54,12 +60,6 @@ import {
 } from '../../components/progress.tsx';
 import { RunningTime } from '../../components/running-time.tsx';
 import { PhasePill, StepGlyph, statusWord } from '../../components/status.tsx';
-import {
-  type DeployView,
-  isInFlight,
-  type SourceView,
-  type StepStatus,
-} from '../../model.ts';
 import { Button } from '../../ui/button.tsx';
 import { Card, CardContent, Eyebrow } from '../../ui/card.tsx';
 import {

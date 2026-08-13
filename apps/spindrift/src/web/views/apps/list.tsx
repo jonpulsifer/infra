@@ -23,6 +23,7 @@
  * route to it at all.
  */
 import { ExternalLink, Globe, Plus, Server, Zap } from 'lucide-react';
+import type { AppListItem, DeployPhase } from '../../../commands/views.ts';
 import {
   type AppDeletionControls,
   DeleteAppButton,
@@ -33,7 +34,6 @@ import {
   ExplorerPageHeader,
   ObjectExplorer,
 } from '../../components/object-explorer.tsx';
-import type { AppListItem, DeployPhase } from '../../model.ts';
 import { Badge } from '../../ui/badge.tsx';
 import { Button } from '../../ui/button.tsx';
 import { Eyebrow } from '../../ui/card.tsx';

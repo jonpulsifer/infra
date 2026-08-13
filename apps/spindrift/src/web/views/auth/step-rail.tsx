@@ -24,8 +24,8 @@
  * so a wizard step and a deploy step do not read as two different vocabularies.
  */
 
+import type { StepStatus } from '../../../commands/views.ts';
 import { StepGlyph, statusWord } from '../../components/status.tsx';
-import type { StepStatus } from '../../model.ts';
 import { cn } from '../../ui/utils.ts';
 
 export interface RailStep {

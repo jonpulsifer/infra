@@ -2,15 +2,15 @@ import { z } from 'zod';
 import type { Blame, FailureReason } from '../../adapters/deploy/contract.ts';
 import { elapsedSince } from '../../domain/elapsed.ts';
 import { targetRowLabel } from '../../domain/target.ts';
+import { buildViewOf, sourceViewOf } from '../builds/view.ts';
+import { type Command, failed, ok } from '../types.ts';
 import type {
   ChecklistItem,
   DeployPhase,
   DeployView,
   Diagnosis,
   LogLine,
-} from '../../web/model.ts';
-import { buildViewOf, sourceViewOf } from '../builds/view.ts';
-import { type Command, failed, ok } from '../types.ts';
+} from '../views.ts';
 
 export const getDeployDetailInput = z.object({
   id: z.union([z.number(), z.string()]),

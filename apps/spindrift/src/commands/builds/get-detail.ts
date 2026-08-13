@@ -15,8 +15,8 @@
 import { z } from 'zod';
 import { elapsedSince } from '../../domain/elapsed.ts';
 import { targetRowLabel } from '../../domain/target.ts';
-import type { DeployPhase, DeployView } from '../../web/model.ts';
 import { type Command, failed, ok } from '../types.ts';
+import type { DeployPhase, DeployView } from '../views.ts';
 import { buildViewOf, sourceViewOf } from './view.ts';
 
 export const getBuildDetailInput = z.object({

@@ -30,7 +30,7 @@
  */
 import { Upload } from 'lucide-react';
 import { useId, useState } from 'react';
-import type { ComponentView } from '../../model.ts';
+import type { ComponentView } from '../../../commands/views.ts';
 import { Button } from '../../ui/button.tsx';
 import { Card, CardContent } from '../../ui/card.tsx';
 

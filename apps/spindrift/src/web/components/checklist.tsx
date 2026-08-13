@@ -12,7 +12,7 @@
  * They are the same shape — a name, a state, and one line of platform words —
  * and giving them two components is how they drift apart.
  */
-import type { ChecklistItem } from '../model.ts';
+import type { ChecklistItem } from '../../commands/views.ts';
 import { cn } from '../ui/utils.ts';
 import { StepGlyph } from './status.tsx';
 
