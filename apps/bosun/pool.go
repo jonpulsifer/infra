@@ -261,21 +261,115 @@ func (p *pool) sweepWorkspaces() {
 func (p *pool) fill(ctx context.Context) {
 	for name, class := range p.cfg.Classes {
 		for i := 0; i < class.Warm; i++ {
-			p.spawn(ctx, name)
+			p.spawn(ctx, p.runnerBerth(name))
 		}
 	}
 }
 
-// spawn mints a JIT registration, boots one skiff for className, and hands
-// its lifetime off to awaitExit. Errors are logged and swallowed: a single
-// failed spawn should not take down the rest of the pool.
-func (p *pool) spawn(ctx context.Context, className string) {
+// A berth is the job a skiff is born to do: crew a GitHub Actions runner, or
+// run one claimed Spindrift build. Both births are otherwise the same
+// sequence — the draining guard, the class lookup, the id, the hull, the
+// paths, the slot claim, boot, and the handoff to awaitExit — so spawn owns
+// all of that and the berth supplies only what differs: which class boots,
+// what its log lines call it, and the credential or request the guest finds
+// in the skiff's state directory.
+//
+// A struct of funcs rather than an interface with two implementations,
+// because the GitHub berth has to carry a minted registration from mint to
+// prepare and on into the booted line: closures over the mint's own locals
+// say that in a few lines, where an interface would need a struct of the same
+// fields behind it.
+type berth struct {
+	class string
+	// noun is what a log line calls this skiff: "skiff" or "build skiff".
+	noun string
+	// fields are added to the logger for every line this birth writes.
+	fields []any
+	// mint acquires whatever the job needs from the outside world. It runs
+	// before any workspace slot is claimed and logs its own failure, because a
+	// failure here returns with no skiff and so no retire to release anything.
+	mint func(ctx context.Context, logger *slog.Logger, id string) error
+	// prepare stamps the berth onto the constructed skiff and writes its state
+	// directory. It logs its own failure; spawn retires the skiff.
+	prepare func(logger *slog.Logger, s *skiff, hullDigest string) error
+	// booted are the extra fields on the "<noun> booted" line.
+	booted func() []any
+}
+
+// runnerBerth is a skiff born to crew a GitHub Actions runner for className:
+// it registers with a JIT config minted for exactly this skiff, and awaitExit
+// replaces it 1:1 when it exits.
+func (p *pool) runnerBerth(className string) berth {
+	// Minted by mint, spent by prepare and by the booted line: a berth serves
+	// exactly one spawn.
+	var runnerID int64
+	var jitConfig string
+	return berth{
+		class: className,
+		noun:  "skiff",
+		mint: func(ctx context.Context, logger *slog.Logger, id string) error {
+			// Mint immediately before boot, never stockpiled: the config expires
+			// ~1h from this call, not from when a guest first connects.
+			var err error
+			runnerID, jitConfig, err = p.gh.GenerateJITConfig(ctx, p.cfg.Repo, p.runnerName(id), []string{className})
+			if err != nil {
+				logger.Error("generate jitconfig", "error", err)
+			}
+			return err
+		},
+		prepare: func(logger *slog.Logger, s *skiff, hullDigest string) error {
+			s.runnerID = runnerID
+			if err := p.writeState(s.paths.dir, runnerID, jitConfig, hullDigest); err != nil {
+				logger.Error("write state", "error", err)
+				return err
+			}
+			return nil
+		},
+		booted: func() []any { return []any{"runner_id", runnerID} },
+	}
+}
+
+// buildBerth is a skiff born to run one claimed Spindrift build. It carries no
+// GitHub registration: nothing to mint, nothing to poll, and nothing for
+// retire or sweep to deregister.
+func (p *pool) buildBerth(claim *buildClaim) berth {
+	return berth{
+		class:  claim.Class,
+		noun:   "build skiff",
+		fields: []any{"build_id", claim.ID},
+		mint:   func(context.Context, *slog.Logger, string) error { return nil },
+		prepare: func(logger *slog.Logger, s *skiff, hullDigest string) error {
+			s.build = true
+			s.buildID = claim.ID
+			s.busySince = s.mintedAt // busy by construction; see pollBuildSkiff
+			s.done = make(chan struct{})
+			if err := p.writeBuildState(s.paths.dir, claim.Request, hullDigest); err != nil {
+				logger.Error("write build state", "error", err)
+				return err
+			}
+			return nil
+		},
+		booted: func() []any { return nil },
+	}
+}
+
+// spawn boots one skiff for berth b and hands its lifetime off to awaitExit.
+// Errors are logged before they are returned, and fill and awaitExit ignore
+// them: a single failed spawn should not take down the rest of the pool.
+//
+// Returns (nil, errDraining) when a stop is in progress: bosun never ran the
+// build, so runBuild must NOT post a result -- staying silent lets the claim's
+// lease expire and another host pick the request up, where a FAILED post
+// would close the Spindrift build permanently for work nobody attempted. Any
+// other nil return is a real setup failure, already logged; runBuild reports
+// that one, and Spindrift's lease expiry is not waited on for it.
+func (p *pool) spawn(ctx context.Context, b berth) (*skiff, error) {
 	// Checked under the same mutex drain sets it under, so every spawn either
 	// happens-before drain's first scuttle pass or is refused outright.
 	p.mu.Lock()
 	if p.draining {
 		p.mu.Unlock()
-		return
+		return nil, errDraining
 	}
 	p.spawning++
 	p.mu.Unlock()
@@ -285,37 +379,34 @@ func (p *pool) spawn(ctx context.Context, className string) {
 		p.mu.Unlock()
 	}()
 
-	class, ok := p.cfg.Classes[className]
+	class, ok := p.cfg.Classes[b.class]
 	if !ok {
-		p.logger.Error("spawn: unknown class", "class", className)
-		return
+		p.logger.Error("spawn: unknown class", "class", b.class)
+		return nil, fmt.Errorf("unknown class %q", b.class)
 	}
-	logger := p.logger.With("class", className)
+	logger := p.logger.With("class", b.class).With(b.fields...)
 
 	id, err := newSkiffID()
 	if err != nil {
 		logger.Error("generate skiff id", "error", err)
-		return
+		return nil, err
 	}
 	logger = logger.With("skiff", id)
 
 	h, err := loadHull(class.Hull)
 	if err != nil {
 		logger.Error("load hull", "error", err)
-		return
+		return nil, err
 	}
 
 	paths, err := resolvePaths(p.cfg.RuntimeDir, p.cfg.LogDir, id, h.manifest.Devices)
 	if err != nil {
 		logger.Error("resolve paths", "error", err)
-		return
+		return nil, err
 	}
-	// Mint immediately before boot, never stockpiled: the config expires
-	// ~1h from this call, not from when a guest first connects.
-	runnerID, jitConfig, err := p.gh.GenerateJITConfig(ctx, p.cfg.Repo, p.runnerName(id), []string{className})
-	if err != nil {
-		logger.Error("generate jitconfig", "error", err)
-		return
+
+	if err := b.mint(ctx, logger, id); err != nil {
+		return nil, err
 	}
 
 	// Claimed after the mint, because every exit path past this point hands the
@@ -324,141 +415,36 @@ func (p *pool) spawn(ctx context.Context, className string) {
 	slot := -1
 	if class.Workspace != "" {
 		if class.Persist {
-			slot = p.claimSlot(className)
-			paths.workspace = filepath.Join(p.cfg.WorkspaceDir, workspaceSlotName(className, slot))
+			slot = p.claimSlot(b.class)
+			paths.workspace = filepath.Join(p.cfg.WorkspaceDir, workspaceSlotName(b.class, slot))
 			logger = logger.With("workspace_slot", slot)
 		} else {
 			paths.workspace = filepath.Join(p.cfg.WorkspaceDir, id+".img")
 		}
 	}
-	s := &skiff{id: id, class: className, runnerID: runnerID, paths: paths, slot: slot, mintedAt: time.Now()}
+	s := &skiff{id: id, class: b.class, paths: paths, slot: slot, mintedAt: time.Now()}
 
-	if err := p.writeState(paths.dir, runnerID, jitConfig, h.digest); err != nil {
-		logger.Error("write state", "error", err)
+	if err := b.prepare(logger, s, h.digest); err != nil {
 		s.setExitReason(exitBootFailed)
 		p.retire(ctx, s, logger)
-		return
+		return nil, err
 	}
 
 	if err := p.boot(s, h, class, logger); err != nil {
 		logger.Error("boot", "error", err)
 		s.setExitReason(exitBootFailed)
 		p.retire(ctx, s, logger)
-		return
+		return nil, err
 	}
 
 	p.mu.Lock()
 	if p.draining {
-		// Drain began mid-boot. The registration minted above may postdate
+		// Drain began mid-boot. Anything the berth minted above may postdate
 		// drain's scuttle pass, so this skiff must not join the pool: retire
 		// deregisters it and kills what boot started, and the spawning
 		// counter keeps drain from returning before that finishes.
 		p.mu.Unlock()
-		logger.Info("drain: scuttling skiff spawned mid-stop")
-		s.setExitReason(exitDrained)
-		p.retire(ctx, s, logger)
-		return
-	}
-	p.skiffs[id] = s
-	p.mu.Unlock()
-
-	p.stats.boot(className)
-	logger.Info("skiff booted", "runner_id", runnerID)
-	p.publish()
-	go p.awaitExit(ctx, s, logger)
-}
-
-// spawnBuild boots one skiff to run a claimed Spindrift build instead of
-// registering it as a GitHub runner. It shares spawn's low-level machinery --
-// claimSlot, writeState's build sibling writeBuildState, boot, and
-// awaitExit -- but duplicates spawn's setup (draining guard, id, hull,
-// paths) rather than threading a build/non-build fork through spawn itself:
-// the two diverge immediately after that prefix on the one thing that
-// matters (a GitHub JIT mint vs a request write), and forking spawn's own
-// early-return chain would cost more clarity than the small duplication
-// here does.
-//
-// Returns (nil, errDraining) when a stop is in progress: bosun never ran the
-// build, so runBuild must NOT post a result -- staying silent lets the claim's
-// lease expire and another host pick the request up, where a FAILED post
-// would close the Spindrift build permanently for work nobody attempted. Any
-// other nil return is a real setup failure, already logged; runBuild reports
-// that one, and Spindrift's lease expiry is not waited on for it.
-func (p *pool) spawnBuild(ctx context.Context, claim *buildClaim) (*skiff, error) {
-	p.mu.Lock()
-	if p.draining {
-		p.mu.Unlock()
-		return nil, errDraining
-	}
-	p.spawning++
-	p.mu.Unlock()
-	defer func() {
-		p.mu.Lock()
-		p.spawning--
-		p.mu.Unlock()
-	}()
-
-	class, ok := p.cfg.Classes[claim.Class]
-	if !ok {
-		p.logger.Error("spawnBuild: unknown class", "class", claim.Class)
-		return nil, fmt.Errorf("unknown class %q", claim.Class)
-	}
-	logger := p.logger.With("class", claim.Class, "build_id", claim.ID)
-
-	id, err := newSkiffID()
-	if err != nil {
-		logger.Error("generate skiff id", "error", err)
-		return nil, err
-	}
-	logger = logger.With("skiff", id)
-
-	h, err := loadHull(class.Hull)
-	if err != nil {
-		logger.Error("load hull", "error", err)
-		return nil, err
-	}
-
-	paths, err := resolvePaths(p.cfg.RuntimeDir, p.cfg.LogDir, id, h.manifest.Devices)
-	if err != nil {
-		logger.Error("resolve paths", "error", err)
-		return nil, err
-	}
-
-	slot := -1
-	if class.Workspace != "" {
-		if class.Persist {
-			slot = p.claimSlot(claim.Class)
-			paths.workspace = filepath.Join(p.cfg.WorkspaceDir, workspaceSlotName(claim.Class, slot))
-			logger = logger.With("workspace_slot", slot)
-		} else {
-			paths.workspace = filepath.Join(p.cfg.WorkspaceDir, id+".img")
-		}
-	}
-	now := time.Now()
-	s := &skiff{
-		id: id, class: claim.Class, paths: paths, slot: slot, mintedAt: now,
-		busySince: now, // busy by construction; see pollBuildSkiff
-		build:     true, buildID: claim.ID, done: make(chan struct{}),
-	}
-
-	if err := p.writeBuildState(paths.dir, claim.Request, h.digest); err != nil {
-		logger.Error("write build state", "error", err)
-		s.setExitReason(exitBootFailed)
-		p.retire(ctx, s, logger)
-		return nil, err
-	}
-
-	if err := p.boot(s, h, class, logger); err != nil {
-		logger.Error("boot", "error", err)
-		s.setExitReason(exitBootFailed)
-		p.retire(ctx, s, logger)
-		return nil, err
-	}
-
-	p.mu.Lock()
-	if p.draining {
-		p.mu.Unlock()
-		logger.Info("drain: scuttling build skiff spawned mid-stop")
+		logger.Info("drain: scuttling " + b.noun + " spawned mid-stop")
 		s.setExitReason(exitDrained)
 		p.retire(ctx, s, logger)
 		return nil, errDraining
@@ -466,8 +452,8 @@ func (p *pool) spawnBuild(ctx context.Context, claim *buildClaim) (*skiff, error
 	p.skiffs[id] = s
 	p.mu.Unlock()
 
-	p.stats.boot(claim.Class)
-	logger.Info("build skiff booted")
+	p.stats.boot(b.class)
+	logger.Info(b.noun+" booted", b.booted()...)
 	p.publish()
 	go p.awaitExit(ctx, s, logger)
 	return s, nil
@@ -608,7 +594,7 @@ func (p *pool) awaitExit(ctx context.Context, s *skiff, logger *slog.Logger) {
 	if ctx.Err() != nil {
 		return // shutting down; do not refill
 	}
-	p.spawn(ctx, s.class)
+	p.spawn(ctx, p.runnerBerth(s.class))
 }
 
 // retire tears down everything bosun started for s: kills the helper

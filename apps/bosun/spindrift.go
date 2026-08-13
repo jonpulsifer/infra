@@ -15,7 +15,7 @@ import (
 	"time"
 )
 
-// errDraining marks a claim spawnBuild refused because a stop is in
+// errDraining marks a claim spawn refused because a stop is in
 // progress; runBuild posts nothing for it so the lease can recover the work.
 var errDraining = errors.New("draining")
 
@@ -186,7 +186,7 @@ func (p *pool) buildLoop(ctx context.Context, sd spindriftClient, classes []stri
 func (p *pool) runBuild(ctx context.Context, sd spindriftClient, claim *buildClaim) {
 	logger := p.logger.With("build_id", claim.ID, "class", claim.Class)
 
-	s, err := p.spawnBuild(ctx, claim)
+	s, err := p.spawn(ctx, p.buildBerth(claim))
 	if err != nil {
 		if errors.Is(err, errDraining) {
 			// Never attempted: stay silent so the claim's lease expires and

@@ -388,7 +388,7 @@ func TestSpawnRefusesDuringDrain(t *testing.T) {
 		return p.draining
 	})
 
-	p.spawn(ctx, "skiff-test") // the racing refill
+	p.spawn(ctx, p.runnerBerth("skiff-test")) // the racing refill
 	gh.mu.Lock()
 	mints := len(gh.generated)
 	gh.mu.Unlock()
@@ -803,9 +803,9 @@ func TestSpawnBuildBootsSkiffWithRequestJSONAndNoJITConfig(t *testing.T) {
 	ctx := context.Background()
 	claim := &buildClaim{ID: "build-1", Class: "skiff-test", Request: json.RawMessage(`{"repo":"acme/widgets"}`)}
 
-	s, err := p.spawnBuild(ctx, claim)
+	s, err := p.spawn(ctx, p.buildBerth(claim))
 	if err != nil || s == nil {
-		t.Fatalf("spawnBuild: %v", err)
+		t.Fatalf("spawn: %v", err)
 	}
 	if !s.build || s.buildID != "build-1" {
 		t.Fatalf("skiff not marked as a build skiff: %+v", s)
@@ -956,9 +956,9 @@ func TestDrainDoesNotScuttleAnInFlightBuildSkiffViaScuttleIdle(t *testing.T) {
 	ctx := context.Background()
 	claim := &buildClaim{ID: "build-4", Class: "skiff-test", Request: json.RawMessage(`{}`)}
 
-	s, err := p.spawnBuild(ctx, claim)
+	s, err := p.spawn(ctx, p.buildBerth(claim))
 	if err != nil || s == nil {
-		t.Fatalf("spawnBuild: %v", err)
+		t.Fatalf("spawn: %v", err)
 	}
 
 	p.scuttleIdle(context.Background())
@@ -987,9 +987,9 @@ func TestBuildSkiffIsReapedByMaxLifetime(t *testing.T) {
 	ctx := context.Background()
 	claim := &buildClaim{ID: "build-5", Class: "skiff-test", Request: json.RawMessage(`{}`)}
 
-	s, err := p.spawnBuild(ctx, claim)
+	s, err := p.spawn(ctx, p.buildBerth(claim))
 	if err != nil || s == nil {
-		t.Fatalf("spawnBuild: %v", err)
+		t.Fatalf("spawn: %v", err)
 	}
 	time.Sleep(5 * time.Millisecond)
 
@@ -1000,7 +1000,7 @@ func TestBuildSkiffIsReapedByMaxLifetime(t *testing.T) {
 	}
 }
 
-// A claim that lands just as a stop begins is refused by spawnBuild -- and
+// A claim that lands just as a stop begins is refused by spawn -- and
 // runBuild must post nothing for it: the build was never attempted, so
 // staying silent lets Spindrift's lease expire and another host claim the
 // request, where a FAILED post would close the build permanently.
