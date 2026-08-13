@@ -238,9 +238,20 @@ export class GitHubAppAuth {
       : { state: 'authorized', slug: identity.slug, appId: identity.appId };
   }
 
-  /** Combined App/installation identity recorded on source receipts. */
+  /**
+   * Combined App/installation identity recorded on source receipts.
+   *
+   * Read through `identity()`, which knows both homes an App id lives in — an
+   * adopted App has no sealed row, and a receipt that only consulted the row
+   * failed a staging fetch that had already succeeded.
+   */
   async principalSubject(ref: InstallationRef): Promise<string> {
-    const identity = await this.requireIdentity();
+    const identity = await this.identity();
+    if (identity === null) {
+      throw new RepositoryAuthorizationRequiredError(
+        'this installation has no GitHub App identity; create one from the Repositories screen',
+      );
+    }
     return `installation:${ref.installationId}/app:${identity.appId}`;
   }
 
@@ -543,11 +554,6 @@ export class GitHubAppAuth {
       );
     }
     return row;
-  }
-
-  private async requireIdentity(): Promise<GitHubAppIdentity> {
-    const row = await this.requireRow();
-    return { appId: row.appId, slug: row.slug, clientId: row.clientId };
   }
 
   /**
