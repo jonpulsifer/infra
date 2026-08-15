@@ -48,6 +48,7 @@ tags:: architecture
 	- Because a cgroup kill leaves no chance to run teardown, bosun sweeps on start and deregisters what it finds.
 - ## Where it runs
 	- [[Fleet/riptide]] and [[Fleet/oldschool]] enable `services.bosun`, and both share the box with kubelet. A class name is a promise about shape, so the two sites do not share one: oldschool serves the fast-internet site's slot, riptide serves a small one for platform experiments and holds a parked class behind it. This site rides a satellite link, which is why production CI is not served from it.
+	- `.github/workflows/kustomize.yml` is the merge-path job the pool serves, on `skiff-offsite`. It carries a dispatch input naming the runner, which is the escape hatch a single-host class needs: bosun being down there queues the job rather than failing it, and a `runs-on` a workflow cannot override would mean editing this repo to get an answer.
 	- Nothing about the module is host-specific; another host imports it with only its class definitions differing.
 	- ARC keeps serving `folly`, `offsite` and `self-hosted` throughout. A skiff never claims those labels — its class name is its only label.
 - ## Trying it
