@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net/http"
 	"os"
 	"path/filepath"
 	"slices"
@@ -1093,7 +1094,7 @@ func TestSkiffVerdict(t *testing.T) {
 			for _, r := range tt.readings {
 				s.observe(minted, r.status, r.busy)
 			}
-			if got := s.verdict(minted.Add(tt.after), maxLifetime); got != tt.want {
+			if got := s.verdict(minted.Add(tt.after), maxLifetime, true); got != tt.want {
 				t.Fatalf("verdict = %q, want %q", got, tt.want)
 			}
 		})
@@ -1107,7 +1108,7 @@ func TestAZeroBudgetNeverReaps(t *testing.T) {
 	minted := time.Date(2026, 8, 13, 12, 0, 0, 0, time.UTC)
 	s := &skiff{mintedAt: minted}
 	s.observe(minted, "online", true)
-	if got := s.verdict(minted.Add(72*time.Hour), 0); got != "" {
+	if got := s.verdict(minted.Add(72*time.Hour), 0, true); got != "" {
 		t.Fatalf("verdict = %q, want %q: an absent class has no budget to exceed", got, "")
 	}
 }
@@ -1162,5 +1163,438 @@ func TestDrainRefusedClaimPostsNoResult(t *testing.T) {
 
 	if results := sd.postedResults(); len(results) != 0 {
 		t.Fatalf("drain-refused claim posted a result: %+v", results)
+	}
+}
+
+// ── recovery: what the pool does when GitHub is unreachable ────────────────
+//
+// The paths below are the ones a live outage exercises and a happy-path fake
+// never did. Every one of them was silently broken before it had a test.
+
+// A replacement that cannot boot used to shrink its class permanently: spawn
+// logged the failure, awaitExit dropped it, and nothing anywhere compared the
+// live count against the declared warm count again. One transient error, one
+// slot gone for the life of the process, and no counter that said so.
+func TestTopUpRecoversAClassFromAFailedReplacement(t *testing.T) {
+	p, gh, fl := testPool(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	p.fill(ctx)
+	first := onlySkiff(t, p)
+
+	gh.fail(errors.New("github is down"), nil, nil)
+	chCall, ok := fl.last("cloud-hypervisor")
+	if !ok {
+		t.Fatal("cloud-hypervisor was never launched")
+	}
+	chCall.proc.exit(nil) // the guest finished its job; the refill cannot mint
+
+	waitFor(t, "the failed replacement empties the class", func() bool {
+		return len(p.snapshot()) == 0
+	})
+
+	// Ticking while GitHub is still down leaves the class empty. How often it
+	// is willing to retry is a separate property; see the backoff test.
+	for range 3 {
+		p.pollOnce(ctx)
+	}
+	if n := len(p.snapshot()); n != 0 {
+		t.Fatalf("want the class still empty while GitHub is down, got %d", n)
+	}
+
+	gh.fail(nil, nil, nil)
+	waitFor(t, "the top-up refills the class once GitHub returns", func() bool {
+		p.pollOnce(ctx)
+		return len(p.snapshot()) == 1
+	})
+	if s := onlySkiff(t, p); s.id == first.id {
+		t.Fatal("the top-up booted the retired skiff rather than a fresh one")
+	}
+}
+
+// The window awaitExit holds open around its 1:1 replacement: the outgoing
+// skiff is out of the map and the incoming one is not in it yet. A top-up that
+// reads that as a shortfall boots a second replacement, and because every
+// replacement after it is 1:1, the class stays one over its warm count for
+// good -- on a host whose MemoryMax was sized for the declared number.
+func TestTopUpDoesNotBootIntoTheReplacementWindow(t *testing.T) {
+	p, _, _ := testPool(t)
+	ctx := context.Background()
+	p.fill(ctx)
+
+	s := onlySkiff(t, p)
+	p.reserve(s.class)
+	p.mu.Lock()
+	delete(p.skiffs, s.id)
+	p.mu.Unlock()
+
+	if got := p.shortfall("skiff-test"); got != 0 {
+		t.Fatalf("want shortfall 0 across the replacement window, got %d", got)
+	}
+	if n := p.topUp(ctx); n != 0 {
+		t.Fatalf("the top-up booted %d skiffs into a window already being filled", n)
+	}
+
+	p.release(s.class)
+	if got := p.shortfall("skiff-test"); got != 1 {
+		t.Fatalf("want shortfall 1 once the reservation is dropped, got %d", got)
+	}
+}
+
+// The same property under the real thing rather than a hand-built window:
+// recycle repeatedly while the poll loop runs, and the class never exceeds
+// what it declares. This is the assertion the mechanism test above cannot
+// make, and the one that fails if the reservation is ever dropped.
+func TestRecyclingUnderAPollLoopNeverExceedsTheWarmCount(t *testing.T) {
+	p, _, fl := testPool(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	p.fill(ctx)
+
+	stop := make(chan struct{})
+	done := make(chan struct{})
+	over := make(chan int, 1)
+	go func() {
+		defer close(done)
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+			}
+			p.pollOnce(ctx)
+			if n := len(p.snapshot()); n > 1 {
+				select {
+				case over <- n:
+				default:
+				}
+			}
+		}
+	}()
+
+	for range 5 {
+		chCall, ok := fl.last("cloud-hypervisor")
+		if !ok {
+			t.Fatal("cloud-hypervisor was never launched")
+		}
+		chCall.proc.exit(nil)
+		waitFor(t, "a replacement boots", func() bool {
+			next, ok := fl.last("cloud-hypervisor")
+			return ok && next.proc != chCall.proc
+		})
+	}
+	close(stop)
+	<-done
+
+	select {
+	case n := <-over:
+		t.Fatalf("class ran %d skiffs against a warm count of 1", n)
+	default:
+	}
+}
+
+// Reaping used to be skipped entirely when the status read failed, which
+// froze maxLifetime, JIT expiry and the wedge rule together for the length of
+// an outage. A class budget is a wall-clock judgement: the job is over its
+// budget whether or not GitHub is answering, and the frozen skiff published as
+// live-and-idle, so nothing else could see it either.
+func TestLifetimeReaperStillFiresWhileGitHubIsUnreachable(t *testing.T) {
+	p, gh, fl := testPool(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	now := time.Now()
+	p.now = func() time.Time { return now }
+	p.fill(ctx)
+	s := onlySkiff(t, p)
+	chCall, ok := fl.last("cloud-hypervisor")
+	if !ok {
+		t.Fatal("cloud-hypervisor was never launched")
+	}
+
+	gh.setStatus(s.runnerID, "online", true)
+	p.pollOnce(ctx) // it goes busy while GitHub is still answering
+
+	gh.fail(nil, errors.New("github is down"), nil)
+	now = now.Add(2 * time.Hour) // well past the class's one-hour budget
+	p.pollOnce(ctx)
+
+	if r := s.reason(); r != exitLifetime {
+		t.Fatalf("reason = %q, want %q", r, exitLifetime)
+	}
+	if !chCall.proc.killed.Load() {
+		t.Fatal("the over-budget VMM was not killed")
+	}
+}
+
+// The rule that must NOT fire from a failed read, and the one this change got
+// wrong on its first pass.
+//
+// busySince is set only by observe, so on a poll whose read failed a zero one
+// means "bosun has not looked", not "idle". A skiff's runner holds its own
+// connection to the Actions service, so GitHub can hand it a job while
+// api.github.com is refusing bosun's reads -- and reaping on that stale zero
+// destroys the job, counted as jit_expired, which no alert watches.
+func TestJITExpiryDoesNotFireOnAFailedRead(t *testing.T) {
+	p, gh, fl := testPool(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	now := time.Now()
+	p.now = func() time.Time { return now }
+	p.fill(ctx)
+	s := onlySkiff(t, p)
+	chCall, ok := fl.last("cloud-hypervisor")
+	if !ok {
+		t.Fatal("cloud-hypervisor was never launched")
+	}
+
+	gh.setStatus(s.runnerID, "online", false)
+	p.pollOnce(ctx) // online and idle, on a reading that succeeded
+
+	// GitHub goes away. For all bosun knows the guest has since been handed a
+	// job, because that dispatch does not come through the API bosun reads.
+	gh.fail(nil, errors.New("github is down"), nil)
+	now = now.Add(jitExpiry + time.Minute)
+	p.pollOnce(ctx)
+
+	if r := s.reason(); r != "" {
+		t.Fatalf("reason = %q: a skiff whose busy state is unknown must not be reaped as idle", r)
+	}
+	if chCall.proc.killed.Load() {
+		t.Fatal("killed a skiff GitHub may have handed a job")
+	}
+
+	// It is garbage collection, not a deadline. The first reading that comes
+	// back and does say idle reaps it, one poll interval later.
+	gh.fail(nil, nil, nil)
+	p.pollOnce(ctx)
+	if r := s.reason(); r != exitJITExpired {
+		t.Fatalf("reason = %q, want %q once a reading confirms it is idle", r, exitJITExpired)
+	}
+}
+
+// The one rule that must NOT fire from a failed read. The wedge verdict is
+// GitHub saying "offline" repeatedly; GitHub saying nothing at all is a
+// different thing, and killing a healthy guest for it would turn every
+// upstream blip into destroyed jobs.
+func TestWedgeRuleDoesNotFireOnFailedReads(t *testing.T) {
+	p, gh, _ := testPool(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	now := time.Now()
+	p.now = func() time.Time { return now }
+	p.fill(ctx)
+	s := onlySkiff(t, p)
+
+	gh.setStatus(s.runnerID, "online", false)
+	p.pollOnce(ctx) // everOnline: the wedge rule's precondition
+
+	gh.fail(nil, errors.New("github is down"), nil)
+	for range wedgeThreshold * 3 {
+		p.pollOnce(ctx)
+	}
+
+	if r := s.reason(); r != "" {
+		t.Fatalf("a GitHub outage read as %q; it must not read as a verdict at all", r)
+	}
+}
+
+// runner-id is the only record of a registration bosun could not delete, and
+// sweep-on-start is the only thing that can still act on it. Wiping the state
+// directory anyway is how one unreachable GitHub during a retire became a
+// ghost runner nothing could ever name again.
+func TestRetireKeepsTheRunnerIDWhenDeregistrationFails(t *testing.T) {
+	p, gh, fl := testPool(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	p.fill(ctx)
+	s := onlySkiff(t, p)
+	dir, runnerID := s.paths.dir, s.runnerID
+
+	gh.fail(nil, nil, errors.New("github is down"))
+	chCall, ok := fl.last("cloud-hypervisor")
+	if !ok {
+		t.Fatal("cloud-hypervisor was never launched")
+	}
+	chCall.proc.exit(nil)
+
+	waitFor(t, "the skiff retires", func() bool {
+		p.mu.Lock()
+		defer p.mu.Unlock()
+		_, still := p.skiffs[s.id]
+		return !still
+	})
+
+	if _, err := os.ReadFile(filepath.Join(dir, "runner-id")); err != nil {
+		t.Fatalf("runner-id must survive a failed deregistration: %v", err)
+	}
+	// The credential must not. The registration is still live -- which is
+	// precisely why leaving a jitconfig on disk beside it would be wrong.
+	if _, err := os.Stat(filepath.Join(dir, "jitconfig")); !os.IsNotExist(err) {
+		t.Fatalf("jitconfig should be gone, err=%v", err)
+	}
+
+	gh.fail(nil, nil, nil)
+	if err := p.sweep(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Contains(gh.deletedIDs(), runnerID) {
+		t.Fatalf("sweep did not retry runner %d; deleted=%v", runnerID, gh.deletedIDs())
+	}
+	if _, err := os.Stat(dir); !os.IsNotExist(err) {
+		t.Fatalf("state dir should be gone once the retry succeeds, err=%v", err)
+	}
+}
+
+// A 404 is the outcome the DELETE exists to produce, not a failure to reach
+// GitHub. Treating it as one would keep every already-gone runner's directory
+// forever, retried on every start.
+func TestRetireTreatsAnAlreadyGoneRunnerAsDeregistered(t *testing.T) {
+	p, gh, fl := testPool(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	p.fill(ctx)
+	s := onlySkiff(t, p)
+	dir := s.paths.dir
+
+	gh.fail(nil, nil, &httpStatusError{method: http.MethodDelete, status: "404 Not Found", statusCode: http.StatusNotFound})
+	chCall, ok := fl.last("cloud-hypervisor")
+	if !ok {
+		t.Fatal("cloud-hypervisor was never launched")
+	}
+	chCall.proc.exit(nil)
+
+	waitFor(t, "the state dir is removed", func() bool {
+		_, err := os.Stat(dir)
+		return os.IsNotExist(err)
+	})
+}
+
+// main logs the start against what was asked for, because it is routinely
+// less: every class mints to boot, so a GitHub that is down at start yields an
+// empty pool. Reporting "filled" regardless is what made that look fine.
+func TestFillReportsWhatItActuallyBooted(t *testing.T) {
+	ctx := context.Background()
+
+	down, gh, _ := testPool(t)
+	gh.fail(errors.New("github is down"), nil, nil)
+	if n := down.fill(ctx); n != 0 {
+		t.Fatalf("want 0 booted with GitHub down, got %d", n)
+	}
+
+	up, _, _ := testPool(t)
+	if n := up.fill(ctx); n != 1 {
+		t.Fatalf("want 1 booted, got %d", n)
+	}
+	if n := up.fill(ctx); n != 0 {
+		t.Fatalf("fill must be a no-op once the class is full, got %d", n)
+	}
+}
+
+// The cap is what keeps the backstop cheap: spawn boots processes
+// synchronously on the poll goroutine, so a class several slots short has to
+// converge over several ticks rather than stalling one on a fleet of mints.
+// fill, which runs once at start, has no cap -- start-up should not take three
+// poll intervals to reach a warm count.
+func TestTopUpBootsAtMostOneSkiffPerClassPerTick(t *testing.T) {
+	ctx := context.Background()
+
+	p, _, _ := testPool(t)
+	widen(p, 3)
+	for tick, want := range []int{1, 2, 3, 3} {
+		if n := p.topUp(ctx); n > 1 {
+			t.Fatalf("tick %d booted %d skiffs; the cap is 1", tick, n)
+		}
+		if got := len(p.snapshot()); got != want {
+			t.Fatalf("after tick %d: %d skiffs, want %d", tick, got, want)
+		}
+	}
+
+	q, _, _ := testPool(t)
+	widen(q, 3)
+	if n := q.fill(ctx); n != 3 {
+		t.Fatalf("fill booted %d, want the whole warm count in one pass", n)
+	}
+}
+
+// Every spawn attempt has external cost -- a real GitHub registration minted
+// and deleted, a helpers log, and a diagnostic directory nothing collects
+// inside the retention window. A class that cannot boot at all (a hull path
+// that does not exist, a workspace that will not fit) must not pay that once
+// per tick forever against a condition an operator is already paged for.
+func TestARepeatedlyFailingClassBacksOff(t *testing.T) {
+	p, gh, _ := testPool(t)
+	ctx := context.Background()
+	gh.fail(errors.New("github is down"), nil, nil)
+
+	var attempts []int
+	for range 8 {
+		before := gh.generateCount()
+		p.topUp(ctx)
+		attempts = append(attempts, gh.generateCount()-before)
+	}
+	// Tick 1 tries and arms a two-tick holdoff; tick 4 tries and arms four.
+	want := []int{1, 0, 0, 1, 0, 0, 0, 0}
+	if !slices.Equal(attempts, want) {
+		t.Fatalf("mint attempts per tick = %v, want %v", attempts, want)
+	}
+
+	// And any success clears it, so a transient failure costs ticks rather
+	// than the rest of the process's life.
+	gh.fail(nil, nil, nil)
+	waitFor(t, "the class recovers once GitHub returns", func() bool {
+		p.topUp(ctx)
+		return len(p.snapshot()) == 1
+	})
+	if n := p.holdoff["skiff-test"]; n != 0 {
+		t.Fatalf("holdoff = %d after a success, want 0", n)
+	}
+}
+
+// widen raises the test class's warm count, which testPool pins at 1.
+func widen(p *pool, warm int) {
+	class := p.cfg.Classes["skiff-test"]
+	class.Warm = warm
+	p.cfg.Classes["skiff-test"] = class
+}
+
+// A build skiff is claimed work, not a warm slot. Counting one as filling the
+// class would leave GitHub with nothing to hand a job to for as long as the
+// build ran.
+func TestBuildSkiffDoesNotCountTowardTheWarmCount(t *testing.T) {
+	p, _, _ := testPool(t)
+	ctx := context.Background()
+
+	if _, err := p.spawn(ctx, p.buildBerth(&buildClaim{ID: "build-1", Class: "skiff-test", Request: json.RawMessage(`{}`)})); err != nil {
+		t.Fatal(err)
+	}
+	if got := p.shortfall("skiff-test"); got != 1 {
+		t.Fatalf("want the warm slot still owed with a build skiff running, got shortfall %d", got)
+	}
+	if n := p.topUp(ctx); n != 1 {
+		t.Fatalf("want the top-up to boot the warm skiff, got %d", n)
+	}
+}
+
+// Draining is the one time a short class is correct: the stop path's whole
+// job is to stop replacing.
+func TestTopUpIsRefusedWhileDraining(t *testing.T) {
+	p, _, _ := testPool(t)
+	ctx := context.Background()
+
+	p.mu.Lock()
+	p.draining = true
+	p.mu.Unlock()
+
+	if got := p.shortfall("skiff-test"); got != 0 {
+		t.Fatalf("want shortfall 0 while draining, got %d", got)
+	}
+	if n := p.topUp(ctx); n != 0 {
+		t.Fatalf("the top-up booted %d skiffs during a drain", n)
 	}
 }
