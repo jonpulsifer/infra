@@ -193,11 +193,21 @@ capabilities:
   mountPath: /tmp
 - name: config
   mountPath: /home/prowler/.config
+{{/*
+Every entrypoint path is `uv run`, and uv builds its cache under $HOME before it
+executes anything — so this is not an optimisation, it is what lets the process
+start at all. It cannot be a mount of /home/prowler itself: the application code
+lives at /home/prowler/backend and an emptyDir there would hide it.
+*/}}
+- name: cache
+  mountPath: /home/prowler/.cache
 {{- end }}
 
 {{- define "prowler.writableVolumes" -}}
 - name: tmp
   emptyDir: {}
 - name: config
+  emptyDir: {}
+- name: cache
   emptyDir: {}
 {{- end }}

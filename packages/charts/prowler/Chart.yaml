@@ -2,5 +2,5 @@ apiVersion: v2
 name: prowler
 description: Prowler Open Cloud Security — API, workers and UI, on this cluster's own CloudNativePG and Valkey operators, authenticating to GCP by workload identity federation
 type: application
-version: 0.1.0
+version: 0.1.1
 appVersion: "5.39.0"
