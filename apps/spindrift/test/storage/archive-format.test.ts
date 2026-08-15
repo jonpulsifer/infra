@@ -20,11 +20,12 @@ import { gunzipSync } from 'node:zlib';
 import {
   type ArchiveFormat,
   ArchiveFormatError,
+  canonicalGzip,
   normalizeArchive,
   sniffArchiveFormat,
 } from '../../src/storage/archive-format.ts';
 import { zipOf } from '../fixtures/zip.ts';
-import { bytes, tarball } from '../harness/tar.ts';
+import { bytes, tar, tarball } from '../harness/tar.ts';
 
 /**
  * Read the produced tar the way an extractor does, so the assertions are about
@@ -270,5 +271,45 @@ describe('the wire format of a staged bundle', () => {
         await rm(workspace, { recursive: true, force: true });
       }
     }
+  });
+});
+
+describe('canonical gzip framing', () => {
+  // The instability being pinned: two fetches of the same commit whose gzip
+  // wrappers disagree — a different compression level here, a header mtime
+  // there — while the tar inside is byte-identical, the way `git archive`
+  // makes it. §16 digests the staged bytes, so without re-framing these would
+  // be two depot objects holding the same source.
+  const tarBytes = tar([
+    { name: 'repo-abc123/README.md', bytes: bytes('hello') },
+    { name: 'repo-abc123/build.sh', bytes: bytes('#!/bin/sh\n') },
+  ]);
+
+  test('two unstable wrappers of the same tar become one set of bytes', () => {
+    const relaxed = Bun.gzipSync(tarBytes, { level: 1 });
+    const eager = Bun.gzipSync(tarBytes, { level: 9 });
+    // A host is also free to stamp the header's mtime field (bytes 4–7).
+    eager[4] = 0x5e;
+    eager[5] = 0x0b;
+    expect(Bun.SHA256.hash(relaxed)).not.toEqual(Bun.SHA256.hash(eager));
+
+    const one = canonicalGzip(relaxed);
+    const two = canonicalGzip(eager);
+    expect(one).toEqual(two);
+  });
+
+  test('the tar inside is untouched', () => {
+    // The §16 chain depends on this: the digest describes bytes whose *tar*
+    // content is exactly what the host archived, so `tar -xz` in the build
+    // hull extracts the same tree whichever wrapper the fetch arrived in.
+    const framed = canonicalGzip(Bun.gzipSync(tarBytes, { level: 3 }));
+    expect(new Uint8Array(gunzipSync(framed))).toEqual(tarBytes);
+  });
+
+  test('re-framing its own output is the identity', () => {
+    // Staging the same commit twice runs the fetch twice; the second pass must
+    // land on the first pass's digest or the depot grows an object per fetch.
+    const once = canonicalGzip(Bun.gzipSync(tarBytes));
+    expect(canonicalGzip(once)).toEqual(once);
   });
 });

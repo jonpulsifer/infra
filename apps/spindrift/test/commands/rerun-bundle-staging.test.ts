@@ -244,6 +244,33 @@ describe('the bundle a rerun stages', () => {
     expect(stager.staged).toHaveLength(0);
   });
 
+  test('an ephemeral bundle is staged again rather than inherited', async () => {
+    // The depot is allowed to expire anything under `ephemeral/`, so a Build
+    // created weeks later cannot safely carry that address — it would die at
+    // `curl`, which is this file's founding defect wearing a new scheme.
+    // Staging again is cheap and self-deduplicating: canonical bytes mean the
+    // same commit digests to the same object, and the overwrite resets the
+    // object's lifecycle clock.
+    const seeded = await seedFailedBuild({
+      location:
+        'gs://bluenose-spindrift-source/ephemeral/3f5cbbc2ced964573220535fc887677dcb768b9d56b4931c415db44402440b03.tgz',
+      connectRepository: true,
+    });
+
+    const result = await deployApp({ name: seeded.app.name }, ctx);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    expect(stager.staged).toEqual([
+      { repository: `jonpulsifer/${seeded.app.name}`, commit: COMMIT },
+    ]);
+    const [rerun] = await ctx.db
+      .select()
+      .from(builds)
+      .where(eq(builds.id, result.value.buildId));
+    expect(rerun!.bundleLocation).toBe(FRESH_LOCATION);
+  });
+
   test('a durable bundle is left behind once the repository has moved past it', async () => {
     // The hole this closes: `authoritative_commit` moves on every default-branch
     // push, and a rerun that inherited any still-fetchable bundle rebuilt the

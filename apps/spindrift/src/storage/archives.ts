@@ -23,6 +23,7 @@ import { join } from 'node:path';
 import type { FederationOptions } from '../adapters/deploy/cloud/federation.ts';
 import { sharedServicesOf } from '../config/manifest.schema.ts';
 import type { InstallationManifest } from '../config/manifest.ts';
+import type { BundleRetention } from '../domain/source-bundle.ts';
 import { uploadToGcsBucket } from './cloud.ts';
 
 export interface StagedArchive {
@@ -146,6 +147,41 @@ export function depotObjectName(filename: string, digest: string): string {
 }
 
 /**
+ * The prefix that makes §15's "repository bundles are ephemeral" a fact the
+ * bucket can act on.
+ *
+ * Retention used to be a word in a TypeScript union and nothing else: every
+ * object landed at the bucket root, and the bucket's lifecycle rule only
+ * touched noncurrent versions — which a content-addressed object never
+ * becomes, since the same bytes always write the same name. So "ephemeral"
+ * bundles were durable, and the depot accumulated one full source archive per
+ * built commit, forever. A prefix is the property a lifecycle rule can match;
+ * the rule itself lives with the bucket
+ * (`terraform/gcp/projects/bluenose/storage.tf`).
+ *
+ * Re-staging the same commit overwrites the same object, which resets its
+ * lifecycle age — a bundle stays alive exactly as long as something keeps
+ * building it, and that is the retention policy working rather than a race
+ * against it.
+ */
+export const EPHEMERAL_PREFIX = 'ephemeral/';
+
+/**
+ * Whether this location names an object the depot is allowed to expire.
+ *
+ * The one question `sourceForRerun` asks before inheriting a bundle instead of
+ * staging one: a durable object is safe to hand to a Build created weeks
+ * later; an ephemeral one may be gone by then, and the honest move is to stage
+ * it again — same canonical bytes, same digest, same object, fresher clock.
+ */
+export function isEphemeralBundleLocation(
+  location: string | null | undefined,
+): boolean {
+  if (!location) return false;
+  return /^gs:\/\/[^/]+\/ephemeral\//.test(location);
+}
+
+/**
  * Stage archive bytes durably and return the digest and location.
  *
  * With a depot, the location is the `gs://` object address — durable, shared
@@ -158,6 +194,7 @@ export async function stageArchiveBytes(
   filename: string,
   bytes: Uint8Array,
   depot?: SourceDepot | null,
+  retention: BundleRetention = 'durable',
 ): Promise<StagedArchive> {
   const digest = digestOfBytes(bytes);
   const objectName = depotObjectName(filename, digest);
@@ -165,7 +202,11 @@ export async function stageArchiveBytes(
   if (depot !== undefined && depot !== null) {
     const stored = await uploadToGcsBucket({
       bucketName: depot.bucket,
-      objectName,
+      // Retention is a bucket concept — the prefix is what the lifecycle rule
+      // matches. The local fallback below ignores it, because a laptop's tmpdir
+      // has no lifecycle and `readStagedArchive` scans one flat directory.
+      objectName:
+        (retention === 'ephemeral' ? EPHEMERAL_PREFIX : '') + objectName,
       bytes,
       federation: depot.federation,
     });

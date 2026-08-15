@@ -10,6 +10,7 @@
 import { describe, expect, test } from 'bun:test';
 import {
   digestOfBytes,
+  isEphemeralBundleLocation,
   readStagedArchive,
   type SourceDepot,
   sourceDepotFor,
@@ -138,6 +139,41 @@ describe('the source depot', () => {
     expect(await readStagedArchive(staged.digest)).toBeNull();
     expect(cloud.uploads).toHaveLength(1);
     expect(cloud.uploads[0]?.bytes).toEqual(bytes);
+  });
+
+  test('an ephemeral bundle lands under the prefix the lifecycle rule matches', async () => {
+    // §15's "repository bundles are ephemeral" used to be a word in a union
+    // and nothing else: every object landed at the bucket root, where the
+    // bucket's lifecycle rules never touch a content-addressed object, and the
+    // depot grew one full source archive per built commit forever. The prefix
+    // is the property the bucket can act on.
+    const cloud = fakeCloud();
+    const bytes = new TextEncoder().encode('a repository bundle');
+    const depot: SourceDepot = {
+      bucket: 'bluenose-spindrift-source',
+      federation: {
+        ...federation,
+        fetch: cloud.fetch,
+        readToken: async () => 'jwt',
+      },
+    };
+
+    const staged = await stageArchiveBytes(
+      'bundle.tgz',
+      bytes,
+      depot,
+      'ephemeral',
+    );
+    const hex = digestOfBytes(bytes).replace('sha256:', '');
+
+    expect(staged.location).toBe(
+      `gs://bluenose-spindrift-source/ephemeral/${hex}.tgz`,
+    );
+    expect(isEphemeralBundleLocation(staged.location)).toBe(true);
+    // A durable upload keeps the root address the rules leave alone.
+    expect(
+      isEphemeralBundleLocation(`gs://bluenose-spindrift-source/${hex}.tgz`),
+    ).toBe(false);
   });
 
   test('falls back to local disk under a handle that is not a URL', async () => {

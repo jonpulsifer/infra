@@ -50,6 +50,7 @@ import {
   hasGitHubAppEnvIdentity,
 } from '../integrations/github/app-auth.ts';
 import type { Fetcher } from '../integrations/github/http.ts';
+import { canonicalGzip } from '../storage/archive-format.ts';
 import { sourceDepotFor, stageArchiveBytes } from '../storage/archives.ts';
 import { buildOutbox } from '../storage/build-outbox.ts';
 import { registryCredentialStore } from '../storage/registry-credentials.ts';
@@ -452,7 +453,17 @@ export function createAdapterRegistry(
               credential: input.ref,
             },
             {
-              fetcher: app,
+              // The host's gzip wrapper is not stable between fetches, and §16
+              // digests exactly what is staged — so the wrapper is re-framed
+              // deterministically here, at the one seam that sees the bytes
+              // before the digest does. Same commit, same digest, same depot
+              // object, however many times it is staged.
+              fetcher: {
+                async fetchExactCommit(fetchInput) {
+                  const fetched = await app.fetchExactCommit(fetchInput);
+                  return { ...fetched, bytes: canonicalGzip(fetched.bytes) };
+                },
+              },
               depot: {
                 async putImmutable(item) {
                   const archived = await stageArchiveBytes(
@@ -462,6 +473,9 @@ export function createAdapterRegistry(
                     `bundle-${item.digest.replace('sha256:', '')}.tgz`,
                     item.bytes,
                     depot,
+                    // Repository bundles expire (§15); the retention the domain
+                    // declared is what routes them under the expiring prefix.
+                    item.retention,
                   );
                   return { location: archived.location };
                 },

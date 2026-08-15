@@ -56,7 +56,10 @@ import {
 } from '../../db/schema.ts';
 import { artifactTypeFor, placementTargetOf } from '../../domain/placement.ts';
 import { repositoryRefOf } from '../../domain/repository.ts';
-import { isFetchableBundleLocation } from '../../storage/archives.ts';
+import {
+  isEphemeralBundleLocation,
+  isFetchableBundleLocation,
+} from '../../storage/archives.ts';
 import { createDeploy } from '../deploys/create.ts';
 import {
   type Command,
@@ -202,7 +205,14 @@ async function sourceForRerun(
   if (
     wanted === baseCommit &&
     inherited !== null &&
-    isFetchableBundleLocation(inherited)
+    isFetchableBundleLocation(inherited) &&
+    // An *ephemeral* bundle is not inherited, because the depot is allowed to
+    // have expired it since the Build it was staged for — a Build carrying a
+    // location nothing can fetch dies at `curl`, which is this function's
+    // founding defect wearing a new scheme. Staging again is the safe form of
+    // the same reuse: canonical bytes mean the same commit digests to the same
+    // object, and the overwrite resets the object's lifecycle clock.
+    !isEphemeralBundleLocation(inherited)
   ) {
     // A durable bundle to reuse: a `gs://` object is immutable and shared, so
     // the same commit wants the same one. A *repo* Component with no bundle
