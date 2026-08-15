@@ -1,48 +1,113 @@
 {{/*
-One shard, no replicas: the smallest cluster this operator will build. It is
-still a *cluster* — the operator sets `cluster-enabled yes` unconditionally and
-exposes no way to turn it off, so `shards: 1` buys one shard, not a plain
-server. Cluster mode serves database 0 and nothing else; the server reports
-`databases 16` but `SELECT 2` answers `ERR DB index is out of range`. That is
-why the Celery broker and the SSE bus are both pinned to database 0 in
-`prowler.apiEnv` rather than split the way Prowler defaults to.
+A plain single-node Valkey, deliberately not the cluster operator this repo runs
+for everything else.
 
-`noeviction` still holds, because no maxmemory is set. It is a broker, not a
-cache — an eviction here silently drops a queued scan.
+Celery consumes all nine of its queues with one `BRPOP`, and their keys hash to
+different slots:
 
-The operator sets no security context of its own, so the pod carries one here or
-it is refused outright by anything stricter than a `baseline` namespace.
+  CLUSTER KEYSLOT celery -> 3213
+  CLUSTER KEYSLOT scans  -> 15312
+  BRPOP celery scans 1   -> CROSSSLOT Keys in request don't hash to the same slot
+
+Cluster mode enforces that rule even when a single shard holds all 16384 slots,
+and kombu's Redis transport is not cluster-aware, so there is no configuration
+of the operator that serves this workload — `shards: 1` still sets
+`cluster-enabled yes`, which the CRD offers no way to turn off. The failure is
+quiet and specific: the broker connects, tasks register, and the worker dies
+without a traceback the moment it starts consuming. The API and beat survive it
+because they only ever issue single-key commands.
+
+Cluster mode is also why database 0 has to carry the SSE bus as well; a plain
+server restores the 16 databases Prowler expects, but both stay pinned to 0 so
+that the broker URL is the same object either way.
+
+Persistence because `task_acks_late` leaves in-flight tasks in the broker, and
+losing the volume loses queued scans. Eviction is left at the default
+`noeviction`: this is a broker, not a cache.
 */}}
-apiVersion: valkey.io/v1alpha1
-kind: ValkeyCluster
+apiVersion: v1
+kind: Service
 metadata:
   name: {{ include "prowler.valkeyName" . }}
   namespace: {{ .Release.Namespace }}
   labels:
     {{- include "prowler.labels" . | nindent 4 }}
 spec:
-  shards: 1
-  replicas: 0
-  persistence:
-    size: {{ .Values.valkey.size }}
-    {{- with .Values.valkey.storageClass }}
-    storageClassName: {{ . }}
-    {{- end }}
-  podSecurityContext:
-    runAsNonRoot: true
-    runAsUser: 999
-    runAsGroup: 1000
-    fsGroup: 1000
-    seccompProfile:
-      type: RuntimeDefault
-  containers:
-    # The operator's own container name. Any other name adds a second container
-    # rather than configuring the server.
-    - name: server
+  ports:
+    - name: valkey
+      port: 6379
+      targetPort: valkey
+      protocol: TCP
+  selector:
+    {{- include "prowler.selectorLabels" (dict "root" . "component" "valkey") | nindent 4 }}
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "prowler.valkeyName" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "prowler.labels" . | nindent 4 }}
+spec:
+  serviceName: {{ include "prowler.valkeyName" . }}
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "prowler.selectorLabels" (dict "root" . "component" "valkey") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "prowler.podLabels" (dict "root" . "component" "valkey") | nindent 8 }}
+    spec:
+      automountServiceAccountToken: false
       securityContext:
-        allowPrivilegeEscalation: false
-        capabilities:
-          drop:
-            - ALL
-  exporter:
-    enabled: false
+        runAsNonRoot: true
+        runAsUser: 999
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: valkey
+          image: {{ .Values.valkey.image }}
+          imagePullPolicy: IfNotPresent
+          args:
+            - --appendonly
+            - "yes"
+            - --dir
+            - /data
+          ports:
+            - name: valkey
+              containerPort: 6379
+              protocol: TCP
+          livenessProbe:
+            exec:
+              command: ["valkey-cli", "ping"]
+            periodSeconds: 20
+          readinessProbe:
+            exec:
+              command: ["valkey-cli", "ping"]
+            periodSeconds: 10
+          resources:
+            {{- toYaml .Values.valkey.resources | nindent 12 }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          volumeMounts:
+            - name: data
+              mountPath: /data
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes:
+          - ReadWriteOnce
+        {{- with .Values.valkey.storageClass }}
+        storageClassName: {{ . }}
+        {{- end }}
+        resources:
+          requests:
+            storage: {{ .Values.valkey.size }}
