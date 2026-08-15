@@ -26,6 +26,12 @@ ingress:
 api:
   replicas: 1
   port: 8080
+  # Gunicorn sizes its pool `cpu_count() * 2 + 1` when this is unset, and every
+  # worker loads the full Prowler SDK and warms a compliance cache for sixteen
+  # providers — 9 of them on a 4-core node, 17 on an 8-core one, against a 2Gi
+  # limit. This is the same trap as `worker.concurrency` below, on the other
+  # pool.
+  workers: 2
   resources:
     requests: {memory: 1Gi, cpu: 250m}
     limits: {memory: 2Gi, cpu: "2"}

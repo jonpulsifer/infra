@@ -60,6 +60,10 @@ spec:
           args: ["prod"]
           env:
             {{- include "prowler.apiEnv" . | nindent 12 }}
+            # Only the gunicorn process reads this, so it sits here rather than
+            # in the env the worker and beat share.
+            - name: DJANGO_WORKERS
+              value: {{ .Values.api.workers | quote }}
           envFrom:
             - secretRef:
                 name: {{ required "envFromSecret is required: it carries the Django signing, encryption and database secrets" .Values.envFromSecret }}

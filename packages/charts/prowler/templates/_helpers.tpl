@@ -201,6 +201,10 @@ lives at /home/prowler/backend and an emptyDir there would hide it.
 */}}
 - name: cache
   mountPath: /home/prowler/.cache
+# gunicorn's control server opens its state here. Failing to is not fatal, but it
+# logs an error on every boot.
+- name: gunicorn
+  mountPath: /home/prowler/.gunicorn
 {{- end }}
 
 {{- define "prowler.writableVolumes" -}}
@@ -209,5 +213,7 @@ lives at /home/prowler/backend and an emptyDir there would hide it.
 - name: config
   emptyDir: {}
 - name: cache
+  emptyDir: {}
+- name: gunicorn
   emptyDir: {}
 {{- end }}
