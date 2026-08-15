@@ -1,10 +1,13 @@
 {{/*
-One shard, no replicas — a single logical instance is a hard requirement, not a
-sizing choice. Prowler selects logical databases by number (0 for the Celery
-broker, 2 for the SSE bus) and cluster mode does not implement SELECT.
+One shard, no replicas: the smallest cluster this operator will build. It is
+still a *cluster* — the operator sets `cluster-enabled yes` unconditionally and
+exposes no way to turn it off, so `shards: 1` buys one shard, not a plain
+server. Cluster mode serves database 0 and nothing else; the server reports
+`databases 16` but `SELECT 2` answers `ERR DB index is out of range`. That is
+why the Celery broker and the SSE bus are both pinned to database 0 in
+`prowler.apiEnv` rather than split the way Prowler defaults to.
 
-Valkey's own defaults already satisfy the other two constraints: 16 logical
-databases, and `noeviction` whenever no maxmemory is set. It is a broker, not a
+`noeviction` still holds, because no maxmemory is set. It is a broker, not a
 cache — an eviction here silently drops a queued scan.
 
 The operator sets no security context of its own, so the pod carries one here or
