@@ -73,7 +73,7 @@ database:
 valkey:
   # The same build the cluster operator runs, just not clustered — see the
   # comment on the StatefulSet for why the operator cannot serve Celery.
-  image: valkey/valkey:9.0.0
+  image: valkey/valkey:9.1.1
   size: 1Gi
   storageClass: ""
   resources:
