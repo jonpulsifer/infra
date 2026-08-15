@@ -1,0 +1,102 @@
+{{/*
+The Attack Paths graph store. Cartography ingests each scan into a temporary
+database and syncs the result into a per-tenant one, so the server has to
+implement `CREATE DATABASE` — which Neo4j Community Edition does not. DozerDB is
+the CE fork that adds multi-database; upstream's own chart pins
+`edition: community` and cannot run the feature it ships.
+
+There is no way to switch Attack Paths off: the four NEO4J_* variables are read
+at Django settings import with no defaults, and the API's gunicorn `post_fork`
+hook builds a driver on every worker. Absent, the process fails to import; empty,
+it crash-loops.
+*/}}
+{{- if .Values.neo4j.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "prowler.neo4jName" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "prowler.labels" . | nindent 4 }}
+spec:
+  ports:
+    - name: bolt
+      port: 7687
+      targetPort: bolt
+      protocol: TCP
+  selector:
+    {{- include "prowler.selectorLabels" (dict "root" . "component" "neo4j") | nindent 4 }}
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "prowler.neo4jName" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "prowler.labels" . | nindent 4 }}
+spec:
+  serviceName: {{ include "prowler.neo4jName" . }}
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "prowler.selectorLabels" (dict "root" . "component" "neo4j") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "prowler.podLabels" (dict "root" . "component" "neo4j") | nindent 8 }}
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 7474
+        runAsGroup: 7474
+        fsGroup: 7474
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: neo4j
+          image: {{ .Values.image.neo4j }}
+          imagePullPolicy: IfNotPresent
+          env:
+            # `neo4j/<password>`, the same password the API reads as
+            # NEO4J_PASSWORD. The two names exist because the server and the
+            # client disagree on what to call it.
+            - name: NEO4J_AUTH
+              valueFrom:
+                secretKeyRef:
+                  name: {{ required "envFromSecret is required: it carries NEO4J_AUTH" .Values.envFromSecret }}
+                  key: NEO4J_AUTH
+            - name: NEO4J_server_default__listen__address
+              value: 0.0.0.0
+          ports:
+            - name: bolt
+              containerPort: 7687
+              protocol: TCP
+          resources:
+            {{- toYaml .Values.neo4j.resources | nindent 12 }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+          volumeMounts:
+            - name: data
+              mountPath: /data
+            - name: logs
+              mountPath: /logs
+      volumes:
+        - name: logs
+          emptyDir: {}
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes:
+          - ReadWriteOnce
+        {{- with .Values.neo4j.storageClass }}
+        storageClassName: {{ . }}
+        {{- end }}
+        resources:
+          requests:
+            storage: {{ .Values.neo4j.size }}
+{{- end }}

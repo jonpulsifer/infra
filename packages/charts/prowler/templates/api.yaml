@@ -1,0 +1,114 @@
+{{/*
+The ServiceAccount exists for its token, not for any Kubernetes API access —
+`offsite:system:serviceaccount:<namespace>:<name>` is the subject the workload
+identity pool maps, so the name here is the name bound in IAM.
+*/}}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ include "prowler.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "prowler.labels" . | nindent 4 }}
+automountServiceAccountToken: false
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "prowler.fullname" . }}-api
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "prowler.labels" . | nindent 4 }}
+spec:
+  ports:
+    - name: http
+      port: {{ .Values.api.port }}
+      targetPort: http
+      protocol: TCP
+  selector:
+    {{- include "prowler.selectorLabels" (dict "root" . "component" "api") | nindent 4 }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "prowler.fullname" . }}-api
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "prowler.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.api.replicas }}
+  selector:
+    matchLabels:
+      {{- include "prowler.selectorLabels" (dict "root" . "component" "api") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "prowler.podLabels" (dict "root" . "component" "api") | nindent 8 }}
+    spec:
+      {{- if .Values.sandbox }}
+      runtimeClassName: gvisor
+      {{- end }}
+      serviceAccountName: {{ include "prowler.fullname" . }}
+      automountServiceAccountToken: false
+      securityContext:
+        {{- include "prowler.podSecurityContext" . | nindent 8 }}
+      containers:
+        - name: api
+          image: {{ .Values.image.api }}
+          imagePullPolicy: IfNotPresent
+          command: ["/home/prowler/docker-entrypoint.sh"]
+          args: ["prod"]
+          env:
+            {{- include "prowler.apiEnv" . | nindent 12 }}
+          envFrom:
+            - secretRef:
+                name: {{ required "envFromSecret is required: it carries the Django signing, encryption and database secrets" .Values.envFromSecret }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.api.port }}
+              protocol: TCP
+          {{/*
+          `prod` runs the migrations in-band before gunicorn binds, so the first
+          start after a schema change is minutes, not seconds. The startup probe
+          is what buys that time; liveness would restart the pod mid-migration.
+
+          Liveness deliberately consults no dependency — /health/ready checks
+          Postgres, Valkey and the graph store and answers 503 when any is
+          unreachable, which is a restart the container must not take. Readiness
+          is throttled 60/min per client IP, and the probe's client is the
+          node's kubelet, so 20s is the floor rather than a preference.
+          */}}
+          startupProbe:
+            httpGet:
+              path: /health/live
+              port: http
+              httpHeaders: [{name: Host, value: {{ include "prowler.fullname" . }}-api}]
+            periodSeconds: 10
+            failureThreshold: 60
+          livenessProbe:
+            httpGet:
+              path: /health/live
+              port: http
+              httpHeaders: [{name: Host, value: {{ include "prowler.fullname" . }}-api}]
+            periodSeconds: 20
+            failureThreshold: 10
+          readinessProbe:
+            httpGet:
+              path: /health/ready
+              port: http
+              # Without this the probe's Host is the pod IP, which
+              # DJANGO_ALLOWED_HOSTS rejects with a 400 the kubelet reads as
+              # unready — forever, since the address changes every restart.
+              httpHeaders: [{name: Host, value: {{ include "prowler.fullname" . }}-api}]
+            periodSeconds: 20
+            failureThreshold: 10
+          resources:
+            {{- toYaml .Values.api.resources | nindent 12 }}
+          securityContext:
+            {{- include "prowler.containerSecurityContext" . | nindent 12 }}
+          volumeMounts:
+            {{- include "prowler.writableMounts" . | nindent 12 }}
+            {{- include "prowler.gcpVolumeMounts" . | nindent 12 }}
+      volumes:
+        {{- include "prowler.writableVolumes" . | nindent 8 }}
+        {{- include "prowler.gcpVolume" . | nindent 8 }}

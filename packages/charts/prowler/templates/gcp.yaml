@@ -1,0 +1,44 @@
+{{/*
+The whole of the workload's GCP federation, in one ordinary ADC
+`external_account` document. The pod projects a ServiceAccount token for the
+cluster's own OIDC issuer at `credential_source.file`; Google exchanges it at
+STS and impersonates the target service account. No service-account key exists
+anywhere in the path, which is what the organization's
+`iam.managed.disableServiceAccountKeyCreation` requires.
+
+This document is also what an operator pastes into the UI when onboarding a
+provider. Prowler stores a GCP credential as an unvalidated JSON blob and hands
+it to `google.auth.load_credentials_from_dict`, which dispatches on `type` and
+handles `external_account` natively — so the same text serves as both the
+ambient credential and the stored one, and the projected token satisfies both.
+
+That the stored path works is a property of an unvalidated field rather than a
+designed feature; the image is digest-pinned so an upgrade cannot quietly
+tighten it underfoot.
+*/}}
+{{- with .Values.gcp.audience }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "prowler.fullname" $ }}-gcp
+  namespace: {{ $.Release.Namespace }}
+  labels:
+    {{- include "prowler.labels" $ | nindent 4 }}
+data:
+  gcp-credentials.json: |-
+    {
+      "type": "external_account",
+      "audience": {{ . | quote }},
+      "subject_token_type": "urn:ietf:params:oauth:token-type:jwt",
+      "token_url": "https://sts.googleapis.com/v1/token",
+      {{- with $.Values.gcp.impersonationUrl }}
+      "service_account_impersonation_url": {{ . | quote }},
+      {{- end }}
+      "credential_source": {
+        "file": {{ printf "%s/gcp-token" $.Values.gcp.tokenMountPath | quote }},
+        "format": {
+          "type": "text"
+        }
+      }
+    }
+{{- end }}

@@ -63,6 +63,26 @@ spec:
               kubernetes.io/metadata.name: oauth2-proxy
         kinds:
           - kind: HTTPRoute
+    # Prowler authenticates its own users, so unlike the oauth2 listener above
+    # this one fronts the app directly. Its route lives in the app's namespace,
+    # which the selector names — a listener with no `allowedRoutes` admits only
+    # `default`, where the media routes below sit.
+    - name: prowler-tls
+      protocol: HTTPS
+      port: 443
+      hostname: &hostname "prowler.${SECRET_DOMAIN}"
+      tls:
+        certificateRefs:
+          - kind: Secret
+            name: *hostname
+      allowedRoutes:
+        namespaces:
+          from: Selector
+          selector:
+            matchLabels:
+              kubernetes.io/metadata.name: prowler
+        kinds:
+          - kind: HTTPRoute
     - name: bittorrent-tls
       protocol: HTTPS
       port: 443

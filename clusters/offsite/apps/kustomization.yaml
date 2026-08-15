@@ -6,6 +6,7 @@ resources:
   - atlantis
   - descheduler
   - hub
+  - prowler
   - spindrift
   - ../../base/platform/spindrift-target
   - dave.yaml
