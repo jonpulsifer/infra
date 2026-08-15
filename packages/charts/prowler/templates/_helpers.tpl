@@ -48,12 +48,8 @@ app.kubernetes.io/managed-by: {{ .root.Release.Service }}
 {{ include "prowler.fullname" . }}-db
 {{- end }}
 
-{{/*
-The operator names its Service `valkey-<cluster>`, so the cluster is named for
-the release alone — `<release>-valkey` would render `valkey-prowler-valkey`.
-*/}}
 {{- define "prowler.valkeyName" -}}
-{{ include "prowler.fullname" . }}
+{{ include "prowler.fullname" . }}-valkey
 {{- end }}
 
 {{- define "prowler.neo4jName" -}}
@@ -111,26 +107,23 @@ which no list can predict, so they override the header instead.
 - name: POSTGRES_USER
   value: {{ .Values.database.user | quote }}
 {{/*
-Valkey carries the Celery broker on DB 0 and the SSE pub/sub bus on DB 2. The
-operator's Service is headless and authenticates nobody — no ACL user is
-declared, so the URL has no credentials. The scheme must be `redis`; anything
-else raises at settings import.
+Valkey carries the Celery broker and the SSE pub/sub bus. It authenticates
+nobody — no ACL user is configured — so the URL has no credentials. The scheme
+must be `redis`; anything else raises at settings import.
 */}}
 - name: VALKEY_SCHEME
   value: redis
 - name: VALKEY_HOST
-  value: valkey-{{ include "prowler.valkeyName" . }}
+  value: {{ include "prowler.valkeyName" . }}
 - name: VALKEY_PORT
   value: "6379"
 - name: VALKEY_DB
   value: "0"
 {{/*
 Prowler puts the SSE pub/sub bus on database 2 by default, to keep a noisy
-broker off the streaming keyspace. It cannot have one here: the valkey operator
-runs every cluster with `cluster-enabled yes` — there is no knob to turn that
-off, and `shards: 1` only means one shard, not one plain server — and cluster
-mode serves database 0 alone. `SELECT 2` answers `ERR DB index is out of range`.
-Both therefore share database 0.
+broker off the streaming keyspace. Both are pinned to database 0 instead so the
+broker URL names the whole of what this server is used for — one object to reason
+about, and one for a readiness probe to cover.
 */}}
 - name: EVENTSTREAM_VALKEY_DB
   value: "0"
