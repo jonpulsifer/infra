@@ -34,7 +34,7 @@ on:
       # Optional, because a caller that passes nothing still runs every build
       # that carries no credential. Present, it is the private half of the
       # manifest's `sealPublicKey` — the only thing that can open what
-      # `GitHubActionsBuildRoute.sealRegistryAuth` sealed into `spec`, and
+      # `GitHubActionsBuildRoute.sealForRun` sealed into `spec`, and
       # asked for here by name so a caller can pass it explicitly or with
       # `secrets: inherit`. A connected repository's caller does neither (see
       # "Log in with sealed credentials" below for what that means for it).
@@ -107,6 +107,11 @@ jobs:
             # opened by "Log in with sealed credentials" below; nothing about
             # it is readable in this output or anywhere this step touches.
             printf 'sealedRegistryAuth=%s\n' "$(read_key '.sealedRegistryAuth // ""')"
+            # Story 112: the build secrets, sealed to the same key. Present
+            # only when the Component declares some; opened by "Stage sealed
+            # build secrets" below, which turns them into files the engine
+            # reads as named mounts. Ciphertext here, like the credential.
+            printf 'sealedBuildSecrets=%s\n' "$(read_key '.sealedBuildSecrets // ""')"
             # One login per distinct registry host. The GitHub token below only
             # authenticates to GHCR; anything else is a cloud registry the
             # `Authenticate to Google Cloud` step already federates for, so the
@@ -541,7 +546,7 @@ jobs:
 
       # §16's Docker Hub exception, opened rather than sent in the clear. The
       # credential travelled inside `spec` sealed to this route's
-      # `sealPublicKey` (`GitHubActionsBuildRoute.sealRegistryAuth`) precisely
+      # `sealPublicKey` (`GitHubActionsBuildRoute.sealForRun`) precisely
       # because `workflow_dispatch` renders every other input of this run in
       # its header — nothing about it was readable before this step, and the
       # only key that opens it is this repository's own
@@ -575,7 +580,7 @@ jobs:
           const iv = Buffer.from(envelope.iv, 'base64');
           const combined = Buffer.from(envelope.c, 'base64');
           // WebCrypto's AES-GCM appends its 16-byte tag to the ciphertext
-          // rather than returning it separately — `sealRegistryAuth` never
+          // rather than returning it separately — `sealForRun` never
           // split the two, so this is the split back apart.
           const tag = combined.subarray(combined.length - 16);
           const ciphertext = combined.subarray(0, combined.length - 16);
@@ -614,6 +619,76 @@ jobs:
               { input: entry.secret, stdio: ['pipe', 'inherit', 'inherit'] },
             );
           }
+          SPINDRIFT_SEAL_SCRIPT
+
+      # Story 112's build secrets, opened the same way the credential above is
+      # and for the same reason: nothing about them was readable before this
+      # step, and nothing after it sees a value — each goes to a file under
+      # `RUNNER_TEMP`, and what the build steps receive is `name=path` lines
+      # for the engine's named mounts. A `RUN --mount=type=secret,id=<name>`
+      # reads the file for the length of that instruction; no layer, no log,
+      # and no baked value carries it.
+      - name: Stage sealed build secrets
+        id: buildsecrets
+        if: steps.request.outputs.sealedBuildSecrets != ''
+        env:
+          SEALED: ${{ steps.request.outputs.sealedBuildSecrets }}
+          SEAL_KEY: ${{ secrets.SPINDRIFT_BUILD_SEAL_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -z "${SEAL_KEY:-}" ]; then
+            echo "::error::this build carries sealed build secrets, but SPINDRIFT_BUILD_SEAL_KEY is not set on this repository — set it to the private half of the manifest's sealPublicKey, or the RUN that mounts one fails instead, with a worse error." >&2
+            exit 1
+          fi
+          node <<'SPINDRIFT_SEAL_SCRIPT'
+          const crypto = require('node:crypto');
+          const fs = require('node:fs');
+          const path = require('node:path');
+
+          const envelope = JSON.parse(
+            Buffer.from(process.env.SEALED, 'base64').toString('utf8'),
+          );
+          const wrappedKey = Buffer.from(envelope.k, 'base64');
+          const iv = Buffer.from(envelope.iv, 'base64');
+          const combined = Buffer.from(envelope.c, 'base64');
+          // WebCrypto's AES-GCM appends its 16-byte tag to the ciphertext —
+          // `sealForRun` never split the two, so this is the split back apart.
+          const tag = combined.subarray(combined.length - 16);
+          const ciphertext = combined.subarray(0, combined.length - 16);
+
+          const aesKey = crypto.privateDecrypt(
+            {
+              key: process.env.SEAL_KEY,
+              padding: crypto.constants.RSA_PKCS1_OAEP_PADDING,
+              oaepHash: 'sha256',
+            },
+            wrappedKey,
+          );
+
+          const decipher = crypto.createDecipheriv('aes-256-gcm', aesKey, iv);
+          decipher.setAuthTag(tag);
+          const plaintext = Buffer.concat([
+            decipher.update(ciphertext),
+            decipher.final(),
+          ]);
+          const secrets = JSON.parse(plaintext.toString('utf8'));
+
+          const dir = path.join(process.env.RUNNER_TEMP, 'spindrift-build-secrets');
+          fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+          const lines = [];
+          for (const entry of secrets) {
+            // Masked before anything else prints. The value only: the name is
+            // the mount id a Dockerfile asks for, public by design.
+            console.log(`::add-mask::${entry.value}`);
+            const file = path.join(dir, entry.name);
+            fs.writeFileSync(file, entry.value, { mode: 0o600 });
+            lines.push(`${entry.name}=${file}`);
+          }
+          // The output is names and paths, never values — safe to render.
+          fs.appendFileSync(
+            process.env.GITHUB_OUTPUT,
+            `secretFiles<<SPINDRIFT_EOF\n${lines.join('\n')}\nSPINDRIFT_EOF\n`,
+          );
           SPINDRIFT_SEAL_SCRIPT
 
       # §3, story 42: a website placed on a static Target is the files its build
@@ -726,6 +801,7 @@ jobs:
           FILE: ${{ steps.frontend.outputs.file }}
           REQUEST_ARGS: ${{ steps.request.outputs.buildArgs }}
           LADDER_ARGS: ${{ steps.frontend.outputs.buildArgs }}
+          SECRET_FILES: ${{ steps.buildsecrets.outputs.secretFiles }}
           SCRATCHFILE: ${{ steps.frontend.outputs.scratchfile }}
           LIFT: ${{ steps.frontend.outputs.lift }}
         run: |
@@ -740,6 +816,15 @@ jobs:
           ${REQUEST_ARGS}
           ${LADDER_ARGS}
           SPINDRIFT_ARGS_EOF
+          # Story 112: this is the app's real build, so the mounts ride here
+          # exactly as they would have on `Build and push` — `name=path` lines
+          # from "Stage sealed build secrets", already on disk, never echoed.
+          while IFS= read -r pair; do
+            [ -n "$pair" ] || continue
+            set -- "$@" --secret "id=${pair%%=*},src=${pair#*=}"
+          done <<SPINDRIFT_SECRETS_EOF
+          ${SECRET_FILES}
+          SPINDRIFT_SECRETS_EOF
 
           docker buildx build --load --tag spindrift-lift:local \
             --file "$FILE" "$@" "$CONTEXT"
@@ -797,6 +882,12 @@ jobs:
           build-args: |
             ${{ steps.lift.outputs.context == '' && steps.vercel.outputs.context == '' && steps.request.outputs.buildArgs || '' }}
             ${{ steps.lift.outputs.context == '' && steps.vercel.outputs.context == '' && steps.frontend.outputs.buildArgs || '' }}
+          # Story 112's mounts, dropped when a site was lifted for the same
+          # reason the arguments above are: the app's build already consumed
+          # them in `Lift the site out of the build`, and the `FROM scratch`
+          # export of a finished directory mounts nothing.
+          secret-files: |
+            ${{ steps.lift.outputs.context == '' && steps.vercel.outputs.context == '' && steps.buildsecrets.outputs.secretFiles || '' }}
           push: true
           tags: ${{ steps.request.outputs.tags }}
           cache-from: |

@@ -46,6 +46,7 @@ const spec: BuildSpec = {
   outputDirectory: null,
   vercelFramework: null,
   registryAuth: [],
+  buildSecrets: [],
 };
 
 /**

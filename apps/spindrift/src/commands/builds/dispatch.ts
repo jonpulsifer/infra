@@ -66,6 +66,10 @@ import { isFetchableBundleLocation } from '../../storage/archives.ts';
 import { parseGcsLocation, signedObjectUrl } from '../../storage/signed-url.ts';
 import { isBuildTimeConfig, readBuildArgs } from '../config/build-args.ts';
 import {
+  declaredBuildSecrets,
+  resolveBuildSecrets,
+} from '../config/build-secrets.ts';
+import {
   type CommandContext,
   type CommandFailureCode,
   type CommandResult,
@@ -845,7 +849,7 @@ export const dispatchBuild = async (
   // where the route puts its inputs. `waits`, because both halves are
   // configuration: admitting a different route on the Target, or forgetting a
   // credential this registry did not need, makes the next tick work.
-  if (registryAuth.length > 0 && !adapter.carriesRegistryCredential) {
+  if (registryAuth.length > 0 && !adapter.carriesHeldSecret) {
     const hosts = registryAuth.map((one) => one.host).join(', ');
     return refuseDispatch(
       context,
@@ -860,12 +864,61 @@ export const dispatchBuild = async (
     );
   }
 
+  // The Component's declared build secrets (story 112), gated by the same
+  // capability the registry credential is — what makes a route safe to hand
+  // one makes it safe to hand the other. Names are read first and the
+  // capability refused on them alone, so no plaintext is ever resolved for a
+  // route that could not be handed it; a route that has nowhere safe to carry
+  // one refuses the build at dispatch rather than running it without.
+  const buildSecretNames =
+    effectiveTargetId === undefined
+      ? []
+      : await declaredBuildSecrets(context, component.id, effectiveTargetId);
+  if (buildSecretNames.length > 0 && !adapter.carriesHeldSecret) {
+    return refuseDispatch(
+      context,
+      subject,
+      'NOT_BUILDABLE',
+      `${component.name} declares build secrets (${buildSecretNames.join(', ')}), ` +
+        `and the "${adapter.name}" route cannot carry one — its dispatch ` +
+        'inputs are readable by anyone who can see the run. Admit a route ' +
+        'that runs the build in a container of its own, or remove the ' +
+        'declarations if the build no longer needs them.',
+      { kind: 'waits' },
+    );
+  }
+  // Opened here and nowhere else, exactly as the registry credential is: the
+  // plaintext exists for the length of this request, reaches exactly one
+  // route, and is never written to the Build row, the attempt log, or an
+  // event. What the row records is the *names*, below.
+  let buildSecrets: BuildSpec['buildSecrets'] = [];
+  if (buildSecretNames.length > 0 && effectiveTargetId !== undefined) {
+    const resolved = await resolveBuildSecrets(
+      context,
+      component.id,
+      effectiveTargetId,
+    );
+    if ('refusal' in resolved) {
+      return refuseDispatch(
+        context,
+        subject,
+        'NOT_BUILDABLE',
+        resolved.refusal,
+        {
+          kind: 'waits',
+        },
+      );
+    }
+    buildSecrets = resolved.secrets;
+  }
+
   const spec: BuildSpec = {
     artifactType: build.artifactType,
     kind: component.kind,
     platform: DEFAULT_PLATFORM,
     destinations,
     registryAuth,
+    buildSecrets,
     /**
      * §12 counts tags, so a push that carried only the implicit `:latest` would
      * leave retention nothing to act on and a rollback depth of one.
@@ -956,6 +1009,11 @@ export const dispatchBuild = async (
         logFidelity: adapter.logFidelity,
         dispatchId,
         leasedAt: now,
+        // Story 112: which secrets this run could read — names only, written
+        // at the claim so a build that fails still records what it held. A
+        // provenance that does not mention a credential the build had is a
+        // provenance that overclaims.
+        buildSecretNames,
         // The wait is over, so what it was waiting on stops being true. Cleared
         // here rather than left to age out, so that a Build whose lease expires
         // and is refused again reports it again instead of being suppressed

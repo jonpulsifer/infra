@@ -282,6 +282,16 @@ export const targetHealth = pgEnum('target_health', ['healthy', 'unhealthy']);
 export const configItemKind = pgEnum('config_item_kind', [
   'secret_ref',
   'plain',
+  /**
+   * Story 112: a credential the *build* needs and the runtime must not hold —
+   * a private package token being the ordinary case. The same two pin columns
+   * as `secret_ref`, but a different actor resolves it (core, at dispatch,
+   * against the store), on a different clock (a rotation reaches the next
+   * build, never a running pod), with a different failure (a dispatch refusal,
+   * not a pod that will not start). Kept out of the pinned config document, so
+   * rotating one never mints a Deploy.
+   */
+  'build_secret',
 ]);
 
 /**
@@ -703,6 +713,20 @@ export const builds = pgTable(
     buildkitProvenanceRef: text('buildkit_provenance_ref'),
     /** SPDX evidence attached to the artifact; deliberately not assessed in v1. */
     sbomRef: text('sbom_ref'),
+    /**
+     * The build secrets this build could read — names only, never values and
+     * never store references (story 112). The names have to be recorded: a
+     * build that held a credential its record does not mention is a build whose
+     * provenance overclaims, and "this build could read `NPM_TOKEN`" is the
+     * fact somebody reproducing it needs. The store reference stays out
+     * because this row's provenance travels into conversations a registry
+     * object starts, and a reference there is a map of where this installation
+     * keeps its credentials.
+     *
+     * Written at dispatch, before the route runs, so a failed build records
+     * what it could read too.
+     */
+    buildSecretNames: jsonbDocument('build_secret_names').$type<string[]>(),
     /**
      * §4/§32: "The bundle digest must be a build parameter on every route,"
      * the join between a source receipt and its provenance document.

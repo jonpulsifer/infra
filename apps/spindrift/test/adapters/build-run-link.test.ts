@@ -44,6 +44,7 @@ const spec: BuildSpec = {
   outputDirectory: null,
   vercelFramework: null,
   registryAuth: [],
+  buildSecrets: [],
 };
 
 /** A host whose run goes green, reporting whatever web address a test names. */

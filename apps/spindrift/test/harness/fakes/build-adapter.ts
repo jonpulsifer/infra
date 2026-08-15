@@ -50,7 +50,7 @@ export interface FakeBuildAdapterOptions {
   buildLevel?: BuildLevel;
   provenanceBuilderId?: string;
   /** Defaults to true; a test asserting the hosted route's refusal sets false. */
-  carriesRegistryCredential?: boolean;
+  carriesHeldSecret?: boolean;
   /** Defaults to every flavour, so a test narrows only when that is its point. */
   selfAuthorizedRegistries?: readonly RegistryFlavour[];
   script?: readonly ScriptedBuild[];
@@ -63,7 +63,7 @@ export class FakeBuildAdapter implements BuildAdapter {
   readonly logFidelity: LogFidelity;
   readonly buildLevel: BuildLevel;
   readonly provenanceBuilderId: string;
-  readonly carriesRegistryCredential: boolean;
+  readonly carriesHeldSecret: boolean;
   readonly selfAuthorizedRegistries: readonly RegistryFlavour[];
 
   /** Every `build`, in call order. */
@@ -78,7 +78,7 @@ export class FakeBuildAdapter implements BuildAdapter {
     this.buildLevel = options.buildLevel ?? 2;
     this.provenanceBuilderId =
       options.provenanceBuilderId ?? 'https://spindrift.dev/builders/fake';
-    this.carriesRegistryCredential = options.carriesRegistryCredential ?? true;
+    this.carriesHeldSecret = options.carriesHeldSecret ?? true;
     this.selfAuthorizedRegistries = options.selfAuthorizedRegistries ?? [
       'artifactRegistry',
       'dockerHub',

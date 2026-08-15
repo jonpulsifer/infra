@@ -27,6 +27,7 @@ import {
 } from '../deploy/kubernetes/api.ts';
 import {
   buildKitProgramFor,
+  buildSecretEnvOf,
   dockerConfigFor,
   REGISTRY_AUTH_VAR,
 } from './buildkit.ts';
@@ -91,12 +92,12 @@ export class InClusterBuildRoute implements BuildAdapter {
    * The Job's container is a place a secret can go. See the ceiling named on
    * {@link InClusterBuildRoute.job}.
    */
-  readonly carriesRegistryCredential = true;
+  readonly carriesHeldSecret = true;
   /**
    * The Job runs as a service account, and what that account reaches is a
    * workload identity binding on one vendor's registries. Anything else the
    * installation pushes to needs a stored credential, which this route can
-   * carry — see {@link InClusterBuildRoute.carriesRegistryCredential}.
+   * carry — see {@link InClusterBuildRoute.carriesHeldSecret}.
    */
   readonly selfAuthorizedRegistries: readonly RegistryFlavour[] = [
     'artifactRegistry',
@@ -120,6 +121,7 @@ export class InClusterBuildRoute implements BuildAdapter {
       name,
       buildKitProgramFor(source, spec, this.options.zeroConfigFrontend),
       dockerConfigFor(spec.registryAuth),
+      buildSecretEnvOf(spec.buildSecrets),
     );
 
     try {
@@ -234,7 +236,20 @@ export class InClusterBuildRoute implements BuildAdapter {
     name: string,
     program: string,
     dockerConfig: string | null,
+    buildSecretEnv: Record<string, string>,
   ): KubernetesObject {
+    // The registry credential's ceiling above covers these too: a build
+    // secret rides the same container environment, in the same platform-owned
+    // namespace, with the same upgrade path.
+    const env = [
+      ...(dockerConfig === null
+        ? []
+        : [{ name: REGISTRY_AUTH_VAR, value: dockerConfig }]),
+      ...Object.entries(buildSecretEnv).map(([name, value]) => ({
+        name,
+        value,
+      })),
+    ];
     return {
       apiVersion: 'batch/v1',
       kind: 'Job',
@@ -256,14 +271,10 @@ export class InClusterBuildRoute implements BuildAdapter {
                 name: 'build',
                 image: this.options.image,
                 command: ['sh', '-c', program],
-                // Absent entirely when there is no credential, rather than
+                // Absent entirely when there is nothing held, rather than
                 // present and empty: an installation that stores nothing should
                 // leave no trace of the mechanism on its build Jobs.
-                ...(dockerConfig === null
-                  ? {}
-                  : {
-                      env: [{ name: REGISTRY_AUTH_VAR, value: dockerConfig }],
-                    }),
+                ...(env.length === 0 ? {} : { env }),
               },
             ],
           },

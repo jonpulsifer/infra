@@ -27,7 +27,7 @@
  * key when. There is no value column in `config_audit_events` to fill even if
  * this file wanted to.
  */
-import { and, eq } from 'drizzle-orm';
+import { and, eq, inArray } from 'drizzle-orm';
 import { z } from 'zod';
 import type {
   ConfigScope,
@@ -311,6 +311,33 @@ export async function applyConfigChange(
   entries: readonly { key: string; value: string }[],
   removals: readonly string[],
 ): Promise<CommandResult<ConfigChangeResult>> {
+  // One key, one kind (story 112): a key declared as a build secret is not
+  // updated or removed from here — silently converting it would hand the
+  // runtime the credential the separate list exists to keep away from it.
+  const touched = [...entries.map((entry) => entry.key), ...removals];
+  if (touched.length > 0) {
+    const [held] = await context.db
+      .select({ key: configItems.key })
+      .from(configItems)
+      .where(
+        and(
+          eq(configItems.componentId, subject.componentId),
+          eq(configItems.targetId, subject.targetId),
+          eq(configItems.environment, PINNED_ENVIRONMENT),
+          eq(configItems.kind, 'build_secret'),
+          inArray(configItems.key, touched),
+        ),
+      );
+    if (held !== undefined) {
+      return failed(
+        'INVALID_INPUT',
+        `${held.key} is a build secret on this pair — it is a separate list ` +
+          'the runtime never holds, so change it through setBuildSecrets, ' +
+          'and remove it there first if this key is meant to become config',
+      );
+    }
+  }
+
   const now = context.clock.now();
   const written: string[] = [];
   // Narrowed once, here, so nothing below asserts a store it cannot see: the
@@ -353,7 +380,7 @@ export async function applyConfigChange(
         set: { ...row, updatedAt: now },
       });
     written.push(entry.key);
-    await audit(context, subject, entry.key, 'set', now);
+    await auditConfigChange(context, subject, entry.key, 'set', now);
   }
 
   for (const key of removals) {
@@ -367,7 +394,7 @@ export async function applyConfigChange(
           eq(configItems.key, key),
         ),
       );
-    await audit(context, subject, key, 'removed', now);
+    await auditConfigChange(context, subject, key, 'removed', now);
   }
 
   // Retention applies to what was just written and to what was just removed,
@@ -510,7 +537,7 @@ async function deployChange(
 }
 
 /** One metadata-only audit row: who changed which key when (§10). */
-async function audit(
+export async function auditConfigChange(
   context: CommandContext,
   subject: ConfigSubject,
   key: string,
@@ -538,7 +565,15 @@ function firstDuplicate(keys: readonly string[]): string | null {
   return null;
 }
 
-/** Every key currently configured for one pair, sorted. */
+/**
+ * Every key currently configured for one pair, sorted.
+ *
+ * Configured, not declared: a `build_secret` row is a separate list (story
+ * 112) that no runtime document contains, so it is not in this answer — a
+ * `replaceConfig` diffed against it would try to remove what it never
+ * restated, and the workspace would render a build credential as if it were
+ * environment.
+ */
 export async function configuredKeys(
   db: Database,
   componentId: string,
@@ -552,6 +587,7 @@ export async function configuredKeys(
         eq(configItems.componentId, componentId),
         eq(configItems.targetId, targetId),
         eq(configItems.environment, PINNED_ENVIRONMENT),
+        inArray(configItems.kind, ['secret_ref', 'plain']),
       ),
     );
   return rows.map((row) => row.key).sort();

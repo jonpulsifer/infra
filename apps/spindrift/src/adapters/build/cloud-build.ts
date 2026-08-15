@@ -40,6 +40,7 @@
 import type { RegistryFlavour } from '../../domain/artifact-name.ts';
 import {
   buildKitProgramFor,
+  buildSecretEnvOf,
   dockerConfigFor,
   quote,
   REGISTRY_AUTH_VAR,
@@ -199,7 +200,7 @@ export class CloudBuildRoute implements BuildAdapter {
    * scoped to that container rather than to the build's own arguments — which
    * are what a reader of the build resource sees.
    */
-  readonly carriesRegistryCredential = true;
+  readonly carriesHeldSecret = true;
   /**
    * One vendor's registries, because that is what the metadata server issues a
    * token for. Everything else this route publishes to needs a stored
@@ -351,6 +352,18 @@ export class CloudBuildRoute implements BuildAdapter {
   private async submit(program: string, spec: BuildSpec): Promise<CloudBuild> {
     const attest = attestStep(spec.destinations, this.options);
     const dockerConfig = dockerConfigFor(spec.registryAuth);
+    // On the step's environment for the same reason the Docker config is —
+    // the program is readable in full on the build resource, its variables
+    // are not. `literalDollars` because a secret's value is text, never a
+    // substitution.
+    const stepEnv = [
+      ...(dockerConfig === null
+        ? []
+        : [`${REGISTRY_AUTH_VAR}=${dockerConfig}`]),
+      ...Object.entries(buildSecretEnvOf(spec.buildSecrets)).map(
+        ([name, value]) => `${name}=${value}`,
+      ),
+    ].map(literalDollars);
     const operation = await this.json<{
       metadata?: { build?: CloudBuild };
     }>(`${this.options.endpoint}/v1/${this.parent}/builds`, {
@@ -371,11 +384,7 @@ export class CloudBuildRoute implements BuildAdapter {
             // On the step's environment and never in `args`: the arguments are
             // the program, and the program is what a reader of this build
             // resource sees in full. See REGISTRY_AUTH_VAR.
-            ...(dockerConfig === null
-              ? {}
-              : {
-                  env: [literalDollars(`${REGISTRY_AUTH_VAR}=${dockerConfig}`)],
-                }),
+            ...(stepEnv.length === 0 ? {} : { env: stepEnv }),
           },
           ...(attest === null
             ? []

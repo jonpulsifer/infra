@@ -281,6 +281,13 @@
       "when": 1786968060000,
       "tag": "0039_datastore_vessel_anchor",
       "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "7",
+      "when": 1786968120000,
+      "tag": "0040_build_secrets",
+      "breakpoints": true
     }
   ]
 }

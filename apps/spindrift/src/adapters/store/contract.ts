@@ -5,12 +5,13 @@
  * secret operator**. Spindrift writes; the operator on the far side reads. That
  * shape is what the three rules below defend:
  *
- * - **Values are write-only.** There is deliberately no verb here that returns a
+ * - **Values are write-only.** Runtime config has no verb here that returns a
  *   value. Plaintext is confined to transient request memory and the store,
  *   auditing is metadata only, and redaction is structural rather than a promise
  *   to scrub what an App prints (§10). The consequence is stated and accepted:
  *   core cannot migrate config between stores, so Place names the keys that will
- *   not follow and demands them before the move commits.
+ *   not follow and demands them before the move commits. {@link SecretStore.open}
+ *   is the one stated exception, and it belongs to build dispatch alone.
  * - **One secret per variable, not a blob.** The blob is elegant on Kubernetes
  *   and has no cloud-runtime equivalent, so the contract is per key (§10).
  * - **Pinned, never a floating latest.** A put returns the reference to the
@@ -111,6 +112,24 @@ export interface SecretStore {
    * before it deploys against it.
    */
   describe(reference: SecretReference): Promise<SecretVersion | null>;
+
+  /**
+   * The value of one pinned version, or `null` when it is gone.
+   *
+   * The one narrow exception to "values are write-only", and it exists for
+   * exactly one caller: `dispatchBuild` resolving a Component's *build*
+   * secrets. A runtime secret is delivered by the platform's own operator and
+   * core never needs the value; a build secret has no operator on the far side
+   * — the builder is handed the resolved value for the length of one dispatch,
+   * so that no builder ever holds a credential *to the store* (§4). Nothing
+   * else may call this, and no command returns what it opens.
+   *
+   * Optional because not every store can answer: a `CURRENT_ONLY` edge store's
+   * items are the runtime's own namespace, with no read API worth trusting. A
+   * store without this verb cannot back a build secret, and dispatch refuses
+   * the build with a sentence rather than running it without.
+   */
+  open?(reference: SecretReference): Promise<string | null>;
 
   /**
    * Every version Spindrift has written for one key, newest first.

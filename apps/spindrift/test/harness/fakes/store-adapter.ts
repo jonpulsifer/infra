@@ -82,6 +82,10 @@ export class FakeSecretStore implements SecretStore {
     // constructed with only a pinning is never internally contradictory.
     this.adapter = options.adapter ?? STANDS_FOR[this.pinning].adapter;
     this.name = STANDS_FOR[this.pinning].name;
+    if (this.pinning !== 'CURRENT_ONLY') {
+      this.open = async (reference) =>
+        this.stored.get(referenceId(reference))?.value ?? null;
+    }
   }
 
   async put(
@@ -123,6 +127,14 @@ export class FakeSecretStore implements SecretStore {
   async describe(reference: SecretReference): Promise<SecretVersion | null> {
     return this.stored.get(referenceId(reference))?.version ?? null;
   }
+
+  /**
+   * A property rather than a method so it is genuinely absent under
+   * `CURRENT_ONLY` — the real edge store has no read worth trusting, and a fake
+   * that answered anyway would let dispatch's refusal go untested.
+   * Assigned in the constructor, after the strategy it depends on is.
+   */
+  readonly open?: (reference: SecretReference) => Promise<string | null>;
 
   async versions(scope: ConfigScope, key: string): Promise<SecretVersion[]> {
     const item = this.name(scope, key);

@@ -26,7 +26,7 @@
  * hundredth.
  */
 import type { RegistryAuth } from '../../storage/registry-credentials.ts';
-import type { BuildSource, BuildSpec } from './contract.ts';
+import type { BuildSecretValue, BuildSource, BuildSpec } from './contract.ts';
 import { BUILD_REPORT_MARKER } from './report.ts';
 
 /**
@@ -43,6 +43,34 @@ import { BUILD_REPORT_MARKER } from './report.ts';
  * `set -x` is never used in this program for the same reason.
  */
 export const REGISTRY_AUTH_VAR = 'SPINDRIFT_REGISTRY_AUTH';
+
+/**
+ * The prefix a build secret's value rides the environment under (story 112).
+ *
+ * One variable per secret rather than one JSON blob, because the program that
+ * reads them promises only a POSIX shell — no `jq` — and a name matched by
+ * `VARIABLE_NAME` composes into an environment variable with nothing to
+ * escape. The same reasoning as {@link REGISTRY_AUTH_VAR} applies to why they
+ * are variables at all: the program is a string in a readable API object, and
+ * a value interpolated into it would be a secret in that object for its TTL.
+ */
+export const BUILD_SECRET_VAR_PREFIX = 'SPINDRIFT_BUILD_SECRET_';
+
+/**
+ * The environment one route's container sets so the program below can write
+ * each secret to the file its `--secret` flag names. Routes share this so the
+ * variable names cannot drift from the ones the program reads.
+ */
+export function buildSecretEnvOf(
+  secrets: readonly BuildSecretValue[],
+): Record<string, string> {
+  return Object.fromEntries(
+    secrets.map((secret) => [
+      `${BUILD_SECRET_VAR_PREFIX}${secret.name}`,
+      secret.value,
+    ]),
+  );
+}
 
 /**
  * A Docker config the BuildKit client and `buildctl` both read.
@@ -114,6 +142,13 @@ export interface BuildKitProgramInput {
   readonly zeroConfigFrontend: string;
   /** §4: ordinary rows, never fetched from a store. */
   readonly buildArgs: BuildSpec['buildArgs'];
+  /**
+   * The *names* of the build secrets riding the environment (story 112). Names
+   * and not values, because this input becomes a program string in a readable
+   * API object — the values travel as {@link buildSecretEnvOf}'s variables,
+   * and the program moves each to a file only the mount reads.
+   */
+  readonly buildSecretNames: readonly string[];
 }
 
 /**
@@ -144,6 +179,7 @@ export function buildKitProgramFor(
     tags: spec.tags,
     zeroConfigFrontend,
     buildArgs: spec.buildArgs,
+    buildSecretNames: spec.buildSecrets.map((secret) => secret.name),
   });
 }
 
@@ -300,6 +336,40 @@ export function buildKitProgram(input: BuildKitProgramInput): string {
     .map(([key, value]) => `  --opt ${quote(`build-arg:${key}=${value}`)} \\\n`)
     .join('');
 
+  // Story 112: one `--secret` per declared name, same whole-line rule as the
+  // build args above. The id is the name a `RUN --mount=type=secret,id=…`
+  // asks for; the source is the file the block below wrote from the
+  // environment. Names match `VARIABLE_NAME`, so neither needs escaping —
+  // quoted anyway, because the rule is cheaper than the exception.
+  const secretFlags = input.buildSecretNames
+    .map(
+      (name) =>
+        `  --secret id=${quote(name)},src="$secrets_dir"/${quote(name)} \\\n`,
+    )
+    .join('');
+
+  // Files and not `env=`: `buildctl` reads a secret from a file source, and a
+  // file in a directory this program just created is narrower than a variable
+  // every child process inherits. Each variable is unset the moment its file
+  // exists, so the engine invocation below starts with no secret in its
+  // environment at all.
+  const secretSetup =
+    input.buildSecretNames.length === 0
+      ? ''
+      : `
+# Build secrets (story 112). Each rode the container's environment under its
+# own variable — never this program's text — and moves to a file only the
+# named mount reads: available to the RUN that asks, absent from every layer,
+# the log, and the pushed artifact.
+secrets_dir=$(mktemp -d)
+${input.buildSecretNames
+  .map(
+    (name) =>
+      `printf '%s' "$${BUILD_SECRET_VAR_PREFIX}${name}" > "$secrets_dir"/${quote(name)}\nunset ${BUILD_SECRET_VAR_PREFIX}${name}`,
+  )
+  .join('\n')}
+`;
+
   return `set -eu
 workspace=$(mktemp -d)
 
@@ -318,7 +388,7 @@ if [ -n "\${${REGISTRY_AUTH_VAR}:-}" ]; then
   printf '%s' "$${REGISTRY_AUTH_VAR}" > "$DOCKER_CONFIG/config.json"
   unset ${REGISTRY_AUTH_VAR}
 fi
-
+${secretSetup}
 wget -qO- ${quote(input.bundleUrl)} | tar -xz -C "$workspace"
 
 # §5's unwrap. The subpath is relative to the source root, and a bundle's root
@@ -371,7 +441,7 @@ fi
 # buildx's spelling; \`buildctl build\` has no such flag and refuses the whole
 # invocation with \`Incorrect Usage: flag provided but not defined: -attest\`.
 buildctl-daemonless.sh build "$@" \\
-${args}  --opt attest:provenance=mode=max \\
+${args}${secretFlags}  --opt attest:provenance=mode=max \\
   --opt attest:sbom= \\
   --output ${quote(`type=image,${imageNames(input)},push=true`)} \\
   --metadata-file "$workspace/metadata.json"

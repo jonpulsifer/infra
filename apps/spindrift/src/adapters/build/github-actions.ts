@@ -38,7 +38,6 @@ import {
   CALLER_WORKFLOW_FILE,
   RUN_NAME_PREFIX,
 } from '../../integrations/github/config-pr.ts';
-import type { RegistryAuth } from '../../storage/registry-credentials.ts';
 import type {
   BuildAdapter,
   BuildEvent,
@@ -164,7 +163,7 @@ export interface GitHubActionsRouteOptions extends PollingOptions {
   /**
    * SPKI PEM, matching the manifest's `build.routes[].sealPublicKey`.
    *
-   * Its presence is what turns on `carriesRegistryCredential`. Absent, this
+   * Its presence is what turns on `carriesHeldSecret`. Absent, this
    * route composes exactly the dispatch it always has.
    */
   readonly sealPublicKey?: string;
@@ -266,18 +265,26 @@ export interface BuildRequestSpec {
   readonly attestor: string;
   /**
    * The installation's held registry credential, sealed to `sealPublicKey`
-   * (`sealRegistryAuth` below) — absent wherever {@link BuildSpec.registryAuth}
+   * (`sealForRun` below) — absent wherever {@link BuildSpec.registryAuth}
    * is empty, which is the ordinary case (§16).
    *
    * Never the credential itself. `workflow_dispatch` renders every other field
    * of this request in the run header, so the plaintext travels no further
    * than the process that composed this object — see
-   * `carriesRegistryCredential` for the rest of the reasoning. The reusable
+   * `carriesHeldSecret` for the rest of the reasoning. The reusable
    * workflow's "Log in with sealed credentials" step is the only place that
    * ever opens it, and it does so with the private key on the other side of
    * this pair, held as this repository's `SPINDRIFT_BUILD_SEAL_KEY` secret.
    */
   readonly sealedRegistryAuth?: string;
+  /**
+   * The Component's resolved build secrets, sealed the same way to the same
+   * key (story 112) — absent wherever {@link BuildSpec.buildSecrets} is empty.
+   * The workflow's "Stage sealed build secrets" step opens it, writes each
+   * value to a file, and hands the engine the named mounts; nothing about the
+   * values reaches the run header, the log, or the artifact.
+   */
+  readonly sealedBuildSecrets?: string;
 }
 
 export class GitHubActionsBuildRoute implements BuildAdapter {
@@ -297,7 +304,7 @@ export class GitHubActionsBuildRoute implements BuildAdapter {
    * Actions secret written through a libsodium sealed box would have needed a
    * dependency this package has not taken — the alternative actually built is
    * the reverse of that write: this route seals a held credential to
-   * `sealPublicKey` (`sealRegistryAuth` below) *before* it ever reaches the
+   * `sealPublicKey` (`sealForRun` below) *before* it ever reaches the
    * dispatch inputs, so what the run header renders is ciphertext. The only
    * key that opens it is the matching private key, and its only home is the
    * platform repository's `SPINDRIFT_BUILD_SEAL_KEY` Actions secret — never
@@ -310,7 +317,7 @@ export class GitHubActionsBuildRoute implements BuildAdapter {
    * on it — a route an operator can change, rather than a token an operator
    * cannot un-publish.
    */
-  readonly carriesRegistryCredential: boolean;
+  readonly carriesHeldSecret: boolean;
   /**
    * Both, because the run holds two identities at once and the reusable
    * workflow uses each: `docker/login-action` against `ghcr.io` with the run's own
@@ -337,7 +344,7 @@ export class GitHubActionsBuildRoute implements BuildAdapter {
   constructor(private readonly options: GitHubActionsRouteOptions) {
     this.name = options.name;
     this.platformRepository = reusableWorkflowRepository(options.buildWorkflow);
-    this.carriesRegistryCredential = options.sealPublicKey !== undefined;
+    this.carriesHeldSecret = options.sealPublicKey !== undefined;
   }
 
   async *build(
@@ -385,21 +392,31 @@ export class GitHubActionsBuildRoute implements BuildAdapter {
     const runName = `${RUN_NAME_PREFIX} ${correlation}`;
 
     // `dispatchBuild` already refused a build that needs one where
-    // `carriesRegistryCredential` is false, so a seal key is here whenever
-    // `spec.registryAuth` is not empty — the throw below is for a caller that
-    // skipped that refusal, which is a programming error rather than a
-    // configuration one (the same posture `reusableWorkflowRepository` takes).
+    // `carriesHeldSecret` is false, so a seal key is here whenever
+    // `spec.registryAuth` or `spec.buildSecrets` is not empty — the throw
+    // below is for a caller that skipped that refusal, which is a programming
+    // error rather than a configuration one (the same posture
+    // `reusableWorkflowRepository` takes).
     let sealedRegistryAuth: string | undefined;
-    if (spec.registryAuth.length > 0) {
+    let sealedBuildSecrets: string | undefined;
+    if (spec.registryAuth.length > 0 || spec.buildSecrets.length > 0) {
       if (this.options.sealPublicKey === undefined) {
         throw new TypeError(
-          'build received a registry credential but this route has no sealPublicKey configured',
+          'build received a held secret but this route has no sealPublicKey configured',
         );
       }
-      sealedRegistryAuth = await sealRegistryAuth(
-        spec.registryAuth,
-        this.options.sealPublicKey,
-      );
+      if (spec.registryAuth.length > 0) {
+        sealedRegistryAuth = await sealForRun(
+          spec.registryAuth,
+          this.options.sealPublicKey,
+        );
+      }
+      if (spec.buildSecrets.length > 0) {
+        sealedBuildSecrets = await sealForRun(
+          spec.buildSecrets,
+          this.options.sealPublicKey,
+        );
+      }
     }
 
     const request: BuildRequestSpec = {
@@ -417,6 +434,7 @@ export class GitHubActionsBuildRoute implements BuildAdapter {
       signer: this.options.signer,
       attestor: this.options.attestor,
       ...(sealedRegistryAuth !== undefined ? { sealedRegistryAuth } : {}),
+      ...(sealedBuildSecrets !== undefined ? { sealedBuildSecrets } : {}),
     };
 
     let repository: string | null = null;
@@ -650,12 +668,15 @@ export class GitHubActionsBuildRoute implements BuildAdapter {
 }
 
 /**
- * Seals a held registry credential to `sealPublicKey`, so it can travel inside
+ * Seals a held secret to `sealPublicKey`, so it can travel inside
  * `workflow_dispatch`'s inputs without arriving in the clear
- * (`carriesRegistryCredential` above says why that would otherwise matter).
+ * (`carriesHeldSecret` above says why that would otherwise matter). One
+ * envelope, two payloads: a `RegistryAuth[]` for `sealedRegistryAuth` and a
+ * `BuildSecretValue[]` for `sealedBuildSecrets` — sealed separately because
+ * the workflow opens them at different steps for different consumers.
  *
  * Hybrid rather than RSA-OAEP alone: OAEP has no room for more than a couple
- * hundred bytes of plaintext under a 2048-bit key, and a registry login is not
+ * hundred bytes of plaintext under a 2048-bit key, and neither payload is
  * bounded that way. A fresh AES-256-GCM key encrypts the payload; RSA-OAEP
  * wraps only that key.
  *
@@ -664,11 +685,11 @@ export class GitHubActionsBuildRoute implements BuildAdapter {
  * appended to it, each base64 on its own. Exported so a test can decrypt what
  * this produces with the *exact* algorithm the reusable workflow runs — see
  * `.github/workflows/spindrift-build.yml`'s "Log in with sealed credentials"
- * step, the other half of this pair and the one the wire format actually has
- * to agree with.
+ * and "Stage sealed build secrets" steps, the other half of this pair and the
+ * ones the wire format actually has to agree with.
  */
-export async function sealRegistryAuth(
-  auth: readonly RegistryAuth[],
+export async function sealForRun(
+  payload: unknown,
   sealPublicKey: string,
 ): Promise<string> {
   const publicKey = await crypto.subtle.importKey(
@@ -688,7 +709,7 @@ export async function sealRegistryAuth(
   const ciphertext = await crypto.subtle.encrypt(
     { name: 'AES-GCM', iv },
     aesKey,
-    new TextEncoder().encode(JSON.stringify(auth)),
+    new TextEncoder().encode(JSON.stringify(payload)),
   );
   const rawKey = await crypto.subtle.exportKey('raw', aesKey);
   const wrappedKey = await crypto.subtle.encrypt(
