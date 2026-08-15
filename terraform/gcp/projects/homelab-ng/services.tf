@@ -4,6 +4,7 @@ resource "google_project_service" "service" {
     "appengine.googleapis.com",
     "bigquery.googleapis.com",
     "bigquerystorage.googleapis.com",
+    "billingbudgets.googleapis.com",
     "binaryauthorization.googleapis.com",
     "cloudasset.googleapis.com",
     "cloudbilling.googleapis.com",
