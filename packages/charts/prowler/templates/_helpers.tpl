@@ -124,6 +124,16 @@ else raises at settings import.
   value: "6379"
 - name: VALKEY_DB
   value: "0"
+{{/*
+Prowler puts the SSE pub/sub bus on database 2 by default, to keep a noisy
+broker off the streaming keyspace. It cannot have one here: the valkey operator
+runs every cluster with `cluster-enabled yes` — there is no knob to turn that
+off, and `shards: 1` only means one shard, not one plain server — and cluster
+mode serves database 0 alone. `SELECT 2` answers `ERR DB index is out of range`.
+Both therefore share database 0.
+*/}}
+- name: EVENTSTREAM_VALKEY_DB
+  value: "0"
 {{- if .Values.neo4j.enabled }}
 - name: NEO4J_HOST
   value: {{ include "prowler.neo4jName" . }}
