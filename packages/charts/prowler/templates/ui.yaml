@@ -1,0 +1,100 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "prowler.fullname" . }}-ui
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "prowler.labels" . | nindent 4 }}
+spec:
+  ports:
+    - name: http
+      port: {{ .Values.ui.port }}
+      targetPort: http
+      protocol: TCP
+  selector:
+    {{- include "prowler.selectorLabels" (dict "root" . "component" "ui") | nindent 4 }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "prowler.fullname" . }}-ui
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "prowler.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.ui.replicas }}
+  selector:
+    matchLabels:
+      {{- include "prowler.selectorLabels" (dict "root" . "component" "ui") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "prowler.podLabels" (dict "root" . "component" "ui") | nindent 8 }}
+    spec:
+      {{- if .Values.sandbox }}
+      runtimeClassName: gvisor
+      {{- end }}
+      automountServiceAccountToken: false
+      securityContext:
+        # The image's own `nextjs` user. Named in the Dockerfile rather than
+        # numeric, so the uid has to be repeated here — `runAsNonRoot` alone
+        # cannot verify a name and the kubelet refuses the pod.
+        runAsNonRoot: true
+        runAsUser: 1001
+        runAsGroup: 1001
+        fsGroup: 1001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: ui
+          image: {{ .Values.image.ui }}
+          imagePullPolicy: IfNotPresent
+          env:
+            {{/*
+            Every API call the UI makes is server-side, so the in-cluster
+            Service name is the right base URL — the browser never resolves it.
+            The path suffix is not optional.
+            */}}
+            - name: UI_API_BASE_URL
+              value: http://{{ include "prowler.fullname" . }}-api:{{ .Values.api.port }}/api/v1
+            {{/*
+            NextAuth builds its callback URLs from this, so it must be the
+            public origin including the scheme — a bare host silently breaks
+            sign-in. `AUTH_TRUST_HOST` is what makes it honour the forwarded
+            headers from the gateway.
+            */}}
+            - name: AUTH_URL
+              value: https://{{ required "hostname is required: it is the origin NextAuth builds callback URLs from" .Values.hostname }}
+            - name: AUTH_TRUST_HOST
+              value: "true"
+          envFrom:
+            - secretRef:
+                name: {{ required "envFromSecret is required: it carries AUTH_SECRET" .Values.envFromSecret }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.ui.port }}
+              protocol: TCP
+          livenessProbe:
+            httpGet: {path: /api/health, port: http}
+            periodSeconds: 20
+            failureThreshold: 10
+          readinessProbe:
+            httpGet: {path: /api/health, port: http}
+            periodSeconds: 20
+            failureThreshold: 10
+          resources:
+            {{- toYaml .Values.ui.resources | nindent 12 }}
+          securityContext:
+            {{- include "prowler.containerSecurityContext" . | nindent 12 }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            # Next's standalone server writes its fetch cache here, under a
+            # WORKDIR the image otherwise owns read-only.
+            - name: cache
+              mountPath: /app/.next/cache
+      volumes:
+        - name: tmp
+          emptyDir: {}
+        - name: cache
+          emptyDir: {}

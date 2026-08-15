@@ -1,0 +1,45 @@
+{{/*
+One shard, no replicas — a single logical instance is a hard requirement, not a
+sizing choice. Prowler selects logical databases by number (0 for the Celery
+broker, 2 for the SSE bus) and cluster mode does not implement SELECT.
+
+Valkey's own defaults already satisfy the other two constraints: 16 logical
+databases, and `noeviction` whenever no maxmemory is set. It is a broker, not a
+cache — an eviction here silently drops a queued scan.
+
+The operator sets no security context of its own, so the pod carries one here or
+it is refused outright by anything stricter than a `baseline` namespace.
+*/}}
+apiVersion: valkey.io/v1alpha1
+kind: ValkeyCluster
+metadata:
+  name: {{ include "prowler.valkeyName" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "prowler.labels" . | nindent 4 }}
+spec:
+  shards: 1
+  replicas: 0
+  persistence:
+    size: {{ .Values.valkey.size }}
+    {{- with .Values.valkey.storageClass }}
+    storageClassName: {{ . }}
+    {{- end }}
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 999
+    runAsGroup: 1000
+    fsGroup: 1000
+    seccompProfile:
+      type: RuntimeDefault
+  containers:
+    # The operator's own container name. Any other name adds a second container
+    # rather than configuring the server.
+    - name: server
+      securityContext:
+        allowPrivilegeEscalation: false
+        capabilities:
+          drop:
+            - ALL
+  exporter:
+    enabled: false

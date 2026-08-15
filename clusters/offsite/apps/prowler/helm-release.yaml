@@ -1,0 +1,27 @@
+---
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: prowler
+  namespace: prowler
+spec:
+  interval: 1h
+  chart:
+    spec:
+      chart: packages/charts/prowler
+      reconcileStrategy: Revision
+      sourceRef:
+        kind: GitRepository
+        name: infra
+        namespace: flux-system
+  values:
+    fullnameOverride: prowler
+    hostname: prowler.${SECRET_DOMAIN}
+    envFromSecret: prowler-env
+    gcp:
+      # The pool trusts this cluster's own SA-token issuer
+      # (https://oidc.lolwtf.ca/${CLUSTER_NAME}), so the projected token needs
+      # no credential behind it. `prowler-scanner` holds the org-level read
+      # roles; see terraform/gcp/projects/homelab-ng/prowler.tf.
+      audience: //iam.googleapis.com/projects/629296473058/locations/global/workloadIdentityPools/fml-pool/providers/${CLUSTER_NAME}
+      impersonationUrl: https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/prowler-scanner@homelab-ng.iam.gserviceaccount.com:generateAccessToken

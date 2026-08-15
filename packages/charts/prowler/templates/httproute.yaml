@@ -1,0 +1,27 @@
+{{/*
+The UI is the only thing on the public name; the API is reached server-side from
+the UI pod and has no route of its own.
+
+Prowler authenticates its own users — tenants, RS256 JWTs and an optional SAML
+or social provider — so there is no ExternalAuth filter here. Putting
+oauth2-proxy in front would stack a second login on an app that already has one.
+*/}}
+{{- if .Values.ingress.enabled }}
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: {{ include "prowler.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "prowler.labels" . | nindent 4 }}
+spec:
+  parentRefs:
+    - name: {{ .Values.ingress.gateway.name }}
+      namespace: {{ .Values.ingress.gateway.namespace }}
+  hostnames:
+    - {{ required "hostname is required when ingress is enabled" .Values.hostname }}
+  rules:
+    - backendRefs:
+        - name: {{ include "prowler.fullname" . }}-ui
+          port: {{ .Values.ui.port }}
+{{- end }}

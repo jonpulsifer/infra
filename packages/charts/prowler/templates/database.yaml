@@ -1,0 +1,49 @@
+{{/*
+Prowler splits Postgres across two roles: an admin that owns the schema, runs
+the migrations and holds the `django_*` tables, and a least-privilege role the
+tenant-scoped tables are read through under row-level security. The admin role
+is CNPG's own bootstrapped owner, so `<cluster>-app` is the credential for it.
+
+`managed.roles` reconciles that same owner role to add CREATEROLE, which the
+first migration needs to `CREATE ROLE` the least-privilege user. Pointing
+`passwordSecret` back at `<cluster>-app` keeps CNPG's generated credential as
+the single source rather than minting a second one that would then have to be
+kept in step. Superuser is not required: CREATEROLE plus ownership of the
+database covers every statement the migrations issue, and `pg_trgm` — the only
+extension — is trusted from PG13 on.
+*/}}
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: {{ include "prowler.databaseName" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "prowler.labels" . | nindent 4 }}
+spec:
+  instances: {{ .Values.database.instances }}
+  enableSuperuserAccess: false
+  storage:
+    {{- with .Values.database.storageClass }}
+    storageClass: {{ . }}
+    {{- end }}
+    size: {{ .Values.database.size }}
+  bootstrap:
+    initdb:
+      database: {{ .Values.database.name }}
+      owner: {{ .Values.database.name }}
+      encoding: UTF8
+      localeCollate: C
+      localeCType: C
+      dataChecksums: true
+  managed:
+    roles:
+      - name: {{ .Values.database.name }}
+        ensure: present
+        login: true
+        createrole: true
+        createdb: false
+        superuser: false
+        inherit: true
+        connectionLimit: -1
+        passwordSecret:
+          name: {{ include "prowler.databaseName" . }}-app

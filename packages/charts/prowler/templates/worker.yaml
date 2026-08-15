@@ -1,0 +1,61 @@
+{{/*
+The Celery worker and the beat scheduler: the same image and the same env as the
+API, with a different entrypoint argument and no HTTP surface to probe.
+
+The worker is the process that actually runs a scan, so it — not just the API —
+carries the GCP federation mount. The API needs it too, for the connection test
+the UI runs when a provider is onboarded.
+*/}}
+{{- range $component, $spec := dict "worker" $.Values.worker "beat" $.Values.beat }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "prowler.fullname" $ }}-{{ $component }}
+  namespace: {{ $.Release.Namespace }}
+  labels:
+    {{- include "prowler.labels" $ | nindent 4 }}
+spec:
+  {{- if eq $component "beat" }}
+  # A scheduler, so exactly one: a second replica double-fires every periodic task.
+  replicas: 1
+  {{- else }}
+  replicas: {{ $spec.replicas }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "prowler.selectorLabels" (dict "root" $ "component" $component) | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "prowler.podLabels" (dict "root" $ "component" $component) | nindent 8 }}
+    spec:
+      {{- if $.Values.sandbox }}
+      runtimeClassName: gvisor
+      {{- end }}
+      serviceAccountName: {{ include "prowler.fullname" $ }}
+      automountServiceAccountToken: false
+      securityContext:
+        {{- include "prowler.podSecurityContext" $ | nindent 8 }}
+      containers:
+        - name: {{ $component }}
+          image: {{ $.Values.image.api }}
+          imagePullPolicy: IfNotPresent
+          command: ["/home/prowler/docker-entrypoint.sh"]
+          args: [{{ $component | quote }}]
+          env:
+            {{- include "prowler.apiEnv" $ | nindent 12 }}
+          envFrom:
+            - secretRef:
+                name: {{ required "envFromSecret is required: it carries the Django signing, encryption and database secrets" $.Values.envFromSecret }}
+          resources:
+            {{- toYaml $spec.resources | nindent 12 }}
+          securityContext:
+            {{- include "prowler.containerSecurityContext" $ | nindent 12 }}
+          volumeMounts:
+            {{- include "prowler.writableMounts" $ | nindent 12 }}
+            {{- include "prowler.gcpVolumeMounts" $ | nindent 12 }}
+      volumes:
+        {{- include "prowler.writableVolumes" $ | nindent 8 }}
+        {{- include "prowler.gcpVolume" $ | nindent 8 }}
+{{- end }}
