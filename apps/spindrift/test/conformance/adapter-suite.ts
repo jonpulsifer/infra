@@ -284,6 +284,7 @@ export function buildAdapterSuite(
       outputDirectory: null,
       vercelFramework: null,
       registryAuth: [],
+      buildSecrets: [],
     } as const;
 
     test('declares a fidelity and a level', () => {

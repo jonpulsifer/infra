@@ -114,7 +114,7 @@ export class BosunBuildRoute implements BuildAdapter {
    * credential before it ever reaches the request. Nothing here renders the
    * outbox row anywhere public, so it travels as the other fields do.
    */
-  readonly carriesRegistryCredential = true;
+  readonly carriesHeldSecret = true;
   /** A skiff has no ambient registry identity — nothing it pushes to is unaided. */
   readonly selfAuthorizedRegistries: readonly RegistryFlavour[] = [];
 
@@ -142,6 +142,9 @@ export class BosunBuildRoute implements BuildAdapter {
         buildArgs: spec.buildArgs,
         zeroConfigFrontend: this.options.zeroConfigFrontend,
         registryAuth: spec.registryAuth,
+        // Same channel, same reasoning as the registry credential above. The
+        // hull writes each to a file and hands `docker buildx` the mounts.
+        buildSecrets: spec.buildSecrets,
       },
     };
 

@@ -35,6 +35,7 @@ const spec: BuildSpec = {
   outputDirectory: null,
   vercelFramework: null,
   registryAuth: [],
+  buildSecrets: [],
 };
 
 const source: BuildSource = {
@@ -54,7 +55,7 @@ const route: BuildAdapter = {
   logFidelity: 'LIVE_TEXT',
   buildLevel: 2,
   provenanceBuilderId: 'https://spindrift.dev/builders/example',
-  carriesRegistryCredential: true,
+  carriesHeldSecret: true,
   selfAuthorizedRegistries: ['ghcr'],
   async *build(
     given: BuildSource,

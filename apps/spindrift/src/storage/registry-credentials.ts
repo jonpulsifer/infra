@@ -22,7 +22,7 @@
  *
  * The honest cost, stated rather than mitigated: a credential handed to a
  * builder is a credential that builder holds. What this bounds is *which*
- * builders — see `carriesRegistryCredential` on the build contract, and the
+ * builders — see `carriesHeldSecret` on the build contract, and the
  * refusal `dispatchBuild` makes for a route that is not one of them.
  */
 import { eq, inArray } from 'drizzle-orm';

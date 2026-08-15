@@ -45,6 +45,7 @@ const spec: BuildSpec = {
   outputDirectory: null,
   vercelFramework: null,
   registryAuth: [],
+  buildSecrets: [],
 };
 
 /** A clock that only moves when the route waits — see `build-routes.test.ts`. */
@@ -266,7 +267,7 @@ describe('the route’s declared profile', () => {
     expect(built.logFidelity).toBe('ON_COMPLETION');
     expect(built.buildLevel).toBe(2);
     expect(built.provenanceBuilderId).toBe(BUILDER_ID);
-    expect(built.carriesRegistryCredential).toBe(true);
+    expect(built.carriesHeldSecret).toBe(true);
     expect(built.selfAuthorizedRegistries).toEqual([]);
   });
 });

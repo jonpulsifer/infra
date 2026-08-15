@@ -64,6 +64,10 @@ import {
   unplaceComponent,
   unplaceComponentInput,
 } from './components/unplace.ts';
+import {
+  setBuildSecrets,
+  setBuildSecretsInput,
+} from './config/build-secrets.ts';
 import { replaceConfig, replaceConfigInput } from './config/replace.ts';
 import { setConfig, setConfigInput } from './config/set.ts';
 import {
@@ -245,6 +249,7 @@ export const commandRegistry = {
   listDatastores: { input: listDatastoresInput, handler: listDatastores },
   getDatastore: { input: getDatastoreInput, handler: getDatastore },
   setConfig: { input: setConfigInput, handler: setConfig },
+  setBuildSecrets: { input: setBuildSecretsInput, handler: setBuildSecrets },
   configureInstallation: {
     input: configureInstallationInput,
     handler: configureInstallation,

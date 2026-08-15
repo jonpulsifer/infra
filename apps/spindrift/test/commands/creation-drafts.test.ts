@@ -416,7 +416,7 @@ describe('creation drafts', () => {
       logFidelity: base.logFidelity,
       buildLevel: base.buildLevel,
       provenanceBuilderId: base.provenanceBuilderId,
-      carriesRegistryCredential: base.carriesRegistryCredential,
+      carriesHeldSecret: base.carriesHeldSecret,
       // Every flavour, matching `FakeBuildAdapter`'s default: these fakes stand in
       // for a route, not for one route's reach.
       selfAuthorizedRegistries: [
@@ -722,7 +722,7 @@ describe('creation drafts', () => {
       logFidelity: 'LIVE_TEXT' as const,
       buildLevel: 2 as const,
       provenanceBuilderId: 'https://builders.example.test/crashing',
-      carriesRegistryCredential: true,
+      carriesHeldSecret: true,
       // Every flavour, matching `FakeBuildAdapter`'s default: these fakes stand in
       // for a route, not for one route's reach.
       selfAuthorizedRegistries: [

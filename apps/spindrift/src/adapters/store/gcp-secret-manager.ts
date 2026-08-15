@@ -68,6 +68,11 @@ interface ListVersionsResponse {
   nextPageToken?: string;
 }
 
+/** What `:access` answers with — the one payload-bearing read (§4). */
+interface AccessVersionResponse {
+  payload?: { data?: string };
+}
+
 /**
  * The annotations every secret this adapter creates carries.
  *
@@ -214,6 +219,23 @@ export class SecretManagerStore implements SecretStore {
     if (key === undefined) return null;
 
     return { reference, key, createdAt: new Date(version.createTime) };
+  }
+
+  /**
+   * The contract's one read-back of a value, for build dispatch alone.
+   *
+   * `:access` rather than the metadata GET `describe` uses — that is the whole
+   * difference between the two verbs, and it is why the service account that
+   * only delivers runtime config does not need `secretAccessor` here.
+   */
+  async open(reference: SecretReference): Promise<string | null> {
+    const version = await this.http.json<AccessVersionResponse>({
+      method: 'GET',
+      path: `${this.versionPath(reference.key, reference.version)}:access`,
+    });
+    const data = version?.payload?.data;
+    if (data === undefined) return null;
+    return Buffer.from(data, 'base64').toString('utf8');
   }
 
   async versions(scope: ConfigScope, key: string): Promise<SecretVersion[]> {

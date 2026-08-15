@@ -199,11 +199,42 @@ export interface BuildSpec {
    * and what the Docker config a builder reads is keyed on.
    *
    * A route that cannot carry one declares so with
-   * {@link BuildAdapter.carriesRegistryCredential}, and `dispatchBuild` refuses
+   * {@link BuildAdapter.carriesHeldSecret}, and `dispatchBuild` refuses
    * before dispatching rather than sending the field to a route that would put
    * it somewhere readable.
    */
   registryAuth: readonly RegistryAuth[];
+  /**
+   * The Component's declared build secrets, resolved (story 112).
+   *
+   * Each reaches the engine as a BuildKit secret mount — available to a `RUN`
+   * that asks for it by name, absent from every layer, from the build log, and
+   * from the baked artifact. Not {@link buildArgs} with ceremony: a build
+   * argument is defined by being baked and a secret mount is defined by not
+   * being, which is why the §4 rule against fetching arguments from a store
+   * does not reach here.
+   *
+   * Values, not references. Core resolved them against §10's store at
+   * dispatch, so the builder holds the secret for the length of one build and
+   * never a credential *to the store* — the half of §4's sentence that
+   * survives. A route that cannot carry one is refused at dispatch via
+   * {@link BuildAdapter.carriesHeldSecret}, the same gate `registryAuth`
+   * passes through.
+   *
+   * Provenance records the *names* alone: they are what someone reproducing
+   * the build needs, and the store reference beside them would be a map of
+   * where this installation keeps its credentials, published with the
+   * artifact.
+   */
+  buildSecrets: readonly BuildSecretValue[];
+}
+
+/** One resolved build secret, alive for the length of one dispatch. */
+export interface BuildSecretValue {
+  /** The mount id a `RUN --mount=type=secret,id=<name>` asks for. */
+  readonly name: string;
+  /** Plaintext, resolved by core at dispatch. Never persisted in this form. */
+  readonly value: string;
 }
 
 /**
@@ -358,24 +389,28 @@ export interface BuildAdapter {
    */
   readonly provenanceBuilderId: string;
   /**
-   * Whether this route can be handed {@link BuildSpec.registryAuth} without
-   * putting it somewhere it should not be.
+   * Whether this route can be handed a secret this installation holds —
+   * {@link BuildSpec.registryAuth} and {@link BuildSpec.buildSecrets} alike —
+   * without putting it somewhere it should not be.
    *
-   * A property of the route's *mechanism*, not a policy. The two routes that
-   * run the BuildKit program in a container of their own can take a secret
-   * through an environment variable scoped to that container. The hosted route
-   * is dispatched by a `workflow_dispatch` whose inputs GitHub renders in the
-   * run header, so a token in the request would be published to anyone who can
-   * see the run — including a repository the installation does not own — and
-   * it answers `true` only where it has somewhere else to put one: see
-   * `GitHubActionsBuildRoute.carriesRegistryCredential` for the sealed
-   * mechanism that opens up.
+   * A property of the route's *mechanism*, not a policy, which is why it is
+   * one capability and not one per kind of secret: what makes a route safe to
+   * hand a registry login is exactly what makes it safe to hand a build
+   * secret, and two flags could only ever disagree by mistake. The routes
+   * that run the BuildKit program in a container of their own take a secret
+   * through an environment variable scoped to that container. The hosted
+   * route is dispatched by a `workflow_dispatch` whose inputs GitHub renders
+   * in the run header, so a value in the request would be published to anyone
+   * who can see the run — including a repository the installation does not
+   * own — and it answers `true` only where it has somewhere else to put one:
+   * see `GitHubActionsBuildRoute.carriesHeldSecret` for the sealed mechanism
+   * that opens up.
    *
    * A route with nowhere configured to carry one answers `false`, and
-   * `dispatchBuild` refuses a build that needs a stored credential on it —
-   * which is the direction being wrong has to fail in.
+   * `dispatchBuild` refuses a build that needs a held secret on it — which is
+   * the direction being wrong has to fail in.
    */
-  readonly carriesRegistryCredential: boolean;
+  readonly carriesHeldSecret: boolean;
   /**
    * The registry flavours this route's own identity can push to unaided.
    *

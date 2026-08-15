@@ -136,7 +136,7 @@ describe('a build whose destination needs a stored credential', () => {
   ): { context: CommandContext; asked: string[][] } {
     const { store, asked } = credentialStore(held);
     route = new FakeBuildAdapter({
-      carriesRegistryCredential: carries,
+      carriesHeldSecret: carries,
       selfAuthorizedRegistries: selfAuthorized,
     });
     return {

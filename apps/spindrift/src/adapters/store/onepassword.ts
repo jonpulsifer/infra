@@ -59,6 +59,8 @@ interface ConnectItemOverview {
 interface ConnectField {
   type?: string;
   label?: string;
+  /** Populated on an item GET; only {@link OnePasswordStore.open} reads it. */
+  value?: string;
   section?: { id?: string };
 }
 
@@ -167,6 +169,28 @@ export class OnePasswordStore implements SecretStore {
     if (key === null) return null;
 
     return { reference, key, createdAt: new Date(item.createdAt) };
+  }
+
+  /**
+   * The contract's one read-back of a value, for build dispatch alone.
+   *
+   * The same GET `describe` makes — Connect returns fields with their values on
+   * an item read — with the same title check, so a renamed item cannot hand a
+   * build a different variable's value.
+   */
+  async open(reference: SecretReference): Promise<string | null> {
+    const item = await this.http.json<ConnectItem>({
+      method: 'GET',
+      path: this.itemPath(reference.version),
+    });
+    if (item === null || item.title !== reference.key) return null;
+
+    for (const field of item.fields ?? []) {
+      if (field.section?.id !== SECTION) continue;
+      if (field.type !== 'CONCEALED') continue;
+      return field.value ?? null;
+    }
+    return null;
   }
 
   async versions(scope: ConfigScope, key: string): Promise<SecretVersion[]> {

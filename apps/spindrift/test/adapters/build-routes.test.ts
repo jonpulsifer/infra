@@ -32,7 +32,7 @@ import type {
 import {
   GitHubActionsBuildRoute,
   reusableWorkflowRepository,
-  sealRegistryAuth,
+  sealForRun,
 } from '../../src/adapters/build/github-actions.ts';
 import {
   InClusterBuildRoute,
@@ -95,6 +95,7 @@ const spec: BuildSpec = {
   outputDirectory: null,
   vercelFramework: null,
   registryAuth: [],
+  buildSecrets: [],
 };
 
 /**
@@ -545,10 +546,9 @@ describe('the hosted build route', () => {
   });
 
   test('carries a registry credential only where a seal key is configured', () => {
-    expect(hostedRoute().route.carriesRegistryCredential).toBe(false);
+    expect(hostedRoute().route.carriesHeldSecret).toBe(false);
     expect(
-      hostedRoute({}, {}, SEAL_KEYPAIR.publicKey).route
-        .carriesRegistryCredential,
+      hostedRoute({}, {}, SEAL_KEYPAIR.publicKey).route.carriesHeldSecret,
     ).toBe(true);
   });
 
@@ -587,7 +587,7 @@ describe('the hosted build route', () => {
       { host: 'registry-1.docker.io', username: 'an-owner', secret: 'a-token' },
       { host: 'ghcr.io', username: 'other-owner', secret: 'a-second-token' },
     ];
-    const sealed = await sealRegistryAuth(auth, SEAL_KEYPAIR.publicKey);
+    const sealed = await sealForRun(auth, SEAL_KEYPAIR.publicKey);
 
     const proc = Bun.spawn(['node', '-e', await workflowDecryptScript()], {
       env: {
@@ -1146,6 +1146,7 @@ describe('the BuildKit program', () => {
     destinations: ['registry.example.test/app'],
     tags: ['sha256-bundle', 'latest'],
     zeroConfigFrontend: FRONTEND,
+    buildSecretNames: [],
     buildArgs: { PUBLIC_URL: 'https://app.example.test' },
   });
 
@@ -1176,6 +1177,7 @@ describe('the BuildKit program', () => {
       destinations: ['registry.example.test/app'],
       tags: ['latest'],
       zeroConfigFrontend: FRONTEND,
+      buildSecretNames: [],
       buildArgs: {},
     });
     expect(bare).not.toMatch(/\\\n\s*\n\s*--/);
@@ -1254,6 +1256,7 @@ describe('the BuildKit program', () => {
       destinations: ['registry.example.test/app'],
       tags: ['latest'],
       zeroConfigFrontend: 'registry.example.test/zero-config',
+      buildSecretNames: [],
       buildArgs: {},
     });
     expect(untagged).toContain('--frontend dockerfile.v0');
@@ -1314,6 +1317,7 @@ describe('the BuildKit program', () => {
       destinations: ['registry.example.test/app'],
       tags: ['sha256-bundle', 'latest'],
       zeroConfigFrontend: FRONTEND,
+      buildSecretNames: [],
       buildArgs: { EVIL: "'; rm -rf /; echo '" },
     });
     // Neither value may end its own quoting: the escape is what keeps a build

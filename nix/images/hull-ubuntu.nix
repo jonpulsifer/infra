@@ -505,6 +505,22 @@ let
     done < <(jq -r '(.spec.buildArgs // {}) | to_entries[] | "\(.key)=\(.value)"' "$req")
     [ -n "$frontend_build_arg" ] && build_arg_flags+=(--build-arg "$frontend_build_arg")
 
+    # Build secrets (story 112): each value goes to a file inside the skiff's
+    # private build root and rides the build as a named mount — available to
+    # the RUN that asks for it, absent from every layer and from this log.
+    # Names match spindrift's VARIABLE_NAME, so they are safe as filenames.
+    secret_flags=()
+    secrets_dir="$build_root/build-secrets"
+    secret_count=$(jq -r '(.spec.buildSecrets // []) | length' "$req")
+    if [ "$secret_count" -gt 0 ]; then
+      mkdir -p "$secrets_dir"
+      for ((i = 0; i < secret_count; i++)); do
+        sname=$(jq -r ".spec.buildSecrets[$i].name" "$req")
+        jq -rj ".spec.buildSecrets[$i].value" "$req" > "$secrets_dir/$sname"
+        secret_flags+=(--secret "id=$sname,src=$secrets_dir/$sname")
+      done
+    fi
+
     tag_flags=()
     while IFS= read -r t; do
       [ -n "$t" ] && tag_flags+=(-t "$t")
@@ -519,6 +535,7 @@ let
       --push \
       "''${tag_flags[@]}" \
       "''${build_arg_flags[@]}" \
+      "''${secret_flags[@]}" \
       "''${platform_flags[@]}" \
       --provenance=mode=max --sbom=true \
       --metadata-file "$metadata_file" \

@@ -81,6 +81,7 @@ describe('the BuildKit program', () => {
     tags: ['latest'],
     zeroConfigFrontend: 'registry.example.test/zero-config',
     buildArgs: {},
+    buildSecretNames: [],
   });
 
   test('reads the credential out of the environment, never out of itself', () => {
@@ -157,6 +158,7 @@ describe('the cloud build route', () => {
         outputDirectory: null,
         vercelFramework: null,
         registryAuth,
+        buildSecrets: [],
       },
     )) {
       // drained for the submit; the route reports the 500 as a failure
@@ -270,6 +272,7 @@ describe('the in-cluster route', () => {
           outputDirectory: null,
           vercelFramework: null,
           registryAuth,
+          buildSecrets: [],
         },
       )
       .next();

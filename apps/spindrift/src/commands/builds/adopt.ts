@@ -173,10 +173,13 @@ export const adoptBuild: Command<AdoptBuildInput, AdoptBuildResult> = async (
   // - **The same artifact** — this adoption already happened (or the caller named
   //   this Component's own Build). Answering with it is idempotent and true.
   // - **A different one** — this Component built that commit itself, or is
-  //   building it right now. Overwriting is out of the question (it would blank a
-  //   Build in flight, or retarget one a Deploy names), and answering with it
-  //   would hand back a row that is not the artifact that was asked for. So it is
-  //   refused, naming the row in the way.
+  //   building it right now. Two digests for one commit is not a contradiction
+  //   — bases move, timestamps differ, a rotated build secret rebuilds
+  //   differently (story 112); the digest is the artifact's identity and the
+  //   commit is not. What stays out of the question is overwriting: it would
+  //   blank a Build in flight, or retarget one a Deploy names. And answering
+  //   with the row would hand back an artifact that was not the one asked for.
+  //   So it is refused, naming the row in the way.
   const [existing] = await context.db
     .select()
     .from(builds)
@@ -196,7 +199,7 @@ export const adoptBuild: Command<AdoptBuildInput, AdoptBuildResult> = async (
   if (existing.artifactDigest !== artifactDigest) {
     return failed(
       'INVALID_INPUT',
-      `${component.name} already has Build ${existing.id} for commit ${source.commit} as ${source.targetShape}, and it is not this artifact`,
+      `${component.name} already has Build ${existing.id} for commit ${source.commit} as ${source.targetShape}, carrying a different artifact — not a contradiction, but a row a Deploy may name, so it is not retargeted`,
       [{ path: 'componentId', message: 'already has a Build for that commit' }],
     );
   }

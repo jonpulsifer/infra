@@ -281,8 +281,8 @@ export const deleteApp: Command<DeleteAppInput, DeleteAppResult> = async (
     .where(eq(datastores.appId, app.id));
 
   // The scope a store item is reachable at is derived from rows this delete is
-  // about to remove, so it is resolved now and used after. `kind: 'secret_ref'`
-  // is the only kind with anything in a store — §10's website exception is a
+  // about to remove, so it is resolved now and used after. `secret_ref` and
+  // `build_secret` both pin versions in a store; §10's website exception is a
   // plain column, and it goes with the row.
   const pinned =
     componentIds.length === 0
@@ -297,7 +297,7 @@ export const deleteApp: Command<DeleteAppInput, DeleteAppResult> = async (
           .where(
             and(
               inArray(configItems.componentId, componentIds),
-              eq(configItems.kind, 'secret_ref'),
+              inArray(configItems.kind, ['secret_ref', 'build_secret']),
             ),
           );
 
