@@ -4,13 +4,27 @@ the migrations and holds the `django_*` tables, and a least-privilege role the
 tenant-scoped tables are read through under row-level security. The admin role
 is CNPG's own bootstrapped owner, so `<cluster>-app` is the credential for it.
 
-`managed.roles` reconciles that same owner role to add CREATEROLE, which the
-first migration needs to `CREATE ROLE` the least-privilege user. Pointing
+`managed.roles` reconciles that same owner role to add two attributes. Pointing
 `passwordSecret` back at `<cluster>-app` keeps CNPG's generated credential as
 the single source rather than minting a second one that would then have to be
-kept in step. Superuser is not required: CREATEROLE plus ownership of the
-database covers every statement the migrations issue, and `pg_trgm` — the only
-extension — is trusted from PG13 on.
+kept in step.
+
+CREATEROLE, because the first migration issues `CREATE ROLE` for the
+least-privilege user.
+
+BYPASSRLS, because the admin connection writes rows that belong to no tenant
+yet. Prowler marks its tenant tables `FORCE ROW LEVEL SECURITY`, which applies
+to the table owner as well, and every policy it creates is granted `TO` the
+least-privilege role alone — so for the owner no policy matches and the default
+is deny. Registering a user does `Role.objects.using(admin_db).create(...)`
+before any `api.tenant_id` is set, and without this it fails with `new row
+violates row-level security policy for table "roles"`, leaving an account with
+no role attached. Upstream runs this connection as the `postgres` superuser,
+where the bypass is implicit; this keeps the rest of least privilege and grants
+only the part that is load-bearing.
+
+Superuser itself is still not required: `pg_trgm`, the only extension, is
+trusted from PG13 on.
 */}}
 apiVersion: postgresql.cnpg.io/v1
 kind: Cluster
@@ -41,6 +55,7 @@ spec:
         ensure: present
         login: true
         createrole: true
+        bypassrls: true
         createdb: false
         superuser: false
         inherit: true
