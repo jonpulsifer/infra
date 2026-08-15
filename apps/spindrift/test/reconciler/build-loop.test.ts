@@ -49,9 +49,14 @@ function registryOf(route: FakeBuildAdapter): AdapterRegistry {
     deploy: (adapter) =>
       adapter === 'static'
         ? new FakeDeployAdapter({ adapter: 'static', artifactTypes: ['files'] })
-        : adapter === 'kubernetes'
-          ? new FakeDeployAdapter({ adapter: 'kubernetes' })
-          : null,
+        : adapter === 'vercel'
+          ? new FakeDeployAdapter({
+              adapter: 'vercel',
+              artifactTypes: ['vercel-output', 'files'],
+            })
+          : adapter === 'kubernetes'
+            ? new FakeDeployAdapter({ adapter: 'kubernetes' })
+            : null,
     build: (name) => (name === 'hosted' ? route : null),
     store: () => new FakeSecretStore(),
     repository: () => null,
@@ -210,6 +215,48 @@ describe('a rebuild staged by a move dispatches against the new placement', () =
     expect(route.built[0]?.spec.buildArgs).toEqual({
       SITE_URL: 'https://new.example.test',
     });
+  });
+
+  test('a files Build placed on Vercel dispatches — the accept list, not the preferred shape', async () => {
+    // Vercel prefers `vercel-output` for a website and still serves plain
+    // `files`, so a `files` Build staged before a move onto Vercel is not a
+    // stranded shape — it dispatches and the artifact it produces will land.
+    const { component, staticTarget, build } = await movedWebsite();
+    const db = database().db;
+
+    const vercelVessel = await insertVessel(db, 'vercel', {
+      name: `vercel-${crypto.randomUUID()}`,
+    });
+    const [vercelTarget] = await db
+      .insert(targets)
+      .values(
+        targetValues({
+          adapter: 'vercel',
+          vesselId: vercelVessel.id,
+          rank: 3,
+          discovery: null,
+        }),
+      )
+      .returning();
+    await db
+      .delete(componentTargetDesired)
+      .where(eq(componentTargetDesired.targetId, staticTarget.id));
+    await db
+      .update(components)
+      .set({ placedTargetId: vercelTarget!.id })
+      .where(eq(components.id, component.id));
+    await db.insert(componentTargetDesired).values({
+      componentId: component.id,
+      targetId: vercelTarget!.id,
+      updatedAt: FROZEN,
+    });
+
+    const route = new FakeBuildAdapter();
+    expect(await runBuildPass(context(registryOf(route)))).toBe(1);
+
+    expect((await buildRow(build.id)).status).toBe('SUCCEEDED');
+    expect(route.built).toHaveLength(1);
+    expect(route.built[0]?.spec.artifactType).toBe('files');
   });
 
   test('a Build whose shape the placement of record does not take waits and says so', async () => {

@@ -50,7 +50,7 @@ import type {
   TargetDiscovery,
 } from '../domain/capabilities.ts';
 import type { Draft } from '../domain/creation-draft.ts';
-import type { DesiredDocument } from '../domain/desired-state.ts';
+import type { ArtifactType, DesiredDocument } from '../domain/desired-state.ts';
 import type { TargetConnection } from '../domain/target.ts';
 import {
   VESSEL_KINDS,
@@ -153,9 +153,10 @@ export const authMode = pgEnum('auth_mode', ['none', 'proxy']);
  *
  * `vercel-output` is a third *shape* rather than a flavour of `files` because
  * §2 keys a Build on the target shape: a `.vercel/output` tree and a directory
- * of static files are both "a tar in a registry" and are not interchangeable,
- * and a Component moving between a static Target and a Vercel one has to
- * rebuild rather than deploy the other's artifact as though it fit.
+ * of static files are both "a tar in a registry" and are not interchangeable.
+ * The type is what lets an adapter that serves several shapes pick the right
+ * rendering (`takesShape`), and what makes a `vercel-output` tar refusable on
+ * a host that serves bare files instead of served as though it fit.
  */
 export const artifactType = pgEnum('artifact_type', [
   'image',
@@ -630,7 +631,7 @@ export const builds = pgTable(
      * §3: "Resolution runs before the build and outputs placement plus
      * artifact shape, which is why Build's key includes target-shape."
      */
-    targetShape: text('target_shape').notNull(),
+    targetShape: text('target_shape').notNull().$type<ArtifactType>(),
     artifactType: artifactType('artifact_type').notNull(),
     /** Set once the build produces a digestible artifact. */
     artifactDigest: text('artifact_digest'),

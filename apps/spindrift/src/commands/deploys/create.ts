@@ -54,6 +54,7 @@ import {
   placementTargetOf,
   reachExclusions,
   sentence,
+  takesShape,
 } from '../../domain/placement.ts';
 import { targetRowLabel } from '../../domain/target.ts';
 import { demandSentence, migrationFor } from '../config/migration.ts';
@@ -534,17 +535,20 @@ export async function checkDeployable(
     }
   }
 
-  // §3: "changing placement across shapes forces a rebuild." The Build's key
-  // carries the shape it was built for, so a `files` artifact reaching a Target
-  // that runs images is not a deploy that fails later — it is one that never
-  // starts, which is the whole reason resolution runs before the build.
+  // §3: a Build's key carries the shape it was built for, so a shape this
+  // Target's adapter has no rendering of is not a deploy that fails later — it
+  // is one that never starts, which is the whole reason resolution runs before
+  // the build. Membership in the adapter's accept list, not equality with the
+  // one shape a fresh build here would take: Vercel prefers `vercel-output`
+  // and still serves plain `files`, so a static site moving in from Pages or
+  // Firebase ships the artifact it already has (`takesShape`).
   const placement = placementTargetOf(target, {
     artifactTypes:
       context.adapters.deploy(target.adapter)?.artifactTypes ?? null,
     manifest: context.manifest,
   });
-  const shape = artifactTypeFor(component.kind, placement);
-  if (build.targetShape !== shape) {
+  if (!takesShape(component.kind, build.targetShape, placement)) {
+    const shape = artifactTypeFor(component.kind, placement);
     return refuse(
       'NOT_DEPLOYABLE',
       `Build ${build.id} produced ${build.targetShape}, and ${targetRowLabel(target)} takes ${shape} — this placement needs a rebuild`,

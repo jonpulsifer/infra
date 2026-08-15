@@ -66,7 +66,7 @@ async function seed(
     status?: 'PENDING' | 'SUCCEEDED';
     artifactType?: 'image' | 'files';
     /** A second shape over the same bytes, which must not be a second Source. */
-    targetShape?: string;
+    targetShape?: 'image' | 'files' | 'vercel-output';
     commit?: string;
     repoUrl?: string;
   },
