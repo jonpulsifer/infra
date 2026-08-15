@@ -13,7 +13,7 @@ import {
 } from '../commands/builds/dispatch.ts';
 import { buildRouteFor } from '../commands/builds/route.ts';
 import { builds, components, targets, vessels } from '../db/schema.ts';
-import { artifactTypeFor } from '../domain/placement.ts';
+import { artifactTypeFor, takesShape } from '../domain/placement.ts';
 import { targetLabel } from '../domain/target.ts';
 import {
   reconcilerAttemptDuration,
@@ -101,18 +101,21 @@ export async function runBuildPass(
       );
       continue;
     }
-    const shapeTaken = artifactTypeFor(row.kind, {
+    const placement = {
       capabilities: {
         artifactTypes:
           context.adapters.deploy(row.adapter)?.artifactTypes ?? [],
       },
-    });
-    if (shapeTaken !== row.targetShape) {
+    };
+    if (!takesShape(row.kind, row.targetShape, placement)) {
       // The placement of record does not take what this Build produces —
       // it was staged for a placement the Component has since moved off.
       // Binding it anywhere else would evaluate route and policy against a
       // Target the artifact can never land on, so the Build stays PENDING and
-      // says so.
+      // says so. Membership, not equality with the shape a fresh build here
+      // would take (`takesShape`): a `files` Build placed on Vercel dispatches,
+      // because Vercel serves the shape it produces.
+      const shapeTaken = artifactTypeFor(row.kind, placement);
       await recordDispatchWait(
         context,
         {

@@ -23,7 +23,9 @@
  *
  * **Resolution runs before the build**, and outputs placement *plus artifact
  * shape* — which is why a Build's key includes the target shape and why moving
- * across shapes forces a rebuild while moving within one does not (§3).
+ * to a Target that does not take the built shape forces a rebuild, while a
+ * move whose destination accepts it ships the artifact as is (§3,
+ * {@link takesShape}).
  */
 import type {
   InstallationManifest,
@@ -260,12 +262,16 @@ function routesAttachTo(target: RankedTargetRow): boolean {
 }
 
 /**
- * The artifact shape a Component takes on a Target (§3, §6).
+ * The artifact shape a fresh Build for this placement produces (§3, §6).
  *
  * Shape follows the Target, not the kind: a `website` is the one kind that can
  * land on either, rendered to files on a `static` Target and to a server image
  * anywhere else. That is the whole reason exposure "filters Targets and selects
  * artifact shape" rather than being a chart setting (§28).
+ *
+ * This is the *preferred* shape — what to build next, one answer. Whether an
+ * artifact that already exists can land here is {@link takesShape}, which
+ * consults the adapter's whole accept list.
  *
  * Narrowed to the one capability it reads, the way {@link sentence} is: the
  * build loop asks it of bare `targets` rows, which have an adapter's artifact
@@ -597,14 +603,26 @@ export function resolvePlacement(
 }
 
 /**
- * Whether moving a Component from one placement to another forces a rebuild.
+ * Whether a Build of `shape` can land on a Target as a `kind` Component —
+ * the one gate deploy admission and build dispatch share.
  *
- * §3: "changing placement across shapes forces a rebuild" — a Build's key
- * includes the target shape, so a website moving from a cluster to the static
- * Target has no artifact of the right shape to deploy. Within one shape the
- * existing Build is deployable as is, which is what makes a cluster-to-cluster
- * move free (§10).
+ * Membership in the adapter's accept list, not equality with the single shape
+ * {@link artifactTypeFor} prefers: Vercel prefers `vercel-output` for a
+ * website and still serves plain `files`, so a `files` site moving in from
+ * static hosting travels as it is. Only a shape the adapter has no rendering
+ * for — a server image on static hosting, `vercel-output` handed to a host
+ * that serves bare files — forces the rebuild §3 prescribes. The equality arm
+ * stays because {@link artifactTypeFor} answers even for a Target whose
+ * adapter this installation does not ship (an empty list falls back to
+ * `image`), and that Target must keep taking what it always took.
  */
-export function requiresRebuild(from: ArtifactType, to: ArtifactType): boolean {
-  return from !== to;
+export function takesShape(
+  kind: ComponentKind,
+  shape: ArtifactType,
+  target: { readonly capabilities: Pick<TargetCapabilities, 'artifactTypes'> },
+): boolean {
+  return (
+    shape === artifactTypeFor(kind, target) ||
+    target.capabilities.artifactTypes.includes(shape)
+  );
 }

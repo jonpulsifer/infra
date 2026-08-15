@@ -1764,8 +1764,10 @@ export function ReachEditor({
  *
  * **What it does not do is a release.** Nothing is placed on the new Target
  * until Deploy runs, which is why the success sentence names Deploy and names
- * Rebuild: the artifact travels as it is where the shapes match, and where they
- * do not, `createDeploy` refuses with "this placement needs a rebuild" (§3) and
+ * Rebuild: the artifact travels as it is where the new placement takes the
+ * built shape (`takesShape`, which consults the adapter's whole accept list),
+ * and where it does not,
+ * `createDeploy` refuses with "this placement needs a rebuild" (§3) and
  * Rebuild in the header is the answer to it. Neither happens here — a form that
  * deployed as well would be substituting one act for the other, which
  * `deployApp`'s own header (`src/commands/apps/deploy.ts:1-43`) forbids.
@@ -1941,8 +1943,8 @@ export function PlacementEditor({
       {outcome?.kind === 'moved' ? (
         <p className="rounded-md border border-warning/40 bg-warning-soft px-3 py-2 text-xs">
           Moved to {outcome.to}. Nothing is running there yet — Deploy places
-          the artifact that is already built, and where that Build was made for
-          a different shape Deploy says so and Rebuild is the answer.
+          the artifact that is already built, and where the new Target cannot
+          take that Build&apos;s shape Deploy says so and Rebuild is the answer.
           {outcome.carried.length === 0
             ? ''
             : ` ${outcome.carried.join(', ')} came with it as references; no value was read.`}{' '}

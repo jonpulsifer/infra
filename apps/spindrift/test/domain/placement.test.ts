@@ -21,8 +21,8 @@ import {
   type DerivedRequirements,
   exclusionsFor,
   type PlacementTarget,
-  requiresRebuild,
   resolvePlacement,
+  takesShape,
 } from '../../src/domain/placement.ts';
 import { CAPABLE_DISCOVERY } from '../harness/fakes/deploy-adapter.ts';
 
@@ -36,7 +36,7 @@ const ARTIFACT_TYPES = {
   kubernetes: ['image'],
   cloudrun: ['image'],
   static: ['files'],
-  vercel: ['files'],
+  vercel: ['vercel-output', 'files'],
   'cloudflare-pages': ['files'],
 } as const satisfies Record<TargetAdapter, readonly ArtifactType[]>;
 
@@ -226,15 +226,42 @@ describe('exposure filters Targets and selects artifact shape', () => {
 });
 
 describe('moving between placements', () => {
-  test('a cross-shape move forces a rebuild', () => {
+  test('a shape the destination has no rendering of forces a rebuild', () => {
     // §3: a Build's key includes the target shape, so a website moving from a
     // cluster to the static Target has no artifact of the right shape.
-    expect(requiresRebuild('image', 'files')).toBe(true);
+    expect(takesShape('website', 'image', target({ adapter: 'static' }))).toBe(
+      false,
+    );
+    // And the inverse: `vercel-output` handed to a host that serves bare files.
+    expect(
+      takesShape('website', 'vercel-output', target({ adapter: 'static' })),
+    ).toBe(false);
   });
 
-  test('a same-shape move does not', () => {
+  test('a same-shape move ships the artifact as is', () => {
     // Which is what makes cluster-to-cloud, and cluster-to-cluster, free.
-    expect(requiresRebuild('image', 'image')).toBe(false);
+    expect(
+      takesShape('service', 'image', target({ adapter: 'kubernetes' })),
+    ).toBe(true);
+  });
+
+  test('an accepted non-preferred shape ships as is too', () => {
+    // Vercel prefers `vercel-output` for a website and still serves plain
+    // `files` — a static site moving in from Pages or Firebase travels
+    // without a rebuild, because the files are the site.
+    const vercel = target({ adapter: 'vercel' });
+    expect(artifactTypeFor('website', vercel)).toBe('vercel-output');
+    expect(takesShape('website', 'files', vercel)).toBe(true);
+  });
+
+  test('a Target with no adapter keeps taking what it always took', () => {
+    // The empty accept list falls back to `artifactTypeFor`'s answer, so the
+    // membership gate never newly strands a placement equality admitted.
+    const bare = {
+      capabilities: { artifactTypes: [] as readonly ArtifactType[] },
+    };
+    expect(takesShape('service', 'image', bare)).toBe(true);
+    expect(takesShape('website', 'files', bare)).toBe(false);
   });
 });
 

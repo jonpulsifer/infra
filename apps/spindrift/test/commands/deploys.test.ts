@@ -176,7 +176,7 @@ async function fixture(
 async function succeededBuild(
   componentId: string,
   seed: number,
-  shape: 'image' | 'files' = 'image',
+  shape: 'image' | 'files' | 'vercel-output' = 'image',
   verifiedBuildLevel = 2,
 ) {
   const [build] = await database()
@@ -292,6 +292,65 @@ describe('createDeploy writes an intent, and only an intent', () => {
     if (result.ok) return;
     expect(result.failure.code).toBe('NOT_DEPLOYABLE');
     expect(result.failure.message).toContain('rebuild');
+  });
+
+  test('an accepted non-preferred shape is admitted — files lands on Vercel', async () => {
+    // The gate is membership in the adapter's accept list, not equality with
+    // the shape a fresh build here would take: Vercel prefers `vercel-output`
+    // for a website and still serves plain `files`, so a static site moving in
+    // from Pages or Firebase ships the artifact it already has.
+    const { component, target } = await fixture({
+      kind: 'website',
+      adapter: 'vercel',
+      reach: 'public',
+      auth: 'none',
+    });
+    const build = await succeededBuild(component.id, 3, 'files');
+
+    const result = await createDeploy(
+      { componentId: component.id, targetId: target.id, buildId: build.id },
+      context(
+        registryOf(
+          new FakeDeployAdapter({
+            adapter: 'vercel',
+            artifactTypes: ['vercel-output', 'files'],
+          }),
+        ),
+      ),
+    );
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.phase).toBe('PENDING');
+  });
+
+  test('the inverse still needs the rebuild — vercel-output on a files host', async () => {
+    // A `vercel-output` tar is the Build Output API tree, not the site's own
+    // files; a host that serves bare files has no rendering of it.
+    const { component, target } = await fixture({
+      kind: 'website',
+      adapter: 'static',
+      reach: 'public',
+      auth: 'none',
+    });
+    const build = await succeededBuild(component.id, 4, 'vercel-output');
+
+    const result = await createDeploy(
+      { componentId: component.id, targetId: target.id, buildId: build.id },
+      context(
+        registryOf(
+          new FakeDeployAdapter({
+            adapter: 'static',
+            artifactTypes: ['files'],
+          }),
+        ),
+      ),
+    );
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.failure.code).toBe('NOT_DEPLOYABLE');
+    expect(result.failure.message).toContain('needs a rebuild');
   });
 
   test('a Component is refused at a reach its Target does not assert', async () => {
