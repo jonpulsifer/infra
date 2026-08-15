@@ -74,7 +74,7 @@
     # production CI labels are served from oldschool -- one small slot is the
     # agreed exception, not the start of a pool. 4G workspace, not 6G,
     # because the ~20 GiB free on this root also backs the 10G cache cap
-    # below and skiff-ubuntu's parked slots: the standing reservation stays
+    # below and skiff-folly's parked slots: the standing reservation stays
     # small so the un-park arithmetic stays possible at all.
     classes.skiff-ubuntu-lite = {
       hull = "${inputs.self.packages.x86_64-linux.hull-ubuntu}";
@@ -117,7 +117,7 @@
       persist = true;
       # Parked, and not as spare capacity: a CI job's traffic -- checkout,
       # caches, docker pulls -- does not belong on this site's satellite
-      # link, so oldschool serves skiff-ubuntu from the fast-internet site.
+      # link, so oldschool serves skiff-offsite from the fast-internet site.
       # Un-parking is a last resort, not a rebalancing lever, and re-does
       # the disk arithmetic first as well as the memory's: two 6G slots
       # plus the lite slot's 4G plus a full 10G cache oversubscribe the
@@ -135,8 +135,8 @@
     };
   };
 
-  # The pool's declared ceiling is 2048M + 2048M with skiff-ubuntu parked,
-  # well inside the limit below. Un-parking skiff-ubuntu at warm = 2 would
+  # The pool's declared ceiling is 2048M + 2048M with skiff-folly parked,
+  # well inside the limit below. Un-parking skiff-folly at warm = 2 would
   # take the declared total to 10 GiB -- over this limit and over what the
   # host can spare (15.2 GiB total, ~5 GiB held by kubelet and the system,
   # no swap), so that last resort re-does this arithmetic first. Without a

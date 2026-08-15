@@ -1,6 +1,6 @@
 name: TypeScript Benchmark
 
-# Compares runner labels on one identical real workload. `skiff-ubuntu` belongs
+# Compares runner labels on one identical real workload. `skiff-offsite` belongs
 # here on the strongest possible footing: its rootfs is the very same pinned
 # actions-runner image digest ARC boots (nix/images/hull-ubuntu.nix,
 # clusters/base/apps/arc/infra.yaml), so a difference in these numbers is the
@@ -21,8 +21,6 @@ on:
           - all
           - infra-offsite
           - infra-folly
-          - skiff-ubuntu
-          - skiff-ubuntu-bench
           - skiff-offsite
           - skiff-folly
           - ubuntu-latest
@@ -60,13 +58,14 @@ jobs:
       - id: set-runners
         run: |
           if [ "${{ inputs.target }}" = "all" ]; then
-            echo 'runners=["infra-offsite", "infra-folly", "skiff-ubuntu", "ubuntu-latest"]' >> "$GITHUB_OUTPUT"
+            echo 'runners=["infra-offsite", "infra-folly", "skiff-offsite", "ubuntu-latest"]' >> "$GITHUB_OUTPUT"
           else
             echo 'runners=["${{ inputs.target }}"]' >> "$GITHUB_OUTPUT"
           fi
           # A JSON array [1..waves]. The matrix multiplies it against the label
-          # list, so `waves: 8` on `skiff-ubuntu` fires eight identical jobs at
-          # the fleet's shared pool at once.
+          # list, so `waves: 8` on `skiff-offsite` fires eight identical jobs at
+          # the fleet's shared pool at once. `skiff-folly` is parked at warm 0,
+          # so a wave there measures cold boots, not a pool.
           seq 1 "${{ inputs.waves }}" | jq -cs '.' | sed 's/^/waves=/' >> "$GITHUB_OUTPUT"
 
   # The cheapest job that can exist, on every label, so the Actions timings
