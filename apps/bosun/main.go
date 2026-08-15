@@ -64,8 +64,20 @@ func main() {
 		logger.Error("sweep", "error", err)
 		os.Exit(1)
 	}
-	p.fill(ctx)
-	logger.Info("warm pool filled", "classes", len(cfg.Classes))
+	// Reported against what was asked for, because it is routinely less: every
+	// class mints a JIT config to boot, so a GitHub that is down at start
+	// yields an empty pool. The poll loop's top-up is what recovers from that,
+	// and saying "filled" here regardless is what made an empty pool look like
+	// a working one.
+	wanted := 0
+	for _, class := range cfg.Classes {
+		wanted += class.Warm
+	}
+	if booted := p.fill(ctx); booted < wanted {
+		logger.Warn("warm pool started short; the poll loop keeps trying", "classes", len(cfg.Classes), "booted", booted, "wanted", wanted)
+	} else {
+		logger.Info("warm pool filled", "classes", len(cfg.Classes), "booted", booted)
+	}
 
 	// buildDone closes once buildLoop has returned, so shutdown can wait for
 	// it: buildLoop keeps running (heartbeating, then posting a result) past
