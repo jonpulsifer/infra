@@ -30,8 +30,6 @@ creation_rules:
           - age15ylde96ar2x0q5gzqrxhkheh5puwtqf0rkuv6khgsv3xfhqu35hquw70ym
           # oldschool (ssh-to-age of its ed25519 host key)
           - age1apj76svz7gq7uk9w702fv589s2vcu2vfrayx0uucrkrjwl7xcqaqv6g50c
-          # tender (ssh-to-age of its ed25519 host key, 2026-08-12 boot)
-          - age1ed5hqc275lfc8gvymxk5zcy0jr2va3y6ncqjcsc6hslufnd7pvxs3q562a
   - path_regex: nix/secrets/optiplex\.sops\.ya?ml
     key_groups:
       - age:

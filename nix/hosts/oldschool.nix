@@ -47,12 +47,12 @@
       privateKeyFile = config.sops.secrets."bosun-github-app-key".path;
     };
     # `skiff-offsite`, not `skiff-ubuntu`, because this is not that machine.
-    # `skiff-ubuntu` means a hosted-shaped runner -- 4 vCPU / 16 GiB, what
-    # tender serves -- and one label spanning two very different boxes made
-    # every measurement on it a coin toss: an eight-wide benchmark put eight
-    # jobs on tender at 289-328 s and the ninth here at 620 s, which read as a
-    # variance problem in the pool and was really a job on a quarter of the
-    # machine, across a satellite link.
+    # `skiff-ubuntu` promises a hosted-shaped runner -- 4 vCPU / 16 GiB -- and
+    # no host here declares that shape. One label spanning two very different
+    # boxes made every measurement on it a coin toss: an eight-wide benchmark
+    # put eight jobs on a hosted-shaped host at 289-328 s and the ninth here at
+    # 620 s, which read as a variance problem in the pool and was really a job
+    # on a quarter of the machine, across a satellite link.
     #
     # The capacity is still worth having, and a workflow that wants it can name
     # it. What it must not do is arrive by accident at a label that promises

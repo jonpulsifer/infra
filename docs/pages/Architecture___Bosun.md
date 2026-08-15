@@ -47,7 +47,7 @@ tags:: architecture
 	- Orphaned VMMs still cannot exist: the unit runs `KillMode=mixed`, so the stop signal reaches the daemon alone but systemd SIGKILLs the whole cgroup at the stop timeout.
 	- Because a cgroup kill leaves no chance to run teardown, bosun sweeps on start and deregisters what it finds.
 - ## Where it runs
-	- [[Fleet/riptide]] enables `services.bosun`. It shares the box with kubelet.
+	- [[Fleet/riptide]] and [[Fleet/oldschool]] enable `services.bosun`, and both share the box with kubelet. A class name is a promise about shape, so the two sites do not share one: oldschool serves the fast-internet site's slot, riptide serves a small one for platform experiments and holds a parked class behind it. This site rides a satellite link, which is why production CI is not served from it.
 	- Nothing about the module is host-specific; another host imports it with only its class definitions differing.
 	- ARC keeps serving `folly`, `offsite` and `self-hosted` throughout. A skiff never claims those labels — its class name is its only label.
 - ## Trying it

@@ -222,10 +222,12 @@ spec:
           # The builder id must match the constant the build-hull stamps
           # into its provenance statement (nix/images/hull-ubuntu.nix,
           # buildRun) — a mismatch fails closed at verification. No host
-          # serves the class while tender rests; the route stays declared so
-          # a resurrection serves it with no configuration steps, and a
-          # build that falls through to it times out at the build budget
-          # rather than hanging forever.
+          # declares this class: it wants a 20 G workspace and the two the
+          # fleet serves carry 6 G and 4 G. The route stays declared because
+          # it is ranked last and costs nothing until something reaches it —
+          # a build that falls through times out at the build budget rather
+          # than hanging forever — and a host that declares the class serves
+          # it with no change here.
           - name: pool
             adapter: bosun
             class: skiff-build-xl

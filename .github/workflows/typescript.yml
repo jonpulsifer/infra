@@ -8,14 +8,14 @@ on:
   workflow_dispatch:
     inputs:
       runner:
-        description: 'Runner target (skiff-ubuntu, infra-offsite, infra-folly, ubuntu-latest)'
+        description: 'Runner target (skiff-offsite, infra-offsite, infra-folly, ubuntu-latest)'
         type: choice
         options:
-          - skiff-ubuntu
+          - skiff-offsite
           - infra-offsite
           - infra-folly
           - ubuntu-latest
-        default: skiff-ubuntu
+        default: skiff-offsite
 
 permissions:
   contents: read
@@ -102,7 +102,7 @@ jobs:
   validate:
     needs: detect
     if: needs.detect.outputs.has_changes == 'true' || github.event_name == 'workflow_dispatch'
-    # A hosted runner, because the suite no longer fits `skiff-ubuntu`'s
+    # A hosted runner, because the suite no longer fits `skiff-offsite`'s
     # 3072M/2-vcpu class. Restoring the installation's conformance tests —
     # each one standing up an isolated database — takes the Test step past
     # what that slot can hold: it dies at ~229 s where a hosted runner

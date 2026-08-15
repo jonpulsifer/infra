@@ -52,7 +52,7 @@ Path given via `-config`. Example:
   "drainTimeout": "15m",
   "classes": {
     "skiff-nixos": {"hull": "/nix/store/...-hull-nixos", "vcpus": 4, "memory": "4096M", "warm": 1, "maxLifetime": "1h"},
-    "skiff-ubuntu": {"hull": "/nix/store/...-hull-ubuntu", "vcpus": 4, "memory": "3072M", "workspace": "6G", "warm": 2, "maxLifetime": "1h"}
+    "skiff-offsite": {"hull": "/nix/store/...-hull-ubuntu", "vcpus": 2, "memory": "3072M", "workspace": "6G", "warm": 1, "maxLifetime": "1h"}
   }
 }
 ```
@@ -75,6 +75,12 @@ is the hull's business, and bosun never learns what was written to it.
 bosun execs; unset ones resolve from `PATH`.
 
 ## Benchmarks
+
+Each table names the class the measurement ran on, and several of those
+classes were shaped for the measurement rather than for the fleet. What the
+fleet declares today is in `nix/hosts/` — read it there rather than inferring
+a class from a benchmark label, and note that a class name is a promise about
+shape, so two sites deliberately do not share one.
 
 Measured 2026-08-09/10 on this repo's real CI suite (the `TypeScript`
 workflow's lint/typecheck/build/test against a live Postgres), via

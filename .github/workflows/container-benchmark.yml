@@ -12,6 +12,13 @@ name: Container Benchmark
 # behind, and without the prune its "cold" build would start with every base
 # layer already on disk — an advantage the hosted runner never has.
 #
+# `skiff-ubuntu-bench` has no host. It wants 4 vCPU / 16 GiB with a 20 G
+# workspace, and no class in nix/hosts/ declares that shape — the two skiff
+# labels the fleet serves carry 6 G and 4 G workspaces, which is the size a
+# cold docker build does not fit in and is exactly what this benchmark
+# measures. Dispatching the skiff arm queues until a host declares the class;
+# the last numbers it produced are in apps/bosun/README.md.
+#
 # The Cloud Build leg is not here. GCB builds are submitted out-of-band from a
 # staged GCS source (an in-workflow submit would need cloudbuild grants the WIF
 # identity does not carry, and would time the runner's uplink instead of the
@@ -27,7 +34,7 @@ on:
           - both
           - ubuntu-latest
           - skiff-ubuntu-bench
-        default: both
+        default: ubuntu-latest
 
 permissions:
   contents: read
@@ -41,8 +48,8 @@ jobs:
       - id: set
         run: |
           # skiff-ubuntu-bench is 4 vCPU / 16 GiB with a 20 G workspace -- a cold
-          # docker build does not fit in the 6 G the shared skiff-ubuntu slots
-          # carry, which is what this label is sized for.
+          # docker build does not fit in the 6 G a shared slot carries, which is
+          # what this label is sized for and why no current host declares it.
           if [ "${{ inputs.target }}" = "both" ]; then
             echo 'runners=["ubuntu-latest", "skiff-ubuntu-bench"]' >> "$GITHUB_OUTPUT"
           else
