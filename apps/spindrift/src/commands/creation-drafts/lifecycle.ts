@@ -30,7 +30,11 @@ import { SUPPLIED_ARTIFACT_TYPE } from '../../domain/source.ts';
 import type { StagedSourceBundle } from '../../domain/source-bundle.ts';
 import { targetRowLabel } from '../../domain/target.ts';
 import { dispatchAutoDeploys } from '../../reconciler/auto-deploy.ts';
-import { reconcileRepository } from '../../reconciler/repo-loop.ts';
+import {
+  type RepositoryReconciliation,
+  reconcileRepository,
+} from '../../reconciler/repo-loop.ts';
+import { logWarn } from '../../telemetry/index.ts';
 import { routeForTarget } from '../builds/route.ts';
 import type { CreateAppResult } from '../create-app.ts';
 import { connectRepository } from '../repositories/connect.ts';
@@ -476,6 +480,30 @@ async function prepareCreation(
     repository = connected.value.repository;
     configPullRequest = connected.value.pullRequest;
     configPullRequestError = connected.value.pullRequestError;
+  } else if (
+    repository !== undefined &&
+    repository.access === 'active' &&
+    repository.authoritativeCommit === null
+  ) {
+    // Connected, readable, and nothing adopted from it yet — so there is no
+    // commit to stage and the guard below would refuse a repository that is
+    // perfectly fine. Reached whenever the row was written by `connect` and no
+    // repo-loop tick has run since: the wizard classifies it as connected and
+    // therefore sends `connect: false`, so the arm above does not fire.
+    //
+    // Adopting here rather than waiting five minutes for the loop, and
+    // dispatching what it adopts, which is what makes this a legal writer of
+    // `authoritative_commit` at all (see `repo-loop.ts`'s header).
+    const host = context.adapters.repository?.() ?? null;
+    if (host !== null) {
+      const pass = await reconcileRepository(
+        { db: context.db, clock: context.clock, host },
+        repository,
+      );
+      await dispatchAdopted(pass, context);
+      repository =
+        (await repositoryRow(context, draft.source.repo)) ?? repository;
+    }
   }
   if (
     repository?.access !== 'active' ||
@@ -528,6 +556,40 @@ function noBuildRoute(target: string) {
     'NOT_BUILDABLE',
     `this installation has no eligible build route for ${target}`,
   );
+}
+
+/**
+ * Hand an adopted pass to the dispatcher, without letting it fail the creation.
+ *
+ * Adopting outside the loop obliges this command to dispatch (`repo-loop.ts`:
+ * only a writer of `authoritative_commit` that also dispatches keeps a push
+ * self-healing). But the Apps dispatched here belong to *other* people — every
+ * opted-in App already on this repository — and `deployApp` is not, unlike
+ * `reconcileRepository`, documented never to throw. Somebody else's staging
+ * failure is not a reason to 500 this operator's App creation, and the poll
+ * loop reconciles the same commit on its next tick, so the worst case of
+ * swallowing is the latency the loop was always allowed to take.
+ */
+async function dispatchAdopted(
+  pass: RepositoryReconciliation,
+  context: CommandContext,
+): Promise<void> {
+  try {
+    await dispatchAutoDeploys(
+      {
+        db: context.db,
+        clock: context.clock,
+        adapters: context.adapters,
+        manifest: context.manifest,
+      },
+      [pass],
+    );
+  } catch (cause) {
+    logWarn('an adopted commit could not be dispatched during App creation', {
+      'spindrift.repository': pass.fullName,
+      'spindrift.error': cause instanceof Error ? cause.message : String(cause),
+    });
+  }
 }
 
 async function repositoryRow(context: CommandContext, fullName: string) {
@@ -594,15 +656,7 @@ async function connectAndAdopt(
     { db: context.db, clock: context.clock, host },
     row,
   );
-  await dispatchAutoDeploys(
-    {
-      db: context.db,
-      clock: context.clock,
-      adapters: context.adapters,
-      manifest: context.manifest,
-    },
-    [pass],
-  );
+  await dispatchAdopted(pass, context);
   return ok({
     repository: (await repositoryRow(context, fullName)) ?? row,
     pullRequest,

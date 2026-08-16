@@ -17,6 +17,7 @@
  */
 import { describe, expect, test } from 'bun:test';
 import { eq } from 'drizzle-orm';
+import { deployApp } from '../../src/commands/apps/deploy.ts';
 import { listRepositories } from '../../src/commands/repositories/list.ts';
 import type {
   AdapterRegistry,
@@ -31,6 +32,7 @@ import {
   repositories,
   targets,
 } from '../../src/db/schema.ts';
+import { readAttemptStream } from '../../src/domain/attempt-log.ts';
 import type {
   RepositorySourceStager,
   StagedSourceBundle,
@@ -229,6 +231,10 @@ async function pushableApp(autoDeploy: boolean) {
     repository: repository!,
     app: app!,
     component: component!,
+    // The placement of record, returned so a test can take it away between the
+    // push and the verdict — which is the only lever that makes the deploy the
+    // build loop attempts a refusal rather than a row.
+    target: target!,
     build: build!,
   };
 }
@@ -253,6 +259,26 @@ async function deploysFor(componentId: string) {
     .db.select()
     .from(deploys)
     .where(eq(deploys.componentId, componentId));
+}
+
+/**
+ * Every "the deploy was refused" line on **one Build's** leg of the attempt log.
+ *
+ * Read through the real stream reader rather than off the table, because which
+ * Build a line is on is the whole question: `readAttemptStream` is what the
+ * screen a push sends a developer to subscribes with, so a line the wrong side
+ * of that filter is a line nobody reads.
+ */
+async function refusalsOn(
+  componentId: string,
+  buildId: number,
+): Promise<readonly string[]> {
+  const page = await readAttemptStream(database().db, { componentId, buildId });
+  return page.entries.flatMap((entry) =>
+    entry.type === 'log' && entry.line.includes('deploying it was refused')
+      ? [entry.line]
+      : [],
+  );
 }
 
 /** One real pass over every repository, dispatched exactly as the loop does. */
@@ -375,5 +401,177 @@ describe('a push reaches a running deploy', () => {
     expect(await deploysFor(component.id)).toHaveLength(0);
     expect(stager.staged).toEqual([]);
     expect(route.built).toEqual([]);
+  });
+
+  test("an operator's Rebuild press on an opted-in App does not deploy by itself", async () => {
+    stager = new FakeSourceStager();
+    const { fake, app, component, build } = await pushableApp(true);
+
+    // Nothing is pushed anywhere in this test: the repository is still at the
+    // commit the App's artifact was built from, and the App is opted in. So the
+    // only act here is the operator's, and the only thing that could place a
+    // Deploy is the opt-in being read as one.
+    const pressed = await deployApp(
+      // What the workspace's Rebuild button sends, field for field
+      // (`src/web/views/apps/workspace.tsx`): the App by id, `rebuild`, and no
+      // commit — a press is not about one.
+      { name: app.id, rebuild: true },
+      commandContext(fake),
+    );
+    if (!pressed.ok) throw new Error(pressed.failure.message);
+    // The second act, said in the result: a Build started, no intent written.
+    expect(pressed.value.phase).toBe('BUILDING');
+
+    const route = new FakeBuildAdapter();
+    expect(await runBuildPass(commandContext(fake, route))).toBe(1);
+
+    const rebuilt = (await buildsFor(component.id)).find(
+      (one) => one.id !== build.id,
+    );
+    expect(rebuilt?.status).toBe('SUCCEEDED');
+    // Nobody asked for a release, and the Build says so. `deployApp` records
+    // this only for a caller that named a commit, which is §15's dispatcher and
+    // nothing else.
+    expect(rebuilt?.deployOnSuccess).toBe(false);
+
+    // The assertion this test exists for. `apps.autoDeploy` is on, and keying
+    // the placement on it reads the opt-in as "this App deploys whenever a
+    // Build goes green" — it says "this App deploys on push", which this Build
+    // did not come from. So the press would have shipped to production by
+    // itself, which is exactly the substitution `deployApp`'s header forbids.
+    expect(await deploysFor(component.id)).toHaveLength(0);
+  });
+
+  test("a push's Build carries the instruction to place it, and a Rebuild's does not", async () => {
+    stager = new FakeSourceStager();
+    const { fake, base, app, component } = await pushableApp(true);
+
+    // The two callers that can ask for a Build, one after the other on the same
+    // App: an operator who wants this commit built again, and a push that wants
+    // a different one built and released.
+    const pressed = await deployApp(
+      { name: app.id, rebuild: true },
+      commandContext(fake),
+    );
+    if (!pressed.ok) throw new Error(pressed.failure.message);
+
+    const pushed = pushCommit(fake);
+    const { attempts } = await tick(fake);
+    const dispatched = attempts[0]?.result;
+    if (dispatched === undefined || !dispatched.ok) {
+      throw new Error('the push dispatched nothing to assert on');
+    }
+
+    const rows = await buildsFor(component.id);
+    const rebuilt = rows.find((one) => one.id === pressed.value.buildId);
+    const fromPush = rows.find((one) => one.id === dispatched.value.buildId);
+
+    // Two distinct Builds of two distinct commits, so neither assertion below
+    // can be about the other one's row.
+    expect(rebuilt?.id).not.toBe(fromPush?.id);
+    expect(rebuilt?.commit.split('#')[0]).toBe(base);
+    expect(fromPush?.commit.split('#')[0]).toBe(pushed);
+
+    // The column read directly rather than inferred from a deploy count, which
+    // is what pins its meaning: what was asked for is recorded on the Build
+    // because whoever asked is long gone by the time there is a verdict, and
+    // an App's opt-in can be flipped in between (schema.ts). Everything the
+    // build loop does with a green artifact keys on these two values.
+    expect(fromPush?.deployOnSuccess).toBe(true);
+    expect(rebuilt?.deployOnSuccess).toBe(false);
+  });
+
+  test('the Build that succeeded is the one placed, even when a newer Build is already queued', async () => {
+    stager = new FakeSourceStager();
+    const { fake, component } = await pushableApp(true);
+
+    // Two pushes with no build pass between them — a second merge while the
+    // first is still queued. The second dispatch falls through to the rerun arm
+    // because the newest Build names the first commit, so it writes a *second*
+    // PENDING row rather than resetting the first, and the Component ends up
+    // with two queued Builds that both ask to be placed.
+    const first = fake.commitFiles('main', {
+      'README.md': 'hello',
+      'src/index.ts': 'export const answer = 42;\n',
+    });
+    await tick(fake);
+    const second = fake.commitFiles('main', {
+      'README.md': 'hello',
+      'src/index.ts': 'export const answer = 43;\n',
+    });
+    await tick(fake);
+
+    const queued = (await buildsFor(component.id))
+      .filter((one) => one.status === 'PENDING')
+      .sort((left, right) => left.id - right.id);
+    expect(queued.map((one) => one.commit.split('#')[0])).toEqual([
+      first,
+      second,
+    ]);
+    // Both came from a push, so both carry the instruction — the interesting
+    // case is which Build each instruction is *about*, not whether one of them
+    // is missing.
+    expect(queued.map((one) => one.deployOnSuccess)).toEqual([true, true]);
+
+    const route = new FakeBuildAdapter();
+    expect(await runBuildPass(commandContext(fake, route))).toBe(2);
+
+    const placed = (await deploysFor(component.id)).sort(
+      (left, right) => left.id - right.id,
+    );
+    // `runBuildPass` orders `asc(builds.id)`, so the older Build dispatches
+    // first — and the Deploy that follows it names *it*. Re-deriving "the App's
+    // newest Build" at that moment names the second row instead, which is still
+    // PENDING: the artifact that just went green was dropped without a word,
+    // and the sentence written about the failure was about a different Build.
+    expect(placed[0]?.buildId).toBe(queued[0]!.id);
+    // And the second pass of the same loop places the second one, so this is a
+    // statement about which Build each Deploy is for rather than about a queue
+    // that only ever gets through one.
+    expect(placed.map((one) => one.buildId)).toEqual([
+      queued[0]!.id,
+      queued[1]!.id,
+    ]);
+  });
+
+  test('a refused deploy is recorded on the Build it is about', async () => {
+    stager = new FakeSourceStager();
+    const { fake, component, target, build } = await pushableApp(true);
+    pushCommit(fake);
+    await tick(fake);
+
+    // The Target goes away between the push and the verdict — §13 says a
+    // disconnected one "strands what is on it and takes nothing new", and
+    // `checkDeployable` refuses a placement on one. Nothing sweeps a PENDING
+    // Build for it, so the build still runs and the deploy is what is refused.
+    await database()
+      .db.update(targets)
+      .set({ status: 'disconnected' })
+      .where(eq(targets.id, target.id));
+
+    const route = new FakeBuildAdapter();
+    expect(await runBuildPass(commandContext(fake, route))).toBe(1);
+
+    const built = (await buildsFor(component.id)).find(
+      (one) => one.id !== build.id,
+    );
+    expect(built?.status).toBe('SUCCEEDED');
+    expect(await deploysFor(component.id)).toHaveLength(0);
+
+    // A green Build whose deploy was refused and said so nowhere is the silence
+    // this whole file is about, one seam further along — so the sentence lands
+    // on the attempt log of the Build the push sent the developer to, and it is
+    // this Build's own refusal rather than a verdict about some other row.
+    const refusals = await refusalsOn(component.id, built!.id);
+    expect(refusals).toHaveLength(1);
+    expect(refusals[0]).toStartWith(
+      'this Build succeeded, and deploying it was refused:',
+    );
+    expect(refusals[0]).toContain(
+      'is disconnected, so nothing new can be placed on it',
+    );
+    // Not on the App's previous Build, which succeeded long before any of this
+    // and is not what anybody is watching.
+    expect(await refusalsOn(component.id, build.id)).toEqual([]);
   });
 });

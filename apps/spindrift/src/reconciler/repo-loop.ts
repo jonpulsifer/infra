@@ -59,6 +59,15 @@
  *   webhook pass and the poll pass cannot both observe the same predecessor and
  *   both report `adopted`. The loser reports `unchanged` and dispatches
  *   nothing, because the winner already did.
+ *
+ * **What that does not buy is atomicity with the dispatch.** The advance
+ * commits here and the dispatch happens in the caller, so a process that dies
+ * between the two leaves a commit adopted and never deployed — and the next
+ * tick, reading `head === authoritativeCommit`, will call it `unchanged`
+ * forever. `reconcileAllRepositories` widens that window to a whole fleet walk,
+ * because `runRepoLoop` dispatches once at the end rather than per repository.
+ * Nothing here closes it; the honest statement is that every *writer* is a
+ * dispatching path, not that every adoption is dispatched.
  */
 import { and, eq, isNull } from 'drizzle-orm';
 import type { Clock } from '../commands/types.ts';

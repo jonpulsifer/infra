@@ -82,27 +82,42 @@ let stager = new FakeSourceStager();
  * makes the App already-built at the commit the pass adopts; the default leaves
  * it one commit behind, which is the ordinary case a push arrives in.
  */
-async function deployableApp(
-  autoDeploy: boolean,
-  builtCommit: string = PREVIOUS,
-) {
-  const db = database().db;
-  const [repository] = await db
-    .insert(repositories)
+/**
+ * A repository row whose adopted commit is what a pass will claim to carry.
+ *
+ * Separate from the App because `dispatchAutoDeploys` re-reads
+ * `authoritative_commit` before acting: a pass whose commit no longer governs
+ * has been overtaken, and skipping it is the point. So a synthetic pass has to
+ * name a real repository sitting at the commit it claims, or it is testing the
+ * overtaken path by accident.
+ */
+async function repositoryAt(commit: string) {
+  const [repository] = await database()
+    .db.insert(repositories)
     .values({
       fullName: `example/${crypto.randomUUID()}`,
       installationId: '42',
       defaultBranch: 'main',
-      authoritativeCommit: PUSHED,
+      authoritativeCommit: commit,
     })
     .returning();
+  return repository!;
+}
+
+async function deployableApp(
+  autoDeploy: boolean,
+  builtCommit: string = PREVIOUS,
+  on?: Awaited<ReturnType<typeof repositoryAt>>,
+) {
+  const db = database().db;
+  const repository = on ?? (await repositoryAt(PUSHED));
   const [app] = await db
     .insert(apps)
     .values({
       name: `svc-${crypto.randomUUID()}`,
       sourceKind: 'repo',
-      sourceRepoUrl: `https://git.invalid/${repository!.fullName}`,
-      repositoryId: repository!.id,
+      sourceRepoUrl: `https://git.invalid/${repository.fullName}`,
+      repositoryId: repository.id,
       autoDeploy,
     })
     .returning();
@@ -150,7 +165,7 @@ async function deployableApp(
     app: app!,
     component: component!,
     build: build!,
-    repository: repository!,
+    repository,
   };
 }
 
@@ -175,12 +190,13 @@ function context(): AutoDeployContext {
 }
 
 function adoptedPass(
+  repository: { readonly id: string; readonly fullName: string },
   appIds: readonly string[],
   commit: string = PUSHED,
 ): RepositoryReconciliation {
   return {
-    repositoryId: crypto.randomUUID(),
-    fullName: 'example/app',
+    repositoryId: repository.id,
+    fullName: repository.fullName,
     outcome: 'adopted',
     commit,
     scopes: appIds.map((appId) => ({
@@ -210,10 +226,10 @@ async function buildsFor(componentId: string) {
 describe('which act a push asks for', () => {
   test('a push whose commit is not built writes a Build for that commit, and deploys nothing', async () => {
     stager = new FakeSourceStager();
-    const { app, component, build } = await deployableApp(true);
+    const { app, component, build, repository } = await deployableApp(true);
 
     const attempts = await dispatchAutoDeploys(context(), [
-      adoptedPass([app.id]),
+      adoptedPass(repository, [app.id]),
     ]);
 
     expect(attempts).toHaveLength(1);
@@ -243,10 +259,13 @@ describe('which act a push asks for', () => {
 
   test('a push whose commit is already built deploys that Build', async () => {
     stager = new FakeSourceStager();
-    const { app, component, build } = await deployableApp(true, PUSHED);
+    const { app, component, build, repository } = await deployableApp(
+      true,
+      PUSHED,
+    );
 
     const attempts = await dispatchAutoDeploys(context(), [
-      adoptedPass([app.id]),
+      adoptedPass(repository, [app.id]),
     ]);
 
     expect(attempts[0]).toMatchObject({
@@ -265,14 +284,19 @@ describe('which act a push asks for', () => {
 
   test('a push whose commit is already what is desired writes nothing at all', async () => {
     stager = new FakeSourceStager();
-    const { app, component, build } = await deployableApp(true, PUSHED);
+    const { app, component, build, repository } = await deployableApp(
+      true,
+      PUSHED,
+    );
 
     // The first pass places it. This is the state an App created from the very
     // commit the loop is about to adopt lands in.
-    await dispatchAutoDeploys(context(), [adoptedPass([app.id])]);
+    await dispatchAutoDeploys(context(), [adoptedPass(repository, [app.id])]);
     expect(await deployCountFor(component.id)).toBe(1);
 
-    const again = await dispatchAutoDeploys(context(), [adoptedPass([app.id])]);
+    const again = await dispatchAutoDeploys(context(), [
+      adoptedPass(repository, [app.id]),
+    ]);
 
     expect(again[0]).toMatchObject({
       result: { ok: true, value: { buildId: build.id, phase: 'UNCHANGED' } },
@@ -285,16 +309,18 @@ describe('which act a push asks for', () => {
 
   test('a push arriving while that commit is still building waits for it', async () => {
     stager = new FakeSourceStager();
-    const { app, component } = await deployableApp(true);
+    const { app, component, repository } = await deployableApp(true);
 
     // First push: a PENDING Build of the pushed commit.
-    await dispatchAutoDeploys(context(), [adoptedPass([app.id])]);
+    await dispatchAutoDeploys(context(), [adoptedPass(repository, [app.id])]);
     const afterFirst = await buildsFor(component.id);
     expect(afterFirst).toHaveLength(2);
 
     // The same commit adopted again — the webhook and the poll loop racing, or
     // a redelivery. It must not reset the Build that is already for it.
-    const again = await dispatchAutoDeploys(context(), [adoptedPass([app.id])]);
+    const again = await dispatchAutoDeploys(context(), [
+      adoptedPass(repository, [app.id]),
+    ]);
 
     expect(again[0]).toMatchObject({
       result: { ok: true, value: { phase: 'BUILDING' } },
@@ -306,13 +332,17 @@ describe('which act a push asks for', () => {
 
   test('two repositories adopting in one round each dispatch their own commit', async () => {
     stager = new FakeSourceStager();
-    const first = await deployableApp(true);
-    const second = await deployableApp(true);
     const otherCommit = '2'.repeat(40);
+    const first = await deployableApp(true);
+    const second = await deployableApp(
+      true,
+      PREVIOUS,
+      await repositoryAt(otherCommit),
+    );
 
     const attempts = await dispatchAutoDeploys(context(), [
-      adoptedPass([first.app.id]),
-      adoptedPass([second.app.id], otherCommit),
+      adoptedPass(first.repository, [first.app.id]),
+      adoptedPass(second.repository, [second.app.id], otherCommit),
     ]);
 
     expect(attempts.map((attempt) => attempt.commit)).toEqual([
@@ -326,13 +356,56 @@ describe('which act a push asks for', () => {
   });
 });
 
+describe('a pass that has been overtaken', () => {
+  test('dispatches nothing, because a newer commit already governs', async () => {
+    stager = new FakeSourceStager();
+    const { app, component, repository } = await deployableApp(true);
+    // The poll loop reconciles the whole fleet before it dispatches any of it,
+    // so this pass can be minutes old on arrival. In that window the webhook —
+    // another process — adopted a newer commit and dispatched it. The row is
+    // what that looks like from here.
+    const newer = '3'.repeat(40);
+    await database()
+      .db.update(repositories)
+      .set({ authoritativeCommit: newer })
+      .where(eq(repositories.id, repository.id));
+
+    const attempts = await dispatchAutoDeploys(context(), [
+      adoptedPass(repository, [app.id], PUSHED),
+    ]);
+
+    // Acting on the older commit would stage it, build it, and place it after
+    // the newer one — a rollback nobody asked for. The newer pass is already
+    // doing this work.
+    expect(attempts).toEqual([]);
+    expect(stager.staged).toEqual([]);
+    expect(await buildsFor(component.id)).toHaveLength(1);
+    expect(await deployCountFor(component.id)).toBe(0);
+  });
+
+  test('the same pass dispatches while its commit still governs', async () => {
+    stager = new FakeSourceStager();
+    const { app, component, repository } = await deployableApp(true);
+
+    // Identical to the case above but for the row, which is what makes that one
+    // the guard firing rather than the fixture being inert.
+    const attempts = await dispatchAutoDeploys(context(), [
+      adoptedPass(repository, [app.id], PUSHED),
+    ]);
+
+    expect(attempts).toHaveLength(1);
+    expect(stager.staged.map((entry) => entry.commit)).toEqual([PUSHED]);
+    expect(await buildsFor(component.id)).toHaveLength(2);
+  });
+});
+
 describe('the opt-in gate', () => {
   test('an App that never opted in is left alone', async () => {
     stager = new FakeSourceStager();
-    const { app, component } = await deployableApp(false, PUSHED);
+    const { app, component, repository } = await deployableApp(false, PUSHED);
 
     const attempts = await dispatchAutoDeploys(context(), [
-      adoptedPass([app.id]),
+      adoptedPass(repository, [app.id]),
     ]);
 
     expect(attempts).toEqual([]);
@@ -341,11 +414,15 @@ describe('the opt-in gate', () => {
 
   test('one repository can carry both — only the opted-in App moves', async () => {
     stager = new FakeSourceStager();
-    const opted = await deployableApp(true, PUSHED);
-    const silent = await deployableApp(false, PUSHED);
+    // One repository, two Apps — which is the premise: the opt-in is a
+    // property of the App, so the same adopted commit must move one and not
+    // the other.
+    const shared = await repositoryAt(PUSHED);
+    const opted = await deployableApp(true, PUSHED, shared);
+    const silent = await deployableApp(false, PUSHED, shared);
 
     const attempts = await dispatchAutoDeploys(context(), [
-      adoptedPass([opted.app.id, silent.app.id]),
+      adoptedPass(shared, [opted.app.id, silent.app.id]),
     ]);
 
     expect(attempts.map((attempt) => attempt.appId)).toEqual([opted.app.id]);
@@ -355,12 +432,15 @@ describe('the opt-in gate', () => {
 
   test('a pass that adopted nothing dispatches nothing, opted in or not', async () => {
     stager = new FakeSourceStager();
-    const { app, component } = await deployableApp(true, PUSHED);
+    const { app, component, repository } = await deployableApp(true, PUSHED);
+    // The App's own repository, at the commit it has actually adopted — so the
+    // empty result below is the `unchanged` outcome being ignored, and not a
+    // pass this dispatcher would have skipped for naming a stranger.
     const unchanged: RepositoryReconciliation = {
-      repositoryId: crypto.randomUUID(),
-      fullName: 'example/app',
+      repositoryId: repository.id,
+      fullName: repository.fullName,
       outcome: 'unchanged',
-      commit: '2'.repeat(40),
+      commit: PUSHED,
     };
 
     const attempts = await dispatchAutoDeploys(context(), [unchanged]);

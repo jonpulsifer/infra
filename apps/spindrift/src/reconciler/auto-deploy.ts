@@ -42,7 +42,7 @@ import type {
 } from '../commands/types.ts';
 import type { InstallationManifest } from '../config/manifest.schema.ts';
 import type { Database } from '../db/client.ts';
-import { apps } from '../db/schema.ts';
+import { apps, repositories } from '../db/schema.ts';
 import { logWarn } from '../telemetry/index.ts';
 import type { RepositoryReconciliation } from './repo-loop.ts';
 
@@ -104,8 +104,34 @@ export async function dispatchAutoDeploys(
     ).map((app) => app.id),
   );
 
+  // **What still governs, read now rather than when the pass was taken.** The
+  // poll loop reconciles the whole fleet before it dispatches any of it, so a
+  // pass can be minutes old by the time it arrives here — old enough for the
+  // webhook, in another process, to have adopted a newer commit and dispatched
+  // it already. Building the older commit anyway would place it *after* the
+  // newer one, which is a rollback nobody asked for. §15 makes
+  // `authoritative_commit` the thing that governs, so a pass that no longer
+  // agrees with it has been overtaken and its work is already being done.
+  const governing = new Map(
+    (
+      await context.db
+        .select({
+          id: repositories.id,
+          commit: repositories.authoritativeCommit,
+        })
+        .from(repositories)
+        .where(
+          inArray(
+            repositories.id,
+            adopted.map((pass) => pass.repositoryId),
+          ),
+        )
+    ).map((row) => [row.id, row.commit]),
+  );
+
   const attempts: AutoDeployAttempt[] = [];
   for (const pass of adopted) {
+    if (governing.get(pass.repositoryId) !== pass.commit) continue;
     for (const scope of pass.scopes) {
       if (!optedIn.has(scope.appId)) continue;
       const result = await deployApp(

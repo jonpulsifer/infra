@@ -45,6 +45,7 @@ import {
   componentTargetDesired,
   datastores,
   deploys,
+  repositories,
   targets,
 } from '../../src/db/schema.ts';
 import { configVersionOf } from '../../src/domain/config-version.ts';
@@ -1058,6 +1059,15 @@ describe('a move across shapes reaches the Build the refusal asks for (§3)', ()
  * The claims below are that the fence is a fence and not a wedge: a live lease
  * is refused, an expired one is still reclaimable, and a queued Build — which
  * has no lease to revoke — is re-armed exactly as it always was.
+ *
+ * §15's dispatcher lands in the same arm through a different door — it names a
+ * `commit`, which gives this command an "already in flight, nothing to do here"
+ * answer the button has no way to reach — so the same lease question is asked
+ * again from that side, where getting it wrong strands a commit rather than
+ * doubling a generator. And the fence itself is a check-and-set: the last test
+ * lands a claim in the window between the read at the top of the command and
+ * the write at the bottom of it, which is the interleaving an in-memory guard
+ * cannot see.
  */
 describe('deployApp will not re-arm a Build a runner still holds', () => {
   /**
@@ -1115,6 +1125,101 @@ describe('deployApp will not re-arm a Build a runner still holds', () => {
       .from(builds)
       .where(eq(builds.id, id));
     return row;
+  }
+
+  /**
+   * The same fixture as a **repo** App sitting at `commit`.
+   *
+   * A push is the only caller that names a commit, and only a repo App can
+   * have one — an archive's bytes are what a developer uploaded, so there is
+   * no ref for §15's dispatcher to be about. The repository row states the
+   * same commit the press below carries because that is what a pass leaves
+   * behind when it adopts one: `sourceForRerun` reads
+   * `authoritative_commit` on any press that reaches the rerun arm, so a row
+   * disagreeing with the caller would quietly turn these tests into tests
+   * about staging.
+   */
+  async function pushedFixture(commit: string) {
+    const seeded = await placedFixture();
+    const [repository] = await database()
+      .db.insert(repositories)
+      .values({
+        fullName: `example/${crypto.randomUUID()}`,
+        // TEXT: the far side's numeric id is an opaque handle here.
+        installationId: '42',
+        defaultBranch: 'main',
+        authoritativeCommit: commit,
+      })
+      .returning();
+    await database()
+      .db.update(apps)
+      .set({
+        sourceKind: 'repo',
+        sourceRepoUrl: `https://git.invalid/${repository!.fullName}`,
+        repositoryId: repository!.id,
+      })
+      .where(eq(apps.id, seeded.app.id));
+    return { ...seeded, repository: repository! };
+  }
+
+  /**
+   * A `db` that lands `claim` inside the command, between its read and its
+   * write.
+   *
+   * The window is real and it is wide: `deployApp` reads the newest Build in
+   * its opening query and writes the reset hundreds of lines later, with a
+   * Target lookup and a network staging possible in between, while
+   * `dispatchBuild` claims `PENDING` rows concurrently by design. Nothing in a
+   * test can make that interleaving happen by luck, so it is made to happen —
+   * the first `UPDATE` the command issues is the reset itself, and this proxy
+   * runs `claim` to completion immediately before that statement executes.
+   *
+   * Every other call passes through untouched, so what runs is the real
+   * command against the real database; the only thing added is *when* the
+   * competing claim commits.
+   */
+  function claimingBeforeItsFirstWrite(
+    db: CommandContext['db'],
+    claim: () => Promise<unknown>,
+  ): CommandContext['db'] {
+    let armed = true;
+    const fire = async (): Promise<void> => {
+      if (!armed) return;
+      armed = false;
+      await claim();
+    };
+    // Drizzle's builders are lazy: `.set()`, `.where()` and `.returning()` only
+    // assemble the statement, and awaiting is what runs it. So the wrap follows
+    // the chain and hooks `then`, which is the one moment that matters.
+    const deferring = <T extends object>(builder: T): T =>
+      new Proxy(builder, {
+        get(target, property) {
+          const value = Reflect.get(target, property) as unknown;
+          if (typeof value !== 'function') return value;
+          const method = value as (...args: unknown[]) => unknown;
+          if (property === 'then') {
+            return (...args: unknown[]) =>
+              fire().then(() => method.apply(target, args));
+          }
+          return (...args: unknown[]) => {
+            const next = method.apply(target, args);
+            return typeof next === 'object' && next !== null
+              ? deferring(next)
+              : next;
+          };
+        },
+      });
+    return new Proxy(db, {
+      get(target, property) {
+        const value = Reflect.get(target, property) as unknown;
+        if (typeof value !== 'function') return value;
+        const method = value as (...args: unknown[]) => unknown;
+        return property === 'update'
+          ? (...args: unknown[]) =>
+              deferring(method.apply(target, args) as object)
+          : method.bind(target);
+      },
+    });
   }
 
   test('a RUNNING Build under a live lease is refused, and keeps its lease', async () => {
@@ -1218,6 +1323,142 @@ describe('deployApp will not re-arm a Build a runner still holds', () => {
       .where(eq(builds.componentId, component.id));
     expect(rows).toHaveLength(1);
     expect(await desiredRow(component.id, target.id)).toBeDefined();
+  });
+
+  test('a push whose runner died reclaims the Build rather than reporting it as building', async () => {
+    // The commit the push is about, and the commit the dead Build was started
+    // for: one row, so the dispatcher's question is about this Build and no
+    // other. `inFlightBuild` names its row `digest(seed)`, which is what makes
+    // the two the same commit.
+    const commit = digest(83);
+    const { app, component, target } = await pushedFixture(commit);
+    const dead = await inFlightBuild(
+      component.id,
+      83,
+      'RUNNING',
+      // A lease nobody renewed, past the cutoff by a second — a runner that
+      // died mid-build, which is the only way this state is reachable.
+      new Date(FROZEN.getTime() - DISPATCH_LEASE_TIMEOUT_MS - 1_000),
+    );
+
+    const result = await deployApp(
+      { name: app.name, commit },
+      context(registryOf(capableAdapter())),
+    );
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    // The same row goes back in the queue rather than a second one being
+    // staged: its bundle was already staged for this very commit.
+    expect(result.value.buildId).toBe(dead.id);
+
+    // The assertion that matters, and the reason `phase` alone proves nothing
+    // here — a push that reported "still building" answered `BUILDING` too.
+    // `runBuildPass` selects only PENDING rows, so nothing else sweeps a dead
+    // RUNNING row: the reset arm is the only reclaimer, and treating an expired
+    // lease as in-flight wedged this commit for good.
+    const row = await buildRow(dead.id);
+    expect(row?.status).toBe('PENDING');
+    expect(row?.dispatchId).toBeNull();
+    expect(row?.leasedAt).toBeNull();
+    expect(row?.runner).toBeNull();
+    expect(row?.logFidelity).toBeNull();
+
+    const rows = await database()
+      .db.select()
+      .from(builds)
+      .where(eq(builds.componentId, component.id));
+    expect(rows).toHaveLength(1);
+    // And the row the loop needs to dispatch against exists, so the reclaim is
+    // a Build that will actually run rather than a status nobody reads.
+    expect(await desiredRow(component.id, target.id)).toBeDefined();
+  });
+
+  test('a push whose Build is genuinely in flight waits for it', async () => {
+    const commit = digest(84);
+    const { app, component, target } = await pushedFixture(commit);
+    const live = await inFlightBuild(component.id, 84, 'RUNNING', FROZEN);
+
+    const result = await deployApp(
+      { name: app.name, commit },
+      context(registryOf(capableAdapter())),
+    );
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.phase).toBe('BUILDING');
+    expect(result.value.deployId).toBeNull();
+    expect(result.value.buildId).toBe(live.id);
+
+    // This is what makes the reclaim above a *lease* check rather than a
+    // deleted guard. A generator is streaming into this attempt's log right
+    // now, so the push has already caused everything it is going to cause, and
+    // the row it would have reset is untouched — claim, runner and all.
+    const row = await buildRow(live.id);
+    expect(row?.status).toBe('RUNNING');
+    expect(row?.dispatchId).toBe('dispatch-84');
+    expect(row?.leasedAt?.getTime()).toBe(FROZEN.getTime());
+    expect(row?.runner).toBe('hosted');
+    expect(row?.logFidelity).toBe('LIVE_TEXT');
+
+    // Nothing at all was written: no second Build of the same commit, and not
+    // even the desired row, because this push had nothing to cause.
+    const rows = await database()
+      .db.select()
+      .from(builds)
+      .where(eq(builds.componentId, component.id));
+    expect(rows).toHaveLength(1);
+    expect(await desiredRow(component.id, target.id)).toBeUndefined();
+  });
+
+  test('a claim that lands after the command read the row is not clobbered', async () => {
+    const { app, component, target } = await placedFixture();
+    // Queued, so the command's opening read sees a Build with no lease at all
+    // and every in-memory guard it could ask is satisfied.
+    const queued = await inFlightBuild(component.id, 85, 'PENDING', null);
+
+    // The interleaving, pinned: `dispatchBuild` claims this row after the
+    // command read it and before the command writes to it. Committed by the
+    // time the reset statement runs, which is the whole of the window.
+    const racing = claimingBeforeItsFirstWrite(database().db, () =>
+      database()
+        .db.update(builds)
+        .set({
+          status: 'RUNNING',
+          dispatchId: 'dispatch-85',
+          leasedAt: FROZEN,
+          runner: 'hosted',
+          logFidelity: 'LIVE_TEXT',
+        })
+        .where(eq(builds.id, queued.id)),
+    );
+
+    const result = await deployApp(
+      { name: app.name },
+      { ...context(registryOf(capableAdapter())), db: racing },
+    );
+
+    // The refusal is itself the proof the claim landed *first*: had it landed
+    // after the reset, the `WHERE` would have matched the PENDING row and this
+    // press would have succeeded.
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.failure.code).toBe('NOT_BUILDABLE');
+    expect(result.failure.message).toContain(`Build ${queued.id}`);
+
+    // The assertion that matters. The condition lives in the `UPDATE`'s own
+    // `WHERE`, so zero rows matched *is* the refusal — a guard read against the
+    // snapshot taken at the top of the command would have passed here and then
+    // clobbered a claim a runner is holding, which is the fence failing in the
+    // one case it exists for.
+    const row = await buildRow(queued.id);
+    expect(row?.status).toBe('RUNNING');
+    expect(row?.dispatchId).toBe('dispatch-85');
+    expect(row?.leasedAt?.getTime()).toBe(FROZEN.getTime());
+    expect(row?.runner).toBe('hosted');
+    expect(row?.logFidelity).toBe('LIVE_TEXT');
+
+    expect(await desiredRow(component.id, target.id)).toBeUndefined();
   });
 });
 

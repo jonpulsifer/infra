@@ -288,6 +288,13 @@
       "when": 1786968120000,
       "tag": "0040_build_secrets",
       "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "7",
+      "when": 1786968180000,
+      "tag": "0041_deploy_on_success",
+      "breakpoints": true
     }
   ]
 }

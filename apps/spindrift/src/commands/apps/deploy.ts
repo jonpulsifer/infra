@@ -52,7 +52,7 @@
  * one here would name an artifact that does not exist (§4: "a build records an
  * artifact rather than deploying one").
  */
-import { and, eq, isNull } from 'drizzle-orm';
+import { and, eq, isNull, lt, or } from 'drizzle-orm';
 import { z } from 'zod';
 import { targetAdapterSchema } from '../../config/manifest.schema.ts';
 import {
@@ -131,6 +131,22 @@ export const deployAppInput = z
   .strict();
 
 export type DeployAppInput = z.infer<typeof deployAppInput>;
+
+/**
+ * What a *caller over HTTP* may say — the same command, minus `commit`.
+ *
+ * §15: only the default branch is authoritative, and the one thing that decides
+ * which commit is authoritative is a reconciliation pass. `commit` exists so
+ * that pass can tell this command what it adopted; a browser naming one would
+ * be asking Spindrift to stage, build and place an arbitrary ref — an unmerged
+ * branch, a fork's head — through a path with no review and no admission gate
+ * of its own. The schema is `.strict()`, so a request carrying `commit` is
+ * refused outright rather than quietly ignored.
+ *
+ * This is the registered schema; {@link deployAppInput} stays the in-process
+ * one, and §15's dispatcher calls the handler directly.
+ */
+export const deployAppRequestInput = deployAppInput.omit({ commit: true });
 
 export interface DeployAppResult {
   /**
@@ -562,21 +578,32 @@ export const deployApp: Command<DeployAppInput, DeployAppResult> = async (
   }
 
   const now = context.clock.now();
+  const leaseCutoff = new Date(now.getTime() - DISPATCH_LEASE_TIMEOUT_MS);
   let buildToRun = latestBuild;
+
+  /**
+   * Whether a Build is genuinely in flight, as opposed to merely not finished.
+   *
+   * `RUNNING` past its lease is a runner that died: `runBuildPass` selects only
+   * `PENDING` rows, so nothing sweeps it, and the reset below is the only thing
+   * that puts it back in the queue. Treating it as in-flight would strand that
+   * commit for good.
+   */
+  const inFlight =
+    buildToRun !== undefined &&
+    (buildToRun.status === 'PENDING' ||
+      (buildToRun.status === 'RUNNING' &&
+        buildToRun.leasedAt !== null &&
+        buildToRun.leasedAt >= leaseCutoff));
 
   // A Build of this very commit is already in flight, so the push it came from
   // has already caused everything it is going to cause. Falling through would
   // reset a Build that is fine — and, where it is `RUNNING`, revoke a live
   // attempt's lease.
-  if (
-    input.commit !== undefined &&
-    isRequestedCommit &&
-    buildToRun &&
-    (buildToRun.status === 'PENDING' || buildToRun.status === 'RUNNING')
-  ) {
+  if (input.commit !== undefined && isRequestedCommit && inFlight) {
     return ok({
       deployId: null,
-      buildId: buildToRun.id,
+      buildId: buildToRun!.id,
       phase: 'BUILDING' as const,
     });
   }
@@ -656,6 +683,10 @@ export const deployApp: Command<DeployAppInput, DeployAppResult> = async (
             : (buildToRun?.bundleSubpath ?? '.'),
         status: 'PENDING',
         createdAt: now,
+        // What a push asked for, recorded where it survives the wait. See the
+        // column's own note: the build loop reads it when the verdict lands,
+        // by which time this caller is long gone.
+        deployOnSuccess: input.commit !== undefined,
       })
       .returning();
 
@@ -669,21 +700,14 @@ export const deployApp: Command<DeployAppInput, DeployAppResult> = async (
     // because there is no cancel to offer: the route's own terminal write is
     // what ends an attempt, and the lease expiring is what makes this row
     // reclaimable, which is the wait this sentence names.
-    const leaseCutoff = new Date(now.getTime() - DISPATCH_LEASE_TIMEOUT_MS);
-    if (
-      buildToRun.status === 'RUNNING' &&
-      buildToRun.leasedAt !== null &&
-      buildToRun.leasedAt >= leaseCutoff
-    ) {
-      return failed(
-        'NOT_BUILDABLE',
-        `Build ${buildToRun.id} for '${component.name}' is already running — ` +
-          'wait for it to finish, or for its lease to expire, before starting ' +
-          'another',
-      );
-    }
-
-    await context.db
+    //
+    // **The condition is the `WHERE`, not a check above it.** `buildToRun` was
+    // read at the top of this command, several awaits and a network staging
+    // ago, and `dispatchBuild` claims rows concurrently by design — so a claim
+    // that lands in that window would pass any in-memory guard and then be
+    // clobbered by an unconditional update. Matching zero rows *is* the
+    // refusal.
+    const rearmed = await context.db
       .update(builds)
       .set({
         status: 'PENDING',
@@ -691,8 +715,34 @@ export const deployApp: Command<DeployAppInput, DeployAppResult> = async (
         logFidelity: null,
         dispatchId: null,
         leasedAt: null,
+        // `deployOnSuccess` is deliberately **not** cleared. Re-arming a Build
+        // a push asked for does not change what was asked for — the operator
+        // re-queued that Build, they did not replace it — and clearing it here
+        // would make a Rebuild press silently cancel the push's deploy, which
+        // is a worse surprise than the one this arm was hardened against.
       })
-      .where(eq(builds.id, buildToRun.id));
+      .where(
+        and(
+          eq(builds.id, buildToRun.id),
+          or(
+            eq(builds.status, 'PENDING'),
+            and(
+              eq(builds.status, 'RUNNING'),
+              or(isNull(builds.leasedAt), lt(builds.leasedAt, leaseCutoff)),
+            ),
+          ),
+        ),
+      )
+      .returning({ id: builds.id });
+
+    if (rearmed.length === 0) {
+      return failed(
+        'NOT_BUILDABLE',
+        `Build ${buildToRun.id} for '${component.name}' is already running — ` +
+          'wait for it to finish, or for its lease to expire, before starting ' +
+          'another',
+      );
+    }
   }
 
   // The desired row, and nothing on it. `runBuildPass` dispatches a Build

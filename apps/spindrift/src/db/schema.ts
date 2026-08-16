@@ -687,6 +687,22 @@ export const builds = pgTable(
      * closed out.
      */
     dispatchWaitingOn: text('dispatch_waiting_on'),
+    /**
+     * Whether this Build's artifact is to be placed the moment it succeeds.
+     *
+     * True for the one caller that asked for a Build *and* meant a release:
+     * §15's dispatcher, which builds an adopted commit because a push means
+     * "this commit". Nothing else does — the workspace's Rebuild is the act
+     * that builds without deploying, and inferring this from `apps.auto_deploy`
+     * instead would make that press ship to production, which is exactly the
+     * substitution `deployApp`'s header forbids.
+     *
+     * A recorded fact rather than a derived one because the two moments are far
+     * apart: whoever asked is gone by the time the build loop has a verdict, and
+     * an App's opt-in can be flipped in between. What was asked for does not
+     * change when the flag does.
+     */
+    deployOnSuccess: boolean('deploy_on_success').notNull().default(false),
     /** §4: durable identity for the dispatch attempt running or that ran this build. */
     dispatchId: text('dispatch_id'),
     /** Timestamp when the current runner claimed the dispatch lease. */
