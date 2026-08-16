@@ -22,7 +22,10 @@ import { and, eq } from 'drizzle-orm';
 import type { DeployAdapter } from '../../src/adapters/deploy/contract.ts';
 import { deployApp } from '../../src/commands/apps/deploy.ts';
 import { uploadArchive } from '../../src/commands/apps/upload-archive.ts';
-import { dispatchBuild } from '../../src/commands/builds/dispatch.ts';
+import {
+  DISPATCH_LEASE_TIMEOUT_MS,
+  dispatchBuild,
+} from '../../src/commands/builds/dispatch.ts';
 import { placeComponent } from '../../src/commands/components/place.ts';
 import {
   createDeploy,
@@ -1038,6 +1041,183 @@ describe('a move across shapes reaches the Build the refusal asks for (§3)', ()
 
     const desired = await desiredRow(component.id, staticTarget!.id);
     expect(desired?.desiredBuildId).toBe(rebuilt.value.buildId);
+  });
+});
+
+/**
+ * The reset arm, and the one Build it is not allowed to touch.
+ *
+ * Pressing the button on a Component whose newest Build is still in flight
+ * lands in `deployApp`'s `else` branch, which re-arms that row for the build
+ * loop by writing `status: 'PENDING'`, `dispatchId: null`, `leasedAt: null`.
+ * Against a `RUNNING` row whose lease is live that revokes a generator's claim
+ * without stopping the generator — nothing in this process can — so the build
+ * loop dispatches a second one into the same attempt log on its next 500ms
+ * tick and whichever finishes last lands the verdict.
+ *
+ * The claims below are that the fence is a fence and not a wedge: a live lease
+ * is refused, an expired one is still reclaimable, and a queued Build — which
+ * has no lease to revoke — is re-armed exactly as it always was.
+ */
+describe('deployApp will not re-arm a Build a runner still holds', () => {
+  /**
+   * A Build in flight, with its lease stated rather than defaulted.
+   *
+   * `builds.created_at` defaults to the *database's* `now()`, which in a test
+   * is wall clock and therefore newer than every row written at the frozen
+   * clock — so it is set explicitly, relative to `FROZEN`, for the same reason
+   * `leasedAt` is: the refusal compares the lease against `context.clock.now()`
+   * minus `DISPATCH_LEASE_TIMEOUT_MS`, and a lease pinned to wall time would
+   * read as ten minutes in the future of a clock that says 2024.
+   */
+  async function inFlightBuild(
+    componentId: string,
+    seed: number,
+    status: 'PENDING' | 'RUNNING',
+    leasedAt: Date | null,
+  ) {
+    const [row] = await database()
+      .db.insert(builds)
+      .values({
+        componentId,
+        commit: digest(seed),
+        targetShape: 'image',
+        artifactType: 'image',
+        bundleDigest: digest(seed),
+        bundleLocation: `https://depot.lolwtf.ca/bundles/${seed}.zip`,
+        status,
+        // The claim `dispatchBuild` writes in one go with `RUNNING` — a
+        // `PENDING` row never carries one, which is exactly what makes it
+        // safe to re-arm.
+        dispatchId: leasedAt === null ? null : `dispatch-${seed}`,
+        leasedAt,
+        runner: leasedAt === null ? null : 'hosted',
+        logFidelity: leasedAt === null ? null : 'LIVE_TEXT',
+        createdAt: new Date(FROZEN.getTime() - 60_000),
+      })
+      .returning();
+    return row!;
+  }
+
+  /** The fixture's Component, placed, so the press resolves a Target. */
+  async function placedFixture() {
+    const seeded = await fixture();
+    await database()
+      .db.update(components)
+      .set({ placedTargetId: seeded.target.id })
+      .where(eq(components.id, seeded.component.id));
+    return seeded;
+  }
+
+  async function buildRow(id: number) {
+    const [row] = await database()
+      .db.select()
+      .from(builds)
+      .where(eq(builds.id, id));
+    return row;
+  }
+
+  test('a RUNNING Build under a live lease is refused, and keeps its lease', async () => {
+    const { app, component, target } = await placedFixture();
+    const running = await inFlightBuild(component.id, 80, 'RUNNING', FROZEN);
+
+    const result = await deployApp(
+      { name: app.name },
+      context(registryOf(capableAdapter())),
+    );
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.failure.code).toBe('NOT_BUILDABLE');
+    // The operator has to be able to tell *which* Build is holding the press
+    // off, because the remedy — wait for it, or wait out its lease — is about
+    // that row.
+    expect(result.failure.message).toContain(`Build ${running.id}`);
+
+    // The assertion that matters. A refusal that returned the right sentence
+    // and still nulled the claim would pass every message-only check above
+    // while leaving the build loop free to dispatch a second generator into
+    // this attempt's log — which is the whole defect the refusal exists for.
+    const row = await buildRow(running.id);
+    expect(row?.status).toBe('RUNNING');
+    expect(row?.dispatchId).toBe('dispatch-80');
+    expect(row?.leasedAt?.getTime()).toBe(FROZEN.getTime());
+
+    // And it refused before writing anything else: no second Build was staged,
+    // and the desired row this command would otherwise insert does not exist.
+    const rows = await database()
+      .db.select()
+      .from(builds)
+      .where(eq(builds.componentId, component.id));
+    expect(rows).toHaveLength(1);
+    expect(await desiredRow(component.id, target.id)).toBeUndefined();
+  });
+
+  test('a RUNNING Build whose lease has expired is reclaimed, not refused', async () => {
+    const { app, component, target } = await placedFixture();
+    // Past the cutoff by a second, so this is unambiguously the expired side
+    // of `DISPATCH_LEASE_TIMEOUT_MS` rather than a boundary coin flip.
+    const expired = new Date(
+      FROZEN.getTime() - DISPATCH_LEASE_TIMEOUT_MS - 1_000,
+    );
+    const stale = await inFlightBuild(component.id, 81, 'RUNNING', expired);
+
+    const result = await deployApp(
+      { name: app.name },
+      context(registryOf(capableAdapter())),
+    );
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.phase).toBe('BUILDING');
+    expect(result.value.deployId).toBeNull();
+    // The same row, re-armed — not a new Build. A rerun would have needed a
+    // freshly staged bundle, which is a different act with different refusals.
+    expect(result.value.buildId).toBe(stale.id);
+
+    // This is what makes the test above a fence rather than a wedge: a runner
+    // that died mid-build leaves a `RUNNING` row nobody holds, and the press is
+    // still the way out of it.
+    const row = await buildRow(stale.id);
+    expect(row?.status).toBe('PENDING');
+    expect(row?.dispatchId).toBeNull();
+    expect(row?.leasedAt).toBeNull();
+    expect(row?.runner).toBeNull();
+    expect(row?.logFidelity).toBeNull();
+
+    expect(await desiredRow(component.id, target.id)).toBeDefined();
+  });
+
+  test('a PENDING Build is still re-armed — it never had a lease to revoke', async () => {
+    const { app, component, target } = await placedFixture();
+    const queued = await inFlightBuild(component.id, 82, 'PENDING', null);
+
+    const result = await deployApp(
+      { name: app.name },
+      context(registryOf(capableAdapter())),
+    );
+
+    // The fence keys on `RUNNING` under a live lease, not on "in flight" — a
+    // queued Build has no generator streaming into it, so refusing here would
+    // have turned a press on a Build the loop had not reached yet into a dead
+    // end.
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.phase).toBe('BUILDING');
+    expect(result.value.buildId).toBe(queued.id);
+
+    const row = await buildRow(queued.id);
+    expect(row?.status).toBe('PENDING');
+    expect(row?.dispatchId).toBeNull();
+    expect(row?.leasedAt).toBeNull();
+
+    // Re-armed rather than re-staged: the press wrote no second Build row.
+    const rows = await database()
+      .db.select()
+      .from(builds)
+      .where(eq(builds.componentId, component.id));
+    expect(rows).toHaveLength(1);
+    expect(await desiredRow(component.id, target.id)).toBeDefined();
   });
 });
 

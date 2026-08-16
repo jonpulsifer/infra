@@ -29,6 +29,7 @@ import { cloneUrlFor, repositoryRefOf } from '../../domain/repository.ts';
 import { SUPPLIED_ARTIFACT_TYPE } from '../../domain/source.ts';
 import type { StagedSourceBundle } from '../../domain/source-bundle.ts';
 import { targetRowLabel } from '../../domain/target.ts';
+import { dispatchAutoDeploys } from '../../reconciler/auto-deploy.ts';
 import { reconcileRepository } from '../../reconciler/repo-loop.ts';
 import { routeForTarget } from '../builds/route.ts';
 import type { CreateAppResult } from '../create-app.ts';
@@ -553,6 +554,14 @@ async function repositoryRow(context: CommandContext, fullName: string) {
  * source to build. Reading the default branch here is the same pass the repo
  * loop makes on its own schedule, taken now so that creation does not wait a
  * tick for a commit that is already there.
+ *
+ * **And therefore dispatched here too.** That pass adopts, and adopting is what
+ * an opted-in App's push *is* — so dropping the pass on the floor would cancel
+ * it for every other App already watching this repository, exactly as the
+ * Repositories screen used to. This is the second of the two ways a caller may
+ * stop disagreeing with the loop: `listRepositories` refreshes without
+ * claiming, and this one claims and dispatches. The App being created is not
+ * among them — it does not exist yet, and its own first Build is staged below.
  */
 async function connectAndAdopt(
   fullName: string,
@@ -581,9 +590,18 @@ async function connectAndAdopt(
   if (host === null) {
     return ok({ repository: row, pullRequest, pullRequestError });
   }
-  await reconcileRepository(
+  const pass = await reconcileRepository(
     { db: context.db, clock: context.clock, host },
     row,
+  );
+  await dispatchAutoDeploys(
+    {
+      db: context.db,
+      clock: context.clock,
+      adapters: context.adapters,
+      manifest: context.manifest,
+    },
+    [pass],
   );
   return ok({
     repository: (await repositoryRow(context, fullName)) ?? row,

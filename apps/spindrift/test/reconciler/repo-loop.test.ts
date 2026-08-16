@@ -278,6 +278,154 @@ describe('adopting the default branch', () => {
   });
 });
 
+/** Every Spindrift-file read the client made, which `adopt: false` skips. */
+function scopeFileReads(fake: FakeGitHub) {
+  return fake.requests.filter((request) => request.path.includes('/contents/'));
+}
+
+/**
+ * A repository that has already adopted a commit and has not been looked at
+ * since, wearing a default-branch name the far side has moved on from — the
+ * three columns the refresh half of a pass owns, all visibly stale, so that
+ * "was refreshed" is an assertion rather than a coincidence of the frozen clock.
+ */
+async function alreadyAdopted(fake: FakeGitHub, commit: string) {
+  const { repository } = await connect(fake);
+  await database()
+    .db.update(repositories)
+    .set({
+      authoritativeCommit: commit,
+      defaultBranch: 'master',
+      reconciledAt: null,
+    })
+    .where(eq(repositories.id, repository.id));
+  return repository;
+}
+
+describe('a pass that is not going to dispatch', () => {
+  test('refreshes the row and leaves the transition for a pass that will', async () => {
+    const fake = new FakeGitHub();
+    const adopted = fake.commitFiles('main', {
+      'services/api/spindrift.yaml': SPINDRIFT_YAML,
+    });
+    const repository = await alreadyAdopted(fake, adopted);
+    const loop = await context(fake);
+
+    const pushed = fake.commitFiles('main', {
+      'services/api/spindrift.yaml': SPINDRIFT_YAML,
+      'README.md': 'pushed',
+    });
+    const read = await reconcileRepository(loop, await reload(repository.id), {
+      adopt: false,
+    });
+
+    // `behind` rather than `unchanged`: there is a commit waiting, and saying
+    // so is the difference between a screen that can render "one push behind"
+    // and one that cannot tell that state from nothing having happened.
+    expect(read).toMatchObject({ outcome: 'behind', commit: pushed, adopted });
+    const row = await reload(repository.id);
+    // The transition itself is untouched…
+    expect(row.authoritativeCommit).toBe(adopted);
+    // …while the facts a screen actually came for are current.
+    expect(row.defaultBranch).toBe('main');
+    expect(row.reconciledAt).toEqual(NOW);
+
+    // The point of the whole option: the push is still there to be claimed. A
+    // read that advanced the cursor would have cancelled it for good — nothing
+    // dispatches a `behind`, and every later pass would see `head ===
+    // authoritativeCommit` and report `unchanged`.
+    const claim = await reconcileRepository(loop, await reload(repository.id));
+    expect(claim).toMatchObject({ outcome: 'adopted', commit: pushed });
+    expect((await reload(repository.id)).authoritativeCommit).toBe(pushed);
+  });
+
+  test('does not read one scope’s Spindrift file', async () => {
+    const fake = new FakeGitHub();
+    const adopted = fake.commitFiles('main', {
+      'services/api/spindrift.yaml': SPINDRIFT_YAML,
+    });
+    const repository = await alreadyAdopted(fake, adopted);
+    const loop = await context(fake);
+    fake.commitFiles('main', {
+      'services/api/spindrift.yaml': SPINDRIFT_YAML,
+      'README.md': 'pushed',
+    });
+
+    await reconcileRepository(loop, await reload(repository.id), {
+      adopt: false,
+    });
+
+    // Not an optimisation detail: reading every scope of every repository is
+    // most of what a listing costs, and a pass that is not going to adopt has
+    // nothing to do with what those files say.
+    expect(scopeFileReads(fake)).toEqual([]);
+
+    // And the scope is genuinely there — the adopting pass reads it — so the
+    // empty list above is the option working rather than the fixture being bare.
+    await reconcileRepository(loop, await reload(repository.id));
+    expect(
+      scopeFileReads(fake).map((request) => request.path.split('?')[0]),
+    ).toContain('/repos/example/app/contents/services/api/spindrift.yaml');
+  });
+});
+
+describe('claiming a transition exactly once', () => {
+  test('two passes observing the same new commit adopt it once', async () => {
+    const fake = new FakeGitHub();
+    fake.commitFiles('main', {
+      'services/api/spindrift.yaml': SPINDRIFT_YAML,
+    });
+    const { repository } = await connect(fake);
+    const loop = await context(fake);
+    await reconcileRepository(loop, repository);
+
+    const pushed = fake.commitFiles('main', {
+      'services/api/spindrift.yaml': SPINDRIFT_YAML,
+      'README.md': 'pushed',
+    });
+    // This row is not a simulation of the race — it *is* the race. The webhook
+    // pass and the poll pass each `SELECT` the repository before they read the
+    // branch, so the loser is holding exactly this: a row whose
+    // `authoritativeCommit` is the predecessor, read before the winner wrote.
+    // Passing it twice replays that interleaving without threads.
+    const observed = await reload(repository.id);
+
+    const winner = await reconcileRepository(loop, observed);
+    const loser = await reconcileRepository(loop, observed);
+
+    expect(winner).toMatchObject({ outcome: 'adopted', commit: pushed });
+    // `unchanged`, not `adopted`: the winner is dispatching this commit, and a
+    // second `adopted` would put a second Build on it — which since ticket 131
+    // is keyed `commit#<millis>` and so cannot be collapsed by the unique index.
+    expect(loser).toMatchObject({ outcome: 'unchanged', commit: pushed });
+    expect((await reload(repository.id)).authoritativeCommit).toBe(pushed);
+  });
+
+  test('a repository adopting its very first commit still adopts', async () => {
+    const fake = new FakeGitHub();
+    const first = fake.commitFiles('main', {
+      'services/api/spindrift.yaml': SPINDRIFT_YAML,
+    });
+    // Nothing adopted yet, so the compare-and-swap has no predecessor to name
+    // and swaps on the column still being null instead. That is a different
+    // `WHERE` from every other adoption, and it is the one every repository
+    // takes exactly once.
+    const { repository } = await connect(fake);
+    const loop = await context(fake);
+    expect(repository.authoritativeCommit).toBeNull();
+
+    const pass = await reconcileRepository(loop, repository);
+
+    expect(pass).toMatchObject({ outcome: 'adopted', commit: first });
+    expect((await reload(repository.id)).authoritativeCommit).toBe(first);
+
+    // And the null arm is a real condition rather than an unconditional write:
+    // a concurrent pass holding the same pre-adoption row loses it too.
+    const loser = await reconcileRepository(loop, repository);
+    expect(loser).toMatchObject({ outcome: 'unchanged', commit: first });
+  });
+});
+
 describe('an unmerged configuration pull request', () => {
   test('changes nothing', async () => {
     const fake = new FakeGitHub();

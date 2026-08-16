@@ -5,10 +5,11 @@
  * verify-then-classify contract; this file proves the thing that used to be
  * missing — that `webRoutes` actually reaches it, over a real HTTP `Request`,
  * with the secret and installation state arriving the way `serve.ts` wires
- * them. The opt-in gate gets its own focused coverage in
- * `test/reconciler/auto-deploy.test.ts`; the case here is the one only the
- * mounted route can prove — that a real signed delivery reaches an opted-in
- * App's Deploy end to end.
+ * them. The opt-in gate and the act a push asks for get their own focused
+ * coverage in `test/reconciler/auto-deploy.test.ts` over synthetic passes; the
+ * case here is the one only the mounted route can prove — that a real signed
+ * delivery, reconciled against a real repository host, causes the pushed
+ * commit to be built.
  */
 import { describe, expect, test } from 'bun:test';
 import { eq } from 'drizzle-orm';
@@ -23,6 +24,10 @@ import {
   repositories,
   targets,
 } from '../../src/db/schema.ts';
+import type {
+  RepositorySourceStager,
+  StagedSourceBundle,
+} from '../../src/domain/source-bundle.ts';
 import { GitHubApp } from '../../src/integrations/github/app.ts';
 import {
   WEBHOOK_PATH,
@@ -106,6 +111,23 @@ function post(deps: WebhookRouteDeps, request: Request): Promise<Response> {
   return webhookRoutes(deps)[WEBHOOK_PATH]!(request);
 }
 
+/** Records what it was asked to stage; fetches nothing. */
+class FakeSourceStager implements RepositorySourceStager {
+  readonly staged: Array<{ repository: string; commit: string }> = [];
+
+  async stageRepository(input: {
+    readonly repository: string;
+    readonly commit: string;
+  }): Promise<StagedSourceBundle> {
+    this.staged.push({ repository: input.repository, commit: input.commit });
+    return {
+      digest: `sha256:${'b'.repeat(64)}`,
+      location: `gs://depot/${input.commit}.tgz`,
+      retention: 'ephemeral',
+    };
+  }
+}
+
 describe('the route the earlier handler had nowhere to be reached from', () => {
   test('refuses a GET', async () => {
     const response = await post(
@@ -169,8 +191,9 @@ describe('the route the earlier handler had nowhere to be reached from', () => {
 });
 
 describe('a push that reaches an opted-in App', () => {
-  test('deploys it end to end, through the same command a developer would press', async () => {
+  test('builds the commit that was pushed, and places no Deploy of the artifact built from an older one', async () => {
     const db = database().db;
+    const stager = new FakeSourceStager();
     const fake = new FakeGitHub();
     const commit = fake.commitFiles('main', { 'README.md': 'hello' });
 
@@ -212,6 +235,10 @@ describe('a push that reaches an opted-in App', () => {
       .update(components)
       .set({ placedTargetId: target!.id })
       .where(eq(components.id, component!.id));
+    // The artifact on hand, built from the commit *before* the one being
+    // pushed. Deployable in every other respect — signed, at Build Level 2, on
+    // a connected Target — so the only reason the push below must not place it
+    // is the one this test is about.
     const digest = `sha256:${'a'.repeat(64)}`;
     const [build] = await db
       .insert(builds)
@@ -226,6 +253,10 @@ describe('a push that reaches an opted-in App', () => {
         status: 'SUCCEEDED',
         verifiedBuildLevel: 2,
         signature: testSignature(digest, NOW.toISOString()),
+        // Explicit, and before the frozen clock: the column defaults to the
+        // database's `now()`, which in a test is the real wall clock and
+        // therefore *newer* than the row this delivery writes at `NOW`.
+        createdAt: new Date(NOW.getTime() - 60_000),
       })
       .returning();
     expect(build).toBeDefined();
@@ -249,8 +280,9 @@ describe('a push that reaches an opted-in App', () => {
                 ? new FakeDeployAdapter({ adapter })
                 : null,
             build: () => null,
+            source: () => stager,
             store: () => {
-              throw new Error('unreachable: this Build is already SUCCEEDED');
+              throw new Error('unreachable: staging a bundle reads no secret');
             },
             repository: () => host,
             supplyChain: () => supplyChain,
@@ -269,13 +301,33 @@ describe('a push that reaches an opted-in App', () => {
     );
 
     expect(response.status).toBe(202);
+
+    // The sharpest fact in this file: the delivery travelled through
+    // verification, classification, a real reconciliation against the host, and
+    // the dispatcher, and what came out the far end was a request to stage
+    // *the commit that was pushed*. Nothing along that path had to be told it —
+    // the reconciliation read it off the branch the delivery named.
+    expect(stager.staged).toEqual([{ repository: fake.fullName, commit }]);
+
+    // And that commit is what the new Build is of. The `#<millis>` suffix is
+    // the rerun uniqueness key, so the commit is read off the base.
+    const rows = await db
+      .select()
+      .from(builds)
+      .where(eq(builds.componentId, component!.id));
+    expect(rows).toHaveLength(2);
+    const pending = rows.find((row) => row.id !== build!.id);
+    expect(pending?.status).toBe('PENDING');
+    expect(pending?.commit.split('#')[0]).toBe(commit);
+
     const [desired] = await db
       .select()
       .from(componentTargetDesired)
       .where(eq(componentTargetDesired.componentId, component!.id));
-    // The webhook reached the same one-button command a developer presses:
-    // the existing SUCCEEDED Build was deployed, not rebuilt.
-    expect(desired?.desiredBuildId).toBe(build!.id);
-    expect(await db.select().from(deploys)).toHaveLength(1);
+    // Nothing was placed. A push used to take the deployable branch here and
+    // make the artifact built from `0`×40 live — deploying a commit nobody
+    // pushed, and never building the one they did.
+    expect(desired?.desiredBuildId).toBeNull();
+    expect(await db.select().from(deploys)).toHaveLength(0);
   });
 });

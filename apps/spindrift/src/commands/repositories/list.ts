@@ -45,10 +45,18 @@ export const listRepositories: Command<
           // is a commit from an hour ago rendered as current. `unavailable` is
           // the loop's own word for that, and a throw is the same fact
           // arriving as an exception.
+          //
+          // `adopt: false` because rendering a screen is not a deploy. This
+          // pass used to advance `authoritative_commit` and then keep only the
+          // stale banner, which meant an operator who opened this page between
+          // a push and the next loop tick consumed that push's transition: the
+          // dispatcher never saw an `adopted` pass, and every later tick read
+          // the commit as already adopted. A read refreshes; it does not claim.
           try {
             const pass = await reconcileRepository(
               { db: context.db, clock: context.clock, host },
               repo,
+              { adopt: false },
             );
             if (pass.outcome === 'unavailable') {
               staleReasons.set(repo.id, pass.detail);

@@ -6,13 +6,15 @@
  * an HTTP request never has to stay open for the duration of a build.
  */
 import { asc, eq } from 'drizzle-orm';
+import { deployApp } from '../commands/apps/deploy.ts';
 import {
   type BuildDispatchContext,
   dispatchBuild,
   recordDispatchWait,
 } from '../commands/builds/dispatch.ts';
 import { buildRouteFor } from '../commands/builds/route.ts';
-import { builds, components, targets, vessels } from '../db/schema.ts';
+import { apps, builds, components, targets, vessels } from '../db/schema.ts';
+import { recordBuildEvent } from '../domain/attempt-log.ts';
 import { artifactTypeFor, takesShape } from '../domain/placement.ts';
 import { targetLabel } from '../domain/target.ts';
 import {
@@ -21,6 +23,7 @@ import {
   reconcilerPickupLatency,
   reconcilerQueueDepth,
 } from '../telemetry/index.ts';
+import { AUTO_DEPLOY_PRINCIPAL } from './auto-deploy.ts';
 
 /**
  * How often to look for a Build to dispatch.
@@ -60,6 +63,9 @@ export async function runBuildPass(
       // cannot get one from `dispatchBuild` — it never reaches it.
       appId: components.appId,
       componentId: components.id,
+      // Whether a Build that succeeds here is one a push asked for. See the
+      // dispatch below.
+      autoDeploy: apps.autoDeploy,
       waitingOn: builds.dispatchWaitingOn,
       // For the pickup-latency metric below — every row here is PENDING by
       // the `where` clause, so this is the age of a Build still waiting to be
@@ -75,6 +81,7 @@ export async function runBuildPass(
     })
     .from(builds)
     .innerJoin(components, eq(builds.componentId, components.id))
+    .innerJoin(apps, eq(apps.id, components.appId))
     .leftJoin(targets, eq(targets.id, components.placedTargetId))
     .leftJoin(vessels, eq(vessels.id, targets.vesselId))
     .where(eq(builds.status, 'PENDING'))
@@ -184,6 +191,43 @@ export async function runBuildPass(
         (Date.now() - row.createdAt.getTime()) / 1000,
         { kind: 'build' },
       );
+
+      // **The second half of a push.** §15's dispatcher asks `deployApp` for
+      // the *build* act, because a push means "this commit" and the artifact
+      // already on hand is the previous one's. That leaves the artifact this
+      // Build just produced with nothing to place it — the workspace's Rebuild
+      // has an operator who presses Deploy next, and a push has nobody.
+      //
+      // Deliberately `deployApp` and not a `deploys` row of this loop's own:
+      // §6's check-and-set is only a correctness argument while every intent
+      // goes through `checkDeployable` then `placeIntent`. This is the same
+      // call the button makes, on the Component the Build belongs to, and its
+      // refusals are the button's refusals.
+      if (row.autoDeploy && result.value.status === 'SUCCEEDED') {
+        const placed = await deployApp(
+          { name: row.appId, component: row.componentId },
+          { ...context, principal: AUTO_DEPLOY_PRINCIPAL },
+        );
+        if (!placed.ok) {
+          // Onto this Build's own attempt log, because that is the screen the
+          // push sent the developer to. A green build whose deploy was refused
+          // and said so nowhere is the same silence ticket 132 is about, one
+          // seam further along.
+          await recordBuildEvent(
+            context.db,
+            {
+              appId: row.appId,
+              componentId: row.componentId,
+              buildId: row.buildId,
+            },
+            {
+              type: 'log',
+              line: `this Build succeeded, and deploying it was refused: ${placed.failure.message}`,
+              resource: 'dispatch',
+            },
+          );
+        }
+      }
     }
   }
   // Every Build this pass looked at — one row each, all of them PENDING by
