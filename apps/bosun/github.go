@@ -155,6 +155,23 @@ func (e *httpStatusError) Error() string {
 	return fmt.Sprintf("github %s %s: %s: %s", e.method, e.url, e.status, e.body)
 }
 
+// runnerGone reports whether err is a DeleteRunner that found nothing to
+// delete. A 404 is the outcome the call exists to produce, not a failure to
+// reach GitHub — and the callers that keep a runner id around to retry a
+// failed deregistration would otherwise keep this one forever.
+//
+// The method check is what makes this safe, not a detail. DeleteRunner's own
+// auth chain 404s too — resolveInstallation GETs /repos/{repo}/installation
+// and mintInstallationToken POSTs for a token, and DeleteRunner wraps both —
+// so errors.As alone matches "this App is not installed on the repo" and reads
+// it as "that runner is already gone". Deleting the runner id on the strength
+// of a DELETE that never left the process is the exact failure the id is kept
+// to prevent, and it would be silent.
+func runnerGone(err error) bool {
+	var se *httpStatusError
+	return errors.As(err, &se) && se.statusCode == http.StatusNotFound && se.method == http.MethodDelete
+}
+
 // appAuth mints GitHub App installation tokens: it signs its own short-lived
 // JWTs with the App's private key, resolves which installation owns a repo,
 // and caches the resulting installation token against its ~1h expiry. Go

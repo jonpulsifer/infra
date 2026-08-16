@@ -7,6 +7,7 @@ import (
 	"crypto/x509"
 	"encoding/json"
 	"encoding/pem"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -35,6 +36,18 @@ type fakeGitHub struct {
 	deleted   []int64
 	generated []fakeGenerated
 	onDelete  func(runnerID int64) // observation hook for a successful delete; drain tests pin ordering with it
+
+	// Error injection. bosun's recovery paths are the ones a live GitHub
+	// outage exercises and a happy-path fake never does: what a class does
+	// when its mint fails, what a reaper does when it cannot read a status,
+	// and what a retire does when it cannot delete a registration.
+	generateErr error
+	getErr      error
+	deleteErr   error
+	// generateCalls counts attempts rather than successes, which is what a
+	// test of the top-up's backoff needs: a failed mint appends nothing to
+	// generated but still costs a real registration call.
+	generateCalls int
 }
 
 type fakeRunnerStatus struct {
@@ -54,6 +67,10 @@ func newFakeGitHub() *fakeGitHub {
 func (f *fakeGitHub) GenerateJITConfig(ctx context.Context, repo, name string, labels []string) (int64, string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	f.generateCalls++
+	if f.generateErr != nil {
+		return 0, "", f.generateErr
+	}
 	f.nextID++
 	id := f.nextID
 	f.generated = append(f.generated, fakeGenerated{repo: repo, name: name, labels: labels})
@@ -64,6 +81,9 @@ func (f *fakeGitHub) GenerateJITConfig(ctx context.Context, repo, name string, l
 func (f *fakeGitHub) GetRunner(ctx context.Context, repo string, runnerID int64) (string, bool, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.getErr != nil {
+		return "", false, f.getErr
+	}
 	s, ok := f.statuses[runnerID]
 	if !ok {
 		return "", false, fmt.Errorf("unknown runner %d", runnerID)
@@ -74,6 +94,9 @@ func (f *fakeGitHub) GetRunner(ctx context.Context, repo string, runnerID int64)
 func (f *fakeGitHub) DeleteRunner(ctx context.Context, repo string, runnerID int64) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.deleteErr != nil {
+		return f.deleteErr
+	}
 	// The real API refuses to delete a runner that is running a job (422),
 	// and drain's whole safety argument rests on that refusal.
 	if s, ok := f.statuses[runnerID]; ok && s.busy {
@@ -97,6 +120,50 @@ func (f *fakeGitHub) setStatus(runnerID int64, status string, busy bool) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.statuses[runnerID] = fakeRunnerStatus{status: status, busy: busy}
+}
+
+// fail makes every call of one kind return err until it is cleared, which is
+// how these tests spell "GitHub is unreachable right now".
+func (f *fakeGitHub) fail(generate, get, del error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.generateErr, f.getErr, f.deleteErr = generate, get, del
+}
+
+func (f *fakeGitHub) generateCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.generateCalls
+}
+
+// runnerGone must key on the DELETE's own response. Every failure below
+// carries an *httpStatusError somewhere in its chain, and only one of them
+// means the runner is gone.
+func TestRunnerGoneOnlyMatchesTheDeleteItself(t *testing.T) {
+	del404 := &httpStatusError{method: http.MethodDelete, url: "https://api/x", status: "404 Not Found", statusCode: http.StatusNotFound}
+	tests := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{"the DELETE itself 404s", del404, true},
+		{"wrapped, still the DELETE", fmt.Errorf("delete runner: %w", del404), true},
+		// DeleteRunner resolves an installation token first and wraps the
+		// failure as "github auth: %w". A repo the App is not installed on
+		// 404s there, and reading that as "already deleted" throws away the
+		// runner id on the strength of a request that never left the process.
+		{"the auth chain's GET 404s", fmt.Errorf("github auth: %w", &httpStatusError{method: http.MethodGet, url: "https://api/repos/o/r/installation", status: "404 Not Found", statusCode: http.StatusNotFound}), false},
+		{"the token mint 404s", fmt.Errorf("github auth: %w", &httpStatusError{method: http.MethodPost, url: "https://api/app/installations/1/access_tokens", status: "404 Not Found", statusCode: http.StatusNotFound}), false},
+		{"the DELETE fails some other way", &httpStatusError{method: http.MethodDelete, status: "500 Internal Server Error", statusCode: http.StatusInternalServerError}, false},
+		{"not an HTTP error at all", errors.New("dial tcp: i/o timeout"), false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := runnerGone(tt.err); got != tt.want {
+				t.Fatalf("runnerGone(%v) = %v, want %v", tt.err, got, tt.want)
+			}
+		})
+	}
 }
 
 func TestGHClientGenerateJITConfig(t *testing.T) {

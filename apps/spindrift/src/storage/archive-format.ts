@@ -41,7 +41,7 @@
  * something self-contained, and these are two fixed formats that have not moved
  * in thirty years.
  */
-import { deflateRawSync, inflateRawSync } from 'node:zlib';
+import { deflateRawSync, gunzipSync, inflateRawSync } from 'node:zlib';
 
 /** The containers an upload may arrive in. */
 export type ArchiveFormat = 'gzip' | 'zip';
@@ -117,6 +117,28 @@ export function normalizeArchive(
     filename: `${filename.replace(/\.zip$/i, '')}.tar.gz`,
     from: 'zip',
   };
+}
+
+/**
+ * The same gzipped tar, wearing this module's own deterministic gzip framing.
+ *
+ * A repository host's tarball endpoint gives no promise about the *gzip* layer:
+ * the compressor version, its settings, and the header's mtime/name fields are
+ * the host's to change between any two fetches of the same commit. §16 digests
+ * exactly what is staged, so an unstable wrapper mints a new depot object for
+ * bytes whose tar content is identical — which is how the source bucket filled
+ * with archives that are literally the same source. The tar inside *is* stable
+ * per commit (`git archive` output), so stripping the wrapper and re-framing it
+ * the way {@link gzip} frames a transcoded ZIP — no timestamp, no name, one
+ * compressor at one setting — makes the digest a function of the commit again.
+ *
+ * The tar bytes themselves are untouched: symlinks, pax headers, and the
+ * host's `owner-repo-sha/` prefix all pass through, so `tar -xz` extracts
+ * exactly what the host archived and the §16 `sha256sum` check still describes
+ * the staged object.
+ */
+export function canonicalGzip(bytes: Uint8Array): Uint8Array {
+  return gzip(new Uint8Array(gunzipSync(bytes)));
 }
 
 /** The first bytes, for a refusal that says what it saw rather than only what it wanted. */

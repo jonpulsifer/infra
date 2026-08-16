@@ -1,0 +1,62 @@
+name: go
+
+# bosun's tests did not run anywhere. A change to apps/bosun/*.go routes to
+# nothing in .github/scripts/validation-impact.sh, so the nix workflow's
+# flake-check never fired for one -- and the host builds that would have run
+# `go test` through buildGoModule's check phase are push-to-main only, gated
+# on the same filter. The suite executed only when some unrelated nix file
+# changed and a host closure happened to be rebuilt.
+#
+# So: the Go modules in apps/, tested on their own terms, on the PR. Straight
+# toolchain rather than through nix, because this needs to answer in seconds
+# on a path filter this narrow; the host builds still exercise the same tests
+# through the package on merge.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'apps/bosun/**'
+      - 'apps/spindrift-verifier/**'
+      - '.github/workflows/go.yml'
+  pull_request:
+    paths:
+      - 'apps/bosun/**'
+      - 'apps/spindrift-verifier/**'
+      - '.github/workflows/go.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: go-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        module:
+          - apps/bosun
+          - apps/spindrift-verifier
+    defaults:
+      run:
+        working-directory: ${{ matrix.module }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version-file: ${{ matrix.module }}/go.mod
+          # Both modules are stdlib-only, so there is no go.sum and nothing to
+          # cache. setup-go's default cache looks for one and fails without it.
+          cache: false
+      - run: go build ./...
+      - run: go vet ./...
+      # -race, because bosun's pool is reached from the poll loop, every
+      # skiff's awaitExit goroutine, and the drain path at once. The runner
+      # has a C toolchain; a workstation without one fails this with
+      # "requires cgo", which reads as a broken suite rather than a missing
+      # compiler.
+      - run: go test -race ./...

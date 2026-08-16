@@ -13,6 +13,7 @@ tags:: architecture
 - ## Warm pool, not dispatch
 	- A JIT-registered runner is ephemeral by construction: it runs one job, deregisters itself, and exits. So bosun keeps N skiffs booted and registered, and **GitHub hands one a matching job unprompted**.
 	- The consequence is what makes this small: **bosun never learns that a job was queued.** There is no webhook endpoint, no queue listener, no inbound connectivity, and nothing to replay. It notices a skiff halted — the VMM exits 0, which is a `wait(2)` on a child — and boots a replacement.
+	- That replacement is the fast path, not the guarantee. Every poll tick also **reconciles each class against its warm count** and boots what is missing, because a spawn can fail — a mint that 5xx'd, a workspace that would not fit — and a class one slot short otherwise stays that way for the life of the process, serving at half its declared depth and looking exactly like a class that works. A class that keeps failing to boot backs off rather than minting a registration every tick forever.
 	- Named cost: idle skiffs hold RAM, and there is no scale-to-zero.
 - ## The Spindrift build source
 	- `services.bosun.spindrift` turns a host into a second, independent work source alongside its GitHub warm pool: bosun long-polls [[Architecture/Spindrift]]'s outbox instead of waiting for GitHub to hand a registered skiff a job.
@@ -43,9 +44,10 @@ tags:: architecture
 	- Denying RFC1918 breaks DNS, so a public resolver is pinned and the deny stays absolute.
 - ## State
 	- One directory per skiff under `/run`, holding the runner id and the hull digest. `/run` is tmpfs, so a reboot clears it, which is correct — there is no database.
+	- A skiff whose registration bosun **could not** delete leaves its directory behind holding the runner id alone, credential included in what is stripped. That id is the only handle left on a live registration, and the sweep below is the only thing that can still spend it.
 	- A stop **drains** instead of failing every in-flight job. Idle skiffs are scuttled registration-first: GitHub refuses to delete a busy runner's registration, so a successful delete proves no job can land on that skiff and its VMM is safe to kill. Busy skiffs get the module's `drainTimeout` (default 15 min) to finish — which is also how long a `nixos-rebuild switch` may block on that host.
 	- Orphaned VMMs still cannot exist: the unit runs `KillMode=mixed`, so the stop signal reaches the daemon alone but systemd SIGKILLs the whole cgroup at the stop timeout.
-	- Because a cgroup kill leaves no chance to run teardown, bosun sweeps on start and deregisters what it finds.
+	- Because a cgroup kill leaves no chance to run teardown, bosun sweeps on start and deregisters what it finds — retrying, rather than discarding, any id whose delete fails again.
 - ## Where it runs
 	- [[Fleet/riptide]] and [[Fleet/oldschool]] enable `services.bosun`, and both share the box with kubelet. A class name is a promise about shape, so the two sites do not share one: oldschool serves the fast-internet site's slot, riptide serves a small one for platform experiments and holds a parked class behind it. This site rides a satellite link, which is why production CI is not served from it.
 	- `.github/workflows/kustomize.yml` is the merge-path job the pool serves, on `skiff-offsite`. It carries a dispatch input naming the runner, which is the escape hatch a single-host class needs: bosun being down there queues the job rather than failing it, and a `runs-on` a workflow cannot override would mean editing this repo to get an answer.

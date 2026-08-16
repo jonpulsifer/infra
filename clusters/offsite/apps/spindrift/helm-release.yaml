@@ -36,7 +36,7 @@ spec:
     # Renovate pins the digest on this line and Flux rolls it out. The image's
     # manifest schema and the chart must agree on which keys a declaration may
     # carry — the manifest below has to satisfy both.
-    image: ghcr.io/jonpulsifer/spindrift:latest@sha256:df0c54d85564fa6709139eacc210c0ed3f92b5bf4d087afc9d1dcc577ebc37bd
+    image: ghcr.io/jonpulsifer/spindrift:latest@sha256:bdcba4d5501cc0a707d705595dd94952096280f499ecb5013e709c4ab7247c58
     # Substituted by the apps Kustomization from the cluster-secrets Secret, so
     # the zone is read rather than restated. external-dns publishes the record
     # from the HTTPRoute and cert-manager issues the certificate, so this line
