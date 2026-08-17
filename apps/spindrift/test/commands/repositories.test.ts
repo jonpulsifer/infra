@@ -700,6 +700,37 @@ describe('listRepositories', () => {
     expect(result.value.repos[0]?.staleReason).toContain('unreachable');
   });
 
+  test('renders the commit that governs, not the one the branch has moved to', async () => {
+    const fake = new FakeGitHub();
+    const adopted = fake.commitFiles('main', { 'README.md': 'unconnected' });
+    const connected = await connectRepository(input(fake), await context(fake));
+    expect(connected.ok).toBe(true);
+    if (!connected.ok) return;
+    await database()
+      .db.update(repositories)
+      .set({ authoritativeCommit: adopted })
+      .where(eq(repositories.id, connected.value.repositoryId));
+
+    // Somebody pushes, and then somebody opens this screen before the loop's
+    // next tick. Refreshing the row must not consume that push.
+    const pushed = fake.commitFiles('main', { 'README.md': 'pushed' });
+
+    const result = await listRepositories({}, await context(fake));
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const [row] = await database()
+      .db.select()
+      .from(repositories)
+      .where(eq(repositories.id, connected.value.repositoryId));
+    expect(row?.authoritativeCommit).toBe(adopted);
+    expect(row?.authoritativeCommit).not.toBe(pushed);
+    // The field says "last reconciled", and the screen must not claim a commit
+    // nothing has dispatched: `pushed` has had no build and no deploy, and the
+    // only thing that will give it one is a pass that adopts it.
+    expect(result.value.repos[0]?.lastReconciledSha).toBe(adopted);
+  });
+
   test('keeps GitHub-granted repositories separate from durable connections', async () => {
     const base = await context(null);
     const result = await listRepositories(

@@ -44,8 +44,32 @@
  * missed delivery self-healing rather than silently skipping a deploy: the
  * loop's next tick reconciles the same commit and dispatches exactly as the
  * webhook would have.
+ *
+ * **Which is why advancing `authoritative_commit` is a claim, not a refresh.**
+ * The self-healing argument above holds only while every writer of that column
+ * is a path that also dispatches. A third writer that moves the cursor and
+ * drops the pass on the floor cancels that push for good — the next tick reads
+ * `head === authoritativeCommit`, reports `unchanged`, and the dispatcher has
+ * nothing to fire on. Two things enforce it here:
+ *
+ * - **{@link ReconcileOptions.adopt}.** A caller that only wants the row fresh
+ *   — a screen rendering repository health — passes `false` and gets `behind`
+ *   rather than a transition it is not going to dispatch.
+ * - **The advance is a compare-and-swap.** It names the commit it read, so the
+ *   webhook pass and the poll pass cannot both observe the same predecessor and
+ *   both report `adopted`. The loser reports `unchanged` and dispatches
+ *   nothing, because the winner already did.
+ *
+ * **What that does not buy is atomicity with the dispatch.** The advance
+ * commits here and the dispatch happens in the caller, so a process that dies
+ * between the two leaves a commit adopted and never deployed — and the next
+ * tick, reading `head === authoritativeCommit`, will call it `unchanged`
+ * forever. `reconcileAllRepositories` widens that window to a whole fleet walk,
+ * because `runRepoLoop` dispatches once at the end rather than per repository.
+ * Nothing here closes it; the honest statement is that every *writer* is a
+ * dispatching path, not that every adoption is dispatched.
  */
-import { eq } from 'drizzle-orm';
+import { and, eq, isNull } from 'drizzle-orm';
 import type { Clock } from '../commands/types.ts';
 import type { Database } from '../db/client.ts';
 import { apps, type Repository, repositories } from '../db/schema.ts';
@@ -100,9 +124,29 @@ export type RepositoryReconciliation =
   | {
       readonly repositoryId: string;
       readonly fullName: string;
-      /** The default branch had not moved since the adopted commit. */
+      /**
+       * Nothing for this pass to adopt: either the default branch had not moved
+       * since the adopted commit, or a concurrent pass claimed the same
+       * transition first and dispatched it. Both mean the same thing to a
+       * caller — this pass carries no new commit.
+       */
       readonly outcome: 'unchanged';
       readonly commit: string;
+    }
+  | {
+      readonly repositoryId: string;
+      readonly fullName: string;
+      /**
+       * The default branch has moved and this pass deliberately did not claim
+       * it (`adopt: false`). Distinct from `unchanged` because the difference
+       * is visible — there is a commit waiting that this pass declined to
+       * adopt, and some later pass will.
+       */
+      readonly outcome: 'behind';
+      /** The head this pass observed, which is not what governs yet. */
+      readonly commit: string;
+      /** What still governs, and what the screen should still render. */
+      readonly adopted: string | null;
     }
   | {
       readonly repositoryId: string;
@@ -194,6 +238,27 @@ async function thaw(
     .where(eq(repositories.id, repositoryId));
 }
 
+/** How much of a pass a caller is asking for. */
+export interface ReconcileOptions {
+  /**
+   * Whether this pass may claim the transition to a new commit.
+   *
+   * `true` — the default, and what the loop, the webhook and the creation flow
+   * ask for — is the whole pass: read the scopes, advance
+   * `authoritative_commit`, report `adopted`. The caller is then obliged to
+   * hand the pass to `dispatchAutoDeploys`, because adopting is what an opted-in
+   * App's push *is*.
+   *
+   * `false` is for a caller that wants the row fresh and is not going to
+   * dispatch — a screen. It refreshes `default_branch` and `reconciled_at`,
+   * skips the per-scope file reads (which is also most of the latency), leaves
+   * `authoritative_commit` alone, and reports `behind`. A read that claimed the
+   * transition would permanently cancel that push: nothing dispatches it, and
+   * the next pass sees `head === authoritativeCommit` and calls it `unchanged`.
+   */
+  readonly adopt?: boolean;
+}
+
 /**
  * One pass over one repository.
  *
@@ -204,7 +269,9 @@ async function thaw(
 export async function reconcileRepository(
   context: RepoLoopContext,
   repository: Repository,
+  options: ReconcileOptions = {},
 ): Promise<RepositoryReconciliation> {
+  const adopt = options.adopt ?? true;
   const ref = repositoryRefOf(repository);
   const now = context.clock.now();
 
@@ -251,6 +318,24 @@ export async function reconcileRepository(
       fullName: repository.fullName,
       outcome: 'unchanged',
       commit: head,
+    };
+  }
+
+  if (!adopt) {
+    // Everything above this line is a refresh of facts the row is allowed to be
+    // wrong about between passes — the branch's name, when it was last looked
+    // at, whether access came back. Everything below it is the transition, and
+    // a caller that is not going to dispatch does not get to consume one.
+    await context.db
+      .update(repositories)
+      .set({ defaultBranch, reconciledAt: now, updatedAt: now })
+      .where(eq(repositories.id, repository.id));
+    return {
+      repositoryId: repository.id,
+      fullName: repository.fullName,
+      outcome: 'behind',
+      commit: head,
+      adopted: repository.authoritativeCommit,
     };
   }
 
@@ -356,8 +441,16 @@ export async function reconcileRepository(
   // interesting for having put the file where this loop reads it. Clearing the
   // number is what stops "merge your configuration PR" standing on a screen
   // over a pull request that landed weeks ago.
+  //
+  // **Conditional on the commit this pass read.** The webhook and the poll loop
+  // reconcile the same repository concurrently by design, and an unconditional
+  // advance lets both observe the same predecessor, both write `head`, and both
+  // report `adopted` — two dispatches for one commit. Since ticket 131 those are
+  // two Builds keyed `commit#<millis>`, which `builds_component_commit_shape_unique`
+  // is explicitly unable to collapse (see `deployApp`'s rerun key). Naming the
+  // predecessor makes exactly one of them the adopter.
   const adopted = outcomes.some((outcome) => outcome.outcome === 'adopted');
-  await context.db
+  const [claimed] = await context.db
     .update(repositories)
     .set({
       defaultBranch,
@@ -366,7 +459,27 @@ export async function reconcileRepository(
       updatedAt: now,
       ...(adopted ? { configPullRequest: null } : {}),
     })
-    .where(eq(repositories.id, repository.id));
+    .where(
+      and(
+        eq(repositories.id, repository.id),
+        previous === null
+          ? isNull(repositories.authoritativeCommit)
+          : eq(repositories.authoritativeCommit, previous),
+      ),
+    )
+    .returning({ id: repositories.id });
+
+  if (claimed === undefined) {
+    // Another pass moved the cursor between this one's read and its write. It
+    // adopted, and it is dispatching — so this pass reports that it carries no
+    // new commit rather than a second `adopted` nobody should act on twice.
+    return {
+      repositoryId: repository.id,
+      fullName: repository.fullName,
+      outcome: 'unchanged',
+      commit: head,
+    };
+  }
 
   return {
     repositoryId: repository.id,

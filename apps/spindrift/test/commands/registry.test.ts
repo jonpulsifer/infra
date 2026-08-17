@@ -50,6 +50,42 @@ describe('dispatch refuses what the registry does not back', () => {
     expect(result.failure.message).toContain('deployTheWholeFleet');
   });
 
+  test('a browser cannot name the commit deployApp builds', async () => {
+    // `commit` is how §15's dispatcher tells `deployApp` which commit a pass
+    // adopted, and adopting is the only thing that makes a commit
+    // authoritative. A caller naming one directly would be asking Spindrift to
+    // stage, build and place an arbitrary ref — an unmerged branch, a fork's
+    // head — through a path with no review and no admission gate of its own.
+    // So the registered schema is the command's input minus that field, and
+    // `.strict()` makes naming it a refusal rather than a silent drop.
+    const result = await dispatch(
+      'deployApp',
+      { name: 'invoices', commit: 'f'.repeat(40) },
+      context,
+    );
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.failure.code).toBe('INVALID_INPUT');
+    // The whole object is what `.strict()` rejects, so the issue carries no
+    // field path — the key it names is in the sentence.
+    expect(
+      result.failure.issues?.some((issue) => issue.message.includes('commit')),
+    ).toBe(true);
+    // `unreachableContext` throws on any database access, so reaching this line
+    // is itself the proof that no handler ran.
+  });
+
+  test('the same call without a commit reaches the handler', async () => {
+    // The guard above has to be about the field and not about the command:
+    // every other caller of `deployApp` must still dispatch. This one gets past
+    // validation and dies in `unreachableContext`, which is exactly far enough
+    // to prove the schema admitted it.
+    expect(
+      dispatch('deployApp', { name: 'invoices' }, context),
+    ).rejects.toThrow();
+  });
+
   test('isCommandName rejects a name that is only a property of Object', () => {
     expect(isCommandName('toString')).toBe(false);
     expect(isCommandName('constructor')).toBe(false);

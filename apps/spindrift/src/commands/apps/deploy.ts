@@ -32,6 +32,16 @@
  * same refusals — and the result still says which of the two happened, so the
  * substitution this command forbids stays forbidden in both directions.
  *
+ * `commit` is the other way the caller decides which act, and it is the one
+ * §15's dispatcher uses. The two are different questions: `rebuild` is "build
+ * again whatever is there", `commit` is "this act is about *this* commit", and
+ * a push is only the second. Where the newest Build already carries the named
+ * commit, the acts are the same as they always were — deploy it if it
+ * succeeded, wait if it is still building, and where it is already what is
+ * desired on the pair, do nothing at all. Where it does not, the deployable
+ * branch is not deployable *for this caller*: taking it meant a push adopted a
+ * commit and then placed the artifact built from the one before it.
+ *
  * **This command writes no `deploys` row of its own**, on either branch. That
  * is the point rather than an omission: §6's check-and-set is only a
  * correctness argument if every intent is written through the one pair that
@@ -42,7 +52,7 @@
  * one here would name an artifact that does not exist (§4: "a build records an
  * artifact rather than deploying one").
  */
-import { and, eq, isNull } from 'drizzle-orm';
+import { and, eq, isNull, lt, or } from 'drizzle-orm';
 import { z } from 'zod';
 import { targetAdapterSchema } from '../../config/manifest.schema.ts';
 import {
@@ -60,6 +70,7 @@ import {
   isEphemeralBundleLocation,
   isFetchableBundleLocation,
 } from '../../storage/archives.ts';
+import { DISPATCH_LEASE_TIMEOUT_MS } from '../builds/dispatch.ts';
 import { createDeploy } from '../deploys/create.ts';
 import {
   type Command,
@@ -81,6 +92,21 @@ export const deployAppInput = z
      * for a Build in as many words.
      */
     rebuild: z.boolean().optional(),
+    /**
+     * The commit this act is about, for a caller that has one.
+     *
+     * §15's dispatcher does; the workspace button does not, and that is the
+     * whole difference between them. A press means "deploy what is built" and
+     * carries no commit to disagree with. A push means "this commit", so an App
+     * whose newest Build succeeded at the *previous* commit is not deployable
+     * for this caller — it needs the second act, which is what `rebuild` names
+     * when an operator asks for it in as many words.
+     *
+     * Absent is every existing caller unchanged. Set, it is a fact this command
+     * decides *which act* against — never a second admission policy, and never
+     * a bypass of `checkDeployable`/`placeIntent`.
+     */
+    commit: z.string().trim().min(1).optional(),
     /**
      * The Component to act on, by its name or id within this App.
      *
@@ -106,6 +132,22 @@ export const deployAppInput = z
 
 export type DeployAppInput = z.infer<typeof deployAppInput>;
 
+/**
+ * What a *caller over HTTP* may say — the same command, minus `commit`.
+ *
+ * §15: only the default branch is authoritative, and the one thing that decides
+ * which commit is authoritative is a reconciliation pass. `commit` exists so
+ * that pass can tell this command what it adopted; a browser naming one would
+ * be asking Spindrift to stage, build and place an arbitrary ref — an unmerged
+ * branch, a fork's head — through a path with no review and no admission gate
+ * of its own. The schema is `.strict()`, so a request carrying `commit` is
+ * refused outright rather than quietly ignored.
+ *
+ * This is the registered schema; {@link deployAppInput} stays the in-process
+ * one, and §15's dispatcher calls the handler directly.
+ */
+export const deployAppRequestInput = deployAppInput.omit({ commit: true });
+
 export interface DeployAppResult {
   /**
    * The intent that was written, or `null` when a Build had to start first.
@@ -117,8 +159,16 @@ export interface DeployAppResult {
   readonly deployId: number | null;
   /** The Build this act is about: the one being deployed, or the one started. */
   readonly buildId: number;
-  /** `PENDING` for a written intent, `BUILDING` when only a Build was started. */
-  readonly phase: 'PENDING' | 'BUILDING';
+  /**
+   * `PENDING` for a written intent, `BUILDING` when only a Build was started,
+   * `UNCHANGED` when this commit is already what is desired here and nothing
+   * was written at all.
+   *
+   * `UNCHANGED` is reachable only for a caller that named a {@link
+   * DeployAppInput.commit} — the button cannot produce it, because a press with
+   * nothing new to say is still an operator asking for a re-apply.
+   */
+  readonly phase: 'PENDING' | 'BUILDING' | 'UNCHANGED';
 }
 
 /** What a rerun's new Build records about the source it will be built from. */
@@ -169,6 +219,15 @@ async function sourceForRerun(
     typeof builds.$inferSelect,
     'commit' | 'bundleDigest' | 'bundleLocation'
   > | null,
+  /**
+   * The commit the caller's act is about, where it named one.
+   *
+   * §15's dispatcher decides *which act* against a commit, so the Build that
+   * act writes has to be of that same commit — otherwise the decision and the
+   * artifact disagree, which is the defect this whole path exists to fix one
+   * layer up. `null` is every other caller, which asks the repository.
+   */
+  requested: string | null,
   context: Pick<CommandContext, 'db' | 'adapters' | 'clock'>,
 ): Promise<CommandResult<RerunSource>> {
   // `builds_component_commit_shape_unique` makes a rerun collide with the
@@ -198,9 +257,10 @@ async function sourceForRerun(
           .limit(1)
       : [];
   const wanted =
-    repository?.access === 'active'
+    requested ??
+    (repository?.access === 'active'
       ? (repository.authoritativeCommit ?? baseCommit)
-      : baseCommit;
+      : baseCommit);
 
   if (
     wanted === baseCommit &&
@@ -337,7 +397,15 @@ export const deployApp: Command<DeployAppInput, DeployAppResult> = async (
         orderBy: (componentsTable, { asc }) => [asc(componentsTable.createdAt)],
         with: {
           builds: {
-            orderBy: (buildsTable, { desc }) => [desc(buildsTable.createdAt)],
+            // `id` breaks the tie. Two Builds can share a `createdAt` — the
+            // column is written from the command's own clock, not the
+            // database's — and "the newest Build" is what every act below
+            // keys on, so an ambiguous answer picks a different Build on
+            // different reads of the same rows.
+            orderBy: (buildsTable, { desc }) => [
+              desc(buildsTable.createdAt),
+              desc(buildsTable.id),
+            ],
             limit: 1,
           },
         },
@@ -437,12 +505,57 @@ export const deployApp: Command<DeployAppInput, DeployAppResult> = async (
 
   const latestBuild = component.builds[0];
 
+  // A rerun row is keyed `<commit>#<millis>` (see the insert below) because
+  // `builds_component_commit_shape_unique` would otherwise make a rerun collide
+  // with the attempt it reruns. The suffix is a uniqueness device and never part
+  // of the commit, so every comparison against one strips it — the same reading
+  // `sourceForRerun` takes.
+  const builtCommit =
+    latestBuild === undefined
+      ? null
+      : (latestBuild.commit.split('#')[0] ?? latestBuild.commit);
+  const isRequestedCommit =
+    input.commit === undefined || builtCommit === input.commit;
+
   if (
     !input.rebuild &&
+    // The newest Build has to be *of this commit* for a caller that named one.
+    // Without this, a push to a healthy App took the deployable branch and
+    // placed a Deploy of the artifact built from the previous commit: the
+    // pushed commit was adopted and then never built at all.
+    isRequestedCommit &&
     latestBuild &&
     latestBuild.status === 'SUCCEEDED' &&
     latestBuild.artifactDigest !== null
   ) {
+    if (input.commit !== undefined) {
+      // This commit is already what is desired on this pair, so there is
+      // nothing for a push to cause. Writing the intent anyway is a Deploy row
+      // and a full re-apply of a byte-identical artifact — free on Kubernetes,
+      // another production deployment on Vercel. Reached whenever an App is
+      // created from the commit the loop is about to adopt for the first time.
+      const [desired] = await context.db
+        .select({
+          desiredBuildId: componentTargetDesired.desiredBuildId,
+          desiredDeployId: componentTargetDesired.desiredDeployId,
+        })
+        .from(componentTargetDesired)
+        .where(
+          and(
+            eq(componentTargetDesired.componentId, component.id),
+            eq(componentTargetDesired.targetId, targetId),
+          ),
+        )
+        .limit(1);
+      if (desired?.desiredBuildId === latestBuild.id) {
+        return ok({
+          deployId: desired.desiredDeployId,
+          buildId: latestBuild.id,
+          phase: 'UNCHANGED' as const,
+        });
+      }
+    }
+
     const deployAttempt = await createDeploy(
       {
         componentId: component.id,
@@ -465,12 +578,46 @@ export const deployApp: Command<DeployAppInput, DeployAppResult> = async (
   }
 
   const now = context.clock.now();
+  const leaseCutoff = new Date(now.getTime() - DISPATCH_LEASE_TIMEOUT_MS);
   let buildToRun = latestBuild;
+
+  /**
+   * Whether a Build is genuinely in flight, as opposed to merely not finished.
+   *
+   * `RUNNING` past its lease is a runner that died: `runBuildPass` selects only
+   * `PENDING` rows, so nothing sweeps it, and the reset below is the only thing
+   * that puts it back in the queue. Treating it as in-flight would strand that
+   * commit for good.
+   */
+  const inFlight =
+    buildToRun !== undefined &&
+    (buildToRun.status === 'PENDING' ||
+      (buildToRun.status === 'RUNNING' &&
+        buildToRun.leasedAt !== null &&
+        buildToRun.leasedAt >= leaseCutoff));
+
+  // A Build of this very commit is already in flight, so the push it came from
+  // has already caused everything it is going to cause. Falling through would
+  // reset a Build that is fine — and, where it is `RUNNING`, revoke a live
+  // attempt's lease.
+  if (input.commit !== undefined && isRequestedCommit && inFlight) {
+    return ok({
+      deployId: null,
+      buildId: buildToRun!.id,
+      phase: 'BUILDING' as const,
+    });
+  }
 
   if (
     !buildToRun ||
     buildToRun.status === 'FAILED' ||
-    buildToRun.status === 'SUCCEEDED'
+    buildToRun.status === 'SUCCEEDED' ||
+    // A caller that named a commit and did not find it built needs a Build of
+    // *that* commit. The reset arm below cannot produce one: it re-dispatches
+    // the existing row, whose bundle was staged for the commit it already
+    // names — so a push arriving while an older commit was still queued would
+    // rebuild the older commit and report success.
+    !isRequestedCommit
   ) {
     // §3: shape follows the Target, not the predecessor. A rebuild is the
     // remediation the cross-shape refusal prescribes — "this placement needs
@@ -505,6 +652,7 @@ export const deployApp: Command<DeployAppInput, DeployAppResult> = async (
       app,
       component.name,
       buildToRun ?? null,
+      input.commit ?? null,
       context,
     );
     if (!rerun.ok) return rerun;
@@ -535,12 +683,31 @@ export const deployApp: Command<DeployAppInput, DeployAppResult> = async (
             : (buildToRun?.bundleSubpath ?? '.'),
         status: 'PENDING',
         createdAt: now,
+        // What a push asked for, recorded where it survives the wait. See the
+        // column's own note: the build loop reads it when the verdict lands,
+        // by which time this caller is long gone.
+        deployOnSuccess: input.commit !== undefined,
       })
       .returning();
 
     buildToRun = newBuild;
   } else {
-    await context.db
+    // `RUNNING` under a live lease is a generator streaming into this attempt's
+    // log right now. Nulling `dispatchId` and `leasedAt` under it does not stop
+    // it — nothing here can — it only makes the build loop dispatch a second
+    // one on its next 500ms tick, so two generators write one attempt log and
+    // whichever finishes last lands the verdict. Refused rather than cancelled
+    // because there is no cancel to offer: the route's own terminal write is
+    // what ends an attempt, and the lease expiring is what makes this row
+    // reclaimable, which is the wait this sentence names.
+    //
+    // **The condition is the `WHERE`, not a check above it.** `buildToRun` was
+    // read at the top of this command, several awaits and a network staging
+    // ago, and `dispatchBuild` claims rows concurrently by design — so a claim
+    // that lands in that window would pass any in-memory guard and then be
+    // clobbered by an unconditional update. Matching zero rows *is* the
+    // refusal.
+    const rearmed = await context.db
       .update(builds)
       .set({
         status: 'PENDING',
@@ -548,8 +715,34 @@ export const deployApp: Command<DeployAppInput, DeployAppResult> = async (
         logFidelity: null,
         dispatchId: null,
         leasedAt: null,
+        // `deployOnSuccess` is deliberately **not** cleared. Re-arming a Build
+        // a push asked for does not change what was asked for — the operator
+        // re-queued that Build, they did not replace it — and clearing it here
+        // would make a Rebuild press silently cancel the push's deploy, which
+        // is a worse surprise than the one this arm was hardened against.
       })
-      .where(eq(builds.id, buildToRun.id));
+      .where(
+        and(
+          eq(builds.id, buildToRun.id),
+          or(
+            eq(builds.status, 'PENDING'),
+            and(
+              eq(builds.status, 'RUNNING'),
+              or(isNull(builds.leasedAt), lt(builds.leasedAt, leaseCutoff)),
+            ),
+          ),
+        ),
+      )
+      .returning({ id: builds.id });
+
+    if (rearmed.length === 0) {
+      return failed(
+        'NOT_BUILDABLE',
+        `Build ${buildToRun.id} for '${component.name}' is already running — ` +
+          'wait for it to finish, or for its lease to expire, before starting ' +
+          'another',
+      );
+    }
   }
 
   // The desired row, and nothing on it. `runBuildPass` dispatches a Build

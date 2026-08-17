@@ -29,7 +29,7 @@ import type { z } from 'zod';
 import { setAppAutoDeploy, setAppAutoDeployInput } from './apps/auto-deploy.ts';
 import { setAppBuildRoute, setAppBuildRouteInput } from './apps/build-route.ts';
 import { deleteApp, deleteAppInput } from './apps/delete.ts';
-import { deployApp, deployAppInput } from './apps/deploy.ts';
+import { deployApp, deployAppRequestInput } from './apps/deploy.ts';
 import { listApps, listAppsInput } from './apps/list.ts';
 import {
   resolveComponentPlacement,
@@ -180,7 +180,7 @@ export type AnyCommandDescriptor = CommandDescriptor<any, any>;
 /** Every command, by the name it is dispatched under. */
 export const commandRegistry = {
   deleteApp: { input: deleteAppInput, handler: deleteApp },
-  deployApp: { input: deployAppInput, handler: deployApp },
+  deployApp: { input: deployAppRequestInput, handler: deployApp },
   setAppAutoDeploy: {
     input: setAppAutoDeployInput,
     handler: setAppAutoDeploy,

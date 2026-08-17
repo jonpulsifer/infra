@@ -12,7 +12,9 @@ import {
   recordDispatchWait,
 } from '../commands/builds/dispatch.ts';
 import { buildRouteFor } from '../commands/builds/route.ts';
+import { createDeploy } from '../commands/deploys/create.ts';
 import { builds, components, targets, vessels } from '../db/schema.ts';
+import { recordBuildEvent } from '../domain/attempt-log.ts';
 import { artifactTypeFor, takesShape } from '../domain/placement.ts';
 import { targetLabel } from '../domain/target.ts';
 import {
@@ -21,6 +23,7 @@ import {
   reconcilerPickupLatency,
   reconcilerQueueDepth,
 } from '../telemetry/index.ts';
+import { AUTO_DEPLOY_PRINCIPAL } from './auto-deploy.ts';
 
 /**
  * How often to look for a Build to dispatch.
@@ -60,6 +63,10 @@ export async function runBuildPass(
       // cannot get one from `dispatchBuild` — it never reaches it.
       appId: components.appId,
       componentId: components.id,
+      // Whether a Build that succeeds here is one a push asked for — a fact
+      // the Build itself records, because whoever asked is long gone by the
+      // time there is a verdict. See the dispatch below.
+      deployOnSuccess: builds.deployOnSuccess,
       waitingOn: builds.dispatchWaitingOn,
       // For the pickup-latency metric below — every row here is PENDING by
       // the `where` clause, so this is the age of a Build still waiting to be
@@ -184,6 +191,55 @@ export async function runBuildPass(
         (Date.now() - row.createdAt.getTime()) / 1000,
         { kind: 'build' },
       );
+
+      // **The second half of a push.** §15's dispatcher asks for the *build*
+      // act, because a push means "this commit" and the artifact already on
+      // hand is the previous one's. That leaves the artifact this Build just
+      // produced with nothing to place it — the workspace's Rebuild has an
+      // operator who presses Deploy next, and a push has nobody.
+      //
+      // `createDeploy` rather than `deployApp`, because there is no act left to
+      // choose: this Build is the subject, and it just succeeded. `deployApp`
+      // would re-derive "the App's newest Build" from the database, which is a
+      // different row whenever a later push has already queued one — and would
+      // then place *that* artifact, or silently place nothing at all. §6's
+      // check-and-set is what has to be preserved here, not the act-chooser
+      // above it, and `createDeploy` is the pair that implements it —
+      // `checkDeployable` then `placeIntent` — which `placeComponent`,
+      // `setConfig` and `rollbackDeploy` all reach the same way.
+      //
+      // `deployOnSuccess` and not `apps.autoDeploy`: the flag says the App
+      // deploys on push, not that this Build came from one, and keying on it
+      // would make an operator's Rebuild press ship to production.
+      if (row.deployOnSuccess && result.value.status === 'SUCCEEDED') {
+        const placed = await createDeploy(
+          {
+            componentId: row.componentId,
+            targetId: row.targetId,
+            buildId: row.buildId,
+          },
+          { ...context, principal: AUTO_DEPLOY_PRINCIPAL },
+        );
+        if (!placed.ok) {
+          // Onto this Build's own attempt log, because that is the screen the
+          // push sent the developer to. A green build whose deploy was refused
+          // and said so nowhere is the same silence ticket 132 is about, one
+          // seam further along.
+          await recordBuildEvent(
+            context.db,
+            {
+              appId: row.appId,
+              componentId: row.componentId,
+              buildId: row.buildId,
+            },
+            {
+              type: 'log',
+              line: `this Build succeeded, and deploying it was refused: ${placed.failure.message}`,
+              resource: 'dispatch',
+            },
+          );
+        }
+      }
     }
   }
   // Every Build this pass looked at — one row each, all of them PENDING by

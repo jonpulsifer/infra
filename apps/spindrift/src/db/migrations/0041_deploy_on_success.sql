@@ -1,0 +1,15 @@
+-- Story 131: auto-deploy builds the commit that was pushed.
+--
+-- A push means "this commit", so §15's dispatcher asks for a Build rather than
+-- a Deploy of whatever artifact happens to be on hand. That leaves the artifact
+-- it produces with nobody to place it: the workspace's Rebuild has an operator
+-- who presses Deploy next, and a push has nobody.
+--
+-- This column is who asked. `apps.auto_deploy` cannot answer it — it says the
+-- App deploys on push, not that *this Build* came from one — so keying the
+-- build loop's placement on it would make an operator's Rebuild press ship to
+-- production, which is the substitution `deployApp` exists to refuse.
+--
+-- Defaulted false and backfilled false: every Build that exists today was asked
+-- for by somebody who is still expected to press Deploy.
+ALTER TABLE "builds" ADD COLUMN "deploy_on_success" boolean DEFAULT false NOT NULL;
