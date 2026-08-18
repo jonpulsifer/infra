@@ -16,7 +16,7 @@ spec:
         namespace: flux-system
   values:
     fullnameOverride: hub
-    image: ghcr.io/jonpulsifer/hub:latest@sha256:dad36acc706b4d044875cb6b5703d432488e398412c634e8acba552b8ff5cc77
+    image: ghcr.io/jonpulsifer/hub:latest@sha256:464e78615e63d980fc0bed039b7b936d30b9832dcaebc702e8fdd7d5de05c219
     command: "bun run start"
     port: 3000
     hostname: hub.lolwtf.ca
