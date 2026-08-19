@@ -86,22 +86,19 @@ spec:
           publicDashboards: true
       plugins:
         - grafana-mqtt-datasource
+        - victoriametrics-logs-datasource
       deleteDatasources:
         - name: Loki
           orgId: 1
       additionalDataSources:
-        - name: Loki
-          type: loki
-          uid: loki
+        - name: VictoriaLogs
+          type: victoriametrics-logs-datasource
+          uid: victorialogs
           isDefault: false
           access: proxy
-          url: https://loki.${SECRET_DOMAIN}
+          url: http://victoria-logs-server.monitoring.svc.cluster.local:9428
           orgId: 1
           version: 1
-          jsonData:
-            httpHeaderName1: "X-Scope-OrgID"
-          secureJsonData:
-            httpHeaderValue1: "1"
         - name: Tempo
           type: tempo
           uid: tempo
@@ -112,7 +109,7 @@ spec:
           version: 1
           jsonData:
             tracesToLogs:
-              datasourceUid: loki
+              datasourceUid: victorialogs
               filterByTraceID: false
               tags:
                 - key: pod

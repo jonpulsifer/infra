@@ -61,11 +61,11 @@ spec:
           type: journald
           journal_directory: /var/log/journal
       sinks:
-        loki_kubernetes:
+        victoria_logs_kubernetes:
           type: loki
           inputs:
             - kubernetes_logs
-          endpoint: http://loki.monitoring.svc.cluster.local:3100
+          endpoint: http://victoria-logs-server.monitoring.svc.cluster.local:9428/insert/loki/api/v1/push
           tenant_id: "1"
           encoding:
             codec: json
@@ -77,11 +77,11 @@ spec:
             pod: "{{`{{ kubernetes.pod_name }}`}}"
             container: "{{`{{ kubernetes.container_name }}`}}"
             node: "{{`{{ kubernetes.pod_node_name }}`}}"
-        loki_journald:
+        victoria_logs_journald:
           type: loki
           inputs:
             - journald
-          endpoint: http://loki.monitoring.svc.cluster.local:3100
+          endpoint: http://victoria-logs-server.monitoring.svc.cluster.local:9428/insert/loki/api/v1/push
           tenant_id: "1"
           encoding:
             codec: json

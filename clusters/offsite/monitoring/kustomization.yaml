@@ -4,7 +4,6 @@ kind: Kustomization
 resources:
   - secret.sops.yaml
   - kube-prometheus.yaml
-  - loki.yaml
   - tempo.yaml
   - ../../base/monitoring
 patches:
