@@ -69,6 +69,13 @@ spec:
       replicas: 0
     minio:
       enabled: false
+    # Loki stores chunks on the local filesystem, so the memcached chunks- and
+    # results-cache the chart enables by default front no object store. Their
+    # default sizing reserves 9830Mi + 1229Mi of memory and 1 CPU to do it.
+    chunksCache:
+      enabled: false
+    resultsCache:
+      enabled: false
     monitoring:
       dashboards:
         enabled: false
