@@ -715,6 +715,11 @@ export const deployApp: Command<DeployAppInput, DeployAppResult> = async (
         logFidelity: null,
         dispatchId: null,
         leasedAt: null,
+        // A fresh press resets the backoff clock (story 101): the operator
+        // asked for this Build *now*, and holding it to a wait earned by
+        // refusals they may have just fixed would read as a dead button.
+        dispatchAttempts: 0,
+        nextDispatchAt: null,
         // `deployOnSuccess` is deliberately **not** cleared. Re-arming a Build
         // a push asked for does not change what was asked for — the operator
         // re-queued that Build, they did not replace it — and clearing it here
