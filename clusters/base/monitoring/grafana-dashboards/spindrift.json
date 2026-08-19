@@ -137,13 +137,13 @@
       "type": "logs",
       "title": "Spindrift Logs",
       "datasource": {
-        "type": "loki",
-        "uid": "loki"
+        "type": "victoriametrics-logs-datasource",
+        "uid": "victorialogs"
       },
       "gridPos": { "h": 16, "w": 24, "x": 0, "y": 8 },
       "targets": [
         {
-          "datasource": { "type": "loki", "uid": "loki" },
+          "datasource": { "type": "victoriametrics-logs-datasource", "uid": "victorialogs" },
           "expr": "{namespace=~\"spindrift|spindrift-apps\"}",
           "refId": "A"
         }

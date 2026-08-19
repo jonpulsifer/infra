@@ -7,8 +7,6 @@ resources:
   - local-node-exporters.yaml
   - capsule.yaml
   - spore.yaml
-  - git-repository-loki.yaml
-  - loki.yaml
   - tempo.yaml
  # - picow.yaml
   - ../../base/monitoring

@@ -125,14 +125,18 @@ spec:
         existingSecret: grafana-admin-user
         userKey: user
         passwordKey: password
-      plugins: []
-      additionalDataSources:
+      plugins:
+        - victoriametrics-logs-datasource
+      deleteDatasources:
         - name: Loki
-          type: loki
-          uid: loki
+          orgId: 1
+      additionalDataSources:
+        - name: VictoriaLogs
+          type: victoriametrics-logs-datasource
+          uid: victorialogs
           isDefault: false
           access: proxy
-          url: http://loki.monitoring.svc.cluster.local:3100
+          url: http://victoria-logs-server.monitoring.svc.cluster.local:9428
           orgId: 1
           version: 1
         - name: Tempo
@@ -145,7 +149,7 @@ spec:
           version: 1
           jsonData:
             tracesToLogs:
-              datasourceUid: loki
+              datasourceUid: victorialogs
               filterByTraceID: false
               tags:
                 - key: pod

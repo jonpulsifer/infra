@@ -63,8 +63,11 @@ spec:
             falcosidekick:
               namespace: monitoring
       config:
+        # falcosidekick's loki output speaks the Loki push protocol, which is
+        # how VictoriaLogs ingests. Only the host and path move.
         loki:
-          hostport: http://loki.monitoring.svc.cluster.local:3100          
+          hostport: http://victoria-logs-server.monitoring.svc.cluster.local:9428
+          endpoint: /insert/loki/api/v1/push
           tenant_id: "1"
           grafanaDashboard:
             enabled: true
