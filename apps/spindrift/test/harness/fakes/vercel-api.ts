@@ -154,6 +154,11 @@ export class FakeVercel {
     return [...this.uploaded].sort();
   }
 
+  /** Every deployment ever created — the surface for idempotent re-apply. */
+  get deploymentCount(): number {
+    return this.deployments.size;
+  }
+
   domainsOf(project: string): string[] {
     return [...(this.domains.get(project) ?? [])];
   }
@@ -440,6 +445,38 @@ export class FakeVercel {
 
   private list(url: URL): Response {
     const project = url.searchParams.get('projectId') ?? '';
+
+    // `meta-{key}` filtering, as the real endpoint honours it: across every
+    // deployment of the project, newest first, queued and building included —
+    // which is what lets the adapter's idempotency read find a deployment an
+    // interrupted attempt created moments ago and never finished polling.
+    const meta = [...url.searchParams.entries()].filter(([key]) =>
+      key.startsWith('meta-'),
+    );
+    if (meta.length > 0) {
+      const matches = [...this.deployments.values()]
+        .filter((deployment) => deployment.project === project)
+        .filter((deployment) =>
+          meta.every(
+            ([key, value]) =>
+              deployment.meta[key.slice('meta-'.length)] === value,
+          ),
+        )
+        .reverse();
+      return json(200, {
+        deployments: matches.map((deployment) => ({
+          uid: deployment.id,
+          url: deployment.url,
+          readyState:
+            deployment.pending > 0
+              ? 'BUILDING'
+              : (this.options.settlesOn ?? 'READY'),
+          meta: deployment.meta,
+        })),
+        pagination: { count: matches.length, next: null, prev: null },
+      });
+    }
+
     const id = this.production.get(project);
     const deployment = id === undefined ? undefined : this.deployments.get(id);
     return json(200, {

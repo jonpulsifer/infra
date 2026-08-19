@@ -37,6 +37,19 @@
  * metadata a direct upload supplies. `observe` reads the digest back out of it;
  * a deployment made by anything other than Spindrift carries no marker, reports
  * an empty digest, and shows as drift, which is correct because it is.
+ *
+ * **A re-apply finds the deployment it already made.** The platform mints a new
+ * deployment on every create, so every mechanism that can re-run an attempt (a
+ * lease reclaim, a crashed reconciler, a rollout replacing the pod mid-apply)
+ * would otherwise be another production deployment. `apply` therefore reads
+ * the project's recent deployments for one whose commit message carries this
+ * Deploy's {@link DEPLOY_MARKER} before uploading anything, and adopts what it
+ * finds unless the platform already called it failed — a failed deployment
+ * never served, so creating its successor *is* the retry. The platform offers
+ * no unique-name constraint to lean on, so read-then-create is not atomic, and
+ * the read is one page deep: the window is bounded and stated, not a
+ * guarantee, and a refused read falls through to create rather than blocking
+ * the deploy.
  */
 import type {
   StoreAdapter,
@@ -273,19 +286,6 @@ export class PagesDeployAdapter implements DeployAdapter {
 
     yield this.events.status('APPLYING', { resource: project });
 
-    let files: readonly BundleFile[];
-    try {
-      files = await this.fetchBundle(http, location);
-    } catch (cause) {
-      const failure = bundleFailure(cause, ref);
-      yield this.events.status('FAILED', {
-        resource: project,
-        reason: failure.reason,
-      });
-      return failure;
-    }
-    yield this.events.log(`the bundle holds ${files.length} files`, project);
-
     const ensured = await this.ensureProject(http, connection, project);
     if (ensured.ok === false) {
       const failure = cloudWriteFailure(ensured.failure, ref);
@@ -296,48 +296,80 @@ export class PagesDeployAdapter implements DeployAdapter {
       return failure;
     }
 
-    // Collected rather than yielded directly: `uploadAssets` reports progress
-    // through a callback because it is a loop over buckets, and a generator
-    // cannot yield from inside somebody else's await.
-    const lines: string[] = [];
-    const uploaded = await uploadAssets({
-      client: http,
-      account: connection.account,
-      endpoint: this.endpointOf(connection),
-      ...(this.options.fetch === undefined
-        ? {}
-        : { fetch: this.options.fetch }),
-      project,
-      files: hashFiles(files),
-      onProgress: (line) => lines.push(line),
-    });
-    for (const line of lines) yield this.events.log(line, project);
-    if (uploaded.ok === false) {
-      const failure = cloudWriteFailure(uploaded.failure, ref);
-      yield this.events.status('FAILED', {
-        resource: project,
-        reason: failure.reason,
-      });
-      return failure;
-    }
-
-    const released = await this.deploy(
+    // The idempotency read — see the file header. After the project is
+    // ensured, because the deployment list hangs off it; before any upload,
+    // because an adopted deployment's files are already there.
+    const existing = await this.findDeployment(
       http,
       connection,
       project,
-      ensured.value.production_branch ?? PRODUCTION_BRANCH,
-      desired,
-      uploaded.value,
+      desired.deploy,
     );
-    if (released.ok === false) {
-      const failure = cloudWriteFailure(released.failure, ref);
-      yield this.events.status('FAILED', {
-        resource: project,
-        reason: failure.reason,
+    let deployment: PagesDeployment;
+    if (existing !== null && phaseOf(existing) !== 'FAILED') {
+      yield this.events.log(
+        `deployment ${existing.id ?? project} already carries this Deploy — adopting it instead of creating another`,
+        project,
+      );
+      deployment = existing;
+    } else {
+      let files: readonly BundleFile[];
+      try {
+        files = await this.fetchBundle(http, location);
+      } catch (cause) {
+        const failure = bundleFailure(cause, ref);
+        yield this.events.status('FAILED', {
+          resource: project,
+          reason: failure.reason,
+        });
+        return failure;
+      }
+      yield this.events.log(`the bundle holds ${files.length} files`, project);
+
+      // Collected rather than yielded directly: `uploadAssets` reports
+      // progress through a callback because it is a loop over buckets, and a
+      // generator cannot yield from inside somebody else's await.
+      const lines: string[] = [];
+      const uploaded = await uploadAssets({
+        client: http,
+        account: connection.account,
+        endpoint: this.endpointOf(connection),
+        ...(this.options.fetch === undefined
+          ? {}
+          : { fetch: this.options.fetch }),
+        project,
+        files: hashFiles(files),
+        onProgress: (line) => lines.push(line),
       });
-      return failure;
+      for (const line of lines) yield this.events.log(line, project);
+      if (uploaded.ok === false) {
+        const failure = cloudWriteFailure(uploaded.failure, ref);
+        yield this.events.status('FAILED', {
+          resource: project,
+          reason: failure.reason,
+        });
+        return failure;
+      }
+
+      const released = await this.deploy(
+        http,
+        connection,
+        project,
+        ensured.value.production_branch ?? PRODUCTION_BRANCH,
+        desired,
+        uploaded.value,
+      );
+      if (released.ok === false) {
+        const failure = cloudWriteFailure(released.failure, ref);
+        yield this.events.status('FAILED', {
+          resource: project,
+          reason: failure.reason,
+        });
+        return failure;
+      }
+      deployment = released.value;
+      yield this.events.log(`deployed ${deployment.id ?? project}`, project);
     }
-    yield this.events.log(`deployed ${released.value.id ?? project}`, project);
 
     // §9's one record re-point: the vanity name is a domain on the project that
     // is already serving, so moving an App here moves one name.
@@ -367,7 +399,7 @@ export class PagesDeployAdapter implements DeployAdapter {
     // which is the second — the first changes every release.
     const address =
       ensured.value.subdomain === undefined
-        ? released.value.url
+        ? deployment.url
         : `https://${ensured.value.subdomain}`;
     yield this.events.status('LIVE', { resource: project });
     return {
@@ -568,6 +600,44 @@ export class PagesDeployAdapter implements DeployAdapter {
       );
     }
     return readBundle(layer);
+  }
+
+  /**
+   * The deployment an earlier attempt of this Deploy already created, if any.
+   *
+   * Keyed by {@link DEPLOY_MARKER} in the commit message, which every create
+   * stamps — the same field `observe` reads the digest out of, because it is
+   * the one field a direct upload carries that comes back on a read. One page
+   * deep on purpose: the deployment a re-run is looking for was created
+   * moments ago by an attempt that died, so it is at the top of the list, and
+   * paging the whole history would spend reads bounding a window one page
+   * already bounds. `null` means none was found **or the read was refused** —
+   * the two collapse on purpose, because a deploy blocked on a flaky list read
+   * would trade a bounded duplicate-create window for a new way to be stuck.
+   */
+  private async findDeployment(
+    http: CloudHttp,
+    connection: CloudflarePagesAdapterConnection,
+    project: string,
+    deploy: string,
+  ): Promise<PagesDeployment | null> {
+    const listed = unwrap(
+      await http.json<Envelope<readonly PagesDeployment[]>>({
+        method: 'GET',
+        path: `${this.projectPath(connection, project)}/deployments`,
+        query: { per_page: '25' },
+      }),
+    );
+    if (!listed.ok || listed.value === undefined) return null;
+    return (
+      listed.value.find(
+        (deployment) =>
+          markerIn(
+            deployment.deployment_trigger?.metadata?.commit_message,
+            DEPLOY_MARKER,
+          ) === deploy,
+      ) ?? null
+    );
   }
 
   /**

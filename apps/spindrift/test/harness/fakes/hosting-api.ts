@@ -128,6 +128,11 @@ export class FakeHosting {
     return this.sites.has(site);
   }
 
+  /** Every site that exists — the surface for idempotent re-apply. */
+  get siteCount(): number {
+    return this.sites.size;
+  }
+
   /** The version currently serving on one site, if any. */
   serving(site: string): FakeVersion | undefined {
     const name = this.released.get(site);

@@ -436,6 +436,13 @@ export class FakeCloudRun {
     return this.resources.get(`services/${id}`);
   }
 
+  /** Every Service that exists — the surface for idempotent re-apply. */
+  get serviceCount(): number {
+    return [...this.resources.keys()].filter((key) =>
+      key.startsWith('services/'),
+    ).length;
+  }
+
   /** The same, for the other collection. */
   job(id: string): Record<string, unknown> | undefined {
     return this.resources.get(`jobs/${id}`);
