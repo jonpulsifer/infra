@@ -180,6 +180,11 @@ export class FakeDeployAdapter implements DeployAdapter {
     this.placed.set(ref, state);
   }
 
+  /** How many distinct refs hold a placement — the idempotency surface. */
+  get placementCount(): number {
+    return this.placed.size;
+  }
+
   /** Change what the next `inspect` reports — a capability flip, mid-test. */
   discover(discovery: Partial<TargetDiscovery>): void {
     this.options.discovery = { ...this.options.discovery, ...discovery };

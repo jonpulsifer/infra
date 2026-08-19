@@ -564,3 +564,72 @@ describe('one project per (App, Component)', () => {
     );
   });
 });
+
+describe('a re-apply finds the deployment it already made', () => {
+  /** Drive a stream to the first matching event, then abandon it mid-flight. */
+  async function abandonAfter(
+    stream: AsyncGenerator<DeployEvent, DeployVerdict, void>,
+    matches: (event: DeployEvent) => boolean,
+  ): Promise<void> {
+    let step = await stream.next();
+    while (!step.done) {
+      if (matches(step.value)) return;
+      step = await stream.next();
+    }
+    throw new Error('the stream ended before the awaited event');
+  }
+
+  test('a second apply adopts the deployment carrying its Deploy', async () => {
+    const { api, adapter } = adapterFor();
+    const first = await drain(adapter.apply(TARGET, desired()));
+    expect(first.verdict.phase).toBe('LIVE');
+
+    const again = await drain(adapter.apply(TARGET, desired()));
+
+    expect(again.verdict.phase).toBe('LIVE');
+    // One deployment ever: the second apply found the first one by its
+    // DEPLOY_META and said so, rather than creating a production sibling.
+    expect(api.deploymentCount).toBe(1);
+    expect(
+      again.events.some(
+        (event) => event.type === 'log' && event.line.includes('adopting'),
+      ),
+    ).toBe(true);
+    // And it spent nothing getting there: no second fetch of the bundle, no
+    // second upload of its files.
+    expect(
+      api.requests.filter((request) => request.path === '/v2/files'),
+    ).toHaveLength(2);
+  });
+
+  test('an attempt that died after creating is recovered, not orphaned', async () => {
+    const { api, adapter } = adapterFor({ pollsBeforeSettling: 3 });
+    // The first attempt creates the deployment and dies before any verdict —
+    // the lease-reclaim shape: nothing recorded, the far side already real.
+    await abandonAfter(
+      adapter.apply(TARGET, desired()),
+      (event) =>
+        event.type === 'log' && event.line.startsWith('created deployment'),
+    );
+
+    const { verdict } = await drain(adapter.apply(TARGET, desired()));
+
+    // The re-run adopted the mid-flight deployment and drove it to the
+    // platform's own verdict; a second production deployment never existed.
+    expect(verdict.phase).toBe('LIVE');
+    expect(api.deploymentCount).toBe(1);
+  });
+
+  test('a deployment the platform failed is not adopted — its successor is the retry', async () => {
+    const { api, adapter } = adapterFor({ settlesOn: 'ERROR' });
+    const first = await drain(adapter.apply(TARGET, desired()));
+    expect(first.verdict.phase).toBe('FAILED');
+
+    const again = await drain(adapter.apply(TARGET, desired()));
+
+    // A failed deployment never served, so creating its successor is what a
+    // retry is; adopting it would pin the Deploy to a corpse.
+    expect(again.verdict.phase).toBe('FAILED');
+    expect(api.deploymentCount).toBe(2);
+  });
+});

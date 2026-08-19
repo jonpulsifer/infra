@@ -680,3 +680,47 @@ describe('a project is named once, deterministically', () => {
     );
   });
 });
+
+describe('a re-apply finds the deployment it already made', () => {
+  test('a second apply adopts the deployment carrying its Deploy', async () => {
+    const { api, adapter } = adapterFor();
+    const first = await drain(adapter.apply(TARGET, desired()));
+    expect(first.verdict.phase).toBe('LIVE');
+
+    const again = await drain(adapter.apply(TARGET, desired()));
+
+    expect(again.verdict.phase).toBe('LIVE');
+    // One deployment ever: the second apply found the first one by its
+    // commit-message marker and said so, rather than creating a sibling.
+    expect(api.deploymentCount).toBe(1);
+    expect(
+      again.events.some(
+        (event) => event.type === 'log' && event.line.includes('adopting'),
+      ),
+    ).toBe(true);
+    // And it spent nothing getting there: no second fetch of the bundle, no
+    // second offer to the asset store.
+    expect(
+      api.requests.filter(
+        (request) => request.path === '/pages/assets/check-missing',
+      ),
+    ).toHaveLength(1);
+    // The adopted verdict still carries the canonical address (§9).
+    if (again.verdict.phase === 'LIVE') {
+      expect(again.verdict.url).toBe(`https://${PROJECT}.pages.example.test`);
+    }
+  });
+
+  test('a deployment the platform failed is not adopted — its successor is the retry', async () => {
+    const { api, adapter } = adapterFor({
+      stage: { name: 'deploy', status: 'failure' },
+    });
+    await drain(adapter.apply(TARGET, desired()));
+
+    await drain(adapter.apply(TARGET, desired()));
+
+    // A failed deployment never served, so creating its successor is what a
+    // retry is; adopting it would pin the Deploy to a corpse.
+    expect(api.deploymentCount).toBe(2);
+  });
+});

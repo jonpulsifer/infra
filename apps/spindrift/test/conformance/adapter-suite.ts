@@ -106,6 +106,21 @@ async function drain<Event, Verdict>(
   return { events, verdict: step.value };
 }
 
+/** What one enrolment stands up: the adapter, and its far side made countable. */
+export interface EnrolledDeployAdapter {
+  readonly adapter: DeployAdapter;
+  /**
+   * How many placements the fake far side holds right now.
+   *
+   * What a placement *is* belongs to the backend — a Vercel deployment, a
+   * Pages deployment, a hosting site, a Cloud Run Service, a HelmRelease —
+   * so each enrolment counts its own noun and the suite only asserts the
+   * number. Revisions of one placement (a hosting version, a release) are not
+   * placements and must not be counted.
+   */
+  readonly placements: () => number;
+}
+
 /**
  * Run the deploy contract's suite against one adapter.
  *
@@ -115,21 +130,21 @@ async function drain<Event, Verdict>(
  */
 export function deployAdapterSuite(
   label: string,
-  make: () => DeployAdapter,
+  make: () => EnrolledDeployAdapter,
   foreign: ArtifactType,
 ): void {
   enrolled.deploy.add(label);
 
   describe(`deploy contract: ${label}`, () => {
-    const adapter = make().adapter;
-    const target: DeployTarget = deployTargetFor(adapter, 'target');
+    const kind = make().adapter.adapter;
+    const target: DeployTarget = deployTargetFor(kind, 'target');
 
     test('declares at least one artifact type it accepts', () => {
-      expect(make().artifactTypes.length).toBeGreaterThan(0);
+      expect(make().adapter.artifactTypes.length).toBeGreaterThan(0);
     });
 
     test('apply reaches a terminal verdict', async () => {
-      const adapter = make();
+      const { adapter } = make();
       const accepted = adapter.artifactTypes[0];
       expect(accepted).toBeDefined();
       const { verdict } = await drain(
@@ -139,7 +154,7 @@ export function deployAdapterSuite(
     });
 
     test('observe reports what apply placed', async () => {
-      const adapter = make();
+      const { adapter } = make();
       const digest = 'sha256:observed';
       const { verdict } = await drain(
         adapter.apply(
@@ -157,11 +172,32 @@ export function deployAdapterSuite(
     });
 
     test('observe reports null for a ref it never placed', async () => {
-      expect(await make().observe(target, 'never-placed')).toBeNull();
+      expect(await make().adapter.observe(target, 'never-placed')).toBeNull();
+    });
+
+    test('a second apply of one DesiredState leaves one placement', async () => {
+      // The contract's convergence clause, asserted rather than claimed:
+      // every mechanism that re-runs an attempt — a lease reclaim, a crashed
+      // reconciler, a rollout — re-applies from the top, so a backend that
+      // minted a sibling per apply would turn each of those into another
+      // production deployment. This shipped on two backends before anything
+      // here would have caught it.
+      const { adapter, placements } = make();
+      const desired = desiredState(adapter.artifactTypes[0] as ArtifactType);
+      const first = await drain(adapter.apply(target, desired));
+      if (first.verdict.phase !== 'LIVE') {
+        throw new Error('adapter did not place anything to re-apply');
+      }
+      const again = await drain(adapter.apply(target, desired));
+      expect(again.verdict.phase).toBe('LIVE');
+      if (again.verdict.phase === 'LIVE') {
+        expect(again.verdict.ref).toBe(first.verdict.ref);
+      }
+      expect(placements()).toBe(1);
     });
 
     test('destroy is idempotent', async () => {
-      const adapter = make();
+      const { adapter } = make();
       const { verdict } = await drain(
         adapter.apply(
           target,
@@ -177,7 +213,7 @@ export function deployAdapterSuite(
     });
 
     test('inspect answers the whole checklist, exactly once each', async () => {
-      const made = make();
+      const made = make().adapter;
       const inspection = await made.inspect(target);
       // §13 merges health and capability refresh into one loop, which only
       // works if one pass answers every item — a partial checklist would leave
@@ -210,12 +246,12 @@ export function deployAdapterSuite(
       // core holds a `DeployAdapter` without knowing which backend is behind
       // it — and it answers `carried` here, since the far side these suites
       // stand up is one that answers.
-      const { surface } = await make().inspect(target);
+      const { surface } = await make().adapter.inspect(target);
       expect(surface).toEqual({ kind: 'carried' });
     });
 
     test('inspect reports observations, not judgements', async () => {
-      const { discovery } = await make().inspect(target);
+      const { discovery } = await make().adapter.inspect(target);
       // `verifiedDeploy` and `offlineDeploy` are core's conclusions (§32, §33).
       // An adapter reporting either directly would let two adapters disagree
       // about how the conclusion is drawn.
@@ -232,7 +268,7 @@ export function deployAdapterSuite(
       // for a run on a website would crash rather than read a sentence. Every
       // backend has this case — the ref names nothing, or names something that
       // is not a job — and every backend has to have words for it.
-      const adapter = make();
+      const { adapter } = make();
       const answers = [
         await adapter.run(target, 'never-placed'),
         await adapter.executions(target, 'never-placed'),
@@ -245,7 +281,7 @@ export function deployAdapterSuite(
     });
 
     test('refuses an artifact type it did not declare', async () => {
-      const adapter = make();
+      const { adapter } = make();
       expect(adapter.artifactTypes).not.toContain(foreign);
       const { verdict } = await drain(
         adapter.apply(target, desiredState(foreign)),

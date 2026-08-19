@@ -455,6 +455,24 @@ export interface DeployAdapter {
    */
   readonly artifactTypes: readonly ArtifactType[];
 
+  /**
+   * Place the desired state, streaming the attempt to a terminal verdict.
+   *
+   * **Re-applying one `DesiredState` leaves one placement.** Core re-runs
+   * `apply` from the top rather than resuming — a lease reclaim, a crashed
+   * reconciler, a rollout replacing the pod mid-apply all land here — so a
+   * second call with the same `DesiredState` must converge on the object the
+   * first call placed, never mint a sibling. How each backend earns that is
+   * its own: `kubernetes` and `cloudrun` name the far-side object after the
+   * Component, so a re-apply is a server-side apply of the same name; `static`
+   * releases atomically onto one site; `vercel` and `cloudflare-pages` are
+   * offered no name to converge on — the platform mints a new deployment per
+   * create — so each queries for the deployment carrying its Deploy's marker
+   * before creating one. That query-then-create is **not atomic**: those two
+   * platforms give no unique-name constraint to lean on, so the guarantee
+   * there is a bounded window, stated in each adapter's header, not an
+   * impossibility.
+   */
   apply(
     target: DeployTarget,
     desired: DesiredState,

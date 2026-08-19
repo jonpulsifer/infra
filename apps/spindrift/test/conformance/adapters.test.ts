@@ -76,7 +76,17 @@ function inClusterBuildLog(): string {
   ].join('\n');
 }
 
-deployAdapterSuite('fake', () => new FakeDeployAdapter(), 'files');
+// Each enrolment counts its backend's own placement noun — a deployment, a
+// site, a Service, a HelmRelease — for the suite's re-apply case; the suite
+// only asserts the number.
+deployAdapterSuite(
+  'fake',
+  () => {
+    const adapter = new FakeDeployAdapter();
+    return { adapter, placements: () => adapter.placementCount };
+  },
+  'files',
+);
 
 deployAdapterSuite(
   'kubernetes',
@@ -124,13 +134,16 @@ deployAdapterSuite(
         clusterpolicies: [],
       },
     });
-    return new KubernetesDeployAdapter({
-      chart: 'example/spindrift-app',
-      token: cluster.token,
-      fetch: cluster.fetch,
-      pollIntervalMs: 1,
-      sleep: async () => {},
-    });
+    return {
+      adapter: new KubernetesDeployAdapter({
+        chart: 'example/spindrift-app',
+        token: cluster.token,
+        fetch: cluster.fetch,
+        pollIntervalMs: 1,
+        sleep: async () => {},
+      }),
+      placements: () => cluster.all('helmreleases').length,
+    };
   },
   'files',
 );
@@ -139,12 +152,15 @@ deployAdapterSuite(
   'cloudrun',
   () => {
     const api = new FakeCloudRun();
-    return new CloudRunDeployAdapter({
-      token: api.token,
-      fetch: api.fetch,
-      pollIntervalMs: 1,
-      sleep: async () => {},
-    });
+    return {
+      adapter: new CloudRunDeployAdapter({
+        token: api.token,
+        fetch: api.fetch,
+        pollIntervalMs: 1,
+        sleep: async () => {},
+      }),
+      placements: () => api.serviceCount,
+    };
   },
   'files',
 );
@@ -162,7 +178,10 @@ deployAdapterSuite(
         ]),
       },
     });
-    return new StaticDeployAdapter({ token: api.token, fetch: api.fetch });
+    return {
+      adapter: new StaticDeployAdapter({ token: api.token, fetch: api.fetch }),
+      placements: () => api.siteCount,
+    };
   },
   'image',
 );
@@ -180,13 +199,16 @@ deployAdapterSuite(
     });
     // The polling is real and the waiting is not, exactly as the cloud runtime
     // route above is driven.
-    return new VercelDeployAdapter({
-      token: api.token,
-      artifactToken: api.token,
-      fetch: api.fetch,
-      pollIntervalMs: 1,
-      sleep: async () => {},
-    });
+    return {
+      adapter: new VercelDeployAdapter({
+        token: api.token,
+        artifactToken: api.token,
+        fetch: api.fetch,
+        pollIntervalMs: 1,
+        sleep: async () => {},
+      }),
+      placements: () => api.deploymentCount,
+    };
   },
   'image',
 );
@@ -204,11 +226,14 @@ deployAdapterSuite(
         ]),
       },
     });
-    return new PagesDeployAdapter({
-      token: api.token,
-      artifactToken: api.token,
-      fetch: api.fetch,
-    });
+    return {
+      adapter: new PagesDeployAdapter({
+        token: api.token,
+        artifactToken: api.token,
+        fetch: api.fetch,
+      }),
+      placements: () => api.deploymentCount,
+    };
   },
   'image',
 );

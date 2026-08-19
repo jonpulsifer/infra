@@ -29,6 +29,19 @@
  * This one is driven with the installation's Vercel bearer and reads its bytes
  * out of the installation's own artifacts registry, which is a different far
  * side with a different credential — see {@link VercelAdapterOptions}.
+ *
+ * **A re-apply finds the deployment it already made.** The platform mints a new
+ * deployment on every create — there is no name to server-side-apply against —
+ * so every mechanism that can re-run an attempt (a lease reclaim, a crashed
+ * reconciler, a rollout replacing the pod mid-apply) would otherwise be another
+ * production deployment. `apply` therefore queries for a deployment carrying
+ * this Deploy's {@link DEPLOY_META} before creating one, and adopts what it
+ * finds unless the platform already called it failed — a failed deployment
+ * never served, so creating its successor *is* the retry. The platform offers
+ * no unique-name constraint to lean on, so query-then-create is not atomic:
+ * the window is one list read wide, and a refused list read falls through to
+ * create rather than blocking the deploy — which is exactly the behaviour a
+ * re-run had before the query existed.
  */
 import type {
   StoreAdapter,
@@ -272,6 +285,34 @@ export class VercelDeployAdapter implements DeployAdapter {
 
     yield this.events.status('APPLYING', { resource: project });
 
+    // The idempotency read — see the file header. Before any byte is fetched
+    // or uploaded, because an adopted deployment needs none of that work done
+    // again: the platform already holds its files.
+    const existing = await this.findDeployment(
+      http,
+      connection,
+      project,
+      desired.deploy,
+    );
+    if (
+      existing !== null &&
+      phaseOf(existing.readyState).phase !== 'FAILED' &&
+      existing.uid !== undefined
+    ) {
+      yield this.events.log(
+        `deployment ${existing.uid} already carries this Deploy — adopting it instead of creating another`,
+        project,
+      );
+      return yield* this.release(
+        http,
+        connection,
+        project,
+        existing.uid,
+        ref,
+        desired,
+      );
+    }
+
     let files: readonly BundleFile[];
     try {
       files = await this.fetchBundle(http, location);
@@ -329,8 +370,22 @@ export class VercelDeployAdapter implements DeployAdapter {
     }
     yield this.events.log(`created deployment ${id}`, project);
 
-    // §9's one record re-point: the vanity name is a domain on the project that
-    // is already serving, so moving an App here moves one name.
+    return yield* this.release(http, connection, project, id, ref, desired);
+  }
+
+  /**
+   * The tail every deployment takes to its verdict, created or adopted: the
+   * vanity name goes on (§9's one record re-point — a domain on the project
+   * that is already serving), and then the platform is polled to its answer.
+   */
+  private async *release(
+    http: CloudHttp,
+    connection: VercelAdapterConnection,
+    project: string,
+    id: string,
+    ref: DeployRef,
+    desired: DesiredState,
+  ): AsyncGenerator<DeployEvent, DeployVerdict, void> {
     if (desired.hostname.vanity !== undefined) {
       const attached = await this.attachDomain(
         http,
@@ -519,6 +574,38 @@ export class VercelDeployAdapter implements DeployAdapter {
       );
     }
     return readBundle(layer);
+  }
+
+  /**
+   * The deployment an earlier attempt of this Deploy already created, if any.
+   *
+   * Keyed by {@link DEPLOY_META}, which every create stamps: `meta-{key}` on
+   * the list endpoint is what the first-party client's `list --meta` sends —
+   * like `prebuilt` on the create, a contract that holds without being in the
+   * public REST reference. `null` means none was found **or the read was
+   * refused** — the two collapse on purpose, because a deploy blocked on a
+   * flaky list read would trade a bounded duplicate-create window for a new
+   * way to be stuck. See the file header.
+   */
+  private async findDeployment(
+    http: CloudHttp,
+    connection: VercelAdapterConnection,
+    project: string,
+    deploy: string,
+  ): Promise<{ uid?: string; readyState?: string } | null> {
+    const listed = await http.json<DeploymentList>({
+      method: 'GET',
+      path: '/v7/deployments',
+      query: {
+        projectId: project,
+        target: 'production',
+        [`meta-${DEPLOY_META}`]: deploy,
+        limit: '1',
+        teamId: connection.team,
+      },
+    });
+    if (!listed.ok) return null;
+    return listed.value?.deployments?.[0] ?? null;
   }
 
   /**

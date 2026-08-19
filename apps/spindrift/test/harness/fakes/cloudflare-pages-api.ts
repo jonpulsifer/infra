@@ -70,6 +70,12 @@ export interface FakeCloudflarePagesOptions {
   readonly token?: string;
   /** The production branch an already-existing project carries. */
   readonly productionBranch?: string;
+  /**
+   * The stage every created deployment reports. Defaults to the deploy stage
+   * having succeeded; a test models a deployment the platform failed by
+   * setting `{ name: 'deploy', status: 'failure' }` here.
+   */
+  readonly stage?: { readonly name: string; readonly status: string };
 }
 
 /** One deployment the fake is holding. */
@@ -128,6 +134,14 @@ export class FakeCloudflarePages {
   /** Hashes actually uploaded — what proves the adapter honoured the answer. */
   get uploads(): string[] {
     return [...this.uploaded].sort();
+  }
+
+  /** Every deployment ever created — the surface for idempotent re-apply. */
+  get deploymentCount(): number {
+    return [...this.deployments.values()].reduce(
+      (count, held) => count + held.length,
+      0,
+    );
   }
 
   /** Domains attached to one project (§9). */
@@ -382,7 +396,7 @@ export class FakeCloudflarePages {
       branch: String(body.get('branch') ?? ''),
       commitMessage: String(body.get('commit_message') ?? ''),
       manifest,
-      stage: { name: 'deploy', status: 'success' },
+      stage: this.options.stage ?? { name: 'deploy', status: 'success' },
     };
     this.deployments.set(project, [
       deployment,
