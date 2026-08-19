@@ -707,6 +707,25 @@ export const builds = pgTable(
     dispatchId: text('dispatch_id'),
     /** Timestamp when the current runner claimed the dispatch lease. */
     leasedAt: timestamp('leased_at', { withTimezone: true }),
+    /**
+     * How many times dispatch has refused this row in a row.
+     *
+     * The clock behind the loop's backoff, and a fact worth keeping on its own:
+     * a wedged row that has been refused ten thousand times looks exactly like
+     * one refused twice unless somebody counts. Reset to zero by a successful
+     * claim and by the acts that re-arm a Build — a fresh press means "try now".
+     */
+    dispatchAttempts: integer('dispatch_attempts').notNull().default(0),
+    /**
+     * The earliest the build loop may try this row again, or null for "now".
+     *
+     * What turns a refusal into a wait instead of a 1Hz retry: each refused
+     * attempt pushes this out exponentially (capped — see `dispatchBackoffMs`),
+     * so a Build that cannot currently succeed costs a handful of attempts per
+     * cap interval rather than one per tick. An incident spent 84k signed-URL
+     * mints in a day on exactly that difference.
+     */
+    nextDispatchAt: timestamp('next_dispatch_at', { withTimezone: true }),
     /** §16: the backend envelope plus the facts core verified from it. */
     provenance:
       jsonbDocument('provenance').$type<BackendProvenanceAssessment>(),

@@ -64,6 +64,7 @@ import { targetLabel } from '../../domain/target.ts';
 import { SPINDRIFT_FILE } from '../../integrations/github/config-pr.ts';
 import { isFetchableBundleLocation } from '../../storage/archives.ts';
 import { parseGcsLocation, signedObjectUrl } from '../../storage/signed-url.ts';
+import { reconcilerDispatchAttempts } from '../../telemetry/index.ts';
 import { isBuildTimeConfig, readBuildArgs } from '../config/build-args.ts';
 import {
   declaredBuildSecrets,
@@ -90,6 +91,29 @@ export const CONCURRENT_BUILDS_PER_APP = 3;
 
 /** Duration after which a RUNNING build's dispatch lease is considered expired. */
 export const DISPATCH_LEASE_TIMEOUT_MS = 10 * 60 * 1000;
+
+/**
+ * How a refused row's next attempt is paced (story 101).
+ *
+ * The first refusal costs one second, which a developer watching the screen
+ * never notices; each one after doubles it, so a row that cannot currently
+ * succeed converges on one attempt per cap interval instead of one per tick.
+ * The cap is five minutes — the low end of the ticket's bound — because the
+ * `waits` refusals are cleared by operator acts, and an operator who just
+ * configured federation should not stare at a fixed Build for a quarter hour.
+ * A fresh press resets the clock (`deployApp`'s re-arm), so the developer
+ * always has an immediate path.
+ */
+export const DISPATCH_BACKOFF_BASE_MS = 1_000;
+export const DISPATCH_BACKOFF_CAP_MS = 5 * 60 * 1000;
+
+/** The wait a row's next attempt earns after `attempts` consecutive refusals. */
+export function dispatchBackoffMs(attempts: number): number {
+  return Math.min(
+    DISPATCH_BACKOFF_CAP_MS,
+    DISPATCH_BACKOFF_BASE_MS * 2 ** Math.max(0, attempts - 1),
+  );
+}
 
 export const dispatchBuildInput = z
   .object({
@@ -426,10 +450,12 @@ export interface RefusalSubject {
   readonly attempt: BuildAttemptRef;
   /** `builds.dispatchWaitingOn` as it stands, for suppressing a repeat. */
   readonly waitingOn: string | null;
+  /** `builds.dispatchAttempts` as it stands, for pacing the next attempt. */
+  readonly attempts: number;
 }
 
 async function refuseDispatch<Output>(
-  context: Pick<BuildDispatchContext, 'db'>,
+  context: Pick<BuildDispatchContext, 'db' | 'clock'>,
   subject: RefusalSubject,
   code: CommandFailureCode,
   sentence: string,
@@ -453,6 +479,7 @@ async function refuseDispatch<Output>(
       // though it were.
       .set({ status: 'FAILED', dispatchWaitingOn: null })
       .where(eq(builds.id, subject.attempt.buildId));
+    reconcilerDispatchAttempts.add(1, { outcome: 'closed' });
     return failed(code, sentence);
   }
 
@@ -461,7 +488,8 @@ async function refuseDispatch<Output>(
 }
 
 /**
- * Say once, on the attempt log, what a PENDING Build is waiting for.
+ * Say once, on the attempt log, what a PENDING Build is waiting for — and pace
+ * when the loop may try it again.
  *
  * Exported because one refusal of this class is made before `dispatchBuild` is
  * ever called: `runBuildPass` selects a route for the Target and skips the
@@ -472,22 +500,36 @@ async function refuseDispatch<Output>(
  * No status event is written: the Build has not failed and its phase has not
  * moved. It is PENDING, which is what it was, and the log now says why it
  * still is.
+ *
+ * The row is written even when the sentence is a repeat, because every refusal
+ * advances the backoff clock (story 101): `dispatchAttempts` counts up and
+ * `nextDispatchAt` moves out exponentially, which is what caps a refusal the
+ * loop would otherwise re-make every tick. What stays suppressed is the log
+ * line — the sentence belongs on the attempt log exactly once.
  */
 export async function recordDispatchWait(
-  context: Pick<BuildDispatchContext, 'db'>,
+  context: Pick<BuildDispatchContext, 'db' | 'clock'>,
   subject: RefusalSubject,
   sentence: string,
 ): Promise<void> {
-  if (subject.waitingOn === sentence) return;
-  await recordBuildEvent(context.db, subject.attempt, {
-    type: 'log',
-    line: sentence,
-    resource: 'dispatch',
-  });
+  if (subject.waitingOn !== sentence) {
+    await recordBuildEvent(context.db, subject.attempt, {
+      type: 'log',
+      line: sentence,
+      resource: 'dispatch',
+    });
+  }
+  const attempts = subject.attempts + 1;
+  const now = context.clock?.now() ?? new Date();
   await context.db
     .update(builds)
-    .set({ dispatchWaitingOn: sentence })
+    .set({
+      dispatchWaitingOn: sentence,
+      dispatchAttempts: attempts,
+      nextDispatchAt: new Date(now.getTime() + dispatchBackoffMs(attempts)),
+    })
     .where(eq(builds.id, subject.attempt.buildId));
+  reconcilerDispatchAttempts.add(1, { outcome: 'waiting' });
 }
 
 export const dispatchBuild = async (
@@ -563,6 +605,7 @@ export const dispatchBuild = async (
       buildId: build.id,
     },
     waitingOn: build.dispatchWaitingOn,
+    attempts: build.dispatchAttempts,
   };
 
   if (build.bundleDigest === null) {
@@ -662,11 +705,6 @@ export const dispatchBuild = async (
     );
   }
 
-  // The durable address becomes a fetchable one here and nowhere earlier. A
-  // signed URL is a bearer capability with a TTL in minutes, so minting it at
-  // dispatch is what keeps it out of the Build row, out of the attempt log, and
-  // out of any window between staging and running. What is persisted is the
-  // `gs://` object; what a route is handed is a URL that resolves.
   const attempt = subject.attempt;
 
   /**
@@ -755,33 +793,11 @@ export const dispatchBuild = async (
     });
   }
 
-  const fetchable = await fetchableBundleLocation(
-    context,
-    app,
-    build.bundleLocation,
-  );
-  if (!fetchable.ok) {
-    // Both dispositions come out of this one function, and which one is decided
-    // by the location rather than by the error. Where the location itself is
-    // the problem it is a column on this row and no later tick makes it
-    // fetchable, so the Build is closed out — §6's `ARTIFACT_UNAVAILABLE` is
-    // the platform-blamed reason for an object that is not there to be fetched.
-    //
-    // The other refusals are about this installation's federation rather than
-    // about this row, so they wait: configuring federation is a thing an
-    // operator can do that makes the next tick work. **This is the arm that
-    // recorded nothing at all**, and it is the one build 13 sat two hours in.
-    return refuseDispatch(
-      context,
-      subject,
-      'NOT_BUILDABLE',
-      fetchable.failure.message,
-      isFetchableBundleLocation(build.bundleLocation)
-        ? { kind: 'waits' }
-        : { kind: 'closes', reason: 'ARTIFACT_UNAVAILABLE' },
-    );
-  }
-
+  // The stored location, not yet a fetchable one. Everything between here and
+  // the claim only reads the source's shape — kind, commit, subpath — so the
+  // signed URL it does not carry is not missed, and minting one this early is
+  // what story 101's incident was made of: a signature spent, then a refusal
+  // that was knowable for free. The URL is minted after the claim, below.
   const source: Source =
     app.sourceKind === 'repo'
       ? {
@@ -790,21 +806,16 @@ export const dispatchBuild = async (
           commit: build.commit,
           // §5: an App is repo plus subpath, and the developer named it there.
           subpath: app.sourceRepoSubpath ?? '.',
-          location: fetchable.value,
+          location: build.bundleLocation,
         }
       : {
           kind: 'archive',
           digest: build.bundleDigest,
-          location: fetchable.value,
+          location: build.bundleLocation,
           contents: 'source',
           // Per Build: the unwrap is a fact about the bytes that were uploaded.
           subpath: build.bundleSubpath ?? '.',
         };
-
-  const buildSource: BuildSource = {
-    bundleDigest: build.bundleDigest,
-    origin: buildOriginOf(source),
-  };
 
   /**
    * The stored registry credentials the destinations of this build need (§16).
@@ -1019,6 +1030,12 @@ export const dispatchBuild = async (
         // and is refused again reports it again instead of being suppressed
         // against a sentence from a previous attempt.
         dispatchWaitingOn: null,
+        // The backoff clock ends with the wait it was pacing (story 101): a
+        // claimed Build is being tried, and a stale next-attempt time left
+        // behind would hold a re-armed row hostage to refusals it already
+        // cleared.
+        dispatchAttempts: 0,
+        nextDispatchAt: null,
       })
       .where(
         and(
@@ -1093,6 +1110,7 @@ export const dispatchBuild = async (
     // anybody: another replica won the same row and is writing that Build's log
     // right now, so a line here would say "not dispatched" underneath the events
     // of the dispatch that did happen.
+    reconcilerDispatchAttempts.add(1, { outcome: 'lost' });
     return failed(
       'NOT_BUILDABLE',
       `Build ${build.id} is already running on ${current?.runner ?? adapter.name}`,
@@ -1100,6 +1118,81 @@ export const dispatchBuild = async (
   }
 
   const activeDispatchId = claimResult.dispatchId;
+
+  // The durable address becomes a fetchable one here — after every refusal and
+  // after the claim, so it is the **last** thing an attempt acquires (story
+  // 101). A signed URL is a bearer capability with a TTL in minutes: minting
+  // at dispatch keeps it off the Build row, off the attempt log, and out of
+  // any window between staging and running; minting after the claim means a
+  // refused attempt — a missing route, a shape the Target refuses, a full
+  // concurrency slot, a lost claim — spends no STS exchange and no SignBlob.
+  // The incident behind that ordering spent 84,729 SignBlob calls in a day on
+  // attempts that then refused for free.
+  const fetchable = await fetchableBundleLocation(
+    context,
+    app,
+    build.bundleLocation,
+  );
+  if (!fetchable.ok) {
+    // Which arm is decided by the location rather than by the error. Where the
+    // location itself is the problem it is a column on this row and no later
+    // tick makes it fetchable, so the Build is closed out — §6's
+    // `ARTIFACT_UNAVAILABLE` is the platform-blamed reason for an object that
+    // is not there to be fetched. (The claim above marked the row RUNNING;
+    // `refuseDispatch` settles it FAILED, which is the same terminal write a
+    // red build lands.)
+    if (!isFetchableBundleLocation(build.bundleLocation)) {
+      return refuseDispatch(
+        context,
+        subject,
+        'NOT_BUILDABLE',
+        fetchable.failure.message,
+        { kind: 'closes', reason: 'ARTIFACT_UNAVAILABLE' },
+      );
+    }
+    // The other refusals are about this installation's federation rather than
+    // about this row, so the Build waits: configuring federation is a thing an
+    // operator can do that makes a later tick work. The claim this attempt
+    // took is released in the same write — nothing ran under it — and the
+    // release is fenced on the dispatch id, so a row another replica has since
+    // claimed is left alone.
+    const sentence = fetchable.failure.message;
+    if (subject.waitingOn !== sentence) {
+      await recordBuildEvent(context.db, subject.attempt, {
+        type: 'log',
+        line: sentence,
+        resource: 'dispatch',
+      });
+    }
+    const attempts = subject.attempts + 1;
+    await context.db
+      .update(builds)
+      .set({
+        status: 'PENDING',
+        runner: null,
+        logFidelity: null,
+        dispatchId: null,
+        leasedAt: null,
+        dispatchWaitingOn: sentence,
+        dispatchAttempts: attempts,
+        nextDispatchAt: new Date(now.getTime() + dispatchBackoffMs(attempts)),
+      })
+      .where(
+        and(
+          eq(builds.id, build.id),
+          eq(builds.status, 'RUNNING'),
+          eq(builds.dispatchId, activeDispatchId),
+        ),
+      );
+    reconcilerDispatchAttempts.add(1, { outcome: 'waiting' });
+    return failed('NOT_BUILDABLE', sentence);
+  }
+
+  const buildSource: BuildSource = {
+    bundleDigest: build.bundleDigest,
+    origin: buildOriginOf({ ...source, location: fetchable.value }),
+  };
+  reconcilerDispatchAttempts.add(1, { outcome: 'dispatched' });
 
   try {
     const stream = adapter.build(buildSource, spec);

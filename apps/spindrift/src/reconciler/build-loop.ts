@@ -5,7 +5,7 @@
  * open the real status surface. This loop owns the long-running runner stream;
  * an HTTP request never has to stay open for the duration of a build.
  */
-import { asc, eq } from 'drizzle-orm';
+import { and, asc, eq, isNull, lte, or } from 'drizzle-orm';
 import {
   type BuildDispatchContext,
   dispatchBuild,
@@ -68,6 +68,9 @@ export async function runBuildPass(
       // time there is a verdict. See the dispatch below.
       deployOnSuccess: builds.deployOnSuccess,
       waitingOn: builds.dispatchWaitingOn,
+      // Carried so every refusal below can advance the backoff clock without
+      // a second read — the same reason `waitingOn` rides along.
+      attempts: builds.dispatchAttempts,
       // For the pickup-latency metric below — every row here is PENDING by
       // the `where` clause, so this is the age of a Build still waiting to be
       // claimed.
@@ -84,7 +87,18 @@ export async function runBuildPass(
     .innerJoin(components, eq(builds.componentId, components.id))
     .leftJoin(targets, eq(targets.id, components.placedTargetId))
     .leftJoin(vessels, eq(vessels.id, targets.vesselId))
-    .where(eq(builds.status, 'PENDING'))
+    .where(
+      and(
+        eq(builds.status, 'PENDING'),
+        // The backoff clock (story 101): a row a recent attempt refused is not
+        // looked at again until its wait is up, so a Build that cannot
+        // currently succeed costs attempts per cap interval, not per tick.
+        or(
+          isNull(builds.nextDispatchAt),
+          lte(builds.nextDispatchAt, context.clock?.now() ?? new Date()),
+        ),
+      ),
+    )
     .orderBy(asc(builds.id));
 
   let dispatched = 0;
@@ -103,6 +117,7 @@ export async function runBuildPass(
             buildId: row.buildId,
           },
           waitingOn: row.waitingOn,
+          attempts: row.attempts,
         },
         'this Component is placed on no Target, so nothing can run this Build',
       );
@@ -132,6 +147,7 @@ export async function runBuildPass(
             buildId: row.buildId,
           },
           waitingOn: row.waitingOn,
+          attempts: row.attempts,
         },
         `this Build produces a ${row.targetShape} artifact and the Target this Component is placed on takes another (${targetLabel({ vessel: row.vessel, adapter: row.adapter })} takes ${shapeTaken}), so nothing can run it`,
       );
@@ -161,6 +177,7 @@ export async function runBuildPass(
             buildId: row.buildId,
           },
           waitingOn: row.waitingOn,
+          attempts: row.attempts,
         },
         reasons === ''
           ? 'no build route this installation configures meets the policy of the Target this Build is placed on, so nothing can run it'

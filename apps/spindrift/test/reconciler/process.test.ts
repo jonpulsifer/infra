@@ -44,7 +44,17 @@ import { aDesiredDocument } from '../harness/release.ts';
 const database = withIsolatedDatabase();
 const manifest = await fixtureManifest();
 const FROZEN = new Date('2024-06-01T00:00:00.000Z');
-const clock: Clock = { now: () => FROZEN };
+/**
+ * Pinned to an instant, advancing at wall pace. A fully frozen clock would
+ * freeze the dispatch backoff too (story 101): a refused Build earns a wait
+ * measured against this clock, and the manifest test below depends on the
+ * loop refusing the same row across several passes — which now requires the
+ * waits to expire.
+ */
+const EPOCH = Date.now();
+const clock: Clock = {
+  now: () => new Date(FROZEN.getTime() + (Date.now() - EPOCH)),
+};
 const DIGEST = `sha256:${'a'.repeat(64)}`;
 
 describe('reconciler process lifecycle', () => {

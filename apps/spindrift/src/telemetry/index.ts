@@ -173,6 +173,23 @@ export const reconcilerQueueDepth: Gauge = meter.createGauge(
 );
 
 /**
+ * Every dispatch attempt a Build row consumes, labelled by what it ended as —
+ * `dispatched`, `waiting` (refused, will retry), or `lost` (another replica
+ * won the claim).
+ *
+ * The invoice alarm. A wedged row retried at loop cadence spent 84k signed-URL
+ * mints in a day and was first noticed on a billing alert; a rising `waiting`
+ * rate is the same loop, visible in telemetry instead. The per-row count lives
+ * on `builds.dispatch_attempts`, so this stays free of per-row attributes.
+ */
+export const reconcilerDispatchAttempts: Counter = meter.createCounter(
+  'reconciler_dispatch_attempts_total',
+  {
+    description: 'Build dispatch attempts, labelled by outcome',
+  },
+);
+
+/**
  * How many live deploys are currently drifted from their desired artifact, as
  * of the deploy loop's last drift-observing pass (§6's "visible state").
  */
