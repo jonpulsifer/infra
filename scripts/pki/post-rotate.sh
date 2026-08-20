@@ -11,7 +11,8 @@
 #      control-plane host's nix/secrets/<host>.sops.yaml — plaintext never
 #      touches disk,
 #   3. regenerates terraform/pki/oidc/<cluster>/{jwks.json,openid-configuration.json}
-#      via apps/fml-pki.
+#      via apps/fml-pki, and rewrites the one committed certificate copy that
+#      lives outside certs/, clusters/offsite/apps/spindrift/ca-bundle.yaml.
 #
 # Commit the result and let Atlantis upload the refreshed documents, then deploy
 # the control planes per the Kubernetes GitOps runbook. Requires: tofu, sops
@@ -72,8 +73,14 @@ fml_pki() {
   go -C "$repo_root/apps/fml-pki" run . "$@"
 }
 
-cert_fingerprint() {
-  fml_pki fingerprint -
+# Overlap is keyed on the public key, not the certificate. A certificate can be
+# reissued for the same key — a corrected constraint, a longer validity — and
+# nothing that trusted the old one needs to keep trusting it, because the new
+# one verifies every signature the old one did. Keying on the whole
+# certificate turns those reissues into fake rotations: a *-prev.pem nobody
+# needs, and a duplicate signer that publishes the same JWKS kid twice.
+cert_key_id() {
+  fml_pki spki -
 }
 
 verify_key_pair() {
@@ -109,14 +116,14 @@ for cluster in "$@"; do
   # Preserve the old CA before replacement. Consumers stage ca-bundle.pem,
   # rotate every leaf, and only then retire ca-prev.pem in a later commit.
   new_ca="$(jq -er ".cluster_ca_certs.value.\"$cluster\"" <<<"$outputs")"
-  new_ca_fingerprint="$(printf '%s\n' "$new_ca" | cert_fingerprint)"
-  current_ca_fingerprint="$([[ -s $ca_pem ]] && cert_fingerprint <"$ca_pem" || true)"
-  if [[ -n $current_ca_fingerprint ]] && [[ $new_ca_fingerprint != "$current_ca_fingerprint" ]]; then
+  new_ca_key_id="$(printf '%s\n' "$new_ca" | cert_key_id)"
+  current_ca_key_id="$([[ -s $ca_pem ]] && cert_key_id <"$ca_pem" || true)"
+  if [[ -n $current_ca_key_id ]] && [[ $new_ca_key_id != "$current_ca_key_id" ]]; then
     echo "==> $cluster: previous CA kept for overlap ($ca_prev_pem)" >&2
     cp "$ca_pem" "$ca_prev_pem"
   fi
   printf '%s\n' "$new_ca" >"$ca_pem"
-  if [[ -s $ca_prev_pem ]] && [[ $(cert_fingerprint <"$ca_prev_pem") == "$new_ca_fingerprint" ]]; then
+  if [[ -s $ca_prev_pem ]] && [[ $(cert_key_id <"$ca_prev_pem") == "$new_ca_key_id" ]]; then
     echo "==> $cluster: removing duplicate previous CA artifact" >&2
     rm "$ca_prev_pem"
   fi
@@ -139,14 +146,14 @@ for cluster in "$@"; do
 
   # Preserve a replaced signer cert for JWKS overlap during rotation.
   new_signer="$(jq -er ".sa_signer_certs.value.\"$cluster\"" <<<"$outputs")"
-  new_signer_fingerprint="$(printf '%s\n' "$new_signer" | cert_fingerprint)"
-  current_signer_fingerprint="$([[ -s $signer_pem ]] && cert_fingerprint <"$signer_pem" || true)"
-  if [[ -n $current_signer_fingerprint ]] && [[ $new_signer_fingerprint != "$current_signer_fingerprint" ]]; then
+  new_signer_key_id="$(printf '%s\n' "$new_signer" | cert_key_id)"
+  current_signer_key_id="$([[ -s $signer_pem ]] && cert_key_id <"$signer_pem" || true)"
+  if [[ -n $current_signer_key_id ]] && [[ $new_signer_key_id != "$current_signer_key_id" ]]; then
     echo "==> $cluster: previous signer kept for overlap ($prev_pem)" >&2
     cp "$signer_pem" "$prev_pem"
   fi
   printf '%s\n' "$new_signer" >"$signer_pem"
-  if [[ -s $prev_pem ]] && [[ $(cert_fingerprint <"$prev_pem") == "$new_signer_fingerprint" ]]; then
+  if [[ -s $prev_pem ]] && [[ $(cert_key_id <"$prev_pem") == "$new_signer_key_id" ]]; then
     echo "==> $cluster: removing duplicate previous signer artifact" >&2
     rm "$prev_pem"
   fi
@@ -191,13 +198,36 @@ for cluster in "$@"; do
   done
 done
 
+# The only committed copy of certificate material outside certs/. Spindrift
+# reaches a peer cluster's API server over plain fetch, so NODE_EXTRA_CA_CERTS
+# is its whole trust input, and its runtime will not treat an issuing CA as an
+# anchor -- the peer needs a path all the way to a self-signed root. That makes
+# it this cluster's own CA followed by the peer's chain file. Regenerated here
+# because a hand-copied certificate follows nothing: it survives every rotation
+# unchanged and expires on a date nobody is watching.
+spindrift_bundle="$repo_root/clusters/offsite/apps/spindrift/ca-bundle.yaml"
+if [[ -s $spindrift_bundle ]] \
+  && [[ -s $certs_dir/offsite-ca.pem ]] \
+  && [[ -s $certs_dir/folly-ca-chain.pem ]]; then
+  echo "==> regenerating ${spindrift_bundle#"$repo_root/"}" >&2
+  {
+    sed -n '1,/^  ca.crt: |$/p' "$spindrift_bundle"
+    cat "$certs_dir/offsite-ca.pem" "$certs_dir/folly-ca-chain.pem" | awk 'NF {print "    " $0}'
+  } >"$spindrift_bundle.tmp"
+  mv "$spindrift_bundle.tmp" "$spindrift_bundle"
+fi
+
 cat >&2 <<'EOF'
 
 Done. Next steps:
-  1. git add terraform/pki/certs terraform/pki/oidc nix/secrets && commit + PR
+  1. git add terraform/pki/certs terraform/pki/oidc nix/secrets \
+       clusters/offsite/apps/spindrift/ca-bundle.yaml && commit + PR
      (the next atlantis apply uploads the refreshed OIDC documents)
   2. deploy the control planes only after the matching NixOS configuration
-     consumes the refreshed keys
-  3. after every TLS leaf uses the new CA, remove *-ca-prev.pem and rerun this
-     script; after old tokens age out, do the same for *-sa-signer-prev.pem
+     consumes the refreshed keys, then restart cfssl and kube-controller-manager
+     on each of them: sops-nix compares decrypted plaintext to decide restarts,
+     so neither bounces when a certificate changes but its key does not
+  3. a *-prev.pem appears only when a key actually changed. Once every TLS leaf
+     uses the new CA, remove *-ca-prev.pem and rerun this script; after old
+     tokens age out, do the same for *-sa-signer-prev.pem
 EOF

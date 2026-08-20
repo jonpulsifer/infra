@@ -22,10 +22,8 @@ The chain is Root → Intermediate → FML K8s `<cluster>` CA → leaf. Two CAs 
 the root and one follows the intermediate, so `pathLenConstraint` must be at
 least 2 and 1 respectively.
 
-The anchors in 1Password carry those values. The copies under `certs/` are the
-previous ones, which carried **pathLen:1 and pathLen:0** — one lower than the
-chain they sign — so `mise run pki:verify` fails until `post-rotate.sh`
-republishes `certs/` from the applied state.
+The anchors carry those values, in 1Password and under `certs/` alike, and
+neither expires: both hold `99991231235959Z`.
 
 An anchor holding less than the chain requires forbids the chain it signs: no
 client can build a full path through it, and OpenSSL reports `path length
@@ -68,9 +66,9 @@ plus the previous one during a changeover. It feeds
 `services.kubernetes.caFile`.
 
 `certs/<cluster>-ca-chain.pem` is the **trust chain** — the cluster CA, the FML
-Intermediate, and the FML Root. It is what `kube-controller-manager` should
-publish through `--root-ca-file`, which becomes `kube-root-ca.crt` and every
-pod's `ca.crt`. The cluster CA is not self-signed, so on its own an OpenSSL
+Intermediate, and the FML Root. `kube-controller-manager` publishes it through
+`--root-ca-file`, which becomes `kube-root-ca.crt` and every pod's `ca.crt`
+(wired in `nix/services/k8s/default.nix`). The cluster CA is not self-signed, so on its own an OpenSSL
 client cannot build a path out of it and fails with `unable to get issuer
 certificate`.
 
@@ -83,7 +81,7 @@ file links to a self-signed root and starts with the right cluster CA.
 
 ## Export and rotation
 
-Cluster CAs expire in July 2028. Their shorter lifetime is intentional: the
+Cluster CAs expire in August 2028. Their shorter lifetime is intentional: the
 fleet exercises overlapping CA rotation rather than treating its trust roots as
 permanent. Signer certs live 1 year (`early_renewal_hours` makes plans flag them
 about 30 days out).
@@ -105,13 +103,20 @@ title so rollback remains available for the full overlap window.
 
 ServiceAccount signer overlap and Kubernetes TLS CA overlap are separate
 rotation concerns: JWKS retains the previous signer while its tokens remain
-valid. On CA replacement, the helper moves the current certificate to
-`certs/<cluster>-ca-prev.pem` and builds
+valid. Overlap is keyed on the **public key**, not the certificate: a
+certificate reissued for the same key verifies every signature the old one did,
+so the helper writes no `*-prev.pem` for it. When a key does change, the helper
+moves the current certificate to `certs/<cluster>-ca-prev.pem` and builds
 `certs/<cluster>-ca-bundle.pem` with new and previous CAs. Stage that bundle on
 every Kubernetes client and server, reissue all TLS leaves from the new CA, and
 verify the fleet before deleting `*-ca-prev.pem` and rerunning the helper.
 Rollback restores the prior git revision (including its SOPS ciphertext), then
 redeploys the overlap bundle and rebuilds the affected hosts.
+
+Because a same-key reissue leaves the SOPS plaintext untouched, sops-nix sees no
+change and restarts nothing. `cfssl` keeps serving the certificate it started
+with and `kube-controller-manager` never republishes `kube-root-ca.crt`, so both
+need restarting by hand on each control plane after the rebuild.
 
 <!-- BEGIN_TF_DOCS -->
 <!-- END_TF_DOCS -->

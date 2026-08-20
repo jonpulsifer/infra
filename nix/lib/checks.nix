@@ -56,6 +56,7 @@ in
           lib.filter (f: !builtins.pathExists (../../terraform/pki/certs + "/${f}")) [
             "${net}-ca.pem"
             "${net}-ca-bundle.pem"
+            "${net}-ca-chain.pem"
             "${net}-sa-signer.pem"
           ]
         ) (lib.attrValues (lib.filterAttrs (_: c: c.services.k8s.clusterCa.enable) k8sHosts))
