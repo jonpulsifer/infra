@@ -55,22 +55,45 @@ import type {
  * Each engine is named for the software this platform runs rather than for a
  * protocol family, so an engine value can never name a product no Target in the
  * fleet is able to provision.
+ *
+ * `podLabel` is how a policy names one datastore's pods, and it is an
+ * *operator convention* rather than an API this file can hold either operator
+ * to — the same class of fact {@link VALKEY_RESOURCE_PREFIX} carries, measured
+ * the same way, on a live cluster. Both stamp it with the custom resource's own
+ * name as the value. An operator that renames one fails closed: the policy
+ * selects no pods, the namespace's default-deny still isolates them, and the
+ * attached App loses its own datastore loudly rather than the namespace being
+ * silently opened.
  */
 export const ENGINE_KINDS = {
   postgres: {
     apiVersion: 'postgresql.cnpg.io/v1',
     kind: 'Cluster',
     plural: 'clusters',
+    podLabel: 'cnpg.io/cluster',
   },
   valkey: {
     apiVersion: 'valkey.io/v1alpha1',
     kind: 'ValkeyCluster',
     plural: 'valkeyclusters',
+    podLabel: 'valkey.io/cluster',
   },
 } as const satisfies Record<
   DatastoreEngine,
-  { apiVersion: string; kind: string; plural: string }
+  { apiVersion: string; kind: string; plural: string; podLabel: string }
 >;
+
+/**
+ * The API path for a NetworkPolicy, which is not a kind this adapter provisions.
+ *
+ * Kept out of {@link ENGINE_KINDS} deliberately: that table is one row per
+ * engine and this is one object for both.
+ */
+const NETWORK_POLICY = {
+  apiVersion: 'networking.k8s.io/v1',
+  kind: 'NetworkPolicy',
+  plural: 'networkpolicies',
+} as const;
 
 /**
  * How long a name may be before its backend starts colliding.
@@ -245,6 +268,99 @@ export class KubernetesDatastoreAdapter implements DatastoreAdapter {
       namespace: parsed.namespace,
       name: parsed.name,
     });
+    // The policy is nobody's child — it selects the datastore's pods rather
+    // than being owned by the custom resource — so nothing garbage-collects it.
+    // Deleted here rather than given an `ownerReference`, which would need the
+    // CR's UID read back before every write for a policy that denies rather
+    // than admits when it is left behind.
+    await this.api(connection).delete({
+      ...NETWORK_POLICY,
+      namespace: parsed.namespace,
+      name: policyName(parsed.name),
+    });
+  }
+
+  /**
+   * Admit exactly these namespaces to this datastore's pods.
+   *
+   * The exception on top of the deny floor the installation ships in the
+   * datastore namespace (`clusters/base/platform/spindrift-target/`). One
+   * object per Datastore, named after it, selecting its own pods by the
+   * operator's cluster label — so a policy widened for one Datastore cannot
+   * widen its neighbour, and a Datastore with no App attached has no object at
+   * all rather than one admitting an empty list.
+   *
+   * **A vanilla `NetworkPolicy`, not a `CiliumNetworkPolicy`.** The chart
+   * reaches for the Cilium kind for one reason — a gateway's data plane is an
+   * identity no selector can name — and no gateway fronts a datastore. Every
+   * selector here is a namespace name and a pod label, which the portable kind
+   * expresses, and every Target's CNI enforces.
+   *
+   * **Ingress only, and no `ports`.** Egress here would be the policy taking
+   * away CloudNativePG's instance manager and both operators' DNS, and the
+   * pods listen on their engine's port and nothing else — pinning ports would
+   * add a second per-engine table that must stay in step with the first, to
+   * refuse traffic no pod would answer anyway.
+   *
+   * A Datastore whose ref names a namespace this Target does not provision
+   * into is one placed before `spindrift-datastores` existed. Nothing is
+   * written for it: there is no floor in `spindrift-apps` for an exception to
+   * sit on, and the identity's Role there is read-and-remove only by design.
+   */
+  async permit(
+    target: DeployTarget,
+    ref: DatastoreRef,
+    namespaces: readonly string[],
+  ): Promise<void> {
+    const connection = connectionOf(target);
+    const parsed = parseRef(ref);
+    if (connection === null || parsed === null) return;
+    if (parsed.namespace !== datastoreNamespaceFor(connection)) return;
+
+    const api = this.api(connection);
+    if (namespaces.length === 0) {
+      // Detached: the object goes away rather than being applied with an empty
+      // `from`, which reads identically to a policy somebody truncated.
+      await api.delete({
+        ...NETWORK_POLICY,
+        namespace: parsed.namespace,
+        name: policyName(parsed.name),
+      });
+      return;
+    }
+
+    await api.apply(
+      {
+        apiVersion: NETWORK_POLICY.apiVersion,
+        kind: NETWORK_POLICY.kind,
+        metadata: {
+          name: policyName(parsed.name),
+          namespace: parsed.namespace,
+          labels: {
+            'app.kubernetes.io/managed-by': 'spindrift',
+            'app.kubernetes.io/part-of': 'spindrift',
+          },
+        },
+        spec: {
+          podSelector: {
+            matchLabels: {
+              [ENGINE_KINDS[parsed.engine].podLabel]: parsed.name,
+            },
+          },
+          policyTypes: ['Ingress'],
+          ingress: [
+            {
+              from: namespaces.map((namespace) => ({
+                namespaceSelector: {
+                  matchLabels: { 'kubernetes.io/metadata.name': namespace },
+                },
+              })),
+            },
+          ],
+        },
+      },
+      NETWORK_POLICY.plural,
+    );
   }
 
   /**
@@ -580,6 +696,19 @@ function refOf(
   name: string,
 ): DatastoreRef {
   return `${engine}/${namespace}/${name}`;
+}
+
+/**
+ * The policy object's name, which is the Datastore's with a prefix.
+ *
+ * Unambiguous without the engine in it: `datastores_vessel_name_unique` makes
+ * two Datastores of one name in one vessel impossible, so no two datastore
+ * policies in a namespace can collide. Prefixed so that an operator reading
+ * `kubectl get netpol` can tell the per-Datastore exceptions from the floor
+ * Flux ships beside them.
+ */
+function policyName(name: string): string {
+  return `spindrift-${name}`;
 }
 
 function parseRef(ref: DatastoreRef): ParsedRef | null {

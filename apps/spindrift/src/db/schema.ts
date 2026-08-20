@@ -1053,6 +1053,24 @@ export const datastores = pgTable(
      * reference everywhere else." Never a copy of the credential itself.
      */
     connectionRef: text('connection_ref'),
+    /**
+     * What the far side was last told to admit, never a desired value.
+     *
+     * The network boundary around a Datastore is one ingress exception naming
+     * the attached App's namespace, and the datastore loop writes it — not
+     * `attachDatastore`, because `appId`'s `onDelete: 'set null'` above means
+     * an App delete detaches with no command in the path at all. The loop
+     * converges however `app_id` changed, and this column is what tells it
+     * whether there is anything to converge: a pass compares the namespace the
+     * row's App occupies against this, and calls the adapter only when the two
+     * disagree. Without it every pass would rewrite every policy forever.
+     *
+     * Text and deliberately not a reference to `apps`: a foreign key would be
+     * cascade-nulled by the very App delete this column exists to notice, and
+     * what it records is a fact about the *cluster* — the thing an operator
+     * asking "why can't my App reach its database" needs to see.
+     */
+    permittedNamespace: text('permitted_namespace'),
     createdAt: timestamp('created_at', { withTimezone: true })
       .notNull()
       .defaultNow(),

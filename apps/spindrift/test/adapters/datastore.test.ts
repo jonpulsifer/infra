@@ -552,6 +552,132 @@ describe('destroy', () => {
   });
 });
 
+/**
+ * The ingress exception around one Datastore (§127).
+ *
+ * The floor under it is Flux's — a default-deny plus the platform allow, in
+ * `clusters/base/platform/spindrift-target/networkpolicy.yaml` — and this is
+ * the half only Spindrift can write, because which App is attached is a row in
+ * its database. What the assertions here pin is the part a live cluster
+ * decides: the two operators' pod labels, and the direction.
+ */
+describe('permit', () => {
+  test('admits the App namespace and selects the datastore by its operator label', async () => {
+    const { fake, adapter, target } = adapterOn();
+    const ref = await adapter.provision(target, {
+      name: 'orders',
+      engine: 'postgres',
+      storageGiB: 1,
+    });
+
+    await adapter.permit(target, ref, ['app-storefront']);
+
+    const policy = fake.get(
+      'networkpolicies/spindrift-datastores/spindrift-orders',
+    );
+    expect(policy?.apiVersion).toBe('networking.k8s.io/v1');
+    expect(policy?.spec).toEqual({
+      // CloudNativePG's own label on every instance pod, measured on a live
+      // cluster rather than read off an API guarantee it does not make.
+      podSelector: { matchLabels: { 'cnpg.io/cluster': 'orders' } },
+      policyTypes: ['Ingress'],
+      ingress: [
+        {
+          from: [
+            {
+              namespaceSelector: {
+                matchLabels: {
+                  'kubernetes.io/metadata.name': 'app-storefront',
+                },
+              },
+            },
+          ],
+        },
+      ],
+    });
+    // The one assertion that has to outlive whoever reads this next: an egress
+    // policy on a datastore pod takes away CloudNativePG's instance manager
+    // and both operators' DNS. Ingress is the only direction here, ever.
+    expect(policy?.spec).not.toHaveProperty('egress');
+    // A vanilla policy, not a `CiliumNetworkPolicy`: the chart reaches for the
+    // Cilium kind only to name a gateway's identity, and no gateway fronts a
+    // datastore.
+    expect(fake.all('ciliumnetworkpolicies')).toEqual([]);
+  });
+
+  test('selects a valkey datastore by the Valkey operator label', async () => {
+    const { fake, adapter, target } = adapterOn();
+    const ref = await adapter.provision(target, {
+      name: 'sessions',
+      engine: 'valkey',
+      storageGiB: 1,
+    });
+
+    await adapter.permit(target, ref, ['app-storefront']);
+
+    const policy = fake.get(
+      'networkpolicies/spindrift-datastores/spindrift-sessions',
+    );
+    expect(policy?.spec).toMatchObject({
+      podSelector: { matchLabels: { 'valkey.io/cluster': 'sessions' } },
+    });
+    // The engine with no credential behind the boundary: the network is the
+    // authentication, so this is the case the whole story is about.
+    expect(policy?.spec).toMatchObject({ policyTypes: ['Ingress'] });
+  });
+
+  test('an empty permitted set removes the object rather than emptying it', async () => {
+    const { fake, adapter, target } = adapterOn();
+    const ref = await adapter.provision(target, {
+      name: 'orders',
+      engine: 'postgres',
+      storageGiB: 1,
+    });
+    await adapter.permit(target, ref, ['app-storefront']);
+
+    await adapter.permit(target, ref, []);
+
+    expect(
+      fake.get('networkpolicies/spindrift-datastores/spindrift-orders'),
+    ).toBeUndefined();
+    // Idempotent, like every other write here: revoking what is already
+    // revoked is not an error, and the loop calls this on a schedule.
+    await adapter.permit(target, ref, []);
+  });
+
+  test('destroying a Datastore takes its policy with it', async () => {
+    const { fake, adapter, target } = adapterOn();
+    const ref = await adapter.provision(target, {
+      name: 'orders',
+      engine: 'postgres',
+      storageGiB: 1,
+    });
+    await adapter.permit(target, ref, ['app-storefront']);
+
+    await adapter.destroy(target, ref);
+
+    // Nothing owns the policy — it selects the datastore's pods rather than
+    // being the custom resource's child — so nothing else would collect it.
+    expect(
+      fake.get('networkpolicies/spindrift-datastores/spindrift-orders'),
+    ).toBeUndefined();
+  });
+
+  test('a Datastore in the legacy namespace is left alone', async () => {
+    const { fake, adapter, target } = adapterOn();
+    const before = fake.requests.length;
+
+    await adapter.permit(target, 'postgres/spindrift-apps/orders', [
+      'app-storefront',
+    ]);
+
+    // `spindrift-apps` has no deny floor for an exception to sit on, and this
+    // identity's Role there is read-and-remove only. A policy written into it
+    // would protect nothing and could not be applied anyway.
+    expect(fake.requests.slice(before)).toEqual([]);
+  });
+});
+
 describe('the cloud adapter', () => {
   test('refuses to provision and names the fact it is missing', async () => {
     const adapter = new CloudDatastoreAdapter();

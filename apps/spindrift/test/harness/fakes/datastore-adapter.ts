@@ -34,6 +34,8 @@ export interface FakeDatastoreAdapterOptions {
   describes?: unknown;
   /** When set, `describe` throws — the same unreachable Target, on the read path. */
   describeThrows?: string;
+  /** When set, `permit` throws — the Target that would not take the policy. */
+  permitThrows?: string;
 }
 
 export class FakeDatastoreAdapter implements DatastoreAdapter {
@@ -46,6 +48,14 @@ export class FakeDatastoreAdapter implements DatastoreAdapter {
   readonly destroyed: DatastoreRef[] = [];
   /** Every `observe`, so a test can count the polls a pass actually made. */
   readonly observed: DatastoreRef[] = [];
+  /**
+   * Every `permit`, in call order, with the whole permitted set each time.
+   *
+   * The call count is half the assertion: the loop is supposed to speak to the
+   * far side only when what it knows disagrees with what it last said, so a
+   * pass that changed nothing must appear here not at all.
+   */
+  readonly permits: { ref: DatastoreRef; namespaces: readonly string[] }[] = [];
 
   /**
    * The states each ref answers with, oldest first, the last one repeating.
@@ -112,6 +122,17 @@ export class FakeDatastoreAdapter implements DatastoreAdapter {
       throw new Error(this.options.describeThrows);
     }
     return this.options.describes ?? null;
+  }
+
+  async permit(
+    _target: DeployTarget,
+    ref: DatastoreRef,
+    namespaces: readonly string[],
+  ): Promise<void> {
+    this.permits.push({ ref, namespaces: [...namespaces] });
+    if (this.options.permitThrows !== undefined) {
+      throw new Error(this.options.permitThrows);
+    }
   }
 
   async destroy(_target: DeployTarget, ref: DatastoreRef): Promise<void> {
