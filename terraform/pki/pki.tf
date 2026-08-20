@@ -6,12 +6,14 @@
 #         └─ <cluster> SA token signer (issued here; leaf, RSA-4096, 1y)
 #
 # Two CAs follow the root and one follows the intermediate, so those are the
-# pathLen values the chain requires. The anchors in 1Password still carry
-# pathLen:1 and pathLen:0, one lower than that, which no client can build a full
-# path through: OpenSSL reports "path length constraint exceeded". Go anchors on
-# the published cluster CA and never walks up, which is why every Go client in
-# the fleet accepts it. scripts/pki/reissue-trust-anchors.sh mints replacements;
-# `mise run pki:verify` reports where the committed certs stand.
+# pathLen values the chain requires, and the anchors in 1Password carry them.
+# An anchor holding less forbids the chain it signs: OpenSSL reports "path
+# length constraint exceeded", while Go treats every certificate in a trust
+# store as an anchor and stops there, so it never walks past the published
+# cluster CA and a Go-only fleet sees nothing wrong.
+# scripts/pki/reissue-trust-anchors.sh mints replacements that keep the keys,
+# the subjects and the subject key identifiers, so they are drop-in;
+# `mise run pki:verify` reports where the committed certificates stand.
 #
 # The intermediate's private key is read from 1Password at plan/apply time and
 # therefore transits Terraform state, as do the generated private keys. This is
@@ -57,7 +59,7 @@ data "onepassword_item" "fml_root" {
   uuid  = "ujhf4f5cwerdwtpn27fn52kvwq"
 }
 
-# --- Per-cluster K8s CA (intermediate, pathLen:0) -------------------------
+# --- Per-cluster K8s CA (intermediate) ------------------------------------
 
 resource "tls_private_key" "cluster_ca" {
   for_each = local.clusters
@@ -113,14 +115,15 @@ resource "tls_locally_signed_cert" "cluster_ca" {
 
   is_ca_certificate = true
   # Intended guardrail: this CA may only issue end-entity certs, never another
-  # CA. It does not currently take effect. opentofu/tls drops max_path_length
-  # when it is 0 — Go cannot tell an unset attribute from a zero one — so the
-  # issued certificates carry no pathLenConstraint at all. Setting 1 emits
-  # pathLen:1, which is why the omission is the zero value and not the fork.
-  # The attribute stays so the intent is recorded and starts working if the
-  # provider distinguishes them; `mise run pki:verify` asserts the depth
-  # that actually holds, which the intermediate's pathLen:1 enforces from above
-  # for anything that validates a full path.
+  # CA. It does not take effect. The provider does set the template field, but
+  # x509.CreateCertificate omits pathLenConstraint unless MaxPathLenZero is
+  # also set, which the provider has no way to express — so the issued
+  # certificates carry no constraint at all. Setting 1 emits pathLen:1, which
+  # places the fault in the zero value rather than the fork. The attribute
+  # stays so the intent is recorded and starts working if the provider gains
+  # the distinction; `mise run pki:verify` asserts the depth that actually
+  # holds, which the intermediate's pathLen:1 enforces from above for anything
+  # that validates a full path.
   max_path_length = 0
 
   validity_period_hours = 2 * 8766 # ~2 years
