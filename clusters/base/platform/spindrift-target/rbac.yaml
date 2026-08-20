@@ -237,6 +237,35 @@ rules:
     verbs:
       - get
       - list
+  # The ingress exception around one Datastore, naming the namespace of the App
+  # attached to it. The deny it sits on is Flux's (`networkpolicy.yaml`); this
+  # is the half only Spindrift knows, because which App is attached is a row in
+  # its database rather than anything a manifest can see.
+  #
+  # `create` beside `patch` for the reason the CR rules above give — an apply is
+  # a PATCH, and the apply that has to create the object is authorized as a
+  # create too. `delete` is the revoke: detaching an App, or deleting one, is
+  # the policy going away rather than being narrowed. No `resourceNames`,
+  # because a Datastore's name is typed at runtime and RBAC matches them
+  # literally — the same reason the namespace `create` above could not be
+  # narrower.
+  #
+  # This is the one grant here that can reach an object Flux owns: the floor
+  # lives in this namespace too. Flux reconciles it back on its own interval, so
+  # the exposure is a window rather than a state, and the grant is namespaced so
+  # it reaches no other namespace's policies. Not added to
+  # `spindrift-target-datastores-legacy` below, deliberately: `spindrift-apps`
+  # has no floor for an exception to sit on, so a policy written there would
+  # protect nothing.
+  - apiGroups:
+      - networking.k8s.io
+    resources:
+      - networkpolicies
+    verbs:
+      - create
+      - delete
+      - get
+      - patch
 ---
 # The same two operators in `spindrift-apps`, read-and-remove only.
 #

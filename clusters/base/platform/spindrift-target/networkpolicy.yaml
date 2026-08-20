@@ -1,0 +1,120 @@
+# The floor under `spindrift-datastores`, and only the floor.
+#
+# An App's Components are isolated by their own namespace and the chart's
+# `podSelector: {}` policy. A Datastore is not: it outlives every App attached
+# to it, so it lives in a namespace named for no App, and until this file
+# existed any pod on the cluster that could resolve a Datastore's Service could
+# dial it. For CloudNativePG that reached a port and not a database — the
+# credential is a Secret only the attached App's namespace gets a mirror of.
+# For Valkey, which the operator runs authenticating nobody, the network *is*
+# the authentication.
+#
+# **This is the deny, never the exception.** The per-Datastore ingress rule —
+# one object per Datastore, admitting the namespace of the App attached to it —
+# is written by Spindrift's datastore reconciler, because which App is attached
+# is a row in Spindrift's database and not something a manifest can see. What
+# is here is the half an installation owns: the boundary, which has to exist
+# the moment the namespace does and before the first Datastore is provisioned,
+# and the list of platform components that legitimately reach in, which is an
+# installation fact rather than one core can discover.
+#
+# **This lands in two steps, and the first one isolates nothing.** The
+# `allow-platform` document below carries a transitional rule admitting every
+# App namespace, so that applying this file changes no reach at all. The
+# isolation arrives when that rule is deleted, once core is live and has
+# written one exception per Datastore. The rule documents its own removal.
+#
+# **Never add `policyTypes: Egress` to anything in this namespace.** Every
+# document here is ingress-only on purpose: CloudNativePG's instance manager
+# dials the API server, both operators' pods resolve DNS, and an egress policy
+# on this namespace takes both away. The adapter's own rendering asserts
+# ingress-only for the same reason.
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-ingress
+  namespace: spindrift-datastores
+  labels:
+    app.kubernetes.io/managed-by: flux
+    app.kubernetes.io/part-of: spindrift
+spec:
+  # Every pod, and no `ingress` key at all: the invariant, kept in an object of
+  # its own so that widening the allow list below cannot delete it by editing a
+  # selector.
+  podSelector: {}
+  policyTypes:
+    - Ingress
+---
+# What legitimately reaches a Datastore without being an App.
+#
+# Namespace-wide per component and pinning no port, because what an operator
+# dials is its own business: CloudNativePG polls each instance's status
+# endpoint as well as Postgres itself, and whether the Valkey operator dials
+# 6379 at all is a detail of a version nobody here should have to track.
+#
+# **The sibling rule is not here, and must not be added here.** A Datastore's
+# pods do talk to each other — CloudNativePG's streaming replication and the
+# Valkey cluster bus are pod-to-pod inside this namespace — but the only way to
+# say that in a namespace-wide document is `podSelector: {}`, which admits
+# *every* pod in the namespace and so hands App A's Valkey a route into App B's,
+# authenticating nobody, inside the partition this whole file exists to draw.
+# The reconciler writes it per Datastore instead, selecting that Datastore's own
+# pods by their operator label.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-platform
+  namespace: spindrift-datastores
+  labels:
+    app.kubernetes.io/managed-by: flux
+    app.kubernetes.io/part-of: spindrift
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        # The two operators that reconcile these Datastores, and nothing else
+        # in-cluster: a pod of this namespace reaching another Datastore is
+        # exactly what the per-Datastore exception decides.
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: cloudnative-pg
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: valkey-operator-system
+    # **Transitional, and deliberately temporary.**
+    #
+    # Every App namespace, which is every namespace this installation's core
+    # creates and labels `app.kubernetes.io/managed-by: spindrift`. It is here
+    # because the two halves of this design cannot land at the same instant: a
+    # NetworkPolicy selecting a pod makes that pod default-deny, so the moment
+    # Flux applies the documents above, every Datastore is closed to every App
+    # — and the per-Datastore exception that reopens it for the *attached* App
+    # is written by core, which does not arrive until a later commit bumps the
+    # pinned image digest. Without this rule, that gap is a live outage for
+    # whatever is attached today.
+    #
+    # With it, applying this file reproduces exactly the reach Datastores
+    # already had, and the isolation this file exists for arrives when the rule
+    # is deleted — after core is live and has written one exception per
+    # Datastore. Deleting it is the second half of the change, not a cleanup
+    # someone may skip: while it is here, any App can still reach any Datastore.
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              app.kubernetes.io/managed-by: spindrift
+    # Scraping, which is the one caller that has a port worth naming: 9187 is
+    # CloudNativePG's exporter on each instance. Nothing scrapes this namespace
+    # today — there is no PodMonitor and the Valkey exporter is off in the
+    # adapter's rendering — so this is what keeps adding one from also being an
+    # RBAC-shaped mystery. Enabling the Valkey exporter needs its port added
+    # here, or its metrics vanish silently.
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: monitoring
+      ports:
+        - port: 9187
+          protocol: TCP

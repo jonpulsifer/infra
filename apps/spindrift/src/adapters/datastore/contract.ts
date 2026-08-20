@@ -7,7 +7,7 @@
  * destroy(target, ref)
  * ```
  *
- * **Three verbs and no stream.** §6's deploy contract yields a timeline because
+ * **A lifecycle and no stream.** §6's deploy contract yields a timeline because
  * a deploy is something a developer is watching; a Datastore is provisioned once
  * and then outlives every App attached to it (§2: "deleting an App detaches its
  * Datastores and never cascades"). There is nothing for a timeline to be
@@ -150,6 +150,46 @@ export interface DatastoreAdapter {
 
   /** Idempotent: destroying what is already gone succeeds (§6). */
   destroy(target: DeployTarget, ref: DatastoreRef): Promise<void>;
+
+  /**
+   * Admit exactly these network locations to this datastore, and nobody else.
+   *
+   * The half of isolation core holds. A Datastore lives in no App's namespace
+   * — that is the whole reason it is top-level — so nothing in the backend can
+   * see which App is attached to it; that is a row core owns, and this is how
+   * core states it. What a "network location" is belongs to the backend: on a
+   * cluster it is a namespace name, and the caller derives it the same way the
+   * delivery path does.
+   *
+   * **Replace, never add.** The list is the whole permitted set, so an empty
+   * one means "admit nobody" — a detached Datastore, which is the ordinary
+   * state of one whose App was deleted. A verb pair would leave the revoke to
+   * a caller that may never run.
+   *
+   * **Idempotent, and called on a schedule.** The datastore loop calls this
+   * when what core knows disagrees with what it last said, calls it again
+   * after a failure, and calls it again on a slow cadence to re-assert what it
+   * already said — so writing the same permission twice must be the same as
+   * writing it once.
+   *
+   * **`false` means nothing was established**, which is not the same as a
+   * failure: a backend can hold a ref it has no boundary to write around — one
+   * placed before this Target had a datastore namespace, say — and the honest
+   * answer is that the permitted set is still whatever it was. The caller
+   * records what it was told only when this returns `true`, because the column
+   * it records into claims a fact about the far side.
+   *
+   * Optional, like {@link DatastoreAdapter.describe}, and for a sharper
+   * reason: a backend whose reachability is not an object — a cloud database
+   * behind a project's own network rules — has nothing here to write, and a
+   * stub that threw would turn "this backend isolates differently" into a
+   * failed pass every fifteen seconds.
+   */
+  permit?(
+    target: DeployTarget,
+    ref: DatastoreRef,
+    namespaces: readonly string[],
+  ): Promise<boolean>;
 
   /**
    * The backend's own object, verbatim, for a reader — or `null` where there is

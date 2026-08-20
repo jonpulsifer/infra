@@ -17,7 +17,12 @@
 import { describe, expect, test } from 'bun:test';
 import { eq } from 'drizzle-orm';
 import type { AdapterRegistry, Clock } from '../../src/commands/types.ts';
-import { datastores, type NewTarget, targets } from '../../src/db/schema.ts';
+import {
+  apps,
+  datastores,
+  type NewTarget,
+  targets,
+} from '../../src/db/schema.ts';
 import { runDatastorePass } from '../../src/reconciler/datastore-loop.ts';
 import { withIsolatedDatabase } from '../harness/db.ts';
 import { FakeDatastoreAdapter } from '../harness/fakes/datastore-adapter.ts';
@@ -68,6 +73,15 @@ async function aProvisionedRow(
     })
     .returning();
   return row!;
+}
+
+/** An App for a Datastore to be attached to, by name. */
+async function anApp(name: string) {
+  const [app] = await database()
+    .db.insert(apps)
+    .values({ name, sourceKind: 'archive' })
+    .returning();
+  return app!;
 }
 
 async function reread(id: string) {
@@ -280,5 +294,187 @@ describe('what the loop refuses to touch', () => {
 
     expect(reports).toEqual([]);
     expect((await reread(row.id)).phase).toBe('PENDING');
+  });
+});
+
+/**
+ * The network exception around a Datastore (§127).
+ *
+ * The claim: **the loop tells the far side which App namespace to admit, and
+ * it does so from the row rather than from a command.** Attaching and
+ * detaching are both bookkeeping — `attachDatastore` deliberately makes no
+ * adapter call — and deleting an App is not even that: `app_id` is
+ * `ON DELETE SET NULL`, so the row detaches with nothing running at all. A
+ * revoke hung off the commands would silently never fire for the case that
+ * matters most, which is what the middle test here is.
+ */
+describe('the network exception', () => {
+  test('an attached Datastore has its App namespace admitted, with no poll', async () => {
+    const app = await anApp('storefront');
+    const row = await aProvisionedRow({
+      appId: app.id,
+      phase: 'LIVE',
+      connectionRef: 'secret://spindrift-datastores/orders-app',
+    });
+    const backend = new FakeDatastoreAdapter();
+
+    const reports = await runDatastorePass({
+      db: database().db,
+      adapters: adaptersFor(backend),
+      clock,
+    });
+
+    // `app-{app}` is `appNamespaceFor`'s default and the namespace the release
+    // itself lands in — the two come from one function so they cannot drift.
+    expect(backend.permits).toEqual([
+      { ref: row.ref!, namespaces: ['app-storefront'] },
+    ]);
+    // A settled row still costs no round trip on the poll seam: the attachment
+    // is what changed, not the datastore.
+    expect(backend.observed).toEqual([]);
+    expect(reports[0]?.permitted).toBe(true);
+    expect((await reread(row.id)).permittedNamespace).toBe('app-storefront');
+  });
+
+  test('a second pass with nothing changed says nothing', async () => {
+    const app = await anApp('storefront');
+    await aProvisionedRow({
+      appId: app.id,
+      phase: 'LIVE',
+      connectionRef: 'secret://spindrift-datastores/orders-app',
+    });
+    const backend = new FakeDatastoreAdapter();
+    const context = {
+      db: database().db,
+      adapters: adaptersFor(backend),
+      clock,
+    };
+
+    await runDatastorePass(context);
+    const second = await runDatastorePass(context);
+
+    // The column is what makes convergence converge. Without it every pass
+    // would rewrite every policy forever, at fifteen-second intervals.
+    expect(backend.permits).toHaveLength(1);
+    expect(second).toEqual([]);
+  });
+
+  test('an App deleted out from under the row closes the path it opened', async () => {
+    const app = await anApp('storefront');
+    const row = await aProvisionedRow({
+      appId: app.id,
+      phase: 'LIVE',
+      connectionRef: 'secret://spindrift-datastores/orders-app',
+    });
+    const backend = new FakeDatastoreAdapter();
+    const context = {
+      db: database().db,
+      adapters: adaptersFor(backend),
+      clock,
+    };
+    await runDatastorePass(context);
+
+    // Not `detachDatastore`: the App is deleted, and `app_id`'s
+    // `ON DELETE SET NULL` detaches the row with no command in the path. This
+    // is the case a revoke hanging off attach/detach could never have caught.
+    await database().db.delete(apps).where(eq(apps.id, app.id));
+    await runDatastorePass(context);
+
+    expect(backend.permits).toEqual([
+      { ref: row.ref!, namespaces: ['app-storefront'] },
+      // The empty set is the whole permitted set, which is what makes it a
+      // revoke rather than an addition of nothing.
+      { ref: row.ref!, namespaces: [] },
+    ]);
+    expect((await reread(row.id)).permittedNamespace).toBeNull();
+  });
+
+  test('a Target that will not take the policy is retried, and still polled', async () => {
+    const app = await anApp('storefront');
+    const row = await aProvisionedRow({ appId: app.id });
+    const backend = new FakeDatastoreAdapter({
+      permitThrows: 'networkpolicies is forbidden: RBAC: no policy matched',
+    });
+    backend.script(row.ref!, {
+      ref: row.ref!,
+      phase: 'LIVE',
+      connection: null,
+    });
+
+    const reports = await runDatastorePass({
+      db: database().db,
+      adapters: adaptersFor(backend),
+      clock,
+    });
+
+    // The column says what the cluster was last actually told, so a write that
+    // did not land leaves the disagreement in place and the next pass asks
+    // again. Recording it optimistically would close the hole in the database
+    // and leave it open in the cluster.
+    expect((await reread(row.id)).permittedNamespace).toBeNull();
+    // But the poll is not the policy's hostage. A Target whose kustomization
+    // has not caught up refuses the write on every pass, and coupling the two
+    // would leave the Datastore in PENDING forever with nothing said anywhere
+    // about why — the database that never comes up, cause invisible.
+    expect(backend.observed).toEqual([row.ref!]);
+    expect(reports[0]).toMatchObject({ phase: 'LIVE', permitted: false });
+    expect((await reread(row.id)).phase).toBe('LIVE');
+  });
+
+  test('a written exception is said again once it is old enough', async () => {
+    const app = await anApp('storefront');
+    const row = await aProvisionedRow({
+      appId: app.id,
+      phase: 'LIVE',
+      connectionRef: 'secret://spindrift-datastores/orders-app',
+    });
+    const backend = new FakeDatastoreAdapter();
+    const db = database().db;
+    await runDatastorePass({ db, adapters: adaptersFor(backend), clock });
+
+    // An hour later, with the row unchanged. The policy is not core's to
+    // remember: `kubectl delete netpol` during triage takes it away and the
+    // row still agrees with itself, so a loop that only writes on disagreement
+    // never writes it again and the App is denied its own store forever.
+    const later: Clock = {
+      now: () => new Date('2024-06-01T02:00:00.000Z'),
+    };
+    await runDatastorePass({
+      db,
+      adapters: adaptersFor(backend),
+      clock: later,
+    });
+
+    expect(backend.permits).toEqual([
+      { ref: row.ref!, namespaces: ['app-storefront'] },
+      { ref: row.ref!, namespaces: ['app-storefront'] },
+    ]);
+    expect((await reread(row.id)).permittedAt).toEqual(later.now());
+  });
+
+  test('a backend with nothing to write records nothing', async () => {
+    const app = await anApp('storefront');
+    const row = await aProvisionedRow({
+      appId: app.id,
+      phase: 'LIVE',
+      connectionRef: 'secret://spindrift-datastores/orders-app',
+    });
+    // The legacy ref: the adapter's guard returns before it touches the API,
+    // because there is no deny floor in `spindrift-apps` for an exception to
+    // sit on.
+    const backend = new FakeDatastoreAdapter({ permitNoops: true });
+
+    const reports = await runDatastorePass({
+      db: database().db,
+      adapters: adaptersFor(backend),
+      clock,
+    });
+
+    // Recording it would have the column claim a cluster fact nobody
+    // established — and the comparison that guards the next pass would believe
+    // it forever.
+    expect((await reread(row.id)).permittedNamespace).toBeNull();
+    expect((await reread(row.id)).permittedAt).toBeNull();
+    expect(reports).toEqual([]);
   });
 });
