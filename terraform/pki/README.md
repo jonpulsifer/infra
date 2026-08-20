@@ -54,6 +54,26 @@ constraint. Setting 1 emits `pathLen:1`, which places the fault in the zero
 value rather than the fork. Once the intermediate carries pathLen:1, it bounds
 the depth from above for any full-path validator.
 
+## Two bundles, and why they are not one
+
+`certs/<cluster>-ca-bundle.pem` is a **rotation overlap set** — the current CA
+plus the previous one during a changeover. It feeds
+`services.kubernetes.caFile`.
+
+`certs/<cluster>-ca-chain.pem` is the **trust chain** — the cluster CA, the FML
+Intermediate, and the FML Root. It is what `kube-controller-manager` should
+publish through `--root-ca-file`, which becomes `kube-root-ca.crt` and every
+pod's `ca.crt`. The cluster CA is not self-signed, so on its own an OpenSSL
+client cannot build a path out of it and fails with `unable to get issuer
+certificate`.
+
+**Never merge the chain into `caFile`.** That option also backs `clientCaFile`
+and `kubeletClientCaFile`, so putting the FML anchors there would make the API
+server accept any client certificate issued anywhere under the FML Root as
+authentication — a certificate with `O=system:masters` away from cluster-admin.
+Only `--root-ca-file` takes the chain. `mise run pki:verify` asserts the chain
+file links to a self-signed root and starts with the right cluster CA.
+
 ## Export and rotation
 
 Cluster CAs expire in July 2028. Their shorter lifetime is intentional: the

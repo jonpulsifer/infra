@@ -345,3 +345,58 @@ func pemBytes(t *testing.T, der []byte) []byte {
 	}
 	return b
 }
+
+// TestChainFileMustBuildAPath covers the artifact pods actually receive. A
+// single non-self-signed CA is exactly today's state and exactly what OpenSSL
+// cannot anchor on.
+func TestChainFileMustBuildAPath(t *testing.T) {
+	dir := t.TempDir()
+	far := time.Now().AddDate(50, 0, 0)
+	root, rootKey := mintCA(t, "root", 2, true, far, nil, nil)
+	inter, interKey := mintCA(t, "intermediate", 1, true, far, root, rootKey)
+	clusterCA, _ := mintCA(t, "cluster", 0, false, time.Now().AddDate(2, 0, 0), inter, interKey)
+
+	full := filepath.Join(dir, "c-ca-chain.pem")
+	if err := os.WriteFile(full, concat(t, clusterCA.Raw, inter.Raw, root.Raw), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if problems := checkChainFile("c", full, clusterCA); len(problems) != 0 {
+		t.Errorf("a complete chain should pass, got %v", problems)
+	}
+
+	lonely := filepath.Join(dir, "lonely-ca-chain.pem")
+	if err := os.WriteFile(lonely, concat(t, clusterCA.Raw), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	problems := checkChainFile("c", lonely, clusterCA)
+	if !strings.Contains(strings.Join(problems, "\n"), "cannot build a path out of it") {
+		t.Errorf("a lone cluster CA should be rejected, got %v", problems)
+	}
+
+	// Truncated at the intermediate: linked, but anchored on something that is
+	// not self-signed, which is the err=2 case dressed up as a chain.
+	truncated := filepath.Join(dir, "trunc-ca-chain.pem")
+	if err := os.WriteFile(truncated, concat(t, clusterCA.Raw, inter.Raw), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	problems = checkChainFile("c", truncated, clusterCA)
+	if !strings.Contains(strings.Join(problems, "\n"), "is not self-signed") {
+		t.Errorf("a chain stopping at the intermediate should be rejected, got %v", problems)
+	}
+
+	// Wrong cluster's CA at the head.
+	other, _ := mintCA(t, "other cluster", 0, false, time.Now().AddDate(2, 0, 0), inter, interKey)
+	problems = checkChainFile("c", full, other)
+	if !strings.Contains(strings.Join(problems, "\n"), "not the cluster CA it is published for") {
+		t.Errorf("a mismatched head should be rejected, got %v", problems)
+	}
+}
+
+func concat(t *testing.T, ders ...[]byte) []byte {
+	t.Helper()
+	var out []byte
+	for _, d := range ders {
+		out = append(out, pemBytes(t, d)...)
+	}
+	return out
+}

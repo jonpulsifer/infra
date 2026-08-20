@@ -5,6 +5,7 @@ import (
 	"crypto/x509"
 	"fmt"
 	"io"
+	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -102,6 +103,40 @@ func checkChain(label string, chain []named) []string {
 	return problems
 }
 
+// checkChainFile asserts that <cluster>-ca-chain.pem is what kube-controller-
+// manager can hand to every pod as ca.crt: the cluster CA, then each issuer up
+// to a self-signed root. It is deliberately not the same file as
+// <cluster>-ca-bundle.pem, which is a rotation overlap set (current plus
+// previous CA) and carries no chain.
+//
+// This file must never become services.kubernetes.caFile. That option also
+// feeds clientCaFile and kubeletClientCaFile, so putting the FML anchors in it
+// would let anything issued anywhere under the FML Root authenticate to the API
+// server. Only --root-ca-file takes the chain.
+func checkChainFile(label, path string, clusterCA *x509.Certificate) []string {
+	certs, err := readCerts(path)
+	if err != nil {
+		return []string{fmt.Sprintf("%s: %v", label, err)}
+	}
+	var problems []string
+	if !bytes.Equal(certs[0].Raw, clusterCA.Raw) {
+		problems = append(problems, fmt.Sprintf(
+			"%s: %s starts with %q, not the cluster CA it is published for",
+			label, filepath.Base(path), certs[0].Subject))
+	}
+	chain := make([]named, len(certs))
+	for i, c := range certs {
+		chain[i] = named{c, fmt.Sprintf("%s[%d] %s", filepath.Base(path), i, c.Subject.CommonName)}
+	}
+	if len(chain) < 2 {
+		problems = append(problems, fmt.Sprintf(
+			"%s: %s holds one certificate, so an OpenSSL client cannot build a path out of it",
+			label, filepath.Base(path)))
+		return problems
+	}
+	return append(problems, checkChain(label, chain)...)
+}
+
 // runVerify asserts what a Go client never exercises. crypto/x509 treats every
 // certificate in a trust store as an anchor and stops there, so a hierarchy can
 // contradict itself and still serve kubectl, Flux and Prometheus for years.
@@ -150,6 +185,13 @@ func runVerify(certsDir string, out, errOut io.Writer) error {
 			fmt.Fprintf(out, "      %s\n", describe(n.cert, n.name))
 		}
 		problems = append(problems, checkChain(cluster, chain)...)
+
+		chainPath := filepath.Join(certsDir, cluster+"-ca-chain.pem")
+		if _, statErr := os.Stat(chainPath); statErr == nil {
+			problems = append(problems, checkChainFile(cluster, chainPath, clusterCA)...)
+		} else {
+			fmt.Fprintf(out, "      %s-ca-chain.pem absent — pods still receive the cluster CA alone\n", cluster)
+		}
 	}
 
 	if len(problems) > 0 {
