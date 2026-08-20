@@ -82,6 +82,8 @@ done
 for tool in openssl python3; do
   command -v "$tool" >/dev/null || {
     echo "missing required tool: $tool" >&2
+    echo "the dev shell carries both — run this under 'nix develop -c \\" >&2
+    echo "  bash scripts/pki/reissue-trust-anchors.sh ...'" >&2
     exit 1
   }
 done
@@ -116,11 +118,16 @@ intermediate_subject="$(openssl x509 -in "$repo_root/terraform/pki/certs/fml-int
 echo "==> root subject:         $root_subject" >&2
 echo "==> intermediate subject: $intermediate_subject" >&2
 
-cat >"$work/root.ext" <<EOF
-basicConstraints = critical, CA:TRUE, pathlen:2
-keyUsage = critical, keyCertSign, cRLSign, digitalSignature
-subjectKeyIdentifier = hash
-EOF
+# Ed25519 and Ed448 bind their own hash and OpenSSL refuses an explicit digest
+# for them. Read the algorithm off the existing certificate rather than the key,
+# so nothing secret is parsed to make this decision.
+root_alg="$(openssl x509 -in "$repo_root/terraform/pki/certs/fml-root.pem" -noout -text \
+  | sed -n 's/.*Public Key Algorithm: *//p' | head -1)"
+case "$root_alg" in
+  ED25519 | ed25519 | ED448 | ed448) digest=() ;;
+  *) digest=(-sha256) ;;
+esac
+echo "==> root key algorithm:   ${root_alg:-unknown} (digest: ${digest[*]:-built in})" >&2
 
 cat >"$work/intermediate.ext" <<EOF
 basicConstraints = critical, CA:TRUE, pathlen:1
@@ -130,35 +137,40 @@ authorityKeyIdentifier = keyid:always
 EOF
 
 echo "==> reissuing the root, self-signed, pathlen:2" >&2
+# -addext, not -extfile: that flag belongs to `openssl x509`, and `req` rejects
+# it as an unknown option rather than ignoring it.
 openssl req -x509 -new \
   -key "$root_key" \
-  -sha256 \
+  "${digest[@]}" \
   -days "$root_days" \
   -subj "/$root_subject" \
-  -extensions v3 \
-  -extfile <(printf '[v3]\n%s\n' "$(cat "$work/root.ext")") \
-  -out "$work/fml-root.pem" 2>/dev/null
+  -addext "basicConstraints=critical,CA:TRUE,pathlen:2" \
+  -addext "keyUsage=critical,keyCertSign,cRLSign,digitalSignature" \
+  -addext "subjectKeyIdentifier=hash" \
+  -out "$work/fml-root.pem"
 
 echo "==> reissuing the intermediate off the new root, pathlen:1" >&2
 openssl req -new \
   -key "$work/intermediate.key" \
   -subj "/$intermediate_subject" \
-  -out "$work/intermediate.csr" 2>/dev/null
+  -out "$work/intermediate.csr"
 
 openssl x509 -req \
   -in "$work/intermediate.csr" \
   -CA "$work/fml-root.pem" \
   -CAkey "$root_key" \
-  -sha256 \
+  "${digest[@]}" \
   -days "$intermediate_days" \
   -extfile "$work/intermediate.ext" \
-  -out "$work/fml-intermediate.pem" 2>/dev/null
+  -out "$work/fml-intermediate.pem"
 
 # The intermediate key must still match its certificate, or every cluster CA
 # Terraform signs with it will be unverifiable.
-key_mod="$(openssl rsa -in "$work/intermediate.key" -noout -modulus 2>/dev/null || true)"
-crt_mod="$(openssl x509 -in "$work/fml-intermediate.pem" -noout -modulus 2>/dev/null || true)"
-if [[ -n $key_mod && $key_mod != "$crt_mod" ]]; then
+# Compare public halves, which works for Ed25519 as well as RSA; -modulus is
+# RSA-only and silently matches nothing on an Ed key.
+key_pub="$(openssl pkey -in "$work/intermediate.key" -pubout 2>/dev/null || true)"
+crt_pub="$(openssl x509 -in "$work/fml-intermediate.pem" -noout -pubkey 2>/dev/null || true)"
+if [[ -z $key_pub || $key_pub != "$crt_pub" ]]; then
   echo "the reissued intermediate does not match its private key" >&2
   exit 1
 fi

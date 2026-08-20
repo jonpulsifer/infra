@@ -28,6 +28,19 @@ if (($# == 0)); then
   exit 2
 fi
 
+# Preflight, because this script writes certificates and rewrites SOPS files as
+# it goes: discovering a missing tool halfway leaves certs/ half-updated.
+missing=()
+for tool in tofu sops jq openssl python3; do
+  command -v "$tool" >/dev/null || missing+=("$tool")
+done
+if ((${#missing[@]})); then
+  echo "missing required tool(s): ${missing[*]}" >&2
+  echo "the dev shell carries them — run this under 'nix develop -c \\" >&2
+  echo "  bash scripts/pki/post-rotate.sh $*'" >&2
+  exit 1
+fi
+
 # cluster -> control-plane host (sops secret target)
 declare -A control_plane=(
   [folly]="optiplex"

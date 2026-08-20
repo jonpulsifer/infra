@@ -14,6 +14,9 @@ let
     mise
     nix
     nixos-rebuild
+    # scripts/pki/{post-rotate,reissue-trust-anchors}.sh sign and inspect X.509
+    # with it. mise has no openssl in its registry, so the dev shell carries it.
+    openssl
     python3
     sops
     terraform
