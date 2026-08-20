@@ -1062,8 +1062,9 @@ export const datastores = pgTable(
      * an App delete detaches with no command in the path at all. The loop
      * converges however `app_id` changed, and this column is what tells it
      * whether there is anything to converge: a pass compares the namespace the
-     * row's App occupies against this, and calls the adapter only when the two
-     * disagree. Without it every pass would rewrite every policy forever.
+     * row's App occupies against this, and calls the adapter when the two
+     * disagree — or when `permittedAt` below says it is time to say the same
+     * thing again. Without it every pass would rewrite every policy forever.
      *
      * Text and deliberately not a reference to `apps`: a foreign key would be
      * cascade-nulled by the very App delete this column exists to notice, and
@@ -1071,6 +1072,19 @@ export const datastores = pgTable(
      * asking "why can't my App reach its database" needs to see.
      */
     permittedNamespace: text('permitted_namespace'),
+    /**
+     * When the far side was last told, which is what makes the loop converge.
+     *
+     * The column above is a memory, and a memory alone cannot notice the
+     * policy being deleted out from under it — a `kubectl delete netpol`
+     * during triage, a namespace recreated. Desired and remembered still
+     * agree, so no later pass writes the exception again and the App is denied
+     * its own store permanently and silently; Flux owns the floor, not the
+     * exception, so nothing else puts it back. This is the second half of the
+     * comparison: past a slow re-assert cadence the loop says it again even
+     * when nothing changed.
+     */
+    permittedAt: timestamp('permitted_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true })
       .notNull()
       .defaultNow(),

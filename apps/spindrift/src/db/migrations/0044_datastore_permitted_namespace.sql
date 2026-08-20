@@ -15,4 +15,18 @@
 -- every existing row, which is honest — nothing has been told anything yet, so
 -- the first pass after this ships writes the exception each attached Datastore
 -- has always needed.
-ALTER TABLE "datastores" ADD COLUMN "permitted_namespace" text;
+ALTER TABLE "datastores" ADD COLUMN "permitted_namespace" text;--> statement-breakpoint
+-- When it was last told, which is what makes the loop converge rather than
+-- merely remember. The column above is core's record of what it said, not an
+-- observation of the cluster: if the policy goes away out of band — a
+-- `kubectl delete netpol` during triage, a namespace recreated — the row and
+-- the desired namespace still agree, so nothing ever writes it again and the
+-- App is denied its own store permanently. Flux owns the floor, not the
+-- exception, so nothing else recreates it either.
+--
+-- A timestamp rather than reading the object back every pass: the read would
+-- be a round trip per Datastore every fifteen seconds to catch something that
+-- happens approximately never, and the re-assert it would trigger is one
+-- idempotent apply of what is already there. Null on every existing row, which
+-- is the same "nothing has been told anything yet" the column above starts at.
+ALTER TABLE "datastores" ADD COLUMN "permitted_at" timestamp with time zone;

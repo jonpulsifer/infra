@@ -36,6 +36,11 @@ export interface FakeDatastoreAdapterOptions {
   describeThrows?: string;
   /** When set, `permit` throws — the Target that would not take the policy. */
   permitThrows?: string;
+  /**
+   * When set, `permit` answers `false` — the backend with nothing to write for
+   * this ref, which is a no-op and not a failure.
+   */
+  permitNoops?: boolean;
 }
 
 export class FakeDatastoreAdapter implements DatastoreAdapter {
@@ -128,11 +133,12 @@ export class FakeDatastoreAdapter implements DatastoreAdapter {
     _target: DeployTarget,
     ref: DatastoreRef,
     namespaces: readonly string[],
-  ): Promise<void> {
+  ): Promise<boolean> {
     this.permits.push({ ref, namespaces: [...namespaces] });
     if (this.options.permitThrows !== undefined) {
       throw new Error(this.options.permitThrows);
     }
+    return !this.options.permitNoops;
   }
 
   async destroy(_target: DeployTarget, ref: DatastoreRef): Promise<void> {

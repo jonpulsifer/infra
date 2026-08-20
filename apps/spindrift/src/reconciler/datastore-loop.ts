@@ -47,7 +47,19 @@ import {
   deployTargetOf,
   targetLabel,
 } from '../domain/target.ts';
-import { reconcilerLoopDuration } from '../telemetry/index.ts';
+import { logWarn, reconcilerLoopDuration } from '../telemetry/index.ts';
+
+/**
+ * How long a written exception is trusted before it is simply said again.
+ *
+ * An hour, which is two orders of magnitude slower than the pass itself: the
+ * thing it recovers from — the policy deleted out of band — is rare and its
+ * blast radius is one App unable to reach one database, while the cost is one
+ * idempotent apply per attached Datastore per hour. Reading the object back
+ * every pass would cost a round trip per Datastore every fifteen seconds for
+ * the same answer.
+ */
+const PERMIT_REASSERT_MS = 60 * 60 * 1000;
 
 /** What the loop needs. A structural subset of `ReconcilerContext`. */
 export interface DatastoreLoopContext {
@@ -62,7 +74,7 @@ export interface DatastoreReport {
   readonly phase: DeployPhase;
   /** Whether this pass was the one that learned where the credential lives. */
   readonly connected: boolean;
-  /** Whether this pass was the one that moved the network exception. */
+  /** Whether this pass was the one that stated the network exception. */
   readonly permitted: boolean;
 }
 
@@ -96,6 +108,7 @@ export async function runDatastorePass(
       phase: datastores.phase,
       connectionRef: datastores.connectionRef,
       permittedNamespace: datastores.permittedNamespace,
+      permittedAt: datastores.permittedAt,
       appName: apps.name,
       target: targets,
       vessel: vessels,
@@ -152,26 +165,61 @@ export async function runDatastorePass(
       row.appName === null || connection.adapter !== 'kubernetes'
         ? null
         : appNamespaceFor(connection, row.appName);
+    const now = context.clock.now();
+    // Saying it again, on a cadence, because `permitted_namespace` is core's
+    // memory of what it said and not an observation of the cluster. Lose the
+    // policy out of band — `kubectl delete netpol` during triage, a namespace
+    // recreated — and memory still agrees with desire, so without this the
+    // adapter is never called again and the App is denied its own store
+    // permanently and silently. Nothing else puts it back: Flux owns the deny
+    // floor, not the exception.
+    //
+    // Only for a permission that has to *exist*: with nothing desired the
+    // correct cluster state is no object at all, which is what the floor
+    // already enforces, so a lost one there is fail-closed and not worth a
+    // round trip an hour to re-delete.
+    const stale =
+      desired !== null &&
+      (row.permittedAt === null ||
+        now.getTime() - row.permittedAt.getTime() >= PERMIT_REASSERT_MS);
     let permitted = false;
-    if (adapter.permit !== undefined && desired !== row.permittedNamespace) {
+    if (
+      adapter.permit !== undefined &&
+      (desired !== row.permittedNamespace || stale)
+    ) {
       try {
-        await adapter.permit(
+        // `false` is the adapter saying it wrote nothing — a ref it has no
+        // boundary to draw around — and recording the namespace then would
+        // claim a cluster fact nobody established, which the comparison above
+        // would believe forever.
+        permitted = await adapter.permit(
           target,
           row.ref,
           desired === null ? [] : [desired],
         );
-      } catch {
-        // The same answer the poll below gives an unreachable Target: not a
-        // verdict, and the next pass asks again. The column is left saying
-        // what the cluster was last actually told, which is what makes the
-        // retry happen at all.
-        continue;
+      } catch (error) {
+        // Loud, and not a `continue`: skipping the poll below would leave a
+        // Datastore stuck in PROVISIONING with no phase, no detail and no
+        // reason anywhere, which is the shape of an outage nobody can read.
+        // The write itself is simply not recorded, so the disagreement stays
+        // and the next pass tries again.
+        logWarn('a Datastore network exception was refused', {
+          'spindrift.datastore.id': row.id,
+          'spindrift.datastore.namespace': desired ?? '(none)',
+          'spindrift.target': targetLabel({
+            vessel: row.vessel.name,
+            adapter: row.target.adapter,
+          }),
+          'spindrift.error':
+            error instanceof Error ? error.message : String(error),
+        });
       }
-      await context.db
-        .update(datastores)
-        .set({ permittedNamespace: desired })
-        .where(eq(datastores.id, row.id));
-      permitted = true;
+      if (permitted) {
+        await context.db
+          .update(datastores)
+          .set({ permittedNamespace: desired, permittedAt: now })
+          .where(eq(datastores.id, row.id));
+      }
     }
 
     // Settled: LIVE *and* holding a connection reference has nothing left for
@@ -198,7 +246,6 @@ export async function runDatastorePass(
       continue;
     }
 
-    const now = context.clock.now();
     if (state === null) {
       await context.db
         .update(datastores)

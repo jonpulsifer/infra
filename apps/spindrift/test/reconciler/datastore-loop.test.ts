@@ -389,15 +389,16 @@ describe('the network exception', () => {
     expect((await reread(row.id)).permittedNamespace).toBeNull();
   });
 
-  test('a Target that will not take the policy is retried, not recorded', async () => {
+  test('a Target that will not take the policy is retried, and still polled', async () => {
     const app = await anApp('storefront');
-    const row = await aProvisionedRow({
-      appId: app.id,
-      phase: 'LIVE',
-      connectionRef: 'secret://spindrift-datastores/orders-app',
-    });
+    const row = await aProvisionedRow({ appId: app.id });
     const backend = new FakeDatastoreAdapter({
-      permitThrows: 'dial tcp 10.0.0.1:6443: i/o timeout',
+      permitThrows: 'networkpolicies is forbidden: RBAC: no policy matched',
+    });
+    backend.script(row.ref!, {
+      ref: row.ref!,
+      phase: 'LIVE',
+      connection: null,
     });
 
     const reports = await runDatastorePass({
@@ -410,7 +411,70 @@ describe('the network exception', () => {
     // did not land leaves the disagreement in place and the next pass asks
     // again. Recording it optimistically would close the hole in the database
     // and leave it open in the cluster.
-    expect(reports).toEqual([]);
     expect((await reread(row.id)).permittedNamespace).toBeNull();
+    // But the poll is not the policy's hostage. A Target whose kustomization
+    // has not caught up refuses the write on every pass, and coupling the two
+    // would leave the Datastore in PENDING forever with nothing said anywhere
+    // about why — the database that never comes up, cause invisible.
+    expect(backend.observed).toEqual([row.ref!]);
+    expect(reports[0]).toMatchObject({ phase: 'LIVE', permitted: false });
+    expect((await reread(row.id)).phase).toBe('LIVE');
+  });
+
+  test('a written exception is said again once it is old enough', async () => {
+    const app = await anApp('storefront');
+    const row = await aProvisionedRow({
+      appId: app.id,
+      phase: 'LIVE',
+      connectionRef: 'secret://spindrift-datastores/orders-app',
+    });
+    const backend = new FakeDatastoreAdapter();
+    const db = database().db;
+    await runDatastorePass({ db, adapters: adaptersFor(backend), clock });
+
+    // An hour later, with the row unchanged. The policy is not core's to
+    // remember: `kubectl delete netpol` during triage takes it away and the
+    // row still agrees with itself, so a loop that only writes on disagreement
+    // never writes it again and the App is denied its own store forever.
+    const later: Clock = {
+      now: () => new Date('2024-06-01T02:00:00.000Z'),
+    };
+    await runDatastorePass({
+      db,
+      adapters: adaptersFor(backend),
+      clock: later,
+    });
+
+    expect(backend.permits).toEqual([
+      { ref: row.ref!, namespaces: ['app-storefront'] },
+      { ref: row.ref!, namespaces: ['app-storefront'] },
+    ]);
+    expect((await reread(row.id)).permittedAt).toEqual(later.now());
+  });
+
+  test('a backend with nothing to write records nothing', async () => {
+    const app = await anApp('storefront');
+    const row = await aProvisionedRow({
+      appId: app.id,
+      phase: 'LIVE',
+      connectionRef: 'secret://spindrift-datastores/orders-app',
+    });
+    // The legacy ref: the adapter's guard returns before it touches the API,
+    // because there is no deny floor in `spindrift-apps` for an exception to
+    // sit on.
+    const backend = new FakeDatastoreAdapter({ permitNoops: true });
+
+    const reports = await runDatastorePass({
+      db: database().db,
+      adapters: adaptersFor(backend),
+      clock,
+    });
+
+    // Recording it would have the column claim a cluster fact nobody
+    // established — and the comparison that guards the next pass would believe
+    // it forever.
+    expect((await reread(row.id)).permittedNamespace).toBeNull();
+    expect((await reread(row.id)).permittedAt).toBeNull();
+    expect(reports).toEqual([]);
   });
 });

@@ -273,6 +273,14 @@ export class KubernetesDatastoreAdapter implements DatastoreAdapter {
     // Deleted here rather than given an `ownerReference`, which would need the
     // CR's UID read back before every write for a policy that denies rather
     // than admits when it is left behind.
+    //
+    // Guarded exactly as `permit` is, and for a harder reason than symmetry: a
+    // Datastore placed before `spindrift-datastores` existed has no policy —
+    // `permit` never wrote one — and the legacy Role in `spindrift-apps`
+    // deliberately grants no `networkpolicies`. Deleting unconditionally would
+    // take the CR and then be refused `403`, which `delete` does not swallow,
+    // and the row could no longer be destroyed through the product at all.
+    if (parsed.namespace !== datastoreNamespaceFor(connection)) return;
     await this.api(connection).delete({
       ...NETWORK_POLICY,
       namespace: parsed.namespace,
@@ -302,31 +310,50 @@ export class KubernetesDatastoreAdapter implements DatastoreAdapter {
    * add a second per-engine table that must stay in step with the first, to
    * refuse traffic no pod would answer anyway.
    *
+   * **The sibling grant is here and not on the floor**, because on the floor
+   * it can only be `podSelector: {}` — every pod in the namespace, which is
+   * one App's Valkey reaching another App's, authenticating nobody, inside the
+   * partition this whole story exists to draw. Written per Datastore it is the
+   * same label the policy selects on, so replication and the cluster bus reach
+   * as far as one Datastore's pods and no further.
+   *
    * A Datastore whose ref names a namespace this Target does not provision
    * into is one placed before `spindrift-datastores` existed. Nothing is
-   * written for it: there is no floor in `spindrift-apps` for an exception to
-   * sit on, and the identity's Role there is read-and-remove only by design.
+   * written for it and it answers `false`: there is no floor in
+   * `spindrift-apps` for an exception to sit on, and the identity's Role there
+   * is read-and-remove only by design.
    */
   async permit(
     target: DeployTarget,
     ref: DatastoreRef,
     namespaces: readonly string[],
-  ): Promise<void> {
+  ): Promise<boolean> {
     const connection = connectionOf(target);
     const parsed = parseRef(ref);
-    if (connection === null || parsed === null) return;
-    if (parsed.namespace !== datastoreNamespaceFor(connection)) return;
+    if (connection === null || parsed === null) return false;
+    if (parsed.namespace !== datastoreNamespaceFor(connection)) return false;
+
+    // The datastore's own pods, which is both what the policy selects and one
+    // of the things it admits.
+    const ownPods = {
+      matchLabels: { [ENGINE_KINDS[parsed.engine].podLabel]: parsed.name },
+    };
 
     const api = this.api(connection);
     if (namespaces.length === 0) {
       // Detached: the object goes away rather than being applied with an empty
       // `from`, which reads identically to a policy somebody truncated.
+      //
+      // ponytail: this takes the sibling grant away with it, so a *detached*
+      // multi-pod datastore loses replication. Every Datastore provisioned
+      // today is a single instance; the day one is not, apply the policy with
+      // the sibling rule alone instead of deleting it.
       await api.delete({
         ...NETWORK_POLICY,
         namespace: parsed.namespace,
         name: policyName(parsed.name),
       });
-      return;
+      return true;
     }
 
     await api.apply(
@@ -342,25 +369,33 @@ export class KubernetesDatastoreAdapter implements DatastoreAdapter {
           },
         },
         spec: {
-          podSelector: {
-            matchLabels: {
-              [ENGINE_KINDS[parsed.engine].podLabel]: parsed.name,
-            },
-          },
+          podSelector: ownPods,
           policyTypes: ['Ingress'],
           ingress: [
             {
-              from: namespaces.map((namespace) => ({
-                namespaceSelector: {
-                  matchLabels: { 'kubernetes.io/metadata.name': namespace },
-                },
-              })),
+              from: [
+                // This datastore's own pods, and only its own: a bare
+                // `podSelector: {}` here — or on the floor beside it — admits
+                // every pod in the namespace, which is App A's Valkey reaching
+                // App B's, authenticating nobody, inside the boundary this
+                // object exists to draw. Same label as the selector above, so
+                // the grant is exactly "the pods of this Datastore": what
+                // CloudNativePG's streaming replication and the Valkey cluster
+                // bus need, and nothing wider.
+                { podSelector: ownPods },
+                ...namespaces.map((namespace) => ({
+                  namespaceSelector: {
+                    matchLabels: { 'kubernetes.io/metadata.name': namespace },
+                  },
+                })),
+              ],
             },
           ],
         },
       },
       NETWORK_POLICY.plural,
     );
+    return true;
   }
 
   /**

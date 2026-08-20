@@ -53,11 +53,14 @@ spec:
 # endpoint as well as Postgres itself, and whether the Valkey operator dials
 # 6379 at all is a detail of a version nobody here should have to track.
 #
-# `podSelector: {}` in the `from` list is the sibling rule, and it is load
-# bearing the moment a Datastore has more than one pod: CloudNativePG's
-# streaming replication and the Valkey cluster bus are pod-to-pod inside this
-# namespace, and every Datastore provisioned today is a single instance only
-# because nothing has asked for a second yet.
+# **The sibling rule is not here, and must not be added here.** A Datastore's
+# pods do talk to each other — CloudNativePG's streaming replication and the
+# Valkey cluster bus are pod-to-pod inside this namespace — but the only way to
+# say that in a namespace-wide document is `podSelector: {}`, which admits
+# *every* pod in the namespace and so hands App A's Valkey a route into App B's,
+# authenticating nobody, inside the partition this whole file exists to draw.
+# The reconciler writes it per Datastore instead, selecting that Datastore's own
+# pods by their operator label.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -72,9 +75,9 @@ spec:
     - Ingress
   ingress:
     - from:
-        # This Datastore's own siblings, and the two operators that reconcile
-        # them.
-        - podSelector: {}
+        # The two operators that reconcile these Datastores, and nothing else
+        # in-cluster: a pod of this namespace reaching another Datastore is
+        # exactly what the per-Datastore exception decides.
         - namespaceSelector:
             matchLabels:
               kubernetes.io/metadata.name: cloudnative-pg

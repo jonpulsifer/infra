@@ -167,9 +167,17 @@ export interface DatastoreAdapter {
    * a caller that may never run.
    *
    * **Idempotent, and called on a schedule.** The datastore loop calls this
-   * when what core knows disagrees with what it last said, and calls it again
-   * after a failure, so writing the same permission twice must be the same as
+   * when what core knows disagrees with what it last said, calls it again
+   * after a failure, and calls it again on a slow cadence to re-assert what it
+   * already said — so writing the same permission twice must be the same as
    * writing it once.
+   *
+   * **`false` means nothing was established**, which is not the same as a
+   * failure: a backend can hold a ref it has no boundary to write around — one
+   * placed before this Target had a datastore namespace, say — and the honest
+   * answer is that the permitted set is still whatever it was. The caller
+   * records what it was told only when this returns `true`, because the column
+   * it records into claims a fact about the far side.
    *
    * Optional, like {@link DatastoreAdapter.describe}, and for a sharper
    * reason: a backend whose reachability is not an object — a cloud database
@@ -181,7 +189,7 @@ export interface DatastoreAdapter {
     target: DeployTarget,
     ref: DatastoreRef,
     namespaces: readonly string[],
-  ): Promise<void>;
+  ): Promise<boolean>;
 
   /**
    * The backend's own object, verbatim, for a reader — or `null` where there is
