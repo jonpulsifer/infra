@@ -29,5 +29,8 @@ resource "google_developer_connect_connection" "github" {
     github_app = "DEVELOPER_CONNECT"
   }
 
-  depends_on = [google_project_service.service]
+  # Creating the connection makes the service agent create the token secret,
+  # so the secretmanager.admin grant must exist first — without this edge the
+  # two race and the API returns SECRET_CREATE_PERMISSION_MISSING.
+  depends_on = [google_project_iam_member.developer_connect_secret_admin]
 }
