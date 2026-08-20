@@ -1,6 +1,6 @@
 # terraform/pki — FML PKI & cluster OIDC issuers
 
-Issues the per-cluster **FML K8s CAs** (pathLen:0) and **ServiceAccount token
+Issues the per-cluster **FML K8s CAs** and **ServiceAccount token
 signer** certs off the FML Intermediate CA (private key read from 1Password at
 plan time). Each cluster's OIDC discovery documents live in `oidc/<cluster>/`
 and are served at **https://oidc.lolwtf.ca/<cluster>** via Cloudflare Pages
@@ -22,12 +22,17 @@ The chain is Root → Intermediate → FML K8s `<cluster>` CA → leaf. Two CAs 
 the root and one follows the intermediate, so `pathLenConstraint` must be at
 least 2 and 1 respectively.
 
-The anchors in 1Password carry **pathLen:1 and pathLen:0**, one lower than the
-chain they sign. No client can build a full path through them — OpenSSL reports
-`path length constraint exceeded`. Go's `crypto/x509` treats every certificate
-in a trust store as an anchor and stops there, so it never walks past the
-published cluster CA and never sees the contradiction; kubectl, Flux and
-Prometheus are unaffected. OpenSSL-based clients are not.
+The anchors in 1Password carry those values. The copies under `certs/` are the
+previous ones, which carried **pathLen:1 and pathLen:0** — one lower than the
+chain they sign — so `mise run pki:verify` fails until `post-rotate.sh`
+republishes `certs/` from the applied state.
+
+An anchor holding less than the chain requires forbids the chain it signs: no
+client can build a full path through it, and OpenSSL reports `path length
+constraint exceeded`. Go's `crypto/x509` treats every certificate in a trust
+store as an anchor and stops there, so it never walks past the published cluster
+CA and never sees the contradiction; kubectl, Flux and Prometheus are
+unaffected. OpenSSL-based clients are not.
 
 `scripts/pki/reissue-trust-anchors.sh` mints replacements that keep both keys,
 both subjects and both subject key identifiers, so the new certificates are
@@ -48,11 +53,13 @@ security. Rotation is exercised on the cluster CAs beneath them, which stay
 deliberately short-lived. `--root-days` and `--intermediate-days` bound an
 anchor instead, if that trade is ever worth making.
 
-`max_path_length = 0` on the per-cluster CAs does not take effect: opentofu/tls
-drops the attribute when it is zero, so the issued certificates carry no
-constraint. Setting 1 emits `pathLen:1`, which places the fault in the zero
-value rather than the fork. Once the intermediate carries pathLen:1, it bounds
-the depth from above for any full-path validator.
+`max_path_length = 0` on the per-cluster CAs does not take effect. The provider
+sets the template field, but `x509.CreateCertificate` omits `pathLenConstraint`
+unless `MaxPathLenZero` is also set, which the provider has no way to express,
+so the issued certificates carry no constraint. Setting 1 emits `pathLen:1`,
+which places the fault in the zero value rather than the fork. The
+intermediate's pathLen:1 bounds the depth from above for any full-path
+validator.
 
 ## Two bundles, and why they are not one
 
