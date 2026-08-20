@@ -5,7 +5,8 @@
 # signers, this script:
 #   1. writes the public cert material to terraform/pki/certs/ (committed);
 #      replaced CA and signer certs are kept as *-prev.pem for trust overlap,
-#      and each cluster CA gets a current-plus-previous *-ca-bundle.pem,
+#      each cluster CA gets a current-plus-previous *-ca-bundle.pem, and a
+#      *-ca-chain.pem carrying the cluster CA up to the self-signed root,
 #   2. sops-encrypts each cluster CA and signer private key into the matching
 #      control-plane host's nix/secrets/<host>.sops.yaml — plaintext never
 #      touches disk,
@@ -98,6 +99,7 @@ for cluster in "$@"; do
   ca_pem="$certs_dir/$cluster-ca.pem"
   ca_prev_pem="$certs_dir/$cluster-ca-prev.pem"
   ca_bundle_pem="$certs_dir/$cluster-ca-bundle.pem"
+  ca_chain_pem="$certs_dir/$cluster-ca-chain.pem"
   signer_pem="$certs_dir/$cluster-sa-signer.pem"
   prev_pem="$certs_dir/$cluster-sa-signer-prev.pem"
 
@@ -123,6 +125,17 @@ for cluster in "$@"; do
     printf '\n' >>"$ca_bundle_pem"
     cat "$ca_prev_pem" >>"$ca_bundle_pem"
   fi
+
+  # The chain file is what kube-controller-manager publishes to every pod as
+  # ca.crt via --root-ca-file. The cluster CA is not self-signed, so on its own
+  # an OpenSSL client cannot build a path out of it and fails with "unable to
+  # get issuer certificate" — which is how Vector lost the API server.
+  #
+  # Deliberately a separate file from ca-bundle.pem. That one is the rotation
+  # overlap set and feeds services.kubernetes.caFile, which also backs
+  # clientCaFile and kubeletClientCaFile: putting the FML anchors there would
+  # let anything issued under the FML Root authenticate to the API server.
+  cat "$ca_pem" "$certs_dir/fml-intermediate.pem" "$certs_dir/fml-root.pem" >"$ca_chain_pem"
 
   # Preserve a replaced signer cert for JWKS overlap during rotation.
   new_signer="$(jq -er ".sa_signer_certs.value.\"$cluster\"" <<<"$outputs")"

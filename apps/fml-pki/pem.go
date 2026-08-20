@@ -58,6 +58,36 @@ func parseCert(raw []byte, path string) (*x509.Certificate, error) {
 	return found, nil
 }
 
+// readCerts loads every certificate in a file, in order. Bundles are ordered
+// leaf-most first by convention, and the order is load-bearing for anything
+// that walks the file as a chain.
+func readCerts(path string) ([]*x509.Certificate, error) {
+	raw, err := readBytes(path)
+	if err != nil {
+		return nil, err
+	}
+	var certs []*x509.Certificate
+	for rest := raw; len(rest) > 0; {
+		var block *pem.Block
+		block, rest = pem.Decode(rest)
+		if block == nil {
+			break
+		}
+		if block.Type != "CERTIFICATE" {
+			continue
+		}
+		cert, err := x509.ParseCertificate(block.Bytes)
+		if err != nil {
+			return nil, fmt.Errorf("%s: %w", path, err)
+		}
+		certs = append(certs, cert)
+	}
+	if len(certs) == 0 {
+		return nil, fmt.Errorf("%s: no certificate", path)
+	}
+	return certs, nil
+}
+
 // readPrivateKey accepts PKCS#8, PKCS#1 and SEC1, which covers the Ed25519
 // anchors and the RSA cluster material without asking the caller which is which.
 func readPrivateKey(path string) (crypto.Signer, error) {
