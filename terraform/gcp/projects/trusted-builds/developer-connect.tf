@@ -34,3 +34,10 @@ resource "google_developer_connect_connection" "github" {
   # two race and the API returns SECRET_CREATE_PERMISSION_MISSING.
   depends_on = [google_project_iam_member.developer_connect_secret_admin]
 }
+
+resource "google_developer_connect_git_repository_link" "infra" {
+  location               = local.region
+  parent_connection      = google_developer_connect_connection.github.connection_id
+  git_repository_link_id = "jonpulsifer-infra"
+  clone_uri              = "https://github.com/jonpulsifer/infra.git"
+}
