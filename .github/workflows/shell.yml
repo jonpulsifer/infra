@@ -35,7 +35,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - name: Install shell tooling
         run: sudo apt-get update -qq && sudo apt-get install -y -qq shellcheck
-      - uses: jdx/mise-action@c37c93293d6b742fc901e1406b8f764f6fb19dac # v3
+      - uses: jdx/mise-action@5228313ee0372e111a38da051671ca30fc5a96db # v3
         with:
           # Only shfmt is needed beyond the apt shellcheck above; installing the
           # whole [tools] table here would pull kubectl, tofu and gcloud for a
