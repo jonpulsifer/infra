@@ -18,12 +18,6 @@
 # and the list of platform components that legitimately reach in, which is an
 # installation fact rather than one core can discover.
 #
-# **This lands in two steps, and the first one isolates nothing.** The
-# `allow-platform` document below carries a transitional rule admitting every
-# App namespace, so that applying this file changes no reach at all. The
-# isolation arrives when that rule is deleted, once core is live and has
-# written one exception per Datastore. The rule documents its own removal.
-#
 # **Never add `policyTypes: Egress` to anything in this namespace.** Every
 # document here is ingress-only on purpose: CloudNativePG's instance manager
 # dials the API server, both operators' pods resolve DNS, and an egress policy
@@ -84,27 +78,6 @@ spec:
         - namespaceSelector:
             matchLabels:
               kubernetes.io/metadata.name: valkey-operator-system
-    # **Transitional, and deliberately temporary.**
-    #
-    # Every App namespace, which is every namespace this installation's core
-    # creates and labels `app.kubernetes.io/managed-by: spindrift`. It is here
-    # because the two halves of this design cannot land at the same instant: a
-    # NetworkPolicy selecting a pod makes that pod default-deny, so the moment
-    # Flux applies the documents above, every Datastore is closed to every App
-    # — and the per-Datastore exception that reopens it for the *attached* App
-    # is written by core, which does not arrive until a later commit bumps the
-    # pinned image digest. Without this rule, that gap is a live outage for
-    # whatever is attached today.
-    #
-    # With it, applying this file reproduces exactly the reach Datastores
-    # already had, and the isolation this file exists for arrives when the rule
-    # is deleted — after core is live and has written one exception per
-    # Datastore. Deleting it is the second half of the change, not a cleanup
-    # someone may skip: while it is here, any App can still reach any Datastore.
-    - from:
-        - namespaceSelector:
-            matchLabels:
-              app.kubernetes.io/managed-by: spindrift
     # Scraping, which is the one caller that has a port worth naming: 9187 is
     # CloudNativePG's exporter on each instance. Nothing scrapes this namespace
     # today — there is no PodMonitor and the Valkey exporter is off in the
