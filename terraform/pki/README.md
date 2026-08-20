@@ -16,6 +16,30 @@ Auth: the `onepassword` provider needs `OP_SERVICE_ACCOUNT_TOKEN` (Atlantis) or
 a locally signed-in `op` CLI (`OP_ACCOUNT`). The service account must be able to
 read the FML CA items in the `homelab` vault (UUIDs pinned in `pki.tf`).
 
+## Trust anchor constraints
+
+The chain is Root → Intermediate → FML K8s `<cluster>` CA → leaf. Two CAs follow
+the root and one follows the intermediate, so `pathLenConstraint` must be at
+least 2 and 1 respectively.
+
+The anchors in 1Password carry **pathLen:1 and pathLen:0**, one lower than the
+chain they sign. No client can build a full path through them — OpenSSL reports
+`path length constraint exceeded`. Go's `crypto/x509` treats every certificate
+in a trust store as an anchor and stops there, so it never walks past the
+published cluster CA and never sees the contradiction; kubectl, Flux and
+Prometheus are unaffected. OpenSSL-based clients are not.
+
+`scripts/pki/reissue-trust-anchors.sh` mints replacements that keep both keys
+and both subjects, so the new certificates are drop-in. It needs the offline
+root key. `scripts/pki/verify-chain.py` checks linkage, `CA:TRUE`, pathLen depth
+and expiry ordering across everything under `certs/`, and needs no secrets.
+
+`max_path_length = 0` on the per-cluster CAs does not take effect: opentofu/tls
+drops the attribute when it is zero, so the issued certificates carry no
+constraint. Setting 1 emits `pathLen:1`, which places the fault in the zero
+value rather than the fork. Once the intermediate carries pathLen:1, it bounds
+the depth from above for any full-path validator.
+
 ## Export and rotation
 
 Cluster CAs expire in July 2028. Their shorter lifetime is intentional: the
