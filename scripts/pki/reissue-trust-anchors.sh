@@ -29,8 +29,12 @@ op_root="ujhf4f5cwerdwtpn27fn52kvwq"
 
 root_key=""
 intermediate_key=""
-root_days=5475         # ~15 years
-intermediate_days=3652 # ~10 years, several cluster-CA generations
+# 99991231235959Z is RFC 5280's "no well-defined expiration date". These are
+# trust anchors distributed out of band; an expiry on them buys a fleet-wide
+# outage on a date nobody is watching, not security. The cluster CAs beneath
+# them stay short-lived on purpose, and that is where rotation is exercised.
+root_validity=(-not_after 99991231235959Z)
+intermediate_validity=(-not_after 99991231235959Z)
 
 usage() {
   cat >&2 <<'USAGE'
@@ -39,8 +43,8 @@ usage: reissue-trust-anchors.sh --root-key <path> [options]
   --root-key <path>          PEM private key for the FML Root CA (offline; required)
   --intermediate-key <path>  PEM private key for the Intermediate CA
                              (default: read from 1Password)
-  --root-days <n>            Root validity in days (default 5475, ~15y)
-  --intermediate-days <n>    Intermediate validity in days (default 3652, ~10y)
+  --root-days <n>            Bound the root instead of never expiring
+  --intermediate-days <n>    Bound the intermediate instead of never expiring
 
 Writes new certificates to terraform/pki/certs/staging/ and verifies the chain.
 USAGE
@@ -58,11 +62,11 @@ while (($#)); do
       shift 2
       ;;
     --root-days)
-      root_days="${2:?}"
+      root_validity=(-days "${2:?}")
       shift 2
       ;;
     --intermediate-days)
-      intermediate_days="${2:?}"
+      intermediate_validity=(-days "${2:?}")
       shift 2
       ;;
     -h | --help) usage ;;
@@ -142,7 +146,7 @@ echo "==> reissuing the root, self-signed, pathlen:2" >&2
 openssl req -x509 -new \
   -key "$root_key" \
   "${digest[@]}" \
-  -days "$root_days" \
+  "${root_validity[@]}" \
   -subj "/$root_subject" \
   -addext "basicConstraints=critical,CA:TRUE,pathlen:2" \
   -addext "keyUsage=critical,keyCertSign,cRLSign,digitalSignature" \
@@ -160,7 +164,7 @@ openssl x509 -req \
   -CA "$work/fml-root.pem" \
   -CAkey "$root_key" \
   "${digest[@]}" \
-  -days "$intermediate_days" \
+  "${intermediate_validity[@]}" \
   -extfile "$work/intermediate.ext" \
   -out "$work/fml-intermediate.pem"
 

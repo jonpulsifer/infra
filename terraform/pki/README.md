@@ -34,6 +34,13 @@ and both subjects, so the new certificates are drop-in. It needs the offline
 root key. `scripts/pki/verify-chain.py` checks linkage, `CA:TRUE`, pathLen depth
 and expiry ordering across everything under `certs/`, and needs no secrets.
 
+Both anchors carry `99991231235959Z`, RFC 5280's "no well-defined expiration
+date". They are distributed out of band and pinned by every node, so an expiry
+on them buys a fleet-wide outage on a date nobody is watching rather than any
+security. Rotation is exercised on the cluster CAs beneath them, which stay
+deliberately short-lived. `--root-days` and `--intermediate-days` bound an
+anchor instead, if that trade is ever worth making.
+
 `max_path_length = 0` on the per-cluster CAs does not take effect: opentofu/tls
 drops the attribute when it is zero, so the issued certificates carry no
 constraint. Setting 1 emits `pathLen:1`, which places the fault in the zero
