@@ -65,7 +65,14 @@
       # here showed twice in the bench. Half the cores caps the contention;
       # the bench put the Build delta at seconds, not minutes.
       vcpus = 2;
-      memory = "3072M";
+      # 6144M, not 3072M: measured on this host while the suite ran, the guest
+      # faulted in its whole 3072M before the Test step even started and sat
+      # there, and `bun test` died of it -- a moving segfault site, which is
+      # starvation rather than a logic bug. The figure is a ceiling and not a
+      # reservation: cloud-hypervisor is handed `--memory size=,shared=on` and
+      # nothing else, so an idle warm slot costs what it touched at boot
+      # (measured here: 484 MiB), not what it declares.
+      memory = "6144M";
       workspace = "6G";
       persist = true;
       warm = 1;
@@ -83,7 +90,21 @@
     };
   };
 
-  # Class ceiling is one 3072M skiff; the bound exists so a runaway pool can
+  # Class ceiling is one 6144M skiff; the bound exists so a runaway pool can
   # never make the host OOM killer choose between a skiff and kubelet.
-  systemd.services.bosun.serviceConfig.MemoryMax = "4G";
+  #
+  # The headroom above the ceiling is not slack. A skiff's guest RAM is shmem
+  # -- virtiofs forces `shared=on` on every one of them -- and this host has no
+  # swap, so those pages cannot be reclaimed at all; what reclaim has to work
+  # with is the page cache for the slot's workspace image, charged to the same
+  # cgroup. At the old 4G against a 3072M class that left under a gigabyte, and
+  # the whole job ran pinned at `memory.max`: 7000 reclaim events in one pass of
+  # the suite, none of them optional. 8G against 6144M leaves reclaim something
+  # to find. It still kills rather than throttles when a job genuinely overruns,
+  # because with no swap that is the only thing a bound can do -- and a killed
+  # skiff rather than a killed kubelet is the choice this bound exists to make.
+  #
+  # Measured 2026-08-20: 15.2 GiB total, ~3.6 GiB held by kubelet, yarr,
+  # harmonia and the system, no swap and no zram.
+  systemd.services.bosun.serviceConfig.MemoryMax = "8G";
 }

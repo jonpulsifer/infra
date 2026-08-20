@@ -102,19 +102,18 @@ jobs:
   validate:
     needs: detect
     if: needs.detect.outputs.has_changes == 'true' || github.event_name == 'workflow_dispatch'
-    # A hosted runner, because the suite no longer fits `skiff-offsite`'s
-    # 3072M/2-vcpu class. Restoring the installation's conformance tests —
-    # each one standing up an isolated database — takes the Test step past
-    # what that slot can hold: it dies at ~229 s where a hosted runner
-    # finishes in 255 s, twice, with the DB-timing signature the class's own
-    # comment on `oldschool` predicts and a Bun segfault behind it.
+    # The warm pool, back on the merge path: `skiff-offsite` carries 6144M
+    # since the class was measured against this suite rather than guessed at,
+    # and the hull moved TMPDIR off the guest's tmpfs root at the same time.
+    # What that buys is what the pool exists for — ~1 s acquisition, and
+    # `actions/cache` served from the host's own disk rather than over the
+    # internet.
     #
-    # The warm pool is still the destination and the rest of its case stands
-    # (~1 s acquisition, cache served locally rather than over the internet).
-    # What it needs is a bigger class, and that is a memory bound guarding
-    # kubelet on a shared box — an operator's arithmetic, not a workflow's.
-    # The dispatch input reaches any label, which is how the A/B above ran.
-    runs-on: ${{ inputs.runner || 'ubuntu-latest' }}
+    # The escape hatch is the one `kustomize.yml` carries: this label has a
+    # single host, so if bosun there is down the job queues rather than
+    # failing, and a dispatch with `runner: ubuntu-latest` gets an answer
+    # without editing this file. It is also how the class was A/B'd.
+    runs-on: ${{ inputs.runner || 'skiff-offsite' }}
     permissions:
       contents: read
       id-token: write
