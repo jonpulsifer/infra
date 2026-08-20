@@ -1,0 +1,59 @@
+name: ghcr-cleanup
+
+# GHCR keeps every version this repo has ever pushed. `containers.yml` tags each
+# build with its full commit sha, and buildx adds an sbom/provenance attestation
+# beside it, so a single image accumulates several versions per merge and none
+# of them ever expire.
+#
+# Keeping the newest N *tagged* versions is what makes this safe against the
+# digests pinned in `clusters/`: continuous delivery bumps a manifest's pin in
+# the same push that builds the image, so a live pin is always among the most
+# recent versions of its package — an image nobody has rebuilt in months has
+# its pinned version sitting at the top of the list, not the bottom.
+on:
+  schedule:
+    # Sundays, 08:00 UTC — well clear of the weekday merge traffic that CD bumps.
+    - cron: "0 8 * * 0"
+  workflow_dispatch:
+    inputs:
+      dry-run:
+        description: "Report what would be deleted without deleting it"
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      # The package list is derived from the build map rather than restated
+      # here, so an image added to `containers.json` is cleaned without a second
+      # edit — and one removed from it stops being touched.
+      - id: packages
+        run: |
+          set -euo pipefail
+          list=$(jq -r '.build | join(",")' .github/containers.json)
+          echo "list=$list" >>"$GITHUB_OUTPUT"
+          echo "Cleaning: $list"
+      - uses: dataaxiom/ghcr-cleanup-action@d52806a0dc70b430571a37da1fde39733ffd640f # v1.2.2
+        with:
+          packages: ${{ steps.packages.outputs.list }}
+          token: ${{ secrets.GITHUB_TOKEN }}
+          # Ten builds of headroom over the one digest each manifest pins.
+          keep-n-tagged: 10
+          # `latest` follows the newest build and is never a rollback target;
+          # excluding it keeps the tag from being the thing that pins an
+          # otherwise-expired version alive.
+          exclude-tags: latest
+          # Multi-arch children and the sbom/provenance attestations buildx
+          # pushes alongside each image are untagged by construction. The action
+          # walks the manifest lists first, so only genuinely orphaned versions
+          # match.
+          delete-untagged: true
+          delete-ghost-images: true
+          delete-partial-images: true
+          dry-run: ${{ inputs.dry-run || false }}
