@@ -48,6 +48,7 @@ half for the cluster admission policy to pin.
 | [google_artifact_registry_repository_iam_binding.admins](https://registry.terraform.io/providers/hashicorp/google/latest/docs/resources/artifact_registry_repository_iam_binding) | resource |
 | [google_artifact_registry_repository_iam_member.reader_vault](https://registry.terraform.io/providers/hashicorp/google/latest/docs/resources/artifact_registry_repository_iam_member) | resource |
 | [google_developer_connect_connection.github](https://registry.terraform.io/providers/hashicorp/google/latest/docs/resources/developer_connect_connection) | resource |
+| [google_developer_connect_git_repository_link.infra](https://registry.terraform.io/providers/hashicorp/google/latest/docs/resources/developer_connect_git_repository_link) | resource |
 | [google_org_policy_policy.allow_service_accounts](https://registry.terraform.io/providers/hashicorp/google/latest/docs/resources/org_policy_policy) | resource |
 | [google_org_policy_policy.allowed_cloud_build_worker_pools](https://registry.terraform.io/providers/hashicorp/google/latest/docs/resources/org_policy_policy) | resource |
 | [google_org_policy_policy.allowed_storage_retention_policy_seconds](https://registry.terraform.io/providers/hashicorp/google/latest/docs/resources/org_policy_policy) | resource |
