@@ -1,0 +1,21 @@
+-- Ticket 129: an attempt that lost its lease could still land its verdict.
+--
+-- A claim is a leased phase, not a held lock — the transaction that marks a
+-- Deploy `APPLYING` commits immediately — so the only thing standing between
+-- two reconcilers and one workload was a timestamp compared against each pod's
+-- own clock. Every write that settled the row matched on the primary key alone,
+-- so a reclaimed attempt finishing late overwrote the verdict of the attempt
+-- that had taken its place.
+--
+-- `deploys.attempt_id` is the deploy side's `builds.dispatch_id`: minted by the
+-- claim, carried by the attempt, and required by every write that settles the
+-- row. `build_requests.claimant` is the same fence one seam further out, where
+-- a bosun host whose lease already expired could still extend, or land a result
+-- on, a request another host now holds.
+--
+-- Both nullable and backfilled null: a row nobody has claimed has no attempt,
+-- and every claim made after this lands mints one. Unindexed on purpose — each
+-- write that reads them already has the primary key in its predicate, so this
+-- is a filter on a row that is already located.
+ALTER TABLE "deploys" ADD COLUMN "attempt_id" text;--> statement-breakpoint
+ALTER TABLE "build_requests" ADD COLUMN "claimant" text;

@@ -108,6 +108,35 @@ const IN_FLIGHT: readonly DeployPhase[] = ['APPLYING', 'WAITING'];
 /** A crashed worker's phase remains durable, then becomes safely reclaimable. */
 export const DEFAULT_CLAIM_TIMEOUT_MS = 15 * 60_000;
 
+/**
+ * How often a running attempt says it is still there.
+ *
+ * The reclaim compares `updatedAt` against {@link DEFAULT_CLAIM_TIMEOUT_MS},
+ * and the adapters that take longest emit nothing but `log` events while they
+ * work — a sequential per-file upload writes no row update for its whole
+ * duration, so a healthy twenty-minute apply looked exactly like a dead pod.
+ * A timer refreshes the column the reclaim already reads, which covers the case
+ * absorbing more event types cannot: a single hung HTTP call emits nothing at
+ * all, and a `setInterval` keeps ticking through an `await` that never returns.
+ *
+ * Mirrors bosun's own `buildHeartbeatInterval` (`apps/bosun/spindrift.go`),
+ * which keeps an outbox claim's lease alive the same way.
+ */
+export const DEPLOY_HEARTBEAT_MS = 60_000;
+
+/**
+ * The longest an attempt may hold its lease alive, after which it stops asking.
+ *
+ * Twice the adapters' own convergence deadline, and the cap is the whole point:
+ * an unbounded heartbeat is exactly the hang it was meant to survive, because a
+ * call that never returns would keep refreshing the lease forever and turn a
+ * fifteen-minute self-healing stall into a permanent one. Past this the lease
+ * legitimately expires and another reconciler takes the row — which is safe now
+ * only because {@link deploys.attemptId} stops the abandoned attempt from
+ * writing anything when it finally comes back.
+ */
+export const DEPLOY_ATTEMPT_MAX_MS = 30 * 60_000;
+
 /** How often to look for claimable work, given what is in flight (§6). */
 export interface LoopIntervals {
   /** While an attempt is converging. Short, and bounded by the attempt. */
@@ -244,12 +273,22 @@ export async function claimNextDeploy(
       );
     }
 
+    // The claim mints the attempt's identity in the same statement that takes
+    // the row — the lock dies with this transaction, so this column is what is
+    // left to tell the holder from a predecessor whose lease was reclaimed
+    // under it. `builds.dispatch_id` is the same idiom on the build side.
+    const attemptId = crypto.randomUUID();
     await tx
       .update(deploys)
-      .set({ phase: 'APPLYING', updatedAt: now })
+      .set({ phase: 'APPLYING', updatedAt: now, attemptId })
       .where(eq(deploys.id, row.deploy.id));
 
-    return { ...row.deploy, phase: 'APPLYING' as const, updatedAt: now };
+    return {
+      ...row.deploy,
+      phase: 'APPLYING' as const,
+      updatedAt: now,
+      attemptId,
+    };
   });
 }
 
@@ -326,7 +365,14 @@ export function desiredStateFor(
 /** What one attempt did. */
 export interface AttemptOutcome {
   readonly deployId: number;
-  readonly phase: 'LIVE' | 'FAILED';
+  /**
+   * `LOST` is not a phase the row ever carries: it is this attempt saying the
+   * verdict it arrived at was not its to write, because the claim it started
+   * under had already been reclaimed. Reported rather than swallowed so a
+   * rollout that produces losers is visible — a loser is the fence working, not
+   * an error, which is why it settles nothing and pages nobody.
+   */
+  readonly phase: 'LIVE' | 'FAILED' | 'LOST';
   readonly url: string | null;
 }
 
@@ -343,6 +389,13 @@ export interface AttemptOutcome {
  * thrown error becomes `INTERNAL` — blamed on the platform by §6's table — rather
  * than escaping into the loop, because an attempt that ends by crashing the
  * reconciler is an attempt that stays `APPLYING` forever.
+ *
+ * **The claim is carried, not assumed.** A heartbeat keeps
+ * {@link deploys.updatedAt} moving so a long apply does not self-qualify for
+ * reclaim, and every write below is fenced on the attempt id the claim minted.
+ * The moment a heartbeat matches no row this attempt has been superseded, so it
+ * abandons the stream rather than finishing an apply somebody else is already
+ * redoing.
  */
 export async function runAttempt(
   context: DeployLoopContext,
@@ -356,6 +409,7 @@ export async function runAttempt(
     componentId: subject.component.id,
     deployId: deploy.id,
   };
+  const attemptId = deploy.attemptId;
   const desired = desiredStateFor(
     subject,
     context.manifest,
@@ -363,12 +417,45 @@ export async function runAttempt(
   );
   const targetRef = deployTargetOf(subject.target, subject.vessel);
 
+  let lost = false;
+  const heartbeatUntil = context.clock.now().getTime() + DEPLOY_ATTEMPT_MAX_MS;
+  const heartbeat = setInterval(() => {
+    // Past the cap the attempt stops asking and lets the lease expire. That is
+    // the point of the cap: a heartbeat that outlived every deadline is a hang,
+    // and refreshing it forever would make this stall permanent instead of
+    // self-healing.
+    if (context.clock.now().getTime() >= heartbeatUntil) {
+      clearInterval(heartbeat);
+      return;
+    }
+    void heartbeatAttempt(context, deploy.id, attemptId).then(
+      (held) => {
+        if (!held) lost = true;
+      },
+      // A database that refused this one write is not the same fact as a lease
+      // somebody else holds, and the next tick asks again.
+      () => {},
+    );
+  }, DEPLOY_HEARTBEAT_MS);
+
   let verdict: DeployVerdict;
   try {
     const stream = subject.adapter.apply(targetRef, desired);
     let next = await stream.next();
     while (!next.done) {
-      await absorb(context, attempt, deploy.id, next.value);
+      if (lost) {
+        // `return` rather than dropping the generator on the floor: it runs the
+        // adapter's own `finally` blocks, and the verdict handed in is the
+        // value the generator returns to nobody — this attempt has already lost
+        // the right to write one.
+        await stream.return({
+          phase: 'FAILED',
+          reason: 'INTERNAL',
+          detail: RECLAIMED_SENTENCE,
+        });
+        return abandon(context, attempt);
+      }
+      await absorb(context, attempt, deploy.id, attemptId, next.value);
       next = await stream.next();
     }
     verdict = next.value;
@@ -378,9 +465,56 @@ export async function runAttempt(
       reason: 'INTERNAL',
       detail: cause instanceof Error ? cause.message : String(cause),
     };
+  } finally {
+    clearInterval(heartbeat);
   }
 
   return settle(context, subject, desired, verdict);
+}
+
+/** What the attempt log says when a reclaim, not a platform, ended an attempt. */
+const RECLAIMED_SENTENCE =
+  'this attempt lost its claim to another reconciler and wrote nothing; ' +
+  'the attempt that holds the claim reports what happened';
+
+/**
+ * Say on the attempt log that this attempt is not the one settling the row.
+ *
+ * Said rather than swallowed: an attempt that stopped mid-apply and left no
+ * line reads, from the log, as a rollout that simply stopped — and the whole
+ * value of the fence is that the silence it prevents is a wrong verdict.
+ */
+async function abandon(
+  context: DeployLoopContext,
+  attempt: { appId: string; componentId: string; deployId: number },
+): Promise<AttemptOutcome> {
+  await recordDeployEvent(context.db, attempt, {
+    type: 'log',
+    line: RECLAIMED_SENTENCE,
+  });
+  return { deployId: attempt.deployId, phase: 'LOST', url: null };
+}
+
+/**
+ * Say the attempt is still running, and report whether it still holds the claim.
+ *
+ * Exported apart from the timer that calls it so the part with a decision in it
+ * is testable under an injected clock, while the untestable `setInterval` stays
+ * the two lines around it. `false` means the row has moved on — either its
+ * `attempt_id` is somebody else's now, or the Deploy is gone.
+ */
+export async function heartbeatAttempt(
+  context: DeployLoopContext,
+  deployId: number,
+  attemptId: string | null,
+): Promise<boolean> {
+  if (attemptId === null) return false;
+  const held = await context.db
+    .update(deploys)
+    .set({ updatedAt: context.clock.now() })
+    .where(and(eq(deploys.id, deployId), eq(deploys.attemptId, attemptId)))
+    .returning({ id: deploys.id });
+  return held.length > 0;
 }
 
 /**
@@ -413,6 +547,7 @@ async function absorb(
   context: DeployLoopContext,
   attempt: { appId: string; componentId: string; deployId: number },
   deployId: number,
+  attemptId: string | null,
   event: DeployEvent,
 ): Promise<void> {
   if (event.type === 'log') {
@@ -438,11 +573,33 @@ async function absorb(
     await context.db
       .update(deploys)
       .set({ phase: event.phase, updatedAt: context.clock.now() })
-      .where(eq(deploys.id, deployId));
+      .where(fencedOn(deployId, attemptId));
   }
 }
 
-/** Persist the terminal verdict, and the diagnosis if there is one. */
+/**
+ * The row, and only while this attempt still holds it.
+ *
+ * Every write an attempt makes to its own Deploy row goes through this. Zero
+ * rows matched **is** the refusal — the same discipline `deployApp`'s re-arm
+ * takes against a live build lease, and the same shape `dispatch.ts` already
+ * releases a claim under. A caller with no attempt id holds nothing, and the
+ * empty string it falls back to is a value no claim ever mints — so it matches
+ * no row, which is the right answer rather than an accident of SQL's `= NULL`.
+ */
+function fencedOn(deployId: number, attemptId: string | null) {
+  return and(eq(deploys.id, deployId), eq(deploys.attemptId, attemptId ?? ''));
+}
+
+/**
+ * Persist the terminal verdict, and the diagnosis if there is one.
+ *
+ * Both writes are fenced on the attempt id the claim minted ({@link fencedOn}),
+ * and matching zero rows ends the attempt in {@link abandon} instead of in a
+ * verdict. This is the write the whole fence exists for: an attempt whose lease
+ * was reclaimed mid-apply used to arrive here minutes after another reconciler
+ * had already placed the same workload, and write `LIVE` over its `FAILED`.
+ */
 async function settle(
   context: DeployLoopContext,
   subject: AttemptSubject,
@@ -451,6 +608,7 @@ async function settle(
 ): Promise<AttemptOutcome> {
   const now = context.clock.now();
   const deployId = subject.deploy.id;
+  const mine = fencedOn(deployId, subject.deploy.attemptId);
   const attempt = {
     appId: subject.app.id,
     componentId: subject.component.id,
@@ -464,7 +622,7 @@ async function settle(
     const url =
       verdict.url ?? displayUrl({ canonical: desired.hostname.canonical });
 
-    await context.db
+    const settled = await context.db
       .update(deploys)
       .set({
         phase: 'LIVE',
@@ -480,7 +638,9 @@ async function settle(
         observedDigest: desired.artifact.digest,
         updatedAt: now,
       })
-      .where(eq(deploys.id, deployId));
+      .where(mine)
+      .returning({ id: deploys.id });
+    if (settled.length === 0) return abandon(context, attempt);
 
     await recordDeployEvent(context.db, attempt, {
       type: 'status',
@@ -492,14 +652,16 @@ async function settle(
   const diagnosis = diagnosisOf(verdict);
   // §12: the platform will not keep this. Cluster events expire in about an
   // hour, so what is written here is the only copy that will exist tomorrow.
-  await context.db
+  const settled = await context.db
     .update(deploys)
     .set({
       ...failureColumns(diagnosis!),
       ...(verdict.ref === undefined ? {} : { ref: verdict.ref }),
       updatedAt: now,
     })
-    .where(eq(deploys.id, deployId));
+    .where(mine)
+    .returning({ id: deploys.id });
+  if (settled.length === 0) return abandon(context, attempt);
 
   await recordDeployEvent(context.db, attempt, {
     type: 'status',

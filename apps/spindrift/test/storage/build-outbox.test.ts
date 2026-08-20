@@ -24,7 +24,12 @@ describe('enqueue and claim', () => {
     const { id } = await store.enqueue({ class: 'skiff-a', request });
 
     const claimed = await store.claim(['skiff-a']);
-    expect(claimed).toEqual({ id, class: 'skiff-a', request });
+    expect(claimed).toEqual({
+      id,
+      class: 'skiff-a',
+      request,
+      claimant: expect.any(String),
+    });
   });
 
   test('claim filters by class', async () => {
@@ -139,6 +144,36 @@ describe('lease expiry and reclamation', () => {
     expect(await store.heartbeat(id)).toBe(false);
     expect(await store.heartbeat(crypto.randomUUID())).toBe(false);
   });
+
+  test('a host whose claim was reclaimed cannot extend the new one', async () => {
+    let clock = new Date('2026-01-01T00:00:00.000Z');
+    const store = buildOutbox(database().db, () => clock);
+    const { id } = await store.enqueue({ class: 'skiff-a', request: {} });
+    const first = await store.claim(['skiff-a']);
+
+    clock = new Date(clock.getTime() + BUILD_REQUEST_LEASE_MS + 1000);
+    await store.reclaimExpired();
+    const second = await store.claim(['skiff-a']);
+    expect(second?.claimant).not.toBe(first?.claimant);
+
+    // The first host is still running, and its heartbeat would otherwise keep
+    // the lease the second host now holds alive under it.
+    expect(await store.heartbeat(id, first!.claimant)).toBe(false);
+    expect(await store.heartbeat(id, second!.claimant)).toBe(true);
+  });
+
+  test('a heartbeat that names no claim is still served', async () => {
+    const store = buildOutbox(database().db);
+    const { id } = await store.enqueue({ class: 'skiff-a', request: {} });
+    await store.claim(['skiff-a']);
+
+    // The tolerant window: bosun reaches production on its own auto-upgrade,
+    // so a host that has not learned to send a claimant yet must keep working.
+    // An empty string is what a claim response without the field decodes to on
+    // the Go side, and it means the same thing as sending nothing.
+    expect(await store.heartbeat(id)).toBe(true);
+    expect(await store.heartbeat(id, '')).toBe(true);
+  });
 });
 
 describe('complete', () => {
@@ -169,6 +204,45 @@ describe('complete', () => {
     const store = buildOutbox(database().db);
     const result = { status: 'SUCCEEDED' as const, log: 'ok' };
     expect(await store.complete(crypto.randomUUID(), result)).toBe('missing');
+  });
+
+  test('a result for a request another host now holds conflicts', async () => {
+    let clock = new Date('2026-01-01T00:00:00.000Z');
+    const store = buildOutbox(database().db, () => clock);
+    const { id } = await store.enqueue({ class: 'skiff-a', request: {} });
+    const first = await store.claim(['skiff-a']);
+
+    clock = new Date(clock.getTime() + BUILD_REQUEST_LEASE_MS + 1000);
+    await store.reclaimExpired();
+
+    // Nobody holds it yet, so the late result still beats a rerun — that is
+    // the property the unfenced `complete` had and this keeps.
+    const second = await store.claim(['skiff-a']);
+    const late = { status: 'SUCCEEDED' as const, log: 'late' };
+    expect(await store.complete(id, late, first!.claimant)).toBe('conflict');
+    expect(await store.complete(id, late, second!.claimant)).toBe('done');
+  });
+
+  test('a result from a claim nobody has replaced still lands', async () => {
+    let clock = new Date('2026-01-01T00:00:00.000Z');
+    const store = buildOutbox(database().db, () => clock);
+    const { id } = await store.enqueue({ class: 'skiff-a', request: {} });
+    const claimed = await store.claim(['skiff-a']);
+
+    clock = new Date(clock.getTime() + BUILD_REQUEST_LEASE_MS + 1000);
+    await store.reclaimExpired();
+
+    const result = { status: 'SUCCEEDED' as const, log: 'ok' };
+    expect(await store.complete(id, result, claimed!.claimant)).toBe('done');
+  });
+
+  test('a result that names no claim is still served', async () => {
+    const store = buildOutbox(database().db);
+    const { id } = await store.enqueue({ class: 'skiff-a', request: {} });
+    await store.claim(['skiff-a']);
+
+    const result = { status: 'SUCCEEDED' as const, log: 'ok' };
+    expect(await store.complete(id, result, '')).toBe('done');
   });
 });
 

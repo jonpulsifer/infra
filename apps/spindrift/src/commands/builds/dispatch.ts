@@ -452,6 +452,49 @@ export interface RefusalSubject {
   readonly waitingOn: string | null;
   /** `builds.dispatchAttempts` as it stands, for pacing the next attempt. */
   readonly attempts: number;
+  /**
+   * The claim this refusal is being made under, when it is made after one.
+   *
+   * Almost every refusal in this file happens before the claim and has no
+   * dispatch id to carry — but one does not: an unfetchable bundle location is
+   * only discovered after the row is `RUNNING`, and closing it out is then a
+   * terminal write like any other. Present means "fence this on my claim".
+   */
+  readonly dispatchId?: string;
+}
+
+/**
+ * What an attempt says when the row it was settling is no longer its to settle.
+ *
+ * Unlike the lost claim at the *top* of a dispatch — which writes nothing,
+ * because another replica is filling that Build's log right now — this one is
+ * worth a line: this attempt ran a whole build and streamed its events onto the
+ * log, so a run that simply stopped mid-stream with no ending is a log that
+ * reads as a hang.
+ */
+const LOST_CLAIM_SENTENCE =
+  'this dispatch lost its claim to another reconciler and wrote nothing; ' +
+  'the attempt that holds the claim reports what happened';
+
+/**
+ * End an attempt whose fenced write matched no row.
+ *
+ * `failed` and not `ok`, and that is load-bearing: `runBuildPass` keys
+ * auto-deploy off `result.value.status === 'SUCCEEDED'`, so an attempt that
+ * refused to write its verdict and still returned one would ship the artifact
+ * of a build somebody else has already superseded.
+ */
+async function lostClaim<Output>(
+  context: Pick<BuildDispatchContext, 'db'>,
+  attempt: BuildAttemptRef,
+): Promise<CommandResult<Output>> {
+  await recordBuildEvent(context.db, attempt, {
+    type: 'log',
+    line: LOST_CLAIM_SENTENCE,
+    resource: 'dispatch',
+  });
+  reconcilerDispatchAttempts.add(1, { outcome: 'lost' });
+  return failed('NOT_BUILDABLE', LOST_CLAIM_SENTENCE);
 }
 
 async function refuseDispatch<Output>(
@@ -462,6 +505,28 @@ async function refuseDispatch<Output>(
   disposition: RefusalDisposition,
 ): Promise<CommandResult<Output>> {
   if (disposition.kind === 'closes') {
+    // The row first, the log second, because a refusal made under a claim can
+    // find the row already gone: writing the sentence before knowing whether
+    // this attempt still holds the row would put a verdict on somebody else's
+    // attempt log.
+    const closed = await context.db
+      .update(builds)
+      // Cleared with the same statement that ends the wait: a FAILED Build is
+      // not waiting on anything, and leaving the sentence behind would read as
+      // though it were.
+      .set({ status: 'FAILED', dispatchWaitingOn: null })
+      .where(
+        subject.dispatchId === undefined
+          ? eq(builds.id, subject.attempt.buildId)
+          : and(
+              eq(builds.id, subject.attempt.buildId),
+              eq(builds.dispatchId, subject.dispatchId),
+            ),
+      )
+      .returning({ id: builds.id });
+    if (subject.dispatchId !== undefined && closed.length === 0) {
+      return lostClaim(context, subject.attempt);
+    }
     await recordBuildEvent(context.db, subject.attempt, {
       type: 'log',
       line: sentence,
@@ -472,13 +537,6 @@ async function refuseDispatch<Output>(
       phase: 'FAILED',
       reason: disposition.reason,
     });
-    await context.db
-      .update(builds)
-      // Cleared with the same statement that ends the wait: a FAILED Build is
-      // not waiting on anything, and leaving the sentence behind would read as
-      // though it were.
-      .set({ status: 'FAILED', dispatchWaitingOn: null })
-      .where(eq(builds.id, subject.attempt.buildId));
     reconcilerDispatchAttempts.add(1, { outcome: 'closed' });
     return failed(code, sentence);
   }
@@ -1119,6 +1177,18 @@ export const dispatchBuild = async (
 
   const activeDispatchId = claimResult.dispatchId;
 
+  // Every write from here down touches a row this attempt claimed, so every one
+  // of them carries the claim. `dispatchId` is a fencing token: matching zero
+  // rows *is* the refusal, the same discipline `deployApp`'s re-arm takes
+  // against a live lease. Without it a claim reclaimed under a long build came
+  // back minutes later and wrote its verdict over the attempt that had replaced
+  // it — a red build going green, or a green one going red, with nothing in
+  // either log to say which run wrote it.
+  const mine = and(
+    eq(builds.id, build.id),
+    eq(builds.dispatchId, activeDispatchId),
+  );
+
   // The durable address becomes a fetchable one here — after every refusal and
   // after the claim, so it is the **last** thing an attempt acquires (story
   // 101). A signed URL is a bearer capability with a TTL in minutes: minting
@@ -1144,7 +1214,7 @@ export const dispatchBuild = async (
     if (!isFetchableBundleLocation(build.bundleLocation)) {
       return refuseDispatch(
         context,
-        subject,
+        { ...subject, dispatchId: activeDispatchId },
         'NOT_BUILDABLE',
         fetchable.failure.message,
         { kind: 'closes', reason: 'ARTIFACT_UNAVAILABLE' },
@@ -1177,13 +1247,7 @@ export const dispatchBuild = async (
         dispatchAttempts: attempts,
         nextDispatchAt: new Date(now.getTime() + dispatchBackoffMs(attempts)),
       })
-      .where(
-        and(
-          eq(builds.id, build.id),
-          eq(builds.status, 'RUNNING'),
-          eq(builds.dispatchId, activeDispatchId),
-        ),
-      );
+      .where(and(mine, eq(builds.status, 'RUNNING')));
     reconcilerDispatchAttempts.add(1, { outcome: 'waiting' });
     return failed('NOT_BUILDABLE', sentence);
   }
@@ -1204,10 +1268,7 @@ export const dispatchBuild = async (
       // screen can offer it *during* the run, which is the whole of its value
       // on a `LIVE_STATUS` route whose text arrives only at the end.
       if (event.type === 'runner') {
-        await context.db
-          .update(builds)
-          .set({ runUrl: event.url })
-          .where(eq(builds.id, build.id));
+        await context.db.update(builds).set({ runUrl: event.url }).where(mine);
         next = await stream.next();
         continue;
       }
@@ -1229,15 +1290,21 @@ export const dispatchBuild = async (
     const result = next.value;
 
     if (result.status === 'FAILED') {
+      // The row before the log line, everywhere below: the fenced write is what
+      // decides whether this attempt gets to have a verdict at all, and a status
+      // event written first would land on the log of the attempt that replaced
+      // it.
+      const settled = await context.db
+        .update(builds)
+        .set({ status: 'FAILED' })
+        .where(mine)
+        .returning({ id: builds.id });
+      if (settled.length === 0) return lostClaim(context, attempt);
       await recordBuildEvent(context.db, attempt, {
         type: 'status',
         phase: 'FAILED',
         reason: result.reason,
       });
-      await context.db
-        .update(builds)
-        .set({ status: 'FAILED' })
-        .where(eq(builds.id, build.id));
       return ok({
         buildId: build.id,
         status: 'FAILED' as const,
@@ -1260,6 +1327,12 @@ export const dispatchBuild = async (
       source: buildSource,
     });
     if (!finalized.ok) {
+      const settled = await context.db
+        .update(builds)
+        .set({ status: 'FAILED' })
+        .where(mine)
+        .returning({ id: builds.id });
+      if (settled.length === 0) return lostClaim(context, attempt);
       await recordBuildEvent(context.db, attempt, {
         type: 'log',
         line: `supply-chain admission failed: ${finalized.message}`,
@@ -1270,10 +1343,6 @@ export const dispatchBuild = async (
         phase: 'FAILED',
         reason: 'BUILD_FAILED',
       });
-      await context.db
-        .update(builds)
-        .set({ status: 'FAILED' })
-        .where(eq(builds.id, build.id));
       return ok({
         buildId: build.id,
         status: 'FAILED' as const,
@@ -1283,12 +1352,7 @@ export const dispatchBuild = async (
       });
     }
 
-    await recordBuildEvent(context.db, attempt, {
-      type: 'status',
-      phase: 'SUCCEEDED',
-    });
-
-    await context.db
+    const settled = await context.db
       .update(builds)
       .set({
         status: 'SUCCEEDED',
@@ -1301,7 +1365,14 @@ export const dispatchBuild = async (
         buildkitProvenanceRef: result.buildkitProvenanceRef,
         sbomRef: result.sbomRef,
       })
-      .where(eq(builds.id, build.id));
+      .where(mine)
+      .returning({ id: builds.id });
+    if (settled.length === 0) return lostClaim(context, attempt);
+
+    await recordBuildEvent(context.db, attempt, {
+      type: 'status',
+      phase: 'SUCCEEDED',
+    });
 
     return ok({
       buildId: build.id,
@@ -1312,6 +1383,12 @@ export const dispatchBuild = async (
     });
   } catch (cause) {
     const detail = cause instanceof Error ? cause.message : String(cause);
+    const settled = await context.db
+      .update(builds)
+      .set({ status: 'FAILED' })
+      .where(mine)
+      .returning({ id: builds.id });
+    if (settled.length === 0) return lostClaim(context, attempt);
     await recordBuildEvent(context.db, attempt, {
       type: 'log',
       line: `build dispatch failed: ${detail}`,
@@ -1321,10 +1398,6 @@ export const dispatchBuild = async (
       phase: 'FAILED',
       reason: 'INTERNAL',
     });
-    await context.db
-      .update(builds)
-      .set({ status: 'FAILED' })
-      .where(eq(builds.id, build.id));
     return ok({
       buildId: build.id,
       status: 'FAILED' as const,
