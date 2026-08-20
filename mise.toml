@@ -111,7 +111,7 @@ run = "bash -lc 'find . -name node_modules -prune -o -name .git -prune -o -name 
 
 [tasks."pki:verify"]
 description = "Assert the committed FML PKI chain links, anchors on a self-signed root, and admits its own depth"
-run = "python3 scripts/pki/verify-chain.py"
+run = "go -C apps/fml-pki run . verify"
 
 [tasks."docs:check"]
 description = "Docs contract: wikilinks resolve, referenced paths exist, no archaeology"
