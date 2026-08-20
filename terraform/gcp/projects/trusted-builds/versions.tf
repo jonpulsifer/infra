@@ -13,6 +13,12 @@ provider "google" {
   region                      = local.region
 }
 
+provider "google-beta" {
+  impersonate_service_account = "terraform@homelab-ng.iam.gserviceaccount.com"
+  project                     = local.project
+  region                      = local.region
+}
+
 terraform {
   backend "gcs" {
     bucket                      = "homelab-ng"
@@ -23,6 +29,10 @@ terraform {
   required_providers {
     google = {
       source  = "hashicorp/google"
+      version = "~> 7.44.0"
+    }
+    google-beta = {
+      source  = "hashicorp/google-beta"
       version = "~> 7.44.0"
     }
   }

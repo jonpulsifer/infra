@@ -6,6 +6,8 @@ resource "google_project_service" "service" {
     "cloudkms.googleapis.com",
     "containeranalysis.googleapis.com",
     "containerscanning.googleapis.com",
+    "developerconnect.googleapis.com",
+    "secretmanager.googleapis.com",
   ])
   service            = each.key
   disable_on_destroy = false
