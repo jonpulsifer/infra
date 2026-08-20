@@ -190,6 +190,25 @@ export const reconcilerDispatchAttempts: Counter = meter.createCounter(
 );
 
 /**
+ * Bosun calls that named no claim, labelled by `call` (`heartbeat`/`result`).
+ *
+ * The instrument that says when the tolerant window can close (ticket 129).
+ * Bosun ships on each host's NixOS auto-upgrade while Spindrift ships as a
+ * pinned image digest, so for some stretch after this lands there are hosts
+ * still posting without a claimant and `src/storage/build-outbox.ts` serves
+ * them unfenced. This counter reading zero — across every host, for long enough
+ * to be sure — is the evidence that requiring a claimant would refuse nobody.
+ * Guessing at that from a calendar date would be guessing at when somebody
+ * else's auto-upgrade ran.
+ */
+export const bosunUnfencedCalls: Counter = meter.createCounter(
+  'bosun_unfenced_calls_total',
+  {
+    description: 'Bosun heartbeat/result calls that carried no claimant',
+  },
+);
+
+/**
  * How many live deploys are currently drifted from their desired artifact, as
  * of the deploy loop's last drift-observing pass (§6's "visible state").
  */

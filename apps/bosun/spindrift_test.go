@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -20,14 +21,16 @@ type fakeSpindrift struct {
 	claims       []*buildClaim // popped front-to-back by ClaimBuild
 	claimErr     error
 	heartbeats   []string
+	claimants    []string
 	heartbeatErr error
 	results      []postedResult
 	resultErr    error
 }
 
 type postedResult struct {
-	id  string
-	res buildResult
+	id       string
+	claimant string
+	res      buildResult
 }
 
 func (f *fakeSpindrift) ClaimBuild(ctx context.Context, classes []string) (*buildClaim, error) {
@@ -44,20 +47,21 @@ func (f *fakeSpindrift) ClaimBuild(ctx context.Context, classes []string) (*buil
 	return c, nil
 }
 
-func (f *fakeSpindrift) Heartbeat(ctx context.Context, id string) error {
+func (f *fakeSpindrift) Heartbeat(ctx context.Context, id, claimant string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.heartbeats = append(f.heartbeats, id)
+	f.claimants = append(f.claimants, claimant)
 	return f.heartbeatErr
 }
 
-func (f *fakeSpindrift) PostResult(ctx context.Context, id string, res buildResult) error {
+func (f *fakeSpindrift) PostResult(ctx context.Context, id, claimant string, res buildResult) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.resultErr != nil {
 		return f.resultErr
 	}
-	f.results = append(f.results, postedResult{id: id, res: res})
+	f.results = append(f.results, postedResult{id: id, claimant: claimant, res: res})
 	return nil
 }
 
@@ -203,7 +207,7 @@ func TestSDClientPostResultSendsBodyAndAuth(t *testing.T) {
 	defer server.Close()
 
 	c := &sdClient{httpClient: server.Client(), token: "test-token", base: server.URL}
-	err := c.PostResult(context.Background(), "build-1", buildResult{Status: buildSucceeded, Log: "ok"})
+	err := c.PostResult(context.Background(), "build-1", "", buildResult{Status: buildSucceeded, Log: "ok"})
 	if err != nil {
 		t.Fatalf("PostResult: %v", err)
 	}
@@ -226,11 +230,65 @@ func TestSDClientHeartbeatPostsToTheRequestID(t *testing.T) {
 	defer server.Close()
 
 	c := &sdClient{httpClient: server.Client(), token: "t", base: server.URL}
-	if err := c.Heartbeat(context.Background(), "build-1"); err != nil {
+	if err := c.Heartbeat(context.Background(), "build-1", ""); err != nil {
 		t.Fatalf("Heartbeat: %v", err)
 	}
 	if !called {
 		t.Fatal("heartbeat endpoint was never called")
+	}
+}
+
+// The fence's Go half: the claim's token rides on every later call, and an
+// empty one -- what a Spindrift too old to mint claimants decodes to -- sends
+// no parameter at all rather than an empty one the far side would have to
+// special-case.
+func TestSDClientCarriesTheClaimantWhenThereIsOne(t *testing.T) {
+	var heartbeatQuery, resultQuery string
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /internal/bosun/requests/build-1/heartbeat", func(w http.ResponseWriter, r *http.Request) {
+		heartbeatQuery = r.URL.RawQuery
+		w.WriteHeader(http.StatusNoContent)
+	})
+	mux.HandleFunc("POST /internal/bosun/requests/build-1/result", func(w http.ResponseWriter, r *http.Request) {
+		resultQuery = r.URL.RawQuery
+		w.WriteHeader(http.StatusNoContent)
+	})
+	server := httptest.NewServer(mux)
+	defer server.Close()
+
+	c := &sdClient{httpClient: server.Client(), token: "t", base: server.URL}
+	if err := c.Heartbeat(context.Background(), "build-1", "claim/one"); err != nil {
+		t.Fatalf("Heartbeat: %v", err)
+	}
+	if err := c.PostResult(context.Background(), "build-1", "claim/one", buildResult{Status: buildSucceeded}); err != nil {
+		t.Fatalf("PostResult: %v", err)
+	}
+	if heartbeatQuery != "claimant=claim%2Fone" {
+		t.Fatalf("heartbeat query: %q", heartbeatQuery)
+	}
+	if resultQuery != "claimant=claim%2Fone" {
+		t.Fatalf("result query: %q", resultQuery)
+	}
+	if got := claimantQuery(""); got != "" {
+		t.Fatalf("an empty claimant should send nothing, got %q", got)
+	}
+}
+
+func TestRunBuildHandsBackTheClaimant(t *testing.T) {
+	sd := &fakeSpindrift{}
+	b := &buildSource{
+		sd:     sd,
+		logger: testLogger(),
+		stats:  newMetrics(),
+		spawn: func(ctx context.Context, claim *buildClaim) (*skiff, error) {
+			return nil, fmt.Errorf("no berth")
+		},
+	}
+	b.runBuild(context.Background(), &buildClaim{ID: "build-1", Claimant: "claim-1"})
+
+	posted := sd.postedResults()
+	if len(posted) != 1 || posted[0].claimant != "claim-1" {
+		t.Fatalf("expected the claim's token on the posted result, got %+v", posted)
 	}
 }
 

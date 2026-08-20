@@ -39,7 +39,9 @@ import {
   claimNextDeploy,
   DEFAULT_CLAIM_TIMEOUT_MS,
   DEFAULT_INTERVALS,
+  DEPLOY_ATTEMPT_MAX_MS,
   type DeployLoopContext,
+  heartbeatAttempt,
   intervalFor,
   runAttempt,
   runDeployPass,
@@ -860,5 +862,132 @@ describe('the poll is the correctness path (plan, Transport shape)', () => {
     expect(intervalFor([])).toBe(DEFAULT_INTERVALS.slowMs);
     expect(intervalFor(['LIVE', 'APPLYING'])).toBe(DEFAULT_INTERVALS.fastMs);
     expect(intervalFor(['WAITING'])).toBe(DEFAULT_INTERVALS.fastMs);
+  });
+});
+
+describe('the attempt fence (ticket 129)', () => {
+  test('two reconcilers, one Postgres: only the holder lands a verdict', async () => {
+    const { deploy } = await pendingDeploy();
+    const first = new FakeDeployAdapter();
+    const second = new FakeDeployAdapter();
+    const otherDb = createDb(database().connect());
+
+    const held = await claimNextDeploy(context(first));
+    expect(held?.attemptId).toEqual(expect.any(String));
+
+    // The second reconciler is the rollout's other pod, arriving after the
+    // first attempt's lease has aged out — which is what a long apply that
+    // emits nothing but `log` events used to look like from here.
+    const reclaimed = await claimNextDeploy(
+      context(second, {
+        db: otherDb,
+        clock: {
+          now: () => new Date(FROZEN.getTime() + DEFAULT_CLAIM_TIMEOUT_MS + 1),
+        },
+      }),
+    );
+    expect(reclaimed?.id).toBe(deploy.id);
+    expect(reclaimed?.attemptId).not.toBe(held?.attemptId);
+
+    // The first attempt finishes late and arrives at a verdict it no longer
+    // owns. Before the fence it wrote that verdict over the second attempt's.
+    const outcome = await runAttempt(context(first), held!);
+    expect(outcome?.phase).toBe('LOST');
+
+    const stranded = await deployRow(deploy.id);
+    expect(stranded?.attemptId).toBe(reclaimed!.attemptId!);
+    expect(stranded?.phase).toBe('APPLYING');
+    expect(stranded?.url).toBeNull();
+
+    // Said out loud, because an attempt that stopped and left no line reads
+    // from the log as a rollout that simply hung.
+    const events = await database()
+      .db.select()
+      .from(attemptEvents)
+      .where(eq(attemptEvents.deployId, deploy.id))
+      .orderBy(asc(attemptEvents.id));
+    expect(events.at(-1)?.line).toContain('lost its claim');
+
+    // And the holder settles normally.
+    const landed = await runAttempt(
+      context(second, { db: otherDb }),
+      reclaimed!,
+    );
+    expect(landed?.phase).toBe('LIVE');
+    expect((await deployRow(deploy.id))?.phase).toBe('LIVE');
+  });
+
+  test('a heartbeat keeps a long apply out of the reclaim, and only its holder can send one', async () => {
+    const { deploy } = await pendingDeploy();
+    const adapter = new FakeDeployAdapter();
+    const held = await claimNextDeploy(context(adapter));
+
+    // One tick short of the timeout, which is the point of the heartbeat: an
+    // upload that emits only `log` events writes no row update on its own.
+    const later = new Date(FROZEN.getTime() + DEFAULT_CLAIM_TIMEOUT_MS - 1);
+    const beating = context(adapter, { clock: { now: () => later } });
+    expect(await heartbeatAttempt(beating, deploy.id, held!.attemptId)).toBe(
+      true,
+    );
+    expect((await deployRow(deploy.id))?.updatedAt).toEqual(later);
+
+    // A moment that would have been past the original lease is not past this
+    // one, so nothing reclaims a healthy attempt.
+    const afterOriginalLease = new Date(
+      FROZEN.getTime() + DEFAULT_CLAIM_TIMEOUT_MS + 1,
+    );
+    expect(
+      await claimNextDeploy(
+        context(adapter, { clock: { now: () => afterOriginalLease } }),
+      ),
+    ).toBeNull();
+
+    // And a heartbeat from an attempt the row has moved past says so, which is
+    // how a reclaimed attempt learns to stop before it finishes.
+    expect(
+      await heartbeatAttempt(beating, deploy.id, crypto.randomUUID()),
+    ).toBe(false);
+  });
+
+  test('past the attempt cap the heartbeat still notices a reclaim without renewing the lease', async () => {
+    const { deploy } = await pendingDeploy();
+    const adapter = new FakeDeployAdapter();
+    const held = await claimNextDeploy(context(adapter));
+
+    // A reclaim cannot happen until DEFAULT_CLAIM_TIMEOUT_MS after the last
+    // refresh, so it lands *past* DEPLOY_ATTEMPT_MAX_MS — the window in which
+    // the attempt has stopped refreshing but is still running. Ticks in that
+    // window are the only ones that can ever answer no.
+    const afterCap = FROZEN.getTime() + DEPLOY_ATTEMPT_MAX_MS;
+    const observing = context(adapter, {
+      clock: { now: () => new Date(afterCap) },
+    });
+    expect(
+      await heartbeatAttempt(observing, deploy.id, held!.attemptId, false),
+    ).toBe(true);
+    // Read-only: it answered without moving the column the reclaim reads, which
+    // is what the cap took away and what keeps the lease expiring on schedule.
+    expect((await deployRow(deploy.id))?.updatedAt).toEqual(FROZEN);
+
+    const reclaimTime = new Date(afterCap + DEFAULT_CLAIM_TIMEOUT_MS + 1);
+    const reclaimed = await claimNextDeploy(
+      context(new FakeDeployAdapter(), {
+        db: createDb(database().connect()),
+        clock: { now: () => reclaimTime },
+      }),
+    );
+    expect(reclaimed?.id).toBe(deploy.id);
+
+    // And now the still-running attempt finds out, which is the whole reason
+    // the timer outlives the cap: `lost` is what stops it streaming into a log
+    // somebody else owns.
+    expect(
+      await heartbeatAttempt(
+        context(adapter, { clock: { now: () => reclaimTime } }),
+        deploy.id,
+        held!.attemptId,
+        false,
+      ),
+    ).toBe(false);
   });
 });

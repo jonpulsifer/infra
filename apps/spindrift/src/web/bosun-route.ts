@@ -34,6 +34,7 @@ import type { Clock } from '../commands/types.ts';
 import type { Database } from '../db/client.ts';
 import { recordClaimPoll } from '../storage/bosun-poll.ts';
 import { buildOutbox } from '../storage/build-outbox.ts';
+import { bosunUnfencedCalls } from '../telemetry/index.ts';
 
 export const BOSUN_CLAIM_PATH = '/internal/bosun/claim';
 export const BOSUN_HEARTBEAT_PATH = '/internal/bosun/requests/:id/heartbeat';
@@ -114,6 +115,22 @@ function refuse(status: number, code: string, message: string): Response {
  * {@link BOSUN_HEARTBEAT_PATH} and {@link BOSUN_RESULT_PATH} still tells
  * `Bun.serve` which requests reach these handlers at all.
  */
+/**
+ * The claim this call is made under, from `?claimant=`.
+ *
+ * A query parameter and not a body field: {@link resultBodySchema} is
+ * `.strict()` and the heartbeat posts no body at all, so this is the one place
+ * a token can cross without changing either shape. `undefined` for an absent or
+ * empty value — a bosun host that reached production before the Spindrift that
+ * mints claimants sends `''`, and `src/storage/build-outbox.ts` reads that as
+ * "did not ask to be fenced" rather than as a mismatch.
+ */
+function claimantFromQuery(url: URL, call: string): string | undefined {
+  const claimant = url.searchParams.get('claimant')?.trim() || undefined;
+  if (claimant === undefined) bosunUnfencedCalls.add(1, { call });
+  return claimant;
+}
+
 function idFromPath(pathname: string): string | null {
   const match =
     /^\/internal\/bosun\/requests\/([^/]+)\/(?:heartbeat|result)$/.exec(
@@ -185,6 +202,7 @@ async function handleClaim(
         id: claimed.id,
         class: claimed.class,
         request: claimed.request,
+        claimant: claimed.claimant,
       });
     }
     if (budget.expired()) return new Response(null, { status: 204 });
@@ -202,10 +220,14 @@ async function handleHeartbeat(
   const denied = checkAuth(request, deps);
   if (denied) return denied;
 
-  const id = idFromPath(new URL(request.url).pathname);
+  const url = new URL(request.url);
+  const id = idFromPath(url.pathname);
   if (id === null) return refuse(400, 'BODY_MALFORMED', 'missing request id');
   const outbox = buildOutbox(deps.db, deps.clock.now);
-  const extended = await outbox.heartbeat(id);
+  const extended = await outbox.heartbeat(
+    id,
+    claimantFromQuery(url, 'heartbeat'),
+  );
   return extended
     ? new Response(null, { status: 204 })
     : refuse(404, 'NOT_FOUND', `no claimed build request ${id}`);
@@ -226,10 +248,15 @@ async function handleResult(
     return refuse(400, 'BODY_MALFORMED', parsed.error.message);
   }
 
-  const id = idFromPath(new URL(request.url).pathname);
+  const url = new URL(request.url);
+  const id = idFromPath(url.pathname);
   if (id === null) return refuse(400, 'BODY_MALFORMED', 'missing request id');
   const outbox = buildOutbox(deps.db, deps.clock.now);
-  const outcome = await outbox.complete(id, parsed.data);
+  const outcome = await outbox.complete(
+    id,
+    parsed.data,
+    claimantFromQuery(url, 'result'),
+  );
   switch (outcome) {
     case 'done':
       return new Response(null, { status: 204 });

@@ -32,8 +32,40 @@
  * guard is one `UPDATE ... WHERE state != 'DONE'`, which is what makes two
  * concurrent completions of the same id resolve to exactly one `'done'` and
  * one `'conflict'` rather than both believing they won.
+ *
+ * **A lease says when; the claimant says whose** (ticket 129). "Nothing else
+ * claimed the row in between" is the whole of that argument, and keying on the
+ * request id alone could not check it: a host whose lease expired could extend,
+ * or land a result on, a request another host was already running. `claim`
+ * mints a claimant, hands it back in the response, and `heartbeat` and
+ * `complete` require it — the same fencing token `builds.dispatch_id` is one
+ * seam further in.
+ *
+ * `complete` is deliberately the weaker of the two: it accepts a result from a
+ * claimant the row no longer names *if it names nobody*, because that is the
+ * "nothing else claimed it in between" case above. What it refuses is a result
+ * for a request some other host is running right now.
+ *
+ * **A caller that sends no claimant is still served.** Bosun ships as a NixOS
+ * module on each host's own auto-upgrade while Spindrift ships as a pinned
+ * image digest, so the Go half can reach production first and its claims come
+ * back carrying nothing. An absent claimant — undefined, or the empty string a
+ * missing JSON field decodes to — reads as "did not ask to be fenced" and gets
+ * exactly today's predicate, never as a mismatch that would 404 every heartbeat
+ * on a host mid-build.
  */
-import { and, asc, count, eq, inArray, lt, min, ne } from 'drizzle-orm';
+import {
+  and,
+  asc,
+  count,
+  eq,
+  inArray,
+  isNull,
+  lt,
+  min,
+  ne,
+  or,
+} from 'drizzle-orm';
 import type { Database } from '../db/client.ts';
 import { type BuildRequest, buildRequests } from '../db/schema.ts';
 
@@ -54,6 +86,8 @@ export interface ClaimedBuildRequest {
   readonly class: string;
   /** The request document exactly as `enqueue` stored it. */
   readonly request: unknown;
+  /** This claim's fencing token, to be handed back on every later call. */
+  readonly claimant: string;
 }
 
 /** What a finished attempt reports back. */
@@ -85,12 +119,16 @@ export interface BuildOutbox {
   claim(classes: readonly string[]): Promise<ClaimedBuildRequest | null>;
   /** Return every lease-expired `CLAIMED` row to `PENDING`. */
   reclaimExpired(): Promise<void>;
-  /** Extend a claim's lease. `false` when the row is not currently claimed. */
-  heartbeat(id: string): Promise<boolean>;
-  /** Record a result, unless one already landed. */
+  /**
+   * Extend a claim's lease. `false` when the row is not currently claimed, or
+   * when `claimant` names a claim the row no longer carries.
+   */
+  heartbeat(id: string, claimant?: string): Promise<boolean>;
+  /** Record a result, unless one already landed or the claim moved on. */
   complete(
     id: string,
     result: BuildRequestResult,
+    claimant?: string,
   ): Promise<'done' | 'conflict' | 'missing'>;
   /** The row as it stands, or `null` when no such request exists. */
   get(id: string): Promise<BuildRequest | null>;
@@ -111,6 +149,49 @@ export interface BuildOutbox {
   cancel(id: string): Promise<void>;
 }
 
+/**
+ * Whether a caller named a claim at all.
+ *
+ * Empty string and `undefined` both mean *absent*: a claim response that
+ * carried no claimant decodes to `''` on the Go side, and reading that as a
+ * mismatch would refuse every call from a bosun host that reached production
+ * before this did.
+ */
+function unfenced(claimant: string | undefined): claimant is undefined | '' {
+  return claimant === undefined || claimant === '';
+}
+
+/**
+ * "Still mine", as a conjunct or as nothing at all.
+ *
+ * Spread into a predicate rather than branched around one, so the fenced and
+ * the unfenced call are the same statement with one term more.
+ */
+function heldBy(claimant: string | undefined) {
+  return unfenced(claimant) ? [] : [eq(buildRequests.claimant, claimant)];
+}
+
+/**
+ * "Mine, or nobody's" — what a *result* has to satisfy.
+ *
+ * Weaker than {@link heldBy} on purpose, and the module header says why: a
+ * result from a claimant whose lease expired still lands as long as nothing
+ * else claimed the row in between, because a real result beats a rerun.
+ * `reclaimExpired` clears the claimant with the lease, so a null one is
+ * precisely "in between" — while a claimant that is somebody else's is the
+ * case this fence exists to refuse.
+ */
+function heldByOrNobody(claimant: string | undefined) {
+  return unfenced(claimant)
+    ? []
+    : [
+        or(
+          isNull(buildRequests.claimant),
+          eq(buildRequests.claimant, claimant),
+        ),
+      ];
+}
+
 /** The outbox an installation with a database has. */
 export function buildOutbox(
   db: Database,
@@ -128,6 +209,7 @@ export function buildOutbox(
     async claim(classes) {
       if (classes.length === 0) return null;
       const claimedAt = now();
+      const claimant = crypto.randomUUID();
 
       return db.transaction(async (tx) => {
         const [row] = await tx
@@ -152,6 +234,7 @@ export function buildOutbox(
           .update(buildRequests)
           .set({
             state: 'CLAIMED',
+            claimant,
             leaseExpires: new Date(
               claimedAt.getTime() + BUILD_REQUEST_LEASE_MS,
             ),
@@ -159,14 +242,22 @@ export function buildOutbox(
           })
           .where(eq(buildRequests.id, row.id));
 
-        return row;
+        return { ...row, claimant };
       });
     },
 
     async reclaimExpired() {
       await db
         .update(buildRequests)
-        .set({ state: 'PENDING', leaseExpires: null, updatedAt: now() })
+        // The claimant goes with the lease it named: a row back in the queue is
+        // held by nobody, and leaving the previous holder on it would let that
+        // host's next heartbeat pass the fence.
+        .set({
+          state: 'PENDING',
+          claimant: null,
+          leaseExpires: null,
+          updatedAt: now(),
+        })
         .where(
           and(
             eq(buildRequests.state, 'CLAIMED'),
@@ -175,7 +266,7 @@ export function buildOutbox(
         );
     },
 
-    async heartbeat(id) {
+    async heartbeat(id, claimant) {
       const heartbeatAt = now();
       const rows = await db
         .update(buildRequests)
@@ -186,13 +277,17 @@ export function buildOutbox(
           updatedAt: heartbeatAt,
         })
         .where(
-          and(eq(buildRequests.id, id), eq(buildRequests.state, 'CLAIMED')),
+          and(
+            eq(buildRequests.id, id),
+            eq(buildRequests.state, 'CLAIMED'),
+            ...heldBy(claimant),
+          ),
         )
         .returning({ id: buildRequests.id });
       return rows.length > 0;
     },
 
-    async complete(id, result) {
+    async complete(id, result, claimant) {
       const completedAt = now();
       const done = await db
         .update(buildRequests)
@@ -202,7 +297,13 @@ export function buildOutbox(
           leaseExpires: null,
           updatedAt: completedAt,
         })
-        .where(and(eq(buildRequests.id, id), ne(buildRequests.state, 'DONE')))
+        .where(
+          and(
+            eq(buildRequests.id, id),
+            ne(buildRequests.state, 'DONE'),
+            ...heldByOrNobody(claimant),
+          ),
+        )
         .returning({ id: buildRequests.id });
       if (done.length > 0) return 'done';
 
@@ -268,6 +369,7 @@ export function buildOutbox(
         .set({
           state: 'DONE',
           result: null,
+          claimant: null,
           leaseExpires: null,
           updatedAt: now(),
         })

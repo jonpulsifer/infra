@@ -913,6 +913,24 @@ export const deploys = pgTable('deploys', {
    * fail: it reached `LIVE` and the platform has since stopped agreeing.
    */
   driftDetail: text('drift_detail'),
+  /**
+   * Durable identity for the attempt that holds this Deploy's claim.
+   *
+   * The deploy side's answer to {@link builds.dispatchId}, under the deploy
+   * side's own noun — §6 calls one run of the adapter an *attempt*. Minted by
+   * `claimNextDeploy` in the same `UPDATE` that moves the row to `APPLYING`,
+   * carried in memory for the length of the apply, and required by every write
+   * that settles the row. The claim's lock is released when its transaction
+   * commits (`src/reconciler/deploy-loop.ts`'s header says so deliberately), so
+   * this column is the only thing that distinguishes the attempt that still
+   * holds the lease from one whose lease was reclaimed under it while a
+   * ten-minute upload was still running.
+   *
+   * Nullable because a row that has never been claimed has no attempt, and
+   * unindexed on purpose: every write that reads it already has the primary key
+   * in its predicate, so this is a filter on a row that is already located.
+   */
+  attemptId: text('attempt_id'),
   createdAt: timestamp('created_at', { withTimezone: true })
     .notNull()
     .defaultNow(),
@@ -1621,6 +1639,22 @@ export const buildRequests = pgTable(
     request: jsonbDocument('request').notNull(),
     state: buildRequestState('state').notNull().default('PENDING'),
     leaseExpires: timestamp('lease_expires', { withTimezone: true }),
+    /**
+     * Which claimant holds the lease, minted by `claim` and handed back in the
+     * claim response.
+     *
+     * A lease says *when* a claim expires; this says *whose* it is. Without it
+     * `heartbeat` and `complete` key on the request id alone, so a bosun host
+     * whose lease was already reclaimed can keep extending — or land a result
+     * on — a request another host is now running. Same shape as
+     * {@link builds.dispatchId}, one seam further out.
+     *
+     * Nullable, and read as "absent" rather than "mismatch" when a caller sends
+     * none: bosun ships on each host's NixOS auto-upgrade while Spindrift ships
+     * as a pinned image digest, so the two halves reach production on
+     * independent clocks and a claimant-less call has to keep working.
+     */
+    claimant: text('claimant'),
     /** `null` until `complete` writes it; also `null` for a cancelled request. */
     result: jsonbDocument('result'),
     createdAt: timestamp('created_at', { withTimezone: true })

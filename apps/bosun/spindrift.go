@@ -9,6 +9,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 )
@@ -26,17 +27,23 @@ type spindriftClient interface {
 	// nil, nil means none arrived within the poll window; that is not an
 	// error.
 	ClaimBuild(ctx context.Context, classes []string) (*buildClaim, error)
-	Heartbeat(ctx context.Context, id string) error
-	PostResult(ctx context.Context, id string, res buildResult) error
+	Heartbeat(ctx context.Context, id, claimant string) error
+	PostResult(ctx context.Context, id, claimant string, res buildResult) error
 }
 
 // buildClaim is one build request handed to this bosun host. Request is
 // opaque -- bosun never parses it, only writes it into the claimed skiff's
 // share for the guest to read.
 type buildClaim struct {
-	ID      string          `json:"id"`
-	Class   string          `json:"class"`
-	Request json.RawMessage `json:"request"`
+	ID    string `json:"id"`
+	Class string `json:"class"`
+	// Claimant is this claim's fencing token, handed back on every later call
+	// so Spindrift can tell this host from one whose lease it already
+	// reclaimed. Empty against a Spindrift that does not mint one yet -- bosun
+	// ships on this host's own auto-upgrade and can arrive first -- in which
+	// case nothing is sent and the far side serves the call unfenced.
+	Claimant string          `json:"claimant"`
+	Request  json.RawMessage `json:"request"`
 }
 
 // buildResult is what bosun posts back once a build skiff halts.
@@ -93,18 +100,30 @@ func (c *sdClient) ClaimBuild(ctx context.Context, classes []string) (*buildClai
 	return &claim, nil
 }
 
-func (c *sdClient) Heartbeat(ctx context.Context, id string) error {
+func (c *sdClient) Heartbeat(ctx context.Context, id, claimant string) error {
 	ctx, cancel := context.WithTimeout(ctx, callTimeout)
 	defer cancel()
-	_, err := c.do(ctx, http.MethodPost, c.base+"/internal/bosun/requests/"+id+"/heartbeat", nil, nil)
+	_, err := c.do(ctx, http.MethodPost, c.base+"/internal/bosun/requests/"+id+"/heartbeat"+claimantQuery(claimant), nil, nil)
 	return err
 }
 
-func (c *sdClient) PostResult(ctx context.Context, id string, res buildResult) error {
+func (c *sdClient) PostResult(ctx context.Context, id, claimant string, res buildResult) error {
 	ctx, cancel := context.WithTimeout(ctx, callTimeout)
 	defer cancel()
-	_, err := c.do(ctx, http.MethodPost, c.base+"/internal/bosun/requests/"+id+"/result", res, nil)
+	_, err := c.do(ctx, http.MethodPost, c.base+"/internal/bosun/requests/"+id+"/result"+claimantQuery(claimant), res, nil)
 	return err
+}
+
+// claimantQuery is the fencing token as a query string, or nothing at all. A
+// query parameter because the result body's schema is strict and a heartbeat
+// posts no body -- there is nowhere else for it to ride. Empty sends nothing,
+// which is what makes this binary safe against a Spindrift old enough not to
+// mint claimants.
+func claimantQuery(claimant string) string {
+	if claimant == "" {
+		return ""
+	}
+	return "?claimant=" + url.QueryEscape(claimant)
 }
 
 // do sends one request and, for a body-bearing response, decodes it into
@@ -213,7 +232,7 @@ func (b *buildSource) runBuild(ctx context.Context, claim *buildClaim) {
 		}
 		res := buildResult{Status: buildFailed, Detail: fmt.Sprintf("failed to spawn a build skiff: %v", err)}
 		b.stats.buildResult(res.Status)
-		b.postBuildResult(ctx, claim.ID, res, logger)
+		b.postBuildResult(ctx, claim, res, logger)
 		return
 	}
 
@@ -224,10 +243,10 @@ func (b *buildSource) runBuild(ctx context.Context, claim *buildClaim) {
 		case <-s.done:
 			res := readBuildResult(s.paths.diagDir, s.reason(), logger)
 			b.stats.buildResult(res.Status)
-			b.postBuildResult(ctx, claim.ID, res, logger)
+			b.postBuildResult(ctx, claim, res, logger)
 			return
 		case <-heartbeat.C:
-			if err := b.sd.Heartbeat(ctx, claim.ID); err != nil {
+			if err := b.sd.Heartbeat(ctx, claim.ID, claim.Claimant); err != nil {
 				logger.Warn("heartbeat", "error", err)
 			}
 		}
@@ -248,7 +267,7 @@ func tailString(b []byte, max int) string {
 // for the same reason: a lost result strands a Spindrift build row until its
 // lease expires, which is worth a little extra time after bosun has
 // otherwise decided to move on.
-func (b *buildSource) postBuildResult(ctx context.Context, id string, res buildResult, logger *slog.Logger) {
+func (b *buildSource) postBuildResult(ctx context.Context, claim *buildClaim, res buildResult, logger *slog.Logger) {
 	pctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Minute)
 	defer cancel()
 	const attempts = 3
@@ -257,7 +276,7 @@ func (b *buildSource) postBuildResult(ctx context.Context, id string, res buildR
 		if i > 0 {
 			time.Sleep(5 * time.Second)
 		}
-		if err = b.sd.PostResult(pctx, id, res); err == nil {
+		if err = b.sd.PostResult(pctx, claim.ID, claim.Claimant, res); err == nil {
 			logger.Info("build result posted", "status", res.Status)
 			return
 		}

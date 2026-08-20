@@ -136,6 +136,7 @@ describe('claim', () => {
       id,
       class: 'skiff-a',
       request: body,
+      claimant: expect.any(String),
     });
   });
 
@@ -170,6 +171,24 @@ describe('heartbeat', () => {
       request(`/internal/bosun/requests/${crypto.randomUUID()}/heartbeat`),
     );
     expect(response.status).toBe(404);
+  });
+
+  test('the claimant rides on the query string, and an empty one is absent', async () => {
+    const store = buildOutbox(database().db, () => NOW);
+    const { id } = await store.enqueue({ class: 'skiff-a', request: {} });
+    const claimed = await store.claim(['skiff-a']);
+
+    const beat = (query: string) =>
+      post(
+        BOSUN_HEARTBEAT_PATH,
+        deps(),
+        request(`/internal/bosun/requests/${id}/heartbeat${query}`),
+      );
+
+    expect((await beat(`?claimant=${claimed!.claimant}`)).status).toBe(204);
+    expect((await beat('?claimant=somebody-else')).status).toBe(404);
+    // What a bosun host that predates the claimant sends: absent, not wrong.
+    expect((await beat('?claimant=')).status).toBe(204);
   });
 });
 
