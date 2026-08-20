@@ -10,12 +10,13 @@
 #      control-plane host's nix/secrets/<host>.sops.yaml — plaintext never
 #      touches disk,
 #   3. regenerates terraform/pki/oidc/<cluster>/{jwks.json,openid-configuration.json}
-#      via scripts/pki/jwks_from_certs.py.
+#      via apps/fml-pki.
 #
 # Commit the result and let Atlantis upload the refreshed documents, then deploy
 # the control planes per the Kubernetes GitOps runbook. Requires: tofu, sops
-# (>= 3.9 for --filename-override), jq, openssl, python3. Run from anywhere in
-# the repo; needs op auth only indirectly (tofu output reads state, not 1P).
+# (>= 3.9 for --filename-override), jq and go. All certificate handling goes
+# through apps/fml-pki, so there is no openssl or python dependency. Run from
+# anywhere in the repo; needs op auth only indirectly (tofu reads state, not 1P).
 
 set -euo pipefail
 
@@ -31,7 +32,7 @@ fi
 # Preflight, because this script writes certificates and rewrites SOPS files as
 # it goes: discovering a missing tool halfway leaves certs/ half-updated.
 missing=()
-for tool in tofu sops jq openssl python3; do
+for tool in tofu sops jq go; do
   command -v "$tool" >/dev/null || missing+=("$tool")
 done
 if ((${#missing[@]})); then
@@ -64,8 +65,14 @@ sops_set_key() {
     | sops set --value-stdin "$secret_file" "[\"$secret_name\"]"
 }
 
+# All certificate maths lives in the Go tool; "-" reads the PEM on stdin so a
+# Terraform output never needs a temp file.
+fml_pki() {
+  go -C "$repo_root/apps/fml-pki" run . "$@"
+}
+
 cert_fingerprint() {
-  openssl x509 -outform DER | openssl sha256
+  fml_pki fingerprint -
 }
 
 verify_key_pair() {
@@ -73,17 +80,8 @@ verify_key_pair() {
   key_output=$2
   cluster=$3
 
-  cert_spki="$(
-    jq -er ".${cert_output}.value.\"$cluster\"" <<<"$outputs" \
-      | openssl x509 -pubkey -noout \
-      | openssl pkey -pubin -outform DER \
-      | openssl sha256
-  )"
-  key_spki="$(
-    jq -er ".${key_output}.value.\"$cluster\"" <<<"$outputs" \
-      | openssl pkey -pubout -outform DER \
-      | openssl sha256
-  )"
+  cert_spki="$(jq -er ".${cert_output}.value.\"$cluster\"" <<<"$outputs" | fml_pki spki -)"
+  key_spki="$(jq -er ".${key_output}.value.\"$cluster\"" <<<"$outputs" | fml_pki spki -)"
   if [[ $cert_spki != "$key_spki" ]]; then
     echo "error: $cluster $cert_output does not match $key_output" >&2
     return 1
@@ -141,7 +139,7 @@ for cluster in "$@"; do
   fi
 
   # Drop the overlap cert once it has expired.
-  if [[ -s $prev_pem ]] && ! openssl x509 -checkend 0 -noout -in "$prev_pem" >/dev/null; then
+  if [[ -s $prev_pem ]] && fml_pki expired "$prev_pem"; then
     echo "==> $cluster: previous signer expired; removing $prev_pem" >&2
     rm "$prev_pem"
   fi
@@ -168,7 +166,7 @@ for cluster in "$@"; do
   echo "==> $cluster: regenerating OIDC documents" >&2
   jwks_args=("$signer_pem")
   [[ -s $prev_pem ]] && jwks_args+=("$prev_pem")
-  python3 "$repo_root/scripts/pki/jwks_from_certs.py" \
+  fml_pki jwks \
     --issuer "$issuer" \
     --out "$pki_dir/oidc/$cluster" \
     "${jwks_args[@]}"
@@ -176,8 +174,7 @@ for cluster in "$@"; do
   echo "==> $cluster: certificate inventory" >&2
   for cert in "$ca_pem" "$ca_prev_pem" "$signer_pem" "$prev_pem"; do
     [[ -s $cert ]] || continue
-    openssl x509 -noout -subject -serial -dates -in "$cert" \
-      | sed "s|^|    $(basename "$cert"): |" >&2
+    fml_pki inspect "$cert" | sed "s|^|    |" >&2
   done
 done
 

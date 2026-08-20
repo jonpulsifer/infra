@@ -29,10 +29,17 @@ in a trust store as an anchor and stops there, so it never walks past the
 published cluster CA and never sees the contradiction; kubectl, Flux and
 Prometheus are unaffected. OpenSSL-based clients are not.
 
-`scripts/pki/reissue-trust-anchors.sh` mints replacements that keep both keys
-and both subjects, so the new certificates are drop-in. It needs the offline
-root key. `scripts/pki/verify-chain.py` checks linkage, `CA:TRUE`, pathLen depth
-and expiry ordering across everything under `certs/`, and needs no secrets.
+`scripts/pki/reissue-trust-anchors.sh` mints replacements that keep both keys,
+both subjects and both subject key identifiers, so the new certificates are
+drop-in — everything already issued beneath them names its issuer by that
+identifier. It needs the offline root key. `mise run pki:verify` checks linkage,
+signatures, `CA:TRUE`, pathLen depth and expiry ordering across everything under
+`certs/`, and needs no secrets.
+
+The certificate handling lives in `apps/fml-pki`, standard library only, so the
+toolchain needs `go` and nothing else — no openssl, which neither mise's registry
+nor the dev shell carries. It also derives the OIDC documents and answers the
+fingerprint and key-match questions `post-rotate.sh` asks.
 
 Both anchors carry `99991231235959Z`, RFC 5280's "no well-defined expiration
 date". They are distributed out of band and pinned by every node, so an expiry

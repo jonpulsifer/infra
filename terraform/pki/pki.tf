@@ -11,7 +11,7 @@
 # path through: OpenSSL reports "path length constraint exceeded". Go anchors on
 # the published cluster CA and never walks up, which is why every Go client in
 # the fleet accepts it. scripts/pki/reissue-trust-anchors.sh mints replacements;
-# scripts/pki/verify-chain.py reports where the committed certs stand.
+# `mise run pki:verify` reports where the committed certs stand.
 #
 # The intermediate's private key is read from 1Password at plan/apply time and
 # therefore transits Terraform state, as do the generated private keys. This is
@@ -118,7 +118,7 @@ resource "tls_locally_signed_cert" "cluster_ca" {
   # issued certificates carry no pathLenConstraint at all. Setting 1 emits
   # pathLen:1, which is why the omission is the zero value and not the fork.
   # The attribute stays so the intent is recorded and starts working if the
-  # provider distinguishes them; scripts/pki/verify-chain.py asserts the depth
+  # provider distinguishes them; `mise run pki:verify` asserts the depth
   # that actually holds, which the intermediate's pathLen:1 enforces from above
   # for anything that validates a full path.
   max_path_length = 0

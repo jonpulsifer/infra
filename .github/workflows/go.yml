@@ -17,11 +17,13 @@ on:
     branches: [main]
     paths:
       - 'apps/bosun/**'
+      - 'apps/fml-pki/**'
       - 'apps/spindrift-verifier/**'
       - '.github/workflows/go.yml'
   pull_request:
     paths:
       - 'apps/bosun/**'
+      - 'apps/fml-pki/**'
       - 'apps/spindrift-verifier/**'
       - '.github/workflows/go.yml'
 
@@ -40,6 +42,7 @@ jobs:
       matrix:
         module:
           - apps/bosun
+          - apps/fml-pki
           - apps/spindrift-verifier
     defaults:
       run:
