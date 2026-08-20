@@ -38,6 +38,15 @@ spec:
           condition: or (container.image.repository in (docker.io/kiwigrid/k8s-sidecar, quay.io/kiwigrid/k8s-sidecar))
           override:
             condition: append
+      rules-quiet-k8s-api.yaml: |-
+        # 416,970 of 417,006 falco events in 24h are this one rule. Every
+        # in-cluster controller trips it, and thousands arrive with
+        # container.image.repository unresolved, so the k8s_containers
+        # allow-list above structurally cannot match them.
+        - rule: Contact K8S API Server From Container
+          enabled: false
+          override:
+            enabled: replace
     resources:
       requests:
         memory: 2Gi
@@ -72,20 +81,8 @@ spec:
           grafanaDashboard:
             enabled: true
             namespace: monitoring
+      # The webui's bundled redis stores every event with no TTL, no
+      # maxmemory and no memory limit. Events already land in VictoriaLogs
+      # via the loki output above, at 30d retention with a Grafana dashboard.
       webui:
-        enabled: true
-        ingress:
-          enabled: true
-          annotations:
-            cert-manager.io/cluster-issuer: ${CERT_CLUSTER_ISSUER}
-            hajimari.io/enable: "true"
-            hajimari.io/icon: "mdi:bird"
-          hosts:
-            - host: &host "falco.${SECRET_DOMAIN}"
-              paths:
-                - path: /
-                  pathType: Prefix
-          tls:
-            - hosts:
-                - *host
-              secretName: *host
+        enabled: false
