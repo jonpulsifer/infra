@@ -125,15 +125,17 @@ export const DEFAULT_CLAIM_TIMEOUT_MS = 15 * 60_000;
 export const DEPLOY_HEARTBEAT_MS = 60_000;
 
 /**
- * The longest an attempt may hold its lease alive, after which it stops asking.
+ * The longest an attempt may keep refreshing its lease.
  *
- * Twice the adapters' own convergence deadline, and the cap is the whole point:
- * an unbounded heartbeat is exactly the hang it was meant to survive, because a
- * call that never returns would keep refreshing the lease forever and turn a
- * fifteen-minute self-healing stall into a permanent one. Past this the lease
- * legitimately expires and another reconciler takes the row — which is safe now
- * only because {@link deploys.attemptId} stops the abandoned attempt from
- * writing anything when it finally comes back.
+ * Three times the adapters' own convergence deadline (their `DEFAULT_TIMEOUT_MS`
+ * is ten minutes), and the cap is the whole point: an unbounded heartbeat is
+ * exactly the hang it was meant to survive, because a call that never returns
+ * would keep refreshing the lease forever and turn a self-healing stall into a
+ * permanent one. Past this the lease ages out over the following
+ * {@link DEFAULT_CLAIM_TIMEOUT_MS} and another reconciler takes the row, so a
+ * hung apply is somebody else's again forty-five minutes after it was claimed —
+ * which is safe only because {@link deploys.attemptId} stops the abandoned
+ * attempt from writing anything when it finally comes back.
  */
 export const DEPLOY_ATTEMPT_MAX_MS = 30 * 60_000;
 
@@ -418,17 +420,20 @@ export async function runAttempt(
   const targetRef = deployTargetOf(subject.target, subject.vessel);
 
   let lost = false;
-  const heartbeatUntil = context.clock.now().getTime() + DEPLOY_ATTEMPT_MAX_MS;
+  const refreshUntil = context.clock.now().getTime() + DEPLOY_ATTEMPT_MAX_MS;
   const heartbeat = setInterval(() => {
-    // Past the cap the attempt stops asking and lets the lease expire. That is
-    // the point of the cap: a heartbeat that outlived every deadline is a hang,
-    // and refreshing it forever would make this stall permanent instead of
-    // self-healing.
-    if (context.clock.now().getTime() >= heartbeatUntil) {
-      clearInterval(heartbeat);
-      return;
-    }
-    void heartbeatAttempt(context, deploy.id, attemptId).then(
+    // The tick has two jobs and the cap ends only one of them. Refreshing
+    // `updated_at` is what keeps a slow-but-healthy apply out of the reclaim,
+    // and past the cap that stops: a heartbeat which outlived every deadline is
+    // a hang, and renewing it forever would make the stall permanent instead of
+    // self-healing. Asking whether the row is still ours does *not* stop, and
+    // the ticks past the cap are the only ones that can ever answer no — a
+    // reclaim needs DEFAULT_CLAIM_TIMEOUT_MS of silence, so it cannot happen
+    // until long after the last refresh. Ending the timer at the cap left this
+    // attempt streaming into a log somebody else now owns for the rest of its
+    // life; keeping it alive read-only is how `lost` gets to fire.
+    const refreshLease = context.clock.now().getTime() < refreshUntil;
+    void heartbeatAttempt(context, deploy.id, attemptId, refreshLease).then(
       (held) => {
         if (!held) lost = true;
       },
@@ -496,24 +501,33 @@ async function abandon(
 }
 
 /**
- * Say the attempt is still running, and report whether it still holds the claim.
+ * Report whether the attempt still holds the claim, optionally saying so first.
  *
  * Exported apart from the timer that calls it so the part with a decision in it
  * is testable under an injected clock, while the untestable `setInterval` stays
  * the two lines around it. `false` means the row has moved on — either its
  * `attempt_id` is somebody else's now, or the Deploy is gone.
+ *
+ * `refreshLease` is the half {@link DEPLOY_ATTEMPT_MAX_MS} takes away. Read-only
+ * it answers the same question without renewing a lease the cap has decided
+ * should expire, which is what lets an attempt past the cap still find out it
+ * was reclaimed.
  */
 export async function heartbeatAttempt(
   context: DeployLoopContext,
   deployId: number,
   attemptId: string | null,
+  refreshLease = true,
 ): Promise<boolean> {
   if (attemptId === null) return false;
-  const held = await context.db
-    .update(deploys)
-    .set({ updatedAt: context.clock.now() })
-    .where(and(eq(deploys.id, deployId), eq(deploys.attemptId, attemptId)))
-    .returning({ id: deploys.id });
+  const mine = fencedOn(deployId, attemptId);
+  const held = refreshLease
+    ? await context.db
+        .update(deploys)
+        .set({ updatedAt: context.clock.now() })
+        .where(mine)
+        .returning({ id: deploys.id })
+    : await context.db.select({ id: deploys.id }).from(deploys).where(mine);
   return held.length > 0;
 }
 

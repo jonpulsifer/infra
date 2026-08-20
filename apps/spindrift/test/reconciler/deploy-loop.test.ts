@@ -39,6 +39,7 @@ import {
   claimNextDeploy,
   DEFAULT_CLAIM_TIMEOUT_MS,
   DEFAULT_INTERVALS,
+  DEPLOY_ATTEMPT_MAX_MS,
   type DeployLoopContext,
   heartbeatAttempt,
   intervalFor,
@@ -945,6 +946,48 @@ describe('the attempt fence (ticket 129)', () => {
     // how a reclaimed attempt learns to stop before it finishes.
     expect(
       await heartbeatAttempt(beating, deploy.id, crypto.randomUUID()),
+    ).toBe(false);
+  });
+
+  test('past the attempt cap the heartbeat still notices a reclaim without renewing the lease', async () => {
+    const { deploy } = await pendingDeploy();
+    const adapter = new FakeDeployAdapter();
+    const held = await claimNextDeploy(context(adapter));
+
+    // A reclaim cannot happen until DEFAULT_CLAIM_TIMEOUT_MS after the last
+    // refresh, so it lands *past* DEPLOY_ATTEMPT_MAX_MS — the window in which
+    // the attempt has stopped refreshing but is still running. Ticks in that
+    // window are the only ones that can ever answer no.
+    const afterCap = FROZEN.getTime() + DEPLOY_ATTEMPT_MAX_MS;
+    const observing = context(adapter, {
+      clock: { now: () => new Date(afterCap) },
+    });
+    expect(
+      await heartbeatAttempt(observing, deploy.id, held!.attemptId, false),
+    ).toBe(true);
+    // Read-only: it answered without moving the column the reclaim reads, which
+    // is what the cap took away and what keeps the lease expiring on schedule.
+    expect((await deployRow(deploy.id))?.updatedAt).toEqual(FROZEN);
+
+    const reclaimTime = new Date(afterCap + DEFAULT_CLAIM_TIMEOUT_MS + 1);
+    const reclaimed = await claimNextDeploy(
+      context(new FakeDeployAdapter(), {
+        db: createDb(database().connect()),
+        clock: { now: () => reclaimTime },
+      }),
+    );
+    expect(reclaimed?.id).toBe(deploy.id);
+
+    // And now the still-running attempt finds out, which is the whole reason
+    // the timer outlives the cap: `lost` is what stops it streaming into a log
+    // somebody else owns.
+    expect(
+      await heartbeatAttempt(
+        context(adapter, { clock: { now: () => reclaimTime } }),
+        deploy.id,
+        held!.attemptId,
+        false,
+      ),
     ).toBe(false);
   });
 });
