@@ -1,9 +1,17 @@
 # FML PKI: per-cluster Kubernetes CAs and ServiceAccount token signers.
 #
-#   FML Root CA (offline; 1P ujhf4f5cwerdwtpn27fn52kvwq, ca.crt only)
-#   └─ FML Intermediate CA (1P ofl5zkj2rcjnexv3f45wc5i7aq, ca.crt + ca.key)
-#      └─ FML K8s <cluster> CA (issued here; CA:TRUE, pathLen:0)
+#   FML Root CA (offline; 1P ujhf4f5cwerdwtpn27fn52kvwq, ca.crt only) pathLen:2
+#   └─ FML Intermediate CA (1P ofl5zkj2rcjnexv3f45wc5i7aq, ca.crt + ca.key) pathLen:1
+#      └─ FML K8s <cluster> CA (issued here; CA:TRUE)
 #         └─ <cluster> SA token signer (issued here; leaf, RSA-4096, 1y)
+#
+# Two CAs follow the root and one follows the intermediate, so those are the
+# pathLen values the chain requires. The anchors in 1Password still carry
+# pathLen:1 and pathLen:0, one lower than that, which no client can build a full
+# path through: OpenSSL reports "path length constraint exceeded". Go anchors on
+# the published cluster CA and never walks up, which is why every Go client in
+# the fleet accepts it. scripts/pki/reissue-trust-anchors.sh mints replacements;
+# scripts/pki/verify-chain.py reports where the committed certs stand.
 #
 # The intermediate's private key is read from 1Password at plan/apply time and
 # therefore transits Terraform state, as do the generated private keys. This is
@@ -104,7 +112,15 @@ resource "tls_locally_signed_cert" "cluster_ca" {
   ca_cert_pem        = local.fml_intermediate_cert
 
   is_ca_certificate = true
-  # Guardrail: this CA may only issue end-entity certs, never another CA.
+  # Intended guardrail: this CA may only issue end-entity certs, never another
+  # CA. It does not currently take effect. opentofu/tls drops max_path_length
+  # when it is 0 — Go cannot tell an unset attribute from a zero one — so the
+  # issued certificates carry no pathLenConstraint at all. Setting 1 emits
+  # pathLen:1, which is why the omission is the zero value and not the fork.
+  # The attribute stays so the intent is recorded and starts working if the
+  # provider distinguishes them; scripts/pki/verify-chain.py asserts the depth
+  # that actually holds, which the intermediate's pathLen:1 enforces from above
+  # for anything that validates a full path.
   max_path_length = 0
 
   validity_period_hours = 2 * 8766 # ~2 years

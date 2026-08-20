@@ -109,6 +109,10 @@ description = "Render every *.d2 to the *.svg committed beside it"
 # build and the spindrift image build both consume them and neither has d2.
 run = "bash -lc 'find . -name node_modules -prune -o -name .git -prune -o -name \"*.d2\" -print | while read -r f; do d2 --omit-version --no-xml-tag \"$f\" \"${f%.d2}.svg\"; done'"
 
+[tasks."pki:verify"]
+description = "Assert the committed FML PKI chain links, anchors on a self-signed root, and admits its own depth"
+run = "python3 scripts/pki/verify-chain.py"
+
 [tasks."docs:check"]
 description = "Docs contract: wikilinks resolve, referenced paths exist, no archaeology"
 run = "bash .github/scripts/docs-contract.sh"
@@ -120,38 +124,35 @@ run = [
 ]
 
 # helper: find bash/sh scripts (excludes python, etc.)
+# Paths are repo-relative: scoping this to dotfiles/ left the repo's own
+# scripts/ unlinted, which is invisible because an empty match still exits 0.
 [tasks._scripts]
 description = "List shell scripts in this repo"
 hide = true
-dir = "dotfiles"
 run = """
-grep -rl '^#!/usr/bin/env bash' .local/bin/* scripts/* 2>/dev/null
+grep -rl '^#!/usr/bin/env bash' dotfiles/.local/bin/* dotfiles/scripts/* scripts/* 2>/dev/null
 """
 
 [tasks.format]
 description = "Format shell scripts with shfmt"
-dir = "dotfiles"
 run = """
 mise run _scripts | xargs shfmt -w -i 2 -ci -bn
 """
 
 [tasks."format:check"]
 description = "Check shell script formatting (no writes)"
-dir = "dotfiles"
 run = """
 mise run _scripts | xargs shfmt -d -i 2 -ci -bn
 """
 
 [tasks.lint]
 description = "Lint shell scripts with shellcheck"
-dir = "dotfiles"
 run = """
 mise run _scripts | xargs shellcheck
 """
 
 [tasks.check]
 description = "Run format check and lint"
-dir = "dotfiles"
 depends = ["format:check", "lint"]
 
 [tasks.deploy]
