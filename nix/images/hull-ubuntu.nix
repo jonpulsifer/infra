@@ -240,11 +240,25 @@ let
       # tmpfs, so it costs the class's memory *and* is gone next boot. Naming it
       # here rather than in a workflow makes it a property of the machine, which
       # is what it is: the runner reads it before any job exists.
-      $bb mkdir -p /mnt/skiff/tools /mnt/skiff/cache/bun /mnt/skiff/cache/xdg
+      #
+      # TMPDIR is the third big writer to come off the class's memory, after
+      # the tool cache and bun's store. Nothing sets it, so `mktemp` and
+      # node/bun's `os.tmpdir()` land on /tmp -- the tmpfs root overlay, which
+      # is guest RAM. This repo's own suite has 26 `mkdtemp(tmpdir())` sites in
+      # apps/spindrift alone, several of them holding an extracted bundle at
+      # the same moment.
+      #
+      # It is wiped every boot, unlike the caches beside it: /tmp's contract is
+      # that a reboot empties it, and a persisting slot would otherwise keep
+      # the leftovers of every job that died before its own cleanup ran.
+      $bb rm -rf /mnt/skiff/tmp
+      $bb mkdir -p /mnt/skiff/tools /mnt/skiff/cache/bun /mnt/skiff/cache/xdg /mnt/skiff/tmp
+      $bb chmod 1777 /mnt/skiff/tmp
       {
         echo 'export SKIFF_CACHE=/mnt/skiff/cache'
         echo 'export RUNNER_TOOL_CACHE=/mnt/skiff/tools'
         echo 'export AGENT_TOOLSDIRECTORY=/mnt/skiff/tools'
+        echo 'export TMPDIR=/mnt/skiff/tmp'
         # $HOME is the tmpfs root, so a tool cache written there is charged
         # against the class's memory -- bun's store alone is ~1.5G, which
         # ENOSPCed the first unmodified workflow this pool served (measured:
