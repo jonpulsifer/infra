@@ -23,13 +23,15 @@ half for the cluster admission policy to pin.
 | Name | Version |
 | ---- | ------- |
 | <a name="requirement_terraform"></a> [terraform](#requirement\_terraform) | >= 1.3.3 |
-| <a name="requirement_google"></a> [google](#requirement\_google) | ~> 7.43.0 |
+| <a name="requirement_google"></a> [google](#requirement\_google) | ~> 7.44.0 |
+| <a name="requirement_google-beta"></a> [google-beta](#requirement\_google-beta) | ~> 7.44.0 |
 
 ## Providers
 
 | Name | Version |
 | ---- | ------- |
-| <a name="provider_google"></a> [google](#provider\_google) | 7.43.0 |
+| <a name="provider_google"></a> [google](#provider\_google) | 7.44.0 |
+| <a name="provider_google-beta"></a> [google-beta](#provider\_google-beta) | 7.44.0 |
 
 ## Modules
 
@@ -41,12 +43,15 @@ half for the cluster admission policy to pin.
 
 | Name | Type |
 | ---- | ---- |
+| [google-beta_google_project_service_identity.developer_connect](https://registry.terraform.io/providers/hashicorp/google-beta/latest/docs/resources/google_project_service_identity) | resource |
 | [google_artifact_registry_repository.images](https://registry.terraform.io/providers/hashicorp/google/latest/docs/resources/artifact_registry_repository) | resource |
 | [google_artifact_registry_repository_iam_binding.admins](https://registry.terraform.io/providers/hashicorp/google/latest/docs/resources/artifact_registry_repository_iam_binding) | resource |
 | [google_artifact_registry_repository_iam_member.reader_vault](https://registry.terraform.io/providers/hashicorp/google/latest/docs/resources/artifact_registry_repository_iam_member) | resource |
+| [google_developer_connect_connection.github](https://registry.terraform.io/providers/hashicorp/google/latest/docs/resources/developer_connect_connection) | resource |
 | [google_org_policy_policy.allow_service_accounts](https://registry.terraform.io/providers/hashicorp/google/latest/docs/resources/org_policy_policy) | resource |
 | [google_org_policy_policy.allowed_cloud_build_worker_pools](https://registry.terraform.io/providers/hashicorp/google/latest/docs/resources/org_policy_policy) | resource |
 | [google_org_policy_policy.allowed_storage_retention_policy_seconds](https://registry.terraform.io/providers/hashicorp/google/latest/docs/resources/org_policy_policy) | resource |
+| [google_project_iam_member.developer_connect_secret_admin](https://registry.terraform.io/providers/hashicorp/google/latest/docs/resources/project_iam_member) | resource |
 | [google_project_service.service](https://registry.terraform.io/providers/hashicorp/google/latest/docs/resources/project_service) | resource |
 | [google_storage_bucket.trusted_artifacts](https://registry.terraform.io/providers/hashicorp/google/latest/docs/resources/storage_bucket) | resource |
 | [google_storage_bucket_iam_policy.trusted_artifacts](https://registry.terraform.io/providers/hashicorp/google/latest/docs/resources/storage_bucket_iam_policy) | resource |

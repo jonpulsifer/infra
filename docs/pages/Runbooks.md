@@ -15,6 +15,7 @@ icon:: 🚒
 	- [[Runbooks/Kiosk]] — the Raspberry Pi kiosk hosts: Cage/Wayland, Firefox, container-backed apps
 	- [[Runbooks/Adopt Folly Prometheus Operator CRDs]] — the one-time live ownership stamp and Kustomization wiring that lets folly join `monitoring-crds`
 	- [[Runbooks/Install Spindrift]] — from nothing to an enrolled, Target-connected Spindrift installation: Terraform bootstrap, chart declaration, first-operator enrolment
+	- [[Runbooks/Developer Connect GitHub OAuth]] — one-time browser authorization that moves the trusted-builds GitHub connection from PENDING_USER_OAUTH to COMPLETE
 - ## Conventions
 	- Tag runbook pages `#runbook`, lead with quick checks, then symptom-shaped sections ("If X…"), each with copy-pasteable commands and expected output.
 	- Prefer `mise run <task>` where a task exists; it encodes the correct binary and flags. Give a raw invocation only where mise has no task — deploying to a live host, `sops`, `flux reconcile`.
