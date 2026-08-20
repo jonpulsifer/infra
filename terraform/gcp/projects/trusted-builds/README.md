@@ -69,5 +69,6 @@ No inputs.
 | Name | Description |
 | ---- | ----------- |
 | <a name="output_attestor"></a> [attestor](#output\_attestor) | Binary Authorization attestor id (projects/*/attestors/*) the bluenose vessel root's attestor variable takes. |
+| <a name="output_infra_git_repository_link"></a> [infra\_git\_repository\_link](#output\_infra\_git\_repository\_link) | The infra repo's Developer Connect link (projects/*/locations/*/connections/*/gitRepositoryLinks/*), what a Cloud Build trigger's developer\_connect\_event\_config takes. |
 | <a name="output_supply_chain_manifest_block"></a> [supply\_chain\_manifest\_block](#output\_supply\_chain\_manifest\_block) | The installation manifest's supplyChain block: signer key uri and registry namespace. |
 <!-- END_TF_DOCS -->
