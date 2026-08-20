@@ -4,8 +4,10 @@
 #
 # The hierarchy is Root -> Intermediate -> FML K8s <cluster> CA -> leaf, so two
 # CAs follow the root and one follows the intermediate. The root therefore needs
-# pathLen >= 2 and the intermediate pathLen >= 1. Both currently sit one lower,
-# which makes the chain invalid to any client that builds a full path.
+# pathLen >= 2 and the intermediate pathLen >= 1. An anchor that carries less
+# than that forbids the chain it signs, and no client building a full path can
+# verify it. `mise run pki:verify` reports where the committed certificates
+# stand.
 #
 # The crypto lives in apps/fml-pki, which keeps the previous key, subject and
 # subjectKeyIdentifier, so the replacements are drop-in: everything already
@@ -121,18 +123,38 @@ Next, in order:
        op://$op_vault/$op_intermediate/ca.crt  <- staging/fml-intermediate.pem
      The intermediate's ca.key is unchanged.
 
-  2. Let Atlantis apply terraform/pki. Both cluster CAs and both SA signers are
-     replaced, because their issuer certificate changed.
+  2. Plan and apply terraform/pki. The 1Password edit is not a git change, so
+     nothing autoplans on its own — open a PR that touches terraform/pki/*.tf,
+     or comment: atlantis plan -d terraform/pki
+     Read the plan before applying. It must replace exactly four resources,
+     all tls_locally_signed_cert (both cluster CAs, both SA signers), because
+     their issuer certificate changed. Every tls_private_key must show no
+     change: a diff there marks the 1Password key escrow for replacement, and
+     its prevent_destroy fails the apply.
 
   3. Run scripts/pki/post-rotate.sh folly offsite, which overwrites
      terraform/pki/certs/ from the new state. Delete the staging directory
      afterwards; it is scratch, not the source of truth.
 
-  4. Run mise run pki:verify. It must pass before anything is deployed.
+  4. Delete any *-ca-prev.pem and *-sa-signer-prev.pem it wrote, then rerun it.
+     Those are overlap artifacts for a key rotation. This is not one — the keys
+     survive, so the previous certificates protect nothing, and a duplicate
+     signer certificate publishes the same JWKS kid twice.
 
-  5. Distribute the chain. certs/<cluster>-ca-bundle.pem feeds
-     /var/lib/kubernetes/secrets/ca.pem and from there --root-ca-file, which is
-     what every pod receives as ca.crt. Until that bundle carries the
-     intermediate and root, OpenSSL clients still cannot build a path from the
-     cluster CA on its own.
+  5. Run mise run pki:verify. It must pass before anything is deployed.
+
+  6. Distribute the chain. certs/<cluster>-ca-chain.pem is the file pods need:
+     kube-controller-manager publishes it through --root-ca-file, which becomes
+     every pod's ca.crt, and it carries the cluster CA up to the self-signed
+     root that an OpenSSL client can anchor on.
+
+     Never merge the anchors into certs/<cluster>-ca-bundle.pem. That file
+     feeds services.kubernetes.caFile, which also backs clientCaFile and
+     kubeletClientCaFile: anything issued anywhere under the FML Root would
+     then authenticate to the API server.
+
+  7. Restart cfssl and kube-controller-manager on each control plane after the
+     rebuild. sops-nix compares decrypted plaintext to decide restarts and the
+     keys are unchanged, so neither unit bounces on its own — cfssl keeps
+     serving the old CA and kube-root-ca.crt is never republished.
 EOF
