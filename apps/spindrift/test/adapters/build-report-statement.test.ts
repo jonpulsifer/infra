@@ -7,12 +7,31 @@
  * suite and refused every real build at admission, after the image was pushed.
  * A fixture cannot catch that. Running the step's own `run:` script can.
  *
- * `docker buildx imagetools inspect` is not on the box here; the step guards
- * that lookup with `|| true` and reports `baseDigest: null`, which is the same
- * answer §16 wants from a builder that cannot read its own base.
+ * The step's base-digest probe shells out to `docker buildx imagetools inspect`,
+ * and this file supplies its own `docker` on `PATH` rather than letting the box
+ * decide. Inheriting the runner's `PATH` made the probe an unbounded network
+ * call: a hosted runner has Docker and the buildx plugin — the same CI job
+ * starts this suite's Postgres with `docker run` — so the lookup left the
+ * machine for a digest that does not exist and paid cold DNS, TLS and a
+ * registry token exchange inside a 5-second test budget. `|| true` bounds the
+ * step's exit code, never its clock. That is what made one test per CI run fail
+ * at 5001 ms, a different one each time, and it broke the offline contract the
+ * harness states at `test/harness/db.ts`: the only external process is Postgres.
+ *
+ * A shim also makes the probe testable in both directions, which a box-dependent
+ * one never was — `UNREACHABLE` is the `baseDigest: null` §16 wants from a
+ * builder that cannot read its own base, and `PROVENANCE` exercises the
+ * jq/grep/sed pipeline that turns a percent-encoded package URL into a digest.
  */
 import { describe, expect, test } from 'bun:test';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import {
+  chmod,
+  mkdir,
+  mkdtemp,
+  readFile,
+  rm,
+  writeFile,
+} from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { GitHubActionsBuildRoute } from '../../src/adapters/build/github-actions.ts';
@@ -38,6 +57,29 @@ const AR_DESTINATION =
   'northamerica-northeast1-docker.pkg.dev/trusted-builds/i/demo/web';
 const DESTINATIONS = [DESTINATION, AR_DESTINATION];
 
+/** The base image `PROVENANCE` names, and what the probe must extract from it. */
+const BASE_DIGEST = `sha256:${'c'.repeat(64)}`;
+
+/**
+ * A `docker` that cannot answer — the shape this file has always asserted.
+ *
+ * It stands in for both an absent binary and a registry the runner cannot
+ * reach, because the step cannot tell those apart: each writes nothing to
+ * stdout and exits non-zero, and `|| true` turns both into `baseDigest: null`.
+ */
+const UNREACHABLE = 'exit 1';
+
+/**
+ * A `docker` that answers the way buildx does, `sha256%3A` and all.
+ *
+ * The percent-encoding is the point: buildx emits the base as a package URL,
+ * so the step greps for `sha256(:|%3A)` and `sed`s the escape back out. A
+ * fixture spelling the digest plainly would pass without that arm working.
+ */
+const PROVENANCE = `cat <<'JSON'
+{"SLSA":{"materials":[{"uri":"pkg:docker/library/alpine@${BASE_DIGEST.replace(':', '%3A')}?platform=linux%2Famd64"}]}}
+JSON`;
+
 /** The `run:` script of the named step, straight out of the shipped file. */
 async function reportScript(): Promise<string> {
   const document = Bun.YAML.parse(await Bun.file(WORKFLOW).text()) as {
@@ -50,12 +92,30 @@ async function reportScript(): Promise<string> {
   return step.run;
 }
 
-/** Run that script the way a runner does, and read what it printed. */
-async function runReportStep() {
+/**
+ * Run that script the way a runner does, and read what it printed.
+ *
+ * `docker` is the only tool the step calls that this repo does not control the
+ * behaviour of, so it is the only one shimmed; `jq`, `grep` and `sed` come from
+ * the real `PATH` because the step's parsing is what is under test.
+ */
+async function runReportStep(docker: string = UNREACHABLE) {
   const directory = await mkdtemp(join(tmpdir(), 'spindrift-report-'));
   try {
     const script = join(directory, 'report.sh');
     await writeFile(script, await reportScript());
+
+    // Recorded rather than merely stubbed: a probe that stopped running would
+    // still report `baseDigest: null` and still pass the assertion below, so
+    // the argv file is what separates "answered null" from "never asked".
+    const argv = join(directory, 'docker-argv');
+    const bin = join(directory, 'bin');
+    await mkdir(bin, { recursive: true });
+    await writeFile(
+      join(bin, 'docker'),
+      `#!/usr/bin/env bash\nprintf '%s\\n' "$@" >> ${JSON.stringify(argv)}\n${docker}\n`,
+    );
+    await chmod(join(bin, 'docker'), 0o755);
     // `bash`, not `sh`: a GitHub Actions `run:` block runs under
     // `bash --noprofile --norc -e -o pipefail` on a Linux runner, and this step
     // opens with `set -euo pipefail`. Under a POSIX `sh` — dash on the runner
@@ -66,7 +126,7 @@ async function runReportStep() {
       stdout: 'pipe',
       stderr: 'pipe',
       env: {
-        PATH: Bun.env.PATH ?? '',
+        PATH: `${bin}:${Bun.env.PATH ?? ''}`,
         BUNDLE_DIGEST,
         DESTINATION,
         DESTINATIONS: DESTINATIONS.join('\n'),
@@ -82,7 +142,12 @@ async function runReportStep() {
       new Response(child.stderr).text(),
       child.exited,
     ]);
-    return { stdout, stderr, exitCode };
+    return {
+      stdout,
+      stderr,
+      exitCode,
+      argv: await readFile(argv, 'utf8').catch(() => ''),
+    };
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
@@ -107,6 +172,25 @@ describe('the hosted route reports a statement admission can read', () => {
       DESTINATIONS.map((destination) => `${destination}@${IMAGE_DIGEST}`),
     );
     expect(report?.baseDigest).toBeNull();
+  });
+
+  test('a base the registry will not answer for is reported as null', async () => {
+    const { exitCode, argv, stdout } = await runReportStep(UNREACHABLE);
+
+    // The probe asked, and asked for the immutable reference this build pushed
+    // — `baseDigest: null` here is a refusal to guess, not a step that skipped.
+    expect(argv).toContain(`${DESTINATION}@${IMAGE_DIGEST}`);
+    expect(exitCode).toBe(0);
+    expect(parseBuildReport(stdout)?.baseDigest).toBeNull();
+  });
+
+  test('a base the registry does answer for survives percent-decoding', async () => {
+    const { exitCode, stdout } = await runReportStep(PROVENANCE);
+    expect(exitCode).toBe(0);
+
+    // The whole point of the arm: buildx spells the digest `sha256%3A…` inside
+    // a package URL, and what admission compares against is `sha256:…`.
+    expect(parseBuildReport(stdout)?.baseDigest).toBe(BASE_DIGEST);
   });
 
   /**
