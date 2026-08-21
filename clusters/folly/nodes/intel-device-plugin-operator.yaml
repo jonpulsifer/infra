@@ -22,4 +22,47 @@ spec:
     manager:
       devices:
         gpu: true
+  # manager.devices only ever reaches the operator's --devices= argument. The
+  # chart writes all eighteen webhooks regardless, so seventeen of them name
+  # paths this operator does not serve. Two are pod-scoped and fail open, which
+  # means every pod created anywhere in the cluster pays two admission
+  # round-trips that the API server then logs as failures; the rest are
+  # failurePolicy Fail on CR paths, so creating one of those device plugins
+  # today would be rejected rather than simply ignored.
+  #
+  # Keyed by name rather than list index, so a chart bump cannot silently
+  # re-point a delete at the wrong webhook, and a name that stops existing is
+  # tolerated instead of wedging the release. Delete the matching pair of
+  # entries here if another device is ever enabled above.
+  postRenderers:
+    - kustomize:
+        patches:
+          - patch: |
+              apiVersion: admissionregistration.k8s.io/v1
+              kind: MutatingWebhookConfiguration
+              metadata:
+                name: inteldeviceplugins-mutating-webhook-configuration
+              webhooks:
+                - {name: fpga.mutator.webhooks.intel.com, $patch: delete}
+                - {name: sgx.mutator.webhooks.intel.com, $patch: delete}
+                - {name: mdlbdeviceplugin.kb.io, $patch: delete}
+                - {name: mdsadeviceplugin.kb.io, $patch: delete}
+                - {name: mfpgadeviceplugin.kb.io, $patch: delete}
+                - {name: miaadeviceplugin.kb.io, $patch: delete}
+                - {name: mnpudeviceplugin.kb.io, $patch: delete}
+                - {name: mqatdeviceplugin.kb.io, $patch: delete}
+                - {name: msgxdeviceplugin.kb.io, $patch: delete}
+          - patch: |
+              apiVersion: admissionregistration.k8s.io/v1
+              kind: ValidatingWebhookConfiguration
+              metadata:
+                name: inteldeviceplugins-validating-webhook-configuration
+              webhooks:
+                - {name: vdlbdeviceplugin.kb.io, $patch: delete}
+                - {name: vdsadeviceplugin.kb.io, $patch: delete}
+                - {name: vfpgadeviceplugin.kb.io, $patch: delete}
+                - {name: viaadeviceplugin.kb.io, $patch: delete}
+                - {name: vnpudeviceplugin.kb.io, $patch: delete}
+                - {name: vqatdeviceplugin.kb.io, $patch: delete}
+                - {name: vsgxdeviceplugin.kb.io, $patch: delete}
   

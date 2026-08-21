@@ -15,3 +15,26 @@ spec:
         name: node-feature-discovery
   values:
     fullnameOverride: node-feature-discovery
+    # Both settings exist to survive an API server that is briefly unreachable.
+    # Neither component tolerates one by default, and folly's control plane goes
+    # away for minutes at a time whenever its disk saturates.
+    master:
+      # replicaCount is 1, so the lease protects nothing — and losing it is the
+      # only way into an upstream nil-deref in NamespaceLister.stop, which has
+      # taken the master down 261 times across 909 leadership transitions.
+      # master.yaml hardcodes -enable-leader-election with no value guarding it,
+      # but renders extraArgs afterwards and nfd-master parses with stdlib flag,
+      # so the last occurrence wins.
+      extraArgs:
+        - "-enable-leader-election=false"
+    worker:
+      config:
+        core:
+          # The worker's first act is a self-GET on its own Pod to inherit an
+          # ownerReference for its NodeFeature, and it exits rather than retries
+          # when that fails — 1,565 restarts across three pods. This is the flag
+          # upstream provides to skip it, and it is the only API call the worker
+          # makes before it can do any work. The NodeFeature object loses its
+          # owning-Pod reference; it is per-node and updated in place, and
+          # nfd-gc still collects objects for deleted nodes.
+          noOwnerRefs: true
