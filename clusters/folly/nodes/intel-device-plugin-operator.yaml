@@ -17,4 +17,9 @@ spec:
     - name: node-feature-discovery
   values:
     fullnameOverride: intel-device-plugin-operator
+    # Only riptide's UHD 630 exists here, and GpuDevicePlugin is the only CR.
+    # Without this the operator runs watches for all eight device types.
+    manager:
+      devices:
+        gpu: true
   
