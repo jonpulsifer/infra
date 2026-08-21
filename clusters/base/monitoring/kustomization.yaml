@@ -13,6 +13,7 @@ resources:
   - alertmanager-discord.yaml
   - bosun-rules.yaml
   - coredns-rules.yaml
+  - etcd-rules.yaml
   - grafana-dashboards
   - helm-repository-grafana.yaml
   - helm-repository-prometheus.yaml
