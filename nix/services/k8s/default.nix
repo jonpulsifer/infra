@@ -15,6 +15,7 @@ let
   fmlSignerCert = ../../../terraform/pki/certs/${cfg.network}-sa-signer.pem;
   fmlClusterCaCert = ../../../terraform/pki/certs/${cfg.network}-ca.pem;
   fmlClusterCaBundle = ../../../terraform/pki/certs/${cfg.network}-ca-bundle.pem;
+  fmlClusterCaChain = ../../../terraform/pki/certs/${cfg.network}-ca-chain.pem;
   cfsslCaPrefix = "${config.services.cfssl.dataDir}/ca";
 in
 {
@@ -221,6 +222,20 @@ in
         controllerManager = {
           enable = true;
           serviceAccountKeyFile = config.sops.secrets."k8s-sa-signing-key".path;
+          # --root-ca-file is what every pod receives as ca.crt, through the
+          # kube-root-ca.crt ConfigMap. The cluster CA is not self-signed, so
+          # on its own an OpenSSL client cannot build a path out of it and
+          # fails with "unable to get issuer certificate" — Go accepts it only
+          # because it treats any certificate in a trust store as an anchor.
+          # The chain carries the cluster CA up to the self-signed root.
+          #
+          # Deliberately not caFile: that one also backs clientCaFile and
+          # kubeletClientCaFile, where the FML anchors would let anything
+          # issued under the FML Root authenticate to the API server.
+          #
+          # mkForce because nixpkgs assigns rootCaFile from the cfssl-issued
+          # controller-manager client CA without mkDefault.
+          rootCaFile = lib.mkIf cfg.clusterCa.enable (lib.mkForce fmlClusterCaChain);
         };
         scheduler.enable = true;
         addonManager.enable = false;

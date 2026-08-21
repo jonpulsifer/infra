@@ -201,15 +201,19 @@ func cmdInspect(args []string) error {
 	if len(args) == 0 {
 		usage()
 	}
+	// Every certificate, because the files worth inspecting most are the
+	// bundle and the chain, and readCert refuses anything but a lone cert.
 	for _, p := range args {
-		cert, err := readCert(p)
+		certs, err := readCerts(p)
 		if err != nil {
 			return err
 		}
-		fmt.Printf("%s: subject=%s serial=%X notBefore=%s notAfter=%s\n",
-			filepath.Base(p), cert.Subject, cert.SerialNumber,
-			cert.NotBefore.UTC().Format(time.RFC3339),
-			cert.NotAfter.UTC().Format(time.RFC3339))
+		for _, cert := range certs {
+			fmt.Printf("%s: subject=%s serial=%X notBefore=%s notAfter=%s\n",
+				filepath.Base(p), cert.Subject, cert.SerialNumber,
+				cert.NotBefore.UTC().Format(time.RFC3339),
+				cert.NotAfter.UTC().Format(time.RFC3339))
+		}
 	}
 	return nil
 }
