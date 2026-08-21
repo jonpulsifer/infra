@@ -55,6 +55,11 @@ metadata:
     {{- include "ai-agent.labels" . | nindent 4 }}
 spec:
   replicas: 1
+  # The gateway keeps SQLite on hermes-data. Two pods cannot hold it at once,
+  # and a rolling update deadlocks: the new pod waits on a lock the old pod
+  # only releases once the new one is ready.
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       {{- include "ai-agent.selectorLabels" . | nindent 6 }}
