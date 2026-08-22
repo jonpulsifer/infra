@@ -262,9 +262,8 @@ spec:
       # /var/lib/prometheus-node-exporter-text-files -- the same directory
       # nix/services/spore-native-boot.nix already uses, so the fleet has one
       # drop box and not one per exporter -- and this picks it up, labelled
-      # with the node it came from. That is how bosun on riptide is scraped: its unit
-      # carries an IPAddressDeny every skiff inherits, so a listener in-cluster
-      # Prometheus could reach would open the pod CIDR to job code as well.
+      # with the node it came from. That is how a host service with no
+      # listener in-cluster Prometheus can reach gets its metrics scraped.
       #
       # Reached through the host-root mount the chart already makes, so this
       # needs no extra volume. extraArgs REPLACES the chart's defaults, so the
