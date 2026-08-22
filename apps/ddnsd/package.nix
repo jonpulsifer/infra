@@ -1,9 +1,9 @@
-{ lib, buildGoModule }:
-buildGoModule {
+{ lib, buildGoModule, go_1_27 }:
+(buildGoModule.override { go = go_1_27; }) {
   pname = "ddnsd";
   version = "0.0.1";
   src = ./.;
-  vendorHash = "sha256-YaleUmaptwY/22aZ2Lj/liQjcBmA5ZdPinV9JCnLx0U=";
+  vendorHash = "sha256-Q49uB2DxjqBfOa279WVBRKUCE2hW7u+/jVAAzcV7/dw=";
   subPackages = [ "." ];
 
   meta = with lib; {

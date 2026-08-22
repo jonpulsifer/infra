@@ -1,9 +1,9 @@
 module github.com/jonpulsifer/ddnsd
 
-go 1.25.0
+go 1.27.0
 
 require (
-	codeberg.org/miekg/dns v0.6.101
+	codeberg.org/miekg/dns v0.6.102
 	github.com/cloudflare/cloudflare-go/v7 v7.8.0
 )
 
@@ -12,7 +12,7 @@ require (
 	github.com/tidwall/match v1.1.1 // indirect
 	github.com/tidwall/pretty v1.2.1 // indirect
 	github.com/tidwall/sjson v1.2.5 // indirect
-	golang.org/x/crypto v0.51.0 // indirect
+	golang.org/x/crypto v0.52.0 // indirect
 	golang.org/x/net v0.55.0 // indirect
 	golang.org/x/sys v0.45.0 // indirect
 )

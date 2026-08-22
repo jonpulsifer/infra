@@ -226,3 +226,45 @@ func TestDefaultInterval(t *testing.T) {
 		t.Errorf("DDNSD_INTERVAL=30s: got %v, want 30s", got)
 	}
 }
+
+// TestRefreshReResolves pins the contract that makes ddnsd dynamic: every pass
+// looks the address up again. Reading it once and reusing the value leaves the
+// record pointing at the previous lease forever.
+func TestRefreshReResolves(t *testing.T) {
+	fake := &fakeCloudflare{
+		zoneID:   "zone-123",
+		zoneName: "example.com",
+		records: map[string]fakeRecord{
+			"rec-1": {Type: "A", Name: "host.example.com", Content: "192.0.2.1", Proxied: false},
+		},
+	}
+	api := newTestClient(t, fake)
+
+	addresses := []string{"192.0.2.1", "198.51.100.7"}
+	resolved := 0
+	original := resolveIP
+	t.Cleanup(func() { resolveIP = original })
+	resolveIP = func(context.Context) (string, error) {
+		ip := addresses[resolved]
+		resolved++
+		return ip, nil
+	}
+
+	for range addresses {
+		if err := refresh(context.Background(), api, "host", "example.com", false, testLogger()); err != nil {
+			t.Fatalf("refresh: %v", err)
+		}
+	}
+
+	if resolved != len(addresses) {
+		t.Errorf("resolved %d times, want %d", resolved, len(addresses))
+	}
+	// First pass matches the existing record and writes nothing; the second
+	// sees a new address and must push it.
+	if len(fake.updates) != 1 {
+		t.Fatalf("expected 1 update, got %d", len(fake.updates))
+	}
+	if got := fake.updates[0].Content; got != "198.51.100.7" {
+		t.Errorf("updated to %q, want the freshly resolved address", got)
+	}
+}

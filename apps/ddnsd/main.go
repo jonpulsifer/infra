@@ -65,22 +65,16 @@ func main() {
 		os.Exit(1)
 	}
 
+	logger = logger.With("name", *name, "zone", *zone, "proxied", *proxied)
+
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-
-	ip, err := getIP(ctx)
-	if err != nil {
-		logger.Error("Failed to get IP address", "error", err.Error())
-		os.Exit(1)
-	}
-
-	logger = logger.With("name", *name, "zone", *zone, "ip", ip, "proxied", *proxied)
 
 	api := cloudflare.NewClient(
 		option.WithAPIToken(*token),
 	)
 
-	if err := update(ctx, api, ip, *name, *zone, *proxied, logger); err != nil {
+	if err := refresh(ctx, api, *name, *zone, *proxied, logger); err != nil {
 		logger.Error("Update failed", "error", err.Error())
 		os.Exit(1)
 	}
@@ -97,12 +91,29 @@ func main() {
 			logger.Info("Shutting down due to signal")
 			return
 		case <-ticker.C:
-			if err := update(ctx, api, ip, *name, *zone, *proxied, logger); err != nil {
+			// A failed tick is not fatal. The address is resolved again from
+			// scratch on the next one, and exiting here would turn a single
+			// DNS timeout into a service restart.
+			if err := refresh(ctx, api, *name, *zone, *proxied, logger); err != nil {
 				logger.Error("Update failed", "error", err.Error())
-				os.Exit(1)
 			}
 		}
 	}
+}
+
+// resolveIP is the address lookup refresh uses, swapped out in tests.
+var resolveIP = getIP
+
+// refresh resolves the current public address and reconciles the record with
+// it. The lookup happens on every pass: an address read once at startup goes
+// stale the moment the ISP hands out a new lease, which is the one thing a
+// dynamic DNS client exists to notice.
+func refresh(ctx context.Context, api *cloudflare.Client, name, zone string, proxied bool, logger *slog.Logger) error {
+	ip, err := resolveIP(ctx)
+	if err != nil {
+		return fmt.Errorf("getting IP address: %w", err)
+	}
+	return update(ctx, api, ip, name, zone, proxied, logger.With("ip", ip))
 }
 
 func update(ctx context.Context, api *cloudflare.Client, ip, name, zone string, proxied bool, logger *slog.Logger) error {
