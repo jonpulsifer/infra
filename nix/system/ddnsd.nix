@@ -2,6 +2,7 @@
   config,
   lib,
   pkgs,
+  inputs,
   ...
 }:
 let
@@ -15,7 +16,7 @@ in
   ];
 
   nixpkgs.overlays = [
-    (import ../overlays/ddnsd.nix)
+    (import ../overlays/ddnsd.nix inputs.unstable)
   ];
 
   services.ddnsd = {

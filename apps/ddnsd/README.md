@@ -22,7 +22,7 @@ Before you begin, ensure you have met the following requirements:
 
 - A Cloudflare account and API token with permissions to edit DNS records
 - The zone (domain) name for which you want to update the DNS record
-- Go 1.25 or later, to build from source
+- Go 1.27 or later, to build from source
 
 ## 🛠 Installation
 
