@@ -1,0 +1,70 @@
+---
+# Everything in this repo reaches a cluster through Flux, so a resource that
+# stops reconciling stops the delivery of every change behind it — silently,
+# because the object keeps serving whatever it applied last. These read
+# flux-operator's `flux_resource_info` (declared in flux-monitoring.yaml),
+# which carries one series per Flux object with its readiness and reason.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: flux
+  namespace: monitoring
+  labels:
+    lolwtf.ca/service: flux
+    release: prom-stack
+spec:
+  groups:
+    - name: flux
+      rules:
+        # ready is a three-state label: True, False, and Unknown while a
+        # reconcile is in flight. Matching `!= "True"` covers a wedge that
+        # parks on Progressing, and 15m is well past the slowest healthy
+        # reconcile in either cluster.
+        #
+        # Suspended objects are excluded here and carry their own alert
+        # below: a suspension is a decision, an unready object is a fault.
+        - alert: FluxResourceNotReady
+          expr: flux_resource_info{ready!="True", suspended="False"} == 1
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            message: "{{ $labels.kind }}/{{ $labels.name }} in {{ $labels.exported_namespace }} has not reconciled: {{ $labels.reason }}"
+            description: "Flux has been unable to converge this object for 15 minutes, so every change behind it is undelivered while the cluster keeps running what was applied last. `flux get all -A --status-selector ready=false` names it; the object's conditions carry the error. A dangling HelmChart whose HelmRepository is gone reports SourceUnavailable and has no owner to prune it — that one is deleted by hand."
+
+        # Suspension is how a human parks a resource to work on it. Left
+        # parked, it is indistinguishable from a resource that is up to date,
+        # and the next change to it goes nowhere. A day is long enough that
+        # deliberate work is not interrupted.
+        - alert: FluxResourceSuspended
+          expr: flux_resource_info{suspended="True"} == 1
+          for: 24h
+          labels:
+            severity: warning
+          annotations:
+            message: "{{ $labels.kind }}/{{ $labels.name }} in {{ $labels.exported_namespace }} has been suspended for a day"
+            description: "A suspended object ignores git. Resume it with `flux resume {{ $labels.kind | lower }} -n {{ $labels.exported_namespace }} {{ $labels.name }}`, or delete it if it is no longer wanted."
+
+        # Both alerts above are readings of one exporter. If it stops, they go
+        # quiet and the silence reads exactly like a healthy tree, so the
+        # exporter needs its own deadman.
+        - alert: FluxMetricsMissing
+          expr: absent(flux_instance_info)
+          for: 15m
+          labels:
+            severity: critical
+          annotations:
+            message: flux-operator has stopped exporting the state of the GitOps tree
+            description: "No flux_instance_info series for 15 minutes: flux-operator is down, or the ServiceMonitor in flux-system no longer matches it. Every other Flux alert is blind until this returns — check the operator's Deployment in flux-system, then the target in Prometheus."
+
+        # The operator reconciles the Flux installation itself. When it is
+        # unready the controllers may still be running, but their versions and
+        # configuration have stopped tracking what the FluxInstance declares.
+        - alert: FluxInstanceNotReady
+          expr: flux_instance_info{ready!="True"} == 1
+          for: 15m
+          labels:
+            severity: critical
+          annotations:
+            message: "FluxInstance {{ $labels.name }} is not ready: {{ $labels.reason }}"
+            description: "The Flux installation itself has stopped converging. The controllers keep reconciling with whatever they last had, so the tree may look healthy while an upgrade or a config change to Flux is stuck."
