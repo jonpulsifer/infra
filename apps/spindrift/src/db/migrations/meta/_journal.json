@@ -337,6 +337,13 @@
       "when": 1786968540000,
       "tag": "0047_function_env",
       "breakpoints": true
+    },
+    {
+      "idx": 48,
+      "version": "7",
+      "when": 1786968600000,
+      "tag": "0048_vessel_discovery",
+      "breakpoints": true
     }
   ]
 }
