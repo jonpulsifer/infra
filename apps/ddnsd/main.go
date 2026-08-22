@@ -5,18 +5,18 @@ import (
 	"flag"
 	"fmt"
 	"log/slog"
-	"net"
+	"net/netip"
 	"os"
 	"os/signal"
 	"strings"
 	"syscall"
 	"time"
 
+	dnsclient "codeberg.org/miekg/dns"
 	"github.com/cloudflare/cloudflare-go/v7"
 	"github.com/cloudflare/cloudflare-go/v7/dns"
 	"github.com/cloudflare/cloudflare-go/v7/option"
 	"github.com/cloudflare/cloudflare-go/v7/zones"
-	dnsclient "github.com/miekg/dns"
 )
 
 var (
@@ -65,16 +65,16 @@ func main() {
 		os.Exit(1)
 	}
 
-	ip, err := getIP()
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	ip, err := getIP(ctx)
 	if err != nil {
 		logger.Error("Failed to get IP address", "error", err.Error())
 		os.Exit(1)
 	}
 
 	logger = logger.With("name", *name, "zone", *zone, "ip", ip, "proxied", *proxied)
-
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
 
 	api := cloudflare.NewClient(
 		option.WithAPIToken(*token),
@@ -195,27 +195,23 @@ func update(ctx context.Context, api *cloudflare.Client, ip, name, zone string, 
 	return nil
 }
 
-func getIP() (string, error) {
-	var ip string
-	m := new(dnsclient.Msg)
-	m.Id = dnsclient.Id()
-	m.RecursionDesired = true
-	m.Question = make([]dnsclient.Question, 1)
-	m.Question[0] = dnsclient.Question{Name: "whoami.cloudflare.", Qtype: dnsclient.TypeTXT, Qclass: dnsclient.ClassCHAOS}
+func getIP(ctx context.Context) (string, error) {
+	m := dnsclient.NewMsg("whoami.cloudflare.", dnsclient.TypeTXT, dnsclient.ClassCHAOS)
 
-	c := new(dnsclient.Client)
-	in, _, err := c.Exchange(m, "1.1.1.1:53")
+	in, err := dnsclient.Exchange(ctx, m, "udp", "1.1.1.1:53")
 	if err != nil {
-		return ip, err
+		return "", err
 	}
 
-	if t, ok := in.Answer[0].(*dnsclient.TXT); ok {
-		ip = t.Txt[0]
+	var ip string
+	if len(in.Answer) > 0 {
+		if t, ok := in.Answer[0].(*dnsclient.TXT); ok && len(t.Txt) > 0 {
+			ip = t.Txt[0]
+		}
 	}
 
-	if net.ParseIP(ip) == nil {
+	if _, err := netip.ParseAddr(ip); err != nil {
 		return ip, fmt.Errorf("could not determine IP address: %s", ip)
-
 	}
 	return ip, nil
 }

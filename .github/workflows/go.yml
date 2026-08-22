@@ -17,12 +17,14 @@ on:
     branches: [main]
     paths:
       - 'apps/bosun/**'
+      - 'apps/ddnsd/**'
       - 'apps/fml-pki/**'
       - 'apps/spindrift-verifier/**'
       - '.github/workflows/go.yml'
   pull_request:
     paths:
       - 'apps/bosun/**'
+      - 'apps/ddnsd/**'
       - 'apps/fml-pki/**'
       - 'apps/spindrift-verifier/**'
       - '.github/workflows/go.yml'
@@ -42,6 +44,7 @@ jobs:
       matrix:
         module:
           - apps/bosun
+          - apps/ddnsd
           - apps/fml-pki
           - apps/spindrift-verifier
     defaults:
@@ -52,8 +55,8 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with:
           go-version-file: ${{ matrix.module }}/go.mod
-          # Both modules are stdlib-only, so there is no go.sum and nothing to
-          # cache. setup-go's default cache looks for one and fails without it.
+          # Most of these modules are stdlib-only and have no go.sum, which
+          # setup-go's default cache looks for and fails without.
           cache: false
       - run: go build ./...
       - run: go vet ./...

@@ -3,7 +3,7 @@ buildGoModule {
   pname = "ddnsd";
   version = "0.0.1";
   src = ./.;
-  vendorHash = "sha256-l8LPlPpG6fHyjvuoSuaSnwTPnsb687TmRih+tn+VV9Y=";
+  vendorHash = "sha256-YaleUmaptwY/22aZ2Lj/liQjcBmA5ZdPinV9JCnLx0U=";
   subPackages = [ "." ];
 
   meta = with lib; {
