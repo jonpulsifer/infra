@@ -29,24 +29,34 @@ import {
   type AuthoredManifest,
   installationManifestSchema,
 } from '../../config/manifest.schema.ts';
-import { ManifestError, validateManifest } from '../../config/manifest.ts';
 import {
-  governedSliceRefusal,
-  writeStoredManifest,
-} from '../../config/manifest-store.ts';
+  ManifestError,
+  parseManifest,
+  trustedGatewayRefusal,
+  validateManifest,
+} from '../../config/manifest.ts';
+import { writeStoredManifest } from '../../config/manifest-store.ts';
 import { targetLabel } from '../../domain/target.ts';
 import { type Command, failed, ok } from '../types.ts';
 
 export const configureInstallationInput = z
   .object({
     /**
-     * The manifest document, parsed but not yet validated.
+     * The manifest document, parsed but not yet validated — or the text of one.
      *
      * `unknown` rather than the schema itself, so a bad document is refused by
      * {@link validateManifest} with every offending key named, instead of by
      * the dispatch layer's generic input refusal with a Zod path. The operator
      * is editing configuration; the sentence they read has to be about their
      * configuration.
+     *
+     * **A string is a document somebody is restoring**, from a file this
+     * installation exported before it was torn down. It is parsed here rather
+     * than in the browser because `parseManifest` is the same reader every
+     * other document goes through — a second parser in the client bundle would
+     * be a second answer to "is this a manifest", and the one that matters is
+     * the server's. YAML, and therefore JSON, so the file the export writes
+     * reads back unchanged.
      */
     manifest: z.unknown(),
   })
@@ -73,7 +83,10 @@ export const configureInstallation: Command<
 > = async (input, context) => {
   let manifest: AuthoredManifest;
   try {
-    manifest = validateManifest(input.manifest, 'the submitted manifest');
+    manifest =
+      typeof input.manifest === 'string'
+        ? parseManifest(input.manifest, 'the restored document')
+        : validateManifest(input.manifest, 'the submitted manifest');
   } catch (cause) {
     if (cause instanceof ManifestError) {
       return failed('INVALID_INPUT', cause.message);
@@ -81,16 +94,19 @@ export const configureInstallation: Command<
     throw cause;
   }
 
-  // The one slice this screen may not drive. A boot re-applies the declaration
-  // to the two vessels this installation is built on, so taking an edit to them
-  // here would be saving a value the next restart discards — the refusal is
-  // what turns that into something an operator reads before it happens. A
-  // `NOT_DEPLOYABLE` fact rather than an `INVALID_INPUT` field error: nothing
-  // in the document is malformed, and no amount of re-typing makes this
-  // installation take it.
-  const governed = governedSliceRefusal(manifest, context.declaration);
-  if (governed !== null) {
-    return failed('NOT_DEPLOYABLE', governed);
+  // What this screen can write that the next restart cannot serve.
+  // `auth.gateway` is refused at boot without the deployment's attestation that
+  // a policy strips identity headers, so a document setting it here saved
+  // cleanly and wedged the web process the next time a pod restarted — hours
+  // later, with nothing connecting the two. `NOT_DEPLOYABLE` rather than
+  // `INVALID_INPUT`: nothing in the document is malformed, and no amount of
+  // re-typing makes this deployment able to honour it.
+  const boundary = trustedGatewayRefusal({
+    auth: manifest.auth,
+    boundary: context.manifest.boundary,
+  });
+  if (boundary !== null) {
+    return failed('NOT_DEPLOYABLE', boundary);
   }
 
   // **Reconciliation makes no refusal of its own.** It used to make exactly one

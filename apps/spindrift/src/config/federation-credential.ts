@@ -70,11 +70,10 @@ type Env = Record<string, string | undefined>;
 /**
  * The federation this deployment declares, or `null` when it declares none.
  *
- * A credential named and absent is an error rather than a `null`, the same
- * distinction {@link loadManifestIfPresent} draws for a mounted manifest: a
- * broken mount is not the same state as no cloud at all, and silently becoming
- * an installation with no cloud Targets is how a deploy fails for a reason
- * nobody can act on.
+ * A credential named and absent is an error rather than a `null`: a broken
+ * mount is not the same state as no cloud at all, and silently becoming an
+ * installation with no cloud Targets is how a deploy fails for a reason nobody
+ * can act on.
  */
 export async function loadDeploymentFederation(
   env: Env = Bun.env,

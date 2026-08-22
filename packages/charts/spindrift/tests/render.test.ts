@@ -209,98 +209,43 @@ describe('migration Job identity', () => {
 });
 
 describe('ui-driven installation configuration', () => {
-  test('renders deployments without requiring a file-based installation manifest', async () => {
+  test('renders deployments with no installation manifest to read at all', async () => {
+    // Configuration is the product's and lives in the row. There is no key on
+    // this chart that could declare one, so there is no path, no inline
+    // document, no ConfigMap and no volume for either process.
     const objects = await render({
       reconciler: { enabled: true },
       envFromSecret: 'spindrift-env',
+      manifest: { installation: 'declared' },
     });
+    expect(
+      objects.some((object) => object.metadata.name === 'spindrift-manifest'),
+    ).toBe(false);
+
     const deployments = objects.filter(
       (object) => object.kind === 'Deployment',
     );
     expect(deployments).toHaveLength(2);
     for (const deployment of deployments) {
       const pod = deployment.spec.template.spec;
-      expect(
-        pod.containers[0].env.some(
-          (item: { name: string }) => item.name === 'SPINDRIFT_MANIFEST_PATH',
-        ),
-      ).toBe(false);
-      expect(
-        pod.containers[0].env.some(
-          (item: { name: string }) => item.name === 'SPINDRIFT_MANIFEST',
-        ),
-      ).toBe(false);
-    }
-  });
-
-  test('renders no manifest ConfigMap when the release declares none', async () => {
-    const objects = await render({ reconciler: { enabled: true } });
-    expect(
-      objects.some((object) => object.metadata.name === 'spindrift-manifest'),
-    ).toBe(false);
-    for (const deployment of objects.filter(
-      (object) => object.kind === 'Deployment',
-    )) {
-      const pod = deployment.spec.template.spec;
+      for (const name of ['SPINDRIFT_MANIFEST_PATH', 'SPINDRIFT_MANIFEST']) {
+        expect(
+          pod.containers[0].env.some(
+            (item: { name: string }) => item.name === name,
+          ),
+        ).toBe(false);
+      }
       expect(
         pod.volumes.some(
           (volume: { name: string }) => volume.name === 'manifest',
         ),
       ).toBe(false);
+      expect(
+        pod.containers[0].volumeMounts.some(
+          (mount: { name: string }) => mount.name === 'manifest',
+        ),
+      ).toBe(false);
     }
-  });
-
-  test('mounts a declared manifest at the path both processes read', async () => {
-    const manifest = { installation: 'declared', build: { routes: [] } };
-    const objects = await render({ manifest, reconciler: { enabled: true } });
-
-    const configMap = one(objects, 'ConfigMap', 'spindrift-manifest');
-    expect(Bun.YAML.parse(configMap.data?.['manifest.yaml'] ?? '')).toEqual(
-      manifest,
-    );
-
-    const deployments = objects.filter(
-      (object) => object.kind === 'Deployment',
-    );
-    expect(deployments).toHaveLength(2);
-    for (const deployment of deployments) {
-      const pod = deployment.spec.template.spec;
-      // The declaration is named, not left to the default path, so a mount that
-      // never lands is fatal rather than a silent fall back to the stored row.
-      expect(pod.containers[0].env).toContainEqual({
-        name: 'SPINDRIFT_MANIFEST_PATH',
-        value: '/etc/spindrift/manifest.yaml',
-      });
-      expect(pod.containers[0].volumeMounts).toContainEqual({
-        name: 'manifest',
-        mountPath: '/etc/spindrift',
-        readOnly: true,
-      });
-      expect(pod.volumes).toContainEqual({
-        name: 'manifest',
-        configMap: { name: 'spindrift-manifest' },
-      });
-    }
-  });
-
-  test('rolls both processes when the declared manifest changes', async () => {
-    const checksums = async (manifest: Record<string, unknown>) =>
-      (await render({ manifest, reconciler: { enabled: true } }))
-        .filter((object) => object.kind === 'Deployment')
-        .map(
-          (object) =>
-            object.spec.template.metadata.annotations?.['checksum/manifest'],
-        );
-
-    const before = await checksums({ installation: 'declared' });
-    const after = await checksums({ installation: 'retuned' });
-
-    expect(before).toHaveLength(2);
-    for (const checksum of before) expect(checksum).toBeString();
-    // Both processes read the manifest once at start, so a ConfigMap change
-    // that does not restart them is a declaration that does nothing.
-    expect(after[0]).not.toBe(before[0]);
-    expect(after[1]).not.toBe(before[1]);
   });
 });
 
@@ -409,177 +354,42 @@ describe('the credential is the only copy of the federation', () => {
     );
     expect(credential).not.toHaveProperty('service_account_impersonation_url');
   });
-
-  test('refuses a declaration that restates the federation', async () => {
-    await expect(
-      render({
-        manifest: {
-          installation: 'declared',
-          cloud: { federation: { audience: '//iam.stale.test/pools/stale' } },
-        },
-      }),
-    ).rejects.toThrow('manifest.cloud is not a manifest key');
-  });
-
-  test('refuses a declaration that states the home vessel’s projects', async () => {
-    // The whole `cloud` key, not the federation alone: the artifacts project
-    // and the project the home vessel is are properties of the vessel
-    // `installation.homeVessel` names, so a document restating them there is
-    // two answers to one question and is refused at render time.
-    await expect(
-      render({
-        manifest: {
-          installation: 'declared',
-          cloud: { artifactsProject: 'stale-artifacts' },
-        },
-      }),
-    ).rejects.toThrow('properties of the vessel installation.homeVessel names');
-  });
-
-  test('refuses a declaration that names the chart it was installed from', async () => {
-    await expect(
-      render({
-        manifest: {
-          installation: 'declared',
-          charts: { app: 'example/spindrift-app', installer: 'example/x' },
-        },
-      }),
-    ).rejects.toThrow('manifest.charts.installer is not a manifest key');
-  });
 });
 
-describe('the relying party and the front door cannot disagree', () => {
-  test('refuses a declaration whose hostname is not the one served', async () => {
-    // `controlPlane.hostname` is kept rather than derived — it is the passkey
-    // relying-party id, bound at boot on purpose, and an installation with no
-    // Gateway still needs one. What is not kept is the ability for the two to
-    // differ, which would enrol nobody.
-    await expect(
-      render({
-        hostname: 'spindrift.example.test',
-        manifest: {
-          installation: 'declared',
-          controlPlane: { hostname: 'stale.example.test' },
-        },
-      }),
-    ).rejects.toThrow(
-      /manifest.controlPlane.hostname is "stale.example.test" but this release serves the control plane at "spindrift.example.test"/,
-    );
-  });
+describe('the relying party is the front door', () => {
+  const envOf = (objects: RenderedObject[], name: string) =>
+    one(objects, 'Deployment', name).spec.template.spec.containers[0].env as {
+      name: string;
+      value?: string;
+    }[];
 
-  test('renders when they agree', async () => {
-    const objects = await render({
-      hostname: 'spindrift.example.test',
-      manifest: {
-        installation: 'declared',
-        controlPlane: { hostname: 'spindrift.example.test' },
-      },
-    });
+  test('is the hostname this release serves, not a manifest key', async () => {
+    const objects = await render({ hostname: 'spindrift.example.test' });
+    // One value, so there is nothing for a second copy to disagree with: the
+    // env the process binds its relying party from and the name the HTTPRoute
+    // answers on are the same `hostname`.
+    expect(
+      envOf(objects, 'spindrift-web').find(
+        (item) => item.name === 'SPINDRIFT_HOSTNAME',
+      )?.value,
+    ).toBe('spindrift.example.test');
     expect(
       one(objects, 'HTTPRoute', 'spindrift-http-route').spec.hostnames,
     ).toEqual(['spindrift.example.test']);
   });
 
-  test('leaves an in-cluster-only installation free to name its own relying party', async () => {
+  test('is unset for a release that serves no origin', async () => {
     // The chart's `hostname` may be empty — no Gateway, no HTTPRoute, still a
-    // valid installation. That installation has no deployment fact to derive a
-    // relying party from, which is the structural reason the key stays.
-    const objects = await render({
-      manifest: {
-        installation: 'declared',
-        controlPlane: { hostname: 'spindrift.internal.example.test' },
-      },
-    });
+    // valid installation. It has no origin, so it has nothing to scope a
+    // ceremony to and enrols nobody; the process falls back to the hostname a
+    // browser refuses rather than to an empty string.
+    const objects = await render();
     expect(objects.some((object) => object.kind === 'HTTPRoute')).toBe(false);
     expect(
-      Bun.YAML.parse(
-        one(objects, 'ConfigMap', 'spindrift-manifest').data?.[
-          'manifest.yaml'
-        ] ?? '',
+      envOf(objects, 'spindrift-web').some(
+        (item) => item.name === 'SPINDRIFT_HOSTNAME',
       ),
-    ).toMatchObject({
-      controlPlane: { hostname: 'spindrift.internal.example.test' },
-    });
-  });
-});
-
-describe('a chart-only install seeds its own relying party', () => {
-  // Ticket 77: `manifest: {}` with a `hostname` used to render no ConfigMap
-  // at all, so `loadStoredManifest` fell through to the code's own
-  // placeholder — `spindrift.example.com` — and no browser on this release's
-  // real origin can complete a passkey ceremony against it. See
-  // `spindrift.manifest.content` in `_helpers.tpl` for the precedence and
-  // `apps/spindrift/test/conformance/chart-only-enrolment.test.ts` for the
-  // proof that this document still agrees with the code's copy everywhere
-  // except the hostname.
-  test('renders a default manifest naming this release as the relying party, when none is declared', async () => {
-    const objects = await render({ hostname: 'spindrift.example.test' });
-    const configMap = one(objects, 'ConfigMap', 'spindrift-manifest');
-    const seeded = Bun.YAML.parse(
-      configMap.data?.['manifest.yaml'] ?? '',
-    ) as Record<string, unknown>;
-    expect(seeded.controlPlane).toEqual({
-      hostname: 'spindrift.example.test',
-    });
-    // The genuine choices stay at their stand-ins, so the seeded document is
-    // still one `isUnconfiguredInstallation` (apps/spindrift/src/config/manifest.ts)
-    // reads as unconfigured.
-    const installation = seeded.installation as Record<string, string>;
-    expect(installation.name).toBe('default');
-    // And both pointers name vessels this same document declares. A chart-only
-    // install boots from nothing else, so a pointer that resolves to nothing
-    // here is an installation that refuses its own seed.
-    const declared = (seeded.vessels as { name: string }[]).map(
-      (vessel) => vessel.name,
-    );
-    expect(declared).toContain(installation.controlPlaneVessel ?? '');
-    expect(declared).toContain(installation.homeVessel ?? '');
-    expect((seeded.github as { webBaseUrl?: string }).webBaseUrl).toBe(
-      'https://github.com',
-    );
-    expect((seeded.secretStore as { adapter?: string }).adapter).toBe(
-      'onepassword',
-    );
-    expect((seeded.supplyChain as { registry?: string[] }).registry).toEqual([
-      'ghcr.io/spindrift',
-    ]);
-
-    const web = one(objects, 'Deployment', 'spindrift-web');
-    const pod = web.spec.template.spec;
-    expect(
-      pod.containers[0].env.some(
-        (item: { name: string }) => item.name === 'SPINDRIFT_MANIFEST_PATH',
-      ),
-    ).toBe(true);
-    expect(
-      pod.volumes.some((v: { name: string }) => v.name === 'manifest'),
-    ).toBe(true);
-  });
-
-  test('renders no manifest ConfigMap for a hostless, undeclared release', async () => {
-    // The in-cluster-only shape stays exactly as unreachable-by-default as it
-    // was: no hostname means no deployment fact to seed a relying party from,
-    // so this release still renders nothing rather than a document naming an
-    // empty string.
-    const objects = await render();
-    expect(
-      objects.some((object) => object.metadata.name === 'spindrift-manifest'),
     ).toBe(false);
-  });
-
-  test('an explicit declaration still wins over the seeded default', async () => {
-    const objects = await render({
-      hostname: 'spindrift.example.test',
-      manifest: {
-        installation: 'declared',
-        controlPlane: { hostname: 'spindrift.example.test' },
-      },
-    });
-    const configMap = one(objects, 'ConfigMap', 'spindrift-manifest');
-    expect(Bun.YAML.parse(configMap.data?.['manifest.yaml'] ?? '')).toEqual({
-      installation: 'declared',
-      controlPlane: { hostname: 'spindrift.example.test' },
-    });
   });
 });
 

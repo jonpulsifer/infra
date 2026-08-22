@@ -22,14 +22,9 @@ import { createAdapterRegistry } from '../adapters/registry.ts';
 import type { EnrolmentDeps } from '../auth/enrol.ts';
 import { authenticateRequest, type GatewayDeps } from '../auth/gateway.ts';
 import { systemClock } from '../commands/types.ts';
-import { toAuthoredManifest } from '../config/manifest.schema.ts';
-import {
-  assertTrustedGatewayBoundary,
-  loadManifestIfPresent,
-} from '../config/manifest.ts';
+import { assertTrustedGatewayBoundary } from '../config/manifest.ts';
 import {
   currentStoredManifest,
-  diffManifestPaths,
   loadStoredManifest,
 } from '../config/manifest-store.ts';
 import { CredentialKeyring } from '../crypto/credential-envelope.ts';
@@ -149,26 +144,6 @@ export async function start(
   });
 
   /**
-   * The mounted declaration, read once and held for the life of the process.
-   *
-   * `loadStoredManifest` already read this file at boot to decide whether to
-   * seed from it, and already logs when it disagrees with what got stored —
-   * this is a second, best-effort read of the same file so `declarationDivergence`
-   * below can answer the same question on demand rather than only once, to a
-   * log line, at the moment nobody was watching. It also rides the context
-   * whole, as `declaration` itself — not only as the paths it disagrees at —
-   * which is what lets a surface put it on the stored row without a second
-   * reader (`src/commands/installation/get.ts` and `configure.ts` say why that
-   * is safe). `null` for "unreadable" as well as "absent": an invalid
-   * declaration is already reported by that boot warning, and this is a
-   * display concern, not a second place to be fatal about it. Not re-read per
-   * request — the ConfigMap volume it lives on does not change without a pod
-   * restart in the ordinary case, which is the same reasoning `relyingParty`
-   * below rests on.
-   */
-  const declaration = await loadManifestIfPresent().catch(() => null);
-
-  /**
    * The configuration a command runs against, current as of this request.
    *
    * `configureInstallation` writes the row, so a process-lifetime copy would
@@ -176,24 +151,14 @@ export async function start(
    * is one `select` per command; the adapters are rebuilt only when the
    * document actually changed, which is what makes doing this per request
    * affordable — `createAdapterRegistry` is pure assembly whose credentials are
-   * providers called per request, so rebuilding opens nothing. `declarationDivergence`
-   * is recomputed on that same change, against the one-time `declaration`
-   * above — cheap, because `diffManifestPaths` is a pure walk over two
-   * documents already in memory.
+   * providers called per request, so rebuilding opens nothing.
    *
    * Deliberately **not** current: `auth` below. `controlPlane.hostname` is the
    * passkey relying-party id, and a ceremony is scoped to the origin it began
    * at — re-reading it mid-session would invalidate credentials rather than
    * update them. Changing where an installation is served is a restart.
    */
-  let current = {
-    manifest,
-    adapters,
-    declarationDivergence:
-      declaration === null
-        ? []
-        : diffManifestPaths(declaration, toAuthoredManifest(manifest)),
-  };
+  let current = { manifest, adapters };
   const installationNow = async () => {
     const stored = await currentStoredManifest(db);
     if (stored === null || Bun.deepEquals(stored, current.manifest, true)) {
@@ -206,10 +171,6 @@ export async function start(
         db,
         clock: systemClock,
       }),
-      declarationDivergence:
-        declaration === null
-          ? []
-          : diffManifestPaths(declaration, toAuthoredManifest(stored)),
     };
     return current;
   };
@@ -246,8 +207,6 @@ export async function start(
           db,
           adapters: installation.adapters,
           manifest: installation.manifest,
-          declaration,
-          declarationDivergence: installation.declarationDivergence,
         };
       },
     },

@@ -15,7 +15,7 @@ import { describe, expect, test } from 'bun:test';
 import { configureInstallation } from '../../src/commands/installation/configure.ts';
 import type { Clock, CommandContext } from '../../src/commands/types.ts';
 import type { AuthoredManifest } from '../../src/config/manifest.schema.ts';
-import { loadStoredManifest } from '../../src/config/manifest-store.ts';
+import { writeStoredManifest } from '../../src/config/manifest-store.ts';
 import { installation } from '../../src/db/schema.ts';
 import { targetLabel } from '../../src/domain/target.ts';
 import { withIsolatedDatabase } from '../harness/db.ts';
@@ -118,6 +118,109 @@ describe('configuring an installation', () => {
     }
   });
 
+  test('refuses header authentication this deployment cannot enforce', async () => {
+    await seed();
+    // The process cannot see a NetworkPolicy from inside its own pod, so
+    // `auth.gateway` is refused at boot without the deployment's attestation.
+    // Taking it here would store a document that wedges the web process at its
+    // next restart — hours later, with nothing connecting the two.
+    const result = await configureInstallation(
+      {
+        manifest: {
+          ...manifest,
+          auth: {
+            gateway: {
+              adapterKey: 'front-door',
+              issuer: 'https://issuer.example.test',
+              subjectHeader: 'x-auth-request-subject',
+            },
+          },
+        },
+      },
+      context(),
+    );
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.failure.code).toBe('NOT_DEPLOYABLE');
+      expect(result.failure.message).toContain(
+        'SPINDRIFT_TRUSTED_GATEWAY_BOUNDARY',
+      );
+    }
+    expect((await storedManifest())?.auth.gateway).toBeNull();
+  });
+
+  test('takes it on a deployment that attests the boundary', async () => {
+    await seed();
+    const gateway = {
+      adapterKey: 'front-door',
+      issuer: 'https://issuer.example.test',
+      subjectHeader: 'x-auth-request-subject',
+    };
+
+    const result = await configureInstallation(
+      { manifest: { ...manifest, auth: { gateway } } },
+      {
+        ...context(),
+        manifest: { ...resolved, boundary: { trustedGateway: true } },
+      },
+    );
+
+    expect(result.ok).toBe(true);
+    expect((await storedManifest())?.auth.gateway).toEqual(gateway);
+  });
+
+  test('refuses a store whose adapter has no address to assume', async () => {
+    await seed();
+    // `onepassword` Connect is self-hosted, so there is no default endpoint.
+    // The store constructor already throws on this pair — but it throws on the
+    // *next* command, after the write has landed, so the schema is where the
+    // operator has to meet it.
+    const result = await configureInstallation(
+      { manifest: { ...manifest, secretStore: { adapter: 'onepassword' } } },
+      context(),
+    );
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.failure.code).toBe('INVALID_INPUT');
+      expect(result.failure.message).toContain('secretStore.endpoint');
+    }
+  });
+
+  test('restores a document handed over as text', async () => {
+    await seed();
+    // The other half of the export: a file this installation wrote, read back
+    // through the same parser every other document goes through. YAML, and
+    // therefore the JSON the download emits.
+    const restored = {
+      ...manifest,
+      installation: { ...manifest.installation, name: 'restored' },
+    };
+
+    const result = await configureInstallation(
+      { manifest: JSON.stringify(restored) },
+      context(),
+    );
+
+    expect(result.ok).toBe(true);
+    expect((await storedManifest())?.installation.name).toBe('restored');
+  });
+
+  test('refuses text that is not a document at all', async () => {
+    await seed();
+    const before = await storedManifest();
+
+    const result = await configureInstallation(
+      { manifest: '\tthis: [is not\n  yaml' },
+      context(),
+    );
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.failure.code).toBe('INVALID_INPUT');
+    expect(await storedManifest()).toEqual(before);
+  });
+
   test('leaves the stored manifest alone when it refuses', async () => {
     await seed();
     const before = await storedManifest();
@@ -132,7 +235,5 @@ describe('configuring an installation', () => {
 });
 
 async function seed(): Promise<void> {
-  await loadStoredManifest(database().db, {
-    SPINDRIFT_MANIFEST: JSON.stringify(manifest),
-  });
+  await writeStoredManifest(database().db, manifest);
 }

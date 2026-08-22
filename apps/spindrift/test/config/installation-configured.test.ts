@@ -5,25 +5,18 @@
  * product, true replaces it with a three-question wizard. The two directions are
  * not symmetric and neither is what a test owes them.
  *
- * **A false positive replaces a working installation with a wizard**, which is
- * why the first claim below reads the *real* declaration out of
- * `clusters/offsite/apps/spindrift/helm-release.yaml` rather than a fixture. A
- * fixture asserting the right thing while the repository says something else is
- * exactly the false positive this file exists to refuse, and the predicate reads
- * three specific values — any of which an installation may legitimately leave at
- * the stand-in — so "obviously configured" is not obvious enough to assert from
- * memory.
+ * **A false positive replaces a working installation with a wizard.** There is
+ * no declaration in this repository to read any more — configuration is the
+ * row's — so what is asserted is the predicate's shape rather than one
+ * installation's document: each genuine choice, answered alone, is enough to
+ * make an installation configured.
  *
- * **A false negative is a wizard nobody can reach**, which is what shipped: a
- * predicate over the whole document answered true for exactly one document, the
- * placeholder verbatim, and that document's `controlPlane.hostname` is
- * `spindrift.example.com`. The relying party is bound to it at boot, so no
- * browser will run a passkey ceremony against that installation and onboarding
- * renders only behind a session. The seeded-declaration claim below is the state
- * that fixes — a document with a real hostname whose genuine choices are still
- * stand-ins can enrol somebody and is still unconfigured — and it is one
- * document, not a class: nothing in the schema is optional, so that document has
- * to restate every stand-in by hand. See `isUnconfiguredInstallation`.
+ * **A false negative is a wizard nobody can reach.** That used to be the whole
+ * of the placeholder's problem: the relying party came out of the document, so
+ * an unconfigured installation was served at `spindrift.example.com` and no
+ * browser would run a passkey ceremony against it. The relying party is a
+ * deployment fact now, so every installation is served at its own origin and
+ * this predicate's `true` is reachable by construction.
  *
  * **Each conjunct gets its own claim**, because dropping one from an `&&` is the
  * false-positive direction and the three-value assertion below cannot see it: it
@@ -32,83 +25,12 @@
  * that stops being read a red build rather than a silent widening.
  */
 import { describe, expect, test } from 'bun:test';
-import { join } from 'node:path';
 import type { AuthoredManifest } from '../../src/config/manifest.schema.ts';
 import {
   DEFAULT_PLACEHOLDER_MANIFEST,
   isUnconfiguredInstallation,
   validateManifest,
 } from '../../src/config/manifest.ts';
-
-const REPO_ROOT = join(import.meta.dir, '../../../..');
-const LIVE_RELEASE = 'clusters/offsite/apps/spindrift/helm-release.yaml';
-
-/**
- * What Flux's `postBuild` fills in, standing in for the values themselves.
- *
- * The zones are read from cluster settings and cluster secrets rather than
- * written in the release, and restating either here would put a network fact in
- * a place that is not its source. Neither is a value the predicate reads; what
- * this substitution is for is letting the rest of the document parse.
- */
-const SUBSTITUTED = 'substituted.example';
-
-async function liveDeclaration() {
-  const text = (
-    await Bun.file(join(REPO_ROOT, LIVE_RELEASE)).text()
-  ).replaceAll(/\$\{[A-Z_]+\}/g, SUBSTITUTED);
-  const release = Bun.YAML.parse(text) as {
-    spec?: { values?: { manifest?: unknown } };
-  };
-  return validateManifest(release.spec?.values?.manifest, LIVE_RELEASE);
-}
-
-/**
- * **The declaration, which is not the document that governs**, and the name says
- * so on purpose. `loadStoredManifest` resolves `stored ?? declaration ??
- * placeholder`, this installation has been seeded for months, and the release's
- * own header says a declaration seeds and the row governs. So no test in this
- * file can assert what the live *installation* renders; what it can assert is
- * that the document this repository declares is not one that would hand an
- * operator a wizard.
- *
- * The offsite web pod's boot warning reports the row and the declaration
- * disagreeing at `charts.app`, at both Targets'
- * `delivery.sourceRef.name`/`.namespace` and
- * `chartValues.platform.externalAuth.name`/`.port`, and — since the fleet moved
- * onto one store of record — at the whole `secretStore` block and both Targets'
- * `chartValues.platform.secretStore.name`. The row still says `onepassword`,
- * which is what `configureInstallation` carries across.
- *
- * That divergence is what this file cannot see and does not claim to. The
- * predicate below reads the declaration, and the assertion is about which of
- * its three genuine choices are answered — not about which document is live.
- */
-describe('the declaration this repository deploys is configured', () => {
-  test('it is not a document that would replace the product with a wizard', async () => {
-    const manifest = await liveDeclaration();
-
-    expect(isUnconfiguredInstallation(manifest)).toBe(false);
-  });
-
-  test('its genuine choices are all answered, which is what makes it configured', async () => {
-    // Worth a test rather than a glance because the predicate is "all three"
-    // rather than "any": a live installation is free to leave one at the
-    // stand-in, and a predicate that asked whether *any* genuine choice was
-    // still a stand-in would hand an operator a wizard over it.
-    const manifest = await liveDeclaration();
-
-    expect(manifest.secretStore.adapter).not.toBe(
-      DEFAULT_PLACEHOLDER_MANIFEST.secretStore.adapter,
-    );
-    expect(manifest.installation).not.toBe(
-      DEFAULT_PLACEHOLDER_MANIFEST.installation,
-    );
-    expect(manifest.supplyChain.registry).not.toEqual(
-      DEFAULT_PLACEHOLDER_MANIFEST.supplyChain.registry,
-    );
-  });
-});
 
 describe('an installation nobody has configured says so', () => {
   test('the document an unseeded row is seeded with is unconfigured', () => {

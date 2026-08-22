@@ -42,7 +42,7 @@
  * leaving a control writing somewhere nothing reads.
  */
 import { Check, CircleAlert, Search } from 'lucide-react';
-import { useState } from 'react';
+import { type CSSProperties, useState } from 'react';
 import type {
   DiscoveredCandidate,
   DiscoveredFact,
@@ -52,13 +52,13 @@ import {
   placementOf,
 } from '../../../commands/installation/discover.ts';
 import { command } from '../../client.ts';
-import type { Path } from '../../forms/document.ts';
 import { valueAt, withValueAt } from '../../forms/document.ts';
 import { humanize } from '../../forms/schema.ts';
 import { Badge } from '../../ui/badge.tsx';
 import { Button } from '../../ui/button.tsx';
 import { Card, CardContent, CardHeader, CardTitle } from '../../ui/card.tsx';
 import { Field } from '../../ui/field.tsx';
+import { cn } from '../../ui/utils.ts';
 
 /** One ask, in the two arms every answer on this path comes back in. */
 export type DiscoveryAnswer =
@@ -117,22 +117,10 @@ export async function askInstallationCloud(narrowing: {
 export function DiscoveryPanel({
   document,
   disabled = false,
-  locked,
   onChange,
 }: {
   readonly document: unknown;
   readonly disabled?: boolean;
-  /**
-   * Whether the value at a path is somebody else's to write — the same
-   * predicate the form below this panel locks its controls with.
-   *
-   * Offering a value for a field a save would refuse is the shape of button
-   * `commands/targets/disconnect.ts` refuses to render: an act that cannot
-   * happen, shown as one that can. The reason is said in place of the
-   * candidates rather than by greying them, because a disabled button with no
-   * sentence reads as a cloud that answered nothing.
-   */
-  locked?(at: Path): boolean;
   onChange(document: unknown): void;
 }) {
   // Seeded once, from the document this panel opened on. Later edits do not
@@ -241,7 +229,7 @@ export function DiscoveryPanel({
             facts={facts}
             document={document}
             disabled={disabled || busy}
-            unwritable={(fact) => unwritable(fact, document, locked)}
+            unwritable={(fact) => unwritable(fact, document)}
             onApply={apply}
           />
         )}
@@ -343,22 +331,20 @@ export function applyDiscovered(
 /**
  * Why a confirmed value would not land, or `null` when it would.
  *
- * Two ways of not landing and one sentence each, because they send an operator
- * to two different places: a document the answer has no home in is something to
- * fix in the form below, and a value the declaration owns is something to fix
- * in the declaration.
+ * One way of not landing: an answer about a vessel the document below does not
+ * declare has nowhere to go, and the sentence says where to fix it. Offering a
+ * value that cannot be written is the shape of button
+ * `commands/targets/disconnect.ts` refuses to render — an act that cannot
+ * happen, shown as one that can — so the reason takes the place of the
+ * candidates rather than greying them, because a disabled button with no
+ * sentence reads as a cloud that answered nothing.
  */
 export function unwritable(
   fact: DiscoveredFact,
   document: unknown,
-  locked?: (at: Path) => boolean,
 ): string | null {
-  const at = placementOf(fact, document);
-  if (at === null) {
-    return 'the vessel this answers for is not declared in the document below';
-  }
-  return locked?.(at) === true
-    ? 'this is declared by the mounted declaration and reconciled from it on every boot, so it is not written here'
+  return placementOf(fact, document) === null
+    ? 'the vessel this answers for is not declared in the document below'
     : null;
 }
 
@@ -391,7 +377,7 @@ export function DiscoveredFactList({
 }) {
   return (
     <dl className="flex flex-col gap-3">
-      {facts.map((fact) => {
+      {facts.map((fact, index) => {
         const at = document === undefined ? null : placementOf(fact, document);
         const current = at === null ? undefined : valueAt(document, at);
         const applied =
@@ -401,7 +387,31 @@ export function DiscoveredFactList({
         return (
           <div
             key={fact.path.join('.')}
-            className="flex flex-col gap-1.5 border-t border-border pt-3 first:border-t-0 first:pt-0"
+            // Rows arrive in the order the cloud answered for, one behind the
+            // next, because five values appearing at once reads as a page
+            // reloading rather than as an installation being read.
+            //
+            // **A refusal does not arrive**, and that is the whole of the
+            // rule this file already keeps in words: an `unavailable` arm is
+            // an API that is switched off, and animating it in would make a
+            // dead end look like something still landing. It renders as it
+            // always did, immediately and still.
+            //
+            // The delay is per row rather than per group so a stagger stays a
+            // stagger when a group is one row long, and `--i` carries the
+            // index because CSS cannot count siblings into a duration.
+            style={
+              fact.kind === 'unavailable'
+                ? undefined
+                : ({
+                    '--i': index,
+                    animationDelay: 'calc(var(--i) * 60ms)',
+                  } as CSSProperties)
+            }
+            className={cn(
+              'flex flex-col gap-1.5 border-t border-border pt-3 first:border-t-0 first:pt-0',
+              fact.kind !== 'unavailable' && 'motion-safe:animate-rise',
+            )}
           >
             <dt className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
               <span className="text-caption font-semibold uppercase tracking-eyebrow text-muted-foreground">

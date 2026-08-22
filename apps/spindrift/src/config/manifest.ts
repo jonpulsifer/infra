@@ -18,16 +18,31 @@ import {
 } from './manifest.schema.ts';
 import { upgradeManifestDocument } from './manifest-upgrade.ts';
 
-/** Path to a YAML or JSON manifest document. */
-export const MANIFEST_PATH_VAR = 'SPINDRIFT_MANIFEST_PATH';
-/** An inline YAML or JSON manifest document, used in place of a file. */
-export const MANIFEST_INLINE_VAR = 'SPINDRIFT_MANIFEST';
 /**
  * Deployment attestation set by the chart only when it renders a default-deny
  * NetworkPolicy admitting the configured trusted Gateway peers.
  */
 export const TRUSTED_GATEWAY_BOUNDARY_VAR =
   'SPINDRIFT_TRUSTED_GATEWAY_BOUNDARY';
+
+/**
+ * Where this deployment serves the control plane. Set by the chart from the
+ * same `hostname` value that renders the Gateway and the HTTPRoute.
+ */
+export const HOSTNAME_VAR = 'SPINDRIFT_HOSTNAME';
+
+/**
+ * The relying party of a deployment that serves no origin.
+ *
+ * An installation reachable only in-cluster renders no Gateway and no
+ * HTTPRoute, and the chart says that is supported — but a passkey ceremony
+ * still has to be scoped to something, and there is nothing true to scope it
+ * to. This is the honest stand-in: a browser refuses a ceremony against it, so
+ * that installation cannot enrol anybody, which is the same thing the missing
+ * origin already meant. It is named here rather than spelled inline so the one
+ * unreachable configuration is one value, findable.
+ */
+export const UNSERVED_HOSTNAME = 'spindrift.example.com';
 
 /** Raised when the manifest is absent, unparseable, or invalid. */
 export class ManifestError extends Error {
@@ -95,18 +110,12 @@ export function validateManifest(
   return result.data;
 }
 
-/** Default file path where the installer chart mounts the ConfigMap. */
-export const DEFAULT_MANIFEST_PATH = '/etc/spindrift/manifest.yaml';
-
 /** High-trust default placeholder manifest used when initializing an unseeded installation. */
 export const DEFAULT_PLACEHOLDER_MANIFEST: AuthoredManifest = {
   installation: {
     name: 'default',
     controlPlaneVessel: 'primary',
     homeVessel: 'spindrift',
-  },
-  controlPlane: {
-    hostname: 'spindrift.example.com',
   },
   auth: {
     gateway: null,
@@ -133,7 +142,7 @@ export const DEFAULT_PLACEHOLDER_MANIFEST: AuthoredManifest = {
      * Null, never a placeholder ref. `connectRepository` writes this value
      * into a caller workflow inside somebody's repository, so a stand-in
      * `owner/repo@sha` here is not inert scaffolding the way
-     * `spindrift.example.com` is — it is a foreign repository handed the
+     * `spindrift-vessel` is — it is a foreign repository handed the
      * build of every repo an unseeded installation connects. Null makes the
      * gap loud: connect refuses until an operator states a real workflow.
      */
@@ -222,39 +231,29 @@ export const DEFAULT_PLACEHOLDER_MANIFEST: AuthoredManifest = {
  * copy of a fact the row already carries whole, and it would go stale the first
  * time somebody edited the row by hand or restored a database.
  *
- * **The three values below and not the whole document**, which is the difference
- * between a predicate with a reachable `true` and one without. The manifest is
- * three kinds of value: deployment facts the chart already knows, cloud facts
+ * **The three values below and not the whole document.** The manifest is three
+ * kinds of value: deployment facts the deployment itself supplies, cloud facts
  * discovery can ask for, and the genuine choices — what this installation is
- * called, where its artifacts are published, and
- * which store it delivers config through. Comparing the *whole* document made
- * `true` reachable for exactly one document, the placeholder verbatim, and that
- * document names `spindrift.example.com` as its control plane. `serve.ts` binds
- * the passkey relying party to that hostname at boot, so a browser refuses every
- * ceremony against it and nobody can sign in — and onboarding renders only after
- * a session exists. A predicate whose one `true` sits behind a door that cannot
- * open is a wizard nobody can be shown.
+ * called, where its artifacts are published, and which store it delivers config
+ * through. Only the third kind is a question, so only the third kind decides
+ * whether anybody has answered one.
  *
- * **What that actually makes reachable, and it is now the ordinary case.** A
- * declaration carrying a real `controlPlane.hostname` with these three left at
- * their stand-ins answers `true` and *can* enrol somebody, so the reachable set
- * is no longer empty. It is not a document anybody writes by accident: nothing
- * in `installationManifestSchema` is optional, so an operator cannot **leave**
- * the genuine choices — every key must be authored — and the values one would
- * have to type to stay unconfigured are `installation: default`,
- * somebody else's GHCR namespace and
- * `onepassword`. What makes the wizard ordinarily reachable is the chart seeding
- * the deployment facts it already holds, `controlPlane.hostname` above all, so
- * that the *placeholder* — what an installation with no declaration at all is
- * seeded with — is itself an installation a browser will run a ceremony
- * against: a bare `manifest: {}` release with a `hostname` renders
- * `files/default-manifest.yaml` (`packages/charts/spindrift`) in place of the
- * stored row's fallback, and that document is this same
- * `DEFAULT_PLACEHOLDER_MANIFEST` with `controlPlane.hostname` bound to the
- * release's own instead of `spindrift.example.com`. A seeded declaration and a
- * bare `manifest: {}` install both reach the wizard now; only a release with
- * neither a declaration nor a `hostname` — in-cluster-only, nothing to bind a
- * relying party to — still cannot.
+ * **Reachable by construction, now that the relying party is a deployment
+ * fact.** Every installation resolves `controlPlane.hostname` from the
+ * deployment that serves it, so an unconfigured one is served at its own real
+ * origin and a browser will run a ceremony against it. That is what makes this
+ * predicate answerable rather than academic: onboarding renders only after a
+ * session exists, and until the hostname moved out of the document, the one
+ * document this answered `true` for named `spindrift.example.com` and could
+ * enrol nobody. The only installation that still cannot is the one with no
+ * origin at all — in-cluster-only, nothing to bind a relying party to — and
+ * that is the missing Gateway saying so, not this.
+ *
+ * It is not a state anybody reaches by accident either: nothing in
+ * `installationManifestSchema` is optional, so an operator cannot **leave** the
+ * genuine choices — every key must be authored — and the values one would have
+ * to type to stay unconfigured are `installation: default`, somebody else's
+ * GHCR namespace, and `onepassword`.
  *
  * **All three, not any**, and a false positive here replaces the whole product
  * with a wizard, so the direction matters. One of the three is legitimately the
@@ -273,37 +272,6 @@ export const DEFAULT_PLACEHOLDER_MANIFEST: AuthoredManifest = {
  * honest — they chose nothing — but it does mean "configured" is a record of a
  * document, not of a ceremony.
  */
-/**
- * The mounted declaration where it governs, and `null` where it does not.
- *
- * **A stand-in governs nothing.** The governed slice
- * (`manifest-store.ts:governedByDeclaration`) exists so a rollout cannot revert
- * the two vessels an installation is built on: a control plane pointed at a
- * boundary that is not there, or a home vessel whose bucket and signer nobody
- * can reach, is an installation that cannot come back, and that is worth taking
- * out of the operator's hands. **None of that reasoning survives the document
- * being the placeholder.** There is no operator assertion to protect, and what
- * the rule protects instead is `spindrift-vessel` and `spindrift-artifacts` —
- * names of nothing — against the real ones, forever, because the wizard that
- * would set them is refused for editing a governed path.
- *
- * That is not a hypothetical: the chart mounts exactly this document on a
- * release with no `manifest:` value, which is the chart-only install path, and
- * the two collided the first time anybody ran one. The relying party is why the
- * chart mounts it at all — see `files/default-manifest.yaml` — so the document
- * has to stay mounted and stop governing, rather than not be mounted.
- *
- * The same three keys as {@link isUnconfiguredInstallation}, and deliberately
- * the same function: "this document is the stand-in" is one fact, and a second
- * spelling of it is a second thing to keep in step with the chart's copy.
- */
-export function governingDeclaration(
-  declaration: AuthoredManifest | null | undefined,
-): AuthoredManifest | null {
-  if (declaration == null) return null;
-  return isUnconfiguredInstallation(declaration) ? null : declaration;
-}
-
 export function isUnconfiguredInstallation(
   manifest: AuthoredManifest,
 ): boolean {
@@ -320,54 +288,6 @@ export function isUnconfiguredInstallation(
     // sides are arrays here and neither spelling changes the answer.
     Bun.deepEquals(manifest.supplyChain.registry, stand.supplyChain.registry)
   );
-}
-
-/**
- * Read the manifest the environment points at.
- *
- * `SPINDRIFT_MANIFEST_PATH` wins over `SPINDRIFT_MANIFEST`. If neither is set,
- * checks `DEFAULT_MANIFEST_PATH` (/etc/spindrift/manifest.yaml) before erroring.
- */
-export async function loadManifest(
-  env: Env = Bun.env,
-): Promise<AuthoredManifest> {
-  const manifest = await loadManifestIfPresent(env);
-  if (manifest !== null) return manifest;
-
-  throw new ManifestError(
-    `no installation manifest: set ${MANIFEST_PATH_VAR} to a manifest file or ${MANIFEST_INLINE_VAR} to its contents`,
-  );
-}
-
-/**
- * Read a declared manifest when one is available.
- *
- * An explicit missing path is still an error: it is a broken declaration, not
- * the same state as no declaration. `null` means callers may deliberately fall
- * back to a durable copy.
- */
-export async function loadManifestIfPresent(
-  env: Env = Bun.env,
-): Promise<AuthoredManifest | null> {
-  const explicitPath = env[MANIFEST_PATH_VAR]?.trim();
-  const path = explicitPath || DEFAULT_MANIFEST_PATH;
-
-  const file = Bun.file(path);
-  if (await file.exists()) {
-    return parseManifest(await file.text(), path);
-  }
-
-  if (explicitPath) {
-    throw new ManifestError(
-      `${MANIFEST_PATH_VAR}=${explicitPath}: no such file`,
-    );
-  }
-
-  const inline = env[MANIFEST_INLINE_VAR];
-  if (inline?.trim()) {
-    return parseManifest(inline, `$${MANIFEST_INLINE_VAR}`);
-  }
-  return null;
 }
 
 /**
@@ -390,28 +310,43 @@ export async function resolveManifest(
   return {
     ...manifest,
     cloud: { federation: await loadDeploymentFederation(env) },
+    boundary: { trustedGateway: env[TRUSTED_GATEWAY_BOUNDARY_VAR] === 'true' },
+    controlPlane: { hostname: env[HOSTNAME_VAR]?.trim() || UNSERVED_HOSTNAME },
   };
 }
 
 /**
- * Refuse to enable header authentication without its non-bypassable boundary.
+ * The sentence refusing header authentication without its non-bypassable
+ * boundary, or `null` for a document this deployment can serve.
  *
  * The process cannot observe a Kubernetes NetworkPolicy from inside its own
- * pod. The installer chart therefore sets this attestation beside the policy;
- * a manifest copied into an unrestricted deployment fails closed at boot.
+ * pod. The installer chart therefore sets an attestation beside the policy,
+ * which {@link resolveManifest} joins on as `boundary.trustedGateway`; a
+ * manifest copied into an unrestricted deployment fails closed.
+ *
+ * **A sentence rather than a throw, because two callers need it at two
+ * moments.** Boot is fatal — an installation that cannot honour what its own
+ * document says about authentication has nothing honest to serve — but
+ * `configureInstallation` is an operator pressing Save, and there the same fact
+ * is a refusal to read rather than a pod that stops coming back. Until it was
+ * both, a wizard could write `auth.gateway` on a deployment with no policy and
+ * wedge the web process at its next restart.
  */
-export function assertTrustedGatewayBoundary(
-  manifest: Pick<InstallationManifest, 'auth'>,
-  env: Env = Bun.env,
-): void {
-  if (
-    manifest.auth.gateway !== null &&
-    env[TRUSTED_GATEWAY_BOUNDARY_VAR] !== 'true'
-  ) {
-    throw new ManifestError(
-      `auth.gateway requires ${TRUSTED_GATEWAY_BOUNDARY_VAR}=true from a deployment that strips identity headers and restricts ingress to the trusted Gateway`,
-    );
+export function trustedGatewayRefusal(
+  manifest: Pick<InstallationManifest, 'auth' | 'boundary'>,
+): string | null {
+  if (manifest.auth.gateway === null || manifest.boundary.trustedGateway) {
+    return null;
   }
+  return `auth.gateway requires ${TRUSTED_GATEWAY_BOUNDARY_VAR}=true from a deployment that strips identity headers and restricts ingress to the trusted Gateway`;
+}
+
+/** {@link trustedGatewayRefusal} at boot, where it is fatal. */
+export function assertTrustedGatewayBoundary(
+  manifest: Pick<InstallationManifest, 'auth' | 'boundary'>,
+): void {
+  const refusal = trustedGatewayRefusal(manifest);
+  if (refusal !== null) throw new ManifestError(refusal);
 }
 
 export type {

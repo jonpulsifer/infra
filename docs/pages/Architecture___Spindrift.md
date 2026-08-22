@@ -43,7 +43,7 @@ tags:: architecture
 	- `clusters/base/platform/onepassword-connect/` stays the platform's own store — oauth2-proxy's credentials, the tunnel, the operators. It is a second store both clusters reach, and a Target reporting two stores still writes App config to the one the installation names.
 	- A Target's `ClusterSecretStore` is operator-stated in that Target's chart-values. The chart refuses to render config without it rather than producing an ExternalSecret that never syncs.
 	- Config that cannot follow a Component to another Target is named and demanded before the move commits, because Spindrift reads no value back and so cannot copy one. Between the two clusters nothing has to follow: they are two paths to one store, so the reference moves and no value does.
-	- The store a running installation writes to is its stored row's, not its declaration's. A declared manifest seeds only an installation that has no row yet; moving a running one takes the same `configureInstallation` that carries every other manifest change.
+	- The store a running installation writes to is its stored row's. Nothing else declares one: moving it takes the same `configureInstallation` that carries every other manifest change.
 - ## Reach and auth
 	- A Component states two independent facts: `reach` is `none`, `private`, or `public`; `auth` is `none` or `proxy`. `auth: proxy` with `reach: none` is refused — there is no route to filter.
 	- The App chart at `packages/charts/spindrift-app/` renders an HTTPRoute when `reach` is not `none`, and the Gateway API `ExternalAuth` filter exactly when `auth` is `proxy`. The cross-namespace grant belongs to the shared proxy platform resources; the chart renders no Gateway and no certificate.

@@ -141,22 +141,21 @@ describe('confirming a value edits the document at the path it came with', () =>
     expect(unwritable(fact, homeless)).toContain('not declared');
   });
 
-  test('a value the declaration owns is said, not offered', () => {
-    // The panel edits the same document the form below it locks, so a candidate
-    // for a governed path is a button whose only outcome is a refused save.
+  test('an unwritable answer is said in place of its candidates', () => {
+    // Offering a value that cannot land is a button whose only outcome is a
+    // refusal, so the reason takes the place of the candidates rather than
+    // greying them.
     const fact = FACTS[0]!;
     if (fact.kind !== 'found') throw new Error('the fixture lost its arm');
-    const reason = unwritable(fact, document, (at) => at[0] === 'vessels');
-    expect(reason).toContain('mounted declaration');
 
     const markup = renderToStaticMarkup(
       <DiscoveredFactList
         facts={[fact]}
-        unwritable={() => reason}
+        unwritable={() => 'the vessel this answers for is not declared'}
         onApply={() => undefined}
       />,
     );
-    expect(markup).toContain('mounted declaration');
+    expect(markup).toContain('not declared');
     expect(markup).not.toContain('example-home');
   });
 
@@ -419,5 +418,35 @@ describe('a refusal is shown as a fact about the installation', () => {
       'this installation mounts no cloud federation credential',
     );
     expect(markup).toContain('not a field to correct');
+  });
+});
+
+describe('an answer arrives; a refusal does not', () => {
+  /**
+   * The one claim motion owes a test: a `found` row is staggered in and an
+   * `unavailable` row is not. Animating a refusal would make an API that is
+   * switched off look like something still landing, which is the failure the
+   * two-armed answer exists to prevent, restated in CSS.
+   */
+  const markup = renderToStaticMarkup(
+    <DiscoveredFactList facts={FACTS} onApply={() => undefined} />,
+  );
+
+  test('a found row rises, one behind the next', () => {
+    expect(markup).toContain('animate-rise');
+    expect(markup).toContain('calc(var(--i) * 60ms)');
+  });
+
+  test('an unavailable row carries no animation at all', () => {
+    const unavailable = FACTS.find((fact) => fact.kind === 'unavailable');
+    expect(unavailable).toBeDefined();
+    const only = renderToStaticMarkup(
+      <DiscoveredFactList facts={[unavailable!]} onApply={() => undefined} />,
+    );
+    expect(only).toContain(
+      unavailable!.kind === 'unavailable' ? unavailable!.reason : '',
+    );
+    expect(only).not.toContain('animate-rise');
+    expect(only).not.toContain('animationDelay');
   });
 });

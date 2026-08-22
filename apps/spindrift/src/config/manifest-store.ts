@@ -19,9 +19,6 @@ import {
 } from './manifest.schema.ts';
 import {
   DEFAULT_PLACEHOLDER_MANIFEST,
-  governingDeclaration,
-  loadManifestIfPresent,
-  ManifestError,
   resolveManifest,
   validateManifest,
 } from './manifest.ts';
@@ -29,229 +26,42 @@ import {
 type Env = Record<string, string | undefined>;
 
 /**
- * Load the durable singleton, seeding it from a declaration when it is empty.
+ * Load the durable singleton, seeding it with the placeholder when it is empty.
  *
- * **A declaration seeds; it does not govern.** The stored row wins whenever one
- * exists, because configuration is the UI's to drive and a rollout must not
- * revert what an operator just configured. A mounted file or inline env
- * document is therefore consulted only for an unseeded installation, ahead of
- * the high-trust placeholder — which is what makes a torn-down installation
- * come back configured without anyone opening a browser.
- *
- * The cost is that editing a declaration does nothing to an installation that
- * already has a row, so an ignored declaration says so at startup rather than
- * being quietly skipped. Re-seeding is deliberate: discard the row.
+ * **The row is the whole of what this installation is.** Nothing is mounted and
+ * nothing is reconciled from anywhere: what an operator configured is what the
+ * next process reads, and an installation with no row yet is seeded with the
+ * placeholder so onboarding has a document to edit rather than a null to
+ * special-case.
  *
  * What is written is the authored document; what is returned has the
  * deployment's own facts resolved onto it. The row therefore never holds a
  * second copy of something the deployment declares — which is the whole of why
  * the two types are different.
  *
- * **A stored row this build cannot parse is a row this build has no seed in**,
- * so the declaration takes over rather than the process crash-looping. A
- * manifest key can be renamed — `dns.zones` replaced `dns.apexZone` — and the
- * row written by the previous image does not rewrite itself; strictness there
- * took down an installation whose mounted declaration said, correctly, exactly
- * what it should have been. The cost is stated in the warning: whatever an
- * operator configured through the UI that the declaration does not carry is
- * lost. With no declaration to fall back on there is nothing honest to boot as,
- * and the error stands.
+ * **A row this build cannot parse is fatal.** It used to be survivable by
+ * re-seeding from the mounted declaration, at the cost of discarding whatever
+ * an operator had configured that the declaration did not carry. There is no
+ * declaration to re-seed from, so `manifest-upgrade.ts` is what makes a row
+ * written under an older schema readable — and a document that reaches here
+ * unparseable is one that module has to learn a step for, not one to boot past.
  */
 export async function loadStoredManifest(
   db: Database,
   env: Env = Bun.env,
 ): Promise<InstallationManifest> {
-  let stored: AuthoredManifest | null = null;
-  let unreadable: ManifestError | null = null;
-  try {
-    stored = await readStoredManifest(db);
-  } catch (cause) {
-    if (!(cause instanceof ManifestError)) throw cause;
-    unreadable = cause;
-  }
-  const declaration = await declaredManifest(stored !== null, env);
-  if (unreadable !== null) {
-    if (declaration === null) throw unreadable;
-    console.warn(
-      `installation manifest: the stored manifest is not valid for this build, so this installation is being re-seeded from the mounted declaration — anything configured through the UI that the declaration does not carry is lost: ${unreadable.message}`,
-    );
-  }
-  // Seeding takes the declaration whatever it is — a stand-in carrying this
-  // release's own hostname is the whole of what makes a chart-only install
-  // reachable (ticket 77). Governing is the other half of the same document and
-  // does not follow: see {@link governingDeclaration}.
-  const governing = governingDeclaration(declaration);
-  const declared =
-    stored === null
-      ? (declaration ?? DEFAULT_PLACEHOLDER_MANIFEST)
-      : governing === null
-        ? stored
-        : governedByDeclaration(stored, governing);
-  if (unreadable === null && stored !== null && declaration !== null) {
-    // The generic half of this warning has existed since the rule did — "a
-    // declaration is mounted and ignored" — and it is not enough. Proven live:
-    // a rollout moved a Target's gateway in the declaration; the stored row
-    // never moved because the row wins by design; and this line gave nobody a
-    // reason to go look, right up until the listener that rollout deleted took
-    // the Target's gateway with it. §6: "drift is detected and surfaced, never
-    // silently corrected" — naming the paths is that rule applied to the
-    // manifest itself, not just to what it deploys.
-    //
-    // Against the document actually being used rather than against the row, so
-    // the governed slice does not appear as divergence a boot has already
-    // resolved: what this names is what is genuinely ignored.
-    const divergentPaths = diffManifestPaths(declaration, declared);
-    console.warn(
-      divergentPaths.length === 0
-        ? 'installation manifest: a declaration is mounted but this installation is already seeded, so the stored manifest is being used and the declaration is ignored — discard the row to re-seed from it'
-        : `installation manifest: a declaration is mounted but this installation is already seeded, so the stored manifest is being used and the declaration is ignored — discard the row to re-seed from it. It now disagrees with the stored row at: ${divergentPaths.join(', ')}`,
-    );
-  }
+  const stored = await readStoredManifest(db);
+  const declared = stored ?? DEFAULT_PLACEHOLDER_MANIFEST;
   // `booted` exactly when the document being written is the one the
-  // installation already had — see {@link ManifestWrite}. A stored row this
-  // build could not parse leaves `stored` null, which is right: that boot is
-  // re-seeding from the declaration, and re-seeding is a declaration.
+  // installation already had — see {@link ManifestWrite}. A row this build
+  // could not parse does not reach here: `readStoredManifest` throws, and with
+  // nothing to fall back to there is nothing honest to boot as.
   await writeStoredManifest(
     db,
     declared,
     stored === null ? 'declared' : 'booted',
   );
   return resolveManifest(declared, env);
-}
-
-/**
- * The stored document with the two vessels this installation is built on, and
- * the repository they are declared in, taken from the mounted declaration.
- *
- * **The one slice a declaration governs.** Everywhere else the row wins, because
- * configuration is the UI's to drive and a rollout must not revert what an
- * operator just configured. These are the exception, and the reason is that the
- * failure they protect against is not a reverted edit but an installation that
- * cannot come back: a control plane pointed at a boundary that is not there, or
- * a home vessel whose bucket, store and signer nobody can reach.
- *
- * Both pointers move with the entries, so a declaration may hand the role to a
- * different boundary in one edit. The old home's `shared` block goes with the
- * role — the schema admits exactly one vessel carrying it — and a governed
- * vessel the row does not have yet is added rather than dropped.
- *
- * **`github.infrastructureRepository` travels with them**, and it is the one
- * key outside `installation` and `vessels` that does. A governed vessel entry
- * carries `terraformRoot`, which is a path *relative to that repository*: govern
- * the path and not the repository it is inside and a declaration can move a
- * root while the row keeps pointing the pull request at somewhere else — two
- * halves of one address, disagreeing, with nothing to notice. Nothing else in
- * the `github` block is governed: the App id, its key reference and the OAuth
- * endpoints are credentials an operator configures, and the row keeps them.
- *
- * Only when the declaration states one. A document that names no infrastructure
- * repository is not asserting there is none — the chart's own placeholder omits
- * the key entirely — so taking its absence would clear what an operator set
- * through the settings screen on every boot of every installation running the
- * default.
- *
- * **A merge that will not validate is not applied.** A declaration and the image
- * that understands it land in separate merges, so a document this build reads
- * differently is the ordinary shape of a rollout rather than a fault; taking the
- * row whole is the same fallback `declaredManifest` already makes one step
- * earlier, and it keeps a healthy installation running.
- */
-function governedByDeclaration(
-  stored: AuthoredManifest,
-  declaration: AuthoredManifest,
-): AuthoredManifest {
-  const governed = new Set([
-    declaration.installation.controlPlaneVessel,
-    declaration.installation.homeVessel,
-  ]);
-  const declared = new Map(
-    declaration.vessels
-      .filter((vessel) => governed.has(vessel.name))
-      .map((vessel) => [vessel.name, vessel] as const),
-  );
-  const kept = stored.vessels.map((vessel) => {
-    const replacement = declared.get(vessel.name);
-    if (replacement !== undefined) return replacement;
-    // Only the outgoing home can be carrying this, and it is not the home any
-    // more — two vessels declaring the shared services is two answers to one
-    // question and the schema refuses it.
-    const { shared: _handedOver, ...withoutShared } = vessel;
-    return withoutShared;
-  });
-  const infrastructure = declaration.github.infrastructureRepository;
-  const merged = {
-    ...stored,
-    installation: {
-      ...stored.installation,
-      controlPlaneVessel: declaration.installation.controlPlaneVessel,
-      homeVessel: declaration.installation.homeVessel,
-    },
-    ...(infrastructure === undefined
-      ? {}
-      : {
-          github: {
-            ...stored.github,
-            infrastructureRepository: infrastructure,
-          },
-        }),
-    vessels: [
-      ...kept,
-      ...[...declared.values()].filter(
-        (vessel) =>
-          !stored.vessels.some((existing) => existing.name === vessel.name),
-      ),
-    ],
-  };
-  try {
-    return validateManifest(merged, 'the governed installation vessels');
-  } catch (cause) {
-    if (!(cause instanceof ManifestError)) throw cause;
-    console.warn(
-      `installation manifest: the declaration's installation vessels do not compose with the stored document for this build, so the stored one is being used whole: ${cause.message}`,
-    );
-    return stored;
-  }
-}
-
-/**
- * The sentence refusing a document the next boot would take back, or `null` for
- * one it would leave standing.
- *
- * **The guard every write path owes the governed slice.** `loadStoredManifest`
- * re-applies {@link governedByDeclaration} on every boot, so an operator edit to
- * anything it governs is accepted, saved, and reverted at the next pod restart —
- * with the screen that took it then showing the old values and no reason why.
- * That is the failure `ManifestWrite` records having already happened once to a
- * Target's connection; refusing here is the same answer one noun up, and it is
- * what makes that slice safe to govern.
- *
- * Derived by running the merge and diffing rather than by a second list of the
- * governed keys: the check and the governance are then the same code, so a
- * pointer that starts governing something new cannot start being editable at
- * the same moment.
- *
- * Paths, never values, for the reason {@link diffManifestPaths} gives. `null`
- * with no declaration mounted, because there is then nothing to govern and the
- * row is the operator's outright.
- */
-export function governedSliceRefusal(
-  manifest: AuthoredManifest,
-  declaration: AuthoredManifest | null | undefined,
-): string | null {
-  const governing = governingDeclaration(declaration);
-  if (governing === null) return null;
-  // Both sides through the same parse. The schema normalizes as it validates —
-  // `supplyChain.registry` is authored as a string or a list and comes out a
-  // list — and {@link governedByDeclaration} validates what it merges, so
-  // diffing that against an unnormalized document would report every
-  // normalization as a path a boot reverts and refuse a document nobody edited.
-  const normalized = validateManifest(manifest, 'the submitted manifest');
-  const reverted = diffManifestPaths(
-    governedByDeclaration(normalized, governing),
-    normalized,
-  );
-  if (reverted.length === 0) return null;
-  return `the vessels this installation is built on, and the repository they are declared in, are reconciled from the mounted declaration on every boot — so this document would be taken back at: ${reverted.join(', ')}. Change the declaration instead.`;
 }
 
 /**
@@ -375,47 +185,6 @@ function containerEntries(value: unknown): [string, unknown][] | null {
     return Object.entries(value as Record<string, unknown>);
   }
   return null;
-}
-
-/**
- * The mounted declaration, and `null` for one a **seeded** installation cannot
- * parse.
- *
- * A declaration seeds and does not govern, so on an installation that already
- * has a row it is read, announced as ignored, and thrown away. Validating it
- * strictly on that path meant a document this build could not parse took the
- * process down — over a value it had already decided not to use.
- *
- * That is not hypothetical. A manifest key added to the declaration ahead of
- * the image that understands it is the ordinary shape of a rollout: the
- * declaration lands with the merge and the image lands with the digest bump,
- * and between them every replica crash-loops on
- * `Unrecognized key` for a field the stored row does not have and no reader
- * would have consulted. Nothing about the running installation was wrong.
- *
- * **Unseeded is still fatal**, and has to be: there the declaration is the
- * whole configuration, and continuing would boot the placeholder manifest as
- * though the operator had declared nothing.
- *
- * The cost, stated: a declaration that has been broken for a while is a
- * warning nobody reads until a torn-down installation fails to come back
- * configured. That is the smaller failure. Crashing a healthy installation to
- * report a document it is ignoring is the larger one.
- */
-async function declaredManifest(
-  seeded: boolean,
-  env: Env,
-): Promise<AuthoredManifest | null> {
-  try {
-    return await loadManifestIfPresent(env);
-  } catch (cause) {
-    if (!seeded) throw cause;
-    const detail = cause instanceof Error ? cause.message : String(cause);
-    console.warn(
-      `installation manifest: the mounted declaration is not valid for this build and is being ignored, which is what a declaration already is for a seeded installation — re-seeding from it would fail until it is corrected: ${detail}`,
-    );
-    return null;
-  }
 }
 
 /**

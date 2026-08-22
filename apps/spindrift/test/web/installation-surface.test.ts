@@ -30,6 +30,7 @@ import { DEFAULT_PLACEHOLDER_MANIFEST } from '../../src/config/manifest.ts';
 import {
   currentStoredManifest,
   loadStoredManifest,
+  writeStoredManifest,
 } from '../../src/config/manifest-store.ts';
 import { installation } from '../../src/db/schema.ts';
 import { targetLabel } from '../../src/domain/target.ts';
@@ -105,22 +106,20 @@ async function post(
 }
 
 async function seed(): Promise<void> {
-  await loadStoredManifest(database().db, {
-    SPINDRIFT_MANIFEST: JSON.stringify(fixture),
-  });
+  await writeStoredManifest(database().db, fixture);
 }
 
 /**
  * Boot with no declaration at all — the state the wizard exists for.
  *
  * The real loader rather than an insert of the placeholder constant, because
- * the claim being tested is about *that function's* placeholder arm: it
- * resolves `stored ?? declaration ?? placeholder` and then writes whichever arm
- * it took, so a test that wrote the row itself would prove nothing about what a
- * fresh installation actually boots holding.
+ * the claim being tested is about *that function's* placeholder arm: it takes
+ * the row or the placeholder and writes whichever it took, so a test that wrote
+ * the row itself would prove nothing about what a fresh installation actually
+ * boots holding.
  */
 async function bootUnconfigured(): Promise<void> {
-  await loadStoredManifest(database().db, {});
+  await loadStoredManifest(database().db);
 }
 
 async function readInstallation(): Promise<{

@@ -2,13 +2,10 @@
  * A stored manifest written under an older schema is upgraded, never discarded.
  *
  * **This is the test that makes the next manifest schema change safe, not just
- * this one.** The stored row governs — `loadStoredManifest` resolves
- * `stored ?? declaration ?? placeholder` — and a row this build cannot parse is
- * a row this build treats as unseeded, so it re-seeds from the mounted
- * declaration and silently discards everything an operator configured through
- * the UI. Nothing used to fail when a schema change made that reachable. The
- * failure mode is quiet, it lands on a real installation, and the only signal
- * is a `console.warn` in a pod log nobody is reading during a rollout.
+ * this one.** The row is the only copy of what an installation is, so a row
+ * this build cannot parse is an installation that cannot boot — there is no
+ * declaration left to fall back to, which makes every step in
+ * `manifest-upgrade.ts` load-bearing rather than merely tidy.
  *
  * So the corpus in `test/fixtures/stored-manifests/` holds one frozen snapshot
  * per shape a stored document has ever had, and every one of them has to boot.
@@ -29,10 +26,7 @@ import type {
   AuthoredManifest,
   InstallationManifest,
 } from '../../src/config/manifest.schema.ts';
-import {
-  MANIFEST_INLINE_VAR,
-  validateManifest,
-} from '../../src/config/manifest.ts';
+import { validateManifest } from '../../src/config/manifest.ts';
 import { loadStoredManifest } from '../../src/config/manifest-store.ts';
 import { upgradeManifestDocument } from '../../src/config/manifest-upgrade.ts';
 import { installation } from '../../src/db/schema.ts';
@@ -42,11 +36,6 @@ const CORPUS = join(import.meta.dir, '../fixtures/stored-manifests');
 const SNAPSHOTS = readdirSync(CORPUS)
   .filter((name) => name.endsWith('.yaml'))
   .sort();
-
-/** The declaration a re-seed would fall back to — a different installation. */
-const DECLARATION = await Bun.file(
-  join(import.meta.dir, '../fixtures/installation.example.yaml'),
-).text();
 
 /**
  * One snapshot, parsed fresh.
@@ -79,19 +68,14 @@ describe('every stored manifest this project has ever written', () => {
     };
     let loaded: InstallationManifest;
     try {
-      loaded = await loadStoredManifest(database().db, {
-        // A declaration is mounted on purpose. Without one the re-seed path
-        // throws instead of firing, and this test would pass on a build that
-        // discards the row — which is the exact failure it exists to catch.
-        [MANIFEST_INLINE_VAR]: DECLARATION,
-      });
+      loaded = await loadStoredManifest(database().db);
     } finally {
       console.warn = original;
     }
 
-    // The document that was stored is the document that was loaded. If a schema
-    // change made this row unreadable, `installation` would read `example` —
-    // the declaration's — and everything the operator configured would be gone.
+    // The document that was stored is the document that was loaded. A schema
+    // change that made this row unreadable would take the installation down
+    // with everything an operator configured in it.
     // The `installation` block on the row, whatever shape the snapshot wrote
     // it in: a document from before the pointers existed carried the label
     // bare, and the upgrade is what turns it into the block with the two
@@ -295,10 +279,10 @@ describe('the vessels a pre-declaration document is upgraded into', () => {
 
   test('is a no-op on a document that already declares them', () => {
     // `04` now upgrades too — it states `dns.zones` as the object naming one
-    // zone per reach, and `09` still carries the Device Flow `github` pair.
-    // `10` is the shape with none of the gaps, so this is where "already
-    // current" moved.
-    const current = snapshot('10-github-app-identity.yaml');
+    // zone per reach, `09` still carries the Device Flow `github` pair, and
+    // `10` still authors `controlPlane`. `11` is the shape with none of the
+    // gaps, so this is where "already current" moved.
+    const current = snapshot('11-deployment-serves-the-control-plane.yaml');
     expect(upgradeManifestDocument(current)).toEqual(current);
   });
 });

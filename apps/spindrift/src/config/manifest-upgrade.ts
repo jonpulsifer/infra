@@ -48,17 +48,44 @@ function asDocument(value: unknown): Document | null {
  * what is wrong with it rather than reporting what this function made of it.
  */
 export function upgradeManifestDocument(document: unknown): unknown {
-  return dropDeviceFlowIdentity(
-    listDnsZones(
-      movePinnedBuildWorkflowToMain(
-        scrubPlaceholderBuildWorkflow(
-          nameInstallationVessels(
-            dropTargetNames(addDeclaredVessels(document)),
+  return dropControlPlane(
+    dropDeviceFlowIdentity(
+      listDnsZones(
+        movePinnedBuildWorkflowToMain(
+          scrubPlaceholderBuildWorkflow(
+            nameInstallationVessels(
+              dropTargetNames(addDeclaredVessels(document)),
+            ),
           ),
         ),
       ),
     ),
   );
+}
+
+/**
+ * Drop the control plane's own hostname, which is no longer authored.
+ *
+ * `controlPlane.hostname` is the passkey relying party and was a second copy of
+ * the `hostname` the chart already renders the Gateway and the HTTPRoute from.
+ * It is now resolved from the deployment (`manifest.ts:resolveManifest`), so
+ * the schema is `.strict()` against it and every row written before this step
+ * carries one.
+ *
+ * A drop rather than a read: the value in the row is the same value the
+ * deployment supplies — the chart refused to render a release where the two
+ * disagreed — so there is nothing here worth carrying forward, and carrying it
+ * forward would be the second copy again one layer down.
+ *
+ * The whole key, not just the hostname inside it. `controlPlane` held exactly
+ * one key, so a document that kept an empty object would fail the same
+ * `.strict()` parse for a different reason.
+ */
+function dropControlPlane(document: unknown): unknown {
+  const manifest = asDocument(document);
+  if (manifest === null || !('controlPlane' in manifest)) return document;
+  const { controlPlane: _served, ...rest } = manifest;
+  return rest;
 }
 
 /**

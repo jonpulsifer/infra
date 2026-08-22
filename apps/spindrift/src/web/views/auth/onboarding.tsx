@@ -71,7 +71,7 @@
  * them first.
  */
 import { CircleAlert, PartyPopper, Rocket } from 'lucide-react';
-import { type ReactNode, useEffect, useState } from 'react';
+import { type CSSProperties, type ReactNode, useEffect, useState } from 'react';
 import type { StepStatus } from '../../../commands/views.ts';
 import { command } from '../../client.ts';
 import type { Path } from '../../forms/document.ts';
@@ -85,6 +85,7 @@ import { DiscoveryPanel } from './discovery.tsx';
 import {
   issuesOf,
   Outcome,
+  RestoreInstallation,
   refusalOf,
   type SaveOutcome,
 } from './installation.tsx';
@@ -358,9 +359,28 @@ export function Onboarding({
   // followed it nor noticed.
   const setStep = (next: number) => {
     const clamped = Math.min(Math.max(next, 0), ONBOARDING_ASKS.length - 1);
-    setStepState(clamped);
-    if (typeof location !== 'undefined')
-      location.hash = `/setup/${clamped + 1}`;
+    const move = () => {
+      setStepState(clamped);
+      if (typeof location !== 'undefined')
+        location.hash = `/setup/${clamped + 1}`;
+    };
+    // A view transition where the browser has one, and the same swap where it
+    // does not. The whole of what it buys is that the question leaving and the
+    // question arriving are one movement rather than two unrelated repaints —
+    // a wizard reads as one screen changing its mind, not as three screens.
+    //
+    // Nothing waits on it and nothing is conditional on it having run: the
+    // callback is the state update either way, so a browser without the API,
+    // or a reader who asked for less motion, gets the instant swap that was
+    // always here.
+    const view = globalThis.document as
+      | { startViewTransition?: (update: () => void) => unknown }
+      | undefined;
+    if (typeof view?.startViewTransition === 'function') {
+      view.startViewTransition(move);
+    } else {
+      move();
+    }
   };
 
   useEffect(() => {
@@ -439,6 +459,7 @@ export function Onboarding({
       }}
       onStep={setStep}
       onFinish={() => void finish()}
+      onRestored={setOutcome}
       onDone={onDone}
     />
   );
@@ -461,6 +482,7 @@ export function OnboardingView({
   onChange,
   onStep,
   onFinish,
+  onRestored,
   onDone,
 }: {
   readonly step: number;
@@ -471,6 +493,11 @@ export function OnboardingView({
   onChange(document: unknown): void;
   onStep(step: number): void;
   onFinish(): void;
+  /**
+   * A document arrived from a file instead of from the three questions. The
+   * same outcome the last press produces, because it is the same write.
+   */
+  onRestored(outcome: SaveOutcome): void;
   onDone(next: string | null): void;
 }) {
   // A saved document is the end of this screen's job, whatever step it was on.
@@ -513,7 +540,9 @@ export function OnboardingView({
 
   const body = (
     <>
-      <Card>
+      {/* Keyed by the step so React remounts it, which is what replays the
+          animation: a question is a new question, not the last one edited. */}
+      <Card key={step} className="motion-safe:animate-rise">
         <CardHeader>
           <Rocket aria-hidden="true" className="mt-0.5 size-4 text-subtle" />
           <div>
@@ -543,14 +572,22 @@ export function OnboardingView({
       <Outcome outcome={outcome} />
 
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <Button
-          type="button"
-          variant="outline"
-          disabled={saving || step === 0}
-          onClick={() => onStep(step - 1)}
-        >
-          Back
-        </Button>
+        {step === 0 ? (
+          // Nothing to go back to on the first question, and the one thing an
+          // operator might be here to do instead of answering it: a torn-down
+          // installation comes back from the file it exported, rather than from
+          // whatever document a chart happened to mount.
+          <RestoreInstallation disabled={saving} onRestored={onRestored} />
+        ) : (
+          <Button
+            type="button"
+            variant="outline"
+            disabled={saving}
+            onClick={() => onStep(step - 1)}
+          >
+            Back
+          </Button>
+        )}
         <div className="flex items-center gap-3">
           {/* Whatever the button is currently mumbling, said out loud. A
               ceremony that takes as long as a cloud write takes was announced
@@ -666,11 +703,41 @@ function OnboardingDone({
         <PartyPopper aria-hidden="true" className="mt-0.5 size-4 text-subtle" />
         <div>
           <CardTitle>This installation is configured.</CardTitle>
-          <p className="mt-1 text-sm text-muted-foreground">
-            {targets.length === 0
-              ? 'It declares no Targets yet. Connect one from Settings when there is somewhere to deploy.'
-              : `Targets reconciled, in rank order: ${targets.join(', ')}.`}
-          </p>
+          {targets.length === 0 ? (
+            <p className="mt-1 text-sm text-muted-foreground">
+              It declares no Targets yet. Connect one from Settings when there
+              is somewhere to deploy.
+            </p>
+          ) : (
+            <>
+              <p className="mt-1 text-sm text-muted-foreground">
+                Targets reconciled, in rank order:
+              </p>
+              {/* One at a time, in the order the write worked them: the
+                  reconciliation really is sequential inside one transaction,
+                  and rank really is the order, so the stagger is the shape of
+                  what happened rather than an effect over a finished list.
+                  Still one sentence to a reader who cannot see it — the list
+                  is comma-separated text with the delay on each item. */}
+              <ul className="mt-1 flex flex-wrap gap-x-1 text-sm text-muted-foreground">
+                {targets.map((target, index) => (
+                  <li
+                    key={target}
+                    className="motion-safe:animate-rise font-mono text-xs"
+                    style={
+                      {
+                        '--i': index,
+                        animationDelay: 'calc(var(--i) * 90ms)',
+                      } as CSSProperties
+                    }
+                  >
+                    {target}
+                    {index === targets.length - 1 ? '.' : ','}
+                  </li>
+                ))}
+              </ul>
+            </>
+          )}
         </div>
       </CardHeader>
       <CardContent className="flex flex-col gap-3">

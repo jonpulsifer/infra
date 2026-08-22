@@ -28,7 +28,6 @@ import type { DeployAdapter } from '../adapters/deploy/contract.ts';
 import type { DnsPublisher } from '../adapters/dns/contract.ts';
 import type { SecretStore } from '../adapters/store/contract.ts';
 import type {
-  AuthoredManifest,
   InstallationManifest,
   StoreAdapter,
   TargetAdapter,
@@ -241,53 +240,6 @@ export interface CommandContext {
    * to exist, and a test can run two installations in one process.
    */
   readonly manifest: InstallationManifest;
-  /**
-   * The mounted declaration, whole — or `null` where none is mounted, one is
-   * unreadable, or a caller has not computed one. `undefined` for the same
-   * reason `declarationDivergence` below is: every production context reads
-   * this once at boot (`src/web/serve.ts`'s `declaration`) and carries it
-   * along, and a test context that does not care is not required to.
-   *
-   * Answering a whole document here, rather than only the paths it disagrees
-   * with, rests on the same guarantee `getInstallationManifest` already leans
-   * on to answer `manifest` itself: §13 keeps every manifest variant
-   * credential-free by construction, so nothing this field can hold is
-   * secret. It does not weaken {@link diffManifestPaths}'s paths-only promise
-   * below — that walk stays generic over whatever the schema is next asked to
-   * carry regardless of what else the context exposes. Two documents resting
-   * on one guarantee, not two guarantees.
-   *
-   * `configureInstallation` takes exactly this type, which is what makes this
-   * field the whole of what a surface needs to put the declaration onto the
-   * stored row — see `src/commands/installation/get.ts`.
-   */
-  readonly declaration?: AuthoredManifest | null;
-  /**
-   * Dotted paths where {@link declaration} disagrees with `manifest`, from
-   * {@link diffManifestPaths}. `undefined` where a caller has not computed
-   * one — every production context does; a test context that does not care is
-   * not required to.
-   *
-   * §6: "drift is detected and surfaced, never silently corrected" applies to
-   * the manifest itself, not only to what it deploys. `loadStoredManifest`
-   * already says this once, in a pod log nobody is watching at the moment a
-   * rollout quietly stops matching what is running; this is the same fact
-   * reachable from a screen an operator actually opens. `getInstallationManifest`
-   * is the one command that answers it — carried on the context, not
-   * recomputed by that command, because it has no server-only import to
-   * recompute it with (`src/commands/installation/get.ts` says why).
-   *
-   * **Paths only, exactly as {@link diffManifestPaths} promises — never a
-   * value.** A command that reads this must not append a value onto a path
-   * before handing it back; doing so would defeat the one property this
-   * field exists to keep. Named `declarationDivergence` rather than
-   * `manifestDivergence` because `targets/list.ts` answers a different
-   * question under a name that used to collide with this one — a Target's
-   * row against its own manifest entry, not the declaration against the
-   * stored manifest. Same walk, same word `diffManifestPaths` produces,
-   * different pair of documents.
-   */
-  readonly declarationDivergence?: readonly string[];
 }
 
 /**

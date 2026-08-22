@@ -41,16 +41,14 @@
 import {
   CircleAlert,
   CircleCheck,
+  Download,
   RotateCcw,
-  Server,
   Sliders,
+  Upload,
 } from 'lucide-react';
-import { useCallback, useEffect, useState } from 'react';
-import { governedManifestPaths } from '../../../config/manifest.schema.ts';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { TransportFailure } from '../../client.ts';
 import { command } from '../../client.ts';
-import type { Path } from '../../forms/document.ts';
-import { pathKey } from '../../forms/document.ts';
 import { manifestFields, manifestIssues } from '../../forms/manifest.ts';
 import type { FieldErrors } from '../../forms/render.tsx';
 import { SchemaFields } from '../../forms/render.tsx';
@@ -76,33 +74,10 @@ export function InstallationSettings() {
   const [errors, setErrors] = useState<FieldErrors>(new Map());
   const [outcome, setOutcome] = useState<SaveOutcome | null>(null);
   const [saving, setSaving] = useState(false);
-  const [divergence, setDivergence] = useState<readonly string[]>([]);
-  /**
-   * The mounted declaration, whole — what an "Adopt this declaration" press
-   * sends to `configureInstallation` unedited. `null` until the first load
-   * answers, and whenever nothing is mounted; `ManifestDivergenceNotice` does
-   * not offer the act without it.
-   */
-  const [declaration, setDeclaration] = useState<unknown>(null);
-  /**
-   * Whether that declaration takes the governed slice back on every boot.
-   *
-   * Separate from `declaration` because a mounted document and a governing one
-   * are different facts, and the chart-only install is where they part: the
-   * chart mounts its stand-in to bind the relying party, and a stand-in governs
-   * nothing. Answered by the server (`getInstallationManifest`) rather than
-   * decided here, so this screen locks exactly what `configureInstallation`
-   * would refuse — never a field it would have accepted.
-   */
-  const [declarationGoverns, setDeclarationGoverns] = useState(false);
-
   const load = useCallback(async () => {
     const result = await command('getInstallationManifest', {});
     if (result.ok) {
       setDocument(result.value.manifest);
-      setDivergence(result.value.declarationDivergence);
-      setDeclaration(result.value.declaration);
-      setDeclarationGoverns(result.value.declarationGoverns);
       setLoadError(null);
     } else {
       setLoadError(result.failure.message);
@@ -210,24 +185,12 @@ export function InstallationSettings() {
       errors={errors}
       outcome={outcome}
       saving={saving}
-      divergence={divergence}
-      declaration={declaration}
-      declarationGoverns={declarationGoverns}
       onChange={(next) => {
         setDocument(next);
         setOutcome(null);
       }}
       onSave={() => void save()}
       onReload={() => {
-        setErrors(new Map());
-        setOutcome(null);
-        void load();
-      }}
-      onAdopted={() => {
-        // The row changed under this screen exactly as a `configureInstallation`
-        // save does, so it is re-read the same way: what the write left, not
-        // what was sent, and any local edit below it is discarded along with
-        // it — the notice says so before the press that causes it.
         setErrors(new Map());
         setOutcome(null);
         void load();
@@ -278,52 +241,18 @@ export function InstallationSettingsView({
   errors,
   outcome,
   saving,
-  divergence = [],
-  declaration = null,
-  declarationGoverns = false,
   onChange,
   onSave,
   onReload,
-  onAdopted,
 }: {
   readonly fields: readonly FormField[];
   readonly document: unknown;
   readonly errors: FieldErrors;
   readonly outcome: SaveOutcome | null;
   readonly saving: boolean;
-  /**
-   * Dotted paths where the mounted declaration disagrees with what is shown
-   * below, from `getInstallationManifest`. Optional, and defaulted to `[]`
-   * rather than required, so a test rendering this view for the ordinary case
-   * — no declaration mounted, or nothing seeded yet — states nothing about a
-   * fact it is not exercising.
-   */
-  readonly divergence?: readonly string[];
-  /**
-   * The mounted declaration itself, from the same command as `divergence` —
-   * `getInstallationManifest`'s `declaration`. What "Adopt this declaration"
-   * sends to `configureInstallation`, unedited. Optional and defaulted to
-   * `null` for the same reason `divergence` is; the notice offers no adopt
-   * act without it, which a test asserting only `divergence` is still
-   * entitled to leave unset.
-   */
-  readonly declaration?: unknown;
-  /**
-   * Whether {@link declaration} governs. Defaults to `false` so a caller that
-   * passes neither locks nothing, which is the honest answer for a screen with
-   * no declaration behind it.
-   */
-  readonly declarationGoverns?: boolean;
   onChange(document: unknown): void;
   onSave(): void;
   onReload(): void;
-  /**
-   * The row changed underneath this screen by a route other than `onSave` —
-   * an adopt press. Optional because a caller that never passes a
-   * `declaration` has no act to report finishing; `ManifestDivergenceNotice`
-   * does not render the button that would need it.
-   */
-  onAdopted?(): void;
 }) {
   // The slice the mounted declaration takes back on every boot. Read-only here
   // rather than accepted and reverted: `configureInstallation` refuses a
@@ -331,15 +260,7 @@ export function InstallationSettingsView({
   // is a field that teaches them the wrong thing about who owns it. Still no
   // key named in this file — the paths come from the schema module that owns
   // them, resolved against the document being edited.
-  const governed = governedManifestPaths(
-    declarationGoverns ? declaration : null,
-    document,
-  ).map(pathKey);
-  const locked = (at: Path) => {
-    const here = pathKey(at);
-    return governed.some((key) => here === key || here.startsWith(`${key}.`));
-  };
-  const form = { document, errors, disabled: saving, locked, onChange };
+  const form = { document, errors, disabled: saving, onChange };
   // Sections are whichever keys have structure. Derived rather than listed, so
   // a key that changes shape moves itself between the two halves.
   const nested = fields.filter(
@@ -366,14 +287,6 @@ export function InstallationSettingsView({
         </p>
       </div>
 
-      <ManifestDivergenceNotice
-        paths={divergence}
-        declaration={declaration}
-        onAdopted={onAdopted}
-      />
-
-      <GovernedSliceNotice locked={governed.length > 0} />
-
       {/* Above the form, because it is the step that comes before editing: a
           value confirmed from the cloud is a value nobody has to type, and one
           typed here is a value nothing checked. It edits the same document
@@ -382,7 +295,6 @@ export function InstallationSettingsView({
       <DiscoveryPanel
         document={document}
         disabled={saving}
-        locked={locked}
         onChange={onChange}
       />
 
@@ -432,7 +344,7 @@ export function InstallationSettingsView({
 
       <Outcome outcome={outcome} />
 
-      <div className="flex items-center gap-3">
+      <div className="flex flex-wrap items-center gap-3">
         <Button type="submit" disabled={saving}>
           {saving ? 'Saving…' : 'Save this installation'}
         </Button>
@@ -445,164 +357,171 @@ export function InstallationSettingsView({
           <RotateCcw aria-hidden="true" />
           Discard edits and re-read
         </Button>
+        <DownloadInstallation disabled={saving} />
       </div>
     </form>
   );
 }
 
 /**
- * Why some of the fields below cannot be typed into.
+ * The document this installation actually has, as a file.
  *
- * The sentence rather than a tooltip on each control, and the same sentence
- * `views/targets/list.tsx` renders on a governed Target's card: these two
- * boundaries reconcile from the mounted declaration on every boot, so an edit
- * accepted here would survive exactly until the next restart — with the screen
- * that accepted it then showing the old values and no reason. A lock with no
- * sentence beside it reads as a bug in the form.
+ * **What replaced the declaration as the disaster-recovery artifact.** A
+ * mounted document was a copy of the configuration that only ever matched by
+ * somebody remembering to keep it matching — it seeded an empty row and was
+ * ignored ever after, so the file in git and the row a torn-down installation
+ * would need to come back as drifted apart silently, and the drift surfaced as
+ * a warning in a pod log at the moment a rollout stopped matching what was
+ * running. This is the same artifact derived the other way round: it is by
+ * construction what the installation has, because it is read back out of it.
  *
- * Not a refusal: nothing failed and nothing here is wrong to fix, so it takes
- * the neutral voice `Outcome`'s `refused` arm uses rather than the destructive
- * one.
+ * **Re-read rather than serialized from the form.** The screen above holds an
+ * edited document, and a file written from that is a record of what somebody
+ * was in the middle of typing. What is worth committing is what is stored, so
+ * this asks the server for it.
+ *
+ * JSON, and no YAML emitter anywhere near the browser bundle: JSON is valid
+ * YAML, `parseManifest` says so, and the restore below reads this file back
+ * through that same reader. An emitter here would be a second serializer to
+ * keep in step with a schema that is still moving.
  */
-function GovernedSliceNotice({ locked }: { readonly locked: boolean }) {
-  if (!locked) return null;
+function DownloadInstallation({ disabled }: { readonly disabled: boolean }) {
+  const [failure, setFailure] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  const download = async () => {
+    setBusy(true);
+    setFailure(null);
+    try {
+      const result = await command('getInstallationManifest', {});
+      if (!result.ok) {
+        setFailure(result.failure.message);
+        return;
+      }
+      const manifest = result.value.manifest as {
+        installation?: { name?: string };
+      };
+      const url = URL.createObjectURL(
+        new Blob([JSON.stringify(result.value.manifest, null, 2)], {
+          type: 'application/json',
+        }),
+      );
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `${manifest.installation?.name ?? 'installation'}.json`;
+      link.click();
+      // The object URL outlives the click and nothing else will ever ask for
+      // it, so releasing it here is the whole of this element's lifetime.
+      URL.revokeObjectURL(url);
+    } catch (cause) {
+      setFailure(
+        cause instanceof Error
+          ? cause.message
+          : 'This installation could not be read.',
+      );
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
-    <div className="flex items-start gap-2 rounded-md border border-border bg-secondary p-3 text-sm text-foreground">
-      <Server aria-hidden="true" className="mt-0.5 size-4 text-subtle" />
-      <div>
-        <p className="font-medium">
-          The vessels this installation is built on are declared, not configured
-          here.
+    <div className="flex items-center gap-2">
+      <Button
+        type="button"
+        variant="outline"
+        disabled={disabled || busy}
+        onClick={() => void download()}
+      >
+        <Download aria-hidden="true" />
+        {busy ? 'Reading…' : 'Download this installation'}
+      </Button>
+      {failure === null ? null : (
+        <p role="alert" className="text-xs text-destructive">
+          {failure}
         </p>
-        <p className="mt-0.5 text-muted-foreground">
-          This installation reconciles them from the mounted declaration on
-          every boot, so they are read-only below and a save that changed one
-          would be refused. Change the declaration instead.
-        </p>
-      </div>
+      )}
     </div>
   );
 }
 
 /**
- * The one thing this screen says that is not about the last save: the
- * mounted declaration and the document below no longer agree.
+ * A document from a file, restored whole.
  *
- * `loadStoredManifest` seeds from a declaration and, once seeded, ignores
- * it — deliberately, so a rollout can never revert what an operator just
- * configured here. The cost of that rule is that a declaration can drift for
- * a long time with nothing but a boot-time pod log to say so, which is how
- * PR #1607 moved a Target's gateway in the declaration while the row this
- * screen edits kept pointing at the one that PR deleted. This notice is that
- * same fact, read where an operator actually looks rather than where a
- * rollout happened to leave it.
+ * The other half of {@link DownloadInstallation}, and the reason that one is
+ * worth having: an export nothing can read back is a file somebody keeps out of
+ * superstition. This is how a torn-down installation comes back configured —
+ * the act a mounted declaration used to perform at boot, done on purpose by
+ * somebody who chose the document, rather than silently by whichever document
+ * happened to be mounted.
  *
- * Not a refusal — nothing failed, and nothing here is wrong to fix — so it
- * renders beside `Outcome` rather than as one of its arms, and it is present
- * whenever `divergence` is non-empty rather than only after a save.
+ * **The text, not a parse.** The file goes to `configureInstallation` as a
+ * string and the server reads it, so the one reader that decides what a
+ * manifest is stays the one every other document goes through. That also makes
+ * a file that is not a manifest at all a refusal an operator reads, rather than
+ * an exception in a browser console.
  *
- * **Paths only**, exactly as `getInstallationManifest` answers them: the list
- * says where the two documents disagree, never what either one says at that
- * path.
- *
- * **Adopting sends `declaration` whole, the same way `onSave` sends the
- * edited document.** `declaration` is already an `AuthoredManifest` —
- * `configureInstallation`'s own input type — so this is not a patch applied
- * at `paths`: "apply only the diverging paths" would let a partially valid
- * document through, which is exactly what a manifest must never be. The cost
- * is stated next to the button that causes it, before the press rather than
- * after: a `declared` write resets the assessment of every Target whose
- * connection moves to an unhealthy, awaiting-inspection checklist
- * (`manifest-store.ts`'s `reconcileManifestTargets`) — which is what most of
- * a divergence like this one actually is, because a Target's connection is
- * exactly what a rollout to `helm-release.yaml` most often moves. Said
- * plainly rather than behind a second confirming click: the sentence is the
- * same regardless of which paths differ, so a click that only reveals it
- * would cost an operator a step without giving them anything to decide with
- * that they could not already read.
+ * The input is reset after every attempt: choosing the same file twice is a
+ * real thing to want after fixing it, and a file input fires nothing when the
+ * selection has not changed.
  */
-function ManifestDivergenceNotice({
-  paths,
-  declaration,
-  onAdopted,
+export function RestoreInstallation({
+  disabled,
+  onRestored,
 }: {
-  readonly paths: readonly string[];
-  /** The document an adopt press submits, whole. `null` offers no press. */
-  readonly declaration?: unknown;
-  onAdopted?(): void;
+  readonly disabled: boolean;
+  /** A document landed. The caller decides what to show next. */
+  onRestored(outcome: SaveOutcome): void;
 }) {
-  const [adopting, setAdopting] = useState(false);
-  const [adoptError, setAdoptError] = useState<string | null>(null);
+  const input = useRef<HTMLInputElement>(null);
+  const [busy, setBusy] = useState(false);
 
-  if (paths.length === 0) return null;
-
-  const adopt = async () => {
-    setAdopting(true);
-    setAdoptError(null);
+  const restore = async (file: File) => {
+    setBusy(true);
     try {
       const result = await command('configureInstallation', {
-        manifest: declaration,
+        manifest: await file.text(),
       });
-      if (result.ok) {
-        onAdopted?.();
-      } else {
-        setAdoptError(result.failure.message);
-      }
-    } catch (cause) {
-      setAdoptError(
-        cause instanceof Error
-          ? cause.message
-          : 'Adopting the declaration failed.',
+      onRestored(
+        result.ok
+          ? { kind: 'saved', targets: result.value.targets }
+          : refusalOf(result.failure),
       );
+    } catch (cause) {
+      onRestored({
+        kind: 'failed',
+        message:
+          cause instanceof Error
+            ? cause.message
+            : 'That file could not be restored.',
+      });
     } finally {
-      setAdopting(false);
+      setBusy(false);
+      if (input.current !== null) input.current.value = '';
     }
   };
 
   return (
-    <div
-      role="alert"
-      className="flex items-start gap-2 rounded-md border border-border bg-secondary p-3 text-sm text-foreground"
-    >
-      <CircleAlert aria-hidden="true" className="mt-0.5 size-4 text-subtle" />
-      <div className="w-full">
-        <p className="font-medium">
-          The mounted declaration no longer matches this installation.
-        </p>
-        <p className="mt-0.5">
-          Configuration is this screen's to drive, so what is stored below is
-          what is running — the declaration was only ever the seed.
-        </p>
-        <p className="mt-1 text-muted-foreground">
-          Differs at: {paths.join(', ')}.
-        </p>
-
-        {declaration === null || declaration === undefined ? null : (
-          <div className="mt-2 flex flex-col gap-2">
-            <p className="text-xs text-muted-foreground">
-              Adopting replaces the document below with the declaration above,
-              whole — discarding any unsaved edit here along with it. Every
-              Target whose connection moves is reset to unhealthy, with an
-              awaiting-inspection checklist, until it is re-inspected.
-            </p>
-            {adoptError !== null ? (
-              <p className="text-terminal-destructive">{adoptError}</p>
-            ) : null}
-            <div>
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                disabled={adopting}
-                onClick={() => void adopt()}
-              >
-                {adopting ? 'Adopting…' : 'Adopt this declaration'}
-              </Button>
-            </div>
-          </div>
-        )}
-      </div>
-    </div>
+    <>
+      <input
+        ref={input}
+        type="file"
+        accept=".json,.yaml,.yml,application/json"
+        className="hidden"
+        onChange={(event) => {
+          const file = event.target.files?.[0];
+          if (file !== undefined) void restore(file);
+        }}
+      />
+      <Button
+        type="button"
+        variant="outline"
+        disabled={disabled || busy}
+        onClick={() => input.current?.click()}
+      >
+        <Upload aria-hidden="true" />
+        {busy ? 'Restoring…' : 'Restore from a file'}
+      </Button>
+    </>
   );
 }
 

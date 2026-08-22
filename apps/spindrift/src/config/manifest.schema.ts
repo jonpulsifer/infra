@@ -89,7 +89,6 @@ export const gatewayAuthSchema = z
     adapterKey: nonEmptyString,
     issuer: z.string().url(),
     subjectHeader: headerName,
-    displayNameHeader: headerName.optional(),
   })
   .strict();
 
@@ -517,46 +516,6 @@ export const installationManifestSchema = z
       })
       .strict(),
 
-    controlPlane: z
-      .object({
-        /**
-         * Where this control plane's own UI is served.
-         *
-         * Two things read it and both genuinely need it. A passkey is scoped to
-         * a **relying party id**, which is this name, and a ceremony performed
-         * against any other origin is refused (Task 37) — so an installation
-         * that guessed this wrong could enrol nobody. And the status page
-         * (§9) has to tell its own address apart from an App's, which is the
-         * only way one process can serve both.
-         *
-         * It is not derived from `dns.zones`: the control plane is a
-         * platform workload (§19) and never one of its own Apps, so it does not
-         * live in the zone Apps are named in.
-         *
-         * **Authored, even though the installer chart has a `hostname` value
-         * that renders the Gateway and the HTTPRoute.** That looks like the
-         * same fact restated, and it is not, for two reasons.
-         *
-         * The chart's `hostname` may be empty, and the chart says so: an
-         * installation that renders no Gateway and no HTTPRoute, reachable only
-         * in-cluster, is supported. That installation still needs a relying
-         * party id, so the chart is not a total source for this and deriving it
-         * would make a supported installation unconfigurable.
-         *
-         * And the relying party is bound once, at boot, on purpose — a passkey
-         * ceremony is scoped to the origin it began at, so re-resolving this
-         * mid-session invalidates credentials rather than updating them.
-         * Moving where it resolves from changes which origin ceremonies are
-         * accepted, and the only honest proof of that change is a real
-         * enrolment, not an argument. So the chart refuses instead: a release
-         * that declares a manifest whose `controlPlane.hostname` disagrees with
-         * its own `hostname` fails to render, which is the earliest moment the
-         * two can be compared and the only one where being wrong costs nothing.
-         */
-        hostname: zone,
-      })
-      .strict(),
-
     auth: z
       .object({
         /**
@@ -898,10 +857,9 @@ export const installationManifestSchema = z
          * hostname for every project rather than an installation fact —
          * `createSecretStore` in `adapters/registry.ts` applies its default
          * when this is absent. `onepassword` gets no such default: a Connect
-         * server is self-hosted, so that adapter still requires a real value
-         * here, enforced where the store is constructed rather than by the
-         * schema, because which adapter needs it is a fact this object's
-         * sibling key carries, not the type of this one.
+         * server is self-hosted, so there is no universal address to assume,
+         * and the refinement below refuses the pair rather than letting the
+         * store constructor throw on the next request after the write.
          */
         endpoint: z.string().url().optional(),
         /**
@@ -911,7 +869,22 @@ export const installationManifestSchema = z
          * project moved to, and for the same reason.
          */
       })
-      .strict(),
+      .strict()
+      // Which adapter needs an endpoint is a fact the sibling key carries, and
+      // a refinement is where a fact about two keys belongs. It was left to
+      // `createSecretStore` to notice, which is one request too late: the
+      // document validates, the write lands, and the *next* command rebuilds
+      // the registry and throws — so a wizard could store a document that
+      // stops the installation answering, with nothing on screen saying why.
+      .refine(
+        (store) =>
+          store.adapter !== 'onepassword' || store.endpoint !== undefined,
+        {
+          error:
+            'the onepassword adapter needs an endpoint: a Connect server is self-hosted, so there is no universal address to assume',
+          path: ['endpoint'],
+        },
+      ),
 
     /**
      * The tenancy boundaries this installation deploys into (§13, §14).
@@ -1055,6 +1028,48 @@ export type InstallationManifest = AuthoredManifest & {
     /** Resolved from the credential the deployment mounts, never authored. */
     readonly federation: FederationConfig | null;
   };
+  readonly boundary: {
+    /**
+     * Whether this deployment strips identity headers and restricts ingress to
+     * the trusted Gateway, attested by the deployment that renders the policy.
+     *
+     * A derived key for the same reason the two above are: the process cannot
+     * observe a NetworkPolicy from inside its own pod, so this is a fact about
+     * the deployment rather than about the installation, and nothing that can
+     * write a manifest can write it. `auth.gateway` is refused wherever this is
+     * false — at boot, and at the command that would set it.
+     */
+    readonly trustedGateway: boolean;
+  };
+  readonly controlPlane: {
+    /**
+     * Where this control plane's own UI is served, from the deployment that
+     * serves it — never authored.
+     *
+     * Two things read it and both genuinely need it. A passkey is scoped to a
+     * **relying party id**, which is this name, and a ceremony performed
+     * against any other origin is refused — so an installation that had this
+     * wrong could enrol nobody. And the status page has to tell its own address
+     * apart from an App's, which is the only way one process can serve both.
+     *
+     * Derived rather than authored, and that is what makes an installation
+     * reachable before anyone has configured it. The chart renders the Gateway
+     * and the HTTPRoute from one `hostname` value; a manifest key beside it was
+     * a second copy of the same fact, and the only way to keep two copies
+     * honest was for the chart to refuse a release where they disagreed and to
+     * carry a whole second placeholder document to seed the value into. Read it
+     * from the deployment and there is one copy, no refusal, and no document.
+     *
+     * It is not derived from `dns.zones`: the control plane is a platform
+     * workload (§19) and never one of its own Apps, so it does not live in the
+     * zone Apps are named in.
+     *
+     * Still bound once, at boot, on purpose — a passkey ceremony is scoped to
+     * the origin it began at, so re-resolving this mid-session would invalidate
+     * credentials rather than update them.
+     */
+    readonly hostname: string;
+  };
 };
 
 /** The document both halves of a pointer are resolved against. */
@@ -1151,49 +1166,6 @@ export function terraformRootOf(
 }
 
 /**
- * Every path in a document a mounted declaration governs, as
- * `web/forms/document.ts` addresses one — the two pointers, and whichever
- * entries of `vessels` they name. `[]` when nothing is mounted, which is when
- * nothing is governed.
- *
- * **By name resolved against the document, never by a position carried from
- * anywhere else.** `vessels` is an array an editing surface adds to and removes
- * from, so a position computed before an edit addresses a different entry after
- * it.
- *
- * Both arguments are `unknown` because both callers hold one: the declaration
- * arrives over the wire and the document is mid-edit, and a predicate that only
- * answered for a document that already validates would stop locking exactly
- * while a mistake was being typed.
- */
-export function governedManifestPaths(
-  declaration: unknown,
-  document: unknown,
-): readonly (readonly (string | number)[])[] {
-  const pointers = (declaration as { installation?: Record<string, unknown> })
-    ?.installation;
-  const governed = new Set(
-    (['controlPlaneVessel', 'homeVessel'] as const)
-      .map((key) => pointers?.[key])
-      .filter((name): name is string => typeof name === 'string'),
-  );
-  if (governed.size === 0) return [];
-
-  const declared = (document as { vessels?: unknown })?.vessels;
-  const entries = Array.isArray(declared) ? declared : [];
-  return [
-    ['installation', 'controlPlaneVessel'],
-    ['installation', 'homeVessel'],
-    ...entries.flatMap((vessel, index) => {
-      const name = (vessel as { name?: unknown })?.name;
-      return typeof name === 'string' && governed.has(name)
-        ? [['vessels', index] as readonly (string | number)[]]
-        : [];
-    }),
-  ];
-}
-
-/**
  * Project a resolved manifest back down to the document an operator may write.
  *
  * The inverse of the join `resolveManifest` performs, and it exists because an
@@ -1210,6 +1182,11 @@ export function governedManifestPaths(
 export function toAuthoredManifest(
   manifest: InstallationManifest,
 ): AuthoredManifest {
-  const { cloud: _derived, ...authored } = manifest;
+  const {
+    cloud: _cloud,
+    boundary: _boundary,
+    controlPlane: _controlPlane,
+    ...authored
+  } = manifest;
   return authored;
 }

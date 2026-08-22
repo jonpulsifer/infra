@@ -41,7 +41,7 @@ tags:: runbook, spindrift, terraform, kubernetes
 		- `envFromSecret` — the installation Secret, next section.
 		- `database.enabled` — the chart declares a CNPG `Cluster` named `<release>-db` beside the two processes, with a migration Job that holds both below Ready until the schema is present. [[Runbooks/Managed Postgres]] is how to reach it. `keepOnDelete` decides whether uninstalling keeps the rows.
 		- `reconciler.enabled` — the second process off the same image; nothing deploys without it.
-	- `manifest:` is optional and seeds only an installation that has no stored row yet. Omit it and a placeholder seeds the row, with every genuine choice made in the product ("Configure in the product" below). Once a row exists the mounted declaration is ignored — correcting a value on a running installation is the UI's job, not a redeploy.
+	- There is no `manifest:` value: the chart installs a control plane and says nothing about what the installation is. A release with no stored row seeds the placeholder, and every genuine choice is made in the product ("Configure in the product" below). An installation that has been configured before comes back from the file Settings writes, restored on onboarding's first screen.
 - # The installation Secret
 	- `envFromSecret` names a sops-encrypted Secret in the installation's namespace carrying two keys:
 		- `SPINDRIFT_ENROLMENT_TOKEN` — the token the first operator spends to claim the installation. Consumed on use; rotating it in this Secret is the whole recovery procedure.

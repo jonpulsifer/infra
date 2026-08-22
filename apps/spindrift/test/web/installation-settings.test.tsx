@@ -35,9 +35,6 @@ function screen({
   errors = new Map() as FieldErrors,
   outcome = null as SaveOutcome | null,
   saving = false,
-  divergence = [] as readonly string[],
-  declaration = null as unknown,
-  declarationGoverns = false,
 } = {}): string {
   return renderToStaticMarkup(
     <InstallationSettingsView
@@ -46,13 +43,9 @@ function screen({
       errors={errors}
       outcome={outcome}
       saving={saving}
-      divergence={divergence}
-      declaration={declaration}
-      declarationGoverns={declarationGoverns}
       onChange={() => undefined}
       onSave={() => undefined}
       onReload={() => undefined}
-      onAdopted={() => undefined}
     />,
   );
 }
@@ -181,15 +174,18 @@ describe('a refusal reads as what it is', () => {
 });
 
 /**
- * Ticket 81's second clause: the two vessels the installation is built on
- * reconcile from the mounted declaration on boot **and render read-only**.
+ * Nothing on this screen is somebody else's to write.
  *
- * The lock is the point rather than the refusal behind it. `loadStoredManifest`
- * re-applies the declaration to those two entries at every restart, so a field
- * an operator can type into here is a field that accepts a value and loses it —
- * which is the failure `views/targets/list.tsx` renders its own sentence for.
+ * The two vessels this installation is built on used to reconcile from the
+ * mounted declaration at every restart, so the form rendered them locked — a
+ * field that accepted a value and lost it is worse than one that refuses. There
+ * is no declaration to reconcile from any more, and the two invariants that
+ * lock protected are refusals the schema already makes: a pointer naming no
+ * declared vessel, and a home vessel with no shared services. What replaced the
+ * "an installation that cannot come back" argument is the export beside Save —
+ * it covers every key rather than four.
  */
-describe('the vessels this installation is built on are read-only', () => {
+describe('the whole document is this screen\u2019s', () => {
   /** The fixture plus a boundary neither pointer names. */
   const withAppVessel = {
     ...manifest,
@@ -203,124 +199,21 @@ describe('the vessels this installation is built on are read-only', () => {
     return control.includes('disabled=""');
   }
 
-  test('a declaration locks the pointers and the entries they name', () => {
-    const markup = screen({
-      document: withAppVessel,
-      declaration: manifest,
-      declarationGoverns: true,
-    });
-
-    expect(locked(markup, 'installation.controlPlaneVessel')).toBe(true);
-    expect(locked(markup, 'installation.homeVessel')).toBe(true);
-    // Everything under a governed entry, not only its name: the shared services
-    // are the half a boot most often takes back, and the half three commands
-    // used to write.
-    expect(locked(markup, 'vessels.1.name')).toBe(true);
-    expect(locked(markup, 'vessels.1.shared.sourceBucket')).toBe(true);
-    // By name, resolved against the document. The third boundary is nobody's
-    // but this screen's, and so is every ordinary key.
-    expect(locked(markup, 'vessels.2.name')).toBe(false);
-    expect(locked(markup, 'build.zeroConfigFrontend')).toBe(false);
-  });
-
-  test('the lock carries the sentence saying why', () => {
-    // A disabled input with nothing beside it reads as a bug in the form.
-    expect(
-      screen({
-        document: withAppVessel,
-        declaration: manifest,
-        declarationGoverns: true,
-      }),
-    ).toContain('are declared, not configured here');
-  });
-
-  test('a governed field is marked declared where it is, not only at the top', () => {
-    // The sentence above is one sentence at the top of a page that runs to
-    // twelve cards, and the fields it explains were rendered as `disabled`,
-    // which is the same attribute a save in flight sets. A declared value is
-    // the most authoritative thing on the screen and it read as the most
-    // broken.
-    const markup = screen({
-      document: withAppVessel,
-      declaration: manifest,
-      declarationGoverns: true,
-    });
-
-    expect(markup).toContain('declared</span>');
-    // At the boundary the answer changes, not on every descendant of it: a
-    // governed vessel would otherwise carry eight identical badges inside one
-    // card to say one thing.
-    expect(markup.split('declared</span>').length - 1).toBeLessThan(
-      manifestFields().length,
-    );
-    expect(screen({ document: withAppVessel })).not.toContain(
-      'declared</span>',
-    );
-  });
-
-  test('with no declaration mounted the whole document is this screen’s', () => {
-    // Governance is what a declaration does on a boot. An installation running
-    // without one owns its document outright — which is how the shared services
-    // are configured at all on an install that mounts nothing.
+  test('every value is editable', () => {
     const markup = screen({ document: withAppVessel });
-
+    expect(locked(markup, 'installation.controlPlaneVessel')).toBe(false);
     expect(locked(markup, 'installation.homeVessel')).toBe(false);
     expect(locked(markup, 'vessels.1.shared.sourceBucket')).toBe(false);
-    expect(markup).not.toContain('are declared, not configured here');
+    expect(locked(markup, 'build.zeroConfigFrontend')).toBe(false);
+    expect(markup).not.toContain('declared</span>');
   });
 
-  test('a mounted declaration that governs nothing locks nothing', () => {
-    // The chart-only install. The chart mounts its stand-in so the passkey
-    // relying party is the hostname the release actually serves, and a stand-in
-    // asserts nothing about anybody's boundaries — so this screen has to be the
-    // one place those two values can be set, not the one place they cannot.
-    //
-    // The server answers whether the declaration governs; this screen must not
-    // lock on `declaration` being present, which is the shape that shipped the
-    // wizard nobody could finish.
-    const markup = screen({
-      document: withAppVessel,
-      declaration: manifest,
-      declarationGoverns: false,
-    });
-
-    expect(locked(markup, 'installation.homeVessel')).toBe(false);
-    expect(locked(markup, 'vessels.1.shared.artifactsProject')).toBe(false);
-    expect(markup).not.toContain('are declared, not configured here');
-  });
-});
-
-describe('adopting a divergent declaration', () => {
-  test('no divergence, no notice and no adopt act', () => {
-    const markup = screen();
-    expect(markup).not.toContain(
-      'The mounted declaration no longer matches this installation.',
+  test('the document can be written down as well as edited', () => {
+    // The other half of what makes those fields safe to hand over: an
+    // installation that can be written down is one that can be restored, which
+    // is the whole of what the governed slice was protecting.
+    expect(screen({ document: withAppVessel })).toContain(
+      'Download this installation',
     );
-    expect(markup).not.toContain('Adopt this declaration');
-  });
-
-  test('a divergence with nothing to adopt says so, but offers no press', () => {
-    // Reachable when a caller has paths but no document for them — a test
-    // context that computed one without the other. The notice still names
-    // the disagreement; it just cannot act on it.
-    const markup = screen({ divergence: ['build.zeroConfigFrontend'] });
-    expect(markup).toContain(
-      'The mounted declaration no longer matches this installation.',
-    );
-    expect(markup).toContain('Differs at: build.zeroConfigFrontend.');
-    expect(markup).not.toContain('Adopt this declaration');
-  });
-
-  test('a divergence with a declaration offers the adopt act, and its cost', () => {
-    const markup = screen({
-      divergence: ['build.zeroConfigFrontend'],
-      declaration: manifest,
-    });
-    expect(markup).toContain('Adopt this declaration');
-    // The cost, named beside the button rather than after the press: a
-    // `declared` write is what resets a moved Target connection to unhealthy
-    // pending inspection (`manifest-store.ts`'s `reconcileManifestTargets`).
-    expect(markup).toContain('reset to unhealthy');
-    expect(markup).toContain('awaiting-inspection checklist');
   });
 });

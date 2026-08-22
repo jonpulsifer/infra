@@ -124,7 +124,60 @@
   }
 }
 
+/*
+ * The two motions this app has, defined here because it had none.
+ *
+ * Everything that moved before this was `animate-pulse`, `animate-spin` and a
+ * width transition — three utilities Tailwind ships, and nothing of the app's
+ * own. What was missing is the vocabulary for something *arriving*: a value the
+ * cloud just answered with, a step that just finished. Both are below, and both
+ * are one-shot: nothing here loops, because a loop is a claim that something is
+ * still happening and only the spinner is entitled to make it.
+ *
+ * Top level rather than inside `@theme`, which is `inline` here — the tokens
+ * below name these, and a keyframe declared in a stylesheet exists whether or
+ * not a utility references it.
+ *
+ * The reduced-motion reset at the foot of this file collapses both to 0.01ms.
+ * Neither carries meaning a word does not: a risen row reads the same still,
+ * and the drawn tick is a tick either way.
+ */
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/*
+ * A stroke drawing itself, for the one glyph that marks a thing as finished.
+ *
+ * `pathLength: 1` on the SVG normalizes every path to a single unit whatever
+ * its real geometry, which is what lets one keyframe draw a tick, a rule or an
+ * arrow without knowing which it got.
+ */
+@keyframes draw {
+  from {
+    stroke-dashoffset: 1;
+  }
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
 @theme inline {
+  /*
+   * Named animations, as Tailwind v4 theme tokens — `--animate-rise` is the
+   * `animate-rise` utility. Durations belong here rather than at each call
+   * site so "how long does something take to arrive" is one answer.
+   */
+  --animate-rise: rise 220ms ease-out both;
+  --animate-draw: draw 320ms ease-out both;
+
   --color-background: var(--ground);
   --color-foreground: var(--ink);
   --color-card: var(--surface);

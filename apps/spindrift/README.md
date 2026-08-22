@@ -58,7 +58,7 @@ explicit standalone scenario for developing the views without a database.
 that resolves before anything has been deployed to it, on a lowest-precedence
 wildcard route, and `src/web/status-route.ts` is the page it lands on: one
 process serves both surfaces and tells them apart by the `Host` header, which is
-what `controlPlane.hostname` is authored for. It answers 503 rather than 200 —
+what `controlPlane.hostname` is resolved from `SPINDRIFT_HOSTNAME` for. It answers 503 rather than 200 —
 every state it reports is an address that is not serving — and says only which
 name was asked for and whether a release has reached it. The two halves outside
 this app are the wildcard route on the Apps gateway
@@ -313,21 +313,18 @@ carries those services as its own properties (`shared`), which is what stops a
 bucket, a store and a project id from being four unrelated strings that nothing
 requires to describe the same place.
 
-Both reconcile from the mounted declaration **on every boot** and render
-read-only, which narrows — and does not invert — the rule that a declaration
-seeds and does not govern: every other vessel is still seed-once-then-UI-owns.
-Read-only on the screens and refused underneath them: a write that would edit
-either of them names the paths a boot would take back rather than saving a value
-the next restart discards. Neither can be disconnected, guarded explicitly in
-the command path because neither pointer is a foreign key. **The home vessel's
-checklist may be red while the control plane runs on it**; that is already true
-of the manifest, and the guards are what make it safe.
+Both are the operator's to set, like every other vessel. What keeps them
+answerable is the schema rather than a reserved slice: a pointer naming no
+declared vessel is refused, and exactly one vessel — the one `homeVessel` names
+— may carry the shared services. Neither can be disconnected, guarded explicitly
+in the command path because neither pointer is a foreign key. **The home
+vessel's checklist may be red while the control plane runs on it**; that is
+already true of the manifest, and the guards are what make it safe.
 
-A boot reconciling those two moves the boundary and reassesses the surfaces on
-it; it does not re-assert the manifest's copy of a connection, and it does not
-null a fact the declaration is silent about. Both would undo the connect act on
-every restart, which is the same rule `ManifestWrite` already keeps one noun
-down.
+What makes a wrong answer survivable is that an installation can be written
+down: Settings exports the stored document and onboarding restores one, so a
+pointer moved to a boundary that is not there is one file away from being
+undone.
 
 **A vessel has a checklist of its own**, keyed by kind × role the way
 `PREREQUISITES_BY_ADAPTER` keys off adapter
@@ -916,28 +913,18 @@ vocabulary is lowercase hyphenated words, and so is a project id, so over a
 browser bundle it reports dozens of findings and no bugs. The test says so at
 length, and the exemption is itself tested.
 
-The validated manifest is durable in Spindrift's Postgres database. Point a
-process at its deployment declaration:
-
-```bash
-export SPINDRIFT_MANIFEST_PATH=test/fixtures/installation.example.yaml
-# or, inline:
-export SPINDRIFT_MANIFEST="$(cat test/fixtures/installation.example.yaml)"
-```
-
-A process validates and reconciles the declared document into the singleton row
-before constructing adapters. A process with no declaration recovers the last
-validated value from Postgres. Boot fails loudly, naming every offending key,
-when a declaration or stored document is invalid, or when both are absent.
-Target connection facts in the document are desired state; omitting them leaves
-an in-product connection untouched. Nothing has a default, because a default
-here would name someone's homelab. The two vessels
-`installation.controlPlaneVessel` and `installation.homeVessel` name are the one
-exception to seeds-but-does-not-govern, for the reason above.
+The validated manifest is durable in Spindrift's Postgres database, and that row
+is the only copy. Nothing is mounted and nothing is reconciled from a file: a
+process reads the row before constructing adapters, and an installation with no
+row yet is seeded with the placeholder so onboarding has a document to edit.
+Boot fails loudly, naming every offending key, when the stored document is
+invalid. Nothing has a default, because a default here would name someone's
+homelab.
 
 A document written under an older schema is brought forward rather than
-discarded — `src/config/manifest-upgrade.ts`, run inside validation, because a
-row this build cannot parse is a row it treats as unseeded and re-seeds over.
+discarded — `src/config/manifest-upgrade.ts`, run inside validation. With no
+declaration to fall back on, every step in that module is what stands between a
+schema change and an installation that cannot boot.
 `test/fixtures/stored-manifests/` holds one frozen snapshot per shape a stored
 document has ever had and every one of them has to boot; the newest must need no
 upgrade at all, which is what makes the next schema change prove itself.
@@ -950,17 +937,15 @@ bun run --cwd apps/spindrift build      # client → dist/
 bun run --cwd apps/spindrift test       # bun test
 bun run --cwd apps/spindrift typecheck  # tsc --noEmit
 
-# The UI, compiled on demand — no build step, hot reload.
-SPINDRIFT_MANIFEST_PATH=test/fixtures/installation.example.yaml \
-  bun run --cwd apps/spindrift dev      # http://localhost:3000
+# The UI, compiled on demand — no build step, hot reload. An empty database
+# boots the placeholder and lands on onboarding.
+bun run --cwd apps/spindrift dev        # http://localhost:3000
 
 # What the image runs: serves dist/, so `build` has to have happened.
-SPINDRIFT_MANIFEST_PATH=test/fixtures/installation.example.yaml \
-  bun run --cwd apps/spindrift start
+bun run --cwd apps/spindrift start
 
 # The second process in the same image.
-SPINDRIFT_MANIFEST_PATH=test/fixtures/installation.example.yaml \
-  bun run --cwd apps/spindrift src/reconciler/main.ts
+bun run --cwd apps/spindrift src/reconciler/main.ts
 ```
 
 `mise run ts:check` typechecks and lints the whole workspace, this package

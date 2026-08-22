@@ -352,50 +352,6 @@ describe('Ticket 12 — Admit the artifact on a second Target', () => {
     expect(isExtractableChartSource(beforeThisFix)).toBe(false);
   });
 
-  test('App chart distribution is an independently pinned, extractable OCI artifact', async () => {
-    // The declaration this installation is seeded from, not a fixture, for the
-    // same reason the installer assertion above reads it: what matters is what
-    // this installation deploys every Component through.
-    const release = Bun.YAML.parse(
-      await Bun.file(
-        join(REPO_ROOT, 'clusters/offsite/apps/spindrift/helm-release.yaml'),
-      ).text(),
-    ) as {
-      spec?: {
-        values?: {
-          manifest?: {
-            charts?: { app?: string };
-            targets?: {
-              connection?: {
-                delivery?: {
-                  sourceRef?: { name?: string; namespace?: string };
-                };
-              };
-            }[];
-          };
-        };
-      };
-    };
-    const declared = release.spec?.values?.manifest;
-    expect(isExtractableAppChartRef(declared?.charts?.app ?? '')).toBe(true);
-
-    // And that the reference is one every Kubernetes Target can actually
-    // resolve. The chart reference is the only discriminant the adapter has, so
-    // an `oci://` value with a Target still pointed at a GitRepository is a
-    // declaration that renders a chartRef at an object of the wrong kind — the
-    // failure mode the `charts.app` string alone cannot show.
-    const sources = (declared?.targets ?? [])
-      .map((target) => target.connection?.delivery?.sourceRef)
-      .filter((ref) => ref !== undefined);
-    expect(sources.length).toBeGreaterThan(0);
-    for (const ref of sources) {
-      expect(ref).toEqual({
-        name: 'spindrift-app',
-        namespace: 'spindrift-apps',
-      });
-    }
-  });
-
   test('the App-chart check catches a repository-local chart path', () => {
     // The proof the assertion above is not the vacuous one it replaces. The old
     // guard asked only that `manifest.charts.app` was a defined string, which

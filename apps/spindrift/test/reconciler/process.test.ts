@@ -15,7 +15,6 @@ import {
 } from '../../src/commands/types.ts';
 import type { InstallationManifest } from '../../src/config/manifest.schema.ts';
 import { toAuthoredManifest } from '../../src/config/manifest.schema.ts';
-import { MANIFEST_INLINE_VAR } from '../../src/config/manifest.ts';
 import { writeStoredManifest } from '../../src/config/manifest-store.ts';
 import {
   apps,
@@ -229,6 +228,9 @@ describe('a manifest saved after boot', () => {
     const ATTESTOR = 'projects/trusted-builds/attestors/spindrift';
 
     let written = false;
+    // The row, which is the only thing a process boots from. Seeded here the
+    // way a configured installation already has one.
+    await writeStoredManifest(database().db, toAuthoredManifest(manifest));
     await startReconciler({
       signal: shutdown.signal,
       client: database().connect(),
@@ -237,7 +239,6 @@ describe('a manifest saved after boot', () => {
       manifestIntervalMs: 5,
       env: {
         ...FIXTURE_DEPLOYMENT_ENV,
-        [MANIFEST_INLINE_VAR]: JSON.stringify(toAuthoredManifest(manifest)),
       },
       createAdapters(storedManifest) {
         const generation = assembled.push(storedManifest);
@@ -290,6 +291,7 @@ describe('a manifest saved after boot', () => {
     const assembled: InstallationManifest[] = [];
     let manifestPasses = 0;
 
+    await writeStoredManifest(database().db, toAuthoredManifest(manifest));
     await startReconciler({
       signal: shutdown.signal,
       client: database().connect(),
@@ -297,7 +299,6 @@ describe('a manifest saved after boot', () => {
       manifestIntervalMs: 5,
       env: {
         ...FIXTURE_DEPLOYMENT_ENV,
-        [MANIFEST_INLINE_VAR]: JSON.stringify(toAuthoredManifest(manifest)),
       },
       createAdapters(storedManifest) {
         assembled.push(storedManifest);
@@ -371,17 +372,17 @@ function configuredAdapters(): AdapterRegistry {
 async function reconcilePendingDeploy(platform: FakeDeployAdapter) {
   const deploy = await pendingDeploy();
   const shutdown = new AbortController();
+  await writeStoredManifest(database().db, toAuthoredManifest(manifest));
   let bootManifest: unknown;
   await startReconciler({
     signal: shutdown.signal,
     client: database().connect(),
     clock,
-    // The declaration and the deployment's own credential, which is how a pod
-    // starts: the manifest names the installation, the mounted external_account
+    // The deployment's own credential, which is the other half of how a pod
+    // starts: the row names the installation, the mounted external_account
     // document names the federation, and the boot manifest is the two joined.
     env: {
       ...FIXTURE_DEPLOYMENT_ENV,
-      [MANIFEST_INLINE_VAR]: JSON.stringify(toAuthoredManifest(manifest)),
     },
     createAdapters(storedManifest) {
       bootManifest = storedManifest;

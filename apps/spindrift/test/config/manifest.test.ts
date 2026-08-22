@@ -9,11 +9,9 @@ import {
 } from '../../src/config/manifest.schema.ts';
 import {
   assertTrustedGatewayBoundary,
-  loadManifest,
-  MANIFEST_INLINE_VAR,
-  MANIFEST_PATH_VAR,
   ManifestError,
   parseManifest,
+  resolveManifest,
 } from '../../src/config/manifest.ts';
 import { zoneFor } from '../../src/domain/naming.ts';
 
@@ -22,30 +20,17 @@ const FIXTURE = join(import.meta.dir, '../fixtures/installation.example.yaml');
 const fixtureText = await Bun.file(FIXTURE).text();
 
 describe('the fixture installation', () => {
-  test('boots clean from a file', async () => {
-    const manifest = await loadManifest({ [MANIFEST_PATH_VAR]: FIXTURE });
+  test('parses clean', async () => {
+    const manifest = parseManifest(fixtureText, FIXTURE);
     expect(manifest.installation.name).toBe('example');
     expect(manifest.auth.gateway).toBeNull();
     expect(zoneFor('private', manifest.dns.zones)).toBe('apps.example.test');
     expect(manifest.secretStore.adapter).toBe('gcp-secret-manager');
-    expect(manifest.targets.map((t) => t.adapter)).toEqual([
+    expect(manifest.targets.map((target) => target.adapter)).toEqual([
       'kubernetes',
       'cloudrun',
       'static',
     ]);
-  });
-
-  test('boots clean from an inline document', async () => {
-    const manifest = await loadManifest({ [MANIFEST_INLINE_VAR]: fixtureText });
-    expect(manifest.installation.name).toBe('example');
-  });
-
-  test('is read from the path when both are set', async () => {
-    const manifest = await loadManifest({
-      [MANIFEST_PATH_VAR]: FIXTURE,
-      [MANIFEST_INLINE_VAR]: 'installation:\n  name: inline',
-    });
-    expect(manifest.installation.name).toBe('example');
   });
 });
 
@@ -63,30 +48,36 @@ describe('the authenticated Gateway trust boundary', () => {
       },
     };
 
-    expect(() => assertTrustedGatewayBoundary(configured, {})).toThrow(
-      'SPINDRIFT_TRUSTED_GATEWAY_BOUNDARY',
-    );
     expect(() =>
-      assertTrustedGatewayBoundary(configured, {
-        SPINDRIFT_TRUSTED_GATEWAY_BOUNDARY: 'true',
+      assertTrustedGatewayBoundary({
+        ...configured,
+        boundary: { trustedGateway: false },
+      }),
+    ).toThrow('SPINDRIFT_TRUSTED_GATEWAY_BOUNDARY');
+    expect(() =>
+      assertTrustedGatewayBoundary({
+        ...configured,
+        boundary: { trustedGateway: true },
       }),
     ).not.toThrow();
+
+    // The attestation is a deployment fact, joined on by the same resolver that
+    // joins the federation and the hostname — so what the env says is what a
+    // reader sees, and nothing that can write a manifest can write it.
+    expect(
+      (
+        await resolveManifest(manifest, {
+          SPINDRIFT_TRUSTED_GATEWAY_BOUNDARY: 'true',
+        })
+      ).boundary,
+    ).toEqual({ trustedGateway: true });
+    expect((await resolveManifest(manifest, {})).boundary).toEqual({
+      trustedGateway: false,
+    });
   });
 });
 
 describe('boot fails loudly', () => {
-  test('when no manifest is pointed at', async () => {
-    await expect(loadManifest({})).rejects.toThrow(ManifestError);
-  });
-
-  test('when the file does not exist', async () => {
-    await expect(
-      loadManifest({
-        [MANIFEST_PATH_VAR]: join(import.meta.dir, 'absent.yaml'),
-      }),
-    ).rejects.toThrow(/no such file/);
-  });
-
   test('when the document is not YAML', () => {
     expect(() => parseManifest('installation: [unclosed', 'test')).toThrow(
       ManifestError,
@@ -329,7 +320,7 @@ describe('the vessels this installation is built on', () => {
   });
 
   test('what a reader gets is the home vessel’s, resolved once', async () => {
-    const manifest = await loadManifest({ [MANIFEST_PATH_VAR]: FIXTURE });
+    const manifest = parseManifest(fixtureText, FIXTURE);
     expect(homeVesselOf(manifest).name).toBe('cloud');
     expect(controlPlaneVesselOf(manifest).name).toBe('cluster');
     expect(sharedServicesOf(manifest)).toEqual({
