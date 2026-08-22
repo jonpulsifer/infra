@@ -317,6 +317,32 @@ describe('a build whose destination needs a stored credential', () => {
     expect(route.built[0]?.spec.registryAuth).toEqual([]);
   });
 
+  /**
+   * A route that can carry a credential is asked about a self-authorized host
+   * too (ticket 136): the run may execute in a repository whose own token is
+   * not the identity that self-authorized this flavour, so the stored
+   * credential rides along wherever one exists rather than only where the
+   * route's own identity falls short.
+   */
+  test('a self-authorized host still gets its stored credential when the route can carry one', async () => {
+    const { context, asked } = withCredentials([HELD], true, [
+      'artifactRegistry',
+      'dockerHub',
+      'ghcr',
+      'other',
+    ]);
+    const build = await seedBuild();
+
+    const result = await dispatchBuild(
+      { buildId: build.id, route: 'hosted' },
+      context,
+    );
+
+    expect(result.ok).toBe(true);
+    expect(asked).toEqual([[HELD.host]]);
+    expect(route.built[0]?.spec.registryAuth).toEqual([HELD]);
+  });
+
   /** A route that self-authorizes *some* flavours still needs the others. */
   test('asks only about the hosts it cannot reach on its own', async () => {
     const { context, asked } = withCredentials([HELD], true, [
