@@ -50,10 +50,11 @@ import {
   GitHubAppAuth,
   hasGitHubAppEnvIdentity,
 } from '../integrations/github/app-auth.ts';
-import type { Fetcher } from '../integrations/github/http.ts';
+import { type Fetcher, retryTransient } from '../integrations/github/http.ts';
 import { canonicalGzip } from '../storage/archive-format.ts';
 import { sourceDepotFor, stageArchiveBytes } from '../storage/archives.ts';
 import { buildOutbox } from '../storage/build-outbox.ts';
+import { cachedBundle, rememberBundle } from '../storage/bundle-cache.ts';
 import { registryCredentialStore } from '../storage/registry-credentials.ts';
 import { CoreSupplyChain, CosignSigner } from '../supply-chain/sign.ts';
 import { SpindriftSignatureVerifier } from '../supply-chain/signature.ts';
@@ -444,8 +445,27 @@ export function createAdapterRegistry(
       // fix and the same reason: a bundle on this pod's disk is unfetchable by
       // a hosted runner whatever kind of source produced it.
       const depot = sourceDepotFor(options.manifest);
+      const db = options.db;
       const defaultSourceStager: RepositorySourceStager = {
         async stageRepository(input) {
+          // The depot is content-addressed and immutable, so a commit already
+          // staged is already the answer — one metadata round trip instead of
+          // a tarball, a gunzip, a gzip and an upload. Without this, one push
+          // to a repository hosting N Apps fetched the same bytes N times,
+          // because `dispatchAutoDeploys` calls `deployApp` once per App and
+          // nothing between them remembered the commit.
+          //
+          // Nothing is skipped on a hit that would have to happen again: the
+          // source receipt is keyed on the bundle digest and is durable, so
+          // the one that was signed when these bytes were actually fetched is
+          // both already stored and the more honest of the two — it names when
+          // the far side was asked, not when a sibling App re-asked.
+          const cached =
+            db === undefined || depot === null
+              ? null
+              : await cachedBundle(db, depot, input.repository, input.commit);
+          if (cached !== null) return cached;
+
           const staged = await stageSourceBundle(
             {
               kind: 'git',
@@ -461,7 +481,15 @@ export function createAdapterRegistry(
               // object, however many times it is staged.
               fetcher: {
                 async fetchExactCommit(fetchInput) {
-                  const fetched = await app.fetchExactCommit(fetchInput);
+                  // Retried here rather than inside the client, and here
+                  // rather than at either call site: this is where the archive
+                  // download actually happens, and both callers turn whatever
+                  // reaches them into a `NOT_BUILDABLE` an operator has to
+                  // press a button to undo. A reset connection partway through
+                  // a large tarball is the case in mind.
+                  const fetched = await retryTransient(() =>
+                    app.fetchExactCommit(fetchInput),
+                  );
                   return { ...fetched, bytes: canonicalGzip(fetched.bytes) };
                 },
               },
@@ -509,6 +537,15 @@ export function createAdapterRegistry(
             },
             input.stagedAt,
           );
+          if (db !== undefined && depot !== null) {
+            await rememberBundle(
+              db,
+              input.repository,
+              input.commit,
+              staged.bundle,
+              input.stagedAt,
+            );
+          }
           return staged.bundle;
         },
       };
