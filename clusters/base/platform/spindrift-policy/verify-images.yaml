@@ -21,8 +21,11 @@ spec:
           - resources:
               kinds:
                 - Pod
+              # The shared namespace and every per-App one: Spindrift names an
+              # App's namespace `app-<app>` (`appNamespace` on the Target).
               namespaces:
                 - spindrift-apps
+                - "app-*"
               selector:
                 matchExpressions:
                   - key: spindrift.dev/deploy

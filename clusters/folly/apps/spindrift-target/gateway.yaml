@@ -36,6 +36,13 @@ spec:
   addresses:
     - type: IPAddress
       value: 10.3.0.80
+  # Every listener admits routes by namespace label, never by name. An App's
+  # route renders into the App's own namespace, which Spindrift creates with
+  # the release and stamps `app.kubernetes.io/part-of: spindrift`
+  # (`apps/spindrift/src/adapters/deploy/kubernetes/index.ts`); `spindrift-apps`
+  # carries the same label for the status route. A name list here would have
+  # to be edited for every App, and a route a listener does not admit is
+  # `Accepted=False` at the gateway while the deploy reads LIVE.
   listeners:
     # Plain HTTP for the in-cluster leg. folly publishes no tunnel of its own to
     # Spindrift, so nothing arrives here from the internet today and this
@@ -48,12 +55,8 @@ spec:
         namespaces:
           from: Selector
           selector:
-            matchExpressions:
-              - key: kubernetes.io/metadata.name
-                operator: In
-                values:
-                  - spindrift-apps
-                  - oauth2-proxy
+            matchLabels:
+              app.kubernetes.io/part-of: spindrift
         kinds:
           - kind: HTTPRoute
     # One wildcard for every App name Spindrift mints here, rather than a
@@ -61,15 +64,11 @@ spec:
     # no release that could own a listener or a certificate. cert-manager's
     # gateway-shim issues it by DNS-01 from the annotation above. Both clusters
     # serve this zone — `clusters/base/cluster-settings.yaml` says why, and
-    # external-dns only deletes records its own `txtOwnerId` claims.
-    #
-    # `oauth2-proxy` is admitted alongside the Apps to match offsite. It admits
-    # nothing today: this cluster's authenticated edge answers on
-    # `oauth2.${SECRET_DOMAIN}`, whose route attaches to `cluster-gateway`. The
-    # ExternalAuth filter is a backend reference governed by the ReferenceGrant
-    # in `clusters/base/apps/oauth2-proxy` rather than by this list, so a
-    # `reach: private` App here authenticates against that edge and lands on a
-    # name that resolves — one hop off this gateway rather than a 404.
+    # external-dns only deletes records its own `txtOwnerId` claims. This
+    # cluster's authenticated edge answers on `oauth2.${SECRET_DOMAIN}`, whose
+    # route attaches to `cluster-gateway`; the ExternalAuth filter is a backend
+    # reference governed by the ReferenceGrant in
+    # `clusters/base/apps/oauth2-proxy`, not by this listener.
     - name: spindrift-apps-tls
       protocol: HTTPS
       port: 443
@@ -82,12 +81,8 @@ spec:
         namespaces:
           from: Selector
           selector:
-            matchExpressions:
-              - key: kubernetes.io/metadata.name
-                operator: In
-                values:
-                  - spindrift-apps
-                  - oauth2-proxy
+            matchLabels:
+              app.kubernetes.io/part-of: spindrift
         kinds:
           - kind: HTTPRoute
     # The second zone the installation mints in, so an App placed here can be
@@ -112,11 +107,7 @@ spec:
         namespaces:
           from: Selector
           selector:
-            matchExpressions:
-              - key: kubernetes.io/metadata.name
-                operator: In
-                values:
-                  - spindrift-apps
-                  - oauth2-proxy
+            matchLabels:
+              app.kubernetes.io/part-of: spindrift
         kinds:
           - kind: HTTPRoute

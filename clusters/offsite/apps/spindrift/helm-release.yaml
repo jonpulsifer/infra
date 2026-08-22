@@ -508,7 +508,11 @@ spec:
                   # publishing it is the private boundary rather than a hole in
                   # one.
                   privateAddress: 10.89.0.69
-                  tunnelHostname: 9d53c07a-8bde-4466-9f99-3a69d06a6325.cfargotunnel.com
+                  # `module.tunnel_spindrift` in `terraform/network/cloudflare/
+                  # spindrift.tf`. A tunnel Terraform recreates gets a new id,
+                  # and this literal has to follow it or every `reach: public`
+                  # record points at a tunnel nothing serves.
+                  tunnelHostname: 3f90ee1e-5250-410d-8488-4eae5bc6843d.cfargotunnel.com
                 networkPolicy:
                   # The chart's ingress is default-deny for every Component, so
                   # a correctly attached route still reaches nothing until the
