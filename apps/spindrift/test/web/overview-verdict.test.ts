@@ -70,7 +70,9 @@ describe('which fact wins when several are true', () => {
   });
 
   test('a failed App outranks an unhealthy Target', () => {
-    const both = verdict(counts({ failedApps: 1, liveApps: 5, attentionTargets: 2 }));
+    const both = verdict(
+      counts({ failedApps: 1, liveApps: 5, attentionTargets: 2 }),
+    );
     expect(both.headline).toBe('One App needs you.');
   });
 
