@@ -32,9 +32,11 @@ spec:
 ---
 # The operator merges this as the FIRST sub-route of the HelmRelease's
 # top-level route and forces `continue: true` on it, so it is evaluated before
-# that route's own entries and does not stop them matching. Watchdog therefore
-# has to be excluded here: relying on a later `alertname = "Watchdog"` route to
-# swallow it first does not work, it just lands in both receivers.
+# that route's own entries and does not stop them matching. The always-firing
+# plumbing alerts therefore have to be excluded here: relying on a later route
+# to swallow them first does not work, they just land in both receivers.
+# Watchdog certifies the pipeline is alive and InfoInhibitor only exists as an
+# inhibition source — neither says anything about the fleet.
 #
 # Matching everything else only works because alertmanagerConfigMatcherStrategy
 # is None; the default would pin this to alerts labelled namespace=monitoring.
@@ -50,8 +52,8 @@ spec:
     receiver: discord
     matchers:
       - name: alertname
-        value: Watchdog
-        matchType: "!="
+        value: Watchdog|InfoInhibitor
+        matchType: "!~"
     groupBy: [cluster, namespace, alertname]
     groupWait: 30s
     groupInterval: 5m
