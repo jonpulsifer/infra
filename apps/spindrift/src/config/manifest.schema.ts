@@ -89,7 +89,6 @@ export const gatewayAuthSchema = z
     adapterKey: nonEmptyString,
     issuer: z.string().url(),
     subjectHeader: headerName,
-    displayNameHeader: headerName.optional(),
   })
   .strict();
 
@@ -858,10 +857,9 @@ export const installationManifestSchema = z
          * hostname for every project rather than an installation fact —
          * `createSecretStore` in `adapters/registry.ts` applies its default
          * when this is absent. `onepassword` gets no such default: a Connect
-         * server is self-hosted, so that adapter still requires a real value
-         * here, enforced where the store is constructed rather than by the
-         * schema, because which adapter needs it is a fact this object's
-         * sibling key carries, not the type of this one.
+         * server is self-hosted, so there is no universal address to assume,
+         * and the refinement below refuses the pair rather than letting the
+         * store constructor throw on the next request after the write.
          */
         endpoint: z.string().url().optional(),
         /**
@@ -871,7 +869,22 @@ export const installationManifestSchema = z
          * project moved to, and for the same reason.
          */
       })
-      .strict(),
+      .strict()
+      // Which adapter needs an endpoint is a fact the sibling key carries, and
+      // a refinement is where a fact about two keys belongs. It was left to
+      // `createSecretStore` to notice, which is one request too late: the
+      // document validates, the write lands, and the *next* command rebuilds
+      // the registry and throws — so a wizard could store a document that
+      // stops the installation answering, with nothing on screen saying why.
+      .refine(
+        (store) =>
+          store.adapter !== 'onepassword' || store.endpoint !== undefined,
+        {
+          error:
+            'the onepassword adapter needs an endpoint: a Connect server is self-hosted, so there is no universal address to assume',
+          path: ['endpoint'],
+        },
+      ),
 
     /**
      * The tenancy boundaries this installation deploys into (§13, §14).
@@ -1014,6 +1027,19 @@ export type InstallationManifest = AuthoredManifest & {
   readonly cloud: {
     /** Resolved from the credential the deployment mounts, never authored. */
     readonly federation: FederationConfig | null;
+  };
+  readonly boundary: {
+    /**
+     * Whether this deployment strips identity headers and restricts ingress to
+     * the trusted Gateway, attested by the deployment that renders the policy.
+     *
+     * A derived key for the same reason the two above are: the process cannot
+     * observe a NetworkPolicy from inside its own pod, so this is a fact about
+     * the deployment rather than about the installation, and nothing that can
+     * write a manifest can write it. `auth.gateway` is refused wherever this is
+     * false — at boot, and at the command that would set it.
+     */
+    readonly trustedGateway: boolean;
   };
   readonly controlPlane: {
     /**
@@ -1199,6 +1225,11 @@ export function governedManifestPaths(
 export function toAuthoredManifest(
   manifest: InstallationManifest,
 ): AuthoredManifest {
-  const { cloud: _cloud, controlPlane: _controlPlane, ...authored } = manifest;
+  const {
+    cloud: _cloud,
+    boundary: _boundary,
+    controlPlane: _controlPlane,
+    ...authored
+  } = manifest;
   return authored;
 }

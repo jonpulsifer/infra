@@ -14,6 +14,7 @@ import {
   MANIFEST_PATH_VAR,
   ManifestError,
   parseManifest,
+  resolveManifest,
 } from '../../src/config/manifest.ts';
 import { zoneFor } from '../../src/domain/naming.ts';
 
@@ -63,14 +64,32 @@ describe('the authenticated Gateway trust boundary', () => {
       },
     };
 
-    expect(() => assertTrustedGatewayBoundary(configured, {})).toThrow(
-      'SPINDRIFT_TRUSTED_GATEWAY_BOUNDARY',
-    );
     expect(() =>
-      assertTrustedGatewayBoundary(configured, {
-        SPINDRIFT_TRUSTED_GATEWAY_BOUNDARY: 'true',
+      assertTrustedGatewayBoundary({
+        ...configured,
+        boundary: { trustedGateway: false },
+      }),
+    ).toThrow('SPINDRIFT_TRUSTED_GATEWAY_BOUNDARY');
+    expect(() =>
+      assertTrustedGatewayBoundary({
+        ...configured,
+        boundary: { trustedGateway: true },
       }),
     ).not.toThrow();
+
+    // The attestation is a deployment fact, joined on by the same resolver that
+    // joins the federation and the hostname — so what the env says is what a
+    // reader sees, and nothing that can write a manifest can write it.
+    expect(
+      (
+        await resolveManifest(manifest, {
+          SPINDRIFT_TRUSTED_GATEWAY_BOUNDARY: 'true',
+        })
+      ).boundary,
+    ).toEqual({ trustedGateway: true });
+    expect((await resolveManifest(manifest, {})).boundary).toEqual({
+      trustedGateway: false,
+    });
   });
 });
 

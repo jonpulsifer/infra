@@ -390,29 +390,43 @@ export async function resolveManifest(
   return {
     ...manifest,
     cloud: { federation: await loadDeploymentFederation(env) },
+    boundary: { trustedGateway: env[TRUSTED_GATEWAY_BOUNDARY_VAR] === 'true' },
     controlPlane: { hostname: env[HOSTNAME_VAR]?.trim() || UNSERVED_HOSTNAME },
   };
 }
 
 /**
- * Refuse to enable header authentication without its non-bypassable boundary.
+ * The sentence refusing header authentication without its non-bypassable
+ * boundary, or `null` for a document this deployment can serve.
  *
  * The process cannot observe a Kubernetes NetworkPolicy from inside its own
- * pod. The installer chart therefore sets this attestation beside the policy;
- * a manifest copied into an unrestricted deployment fails closed at boot.
+ * pod. The installer chart therefore sets an attestation beside the policy,
+ * which {@link resolveManifest} joins on as `boundary.trustedGateway`; a
+ * manifest copied into an unrestricted deployment fails closed.
+ *
+ * **A sentence rather than a throw, because two callers need it at two
+ * moments.** Boot is fatal — an installation that cannot honour what its own
+ * document says about authentication has nothing honest to serve — but
+ * `configureInstallation` is an operator pressing Save, and there the same fact
+ * is a refusal to read rather than a pod that stops coming back. Until it was
+ * both, a wizard could write `auth.gateway` on a deployment with no policy and
+ * wedge the web process at its next restart.
  */
-export function assertTrustedGatewayBoundary(
-  manifest: Pick<InstallationManifest, 'auth'>,
-  env: Env = Bun.env,
-): void {
-  if (
-    manifest.auth.gateway !== null &&
-    env[TRUSTED_GATEWAY_BOUNDARY_VAR] !== 'true'
-  ) {
-    throw new ManifestError(
-      `auth.gateway requires ${TRUSTED_GATEWAY_BOUNDARY_VAR}=true from a deployment that strips identity headers and restricts ingress to the trusted Gateway`,
-    );
+export function trustedGatewayRefusal(
+  manifest: Pick<InstallationManifest, 'auth' | 'boundary'>,
+): string | null {
+  if (manifest.auth.gateway === null || manifest.boundary.trustedGateway) {
+    return null;
   }
+  return `auth.gateway requires ${TRUSTED_GATEWAY_BOUNDARY_VAR}=true from a deployment that strips identity headers and restricts ingress to the trusted Gateway`;
+}
+
+/** {@link trustedGatewayRefusal} at boot, where it is fatal. */
+export function assertTrustedGatewayBoundary(
+  manifest: Pick<InstallationManifest, 'auth' | 'boundary'>,
+): void {
+  const refusal = trustedGatewayRefusal(manifest);
+  if (refusal !== null) throw new ManifestError(refusal);
 }
 
 export type {

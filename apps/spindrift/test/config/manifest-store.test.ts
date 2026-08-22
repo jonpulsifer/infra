@@ -704,6 +704,7 @@ describe('the stored installation manifest', () => {
     expect(loaded).toEqual({
       ...DEFAULT_PLACEHOLDER_MANIFEST,
       cloud: { federation: null },
+      boundary: { trustedGateway: false },
       controlPlane: { hostname: UNSERVED_HOSTNAME },
     });
   });

@@ -29,7 +29,11 @@ import {
   type AuthoredManifest,
   installationManifestSchema,
 } from '../../config/manifest.schema.ts';
-import { ManifestError, validateManifest } from '../../config/manifest.ts';
+import {
+  ManifestError,
+  trustedGatewayRefusal,
+  validateManifest,
+} from '../../config/manifest.ts';
 import {
   governedSliceRefusal,
   writeStoredManifest,
@@ -91,6 +95,21 @@ export const configureInstallation: Command<
   const governed = governedSliceRefusal(manifest, context.declaration);
   if (governed !== null) {
     return failed('NOT_DEPLOYABLE', governed);
+  }
+
+  // The other thing this screen can write that the next restart cannot serve.
+  // `auth.gateway` is refused at boot without the deployment's attestation that
+  // a policy strips identity headers, so a document setting it here saved
+  // cleanly and wedged the web process the next time a pod restarted — hours
+  // later, with nothing connecting the two. `NOT_DEPLOYABLE` for the same
+  // reason the governed slice is: the document is well formed, and this
+  // deployment cannot honour it.
+  const boundary = trustedGatewayRefusal({
+    auth: manifest.auth,
+    boundary: context.manifest.boundary,
+  });
+  if (boundary !== null) {
+    return failed('NOT_DEPLOYABLE', boundary);
   }
 
   // **Reconciliation makes no refusal of its own.** It used to make exactly one

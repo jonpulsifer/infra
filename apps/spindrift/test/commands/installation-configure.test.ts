@@ -118,6 +118,76 @@ describe('configuring an installation', () => {
     }
   });
 
+  test('refuses header authentication this deployment cannot enforce', async () => {
+    await seed();
+    // The process cannot see a NetworkPolicy from inside its own pod, so
+    // `auth.gateway` is refused at boot without the deployment's attestation.
+    // Taking it here would store a document that wedges the web process at its
+    // next restart — hours later, with nothing connecting the two.
+    const result = await configureInstallation(
+      {
+        manifest: {
+          ...manifest,
+          auth: {
+            gateway: {
+              adapterKey: 'front-door',
+              issuer: 'https://issuer.example.test',
+              subjectHeader: 'x-auth-request-subject',
+            },
+          },
+        },
+      },
+      context(),
+    );
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.failure.code).toBe('NOT_DEPLOYABLE');
+      expect(result.failure.message).toContain(
+        'SPINDRIFT_TRUSTED_GATEWAY_BOUNDARY',
+      );
+    }
+    expect((await storedManifest())?.auth.gateway).toBeNull();
+  });
+
+  test('takes it on a deployment that attests the boundary', async () => {
+    await seed();
+    const gateway = {
+      adapterKey: 'front-door',
+      issuer: 'https://issuer.example.test',
+      subjectHeader: 'x-auth-request-subject',
+    };
+
+    const result = await configureInstallation(
+      { manifest: { ...manifest, auth: { gateway } } },
+      {
+        ...context(),
+        manifest: { ...resolved, boundary: { trustedGateway: true } },
+      },
+    );
+
+    expect(result.ok).toBe(true);
+    expect((await storedManifest())?.auth.gateway).toEqual(gateway);
+  });
+
+  test('refuses a store whose adapter has no address to assume', async () => {
+    await seed();
+    // `onepassword` Connect is self-hosted, so there is no default endpoint.
+    // The store constructor already throws on this pair — but it throws on the
+    // *next* command, after the write has landed, so the schema is where the
+    // operator has to meet it.
+    const result = await configureInstallation(
+      { manifest: { ...manifest, secretStore: { adapter: 'onepassword' } } },
+      context(),
+    );
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.failure.code).toBe('INVALID_INPUT');
+      expect(result.failure.message).toContain('secretStore.endpoint');
+    }
+  });
+
   test('leaves the stored manifest alone when it refuses', async () => {
     await seed();
     const before = await storedManifest();
