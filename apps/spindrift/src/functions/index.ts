@@ -4,7 +4,9 @@
  * A Function reaches no vessel-picker of its own (`contract.ts`'s ponytail
  * note) — it deploys to whichever surface the manifest already names for that
  * purpose: the first Cloudflare account vessel for Workers, the home vessel's
- * Cloud Run surface for Cloud Run functions. Either answers `null` where the
+ * Cloud Run surface for Cloud Run functions. The Cloudflare vessel supplies the
+ * account **and** the API root every surface on it reaches, so a mirror in
+ * front of the platform is stated once on the boundary. Either answers `null` where the
  * manifest has not connected that surface yet, which `saveFunction` reports as
  * `NOT_DEPLOYABLE` rather than constructing a deployer that cannot be reached.
  */
@@ -35,16 +37,21 @@ export function functionsFor(input: FunctionsForInput): FunctionDeployers {
     (vessel): vessel is Extract<VesselSeed, { kind: 'cloudflare-account' }> =>
       vessel.kind === 'cloudflare-account' && vessel.location !== undefined,
   );
-  const zoneName = manifest.dns.zones[0]?.name;
+  // Every declared zone, in order, rather than the head: which of them this
+  // account carries is the account's answer, and `WorkersFunctions` asks it.
+  const zoneNames = manifest.dns.zones.map((zone) => zone.name);
   const workers =
     cloudflareVessel === undefined ||
     cloudflareVessel.location === undefined ||
-    zoneName === undefined
+    zoneNames.length === 0
       ? null
       : new WorkersFunctions({
           token: cloudflareToken,
           accountId: cloudflareVessel.location.account,
-          zoneName,
+          zoneNames,
+          ...(cloudflareVessel.location.endpoint === undefined
+            ? {}
+            : { endpoint: cloudflareVessel.location.endpoint }),
           ...(fetch ? { fetch } : {}),
         });
 

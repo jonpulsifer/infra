@@ -1,10 +1,24 @@
 locals {
-  # Repos allowed to mint tokens from the shared "homelab" GitHub OIDC provider.
-  # This only gates who can authenticate at all; what each repo can then do is
-  # scoped separately by per-resource IAM bindings (see iam.tf, datastore.tf).
+  # Who may mint tokens from the shared "homelab" GitHub OIDC provider. This
+  # only gates who can authenticate at all; what each identity can then do is
+  # scoped separately by per-resource IAM bindings (see iam.tf, datastore.tf,
+  # and terraform/gcp/projects/trusted-builds).
+  #
+  # Two doors. A repository in the id list federates from any of its workflows
+  # — that is this repository's own CI. Every other repository under one of the
+  # owners federates only while running Spindrift's reusable build workflow at
+  # `main`: `job_workflow_ref` names the *called* workflow, so a connected
+  # repository's thin caller (`apps/spindrift/src/integrations/github/config-pr.ts`)
+  # is admitted and nothing else it runs is. The owners are the accounts the
+  # installation connects repositories from (`github.accounts` in its manifest).
   github_actions_allowed_repository_ids = [
     "952814997", # jonpulsifer/infra
   ]
+  github_actions_allowed_owner_ids = [
+    "5461940",  # jonpulsifer
+    "63516210", # homelab-ng
+  ]
+  spindrift_build_workflow_ref = "jonpulsifer/infra/.github/workflows/spindrift-build.yml@refs/heads/main"
 
   # IAM grants use the immutable repository ID mapping so a repository rename
   # does not interrupt direct GitHub Actions federation.
@@ -46,7 +60,7 @@ resource "google_iam_workload_identity_pool_provider" "github" {
   oidc {
     issuer_uri = "https://token.actions.githubusercontent.com"
   }
-  attribute_condition = "assertion.repository_owner_id == '5461940' && assertion.repository_id in ${jsonencode(local.github_actions_allowed_repository_ids)}"
+  attribute_condition = "assertion.repository_owner_id in ${jsonencode(local.github_actions_allowed_owner_ids)} && (assertion.repository_id in ${jsonencode(local.github_actions_allowed_repository_ids)} || assertion.job_workflow_ref == '${local.spindrift_build_workflow_ref}')"
   depends_on          = [time_sleep.workload_identity_org_policy_propagation]
 }
 

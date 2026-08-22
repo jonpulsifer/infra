@@ -39,7 +39,11 @@ import type {
 } from '../domain/desired-state.ts';
 import type { Exclusion } from '../domain/placement.ts';
 import type { AnyPrerequisite, Remediation } from '../domain/remediation.ts';
-import type { VesselKind, VesselRole } from '../domain/vessel.ts';
+import type {
+  VesselDiscovery,
+  VesselKind,
+  VesselRole,
+} from '../domain/vessel.ts';
 import {
   FUNCTION_TARGETS,
   type FunctionTarget,
@@ -1380,6 +1384,15 @@ export interface VesselListItem {
   readonly prerequisites: readonly PrerequisiteRowView[];
   /** When the standing pass last ran against it, ISO-8601, or null if never. */
   readonly inspectedAt: string | null;
+  /**
+   * What that same pass read *in* the boundary — see `VesselDiscovery`.
+   *
+   * Beside the checklist rather than folded into it: a checklist row is a
+   * verdict on whether this installation can use the boundary, and this is the
+   * inventory that answers the operator's next question. `null` for a kind with
+   * no account-wide listing to read, which is every kind but one today.
+   */
+  readonly discovery: VesselDiscovery | null;
 }
 
 /**
@@ -1425,7 +1438,7 @@ export interface PendingTargetConnection {
  * of those is worse than an empty field. A second cluster prefilled with the
  * first one's in-cluster address would look right and be wrong.
  *
- * **No `runEndpoint`, `hostingEndpoint`, `vercelEndpoint` or `pagesEndpoint`
+ * **No `runEndpoint`, `hostingEndpoint` or either edge platform's `endpoint`
  * here.** Those four were never a proposal in the sense the rest of this type
  * is — they were the one value every cloud Target of a given adapter shares,
  * carried forward only because the connect screen used to make an operator
@@ -1433,8 +1446,9 @@ export interface PendingTargetConnection {
  * beside its implementation) when a Target's `connection.endpoint` is absent,
  * so there is nothing left here to propose. An installation that genuinely
  * needs a non-default endpoint — a perimeter, a mirror — still has one: the
- * manifest declares `targets[].connection.endpoint` directly (§20), which
- * this screen never mediates.
+ * manifest declares `targets[].connection.endpoint` directly (§20), and a
+ * Cloudflare account declares it once on the boundary instead, because every
+ * surface on that account reaches the same root. Neither is mediated here.
  */
 export interface TargetConnectionProposal {
   /** The Target these values were read off, or null when there was none. */

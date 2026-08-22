@@ -487,6 +487,84 @@ describe('an unmerged configuration pull request', () => {
   });
 });
 
+/**
+ * `configPullRequest` is written once, when the configuration transaction
+ * opens the pull request, and otherwise trusted — merging clears it (above),
+ * but nothing used to ask again once it did not. A pull request closed
+ * without merging left the column claiming "still open" forever, because the
+ * one pass that would have noticed is exactly the one where the branch never
+ * moves and every other read here reports `unchanged` (ticket 136).
+ */
+describe('a closed configuration pull request', () => {
+  /** A connected repository past its first reconcile, with an open PR on it. */
+  async function withOpenPullRequest(fake: FakeGitHub) {
+    fake.commitFiles('main', { 'README.md': 'unconnected' });
+    const { repository } = await connect(fake);
+    const loop = await context(fake);
+    // The first pass adopts the repository's very first commit, exactly as
+    // every connected repository does — leaving a second pass with nothing on
+    // the branch left to notice.
+    await reconcileRepository(loop, repository);
+
+    const github = await host(fake);
+    const opened = await openConfigurationPullRequest(
+      github,
+      { installationId: fake.installationId },
+      {
+        fullName: fake.fullName,
+        defaultBranch: 'main',
+        transaction: configurationTransaction({
+          scopes: [{ scope: 'services/api', proposal }],
+          buildWorkflow: BUILD_WORKFLOW,
+        }),
+      },
+    );
+    await database()
+      .db.update(repositories)
+      .set({ configPullRequest: opened.number })
+      .where(eq(repositories.id, repository.id));
+
+    return { loop, repository, number: opened.number };
+  }
+
+  test('clears the column once it closes unmerged', async () => {
+    const fake = new FakeGitHub();
+    const { loop, repository, number } = await withOpenPullRequest(fake);
+    fake.closePullRequest(number);
+
+    const pass = await reconcileRepository(loop, await reload(repository.id));
+
+    // The branch never moved, so this is the exact pass that used to leave
+    // the column stuck claiming a merge was still possible.
+    expect(pass.outcome).toBe('unchanged');
+    expect((await reload(repository.id)).configPullRequest).toBeNull();
+  });
+
+  test('keeps naming a pull request that is still open', async () => {
+    const fake = new FakeGitHub();
+    const { loop, repository, number } = await withOpenPullRequest(fake);
+
+    const pass = await reconcileRepository(loop, await reload(repository.id));
+
+    expect(pass.outcome).toBe('unchanged');
+    expect((await reload(repository.id)).configPullRequest).toBe(number);
+  });
+
+  test('tolerates a deleted pull request as closed', async () => {
+    const fake = new FakeGitHub();
+    const { loop, repository } = await withOpenPullRequest(fake);
+    // Nothing about the fake models a delete; standing in for one is simply a
+    // number the far side no longer has an answer for — the same `404` a
+    // pull request's own deletion answers with.
+    fake.pulls.length = 0;
+
+    const pass = await reconcileRepository(loop, await reload(repository.id));
+
+    expect(pass.outcome).toBe('unchanged');
+    expect((await reload(repository.id)).configPullRequest).toBeNull();
+  });
+});
+
 describe('losing access', () => {
   async function snapshot() {
     const db = database().db;

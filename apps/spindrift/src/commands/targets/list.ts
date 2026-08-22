@@ -458,6 +458,7 @@ export const listTargets: Command<ListTargetsInput, ListTargetsResult> = async (
           ),
         ),
         inspectedAt: vessel.inspectedAt?.toISOString() ?? null,
+        discovery: vessel.discovery,
       };
     }),
   });

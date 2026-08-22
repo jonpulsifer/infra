@@ -37,6 +37,7 @@ import { type Vessel, vessels } from '../db/schema.ts';
 import {
   deriveVesselHealth,
   unreachableVesselPrerequisites,
+  type VesselDiscovery,
   type VesselPrerequisite,
   type VesselPrerequisiteResult,
   type VesselRole,
@@ -48,7 +49,10 @@ import { reconcilerLoopDuration } from '../telemetry/index.ts';
 /** What the loop needs. No principal: nobody asked for it to run. */
 export interface VesselLoopContext {
   readonly db: Database;
-  readonly adapters: Pick<AdapterRegistry, 'discovery' | 'store'>;
+  readonly adapters: Pick<
+    AdapterRegistry,
+    'discovery' | 'store' | 'cloudflare'
+  >;
   readonly clock: Clock;
   readonly manifest: InstallationManifest;
 }
@@ -87,14 +91,83 @@ export interface VesselRefresh {
   readonly healthChangedFrom?: 'healthy' | 'unhealthy';
 }
 
+/** What one pass established about a boundary: the verdict and the inventory. */
+export interface VesselInspection {
+  readonly prerequisites: readonly VesselPrerequisiteResult[];
+  /** `null` for a boundary whose kind has no account-wide listing to read. */
+  readonly discovery: VesselDiscovery | null;
+}
+
 /**
  * Ask one boundary the questions its kind and roles put to it.
+ *
+ * Two independent questions, concurrently: whether this installation can use
+ * the boundary (the checklist) and what is in it (the inventory). They are not
+ * one call because they are not one verdict — an account with no zones is
+ * perfectly usable, and a checklist row saying otherwise would be a rule nobody
+ * wrote.
  *
  * Never throws, for the reason `inspectTarget` does not: the far sides here are
  * other people's APIs, and one refusing must produce an unmet row with its
  * sentence rather than stop the pass.
  */
 export async function inspectVessel(
+  context: VesselLoopContext,
+  vessel: Pick<Vessel, 'name' | 'kind' | 'location'>,
+  roles: readonly VesselRole[],
+): Promise<VesselInspection> {
+  const [prerequisites, discovery] = await Promise.all([
+    checklistOf(context, vessel, roles),
+    readVesselDiscovery(context.adapters, vessel),
+  ]);
+  return { prerequisites, discovery };
+}
+
+/**
+ * What the boundary holds, as its own credential can see it.
+ *
+ * `null` rather than an empty document for every kind that has none: a cluster
+ * and a cloud project are read by the checklist above and by the Target loop,
+ * and neither has an account-wide inventory this shape would carry. A stored
+ * `null` there is "there is nothing of this kind to read", which is a different
+ * fact from a Cloudflare account whose reads were all refused — that one stores
+ * a document with three null fields and three sentences.
+ */
+export async function readVesselDiscovery(
+  adapters: Pick<AdapterRegistry, 'cloudflare'>,
+  vessel: Pick<Vessel, 'name' | 'kind' | 'location'>,
+): Promise<VesselDiscovery | null> {
+  if (vessel.kind !== 'cloudflare-account') return null;
+  const location = vessel.location;
+  if (location === null || location.kind !== 'cloudflare-account') {
+    return unreadableAccount(
+      `${vessel.name} states no account, so nothing in it could be listed`,
+    );
+  }
+  const accounts = adapters.cloudflare?.() ?? null;
+  if (accounts === null) {
+    return unreadableAccount(
+      'this installation has no Cloudflare credential, so nothing in this account could be listed',
+    );
+  }
+  return accounts.read(location.account, {
+    ...(location.endpoint === undefined ? {} : { endpoint: location.endpoint }),
+  });
+}
+
+/** The inventory of an account nothing could ask, with the fault stated. */
+function unreadableAccount(detail: string): VesselDiscovery {
+  return {
+    kind: 'cloudflare-account',
+    zones: null,
+    workersSubdomain: null,
+    pagesProjects: null,
+    unreadable: { account: detail },
+  };
+}
+
+/** §13's checklist, one noun up — the four facts a home vessel owes. */
+async function checklistOf(
   context: VesselLoopContext,
   vessel: Pick<Vessel, 'name' | 'kind' | 'location'>,
   roles: readonly VesselRole[],
@@ -245,11 +318,15 @@ export async function refreshAllVessels(
     // Sequential rather than concurrent, exactly as the Target loop is: the far
     // sides are other people's control planes, and a fleet refreshing in
     // lockstep is a thundering herd against every one of them at once.
-    const prerequisites = await inspectVessel(context, vessel, roles);
+    const { prerequisites, discovery } = await inspectVessel(
+      context,
+      vessel,
+      roles,
+    );
     const now = context.clock.now();
     await context.db
       .update(vessels)
-      .set({ prerequisites, inspectedAt: now, updatedAt: now })
+      .set({ prerequisites, discovery, inspectedAt: now, updatedAt: now })
       .where(eq(vessels.id, vessel.id));
 
     const health = deriveVesselHealth(prerequisites, vessel.kind, roles);

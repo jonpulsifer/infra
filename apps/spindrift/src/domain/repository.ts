@@ -120,6 +120,22 @@ export interface RepositoryReader {
     fullName: string,
     commit: string,
   ): Promise<readonly string[]>;
+  /**
+   * Whether one pull request is still open (ticket 136).
+   *
+   * `repositories.config_pull_request` is written once, when the configuration
+   * transaction opens the PR, and otherwise trusted — so a PR closed without
+   * merging leaves the row claiming "still open" forever, with nothing that
+   * ever asks again. This is that ask. A pull request that no longer exists —
+   * deleted, or a fork whose branch is gone — answers `'closed'` rather than
+   * throwing: it is exactly as unmergeable as one a human closed by hand, and
+   * the column exists to say whether there is still something to merge.
+   */
+  pullRequestState(
+    ref: RepositoryRef,
+    fullName: string,
+    number: number,
+  ): Promise<'open' | 'closed'>;
 }
 
 /**

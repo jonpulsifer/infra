@@ -462,6 +462,27 @@ export class GitHubApp implements ExactCommitFetcher<InstallationRef> {
     return null;
   }
 
+  /**
+   * Whether one pull request is still open (ticket 136).
+   *
+   * `404` is tolerated here for the same reason it is in `readFile`: a pull
+   * request that has been deleted is exactly as unmergeable as one a human
+   * closed, and the repository loop only ever asks this to decide whether
+   * `configPullRequest` still names something worth merging.
+   */
+  async pullRequestState(
+    ref: InstallationRef,
+    fullName: string,
+    number: number,
+  ): Promise<'open' | 'closed'> {
+    const pull = await this.http(ref).json<{ state: string }>({
+      method: 'GET',
+      path: `/repos/${fullName}/pulls/${number}`,
+      tolerate: [404],
+    });
+    return pull !== null && pull.state === 'open' ? 'open' : 'closed';
+  }
+
   // --- Actions, which the hosted build route runs on --------------------
   //
   // §4 puts the build on "hosted CI on the fast-pipe side" and §15 puts the run

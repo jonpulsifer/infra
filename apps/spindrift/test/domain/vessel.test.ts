@@ -19,6 +19,7 @@ import * as exports from '../../src/domain/vessel.ts';
 import {
   claimsDisagree,
   deriveVesselHealth,
+  servableZone,
   surfacesToProbe,
   unionOfClaims,
   unreachableVesselPrerequisites,
@@ -67,12 +68,41 @@ describe('the surfaces a connect probes for', () => {
       'VESSEL_ROLES',
       'claimsDisagree',
       'deriveVesselHealth',
+      'servableZone',
       'surfacesToProbe',
       'unionOfClaims',
       'unreachableVesselPrerequisites',
       'vesselPrerequisitesFor',
       'vesselRolesOf',
     ]);
+  });
+});
+
+describe('which declared zone an account can serve', () => {
+  test('the first declared zone the account actually carries', () => {
+    // Not the head of the declared list: `private.test` is this installation's
+    // first zone and is served somewhere else entirely.
+    expect(
+      servableZone(
+        ['private.test', 'public.test'],
+        [
+          { name: 'public.test', id: 'zone-1', status: 'active' },
+          { name: 'spare.test', id: 'zone-2', status: 'active' },
+        ],
+      ),
+    ).toBe('public.test');
+  });
+
+  test('nothing carried is nothing to serve, not the head', () => {
+    expect(servableZone(['private.test'], [])).toBeNull();
+  });
+
+  test('a read that established nothing falls back to the head', () => {
+    // A probe that could not run must not be the reason a deploy stops: the
+    // platform's own refusal is still there, with a better sentence.
+    expect(servableZone(['private.test', 'public.test'], null)).toBe(
+      'private.test',
+    );
   });
 });
 

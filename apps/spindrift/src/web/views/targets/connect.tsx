@@ -100,7 +100,7 @@ export function ConnectTargetForm(props: {
   project?: string;
   /** And for an edge platform's boundary: the team this surface deploys into. */
   team?: string;
-  /** And for a Cloudflare account: the account its projects are created under. */
+  /** And for a Cloudflare account: the account every surface on it sits in. */
   account?: string;
   /** What an edit of a cloud boundary restates so the act does not delete it. */
   carried?: CloudBoundaryFacts;
@@ -900,13 +900,18 @@ function ConnectVercel({
 }
 
 /**
- * A Cloudflare account's one surface, in one act.
+ * A Cloudflare account, in one act.
  *
  * The same one field {@link ConnectVercel} takes, one vendor over and for the
- * same reason — an account has no discovery API to enumerate itself through
- * before it is named — plus the same omission: the platform's REST root
- * answers for every account, so `pages/index.ts` applies it without asking,
- * and the only thing left for this form to ask about is which account.
+ * same reason — an account cannot be enumerated before it is named — plus the
+ * same omission: the platform's REST root answers for every account, so
+ * `adapters/cloudflare.ts` applies it without asking, and the only thing left
+ * for this form to ask about is which account.
+ *
+ * **What comes back is more than the surface it registers.** The act reads the
+ * account itself — its zones, its Workers subdomain, its Pages projects — and
+ * the Targets screen shows that under the connection, so an operator who has
+ * typed an account id sees what is in it rather than only that it answered.
  *
  * **No field for the token here either**, and the same sentence applies: the
  * bearer is the installation's, read from its Secret per request, so a form

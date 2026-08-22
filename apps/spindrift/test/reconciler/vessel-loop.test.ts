@@ -84,6 +84,8 @@ interface Wiring {
   readonly manifest?: InstallationManifest;
   readonly storeReachable?: boolean;
   readonly discovery?: FakeGcpDiscoveryOptions | null;
+  /** Zone names a connected Cloudflare account answers with, or `null` for no reader. */
+  readonly zones?: readonly string[] | null;
 }
 
 function context(wiring: Wiring = {}) {
@@ -107,10 +109,27 @@ function context(wiring: Wiring = {}) {
       ...(wiring.discovery ?? {}),
     }).fetch,
   });
-  const adapters: Pick<AdapterRegistry, 'discovery' | 'store'> = {
-    discovery: () => (wiring.discovery === null ? null : real.discovery!()),
-    store: () => store(wiring.storeReachable ?? true),
-  };
+  const zones = wiring.zones;
+  const adapters: Pick<AdapterRegistry, 'discovery' | 'store' | 'cloudflare'> =
+    {
+      discovery: () => (wiring.discovery === null ? null : real.discovery!()),
+      store: () => store(wiring.storeReachable ?? true),
+      cloudflare: () =>
+        zones == null
+          ? null
+          : {
+              read: async () => ({
+                kind: 'cloudflare-account' as const,
+                zones: zones.map((name) => ({
+                  name,
+                  id: `id-${name}`,
+                  status: 'active',
+                })),
+                workersSubdomain: 'acme',
+                pagesProjects: [],
+              }),
+            },
+    };
   return { db: database().db, clock: { now: () => NOW }, adapters, manifest };
 }
 
@@ -134,7 +153,7 @@ async function homeChecklist(
     },
     ['home'],
   );
-  return new Map(answered.map((item) => [item.name, item]));
+  return new Map(answered.prerequisites.map((item) => [item.name, item]));
 }
 
 describe('the four the home vessel carries', () => {
@@ -337,5 +356,47 @@ describe('one pass over the boundaries', () => {
     for (const item of row.prerequisites ?? []) {
       expect(item.remediation).toBeUndefined();
     }
+  });
+});
+
+describe('what a boundary carries, beside whether it can be used', () => {
+  test('a Cloudflare account’s inventory is written to its own row', async () => {
+    await refreshAllVessels(context({ zones: ['example.test'] }));
+
+    const rows = await database().db.select().from(vessels);
+    const account = rows.find((row) => row.kind === 'cloudflare-account')!;
+
+    expect(account.discovery).toEqual({
+      kind: 'cloudflare-account',
+      zones: [
+        { name: 'example.test', id: 'id-example.test', status: 'active' },
+      ],
+      workersSubdomain: 'acme',
+      pagesProjects: [],
+    });
+    // The inventory is not a checklist: an account is asked nothing, and being
+    // asked nothing is still healthy.
+    expect(account.prerequisites).toEqual([]);
+  });
+
+  test('a kind with no account-wide listing stores none, rather than an empty one', async () => {
+    await refreshAllVessels(context({ zones: ['example.test'] }));
+
+    const rows = await database().db.select().from(vessels);
+    // `null` here is "there is nothing of this kind to read", which is what
+    // keeps it apart from an account whose reads were refused.
+    expect(rows.find((row) => row.kind === 'cluster')!.discovery).toBeNull();
+  });
+
+  test('no reader at all is a sentence, never an account with no zones', async () => {
+    await refreshAllVessels(context({ zones: null }));
+
+    const rows = await database().db.select().from(vessels);
+    const account = rows.find((row) => row.kind === 'cloudflare-account')!;
+
+    expect(account.discovery?.zones).toBeNull();
+    expect(account.discovery?.unreadable?.account).toContain(
+      'no Cloudflare credential',
+    );
   });
 });

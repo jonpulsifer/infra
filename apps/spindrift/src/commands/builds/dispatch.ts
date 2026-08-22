@@ -891,27 +891,43 @@ export const dispatchBuild = async (
    */
   const credentials = context.adapters.registryCredentials?.() ?? null;
   /**
-   * **Only the hosts this route cannot authorize on its own.** The same
-   * `selfAuthorizedRegistries` that chose the destinations above decides this,
-   * because they are the same question asked twice: a flavour the route's own
-   * identity reaches needs no credential handed to it, and asking for one
-   * anyway produces a credential that is unnecessary, unused, and — on a route
-   * that cannot carry one — fatal.
+   * **The hosts this route cannot authorize on its own — every destination
+   * instead, on a route that has somewhere safe to carry a credential.**
    *
-   * That was not hypothetical. GHCR's credential is *minted per dispatch* from
-   * the GitHub OAuth the installation already holds
-   * (`storage/github-registry-credential.ts`), so it answers whenever the
-   * connector is authorized. Asking about every destination therefore always
-   * produced one for `ghcr.io`, and the refusal below fired on every single
-   * build on the hosted route — the route whose own workflow logs into GHCR
-   * with the run's token and needs nothing from here.
+   * `selfAuthorizedRegistries` answers for the identity that *dispatches* the
+   * run, not for wherever the run ends up executing. §15 lets the hosted route
+   * hand the run to whichever repository was connected, and that repository's
+   * own token is not the token that self-authorized `ghcr.io` above: an
+   * org-owned repository's token never writes another owner's namespace, and a
+   * user repository's token is refused on a package this installation's stored
+   * credential already owns (ticket 136). A route that can carry a credential
+   * (`carriesHeldSecret`) is asked about every destination for exactly that
+   * reason — the stored credential rides along wherever one exists, and the
+   * workflow logs in with it *after* the run's own token
+   * (`spindrift-build.yml`'s "Log in with sealed credentials"), so it wins
+   * where both exist and costs nothing extra where the run's own token was
+   * already enough.
+   *
+   * A route with nowhere to carry one keeps asking only about what it cannot
+   * reach on its own — handing it a credential it is refused below for buys
+   * nothing.
+   *
+   * That is not hypothetical. The installation holds a GHCR credential as a
+   * `registry_credentials` row (`storage/registry-credentials.ts`), so
+   * `authFor` answers for `ghcr.io` whenever one is stored. Asking about every
+   * destination on a route that could not carry one would produce it on every
+   * hosted build and fire the refusal below each time — on the route whose own
+   * workflow logs into GHCR with the run's token and needs nothing from here
+   * when the run stays where that token is good.
    */
-  const unauthorizedHosts = [
-    ...new Set(destinations.map(registryHostOf)),
-  ].filter(
+  const destinationHosts = [...new Set(destinations.map(registryHostOf))];
+  const unauthorizedHosts = destinationHosts.filter(
     (host) => !adapter.selfAuthorizedRegistries.includes(registryFlavour(host)),
   );
-  const registryAuth = (await credentials?.authFor(unauthorizedHosts)) ?? [];
+  const registryAuth =
+    (await credentials?.authFor(
+      adapter.carriesHeldSecret ? destinationHosts : unauthorizedHosts,
+    )) ?? [];
 
   // A route that cannot carry one is refused **before** the claim, so nothing
   // is dispatched that would fail at the push — or, worse, put the credential

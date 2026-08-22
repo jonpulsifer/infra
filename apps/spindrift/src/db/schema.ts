@@ -33,6 +33,7 @@ import {
   integer,
   pgEnum,
   pgTable,
+  primaryKey,
   text,
   timestamp,
   unique,
@@ -54,6 +55,7 @@ import type { ArtifactType, DesiredDocument } from '../domain/desired-state.ts';
 import type { TargetConnection } from '../domain/target.ts';
 import {
   VESSEL_KINDS,
+  type VesselDiscovery,
   type VesselLocation,
   type VesselPrerequisiteResult,
 } from '../domain/vessel.ts';
@@ -1173,6 +1175,18 @@ export const vessels = pgTable(
       jsonbDocument('prerequisites').$type<
         readonly VesselPrerequisiteResult[]
       >(),
+    /**
+     * What the same pass read *in* the boundary — its zones, its Workers
+     * subdomain, its Pages projects.
+     *
+     * Not a checklist and deliberately not merged into one: a prerequisite is
+     * a verdict on whether this installation can use the boundary, and this is
+     * the inventory an operator reads to know what is in it. Null means never
+     * assessed, on the same terms as the column above; a field inside it that
+     * is null means that one read established nothing, which
+     * `CloudflareAccountDiscovery` keeps apart from an empty listing.
+     */
+    discovery: jsonbDocument('discovery').$type<VesselDiscovery>(),
     /** When the standing pass last ran against this boundary. */
     inspectedAt: timestamp('inspected_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true })
@@ -1750,6 +1764,66 @@ export const functions = pgTable(
   ],
 );
 
+/**
+ * The commit → bundle index over the source depot (§15).
+ *
+ * §15 stages "one immutable bundle" per commit, and `canonicalGzip`
+ * (`src/storage/archive-format.ts`) is what makes the digest a function of the
+ * commit rather than of the repository host's compressor. Together those two
+ * mean the depot already *is* a cache: the same commit always names the same
+ * object. What it had no way to answer was "have I staged this one before" —
+ * the only memory was `builds.bundle_location` on the previous Build of the
+ * same Component, which `sourceForRerun` correctly refuses to trust for an
+ * ephemeral bundle it cannot prove still exists. So one push to a repository
+ * hosting N Apps fetched the same tarball N times.
+ *
+ * This is that memory, and it is deliberately only an *index*: the bucket
+ * stays the source of truth. A row is a hint that an object existed, never a
+ * promise that it still does — the bucket's lifecycle rule expires an
+ * `ephemeral/` bundle 30 days after it was written and tells nothing here.
+ * `src/storage/bundle-cache.ts` is the only reader, and it verifies every hit
+ * against the depot before returning it. A miss, for any reason at all, falls
+ * through to the fetch that used to happen unconditionally.
+ *
+ * Keyed on `(repository, commit)` because that pair is what a caller has
+ * before any bytes exist. Both `stageRepository` callers resolve a full sha
+ * first (`src/commands/apps/deploy.ts`, `creation-drafts/lifecycle.ts`), and
+ * `stageSourceBundle` refuses a fetch whose resolved revision disagrees — so a
+ * row is only ever written under a commit the far side confirmed.
+ *
+ * That pair is only the whole key while a bundle is the tree and nothing else.
+ * §15 stages a `git archive` of one commit, which carries no history, no tags
+ * and no other ref — so a second bundle *kind* that did would be a different
+ * object at the same commit, and this key would have to grow a column to tell
+ * them apart. Nothing today produces one.
+ */
+export const sourceBundles = pgTable(
+  'source_bundles',
+  {
+    /** `owner/name`, exactly as `stageRepository` was asked for it. */
+    repository: text('repository').notNull(),
+    /** A full sha, never a branch or a tag. */
+    commit: text('commit').notNull(),
+    digest: text('digest').notNull(),
+    /** The `gs://` object this pair last staged to. */
+    location: text('location').notNull(),
+    /**
+     * When the bytes were last fetched from the repository host — not when the
+     * row was last read. Nothing reads it to decide a hit (the depot decides
+     * that); it is here so an operator can see how old the newest copy is.
+     */
+    stagedAt: timestamp('staged_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    primaryKey({
+      name: 'source_bundles_repository_commit_pk',
+      columns: [table.repository, table.commit],
+    }),
+  ],
+);
+
 // --- Relations (query-builder convenience; no schema effect) ---------------
 
 export const appsRelations = relations(apps, ({ one, many }) => ({
@@ -1935,3 +2009,5 @@ export type BuildRequest = typeof buildRequests.$inferSelect;
 export type NewBuildRequest = typeof buildRequests.$inferInsert;
 export type FunctionRow = typeof functions.$inferSelect;
 export type NewFunctionRow = typeof functions.$inferInsert;
+export type SourceBundle = typeof sourceBundles.$inferSelect;
+export type NewSourceBundle = typeof sourceBundles.$inferInsert;

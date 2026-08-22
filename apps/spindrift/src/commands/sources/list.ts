@@ -17,8 +17,11 @@
  * siblings are where staging already writes, and that column is also the
  * `externalParameters.bundleDigest` a SLSA provenance document is verified
  * against — the wire name stays as it is, and the operator-facing noun does
- * not. A `sources` table earns its place when a Source has to exist before or
- * outlive a Build; today one never does.
+ * not. `source_bundles` is not that table: it is the commit → bundle index
+ * `src/storage/bundle-cache.ts` reads, a hint about what the depot holds that
+ * carries no App, no Component and no Build, and is allowed to be wrong. The
+ * ledger below is still what was actually built, derived from the Builds that
+ * were dispatched.
  *
  * `supplied` is derived from what happened rather than from what was declared:
  * a Build that reached `SUCCEEDED` with no `runner` is a Build no route ran,

@@ -332,6 +332,11 @@ export const vesselSeedSchema = z.discriminatedUnion('kind', [
         .object({
           /** The account every surface on this vessel deploys into. */
           account: nonEmptyString,
+          /**
+           * The API root every surface on this account reaches. Optional;
+           * defaults to the vendor's own.
+           */
+          endpoint: z.url().optional(),
         })
         .strict()
         .optional(),

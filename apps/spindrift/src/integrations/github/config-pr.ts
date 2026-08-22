@@ -183,7 +183,13 @@ export function serializeSpindriftFile(
  *
  * `id-token: write` is the workflow-ref-scoped cloud identity §15 names: the
  * job federates as itself rather than holding a credential this file would
- * have to carry.
+ * have to carry. `packages: write` is this repository's own GHCR push —
+ * a called workflow can only narrow the caller's token, never widen it, so
+ * the reusable workflow needs the permission granted here even though every
+ * push it makes happens two files away. It is not always enough on its own
+ * (ticket 136): an org-owned repository's token can never write another
+ * owner's namespace, which is what the sealed credential in `registryAuth`
+ * is for.
  */
 export function buildWorkflowCaller(buildWorkflow: string): string {
   return `# Managed by Spindrift.
@@ -206,6 +212,7 @@ on:
         type: string
 permissions:
   contents: read
+  packages: write
   id-token: write
 jobs:
   build:
