@@ -29,6 +29,7 @@
  */
 import { encodeBuildReport } from '../../../src/adapters/build/report.ts';
 import type { Fetcher } from '../../../src/integrations/github/http.ts';
+import { tarball } from '../tar.ts';
 
 const BASE = 'https://api.git.invalid';
 
@@ -579,12 +580,28 @@ export class FakeGitHub {
           });
     }
 
-    const tarball = rest.match(/^\/tarball\/(.+)$/);
-    if (tarball) {
-      const at = decodeURIComponent(tarball[1] ?? '');
+    const archive = rest.match(/^\/tarball\/(.+)$/);
+    if (archive) {
+      const at = decodeURIComponent(archive[1] ?? '');
       if (!this.commits.has(at)) return this.notFound();
       this.tarballs.push(at);
-      return new Response(new TextEncoder().encode(`tarball:${at}`));
+      // A real gzipped tar, wrapping the tree in the host's own
+      // `owner-repo-sha/` directory, because that is what production answers
+      // with and what every consumer downstream of the fetch assumes:
+      // `canonicalGzip` gunzips it before it is digested, and the build routes
+      // `tar -xz` it and unwrap the lone top-level directory (§5).
+      const root = `${this.fullName.replace('/', '-')}-${at.slice(0, 7)}`;
+      const files = this.filesAt(at);
+      return new Response(
+        tarball(
+          Object.keys(files)
+            .sort()
+            .map((path) => ({
+              name: `${root}/${path}`,
+              bytes: new TextEncoder().encode(files[path] ?? ''),
+            })),
+        ) as unknown as BodyInit,
+      );
     }
 
     // A single pull request by number — what `pullRequestState` asks for —

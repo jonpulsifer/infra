@@ -175,9 +175,8 @@ spec:
       # A host service that wants metrics scraped drops a .prom file in
       # /var/lib/prometheus-node-exporter-text-files, and this picks it up
       # labelled with the node it came from -- the same drop box folly uses.
-      # That is how bosun on oldschool is scraped: its unit carries an
-      # IPAddressDeny every skiff inherits, so a listener in-cluster Prometheus
-      # could reach would open the pod CIDR to job code as well.
+      # That is how a host service with no listener in-cluster Prometheus can
+      # reach gets its metrics scraped.
       #
       # Reached through the host-root mount the chart already makes, so this
       # needs no extra volume. extraArgs REPLACES the chart's defaults, so the

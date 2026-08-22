@@ -87,6 +87,46 @@ export class GitHubAccessError extends Error {
   }
 }
 
+/** How many times a transient refusal is worth asking again. */
+export const TRANSIENT_ATTEMPTS = 3;
+
+/** Waits between them: a blip clears fast, a quota does not. */
+export const TRANSIENT_BACKOFF_MS: readonly number[] = [1_000, 4_000];
+
+/**
+ * Run one call again when the far side merely could not answer.
+ *
+ * This is the *policy* {@link GitHubHttp} deliberately does not have, kept
+ * beside the classification it reads rather than inside the client that
+ * produces it — a caller opts in, the transport still never retries itself.
+ *
+ * **Everything is retried except lost access**, which is the inversion that
+ * matters. A `GitHubAccessError` of `ACCESS_LOST` is §15's freeze signal and
+ * asking again cannot change it. Everything else — a `503`, a spent quota, and
+ * above all a connection reset partway through a multi-megabyte archive, which
+ * throws out of `fetch` before there is any status to classify — is the far
+ * side having a bad moment, and the whole failure mode this exists for is a
+ * deploy dying on one of those with no loop above it to try again.
+ */
+export async function retryTransient<Result>(
+  attempt: () => Promise<Result>,
+  sleep: (ms: number) => Promise<void> = (ms) => Bun.sleep(ms),
+): Promise<Result> {
+  for (let index = 0; ; index += 1) {
+    try {
+      return await attempt();
+    } catch (cause) {
+      const fatal =
+        cause instanceof GitHubAccessError && cause.code === 'ACCESS_LOST';
+      const wait = TRANSIENT_BACKOFF_MS[index];
+      if (fatal || index >= TRANSIENT_ATTEMPTS - 1 || wait === undefined) {
+        throw cause;
+      }
+      await sleep(wait);
+    }
+  }
+}
+
 /** The REST API version this client's response parsing was written against. */
 const API_VERSION = '2022-11-28';
 
@@ -131,8 +171,9 @@ interface RequestOptions {
  * The client this integration makes its calls through.
  *
  * Deliberately thin: it authorizes, negotiates content, and classifies a
- * refusal. Retries and backoff belong to the loop, which is the only thing that
- * knows whether it is worth waiting.
+ * refusal. Retries and backoff belong to the caller, which is the only thing
+ * that knows whether it is worth waiting — {@link retryTransient} is the
+ * policy for the callers that have no loop above them to wait in.
  */
 export class GitHubHttp {
   constructor(private readonly endpoint: GitHubEndpoint) {}
