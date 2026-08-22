@@ -56,8 +56,12 @@ spec:
         enabled: false
       prometheusSpec:
         serviceDiscoveryRole: EndpointSlice
-        retention: 15d
-        retentionSize: 20GB
+        # Same window as folly so a query spans both sites the same way.
+        # 30d here measures ~10GiB against retrofit's 350G of free space; the
+        # size arm matches folly's for one number to reason about, not because
+        # this disk is tight.
+        retention: 30d
+        retentionSize: 16GB
         # `cluster` is what tells the two sites apart once alerts land in one
         # Discord channel, and it is the variable every multi-cluster dashboard
         # in the chart groups on.
