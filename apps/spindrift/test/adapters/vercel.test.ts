@@ -384,6 +384,13 @@ describe('§6: the verdict is the platform’s, read from the deployment', () =>
     if (verdict.phase === 'LIVE') {
       // §9: the platform names its own, and the API answers a bare host.
       expect(verdict.url).toBe(`https://${PROJECT}.vercel.app`);
+      // Every Vercel project answers the same vendor CNAME regardless of
+      // which project or deployment is live, unlike `url` above.
+      expect(verdict.address).toEqual({
+        recordType: 'CNAME',
+        target: 'cname.vercel-dns.com',
+        proxied: true,
+      });
     }
     // WAITING is entered once however many polls it took: three events saying
     // the same thing is not progress a reader can use.

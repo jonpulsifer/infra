@@ -813,6 +813,16 @@ export class VercelDeployAdapter implements DeployAdapter {
           phase: 'LIVE',
           ref,
           ...(host === undefined ? {} : { url: `https://${host}` }),
+          // §9: nobody publishes the vanity record onto Vercel's edge today —
+          // `attachDomain` above only tells the platform the name is allowed
+          // to serve here. Every Vercel project answers the same vendor CNAME
+          // regardless of which deployment is live, so this needs no read of
+          // its own the way the project's own `url` above does.
+          address: {
+            recordType: 'CNAME',
+            target: 'cname.vercel-dns.com',
+            proxied: true,
+          },
         };
       }
       if (status.phase === 'FAILED') {

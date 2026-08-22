@@ -405,6 +405,19 @@ export class PagesDeployAdapter implements DeployAdapter {
       phase: 'LIVE',
       ref,
       ...(address === undefined ? {} : { url: address }),
+      // §9: nobody publishes the vanity record onto this project's own
+      // address today — `attachDomain` above only tells Cloudflare the name
+      // is allowed to serve here. `deploy-loop.ts` is what turns this into a
+      // record, and it needs the project's subdomain, not one deployment's.
+      ...(ensured.value.subdomain === undefined
+        ? {}
+        : {
+            address: {
+              recordType: 'CNAME',
+              target: ensured.value.subdomain,
+              proxied: true,
+            },
+          }),
     };
   }
 

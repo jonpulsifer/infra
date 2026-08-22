@@ -12,8 +12,10 @@ import {
   IDENTITY_TOKEN_PATH_VAR,
   installationServiceAccountToken,
 } from '../../src/adapters/registry.ts';
+import type { InstallationManifest } from '../../src/config/manifest.schema.ts';
 import { parseManifest, resolveManifest } from '../../src/config/manifest.ts';
 import { FakeGcpDiscovery } from '../harness/fakes/gcp-discovery-api.ts';
+import { FakeKubernetes } from '../harness/fakes/kubernetes-api.ts';
 
 test('the installation token provider follows the projected path', async () => {
   const path = join('/tmp', `spindrift-identity-token-${crypto.randomUUID()}`);
@@ -147,4 +149,76 @@ test('the cloud store writes with the federated token, not a stored one', async 
   await store?.describe({ key: 'shop--web--cluster--TOKEN', version: '1' });
 
   expect(authorizations).toEqual(['Bearer the-federated-token']);
+});
+
+/**
+ * §9's one `DnsPublisher`, resolved from the manifest's own seed for the
+ * control-plane vessel's Kubernetes Target — never a database read.
+ */
+test('dns is null when the manifest states no control-plane cluster connection', async () => {
+  const yaml = await Bun.file(
+    join(import.meta.dir, '../fixtures/installation.example.yaml'),
+  ).text();
+  // The fixture deliberately seeds no `location`/`connection` at all — "leaves
+  // how to reach them to the connect act" — which is exactly the half-ready
+  // state this lookup has to answer `null` for rather than throw over.
+  const manifest = await resolveManifest(parseManifest(yaml, 'test'), {});
+
+  const registry = createAdapterRegistry({ manifest, env: {} });
+
+  expect(registry.dns?.()).toBeNull();
+});
+
+test('dns publishes against the control-plane vessel’s own apiServer and delivery namespace', async () => {
+  const yaml = await Bun.file(
+    join(import.meta.dir, '../fixtures/installation.example.yaml'),
+  ).text();
+  const base = await resolveManifest(parseManifest(yaml, 'test'), {});
+  const fake = new FakeKubernetes();
+
+  const manifest: InstallationManifest = {
+    ...base,
+    vessels: base.vessels.map((vessel) => {
+      if (vessel.name !== base.installation.controlPlaneVessel) return vessel;
+      if (vessel.kind !== 'cluster') return vessel;
+      return { ...vessel, location: { apiServer: fake.apiServer } };
+    }),
+    targets: base.targets.map((target) => {
+      if (target.vessel !== base.installation.controlPlaneVessel) {
+        return target;
+      }
+      if (target.adapter !== 'kubernetes') return target;
+      return {
+        ...target,
+        connection: {
+          namespace: 'apps',
+          delivery: {
+            flavour: 'flux-helmrelease' as const,
+            namespace: 'spindrift-platform',
+            sourceRef: { name: 'charts', namespace: 'delivery' },
+          },
+        },
+      };
+    }),
+  };
+
+  const registry = createAdapterRegistry({
+    manifest,
+    env: {},
+    token: fake.token,
+    fetch: fake.fetch,
+  });
+
+  const dns = registry.dns?.() ?? null;
+  expect(dns).not.toBeNull();
+  await dns?.publish('shop-web', {
+    dnsName: 'shop.example.test',
+    recordType: 'CNAME',
+    target: 'shop-web.pages.dev',
+    proxied: true,
+  });
+
+  // The delivery namespace — where this cluster's own HelmReleases and
+  // Applications already land — not the Target's legacy catch-all namespace.
+  expect(fake.get('dnsendpoints/spindrift-platform/shop-web')).toBeDefined();
 });

@@ -71,7 +71,7 @@ import { KubernetesDatastoreAdapter } from './datastore/kubernetes.ts';
 import { workloadIdentityToken } from './deploy/cloud/federation.ts';
 import { CloudRunDeployAdapter } from './deploy/cloudrun/index.ts';
 import type { DeployAdapter } from './deploy/contract.ts';
-import type { TokenProvider } from './deploy/kubernetes/api.ts';
+import { KubernetesApi, type TokenProvider } from './deploy/kubernetes/api.ts';
 import { KubernetesDeployAdapter } from './deploy/kubernetes/index.ts';
 import { PagesDeployAdapter } from './deploy/pages/index.ts';
 import { StaticDeployAdapter } from './deploy/static/index.ts';
@@ -79,6 +79,8 @@ import {
   DEFAULT_ENDPOINT as VERCEL_DEFAULT_ENDPOINT,
   VercelDeployAdapter,
 } from './deploy/vercel/index.ts';
+import { ClusterDnsPublisher } from './dns/cluster.ts';
+import type { DnsPublisher } from './dns/contract.ts';
 import type { SecretStore } from './store/contract.ts';
 import {
   DEFAULT_ENDPOINT as SECRET_MANAGER_DEFAULT_ENDPOINT,
@@ -176,6 +178,19 @@ export function createAdapterRegistry(
     token:
       options.token ?? installationServiceAccountToken(options.env ?? Bun.env),
   });
+
+  // §9's one DNS publisher, addressed once against the control-plane
+  // cluster's own Target — never per Target the way `kubernetes` above is,
+  // because a platform-named Target has no cluster of its own for the
+  // `DNSEndpoint` object to ride along with, so every publish lands on the
+  // same one. The same token as `kubernetes` above: the control-plane vessel
+  // is the cluster this process already runs on (§19), so the projected
+  // service-account token that reaches it reaches this too.
+  const dns = controlPlaneDnsPublisher(
+    options.manifest,
+    options.token ?? installationServiceAccountToken(options.env ?? Bun.env),
+    options.fetch,
+  );
 
   // The connector exists where an identity can: an adopted App pasted into
   // the installation Secret (`SPINDRIFT_GITHUB_APP_ID` + its key), or the
@@ -627,6 +642,10 @@ export function createAdapterRegistry(
     supplyChain() {
       return supplyChain;
     },
+
+    dns(): DnsPublisher | null {
+      return dns;
+    },
   };
 }
 
@@ -672,6 +691,61 @@ function createBuildRoute(
     outbox,
     ...(options.fetch ? { fetch: options.fetch } : {}),
     ...(options.env ? { env: options.env } : {}),
+  });
+}
+
+/**
+ * §9's one `DnsPublisher`, from the manifest's own seed for the control-plane
+ * vessel's Kubernetes Target.
+ *
+ * From the manifest and not a database read: `manifest.targets`/`.vessels`
+ * already carry connection facts an operator seeded, "ordinary,
+ * credential-free platform configuration" that "makes the connection
+ * reproducible from Git" (`manifest.schema.ts`'s `targetSeedSchema`). The
+ * control-plane vessel is the one Target every installation can state this
+ * way honestly: it is the cluster this process already runs on (§19), so
+ * there is nothing an install-time chart could not already know about it —
+ * unlike an App's own Target, which an operator connects after the fact.
+ *
+ * `null` where the manifest states no `connection` for that Target, or no
+ * `location` for that vessel — an installation that relies on connecting it
+ * through the product instead of declaring it here. `deploy-loop.ts` reads
+ * that `null` as one more configuration fact to log, not a hole to fill in.
+ */
+function controlPlaneDnsPublisher(
+  manifest: InstallationManifest,
+  token: TokenProvider,
+  fetch?: Fetcher,
+): DnsPublisher | null {
+  const target = manifest.targets.find(
+    (candidate) =>
+      candidate.vessel === manifest.installation.controlPlaneVessel &&
+      candidate.adapter === 'kubernetes',
+  );
+  // The predicate above already guarantees this; restated so the compiler
+  // narrows the discriminated union the same way — `.find`'s own type does
+  // not carry a predicate's internal checks into its result.
+  if (target === undefined || target.adapter !== 'kubernetes') return null;
+  if (target.connection === undefined) return null;
+
+  const vessel = manifest.vessels.find(
+    (candidate) => candidate.name === target.vessel,
+  );
+  if (vessel === undefined || vessel.kind !== 'cluster') return null;
+  if (vessel.location === undefined) return null;
+
+  return new ClusterDnsPublisher({
+    api: new KubernetesApi({
+      apiServer: vessel.location.apiServer,
+      token,
+      ...(fetch === undefined ? {} : { fetch }),
+    }),
+    // The delivery namespace — where this cluster's Flux or Argo objects are
+    // created — rather than the Target's legacy catch-all `namespace`: it is
+    // the namespace this installation's own operator already reconciles, so
+    // a `DNSEndpoint` beside its `HelmRelease`s and `Application`s is one more
+    // object under the same GitOps eye instead of a stray one in an App's.
+    namespace: target.connection.delivery.namespace,
   });
 }
 
