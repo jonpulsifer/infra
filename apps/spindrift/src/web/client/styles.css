@@ -189,6 +189,17 @@
   --text-title--line-height: 1.3;
   --text-display: 28px;
   --text-display--line-height: 1.15;
+  /*
+   * A seventh step, and the rule above is why it needs a reason rather than a
+   * value. `display` is "the one number or title a screen exists to say", and
+   * every screen has one. This is for the sentence on the Overview that states
+   * the verdict over the *whole installation* — the only place in the product
+   * where one line answers "does anything need me right now", and the only
+   * place with nothing beside it to compete with. It is fluid because it is
+   * read at arm's length on a wall display as often as at a desk.
+   */
+  --text-verdict: clamp(30px, 4.2vw, 46px);
+  --text-verdict--line-height: 1.05;
 
   /* The two letter-spacings the type has: wide for an uppercase eyebrow, tight
      for anything set at display size. Both were retyped as arbitrary values at

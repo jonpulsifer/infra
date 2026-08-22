@@ -57,7 +57,7 @@ import { Ref } from '../../ui/copy.tsx';
 import { type Column, DataTable } from '../../ui/data-table.tsx';
 import { EmptyState } from '../../ui/empty-state.tsx';
 import { Metric, type MetricTone } from '../../ui/metric.tsx';
-import { Page, PageHeader } from '../../ui/page.tsx';
+import { Page } from '../../ui/page.tsx';
 import { Skeleton, SkeletonRows } from '../../ui/skeleton.tsx';
 import { Tabs } from '../../ui/tabs.tsx';
 import { Timestamp } from '../../ui/timestamp.tsx';
@@ -105,6 +105,72 @@ function appTone(phase: AppListItem['phase']): MetricTone {
 /** A count that is only the newest page says so, in the value and beside it. */
 function pageCount(loaded: number, hasMore: boolean): string {
   return hasMore ? `${loaded}+` : String(loaded);
+}
+
+/**
+ * The sentence this screen exists to say, computed rather than written.
+ *
+ * The screen was headed `Operations` under the eyebrow `Control plane`, which
+ * is the name of the machinery and not an answer to the question an operator
+ * opens it with. Every count below was already on the page; what was missing
+ * was the one line that reads them and says which way the installation is
+ * pointing, so that arriving is not a scan.
+ *
+ * It is computed for the reason the pulsing dot is only set on a phase that is
+ * moving: a banner that greets you the same way on the morning a Deploy is
+ * down is a banner nobody reads the second time. The order of the branches is
+ * the order an operator cares — something is red, something is moving,
+ * everything is fine, nothing exists yet — and `FAILED` outranks in-flight
+ * because a release that is still trying is not the thing you were paged for.
+ */
+export function verdict(counts: {
+  apps: number;
+  failedApps: number;
+  inFlightApps: number;
+  failedDeploys: number;
+  failedBuilds: number;
+  runningBuilds: number;
+  attentionTargets: number;
+  liveApps: number;
+}): { headline: string; lede: string } {
+  if (counts.apps === 0) {
+    return {
+      headline: 'Nothing is running yet.',
+      lede: 'Create an App and Spindrift will build it, place it on a Target, and put an address in front of it.',
+    };
+  }
+  if (counts.failedApps > 0) {
+    return {
+      headline:
+        counts.failedApps === 1
+          ? 'One App needs you.'
+          : `${counts.failedApps} Apps need you.`,
+      lede: `${counts.liveApps} of ${counts.apps} are serving. A Component's newest release did not come up — the one before it is still what answers.`,
+    };
+  }
+  if (counts.attentionTargets > 0) {
+    return {
+      headline: 'Everything is serving.',
+      lede: `All ${counts.apps} Apps are up, but ${counts.attentionTargets} ${counts.attentionTargets === 1 ? 'Target needs' : 'Targets need'} attention — a placement that cannot be made is a Deploy that will fail when it is.`,
+    };
+  }
+  const moving = counts.inFlightApps + counts.runningBuilds;
+  if (moving > 0) {
+    return {
+      headline: 'All serving. Something shipping.',
+      lede: `${counts.liveApps} of ${counts.apps} Apps are up, and ${moving} ${moving === 1 ? 'thing is' : 'things are'} moving right now.`,
+    };
+  }
+  if (counts.failedDeploys > 0 || counts.failedBuilds > 0) {
+    return {
+      headline: 'Everything is serving.',
+      lede: `All ${counts.apps} Apps are up. There are failures further back in the ledger — nothing that is failing is what answers a request.`,
+    };
+  }
+  return {
+    headline: 'Everything is serving.',
+    lede: `All ${counts.apps} Apps are up, nothing is in flight, and every Target is healthy.`,
+  };
 }
 
 export function Overview({
@@ -254,27 +320,58 @@ export function Overview({
 
   const byId = new Map(entries.map((entry) => [entry.id, entry]));
 
+  const { headline, lede } = verdict({
+    apps: apps.length,
+    failedApps,
+    inFlightApps,
+    failedDeploys,
+    failedBuilds,
+    runningBuilds,
+    attentionTargets,
+    liveApps,
+  });
+
   return (
     <Page>
-      <PageHeader
-        eyebrow="Control plane"
-        title="Operations"
-        description="What is serving, what it cost to get there, and what is still moving."
-        actions={
-          <>
+      <section
+        aria-label="The state of this installation"
+        className="relative overflow-hidden rounded-lg border border-border bg-card px-6 py-8 sm:px-9 sm:py-11"
+      >
+        {/*
+          The one flourish, and it is a token rather than a literal so it
+          follows the accent through both themes. Behind the text, never over
+          it: `aria-hidden` because it says nothing the sentence does not.
+        */}
+        <div
+          aria-hidden="true"
+          className="pointer-events-none absolute inset-0 bg-[radial-gradient(120%_150%_at_96%_-30%,var(--accent-soft),transparent_58%)] opacity-70"
+        />
+        <div className="relative flex flex-col gap-5">
+          <div className="flex flex-col gap-3">
+            <p className="font-mono text-micro font-bold uppercase tracking-eyebrow text-muted-foreground">
+              {apps.length} Apps · {targets.length} Targets
+            </p>
+            <h1 className="max-w-[18ch] text-balance text-verdict font-semibold tracking-display">
+              {headline}
+            </h1>
+            <p className="max-w-[62ch] text-ui leading-relaxed text-subtle">
+              {lede}
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <Button onClick={() => onNavigate('/apps/new')}>Create App</Button>
+            <Button variant="outline" onClick={() => onNavigate('/deploys')}>
+              Deploy ledger
+            </Button>
             <Button
               variant="outline"
               onClick={() => onNavigate('/settings/connections')}
             >
               Connect Target
             </Button>
-            <Button variant="outline" onClick={() => onNavigate('/deploys')}>
-              Deploy ledger
-            </Button>
-            <Button onClick={() => onNavigate('/apps/new')}>Create App</Button>
-          </>
-        }
-      />
+          </div>
+        </div>
+      </section>
 
       <Serving
         serving={serving}
