@@ -342,9 +342,22 @@ function FunctionEditor({
           ? null
           : 'lowercase letters, digits and hyphens, starting with a letter';
 
+  /**
+   * Monaco's own TypeScript-worker formatter. Best-effort: the worker is a
+   * separate CDN fetch that Monaco tears down after idling and respawns on
+   * demand, so a format that never answers must not hold a Save hostage.
+   */
+  const format = () =>
+    Promise.race([
+      editor.current
+        ?.getAction('editor.action.formatDocument')
+        ?.run()
+        .catch(() => {}),
+      new Promise<void>((resolve) => setTimeout(resolve, 1_500)),
+    ]);
+
   const save = async () => {
     if (isNew && (name === '' || nameIssue !== null)) return;
-    const source = editor.current?.getValue() ?? '';
     // A hostname the edge has not served before: the first deploy, or a move
     // onto Workers from the other target. A redeploy keeps its certificate.
     const newHostname =
@@ -352,6 +365,8 @@ function FunctionEditor({
       (row === null || row.url === null || row.target !== target);
     setSaving(true);
     try {
+      await format();
+      const source = editor.current?.getValue() ?? '';
       const outcome = await command('saveFunction', {
         name,
         target,
@@ -612,6 +627,10 @@ function FunctionEditor({
           {saving ? 'Saving…' : 'Save'}
         </Button>
         <span className="text-caption text-muted-foreground">⌘S / Ctrl+S</span>
+        <Button variant="outline" onClick={() => void format()}>
+          Format
+        </Button>
+        <span className="text-caption text-muted-foreground">also on save</span>
         <select
           aria-label="Insert snippet"
           value=""

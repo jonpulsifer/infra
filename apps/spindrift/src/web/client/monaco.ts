@@ -41,6 +41,7 @@ export interface MonacoEditorInstance {
     }[],
   ): boolean;
   focus(): void;
+  getAction(id: string): { run(): Promise<void> } | null;
   dispose(): void;
 }
 
@@ -269,6 +270,8 @@ function installDefaultOptions(ns: MonacoNamespace): void {
     cursorBlinking: 'smooth',
     bracketPairColorization: { enabled: true },
     tabSize: 2,
+    formatOnType: true,
+    formatOnPaste: true,
   };
   const create = ns.editor.create.bind(ns.editor);
   ns.editor.create = (container, options) =>
