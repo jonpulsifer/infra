@@ -1,18 +1,8 @@
 name: kustomize
 
-# The first merge-path job served by the warm pool.
-#
-# `skiff-offsite` is oldschool's slot: one warm skiff at the site with the fast
-# internet, a persisting workspace so the next run finds this one's mise tool
-# cache, and a host-local actions/cache service the stock action uses without
-# knowing. This job is the right first mover -- one step, one small toolchain,
-# and a path filter that makes it fire on exactly the changes the pool should
-# be proving itself against.
-#
-# The escape hatch is the same one `typescript.yml` carries: the class has a
-# single host, so if bosun there is down the job queues rather than failing,
-# and a dispatch with `runner: ubuntu-latest` gets an answer without editing
-# this file.
+# One step, one small toolchain, and a path filter that fires on exactly the
+# cluster changes worth rendering. `runner` is a dispatch escape hatch onto
+# the self-hosted ARC pools; the merge path runs hosted.
 on:
   push:
     branches: [main]
@@ -41,13 +31,12 @@ on:
         description: 'Runner target'
         type: choice
         options:
-          - skiff-offsite
           - ubuntu-latest
           - infra-offsite
-        default: skiff-offsite
+        default: ubuntu-latest
 jobs:
   render-apps:
-    runs-on: ${{ inputs.runner || 'skiff-offsite' }}
+    runs-on: ${{ inputs.runner || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       # helm templates the in-repo charts the rendered HelmReleases name; yq

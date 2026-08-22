@@ -1,6 +1,7 @@
 icon:: ⛵
 tags:: architecture
 
+- **No host enables `services.bosun` today.** The daemon, its module and both hulls stay in the tree; the fleet's CI runs on GitHub-hosted runners, and the pool is off the lab machines because a warm slot is a standing claim on a box that also runs kubelet. Everything below describes what `apps/bosun` is, and what a host that enables it gets.
 - GitHub Actions jobs that need a real machine boundary run in **skiffs** — ephemeral cloud-hypervisor microVMs, one job each, destroyed afterwards. `apps/bosun` keeps a pool of them warm. It is a peer of [[Architecture/Spindrift]], not part of it.
 - ## The four nouns
 	- | Noun | What it is |
@@ -49,12 +50,12 @@ tags:: architecture
 	- Orphaned VMMs still cannot exist: the unit runs `KillMode=mixed`, so the stop signal reaches the daemon alone but systemd SIGKILLs the whole cgroup at the stop timeout.
 	- Because a cgroup kill leaves no chance to run teardown, bosun sweeps on start and deregisters what it finds — retrying, rather than discarding, any id whose delete fails again.
 - ## Where it runs
-	- [[Fleet/riptide]] and [[Fleet/oldschool]] enable `services.bosun`, and both share the box with kubelet. A class name is a promise about shape, so the two sites do not share one: oldschool serves the fast-internet site's slot, riptide serves a small one for platform experiments and holds a parked class behind it. This site rides a satellite link, which is why production CI is not served from it.
-	- `.github/workflows/kustomize.yml` is the merge-path job the pool serves, on `skiff-offsite`. It carries a dispatch input naming the runner, which is the escape hatch a single-host class needs: bosun being down there queues the job rather than failing it, and a `runs-on` a workflow cannot override would mean editing this repo to get an answer.
-	- Nothing about the module is host-specific; another host imports it with only its class definitions differing.
-	- ARC keeps serving `folly`, `offsite` and `self-hosted` throughout. A skiff never claims those labels — its class name is its only label.
+	- Nowhere. No `nix/hosts/*.nix` imports `apps/bosun/module.nix`, so no host serves a skiff class and every `runs-on:` in this repo names a hosted runner or an ARC pool.
+	- The blocker is capacity shape, not the daemon. `warm` is a constant a host declares, so a class costs its RAM and its `warm × workspace` disk whether or not a job ever arrives — and the only two hosts big enough to spare it are cluster nodes sharing the box with kubelet. A pool that grows on demand and returns to zero is what a host that is not also a cluster node would need to be worth standing up.
+	- Nothing about the module is host-specific; a host imports it with only its class definitions differing, and the workflow side is one dispatch input away from naming a class again.
+	- ARC serves `folly`, `offsite` and `self-hosted`. A skiff never claims those labels — its class name is its only label.
 - ## Trying it
-	- `.github/workflows/skiff-smoke.yml` is a `workflow_dispatch` job on `runs-on: skiff-nixos`. It asserts what a skiff does differently: the warm shared store, the writable overlay, `nix-ld` resolving the FHS interpreter downloaded release binaries ask for, and socket-activated Docker.
+	- All of this needs a host enabling `services.bosun` first. `.github/workflows/skiff-smoke.yml` is a `workflow_dispatch` job on `runs-on: skiff-nixos`. It asserts what a skiff does differently: the warm shared store, the writable overlay, `nix-ld` resolving the FHS interpreter downloaded release binaries ask for, and socket-activated Docker.
 	- Inspect a host with `systemctl status bosun` and `journalctl -u bosun`. Under the module's `logDir`, each skiff leaves its serial console as `<id>.log`, and an Ubuntu-hull skiff also leaves the runner's own trace in `<id>.diag/` — a writable virtiofs share, so it lands on the host *while* the job runs and survives a skiff killed mid-job. bosun offers that share to every skiff; the NixOS hull does not mount it yet, so a `skiff-nixos` `<id>.diag/` is empty. Both outlive the skiff and are aged out by `logRetention`.
 	- A class's `memory` is also its **disk budget** unless the class sizes a `workspace`: the whole guest root is a tmpfs overlay, so a checkout plus build that outgrows it is an OOM rather than an `ENOSPC`.
 	- A `workspace` is a virtio-blk scratch disk, reserved under the module's `workspaceDir` at boot and deleted with the skiff. bosun appends it after every hull-declared device and names it on the cmdline as `bosun.workspace=`, because a device index shifts with what the hull declared and a name does not. It is handed over raw — the Ubuntu hull formats it and puts the runner's workspace and docker's data root there, which is what lets a class hold more warm skiffs than its memory alone would allow. What the disk carries is the hull's business; bosun never learns what was written to it.
