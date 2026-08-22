@@ -1,4 +1,4 @@
-FROM ghcr.io/runatlantis/atlantis:v0.46.0@sha256:e79363da6b55182d0cb13d7d9deb1cef51528f309a64254755c80df09cbfd698
+FROM ghcr.io/runatlantis/atlantis:v0.47.1@sha256:5112319554630f6e4a93bfaf78c1fb9cea024a0eebd210e6563322c1c67df842
 USER root
 
 # Bump OpenTofu past the bundled 1.12.3.
