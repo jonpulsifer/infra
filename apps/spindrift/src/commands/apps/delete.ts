@@ -72,6 +72,7 @@ import {
   targetLabel,
 } from '../../domain/target.ts';
 import type { VesselLocation } from '../../domain/vessel.ts';
+import { dnsHandleFor } from '../../domain/workload-name.ts';
 import { type ConfigSubject, configSubject, reapKey } from '../config/set.ts';
 import { type Command, type CommandContext, failed, ok } from '../types.ts';
 
@@ -346,6 +347,19 @@ export const deleteApp: Command<DeleteAppInput, DeleteAppResult> = async (
           adapter: deploy.target.adapter,
         })} — ${refusal}`,
       );
+      continue;
+    }
+    // §9: withdraw whatever vanity record this placement earned. Idempotent
+    // and best-effort, the same reasoning `unplaceComponent` states: the
+    // workload is already gone, and a stray record is a smaller problem than
+    // reporting a delete that happened as one that did not.
+    try {
+      await context.adapters
+        .dns?.()
+        ?.withdraw(dnsHandleFor(app.name, deploy.component));
+    } catch {
+      // Left to converge next time something else publishes or withdraws
+      // this handle.
     }
   }
 

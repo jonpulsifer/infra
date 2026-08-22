@@ -45,3 +45,22 @@ export function workloadName(parts: WorkloadNameParts, limit: number): string {
   const kept = Math.max(1, limit - DIGEST_LENGTH - 1);
   return `${full.slice(0, kept)}-${hash.slice(0, DIGEST_LENGTH)}`;
 }
+
+/** A generic Kubernetes object name's own limit — RFC 1123's DNS subdomain. */
+const DNS_HANDLE_LIMIT = 253;
+
+/**
+ * A `DnsPublisher`'s handle for one Component's platform-named placement (§9).
+ *
+ * `dns/contract.ts`'s own doc comment already says what this is not: "`name`
+ * is Spindrift's handle, not the hostname." It is this module's concern for
+ * the same reason a release name is — a `DNSEndpoint` object's `metadata.name`
+ * is a Kubernetes identifier with a length Kubernetes imposes, and the publish
+ * that mints it and the later withdraw that removes it have to compute the
+ * identical string or the second one deletes nothing. `deploy-loop.ts`'s
+ * publish and `unplaceComponent`/`deleteApp`'s withdraw all call this rather
+ * than each assembling `<app>-<component>` on their own.
+ */
+export function dnsHandleFor(app: string, component: string): string {
+  return workloadName({ app, component }, DNS_HANDLE_LIMIT);
+}

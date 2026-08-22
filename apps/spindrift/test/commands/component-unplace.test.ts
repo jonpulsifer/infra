@@ -35,6 +35,7 @@ import {
 } from '../../src/reconciler/deploy-loop.ts';
 import { withIsolatedDatabase } from '../harness/db.ts';
 import { FakeDeployAdapter } from '../harness/fakes/deploy-adapter.ts';
+import { FakeDnsPublisher } from '../harness/fakes/dns-publisher.ts';
 import {
   SupplyChainHarness,
   testSignature,
@@ -363,6 +364,63 @@ describe('unplacing the ref a kind change would strand (75, box 3, second half)'
     expect(result.value.destroyed).toBe(true);
     expect(adapter.destroyed).toEqual([`jobs/${component.id}`]);
     expect(await desiredRow(component.id, target.id)).toBeUndefined();
+  });
+});
+
+describe('§9: unplacing withdraws the vanity record (ticket 137b)', () => {
+  test('a successful destroy withdraws the handle', async () => {
+    const { app, component, target, build } = await fixture({});
+    const adapter = new FakeDeployAdapter({ adapter: 'kubernetes' });
+    const dns = new FakeDnsPublisher();
+    const adapters: AdapterRegistry = {
+      ...registryOf(adapter),
+      dns: () => dns,
+    };
+
+    await createDeploy(
+      { componentId: component.id, targetId: target.id, buildId: build.id },
+      context(adapters),
+    );
+    await runDeployPass(loopContext(adapter));
+
+    const result = await unplaceComponent(
+      { componentId: component.id, targetId: target.id },
+      context(adapters),
+    );
+
+    expect(result.ok).toBe(true);
+    // §9's handle is `<App>-<Component>` — idempotent even though a cluster
+    // Target publishes its own vanity record through the App chart rather
+    // than through this seam, which is why the test asserts the call was
+    // made rather than asserting anything about what it converged.
+    expect(dns.withdrawn).toEqual([`${app.name}-main`]);
+  });
+
+  test('a destroy the platform refuses never reaches the DNS publisher', async () => {
+    const { component, target, build } = await fixture({});
+    const adapter = new FakeDeployAdapter({
+      adapter: 'kubernetes',
+      destroyThrows: 'the far side refused to remove this release',
+    });
+    const dns = new FakeDnsPublisher();
+    const adapters: AdapterRegistry = {
+      ...registryOf(adapter),
+      dns: () => dns,
+    };
+
+    await createDeploy(
+      { componentId: component.id, targetId: target.id, buildId: build.id },
+      context(adapters),
+    );
+    await runDeployPass(loopContext(adapter));
+
+    const result = await unplaceComponent(
+      { componentId: component.id, targetId: target.id },
+      context(adapters),
+    );
+
+    expect(result.ok).toBe(false);
+    expect(dns.withdrawn).toEqual([]);
   });
 });
 

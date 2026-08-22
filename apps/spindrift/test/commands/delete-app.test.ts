@@ -42,6 +42,7 @@ import {
 } from '../../src/db/schema.ts';
 import { withIsolatedDatabase } from '../harness/db.ts';
 import { FakeDeployAdapter } from '../harness/fakes/deploy-adapter.ts';
+import { FakeDnsPublisher } from '../harness/fakes/dns-publisher.ts';
 import {
   fixtureManifest,
   insertVessel,
@@ -56,7 +57,9 @@ const FROZEN = new Date('2024-06-01T00:00:00.000Z');
 const clock: Clock = { now: () => FROZEN };
 
 /** One fake per adapter type, so a test can ask whether it was ever called. */
-function fakes(options: { destroyThrows?: string } = {}) {
+function fakes(
+  options: { destroyThrows?: string; dns?: FakeDnsPublisher } = {},
+) {
   const made = new Map<string, FakeDeployAdapter>();
   const registry: AdapterRegistry = {
     deploy(adapter) {
@@ -77,6 +80,7 @@ function fakes(options: { destroyThrows?: string } = {}) {
     supplyChain: () => {
       throw new Error('deleteApp reached the supply chain');
     },
+    ...(options.dns === undefined ? {} : { dns: () => options.dns! }),
   };
   return {
     registry,
@@ -420,6 +424,44 @@ describe('a live workload is named and torn down', () => {
     expect(review.ok).toBe(true);
     if (!review.ok) return;
     expect(review.value.stranded[0]?.firing).toBe(false);
+  });
+});
+
+describe('§9: confirming withdraws the vanity record (ticket 137b)', () => {
+  test('a torn-down placement withdraws its handle', async () => {
+    const target = await seedTarget('folly', 'kubernetes');
+    await seedApp('is-live', { targetId: target.id });
+    const dns = new FakeDnsPublisher();
+    const { registry } = fakes({ dns });
+
+    const result = await deleteApp(
+      { name: 'is-live', confirm: true },
+      context(registry),
+    );
+
+    expect(result.ok).toBe(true);
+    // §9's handle is `<App>-<Component>` — withdrawn even though a cluster
+    // Target publishes its own vanity record through the App chart rather
+    // than through this seam.
+    expect(dns.withdrawn).toEqual(['is-live-web']);
+  });
+
+  test('a refused teardown never reaches the DNS publisher', async () => {
+    const target = await seedTarget('folly', 'kubernetes');
+    await seedApp('wont-tear-down', { targetId: target.id });
+    const dns = new FakeDnsPublisher();
+    const { registry } = fakes({
+      destroyThrows: 'the cluster said no',
+      dns,
+    });
+
+    const result = await deleteApp(
+      { name: 'wont-tear-down', confirm: true },
+      context(registry),
+    );
+
+    expect(result.ok).toBe(true);
+    expect(dns.withdrawn).toEqual([]);
   });
 });
 

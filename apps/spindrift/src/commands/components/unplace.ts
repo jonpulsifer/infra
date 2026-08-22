@@ -40,6 +40,7 @@
 import { and, desc, eq, isNull } from 'drizzle-orm';
 import { z } from 'zod';
 import {
+  apps,
   components,
   componentTargetDesired,
   deploys,
@@ -51,6 +52,7 @@ import {
   hasVesselLocation,
   targetRowLabel,
 } from '../../domain/target.ts';
+import { dnsHandleFor } from '../../domain/workload-name.ts';
 import { type Command, failed, ok } from '../types.ts';
 
 export const unplaceComponentInput = z
@@ -89,6 +91,13 @@ export const unplaceComponent: Command<
       `there is no Component with id ${input.componentId}`,
     );
   }
+  // §9's handle is `<App>-<Component>`, and this row carries only its own
+  // half — read once, ahead of the destroy it may follow, rather than inside
+  // the branch that needs it.
+  const [app] = await context.db
+    .select({ name: apps.name })
+    .from(apps)
+    .where(eq(apps.id, component.appId));
 
   // With the boundary, because half of what names a Target lives there.
   const target = await context.db.query.targets.findFirst({
@@ -168,6 +177,22 @@ export const unplaceComponent: Command<
         'NOT_REMOVABLE',
         cause instanceof Error ? cause.message : String(cause),
       );
+    }
+
+    // §9: withdraw whatever vanity record this placement earned, on every
+    // successful destroy rather than only on a platform-named Target's —
+    // `withdraw` is idempotent, so a cluster Target (which never had one
+    // published under this handle) costs one harmless round trip rather than
+    // a branch on the Target's adapter. Best-effort: the workload is already
+    // gone, and a stray record is a smaller problem than reporting a teardown
+    // that happened as one that failed.
+    try {
+      await context.adapters
+        .dns?.()
+        ?.withdraw(dnsHandleFor(app!.name, component.name));
+    } catch {
+      // Left to converge next time something else publishes or withdraws
+      // this handle; nothing here is retryable on its own.
     }
   }
 
