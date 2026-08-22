@@ -44,6 +44,9 @@ resource "google_service_account_iam_member" "spindrift_controller_token_creator
 # string.
 locals {
   spindrift_project_roles = [
+    # Create, update and delete Cloud Run functions gen2 resources — the
+    # `cloud-run-functions` Functions target.
+    "roles/cloudfunctions.developer",
     "roles/cloudsql.admin",
     # A Cloud Run Job carries no cron expression, so a scheduled Component is a
     # Cloud Scheduler job the controller keeps beside the Job.
@@ -58,11 +61,42 @@ locals {
     "roles/compute.networkUser",
     "roles/firebasehosting.admin",
     "roles/iap.admin",
+    # A Function's live-logs tail reads Cloud Logging entries for its Cloud
+    # Run revision.
+    "roles/logging.viewer",
     "roles/redis.admin",
     "roles/run.admin",
     "roles/secretmanager.admin",
     "roles/serviceusage.serviceUsageConsumer",
   ]
+}
+
+# Cloud Run functions gen2 builds with the project's compute default service
+# account, not a service account the controller creates — the org policy that
+# strips default grants from it (see below) means it otherwise holds nothing
+# a build needs.
+data "google_compute_default_service_account" "default" {
+  project = local.project
+}
+
+# Deploying a Cloud Run function is `functions.deploy` calling `actAs` on the
+# service account its build runs as, the same shape as the runtime `actAs`
+# grant in modules/spindrift-vessel/main.tf — a separate permission from
+# creating the function itself.
+resource "google_service_account_iam_member" "spindrift_controller_acts_as_default" {
+  service_account_id = data.google_compute_default_service_account.default.name
+  role               = "roles/iam.serviceAccountUser"
+  member             = google_service_account.spindrift_controller.member
+}
+
+# The org policy that strips predefined roles from the compute default
+# service account on creation leaves it unable to build anything, Cloud Run
+# functions included. This is the one role Cloud Build itself requires the
+# identity a build runs as to hold.
+resource "google_project_iam_member" "default_service_account_cloudbuild_builder" {
+  project = local.project
+  role    = "roles/cloudbuild.builds.builder"
+  member  = "serviceAccount:${data.google_compute_default_service_account.default.email}"
 }
 
 # `roles/run.invoker` is deliberately absent from the list above, and the

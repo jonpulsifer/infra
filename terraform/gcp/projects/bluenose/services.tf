@@ -11,6 +11,11 @@ locals {
     # token bills its quota here — and GCP refuses a call whose consumer
     # project has not enabled the API, whatever project the URL names.
     "cloudbuild.googleapis.com",
+    # Cloud Run functions gen2 — the deploy target for a Function whose
+    # `target` is `cloud-run-functions`. The build it triggers runs as the
+    # project's compute default service account (see iam.tf), not the
+    # controller.
+    "cloudfunctions.googleapis.com",
     # The signer keys live in trusted-builds, but the controller's federated
     # token bills its quota here — same rule as cloudbuild above. Without this,
     # the home vessel's SIGNER_KEY probe answers SERVICE_DISABLED for a keyring
@@ -28,6 +33,10 @@ locals {
     "iam.googleapis.com",
     "iamcredentials.googleapis.com",
     "iap.googleapis.com",
+    # A Function's live-logs tail polls Cloud Logging for the Cloud Run
+    # functions target; the Workers target tails over its own websocket and
+    # never touches this API.
+    "logging.googleapis.com",
     # The service connection policies in the vessel network module — the
     # consumer half of PSC service connectivity automation.
     "networkconnectivity.googleapis.com",
