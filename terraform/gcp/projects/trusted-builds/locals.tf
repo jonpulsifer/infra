@@ -19,7 +19,19 @@ locals {
   # worker is here because the attestation runs as a step of the build it
   # attests (`adapters/build/cloud-build.ts`), which is the only thing in that
   # route holding the digest at the moment it is pushed.
+  #
+  # The workflow run is named by the reusable workflow it executes, not by the
+  # repository it runs in: a connected repository's caller runs that workflow
+  # on its own Actions minutes, and the pool admits it on the same claim
+  # (terraform/gcp/projects/homelab-ng/workload-identity.tf). The
+  # repository-owner principal beside it is the grant every hosted build has
+  # signed under so far; it goes once one build on `main` has signed under the
+  # workflow principal, which is the first proof of what the claim reads as for
+  # this repository's own `uses: ./…` caller.
+  spindrift_build_workflow_principal = "principalSet://iam.googleapis.com/projects/629296473058/locations/global/workloadIdentityPools/homelab/attribute.workflow/jonpulsifer/infra/.github/workflows/spindrift-build.yml@refs/heads/main"
+
   attester_principals = [
+    local.spindrift_build_workflow_principal,
     "principalSet://iam.googleapis.com/projects/629296473058/locations/global/workloadIdentityPools/homelab/attribute.repository_owner/jonpulsifer",
     local.spindrift_controller_member,
     local.cloud_build_worker_member,
