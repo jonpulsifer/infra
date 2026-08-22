@@ -87,9 +87,6 @@ spec:
       plugins:
         - grafana-mqtt-datasource
         - victoriametrics-logs-datasource
-      deleteDatasources:
-        - name: Loki
-          orgId: 1
       additionalDataSources:
         - name: VictoriaLogs
           type: victoriametrics-logs-datasource
