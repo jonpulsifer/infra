@@ -127,9 +127,6 @@ spec:
         passwordKey: password
       plugins:
         - victoriametrics-logs-datasource
-      deleteDatasources:
-        - name: Loki
-          orgId: 1
       additionalDataSources:
         - name: VictoriaLogs
           type: victoriametrics-logs-datasource
@@ -154,18 +151,6 @@ spec:
               tags:
                 - key: pod
                   value: pod
-      dashboardProviders:
-        dashboardproviders.yaml:
-          apiVersion: 1
-          providers:
-            - name: "default"
-              orgId: 1
-              folder: ""
-              type: file
-              disableDeletion: false
-              editable: true
-              options:
-                path: /var/lib/grafana/dashboards/default
       ingress:
         enabled: true
         ingressClassName: cilium
