@@ -1,7 +1,7 @@
 icon:: ⛵
 tags:: architecture
 
-- **No host enables `services.bosun` today.** The daemon, its module and both hulls stay in the tree; the fleet's CI runs on GitHub-hosted runners, and the pool is off the lab machines because a warm slot is a standing claim on a box that also runs kubelet. Everything below describes what `apps/bosun` is, and what a host that enables it gets.
+- **bosun is an experiment, and no host enables it.** It serves no production CI and never has — the benchmarks in `apps/bosun/README.md` are a race against GitHub's hosted runners, not a migration. The daemon, its module and both hulls stay in the tree, waiting for hardware worth running them on. Everything below describes what `apps/bosun` is, and what a host that enables it gets.
 - GitHub Actions jobs that need a real machine boundary run in **skiffs** — ephemeral cloud-hypervisor microVMs, one job each, destroyed afterwards. `apps/bosun` keeps a pool of them warm. It is a peer of [[Architecture/Spindrift]], not part of it.
 - ## The four nouns
 	- | Noun | What it is |
@@ -51,7 +51,7 @@ tags:: architecture
 	- Because a cgroup kill leaves no chance to run teardown, bosun sweeps on start and deregisters what it finds — retrying, rather than discarding, any id whose delete fails again.
 - ## Where it runs
 	- Nowhere. No `nix/hosts/*.nix` imports `apps/bosun/module.nix`, so no host serves a skiff class and every `runs-on:` in this repo names a hosted runner or an ARC pool.
-	- The blocker is capacity shape, not the daemon. `warm` is a constant a host declares, so a class costs its RAM and its `warm × workspace` disk whether or not a job ever arrives — and the only two hosts big enough to spare it are cluster nodes sharing the box with kubelet. A pool that grows on demand and returns to zero is what a host that is not also a cluster node would need to be worth standing up.
+	- What it wants is a dedicated workstation. `warm` is a constant a host declares, so a class costs its RAM and its `warm × workspace` disk whether or not a job ever arrives, and the only boxes in the fleet big enough to spare that are cluster nodes sharing themselves with kubelet. A machine whose job is serving skiffs pays that cost happily; a worker node pays it out of the cluster's pocket.
 	- Nothing about the module is host-specific; a host imports it with only its class definitions differing, and the workflow side is one dispatch input away from naming a class again.
 	- ARC serves `folly`, `offsite` and `self-hosted`. A skiff never claims those labels — its class name is its only label.
 - ## Trying it
