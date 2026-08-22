@@ -1,13 +1,14 @@
 /*
  * The design tokens, and the only stylesheet.
  *
- * The palette is not invented here — it is the one the prototypes in the
- * effort's `assets/` directory settled, carried over value for value: a
- * cold-water teal against slate, with a near-black terminal for anything that
- * is machine output. The three status colours are semantic rather than
- * decorative, because §6 makes `blame` and phase the two things the deploy
- * screen exists to say, and a UI that renders them in an arbitrary hue is a UI
- * that has to explain itself in words.
+ * The palette is one hue and its neutrals: a cold blue against slate, with a
+ * near-black terminal for anything that is machine output. The neutrals carry
+ * the accent's bias rather than being grey, which is what keeps a page of them
+ * reading as one palette instead of as blue marks on unrelated ground. The
+ * three status colours are semantic rather than decorative, because §6 makes
+ * `blame` and phase the two things the deploy screen exists to say, and a UI
+ * that renders them in an arbitrary hue is a UI that has to explain itself in
+ * words.
  *
  * Every token starts as a raw CSS variable that flips with the theme, then is
  * mapped into Tailwind's namespace by `@theme inline` so
@@ -32,42 +33,44 @@
  * the inherited ink for any reader not on the default. A value that cannot be
  * written twice cannot disagree with itself.
  *
- * Two of the light values are not the prototypes' — `--accent` and `--ink-3`
- * are a shade deeper, because the originals measured below 4.5:1 against the
- * surfaces they are read on. Contrast is not a palette preference.
+ * Every value here is measured, not chosen by eye: each text colour clears
+ * 4.5:1 against every surface it is read on, in **both** themes — including
+ * the two surfaces that stay dark in both, the rail and the terminal, which
+ * are the ones a theme-flipping check forgets. Contrast is not a palette
+ * preference.
  */
 
 @import "tailwindcss";
 
 :root {
   color-scheme: dark;
-  --ground: light-dark(#f4f7f7, #07171b);
-  --surface: light-dark(#ffffff, #0d2228);
-  --surface-2: light-dark(#edf1f2, #10272d);
-  --inspector: light-dark(#f9fbfb, #0a1d22);
-  --topbar: light-dark(#ffffff, #07171b);
-  --line: light-dark(#dce5e6, #29474e);
-  --line-soft: light-dark(#e7edef, #233f46);
-  --ink: light-dark(#102229, #eaf4f5);
-  --ink-2: light-dark(#43585f, #a8bec3);
-  --ink-3: light-dark(#566970, #91aab0);
-  --accent: light-dark(#16707f, #59b8c6);
-  --accent-soft: light-dark(#def1f4, #153740);
-  --good: light-dark(#20784f, #91ddb6);
-  --good-soft: light-dark(#dff3e9, #15392c);
-  --warn: light-dark(#96631d, #f0bd72);
-  --warn-soft: light-dark(#faefd9, #3a2b16);
-  --bad: light-dark(#a43e37, #ef9a94);
-  --bad-soft: light-dark(#f9e4e1, #3b201f);
+  --ground: light-dark(#f5f7fc, #060c18);
+  --surface: light-dark(#ffffff, #0e1729);
+  --surface-2: light-dark(#ecf0f8, #152036);
+  --inspector: light-dark(#fafbfe, #0a1220);
+  --topbar: light-dark(#ffffff, #060c18);
+  --line: light-dark(#d8e0ef, #293a5c);
+  --line-soft: light-dark(#e6ebf6, #213050);
+  --ink: light-dark(#0e1a2e, #e9effc);
+  --ink-2: light-dark(#44536c, #a6b4cf);
+  --ink-3: light-dark(#54637e, #8e9fc0);
+  --accent: light-dark(#1a56c8, #6aa5f7);
+  --accent-soft: light-dark(#e1eafd, #152947);
+  --good: light-dark(#1c7550, #86dcb2);
+  --good-soft: light-dark(#ddf2e8, #12362a);
+  --warn: light-dark(#8f5f1a, #f2c07a);
+  --warn-soft: light-dark(#faeed7, #372a15);
+  --bad: light-dark(#ad3b3b, #f79a98);
+  --bad-soft: light-dark(#fae3e3, #3b1e20);
 
   /*
    * Text drawn *on* the accent, which is a different job from the accent
    * itself. A filled primary button used to set its label to `--ground`, and
-   * on a light page that is near-white type on a mid teal — the surface colour
-   * was doing a text colour's work and failing the same measurement the two
-   * values above were corrected for.
+   * on a light page that is near-white type on a mid blue — the surface colour
+   * doing a text colour's work, and failing the measurement every value above
+   * is held to.
    */
-  --on-accent: light-dark(#ffffff, #07171b);
+  --on-accent: light-dark(#ffffff, #060c18);
 
   /*
    * The terminal does not flip. A build log is a verbatim transcript of
@@ -76,18 +79,18 @@
    * the ground shifts a shade, to sit on a light page without reading as a
    * hole punched in it.
    */
-  --terminal: light-dark(#0e1619, #051216);
-  --terminal-ink: #c3d3d8;
-  --terminal-bad: #f0938a;
-  --terminal-dim: #6d838b;
+  --terminal: light-dark(#0b1220, #040913);
+  --terminal-ink: #c6d2e4;
+  --terminal-bad: #f2938f;
+  --terminal-dim: #6e809c;
 
   /* The rail is dark in both themes, for the same reason the terminal is: it
      is chrome, not page. */
-  --rail: light-dark(#092126, #051216);
-  --rail-active: #17414a;
-  --rail-line: light-dark(#1c444c, #17343b);
-  --rail-foreground: #eefcfd;
-  --rail-muted: light-dark(#9fc1c6, #82a8ae);
+  --rail: light-dark(#0a1426, #040911);
+  --rail-active: #1d3560;
+  --rail-line: light-dark(#1e3358, #152441);
+  --rail-foreground: #eff4fe;
+  --rail-muted: light-dark(#a3b6d8, #8ea2c6);
 
   /*
    * The three tokens a floating surface needs, which were previously typed as
@@ -96,10 +99,10 @@
    * this flips too.
    */
   --panel-shadow: light-dark(
-    0 18px 55px rgb(15 40 46 / 12%),
-    0 18px 55px rgb(0 0 0 / 28%)
+    0 18px 55px rgb(20 38 74 / 12%),
+    0 18px 55px rgb(0 0 0 / 32%)
   );
-  --overlay: light-dark(rgb(16 34 41 / 40%), rgb(3 10 12 / 62%));
+  --overlay: light-dark(rgb(16 26 46 / 40%), rgb(3 7 16 / 62%));
   /*
    * How far to invert a single-colour mark. `ui/logo.tsx` reads it as
    * `filter: invert(var(--logo-invert))` rather than through a Tailwind `dark` variant,
@@ -226,7 +229,7 @@
     background-color: var(--color-background);
     background-image: radial-gradient(
       circle at 82% -12%,
-      rgb(60 163 180 / 12%),
+      rgb(64 116 232 / 14%),
       transparent 36%
     );
     background-attachment: fixed;
