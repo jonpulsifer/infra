@@ -36,6 +36,13 @@ spec:
   addresses:
     - type: IPAddress
       value: 10.89.0.69
+  # Every listener admits routes by namespace label, never by name. An App's
+  # route renders into the App's own namespace, which Spindrift creates with
+  # the release and stamps `app.kubernetes.io/part-of: spindrift`
+  # (`apps/spindrift/src/adapters/deploy/kubernetes/index.ts`); `spindrift-apps`
+  # carries the same label for the status route. A name list here would have
+  # to be edited for every App, and a route a listener does not admit is
+  # `Accepted=False` at the gateway while the deploy reads LIVE.
   listeners:
     # The tunnel's origin, and so the only leg `reach: public` travels. Plain
     # HTTP is correct here: the leg is inside the cluster and Cloudflare
@@ -47,12 +54,8 @@ spec:
         namespaces:
           from: Selector
           selector:
-            matchExpressions:
-              - key: kubernetes.io/metadata.name
-                operator: In
-                values:
-                  - spindrift-apps
-                  - oauth2-proxy
+            matchLabels:
+              app.kubernetes.io/part-of: spindrift
         kinds:
           - kind: HTTPRoute
     # One wildcard for every App name Spindrift mints, rather than a listener
@@ -60,12 +63,9 @@ spec:
     # release that could own a listener or a certificate. cert-manager's
     # gateway-shim issues it by DNS-01 from the annotation at the top of this
     # Gateway. A wildcard binds exactly one label, which is why App names are
-    # flat — `plainboi-web` is covered, `web.plainboi` is not.
-    #
-    # `oauth2-proxy` is admitted alongside the Apps because the authenticated
-    # edge answers on a name in this same zone. A `reach: private` App's record
-    # points here, and the sign-in it redirects to has to be served by the same
-    # listener or the redirect lands on a 404.
+    # flat — `plainboi-web` is covered, `web.plainboi` is not. The authenticated
+    # edge a `reach: private` App redirects to answers on `cluster-gateway`, so
+    # no route of oauth2-proxy's attaches here.
     - name: spindrift-apps-tls
       protocol: HTTPS
       port: 443
@@ -78,12 +78,8 @@ spec:
         namespaces:
           from: Selector
           selector:
-            matchExpressions:
-              - key: kubernetes.io/metadata.name
-                operator: In
-                values:
-                  - spindrift-apps
-                  - oauth2-proxy
+            matchLabels:
+              app.kubernetes.io/part-of: spindrift
         kinds:
           - kind: HTTPRoute
     # The second zone the installation manifest mints in, and the one that is
@@ -91,10 +87,6 @@ spec:
     # that route to it: `cluster-gateway` keeps its own `*.${SECRET_DOMAIN}`
     # listener on its own address, and which of the two a name reaches is
     # decided per record by the App chart's DNSEndpoint, never by this wildcard.
-    #
-    # `oauth2-proxy` is admitted for the reason it is above: a `reach: private`
-    # App here redirects to an authenticated edge that answers in this same
-    # zone, and a redirect off this listener would land on a 404.
     - name: spindrift-apps-tls-secret-domain
       protocol: HTTPS
       port: 443
@@ -107,19 +99,14 @@ spec:
         namespaces:
           from: Selector
           selector:
-            matchExpressions:
-              - key: kubernetes.io/metadata.name
-                operator: In
-                values:
-                  - spindrift-apps
-                  - oauth2-proxy
+            matchLabels:
+              app.kubernetes.io/part-of: spindrift
         kinds:
           - kind: HTTPRoute
     # A public-only zone (`reaches: [public]` in the manifest), so every name on
     # this listener arrives through the tunnel and none of them is ever an
-    # RFC1918 A record. `oauth2-proxy` is deliberately absent: the authenticated
-    # edge answers in `${SECRET_DOMAIN}`, and `auth: proxy` on a public App is
-    # the cell §9 already refuses.
+    # RFC1918 A record. `auth: proxy` on a public App is the cell §9 already
+    # refuses.
     - name: spindrift-apps-tls-wishin
       protocol: HTTPS
       port: 443
@@ -132,10 +119,7 @@ spec:
         namespaces:
           from: Selector
           selector:
-            matchExpressions:
-              - key: kubernetes.io/metadata.name
-                operator: In
-                values:
-                  - spindrift-apps
+            matchLabels:
+              app.kubernetes.io/part-of: spindrift
         kinds:
           - kind: HTTPRoute
