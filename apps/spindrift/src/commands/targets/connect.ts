@@ -61,6 +61,7 @@ import {
   inspectTarget,
   readoptTargetDeploys,
 } from '../../reconciler/target-loop.ts';
+import { readVesselDiscovery } from '../../reconciler/vessel-loop.ts';
 import { type Command, failed, ok } from '../types.ts';
 
 /**
@@ -212,16 +213,21 @@ export const connectTargetInput = z.discriminatedUnion('kind', [
   z
     .object({
       kind: z.literal('cloudflare-account'),
-      /** The boundary being connected, by name. Its one surface is registered. */
+      /** The boundary being connected, by name. Every surface on it registers. */
       vessel: targetNameSchema,
       /** The account id every project on this boundary is created under. */
       account: z.string().trim().min(1),
       /**
-       * The platform's API root. Optional, and ordinarily absent: it is one
-       * hostname for every account, so `pages/index.ts` applies its own
-       * default. Kept for the same override reason `runEndpoint` above is.
+       * The API root **this account** is reached at — not this surface's.
+       *
+       * Spelled `endpoint` rather than `pagesEndpoint`, and that rename is the
+       * point: Pages, Workers and the zone listing are three paths under one
+       * host, so a perimeter or a mirror in front of it is in front of all
+       * three. Optional and ordinarily absent, for the same reason
+       * `runEndpoint` above is; the act writes it to the boundary and to the
+       * Pages surface both, from this one field.
        */
-      pagesEndpoint: z.url().optional(),
+      endpoint: z.url().optional(),
       /** §33's static reachability input, on the same terms as above. */
       servedHosts: z.array(z.string().trim().min(1)).optional(),
     })
@@ -320,9 +326,7 @@ function connectionFor(
     }
     return {
       adapter,
-      ...(input.pagesEndpoint === undefined
-        ? {}
-        : { endpoint: input.pagesEndpoint }),
+      ...(input.endpoint === undefined ? {} : { endpoint: input.endpoint }),
     };
   }
   if (input.kind !== 'gcp-project') {
@@ -407,7 +411,11 @@ function locationOf(
     case 'vercel-team':
       return { kind: 'vercel-team', team: input.team };
     case 'cloudflare-account':
-      return { kind: 'cloudflare-account', account: input.account };
+      return {
+        kind: 'cloudflare-account',
+        account: input.account,
+        ...(input.endpoint === undefined ? {} : { endpoint: input.endpoint }),
+      };
   }
 }
 
@@ -449,6 +457,16 @@ export const connectTarget: Command<
       .where(eq(vessels.name, input.vessel))
   )[0];
   const desiredVessel = vesselFor(input, existingVessel?.location ?? null);
+  // What the boundary carries, read by the act that connects it rather than
+  // only by the loop's next pass. An operator who has just typed an account id
+  // is owed "and here is what is in it" on the screen that follows, and the
+  // same read on the same schedule as the checklist is what makes reconnect the
+  // way to refresh it. `null` for every kind with no account-wide listing.
+  const discovery = await readVesselDiscovery(context.adapters, {
+    name: input.vessel,
+    kind: desiredVessel.kind,
+    location: desiredVessel.location,
+  });
   const vessel =
     existingVessel === undefined
       ? (
@@ -457,6 +475,7 @@ export const connectTarget: Command<
             .values({
               name: input.vessel,
               ...desiredVessel,
+              discovery,
               createdAt: now,
               updatedAt: now,
             })
@@ -465,7 +484,7 @@ export const connectTarget: Command<
       : (
           await context.db
             .update(vessels)
-            .set({ ...desiredVessel, updatedAt: now })
+            .set({ ...desiredVessel, discovery, updatedAt: now })
             .where(eq(vessels.id, existingVessel.id))
             .returning()
         )[0]!;

@@ -35,15 +35,22 @@
  *
  * **A vendor's *default* API root is not, on its own, the same claim.** Every
  * cloud deploy adapter now compiles one in — `cloudrun/index.ts`,
- * `vercel/index.ts`, `static/index.ts` and `pages/index.ts` each own a
- * `DEFAULT_ENDPOINT`, applied when a Target's `connection.endpoint` does not
- * override it (`domain/target.ts` says why: none of these ever varied per
- * installation, so treating every one as connection material meant an operator
- * retyped the same constant per project). That is still not license to compile
- * in a *zone* root: `api.cloudflare.com` is banned everywhere except
- * `pages/index.ts`, and the exemption is scoped to that one literal in that one
- * file — see {@link OWNS_CLOUDFLARE_DEFAULT_ENDPOINT} for why naming Cloudflare's
- * shared REST root there is not the same thing as reaching for its zone API.
+ * `vercel/index.ts` and `static/index.ts` each own a `DEFAULT_ENDPOINT`,
+ * applied when a Target's `connection.endpoint` does not override it
+ * (`domain/target.ts` says why: none of these ever varied per installation, so
+ * treating every one as connection material meant an operator retyped the same
+ * constant per project). Cloudflare's is one root for the whole account rather
+ * than for one product, so it is owned by the account reader — see
+ * {@link OWNS_CLOUDFLARE_DEFAULT_ENDPOINT}.
+ *
+ * **Reading a zone is not holding one.** The account reader lists zones and the
+ * Workers deployer resolves one to its id, because a Worker's custom domain is
+ * created by naming the zone it belongs to — and it is created *by the
+ * platform*, which then owns the record and its certificate. Nothing here
+ * writes a record, and that is the line this file polices at
+ * {@link FORBIDDEN}'s `dns_records` pattern: a zone credential is one that can
+ * publish, and every record Spindrift is responsible for is still a
+ * `DNSEndpoint` the controller publishes.
  *
  * Two exemptions survive: one about naming rather than holding, at
  * {@link NAMES_A_BRAND}, and the one just described.
@@ -62,20 +69,22 @@ const APP = join(import.meta.dir, '../..');
  * every other pattern in {@link FORBIDDEN} still polices this file, and this
  * pattern still polices every other one.
  *
- * **Why this is not the hole §9 exists to close.** `pages/index.ts` is the
- * Cloudflare Pages deploy adapter, and its `DEFAULT_ENDPOINT` is the same kind
- * of value `cloudrun/index.ts` and `vercel/index.ts` each compile in beside
- * it: a vendor's API root, identical for every account, not connection
- * material. Cloudflare happens to put every product — Pages, and separately
- * the zone API §9 is actually about — behind one REST root, so the literal
- * this adapter needs is spelled the same way a zone client's would be. What
- * distinguishes them is not the hostname but the path and the credential: this
- * adapter only ever calls `/accounts/…/pages/…`, never `/zones`, and the
- * bearer it sends (`SPINDRIFT_CLOUDFLARE_TOKEN`) is an operator-scoped Pages
- * token, not a zone-editing one — §9's own line, "between naming a host and
- * holding the key to a zone", drawn again here at the file level.
+ * **Why this is not the hole §9 exists to close.** `adapters/cloudflare.ts`
+ * owns the account's API root, the way `cloudrun/index.ts` and
+ * `vercel/index.ts` each own theirs: a vendor's REST root, identical for every
+ * account, not connection material. It is the account reader rather than the
+ * Pages adapter because Cloudflare puts every product behind that one root, so
+ * the constant belongs to the boundary all three surfaces reach and not to
+ * whichever of them happened to need it first.
+ *
+ * What that file does with it is **read**: it lists the account's zones, its
+ * Workers subdomain and its Pages projects, so an operator can see what they
+ * connected. Listing a zone is not editing one, and the pattern that polices
+ * the difference — `dns_records` — is exempted nowhere, in this file or any
+ * other. §9's own line, "between naming a host and holding the key to a zone",
+ * drawn again at the file level.
  */
-const OWNS_CLOUDFLARE_DEFAULT_ENDPOINT = 'src/adapters/deploy/pages/index.ts';
+const OWNS_CLOUDFLARE_DEFAULT_ENDPOINT = 'src/adapters/cloudflare.ts';
 
 /**
  * Ways a DNS provider credential shows up.
@@ -110,6 +119,14 @@ const FORBIDDEN: readonly {
   {
     pattern: /\broute53\b|\bgoogle-?clouddns\b/i,
     why: 'any zone provider client, not only the one this installation uses',
+  },
+  {
+    // The rule the hostname above is only a proxy for. Reading a zone's name
+    // and id is how a Worker's custom domain is claimed — the platform then
+    // owns the record — and writing one is the thing §9 moved to the
+    // controller. No exemption, in any file.
+    pattern: /dns_records|\bDNSRecord\b/,
+    why: 'publishing a record is the zone credential §9 moved to the controller',
   },
   {
     pattern: /\b(dns|zone)_?(api)?_?token\b/i,
@@ -229,7 +246,7 @@ describe('the scanner catches a deliberately dirty file', () => {
       {
         path: OWNS_CLOUDFLARE_DEFAULT_ENDPOINT,
         source:
-          "const DEFAULT_ENDPOINT = 'https://api.cloudflare.com/client/v4';\n",
+          "const CLOUDFLARE_API_ROOT = 'https://api.cloudflare.com/client/v4';\n",
       },
     ];
     expect(findCredentials(clean)).toEqual([]);
@@ -240,6 +257,19 @@ describe('the scanner catches a deliberately dirty file', () => {
       {
         path: 'src/adapters/deploy/pages/assets.ts',
         source: "const root = 'https://api.cloudflare.com/client/v4';\n",
+      },
+    ];
+    expect(findCredentials(dirty)).not.toEqual([]);
+  });
+
+  test('writing a record is caught in the file that may name the root', () => {
+    // The exemption is one pattern wide, and the pattern that matters most is
+    // not the one exempted: the account reader may say Cloudflare's hostname
+    // and still may not publish a record.
+    const dirty: SourceFile[] = [
+      {
+        path: OWNS_CLOUDFLARE_DEFAULT_ENDPOINT,
+        source: "await http.json({ path: '/zones/zone-1/dns_records' });\n",
       },
     ];
     expect(findCredentials(dirty)).not.toEqual([]);

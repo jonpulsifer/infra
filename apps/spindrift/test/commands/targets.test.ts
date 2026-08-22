@@ -57,6 +57,8 @@ import {
 } from '../harness/fakes/deploy-adapter.ts';
 import {
   CLOUD_ENDPOINTS,
+  CLOUDFLARE_ENDPOINT,
+  cloudflareInput,
   cloudInput,
   clusterInput,
   connectionFor,
@@ -1208,5 +1210,68 @@ describe('listTargets', () => {
     expect(
       healthy.value.vessels.find((vessel) => vessel.name === 'cloud')?.health,
     ).toBe('healthy');
+  });
+});
+
+describe('a Cloudflare account is a connection, not a Pages connection', () => {
+  test('connect stores what the account carries, not only that it answered', async () => {
+    const { registry } = fakes();
+    const input = cloudflareInput();
+    const connected = await connectTarget(input, {
+      ...context(registry),
+      adapters: {
+        ...registry,
+        cloudflare: () => ({
+          read: async (account: string) => ({
+            kind: 'cloudflare-account' as const,
+            zones: [{ name: 'example.test', id: 'zone-1', status: 'active' }],
+            workersSubdomain: account,
+            pagesProjects: ['site'],
+          }),
+        }),
+      },
+    });
+    expect(connected.ok).toBe(true);
+
+    const [vessel] = await database()
+      .db.select()
+      .from(vessels)
+      .where(eq(vessels.name, input.vessel));
+
+    // The inventory is the boundary's, so it is on the boundary's row — not
+    // repeated onto every surface, where two of them could disagree.
+    expect(vessel?.discovery).toEqual({
+      kind: 'cloudflare-account',
+      zones: [{ name: 'example.test', id: 'zone-1', status: 'active' }],
+      workersSubdomain: 'example-account',
+      pagesProjects: ['site'],
+    });
+    // And the API root is stated once, on the boundary every surface reaches.
+    expect(vessel?.location).toEqual({
+      kind: 'cloudflare-account',
+      account: 'example-account',
+      endpoint: CLOUDFLARE_ENDPOINT,
+    });
+  });
+
+  test('an installation with no Cloudflare credential records that nobody looked', async () => {
+    // The registry has no reader at all, which is an ordinary installation.
+    // The honest row is a document saying so — never an account whose zones
+    // are empty, which is what would send an operator to create one.
+    const { registry } = fakes();
+    await connectTarget(
+      cloudflareInput({ vessel: 'unread' }),
+      context(registry),
+    );
+
+    const [vessel] = await database()
+      .db.select()
+      .from(vessels)
+      .where(eq(vessels.name, 'unread'));
+
+    expect(vessel?.discovery?.zones).toBeNull();
+    expect(vessel?.discovery?.unreadable?.account).toContain(
+      'no Cloudflare credential',
+    );
   });
 });

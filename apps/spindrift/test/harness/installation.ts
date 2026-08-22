@@ -217,7 +217,7 @@ export function cloudflareInput(
     kind: 'cloudflare-account',
     vessel: 'cloudflare',
     account: 'example-account',
-    pagesEndpoint: CLOUDFLARE_ENDPOINT,
+    endpoint: CLOUDFLARE_ENDPOINT,
     ...overrides,
   };
 }
@@ -264,7 +264,7 @@ export function connectionFor(adapter: TargetAdapter): TargetConnection {
     case 'vercel':
       return { adapter, endpoint: vercelInput().endpoint };
     case 'cloudflare-pages':
-      return { adapter, endpoint: cloudflareInput().pagesEndpoint };
+      return { adapter, endpoint: cloudflareInput().endpoint };
   }
 }
 

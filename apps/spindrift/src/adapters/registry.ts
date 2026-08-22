@@ -63,6 +63,7 @@ import type { BosunOutbox } from './build/bosun.ts';
 import type { BuildAdapter } from './build/contract.ts';
 import { findBuildRouteDescriptor } from './build/descriptors.ts';
 import { GcpDiscovery } from './cloud-discovery.ts';
+import { type CloudflareAccounts, cloudflareAccounts } from './cloudflare.ts';
 import type { DatastoreAdapter } from './datastore/contract.ts';
 import { CloudDatastoreAdapter } from './datastore/gcp.ts';
 import { KubernetesDatastoreAdapter } from './datastore/kubernetes.ts';
@@ -273,6 +274,14 @@ export function createAdapterRegistry(
   // A fourth consumer of that one provider rather than a fourth credential.
   const discovery = new GcpDiscovery({
     token: cloud,
+    ...(options.fetch ? { fetch: options.fetch } : {}),
+  });
+
+  // The same relationship one vendor over: the account bearer the Pages
+  // adapter and the Workers deployer already hold, asked what the *account*
+  // carries rather than what one surface on it does.
+  const cloudflare = cloudflareAccounts({
+    token: options.cloudflareToken ?? cloudflareToken(options.env ?? Bun.env),
     ...(options.fetch ? { fetch: options.fetch } : {}),
   });
 
@@ -573,6 +582,20 @@ export function createAdapterRegistry(
      */
     discovery(): GcpDiscovery {
       return discovery;
+    },
+
+    /**
+     * Reading a connected Cloudflare account, on the same bearer its surfaces
+     * are driven with (§13).
+     *
+     * A reader rather than an adapter, and account-shaped rather than
+     * Pages-shaped, because what it answers is the boundary's: which zones are
+     * in it, whether Workers is switched on, what Pages already holds. The
+     * Target loop asks a surface; this is what the Vessel loop asks the
+     * account.
+     */
+    cloudflare(): CloudflareAccounts {
+      return cloudflare;
     },
 
     /**

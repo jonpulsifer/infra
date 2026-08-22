@@ -640,16 +640,25 @@ ghcr.io from any route but hosted Actions needs a stored classic PAT
 (`write:packages`) via `setRegistryCredential`: GitHub's registry accepts no
 App token.
 
-**An edge hosting Target needs `SPINDRIFT_CLOUDFLARE_TOKEN`**, and it is the one
-Target that does. That platform's API trades no tokens, so there is no
+**A Cloudflare account needs `SPINDRIFT_CLOUDFLARE_TOKEN`**, and it is the one
+boundary that does. That platform's API trades no tokens, so there is no
 projected identity to exchange and no far side to exchange it with — what is
 left is an account credential the installation Secret carries, read per call so
-a rotation lands on the next deploy rather than the next restart. Scope it to
-edit that platform's hosting product and nothing else; core reaches no zone
-with it, and the guard in `test/extraction/no-dns-credential.test.ts` is what
-keeps that true. A Target of this type with the variable unset says so on the
-attempt rather than at boot, because an installation with no edge account
-should not fail to start over a credential it does not need.
+a rotation lands on the next deploy rather than the next restart. **One token
+for the whole account**, because one connection is the whole account: the same
+bearer deploys Pages, uploads Workers, and reads the account's own inventory
+that the Targets screen shows under the connection.
+
+Scope it to edit that platform's hosting products, plus **zone read**. Core
+lists zones and resolves one to its id — a Worker's custom domain is claimed by
+naming the zone it belongs to, and the platform then owns the record and its
+certificate — but it publishes nothing: every record Spindrift is responsible
+for is a `DNSEndpoint` the controller publishes. The guard in
+`test/extraction/no-dns-credential.test.ts` is what keeps the write side true.
+
+A Target of this type with the variable unset says so on the attempt rather
+than at boot, because an installation with no edge account should not fail to
+start over a credential it does not need.
 
 **A cloud Target needs no variable at all**, and that is §13's one auth mode
 arriving where the spec wanted it: "native OIDC federation, nothing stored".

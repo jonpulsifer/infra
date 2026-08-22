@@ -61,7 +61,7 @@ function deployer(
   return new WorkersFunctions({
     token: () => 'edge-token',
     accountId: 'account-1',
-    zoneName: 'example.test',
+    zoneNames: ['other.test', 'example.test'],
     endpoint: ENDPOINT,
     fetch,
     ...overrides,
@@ -71,7 +71,8 @@ function deployer(
 describe('WorkersFunctions.deploy', () => {
   test('reads the zone, uploads the module, then claims the hostname', async () => {
     const far = api({
-      'GET /client/v4/zones': () => ok([{ id: 'zone-1' }]),
+      'GET /client/v4/zones': () =>
+        ok([{ id: 'zone-1', name: 'example.test' }]),
       'PUT /client/v4/accounts/account-1/workers/scripts/fn-hello': () =>
         ok({ id: 'fn-hello' }),
       'PUT /client/v4/accounts/account-1/workers/domains': () =>
@@ -88,9 +89,11 @@ describe('WorkersFunctions.deploy', () => {
       'PUT /client/v4/accounts/account-1/workers/scripts/fn-hello',
       'PUT /client/v4/accounts/account-1/workers/domains',
     ]);
-    expect(new URL(far.calls[0]!.request.url).searchParams.get('name')).toBe(
-      'example.test',
-    );
+    // Scoped to the account, not to a name: the account's own listing is what
+    // decides which declared zone is here, and `other.test` is not.
+    expect(
+      new URL(far.calls[0]!.request.url).searchParams.get('account.id'),
+    ).toBe('account-1');
     expect(far.calls[0]!.request.headers.get('Authorization')).toBe(
       'Bearer edge-token',
     );
@@ -122,7 +125,8 @@ describe('WorkersFunctions.deploy', () => {
 
   test('raises the platform’s own sentence', async () => {
     const far = api({
-      'GET /client/v4/zones': () => ok([{ id: 'zone-1' }]),
+      'GET /client/v4/zones': () =>
+        ok([{ id: 'zone-1', name: 'example.test' }]),
       'PUT /client/v4/accounts/account-1/workers/scripts/fn-hello': () =>
         Response.json(
           { success: false, errors: [{ code: 10021, message: 'nope' }] },
@@ -148,22 +152,29 @@ describe('WorkersFunctions.deploy', () => {
 describe('WorkersFunctions.remove', () => {
   test('takes the domain before the script', async () => {
     const far = api({
+      'GET /client/v4/zones': () =>
+        ok([{ id: 'zone-1', name: 'example.test' }]),
       'GET /client/v4/accounts/account-1/workers/domains': () =>
         ok([{ id: 'domain-1' }]),
     });
     await deployer(far.fetch).remove('hello');
     expect(far.calls.map((call) => `${call.method} ${call.path}`)).toEqual([
+      // The zone first: the domain is looked up by the hostname it carries,
+      // and the hostname is not known until the zone is.
+      'GET /client/v4/zones',
       'GET /client/v4/accounts/account-1/workers/domains',
       'DELETE /client/v4/accounts/account-1/workers/domains/domain-1',
       'DELETE /client/v4/accounts/account-1/workers/scripts/fn-hello',
     ]);
-    expect(new URL(far.calls[2]!.request.url).searchParams.get('force')).toBe(
+    expect(new URL(far.calls[3]!.request.url).searchParams.get('force')).toBe(
       'true',
     );
   });
 
   test('a function that is already gone is not an error', async () => {
     const far = api({
+      'GET /client/v4/zones': () =>
+        ok([{ id: 'zone-1', name: 'example.test' }]),
       'GET /client/v4/accounts/account-1/workers/domains': () =>
         Response.json({ success: false, errors: [] }, { status: 404 }),
       'DELETE /client/v4/accounts/account-1/workers/scripts/fn-hello': () =>

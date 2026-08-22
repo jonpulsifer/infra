@@ -55,6 +55,7 @@ import type { ArtifactType, DesiredDocument } from '../domain/desired-state.ts';
 import type { TargetConnection } from '../domain/target.ts';
 import {
   VESSEL_KINDS,
+  type VesselDiscovery,
   type VesselLocation,
   type VesselPrerequisiteResult,
 } from '../domain/vessel.ts';
@@ -1174,6 +1175,18 @@ export const vessels = pgTable(
       jsonbDocument('prerequisites').$type<
         readonly VesselPrerequisiteResult[]
       >(),
+    /**
+     * What the same pass read *in* the boundary — its zones, its Workers
+     * subdomain, its Pages projects.
+     *
+     * Not a checklist and deliberately not merged into one: a prerequisite is
+     * a verdict on whether this installation can use the boundary, and this is
+     * the inventory an operator reads to know what is in it. Null means never
+     * assessed, on the same terms as the column above; a field inside it that
+     * is null means that one read established nothing, which
+     * `CloudflareAccountDiscovery` keeps apart from an empty listing.
+     */
+    discovery: jsonbDocument('discovery').$type<VesselDiscovery>(),
     /** When the standing pass last ran against this boundary. */
     inspectedAt: timestamp('inspected_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true })
