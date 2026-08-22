@@ -411,8 +411,13 @@ export const deleteApp: Command<DeleteAppInput, DeleteAppResult> = async (
  * *and the delete continues*, unlike `unplaceComponent` where the refusal is the
  * whole answer. The App is going either way; an unreachable Target is a thing to
  * name, not a veto on a delete the operator confirmed.
+ *
+ * Exported for `deleteComponent` (`../components/delete.ts`), which tears
+ * down exactly the same shape of row for exactly the same reason — a second
+ * copy of this would only be a second place for the reasoning to drift from
+ * this one's.
  */
-async function teardown(
+export async function teardown(
   context: CommandContext,
   deploy: {
     ref: string | null;
@@ -438,7 +443,7 @@ async function teardown(
 }
 
 /** One (Component, Target) scope's keys, with the store to reap them from. */
-interface ReapableScope {
+export interface ReapableScope {
   /** `null` when this scope reaches no store — its keys are simply retained. */
   readonly subject: ConfigSubject | null;
   /** The Component's name, for the sentence a retained key is reported in. */
@@ -453,8 +458,11 @@ interface ReapableScope {
  * A scope that resolves to a failure — a Target that reaches no store this
  * installation can write to — is kept with `reap: null` rather than dropped, so
  * its keys are reported as retained instead of silently forgotten.
+ *
+ * Exported alongside {@link teardown} for `deleteComponent`, over exactly the
+ * one scope its single Component ever has.
  */
-async function reapableScopes(
+export async function reapableScopes(
   context: CommandContext,
   pinned: readonly { componentId: string; targetId: string; key: string }[],
   componentNames: ReadonlyMap<string, string>,

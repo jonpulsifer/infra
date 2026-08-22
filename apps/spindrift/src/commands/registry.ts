@@ -52,6 +52,7 @@ import {
   setComponentCommandInput,
 } from './components/command.ts';
 import { createComponent, createComponentInput } from './components/create.ts';
+import { deleteComponent, deleteComponentInput } from './components/delete.ts';
 import { placeComponent, placeComponentInput } from './components/place.ts';
 import {
   setComponentReach,
@@ -247,6 +248,10 @@ export const commandRegistry = {
   unplaceComponent: {
     input: unplaceComponentInput,
     handler: unplaceComponent,
+  },
+  deleteComponent: {
+    input: deleteComponentInput,
+    handler: deleteComponent,
   },
   createDatastore: { input: createDatastoreInput, handler: createDatastore },
   attachDatastore: { input: attachDatastoreInput, handler: attachDatastore },
