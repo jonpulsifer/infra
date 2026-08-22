@@ -78,11 +78,13 @@ spec:
           hostport: http://victoria-logs-server.monitoring.svc.cluster.local:9428
           endpoint: /insert/loki/api/v1/push
           tenant_id: "1"
-          grafanaDashboard:
-            enabled: true
-            namespace: monitoring
+      # The dashboard that ships alongside this output is not enabled: its
+      # panels are typed `loki` against a `loki` datasource uid, and the
+      # VictoriaLogs plugin is a different datasource type, so every panel
+      # would render as "datasource not found".
+      #
       # The webui's bundled redis stores every event with no TTL, no
       # maxmemory and no memory limit. Events already land in VictoriaLogs
-      # via the loki output above, at 30d retention with a Grafana dashboard.
+      # via the loki output above, at 30d retention.
       webui:
         enabled: false
