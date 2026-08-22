@@ -50,6 +50,8 @@ export interface RecordedPullRequest {
   body: string;
   head: string;
   base: string;
+  /** `'open'` until a test calls {@link FakeGitHub.closePullRequest}. */
+  state: 'open' | 'closed';
 }
 
 interface StoredCommit {
@@ -248,6 +250,12 @@ export class FakeGitHub {
     });
     this.branches.set(branch, commit);
     return commit;
+  }
+
+  /** Close a pull request without merging it — what `pullRequestState` asks about. */
+  closePullRequest(number: number): void {
+    const pull = this.pulls.find((candidate) => candidate.number === number);
+    if (pull !== undefined) pull.state = 'closed';
   }
 
   private nextId(): string {
@@ -579,6 +587,26 @@ export class FakeGitHub {
       return new Response(new TextEncoder().encode(`tarball:${at}`));
     }
 
+    // A single pull request by number — what `pullRequestState` asks for —
+    // matched before the listing below, which `startsWith` would otherwise
+    // also answer.
+    const onePull = rest.match(/^\/pulls\/(\d+)$/);
+    if (onePull) {
+      const pull = this.pulls.find(
+        (candidate) => candidate.number === Number(onePull[1]),
+      );
+      return pull === undefined
+        ? this.notFound()
+        : this.json({
+            number: pull.number,
+            title: pull.title,
+            body: pull.body,
+            head: { ref: pull.head },
+            base: { ref: pull.base },
+            state: pull.state,
+          });
+    }
+
     if (rest.startsWith('/pulls')) {
       return this.json(
         this.pulls.map((p) => ({
@@ -587,6 +615,7 @@ export class FakeGitHub {
           body: p.body,
           head: { ref: p.head },
           base: { ref: p.base },
+          state: p.state,
         })),
       );
     }
@@ -649,12 +678,13 @@ export class FakeGitHub {
 
     if (rest === '/pulls' && method === 'POST') {
       this.pullNumber += 1;
-      const pull = {
+      const pull: RecordedPullRequest = {
         number: this.pullNumber,
         title: String(body.title ?? ''),
         body: String(body.body ?? ''),
         head: String(body.head ?? ''),
         base: String(body.base ?? ''),
+        state: 'open',
       };
       this.pulls.push(pull);
       return this.json(pull, 201);

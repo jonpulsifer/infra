@@ -91,7 +91,8 @@ export interface RepoLoopContext {
   readonly clock: Clock;
   /**
    * The far side, as the domain names it — never a GitHub client. The loop
-   * reads three things and writes none, which is what `RepositoryReader` is.
+   * reads facts about the repository and writes none, which is what
+   * `RepositoryReader` is.
    */
   readonly host: RepositoryReader;
 }
@@ -277,6 +278,15 @@ export async function reconcileRepository(
 
   let defaultBranch: string;
   let head: string;
+  // Whether the configuration PR this row still names has been closed since
+  // the last pass — merged or not. A merge is caught below, where the head it
+  // landed moves the branch; this is the other way `configPullRequest` goes
+  // stale, and nothing else in this function ever asks again once the number
+  // is written (ticket 136). Read alongside the facts above rather than only
+  // when something else changes, because a closed-unmerged PR is precisely
+  // the case where the branch never moves and every other read in this
+  // function reports `unchanged`.
+  let configPullRequestClosed = false;
   try {
     const facts = await context.host.repository(ref, repository.fullName);
     defaultBranch = facts.defaultBranch;
@@ -285,6 +295,14 @@ export async function reconcileRepository(
       repository.fullName,
       defaultBranch,
     );
+    if (repository.configPullRequest !== null) {
+      const state = await context.host.pullRequestState(
+        ref,
+        repository.fullName,
+        repository.configPullRequest,
+      );
+      configPullRequestClosed = state === 'closed';
+    }
   } catch (cause) {
     if (cause instanceof GitHubAccessError && cause.code === 'ACCESS_LOST') {
       return freeze(
@@ -311,7 +329,12 @@ export async function reconcileRepository(
   if (head === repository.authoritativeCommit) {
     await context.db
       .update(repositories)
-      .set({ defaultBranch, reconciledAt: now, updatedAt: now })
+      .set({
+        defaultBranch,
+        reconciledAt: now,
+        updatedAt: now,
+        ...(configPullRequestClosed ? { configPullRequest: null } : {}),
+      })
       .where(eq(repositories.id, repository.id));
     return {
       repositoryId: repository.id,
@@ -328,7 +351,12 @@ export async function reconcileRepository(
     // a caller that is not going to dispatch does not get to consume one.
     await context.db
       .update(repositories)
-      .set({ defaultBranch, reconciledAt: now, updatedAt: now })
+      .set({
+        defaultBranch,
+        reconciledAt: now,
+        updatedAt: now,
+        ...(configPullRequestClosed ? { configPullRequest: null } : {}),
+      })
       .where(eq(repositories.id, repository.id));
     return {
       repositoryId: repository.id,
@@ -424,7 +452,12 @@ export async function reconcileRepository(
     // pass will try this one again.
     await context.db
       .update(repositories)
-      .set({ defaultBranch, reconciledAt: now, updatedAt: now })
+      .set({
+        defaultBranch,
+        reconciledAt: now,
+        updatedAt: now,
+        ...(configPullRequestClosed ? { configPullRequest: null } : {}),
+      })
       .where(eq(repositories.id, repository.id));
     return {
       repositoryId: repository.id,
@@ -440,7 +473,9 @@ export async function reconcileRepository(
   // delivery is subscribed to, and none is needed, because the merge is only
   // interesting for having put the file where this loop reads it. Clearing the
   // number is what stops "merge your configuration PR" standing on a screen
-  // over a pull request that landed weeks ago.
+  // over a pull request that landed weeks ago — or, since ticket 136, over one
+  // that never will, having been closed unmerged instead (`configPullRequestClosed`,
+  // read alongside `head` above).
   //
   // **Conditional on the commit this pass read.** The webhook and the poll loop
   // reconcile the same repository concurrently by design, and an unconditional
@@ -457,7 +492,9 @@ export async function reconcileRepository(
       authoritativeCommit: head,
       reconciledAt: now,
       updatedAt: now,
-      ...(adopted ? { configPullRequest: null } : {}),
+      ...(adopted || configPullRequestClosed
+        ? { configPullRequest: null }
+        : {}),
     })
     .where(
       and(

@@ -116,10 +116,13 @@ interface RequestOptions {
   /**
    * Statuses the caller has a value for, returned instead of thrown.
    *
-   * Only ever `404`, and only from the two calls that ask whether a *file*
-   * exists — where absence is the answer, not a symptom. Everything else lets
-   * the classification above stand, so an installation that lost access does
-   * not silently read as a repository with no configuration in it.
+   * Only ever `404` (`setBranch` adds `422` for a ref that is not there yet),
+   * and only from calls where absence is itself the answer, not a symptom:
+   * whether a *file* exists (`readFile`, `jobLog`), and whether a pull request
+   * a stored column still names is one worth merging (`pullRequestState`,
+   * ticket 136). Everything else lets the classification above stand, so an
+   * installation that lost access does not silently read as a repository with
+   * no configuration in it.
    */
   tolerate?: readonly number[];
 }
