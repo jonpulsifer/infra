@@ -107,7 +107,7 @@ export function FunctionsScreen({
   return (
     <Page>
       <PageHeader
-        eyebrow="Side feature"
+        eyebrow="Function ledger"
         title="Functions"
         description="A JavaScript export default { fetch(request, env) } handler, deployed straight to Cloudflare Workers or Cloud Run functions — no App, no Build."
         actions={

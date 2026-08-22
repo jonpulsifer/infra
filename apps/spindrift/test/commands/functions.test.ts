@@ -332,6 +332,41 @@ describe('deleteFunction', () => {
   });
 });
 
+describe('probeFunction', () => {
+  test('a row with no url reads as not deployed', async () => {
+    const result = await dispatch(
+      'saveFunction',
+      { name: 'hello', target: 'cloud-run-functions', source: 'v1' },
+      context({ 'cloudflare-workers': null, 'cloud-run-functions': null }),
+    );
+    expect(result.ok).toBe(false); // no deployer — the row saves with no url
+
+    const probed = await dispatch(
+      'probeFunction',
+      { name: 'hello' },
+      context(),
+    );
+    expect(probed.ok).toBe(true);
+    if (!probed.ok) return;
+    expect(probed.value).toEqual({
+      ready: false,
+      detail: 'not deployed',
+      checkedAt: FROZEN.toISOString(),
+    });
+  });
+
+  test('probeFunction refuses NOT_FOUND for an absent name', async () => {
+    const result = await dispatch(
+      'probeFunction',
+      { name: 'nothing-here' },
+      context(),
+    );
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.failure.code).toBe('NOT_FOUND');
+  });
+});
+
 describe('runFunction', () => {
   test('previews a handler with no row and no adapter', async () => {
     const result = await dispatch(
