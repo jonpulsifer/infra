@@ -448,9 +448,12 @@ describe('§12: the diagnosis outlives the platform', () => {
 });
 
 describe('§9: one vanity name, and never two claimants', () => {
-  // On a backend that names its own workloads. Where core mints the canonical
-  // it now mints a flat name directly, so there is no second layer to contend
-  // for — the contention this describes is real only where the layer survives.
+  // On a backend that names its own workloads, so the canonical it reports
+  // back is empty and only the vanity name is minted here (ticket 43). The
+  // contention itself is not specific to that case — ticket 137 puts the
+  // vanity name on every Target, and the test below this one is the same
+  // contention proven again on a cluster Target, where core also mints a
+  // canonical alongside it.
   const claimant = () =>
     pendingDeploy({ adapter: 'cloudrun', reach: 'public', auth: 'none' });
   /** The fake standing in for that backend, so the loop has one to call. */
@@ -469,6 +472,26 @@ describe('§9: one vanity name, and never two claimants', () => {
     expect(adapter.applied[0]?.desired.hostname.vanity).toBe(
       `shop.${zoneFor('public', manifest.dns.zones)}`,
     );
+  });
+
+  test('a sole serving Component on a cluster Target carries the vanity name too, beside its own canonical', async () => {
+    // Where core mints the canonical it used to be the whole answer (ticket
+    // 43's "it can simply mint a good one"), but that reasoning was never
+    // about the vanity name — `shop.apps.example.test` is not `shop-web.…`
+    // spelled differently, it is the App's own choice of what to share.
+    const { app } = await pendingDeploy();
+    await database()
+      .db.update(apps)
+      .set({ vanityDomain: 'shop' })
+      .where(eq(apps.id, app.id));
+
+    const adapter = new FakeDeployAdapter();
+    await runDeployPass(context(adapter));
+
+    const zone = zoneFor('private', manifest.dns.zones);
+    const hostname = adapter.applied[0]?.desired.hostname;
+    expect(hostname?.canonical).toBe(`shop-web.${zone}`);
+    expect(hostname?.vanity).toBe(`shop.${zone}`);
   });
 
   test('a second serving Component means neither gets it', async () => {

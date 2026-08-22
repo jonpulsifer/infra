@@ -125,6 +125,18 @@ describe('what an address says about its App', () => {
     expect(await flat.text()).toContain('Waiting for a first release');
   });
 
+  test('the apex vanity name reaches the same Component as the canonical', async () => {
+    // `@` mints as the bare zone (§9, ticket 137): a request for the zone name
+    // with no label at all is still this App's Component.
+    await seedApp({ name: 'root', vanityDomain: '@' });
+
+    const canonical = await get(`root-web.${ZONE}`);
+    const apex = await get(ZONE);
+    expect(canonical.status).toBe(503);
+    expect(apex.status).toBe(503);
+    expect(await apex.text()).toContain('Waiting for a first release');
+  });
+
   test('a port and a capital letter are still the same name', async () => {
     await seedApp({ name: 'shouty' });
 
