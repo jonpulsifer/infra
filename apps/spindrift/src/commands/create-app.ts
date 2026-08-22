@@ -15,6 +15,7 @@
 import { z } from 'zod';
 import { apps } from '../db/schema.ts';
 import { digestSchema } from '../domain/digest.ts';
+import { isVanityLabel } from '../domain/naming.ts';
 import { type Command, ok } from './types.ts';
 
 /** A DNS-safe label: the name appears in canonical hostnames (§9). */
@@ -28,15 +29,15 @@ const appName = z
     'must be lowercase letters, digits and hyphens',
   );
 
-/** §9: "the flat single-label vanity name" — one label, never dotted. */
+/** §9: "the flat single-label vanity name" — one label, or the zone itself. */
 const vanityLabel = z
   .string()
   .trim()
   .min(1)
   .max(63)
-  .regex(
-    /^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/,
-    'must be a single lowercase DNS label',
+  .refine(
+    isVanityLabel,
+    'must be a single lowercase DNS label, or @ for the zone itself',
   );
 
 /** A content digest of the uploaded bundle (§4: the bundle digest joins the receipt to its provenance). */
