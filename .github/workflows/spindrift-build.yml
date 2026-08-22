@@ -312,10 +312,22 @@ jobs:
               echo "::error::this build is shaped for a Vercel Target but names no framework — core refuses that dispatch, so reaching this step means the spec was composed by something that does not know this shape." >&2
               exit 1
             fi
+            # The platform's builder runs the scope's own install command and
+            # takes the package manager from the lockfile — a bun lockfile
+            # means `bun install` — and the hosted runner image ships no bun.
+            # The version is the scope's pin where it states one.
+            bun=""
+            if [ -f "${scope}/bun.lock" ] || [ -f "${scope}/bun.lockb" ]; then
+              bun="latest"
+              if [ -f "${scope}/.bun-version" ]; then
+                bun="$(tr -d '[:space:]' < "${scope}/.bun-version")"
+              fi
+            fi
             {
               printf 'scratchfile=%s\n' "${files}/Dockerfile"
               printf 'vercelscope=%s\n' "$scope"
               printf 'vercelframework=%s\n' "$VERCEL_FRAMEWORK"
+              printf 'vercelbun=%s\n' "$bun"
             } >> "$GITHUB_OUTPUT"
             exit 0
           fi
@@ -730,6 +742,12 @@ jobs:
       # than `--build-arg`, because that is how this builder passes them to the
       # framework — and §4 already settled that a website's build-time config is
       # public, so there is nothing here a store would have held.
+      - name: Set up bun for the platform's builder
+        if: steps.frontend.outputs.vercelbun != ''
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: ${{ steps.frontend.outputs.vercelbun }}
+
       - name: Build with the platform's own builder
         id: vercel
         if: steps.frontend.outputs.vercelscope != ''
