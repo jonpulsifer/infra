@@ -41,6 +41,7 @@ import { getAppWorkspace, getAppWorkspaceInput } from './apps/workspace.ts';
 import { setAppZone, setAppZoneInput } from './apps/zone.ts';
 import { listArtifacts, listArtifactsInput } from './artifacts/list.ts';
 import { adoptBuild, adoptBuildInput } from './builds/adopt.ts';
+import { cancelBuild, cancelBuildInput } from './builds/cancel.ts';
 import { dispatchBuild, dispatchBuildInput } from './builds/dispatch.ts';
 import { getBuildDetail, getBuildDetailInput } from './builds/get-detail.ts';
 import { listBuilds, listBuildsInput } from './builds/list.ts';
@@ -277,6 +278,7 @@ export const commandRegistry = {
   replaceConfig: { input: replaceConfigInput, handler: replaceConfig },
   uploadArchive: { input: uploadArchiveInput, handler: uploadArchive },
   adoptBuild: { input: adoptBuildInput, handler: adoptBuild },
+  cancelBuild: { input: cancelBuildInput, handler: cancelBuild },
   dispatchBuild: { input: dispatchBuildInput, handler: dispatchBuild },
   createDeploy: { input: createDeployInput, handler: createDeploy },
   rollbackDeploy: { input: rollbackDeployInput, handler: rollbackDeploy },

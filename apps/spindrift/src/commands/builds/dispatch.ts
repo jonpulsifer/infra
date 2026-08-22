@@ -505,44 +505,72 @@ async function refuseDispatch<Output>(
   disposition: RefusalDisposition,
 ): Promise<CommandResult<Output>> {
   if (disposition.kind === 'closes') {
-    // The row first, the log second, because a refusal made under a claim can
-    // find the row already gone: writing the sentence before knowing whether
-    // this attempt still holds the row would put a verdict on somebody else's
-    // attempt log.
-    const closed = await context.db
-      .update(builds)
-      // Cleared with the same statement that ends the wait: a FAILED Build is
-      // not waiting on anything, and leaving the sentence behind would read as
-      // though it were.
-      .set({ status: 'FAILED', dispatchWaitingOn: null })
-      .where(
-        subject.dispatchId === undefined
-          ? eq(builds.id, subject.attempt.buildId)
-          : and(
-              eq(builds.id, subject.attempt.buildId),
-              eq(builds.dispatchId, subject.dispatchId),
-            ),
-      )
-      .returning({ id: builds.id });
-    if (subject.dispatchId !== undefined && closed.length === 0) {
-      return lostClaim(context, subject.attempt);
-    }
-    await recordBuildEvent(context.db, subject.attempt, {
-      type: 'log',
-      line: sentence,
-      resource: 'dispatch',
-    });
-    await recordBuildEvent(context.db, subject.attempt, {
-      type: 'status',
-      phase: 'FAILED',
-      reason: disposition.reason,
-    });
-    reconcilerDispatchAttempts.add(1, { outcome: 'closed' });
+    const closed = await recordDispatchClose(
+      context,
+      subject,
+      sentence,
+      disposition.reason,
+    );
+    if (!closed) return lostClaim(context, subject.attempt);
     return failed(code, sentence);
   }
 
   await recordDispatchWait(context, subject, sentence);
   return failed(code, sentence);
+}
+
+/**
+ * Fail a Build out for a refusal no later tick can clear, and say why.
+ *
+ * The `closes` half of {@link refuseDispatch}, exported for the same reason
+ * {@link recordDispatchWait} is: one refusal of this class is made before
+ * `dispatchBuild` is ever called. `runBuildPass` holds a Build to the shape its
+ * placement of record takes, and a Build produced for a placement the Component
+ * has since moved off is a fact about that row — no configuration makes it
+ * legal, and the remediation §3 prescribes is a rebuild, not a wait.
+ *
+ * Answers whether the verdict landed. `false` means the fenced write matched no
+ * row, so this attempt no longer holds the Build and has no verdict to give;
+ * nothing is written, and the caller says so its own way.
+ */
+export async function recordDispatchClose(
+  context: Pick<BuildDispatchContext, 'db'>,
+  subject: RefusalSubject,
+  sentence: string,
+  reason: FailureReason,
+): Promise<boolean> {
+  // The row first, the log second, because a refusal made under a claim can
+  // find the row already gone: writing the sentence before knowing whether
+  // this attempt still holds the row would put a verdict on somebody else's
+  // attempt log.
+  const closed = await context.db
+    .update(builds)
+    // Cleared with the same statement that ends the wait: a FAILED Build is
+    // not waiting on anything, and leaving the sentence behind would read as
+    // though it were.
+    .set({ status: 'FAILED', dispatchWaitingOn: null })
+    .where(
+      subject.dispatchId === undefined
+        ? eq(builds.id, subject.attempt.buildId)
+        : and(
+            eq(builds.id, subject.attempt.buildId),
+            eq(builds.dispatchId, subject.dispatchId),
+          ),
+    )
+    .returning({ id: builds.id });
+  if (subject.dispatchId !== undefined && closed.length === 0) return false;
+  await recordBuildEvent(context.db, subject.attempt, {
+    type: 'log',
+    line: sentence,
+    resource: 'dispatch',
+  });
+  await recordBuildEvent(context.db, subject.attempt, {
+    type: 'status',
+    phase: 'FAILED',
+    reason,
+  });
+  reconcilerDispatchAttempts.add(1, { outcome: 'closed' });
+  return true;
 }
 
 /**

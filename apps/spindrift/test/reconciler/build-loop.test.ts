@@ -17,6 +17,7 @@ import type {
 } from '../../src/commands/types.ts';
 import {
   apps,
+  attemptEvents,
   builds,
   components,
   componentTargetDesired,
@@ -259,7 +260,7 @@ describe('a rebuild staged by a move dispatches against the new placement', () =
     expect(route.built[0]?.spec.artifactType).toBe('files');
   });
 
-  test('a Build whose shape the placement of record does not take waits and says so', async () => {
+  test('a Build whose shape the placement of record does not take fails and says so', async () => {
     const { component, runtimeTarget, runtimeVessel, staticTarget, build } =
       await movedWebsite();
     const db = database().db;
@@ -280,12 +281,24 @@ describe('a rebuild staged by a move dispatches against the new placement', () =
     expect(await runBuildPass(context(registryOf(route)))).toBe(0);
 
     const row = await buildRow(build.id);
-    expect(row.status).toBe('PENDING');
+    // Failed, not queued: no configuration makes this row legal, and the
+    // rebuild §3 prescribes is what `deployApp` stages once it is terminal.
+    expect(row.status).toBe('FAILED');
     expect(route.built).toHaveLength(0);
-    expect(row.dispatchWaitingOn).toContain('files');
-    expect(row.dispatchWaitingOn).toContain(
+    expect(row.dispatchWaitingOn).toBeNull();
+
+    // The sentence goes where the operator reads it, since the row no longer
+    // carries one.
+    const log = await db
+      .select()
+      .from(attemptEvents)
+      .where(eq(attemptEvents.buildId, build.id));
+    const said = log.map((event) => event.line ?? '').join('\n');
+    expect(said).toContain('files');
+    expect(said).toContain(
       `${runtimeVessel.name}/${runtimeTarget.adapter} takes image`,
     );
+    expect(log.some((event) => event.phase === 'FAILED')).toBe(true);
   });
 
   test('an unplaced Component’s Build waits and says so', async () => {

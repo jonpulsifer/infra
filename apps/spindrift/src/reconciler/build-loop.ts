@@ -9,6 +9,7 @@ import { and, asc, eq, isNull, lte, or } from 'drizzle-orm';
 import {
   type BuildDispatchContext,
   dispatchBuild,
+  recordDispatchClose,
   recordDispatchWait,
 } from '../commands/builds/dispatch.ts';
 import { buildRouteFor } from '../commands/builds/route.ts';
@@ -133,12 +134,22 @@ export async function runBuildPass(
       // The placement of record does not take what this Build produces —
       // it was staged for a placement the Component has since moved off.
       // Binding it anywhere else would evaluate route and policy against a
-      // Target the artifact can never land on, so the Build stays PENDING and
-      // says so. Membership, not equality with the shape a fresh build here
-      // would take (`takesShape`): a `files` Build placed on Vercel dispatches,
-      // because Vercel serves the shape it produces.
+      // Target the artifact can never land on. Membership, not equality with
+      // the shape a fresh build here would take (`takesShape`): a `files`
+      // Build placed on Vercel dispatches, because Vercel serves the shape it
+      // produces.
+      //
+      // **Closed, not waited on**, and that is `refuseDispatch`'s own test
+      // rather than a severity judgement: a wait is a fact about the
+      // installation that configuring something clears, and this is a fact
+      // about this row that nothing clears. §3 prescribes a rebuild for a move
+      // across shapes, `deployApp` stages one the moment the newest Build is
+      // terminal, and it derives its shape from the placement of record — so
+      // failing this row is what makes the remediation reachable. Waiting
+      // instead is what left Build 44 queued for nine days under a sentence
+      // that was already the whole truth.
       const shapeTaken = artifactTypeFor(row.kind, placement);
-      await recordDispatchWait(
+      await recordDispatchClose(
         context,
         {
           attempt: {
@@ -150,6 +161,10 @@ export async function runBuildPass(
           attempts: row.attempts,
         },
         `this Build produces a ${row.targetShape} artifact and the Target this Component is placed on takes another (${targetLabel({ vessel: row.vessel, adapter: row.adapter })} takes ${shapeTaken}), so nothing can run it`,
+        // §6's "invalid spec": the artifact this Build would produce is one the
+        // Target would refuse to admit, and moving the Component is the act
+        // that made it so.
+        'REJECTED',
       );
       continue;
     }
