@@ -173,6 +173,34 @@ rules:
     verbs:
       - get
 ---
+# The record for a name a platform-named Target serves.
+#
+# A Target on Vercel, Pages or Firebase Hosting has no cluster of its own, so
+# the DNSEndpoint Spindrift writes for its vanity name lives here, on the
+# control-plane cluster, where external-dns publishes it exactly as it does an
+# App's own (`apps/spindrift/src/adapters/dns/`). One namespace, the delivery
+# one, and nothing cluster-wide: the grant is bound only where an installation
+# runs (`clusters/<site>/apps/spindrift/target-rbac.yaml`), so a Target
+# cluster that is not the control plane carries the Role and no binding.
+# `create` beside `patch` for the reason the HelmRelease rule pairs them — an
+# apply is a PATCH, and one that has to create the object is a create too;
+# `delete` is what withdraws a name when the placement or the vanity goes.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: spindrift-target-dns
+  namespace: spindrift-apps
+rules:
+  - apiGroups:
+      - externaldns.k8s.io
+    resources:
+      - dnsendpoints
+    verbs:
+      - create
+      - delete
+      - get
+      - patch
+---
 # Datastores, in the namespace they are provisioned into and nowhere else.
 #
 # Kept a `Role` while delivery became a `ClusterRole`, because a Datastore no

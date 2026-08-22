@@ -23,6 +23,11 @@ variable "config" {
       # without the rest of the origin coming with it.
       path    = optional(string)
       service = string
+      # Whether this module publishes the proxied CNAME for the rule's
+      # hostname. `false` for a name some other controller publishes — an
+      # App's apex, whose record its own DNSEndpoint carries — so the rule is
+      # routing only and the zone holds one owner per name.
+      publish_record = optional(bool, true)
     }))
   })
   default = {

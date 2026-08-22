@@ -245,6 +245,23 @@ export type DeployVerdict =
        * across this seam rather than being handed in (§9).
        */
       url?: string;
+      /**
+       * Where a record for a name this platform serves should point (§9).
+       *
+       * Absent from every Target core mints the canonical for — a cluster
+       * publishes its own record as part of the release, so there is nothing
+       * for this seam to report back. Present on a platform-named Target
+       * exactly when that platform hands back an address a CNAME can point
+       * at; absent where it cannot (`static`'s Firebase Hosting needs an A
+       * record and TXT verification, `cloudrun` has no custom-domain path
+       * here), which `deploy-loop.ts` reads as "this Target publishes no
+       * record for the name" rather than as a fault.
+       */
+      address?: {
+        readonly recordType: 'CNAME';
+        readonly target: string;
+        readonly proxied: boolean;
+      };
     }
   | {
       phase: 'FAILED';

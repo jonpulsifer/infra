@@ -25,6 +25,7 @@ import type { GcpDiscovery } from '../adapters/cloud-discovery.ts';
 import type { CloudflareAccounts } from '../adapters/cloudflare.ts';
 import type { DatastoreAdapter } from '../adapters/datastore/contract.ts';
 import type { DeployAdapter } from '../adapters/deploy/contract.ts';
+import type { DnsPublisher } from '../adapters/dns/contract.ts';
 import type { SecretStore } from '../adapters/store/contract.ts';
 import type {
   AuthoredManifest,
@@ -202,6 +203,18 @@ export interface AdapterRegistry {
    * rather than storing one in the clear.
    */
   functionEnv?(): FunctionEnvSealer | null;
+  /**
+   * §9's publisher for a name a platform-named Target serves.
+   *
+   * A cluster Target publishes its own record as part of the release, so this
+   * exists only for the Targets whose backend names its own workload —
+   * `coreMintsCanonical` false, `naming.ts`. `null` where this installation
+   * has no control-plane Kubernetes Target to carry the record on, which is
+   * the same configuration-fact rule every other lookup here follows: a
+   * command — or the deploy loop — reports the absence rather than the
+   * publish silently doing nothing.
+   */
+  dns?(): DnsPublisher | null;
   /**
    * Core's verifier and signer (§16).
    *

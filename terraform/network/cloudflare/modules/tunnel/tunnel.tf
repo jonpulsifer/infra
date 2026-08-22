@@ -29,7 +29,7 @@ resource "cloudflare_zero_trust_tunnel_cloudflared_config" "this" {
 # path within it), so key on the hostname itself and de-dupe with toset rather
 # than one record per ingress entry.
 resource "cloudflare_dns_record" "cf" {
-  for_each = toset([for ingress in var.config.ingress : ingress.hostname if ingress.hostname != null && !startswith(ingress.hostname, "*.")])
+  for_each = toset([for ingress in var.config.ingress : ingress.hostname if ingress.hostname != null && !startswith(ingress.hostname, "*.") && ingress.publish_record])
   zone_id  = var.zone_id
   comment  = "terraform managed"
   name     = each.value

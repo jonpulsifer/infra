@@ -68,7 +68,11 @@ import {
   hasDrifted,
   scheduleDrift,
 } from '../domain/diagnosis.ts';
-import { displayUrl, hostnameFor } from '../domain/naming.ts';
+import {
+  coreMintsCanonical,
+  displayUrl,
+  hostnameFor,
+} from '../domain/naming.ts';
 import {
   deployTargetOf,
   hasTargetConnection,
@@ -76,6 +80,7 @@ import {
   type TargetWithConnection,
   type VesselRef,
 } from '../domain/target.ts';
+import { dnsHandleFor } from '../domain/workload-name.ts';
 import {
   reconcilerAttemptDuration,
   reconcilerDriftedDeploys,
@@ -87,7 +92,12 @@ import {
 /** What the loop needs. No principal: nobody asked for it to run. */
 export interface DeployLoopContext {
   readonly db: Database;
-  readonly adapters: Pick<AdapterRegistry, 'deploy'>;
+  /**
+   * `dns` alongside `deploy`: a LIVE verdict on a platform-named Target earns
+   * a vanity record the way a cluster Target already earns one through its
+   * own release (§9), and `settle` is what converges or withdraws it.
+   */
+  readonly adapters: Pick<AdapterRegistry, 'deploy' | 'dns'>;
   readonly clock: Clock;
   readonly manifest: InstallationManifest;
 }
@@ -660,6 +670,14 @@ async function settle(
       type: 'status',
       phase: 'LIVE',
     });
+
+    // §9: a cluster Target already publishes its own record as part of the
+    // release the App chart renders — the only Targets left owing one are the
+    // platform-named ones, exactly `!coreMintsCanonical`.
+    if (!coreMintsCanonical(subject.target.adapter)) {
+      await publishVanityRecord(context, attempt, desired, verdict);
+    }
+
     return { deployId, phase: 'LIVE', url };
   }
 
@@ -687,6 +705,78 @@ async function settle(
   // previous release is still serving, and quietly making it unreachable would
   // turn one failed deploy into an outage.
   return { deployId, phase: 'FAILED', url: null };
+}
+
+/**
+ * Converge or withdraw the vanity record a platform-named Target's LIVE
+ * verdict earns (§9).
+ *
+ * **Never turns a LIVE deploy FAILED.** The workload is up — a DNS write that
+ * fails is a fact for the attempt log, the way every other non-terminal event
+ * `absorb` writes is, not a reason to tell the operator their deploy did not
+ * work.
+ */
+async function publishVanityRecord(
+  context: DeployLoopContext,
+  attempt: { appId: string; componentId: string; deployId: number },
+  desired: DesiredState,
+  verdict: Extract<DeployVerdict, { phase: 'LIVE' }>,
+): Promise<void> {
+  const dns = context.adapters.dns?.() ?? null;
+  if (dns === null) {
+    await recordDeployEvent(context.db, attempt, {
+      type: 'log',
+      line:
+        'this installation has no DNS publisher configured, so no vanity ' +
+        'record was published',
+    });
+    return;
+  }
+
+  const handle = dnsHandleFor(desired.app, desired.component);
+
+  // A cleared or newly ambiguous vanity (`soleServingComponent`) takes its
+  // record with it. Idempotent when nothing was ever published under this
+  // handle — the ordinary case for every Component that never had one.
+  if (desired.hostname.vanity === undefined) {
+    try {
+      await dns.withdraw(handle);
+    } catch (cause) {
+      await recordDeployEvent(context.db, attempt, {
+        type: 'log',
+        line: `withdrawing the DNS record for ${handle} failed: ${cause instanceof Error ? cause.message : String(cause)}`,
+      });
+    }
+    return;
+  }
+
+  if (verdict.address === undefined) {
+    await recordDeployEvent(context.db, attempt, {
+      type: 'log',
+      line:
+        `this Target publishes no record for ${desired.hostname.vanity} — ` +
+        `point it at ${verdict.url ?? 'this Target’s own address'} by hand`,
+    });
+    return;
+  }
+
+  try {
+    await dns.publish(handle, {
+      dnsName: desired.hostname.vanity,
+      recordType: verdict.address.recordType,
+      target: verdict.address.target,
+      proxied: verdict.address.proxied,
+    });
+    await recordDeployEvent(context.db, attempt, {
+      type: 'log',
+      line: `published ${desired.hostname.vanity} -> ${verdict.address.target}`,
+    });
+  } catch (cause) {
+    await recordDeployEvent(context.db, attempt, {
+      type: 'log',
+      line: `publishing the DNS record for ${desired.hostname.vanity} failed: ${cause instanceof Error ? cause.message : String(cause)}`,
+    });
+  }
 }
 
 /** One pass of `observe` over what has converged, to notice drift (§6). */

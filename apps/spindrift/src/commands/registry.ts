@@ -37,6 +37,7 @@ import {
 } from './apps/resolve-placement.ts';
 import { getAppSource, getAppSourceInput } from './apps/source.ts';
 import { uploadArchive, uploadArchiveInput } from './apps/upload-archive.ts';
+import { setAppVanity, setAppVanityInput } from './apps/vanity.ts';
 import { getAppWorkspace, getAppWorkspaceInput } from './apps/workspace.ts';
 import { setAppZone, setAppZoneInput } from './apps/zone.ts';
 import { listArtifacts, listArtifactsInput } from './artifacts/list.ts';
@@ -51,6 +52,7 @@ import {
   setComponentCommandInput,
 } from './components/command.ts';
 import { createComponent, createComponentInput } from './components/create.ts';
+import { deleteComponent, deleteComponentInput } from './components/delete.ts';
 import { placeComponent, placeComponentInput } from './components/place.ts';
 import {
   setComponentReach,
@@ -194,6 +196,7 @@ export const commandRegistry = {
   },
   setAppBuildRoute: { input: setAppBuildRouteInput, handler: setAppBuildRoute },
   setAppZone: { input: setAppZoneInput, handler: setAppZone },
+  setAppVanity: { input: setAppVanityInput, handler: setAppVanity },
   getAppWorkspace: { input: getAppWorkspaceInput, handler: getAppWorkspace },
   getAppSource: { input: getAppSourceInput, handler: getAppSource },
   getDeployDetail: { input: getDeployDetailInput, handler: getDeployDetail },
@@ -245,6 +248,10 @@ export const commandRegistry = {
   unplaceComponent: {
     input: unplaceComponentInput,
     handler: unplaceComponent,
+  },
+  deleteComponent: {
+    input: deleteComponentInput,
+    handler: deleteComponent,
   },
   createDatastore: { input: createDatastoreInput, handler: createDatastore },
   attachDatastore: { input: attachDatastoreInput, handler: attachDatastore },

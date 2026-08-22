@@ -371,6 +371,13 @@ describe('§9: the platform names its own', () => {
       // A deployment's own URL changes every release, so it cannot be what a
       // name points at.
       expect(verdict.url).toBe(`https://${PROJECT}.pages.example.test`);
+      // §9: the vanity record `deploy-loop.ts` publishes points at the same
+      // subdomain, proxied — Cloudflare flattens an apex CNAME.
+      expect(verdict.address).toEqual({
+        recordType: 'CNAME',
+        target: `${PROJECT}.pages.example.test`,
+        proxied: true,
+      });
     }
   });
 

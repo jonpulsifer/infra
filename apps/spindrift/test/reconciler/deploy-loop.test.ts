@@ -22,6 +22,7 @@ import {
   type DeployVerdict,
   FAILURE_REASONS,
 } from '../../src/adapters/deploy/contract.ts';
+import type { DnsPublisher } from '../../src/adapters/dns/contract.ts';
 import type { AdapterRegistry, Clock } from '../../src/commands/types.ts';
 import { createDb } from '../../src/db/client.ts';
 import {
@@ -51,6 +52,7 @@ import {
   FakeDeployAdapter,
   type ScriptedAttempt,
 } from '../harness/fakes/deploy-adapter.ts';
+import { FakeDnsPublisher } from '../harness/fakes/dns-publisher.ts';
 import {
   fixtureManifest,
   insertVessel,
@@ -68,9 +70,12 @@ const DIGEST = `sha256:${'a'.repeat(64)}`;
 function context(
   adapter: FakeDeployAdapter,
   overrides: Partial<DeployLoopContext> = {},
+  /** Omitted is the ordinary case — every test but §9's dns block. */
+  dns?: DnsPublisher,
 ): DeployLoopContext {
-  const adapters: Pick<AdapterRegistry, 'deploy'> = {
+  const adapters: Pick<AdapterRegistry, 'deploy' | 'dns'> = {
     deploy: (name) => (name === adapter.adapter ? adapter : null),
+    ...(dns === undefined ? {} : { dns: () => dns }),
   };
   return { db: database().db, adapters, clock, manifest, ...overrides };
 }
@@ -448,9 +453,12 @@ describe('§12: the diagnosis outlives the platform', () => {
 });
 
 describe('§9: one vanity name, and never two claimants', () => {
-  // On a backend that names its own workloads. Where core mints the canonical
-  // it now mints a flat name directly, so there is no second layer to contend
-  // for — the contention this describes is real only where the layer survives.
+  // On a backend that names its own workloads, so the canonical it reports
+  // back is empty and only the vanity name is minted here (ticket 43). The
+  // contention itself is not specific to that case — ticket 137 puts the
+  // vanity name on every Target, and the test below this one is the same
+  // contention proven again on a cluster Target, where core also mints a
+  // canonical alongside it.
   const claimant = () =>
     pendingDeploy({ adapter: 'cloudrun', reach: 'public', auth: 'none' });
   /** The fake standing in for that backend, so the loop has one to call. */
@@ -469,6 +477,26 @@ describe('§9: one vanity name, and never two claimants', () => {
     expect(adapter.applied[0]?.desired.hostname.vanity).toBe(
       `shop.${zoneFor('public', manifest.dns.zones)}`,
     );
+  });
+
+  test('a sole serving Component on a cluster Target carries the vanity name too, beside its own canonical', async () => {
+    // Where core mints the canonical it used to be the whole answer (ticket
+    // 43's "it can simply mint a good one"), but that reasoning was never
+    // about the vanity name — `shop.apps.example.test` is not `shop-web.…`
+    // spelled differently, it is the App's own choice of what to share.
+    const { app } = await pendingDeploy();
+    await database()
+      .db.update(apps)
+      .set({ vanityDomain: 'shop' })
+      .where(eq(apps.id, app.id));
+
+    const adapter = new FakeDeployAdapter();
+    await runDeployPass(context(adapter));
+
+    const zone = zoneFor('private', manifest.dns.zones);
+    const hostname = adapter.applied[0]?.desired.hostname;
+    expect(hostname?.canonical).toBe(`shop-web.${zone}`);
+    expect(hostname?.vanity).toBe(`shop.${zone}`);
   });
 
   test('a second serving Component means neither gets it', async () => {
@@ -525,6 +553,129 @@ describe('§9: one vanity name, and never two claimants', () => {
     expect(adapter.applied[0]?.desired.hostname.vanity).toBe(
       `shop.${zoneFor('public', manifest.dns.zones)}`,
     );
+  });
+});
+
+describe('§9: dns publishing on a platform-named Target (ticket 137b)', () => {
+  // `cloudrun` is any platform-named Target — `!coreMintsCanonical` is what
+  // gates this, not the adapter type, and the fake's verdict is scripted
+  // regardless of what a real Cloud Run would answer.
+  const claimant = () =>
+    pendingDeploy({ adapter: 'cloudrun', reach: 'public', auth: 'none' });
+
+  const withAddress: ScriptedAttempt = {
+    verdict: {
+      phase: 'LIVE',
+      ref: 'run/shop-web',
+      address: {
+        recordType: 'CNAME',
+        target: 'shop-web.a.run.app',
+        proxied: true,
+      },
+    },
+  };
+
+  test('a vanity name and a reported address publish the record', async () => {
+    const { app } = await claimant();
+    await database()
+      .db.update(apps)
+      .set({ vanityDomain: 'shop' })
+      .where(eq(apps.id, app.id));
+
+    const adapter = new FakeDeployAdapter({
+      adapter: 'cloudrun',
+      script: [withAddress],
+    });
+    const dns = new FakeDnsPublisher();
+
+    await runDeployPass(context(adapter, {}, dns));
+
+    const zone = zoneFor('public', manifest.dns.zones);
+    expect(dns.published).toEqual([
+      {
+        name: 'shop-web',
+        record: {
+          dnsName: `shop.${zone}`,
+          recordType: 'CNAME',
+          target: 'shop-web.a.run.app',
+          proxied: true,
+        },
+      },
+    ]);
+    expect(dns.withdrawn).toEqual([]);
+  });
+
+  test('no vanity name withdraws rather than publishing', async () => {
+    // The App never named one — the ordinary case, not a cleared one — and
+    // `withdraw` still runs: idempotent when nothing was ever published under
+    // this handle.
+    await claimant();
+
+    const adapter = new FakeDeployAdapter({
+      adapter: 'cloudrun',
+      script: [withAddress],
+    });
+    const dns = new FakeDnsPublisher();
+
+    await runDeployPass(context(adapter, {}, dns));
+
+    expect(dns.withdrawn).toEqual(['shop-web']);
+    expect(dns.published).toEqual([]);
+  });
+
+  test('with no DNS publisher configured, the deploy still lands LIVE and the log says so', async () => {
+    const { app, deploy } = await claimant();
+    await database()
+      .db.update(apps)
+      .set({ vanityDomain: 'shop' })
+      .where(eq(apps.id, app.id));
+
+    // No third argument: `context` wires no `dns` at all, exactly as every
+    // other test in this file already did before this ticket.
+    const adapter = new FakeDeployAdapter({
+      adapter: 'cloudrun',
+      script: [withAddress],
+    });
+    const pass = await runDeployPass(context(adapter));
+
+    expect(pass.applied[0]?.phase).toBe('LIVE');
+    const events = await database()
+      .db.select()
+      .from(attemptEvents)
+      .where(eq(attemptEvents.deployId, deploy.id))
+      .orderBy(asc(attemptEvents.id));
+    expect(
+      events.some((event) => event.line?.includes('no DNS publisher')),
+    ).toBe(true);
+  });
+
+  test('a publish that throws leaves the deploy LIVE, with the failure on the attempt log', async () => {
+    const { app, deploy } = await claimant();
+    await database()
+      .db.update(apps)
+      .set({ vanityDomain: 'shop' })
+      .where(eq(apps.id, app.id));
+
+    const adapter = new FakeDeployAdapter({
+      adapter: 'cloudrun',
+      script: [withAddress],
+    });
+    const dns = new FakeDnsPublisher({ publishThrows: 'the zone refused it' });
+
+    const pass = await runDeployPass(context(adapter, {}, dns));
+
+    // The workload is up — a DNS write that failed is not a reason to tell
+    // the operator their deploy did not work.
+    expect(pass.applied[0]?.phase).toBe('LIVE');
+    expect((await deployRow(deploy.id))?.phase).toBe('LIVE');
+    const events = await database()
+      .db.select()
+      .from(attemptEvents)
+      .where(eq(attemptEvents.deployId, deploy.id))
+      .orderBy(asc(attemptEvents.id));
+    expect(
+      events.some((event) => event.line?.includes('the zone refused it')),
+    ).toBe(true);
   });
 });
 

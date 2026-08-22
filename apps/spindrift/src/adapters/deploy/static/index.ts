@@ -315,6 +315,8 @@ export class StaticDeployAdapter implements DeployAdapter {
       // one case core cannot fill in, and saying nothing beats assembling a
       // name the product did not give.
       ...(address === undefined ? {} : { url: address }),
+      // No `address`: Firebase Hosting's custom domains take an A record plus
+      // TXT ownership verification, not a CNAME this port can express.
     };
   }
 

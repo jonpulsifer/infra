@@ -879,6 +879,9 @@ export class CloudRunDeployAdapter implements DeployAdapter {
           phase: 'LIVE',
           ref,
           ...(uri === undefined ? {} : { url: uri }),
+          // No `address`: Cloud Run has no custom-domain mapping this
+          // installation reaches, so there is nothing for a record to point at
+          // beyond the `uri` above.
         };
       }
 

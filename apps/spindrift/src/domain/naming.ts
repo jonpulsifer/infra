@@ -11,15 +11,14 @@
  * > the name a developer shares is backend-agnostic and moving an App between
  * > backends is one record re-point.
  *
- * **The second layer survives only where core does not mint the first.** It was
- * written for a model where canonical was nested, unproxied and LAN-only, and
- * vanity was the only name with public reach — two layers because they were two
- * reach mechanisms. Reach is now a record type in a zone chosen per reach, so
- * where core mints the name it can simply mint a good one, and a second flat
- * name over it would be an alias for something already flat. Where the platform
- * names its own workloads that name is opaque and backend-specific, so the layer
- * still earns its place there: a flat zone name is both prettier and the thing
- * that makes moving backends one record re-point.
+ * **The vanity layer is the App's own name, on every Target — {@link
+ * coreMintsCanonical} decides the canonical, never the vanity.** Ticket 43 once
+ * dropped the layer wherever core mints the canonical, reasoning that "where
+ * core mints the name it can simply mint a good one." That reasoning still
+ * decides what core mints: `<app>-<component>.<zone>`, one label, always
+ * compound. It is never `www`, and it can never be the bare apex — those are
+ * not a better canonical, they are the name a developer chose to share, and a
+ * cluster App wants one exactly as much as a Cloud Run App does.
  *
  * **Core mints only what the platform will not.** {@link hostnameFor} returns an
  * empty canonical for a Target whose backend names its own workloads, and on
@@ -146,9 +145,27 @@ export function componentCanonical(name: CanonicalName): string {
   return `${name.app}-${name.component}.${name.zone}`;
 }
 
-/** §9's flat single-label vanity name, in the zone for its Component's reach. */
+/** The zone itself, spelled the way an App names it as its vanity label (§9). */
+export const APEX = '@';
+
+/**
+ * Whether a string is legal where an App names its vanity: one DNS label, or
+ * {@link APEX} for the zone itself.
+ */
+export function isVanityLabel(value: string): boolean {
+  return value === APEX || isLabel(value);
+}
+
+/**
+ * §9's flat single-label vanity name, in the zone for its Component's reach.
+ *
+ * `@` is the App's one non-label choice: the bare zone joined with nothing.
+ * Every other value is a label joined with a dot, which is why the bare zone
+ * needed a name of its own rather than an empty string — an empty label is
+ * indistinguishable from having asked for no vanity name at all.
+ */
 export function vanity(label: string, zone: string): string {
-  return `${label}.${zone}`;
+  return label === APEX ? zone : `${label}.${zone}`;
 }
 
 /**
@@ -202,12 +219,19 @@ export interface HostnameContext {
  * Otherwise `canonical` is empty exactly when the platform names its own — the
  * adapter fills that gap from its own API and reports the result back, which is
  * why {@link Hostname} carries a string rather than a nullable one: every routed
- * deploy ends with a canonical name, but not every one starts with one. The
- * vanity layer is layered on only there, for the reason in this module's header.
+ * deploy ends with a canonical name, but not every one starts with one. `vanity`
+ * answers a different question and is layered on wherever the App named one,
+ * whatever `canonical` above turned out to be — this module's header is why the
+ * platform's own opacity is no longer what bounds it.
  */
 export function hostnameFor(context: HostnameContext): Hostname {
   const zone = zoneFor(context.reach, context.zones, context.zone);
   if (zone === null) return { canonical: '' };
+
+  const vanityField =
+    context.vanityLabel === null
+      ? {}
+      : { vanity: vanity(context.vanityLabel, zone) };
 
   if (coreMintsCanonical(context.adapter)) {
     return {
@@ -216,15 +240,11 @@ export function hostnameFor(context: HostnameContext): Hostname {
         component: context.component,
         zone,
       }),
+      ...vanityField,
     };
   }
 
-  return {
-    canonical: '',
-    ...(context.vanityLabel === null
-      ? {}
-      : { vanity: vanity(context.vanityLabel, zone) }),
-  };
+  return { canonical: '', ...vanityField };
 }
 
 /**
