@@ -8,14 +8,13 @@ on:
   workflow_dispatch:
     inputs:
       runner:
-        description: 'Runner target (skiff-offsite, infra-offsite, infra-folly, ubuntu-latest)'
+        description: 'Runner target (ubuntu-latest, infra-offsite, infra-folly)'
         type: choice
         options:
-          - skiff-offsite
+          - ubuntu-latest
           - infra-offsite
           - infra-folly
-          - ubuntu-latest
-        default: skiff-offsite
+        default: ubuntu-latest
 
 permissions:
   contents: read
@@ -102,18 +101,9 @@ jobs:
   validate:
     needs: detect
     if: needs.detect.outputs.has_changes == 'true' || github.event_name == 'workflow_dispatch'
-    # The warm pool, back on the merge path: `skiff-offsite` carries 6144M
-    # since the class was measured against this suite rather than guessed at,
-    # and the hull moved TMPDIR off the guest's tmpfs root at the same time.
-    # What that buys is what the pool exists for — ~1 s acquisition, and
-    # `actions/cache` served from the host's own disk rather than over the
-    # internet.
-    #
-    # The escape hatch is the one `kustomize.yml` carries: this label has a
-    # single host, so if bosun there is down the job queues rather than
-    # failing, and a dispatch with `runner: ubuntu-latest` gets an answer
-    # without editing this file. It is also how the class was A/B'd.
-    runs-on: ${{ inputs.runner || 'skiff-offsite' }}
+    # Hosted on the merge path. `runner` is a dispatch escape hatch onto the
+    # self-hosted ARC pools, and the way this suite gets A/B'd against them.
+    runs-on: ${{ inputs.runner || 'ubuntu-latest' }}
     permissions:
       contents: read
       id-token: write
@@ -167,9 +157,9 @@ jobs:
       - name: Cache Bun store
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          # A skiff's hull points bun's store at the workspace disk; the
-          # cache step must follow it or it caches an empty directory. On a
-          # hosted runner the env is unset and this is the usual path.
+          # A runner that relocates bun's store exports BUN_INSTALL_CACHE_DIR;
+          # the cache step must follow it or it caches an empty directory. On
+          # a hosted runner the env is unset and this is the usual path.
           path: ${{ env.BUN_INSTALL_CACHE_DIR || '~/.bun/install/cache' }}
           key: bun-store-${{ runner.os }}-${{ hashFiles('bun.lock') }}
           restore-keys: |
