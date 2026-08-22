@@ -80,6 +80,25 @@ describe('runPreview', () => {
     expect(result.body).toBe('POST payload');
   });
 
+  test('hands the handler the environment it was given', async () => {
+    const result = await runPreview(
+      'export default { fetch: (request, env) => new Response(env.GREETING) };',
+      GET,
+      { env: { GREETING: 'bonjour' } },
+    );
+    expect(result.body).toBe('bonjour');
+  });
+
+  test('a function with no environment sees an empty one', async () => {
+    const result = await runPreview(
+      `export default {
+         fetch: (request, env) => Response.json(Object.keys(env)),
+       };`,
+      GET,
+    );
+    expect(JSON.parse(result.body)).toEqual([]);
+  });
+
   test('a handler that never returns times out rather than wedging', async () => {
     const result = await runPreview(
       'export default { fetch() { while (true) {} } };',

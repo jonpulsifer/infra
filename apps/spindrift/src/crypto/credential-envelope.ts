@@ -20,7 +20,9 @@ export type CredentialPurpose =
   /** The manifest-flow CSRF state — sealed rather than stored, see the setup route. */
   | 'spindrift-github-setup-state'
   /** A registry push credential — see `storage/registry-credentials.ts`. */
-  | 'spindrift-registry-credential';
+  | 'spindrift-registry-credential'
+  /** A Function's whole environment map — see `functions/env.ts`. */
+  | 'spindrift-function-env';
 
 const keyId = z
   .string()

@@ -90,7 +90,7 @@ describe('CloudRunFunctions.deploy', () => {
         }),
     });
 
-    const result = await deployer(far.fetch).deploy('hello', SOURCE);
+    const result = await deployer(far.fetch).deploy('hello', SOURCE, {});
     expect(result.url).toBe('https://fn-hello-x.run.example.test');
     expect(far.keys()).toEqual(
       [
@@ -117,7 +117,11 @@ describe('CloudRunFunctions.deploy', () => {
         entryPoint: string;
         source: { storageSource: unknown };
       };
-      serviceConfig: { ingressSettings: string; serviceAccountEmail: string };
+      serviceConfig: {
+        ingressSettings: string;
+        serviceAccountEmail: string;
+        environmentVariables: Record<string, string>;
+      };
       labels: Record<string, string>;
     };
     expect(new URL(far.calls[2]!.url).searchParams.get('functionId')).toBe(
@@ -134,6 +138,9 @@ describe('CloudRunFunctions.deploy', () => {
       'runner@example-vessel.test',
     );
     expect(created.labels).toEqual({ 'spindrift-function': 'hello' });
+    // Always present: an absent field under this update mask would leave a
+    // removed variable on the Service.
+    expect(created.serviceConfig.environmentVariables).toEqual({});
 
     // §9's open cell: the Service's own field, never an `allUsers` binding.
     const opened = far.calls[4]!;
@@ -154,12 +161,32 @@ describe('CloudRunFunctions.deploy', () => {
           response: { serviceConfig: { uri: 'https://fn-hello.run.test' } },
         }),
     });
-    const result = await deployer(far.fetch).deploy('hello', SOURCE);
+    const result = await deployer(far.fetch).deploy('hello', SOURCE, {});
     expect(result.url).toBe('https://fn-hello.run.test');
     const patch = far.calls.find((call) => call.method === 'PATCH')!;
     expect(new URL(patch.url).searchParams.get('updateMask')).toBe(
       'buildConfig,serviceConfig,labels',
     );
+  });
+
+  test('sends the environment as the Service’s own variables', async () => {
+    const far = api({
+      [`GET /v2/${PARENT}/functions/fn-hello`]: () =>
+        Response.json({ name: 'fn-hello' }),
+      [`PATCH /v2/${PARENT}/functions/fn-hello`]: () =>
+        Response.json({
+          name: `${PARENT}/operations/op-6`,
+          done: true,
+          response: { url: 'https://fn-hello.run.test' },
+        }),
+    });
+    await deployer(far.fetch).deploy('hello', SOURCE, { GREETING: 'hi' });
+
+    const patch = far.calls.find((call) => call.method === 'PATCH')!;
+    const body = (await patch.request.json()) as {
+      serviceConfig: { environmentVariables: Record<string, string> };
+    };
+    expect(body.serviceConfig.environmentVariables).toEqual({ GREETING: 'hi' });
   });
 
   test('follows the operation until it is finished', async () => {
@@ -179,7 +206,7 @@ describe('CloudRunFunctions.deploy', () => {
             });
       },
     });
-    await deployer(far.fetch).deploy('hello', SOURCE);
+    await deployer(far.fetch).deploy('hello', SOURCE, {});
     expect(polls).toBe(3);
   });
 
@@ -194,7 +221,7 @@ describe('CloudRunFunctions.deploy', () => {
         }),
     });
     const failure = await deployer(far.fetch)
-      .deploy('hello', SOURCE)
+      .deploy('hello', SOURCE, {})
       .catch((cause: unknown) => cause);
     expect(failure).toBeInstanceOf(FunctionDeployError);
     expect((failure as Error).message).toBe('Build failed: missing semicolon');
@@ -216,7 +243,7 @@ describe('CloudRunFunctions.deploy', () => {
         ),
     });
     const failure = await deployer(far.fetch)
-      .deploy('hello', SOURCE)
+      .deploy('hello', SOURCE, {})
       .catch((cause: unknown) => cause);
     expect((failure as Error).message).toContain('invokerIamDisabled');
     expect((failure as Error).message).toContain('constraint enforced');

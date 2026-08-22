@@ -15,6 +15,7 @@ import { unlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
+  type FunctionEnv,
   type FunctionLogEntry,
   PREVIEW_TIMEOUT_MS,
   type PreviewRequest,
@@ -25,7 +26,11 @@ import type { PreviewWorkerMessage } from './preview-worker.ts';
 export async function runPreview(
   source: string,
   request: PreviewRequest,
-  options: { readonly timeoutMs?: number } = {},
+  options: {
+    readonly timeoutMs?: number;
+    /** What the handler reads as `env`. Empty for a function with none. */
+    readonly env?: FunctionEnv;
+  } = {},
 ): Promise<PreviewResult> {
   const timeoutMs = options.timeoutMs ?? PREVIEW_TIMEOUT_MS;
   const started = performance.now();
@@ -100,7 +105,7 @@ export async function runPreview(
         });
       };
 
-      worker.postMessage({ file, request });
+      worker.postMessage({ file, request, env: options.env ?? {} });
     });
   } finally {
     if (timer !== undefined) clearTimeout(timer);

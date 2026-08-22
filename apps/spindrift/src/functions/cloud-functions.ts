@@ -16,8 +16,13 @@
  * function's entries are ordinary `cloud_run_revision` entries — which is why
  * the reading helpers are the deploy adapter's, in `cloudrun/logs.ts`.
  *
- * ponytail: no per-function env or secrets, no min instances. Both are fields
- * on `serviceConfig` when a function needs them.
+ * The function's environment is `serviceConfig.environmentVariables` — plain
+ * environment on the Service, so anyone who can read the project reads the
+ * values. It is always sent, empty map included, because an absent field on a
+ * PATCH under this update mask would leave a removed variable in place.
+ *
+ * ponytail: no min instances. That is a field on `serviceConfig` when a
+ * function needs one.
  */
 
 import type { Fetcher, TokenProvider } from '../adapters/deploy/cloud/http.ts';
@@ -30,6 +35,7 @@ import {
 import {
   FunctionDeployError,
   type FunctionDeployer,
+  type FunctionEnv,
   type FunctionLogEntry,
   type FunctionTarget,
   workloadName,
@@ -100,6 +106,7 @@ export class CloudRunFunctions implements FunctionDeployer {
   async deploy(
     name: string,
     source: string,
+    env: FunctionEnv,
   ): Promise<{ readonly url: string }> {
     const id = workloadName(name);
     const encoder = new TextEncoder();
@@ -132,6 +139,7 @@ export class CloudRunFunctions implements FunctionDeployer {
       },
       serviceConfig: {
         ingressSettings: 'ALLOW_ALL',
+        environmentVariables: env,
         maxInstanceCount: 2,
         availableMemory: '256Mi',
         timeoutSeconds: 60,
