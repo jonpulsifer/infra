@@ -8,6 +8,7 @@ import {
   DEFAULT_PLACEHOLDER_MANIFEST,
   MANIFEST_INLINE_VAR,
   ManifestError,
+  UNSERVED_HOSTNAME,
 } from '../../src/config/manifest.ts';
 import {
   diffManifestPaths,
@@ -697,10 +698,13 @@ describe('the stored installation manifest', () => {
     const loaded = await loadStoredManifest(database().db, {});
     // The placeholder as authored, plus the deployment facts resolved onto it.
     // A deployment that mounts no cloud credential resolves `null`, which is
-    // what an installation with no cloud Targets honestly has.
+    // what an installation with no cloud Targets honestly has; a deployment
+    // that serves no origin resolves the hostname no browser will run a
+    // ceremony against, which is what an unreachable installation honestly is.
     expect(loaded).toEqual({
       ...DEFAULT_PLACEHOLDER_MANIFEST,
       cloud: { federation: null },
+      controlPlane: { hostname: UNSERVED_HOSTNAME },
     });
   });
 

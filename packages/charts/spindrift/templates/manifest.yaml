@@ -1,9 +1,6 @@
 {{/*
-The installation manifest, declared by the release — or, absent a
-declaration, seeded from `files/default-manifest.yaml` when this release has
-a `hostname` to bind the passkey relying party to. See
-`spindrift.manifest.content` in `_helpers.tpl` for which case applies, and
-ticket 77 for why the seeded case exists.
+The installation manifest, declared by the release. A release that declares
+none renders no ConfigMap; see `spindrift.manifest.content` in `_helpers.tpl`.
 
 **A declaration seeds; it does not govern.** `loadStoredManifest` takes the
 stored row whenever one exists and this document only when none does, so
@@ -13,9 +10,7 @@ nothing.
 **A declaration may not restate what this chart already renders.** The refusals
 below reject an operator's manifest carrying a fact this chart owns, at render
 time — the earliest the two copies can be compared and the only place being
-wrong is free. They run only against `.Values.manifest`: the seeded default
-document is this chart's own copy of the placeholder, built to already agree
-with `.Values.hostname`, so there is nothing for it to disagree with.
+wrong is free.
 */}}
 {{- if .Values.manifest }}
 {{- if hasKey .Values.manifest "cloud" }}
@@ -24,9 +19,8 @@ with `.Values.hostname`, so there is nothing for it to disagree with.
 {{- if dig "charts" "installer" nil .Values.manifest }}
 {{- fail "manifest.charts.installer is not a manifest key: nothing reads it. Remove it." }}
 {{- end }}
-{{- $declaredHostname := dig "controlPlane" "hostname" "" .Values.manifest }}
-{{- if and .Values.hostname $declaredHostname (ne $declaredHostname .Values.hostname) }}
-{{- fail (printf "manifest.controlPlane.hostname is %q but this release serves the control plane at %q. It is the passkey relying-party id, so the disagreement would enrol nobody: a ceremony is scoped to the origin it began at, and the origin is the one the HTTPRoute answers on." $declaredHostname .Values.hostname) }}
+{{- if hasKey .Values.manifest "controlPlane" }}
+{{- fail "manifest.controlPlane is not a manifest key. The passkey relying party is read from SPINDRIFT_HOSTNAME, which this chart renders from .Values.hostname — the same value that renders the Gateway and the HTTPRoute. Remove it." }}
 {{- end }}
 {{- end }}
 {{- $manifestContent := include "spindrift.manifest.content" . }}

@@ -29,6 +29,25 @@ export const MANIFEST_INLINE_VAR = 'SPINDRIFT_MANIFEST';
 export const TRUSTED_GATEWAY_BOUNDARY_VAR =
   'SPINDRIFT_TRUSTED_GATEWAY_BOUNDARY';
 
+/**
+ * Where this deployment serves the control plane. Set by the chart from the
+ * same `hostname` value that renders the Gateway and the HTTPRoute.
+ */
+export const HOSTNAME_VAR = 'SPINDRIFT_HOSTNAME';
+
+/**
+ * The relying party of a deployment that serves no origin.
+ *
+ * An installation reachable only in-cluster renders no Gateway and no
+ * HTTPRoute, and the chart says that is supported — but a passkey ceremony
+ * still has to be scoped to something, and there is nothing true to scope it
+ * to. This is the honest stand-in: a browser refuses a ceremony against it, so
+ * that installation cannot enrol anybody, which is the same thing the missing
+ * origin already meant. It is named here rather than spelled inline so the one
+ * unreachable configuration is one value, findable.
+ */
+export const UNSERVED_HOSTNAME = 'spindrift.example.com';
+
 /** Raised when the manifest is absent, unparseable, or invalid. */
 export class ManifestError extends Error {
   override readonly name = 'ManifestError';
@@ -105,9 +124,6 @@ export const DEFAULT_PLACEHOLDER_MANIFEST: AuthoredManifest = {
     controlPlaneVessel: 'primary',
     homeVessel: 'spindrift',
   },
-  controlPlane: {
-    hostname: 'spindrift.example.com',
-  },
   auth: {
     gateway: null,
   },
@@ -133,7 +149,7 @@ export const DEFAULT_PLACEHOLDER_MANIFEST: AuthoredManifest = {
      * Null, never a placeholder ref. `connectRepository` writes this value
      * into a caller workflow inside somebody's repository, so a stand-in
      * `owner/repo@sha` here is not inert scaffolding the way
-     * `spindrift.example.com` is — it is a foreign repository handed the
+     * `spindrift-vessel` is — it is a foreign repository handed the
      * build of every repo an unseeded installation connects. Null makes the
      * gap loud: connect refuses until an operator states a real workflow.
      */
@@ -222,39 +238,29 @@ export const DEFAULT_PLACEHOLDER_MANIFEST: AuthoredManifest = {
  * copy of a fact the row already carries whole, and it would go stale the first
  * time somebody edited the row by hand or restored a database.
  *
- * **The three values below and not the whole document**, which is the difference
- * between a predicate with a reachable `true` and one without. The manifest is
- * three kinds of value: deployment facts the chart already knows, cloud facts
+ * **The three values below and not the whole document.** The manifest is three
+ * kinds of value: deployment facts the deployment itself supplies, cloud facts
  * discovery can ask for, and the genuine choices — what this installation is
- * called, where its artifacts are published, and
- * which store it delivers config through. Comparing the *whole* document made
- * `true` reachable for exactly one document, the placeholder verbatim, and that
- * document names `spindrift.example.com` as its control plane. `serve.ts` binds
- * the passkey relying party to that hostname at boot, so a browser refuses every
- * ceremony against it and nobody can sign in — and onboarding renders only after
- * a session exists. A predicate whose one `true` sits behind a door that cannot
- * open is a wizard nobody can be shown.
+ * called, where its artifacts are published, and which store it delivers config
+ * through. Only the third kind is a question, so only the third kind decides
+ * whether anybody has answered one.
  *
- * **What that actually makes reachable, and it is now the ordinary case.** A
- * declaration carrying a real `controlPlane.hostname` with these three left at
- * their stand-ins answers `true` and *can* enrol somebody, so the reachable set
- * is no longer empty. It is not a document anybody writes by accident: nothing
- * in `installationManifestSchema` is optional, so an operator cannot **leave**
- * the genuine choices — every key must be authored — and the values one would
- * have to type to stay unconfigured are `installation: default`,
- * somebody else's GHCR namespace and
- * `onepassword`. What makes the wizard ordinarily reachable is the chart seeding
- * the deployment facts it already holds, `controlPlane.hostname` above all, so
- * that the *placeholder* — what an installation with no declaration at all is
- * seeded with — is itself an installation a browser will run a ceremony
- * against: a bare `manifest: {}` release with a `hostname` renders
- * `files/default-manifest.yaml` (`packages/charts/spindrift`) in place of the
- * stored row's fallback, and that document is this same
- * `DEFAULT_PLACEHOLDER_MANIFEST` with `controlPlane.hostname` bound to the
- * release's own instead of `spindrift.example.com`. A seeded declaration and a
- * bare `manifest: {}` install both reach the wizard now; only a release with
- * neither a declaration nor a `hostname` — in-cluster-only, nothing to bind a
- * relying party to — still cannot.
+ * **Reachable by construction, now that the relying party is a deployment
+ * fact.** Every installation resolves `controlPlane.hostname` from the
+ * deployment that serves it, so an unconfigured one is served at its own real
+ * origin and a browser will run a ceremony against it. That is what makes this
+ * predicate answerable rather than academic: onboarding renders only after a
+ * session exists, and until the hostname moved out of the document, the one
+ * document this answered `true` for named `spindrift.example.com` and could
+ * enrol nobody. The only installation that still cannot is the one with no
+ * origin at all — in-cluster-only, nothing to bind a relying party to — and
+ * that is the missing Gateway saying so, not this.
+ *
+ * It is not a state anybody reaches by accident either: nothing in
+ * `installationManifestSchema` is optional, so an operator cannot **leave** the
+ * genuine choices — every key must be authored — and the values one would have
+ * to type to stay unconfigured are `installation: default`, somebody else's
+ * GHCR namespace, and `onepassword`.
  *
  * **All three, not any**, and a false positive here replaces the whole product
  * with a wizard, so the direction matters. One of the three is legitimately the
@@ -283,19 +289,13 @@ export const DEFAULT_PLACEHOLDER_MANIFEST: AuthoredManifest = {
  * can reach, is an installation that cannot come back, and that is worth taking
  * out of the operator's hands. **None of that reasoning survives the document
  * being the placeholder.** There is no operator assertion to protect, and what
- * the rule protects instead is `spindrift-vessel` and `spindrift-artifacts` —
- * names of nothing — against the real ones, forever, because the wizard that
+ * the rule would protect instead is `spindrift-vessel` and `spindrift-artifacts`
+ * — names of nothing — against the real ones, forever, because the wizard that
  * would set them is refused for editing a governed path.
- *
- * That is not a hypothetical: the chart mounts exactly this document on a
- * release with no `manifest:` value, which is the chart-only install path, and
- * the two collided the first time anybody ran one. The relying party is why the
- * chart mounts it at all — see `files/default-manifest.yaml` — so the document
- * has to stay mounted and stop governing, rather than not be mounted.
  *
  * The same three keys as {@link isUnconfiguredInstallation}, and deliberately
  * the same function: "this document is the stand-in" is one fact, and a second
- * spelling of it is a second thing to keep in step with the chart's copy.
+ * spelling of it is a second thing to keep in step.
  */
 export function governingDeclaration(
   declaration: AuthoredManifest | null | undefined,
@@ -390,6 +390,7 @@ export async function resolveManifest(
   return {
     ...manifest,
     cloud: { federation: await loadDeploymentFederation(env) },
+    controlPlane: { hostname: env[HOSTNAME_VAR]?.trim() || UNSERVED_HOSTNAME },
   };
 }
 

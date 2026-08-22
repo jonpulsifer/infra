@@ -58,7 +58,7 @@ explicit standalone scenario for developing the views without a database.
 that resolves before anything has been deployed to it, on a lowest-precedence
 wildcard route, and `src/web/status-route.ts` is the page it lands on: one
 process serves both surfaces and tells them apart by the `Host` header, which is
-what `controlPlane.hostname` is authored for. It answers 503 rather than 200 —
+what `controlPlane.hostname` is resolved from `SPINDRIFT_HOSTNAME` for. It answers 503 rather than 200 —
 every state it reports is an address that is not serving — and says only which
 name was asked for and whether a release has reached it. The two halves outside
 this app are the wildcard route on the Apps gateway

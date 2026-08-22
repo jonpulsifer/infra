@@ -133,6 +133,16 @@ spec:
               value: {{ printf "%s/gcp-credentials.json" $top.Values.serviceAccount.token.mountPath | quote }}
             {{- end }}
             {{- end }}
+            {{- if $top.Values.hostname }}
+            # The passkey relying party, and the name the status page tells its
+            # own address by. The same value that renders the Gateway listener
+            # and the HTTPRoute, so the origin a ceremony is scoped to is the
+            # origin the release actually answers on, with no second copy to
+            # keep in step. A release serving no origin sets nothing and cannot
+            # enrol anybody, which is what having no origin means.
+            - name: SPINDRIFT_HOSTNAME
+              value: {{ $top.Values.hostname | quote }}
+            {{- end }}
             {{- if $manifestContent }}
             # Named explicitly, so a declaration that fails to mount is fatal
             # rather than falling back to the durable row.

@@ -107,8 +107,6 @@ spec:
         name: offsite
         controlPlaneVessel: offsite
         homeVessel: bluenose
-      controlPlane:
-        hostname: spindrift.${SECRET_DOMAIN}
       dns:
         # The zones this installation mints App names in. Order is the default:
         # an App that pins none takes the first entry that serves its reach.

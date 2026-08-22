@@ -517,46 +517,6 @@ export const installationManifestSchema = z
       })
       .strict(),
 
-    controlPlane: z
-      .object({
-        /**
-         * Where this control plane's own UI is served.
-         *
-         * Two things read it and both genuinely need it. A passkey is scoped to
-         * a **relying party id**, which is this name, and a ceremony performed
-         * against any other origin is refused (Task 37) — so an installation
-         * that guessed this wrong could enrol nobody. And the status page
-         * (§9) has to tell its own address apart from an App's, which is the
-         * only way one process can serve both.
-         *
-         * It is not derived from `dns.zones`: the control plane is a
-         * platform workload (§19) and never one of its own Apps, so it does not
-         * live in the zone Apps are named in.
-         *
-         * **Authored, even though the installer chart has a `hostname` value
-         * that renders the Gateway and the HTTPRoute.** That looks like the
-         * same fact restated, and it is not, for two reasons.
-         *
-         * The chart's `hostname` may be empty, and the chart says so: an
-         * installation that renders no Gateway and no HTTPRoute, reachable only
-         * in-cluster, is supported. That installation still needs a relying
-         * party id, so the chart is not a total source for this and deriving it
-         * would make a supported installation unconfigurable.
-         *
-         * And the relying party is bound once, at boot, on purpose — a passkey
-         * ceremony is scoped to the origin it began at, so re-resolving this
-         * mid-session invalidates credentials rather than updating them.
-         * Moving where it resolves from changes which origin ceremonies are
-         * accepted, and the only honest proof of that change is a real
-         * enrolment, not an argument. So the chart refuses instead: a release
-         * that declares a manifest whose `controlPlane.hostname` disagrees with
-         * its own `hostname` fails to render, which is the earliest moment the
-         * two can be compared and the only one where being wrong costs nothing.
-         */
-        hostname: zone,
-      })
-      .strict(),
-
     auth: z
       .object({
         /**
@@ -1055,6 +1015,35 @@ export type InstallationManifest = AuthoredManifest & {
     /** Resolved from the credential the deployment mounts, never authored. */
     readonly federation: FederationConfig | null;
   };
+  readonly controlPlane: {
+    /**
+     * Where this control plane's own UI is served, from the deployment that
+     * serves it — never authored.
+     *
+     * Two things read it and both genuinely need it. A passkey is scoped to a
+     * **relying party id**, which is this name, and a ceremony performed
+     * against any other origin is refused — so an installation that had this
+     * wrong could enrol nobody. And the status page has to tell its own address
+     * apart from an App's, which is the only way one process can serve both.
+     *
+     * Derived rather than authored, and that is what makes an installation
+     * reachable before anyone has configured it. The chart renders the Gateway
+     * and the HTTPRoute from one `hostname` value; a manifest key beside it was
+     * a second copy of the same fact, and the only way to keep two copies
+     * honest was for the chart to refuse a release where they disagreed and to
+     * carry a whole second placeholder document to seed the value into. Read it
+     * from the deployment and there is one copy, no refusal, and no document.
+     *
+     * It is not derived from `dns.zones`: the control plane is a platform
+     * workload (§19) and never one of its own Apps, so it does not live in the
+     * zone Apps are named in.
+     *
+     * Still bound once, at boot, on purpose — a passkey ceremony is scoped to
+     * the origin it began at, so re-resolving this mid-session would invalidate
+     * credentials rather than update them.
+     */
+    readonly hostname: string;
+  };
 };
 
 /** The document both halves of a pointer are resolved against. */
@@ -1210,6 +1199,6 @@ export function governedManifestPaths(
 export function toAuthoredManifest(
   manifest: InstallationManifest,
 ): AuthoredManifest {
-  const { cloud: _derived, ...authored } = manifest;
+  const { cloud: _cloud, controlPlane: _controlPlane, ...authored } = manifest;
   return authored;
 }

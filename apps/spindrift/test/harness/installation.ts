@@ -22,6 +22,7 @@ import {
   toAuthoredManifest,
 } from '../../src/config/manifest.schema.ts';
 import {
+  HOSTNAME_VAR,
   type InstallationManifest,
   parseManifest,
   resolveManifest,
@@ -57,6 +58,11 @@ export const FIXTURE_DEPLOYMENT_ENV: Record<string, string> = {
     import.meta.dir,
     '../fixtures/gcp-credentials.json',
   ),
+  // Where the fixture deployment serves the control plane, which is the passkey
+  // relying party. A deployment fact like the credential above and for the same
+  // reason: the chart renders it from the one `hostname` that also renders the
+  // Gateway and the HTTPRoute, so no authored document carries it.
+  [HOSTNAME_VAR]: 'spindrift.example.test',
 };
 
 let cached: InstallationManifest | null = null;
