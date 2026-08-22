@@ -684,7 +684,7 @@ function Hero({
   return (
     <Card className="flex flex-wrap items-start gap-6 px-5 py-5">
       <div className="flex flex-col gap-2">
-        <PhasePill phase={view.phase}>{view.phase}</PhasePill>
+        <PhasePill phase={view.phase} />
         <p className="text-xl font-semibold tracking-tight">
           {heroHeadline(view, component)}
         </p>

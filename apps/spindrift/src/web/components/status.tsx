@@ -11,6 +11,7 @@ import type { ReactNode } from 'react';
 import type { Blame } from '../../adapters/deploy/contract.ts';
 import {
   type DeployPhase,
+  deployPhaseWord,
   isInFlight,
   type StepStatus,
 } from '../../commands/views.ts';
@@ -27,18 +28,26 @@ function toneFor(phase: DeployPhase) {
 /**
  * The phase marker: a tone, a word, and a dot that pulses only while the phase
  * is still moving.
+ *
+ * The word defaults to {@link deployPhaseWord} because every caller that had to
+ * supply one chose differently — two passed the raw `DeployPhase`, so two
+ * screens rendered `APPLYING` in capitals at a reader. A default is what makes
+ * the shared vocabulary the path of least resistance rather than a convention
+ * each new screen has to be told about. `children` stays open for the one
+ * caller with more context than a phase: the release screen separates a Build
+ * that failed from a Deploy that did, and no phase alone can.
  */
 export function PhasePill({
   phase,
   children,
 }: {
   phase: DeployPhase;
-  children: ReactNode;
+  children?: ReactNode;
 }) {
   return (
     <Badge tone={toneFor(phase)}>
       <Dot pulse={isInFlight(phase)} />
-      {children}
+      {children ?? deployPhaseWord(phase)}
     </Badge>
   );
 }
