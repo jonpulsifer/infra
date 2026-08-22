@@ -44,6 +44,7 @@ import {
   type RepositorySourceStager,
   stageSourceBundle,
 } from '../domain/source-bundle.ts';
+import { functionsFor } from '../functions/index.ts';
 import { GitHubApp } from '../integrations/github/app.ts';
 import {
   GitHubAppAuth,
@@ -535,6 +536,22 @@ export function createAdapterRegistry(
      */
     discovery(): GcpDiscovery {
       return discovery;
+    },
+
+    /**
+     * §Functions' two deployers, built on the same Cloudflare and cloud
+     * providers every other far side above uses — a Cloudflare Target's
+     * bearer and `cloudTokenFor`'s federated one, not a credential of their
+     * own.
+     */
+    functions() {
+      return functionsFor({
+        manifest: options.manifest,
+        cloudflareToken:
+          options.cloudflareToken ?? cloudflareToken(options.env ?? Bun.env),
+        cloudToken: cloud,
+        ...(options.fetch ? { fetch: options.fetch } : {}),
+      });
     },
 
     supplyChain() {

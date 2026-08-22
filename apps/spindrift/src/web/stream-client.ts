@@ -1,5 +1,5 @@
 /**
- * Reconnecting browser clients for the two internal WebSocket purposes.
+ * Reconnecting browser clients for the internal WebSocket purposes.
  *
  * Imports from `./stream-path.ts` rather than `./streams.ts` — the paths and
  * message types are the only edge this file needs into the streaming
@@ -38,6 +38,8 @@ import { reportSessionExpired } from './session-events.ts';
 import {
   ATTEMPT_STREAM_PATH,
   type AttemptStreamMessage,
+  FUNCTION_LOG_STREAM_PATH,
+  type FunctionLogStreamMessage,
   RUNTIME_STREAM_PATH,
   type RuntimeStreamMessage,
 } from './stream-path.ts';
@@ -225,6 +227,65 @@ export function subscribeRuntime(
       // re-read is what notices when it does.
       if (message.kind === 'none') {
         stopped = true;
+        markSettled(id);
+      }
+      onMessage(message);
+    };
+    socket.onerror = () => socket?.close();
+    socket.onclose = () => {
+      socket = null;
+      if (stopped) return;
+      attempts += 1;
+      scheduleReconnect({
+        id,
+        options,
+        attempt: attempts,
+        reconnect: connect,
+        giveUp: () => {
+          stopped = true;
+        },
+        setRetry: (handle) => {
+          retry = handle;
+        },
+      });
+    };
+  };
+
+  connect();
+  return () => {
+    stopped = true;
+    if (retry !== null) clearTimeout(retry);
+    markSettled(id);
+    socket?.close();
+  };
+}
+
+/**
+ * The Function log tail. No cursor, unlike the two above: a reconnect simply
+ * re-opens the deployer's `tail` from now, which is what a live-logs viewer
+ * wants anyway — the row it is watching is already saved, and a gap during a
+ * drop is a few live lines, not history worth replaying.
+ */
+export function subscribeFunctionLog(
+  input: { readonly name: string },
+  onMessage: (message: FunctionLogStreamMessage) => void,
+  options: SubscribeOptions = {},
+): () => void {
+  let stopped = false;
+  let socket: BrowserSocket | null = null;
+  let retry: ReturnType<typeof setTimeout> | null = null;
+  let attempts = 0;
+  const id = Symbol('function-log-stream');
+  const createSocket = options.createSocket ?? browserSocket;
+
+  const connect = () => {
+    if (stopped) return;
+    const query = new URLSearchParams({ name: input.name });
+    socket = createSocket(streamUrl(`${FUNCTION_LOG_STREAM_PATH}?${query}`));
+    socket.onmessage = (event) => {
+      const message = JSON.parse(event.data) as FunctionLogStreamMessage;
+      if (message.kind === 'function-log') {
+        attempts = 0;
         markSettled(id);
       }
       onMessage(message);

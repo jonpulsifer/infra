@@ -40,6 +40,10 @@ import type {
 import type { Exclusion } from '../domain/placement.ts';
 import type { AnyPrerequisite, Remediation } from '../domain/remediation.ts';
 import type { VesselKind, VesselRole } from '../domain/vessel.ts';
+import {
+  FUNCTION_TARGETS,
+  type FunctionTarget,
+} from '../functions/contract.ts';
 
 /**
  * One checklist row, as either screen renders it.
@@ -1419,4 +1423,28 @@ export interface TargetConnectionProposal {
    * control, the same way `chartValues` is.
    */
   readonly policyEndpoint?: string;
+}
+
+// --- Functions -----------------------------------------------------------
+
+export type { FunctionTarget };
+export { FUNCTION_TARGETS };
+
+/** One Function, as the ledger lists it (`listFunctions`). */
+export interface FunctionListItem {
+  readonly id: string;
+  readonly name: string;
+  readonly target: FunctionTarget;
+  /** Where it answers, or `null` before its first successful deploy. */
+  readonly url: string | null;
+  /** ISO 8601, or `null` before its first successful deploy. */
+  readonly deployedAt: string | null;
+  /** The last deploy's failure, in operator words, or `null`. */
+  readonly error: string | null;
+  readonly updatedAt: string;
+}
+
+/** One Function's own screen: the ledger row plus the source it holds. */
+export interface FunctionDetail extends FunctionListItem {
+  readonly source: string;
 }

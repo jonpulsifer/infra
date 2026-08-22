@@ -21,6 +21,8 @@ import { NewAppScreen } from './views/apps/new/index.tsx';
 import { WorkspaceScreen } from './views/apps/workspace.tsx';
 import { Gate } from './views/auth/gate.tsx';
 import { Onboarding } from './views/auth/onboarding.tsx';
+import { FunctionScreen } from './views/functions/editor.tsx';
+import { FunctionsScreen } from './views/functions/list.tsx';
 import { DatastoreScreen } from './views/operations/datastore-detail.tsx';
 import { DatastoresScreen } from './views/operations/datastores.tsx';
 import { DeploysScreen } from './views/operations/deploys.tsx';
@@ -321,6 +323,7 @@ export function titleOf(path: string): string {
   // No name in the path, so the tab says the noun. The id is a uuid: a title
   // holding one would be a title nobody can read a Datastore's name out of.
   if (path.startsWith('/datastores')) return 'Datastores · Spindrift';
+  if (path.startsWith('/functions')) return 'Functions · Spindrift';
   if (path.startsWith('/apps/new')) return 'New App · Spindrift';
   if (path.startsWith('/deploys')) {
     const deployId = path.replace(/^\/deploys\/?/, '');
@@ -400,6 +403,19 @@ export function Screen({
       />
     ) : (
       <DatastoresScreen onNavigate={onNavigate} />
+    );
+  }
+  // Same reason as `/datastores` above: must land before the catch-all, or
+  // `/functions` reads as an App name.
+  if (path.startsWith('/functions')) {
+    const name = path.replace(/^\/functions\/?/, '') || null;
+    if (name === 'new') {
+      return <FunctionScreen key="new" name={null} onNavigate={onNavigate} />;
+    }
+    return name ? (
+      <FunctionScreen key={name} name={name} onNavigate={onNavigate} />
+    ) : (
+      <FunctionsScreen onNavigate={onNavigate} />
     );
   }
   // The one screen keyed on the route rather than on the object in it, because

@@ -10,6 +10,7 @@ import {
   Rocket,
   Settings,
   WifiOff,
+  Zap,
 } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { useState, useSyncExternalStore } from 'react';
@@ -54,6 +55,12 @@ const NAVIGATION = [
     label: 'Datastores',
     icon: Database,
     roots: ['/datastores'],
+  },
+  {
+    path: '/functions',
+    label: 'Functions',
+    icon: Zap,
+    roots: ['/functions'],
   },
   {
     path: '/settings/connections',

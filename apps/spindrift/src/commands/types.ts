@@ -37,6 +37,7 @@ import type {
   RepositoryHost,
 } from '../domain/repository.ts';
 import type { RepositorySourceStager } from '../domain/source-bundle.ts';
+import type { FunctionDeployers } from '../functions/contract.ts';
 import type { RegistryTransport } from '../storage/registry.ts';
 import type { RegistryCredentialStore } from '../storage/registry-credentials.ts';
 import type { SupplyChain } from '../supply-chain/sign.ts';
@@ -170,6 +171,15 @@ export interface AdapterRegistry {
    * global.
    */
   discovery?(): GcpDiscovery | null;
+  /**
+   * The Functions surfaces this installation can deploy to, keyed by target.
+   *
+   * Optional for the reason every far side above it is: a test registry with
+   * no opinion about Functions omits it, and `saveFunction`/`deleteFunction`
+   * read a missing entry the same way they read a `null` deployer — as
+   * `NOT_DEPLOYABLE`/`NOT_REMOVABLE`, a configuration fact rather than a fault.
+   */
+  functions?(): FunctionDeployers | null;
   /**
    * Core's verifier and signer (§16).
    *
