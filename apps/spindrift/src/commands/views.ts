@@ -571,7 +571,16 @@ export interface DatastoreView {
   readonly name: string;
   readonly engine: 'postgres' | 'valkey';
   readonly provenance: 'managed' | 'external';
-  /** The Component it is attached to, or `null` while it is unattached. */
+  /**
+   * The App it is attached to, by name, or `null` while it is unattached.
+   *
+   * The App, not a Component: §11 attaches on `datastores.appId`, and
+   * `attachDatastore` refuses a second store of the same engine precisely
+   * because the variable lands on every Component of the one App. The
+   * sibling declaration below has always said so; this one said "Component"
+   * while `workspace.ts` fills it with the App’s first Component as a
+   * display convenience — a different claim than the one this was making.
+   */
   readonly attachedTo: string | null;
   /** Where it lives — a cluster-local one pins its App to that Target (§11). */
   readonly target: string;
