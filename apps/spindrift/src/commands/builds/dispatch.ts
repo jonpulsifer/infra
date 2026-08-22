@@ -912,14 +912,13 @@ export const dispatchBuild = async (
    * reach on its own — handing it a credential it is refused below for buys
    * nothing.
    *
-   * That was not hypothetical. GHCR's credential is *minted per dispatch* from
-   * the GitHub OAuth the installation already holds
-   * (`storage/github-registry-credential.ts`), so it answers whenever the
-   * connector is authorized. Asking about every destination on a route that
-   * could not carry one therefore always produced one for `ghcr.io`, and the
-   * refusal below fired on every single build on the hosted route — the route
-   * whose own workflow logs into GHCR with the run's token and needs nothing
-   * from here when the run stays where that token is good.
+   * That is not hypothetical. The installation holds a GHCR credential as a
+   * `registry_credentials` row (`storage/registry-credentials.ts`), so
+   * `authFor` answers for `ghcr.io` whenever one is stored. Asking about every
+   * destination on a route that could not carry one would produce it on every
+   * hosted build and fire the refusal below each time — on the route whose own
+   * workflow logs into GHCR with the run's token and needs nothing from here
+   * when the run stays where that token is good.
    */
   const destinationHosts = [...new Set(destinations.map(registryHostOf))];
   const unauthorizedHosts = destinationHosts.filter(
