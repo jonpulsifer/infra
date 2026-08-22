@@ -46,6 +46,10 @@ spec:
       enabled: true
       prometheus:
         enabled: true
+        # Deliberately unscraped: envoy exports ~9.5k series per node, which
+        # on three nodes is a third again of everything folly stores. The L7
+        # question it answers is already covered by hubble's httpV2 metrics
+        # below, at a twentieth of the cost.
         serviceMonitor:
           enabled: false
           labels:
@@ -67,17 +71,36 @@ spec:
       prometheus:
         enabled: true
         serviceMonitor:
-          enabled: false
+          enabled: true
+          interval: 30s
           labels:
             release: prom-stack
     dashboards:
       enabled: true
     prometheus:
       enabled: true
+      # The metrics endpoint has always been on; nothing selected it, so the
+      # cilium, BGP and endpoint dashboards this chart ships rendered empty.
+      # The ServiceMonitor is what the chart keys the cilium-agent Service off
+      # as well, so this creates the target too.
       serviceMonitor:
-        enabled: false
+        enabled: true
+        # The chart defaults every one of these ServiceMonitors to 10s.
+        # Nothing else in either cluster is scraped faster than the 30s
+        # Prometheus uses globally, and three times the samples for the same
+        # series is the cheapest way to spend a retention ceiling on nothing.
+        interval: 30s
         labels:
           release: prom-stack
+        metricRelabelings:
+          # The agent's series are dominated by its own internals: hive job
+          # timers, workqueue and apiserver-client latency histograms. None of
+          # them appear on a dashboard here and together they are ~45% of the
+          # ~1.9k series each agent exports. folly's TSDB runs close to its
+          # retention ceiling, so they are dropped at ingest.
+          - action: drop
+            sourceLabels: [__name__]
+            regex: cilium_(hive_|k8s_client_|k8s_workqueue_|agent_api_process_time_).*
     hubble:
       enabled: true
       relay:
@@ -85,12 +108,17 @@ spec:
         prometheus:
           enabled: true
           serviceMonitor:
-            enabled: false
+            enabled: true
+            interval: 30s
             labels:
               release: prom-stack
       metrics:
+        # ~440 series per node for drops, DNS, TCP and L7 -- the cheapest
+        # network visibility on offer here, and what the hubble dashboards
+        # this chart already ships are drawn against.
         serviceMonitor:
-          enabled: false
+          enabled: true
+          interval: 30s
           labels:
             release: prom-stack
         dashboards:
