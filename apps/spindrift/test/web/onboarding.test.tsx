@@ -340,18 +340,13 @@ describe('an unconfigured installation is shown onboarding, not the product', ()
       state: 'unconfigured',
       manifest: UNCONFIGURED,
     });
-    const configured = signedIn({
-      state: 'configured',
-      declarationDivergence: [],
-    });
+    const configured = signedIn({ state: 'configured' });
     expect(configured).toContain('Overview');
     expect(unconfigured).not.toContain('Overview');
   });
 
   test('a configured installation never sees it', () => {
-    expect(
-      signedIn({ state: 'configured', declarationDivergence: [] }),
-    ).not.toContain('Step 1 of 3');
+    expect(signedIn({ state: 'configured' })).not.toContain('Step 1 of 3');
   });
 });
 

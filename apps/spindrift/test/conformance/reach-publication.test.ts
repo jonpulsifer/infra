@@ -32,7 +32,6 @@
  * `clusters/` rather than assumed, once per cluster Spindrift deploys through.
  */
 import { describe, expect, test } from 'bun:test';
-import { join } from 'node:path';
 import type {
   DeployEvent,
   DeployTarget,
@@ -54,10 +53,6 @@ import { FakeKubernetes } from '../harness/fakes/kubernetes-api.ts';
 
 /** Every cluster's controller, as that cluster declares it. */
 const CONTROLLERS = await installedControllers();
-
-/** The declaration naming the clusters a Component can be placed on. */
-const REPO_ROOT = join(import.meta.dir, '../../../..');
-const LIVE_RELEASE = 'clusters/offsite/apps/spindrift/helm-release.yaml';
 
 /** The Apps gateway every route in the namespace attaches to. */
 const GATEWAY: GatewayStatus = {
@@ -354,34 +349,11 @@ describe.each(PER_CLUSTER)(
 /**
  * The controller these tests model is the one the clusters declare.
  *
- * Reading it is only worth anything if it is read for every cluster a Component
- * can land on, and if an installation the model does not actually cover fails
- * rather than being quietly approximated. Both are asserted here.
+ * Which clusters a Component can land on is the row's, not this repository's,
+ * so what is asserted here is the other half: an installation the model does
+ * not actually cover fails rather than being quietly approximated.
  */
 describe('the modelled controller is the declared one', () => {
-  test('every Kubernetes Target runs a controller read off its own cluster', async () => {
-    const release = Bun.YAML.parse(
-      await Bun.file(join(REPO_ROOT, LIVE_RELEASE)).text(),
-    ) as {
-      spec?: {
-        values?: {
-          manifest?: { targets?: { vessel?: string; adapter?: string }[] };
-        };
-      };
-    };
-    const clusters = (release.spec?.values?.manifest?.targets ?? [])
-      .filter((target) => target.adapter === 'kubernetes')
-      .map((target) => target.vessel)
-      .filter((vessel) => vessel !== undefined);
-
-    expect(clusters.length).toBeGreaterThan(0);
-    for (const cluster of clusters) {
-      expect(CONTROLLERS.map((controller) => controller.cluster)).toContain(
-        cluster,
-      );
-    }
-  });
-
   test('an argument the model does not account for is refused, not ignored', () => {
     // `--annotation-prefix` renames every annotation key, including the one the
     // route holds itself out with. A model that shrugged at an unfamiliar

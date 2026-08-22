@@ -1,17 +1,12 @@
 {{/*
 Two Deployments off one image — `web` (UI, webhooks, log WebSockets) and
 `reconciler` — rendered from one template so they cannot drift apart in the
-image, the database credential, the manifest bootstrap, or the security context.
+image, the database credential, or the security context.
 
 The reconciler serves nothing, so it gets no port and no probe: a loop that
 claims work with `SELECT … FOR UPDATE SKIP LOCKED` has no readiness to report.
 */}}
 {{- $top := . -}}
-{{/* See spindrift.manifest.content (_helpers.tpl): a declaration verbatim,
-the chart-only seed of files/default-manifest.yaml, or empty. Computed once
-so the checksum, the mount and the env var below all gate on and hash exactly
-what manifest.yaml renders. */}}
-{{- $manifestContent := include "spindrift.manifest.content" $top -}}
 {{- $processes := list (dict "name" "web" "command" "src/web/server.ts" "replicas" .Values.web.replicas "resources" .Values.web.resources "serves" true "federates" true) -}}
 {{- if .Values.reconciler.enabled -}}
 {{- $processes = append $processes (dict "name" "reconciler" "command" "src/reconciler/main.ts" "replicas" .Values.reconciler.replicas "resources" .Values.reconciler.resources "serves" false "federates" true) -}}
@@ -55,12 +50,6 @@ spec:
       {{- include "spindrift.selectorLabels" (dict "Release" $top.Release "Values" $top.Values "Chart" $top.Chart "component" $process.name) | nindent 6 }}
   template:
     metadata:
-      {{- if $manifestContent }}
-      annotations:
-        # Both processes read the manifest once, at start, so a ConfigMap change
-        # has to become a rollout.
-        checksum/manifest: {{ $manifestContent | sha256sum }}
-      {{- end }}
       labels:
         {{- include "spindrift.labels" $top | nindent 8 }}
         app.kubernetes.io/component: {{ $process.name }}
@@ -143,12 +132,6 @@ spec:
             - name: SPINDRIFT_HOSTNAME
               value: {{ $top.Values.hostname | quote }}
             {{- end }}
-            {{- if $manifestContent }}
-            # Named explicitly, so a declaration that fails to mount is fatal
-            # rather than falling back to the durable row.
-            - name: SPINDRIFT_MANIFEST_PATH
-              value: /etc/spindrift/manifest.yaml
-            {{- end }}
             {{- if $top.Values.gatewayAuth.enabled }}
             # Rendered only beside the NetworkPolicy in gateway-auth.yaml.
             - name: SPINDRIFT_TRUSTED_GATEWAY_BOUNDARY
@@ -188,11 +171,6 @@ spec:
           volumeMounts:
             - name: tmp
               mountPath: /tmp
-            {{- if $manifestContent }}
-            - name: manifest
-              mountPath: /etc/spindrift
-              readOnly: true
-            {{- end }}
             {{- if $process.federates }}
             - name: federated-identity
               mountPath: {{ $top.Values.serviceAccount.token.mountPath }}
@@ -213,11 +191,6 @@ spec:
       volumes:
         - name: tmp
           emptyDir: {}
-        {{- if $manifestContent }}
-        - name: manifest
-          configMap:
-            name: {{ include "spindrift.fullname" $top }}-manifest
-        {{- end }}
         {{- if $process.federates }}
         - name: federated-identity
           projected:

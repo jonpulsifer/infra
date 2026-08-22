@@ -217,31 +217,3 @@ describe('declaring a source bucket', () => {
     expect(without.ok && without.value.canVerify).toBe(false);
   });
 });
-
-/**
- * A mounted declaration reserves nothing, so every act here is this screen's.
- *
- * Which bucket a staging picks is a property of the home vessel, and that
- * vessel used to be reconciled from the declaration on every boot — so moving
- * the default was refused rather than left half-applied. Nothing re-applies a
- * declaration now.
- */
-describe('an installation that mounts a declaration', () => {
-  async function declared(): Promise<CommandContext> {
-    return { ...(await context()), declaration: await authoredFixture() };
-  }
-
-  test('adds a bucket and moves the default in one act', async () => {
-    const ctx = await declared();
-    const result = await useSourceBucket(
-      { bucketName: 'a-second-bucket', makeDefault: true },
-      ctx,
-    );
-
-    expect(result.ok).toBe(true);
-    expect(await storedBuckets()).toMatchObject({
-      buckets: ['example-source-bucket', 'a-second-bucket'],
-      defaultBucket: 'a-second-bucket',
-    });
-  });
-});

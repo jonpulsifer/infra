@@ -18,10 +18,6 @@ import {
 } from './manifest.schema.ts';
 import { upgradeManifestDocument } from './manifest-upgrade.ts';
 
-/** Path to a YAML or JSON manifest document. */
-export const MANIFEST_PATH_VAR = 'SPINDRIFT_MANIFEST_PATH';
-/** An inline YAML or JSON manifest document, used in place of a file. */
-export const MANIFEST_INLINE_VAR = 'SPINDRIFT_MANIFEST';
 /**
  * Deployment attestation set by the chart only when it renders a default-deny
  * NetworkPolicy admitting the configured trusted Gateway peers.
@@ -113,9 +109,6 @@ export function validateManifest(
   }
   return result.data;
 }
-
-/** Default file path where the installer chart mounts the ConfigMap. */
-export const DEFAULT_MANIFEST_PATH = '/etc/spindrift/manifest.yaml';
 
 /** High-trust default placeholder manifest used when initializing an unseeded installation. */
 export const DEFAULT_PLACEHOLDER_MANIFEST: AuthoredManifest = {
@@ -295,54 +288,6 @@ export function isUnconfiguredInstallation(
     // sides are arrays here and neither spelling changes the answer.
     Bun.deepEquals(manifest.supplyChain.registry, stand.supplyChain.registry)
   );
-}
-
-/**
- * Read the manifest the environment points at.
- *
- * `SPINDRIFT_MANIFEST_PATH` wins over `SPINDRIFT_MANIFEST`. If neither is set,
- * checks `DEFAULT_MANIFEST_PATH` (/etc/spindrift/manifest.yaml) before erroring.
- */
-export async function loadManifest(
-  env: Env = Bun.env,
-): Promise<AuthoredManifest> {
-  const manifest = await loadManifestIfPresent(env);
-  if (manifest !== null) return manifest;
-
-  throw new ManifestError(
-    `no installation manifest: set ${MANIFEST_PATH_VAR} to a manifest file or ${MANIFEST_INLINE_VAR} to its contents`,
-  );
-}
-
-/**
- * Read a declared manifest when one is available.
- *
- * An explicit missing path is still an error: it is a broken declaration, not
- * the same state as no declaration. `null` means callers may deliberately fall
- * back to a durable copy.
- */
-export async function loadManifestIfPresent(
-  env: Env = Bun.env,
-): Promise<AuthoredManifest | null> {
-  const explicitPath = env[MANIFEST_PATH_VAR]?.trim();
-  const path = explicitPath || DEFAULT_MANIFEST_PATH;
-
-  const file = Bun.file(path);
-  if (await file.exists()) {
-    return parseManifest(await file.text(), path);
-  }
-
-  if (explicitPath) {
-    throw new ManifestError(
-      `${MANIFEST_PATH_VAR}=${explicitPath}: no such file`,
-    );
-  }
-
-  const inline = env[MANIFEST_INLINE_VAR];
-  if (inline?.trim()) {
-    return parseManifest(inline, `$${MANIFEST_INLINE_VAR}`);
-  }
-  return null;
 }
 
 /**

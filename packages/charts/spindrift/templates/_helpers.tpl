@@ -61,19 +61,3 @@ unrelated chart revision leaves the completed Job alone.
 {{ include "spindrift.fullname" . }}-migrate-{{ $digest }}
 {{- end }}
 
-{{/*
-The manifest document this release seeds, as YAML text — empty when there is
-none.
-
-One source: an operator's own declaration. A release that states no `manifest`
-seeds nothing, which is what an installation with no declaration already means
-— `loadStoredManifest` falls through to the code's placeholder, and the
-relying party a passkey ceremony is scoped to comes from `SPINDRIFT_HOSTNAME`
-rather than from any document, so an unseeded installation is still served at
-its own real origin and can enrol its first operator.
-*/}}
-{{- define "spindrift.manifest.content" -}}
-{{- if .Values.manifest -}}
-{{- toYaml .Values.manifest -}}
-{{- end -}}
-{{- end }}

@@ -35,8 +35,6 @@ function screen({
   errors = new Map() as FieldErrors,
   outcome = null as SaveOutcome | null,
   saving = false,
-  divergence = [] as readonly string[],
-  declaration = null as unknown,
 } = {}): string {
   return renderToStaticMarkup(
     <InstallationSettingsView
@@ -45,12 +43,9 @@ function screen({
       errors={errors}
       outcome={outcome}
       saving={saving}
-      divergence={divergence}
-      declaration={declaration}
       onChange={() => undefined}
       onSave={() => undefined}
       onReload={() => undefined}
-      onAdopted={() => undefined}
     />,
   );
 }
@@ -204,60 +199,21 @@ describe('the whole document is this screen\u2019s', () => {
     return control.includes('disabled=""');
   }
 
-  test('every value is editable, declaration mounted or not', () => {
-    for (const markup of [
-      screen({ document: withAppVessel }),
-      screen({ document: withAppVessel, declaration: manifest }),
-    ]) {
-      expect(locked(markup, 'installation.controlPlaneVessel')).toBe(false);
-      expect(locked(markup, 'installation.homeVessel')).toBe(false);
-      expect(locked(markup, 'vessels.1.shared.sourceBucket')).toBe(false);
-      expect(locked(markup, 'build.zeroConfigFrontend')).toBe(false);
-      expect(markup).not.toContain('declared</span>');
-    }
+  test('every value is editable', () => {
+    const markup = screen({ document: withAppVessel });
+    expect(locked(markup, 'installation.controlPlaneVessel')).toBe(false);
+    expect(locked(markup, 'installation.homeVessel')).toBe(false);
+    expect(locked(markup, 'vessels.1.shared.sourceBucket')).toBe(false);
+    expect(locked(markup, 'build.zeroConfigFrontend')).toBe(false);
+    expect(markup).not.toContain('declared</span>');
   });
 
   test('the document can be written down as well as edited', () => {
     // The other half of what makes those fields safe to hand over: an
-    // installation that can be exported is one that can be restored, which is
-    // the whole of what the governed slice was protecting.
+    // installation that can be written down is one that can be restored, which
+    // is the whole of what the governed slice was protecting.
     expect(screen({ document: withAppVessel })).toContain(
       'Download this installation',
     );
-  });
-});
-
-describe('adopting a divergent declaration', () => {
-  test('no divergence, no notice and no adopt act', () => {
-    const markup = screen();
-    expect(markup).not.toContain(
-      'The mounted declaration no longer matches this installation.',
-    );
-    expect(markup).not.toContain('Adopt this declaration');
-  });
-
-  test('a divergence with nothing to adopt says so, but offers no press', () => {
-    // Reachable when a caller has paths but no document for them — a test
-    // context that computed one without the other. The notice still names
-    // the disagreement; it just cannot act on it.
-    const markup = screen({ divergence: ['build.zeroConfigFrontend'] });
-    expect(markup).toContain(
-      'The mounted declaration no longer matches this installation.',
-    );
-    expect(markup).toContain('Differs at: build.zeroConfigFrontend.');
-    expect(markup).not.toContain('Adopt this declaration');
-  });
-
-  test('a divergence with a declaration offers the adopt act, and its cost', () => {
-    const markup = screen({
-      divergence: ['build.zeroConfigFrontend'],
-      declaration: manifest,
-    });
-    expect(markup).toContain('Adopt this declaration');
-    // The cost, named beside the button rather than after the press: a
-    // `declared` write is what resets a moved Target connection to unhealthy
-    // pending inspection (`manifest-store.ts`'s `reconcileManifestTargets`).
-    expect(markup).toContain('reset to unhealthy');
-    expect(markup).toContain('awaiting-inspection checklist');
   });
 });

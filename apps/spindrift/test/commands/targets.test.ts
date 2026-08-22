@@ -28,13 +28,16 @@ import type {
   CommandContext,
 } from '../../src/commands/types.ts';
 import {
+  type AuthoredManifest,
   type InstallationManifest,
   sharedServicesOf,
   type TargetAdapter,
   toAuthoredManifest,
 } from '../../src/config/manifest.schema.ts';
-import { MANIFEST_INLINE_VAR } from '../../src/config/manifest.ts';
-import { loadStoredManifest } from '../../src/config/manifest-store.ts';
+import {
+  loadStoredManifest,
+  writeStoredManifest,
+} from '../../src/config/manifest-store.ts';
 import {
   apps,
   builds,
@@ -165,6 +168,14 @@ async function seedLiveDeploy(targetId: string, ref: string) {
     })
     .returning();
   return { app: app!, component: component!, deploy: deploy! };
+}
+
+/** The row a fresh installation is seeded with, then booted from. */
+async function seedStoredManifest(
+  document: AuthoredManifest,
+): Promise<InstallationManifest> {
+  await writeStoredManifest(database().db, document);
+  return loadStoredManifest(database().db);
 }
 
 describe('connect always succeeds', () => {
@@ -661,9 +672,7 @@ describe('an operator’s Target correction outlives the next boot', () => {
       name: 'gateway-that-moved',
       namespace: 'gateway-that-moved',
     });
-    await loadStoredManifest(database().db, {
-      [MANIFEST_INLINE_VAR]: JSON.stringify(declared),
-    });
+    await seedStoredManifest(declared);
     expect((await targetRow('cluster'))?.connection).toMatchObject({
       chartValues: {
         platform: {
@@ -724,9 +733,7 @@ describe('an operator’s Target correction outlives the next boot', () => {
       name: 'cluster-gateway',
       namespace: 'gateway',
     });
-    const booted = await loadStoredManifest(database().db, {
-      [MANIFEST_INLINE_VAR]: JSON.stringify(declared),
-    });
+    const booted = await seedStoredManifest(declared);
     await connectTarget(clusterInput({ vessel: 'cluster' }), context(registry));
 
     const listed = await listTargets(
@@ -974,11 +981,7 @@ describe('reconnect re-adopts via observe', () => {
       ],
     } satisfies InstallationManifest;
 
-    await loadStoredManifest(database().db, {
-      // Declared as an operator writes it: the federation `declared` carries
-      // is the deployment's, and the schema refuses a document restating it.
-      [MANIFEST_INLINE_VAR]: JSON.stringify(toAuthoredManifest(declared)),
-    });
+    await seedStoredManifest(toAuthoredManifest(declared));
     expect((await targetRow('app-cluster'))?.status).toBe('disconnected');
 
     const readopted = await restoreDeclaredTargetConnections(

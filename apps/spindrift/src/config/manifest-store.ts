@@ -19,8 +19,6 @@ import {
 } from './manifest.schema.ts';
 import {
   DEFAULT_PLACEHOLDER_MANIFEST,
-  loadManifestIfPresent,
-  ManifestError,
   resolveManifest,
   validateManifest,
 } from './manifest.ts';
@@ -28,75 +26,36 @@ import {
 type Env = Record<string, string | undefined>;
 
 /**
- * Load the durable singleton, seeding it from a declaration when it is empty.
+ * Load the durable singleton, seeding it with the placeholder when it is empty.
  *
- * **A declaration seeds; it does not govern.** The stored row wins whenever one
- * exists, because configuration is the UI's to drive and a rollout must not
- * revert what an operator just configured. A mounted file or inline env
- * document is therefore consulted only for an unseeded installation, ahead of
- * the high-trust placeholder — which is what makes a torn-down installation
- * come back configured without anyone opening a browser.
- *
- * The cost is that editing a declaration does nothing to an installation that
- * already has a row, so an ignored declaration says so at startup rather than
- * being quietly skipped. Re-seeding is deliberate: discard the row.
+ * **The row is the whole of what this installation is.** Nothing is mounted and
+ * nothing is reconciled from anywhere: what an operator configured is what the
+ * next process reads, and an installation with no row yet is seeded with the
+ * placeholder so onboarding has a document to edit rather than a null to
+ * special-case.
  *
  * What is written is the authored document; what is returned has the
  * deployment's own facts resolved onto it. The row therefore never holds a
  * second copy of something the deployment declares — which is the whole of why
  * the two types are different.
  *
- * **A stored row this build cannot parse is a row this build has no seed in**,
- * so the declaration takes over rather than the process crash-looping. A
- * manifest key can be renamed — `dns.zones` replaced `dns.apexZone` — and the
- * row written by the previous image does not rewrite itself; strictness there
- * took down an installation whose mounted declaration said, correctly, exactly
- * what it should have been. The cost is stated in the warning: whatever an
- * operator configured through the UI that the declaration does not carry is
- * lost. With no declaration to fall back on there is nothing honest to boot as,
- * and the error stands.
+ * **A row this build cannot parse is fatal.** It used to be survivable by
+ * re-seeding from the mounted declaration, at the cost of discarding whatever
+ * an operator had configured that the declaration did not carry. There is no
+ * declaration to re-seed from, so `manifest-upgrade.ts` is what makes a row
+ * written under an older schema readable — and a document that reaches here
+ * unparseable is one that module has to learn a step for, not one to boot past.
  */
 export async function loadStoredManifest(
   db: Database,
   env: Env = Bun.env,
 ): Promise<InstallationManifest> {
-  let stored: AuthoredManifest | null = null;
-  let unreadable: ManifestError | null = null;
-  try {
-    stored = await readStoredManifest(db);
-  } catch (cause) {
-    if (!(cause instanceof ManifestError)) throw cause;
-    unreadable = cause;
-  }
-  const declaration = await declaredManifest(stored !== null, env);
-  if (unreadable !== null) {
-    if (declaration === null) throw unreadable;
-    console.warn(
-      `installation manifest: the stored manifest is not valid for this build, so this installation is being re-seeded from the mounted declaration — anything configured through the UI that the declaration does not carry is lost: ${unreadable.message}`,
-    );
-  }
-  const declared = stored ?? declaration ?? DEFAULT_PLACEHOLDER_MANIFEST;
-  if (unreadable === null && stored !== null && declaration !== null) {
-    // The generic half of this warning has existed since the rule did — "a
-    // declaration is mounted and ignored" — and it is not enough. Proven live:
-    // a rollout moved a Target's gateway in the declaration; the stored row
-    // never moved because the row wins by design; and this line gave nobody a
-    // reason to go look, right up until the listener that rollout deleted took
-    // the Target's gateway with it. §6: "drift is detected and surfaced, never
-    // silently corrected" — naming the paths is that rule applied to the
-    // manifest itself, not just to what it deploys.
-    //
-    const divergentPaths = diffManifestPaths(declaration, declared);
-    console.warn(
-      divergentPaths.length === 0
-        ? 'installation manifest: a declaration is mounted but this installation is already seeded, so the stored manifest is being used and the declaration is ignored — discard the row to re-seed from it'
-        : `installation manifest: a declaration is mounted but this installation is already seeded, so the stored manifest is being used and the declaration is ignored — discard the row to re-seed from it. It now disagrees with the stored row at: ${divergentPaths.join(', ')}`,
-    );
-  }
+  const stored = await readStoredManifest(db);
+  const declared = stored ?? DEFAULT_PLACEHOLDER_MANIFEST;
   // `booted` exactly when the document being written is the one the
-  // installation already had — see {@link ManifestWrite}. A stored row this
-  // build could not parse leaves `stored` null, which is right: that boot is
-  // re-seeding from the declaration, and re-seeding is a declaration.
+  // installation already had — see {@link ManifestWrite}. A row this build
+  // could not parse does not reach here: `readStoredManifest` throws, and with
+  // nothing to fall back to there is nothing honest to boot as.
   await writeStoredManifest(
     db,
     declared,
@@ -226,47 +185,6 @@ function containerEntries(value: unknown): [string, unknown][] | null {
     return Object.entries(value as Record<string, unknown>);
   }
   return null;
-}
-
-/**
- * The mounted declaration, and `null` for one a **seeded** installation cannot
- * parse.
- *
- * A declaration seeds and does not govern, so on an installation that already
- * has a row it is read, announced as ignored, and thrown away. Validating it
- * strictly on that path meant a document this build could not parse took the
- * process down — over a value it had already decided not to use.
- *
- * That is not hypothetical. A manifest key added to the declaration ahead of
- * the image that understands it is the ordinary shape of a rollout: the
- * declaration lands with the merge and the image lands with the digest bump,
- * and between them every replica crash-loops on
- * `Unrecognized key` for a field the stored row does not have and no reader
- * would have consulted. Nothing about the running installation was wrong.
- *
- * **Unseeded is still fatal**, and has to be: there the declaration is the
- * whole configuration, and continuing would boot the placeholder manifest as
- * though the operator had declared nothing.
- *
- * The cost, stated: a declaration that has been broken for a while is a
- * warning nobody reads until a torn-down installation fails to come back
- * configured. That is the smaller failure. Crashing a healthy installation to
- * report a document it is ignoring is the larger one.
- */
-async function declaredManifest(
-  seeded: boolean,
-  env: Env,
-): Promise<AuthoredManifest | null> {
-  try {
-    return await loadManifestIfPresent(env);
-  } catch (cause) {
-    if (!seeded) throw cause;
-    const detail = cause instanceof Error ? cause.message : String(cause);
-    console.warn(
-      `installation manifest: the mounted declaration is not valid for this build and is being ignored, which is what a declaration already is for a seeded installation — re-seeding from it would fail until it is corrected: ${detail}`,
-    );
-    return null;
-  }
 }
 
 /**

@@ -15,7 +15,7 @@ import { describe, expect, test } from 'bun:test';
 import { configureInstallation } from '../../src/commands/installation/configure.ts';
 import type { Clock, CommandContext } from '../../src/commands/types.ts';
 import type { AuthoredManifest } from '../../src/config/manifest.schema.ts';
-import { loadStoredManifest } from '../../src/config/manifest-store.ts';
+import { writeStoredManifest } from '../../src/config/manifest-store.ts';
 import { installation } from '../../src/db/schema.ts';
 import { targetLabel } from '../../src/domain/target.ts';
 import { withIsolatedDatabase } from '../harness/db.ts';
@@ -235,7 +235,5 @@ describe('configuring an installation', () => {
 });
 
 async function seed(): Promise<void> {
-  await loadStoredManifest(database().db, {
-    SPINDRIFT_MANIFEST: JSON.stringify(manifest),
-  });
+  await writeStoredManifest(database().db, manifest);
 }

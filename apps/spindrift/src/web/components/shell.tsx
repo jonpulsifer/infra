@@ -1,5 +1,4 @@
 import {
-  AlertTriangle,
   Boxes,
   Database,
   Hammer,
@@ -205,7 +204,6 @@ export function AppShell({
   onNavigate,
   onSignOut,
   themeControl,
-  declarationDivergence = [],
   children,
 }: {
   readonly path: string;
@@ -213,19 +211,6 @@ export function AppShell({
   readonly onNavigate: (path: string) => void;
   readonly onSignOut: () => void;
   readonly themeControl: ReactNode;
-  /**
-   * Dotted paths where the mounted declaration disagrees with this
-   * installation (`views/auth/installation.tsx` says why a value never rides
-   * along with one). Optional and defaulted to `[]` so every existing caller
-   * — none of which had an opinion about a declaration — keeps asserting
-   * nothing about a fact it does not exercise.
-   *
-   * Rendered here, under the header rather than only on the Settings screen,
-   * because this is the one component every screen in the product passes
-   * through: an installation nobody opens Settings on otherwise never learns
-   * a merge did not reach the row.
-   */
-  readonly declarationDivergence?: readonly string[];
   readonly children: ReactNode;
 }) {
   // `isReconnecting` doubles as its own server snapshot: unlike
@@ -358,35 +343,13 @@ export function AppShell({
             </Button>
           </div>
         </header>
-        {declarationDivergence.length > 0 ? (
-          <div
-            role="alert"
-            className="flex items-center gap-2 border-b border-warning/40 bg-warning-soft px-4 py-2 text-xs sm:px-6"
-          >
-            <AlertTriangle
-              aria-hidden="true"
-              className="size-3.5 shrink-0 text-warning"
-            />
-            <span>
-              The mounted declaration no longer matches this installation.{' '}
-              <button
-                type="button"
-                className="underline underline-offset-2 hover:no-underline"
-                onClick={() => onNavigate('/settings/installation')}
-              >
-                Review it in Settings
-              </button>
-              .
-            </span>
-          </div>
-        ) : null}
         {reconnecting ? (
           // Silent forever was the bug (`stream-client.ts`'s header explains
           // the retry loop this reports on): a live pane that has stopped
           // updating and says nothing looks identical to one with nothing new
           // to show. This is the one place every screen with a stream passes
-          // through, the same reason `declarationDivergence` renders here
-          // rather than on each screen that could show it.
+          // through, which is why it renders here rather than on each screen
+          // that could show it.
           <div
             role="status"
             className="flex items-center gap-2 border-b border-border bg-muted/60 px-4 py-1.5 text-xs text-muted-foreground sm:px-6"

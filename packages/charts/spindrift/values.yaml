@@ -2,12 +2,6 @@
 
 image: ""
 
-# The installation manifest document, mounted as a ConfigMap. It seeds an
-# installation that has no durable row yet and is ignored once one exists, so
-# it brings a torn-down installation back configured rather than driving a
-# running one. Correcting a value on a seeded installation is the UI's job.
-manifest: {}
-
 # One named identity for the control plane. Both processes receive projected,
 # audience-scoped credentials; the default API credential is never automounted.
 serviceAccount:

@@ -51,7 +51,6 @@ let answer:
   | {
       readonly kind: 'ok';
       readonly configured: boolean;
-      readonly declarationDivergence?: readonly string[];
     }
   | { readonly kind: 'throws' }
   | { readonly kind: 'never' } = { kind: 'ok', configured: true };
@@ -91,11 +90,6 @@ beforeAll(() => {
             ok: true,
             value: {
               manifest: DEFAULT_PLACEHOLDER_MANIFEST,
-              declaration: null,
-              declarationDivergence:
-                answer.kind === 'ok'
-                  ? (answer.declarationDivergence ?? [])
-                  : [],
               configured: answer.kind === 'ok' && answer.configured,
             },
           }),
@@ -206,31 +200,3 @@ describe('the installation decides which application is rendered', () => {
  * against `AppShell` handed a divergence directly: a banner nothing wires
  * confirms nothing.
  */
-describe('a divergent declaration is announced on the product surface', () => {
-  test('a non-empty declarationDivergence is shown, unprompted', async () => {
-    answer = {
-      kind: 'ok',
-      configured: true,
-      declarationDivergence: ['build.zeroConfigFrontend'],
-    };
-
-    const screen = await mount();
-
-    expect(screen.text()).toContain(
-      'The mounted declaration no longer matches this installation.',
-    );
-    expect(screen.text()).toContain('Review it in Settings');
-
-    screen.unmount();
-  });
-
-  test('an empty declarationDivergence says nothing', async () => {
-    answer = { kind: 'ok', configured: true, declarationDivergence: [] };
-
-    const screen = await mount();
-
-    expect(screen.text()).not.toContain('mounted declaration');
-
-    screen.unmount();
-  });
-});
