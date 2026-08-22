@@ -140,7 +140,7 @@ export const DEFAULT_PLACEHOLDER_MANIFEST: AuthoredManifest = {
     buildWorkflow: null,
   },
   build: {
-    routes: [{ name: 'hosted', adapter: 'github-actions' }],
+    routes: [{ name: 'github', adapter: 'github-actions' }],
     /**
      * The one value in this manifest that is not a placeholder, because it
      * names a third party's image rather than anything about an installation:

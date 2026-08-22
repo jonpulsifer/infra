@@ -47,7 +47,7 @@ github:
   buildWorkflow: null
 build:
   routes:
-    - name: hosted
+    - name: github
       adapter: github-actions
   # The one value in this document that is not a placeholder — see the doc
   # comment on `DEFAULT_PLACEHOLDER_MANIFEST.build.zeroConfigFrontend`.

@@ -344,6 +344,13 @@
       "when": 1786968600000,
       "tag": "0048_vessel_discovery",
       "breakpoints": true
+    },
+    {
+      "idx": 49,
+      "version": "7",
+      "when": 1786968660000,
+      "tag": "0049_build_route_names",
+      "breakpoints": true
     }
   ]
 }

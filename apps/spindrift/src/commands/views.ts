@@ -214,11 +214,13 @@ export interface BuildView {
    *
    * Carried beside the runner rather than instead of it, because the two answer
    * different questions and only one of them is stable. `runner` is the route's
-   * name, which an installation chooses: "hosted" says which of *this*
-   * installation's routes ran and nothing at all about what it is. The platform
-   * is what tells an operator which failure modes are on the table — hosted CI
-   * and the cloud builder fail in entirely different ways — and it is the key
-   * the screen draws a mark from, the way a Target's adapter is.
+   * name, which an installation chooses: a route name says *where* the build
+   * ran, which is one installation's arrangement and says nothing about what
+   * the thing is. The platform is what tells an operator which failure modes
+   * are on the table — hosted CI and the cloud builder fail in entirely
+   * different ways — and it is the key the screen draws a mark from, the way a
+   * Target's adapter is. Two routes can share one adapter (a second runner
+   * class, a second project), which is why the two are not one column.
    *
    * `null` for a Build whose recorded runner matches no configured route: a
    * route can be retired while its Builds stay readable, and naming no platform

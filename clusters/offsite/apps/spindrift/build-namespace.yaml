@@ -1,0 +1,97 @@
+# Where the in-cluster build route's Jobs run.
+#
+# Its own namespace and not `spindrift-apps`, because a build Job carries what
+# an App's workload must not be able to read: `in-cluster.ts` rides a registry
+# credential and every build secret as plain container environment, so anyone
+# with `get jobs` in the namespace holds them for the Job's TTL. Putting builds
+# where Apps run would make that App-readable. Here the only reader is the
+# controller.
+#
+# `baseline`, matching the `spindrift` namespace rather than the `restricted`
+# the App namespaces get. Rootless BuildKit needs unprivileged user namespaces,
+# which `restricted` does not by itself forbid — but `baseline` is the honest
+# floor to state for a workload whose whole job is to run untrusted build
+# instructions, and it is the level the route's rendered security context is
+# written against.
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: spindrift-build
+  labels:
+    kustomize.toolkit.fluxcd.io/prune: enabled
+    app.kubernetes.io/part-of: spindrift
+    pod-security.kubernetes.io/enforce: baseline
+    pod-security.kubernetes.io/enforce-version: latest
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/audit-version: latest
+    pod-security.kubernetes.io/warn: restricted
+    pod-security.kubernetes.io/warn-version: latest
+# The account the Job runs as, and the account the push authorizes as.
+#
+# §13's "nothing stored": a build pushing to Artifact Registry does it as this
+# account through workload identity, with no credential handed to the Job.
+# GHCR is not a flavour this route self-authorizes, so a push there still takes
+# a stored registry credential — which is why `offsite` is ranked below the two
+# routes that already push, and why a build dispatched before one is stored
+# refuses cleanly at `publishableRegistries` rather than failing at the push.
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: spindrift-build
+  namespace: spindrift-build
+  labels:
+    app.kubernetes.io/part-of: spindrift
+# What the controller may do in that namespace, and nothing wider.
+#
+# `create` and `get` on jobs and nothing else: the route starts one and polls
+# it, and never edits or deletes one — a finished Job is reaped by its own
+# `ttlSecondsAfterFinished`, so no `delete` is needed for the namespace to stay
+# bounded. `list` on pods and `get` on pods/log are how the live log is read:
+# the route finds its pod by label because it does not know the name ahead of
+# time.
+#
+# Namespaced deliberately. The deploy adapter's grant over `spindrift-apps`
+# (clusters/base/platform/spindrift-target/rbac.yaml) is a different one for a
+# different purpose, and sharing either would give each the other's reach.
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: spindrift-build
+  namespace: spindrift-build
+rules:
+  - apiGroups:
+      - batch
+    resources:
+      - jobs
+    verbs:
+      - create
+      - get
+  - apiGroups:
+      - ""
+    resources:
+      - pods
+    verbs:
+      - list
+  - apiGroups:
+      - ""
+    resources:
+      - pods/log
+    verbs:
+      - get
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: spindrift-build
+  namespace: spindrift-build
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: spindrift-build
+subjects:
+  - kind: ServiceAccount
+    name: spindrift
+    namespace: spindrift
