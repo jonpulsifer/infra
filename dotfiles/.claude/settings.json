@@ -30,5 +30,6 @@
   "theme": "dark",
   "editorMode": "normal",
   "remoteControlAtStartup": false,
-  "agentPushNotifEnabled": true
+  "agentPushNotifEnabled": true,
+  "hooks": {"SessionStart":[{"matcher":"*","hooks":[{"type":"command","command":"bash '/home/jawn/.claude/hooks/herdr-agent-state.sh' session","timeout":10}]}]}
 }
