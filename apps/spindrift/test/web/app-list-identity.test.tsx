@@ -46,11 +46,7 @@ import {
   type AppDeletionControls,
   DeleteAppButton,
 } from '../../src/web/components/delete-app.tsx';
-import {
-  type ExplorerItem,
-  ObjectExplorer,
-} from '../../src/web/components/object-explorer.tsx';
-import { AppList, appHref } from '../../src/web/views/apps/list.tsx';
+import { AppList, AppRow, appHref } from '../../src/web/views/apps/list.tsx';
 import { withIsolatedDatabase } from '../harness/db.ts';
 import {
   fixtureManifest,
@@ -399,47 +395,41 @@ const idleDeletion: AppDeletionControls = {
   dismiss: () => undefined,
 };
 
-describe('the list renders two same-named rows as two Apps', () => {
+/**
+ * The rows this list returns, as elements — one `AppRow` per App.
+ *
+ * The list was an `ObjectExplorer` when this file was written, so these three
+ * tests reached the rows through its `items` and `renderInspector` props. The
+ * screen is a flat list now and the rows are `AppRow` elements, but the claim
+ * is unchanged and so is the method: walk the tree the component *returns*, and
+ * read which value each handler closed over.
+ */
+function rowsOf(onNavigate: (path: string) => void = () => undefined) {
   const tree = AppList({
     apps: TWIN_ROWS,
-    onNavigate: () => undefined,
+    onNavigate,
     deletion: idleDeletion,
   });
-  const explorer = [...elements(tree)].find(
-    (element) => element.type === ObjectExplorer,
-  );
-  if (!explorer) throw new Error('the App list offered no object explorer');
-  const explorerProps = explorer.props as {
-    items: readonly ExplorerItem[];
-    renderInspector: (item: ExplorerItem) => ReactNode;
-  };
+  const rows = [...elements(tree)].filter((element) => element.type === AppRow);
+  if (rows.length === 0) throw new Error('the App list rendered no rows');
+  return rows;
+}
 
+describe('the list renders two same-named rows as two Apps', () => {
   test('there are two rows, keyed by id rather than by name', () => {
     // Keyed by name, React sees one key twice and reconciles two Apps into one
     // row — before any of the rest of this can even be asked.
-    expect(explorerProps.items.map((row) => row.id)).toEqual(
-      IDS.map((id) => `app:${id}`),
-    );
+    expect(rowsOf().map((row) => row.key)).toEqual([...IDS]);
   });
 
   test('each row navigates to its own App', () => {
     const visited: string[] = [];
-    const navigating = AppList({
-      apps: TWIN_ROWS,
-      onNavigate: (path) => visited.push(path),
-      deletion: idleDeletion,
-    });
-    const navigatingExplorer = [...elements(navigating)].find(
-      (element) => element.type === ObjectExplorer,
-    );
-    if (!navigatingExplorer) throw new Error('no navigating object explorer');
-    const props = navigatingExplorer.props as {
-      items: readonly ExplorerItem[];
-      renderInspector: (item: ExplorerItem) => ReactNode;
-    };
-    for (const item of props.items) {
-      const inspector = props.renderInspector(item);
-      for (const inner of elements(inspector)) {
+    for (const row of rowsOf((path) => visited.push(path))) {
+      // The row *is* the button, so its own press is the navigation — there is
+      // no inspector in between any more, which was the point of the change.
+      for (const inner of elements(
+        AppRow(row.props as Parameters<typeof AppRow>[0]),
+      )) {
         const control = inner.props as { onClick?: () => void };
         if (control.onClick) {
           control.onClick();
@@ -451,8 +441,10 @@ describe('the list renders two same-named rows as two Apps', () => {
   });
 
   test('each row hands its own id to the trash affordance', () => {
-    const targets = explorerProps.items.map((item) => {
-      for (const inner of elements(explorerProps.renderInspector(item))) {
+    const targets = rowsOf().map((row) => {
+      for (const inner of elements(
+        AppRow(row.props as Parameters<typeof AppRow>[0]),
+      )) {
         if (inner.type === DeleteAppButton) {
           return inner.props as { appId: string; name: string };
         }
@@ -463,6 +455,23 @@ describe('the list renders two same-named rows as two Apps', () => {
     // The name still travels, because it is what the confirmation says out
     // loud. It is simply not what the command acts on.
     expect(targets.map((target) => target.name)).toEqual(['twins', 'twins']);
+  });
+
+  test('a filter that matches one twin leaves one row', () => {
+    // The filter is the screen's state and the list's prop, so this is the
+    // whole of it: a needle in, the rows that survive out.
+    const filtered = AppList({
+      apps: TWIN_ROWS,
+      onNavigate: () => undefined,
+      deletion: idleDeletion,
+      filter: 'twins.apps.example',
+    });
+    const rows = [...elements(filtered)].filter(
+      (element) => element.type === AppRow,
+    );
+    // Only the second twin has that address, and matching it must not take the
+    // sibling that shares its name with it.
+    expect(rows.map((row) => row.key)).toEqual([IDS[1]!]);
   });
 
   test('and the trash affordance reviews by that id', () => {

@@ -88,6 +88,40 @@ export interface PrerequisiteRowView {
  */
 export type { DeployPhase };
 
+/**
+ * The word a phase reads as, for every screen that shows one in passing.
+ *
+ * Not a new vocabulary — the one `deploys/get-detail.ts` and
+ * `builds/get-detail.ts` already speak, finished. Those two compute a word
+ * because a detail screen can afford a richer one: get-detail knows whether a
+ * Build stands behind the Deploy, so it can separate "Build failed" from
+ * "Deploy failed". Every *other* screen rendered `phase.toLowerCase()` and got
+ * `applying`, which is the platform's word for its own state machine and not
+ * an answer to "what is happening to my App".
+ *
+ * So this is the list-context word: the same vocabulary, minus the
+ * distinctions that need context a row does not have. `FAILED` reads "Deploy
+ * failed" because from a row that is what is known — a Build that failed
+ * underneath is a fact the release screen has and this one does not, and
+ * guessing between them is how a green build got blamed.
+ *
+ * A record rather than a switch, for the reason `STATUS` in
+ * `components/status.tsx` is one: a phase added to §6 without a word here is a
+ * compile error rather than a screen that renders `undefined`.
+ */
+const PHASE_WORD = {
+  PENDING: 'Queued',
+  APPLYING: 'Applying',
+  WAITING: 'Releasing',
+  LIVE: 'Live',
+  FAILED: 'Deploy failed',
+} as const satisfies Record<DeployPhase, string>;
+
+/** {@link PHASE_WORD}, as the function every screen calls. */
+export function deployPhaseWord(phase: DeployPhase): string {
+  return PHASE_WORD[phase];
+}
+
 /** Whether a phase is still moving. Drives the pulsing dot and nothing else. */
 export function isInFlight(phase: DeployPhase): boolean {
   return phase === 'PENDING' || phase === 'APPLYING' || phase === 'WAITING';

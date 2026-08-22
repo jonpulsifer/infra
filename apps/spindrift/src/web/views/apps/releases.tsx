@@ -178,7 +178,7 @@ export function Releases({
     {
       id: 'phase',
       header: 'State',
-      cell: (row) => <PhasePill phase={row.phase}>{row.phase}</PhasePill>,
+      cell: (row) => <PhasePill phase={row.phase} />,
     },
     {
       id: 'when',
