@@ -1,0 +1,54 @@
+---
+# flux-operator exports one `flux_resource_info` series per Flux object with
+# its readiness, suspension, reason and applied revision. That is the only
+# place the reconcile state of the whole GitOps tree is legible to Prometheus:
+# the controllers themselves stopped exporting per-object conditions, so
+# without this a wedged Kustomization is invisible until a human runs
+# `flux get`.
+#
+# `uid` and `url` are dropped: neither is queried, both add label bytes to
+# every one of the ~130 series.
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: flux-operator
+  namespace: flux-system
+  labels:
+    release: prom-stack
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: flux-operator
+  endpoints:
+    - port: http
+      interval: 60s
+      metricRelabelings:
+        - action: labeldrop
+          regex: uid|url
+---
+# The controllers carry the reconcile histogram and controller-runtime's
+# queue depth and error counters -- how long the tree takes to converge and
+# whether a controller is falling behind, which the operator's snapshot of
+# current state cannot show.
+#
+# folly's TSDB runs close to its retention ceiling, so the Go runtime and
+# promhttp families are dropped at ingest: five controller pods' worth of
+# them is a few thousand series that answer nothing here.
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: flux-controllers
+  namespace: flux-system
+  labels:
+    release: prom-stack
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/part-of: flux
+  podMetricsEndpoints:
+    - port: http-prom
+      interval: 60s
+      metricRelabelings:
+        - action: drop
+          sourceLabels: [__name__]
+          regex: go_.*|promhttp_.*|process_.*

@@ -11,6 +11,7 @@ configMapGenerator:
   - name: dashboards-base
     files:
       - bosun.json
+      - flux.json
       - spindrift.json
 generatorOptions:
   disableNameSuffixHash: true

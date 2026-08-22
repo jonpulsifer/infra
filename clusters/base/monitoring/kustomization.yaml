@@ -14,6 +14,8 @@ resources:
   - bosun-rules.yaml
   - coredns-rules.yaml
   - etcd-rules.yaml
+  - flux-monitoring.yaml
+  - flux-rules.yaml
   - grafana-dashboards
   - helm-repository-grafana.yaml
   - helm-repository-prometheus.yaml
