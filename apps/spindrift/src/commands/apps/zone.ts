@@ -25,23 +25,11 @@
 
 import { eq } from 'drizzle-orm';
 import { z } from 'zod';
-import type { TargetAdapter } from '../../config/manifest.schema.ts';
-import {
-  apps,
-  components,
-  componentTargetDesired,
-  targets,
-  vessels,
-} from '../../db/schema.ts';
-import type { Reach } from '../../domain/desired-state.ts';
-import {
-  componentCanonical,
-  coreMintsCanonical,
-  type DnsZones,
-  zoneFor,
-} from '../../domain/naming.ts';
+import { apps } from '../../db/schema.ts';
+import { coreMintsCanonical, zoneFor } from '../../domain/naming.ts';
 import { targetLabel } from '../../domain/target.ts';
 import { type Command, failed, ok } from '../types.ts';
+import { namesUnder, placementsFor } from './names.ts';
 
 export const setAppZoneInput = z
   .object({
@@ -91,26 +79,10 @@ export const setAppZone: Command<SetAppZoneInput, SetAppZoneResult> = async (
     }
   }
 
-  // Every placement this App has, with the reach the Component asks for. The
-  // zone is the App's and the reach is each Component's, so a pin has to be
-  // able to serve all of them — an App whose web is public and whose admin is
-  // private is one App with two boundaries under it.
-  const placements = await context.db
-    .selectDistinct({
-      component: components.name,
-      reach: components.reach,
-      adapter: targets.adapter,
-      vessel: vessels.name,
-      id: targets.id,
-    })
-    .from(componentTargetDesired)
-    .innerJoin(
-      components,
-      eq(components.id, componentTargetDesired.componentId),
-    )
-    .innerJoin(targets, eq(targets.id, componentTargetDesired.targetId))
-    .innerJoin(vessels, eq(vessels.id, targets.vesselId))
-    .where(eq(components.appId, app.id));
+  // The zone is the App's and the reach is each Component's, so a pin has to
+  // be able to serve all of them — an App whose web is public and whose admin
+  // is private is one App with two boundaries under it.
+  const placements = await placementsFor(context.db, app.id);
 
   if (input.zone !== null) {
     // A Component core does not mint for takes its name from the platform, so
@@ -149,22 +121,3 @@ export const setAppZone: Command<SetAppZoneInput, SetAppZoneResult> = async (
     ),
   });
 };
-
-/**
- * What one placement will answer on, so the result states the outcome rather
- * than the setting. Empty where the platform names its own workload — the
- * adapter reports that name back across the deploy seam and core has none to
- * predict — and empty for a Component nothing routes to.
- */
-function namesUnder(
-  app: string,
-  placement: { component: string; reach: Reach; adapter: TargetAdapter },
-  zones: DnsZones,
-  pinned: string | null,
-): string[] {
-  if (!coreMintsCanonical(placement.adapter)) return [];
-  const zone = zoneFor(placement.reach, zones, pinned);
-  return zone === null
-    ? []
-    : [componentCanonical({ app, component: placement.component, zone })];
-}

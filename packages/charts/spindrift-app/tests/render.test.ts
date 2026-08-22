@@ -541,6 +541,37 @@ describe('the published record', () => {
     }
   });
 
+  test('an apex hostname publishes exactly like any other name (ticket 137)', async () => {
+    // §9's vanity name is a label or the bare zone — `example.test` with no
+    // subdomain at all — and the chart never inspects a hostname's shape, so an
+    // apex among `app.hostnames` needs no template branch of its own: it is
+    // still a CNAME to the tunnel, proxied, alongside the route's own name.
+    const objects = await render({
+      app: {
+        reach: 'public',
+        hostnames: ['blog-web.apps.example.test', 'apps.example.test'],
+      },
+    });
+    const route = one(objects, 'HTTPRoute');
+    expect(route.spec.hostnames).toContain('apps.example.test');
+
+    const endpoint = one(objects, 'DNSEndpoint');
+    const apex = endpoint.spec.endpoints.find(
+      (e: { dnsName: string }) => e.dnsName === 'apps.example.test',
+    );
+    expect(apex).toEqual({
+      dnsName: 'apps.example.test',
+      recordType: 'CNAME',
+      targets: ['tunnel.example.test'],
+      providerSpecific: [
+        {
+          name: 'external-dns.alpha.kubernetes.io/cloudflare-proxied',
+          value: 'true',
+        },
+      ],
+    });
+  });
+
   test("it renders on the route's condition, and never without one", async () => {
     // A record for a name nothing routes is the failure the wildcard already
     // was: it resolves, it authenticates, and it 404s.

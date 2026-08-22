@@ -1,11 +1,16 @@
 /**
  * Naming (Task 21, §9).
  *
- * **Both layers are flat now, and for one reason: a wildcard certificate binds
+ * **Both layers are flat, and for one reason: a wildcard certificate binds
  * exactly one label.** `plainboi-web.zone` is covered by `*.zone` and
  * `web.plainboi.zone` is not, which is what the first LIVE Deploy hit. So the
- * nesting the canonical layer used to be allowed is gone, and what survives of
- * the vanity layer is the case where core does not mint the first name at all.
+ * nesting the canonical layer once allowed is gone.
+ *
+ * **The vanity layer is the App's own name, on every Target (ticket 137).**
+ * Ticket 43's "where core mints, it can simply mint a good one" still decides
+ * {@link coreMintsCanonical} — nothing here reopens that — but it never bounded
+ * the vanity layer, which mints `www` and the bare apex, `@`, neither of which
+ * a minted `<app>-<component>.<zone>` can ever be.
  *
  * **What core mints is a name, never a record.** The record each name answers
  * to is the App chart's `DNSEndpoint`, asserted by
@@ -16,29 +21,31 @@
  */
 import { describe, expect, test } from 'bun:test';
 import {
+  APEX,
   componentCanonical,
   coreMintsCanonical,
   displayUrl,
   hostnameFor,
   isLabel,
+  isVanityLabel,
   VANITY_LEG_LOSSES,
   vanity,
   zoneFor,
 } from '../../src/domain/naming.ts';
 
-const APEX = 'apps.example.test';
+const ZONE = 'apps.example.test';
 const VANITY_ZONE = 'sh.example.test';
-const ZONES = [{ name: APEX, reaches: ['private', 'public'] }] as const;
+const ZONES = [{ name: ZONE, reaches: ['private', 'public'] }] as const;
 /** An installation that split its reaches across two zones (§9). */
 const SPLIT = [
-  { name: APEX, reaches: ['private'] },
+  { name: ZONE, reaches: ['private'] },
   { name: VANITY_ZONE, reaches: ['public'] },
 ] as const;
 
 describe('§9: one label under the zone, both layers', () => {
   test('a minted name is flat, and leads with the App', () => {
     expect(
-      componentCanonical({ app: 'shop', component: 'web', zone: APEX }),
+      componentCanonical({ app: 'shop', component: 'web', zone: ZONE }),
     ).toBe('shop-web.apps.example.test');
     // Flat because a wildcard certificate binds one label. Leading with the App
     // so an App's Components sort together in a zone listing.
@@ -52,6 +59,17 @@ describe('§9: one label under the zone, both layers', () => {
     expect(isLabel('shop.web')).toBe(false);
     expect(isLabel('-shop')).toBe(false);
     expect(isLabel('')).toBe(false);
+  });
+
+  test('the apex is the one vanity name with no label at all', () => {
+    // A vanity name is otherwise a label joined with a dot, which is why the
+    // bare zone needed a spelling of its own — `@`, DNS-zone style — rather
+    // than an empty label indistinguishable from asking for none.
+    expect(vanity(APEX, VANITY_ZONE)).toBe(VANITY_ZONE);
+    expect(isVanityLabel(APEX)).toBe(true);
+    expect(isVanityLabel('shop')).toBe(true);
+    expect(isVanityLabel('shop.web')).toBe(false);
+    expect(isVanityLabel('')).toBe(false);
   });
 });
 
@@ -173,7 +191,7 @@ describe('§9: core mints a name only where the platform gives none', () => {
     }
   });
 
-  test('a vanity label is layered on only where core mints nothing', () => {
+  test('a vanity label rides a backend that names its own workload too', () => {
     const hostname = hostnameFor({
       app: 'shop',
       component: 'web',
@@ -188,9 +206,10 @@ describe('§9: core mints a name only where the platform gives none', () => {
     expect(hostname.vanity).toBe('shop.sh.example.test');
   });
 
-  test('a minted name is not layered over, because it is already good', () => {
-    // Where core mints, a second flat name in the same zone would be an alias
-    // for something already flat.
+  test('a minted name carries the vanity name too, on the same Target', () => {
+    // Ticket 43's reasoning bounds `canonical`, not `vanity`: a minted name is
+    // never `www` or the bare apex, and a cluster App wants one of those
+    // exactly as much as a Cloud Run App does.
     const hostname = hostnameFor({
       app: 'shop',
       component: 'web',
@@ -200,7 +219,22 @@ describe('§9: core mints a name only where the platform gives none', () => {
       zone: null,
       vanityLabel: 'shop',
     });
-    expect(hostname.vanity).toBeUndefined();
+    expect(hostname.canonical).toBe('shop-web.apps.example.test');
+    expect(hostname.vanity).toBe('shop.apps.example.test');
+  });
+
+  test('a kubernetes Target can vanity-name the apex too', () => {
+    const hostname = hostnameFor({
+      app: 'shop',
+      component: 'web',
+      adapter: 'kubernetes',
+      reach: 'public',
+      zones: SPLIT,
+      zone: null,
+      vanityLabel: APEX,
+    });
+    expect(hostname.canonical).toBe('shop-web.sh.example.test');
+    expect(hostname.vanity).toBe('sh.example.test');
   });
 
   test('the address shown prefers the vanity name, and is null when there is none', () => {
@@ -220,11 +254,12 @@ describe('§9: core mints a name only where the platform gives none', () => {
 });
 
 describe('§9: the vanity layer, and what it costs', () => {
-  test('the layer survives exactly where the platform names its own', () => {
-    // The certificate ration is gone with the Universal-SSL fact that produced
-    // it: a cert-manager wildcard has no such limit. What is left of the layer
-    // is the case it was always best at — putting a flat name over
-    // `plainboi-web-xyz.run.app`.
+  test('the canonical is minted exactly where the platform names its own; the vanity layer is not', () => {
+    // The certificate ration that once bounded both is gone with the
+    // Universal-SSL fact that produced it: a cert-manager wildcard has no such
+    // limit. `coreMintsCanonical` still narrows to these two — that reasoning
+    // was always about the canonical — but it was never a reason to narrow the
+    // vanity layer with it, which is what ticket 137 undoes.
     for (const adapter of ['cloudrun', 'static'] as const) {
       expect(coreMintsCanonical(adapter)).toBe(false);
     }
