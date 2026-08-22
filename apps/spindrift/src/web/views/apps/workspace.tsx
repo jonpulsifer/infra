@@ -61,6 +61,7 @@ import {
 import { DiagnosisPanel, DriftPanel } from '../../components/diagnosis.tsx';
 import { EmptyState, LogPane } from '../../components/log-pane.tsx';
 import { PhasePill } from '../../components/status.tsx';
+import { Topology } from '../../components/topology.tsx';
 import { useRead } from '../../poll.ts';
 import { subscribeRuntime } from '../../stream-client.ts';
 import { Badge } from '../../ui/badge.tsx';
@@ -530,6 +531,15 @@ export function Workspace({
 
       {current === 'overview' ? (
         <>
+          {/*
+            Above the Components list rather than below it, and this is the one
+            place `components/flow.tsx`'s "the operator came for the rows" does
+            not apply: that objection is about a *static explainer* stacked on
+            top of live data. This is the live data, read a second way, and the
+            question it answers — what is this App made of and what does it
+            talk to — is the one you orient with before reading any row.
+          */}
+          <Topology components={view.components} datastores={view.datastores} />
           <Components
             components={view.components}
             archiveSourced={view.archiveSourced === true}
