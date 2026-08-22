@@ -62,7 +62,13 @@ spec:
       prometheusSpec:
         serviceDiscoveryRole: EndpointSlice
         retention: 30d
-        retentionSize: 40GB
+        # riptide's /mnt/disks carries jellyfin's media hostPath as well as
+        # every local-path PVC on the node, and leaves ~18G free, so the TSDB
+        # needs a bound the disk can honour: filling that partition takes the
+        # other claims down with it. 30d of this cluster measures ~15GiB, so
+        # the two arms land close together on purpose -- 30d is the intent and
+        # 16GiB is the hard stop, whichever comes first.
+        retentionSize: 16GB
         # `cluster` is what tells the two sites apart once alerts land in one
         # Discord channel, and it is the variable every multi-cluster dashboard
         # in the chart groups on.
@@ -75,6 +81,10 @@ spec:
               accessModes: ["ReadWriteOnce"]
               resources:
                 requests:
+                  # The bound PVC is 75Gi, expanded past this. local-path
+                  # enforces neither number, and a volumeClaimTemplate is
+                  # immutable without recreating the StatefulSet, so the two
+                  # stay apart: retentionSize is the real bound.
                   storage: 50Gi
     grafana:
       admin:
