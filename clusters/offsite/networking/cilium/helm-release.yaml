@@ -56,15 +56,42 @@ spec:
       enabled: true
     k8sNetworkPolicy:
       enabled: true
-    operator.prometheus.enabled: true
+    # Nested, not `operator.prometheus.enabled:` -- a dotted key is one
+    # literal value the chart never reads, and it only looked like it worked
+    # because true is already the default.
+    operator:
+      prometheus:
+        enabled: true
+        serviceMonitor:
+          enabled: true
+          interval: 30s
+          labels:
+            release: prom-stack
     dashboards:
       enabled: true
     prometheus:
       enabled: true
+      # The metrics endpoint has always been on; nothing selected it, so the
+      # cilium, BGP and endpoint dashboards this chart ships rendered empty.
+      # The ServiceMonitor is what the chart keys the cilium-agent Service off
+      # as well, so this creates the target too.
       serviceMonitor:
-        enabled: false
+        enabled: true
+        # The chart defaults every one of these ServiceMonitors to 10s.
+        # Nothing else in either cluster is scraped faster than the 30s
+        # Prometheus uses globally, and three times the samples for the same
+        # series is the cheapest way to spend a retention ceiling on nothing.
+        interval: 30s
         labels:
           release: prom-stack
+        metricRelabelings:
+          # Same trim as folly: hive job timers, workqueue and
+          # apiserver-client latency histograms are ~45% of what each agent
+          # exports, appear on no dashboard here, and one shape across both
+          # clusters is worth more than the series offsite could spare.
+          - action: drop
+            sourceLabels: [__name__]
+            regex: cilium_(hive_|k8s_client_|k8s_workqueue_|agent_api_process_time_).*
       dashboards:
         enabled: true
     hubble:
@@ -77,12 +104,17 @@ spec:
         prometheus:
           enabled: true
           serviceMonitor:
-            enabled: false
+            enabled: true
+            interval: 30s
             labels:
               release: prom-stack
       metrics:
+        # ~440 series per node for drops, DNS, TCP and L7 -- the cheapest
+        # network visibility on offer here, and what the hubble dashboards
+        # this chart already ships are drawn against.
         serviceMonitor:
-          enabled: false
+          enabled: true
+          interval: 30s
           labels:
             release: prom-stack
         dashboards:
