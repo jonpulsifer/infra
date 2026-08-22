@@ -43,7 +43,7 @@ spec:
             severity: warning
           annotations:
             message: "{{ $labels.kind }}/{{ $labels.name }} in {{ $labels.exported_namespace }} has been suspended for a day"
-            description: "A suspended object ignores git. Resume it with `flux resume {{ $labels.kind | lower }} -n {{ $labels.exported_namespace }} {{ $labels.name }}`, or delete it if it is no longer wanted."
+            description: "A suspended object ignores git. Resume it with `flux resume {{ $labels.kind | toLower }} -n {{ $labels.exported_namespace }} {{ $labels.name }}`, or delete it if it is no longer wanted."
 
         # Both alerts above are readings of one exporter. If it stops, they go
         # quiet and the silence reads exactly like a healthy tree, so the
