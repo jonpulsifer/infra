@@ -22,6 +22,7 @@
  */
 import type { BuildAdapter } from '../adapters/build/contract.ts';
 import type { GcpDiscovery } from '../adapters/cloud-discovery.ts';
+import type { CloudflareAccounts } from '../adapters/cloudflare.ts';
 import type { DatastoreAdapter } from '../adapters/datastore/contract.ts';
 import type { DeployAdapter } from '../adapters/deploy/contract.ts';
 import type { SecretStore } from '../adapters/store/contract.ts';
@@ -171,6 +172,17 @@ export interface AdapterRegistry {
    * global.
    */
   discovery?(): GcpDiscovery | null;
+  /**
+   * Reading a connected Cloudflare account (§13, §20).
+   *
+   * The boundary's own inventory — its zones, its Workers subdomain, its Pages
+   * projects — as distinct from `deploy('cloudflare-pages')`, which answers for
+   * one surface on it. Optional for the reason `discovery` above is: a registry
+   * with no Cloudflare bearer is an ordinary installation, and a caller that
+   * finds it absent records that nothing was read rather than reaching for a
+   * global.
+   */
+  cloudflare?(): CloudflareAccounts | null;
   /**
    * The Functions surfaces this installation can deploy to, keyed by target.
    *

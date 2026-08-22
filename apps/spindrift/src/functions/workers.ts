@@ -4,8 +4,10 @@
  * The script is uploaded as an ES module and given a **custom domain** rather
  * than a route: a custom domain makes the platform own the hostname's record
  * and its certificate, so nothing here writes DNS and §9's "Spindrift holds no
- * zone credential" survives a feature that hands out hostnames. The zone id
- * that call needs is read once per instance from the zone's name.
+ * zone credential" survives a feature that hands out hostnames. Which zone that
+ * is, is the account's answer rather than the manifest's first entry: the
+ * account's own zone listing is read once per instance and the first declared
+ * zone it carries is the one hostnames are minted in.
  *
  * `tail` opens the platform's own trace websocket. A tail session expires on
  * its own schedule, so the generator reopens one whenever the socket closes
@@ -15,8 +17,9 @@
  * ponytail: no per-function compatibility flags, no bindings. Both are fields
  * on the metadata part when a function needs them.
  */
+import { CLOUDFLARE_API_ROOT } from '../adapters/cloudflare.ts';
 import type { Fetcher, TokenProvider } from '../adapters/deploy/cloud/http.ts';
-import { DEFAULT_ENDPOINT } from '../adapters/deploy/pages/index.ts';
+import { servableZone } from '../domain/vessel.ts';
 import {
   FunctionDeployError,
   type FunctionDeployer,
@@ -52,8 +55,16 @@ const RECONNECT_MAX_MS = 30_000;
 export interface WorkersFunctionsOptions {
   readonly token: TokenProvider;
   readonly accountId: string;
-  /** The zone the function's hostname is created in. */
-  readonly zoneName: string;
+  /**
+   * The zones this installation declares, in the order it declares them.
+   *
+   * A list rather than one name, because `dns.zones` is the installation's
+   * naming policy (§9) and says nothing about which provider answers for each
+   * entry — an installation with a private zone on a resolver of its own and a
+   * public one here declares both. Which of them this account actually carries
+   * is the account's answer, read once by {@link WorkersFunctions.resolveZone}.
+   */
+  readonly zoneNames: readonly string[];
   readonly subdomain?: string;
   readonly endpoint?: string;
   /** Injected so a test can stand a fake far side behind the real client. */
@@ -95,14 +106,15 @@ type Attempt<Result> =
 export class WorkersFunctions implements FunctionDeployer {
   readonly target: FunctionTarget = 'cloudflare-workers';
 
-  private zone: string | null = null;
+  private zone: { readonly name: string; readonly id: string } | null = null;
 
   constructor(private readonly options: WorkersFunctionsOptions) {}
 
   /** `<name>.<subdomain>.<zone>` — the address the function answers on. */
-  hostname(name: string): string {
+  async hostname(name: string): Promise<string> {
     const subdomain = this.options.subdomain ?? DEFAULT_SUBDOMAIN;
-    return `${name}.${subdomain}.${this.options.zoneName}`;
+    const zone = await this.resolveZone();
+    return `${name}.${subdomain}.${zone.name}`;
   }
 
   async deploy(
@@ -110,7 +122,8 @@ export class WorkersFunctions implements FunctionDeployer {
     source: string,
   ): Promise<{ readonly url: string }> {
     const script = workloadName(name);
-    const zoneId = await this.zoneId();
+    const zone = await this.resolveZone();
+    const hostname = await this.hostname(name);
 
     // Multipart, because a module Worker is uploaded as the files it is made
     // of plus a metadata part naming which one is the entry.
@@ -151,15 +164,15 @@ export class WorkersFunctions implements FunctionDeployer {
       `/accounts/${this.options.accountId}/workers/domains`,
       {
         json: {
-          hostname: this.hostname(name),
+          hostname,
           service: script,
-          zone_id: zoneId,
+          zone_id: zone.id,
           environment: 'production',
         },
       },
     );
 
-    return { url: `https://${this.hostname(name)}` };
+    return { url: `https://${hostname}` };
   }
 
   async remove(name: string): Promise<void> {
@@ -170,7 +183,7 @@ export class WorkersFunctions implements FunctionDeployer {
     const domains = await this.attempt<readonly { readonly id?: string }[]>(
       'GET',
       `/accounts/${account}/workers/domains`,
-      { query: { hostname: this.hostname(name) } },
+      { query: { hostname: await this.hostname(name) } },
     );
     if (domains.ok) {
       for (const domain of domains.result ?? []) {
@@ -235,20 +248,48 @@ export class WorkersFunctions implements FunctionDeployer {
     }
   }
 
-  /** The zone's id, read once. A zone is not renamed mid-process. */
-  private async zoneId(): Promise<string> {
+  /**
+   * The declared zone this account actually carries, read once.
+   *
+   * The account's own listing rather than a lookup of one name, because the
+   * question is which of the declared zones is *here*. Taking the head of the
+   * declared list and asking for it by name gave the platform a zone it had
+   * never heard of whenever the installation's first zone was somebody else's,
+   * and the refusal named that zone rather than the mismatch.
+   *
+   * Read once: a zone is not renamed mid-process, and a zone added to the
+   * account during one is picked up by the next restart — the same staleness
+   * every other cached far-side fact here carries.
+   */
+  private async resolveZone(): Promise<{
+    readonly name: string;
+    readonly id: string;
+  }> {
     if (this.zone !== null) return this.zone;
-    const zones = await this.call<
-      readonly { readonly id?: string }[] | undefined
-    >('GET', '/zones', { query: { name: this.options.zoneName } });
-    const id = zones?.[0]?.id;
-    if (id === undefined) {
+    const listed = await this.call<
+      readonly { readonly id?: string; readonly name?: string }[] | undefined
+    >('GET', '/zones', {
+      query: { 'account.id': this.options.accountId, per_page: '50' },
+    });
+    const carried = (listed ?? [])
+      .filter(
+        (zone): zone is { id: string; name: string } =>
+          zone.id !== undefined && zone.name !== undefined,
+      )
+      .map((zone) => ({ ...zone, status: 'unknown' }));
+    const name = servableZone(this.options.zoneNames, carried);
+    const chosen = carried.find((zone) => zone.name === name);
+    if (chosen === undefined) {
       throw new FunctionDeployError(
-        `this installation's Cloudflare token cannot see the zone ${this.options.zoneName}`,
+        `this installation's Cloudflare token sees no zone in account ${
+          this.options.accountId
+        } matching any zone this installation declares (${
+          this.options.zoneNames.join(', ') || 'none'
+        })`,
       );
     }
-    this.zone = id;
-    return id;
+    this.zone = { name: chosen.name, id: chosen.id };
+    return this.zone;
   }
 
   private async call<Result>(
@@ -278,7 +319,9 @@ export class WorkersFunctions implements FunctionDeployer {
     path: string,
     options: RequestOptions = {},
   ): Promise<Attempt<Result>> {
-    const url = new URL(`${this.options.endpoint ?? DEFAULT_ENDPOINT}${path}`);
+    const url = new URL(
+      `${this.options.endpoint ?? CLOUDFLARE_API_ROOT}${path}`,
+    );
     for (const [key, value] of Object.entries(options.query ?? {})) {
       url.searchParams.set(key, value);
     }

@@ -80,9 +80,11 @@ export const PROBED_SURFACES_BY_VESSEL_KIND = {
   // row here on the day a build route emits `.vercel/output` with functions in
   // it — which is what the deploy adapter is already shaped to hand over.
   'vercel-team': ['vercel'],
-  // The same shape one vendor over, and the same one-today: this account also
-  // runs containers, and that is a row here rather than a second vessel,
-  // because both are reached with the one account credential.
+  // The same shape one vendor over, and the same one-today. This account also
+  // runs Workers and containers, and each is a row here rather than a second
+  // vessel, because all of them are reached with the one account credential —
+  // which is why the connect act reads the whole account (`VesselDiscovery`)
+  // even while only one of its surfaces is a Target something is placed on.
   'cloudflare-account': ['cloudflare-pages'],
 } as const satisfies Record<VesselKind, readonly TargetAdapter[]>;
 
@@ -384,23 +386,96 @@ export interface CloudflareAccountLocation {
   kind: 'cloudflare-account';
   /** The account every surface on this vessel deploys into. */
   account: string;
+  /**
+   * The API root this account is reached at, without a trailing slash.
+   *
+   * Optional, and ordinarily absent: one hostname answers for every account,
+   * so `adapters/cloudflare.ts` applies its own default. It is on the boundary
+   * rather than on a surface because every surface on this account reaches the
+   * *same* root — Pages, Workers and the zone listing are three paths under one
+   * host — and a perimeter or a mirror in front of it is in front of all three.
+   * The Pages Target keeps its own `endpoint` for the adapter contract; one
+   * connect act writes both from one field.
+   */
+  endpoint?: string;
 }
 
 /**
- * An edge platform account, the tenancy container its hosting products sit in.
+ * What a pass read off the boundary itself, as opposed to off a surface on it.
  *
- * **No credential here either** (§13) — but this is the boundary where §13's
- * "native OIDC federation, nothing stored" stops being available rather than
- * stops being wanted: this platform's API federates no workload identity, so
- * what authorizes a call is an account token the installation is configured
- * with, minted into the adapter exactly as a federated one is. The account id
- * is not a secret and is the only half of that pair that identifies *which*
- * boundary, so it is the only half that lives on a row.
+ * The vessel's half of `TargetDiscovery`, and it exists for the reason that one
+ * does: an operator's next question after "is this connected" is "what is in
+ * it", and until this column nothing about a Cloudflare account was legible
+ * beyond its id. Zones and Workers are the two facts that are the *account's*
+ * rather than any one surface's — a zone is not Pages' and not Workers', it is
+ * the account's — so putting them on a Target would be the same drift the
+ * Vessel noun was introduced to stop.
+ *
+ * A union with one arm today, discriminated the same way `VesselLocation` is:
+ * a cluster and a cloud project are read by the loops that already read them,
+ * and neither has an account-wide listing this shape would carry.
  */
-export interface CloudflareAccountLocation {
-  kind: 'cloudflare-account';
-  /** The account every surface on this vessel deploys into. */
-  account: string;
+export type VesselDiscovery = CloudflareAccountDiscovery;
+
+/** One zone a Cloudflare account's token can see. */
+export interface CloudflareZone {
+  readonly name: string;
+  /** What `workers/domains` and every record call address it by. */
+  readonly id: string;
+  /** The platform's own word — `active`, `pending`, `moved`. */
+  readonly status: string;
+}
+
+/**
+ * What one Cloudflare account carries, as its own token could see it.
+ *
+ * **`null` in any field means the read established nothing**, and
+ * {@link CloudflareAccountDiscovery.unreadable} carries which read and why. An
+ * empty array is the other answer entirely: the listing answered and there was
+ * nothing in it. That is `cloud-discovery.ts`'s `found`/`unavailable` split
+ * kept intact one noun up — a refused token must not render as an account with
+ * no zones, which is exactly the sentence that sends an operator to create a
+ * zone they already have.
+ *
+ * ponytail: one null-and-a-sentence per read. Split `absent` from
+ * `undetermined` into arms of their own the day something branches on it
+ * rather than displays it.
+ */
+export interface CloudflareAccountDiscovery {
+  readonly kind: 'cloudflare-account';
+  /** Every zone in this account, whatever surface serves it. */
+  readonly zones: readonly CloudflareZone[] | null;
+  /** This account's `workers.dev` subdomain, when Workers is switched on. */
+  readonly workersSubdomain: string | null;
+  /** Pages projects by name — the surface's own inventory, listed once here. */
+  readonly pagesProjects: readonly string[] | null;
+  /** Why a field above is `null`, keyed by the field. Absent when all read. */
+  readonly unreadable?: Readonly<Record<string, string>>;
+}
+
+/**
+ * Which of the installation's declared zones this account can actually serve.
+ *
+ * `dns.zones` is the installation's naming policy (§9) and says nothing about
+ * which provider answers for each entry — an installation with a private zone
+ * on a resolver of its own and a public one on Cloudflare declares both, in
+ * whatever order suits its defaults. Taking the head of that list as *the*
+ * Cloudflare zone is a coin flip that fails at deploy time with the platform
+ * refusing a zone it has never heard of.
+ *
+ * So the probe decides among what the manifest declared: the first declared
+ * zone this account carries. **Nothing was established falls back to the head**
+ * rather than to nothing — a probe that could not run must not be the reason a
+ * deploy stops, and the platform's own refusal is still there behind it with a
+ * better sentence than this could write.
+ */
+export function servableZone(
+  declared: readonly string[],
+  carried: readonly CloudflareZone[] | null,
+): string | null {
+  if (carried === null) return declared[0] ?? null;
+  const names = new Set(carried.map((zone) => zone.name));
+  return declared.find((name) => names.has(name)) ?? null;
 }
 
 /**

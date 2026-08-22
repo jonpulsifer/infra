@@ -1162,6 +1162,7 @@ export const VESSEL_LIST: readonly VesselListItem[] = [
     // rows would say otherwise.
     prerequisites: [],
     inspectedAt: '2026-08-02T12:00:00.000Z',
+    discovery: null,
   },
   {
     name: 'vessel-a',
@@ -1209,6 +1210,7 @@ export const VESSEL_LIST: readonly VesselListItem[] = [
       { name: 'ARTIFACTS_PROJECT', met: true },
     ],
     inspectedAt: '2026-08-02T12:00:00.000Z',
+    discovery: null,
   },
   {
     name: 'secondary',
@@ -1217,5 +1219,6 @@ export const VESSEL_LIST: readonly VesselListItem[] = [
     health: 'healthy',
     prerequisites: [],
     inspectedAt: '2026-08-02T12:00:00.000Z',
+    discovery: null,
   },
 ];

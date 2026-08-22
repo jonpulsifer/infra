@@ -36,6 +36,7 @@ import {
   X,
   Zap,
 } from 'lucide-react';
+import type { ReactNode } from 'react';
 import { useState } from 'react';
 import type {
   PendingTargetConnection,
@@ -45,7 +46,11 @@ import type {
 } from '../../../commands/views.ts';
 import type { TargetAdapter } from '../../../config/manifest.schema.ts';
 import type { ComponentKind } from '../../../domain/desired-state.ts';
-import { surfacesToProbe, type VesselRole } from '../../../domain/vessel.ts';
+import {
+  type CloudflareAccountDiscovery,
+  surfacesToProbe,
+  type VesselRole,
+} from '../../../domain/vessel.ts';
 import type { LogoName } from '../../client/logos/index.ts';
 import { command, type InputOf, type OutputOf } from '../../client.ts';
 import { useRead } from '../../poll.ts';
@@ -361,7 +366,7 @@ export function TargetList({
       (target) => target.adapter === 'cloudrun' || target.adapter === 'static',
     );
     const vercel = configured.filter((target) => target.adapter === 'vercel');
-    const cloudflarePages = configured.filter(
+    const cloudflareSurfaces = configured.filter(
       (target) => target.adapter === 'cloudflare-pages',
     );
     const clusterPending = pending.filter((entry) => entry.kind === 'cluster');
@@ -371,8 +376,11 @@ export function TargetList({
     const vercelPending = pending.filter(
       (entry) => entry.kind === 'vercel-team',
     );
-    const cloudflarePagesPending = pending.filter(
+    const cloudflarePending = pending.filter(
       (entry) => entry.kind === 'cloudflare-account',
+    );
+    const cloudflareAccounts = vessels.filter(
+      (vessel) => vessel.kind === 'cloudflare-account',
     );
 
     return (
@@ -409,11 +417,12 @@ export function TargetList({
           empty="Declare a Vercel team in Installation to make its real connection workflow available here."
         />
         <ProviderTargets
-          name="Cloudflare Pages"
+          name="Cloudflare"
           logo="cloudflare"
-          description="Declared accounts become explicit Cloudflare Pages Targets, addressed directly — an account has no discovery API to enumerate itself through."
-          targets={cloudflarePages}
-          pending={cloudflarePagesPending}
+          description="One account is one connection. Spindrift reads what is in it — zones, Workers, Pages — and each surface it can deploy to becomes a Target."
+          detail={<CloudflareAccountDetail accounts={cloudflareAccounts} />}
+          targets={cloudflareSurfaces}
+          pending={cloudflarePending}
           connecting={connecting}
           onConnect={onConnect}
           onChanged={onChanged}
@@ -527,11 +536,20 @@ function ProviderTargets({
   name,
   logo,
   description,
+  detail,
   ...collection
 }: {
   readonly name: string;
   readonly logo: LogoName;
   readonly description: string;
+  /**
+   * What this provider's boundary carries, under the description.
+   *
+   * A slot rather than a field, because what there is to say is the provider's:
+   * a cloud project's inventory is already three other screens, and an account
+   * whose zones nothing else lists has nowhere else to say so.
+   */
+  readonly detail?: ReactNode;
 } & Parameters<typeof TargetCollection>[0]) {
   const connected = collection.targets.filter(
     (target) => target.status === 'connected',
@@ -559,9 +577,114 @@ function ProviderTargets({
         <p className="mt-3 text-sm leading-6 text-muted-foreground">
           {description}
         </p>
+        {detail}
       </div>
       <TargetCollection {...collection} />
     </section>
+  );
+}
+
+/**
+ * What a connected Cloudflare account carries, under its card.
+ *
+ * The three facts that are the **account's** rather than any one surface's:
+ * its zones, whether Workers is switched on, and what Pages already holds.
+ * Until the boundary was read, an operator's whole view of a connected account
+ * was its id and one Target named after one product.
+ *
+ * A `null` field is not an empty one, and the two do not read alike here: a
+ * listing that answered with nothing says so in words, and one that was refused
+ * shows the platform's own sentence. That is `CloudflareAccountDiscovery`'s
+ * split rendered rather than flattened — "no zones" sends an operator to create
+ * a zone they already have.
+ */
+function CloudflareAccountDetail({
+  accounts,
+}: {
+  readonly accounts: readonly VesselListItem[];
+}) {
+  const read = accounts.filter(
+    (vessel) => vessel.discovery?.kind === 'cloudflare-account',
+  );
+  if (read.length === 0) return null;
+
+  return (
+    <dl className="mt-4 flex flex-col gap-3 text-xs">
+      {read.map((vessel) => {
+        const found = vessel.discovery as CloudflareAccountDiscovery;
+        return (
+          <div key={vessel.name} className="flex flex-col gap-1.5">
+            <dt className="font-medium text-foreground">{vessel.name}</dt>
+            <AccountFact
+              label="Zones"
+              unreadable={found.unreadable?.zones ?? found.unreadable?.account}
+              value={found.zones?.map((zone) => zone.name)}
+              empty="no zones in this account"
+            />
+            <AccountFact
+              label="Workers"
+              unreadable={
+                found.unreadable?.workersSubdomain ?? found.unreadable?.account
+              }
+              value={
+                found.workersSubdomain === null
+                  ? []
+                  : [`${found.workersSubdomain}.workers.dev`]
+              }
+              empty="not enabled on this account"
+            />
+            <AccountFact
+              label="Pages"
+              unreadable={
+                found.unreadable?.pagesProjects ?? found.unreadable?.account
+              }
+              value={found.pagesProjects}
+              empty="no projects yet"
+            />
+          </div>
+        );
+      })}
+    </dl>
+  );
+}
+
+/**
+ * One listing, in the three states it actually has.
+ *
+ * A refusal wins over a value, because a refusal means there is no value —
+ * `unreadable` is only ever set beside a `null`, and rendering the sentence is
+ * what keeps "nobody could look" from reading as "there is nothing there".
+ */
+function AccountFact({
+  label,
+  value,
+  empty,
+  unreadable,
+}: {
+  readonly label: string;
+  readonly value: readonly string[] | null | undefined;
+  readonly empty: string;
+  readonly unreadable: string | undefined;
+}) {
+  const said =
+    unreadable !== undefined
+      ? unreadable
+      : value == null
+        ? 'not read'
+        : value.length === 0
+          ? empty
+          : value.join(', ');
+  return (
+    <dd className="flex gap-2 text-muted-foreground">
+      <span className="w-14 shrink-0 text-foreground/70">{label}</span>
+      <span
+        className={
+          unreadable === undefined ? 'break-all' : 'break-all text-destructive'
+        }
+      >
+        {said}
+      </span>
+    </dd>
   );
 }
 
