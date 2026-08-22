@@ -99,3 +99,55 @@ export async function uploadToGcsBucket({
     size: bytes.byteLength,
   };
 }
+
+export interface GcsObjectInput {
+  readonly bucketName: string;
+  readonly objectName: string;
+  readonly federation: FederationOptions;
+}
+
+/**
+ * Whether one object is still in the bucket, without reading its bytes.
+ *
+ * The whole reason `src/storage/bundle-cache.ts` can trust a hint: the index
+ * says an object existed, this says whether it exists. A metadata read rather
+ * than a download, and `fields=name` so the far side sends the smallest answer
+ * it has — the point is to replace a multi-megabyte fetch with one round trip,
+ * which it is not if the check itself is expensive.
+ *
+ * `404` is a value, because an expired `ephemeral/` bundle is the ordinary
+ * case this exists to detect. Every other refusal throws: a bucket that
+ * answers `403` is a misconfiguration, and reporting it as absence would spend
+ * a full re-stage per deploy while looking like a cold cache.
+ */
+export async function gcsObjectExists({
+  bucketName,
+  objectName,
+  federation,
+}: GcsObjectInput): Promise<boolean> {
+  const getToken = workloadIdentityToken(federation);
+  const token = await getToken();
+
+  const send = federation.fetch ?? ((request: Request) => fetch(request));
+  // The JSON API takes the object name as one fully-escaped path segment, so
+  // the slash in `ephemeral/<hex>.tgz` is `%2F` rather than a path separator.
+  const url = `https://storage.googleapis.com/storage/v1/b/${encodeURIComponent(bucketName)}/o/${encodeURIComponent(objectName)}?fields=name`;
+  const response = await send(
+    new Request(url, {
+      method: 'GET',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Accept: 'application/json',
+      },
+    }),
+  );
+
+  if (response.status === 404) return false;
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new FederationError(
+      `Reading gs://${bucketName}/${objectName} failed (${response.status}): ${errorText}`,
+    );
+  }
+  return true;
+}
