@@ -25,6 +25,7 @@ import type {
   AttemptLogCursor,
   AttemptLogEntry,
 } from '../domain/attempt-log.ts';
+import type { FunctionLogEntry } from '../functions/contract.ts';
 
 /**
  * Unversioned, and named so that nobody has to be told twice — the same
@@ -34,7 +35,12 @@ import type {
  */
 export const ATTEMPT_STREAM_PATH = '/internal/streams/build-attempt';
 export const RUNTIME_STREAM_PATH = '/internal/streams/runtime-log';
-export const STREAM_PATHS = [ATTEMPT_STREAM_PATH, RUNTIME_STREAM_PATH] as const;
+export const FUNCTION_LOG_STREAM_PATH = '/internal/streams/function-log';
+export const STREAM_PATHS = [
+  ATTEMPT_STREAM_PATH,
+  RUNTIME_STREAM_PATH,
+  FUNCTION_LOG_STREAM_PATH,
+] as const;
 
 /** One page of the terminating attempt stream — build or deploy, never both. */
 export interface AttemptStreamMessage {
@@ -53,4 +59,15 @@ export interface StreamErrorMessage {
 /** One page of the non-terminating runtime tail (§17). */
 export type RuntimeStreamMessage = RuntimeLogPage | StreamErrorMessage;
 
-export type StreamMessage = AttemptStreamMessage | RuntimeStreamMessage;
+/** One batch of the non-terminating Function log tail. */
+export interface FunctionLogPage {
+  readonly kind: 'function-log';
+  readonly entries: readonly FunctionLogEntry[];
+}
+
+export type FunctionLogStreamMessage = FunctionLogPage | StreamErrorMessage;
+
+export type StreamMessage =
+  | AttemptStreamMessage
+  | RuntimeStreamMessage
+  | FunctionLogStreamMessage;

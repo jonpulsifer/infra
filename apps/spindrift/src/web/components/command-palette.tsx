@@ -84,6 +84,12 @@ const VERBS: readonly PaletteItem[] = [
     path: '/datastores',
   },
   {
+    id: 'go:/functions',
+    group: 'Go to',
+    label: 'Functions',
+    path: '/functions',
+  },
+  {
     id: 'go:/settings/connections',
     group: 'Go to',
     label: 'Connections',

@@ -111,3 +111,19 @@ resource "onepassword_item" "spindrift_cloudflared" {
 # over the whole zone would add a second prompt in front of the first for a
 # Component that already authenticates, and hold nothing closed for one that
 # deliberately does not.
+
+# Spindrift's Functions own a second family of names in this zone, minted by
+# the platform controller itself rather than by this root: Workers scripts
+# named `fn-*` and Workers custom domains `<name>.fn.lolwtf.dev`. The
+# wildcard CNAME above answers single-label names only — `*.lolwtf.dev` —
+# so a two-label custom domain under `fn.` never resolves through it and can
+# never collide with `spindrift_apps_wildcard`. The custom-domain record
+# itself is a Cloudflare-owned side effect of the Workers custom-domain API:
+# nothing here declares it, and this root manages none of it.
+#
+# The controller reaches these APIs with the installation's existing
+# Workers-scoped bearer (`cloudflareToken` in
+# apps/spindrift/src/adapters/registry.ts), never a DNS credential. The
+# operator widens that token's scopes by hand to cover them:
+#   Account           → Workers Scripts Edit, Workers Tail Read
+#   Zone (lolwtf.dev) → Workers Routes Edit, SSL and Certificates Edit, Zone Read

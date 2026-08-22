@@ -1,7 +1,13 @@
 /**
- * The two authenticated browser streams (§17): terminating attempt events and
- * non-terminating runtime output. Their routes, cursors, and payloads remain
- * distinct so build output can never be presented as application stdout.
+ * The authenticated browser streams (§17): terminating attempt events,
+ * non-terminating runtime output, and a Function's non-terminating log tail.
+ * Their routes, cursors, and payloads remain distinct so build output can
+ * never be presented as application stdout.
+ *
+ * The Function stream is the odd one out: `deployer.tail` is already an
+ * async generator with its own cadence, so its socket runs that generator
+ * directly from `open` rather than joining the shared 750ms `pump` the other
+ * two kinds share — there is no page to poll for.
  *
  * `ATTEMPT_STREAM_PATH`, `RUNTIME_STREAM_PATH`, `STREAM_PATHS`, and the
  * message types live in `./stream-path.ts` and are re-exported below rather
@@ -32,8 +38,16 @@ import {
   hasVesselLocation,
 } from '../domain/target.ts';
 import {
+  FUNCTION_NAME_PATTERN,
+  type FunctionDeployer,
+  type FunctionTarget,
+} from '../functions/contract.ts';
+import {
   ATTEMPT_STREAM_PATH,
   type AttemptStreamMessage,
+  FUNCTION_LOG_STREAM_PATH,
+  type FunctionLogPage,
+  type FunctionLogStreamMessage,
   RUNTIME_STREAM_PATH,
   type RuntimeStreamMessage,
   STREAM_PATHS,
@@ -44,6 +58,9 @@ import {
 export {
   ATTEMPT_STREAM_PATH,
   type AttemptStreamMessage,
+  FUNCTION_LOG_STREAM_PATH,
+  type FunctionLogPage,
+  type FunctionLogStreamMessage,
   RUNTIME_STREAM_PATH,
   type RuntimeStreamMessage,
   STREAM_PATHS,
@@ -81,7 +98,18 @@ interface RuntimeSocketData {
   closed: boolean;
 }
 
-export type StreamSocketData = AttemptSocketData | RuntimeSocketData;
+interface FunctionSocketData {
+  readonly kind: 'function';
+  readonly name: string;
+  readonly deployer: FunctionDeployer;
+  readonly abort: AbortController;
+  closed: boolean;
+}
+
+export type StreamSocketData =
+  | AttemptSocketData
+  | RuntimeSocketData
+  | FunctionSocketData;
 
 type StreamHandler = (
   request: Request,
@@ -94,6 +122,8 @@ export function streamRoutes(deps: StreamDeps): Record<string, StreamHandler> {
       upgradeAttempt(request, server, deps),
     [RUNTIME_STREAM_PATH]: (request, server) =>
       upgradeRuntime(request, server, deps),
+    [FUNCTION_LOG_STREAM_PATH]: (request, server) =>
+      upgradeFunctionLog(request, server, deps),
   };
 }
 
@@ -317,6 +347,54 @@ async function upgradeRuntime(
     : refusal(400, 'MALFORMED_REQUEST', 'WebSocket upgrade failed');
 }
 
+async function upgradeFunctionLog(
+  request: Request,
+  server: Bun.Server<StreamSocketData>,
+  deps: StreamDeps,
+): Promise<Response | undefined> {
+  const authenticated = await authenticate(request, deps);
+  if (authenticated instanceof Response) return authenticated;
+  const url = new URL(request.url);
+  const name = url.searchParams.get('name');
+  if (name === null || !FUNCTION_NAME_PATTERN.test(name)) {
+    return refusal(
+      400,
+      'MALFORMED_REQUEST',
+      'name must be a valid Function name',
+    );
+  }
+
+  const row = await authenticated.context.db.query.functions.findFirst({
+    where: (rows, { eq }) => eq(rows.name, name),
+  });
+  if (!row) {
+    return refusal(404, 'NOT_FOUND', `there is no Function named '${name}'`);
+  }
+
+  const deployers = authenticated.context.adapters.functions?.() ?? null;
+  const deployer = deployers?.[row.target as FunctionTarget] ?? null;
+  if (deployer === null) {
+    return refusal(
+      409,
+      'NOT_DEPLOYABLE',
+      `this installation has no ${row.target} surface to tail '${name}' on`,
+    );
+  }
+
+  const upgraded = server.upgrade(request, {
+    data: {
+      kind: 'function',
+      name,
+      deployer,
+      abort: new AbortController(),
+      closed: false,
+    },
+  });
+  return upgraded
+    ? undefined
+    : refusal(400, 'MALFORMED_REQUEST', 'WebSocket upgrade failed');
+}
+
 export async function readStreamPage(
   data: StreamSocketData,
 ): Promise<StreamMessage> {
@@ -325,6 +403,11 @@ export async function readStreamPage(
       ...(data.cursor === null ? {} : { after: data.cursor }),
       limit: 200,
     });
+  }
+  if (data.kind === 'function') {
+    // A function-log socket runs its own `tail` loop from `open`, never the
+    // pump below — this is not a page it can read.
+    throw new Error('readStreamPage does not serve function-log sockets');
   }
 
   const page = await readAttemptStream(
@@ -356,6 +439,12 @@ export async function readStreamPage(
 
 export const streamWebSocket: Bun.WebSocketHandler<StreamSocketData> = {
   open(socket) {
+    // A function-log socket has no page to pump — it drives the deployer's
+    // own `tail` generator for as long as the connection lives.
+    if (socket.data.kind === 'function') {
+      void tailFunctionLogs(socket.data, socket);
+      return;
+    }
     // Subscribe to in-process wake-ups so the pump fires immediately when
     // the web process itself writes an event (Transport shape).
     if (socket.data.kind === 'attempt') {
@@ -374,14 +463,54 @@ export const streamWebSocket: Bun.WebSocketHandler<StreamSocketData> = {
     if (socket.data.kind === 'attempt') {
       socket.data.unsubscribe?.();
       socket.data.unsubscribe = null;
+    } else if (socket.data.kind === 'function') {
+      socket.data.abort.abort();
     }
   },
 };
+
+/**
+ * The function-log socket's whole life: relay `deployer.tail` until the
+ * caller aborts or the generator ends, one message per log line so a slow
+ * consumer never waits on a batch.
+ */
+async function tailFunctionLogs(
+  data: FunctionSocketData,
+  socket: Bun.ServerWebSocket<StreamSocketData>,
+): Promise<void> {
+  try {
+    for await (const entry of data.deployer.tail(
+      data.name,
+      data.abort.signal,
+    )) {
+      if (data.closed) return;
+      socket.send(
+        JSON.stringify({
+          kind: 'function-log',
+          entries: [entry],
+        } satisfies FunctionLogPage),
+      );
+    }
+  } catch (cause) {
+    if (data.closed) return;
+    socket.send(
+      JSON.stringify({
+        kind: 'error',
+        message: cause instanceof Error ? cause.message : String(cause),
+      } satisfies StreamErrorMessage),
+    );
+    socket.close(1011, 'stream read failed');
+  }
+}
 
 async function pump(
   socket: Bun.ServerWebSocket<StreamSocketData>,
 ): Promise<void> {
   if (socket.data.closed) return;
+  // A function-log socket never reaches `pump` — `open` routes it to
+  // `tailFunctionLogs` instead — but the type is shared, so this narrows the
+  // rest of the function back to the two kinds `readStreamPage` serves.
+  if (socket.data.kind === 'function') return;
   try {
     const page = await readStreamPage(socket.data);
     if (page.kind === 'attempt') {
@@ -401,6 +530,11 @@ async function pump(
       socket.send(JSON.stringify(page));
       socket.close(1011, 'stream read failed');
       return;
+    } else if (page.kind === 'function-log') {
+      // Unreachable: `socket.data.kind !== 'function'` here, so
+      // `readStreamPage` never returns this page. Typed out rather than
+      // asserted away, so a future page kind cannot fall through silently.
+      throw new Error('a runtime/attempt pump received a function-log page');
     } else {
       socket.data.cursor = page.cursor;
       if (page.entries.length > 0) socket.send(JSON.stringify(page));

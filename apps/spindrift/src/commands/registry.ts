@@ -94,6 +94,11 @@ import { getDeployDetail, getDeployDetailInput } from './deploys/get-detail.ts';
 import { listDeploys, listDeploysInput } from './deploys/list.ts';
 import { listAllDeploys, listAllDeploysInput } from './deploys/list-all.ts';
 import { rollbackDeploy, rollbackDeployInput } from './deploys/rollback.ts';
+import { deleteFunction, deleteFunctionInput } from './functions/delete.ts';
+import { getFunction, getFunctionInput } from './functions/get.ts';
+import { listFunctions, listFunctionsInput } from './functions/list.ts';
+import { runFunction, runFunctionInput } from './functions/run.ts';
+import { saveFunction, saveFunctionInput } from './functions/save.ts';
 import {
   configureInstallation,
   configureInstallationInput,
@@ -248,6 +253,11 @@ export const commandRegistry = {
   },
   listDatastores: { input: listDatastoresInput, handler: listDatastores },
   getDatastore: { input: getDatastoreInput, handler: getDatastore },
+  listFunctions: { input: listFunctionsInput, handler: listFunctions },
+  getFunction: { input: getFunctionInput, handler: getFunction },
+  saveFunction: { input: saveFunctionInput, handler: saveFunction },
+  runFunction: { input: runFunctionInput, handler: runFunction },
+  deleteFunction: { input: deleteFunctionInput, handler: deleteFunction },
   setConfig: { input: setConfigInput, handler: setConfig },
   setBuildSecrets: { input: setBuildSecretsInput, handler: setBuildSecrets },
   configureInstallation: {

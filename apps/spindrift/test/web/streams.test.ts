@@ -258,6 +258,8 @@ describe('authenticated attempt stream', () => {
       message: 'cluster log endpoint is unavailable',
     });
     expect(closes).toEqual([[1011, 'stream read failed']]);
+    if (socket.data.kind !== 'runtime')
+      throw new Error('expected a runtime socket');
     expect(socket.data.cursor).toBe('durable-cursor');
   });
 

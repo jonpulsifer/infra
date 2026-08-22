@@ -79,6 +79,12 @@ import type {
 import { type DeployEvents, deployEvents, internalFailure } from '../events.ts';
 import { parseScopedRef, scopedRef } from '../ref.ts';
 import { cloudRunJob } from './job.ts';
+import {
+  type CloudLogPage,
+  cloudLogCursor,
+  cloudLogRecord,
+  encodeCloudLogCursor,
+} from './logs.ts';
 import { cloudSchedulerJob, jobInvokerPolicy, TIME_ZONE } from './scheduler.ts';
 import {
   allowsUnauthenticated,
@@ -163,7 +169,6 @@ const EXECUTIONS = 'executions';
 const JOB_RESOURCE = 'cloud_run_job';
 const SERVICE_RESOURCE = 'cloud_run_revision';
 const EXECUTION_LABEL = 'run.googleapis.com/execution_name';
-const TASK_INDEX_LABEL = 'run.googleapis.com/task_index';
 
 /** How many runs `executions` reports when nothing says otherwise. */
 const DEFAULT_EXECUTION_PAGE = 20;
@@ -1304,79 +1309,6 @@ function startedAtOf(execution: JobExecution): number {
  */
 function shortName(name: string): string {
   return name.slice(name.lastIndexOf('/') + 1);
-}
-
-interface CloudLogPage {
-  readonly entries?: readonly CloudLogEntry[];
-}
-
-interface CloudLogEntry {
-  readonly timestamp?: string;
-  readonly receiveTimestamp?: string;
-  readonly insertId?: string;
-  readonly textPayload?: string;
-  readonly jsonPayload?: unknown;
-  readonly resource?: { readonly labels?: Record<string, string> };
-  /** Where a job's entries carry which execution and task wrote them. */
-  readonly labels?: Record<string, string>;
-}
-
-interface CloudLogRecord {
-  readonly at: string;
-  readonly insertId: string;
-  readonly line: string;
-  readonly replica: string;
-}
-
-function cloudLogRecord(entry: CloudLogEntry): CloudLogRecord | null {
-  const at = entry.timestamp ?? entry.receiveTimestamp;
-  if (!at || !entry.insertId) return null;
-  const line =
-    entry.textPayload ??
-    (entry.jsonPayload === undefined
-      ? null
-      : JSON.stringify(entry.jsonPayload));
-  if (line === null || line.trim() === '') return null;
-  return {
-    at,
-    insertId: entry.insertId,
-    line,
-    // What wrote the line. A service's replica is a revision; a run's is one of
-    // its tasks, and a run with `taskCount: 1` still names the task rather than
-    // leaving the column reading `unknown` for every line it ever writes.
-    replica:
-      entry.resource?.labels?.revision_name ??
-      taskReplica(entry.labels?.[TASK_INDEX_LABEL]) ??
-      'unknown',
-  };
-}
-
-/** The `task N` a task index reads as, or nothing when there is no index. */
-function taskReplica(index: string | undefined): string | undefined {
-  return index === undefined ? undefined : `task ${index}`;
-}
-
-function cloudLogCursor(cursor: string | undefined): CloudLogRecord | null {
-  if (cursor === undefined) return null;
-  try {
-    const value = JSON.parse(
-      Buffer.from(cursor, 'base64').toString('utf8'),
-    ) as {
-      at?: unknown;
-      insertId?: unknown;
-    };
-    return typeof value.at === 'string' && typeof value.insertId === 'string'
-      ? { at: value.at, insertId: value.insertId, line: '', replica: '' }
-      : null;
-  } catch {
-    return null;
-  }
-}
-
-function encodeCloudLogCursor(record: CloudLogRecord): string {
-  return Buffer.from(
-    JSON.stringify({ at: record.at, insertId: record.insertId }),
-  ).toString('base64');
 }
 
 /** `projects/<p>/locations/<r>` — the parent every call hangs off. */

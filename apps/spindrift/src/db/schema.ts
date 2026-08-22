@@ -57,6 +57,7 @@ import {
   type VesselLocation,
   type VesselPrerequisiteResult,
 } from '../domain/vessel.ts';
+import { FUNCTION_TARGETS } from '../functions/contract.ts';
 import type { CoreSignature } from '../supply-chain/sign.ts';
 import type { BackendProvenanceAssessment } from '../supply-chain/verify.ts';
 
@@ -1706,6 +1707,49 @@ export const buildRequests = pgTable(
   ],
 );
 
+/**
+ * A Functions row: one author-written `fetch` handler and where it last
+ * deployed to (`functions/contract.ts`).
+ *
+ * `target` is `text` with a CHECK rather than a `pgEnum`, because the set of
+ * targets is the deployers' — `FunctionDeployers` in the contract — and an
+ * enum would turn a removed deployer into a migration. The CHECK enforces the
+ * same membership without that coupling.
+ *
+ * `error` lives on the row, not a side table: a Save that deployed nothing
+ * still saved, so the failure is state on the thing that failed to deploy, not
+ * a reason the save itself is unavailable.
+ */
+export const functions = pgTable(
+  'functions',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    name: text('name').notNull().unique(),
+    target: text('target').notNull(),
+    source: text('source').notNull(),
+    url: text('url'),
+    deployedAt: timestamp('deployed_at', { withTimezone: true }),
+    error: text('error'),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    // A bound parameter is not legal inside a CHECK constraint's DDL (see
+    // `config_items_environment_pinned` above), hence `sql.raw` over the
+    // joined literal rather than the usual interpolation.
+    check(
+      'functions_target',
+      sql`${table.target} in (${sql.raw(
+        FUNCTION_TARGETS.map((target) => `'${target}'`).join(','),
+      )})`,
+    ),
+  ],
+);
+
 // --- Relations (query-builder convenience; no schema effect) ---------------
 
 export const appsRelations = relations(apps, ({ one, many }) => ({
@@ -1889,3 +1933,5 @@ export type AttemptEvent = typeof attemptEvents.$inferSelect;
 export type NewAttemptEvent = typeof attemptEvents.$inferInsert;
 export type BuildRequest = typeof buildRequests.$inferSelect;
 export type NewBuildRequest = typeof buildRequests.$inferInsert;
+export type FunctionRow = typeof functions.$inferSelect;
+export type NewFunctionRow = typeof functions.$inferInsert;

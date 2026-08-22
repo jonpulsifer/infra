@@ -30,6 +30,7 @@ import {
 } from '../../src/domain/detection/declared.ts';
 import { KUBERNETES_DELIVERY_FLAVOURS } from '../../src/domain/target.ts';
 import { VESSEL_KINDS } from '../../src/domain/vessel.ts';
+import { FUNCTION_TARGETS } from '../../src/functions/contract.ts';
 
 const APP = join(import.meta.dir, '../..');
 
@@ -155,6 +156,15 @@ const PROJECT_ID_ALLOWLIST = new Set<string>([
   // why the registry-credential table names it as an example of a username a
   // typo in would otherwise be undiagnosable.
   'oauth2accesstoken',
+  // The two surfaces a function deploys to. Vocabulary read from the feature's
+  // own contract rather than restated, so adding a surface does not break a
+  // test here.
+  ...FUNCTION_TARGETS,
+  // A language runtime and a websocket subprotocol, both named by the platform
+  // that serves them. Same kind of thing as the header names above: one string
+  // for everybody, written by a deployer rather than by a browser bundle.
+  'nodejs22',
+  'trace-v1',
 ]);
 
 /**
