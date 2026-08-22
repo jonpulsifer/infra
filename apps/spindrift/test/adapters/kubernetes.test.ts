@@ -290,6 +290,50 @@ function pod(reason: string, message: string): FakeObject {
   };
 }
 
+/** A pod the chart rendered that came up and never passed readiness. */
+function podNotReady(): FakeObject {
+  return {
+    apiVersion: 'v1',
+    kind: 'Pod',
+    metadata: { name: 'blog-web-abc', namespace: 'apps', labels: POD_LABELS },
+    status: { containerStatuses: [{ name: 'app', ready: false, state: {} }] },
+  };
+}
+
+/**
+ * An adapter over a release that reports progress forever, on a clock that
+ * reaches the deadline.
+ *
+ * `adapterFor` cannot serve this: the deadline case needs both a budget and a
+ * clock that advances to it, and every other test in the file wants neither.
+ */
+function stalling(lists: FakeKubernetesOptions['lists']): {
+  adapter: KubernetesDeployAdapter;
+  cluster: FakeKubernetes;
+} {
+  const cluster = new FakeKubernetes({
+    servedKinds: SERVED,
+    lists,
+    status: () => ({
+      observedGeneration: 1,
+      conditions: [{ type: 'Ready', status: 'False', reason: 'Progressing' }],
+    }),
+  });
+  let clock = 0;
+  const adapter = new KubernetesDeployAdapter({
+    chart: CHART,
+    token: cluster.token,
+    fetch: cluster.fetch,
+    pollIntervalMs: 1_000,
+    timeoutMs: 5_000,
+    sleep: async () => {
+      clock += 1_000;
+    },
+    now: () => clock,
+  });
+  return { adapter, cluster };
+}
+
 /** A `HelmRelease` that failed without saying why — the read-on-red case. */
 const INSTALL_FAILED: StatusScript = () => ({
   observedGeneration: 1,
@@ -682,6 +726,57 @@ describe('phases come from the controller', () => {
     // §6's table gives TIMEOUT a dash: a deploy that never reached a terminal
     // state indicts nobody.
     expect(blameFor(verdict.reason)).toBeNull();
+  });
+
+  test('a deadline reads the namespace, and names what stalled it', async () => {
+    const { adapter } = stalling({
+      pods: [pod('ImagePullBackOff', 'Back-off pulling image')],
+      events: [],
+    });
+
+    const { verdict } = await drain(adapter.apply(target(), desiredState()));
+    if (verdict.phase !== 'FAILED') throw new Error('expected a failure');
+    // The rollout stalled rather than failing, so nothing declared a verdict —
+    // but a container backing off its image pull is an ARTIFACT_UNAVAILABLE at
+    // the deadline exactly as it is at a failure, and it is the reason §6
+    // cares most about getting right.
+    expect(verdict.reason).toBe('ARTIFACT_UNAVAILABLE');
+    expect(blameFor(verdict.reason)).toBe('platform');
+  });
+
+  test('a deadline over pods that never went ready is UNHEALTHY', async () => {
+    const { adapter } = stalling({ pods: [podNotReady()], events: [] });
+
+    const { verdict } = await drain(adapter.apply(target(), desiredState()));
+    if (verdict.phase !== 'FAILED') throw new Error('expected a failure');
+    expect(verdict.reason).toBe('UNHEALTHY');
+  });
+
+  test('a deadline over an empty namespace stays TIMEOUT', async () => {
+    const { adapter } = stalling({ pods: [], events: [] });
+
+    const { verdict } = await drain(adapter.apply(target(), desiredState()));
+    if (verdict.phase !== 'FAILED') throw new Error('expected a failure');
+    // The guard on the read: under a *verdict* an empty namespace is REJECTED,
+    // because something refused the workload. Under a deadline the same
+    // emptiness is equally "not yet" — a chart still resolving, a wedged
+    // controller — so it must not indict the developer.
+    expect(verdict.reason).toBe('TIMEOUT');
+    expect(blameFor(verdict.reason)).toBeNull();
+  });
+
+  test('the timeline says what the deadline concluded, not TIMEOUT', async () => {
+    const { adapter } = stalling({
+      pods: [pod('CrashLoopBackOff', 'back-off restarting failed container')],
+      events: [],
+    });
+
+    const { events } = await drain(adapter.apply(target(), desiredState()));
+    const failure = events.find(
+      (event) => event.type === 'status' && event.phase === 'FAILED',
+    );
+    if (failure?.type !== 'status') throw new Error('expected a FAILED status');
+    expect(failure.reason).toBe('STARTUP_FAILED');
   });
 });
 

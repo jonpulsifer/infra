@@ -79,7 +79,7 @@ import {
   argoChartRef,
   argoRepository,
 } from './argo-application.ts';
-import { diagnose } from './diagnose.ts';
+import { diagnose, evidence } from './diagnose.ts';
 import {
   chartSourceKind,
   HELM_RELEASE,
@@ -873,14 +873,14 @@ export class KubernetesDeployAdapter implements DeployAdapter {
       }
 
       if (this.events.now() >= deadline) {
-        yield this.events.status('FAILED', { resource, reason: 'TIMEOUT' });
-        return {
-          phase: 'FAILED',
+        return yield* this.timedOut(
+          api,
+          connection,
+          desired,
+          status,
           ref,
-          reason: 'TIMEOUT',
-          detail: status.detail ?? 'the release did not settle in time',
-          debug: status.debug,
-        };
+          resource,
+        );
       }
 
       await this.wait();
@@ -907,9 +907,93 @@ export class KubernetesDeployAdapter implements DeployAdapter {
       };
     }
 
-    // The namespace this apply just used, which is the App's own — a read on
-    // red follows the release that failed, and this one was placed by the
-    // call that is now diagnosing it.
+    const { pods, events } = await this.readOnRed(api, connection, desired);
+    const diagnosis = diagnose(pods, events, status.detail);
+    yield this.events.log(diagnosis.detail);
+    return {
+      phase: 'FAILED',
+      ref,
+      reason: diagnosis.reason,
+      detail: diagnosis.detail,
+      // §12: the diagnosis is stored because the platform will not keep it —
+      // cluster events expire in about an hour.
+      debug: { delivery: status.debug, diagnosis: diagnosis.debug },
+    };
+  }
+
+  /**
+   * A deadline reached, and the one read that can still name a cause.
+   *
+   * `TIMEOUT` is the only reason §6's table leaves a dash in the blame column,
+   * which makes it the least useful thing this adapter can say: the developer
+   * is told the release did not settle and nothing about who to go and talk to.
+   * Most of the time something in the namespace already knows — a container
+   * backing off its image pull is a stalled rollout and an
+   * `ARTIFACT_UNAVAILABLE` at the same moment — and this module has always been
+   * able to read it. It simply never did, because the read was wired only to
+   * the delivery object's own verdict, and a deadline is not one.
+   *
+   * So a deadline now takes the same read a verdict does. What it does not take
+   * is {@link diagnose}'s last branch — see `evidence` for why an empty
+   * namespace means something different under a deadline than under a failure.
+   * Silence keeps `TIMEOUT`, which stays the honest answer when nothing
+   * observed says otherwise.
+   */
+  private async *timedOut(
+    api: KubernetesApi,
+    connection: KubernetesAdapterConnection,
+    desired: DesiredState,
+    status: DeliveryStatus,
+    ref: DeployRef,
+    resource: string,
+  ): AsyncGenerator<DeployEvent, DeployVerdict, void> {
+    const { pods, events } = await this.readOnRed(api, connection, desired);
+    const found = evidence(pods, events, status.detail);
+
+    yield this.events.status('FAILED', {
+      resource,
+      reason: found?.reason ?? 'TIMEOUT',
+    });
+
+    if (found === null) {
+      return {
+        phase: 'FAILED',
+        ref,
+        reason: 'TIMEOUT',
+        detail: status.detail ?? 'the release did not settle in time',
+        debug: status.debug,
+      };
+    }
+
+    yield this.events.log(found.detail);
+    return {
+      phase: 'FAILED',
+      ref,
+      reason: found.reason,
+      detail: found.detail,
+      // §12, as in `failed`: cluster events expire in about an hour, so what
+      // the read saw is stored rather than left where it will not survive.
+      debug: { delivery: status.debug, diagnosis: found.debug },
+    };
+  }
+
+  /**
+   * The two lists every diagnosis is made from (§6).
+   *
+   * The namespace is the App's own, and the one this apply just used — a read
+   * on red follows the release that failed, and this call placed it. A list
+   * that throws becomes an empty one: a diagnosis is a best effort over what
+   * came back, and losing the verdict because the second read failed would be
+   * the worse outcome.
+   */
+  private async readOnRed(
+    api: KubernetesApi,
+    connection: KubernetesAdapterConnection,
+    desired: DesiredState,
+  ): Promise<{
+    readonly pods: readonly KubernetesObject[];
+    readonly events: readonly KubernetesObject[];
+  }> {
     const namespace = appNamespaceFor(connection, desired.app);
     const selector = `app.kubernetes.io/name=${desired.component},app.kubernetes.io/part-of=${desired.app}`;
     const [pods, events] = await Promise.all([
@@ -923,18 +1007,7 @@ export class KubernetesDeployAdapter implements DeployAdapter {
         .list({ apiVersion: 'v1', plural: 'events', namespace })
         .catch(() => null),
     ]);
-
-    const diagnosis = diagnose(pods ?? [], events ?? [], status.detail);
-    yield this.events.log(diagnosis.detail);
-    return {
-      phase: 'FAILED',
-      ref,
-      reason: diagnosis.reason,
-      detail: diagnosis.detail,
-      // §12: the diagnosis is stored because the platform will not keep it —
-      // cluster events expire in about an hour.
-      debug: { delivery: status.debug, diagnosis: diagnosis.debug },
-    };
+    return { pods: pods ?? [], events: events ?? [] };
   }
 
   // --- inspect's two halves ------------------------------------------------
