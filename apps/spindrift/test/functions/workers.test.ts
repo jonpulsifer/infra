@@ -81,6 +81,7 @@ describe('WorkersFunctions.deploy', () => {
     const result = await deployer(far.fetch).deploy(
       'hello',
       'export default { fetch: () => new Response("hi") };',
+      {},
     );
 
     expect(result.url).toBe('https://hello.fn.example.test');
@@ -88,6 +89,7 @@ describe('WorkersFunctions.deploy', () => {
       'GET /client/v4/zones',
       'PUT /client/v4/accounts/account-1/workers/scripts/fn-hello',
       'PUT /client/v4/accounts/account-1/workers/domains',
+      'GET /client/v4/accounts/account-1/workers/scripts/fn-hello/secrets',
     ]);
     // Scoped to the account, not to a name: the account's own listing is what
     // decides which declared zone is here, and `other.test` is not.
@@ -111,6 +113,9 @@ describe('WorkersFunctions.deploy', () => {
       logs: { enabled: true, invocation_logs: true },
     });
     expect(typeof metadata.compatibility_date).toBe('string');
+    // A function with no environment still sends the list — empty — so a
+    // redeploy clears whatever the script held before.
+    expect(metadata.bindings).toEqual([]);
     expect(await (form.get('index.mjs') as File).text()).toContain(
       'export default',
     );
@@ -121,6 +126,53 @@ describe('WorkersFunctions.deploy', () => {
       zone_id: 'zone-1',
       environment: 'production',
     });
+  });
+
+  test('carries the environment as secret_text bindings', async () => {
+    const far = api({
+      'GET /client/v4/zones': () =>
+        ok([{ id: 'zone-1', name: 'example.test' }]),
+      'PUT /client/v4/accounts/account-1/workers/scripts/fn-hello': () =>
+        ok({ id: 'fn-hello' }),
+    });
+    await deployer(far.fetch).deploy('hello', 'export default {};', {
+      API_TOKEN: 'sekrit',
+      GREETING: 'hi',
+    });
+
+    const form = await far.calls[1]!.request.formData();
+    const metadata = JSON.parse(await (form.get('metadata') as File).text());
+    expect(metadata.bindings).toEqual([
+      { type: 'secret_text', name: 'API_TOKEN', text: 'sekrit' },
+      { type: 'secret_text', name: 'GREETING', text: 'hi' },
+    ]);
+  });
+
+  test('deletes a secret the environment no longer names', async () => {
+    const far = api({
+      'GET /client/v4/zones': () =>
+        ok([{ id: 'zone-1', name: 'example.test' }]),
+      'PUT /client/v4/accounts/account-1/workers/scripts/fn-hello': () =>
+        ok({ id: 'fn-hello' }),
+      'GET /client/v4/accounts/account-1/workers/scripts/fn-hello/secrets':
+        () =>
+          ok([
+            { name: 'API_TOKEN', type: 'secret_text' },
+            { name: 'STALE', type: 'secret_text' },
+          ]),
+    });
+    await deployer(far.fetch).deploy('hello', 'export default {};', {
+      API_TOKEN: 'sekrit',
+    });
+
+    expect(
+      far.calls
+        .map((call) => `${call.method} ${call.path}`)
+        .filter((call) => call.includes('/secrets')),
+    ).toEqual([
+      'GET /client/v4/accounts/account-1/workers/scripts/fn-hello/secrets',
+      'DELETE /client/v4/accounts/account-1/workers/scripts/fn-hello/secrets/STALE',
+    ]);
   });
 
   test('raises the platform’s own sentence', async () => {
@@ -134,7 +186,7 @@ describe('WorkersFunctions.deploy', () => {
         ),
     });
     const failure = await deployer(far.fetch)
-      .deploy('hello', 'export default {};')
+      .deploy('hello', 'export default {};', {})
       .catch((cause: unknown) => cause);
     expect(failure).toBeInstanceOf(FunctionDeployError);
     expect((failure as Error).message).toBe('nope');
@@ -143,7 +195,7 @@ describe('WorkersFunctions.deploy', () => {
   test('says which zone the token cannot see', async () => {
     const far = api({ 'GET /client/v4/zones': () => ok([]) });
     const failure = await deployer(far.fetch)
-      .deploy('hello', 'export default {};')
+      .deploy('hello', 'export default {};', {})
       .catch((cause: unknown) => cause);
     expect((failure as Error).message).toContain('example.test');
   });

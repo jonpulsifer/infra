@@ -14,8 +14,14 @@
  * without the caller having aborted — a viewer left open overnight keeps
  * receiving lines instead of going quiet at the hour mark.
  *
- * ponytail: no per-function compatibility flags, no bindings. Both are fields
- * on the metadata part when a function needs them.
+ * The function's environment travels as `secret_text` bindings on the metadata
+ * part. Measured, not assumed: the platform keeps a secret across uploads even
+ * when the new metadata lists none, so a variable the operator removed is
+ * removed by name through the secrets API after the upload — the same Save
+ * that took it off the row takes it off the script.
+ *
+ * ponytail: no per-function compatibility flags. That is a field on the
+ * metadata part when a function needs one.
  */
 import { CLOUDFLARE_API_ROOT } from '../adapters/cloudflare.ts';
 import type { Fetcher, TokenProvider } from '../adapters/deploy/cloud/http.ts';
@@ -23,6 +29,7 @@ import { servableZone } from '../domain/vessel.ts';
 import {
   FunctionDeployError,
   type FunctionDeployer,
+  type FunctionEnv,
   type FunctionLogEntry,
   type FunctionTarget,
   workloadName,
@@ -120,6 +127,7 @@ export class WorkersFunctions implements FunctionDeployer {
   async deploy(
     name: string,
     source: string,
+    env: FunctionEnv,
   ): Promise<{ readonly url: string }> {
     const script = workloadName(name);
     const zone = await this.resolveZone();
@@ -139,6 +147,14 @@ export class WorkersFunctions implements FunctionDeployer {
               enabled: true,
               logs: { enabled: true, invocation_logs: true },
             },
+            // Always sent, empty included: the list is the whole environment,
+            // so a variable the operator removed is removed from the script by
+            // the same upload — an omitted key would leave the old one live.
+            bindings: Object.entries(env).map(([name, text]) => ({
+              type: 'secret_text',
+              name,
+              text,
+            })),
           }),
         ],
         'metadata.json',
@@ -171,6 +187,21 @@ export class WorkersFunctions implements FunctionDeployer {
         },
       },
     );
+
+    // Secrets outlive an upload that does not name them, so the ones the
+    // environment no longer holds are deleted by name. Listed after the upload
+    // so a secret the upload just set is never in the to-delete set.
+    const secrets = await this.call<readonly { readonly name?: string }[]>(
+      'GET',
+      `/accounts/${this.options.accountId}/workers/scripts/${script}/secrets`,
+    );
+    for (const secret of secrets ?? []) {
+      if (secret.name === undefined || secret.name in env) continue;
+      await this.gone(
+        'DELETE',
+        `/accounts/${this.options.accountId}/workers/scripts/${script}/secrets/${encodeURIComponent(secret.name)}`,
+      );
+    }
 
     return { url: `https://${hostname}` };
   }

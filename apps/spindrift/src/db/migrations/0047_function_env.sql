@@ -1,0 +1,12 @@
+-- A Function's environment: the whole `NAME → value` map as one sealed
+-- envelope (`src/functions/env.ts`), not a row per variable.
+--
+-- One column because the map is written whole by a Save and read whole by the
+-- deploy that follows it — a key per row would buy a granularity nothing asks
+-- for and cost a join on the only path that reads this. The value is AES-GCM
+-- ciphertext under the installation keyring, so this column is as opaque to
+-- Postgres as `registry_credentials.secret` is.
+--
+-- Nullable because no values means no envelope: an empty map would otherwise
+-- be a ciphertext that has to be opened to learn it holds nothing.
+ALTER TABLE "functions" ADD COLUMN "env" text;

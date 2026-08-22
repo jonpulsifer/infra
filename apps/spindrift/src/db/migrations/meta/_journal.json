@@ -330,6 +330,13 @@
       "when": 1786968480000,
       "tag": "0046_source_bundle_cache",
       "breakpoints": true
+    },
+    {
+      "idx": 47,
+      "version": "7",
+      "when": 1786968540000,
+      "tag": "0047_function_env",
+      "breakpoints": true
     }
   ]
 }

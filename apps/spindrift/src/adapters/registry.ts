@@ -44,6 +44,7 @@ import {
   type RepositorySourceStager,
   stageSourceBundle,
 } from '../domain/source-bundle.ts';
+import { functionEnvSealer } from '../functions/env.ts';
 import { functionsFor } from '../functions/index.ts';
 import { GitHubApp } from '../integrations/github/app.ts';
 import {
@@ -612,6 +613,15 @@ export function createAdapterRegistry(
         cloudToken: cloud,
         ...(options.fetch ? { fetch: options.fetch } : {}),
       });
+    },
+
+    /**
+     * The same both-halves-or-nothing condition `registryCredentials` is built
+     * under, minus the database: the envelope lives on the function's own row,
+     * so all this needs is a keyring to seal it with.
+     */
+    functionEnv() {
+      return keyring === null ? null : functionEnvSealer(keyring);
     },
 
     supplyChain() {
