@@ -131,6 +131,9 @@ describe('the CI caller', () => {
     // §15's workflow-ref-scoped cloud identity: federated, never a stored
     // credential this file would have to carry.
     expect(caller).toContain('id-token: write');
+    // Ticket 136: a called workflow can only narrow this token, never widen
+    // it, so the connected repository's own GHCR push has to be granted here.
+    expect(caller).toContain('packages: write');
     expect(caller).not.toMatch(/secrets\./);
   });
 });

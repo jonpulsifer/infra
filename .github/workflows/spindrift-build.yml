@@ -2,9 +2,11 @@
 #
 # §15 puts the run in the *connected* repository, on its own Actions minutes,
 # and keeps everything it does here: what lands in somebody's repo is a thin
-# caller pinned to a commit of this file. That is why this workflow reads one
-# opaque `spec` input — a caller does not have to be regenerated when a build
-# gains a parameter.
+# caller naming this file at whatever ref the manifest's `buildWorkflow`
+# points to — ordinarily `@main`, so a merge here reaches every connected
+# repository's next dispatch immediately (`buildWorkflowCaller`). That is why
+# this workflow reads one opaque `spec` input — a caller does not have to be
+# regenerated when a build gains a parameter.
 #
 # It also answers `workflow_dispatch`, because an uploaded archive has no
 # repository of its own and builds here instead.
@@ -34,10 +36,14 @@ on:
       # Optional, because a caller that passes nothing still runs every build
       # that carries no credential. Present, it is the private half of the
       # manifest's `sealPublicKey` — the only thing that can open what
-      # `GitHubActionsBuildRoute.sealForRun` sealed into `spec`, and
-      # asked for here by name so a caller can pass it explicitly or with
-      # `secrets: inherit`. A connected repository's caller does neither (see
-      # "Log in with sealed credentials" below for what that means for it).
+      # `GitHubActionsBuildRoute.sealForRun` sealed into `spec`, and asked for
+      # here by name so a caller can pass it explicitly or with `secrets:
+      # inherit`. This repository's own caller (`spindrift.yml`) is the only
+      # one that can hold it at all — every connected repository's generated
+      # caller passes nothing — so it is a shortcut rather than the only path:
+      # a run with nothing here reads the same key from Secret Manager with
+      # the identity it already federated for signing ("Resolve the seal key"
+      # below).
       SPINDRIFT_BUILD_SEAL_KEY:
         required: false
   workflow_dispatch:
@@ -527,10 +533,18 @@ jobs:
       # share one registry pushes to Artifact Registry as well, and that push
       # needs the same identity — so the step moves up and now runs whenever
       # *either* wants it.
+      #
+      # A third want joined them at ticket 136: "Resolve the seal key" below
+      # reads Secret Manager as this identity whenever this repository holds
+      # no `SPINDRIFT_BUILD_SEAL_KEY` of its own, which is every connected
+      # repository — so this step has to run wherever a sealed value is on the
+      # request, whether or not the artifact ever touches a Google registry.
       - name: Authenticate to Google Cloud
         if: >-
           steps.request.outputs.signer != '' ||
-          steps.request.outputs.googleHosts != ''
+          steps.request.outputs.googleHosts != '' ||
+          steps.request.outputs.sealedRegistryAuth != '' ||
+          steps.request.outputs.sealedBuildSecrets != ''
         uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
         with:
           workload_identity_provider: projects/629296473058/locations/global/workloadIdentityPools/homelab/providers/github
@@ -556,33 +570,71 @@ jobs:
           HOSTS: ${{ steps.request.outputs.googleHosts }}
         run: gcloud auth configure-docker --quiet "$HOSTS"
 
+      # The one key both seal steps below open, resolved once so neither has
+      # to repeat the fallback. This repository's own `SPINDRIFT_BUILD_SEAL_KEY`
+      # secret is a shortcut, not the only path: every connected repository's
+      # generated caller passes no secret at all, and its run reads the same
+      # key out of Secret Manager instead, with the identity it already
+      # federated for signing (ticket 136's trust statement — any repository
+      # owned by jonpulsifer or homelab-ng running this workflow at `main` can
+      # read it).
+      #
+      # The key's bytes land in a `RUNNER_TEMP` file; only its path crosses
+      # into `$GITHUB_OUTPUT`. A masked `$GITHUB_OUTPUT` value is still a
+      # value GitHub's log processing sees and promises to redact — the file
+      # is what keeps the key from ever being a candidate for that promise to
+      # fail.
+      - name: Resolve the seal key
+        id: sealkey
+        if: >-
+          steps.request.outputs.sealedRegistryAuth != '' ||
+          steps.request.outputs.sealedBuildSecrets != ''
+        env:
+          SEAL_KEY: ${{ secrets.SPINDRIFT_BUILD_SEAL_KEY }}
+        run: |
+          set -euo pipefail
+          file="${RUNNER_TEMP}/spindrift-seal-key.pem"
+          if [ -n "${SEAL_KEY:-}" ]; then
+            printf '%s' "$SEAL_KEY" > "$file"
+          elif ! gcloud secrets versions access latest \
+              --secret=projects/trusted-builds/secrets/spindrift-build-seal-key \
+              > "$file"; then
+            echo "::error::this build carries a sealed value, and neither this repository's SPINDRIFT_BUILD_SEAL_KEY secret nor projects/trusted-builds/secrets/spindrift-build-seal-key answered — set the repository secret, or check that this run's identity is federated for the seal key's Secret Manager IAM binding." >&2
+            exit 1
+          fi
+          chmod 600 "$file"
+          printf 'file=%s\n' "$file" >> "$GITHUB_OUTPUT"
+
       # §16's Docker Hub exception, opened rather than sent in the clear. The
       # credential travelled inside `spec` sealed to this route's
       # `sealPublicKey` (`GitHubActionsBuildRoute.sealForRun`) precisely
       # because `workflow_dispatch` renders every other input of this run in
       # its header — nothing about it was readable before this step, and the
-      # only key that opens it is this repository's own
-      # `SPINDRIFT_BUILD_SEAL_KEY` secret. What comes out goes straight into
-      # `docker login`'s stdin and nowhere this workflow can be read from —
-      # not `$GITHUB_OUTPUT`, not a file, not a log line. This repository is
-      # public, and its run log is treated as though it already is.
+      # only key that opens it is the one "Resolve the seal key" just wrote.
+      # What comes out goes straight into `docker login`'s stdin and nowhere
+      # this workflow can be read from — not `$GITHUB_OUTPUT`, not a file, not
+      # a log line. This repository is public, and its run log is treated as
+      # though it already is.
       - name: Log in with sealed credentials
         if: steps.request.outputs.sealedRegistryAuth != ''
         env:
           SEALED: ${{ steps.request.outputs.sealedRegistryAuth }}
-          SEAL_KEY: ${{ secrets.SPINDRIFT_BUILD_SEAL_KEY }}
+          SEAL_KEY_FILE: ${{ steps.sealkey.outputs.file }}
         run: |
           set -euo pipefail
-          # This build carries a sealed credential, so failing to open it here
-          # has to be loud: reaching `docker login` with nothing would instead
-          # fail several steps later, at the push, for a reason this sentence
-          # already knows.
-          if [ -z "${SEAL_KEY:-}" ]; then
-            echo "::error::this build carries a sealed registry credential, but SPINDRIFT_BUILD_SEAL_KEY is not set on this repository — set it to the private half of the manifest's sealPublicKey, or every push below fails instead, with a worse error." >&2
+          # "Resolve the seal key" already failed loudly if neither home
+          # answered, so an empty path here means it never ran — the one way
+          # that happens is a `spec` carrying a sealed value this step's own
+          # `if` did not see, which would otherwise reach `docker login` with
+          # nothing and fail several steps later, at the push, for a reason
+          # this sentence already knows.
+          if [ -z "${SEAL_KEY_FILE:-}" ]; then
+            echo "::error::this build carries a sealed registry credential, but no seal key was resolved for it." >&2
             exit 1
           fi
           node <<'SPINDRIFT_SEAL_SCRIPT'
           const crypto = require('node:crypto');
+          const fs = require('node:fs');
           const { execFileSync } = require('node:child_process');
 
           const envelope = JSON.parse(
@@ -599,7 +651,7 @@ jobs:
 
           const aesKey = crypto.privateDecrypt(
             {
-              key: process.env.SEAL_KEY,
+              key: fs.readFileSync(process.env.SEAL_KEY_FILE, 'utf8'),
               padding: crypto.constants.RSA_PKCS1_OAEP_PADDING,
               oaepHash: 'sha256',
             },
@@ -645,11 +697,14 @@ jobs:
         if: steps.request.outputs.sealedBuildSecrets != ''
         env:
           SEALED: ${{ steps.request.outputs.sealedBuildSecrets }}
-          SEAL_KEY: ${{ secrets.SPINDRIFT_BUILD_SEAL_KEY }}
+          SEAL_KEY_FILE: ${{ steps.sealkey.outputs.file }}
         run: |
           set -euo pipefail
-          if [ -z "${SEAL_KEY:-}" ]; then
-            echo "::error::this build carries sealed build secrets, but SPINDRIFT_BUILD_SEAL_KEY is not set on this repository — set it to the private half of the manifest's sealPublicKey, or the RUN that mounts one fails instead, with a worse error." >&2
+          # See "Log in with sealed credentials" for why an empty path here
+          # means "Resolve the seal key" never ran rather than that it failed
+          # quietly — that step already errors loudly on its own.
+          if [ -z "${SEAL_KEY_FILE:-}" ]; then
+            echo "::error::this build carries sealed build secrets, but no seal key was resolved for them." >&2
             exit 1
           fi
           node <<'SPINDRIFT_SEAL_SCRIPT'
@@ -670,7 +725,7 @@ jobs:
 
           const aesKey = crypto.privateDecrypt(
             {
-              key: process.env.SEAL_KEY,
+              key: fs.readFileSync(process.env.SEAL_KEY_FILE, 'utf8'),
               padding: crypto.constants.RSA_PKCS1_OAEP_PADDING,
               oaepHash: 'sha256',
             },

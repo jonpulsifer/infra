@@ -18,6 +18,9 @@
  */
 import { describe, expect, test } from 'bun:test';
 import { generateKeyPairSync } from 'node:crypto';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import {
   buildKitProgram,
   DOCKERFILE_CONTEXT_PROBE,
@@ -589,23 +592,33 @@ describe('the hosted build route', () => {
     ];
     const sealed = await sealForRun(auth, SEAL_KEYPAIR.publicKey);
 
-    const proc = Bun.spawn(['node', '-e', await workflowDecryptScript()], {
-      env: {
-        ...process.env,
-        SEALED: sealed,
-        SEAL_KEY: SEAL_KEYPAIR.privateKey,
-      },
-      stdout: 'pipe',
-      stderr: 'pipe',
-    });
-    const [stdout, stderr, exitCode] = await Promise.all([
-      new Response(proc.stdout).text(),
-      new Response(proc.stderr).text(),
-      proc.exited,
-    ]);
+    // The workflow's own step reads the key from a file — "Resolve the seal
+    // key" is what ever puts one there (ticket 136) — never from `SEAL_KEY`
+    // directly, so the round trip has to hand it one the same way.
+    const dir = mkdtempSync(join(tmpdir(), 'spindrift-seal-'));
+    const keyFile = join(dir, 'seal-key.pem');
+    writeFileSync(keyFile, SEAL_KEYPAIR.privateKey);
+    try {
+      const proc = Bun.spawn(['node', '-e', await workflowDecryptScript()], {
+        env: {
+          ...process.env,
+          SEALED: sealed,
+          SEAL_KEY_FILE: keyFile,
+        },
+        stdout: 'pipe',
+        stderr: 'pipe',
+      });
+      const [stdout, stderr, exitCode] = await Promise.all([
+        new Response(proc.stdout).text(),
+        new Response(proc.stderr).text(),
+        proc.exited,
+      ]);
 
-    expect(exitCode, stderr).toBe(0);
-    expect(JSON.parse(stdout)).toEqual(auth);
+      expect(exitCode, stderr).toBe(0);
+      expect(JSON.parse(stdout)).toEqual(auth);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
 

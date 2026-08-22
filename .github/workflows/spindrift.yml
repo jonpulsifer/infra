@@ -10,11 +10,13 @@
 # default branch and quietly discard the commit pin §15 requires. A caller keeps
 # the pin where a caller always keeps it: in the `uses:`.
 #
-# The pin here is `./` rather than a SHA, and that is stronger rather than
+# The pin here is `./` rather than a ref, and that is stronger rather than
 # weaker — a local reference resolves to the same commit as this file, so the
 # machinery that runs is by construction the machinery that was reviewed
 # alongside it. A connected repository cannot do that, which is why its caller
-# carries a SHA.
+# names the manifest's `buildWorkflow` instead — ordinarily `@main`, so a
+# merge here reaches its next dispatch immediately rather than at whatever
+# commit was current when it connected.
 name: spindrift
 run-name: spindrift ${{ inputs.correlation }}
 
