@@ -80,17 +80,58 @@ interface PodEvent {
 /**
  * Decide the reason from pods and events.
  *
- * The order is the order the evidence is trustworthy in. A container that could
- * not pull its image is the least ambiguous thing in the list, and it is also
- * the one where every instinct is wrong — §6 calls `ARTIFACT_UNAVAILABLE` the
- * hardest justification for `blame` existing, because the build is green and
- * the developer is about to go and read their own code.
+ * Total by construction: every read ends in a reason, and it is allowed to
+ * because its caller has already been told by the delivery object that this
+ * release failed. {@link evidence} is the half of this that does not need that
+ * guarantee, for the one caller that does not have it.
  */
 export function diagnose(
   pods: readonly KubernetesObject[],
   events: readonly KubernetesObject[],
   fallbackDetail?: string,
 ): Diagnosis {
+  return (
+    evidence(pods, events, fallbackDetail) ??
+    // No pod was ever created. Something between the release and the scheduler
+    // refused it — an admission webhook, a quota, an invalid spec — and §6 puts
+    // all three under one reason.
+    //
+    // Sound only because something has already declared this release failed.
+    // Absent that, "no pods" is equally "no pods *yet*", which is exactly why
+    // this branch is here rather than in `evidence`.
+    conclude('REJECTED', fallbackDetail ?? 'the release produced no pods', {
+      pods,
+      events,
+    })
+  );
+}
+
+/**
+ * The part of the read that rests on what was observed, or `null` when nothing
+ * was.
+ *
+ * The order is the order the evidence is trustworthy in. A container that could
+ * not pull its image is the least ambiguous thing in the list, and it is also
+ * the one where every instinct is wrong — §6 calls `ARTIFACT_UNAVAILABLE` the
+ * hardest justification for `blame` existing, because the build is green and
+ * the developer is about to go and read their own code.
+ *
+ * Split out from {@link diagnose} for the deadline, which is the one red this
+ * module is reached on without a verdict behind it. Handing that read to
+ * `diagnose` would let its last branch conclude `REJECTED` — blame
+ * `developer` — from an empty pod list, and an empty pod list under a deadline
+ * is usually a chart still resolving or a wedged controller. Indicting the
+ * developer for a platform stall is worse than the `TIMEOUT` it replaced,
+ * which at least indicts nobody.
+ *
+ * Every branch below names something that was seen, so each is as true at a
+ * deadline as it is at a verdict.
+ */
+export function evidence(
+  pods: readonly KubernetesObject[],
+  events: readonly KubernetesObject[],
+  fallbackDetail?: string,
+): Diagnosis | null {
   const statuses = pods.flatMap((pod) => containerStatuses(pod));
 
   for (const status of statuses) {
@@ -147,14 +188,7 @@ export function diagnose(
     );
   }
 
-  // No pod was ever created. Something between the release and the scheduler
-  // refused it — an admission webhook, a quota, an invalid spec — and §6 puts
-  // all three under one reason.
-  return conclude(
-    'REJECTED',
-    fallbackDetail ?? 'the release produced no pods',
-    { pods, events },
-  );
+  return null;
 }
 
 function conclude(
