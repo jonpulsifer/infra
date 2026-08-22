@@ -113,13 +113,37 @@ const STATUS = {
   { icon: typeof Check; tone: string; word: string; spin: boolean }
 >;
 
-/** The leading glyph on a checklist line. */
+/**
+ * The leading glyph on a checklist line.
+ *
+ * **`done` draws its tick.** It is the one status that marks a transition
+ * rather than a state — everything else is where a thing currently is, and
+ * `done` is where it just arrived — so it is the one worth animating. The
+ * stroke is drawn rather than the glyph faded because a fade is a thing
+ * appearing and a draw is a thing being written, and the second is what
+ * finishing a step reads as.
+ *
+ * `pathLength={1}` is what makes one keyframe do it: every path in the icon is
+ * normalized to a single unit, so `stroke-dasharray: 1` covers the whole stroke
+ * whatever shape lucide drew. Set here rather than in CSS because it is an SVG
+ * attribute, not a property.
+ *
+ * One-shot, and keyed by nothing: a glyph that re-mounts redraws, and a glyph
+ * that stays put does not. That is right — a step does not finish twice.
+ */
 export function StepGlyph({ status }: { status: StepStatus }) {
   const { icon: Icon, tone, spin } = STATUS[status];
   return (
     <Icon
       aria-hidden="true"
-      className={cn('size-3.5 shrink-0', tone, spin && 'animate-spin')}
+      pathLength={status === 'done' ? 1 : undefined}
+      className={cn(
+        'size-3.5 shrink-0',
+        tone,
+        spin && 'animate-spin',
+        status === 'done' &&
+          'motion-safe:[&_*]:[stroke-dasharray:1] motion-safe:[&_*]:animate-draw',
+      )}
     />
   );
 }

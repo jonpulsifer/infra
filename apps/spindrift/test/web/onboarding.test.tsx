@@ -49,6 +49,7 @@ import {
   stepAsking,
   stepIssues,
 } from '../../src/web/views/auth/onboarding.tsx';
+import { StepRail } from '../../src/web/views/auth/step-rail.tsx';
 
 /** The document an unconfigured installation actually holds. */
 const UNCONFIGURED = DEFAULT_PLACEHOLDER_MANIFEST as unknown;
@@ -363,5 +364,46 @@ describe('the way back in when there are no answers to give', () => {
     const second = screen({ step: 1 });
     expect(second).toContain('>Back<');
     expect(second).not.toContain('Restore from a file');
+  });
+});
+
+describe('what the wizard says by moving', () => {
+  test('the finished step draws its tick rather than fading one in', () => {
+    // The one status that marks a transition rather than a state, and the one
+    // worth animating. `pathLength` is what makes one keyframe draw whatever
+    // shape lucide handed over.
+    const rail = renderToStaticMarkup(
+      <StepRail
+        steps={[
+          { title: 'Answered', status: 'done', value: 'yes' },
+          { title: 'Here', status: 'running' },
+          { title: 'Later', status: 'waiting' },
+        ]}
+        current={1}
+      />,
+    );
+    expect(rail).toContain('pathLength="1"');
+    expect(rail).toContain('animate-draw');
+  });
+
+  test('the reconciled Targets land in rank order, one behind the next', () => {
+    // Rank is the order the write actually worked them in, inside one
+    // transaction — so the stagger is the shape of what happened rather than
+    // an effect over a finished list.
+    const done = screen({
+      outcome: {
+        kind: 'saved',
+        targets: ['cluster/kubernetes', 'cloud/cloudrun'],
+      },
+    });
+    expect(done).toContain('cluster/kubernetes');
+    expect(done).toContain('cloud/cloudrun');
+    expect(done).toContain('calc(var(--i) * 90ms)');
+  });
+
+  test('an installation with no Targets says so, with nothing to stagger', () => {
+    const done = screen({ outcome: { kind: 'saved', targets: [] } });
+    expect(done).toContain('declares no Targets yet');
+    expect(done).not.toContain('calc(var(--i)');
   });
 });

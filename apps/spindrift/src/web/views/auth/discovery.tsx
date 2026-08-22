@@ -42,7 +42,7 @@
  * leaving a control writing somewhere nothing reads.
  */
 import { Check, CircleAlert, Search } from 'lucide-react';
-import { useState } from 'react';
+import { type CSSProperties, useState } from 'react';
 import type {
   DiscoveredCandidate,
   DiscoveredFact,
@@ -58,6 +58,7 @@ import { Badge } from '../../ui/badge.tsx';
 import { Button } from '../../ui/button.tsx';
 import { Card, CardContent, CardHeader, CardTitle } from '../../ui/card.tsx';
 import { Field } from '../../ui/field.tsx';
+import { cn } from '../../ui/utils.ts';
 
 /** One ask, in the two arms every answer on this path comes back in. */
 export type DiscoveryAnswer =
@@ -376,7 +377,7 @@ export function DiscoveredFactList({
 }) {
   return (
     <dl className="flex flex-col gap-3">
-      {facts.map((fact) => {
+      {facts.map((fact, index) => {
         const at = document === undefined ? null : placementOf(fact, document);
         const current = at === null ? undefined : valueAt(document, at);
         const applied =
@@ -386,7 +387,31 @@ export function DiscoveredFactList({
         return (
           <div
             key={fact.path.join('.')}
-            className="flex flex-col gap-1.5 border-t border-border pt-3 first:border-t-0 first:pt-0"
+            // Rows arrive in the order the cloud answered for, one behind the
+            // next, because five values appearing at once reads as a page
+            // reloading rather than as an installation being read.
+            //
+            // **A refusal does not arrive**, and that is the whole of the
+            // rule this file already keeps in words: an `unavailable` arm is
+            // an API that is switched off, and animating it in would make a
+            // dead end look like something still landing. It renders as it
+            // always did, immediately and still.
+            //
+            // The delay is per row rather than per group so a stagger stays a
+            // stagger when a group is one row long, and `--i` carries the
+            // index because CSS cannot count siblings into a duration.
+            style={
+              fact.kind === 'unavailable'
+                ? undefined
+                : ({
+                    '--i': index,
+                    animationDelay: 'calc(var(--i) * 60ms)',
+                  } as CSSProperties)
+            }
+            className={cn(
+              'flex flex-col gap-1.5 border-t border-border pt-3 first:border-t-0 first:pt-0',
+              fact.kind !== 'unavailable' && 'motion-safe:animate-rise',
+            )}
           >
             <dt className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
               <span className="text-caption font-semibold uppercase tracking-eyebrow text-muted-foreground">

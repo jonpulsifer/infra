@@ -420,3 +420,33 @@ describe('a refusal is shown as a fact about the installation', () => {
     expect(markup).toContain('not a field to correct');
   });
 });
+
+describe('an answer arrives; a refusal does not', () => {
+  /**
+   * The one claim motion owes a test: a `found` row is staggered in and an
+   * `unavailable` row is not. Animating a refusal would make an API that is
+   * switched off look like something still landing, which is the failure the
+   * two-armed answer exists to prevent, restated in CSS.
+   */
+  const markup = renderToStaticMarkup(
+    <DiscoveredFactList facts={FACTS} onApply={() => undefined} />,
+  );
+
+  test('a found row rises, one behind the next', () => {
+    expect(markup).toContain('animate-rise');
+    expect(markup).toContain('calc(var(--i) * 60ms)');
+  });
+
+  test('an unavailable row carries no animation at all', () => {
+    const unavailable = FACTS.find((fact) => fact.kind === 'unavailable');
+    expect(unavailable).toBeDefined();
+    const only = renderToStaticMarkup(
+      <DiscoveredFactList facts={[unavailable!]} onApply={() => undefined} />,
+    );
+    expect(only).toContain(
+      unavailable!.kind === 'unavailable' ? unavailable!.reason : '',
+    );
+    expect(only).not.toContain('animate-rise');
+    expect(only).not.toContain('animationDelay');
+  });
+});

@@ -71,7 +71,7 @@
  * them first.
  */
 import { CircleAlert, PartyPopper, Rocket } from 'lucide-react';
-import { type ReactNode, useEffect, useState } from 'react';
+import { type CSSProperties, type ReactNode, useEffect, useState } from 'react';
 import type { StepStatus } from '../../../commands/views.ts';
 import { command } from '../../client.ts';
 import type { Path } from '../../forms/document.ts';
@@ -359,9 +359,28 @@ export function Onboarding({
   // followed it nor noticed.
   const setStep = (next: number) => {
     const clamped = Math.min(Math.max(next, 0), ONBOARDING_ASKS.length - 1);
-    setStepState(clamped);
-    if (typeof location !== 'undefined')
-      location.hash = `/setup/${clamped + 1}`;
+    const move = () => {
+      setStepState(clamped);
+      if (typeof location !== 'undefined')
+        location.hash = `/setup/${clamped + 1}`;
+    };
+    // A view transition where the browser has one, and the same swap where it
+    // does not. The whole of what it buys is that the question leaving and the
+    // question arriving are one movement rather than two unrelated repaints —
+    // a wizard reads as one screen changing its mind, not as three screens.
+    //
+    // Nothing waits on it and nothing is conditional on it having run: the
+    // callback is the state update either way, so a browser without the API,
+    // or a reader who asked for less motion, gets the instant swap that was
+    // always here.
+    const view = globalThis.document as
+      | { startViewTransition?: (update: () => void) => unknown }
+      | undefined;
+    if (typeof view?.startViewTransition === 'function') {
+      view.startViewTransition(move);
+    } else {
+      move();
+    }
   };
 
   useEffect(() => {
@@ -521,7 +540,9 @@ export function OnboardingView({
 
   const body = (
     <>
-      <Card>
+      {/* Keyed by the step so React remounts it, which is what replays the
+          animation: a question is a new question, not the last one edited. */}
+      <Card key={step} className="motion-safe:animate-rise">
         <CardHeader>
           <Rocket aria-hidden="true" className="mt-0.5 size-4 text-subtle" />
           <div>
@@ -682,11 +703,41 @@ function OnboardingDone({
         <PartyPopper aria-hidden="true" className="mt-0.5 size-4 text-subtle" />
         <div>
           <CardTitle>This installation is configured.</CardTitle>
-          <p className="mt-1 text-sm text-muted-foreground">
-            {targets.length === 0
-              ? 'It declares no Targets yet. Connect one from Settings when there is somewhere to deploy.'
-              : `Targets reconciled, in rank order: ${targets.join(', ')}.`}
-          </p>
+          {targets.length === 0 ? (
+            <p className="mt-1 text-sm text-muted-foreground">
+              It declares no Targets yet. Connect one from Settings when there
+              is somewhere to deploy.
+            </p>
+          ) : (
+            <>
+              <p className="mt-1 text-sm text-muted-foreground">
+                Targets reconciled, in rank order:
+              </p>
+              {/* One at a time, in the order the write worked them: the
+                  reconciliation really is sequential inside one transaction,
+                  and rank really is the order, so the stagger is the shape of
+                  what happened rather than an effect over a finished list.
+                  Still one sentence to a reader who cannot see it — the list
+                  is comma-separated text with the delay on each item. */}
+              <ul className="mt-1 flex flex-wrap gap-x-1 text-sm text-muted-foreground">
+                {targets.map((target, index) => (
+                  <li
+                    key={target}
+                    className="motion-safe:animate-rise font-mono text-xs"
+                    style={
+                      {
+                        '--i': index,
+                        animationDelay: 'calc(var(--i) * 90ms)',
+                      } as CSSProperties
+                    }
+                  >
+                    {target}
+                    {index === targets.length - 1 ? '.' : ','}
+                  </li>
+                ))}
+              </ul>
+            </>
+          )}
         </div>
       </CardHeader>
       <CardContent className="flex flex-col gap-3">
