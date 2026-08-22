@@ -41,11 +41,13 @@
 import {
   CircleAlert,
   CircleCheck,
+  Download,
   RotateCcw,
   Server,
   Sliders,
+  Upload,
 } from 'lucide-react';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { governedManifestPaths } from '../../../config/manifest.schema.ts';
 import type { TransportFailure } from '../../client.ts';
 import { command } from '../../client.ts';
@@ -432,7 +434,7 @@ export function InstallationSettingsView({
 
       <Outcome outcome={outcome} />
 
-      <div className="flex items-center gap-3">
+      <div className="flex flex-wrap items-center gap-3">
         <Button type="submit" disabled={saving}>
           {saving ? 'Saving…' : 'Save this installation'}
         </Button>
@@ -445,8 +447,171 @@ export function InstallationSettingsView({
           <RotateCcw aria-hidden="true" />
           Discard edits and re-read
         </Button>
+        <DownloadInstallation disabled={saving} />
       </div>
     </form>
+  );
+}
+
+/**
+ * The document this installation actually has, as a file.
+ *
+ * **What replaced the declaration as the disaster-recovery artifact.** A
+ * mounted document was a copy of the configuration that only ever matched by
+ * somebody remembering to keep it matching — it seeded an empty row and was
+ * ignored ever after, so the file in git and the row a torn-down installation
+ * would need to come back as drifted apart silently, and the drift surfaced as
+ * a warning in a pod log at the moment a rollout stopped matching what was
+ * running. This is the same artifact derived the other way round: it is by
+ * construction what the installation has, because it is read back out of it.
+ *
+ * **Re-read rather than serialized from the form.** The screen above holds an
+ * edited document, and a file written from that is a record of what somebody
+ * was in the middle of typing. What is worth committing is what is stored, so
+ * this asks the server for it.
+ *
+ * JSON, and no YAML emitter anywhere near the browser bundle: JSON is valid
+ * YAML, `parseManifest` says so, and the restore below reads this file back
+ * through that same reader. An emitter here would be a second serializer to
+ * keep in step with a schema that is still moving.
+ */
+function DownloadInstallation({ disabled }: { readonly disabled: boolean }) {
+  const [failure, setFailure] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  const download = async () => {
+    setBusy(true);
+    setFailure(null);
+    try {
+      const result = await command('getInstallationManifest', {});
+      if (!result.ok) {
+        setFailure(result.failure.message);
+        return;
+      }
+      const manifest = result.value.manifest as {
+        installation?: { name?: string };
+      };
+      const url = URL.createObjectURL(
+        new Blob([JSON.stringify(result.value.manifest, null, 2)], {
+          type: 'application/json',
+        }),
+      );
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `${manifest.installation?.name ?? 'installation'}.json`;
+      link.click();
+      // The object URL outlives the click and nothing else will ever ask for
+      // it, so releasing it here is the whole of this element's lifetime.
+      URL.revokeObjectURL(url);
+    } catch (cause) {
+      setFailure(
+        cause instanceof Error
+          ? cause.message
+          : 'This installation could not be read.',
+      );
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="flex items-center gap-2">
+      <Button
+        type="button"
+        variant="outline"
+        disabled={disabled || busy}
+        onClick={() => void download()}
+      >
+        <Download aria-hidden="true" />
+        {busy ? 'Reading…' : 'Download this installation'}
+      </Button>
+      {failure === null ? null : (
+        <p role="alert" className="text-xs text-destructive">
+          {failure}
+        </p>
+      )}
+    </div>
+  );
+}
+
+/**
+ * A document from a file, restored whole.
+ *
+ * The other half of {@link DownloadInstallation}, and the reason that one is
+ * worth having: an export nothing can read back is a file somebody keeps out of
+ * superstition. This is how a torn-down installation comes back configured —
+ * the act a mounted declaration used to perform at boot, done on purpose by
+ * somebody who chose the document, rather than silently by whichever document
+ * happened to be mounted.
+ *
+ * **The text, not a parse.** The file goes to `configureInstallation` as a
+ * string and the server reads it, so the one reader that decides what a
+ * manifest is stays the one every other document goes through. That also makes
+ * a file that is not a manifest at all a refusal an operator reads, rather than
+ * an exception in a browser console.
+ *
+ * The input is reset after every attempt: choosing the same file twice is a
+ * real thing to want after fixing it, and a file input fires nothing when the
+ * selection has not changed.
+ */
+export function RestoreInstallation({
+  disabled,
+  onRestored,
+}: {
+  readonly disabled: boolean;
+  /** A document landed. The caller decides what to show next. */
+  onRestored(outcome: SaveOutcome): void;
+}) {
+  const input = useRef<HTMLInputElement>(null);
+  const [busy, setBusy] = useState(false);
+
+  const restore = async (file: File) => {
+    setBusy(true);
+    try {
+      const result = await command('configureInstallation', {
+        manifest: await file.text(),
+      });
+      onRestored(
+        result.ok
+          ? { kind: 'saved', targets: result.value.targets }
+          : refusalOf(result.failure),
+      );
+    } catch (cause) {
+      onRestored({
+        kind: 'failed',
+        message:
+          cause instanceof Error
+            ? cause.message
+            : 'That file could not be restored.',
+      });
+    } finally {
+      setBusy(false);
+      if (input.current !== null) input.current.value = '';
+    }
+  };
+
+  return (
+    <>
+      <input
+        ref={input}
+        type="file"
+        accept=".json,.yaml,.yml,application/json"
+        className="hidden"
+        onChange={(event) => {
+          const file = event.target.files?.[0];
+          if (file !== undefined) void restore(file);
+        }}
+      />
+      <Button
+        type="button"
+        variant="outline"
+        disabled={disabled || busy}
+        onClick={() => input.current?.click()}
+      >
+        <Upload aria-hidden="true" />
+        {busy ? 'Restoring…' : 'Restore from a file'}
+      </Button>
+    </>
   );
 }
 

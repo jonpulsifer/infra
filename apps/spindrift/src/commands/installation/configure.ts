@@ -31,6 +31,7 @@ import {
 } from '../../config/manifest.schema.ts';
 import {
   ManifestError,
+  parseManifest,
   trustedGatewayRefusal,
   validateManifest,
 } from '../../config/manifest.ts';
@@ -44,13 +45,21 @@ import { type Command, failed, ok } from '../types.ts';
 export const configureInstallationInput = z
   .object({
     /**
-     * The manifest document, parsed but not yet validated.
+     * The manifest document, parsed but not yet validated — or the text of one.
      *
      * `unknown` rather than the schema itself, so a bad document is refused by
      * {@link validateManifest} with every offending key named, instead of by
      * the dispatch layer's generic input refusal with a Zod path. The operator
      * is editing configuration; the sentence they read has to be about their
      * configuration.
+     *
+     * **A string is a document somebody is restoring**, from a file this
+     * installation exported before it was torn down. It is parsed here rather
+     * than in the browser because `parseManifest` is the same reader every
+     * other document goes through — a second parser in the client bundle would
+     * be a second answer to "is this a manifest", and the one that matters is
+     * the server's. YAML, and therefore JSON, so the file the export writes
+     * reads back unchanged.
      */
     manifest: z.unknown(),
   })
@@ -77,7 +86,10 @@ export const configureInstallation: Command<
 > = async (input, context) => {
   let manifest: AuthoredManifest;
   try {
-    manifest = validateManifest(input.manifest, 'the submitted manifest');
+    manifest =
+      typeof input.manifest === 'string'
+        ? parseManifest(input.manifest, 'the restored document')
+        : validateManifest(input.manifest, 'the submitted manifest');
   } catch (cause) {
     if (cause instanceof ManifestError) {
       return failed('INVALID_INPUT', cause.message);

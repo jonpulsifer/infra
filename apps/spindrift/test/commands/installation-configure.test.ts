@@ -188,6 +188,39 @@ describe('configuring an installation', () => {
     }
   });
 
+  test('restores a document handed over as text', async () => {
+    await seed();
+    // The other half of the export: a file this installation wrote, read back
+    // through the same parser every other document goes through. YAML, and
+    // therefore the JSON the download emits.
+    const restored = {
+      ...manifest,
+      installation: { ...manifest.installation, name: 'restored' },
+    };
+
+    const result = await configureInstallation(
+      { manifest: JSON.stringify(restored) },
+      context(),
+    );
+
+    expect(result.ok).toBe(true);
+    expect((await storedManifest())?.installation.name).toBe('restored');
+  });
+
+  test('refuses text that is not a document at all', async () => {
+    await seed();
+    const before = await storedManifest();
+
+    const result = await configureInstallation(
+      { manifest: '\tthis: [is not\n  yaml' },
+      context(),
+    );
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.failure.code).toBe('INVALID_INPUT');
+    expect(await storedManifest()).toEqual(before);
+  });
+
   test('leaves the stored manifest alone when it refuses', async () => {
     await seed();
     const before = await storedManifest();

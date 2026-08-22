@@ -85,6 +85,7 @@ import { DiscoveryPanel } from './discovery.tsx';
 import {
   issuesOf,
   Outcome,
+  RestoreInstallation,
   refusalOf,
   type SaveOutcome,
 } from './installation.tsx';
@@ -439,6 +440,7 @@ export function Onboarding({
       }}
       onStep={setStep}
       onFinish={() => void finish()}
+      onRestored={setOutcome}
       onDone={onDone}
     />
   );
@@ -461,6 +463,7 @@ export function OnboardingView({
   onChange,
   onStep,
   onFinish,
+  onRestored,
   onDone,
 }: {
   readonly step: number;
@@ -471,6 +474,11 @@ export function OnboardingView({
   onChange(document: unknown): void;
   onStep(step: number): void;
   onFinish(): void;
+  /**
+   * A document arrived from a file instead of from the three questions. The
+   * same outcome the last press produces, because it is the same write.
+   */
+  onRestored(outcome: SaveOutcome): void;
   onDone(next: string | null): void;
 }) {
   // A saved document is the end of this screen's job, whatever step it was on.
@@ -543,14 +551,22 @@ export function OnboardingView({
       <Outcome outcome={outcome} />
 
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <Button
-          type="button"
-          variant="outline"
-          disabled={saving || step === 0}
-          onClick={() => onStep(step - 1)}
-        >
-          Back
-        </Button>
+        {step === 0 ? (
+          // Nothing to go back to on the first question, and the one thing an
+          // operator might be here to do instead of answering it: a torn-down
+          // installation comes back from the file it exported, rather than from
+          // whatever document a chart happened to mount.
+          <RestoreInstallation disabled={saving} onRestored={onRestored} />
+        ) : (
+          <Button
+            type="button"
+            variant="outline"
+            disabled={saving}
+            onClick={() => onStep(step - 1)}
+          >
+            Back
+          </Button>
+        )}
         <div className="flex items-center gap-3">
           {/* Whatever the button is currently mumbling, said out loud. A
               ceremony that takes as long as a cloud write takes was announced

@@ -68,6 +68,7 @@ function screen({
       outcome={outcome}
       saving={saving}
       onChange={() => undefined}
+      onRestored={() => undefined}
       onStep={() => undefined}
       onFinish={() => undefined}
       onDone={() => undefined}
@@ -351,5 +352,21 @@ describe('an unconfigured installation is shown onboarding, not the product', ()
     expect(
       signedIn({ state: 'configured', declarationDivergence: [] }),
     ).not.toContain('Step 1 of 3');
+  });
+});
+
+describe('the way back in when there are no answers to give', () => {
+  test('the first question offers a restore where Back would be', () => {
+    // Nothing to go back to on step one, and the one act a torn-down
+    // installation is here to perform: the file it exported, read back.
+    const first = screen({ step: 0 });
+    expect(first).toContain('Restore from a file');
+    expect(first).not.toContain('>Back<');
+  });
+
+  test('every later question offers Back instead', () => {
+    const second = screen({ step: 1 });
+    expect(second).toContain('>Back<');
+    expect(second).not.toContain('Restore from a file');
   });
 });
