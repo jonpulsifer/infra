@@ -37,6 +37,7 @@ import {
 } from './apps/resolve-placement.ts';
 import { getAppSource, getAppSourceInput } from './apps/source.ts';
 import { uploadArchive, uploadArchiveInput } from './apps/upload-archive.ts';
+import { setAppVanity, setAppVanityInput } from './apps/vanity.ts';
 import { getAppWorkspace, getAppWorkspaceInput } from './apps/workspace.ts';
 import { setAppZone, setAppZoneInput } from './apps/zone.ts';
 import { listArtifacts, listArtifactsInput } from './artifacts/list.ts';
@@ -194,6 +195,7 @@ export const commandRegistry = {
   },
   setAppBuildRoute: { input: setAppBuildRouteInput, handler: setAppBuildRoute },
   setAppZone: { input: setAppZoneInput, handler: setAppZone },
+  setAppVanity: { input: setAppVanityInput, handler: setAppVanity },
   getAppWorkspace: { input: getAppWorkspaceInput, handler: getAppWorkspace },
   getAppSource: { input: getAppSourceInput, handler: getAppSource },
   getDeployDetail: { input: getDeployDetailInput, handler: getDeployDetail },
