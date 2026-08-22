@@ -19,7 +19,6 @@ import {
 } from './manifest.schema.ts';
 import {
   DEFAULT_PLACEHOLDER_MANIFEST,
-  governingDeclaration,
   loadManifestIfPresent,
   ManifestError,
   resolveManifest,
@@ -76,17 +75,7 @@ export async function loadStoredManifest(
       `installation manifest: the stored manifest is not valid for this build, so this installation is being re-seeded from the mounted declaration — anything configured through the UI that the declaration does not carry is lost: ${unreadable.message}`,
     );
   }
-  // Seeding takes the declaration whatever it is — a stand-in carrying this
-  // release's own hostname is the whole of what makes a chart-only install
-  // reachable (ticket 77). Governing is the other half of the same document and
-  // does not follow: see {@link governingDeclaration}.
-  const governing = governingDeclaration(declaration);
-  const declared =
-    stored === null
-      ? (declaration ?? DEFAULT_PLACEHOLDER_MANIFEST)
-      : governing === null
-        ? stored
-        : governedByDeclaration(stored, governing);
+  const declared = stored ?? declaration ?? DEFAULT_PLACEHOLDER_MANIFEST;
   if (unreadable === null && stored !== null && declaration !== null) {
     // The generic half of this warning has existed since the rule did — "a
     // declaration is mounted and ignored" — and it is not enough. Proven live:
@@ -97,9 +86,6 @@ export async function loadStoredManifest(
     // silently corrected" — naming the paths is that rule applied to the
     // manifest itself, not just to what it deploys.
     //
-    // Against the document actually being used rather than against the row, so
-    // the governed slice does not appear as divergence a boot has already
-    // resolved: what this names is what is genuinely ignored.
     const divergentPaths = diffManifestPaths(declaration, declared);
     console.warn(
       divergentPaths.length === 0
@@ -117,141 +103,6 @@ export async function loadStoredManifest(
     stored === null ? 'declared' : 'booted',
   );
   return resolveManifest(declared, env);
-}
-
-/**
- * The stored document with the two vessels this installation is built on, and
- * the repository they are declared in, taken from the mounted declaration.
- *
- * **The one slice a declaration governs.** Everywhere else the row wins, because
- * configuration is the UI's to drive and a rollout must not revert what an
- * operator just configured. These are the exception, and the reason is that the
- * failure they protect against is not a reverted edit but an installation that
- * cannot come back: a control plane pointed at a boundary that is not there, or
- * a home vessel whose bucket, store and signer nobody can reach.
- *
- * Both pointers move with the entries, so a declaration may hand the role to a
- * different boundary in one edit. The old home's `shared` block goes with the
- * role — the schema admits exactly one vessel carrying it — and a governed
- * vessel the row does not have yet is added rather than dropped.
- *
- * **`github.infrastructureRepository` travels with them**, and it is the one
- * key outside `installation` and `vessels` that does. A governed vessel entry
- * carries `terraformRoot`, which is a path *relative to that repository*: govern
- * the path and not the repository it is inside and a declaration can move a
- * root while the row keeps pointing the pull request at somewhere else — two
- * halves of one address, disagreeing, with nothing to notice. Nothing else in
- * the `github` block is governed: the App id, its key reference and the OAuth
- * endpoints are credentials an operator configures, and the row keeps them.
- *
- * Only when the declaration states one. A document that names no infrastructure
- * repository is not asserting there is none — the chart's own placeholder omits
- * the key entirely — so taking its absence would clear what an operator set
- * through the settings screen on every boot of every installation running the
- * default.
- *
- * **A merge that will not validate is not applied.** A declaration and the image
- * that understands it land in separate merges, so a document this build reads
- * differently is the ordinary shape of a rollout rather than a fault; taking the
- * row whole is the same fallback `declaredManifest` already makes one step
- * earlier, and it keeps a healthy installation running.
- */
-function governedByDeclaration(
-  stored: AuthoredManifest,
-  declaration: AuthoredManifest,
-): AuthoredManifest {
-  const governed = new Set([
-    declaration.installation.controlPlaneVessel,
-    declaration.installation.homeVessel,
-  ]);
-  const declared = new Map(
-    declaration.vessels
-      .filter((vessel) => governed.has(vessel.name))
-      .map((vessel) => [vessel.name, vessel] as const),
-  );
-  const kept = stored.vessels.map((vessel) => {
-    const replacement = declared.get(vessel.name);
-    if (replacement !== undefined) return replacement;
-    // Only the outgoing home can be carrying this, and it is not the home any
-    // more — two vessels declaring the shared services is two answers to one
-    // question and the schema refuses it.
-    const { shared: _handedOver, ...withoutShared } = vessel;
-    return withoutShared;
-  });
-  const infrastructure = declaration.github.infrastructureRepository;
-  const merged = {
-    ...stored,
-    installation: {
-      ...stored.installation,
-      controlPlaneVessel: declaration.installation.controlPlaneVessel,
-      homeVessel: declaration.installation.homeVessel,
-    },
-    ...(infrastructure === undefined
-      ? {}
-      : {
-          github: {
-            ...stored.github,
-            infrastructureRepository: infrastructure,
-          },
-        }),
-    vessels: [
-      ...kept,
-      ...[...declared.values()].filter(
-        (vessel) =>
-          !stored.vessels.some((existing) => existing.name === vessel.name),
-      ),
-    ],
-  };
-  try {
-    return validateManifest(merged, 'the governed installation vessels');
-  } catch (cause) {
-    if (!(cause instanceof ManifestError)) throw cause;
-    console.warn(
-      `installation manifest: the declaration's installation vessels do not compose with the stored document for this build, so the stored one is being used whole: ${cause.message}`,
-    );
-    return stored;
-  }
-}
-
-/**
- * The sentence refusing a document the next boot would take back, or `null` for
- * one it would leave standing.
- *
- * **The guard every write path owes the governed slice.** `loadStoredManifest`
- * re-applies {@link governedByDeclaration} on every boot, so an operator edit to
- * anything it governs is accepted, saved, and reverted at the next pod restart —
- * with the screen that took it then showing the old values and no reason why.
- * That is the failure `ManifestWrite` records having already happened once to a
- * Target's connection; refusing here is the same answer one noun up, and it is
- * what makes that slice safe to govern.
- *
- * Derived by running the merge and diffing rather than by a second list of the
- * governed keys: the check and the governance are then the same code, so a
- * pointer that starts governing something new cannot start being editable at
- * the same moment.
- *
- * Paths, never values, for the reason {@link diffManifestPaths} gives. `null`
- * with no declaration mounted, because there is then nothing to govern and the
- * row is the operator's outright.
- */
-export function governedSliceRefusal(
-  manifest: AuthoredManifest,
-  declaration: AuthoredManifest | null | undefined,
-): string | null {
-  const governing = governingDeclaration(declaration);
-  if (governing === null) return null;
-  // Both sides through the same parse. The schema normalizes as it validates —
-  // `supplyChain.registry` is authored as a string or a list and comes out a
-  // list — and {@link governedByDeclaration} validates what it merges, so
-  // diffing that against an unnormalized document would report every
-  // normalization as a path a boot reverts and refuse a document nobody edited.
-  const normalized = validateManifest(manifest, 'the submitted manifest');
-  const reverted = diffManifestPaths(
-    governedByDeclaration(normalized, governing),
-    normalized,
-  );
-  if (reverted.length === 0) return null;
-  return `the vessels this installation is built on, and the repository they are declared in, are reconciled from the mounted declaration on every boot — so this document would be taken back at: ${reverted.join(', ')}. Change the declaration instead.`;
 }
 
 /**

@@ -219,46 +219,29 @@ describe('declaring a source bucket', () => {
 });
 
 /**
- * Which bucket a staging picks is a property of the home vessel, and an
- * installation that mounts a declaration takes that vessel from it on every
- * boot. So the choice is the declaration's there, and this command has to say
- * so rather than write it.
+ * A mounted declaration reserves nothing, so every act here is this screen's.
+ *
+ * Which bucket a staging picks is a property of the home vessel, and that
+ * vessel used to be reconciled from the declaration on every boot — so moving
+ * the default was refused rather than left half-applied. Nothing re-applies a
+ * declaration now.
  */
-describe('an installation whose home vessel is declared', () => {
+describe('an installation that mounts a declaration', () => {
   async function declared(): Promise<CommandContext> {
     return { ...(await context()), declaration: await authoredFixture() };
   }
 
-  test('adding a bucket is still this screen’s to do', async () => {
-    // `sources.buckets` is not the home vessel's, so nothing about it moves
-    // with the declaration and the ordinary act stays open.
+  test('adds a bucket and moves the default in one act', async () => {
+    const ctx = await declared();
     const result = await useSourceBucket(
-      { bucketName: 'a-second-bucket', makeDefault: false },
-      await declared(),
+      { bucketName: 'a-second-bucket', makeDefault: true },
+      ctx,
     );
 
     expect(result.ok).toBe(true);
     expect(await storedBuckets()).toMatchObject({
       buckets: ['example-source-bucket', 'a-second-bucket'],
-    });
-  });
-
-  test('moving the default is refused rather than half-applied', async () => {
-    // Accepted, it would leave the bucket added and the choice reverted at the
-    // next restart — one act, half of it standing, and nothing on screen
-    // saying which half.
-    const result = await useSourceBucket(
-      { bucketName: 'a-second-bucket', makeDefault: true },
-      await declared(),
-    );
-
-    expect(result.ok).toBe(false);
-    if (result.ok) return;
-    expect(result.failure.code).toBe('NOT_DEPLOYABLE');
-    expect(result.failure.message).toContain('shared.sourceBucket');
-    expect(await storedBuckets()).toMatchObject({
-      buckets: ['example-source-bucket'],
-      defaultBucket: 'example-source-bucket',
+      defaultBucket: 'a-second-bucket',
     });
   });
 });

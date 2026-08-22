@@ -11,8 +11,7 @@
  * path, so the sentence a Zod issue carries is shown where the value that
  * caused it is typed rather than collected into a summary at the bottom.
  */
-import { CircleAlert, Lock, Plus, Trash2 } from 'lucide-react';
-import { Badge } from '../ui/badge.tsx';
+import { CircleAlert, Plus, Trash2 } from 'lucide-react';
 import { Button } from '../ui/button.tsx';
 import { Input, Label } from '../ui/field.tsx';
 import { cn } from '../ui/utils.ts';
@@ -37,17 +36,6 @@ export interface FormProps {
   readonly errors: FieldErrors;
   readonly disabled: boolean;
   /**
-   * Whether one path is somebody else's to write — read-only rather than
-   * saving-right-now, which is what `disabled` says.
-   *
-   * A predicate over paths rather than a flag on a field, because the answer is
-   * a fact about the *document* and this file has none: which value a screen
-   * may not drive depends on what the document says elsewhere, and a field
-   * carrying it would be the schema describing a screen. The caller answers for
-   * a path and everything under it; omitted means nothing is locked.
-   */
-  locked?(at: Path): boolean;
-  /**
    * Whether the controls this form renders should take focus on mount.
    *
    * For the screen that mounts **one question at a time**, and it is a flag
@@ -65,51 +53,6 @@ export interface FormProps {
   readonly autoFocus?: boolean;
   onChange(document: unknown): void;
 }
-
-/**
- * Whether a control at this path may not be written — either reason.
- *
- * The two are one word to a control and two words to a reader: `disabled` is
- * "not right now, a save is in flight" and `locked` is "not here, ever". The
- * sentence explaining the second belongs on the screen that knows it, not on
- * every input.
- */
-function isFrozen(form: FormProps, at: Path): boolean {
-  return form.disabled || form.locked?.(at) === true;
-}
-
-/**
- * The second of those two words, said where the reader is.
- *
- * The comment above admitted the collapse and the reader still only got one
- * word: a value the mounted declaration owns rendered exactly like a value a
- * save was in flight over — greyed out, unexplained, and indistinguishable from
- * a form that had broken. A governed field is the *most* authoritative value on
- * the screen, so it is marked as declared and keeps its full contrast, and only
- * the save-in-flight arm keeps the dimming that means "wait".
- *
- * Still `disabled`, not `readOnly`: the value cannot be changed here by any
- * route, and `readOnly` would leave it in the submitted form as something this
- * screen appeared to be sending.
- */
-function isDeclared(form: FormProps, at: Path): boolean {
-  return form.locked?.(at) === true;
-}
-
-/**
- * Whether this is the *outermost* declared thing, and so the one to mark.
- *
- * The predicate answers for a path and everything under it, so a governed
- * vessel makes its name, its kind, its location and every shared service answer
- * yes — and badging all of them would put eight identical markers inside one
- * card to say one thing. The boundary is where the answer changes.
- */
-function marksDeclared(form: FormProps, at: Path): boolean {
-  return isDeclared(form, at) && !isDeclared(form, at.slice(0, -1));
-}
-
-/** The class that undoes {@link Input}'s dimming, for the declared arm only. */
-const UNDIMMED = 'disabled:opacity-100';
 
 /** Every key of an object schema, in the order the schema declares them. */
 export function SchemaFields({
@@ -155,7 +98,7 @@ function SchemaFieldControl({
   const present = value !== undefined && value !== null;
   const togglable = field.optional || field.nullable;
   const id = pathKey(at);
-  const frozen = isFrozen(form, at);
+  const frozen = form.disabled === true;
 
   const toggle = (on: boolean) => {
     if (on) {
@@ -190,12 +133,6 @@ function SchemaFieldControl({
           />
         ) : null}
         <Label htmlFor={id}>{field.label}</Label>
-        {marksDeclared(form, at) ? (
-          <Badge tone="idle">
-            <Lock aria-hidden="true" className="size-3" />
-            declared
-          </Badge>
-        ) : null}
       </div>
       {field.description ? (
         <p className="text-xs text-muted-foreground">{field.description}</p>
@@ -224,10 +161,9 @@ export function SchemaControl({
 }) {
   const value = valueAt(form.document, at);
   const id = pathKey(at);
-  const frozen = isFrozen(form, at);
+  const frozen = form.disabled === true;
   // Dimmed only while a save is in flight. A declared value is not pending, it
   // is settled, and greying it said the opposite.
-  const undimmed = isDeclared(form, at) ? UNDIMMED : undefined;
   const set = (next: unknown) =>
     form.onChange(withValueAt(form.document, at, next));
 
@@ -240,7 +176,6 @@ export function SchemaControl({
           type={node.format === 'url' ? 'url' : 'text'}
           value={typeof value === 'string' ? value : ''}
           disabled={frozen}
-          className={undimmed}
           autoFocus={form.autoFocus}
           onChange={(event) => set(event.currentTarget.value)}
         />
@@ -254,7 +189,6 @@ export function SchemaControl({
           step={node.integer ? 1 : 'any'}
           value={typeof value === 'number' ? String(value) : ''}
           disabled={frozen}
-          className={undimmed}
           autoFocus={form.autoFocus}
           onChange={(event) => {
             const parsed = Number(event.currentTarget.value);
@@ -271,7 +205,7 @@ export function SchemaControl({
           checked={value === true}
           disabled={frozen}
           onChange={(event) => set(event.currentTarget.checked)}
-          className={cn('size-4 accent-accent', undimmed)}
+          className="size-4 accent-accent"
         />
       );
     case 'enum':
@@ -280,7 +214,6 @@ export function SchemaControl({
           id={id}
           value={typeof value === 'string' ? value : ''}
           disabled={frozen}
-          className={undimmed}
           onChange={set}
           options={node.values.map((each) => ({ value: each, label: each }))}
         />
@@ -343,7 +276,7 @@ function ArrayControl({
             // Per item, not per array: an array may hold one entry somebody else
             // declares and others a screen owns outright, and locking the whole
             // control for the first would take the second away too.
-            disabled={isFrozen(form, [...at, index])}
+            disabled={form.disabled}
             aria-label={`Remove item ${index + 1}`}
             onClick={() =>
               form.onChange(withoutValueAt(form.document, [...at, index]))
@@ -399,7 +332,7 @@ function UnionControl({
           <Select
             id={`${id}--variant`}
             value={active?.tag ?? ''}
-            disabled={isFrozen(form, at)}
+            disabled={form.disabled}
             onChange={(next) => {
               const chosen = node.variants.find((each) => each.tag === next);
               if (chosen === undefined) return;

@@ -60,10 +60,7 @@ import {
   type AuthoredManifest,
   toAuthoredManifest,
 } from '../../config/manifest.schema.ts';
-import {
-  governingDeclaration,
-  isUnconfiguredInstallation,
-} from '../../config/manifest.ts';
+import { isUnconfiguredInstallation } from '../../config/manifest.ts';
 import { type Command, ok } from '../types.ts';
 
 export const getInstallationManifestInput = z.object({}).strict();
@@ -87,23 +84,6 @@ export interface GetInstallationManifestResult {
    * for a round trip to disagree about.
    */
   readonly declaration: AuthoredManifest | null;
-  /**
-   * Whether that declaration takes the governed slice back on every boot.
-   *
-   * `false` for no declaration, and — the case this field exists for — `false`
-   * for a declaration that is the chart's stand-in, which governs nothing
-   * (`governingDeclaration`). The editing surface reads it to decide whether to
-   * lock the two vessels' fields, and it must reach the same answer
-   * `configureInstallation` will: a field locked against a write that would
-   * have been accepted is a screen refusing on the server's behalf and getting
-   * it wrong, which on a chart-only installation is the wizard refusing the
-   * only two values it exists to collect.
-   *
-   * A boolean rather than the predicate itself, because answering it needs
-   * `DEFAULT_PLACEHOLDER_MANIFEST` and the module that holds it is not one the
-   * client bundle may import.
-   */
-  readonly declarationGoverns: boolean;
   /**
    * Dotted paths where {@link declaration} disagrees with the manifest above,
    * or `[]` when nothing is mounted or the two agree. Paths only — see
@@ -145,7 +125,6 @@ export const getInstallationManifest: Command<
   return ok({
     manifest,
     declaration: context.declaration ?? null,
-    declarationGoverns: governingDeclaration(context.declaration) !== null,
     declarationDivergence: context.declarationDivergence ?? [],
     // The authored document, not the resolved one: the deployment's federation
     // is joined onto `context.manifest` per read, and the predicate reads keys

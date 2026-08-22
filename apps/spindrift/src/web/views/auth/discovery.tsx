@@ -52,7 +52,6 @@ import {
   placementOf,
 } from '../../../commands/installation/discover.ts';
 import { command } from '../../client.ts';
-import type { Path } from '../../forms/document.ts';
 import { valueAt, withValueAt } from '../../forms/document.ts';
 import { humanize } from '../../forms/schema.ts';
 import { Badge } from '../../ui/badge.tsx';
@@ -117,22 +116,10 @@ export async function askInstallationCloud(narrowing: {
 export function DiscoveryPanel({
   document,
   disabled = false,
-  locked,
   onChange,
 }: {
   readonly document: unknown;
   readonly disabled?: boolean;
-  /**
-   * Whether the value at a path is somebody else's to write — the same
-   * predicate the form below this panel locks its controls with.
-   *
-   * Offering a value for a field a save would refuse is the shape of button
-   * `commands/targets/disconnect.ts` refuses to render: an act that cannot
-   * happen, shown as one that can. The reason is said in place of the
-   * candidates rather than by greying them, because a disabled button with no
-   * sentence reads as a cloud that answered nothing.
-   */
-  locked?(at: Path): boolean;
   onChange(document: unknown): void;
 }) {
   // Seeded once, from the document this panel opened on. Later edits do not
@@ -241,7 +228,7 @@ export function DiscoveryPanel({
             facts={facts}
             document={document}
             disabled={disabled || busy}
-            unwritable={(fact) => unwritable(fact, document, locked)}
+            unwritable={(fact) => unwritable(fact, document)}
             onApply={apply}
           />
         )}
@@ -343,22 +330,20 @@ export function applyDiscovered(
 /**
  * Why a confirmed value would not land, or `null` when it would.
  *
- * Two ways of not landing and one sentence each, because they send an operator
- * to two different places: a document the answer has no home in is something to
- * fix in the form below, and a value the declaration owns is something to fix
- * in the declaration.
+ * One way of not landing: an answer about a vessel the document below does not
+ * declare has nowhere to go, and the sentence says where to fix it. Offering a
+ * value that cannot be written is the shape of button
+ * `commands/targets/disconnect.ts` refuses to render — an act that cannot
+ * happen, shown as one that can — so the reason takes the place of the
+ * candidates rather than greying them, because a disabled button with no
+ * sentence reads as a cloud that answered nothing.
  */
 export function unwritable(
   fact: DiscoveredFact,
   document: unknown,
-  locked?: (at: Path) => boolean,
 ): string | null {
-  const at = placementOf(fact, document);
-  if (at === null) {
-    return 'the vessel this answers for is not declared in the document below';
-  }
-  return locked?.(at) === true
-    ? 'this is declared by the mounted declaration and reconciled from it on every boot, so it is not written here'
+  return placementOf(fact, document) === null
+    ? 'the vessel this answers for is not declared in the document below'
     : null;
 }
 

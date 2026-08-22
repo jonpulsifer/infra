@@ -35,10 +35,7 @@ import {
   trustedGatewayRefusal,
   validateManifest,
 } from '../../config/manifest.ts';
-import {
-  governedSliceRefusal,
-  writeStoredManifest,
-} from '../../config/manifest-store.ts';
+import { writeStoredManifest } from '../../config/manifest-store.ts';
 import { targetLabel } from '../../domain/target.ts';
 import { type Command, failed, ok } from '../types.ts';
 
@@ -97,25 +94,13 @@ export const configureInstallation: Command<
     throw cause;
   }
 
-  // The one slice this screen may not drive. A boot re-applies the declaration
-  // to the two vessels this installation is built on, so taking an edit to them
-  // here would be saving a value the next restart discards — the refusal is
-  // what turns that into something an operator reads before it happens. A
-  // `NOT_DEPLOYABLE` fact rather than an `INVALID_INPUT` field error: nothing
-  // in the document is malformed, and no amount of re-typing makes this
-  // installation take it.
-  const governed = governedSliceRefusal(manifest, context.declaration);
-  if (governed !== null) {
-    return failed('NOT_DEPLOYABLE', governed);
-  }
-
-  // The other thing this screen can write that the next restart cannot serve.
+  // What this screen can write that the next restart cannot serve.
   // `auth.gateway` is refused at boot without the deployment's attestation that
   // a policy strips identity headers, so a document setting it here saved
   // cleanly and wedged the web process the next time a pod restarted — hours
-  // later, with nothing connecting the two. `NOT_DEPLOYABLE` for the same
-  // reason the governed slice is: the document is well formed, and this
-  // deployment cannot honour it.
+  // later, with nothing connecting the two. `NOT_DEPLOYABLE` rather than
+  // `INVALID_INPUT`: nothing in the document is malformed, and no amount of
+  // re-typing makes this deployment able to honour it.
   const boundary = trustedGatewayRefusal({
     auth: manifest.auth,
     boundary: context.manifest.boundary,

@@ -279,31 +279,6 @@ export const DEFAULT_PLACEHOLDER_MANIFEST: AuthoredManifest = {
  * honest — they chose nothing — but it does mean "configured" is a record of a
  * document, not of a ceremony.
  */
-/**
- * The mounted declaration where it governs, and `null` where it does not.
- *
- * **A stand-in governs nothing.** The governed slice
- * (`manifest-store.ts:governedByDeclaration`) exists so a rollout cannot revert
- * the two vessels an installation is built on: a control plane pointed at a
- * boundary that is not there, or a home vessel whose bucket and signer nobody
- * can reach, is an installation that cannot come back, and that is worth taking
- * out of the operator's hands. **None of that reasoning survives the document
- * being the placeholder.** There is no operator assertion to protect, and what
- * the rule would protect instead is `spindrift-vessel` and `spindrift-artifacts`
- * — names of nothing — against the real ones, forever, because the wizard that
- * would set them is refused for editing a governed path.
- *
- * The same three keys as {@link isUnconfiguredInstallation}, and deliberately
- * the same function: "this document is the stand-in" is one fact, and a second
- * spelling of it is a second thing to keep in step.
- */
-export function governingDeclaration(
-  declaration: AuthoredManifest | null | undefined,
-): AuthoredManifest | null {
-  if (declaration == null) return null;
-  return isUnconfiguredInstallation(declaration) ? null : declaration;
-}
-
 export function isUnconfiguredInstallation(
   manifest: AuthoredManifest,
 ): boolean {

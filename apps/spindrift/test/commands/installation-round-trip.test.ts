@@ -166,31 +166,24 @@ describe('an installation that mounts a declaration', () => {
     ),
   });
 
-  test('an edit to a governed vessel is refused, and nothing is written', async () => {
+  test('an edit to the home vessel lands, declaration mounted or not', async () => {
     await seed();
 
     const result = await configureInstallation(
       { manifest: withSourceBucket('operator-chosen') },
       declared(),
     );
-    expect(result.ok).toBe(false);
-    if (result.ok) return;
-    // A fact about the installation, not a field to correct — the distinction
-    // this screen keeps three refusals apart for. Re-typing the value in the
-    // form changes nothing about it.
-    expect(result.failure.code).toBe('NOT_DEPLOYABLE');
-    expect(result.failure.message).toContain('shared.sourceBucket');
+    expect(result.ok).toBe(true);
 
     const [row] = await database().db.select().from(installation);
     expect(sharedServicesOf(row!.manifest).sourceBucket).toBe(
-      'example-source-bucket',
+      'operator-chosen',
     );
   });
 
   test('adopting the declaration whole is not an edit to it', async () => {
     // The act `ManifestDivergenceNotice` offers. It submits the declaration
-    // unchanged, so there is nothing in the governed slice for a boot to
-    // revert and the guard has to let it through.
+    // unchanged, which is a write like any other now that nothing is reserved.
     await seed();
     const result = await configureInstallation(
       { manifest: declaration },
