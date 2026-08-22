@@ -97,6 +97,7 @@ import { rollbackDeploy, rollbackDeployInput } from './deploys/rollback.ts';
 import { deleteFunction, deleteFunctionInput } from './functions/delete.ts';
 import { getFunction, getFunctionInput } from './functions/get.ts';
 import { listFunctions, listFunctionsInput } from './functions/list.ts';
+import { probeFunction, probeFunctionInput } from './functions/probe.ts';
 import { runFunction, runFunctionInput } from './functions/run.ts';
 import { saveFunction, saveFunctionInput } from './functions/save.ts';
 import {
@@ -258,6 +259,7 @@ export const commandRegistry = {
   saveFunction: { input: saveFunctionInput, handler: saveFunction },
   runFunction: { input: runFunctionInput, handler: runFunction },
   deleteFunction: { input: deleteFunctionInput, handler: deleteFunction },
+  probeFunction: { input: probeFunctionInput, handler: probeFunction },
   setConfig: { input: setConfigInput, handler: setConfig },
   setBuildSecrets: { input: setBuildSecretsInput, handler: setBuildSecrets },
   configureInstallation: {

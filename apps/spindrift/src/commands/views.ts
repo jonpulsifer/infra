@@ -44,6 +44,7 @@ import {
   FUNCTION_TARGETS,
   type FunctionTarget,
 } from '../functions/contract.ts';
+import type { FunctionProbe } from '../functions/readiness.ts';
 
 /**
  * One checklist row, as either screen renders it.
@@ -1491,3 +1492,5 @@ export interface FunctionListItem {
 export interface FunctionDetail extends FunctionListItem {
   readonly source: string;
 }
+
+export type { FunctionProbe };

@@ -11,6 +11,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type {
   FunctionDetail,
+  FunctionProbe,
   FunctionTarget,
   LogLine,
 } from '../../../commands/views.ts';
@@ -26,12 +27,13 @@ import {
   loadMonaco,
   type MonacoEditorInstance,
   type MonacoNamespace,
+  type MonacoRange,
 } from '../../client/monaco.ts';
 import { command } from '../../client.ts';
 import { EmptyState, LogPane, Notice } from '../../components/log-pane.tsx';
-import { useRead } from '../../poll.ts';
+import { type Cadence, useRead } from '../../poll.ts';
 import { subscribeFunctionLog } from '../../stream-client.ts';
-import { Badge } from '../../ui/badge.tsx';
+import { Badge, Dot } from '../../ui/badge.tsx';
 import { Button } from '../../ui/button.tsx';
 import {
   Collapsible,
@@ -44,6 +46,7 @@ import { Page, PageHeader } from '../../ui/page.tsx';
 import { notify } from '../../ui/toast.tsx';
 import { cn } from '../../ui/utils.ts';
 import { DetailSkeleton, ScreenFailure, ScreenNotFound } from '../screen.tsx';
+import { SNIPPETS } from './snippets.ts';
 
 const TARGET_LABEL: Record<FunctionTarget, string> = {
   'cloudflare-workers': 'Cloudflare Workers',
@@ -70,6 +73,43 @@ function logLine(entry: FunctionLogEntry): LogLine {
           ? 'muted'
           : undefined,
   };
+}
+
+/** While not ready. Fast enough that "Live" replaces the warning within a beat. */
+const PROBE_MS = 10_000;
+
+/**
+ * Once ready. A redeploy changes `deployedAt`, which restarts this hook and
+ * probes again immediately — nothing between here and there is worth a tick
+ * over.
+ */
+const PROBE_SETTLED_MS = 5 * 60_000;
+
+/**
+ * Whether a deployed Function is answering yet (`functions/readiness.ts`).
+ * Its own component so it mounts only beside a URL that exists — probing a
+ * Function with nothing to probe would be a call for an answer nobody asked.
+ */
+function FunctionReadiness({
+  name,
+  deployedAt,
+}: {
+  readonly name: string;
+  readonly deployedAt: string | null;
+}) {
+  const cadence: Cadence<readonly [FunctionProbe]> = (value) =>
+    value?.[0].ready ? PROBE_SETTLED_MS : PROBE_MS;
+  const read = useRead([['probeFunction', { name }]] as const, cadence, [
+    name,
+    deployedAt,
+  ]);
+  if (read.type !== 'success') return null;
+  const [probe] = read.value;
+  return (
+    <Badge tone={probe.ready ? 'success' : 'warning'}>
+      <Dot pulse={!probe.ready} /> {probe.ready ? 'Live' : probe.detail}
+    </Badge>
+  );
 }
 
 /** A native `<select>`, styled like `Input` beside it — this screen's only. */
@@ -146,6 +186,11 @@ function FunctionEditor({
   const save = async () => {
     if (isNew && (name === '' || nameIssue !== null)) return;
     const source = editor.current?.getValue() ?? '';
+    // A hostname the edge has not served before: the first deploy, or a move
+    // onto Workers from the other target. A redeploy keeps its certificate.
+    const newHostname =
+      target === 'cloudflare-workers' &&
+      (row === null || row.url === null || row.target !== target);
     setSaving(true);
     try {
       const outcome = await command('saveFunction', { name, target, source });
@@ -167,6 +212,16 @@ function FunctionEditor({
           tone: 'warning',
           title: 'Saved — deploy failed',
           detail: outcome.value.function.error,
+        });
+      } else if (newHostname) {
+        // Measured fact: a Workers custom domain answers instantly but its
+        // certificate takes ~160s to issue, so the success toast would be
+        // wrong for the next few minutes — `FunctionReadiness` says "Live"
+        // once it actually is.
+        notify({
+          tone: 'warning',
+          title: 'Deployed — the edge is issuing the certificate',
+          detail: outcome.value.function.url ?? undefined,
         });
       } else {
         notify({
@@ -206,6 +261,17 @@ function FunctionEditor({
     } finally {
       setRunning(false);
     }
+  };
+
+  const insertSnippet = (id: string) => {
+    const snippet = SNIPPETS.find((candidate) => candidate.id === id);
+    const instance = editor.current;
+    if (snippet === undefined || instance === null) return;
+    const selection: MonacoRange = instance.getSelection();
+    instance.executeEdits('snippet', [
+      { range: selection, text: snippet.code, forceMoveMarkers: true },
+    ]);
+    instance.focus();
   };
 
   const deleteIt = async () => {
@@ -357,6 +423,7 @@ function FunctionEditor({
             {row.url}
           </a>
           <CopyButton value={row.url} label="URL" />
+          <FunctionReadiness name={row.name} deployedAt={row.deployedAt} />
         </div>
       ) : null}
 
@@ -373,6 +440,29 @@ function FunctionEditor({
           {saving ? 'Saving…' : 'Save'}
         </Button>
         <span className="text-caption text-muted-foreground">⌘S / Ctrl+S</span>
+        <select
+          aria-label="Insert snippet"
+          value=""
+          onChange={(event) => {
+            const { value } = event.currentTarget;
+            event.currentTarget.value = '';
+            if (value !== '') insertSnippet(value);
+          }}
+          className="h-9 rounded-sm border border-input bg-background px-3 font-mono text-body text-foreground"
+        >
+          <option value="" disabled>
+            Insert snippet…
+          </option>
+          {SNIPPETS.map((snippet) => (
+            <option
+              key={snippet.id}
+              value={snippet.id}
+              title={snippet.description}
+            >
+              {snippet.label}
+            </option>
+          ))}
+        </select>
       </div>
 
       <div className="flex flex-col gap-3 rounded-md border border-border-soft p-4">
