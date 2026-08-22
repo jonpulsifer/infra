@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, test } from 'bun:test';
+import { readdirSync, readFileSync } from 'node:fs';
 import {
   copyFile,
   mkdir,
@@ -39,6 +40,23 @@ async function cleanDatabase() {
   return client;
 }
 
+/** The journal's entries, in the order the migrator would apply them. */
+function journalEntries(): { tag: string }[] {
+  return (
+    JSON.parse(
+      readFileSync(join(MIGRATIONS, 'meta/_journal.json'), 'utf8'),
+    ) as { entries: { tag: string }[] }
+  ).entries;
+}
+
+/** Every `.sql` beside the journal, by the tag an entry would name it with. */
+function committedMigrations(): string[] {
+  return readdirSync(MIGRATIONS)
+    .filter((name) => name.endsWith('.sql'))
+    .map((name) => name.slice(0, -'.sql'.length))
+    .sort();
+}
+
 describe('committed migrations', () => {
   test('install a clean database and are idempotent on reinstall', async () => {
     const client = await cleanDatabase();
@@ -58,6 +76,20 @@ describe('committed migrations', () => {
       FROM drizzle.__drizzle_migrations`;
     expect(after).toEqual(before);
     expect(Number(after[0]?.latest)).toBe(expectedMigrationAt());
+  });
+
+  test('every committed migration is in the journal, and nothing else is', () => {
+    // The migrator reads `meta/_journal.json` and never the directory, so a
+    // `.sql` file committed without an entry is silently skipped — the migrate
+    // Job completes, reports success, and the pods that follow it crash on a
+    // column that was never added. Nothing failed when that happened, which is
+    // what this test is.
+    //
+    // The reverse direction matters too: an entry naming a file that is not
+    // there fails the migrator at run time, in the one place where the failure
+    // costs a rollout rather than a test.
+    const journalled = journalEntries().map((entry) => entry.tag);
+    expect(journalled).toEqual(committedMigrations());
   });
 
   test('an upgrade from the previous journal applies only the pending migration', async () => {
