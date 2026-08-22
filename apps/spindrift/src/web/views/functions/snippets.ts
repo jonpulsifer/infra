@@ -19,11 +19,12 @@ export const SNIPPETS: readonly Snippet[] = [
   {
     id: 'bearer-auth',
     label: 'Bearer token check',
-    description: 'Reject requests without a matching Authorization header.',
+    description:
+      'Reject requests without a matching Authorization header. Set API_TOKEN under Environment.',
     placement: 'body',
-    code: `// The token lives in source because functions carry no secrets yet.
-const TOKEN = 'change-me';
-if (request.headers.get('authorization') !== \`Bearer \${TOKEN}\`) {
+    code: `// Set API_TOKEN under Environment — values are write-only.
+const presented = request.headers.get('authorization')?.replace(/^Bearer\\s+/i, '');
+if (!env.API_TOKEN || presented !== env.API_TOKEN) {
   return new Response('unauthorized', { status: 401 });
 }`,
   },

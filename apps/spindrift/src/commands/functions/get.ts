@@ -1,5 +1,8 @@
 /**
  * `getFunction` — one Function's own screen: the ledger row plus its source.
+ *
+ * The environment comes back as key names only: the values are write-only, so
+ * the envelope is opened to learn what is set and never to say what it holds.
  */
 import { z } from 'zod';
 import { type Command, failed, ok } from '../types.ts';
@@ -28,6 +31,9 @@ export const getFunction: Command<GetFunctionInput, GetFunctionResult> = async (
     return failed('NOT_FOUND', `there is no Function named '${input.name}'`);
   }
 
+  const sealer = context.adapters.functionEnv?.() ?? null;
+  const env = sealer === null ? {} : await sealer.open(row.env);
+
   return ok({
     function: {
       id: row.id,
@@ -38,6 +44,7 @@ export const getFunction: Command<GetFunctionInput, GetFunctionResult> = async (
       error: row.error,
       updatedAt: row.updatedAt.toISOString(),
       source: row.source,
+      envKeys: Object.keys(env).sort(),
     },
   });
 };

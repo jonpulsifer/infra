@@ -9,6 +9,13 @@
  * has no deployer for it) is a refusal, because that is a fact about the
  * request rather than the deploy attempt.
  *
+ * **The environment is merged, not replaced.** `env` carries one Save's
+ * changes — a string sets a name, `null` deletes it, an absent name is left
+ * alone — because the browser never holds the saved values and so cannot send
+ * the whole map back. The merged map is sealed onto the row and handed to the
+ * deploy; an installation with no keyring is refused before anything is
+ * written rather than keeping values in the clear.
+ *
  * **A target switch tears the old surface down first.** Two live deploys of
  * one name — the old target still answering while the new one comes up — is
  * a name the operator no longer controls from this row, so the old deployer's
@@ -21,11 +28,14 @@ import { z } from 'zod';
 import type { FunctionRow } from '../../db/schema.ts';
 import { functions } from '../../db/schema.ts';
 import {
+  ENV_NAME_PATTERN,
   FUNCTION_NAME_PATTERN,
   FUNCTION_TARGETS,
+  type FunctionEnv,
   type FunctionTarget,
   RESERVED_FUNCTION_NAMES,
 } from '../../functions/contract.ts';
+import { mergeEnv } from '../../functions/env.ts';
 import { type Command, failed, ok } from '../types.ts';
 import type { FunctionDetail } from '../views.ts';
 
@@ -39,6 +49,13 @@ export const saveFunctionInput = z
       }),
     target: z.enum(FUNCTION_TARGETS),
     source: z.string().min(1).max(1_000_000),
+    /** One Save's changes: a string sets, `null` deletes, absent keeps. */
+    env: z
+      .record(
+        z.string().regex(ENV_NAME_PATTERN),
+        z.string().max(4_096).nullable(),
+      )
+      .default({}),
   })
   .strict();
 
@@ -57,6 +74,33 @@ export const saveFunction: Command<
     where: (rows, { eq }) => eq(rows.name, input.name),
   });
 
+  // Without a keyring there is nothing to open an existing envelope with, and
+  // a merge seeded from `{}` would write `null` over it and redeploy with no
+  // environment — a silent loss on both the row and the live function. So an
+  // envelope this process cannot open is refused before anything is written,
+  // whatever the request asked to change.
+  const sealer = context.adapters.functionEnv?.() ?? null;
+  if (sealer === null && existing?.env != null) {
+    return failed(
+      'NOT_DEPLOYABLE',
+      'set SPINDRIFT_CREDENTIAL_KEYRING before a Function with saved environment values can be changed',
+    );
+  }
+  const env = mergeEnv(
+    sealer === null ? {} : await sealer.open(existing?.env ?? null),
+    input.env,
+  );
+  if (Object.keys(env).length > 0 && sealer === null) {
+    return failed(
+      'NOT_DEPLOYABLE',
+      'set SPINDRIFT_CREDENTIAL_KEYRING before a Function can keep environment values',
+    );
+  }
+  const sealed =
+    sealer === null || Object.keys(env).length === 0
+      ? null
+      : await sealer.seal(env);
+
   const saved =
     existing === undefined
       ? (
@@ -66,6 +110,7 @@ export const saveFunction: Command<
               name: input.name,
               target: input.target,
               source: input.source,
+              env: sealed,
               createdAt: now,
               updatedAt: now,
             })
@@ -77,6 +122,7 @@ export const saveFunction: Command<
             .set({
               target: input.target,
               source: input.source,
+              env: sealed,
               updatedAt: now,
             })
             .where(eq(functions.id, existing.id))
@@ -105,13 +151,13 @@ export const saveFunction: Command<
   }
 
   try {
-    const { url } = await deployer.deploy(input.name, input.source);
+    const { url } = await deployer.deploy(input.name, input.source, env);
     const [deployed] = await context.db
       .update(functions)
       .set({ url, deployedAt: now, error: null, updatedAt: now })
       .where(eq(functions.id, saved.id))
       .returning();
-    return ok({ function: viewOf(deployed!) });
+    return ok({ function: viewOf(deployed!, env) });
   } catch (cause) {
     const message = cause instanceof Error ? cause.message : String(cause);
     const [errored] = await context.db
@@ -122,11 +168,11 @@ export const saveFunction: Command<
       })
       .where(eq(functions.id, saved.id))
       .returning();
-    return ok({ function: viewOf(errored!) });
+    return ok({ function: viewOf(errored!, env) });
   }
 };
 
-function viewOf(row: FunctionRow): FunctionDetail {
+function viewOf(row: FunctionRow, env: FunctionEnv): FunctionDetail {
   return {
     id: row.id,
     name: row.name,
@@ -136,5 +182,6 @@ function viewOf(row: FunctionRow): FunctionDetail {
     error: row.error,
     updatedAt: row.updatedAt.toISOString(),
     source: row.source,
+    envKeys: Object.keys(env),
   };
 }

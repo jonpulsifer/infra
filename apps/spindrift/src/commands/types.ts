@@ -39,6 +39,7 @@ import type {
 } from '../domain/repository.ts';
 import type { RepositorySourceStager } from '../domain/source-bundle.ts';
 import type { FunctionDeployers } from '../functions/contract.ts';
+import type { FunctionEnvSealer } from '../functions/env.ts';
 import type { RegistryTransport } from '../storage/registry.ts';
 import type { RegistryCredentialStore } from '../storage/registry-credentials.ts';
 import type { SupplyChain } from '../supply-chain/sign.ts';
@@ -192,6 +193,15 @@ export interface AdapterRegistry {
    * `NOT_DEPLOYABLE`/`NOT_REMOVABLE`, a configuration fact rather than a fault.
    */
   functions?(): FunctionDeployers | null;
+  /**
+   * How a Function's environment is sealed and opened (`functions/env.ts`).
+   *
+   * `null` when there is no keyring, which is the same condition
+   * `registryCredentials` reports for the same reason: without an installation
+   * Secret there is nowhere durable to keep a value, and `saveFunction` says so
+   * rather than storing one in the clear.
+   */
+  functionEnv?(): FunctionEnvSealer | null;
   /**
    * Core's verifier and signer (§16).
    *

@@ -1733,6 +1733,10 @@ export const buildRequests = pgTable(
  * `error` lives on the row, not a side table: a Save that deployed nothing
  * still saved, so the failure is state on the thing that failed to deploy, not
  * a reason the save itself is unavailable.
+ *
+ * `env` is the whole environment map as one sealed envelope (`functions/
+ * env.ts`), `null` when the function has no values. Write-only: a deploy opens
+ * it, no read path hands a value to a browser.
  */
 export const functions = pgTable(
   'functions',
@@ -1741,6 +1745,7 @@ export const functions = pgTable(
     name: text('name').notNull().unique(),
     target: text('target').notNull(),
     source: text('source').notNull(),
+    env: text('env'),
     url: text('url'),
     deployedAt: timestamp('deployed_at', { withTimezone: true }),
     error: text('error'),

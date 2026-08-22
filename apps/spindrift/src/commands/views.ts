@@ -1505,6 +1505,11 @@ export interface FunctionListItem {
 /** One Function's own screen: the ledger row plus the source it holds. */
 export interface FunctionDetail extends FunctionListItem {
   readonly source: string;
+  /**
+   * The names its environment holds, sorted. Never the values: they are
+   * write-only, so a screen shows what is set and not what it is set to.
+   */
+  readonly envKeys: readonly string[];
 }
 
 export type { FunctionProbe };

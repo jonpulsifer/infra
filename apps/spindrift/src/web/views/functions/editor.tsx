@@ -16,6 +16,7 @@ import type {
   LogLine,
 } from '../../../commands/views.ts';
 import {
+  ENV_NAME_PATTERN,
   FUNCTION_CONTRACT,
   FUNCTION_NAME_PATTERN,
   FUNCTION_TARGETS,
@@ -41,7 +42,7 @@ import {
   CollapsibleTrigger,
 } from '../../ui/collapsible.tsx';
 import { CopyButton } from '../../ui/copy.tsx';
-import { Field, Label } from '../../ui/field.tsx';
+import { Field, Input, Label } from '../../ui/field.tsx';
 import { Page, PageHeader } from '../../ui/page.tsx';
 import { notify } from '../../ui/toast.tsx';
 import { cn } from '../../ui/utils.ts';
@@ -144,6 +145,161 @@ function NativeSelect({
   );
 }
 
+/**
+ * The saved keys, edited as a pending diff (`Record<name, value | null>`)
+ * rather than in place — values are write-only, so this section never holds
+ * one it did not just receive from the person typing it, and Save is the only
+ * thing that turns a pending set or delete into a stored one.
+ */
+function EnvironmentSection({
+  envKeys,
+  pending,
+  onChange,
+}: {
+  readonly envKeys: readonly string[];
+  readonly pending: Readonly<Record<string, string | null>>;
+  readonly onChange: (next: Record<string, string | null>) => void;
+}) {
+  const [revealing, setRevealing] = useState<string | null>(null);
+  const [revealValue, setRevealValue] = useState('');
+  const [newName, setNewName] = useState('');
+  const [newValue, setNewValue] = useState('');
+  const [newIssue, setNewIssue] = useState<string | null>(null);
+
+  const rows = [
+    ...new Set([
+      ...envKeys.filter((key) => pending[key] !== null),
+      ...Object.keys(pending).filter((key) => pending[key] !== null),
+    ]),
+  ].sort();
+  const changeCount = Object.keys(pending).length;
+
+  const commitReplace = (name: string) => {
+    onChange({ ...pending, [name]: revealValue });
+    setRevealing(null);
+    setRevealValue('');
+  };
+
+  const remove = (name: string) => {
+    const next = { ...pending };
+    if (envKeys.includes(name)) {
+      next[name] = null;
+    } else {
+      delete next[name];
+    }
+    onChange(next);
+    if (revealing === name) setRevealing(null);
+  };
+
+  const addVariable = () => {
+    if (newName === '') return;
+    if (!ENV_NAME_PATTERN.test(newName)) {
+      setNewIssue(
+        'letters, digits, underscore — starting with a letter or underscore',
+      );
+      return;
+    }
+    onChange({ ...pending, [newName]: newValue });
+    setNewName('');
+    setNewValue('');
+    setNewIssue(null);
+  };
+
+  return (
+    <div className="flex flex-col gap-3 rounded-md border border-border-soft p-4">
+      <div className="flex items-center gap-2">
+        <Label htmlFor="env-new-name">Environment</Label>
+        {changeCount > 0 ? (
+          <Badge tone="accent">
+            {changeCount} unsaved change{changeCount === 1 ? '' : 's'}
+          </Badge>
+        ) : null}
+      </div>
+      <p className="text-xs text-muted-foreground">
+        Values are write-only — set once, never shown again. Run uses the saved
+        values.
+      </p>
+
+      {rows.length > 0 ? (
+        <div className="flex flex-col gap-1.5">
+          {rows.map((name) => (
+            <div key={name} className="flex flex-wrap items-center gap-2">
+              <span className="font-mono text-body">{name}</span>
+              {revealing === name ? (
+                <>
+                  <Input
+                    autoFocus
+                    value={revealValue}
+                    onChange={(event) =>
+                      setRevealValue(event.currentTarget.value)
+                    }
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter') commitReplace(name);
+                    }}
+                    className="h-8 w-48"
+                  />
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => commitReplace(name)}
+                  >
+                    OK
+                  </Button>
+                </>
+              ) : (
+                <span className="font-mono text-caption text-muted-foreground">
+                  ••••••••
+                </span>
+              )}
+              <div className="ml-auto flex gap-2">
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => {
+                    setRevealing(name);
+                    setRevealValue('');
+                  }}
+                >
+                  Replace
+                </Button>
+                <Button size="sm" variant="ghost" onClick={() => remove(name)}>
+                  Remove
+                </Button>
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : null}
+
+      <div className="flex flex-wrap items-end gap-2">
+        <Input
+          id="env-new-name"
+          placeholder="NAME"
+          value={newName}
+          onChange={(event) => setNewName(event.currentTarget.value)}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter') addVariable();
+          }}
+          className="h-8 w-40 font-mono"
+        />
+        <Input
+          placeholder="value"
+          value={newValue}
+          onChange={(event) => setNewValue(event.currentTarget.value)}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter') addVariable();
+          }}
+          className="h-8 w-48"
+        />
+        <Button size="sm" variant="outline" onClick={addVariable}>
+          Add variable
+        </Button>
+      </div>
+      {newIssue ? <p className="text-xs text-destructive">{newIssue}</p> : null}
+    </div>
+  );
+}
+
 function FunctionEditor({
   existing,
   onNavigate,
@@ -157,6 +313,9 @@ function FunctionEditor({
     existing?.target ?? FUNCTION_TARGETS[0],
   );
   const [row, setRow] = useState<FunctionDetail | null>(existing);
+  const [pendingEnv, setPendingEnv] = useState<Record<string, string | null>>(
+    {},
+  );
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
@@ -193,7 +352,12 @@ function FunctionEditor({
       (row === null || row.url === null || row.target !== target);
     setSaving(true);
     try {
-      const outcome = await command('saveFunction', { name, target, source });
+      const outcome = await command('saveFunction', {
+        name,
+        target,
+        source,
+        env: pendingEnv,
+      });
       if (!outcome.ok) {
         // A target this installation cannot reach refuses the deploy, not the
         // save: the row is written, so a new function has a page to go to.
@@ -207,6 +371,7 @@ function FunctionEditor({
         return;
       }
       setRow(outcome.value.function);
+      setPendingEnv({});
       if (outcome.value.function.error) {
         notify({
           tone: 'warning',
@@ -242,6 +407,7 @@ function FunctionEditor({
     setRunning(true);
     try {
       const outcome = await command('runFunction', {
+        name: row?.name,
         source,
         request: {
           method,
@@ -406,6 +572,12 @@ function FunctionEditor({
           </div>
         </div>
       </div>
+
+      <EnvironmentSection
+        envKeys={row?.envKeys ?? []}
+        pending={pendingEnv}
+        onChange={setPendingEnv}
+      />
 
       {row?.error ? (
         <Notice tone="destructive" label="Deploy failed">

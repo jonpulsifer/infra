@@ -14,6 +14,7 @@
  */
 import {
   FUNCTION_CONTRACT,
+  type FunctionEnv,
   type FunctionLogEntry,
   PREVIEW_BODY_LIMIT,
   type PreviewRequest,
@@ -23,6 +24,8 @@ import {
 interface PreviewJob {
   readonly file: string;
   readonly request: PreviewRequest;
+  /** The function's saved environment, as the handler's second argument. */
+  readonly env: FunctionEnv;
 }
 
 export type PreviewWorkerMessage =
@@ -106,7 +109,7 @@ async function run(job: PreviewJob): Promise<void> {
       env: unknown,
       context: unknown,
     ) => unknown
-  )(request, {}, { waitUntil() {} });
+  )(request, job.env, { waitUntil() {} });
   if (!(response instanceof Response)) {
     throw new Error(
       'the handler resolved with something other than a Response',
