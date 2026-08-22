@@ -36,6 +36,7 @@
  */
 import {
   ArrowLeft,
+  Ban,
   ChevronRight,
   ExternalLink,
   RefreshCw,
@@ -91,7 +92,9 @@ export interface AttemptActions {
   readonly onRollback?: () => void;
   /** Place the artifact this finished Build produced. */
   readonly onDeployBuild?: () => void;
-  readonly busy?: 'redeploy' | 'rollback' | 'deploy' | null;
+  /** End a queued Build nobody intends to make dispatchable (§4). */
+  readonly onCancel?: () => void;
+  readonly busy?: 'redeploy' | 'rollback' | 'deploy' | 'cancel' | null;
 }
 
 export function DeployDetail({
@@ -397,7 +400,7 @@ function Actions({
   view: DeployView;
   actions: AttemptActions;
 }) {
-  const { onRedeploy, onRollback, onDeployBuild, busy } = actions;
+  const { onRedeploy, onRollback, onDeployBuild, onCancel, busy } = actions;
   const buttons = [];
 
   // An artifact that exists is deployable, and the button keys on the artifact
@@ -461,6 +464,24 @@ function Actions({
           : view.build?.status === 'failed'
             ? 'Build again'
             : 'Redeploy'}
+      </Button>,
+    );
+  }
+
+  // Only while it is queued. A Build a runner is streaming into ends when that
+  // route writes its verdict and not before, so offering the act here would be
+  // a button that lies — the grammar this whole function is written in.
+  if (onCancel && view.build?.status === 'waiting') {
+    buttons.push(
+      <Button
+        key="cancel"
+        variant="outline"
+        size="sm"
+        onClick={onCancel}
+        disabled={busy !== null && busy !== undefined}
+      >
+        <Ban aria-hidden="true" className="size-3.5" />
+        {busy === 'cancel' ? 'Cancelling…' : 'Cancel build'}
       </Button>,
     );
   }
@@ -1144,7 +1165,9 @@ export function BuildScreen({
     | { type: 'error'; message: string }
     | { type: 'success'; attempt: DeployView; deployId: number | null }
   >({ type: 'loading' });
-  const [busy, setBusy] = useState<'redeploy' | 'deploy' | null>(null);
+  const [busy, setBusy] = useState<'redeploy' | 'deploy' | 'cancel' | null>(
+    null,
+  );
   const [reloadToken, setReloadToken] = useState(0);
 
   useEffect(() => {
@@ -1238,6 +1261,37 @@ export function BuildScreen({
     }
   };
 
+  /**
+   * End a queued Build, then re-read rather than navigate away.
+   *
+   * The verdict is the point of the screen: the attempt log now carries who
+   * cancelled it, and the reader stays where the sentence they were reading is.
+   */
+  const cancel = async () => {
+    const parsedId = Number.parseInt(buildId, 10);
+    setBusy('cancel');
+    try {
+      const result = await command('cancelBuild', { id: parsedId });
+      if (result.ok) {
+        setReloadToken((token) => token + 1);
+      } else {
+        notify({
+          tone: 'destructive',
+          title: 'Cancel refused',
+          detail: result.failure.message,
+        });
+      }
+    } catch (cause) {
+      notify({
+        tone: 'destructive',
+        title: 'Cancel failed',
+        detail: cause instanceof Error ? cause.message : 'Server failure',
+      });
+    } finally {
+      setBusy(null);
+    }
+  };
+
   if (state.type === 'loading') return <DetailSkeleton />;
 
   if (state.type === 'not-found') {
@@ -1281,6 +1335,7 @@ export function BuildScreen({
         actions={{
           onDeployBuild: () => void act('deploy'),
           onRedeploy: () => void act('redeploy'),
+          onCancel: () => void cancel(),
           busy,
         }}
         onNavigate={onNavigate}
