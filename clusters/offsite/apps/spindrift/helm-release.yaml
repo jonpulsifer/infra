@@ -160,12 +160,17 @@ spec:
       auth:
         gateway: null
       build:
-        # Rank order. `hosted` stays first, so an App that states no preference
-        # builds where every App already built; `managed` is what an App asks
-        # for by name (`setAppBuildRoute`) and what a Target requiring L3 gets
-        # on rank alone.
+        # Rank order, and a route name says **where the build runs** — that is
+        # what tells an operator which failure modes are on the table, and it
+        # is why two routes can share one adapter (a second runner class, a
+        # second project) without the names colliding.
+        #
+        # `github` stays first, so an App that states no preference builds
+        # where every App already built; `gcp` is what an App asks for by name
+        # (`setAppBuildRoute`) and what a Target requiring L3 gets on rank
+        # alone. `offsite` and `bosun` are the two fallbacks, in that order.
         routes:
-          - name: hosted
+          - name: github
             adapter: github-actions
             # The public half of the sealing keypair. A stored registry
             # credential travels to this route only inside an envelope sealed
@@ -198,7 +203,7 @@ spec:
           # terraform/gcp/projects/trusted-builds — `cloudbuild.builds.editor`
           # and `logging.viewer` for the controller, `artifactregistry.writer`
           # and the two attestation permissions for the build worker.
-          - name: managed
+          - name: gcp
             adapter: cloud-build
             endpoint: https://cloudbuild.googleapis.com
             logsEndpoint: https://logging.googleapis.com
@@ -213,12 +218,40 @@ spec:
             # engine every build on this route runs, and a moving tag is an
             # engine that changes underneath a reproducible build.
             image: moby/buildkit:v0.32.2@sha256:28a898719c18a33f4e8000685287fa36fd0dd9560c6440227d3a732d79bb41d8
-          # The outage fallback: a bosun host long-polls the outbox over a
-          # path-scoped tunnel hostname that exposes /internal/bosun/ and
-          # nothing else (terraform/network/cloudflare/spindrift.tf),
-          # claims the request, and builds it on a microVM skiff. Ranked
-          # last — hosted and managed win whenever they are reachable; this
-          # is the route that still works when the Actions plane is down.
+          # This cluster builds for itself: a Job running rootless BuildKit in
+          # `spindrift-build`, beside the registry it pushes to. SLSA L1 — the
+          # same operators reach the builder and the Apps it builds — so a
+          # Target requiring L2 refuses it on the threshold, which is the whole
+          # of its cost and is enforced rather than warned about.
+          #
+          # Ranked above `bosun` because it needs no hardware nobody has: the
+          # uplink being down is exactly when this one still works.
+          #
+          # NOT YET EXERCISED LIVE. The Job asks for `RuntimeDefault` seccomp
+          # because `baseline` forbids `Unconfined`, and upstream's own
+          # rootless example asks for `Unconfined`. If a build dies inside
+          # `unshare`, the fix is a Pod Security level of this namespace's own
+          # plus the matching relaxation in `in-cluster.ts` — not a change
+          # here. Ranked below the two that work, so it costs nothing until
+          # something reaches it.
+          - name: offsite
+            adapter: in-cluster
+            endpoint: https://kubernetes.default.svc
+            namespace: spindrift-build
+            serviceAccount: spindrift-build
+            # Rootless, and that is a requirement rather than a preference:
+            # the Job runs as UID 1000 with no privilege escalation, which the
+            # stock image's root entrypoint cannot honour. Pinned by digest for
+            # the same reason the managed route pins its BuildKit — the image
+            # is the engine, and a moving tag is an engine that changes
+            # underneath a reproducible build.
+            image: moby/buildkit:v0.32.2-rootless@sha256:504731e577c20559c00f968f33219f30115e70be29ab96728d1d06e963fc494b
+          # The outage fallback for when this whole cluster is the problem: a
+          # bosun host long-polls the outbox over a path-scoped tunnel hostname
+          # that exposes /internal/bosun/ and nothing else
+          # (terraform/network/cloudflare/spindrift.tf), claims the request,
+          # and builds it on a microVM skiff. Ranked last — every route above
+          # wins whenever it is reachable.
           # The builder id must match the constant the build-hull stamps
           # into its provenance statement (nix/images/hull-ubuntu.nix,
           # buildRun) — a mismatch fails closed at verification. No host
@@ -228,7 +261,7 @@ spec:
           # a build that falls through times out at the build budget rather
           # than hanging forever — and a host that declares the class serves
           # it with no change here.
-          - name: pool
+          - name: bosun
             adapter: bosun
             class: skiff-build-xl
             provenanceBuilderId: https://bosun.lolwtf.ca/skiff

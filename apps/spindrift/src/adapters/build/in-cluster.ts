@@ -266,11 +266,40 @@ export class InClusterBuildRoute implements BuildAdapter {
           spec: {
             restartPolicy: 'Never',
             serviceAccountName: this.options.serviceAccount,
+            // Rendered, not configured, because it is one coherent choice
+            // rather than a knob: this is the strictest context BuildKit can
+            // run under, and it is what makes the build namespace admissible
+            // at Pod Security `baseline` — the level the `spindrift`
+            // namespace itself enforces. A Job with no security context at all
+            // is rejected outright by anything above `privileged`, which is
+            // why this route could be configured and still never start.
+            //
+            // It follows that `image` must name a **rootless** BuildKit
+            // (`moby/buildkit:vX.Y.Z-rootless`). The stock image's entrypoint
+            // expects to be root and cannot honour `runAsNonRoot`.
+            //
+            // ponytail: `RuntimeDefault` seccomp, because `baseline` forbids
+            // `Unconfined` and upstream's own rootless example asks for it.
+            // Modern kernels admit unprivileged user namespaces under the
+            // default profile, so this is expected to hold. Upgrade path if a
+            // build dies in `unshare`: give the build namespace its own Pod
+            // Security level and relax this to `Unconfined` there — a change
+            // to one namespace label and this block, not to the route.
+            securityContext: {
+              runAsNonRoot: true,
+              runAsUser: 1000,
+              runAsGroup: 1000,
+              seccompProfile: { type: 'RuntimeDefault' },
+            },
             containers: [
               {
                 name: 'build',
                 image: this.options.image,
                 command: ['sh', '-c', program],
+                securityContext: {
+                  allowPrivilegeEscalation: false,
+                  capabilities: { drop: ['ALL'] },
+                },
                 // Absent entirely when there is nothing held, rather than
                 // present and empty: an installation that stores nothing should
                 // leave no trace of the mechanism on its build Jobs.

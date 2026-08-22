@@ -1057,6 +1057,39 @@ describe('the in-cluster build route', () => {
     expect(jobSpec.template.spec.serviceAccountName).toBe('builder');
   });
 
+  test('the Job is admissible at Pod Security baseline', async () => {
+    // Without a security context the pod is rejected by anything above
+    // `privileged`, and every namespace this installation runs is at least
+    // `baseline` — so the route could be configured and never start once.
+    const { cluster, route } = clusterRoute();
+    await run(route.build(archiveSource(), spec));
+
+    const job = cluster.get('jobs/builds/spindrift-build-fixed');
+    const pod = (
+      job?.spec as {
+        template: {
+          spec: {
+            securityContext: Record<string, unknown>;
+            containers: { securityContext: Record<string, unknown> }[];
+          };
+        };
+      }
+    )?.template.spec;
+
+    expect(pod.securityContext).toEqual({
+      runAsNonRoot: true,
+      runAsUser: 1000,
+      runAsGroup: 1000,
+      // `baseline` forbids `Unconfined`, so this is the only profile the
+      // route can ask for without a namespace of its own.
+      seccompProfile: { type: 'RuntimeDefault' },
+    });
+    expect(pod.containers[0]?.securityContext).toEqual({
+      allowPrivilegeEscalation: false,
+      capabilities: { drop: ['ALL'] },
+    });
+  });
+
   test('reads the pod’s log as it goes and yields only what is new', async () => {
     const { route } = clusterRoute({
       status: (reads) => (reads > 2 ? { succeeded: 1 } : { active: 1 }),
