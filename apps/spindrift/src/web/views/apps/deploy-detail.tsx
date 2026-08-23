@@ -39,6 +39,7 @@ import {
   Ban,
   ChevronRight,
   ExternalLink,
+  FileText,
   RefreshCw,
   Rocket,
   Undo2,
@@ -60,9 +61,10 @@ import {
   type Stage as ProgressStage,
   StageProgress,
 } from '../../components/progress.tsx';
-import { RunningTime } from '../../components/running-time.tsx';
+import { formatDuration, RunningTime } from '../../components/running-time.tsx';
 import { PhasePill, StepGlyph, statusWord } from '../../components/status.tsx';
 import { subscribeAttempt } from '../../stream-client.ts';
+import { ATTEMPT_LOG_TEXT_PATH } from '../../stream-path.ts';
 import { Button } from '../../ui/button.tsx';
 import { Card, CardContent, Eyebrow } from '../../ui/card.tsx';
 import {
@@ -370,7 +372,17 @@ function stagesOf(view: DeployView): readonly ProgressStage[] {
           status: build.status,
           ...(build.duration === undefined ? {} : { detail: build.duration }),
         },
-    { name: 'Deploy', status: deployStatus, detail: view.target },
+    {
+      name: 'Deploy',
+      status: deployStatus,
+      // While it is moving, what the strip cannot say is when it will stop —
+      // so it says what the history says instead, which is a fact rather than
+      // the fraction `progress.tsx` refuses to invent.
+      detail:
+        view.id !== null && isInFlight(view.phase) && view.expectedDuration
+          ? `usually about ${formatDuration(view.expectedDuration.p90Ms)}, from ${view.expectedDuration.samples} deploys`
+          : view.target,
+    },
     view.urlLive
       ? { name: 'Live', status: 'done', detail: 'serving' }
       : view.previousReleaseServing
@@ -772,7 +784,7 @@ function BuildOutput({ view }: { view: DeployView }) {
   const build = view.build;
   if (build === null) return null;
   if (build.log !== null) {
-    return <Transcript build={build} />;
+    return <Transcript build={build} buildId={view.buildId} />;
   }
 
   if (build.fidelity === 'LIVE_STATUS') {
@@ -828,7 +840,13 @@ function BuildOutput({ view }: { view: DeployView }) {
  * lands on a drawer that never sprang open. Same shape as `BuildDrawer`'s
  * prior-status effect above, for the same reason.
  */
-function Transcript({ build }: { build: NonNullable<DeployView['build']> }) {
+function Transcript({
+  build,
+  buildId,
+}: {
+  build: NonNullable<DeployView['build']>;
+  buildId: number;
+}) {
   const lines = build.log ?? [];
   const [open, setOpen] = useState(build.status === 'failed');
   const priorStatus = useRef(build.status);
@@ -864,10 +882,43 @@ function Transcript({ build }: { build: NonNullable<DeployView['build']> }) {
               the full transcript stays on the runner.
             </p>
           ) : null}
-          <RunLink url={build.runUrl} />
+          <div className="flex flex-wrap gap-4">
+            <PlainTextLink buildId={buildId} />
+            <RunLink url={build.runUrl} />
+          </div>
         </div>
       </CollapsibleContent>
     </Collapsible>
+  );
+}
+
+/**
+ * The whole attempt log as one text document, for a terminal or a paste.
+ *
+ * A plain `<a>` and nothing more: the route sits behind the same session the
+ * stream does (`streams.ts`), and the browser sends that cookie by itself. With
+ * a `deployId` the document is both legs of the attempt; without one, the
+ * build's.
+ */
+function PlainTextLink({
+  buildId,
+  deployId,
+}: {
+  buildId: number;
+  deployId?: number;
+}) {
+  const query = new URLSearchParams({ buildId: String(buildId) });
+  if (deployId !== undefined) query.set('deployId', String(deployId));
+  return (
+    <a
+      href={`${ATTEMPT_LOG_TEXT_PATH}?${query}`}
+      target="_blank"
+      rel="noreferrer noopener"
+      className="inline-flex items-center gap-1 self-start text-[12.5px] font-medium text-accent-foreground hover:underline"
+    >
+      <FileText aria-hidden className="size-3" />
+      Plain text
+    </a>
   );
 }
 
@@ -939,7 +990,13 @@ function DeployDrawer({ view }: { view: DeployView }) {
           yet.
         </Notice>
       ) : (
-        <LogPane lines={view.deployLog} follow={isInFlight(view.phase)} />
+        <>
+          <LogPane lines={view.deployLog} follow={isInFlight(view.phase)} />
+          <PlainTextLink
+            buildId={view.buildId}
+            deployId={view.id ?? undefined}
+          />
+        </>
       )}
     </Stage>
   );

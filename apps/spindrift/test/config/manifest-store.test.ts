@@ -661,7 +661,7 @@ describe('the stored installation manifest', () => {
       ...DEFAULT_PLACEHOLDER_MANIFEST,
       cloud: { federation: null },
       boundary: { trustedGateway: false },
-      controlPlane: { hostname: UNSERVED_HOSTNAME },
+      controlPlane: { hostname: UNSERVED_HOSTNAME, version: null },
     });
   });
 

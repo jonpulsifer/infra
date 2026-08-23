@@ -69,6 +69,12 @@ export interface GetInstallationManifestResult {
    * on the next load, because the write was real and configured nothing.
    */
   readonly configured: boolean;
+  /**
+   * What the answering process is running (`controlPlane.version`), for the
+   * shell's footer. A deployment fact, so it rides the one read the browser
+   * already makes about this installation rather than a channel of its own.
+   */
+  readonly version: string | null;
 }
 
 export const getInstallationManifest: Command<
@@ -82,5 +88,6 @@ export const getInstallationManifest: Command<
     // is joined onto `context.manifest` per read, and the predicate reads keys
     // an authored document is the only place to state.
     configured: !isUnconfiguredInstallation(manifest),
+    version: context.manifest.controlPlane.version,
   });
 };

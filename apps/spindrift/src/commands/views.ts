@@ -402,6 +402,23 @@ export interface DeployView {
    * only where the act would be accepted.
    */
   readonly rollbackable: boolean;
+  /**
+   * How long a release here usually takes, from the ones before it.
+   *
+   * The p90 of created-to-LIVE over the last hundred releases of this
+   * Component@Target that reached LIVE, computed at read time from the attempt
+   * log and never stored. Absent under three samples — a percentile of two
+   * numbers is a guess wearing a number — and absent on a Build with no
+   * release, which has no history to read.
+   */
+  readonly expectedDuration?: ExpectedDuration;
+}
+
+/** What {@link DeployView.expectedDuration} carries: the estimate and its evidence. */
+export interface ExpectedDuration {
+  readonly p90Ms: number;
+  /** How many prior releases voted, so the sentence can say how sure it is. */
+  readonly samples: number;
 }
 
 /**

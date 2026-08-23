@@ -76,6 +76,9 @@ export function App() {
   const [installation, setInstallation] = useState<Configuration>({
     state: 'asking',
   });
+  // What the answering process is running, from the same read as the
+  // configuration below; the shell's footer repeats it.
+  const [version, setVersion] = useState<string | null>(null);
 
   // The tab bar is where an operator holding three Deploys tells them apart.
   useEffect(() => {
@@ -165,6 +168,7 @@ export function App() {
     ])
       .then((result) => {
         if (!live) return;
+        if (result?.ok) setVersion(result.value.version);
         setInstallation(
           result?.ok && !result.value.configured
             ? { state: 'unconfigured', manifest: result.value.manifest }
@@ -199,6 +203,7 @@ export function App() {
     <SignedIn
       principal={gate.principal}
       installation={installation}
+      version={version}
       path={route.path}
       onNavigate={route.navigate}
       onConfigured={() =>
@@ -239,6 +244,7 @@ export function App() {
 export function SignedIn({
   principal,
   installation,
+  version = null,
   path,
   onNavigate,
   onConfigured,
@@ -246,6 +252,7 @@ export function SignedIn({
 }: {
   readonly principal: Principal;
   readonly installation: Configuration;
+  readonly version?: string | null;
   readonly path: string;
   onNavigate(path: string): void;
   onConfigured(): void;
@@ -270,6 +277,7 @@ export function SignedIn({
       path={path}
       onNavigate={onNavigate}
       principal={principal}
+      version={version}
       themeControl={<ThemeToggle />}
       onSignOut={onSignOut}
     >

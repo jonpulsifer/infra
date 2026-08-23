@@ -75,6 +75,19 @@ describe('the authenticated Gateway trust boundary', () => {
       trustedGateway: false,
     });
   });
+
+  test('the running version is a deployment fact, and unset is null', async () => {
+    const manifest = parseManifest(fixtureText, FIXTURE);
+    // Joined by the same resolver as the hostname, so the footer and the
+    // traces name one thing; nothing that can write a manifest can write it.
+    expect(
+      (await resolveManifest(manifest, { SPINDRIFT_VERSION: ' 1.2.3 ' }))
+        .controlPlane.version,
+    ).toBe('1.2.3');
+    expect(
+      (await resolveManifest(manifest, {})).controlPlane.version,
+    ).toBeNull();
+  });
 });
 
 describe('boot fails loudly', () => {

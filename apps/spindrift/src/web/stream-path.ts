@@ -42,6 +42,14 @@ export const STREAM_PATHS = [
   FUNCTION_LOG_STREAM_PATH,
 ] as const;
 
+/**
+ * The attempt log as one `text/plain` document — the same rows the attempt
+ * stream pumps, read to the end and served once, behind the same session.
+ * Not in {@link STREAM_PATHS}: it is a GET a plain `<a>` can open, not an
+ * upgrade.
+ */
+export const ATTEMPT_LOG_TEXT_PATH = '/internal/streams/build-attempt.txt';
+
 /** One page of the terminating attempt stream — build or deploy, never both. */
 export interface AttemptStreamMessage {
   readonly kind: 'attempt';

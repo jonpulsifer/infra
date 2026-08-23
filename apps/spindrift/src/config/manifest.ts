@@ -32,6 +32,13 @@ export const TRUSTED_GATEWAY_BOUNDARY_VAR =
 export const HOSTNAME_VAR = 'SPINDRIFT_HOSTNAME';
 
 /**
+ * What this deployment is running. The same variable `telemetry/index.ts`
+ * reports as `service.version`, read here so the UI and the traces name one
+ * thing; unset is `null` rather than telemetry's placeholder.
+ */
+export const VERSION_VAR = 'SPINDRIFT_VERSION';
+
+/**
  * The relying party of a deployment that serves no origin.
  *
  * An installation reachable only in-cluster renders no Gateway and no
@@ -311,7 +318,10 @@ export async function resolveManifest(
     ...manifest,
     cloud: { federation: await loadDeploymentFederation(env) },
     boundary: { trustedGateway: env[TRUSTED_GATEWAY_BOUNDARY_VAR] === 'true' },
-    controlPlane: { hostname: env[HOSTNAME_VAR]?.trim() || UNSERVED_HOSTNAME },
+    controlPlane: {
+      hostname: env[HOSTNAME_VAR]?.trim() || UNSERVED_HOSTNAME,
+      version: env[VERSION_VAR]?.trim() || null,
+    },
   };
 }
 
