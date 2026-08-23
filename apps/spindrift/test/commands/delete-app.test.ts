@@ -58,7 +58,11 @@ const clock: Clock = { now: () => FROZEN };
 
 /** One fake per adapter type, so a test can ask whether it was ever called. */
 function fakes(
-  options: { destroyThrows?: string; dns?: FakeDnsPublisher } = {},
+  options: {
+    destroyThrows?: string;
+    sweepThrows?: string;
+    dns?: FakeDnsPublisher;
+  } = {},
 ) {
   const made = new Map<string, FakeDeployAdapter>();
   const registry: AdapterRegistry = {
@@ -462,6 +466,68 @@ describe('§9: confirming withdraws the vanity record (ticket 137b)', () => {
 
     expect(result.ok).toBe(true);
     expect(dns.withdrawn).toEqual([]);
+  });
+});
+
+describe("the App's own container is swept after its placements", () => {
+  test('the Target is swept once, by App name', async () => {
+    // The namespace an adapter made for the App is the one thing no ref names,
+    // so `destroy` alone always left it behind.
+    const target = await seedTarget('folly', 'kubernetes');
+    await seedApp('sweep-me', { targetId: target.id });
+    const { registry, of } = fakes();
+
+    const result = await deleteApp(
+      { name: 'sweep-me', confirm: true },
+      context(registry),
+    );
+
+    expect(result.ok).toBe(true);
+    if (!result.ok || !result.value.deleted) return;
+    expect(of('kubernetes').swept).toEqual(['sweep-me']);
+    expect(result.value.retainedWorkloads).toEqual([]);
+  });
+
+  test('a refused sweep is reported, and the App still goes', async () => {
+    const target = await seedTarget('folly', 'kubernetes');
+    const seeded = await seedApp('wont-sweep', { targetId: target.id });
+    const { registry } = fakes({ sweepThrows: 'the namespace is not ours' });
+
+    const result = await deleteApp(
+      { name: 'wont-sweep', confirm: true },
+      context(registry),
+    );
+
+    expect(result.ok).toBe(true);
+    if (!result.ok || !result.value.deleted) return;
+    expect(result.value.retainedWorkloads).toEqual([
+      'wont-sweep on folly/kubernetes — the namespace is not ours',
+    ]);
+    expect(
+      await database().db.select().from(apps).where(eq(apps.id, seeded.app.id)),
+    ).toHaveLength(0);
+  });
+
+  test('a container two Apps share is left in place', async () => {
+    // The container is named for the App, so a second App of the same name is
+    // in it. Sweeping would take its workloads — the same reason a name is not
+    // an identifier here.
+    const target = await seedTarget('folly', 'kubernetes');
+    const mine = await seedApp('twinned', { targetId: target.id });
+    await seedApp('twinned', { targetId: target.id });
+    const { registry, of } = fakes();
+
+    const result = await deleteApp(
+      { name: mine.app.id, confirm: true },
+      context(registry),
+    );
+
+    expect(result.ok).toBe(true);
+    if (!result.ok || !result.value.deleted) return;
+    expect(of('kubernetes').swept).toEqual([]);
+    expect(result.value.retainedWorkloads).toEqual([
+      "twinned on folly/kubernetes — 1 other App answers to 'twinned', so its container is shared and was left in place",
+    ]);
   });
 });
 

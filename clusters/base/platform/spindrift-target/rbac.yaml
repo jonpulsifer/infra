@@ -100,18 +100,24 @@ rules:
   # and an App's name is typed at runtime — so this is the one grant here that
   # could not have been narrower whatever shape was chosen. `patch` beside it
   # because the write is a server-side apply, which converges an existing
-  # namespace rather than failing on it. No `delete`: nothing removes an App
-  # namespace, deliberately, since deleting one would take every workload in it
-  # including whatever an operator put there by hand.
+  # namespace rather than failing on it.
+  #
+  # `delete` is what `deleteApp` sweeps a deleted App's namespace with, and it
+  # is the one verb here RBAC cannot make safe on its own: `resourceNames` takes
+  # no pattern, so the grant is every namespace on the cluster. What bounds it
+  # is in the adapter — `sweepApp` refuses any namespace not carrying
+  # `app.kubernetes.io/managed-by: spindrift`, so the Target's own declared
+  # namespace and anything an operator made are refused rather than deleted.
   #
   # `get` is what the admission labels are read through, on the Target's
-  # declared namespace.
+  # declared namespace, and what `sweepApp` reads that label off.
   - apiGroups:
       - ""
     resources:
       - namespaces
     verbs:
       - create
+      - delete
       - get
       - patch
   - apiGroups:

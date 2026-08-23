@@ -34,6 +34,13 @@
  * `unplaceComponent`'s rule and the reason a FAILED Deploy's half-made resource
  * is not left behind billing.
  *
+ * **It sweeps the App's own container too.** A ref names one placement, so
+ * `destroy` alone never reached the thing an adapter had to make for the App
+ * itself — the Kubernetes namespace, which Flux's own documentation says "will
+ * not be garbage collected". §6's optional `sweepApp` is that seam, called once
+ * per Target after its placements are gone, and skipped where a second App of
+ * the same name shares the container.
+ *
  * **A teardown the platform refuses does not fail the delete.** Same argument as
  * `retainedSecrets` below: the operator asked for the App to be gone, an
  * unreachable Target is not a reason to keep the rows, and `destroy` is
@@ -49,7 +56,7 @@
  * are already gone by then, and a refusal at that point would report a delete
  * that happened as one that did not.
  */
-import { and, desc, eq, inArray, isNull, or } from 'drizzle-orm';
+import { and, desc, eq, inArray, isNull, ne, or } from 'drizzle-orm';
 import { z } from 'zod';
 import type { TargetAdapter } from '../../config/manifest.schema.ts';
 import {
@@ -157,10 +164,11 @@ export type DeleteAppResult =
        */
       readonly retainedSecrets: readonly string[];
       /**
-       * Workloads that outlived their rows because the teardown was refused —
-       * `<component> on <target> — <why>`. Empty is the ordinary answer; a
-       * non-empty list is what is genuinely stranded and has to be removed on
-       * the Target by hand.
+       * What outlived its rows because the far side refused to remove it —
+       * `<what> on <target> — <why>`, one per refused workload teardown and one
+       * per refused `sweepApp`. Empty is the ordinary answer; a non-empty list
+       * is what is genuinely stranded and has to be removed on the Target by
+       * hand.
        */
       readonly retainedWorkloads: readonly string[];
     } & DeleteAppEffects);
@@ -363,6 +371,33 @@ export const deleteApp: Command<DeleteAppInput, DeleteAppResult> = async (
     }
   }
 
+  // Then the App-scoped container each Target made, which no ref names — the
+  // Kubernetes namespace being the whole of it today (§6's `sweepApp`). After
+  // the placements, because it is what they were in. Every Target this App was
+  // ever placed on, not only the ones still holding a ref: a Component removed
+  // from a Target earlier still left the namespace there.
+  const sameName = await context.db
+    .select({ id: apps.id })
+    .from(apps)
+    .where(and(eq(apps.name, app.name), ne(apps.id, app.id)));
+  for (const target of sweepable(live)) {
+    const refusal =
+      // A namespace is named for the App, so two Apps of the same name share
+      // one. Sweeping this one's would take the other's workloads with it —
+      // the same reason a name is not an identifier here.
+      sameName.length > 0
+        ? `${sameName.length} other App answers to '${app.name}', so its container is shared and was left in place`
+        : await sweep(context, target, app.name);
+    if (refusal !== null) {
+      retainedWorkloads.push(
+        `${app.name} on ${targetLabel({
+          vessel: target.vessel.name,
+          adapter: target.target.adapter,
+        })} — ${refusal}`,
+      );
+    }
+  }
+
   // Ordered rather than left to the cascade. Two of these foreign keys are
   // `restrict` — `deploys.build_id` and `component_target_desired.desired_*` —
   // and Postgres enforces a `restrict` the moment the referenced row is deleted,
@@ -436,6 +471,52 @@ export async function teardown(
   }
   try {
     await adapter.destroy(deployTargetOf(target, vessel), ref);
+    return null;
+  } catch (cause) {
+    return cause instanceof Error ? cause.message : String(cause);
+  }
+}
+
+/** One Target this App was placed on, once each — what `sweepApp` addresses. */
+function sweepable(
+  live: readonly {
+    targetId: string;
+    target: { adapter: TargetAdapter; connection: TargetConnection | null };
+    vessel: { name: string; location: VesselLocation | null };
+  }[],
+) {
+  const byTarget = new Map<string, (typeof live)[number]>();
+  for (const deploy of live) {
+    if (!byTarget.has(deploy.targetId)) byTarget.set(deploy.targetId, deploy);
+  }
+  return byTarget.values();
+}
+
+/**
+ * Sweep one Target's App-scoped container, answering with why not.
+ *
+ * Same contract as {@link teardown} and for the same reason: the App is going
+ * either way, so a Target that refuses is a thing to name rather than a veto.
+ * An adapter with no `sweepApp` made no such container and answers `null`.
+ */
+async function sweep(
+  context: CommandContext,
+  target: {
+    target: { adapter: TargetAdapter; connection: TargetConnection | null };
+    vessel: { location: VesselLocation | null };
+  },
+  app: string,
+): Promise<string | null> {
+  if (
+    !hasTargetConnection(target.target) ||
+    !hasVesselLocation(target.vessel)
+  ) {
+    return 'the Target is not connected, so nothing could be swept there';
+  }
+  const adapter = context.adapters.deploy(target.target.adapter);
+  if (adapter?.sweepApp === undefined) return null;
+  try {
+    await adapter.sweepApp(deployTargetOf(target.target, target.vessel), app);
     return null;
   } catch (cause) {
     return cause instanceof Error ? cause.message : String(cause);
