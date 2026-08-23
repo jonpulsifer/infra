@@ -1,0 +1,49 @@
+---
+# Spindrift has no outbound notification of its own (note §4.3 rung 1): these
+# read the reconciler's OTel histogram once it lands in Prometheus via the
+# opentelemetry-collector `prom-metrics` scrape (../../base/monitoring/
+# opentelemetry-collector-servicemonitor.yaml). `reconciler_attempt_duration_seconds`
+# is recorded once per deploy attempt with `{kind, outcome}`
+# (apps/spindrift/src/reconciler/deploy-loop.ts), so the `_count` series is a
+# counter of terminal events — an `increase()` over one window is both the
+# query and the dedupe, which is why `for:` stays short here rather than the
+# 15m/30m this file's siblings use for a *sustained* condition.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: spindrift
+  namespace: monitoring
+  labels:
+    lolwtf.ca/service: spindrift
+    release: prom-stack
+spec:
+  groups:
+    - name: spindrift
+      rules:
+        # A deploy attempt reached a platform-blamed or developer-blamed
+        # terminal FAILED verdict — not a retry the reconciler will absorb on
+        # its own. §6's FAILED carries reason/blame on the Deploy row itself;
+        # this alert only says one happened, not why.
+        - alert: SpindriftDeployFailed
+          expr: increase(reconciler_attempt_duration_seconds_count{kind="deploy",outcome="FAILED"}[15m]) > 0
+          for: 0m
+          labels:
+            severity: warning
+          annotations:
+            message: "A Spindrift deploy attempt landed FAILED"
+            description: "kind=deploy outcome=FAILED in the last 15m. Check the Spindrift deploys ledger (`/deploys`) for the reason and blame Spindrift already diagnosed."
+
+        # `outcome=LOST` is not the deploy's own verdict — it is an attempt
+        # saying its claim was reclaimed because the reconciler that held it
+        # died or hung mid-apply (deploy-loop.ts's DEFAULT_CLAIM_TIMEOUT_MS).
+        # The fence means the row itself still settles correctly from another
+        # attempt, but a reconciler dying mid-apply is worth knowing about on
+        # its own — it is also what a starved control-plane node looks like.
+        - alert: SpindriftDeployLost
+          expr: increase(reconciler_attempt_duration_seconds_count{kind="deploy",outcome="LOST"}[15m]) > 0
+          for: 0m
+          labels:
+            severity: warning
+          annotations:
+            message: "A Spindrift reconciler died or hung mid-deploy"
+            description: "kind=deploy outcome=LOST in the last 15m: an attempt's claim was reclaimed rather than settling the row. The deploy itself may still land via a later attempt — check the Spindrift deploys ledger (`/deploys`) and the reconciler pod's own restarts/logs."

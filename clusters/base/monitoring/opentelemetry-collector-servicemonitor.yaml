@@ -1,6 +1,11 @@
 ---
-# Scrape the OpenTelemetry Collector's own metrics endpoint so both clusters'
-# Prometheus operators collect collector telemetry via a shared ServiceMonitor.
+# Two distinct endpoints on the same collector, both named to match
+# opentelemetry-collector.yaml's `ports:` block:
+#   - `monitoring` (8888): the collector's own self-telemetry.
+#   - `prom-metrics` (8889): the data-pipeline `prometheus` exporter — every
+#     OTLP metric a workload (e.g. Spindrift) sends the collector. Without
+#     this second endpoint those metrics reach the collector but no
+#     Prometheus ever scrapes them out of it.
 apiVersion: monitoring.coreos.com/v1
 kind: ServiceMonitor
 metadata:
@@ -14,5 +19,8 @@ spec:
       app.kubernetes.io/name: opentelemetry-collector
   endpoints:
     - port: monitoring
+      path: /metrics
+      interval: 30s
+    - port: prom-metrics
       path: /metrics
       interval: 30s
