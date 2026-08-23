@@ -101,9 +101,10 @@ describe('every manifest value is reachable', () => {
   test('a nullable key can be said to be absent', () => {
     // `auth.gateway` is null in the fixture — passkeys are the only path — and
     // the screen has to be able to render that as a chosen configuration
-    // rather than as an empty box.
+    // rather than as an empty box. Null and absent are different answers and
+    // read as different sentences: this one was stated.
     expect(markup).toContain('name="auth.gateway--present"');
-    expect(markup).toContain('not configured');
+    expect(markup).toContain('Stated as none');
   });
 
   test('a discriminated union offers its arms', () => {
@@ -215,5 +216,44 @@ describe('the whole document is this screen\u2019s', () => {
     expect(screen({ document: withAppVessel })).toContain(
       'Download this installation',
     );
+  });
+});
+
+describe('a list is drawn as what its values are', () => {
+  /**
+   * The generator has one rule and it is the element's kind, the same rule it
+   * follows for every other control. Before this, every array was a list of
+   * records: `reaches` — two words out of a closed set of three — rendered as
+   * two bordered, collapsible boxes titled `#1` and `#2`, each holding a
+   * dropdown, and a list of bucket names rendered as a box called `#1` around
+   * a text field.
+   */
+  const markup = screen();
+
+  test('a closed set is the whole set, toggled', () => {
+    // Every value the schema allows, on or off, so nobody has to learn what
+    // the third one was called. No add, no remove, no order.
+    expect(markup).toContain('aria-pressed="true"');
+    expect(markup).toContain('aria-pressed="false"');
+    expect(markup).toContain('name="dns.zones.0.reaches--private"');
+    expect(markup).toContain('name="dns.zones.0.reaches--public"');
+  });
+
+  test('a record carries its own name, not its index', () => {
+    // Derived by shape rather than by key — the first string field that has a
+    // value — so this file still names nothing the schema declares.
+    for (const zone of manifest.dns.zones) expect(markup).toContain(zone.name);
+    for (const route of manifest.build.routes) {
+      expect(markup).toContain(route.name);
+      expect(markup).toContain(route.adapter);
+    }
+  });
+
+  test('a shut entry keeps its fields in the document', () => {
+    // A box being shut is a display decision and must not become a data one:
+    // closed content stays mounted and hidden, so find-in-page and any static
+    // render still see every field.
+    expect(markup).toContain('data-[state=closed]:hidden');
+    expect(markup).toContain('name="targets.0--variant"');
   });
 });
