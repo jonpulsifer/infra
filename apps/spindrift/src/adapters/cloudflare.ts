@@ -110,10 +110,12 @@ export async function readCloudflareAccount(
       method: 'GET',
       path: `${scope}/workers/subdomain`,
     }),
+    // No pagination options: the live endpoint refuses `page`/`per_page`
+    // (error 8000024, "Invalid list options provided") despite documenting
+    // them, so this listing is whatever the platform's default page carries.
     http.json<Envelope<readonly ProjectRow[]>>({
       method: 'GET',
       path: `${scope}/pages/projects`,
-      query: { per_page: PAGE_SIZE },
     }),
   ]);
 
@@ -166,7 +168,38 @@ function zonesOf(listed: readonly ZoneRow[] | undefined): CloudflareZone[] {
 
 /** One refusal as the operator reads it, with the status where there was one. */
 function sentenceOf(failure: CloudFailure): string {
-  return failure.kind === 'status'
-    ? `${failure.status}: ${failure.message}`
-    : failure.message;
+  if (failure.kind !== 'status') return failure.message;
+  return `${failure.status}: ${envelopeErrors(failure.body) ?? failure.message}`;
+}
+
+/**
+ * The platform's own words, out of its envelope.
+ *
+ * `CloudHttp`'s generic message reader speaks the Google shape, so a
+ * Cloudflare refusal reaches it as the whole raw body — a JSON blob nobody
+ * should have to read. Cloudflare's envelope is `{ errors: [{ code, message }] }`;
+ * where the body parses as one, the messages are the sentence. Anything else
+ * falls back to the generic reading.
+ */
+function envelopeErrors(body: string): string | null {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(body);
+  } catch {
+    return null;
+  }
+  if (parsed === null || typeof parsed !== 'object') return null;
+  const errors = (parsed as { errors?: unknown }).errors;
+  if (!Array.isArray(errors)) return null;
+  const said = errors
+    .map((error: unknown) =>
+      error !== null &&
+      typeof error === 'object' &&
+      typeof (error as { message?: unknown }).message === 'string'
+        ? (error as { message: string }).message
+        : null,
+    )
+    .filter((message): message is string => message !== null)
+    .join('; ');
+  return said === '' ? null : said;
 }

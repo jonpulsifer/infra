@@ -116,6 +116,47 @@ describe('readCloudflareAccount', () => {
     expect(found.pagesProjects).toEqual(['site']);
   });
 
+  test('the Pages listing sends no pagination options', async () => {
+    // The live endpoint refuses `page`/`per_page` with error 8000024 even
+    // though it documents them; the read must not carry what the platform
+    // refuses.
+    let pagesQuery: string | null = null;
+    const found = await read(async (request) => {
+      const url = new URL(request.url);
+      if (url.pathname.endsWith('/pages/projects')) pagesQuery = url.search;
+      return Response.json({ success: true, errors: [], result: [] });
+    });
+
+    expect(pagesQuery ?? 'unset').toBe('');
+    expect(found.pagesProjects).toEqual([]);
+  });
+
+  test('a refusal speaks the envelope’s words, not the raw body', async () => {
+    const far = api({
+      'GET /client/v4/accounts/account-1/pages/projects': () =>
+        Response.json(
+          {
+            success: false,
+            errors: [
+              {
+                code: 8000024,
+                message:
+                  'Invalid list options provided. Review the `page` or `per_page` parameter.',
+              },
+            ],
+          },
+          { status: 400 },
+        ),
+    });
+
+    const found = await read(far.fetch);
+
+    expect(found.unreadable?.pagesProjects).toBe(
+      '400: Invalid list options provided. Review the `page` or `per_page` parameter.',
+    );
+    expect(found.unreadable?.pagesProjects).not.toContain('{');
+  });
+
   test('a zone missing the fields anything addresses it by is dropped', async () => {
     const far = api({
       'GET /client/v4/zones': () =>

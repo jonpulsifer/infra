@@ -31,6 +31,7 @@ import {
   Copy,
   GitPullRequest,
   Globe,
+  Loader2,
   Plus,
   Server,
   X,
@@ -606,7 +607,18 @@ function CloudflareAccountDetail({
   const read = accounts.filter(
     (vessel) => vessel.discovery?.kind === 'cloudflare-account',
   );
+  // Before the emptiness return: a hook must run on every render.
+  const manifest = useRead([['getInstallationManifest', {}]], null);
   if (read.length === 0) return null;
+
+  const minted =
+    manifest.type === 'success' && manifest.value[0].configured
+      ? new Set(
+          (manifest.value[0].manifest.dns?.zones ?? []).map(
+            (zone) => zone.name,
+          ),
+        )
+      : null;
 
   return (
     <dl className="mt-4 flex flex-col gap-3 text-xs">
@@ -615,11 +627,11 @@ function CloudflareAccountDetail({
         return (
           <div key={vessel.name} className="flex flex-col gap-1.5">
             <dt className="font-medium text-foreground">{vessel.name}</dt>
-            <AccountFact
-              label="Zones"
+            <ZonesFact
+              zones={found.zones}
               unreadable={found.unreadable?.zones ?? found.unreadable?.account}
-              value={found.zones?.map((zone) => zone.name)}
-              empty="no zones in this account"
+              minted={minted}
+              onMinted={manifest.reload}
             />
             <AccountFact
               label="Workers"
@@ -645,6 +657,135 @@ function CloudflareAccountDetail({
         );
       })}
     </dl>
+  );
+}
+
+/**
+ * The account's zones, each one answerable: is this a zone the installation
+ * mints App names in?
+ *
+ * The discovery already lists what the account holds and the manifest already
+ * says where names are minted; until this control the two only met inside an
+ * operator's head, and the walk from "the account has clankerbanker.ca" to
+ * "Apps can be named there" went through the manifest editor. A zone already
+ * in `dns.zones` wears a check; one that is not carries the one-click grant.
+ *
+ * One click writes `reaches: [public]`, because a zone adopted from a
+ * connections screen is being adopted to serve Apps on the internet — the
+ * private/split shapes stay the manifest editor's. The write is the whole
+ * document (`configureInstallation` takes no patch), re-read from the server
+ * in the same breath so a stale screen cannot resurrect an edited manifest.
+ */
+function ZonesFact({
+  zones,
+  unreadable,
+  minted,
+  onMinted,
+}: {
+  readonly zones: CloudflareAccountDiscovery['zones'];
+  readonly unreadable: string | undefined;
+  /** Zone names the manifest mints in, or `null` while nobody knows. */
+  readonly minted: ReadonlySet<string> | null;
+  onMinted(): void;
+}) {
+  const [busy, setBusy] = useState<string | null>(null);
+  const [refused, setRefused] = useState<string | null>(null);
+
+  if (unreadable !== undefined || zones == null || zones.length === 0) {
+    return (
+      <AccountFact
+        label="Zones"
+        unreadable={unreadable}
+        value={zones?.map((zone) => zone.name)}
+        empty="no zones in this account"
+      />
+    );
+  }
+
+  const mint = async (name: string) => {
+    setBusy(name);
+    setRefused(null);
+    // Fresh document, not the screen's copy: the append must land on what the
+    // manifest says now, and the save is refused with the server's sentence.
+    const current = await command('getInstallationManifest', {});
+    if (!current.ok) {
+      setRefused(current.failure.message);
+      setBusy(null);
+      return;
+    }
+    const document = current.value.manifest;
+    const declared = document.dns?.zones ?? [];
+    if (!declared.some((zone) => zone.name === name)) {
+      const saved = await command('configureInstallation', {
+        manifest: {
+          ...document,
+          dns: {
+            ...document.dns,
+            zones: [...declared, { name, reaches: ['public'] }],
+          },
+        },
+      });
+      if (!saved.ok) {
+        setRefused(saved.failure.message);
+        setBusy(null);
+        return;
+      }
+    }
+    setBusy(null);
+    onMinted();
+  };
+
+  return (
+    <dd className="flex gap-2 text-muted-foreground">
+      <span className="w-14 shrink-0 pt-0.5 text-foreground/70">Zones</span>
+      <span className="flex min-w-0 flex-wrap items-center gap-1.5">
+        {zones.map((zone) => {
+          const isMinted = minted?.has(zone.name) ?? false;
+          return (
+            <span
+              key={zone.name}
+              className={cn(
+                'inline-flex items-center gap-1 rounded-full border px-2 py-0.5',
+                isMinted
+                  ? 'border-success/40 text-foreground'
+                  : 'border-border',
+              )}
+            >
+              <span className="break-all">{zone.name}</span>
+              {zone.status !== 'active' && (
+                <span className="text-warning">{zone.status}</span>
+              )}
+              {isMinted ? (
+                <Check
+                  className="size-3 shrink-0 text-success"
+                  aria-label={`App names are minted in ${zone.name}`}
+                />
+              ) : (
+                minted !== null && (
+                  <button
+                    type="button"
+                    disabled={busy !== null}
+                    onClick={() => void mint(zone.name)}
+                    title={`Mint App names in ${zone.name}`}
+                    aria-label={`Mint App names in ${zone.name}`}
+                    className="grid size-4 shrink-0 place-items-center rounded-full text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground disabled:opacity-50"
+                  >
+                    {busy === zone.name ? (
+                      <Loader2 className="size-3 animate-spin" />
+                    ) : (
+                      <Plus className="size-3" />
+                    )}
+                  </button>
+                )
+              )}
+            </span>
+          );
+        })}
+        {refused !== null && (
+          <span className="break-all text-destructive">{refused}</span>
+        )}
+      </span>
+    </dd>
   );
 }
 
