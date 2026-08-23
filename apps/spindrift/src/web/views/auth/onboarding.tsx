@@ -727,7 +727,7 @@ function OnboardingDone({
                     style={
                       {
                         '--i': index,
-                        animationDelay: 'calc(var(--i) * 90ms)',
+                        animationDelay: 'calc(var(--i) * 60ms)',
                       } as CSSProperties
                     }
                   >

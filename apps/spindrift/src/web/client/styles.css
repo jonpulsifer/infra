@@ -104,6 +104,18 @@
   );
   --overlay: light-dark(rgb(16 26 46 / 40%), rgb(3 7 16 / 62%));
   /*
+   * The band that sweeps a running progress fill. A highlight is lighter than
+   * what it crosses, and which way that is flips with the theme: the three
+   * `FILL` tones are dark ink on a light page and pale on a dark one, so a
+   * fixed white sweep is invisible in exactly one of them.
+   */
+  --shimmer: linear-gradient(
+    90deg,
+    transparent,
+    light-dark(rgb(255 255 255 / 55%), rgb(6 12 24 / 34%)),
+    transparent
+  );
+  /*
    * How far to invert a single-colour mark. `ui/logo.tsx` reads it as
    * `filter: invert(var(--logo-invert))` rather than through a Tailwind `dark` variant,
    * because the variant keys on an attribute that `theme.ts` deliberately
@@ -169,6 +181,26 @@
   }
 }
 
+/*
+ * The one loop this file adds, and the exception the header's rule already
+ * names: a bar that is filling *is* the claim that something is still
+ * happening, so it is entitled to say so continuously. It runs only under
+ * `tone === 'running'` in `components/progress.tsx` and stops the moment the
+ * deploy settles.
+ *
+ * A sweep rather than the `animate-pulse` that was here: pulse fades the whole
+ * bar to half opacity, which is the universal mark of *disabled*, and a deploy
+ * in flight is the one thing on the screen that is not.
+ */
+@keyframes shimmer {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(100%);
+  }
+}
+
 @theme inline {
   /*
    * Named animations, as Tailwind v4 theme tokens — `--animate-rise` is the
@@ -177,6 +209,7 @@
    */
   --animate-rise: rise 220ms ease-out both;
   --animate-draw: draw 320ms ease-out both;
+  --animate-shimmer: shimmer 1.6s linear infinite;
 
   --color-background: var(--ground);
   --color-foreground: var(--ink);
@@ -321,6 +354,52 @@
     outline: 2px solid var(--color-ring);
     outline-offset: 2px;
   }
+
+  /*
+   * A menu arrives from the control that opened it.
+   *
+   * `AccountMenu` in `components/shell.tsx` is the app's only `popover`, and
+   * the platform opens one by flipping `display`, which is not a thing that
+   * can be transitioned on its own. `allow-discrete` on `display` and `overlay`
+   * is what holds the element in the top layer for the length of the exit, so
+   * the menu leaves along the path it came in on rather than being cut.
+   *
+   * The origin is a variable with the account menu's own anchor as the
+   * default, because a menu hung from a different corner would otherwise
+   * inherit this one's and grow out of the wrong edge. A second popover sets
+   * `--popover-origin` at its call site; it does not edit this rule.
+   *
+   * In `@layer base` on purpose. The reduced-motion reset at the foot of this
+   * file is unlayered and therefore beats every rule in here whatever its
+   * specificity, which is the same mechanism its own comment describes. A
+   * reader who asked for less motion gets the menu, immediately.
+   */
+  [popover] {
+    opacity: 0;
+    scale: 0.97;
+    translate: 0 -4px;
+    transform-origin: var(--popover-origin, top right);
+    transition:
+      opacity 140ms ease-out,
+      scale 140ms ease-out,
+      translate 140ms ease-out,
+      overlay 140ms ease-out allow-discrete,
+      display 140ms ease-out allow-discrete;
+  }
+
+  [popover]:popover-open {
+    opacity: 1;
+    scale: 1;
+    translate: none;
+  }
+
+  @starting-style {
+    [popover]:popover-open {
+      opacity: 0;
+      scale: 0.97;
+      translate: 0 -4px;
+    }
+  }
 }
 
 /*
@@ -348,5 +427,25 @@
     animation-iteration-count: 1;
     transition-duration: 0.01ms;
     scroll-behavior: auto;
+  }
+
+  /*
+   * And the view transition, which the rule above cannot reach.
+   *
+   * `views/auth/onboarding.tsx` calls `startViewTransition` to cross-fade one
+   * wizard question into the next, and the browser runs that fade for
+   * everybody: the API has no reduced-motion behaviour of its own. The
+   * pseudo-elements it animates live in their own tree hung off the document
+   * root, so they are not `*`, `*::before` or `*::after`, and the reset above
+   * was leaving the one animation in the app that ignores the preference.
+   *
+   * A separate rule rather than three more lines in the list above: one
+   * selector a browser does not recognise invalidates the **whole** list it
+   * appears in, which would take the universal reset down with it.
+   */
+  ::view-transition-group(*),
+  ::view-transition-old(*),
+  ::view-transition-new(*) {
+    animation-duration: 0.01ms;
   }
 }

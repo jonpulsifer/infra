@@ -17,9 +17,9 @@
  * **The bar is honest about not knowing.** A deploy has no percentage — the
  * platform reports phases, not fractions — so the fill is derived from *stages
  * settled*, and the stage in flight contributes a half rather than a guess. The
- * shimmer over the leading edge is what says "moving, duration unknown"; a bar
- * that crept toward 90% and waited there would be inventing a number the
- * controller never gave.
+ * sweep across the fill is what says "moving, duration unknown"; a bar that
+ * crept toward 90% and waited there would be inventing a number the controller
+ * never gave.
  */
 import type { StepStatus } from '../../commands/views.ts';
 import { cn } from '../ui/utils.ts';
@@ -92,11 +92,21 @@ export function StageProgress({
       <div className="h-1 w-full overflow-hidden rounded-full bg-secondary">
         <div
           className={cn(
-            'h-full rounded-full transition-[width] duration-700 ease-out',
+            'relative h-full overflow-hidden rounded-full',
+            // `width` rather than `scaleX`: the fill is `rounded-full`, and a
+            // scaled box takes its rounded cap with it, so the leading edge
+            // would flatten as the bar grew. One element transitioning five
+            // times across a deploy is a trade worth making for a cap that
+            // stays a cap.
+            'transition-[width] duration-700 ease-out',
             FILL[tone],
-            // Only the moving bar moves. A settled one holding a shimmer would
+            // Only the moving bar moves. A settled one holding a sweep would
             // say something is happening when nothing is.
-            tone === 'running' && 'animate-pulse',
+            tone === 'running' &&
+              cn(
+                'after:absolute after:inset-0 after:bg-[image:var(--shimmer)]',
+                'motion-safe:after:animate-shimmer',
+              ),
           )}
           style={{ width: `${percent}%` }}
         />

@@ -74,10 +74,10 @@ describe('the bar reports settled work, never a guess', () => {
 
   test('only the moving bar moves', () => {
     expect(strip([{ name: 'a', status: 'running' }])).toContain(
-      'animate-pulse',
+      'animate-shimmer',
     );
     expect(strip([{ name: 'a', status: 'done' }])).not.toContain(
-      'animate-pulse',
+      'animate-shimmer',
     );
   });
 });

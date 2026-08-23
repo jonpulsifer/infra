@@ -130,6 +130,11 @@ function ToastRow({ toast }: { toast: Toast }) {
       className={cn(
         'pointer-events-auto w-full max-w-sm rounded-sm border border-border border-l-2 bg-card px-3.5 py-3',
         'shadow-panel',
+        // The app's one word for something arriving, and the host is anchored
+        // to the bottom edge, so rising is also the direction it came from. A
+        // result that blinks into a corner the reader is not looking at is the
+        // jarring change this whole component exists to soften.
+        'motion-safe:animate-rise',
         TONE[toast.tone],
       )}
     >

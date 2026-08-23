@@ -280,7 +280,7 @@ function Body({ state }: { state: AppDeletion }) {
 
   if (state.kind === 'reviewing') {
     return (
-      <p className="animate-pulse text-sm text-muted-foreground">
+      <p className="text-sm text-muted-foreground">
         Working out what deleting {state.name} would do...
       </p>
     );
