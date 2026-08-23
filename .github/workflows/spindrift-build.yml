@@ -846,6 +846,53 @@ jobs:
             echo "::error::the platform's builder left no ${output}/config.json — nothing was produced for this framework (${FRAMEWORK})." >&2
             exit 1
           fi
+
+          # **The output is not self-contained, and this makes it so.** Each
+          # function's `.vc-config.json` carries a `filePathMap` naming the files
+          # it reads at runtime — its traced `node_modules`, its `.next` chunks —
+          # and every one of those paths is in the *project*, outside
+          # `.vercel/output` entirely. `vercel deploy --prebuilt` resolves them
+          # by reading the project it is run in; this route ships only
+          # `.vercel/output`, so left as built every reference dangles and the
+          # platform fails to `lstat` it under `/vercel/path0` — a green build
+          # that deploys a function carrying none of its own code. (A Next.js app
+          # with an OpenTelemetry dependency was the first to reach here: 510
+          # referenced files, none of them in the tree.) So copy each named file
+          # in at the path its map gives, `-L` to dereference as the copy below
+          # does, and the tree the deref and push carry becomes the whole of what
+          # the function needs. A named file the build did not leave behind is a
+          # tree that can never be made whole, so it fails here rather than 500ing
+          # in production.
+          maps="${RUNNER_TEMP}/vercel-filepathmap.txt"
+          : > "$maps"
+          # `functions/` is absent for a build that renders no function at all —
+          # a purely static site. Enumerating it then is a `find` error under
+          # `pipefail`, not an empty list, so the guard is what lets a
+          # function-less build reach the deref with nothing to copy rather than
+          # failing here. The empty `$maps` above is what the loop reads then.
+          if [ -d "${output}/functions" ]; then
+            # `LC_ALL=C`, so the sort is by byte and a directory the map names
+            # sorts before the files beneath it. The skip below no-ops a path
+            # already present, which is only correct when the directory is
+            # copied whole *first*; a localed collation could interleave the two
+            # and drop a directory's contents with no error to show for it.
+            find "${output}/functions" -name .vc-config.json -print0 |
+              while IFS= read -r -d '' cfg; do
+                node -e 'const fs=require("fs");const m=(JSON.parse(fs.readFileSync(process.argv[1],"utf8")).filePathMap)||{};for(const v of Object.values(m))console.log(v)' "$cfg"
+              done | LC_ALL=C sort -u > "$maps"
+          fi
+          while IFS= read -r dep; do
+            if [ -z "$dep" ] || [ -e "${output}/${dep}" ]; then
+              continue
+            fi
+            if [ ! -e "${SCOPE}/${dep}" ]; then
+              echo "::error::a function's filePathMap names ${dep}, which vercel build did not leave in the tree — the prebuilt output cannot be made self-contained." >&2
+              exit 1
+            fi
+            mkdir -p "${output}/$(dirname "$dep")"
+            cp -RL "${SCOPE}/${dep}" "${output}/${dep}"
+          done < "$maps"
+
           # **Symlinks are resolved here, and they have to be.** A framework
           # that emits the same function under two routes emits one bundle and
           # symlinks the other at it — Next.js does exactly this for the RSC
