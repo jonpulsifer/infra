@@ -53,11 +53,16 @@ export function draftWrites<Draft>({
   /**
    * Called `true` when a save leaves and `false` when the chain drains.
    *
-   * At the debounce boundary rather than per edit, which is what keeps Deploy
-   * from flickering through a burst: while edits are only scheduled there is
-   * nothing in flight to report, and pressing Deploy flushes them anyway.
+   * At the debounce boundary rather than per edit: while edits are only
+   * scheduled there is nothing in flight to report.
+   *
+   * Optional because the creation screen no longer watches it. Deploy used to
+   * go dead while a save was in flight and flickered through every burst of
+   * typing — `deployDraft` flushes the debounce and refuses on a write that
+   * never landed, which is a better answer than a button that was briefly not
+   * pressable.
    */
-  onWriting: (writing: boolean) => void;
+  onWriting?: (writing: boolean) => void;
   delay?: number;
 }): DraftWrites<Draft> {
   let timer: ReturnType<typeof setTimeout> | null = null;
@@ -83,10 +88,10 @@ export function draftWrites<Draft>({
     const sending = run;
     scheduled = null;
     inFlight += 1;
-    onWriting(true);
+    onWriting?.(true);
     const settle = () => {
       inFlight -= 1;
-      if (inFlight === 0) onWriting(false);
+      if (inFlight === 0) onWriting?.(false);
     };
     chain = chain
       .then(() => (sending === run ? save(draft) : undefined))

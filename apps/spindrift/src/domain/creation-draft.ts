@@ -8,18 +8,29 @@ import { z } from 'zod';
 import type { Auth, ComponentKind, Reach } from './desired-state.ts';
 import { digestSchema } from './digest.ts';
 
+/**
+ * The tiles offered for where the code comes from.
+ *
+ * Two, because that is how many axes there are. `Service` and `Website` sat
+ * here too and only ever set the *kind* — the thing detection answers before
+ * anybody presses anything — so the row read as a choice between four things
+ * when it was two questions wearing one grammar. The kind is corrected under
+ * Type, where the reasons a kind is unavailable are already on screen.
+ *
+ * The `entry` enum keeps all five values for the reason it already kept
+ * `discover`: drafts are durable rows, and a value dropped from the enum is a
+ * stored draft that no longer parses. What is offered is not what is legal.
+ */
 export const ENTRIES = [
   {
-    id: 'service',
-    label: 'Service',
-    note: 'Start with a long-running process',
-  },
-  { id: 'website', label: 'Website', note: 'Start with a site or frontend' },
-  { id: 'upload', label: 'Upload', note: 'ZIP, artifact, or source archive' },
-  {
     id: 'repo',
-    label: 'Link repo',
-    note: 'Detect what a repository holds and pick a directory',
+    label: 'GitHub repository',
+    note: 'Deploy a directory from a repository',
+  },
+  {
+    id: 'upload',
+    label: 'Upload an archive',
+    note: 'ZIP or tarball, built the same way',
   },
 ] as const;
 
@@ -53,7 +64,7 @@ export const appNameSchema = z
   .string()
   .trim()
   .min(1, 'the App needs a name')
-  .max(63, 'at most 63 characters — it is one DNS label')
+  .max(63, 'at most 63 characters')
   .regex(
     /^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/,
     'must be lowercase letters, digits and hyphens',
@@ -294,40 +305,34 @@ function openingDetection(): Detection {
   };
 }
 
-/** Defaults are selected from current persisted installation capabilities. */
+/**
+ * What a draft opens on, before anybody has said where the code is.
+ *
+ * **No repository is chosen for you.** This used to open on whichever active
+ * repository sorted first — the App was named after it, the screen read it
+ * before anybody pressed anything, and every row below claimed an answer about
+ * a tree nobody had picked. That is the whole reason the screen read as
+ * pre-answered and wrong: it *was* pre-answered, about the wrong thing.
+ *
+ * So the source opens blank and `blockersFor` refuses to create from it, which
+ * is the state the schema already documents as legal. A blank source is not an
+ * archive: `Upload an archive` is a tile somebody presses, and opening on the
+ * archive branch made the picker something you had to switch back to.
+ *
+ * The Target and vessel are still selected from current installation
+ * capabilities — those are facts about the installation rather than answers
+ * about this App, and there is nothing for a person to pick between.
+ */
 export function initialCreationDraft(input: {
-  /** The repository to open on, with the clone URL its host serves it at. */
-  readonly repository: {
-    readonly fullName: string;
-    readonly cloneUrl: string;
-  } | null;
   readonly targetId: string | null;
   readonly vessel: string;
 }): Draft {
-  const name =
-    (input.repository?.fullName.split('/').pop() ?? 'app')
-      .toLowerCase()
-      .replaceAll(/[^a-z0-9-]/g, '-')
-      .replaceAll(/^-+|-+$/g, '') || 'app';
-  const repo = input.repository;
   return {
-    entry: repo ? 'repo' : 'upload',
-    source: repo
-      ? {
-          kind: 'repo',
-          repo: repo.fullName,
-          url: repo.cloneUrl,
-          subpath: '.',
-        }
-      : {
-          kind: 'archive',
-          filename: 'upload.zip',
-          digest: `sha256:${'0'.repeat(64)}`,
-          location: null,
-          contents: 'source',
-          subpath: '.',
-        },
-    appName: name,
+    entry: 'repo',
+    source: blankSource('repo'),
+    // A placeholder that parses, and never survives: picking a repository
+    // derives the name from it, and nothing can be created from a blank source.
+    appName: 'app',
     componentName: 'web',
     detection: openingDetection(),
     kind: 'service',
@@ -544,7 +549,7 @@ export function blockersFor(
   if (!draft.vessel.ready) {
     blockers.push({
       code: 'VESSEL_UNAVAILABLE',
-      title: `The vessel ${draft.vessel.name} is not provisioned.`,
+      title: `${draft.vessel.name} is not ready to take an App yet.`,
       remediation:
         'Vessels are pre-provisioned through Terraform and adopted by Atlantis. Creation waits for that merge; the draft is kept.',
     });
@@ -553,9 +558,9 @@ export function blockersFor(
   if (!candidateTargetIds.includes(draft.targetId)) {
     blockers.push({
       code: 'TARGET_UNAVAILABLE',
-      title: 'The chosen Target is not a candidate for this Component.',
+      title: 'Nothing chosen can run this App.',
       remediation:
-        'Pick a Target listed as a candidate, or clear the reason this one was excluded. Targets state their own reasons.',
+        'Open \u201cWhere it runs\u201d and pick one of the places listed as able to run it. Each one that cannot says why.',
     });
   }
 
@@ -564,7 +569,7 @@ export function blockersFor(
       code: 'SOURCE_UNAVAILABLE',
       title: 'No repository is chosen.',
       remediation:
-        'Pick one under Source. Every repository the GitHub App installation grants is listed there, whether Spindrift has connected it or not.',
+        'Pick one above. Every repository the GitHub App installation grants is listed, whether Spindrift has connected it or not.',
     });
   }
 

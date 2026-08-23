@@ -27,15 +27,22 @@ const MIGRATION = join(
   '../../src/db/migrations/0016_jsonb_documents.sql',
 );
 
-const draftValues = () =>
-  initialCreationDraft({
-    repository: {
-      fullName: 'jonpulsifer/infra',
-      cloneUrl: 'https://vcs.example/jonpulsifer/infra.git',
-    },
+/**
+ * A draft with a repository named, so the nested read below has something to
+ * find. Fresh drafts open with no source at all — that is the point of the
+ * creation screen — and a `->>'repo'` over an empty string proves nothing about
+ * whether jsonb nests.
+ */
+const draftValues = () => {
+  const draft = initialCreationDraft({
     targetId: crypto.randomUUID(),
     vessel: 'bluenose',
   });
+  return {
+    ...draft,
+    source: { ...draft.source, repo: 'jonpulsifer/infra' },
+  } as typeof draft;
+};
 
 /** A draft needs an owner; `creation_drafts.user_id` is a cascading FK. */
 async function seedOperator() {

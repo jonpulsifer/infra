@@ -22,6 +22,8 @@ import {
   targets,
   users,
 } from '../../src/db/schema.ts';
+import type { Draft } from '../../src/domain/creation-draft.ts';
+import { draftReducer } from '../../src/domain/creation-draft.ts';
 import { runBuildPass } from '../../src/reconciler/build-loop.ts';
 import { withIsolatedDatabase } from '../harness/db.ts';
 import { FakeBuildAdapter } from '../harness/fakes/build-adapter.ts';
@@ -131,6 +133,48 @@ async function seedCapabilities(
   return { repository: repository!, target: target! };
 }
 
+/**
+ * Choose the repository, the way the screen does.
+ *
+ * A draft no longer opens on one — nothing preselects a repository for the
+ * operator any more — so a test that wants a repository draft has to say which,
+ * which is exactly the press this change added to the flow. Through
+ * `draftReducer` rather than a literal, so these tests keep exercising the
+ * derivation the browser runs: the App name comes off the repository, and the
+ * directory goes back to the root.
+ */
+function pickRepository(draft: Draft, fullName = 'example/app'): Draft {
+  return draftReducer(draft, {
+    type: 'repo',
+    fullName,
+    url: `https://git.example.test/${fullName}.git`,
+  });
+}
+
+/**
+ * A draft that has been pointed at a repository, ready to complete.
+ *
+ * Two commands rather than one because that is now two acts: starting a draft
+ * asks the question, and saving is the answer. Returns the saved view, so the
+ * revision is the one a completion has to carry.
+ */
+async function startWithRepository(ctx: CommandContext) {
+  const started = await startCreationDraft({}, ctx);
+  if (!started.ok) throw new Error(started.failure.message);
+  const saved = await saveCreationDraft(
+    {
+      id: started.value.id,
+      revision: started.value.revision,
+      draft: pickRepository(started.value.draft),
+    },
+    ctx,
+  );
+  if (!saved.ok) throw new Error(saved.failure.message);
+  // The whole result, so callers read `started.value.revision` the way they do
+  // off `startCreationDraft` — the extra command is the only thing that moved.
+  return saved;
+}
+
 async function productCounts() {
   const tables = [apps, components, builds, deploys] as const;
   return Promise.all(
@@ -158,19 +202,28 @@ describe('creation drafts', () => {
     expect(row?.count).toBe(1);
   });
 
-  test('the draft it opens on clones from the host the manifest names', async () => {
-    // The public host is a value this installation could have and not a
-    // template to write into the source: an enterprise deployment serves its
-    // own, and a draft carrying the wrong one stages nothing.
+  test('the draft it opens on names no repository, and blocks until one does', async () => {
+    // It used to open on whichever active repository sorted first — so a draft
+    // arrived named after a repository nobody chose, and the screen read it
+    // before anybody pressed anything. Choosing is the operator's, and until
+    // they have, the preflight refuses rather than building a guess.
+    //
+    // The clone URL that a chosen repository carries is the manifest's host
+    // rather than the public one; that guarantee lives with the command that
+    // now mints it — see `listRepositories` in `repositories.test.ts`.
     await seedCapabilities();
     const started = await startCreationDraft({}, await context());
     expect(started.ok).toBe(true);
     if (!started.ok) return;
     expect(started.value.draft.source).toMatchObject({
       kind: 'repo',
-      repo: 'example/app',
-      url: 'https://git.example.test/example/app.git',
+      repo: '',
+      url: '',
     });
+    expect(started.value.ready).toBe(false);
+    expect(started.value.blockers.map((blocker) => blocker.code)).toContain(
+      'SOURCE_UNAVAILABLE',
+    );
   });
 
   test('refresh recovers the same server-owned draft for its operator', async () => {
@@ -264,8 +317,7 @@ describe('creation drafts', () => {
   test('revalidates stale repository and Target choices without creating product rows', async () => {
     const { repository, target } = await seedCapabilities();
     const ctx = await context();
-    const started = await startCreationDraft({}, ctx);
-    if (!started.ok) throw new Error(started.failure.message);
+    const started = await startWithRepository(ctx);
 
     await database()
       .db.update(repositories)
@@ -308,7 +360,7 @@ describe('creation drafts', () => {
       {
         id: started.value.id,
         revision: started.value.revision,
-        draft: { ...started.value.draft },
+        draft: pickRepository(started.value.draft),
       },
       ctx,
     );
@@ -377,8 +429,7 @@ describe('creation drafts', () => {
   test('completion is reachable through the validated command boundary', async () => {
     await seedCapabilities();
     const ctx = await context();
-    const started = await startCreationDraft({}, ctx);
-    if (!started.ok) throw new Error(started.failure.message);
+    const started = await startWithRepository(ctx);
 
     const completed = await dispatch(
       'completeCreationDraft',
@@ -457,7 +508,7 @@ describe('creation drafts', () => {
       {
         id: started.value.id,
         revision: started.value.revision,
-        draft: { ...started.value.draft },
+        draft: pickRepository(started.value.draft),
       },
       ctx,
     );
@@ -500,7 +551,7 @@ describe('creation drafts', () => {
         id: started.value.id,
         revision: started.value.revision,
         draft: {
-          ...started.value.draft,
+          ...pickRepository(started.value.draft),
           entry: 'upload',
           source: {
             kind: 'archive',
@@ -549,7 +600,7 @@ describe('creation drafts', () => {
         id: started.value.id,
         revision: started.value.revision,
         draft: {
-          ...started.value.draft,
+          ...pickRepository(started.value.draft),
           entry: 'upload',
           source: {
             kind: 'archive',
@@ -560,7 +611,7 @@ describe('creation drafts', () => {
             subpath: '.',
           },
           detection: {
-            ...started.value.draft.detection,
+            ...pickRepository(started.value.draft).detection,
             kind: 'website',
           },
           kind: 'website',
@@ -599,7 +650,7 @@ describe('creation drafts', () => {
         id: started.value.id,
         revision: started.value.revision,
         draft: {
-          ...started.value.draft,
+          ...pickRepository(started.value.draft),
           entry: 'upload',
           source: {
             kind: 'archive',
@@ -610,7 +661,7 @@ describe('creation drafts', () => {
             subpath: '.',
           },
           detection: {
-            ...started.value.draft.detection,
+            ...pickRepository(started.value.draft).detection,
             kind: 'website',
           },
           kind: 'website',
@@ -647,7 +698,7 @@ describe('creation drafts', () => {
         id: started.value.id,
         revision: started.value.revision,
         draft: {
-          ...started.value.draft,
+          ...pickRepository(started.value.draft),
           source: {
             kind: 'archive',
             filename: 'missing.zip',
@@ -694,8 +745,7 @@ describe('creation drafts', () => {
       }),
     };
     const ctx = await context(registry);
-    const started = await startCreationDraft({}, ctx);
-    if (!started.ok) throw new Error(started.failure.message);
+    const started = await startWithRepository(ctx);
 
     const completed = await completeCreationDraft(
       { id: started.value.id, revision: started.value.revision },
@@ -741,8 +791,7 @@ describe('creation drafts', () => {
       build: (name) => (name === crashing.name ? crashing : null),
     };
     const ctx = await context(registry);
-    const started = await startCreationDraft({}, ctx);
-    if (!started.ok) throw new Error(started.failure.message);
+    const started = await startWithRepository(ctx);
 
     const completed = await completeCreationDraft(
       { id: started.value.id, revision: started.value.revision },

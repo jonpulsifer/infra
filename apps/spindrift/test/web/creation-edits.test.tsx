@@ -288,7 +288,7 @@ describe('an edit the server refused as stale', () => {
     // the tab holds a version that no longer exists, so the next keystroke is
     // refused for the same reason, forever.
     scopes = [detected('apps/only')];
-    stored = { ...repoDraft, componentName: 'renamed-elsewhere' };
+    stored = { ...repoDraft, appName: 'renamed-elsewhere' };
     refuse.set('saveCreationDraft', {
       code: 'STALE_EDIT',
       message: 'this creation draft changed in another browser',
@@ -303,7 +303,7 @@ describe('an edit the server refused as stale', () => {
     );
     expect(called).toContain('getCreationDraft');
     // The server's draft is on screen, and the screen says why it moved.
-    expect(screen.text()).toContain('almanac · renamed-elsewhere');
+    expect(screen.text()).toContain('renamed-elsewhere');
     expect(screen.text()).toContain('This draft was edited somewhere else');
     expect(screen.text()).toContain('STALE_EDIT');
     // And no draft of this tab's reached the server, so what is on screen is
@@ -327,7 +327,7 @@ describe('a repository nothing could be read from', () => {
     const screen = await mount(repoDraft);
 
     expect(screen.text()).toContain('could not read example/almanac');
-    expect(screen.text()).toContain('Spindrift stops before Build #1');
+    expect(screen.text()).toContain('to fix above');
 
     screen.unmount();
   });
@@ -412,7 +412,7 @@ describe('the sentence a read left', () => {
   });
 });
 
-describe('the Source row', () => {
+describe('the Code row', () => {
   test('opens while nothing has answered which directory to deploy', async () => {
     // The repository is chosen and the directory is not, which is the state a
     // fresh draft opens in — the question is the row, so the row is open.
@@ -420,7 +420,7 @@ describe('the Source row', () => {
 
     const screen = await mount(repoDraft);
 
-    expect(screen.text()).toContain('Directories Spindrift read');
+    expect(screen.text()).toContain('Directories in this repo');
 
     screen.unmount();
   });
@@ -440,7 +440,7 @@ describe('the Source row', () => {
       },
     });
 
-    expect(screen.text()).not.toContain('Directories Spindrift read');
+    expect(screen.text()).not.toContain('Directories in this repo');
 
     screen.unmount();
   });

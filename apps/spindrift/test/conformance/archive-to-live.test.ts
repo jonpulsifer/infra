@@ -177,9 +177,8 @@ async function installation(options: { sourceCommit?: string } = {}) {
     )
     .returning();
 
-  // Only for the repository arm. Absent otherwise, so `startCreationDraft`
-  // defaults the draft to `upload` exactly as it does for an installation that
-  // has connected no repository at all.
+  // Only for the repository arm. Absent otherwise — a draft names no
+  // repository either way, so the difference is whether there is one to name.
   const [repository] =
     options.sourceCommit === undefined
       ? []
@@ -374,9 +373,12 @@ describe('Ticket 10 — an archive reaches a live HTTPS App on a clean database'
       // suggested real Target" clause, and asserting it here is what makes the
       // Deploy at the end land somewhere the product chose.
       expect(started.value.draft.targetId).toBe(target.id);
-      expect(started.value.draft.entry).toBe('upload');
+      // A draft opens on no source at all, so the archive is named here rather
+      // than swapped in over a repository nobody chose.
+      expect(started.value.draft.source).toMatchObject({ repo: '' });
       return {
         ...started.value.draft,
+        entry: 'upload',
         appName: 'depot',
         source: {
           kind: 'archive',
@@ -561,10 +563,19 @@ describe('Ticket 10 — an archive reaches a live HTTPS App on a clean database'
 
     const created = await createThroughDraft(context, (started) => {
       if (!started.ok) throw new Error('unreachable');
-      // A connected repository is what the draft defaults to, so this arm
-      // overrides nothing about the source at all.
-      expect(started.value.draft.entry).toBe('repo');
-      return { ...started.value.draft, appName: 'linked' };
+      // Nothing preselects a repository any more, so this arm names the one
+      // the installation connected — the same press the screen now asks for.
+      expect(started.value.draft.source).toMatchObject({ repo: '' });
+      return {
+        ...started.value.draft,
+        appName: 'linked',
+        source: {
+          kind: 'repo',
+          repo: 'example/app',
+          url: 'https://git.example.test/example/app.git',
+          subpath: '.',
+        },
+      };
     });
 
     expect(await runBuildPass(context)).toBe(1);

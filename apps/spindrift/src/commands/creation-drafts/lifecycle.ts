@@ -25,7 +25,7 @@ import {
   placementTargetOf,
   resolvePlacement,
 } from '../../domain/placement.ts';
-import { cloneUrlFor, repositoryRefOf } from '../../domain/repository.ts';
+import { repositoryRefOf } from '../../domain/repository.ts';
 import { SUPPLIED_ARTIFACT_TYPE } from '../../domain/source.ts';
 import type { StagedSourceBundle } from '../../domain/source-bundle.ts';
 import { targetRowLabel } from '../../domain/target.ts';
@@ -106,12 +106,6 @@ export const startCreationDraft: Command<
   StartCreationDraftInput,
   CreationDraftView
 > = async (input, context) => {
-  const [repository] = await context.db
-    .select({ fullName: repositories.fullName })
-    .from(repositories)
-    .where(eq(repositories.access, 'active'))
-    .orderBy(asc(repositories.fullName))
-    .limit(1);
   const [target] = await context.db
     .select({ id: targets.id })
     .from(targets)
@@ -127,16 +121,6 @@ export const startCreationDraft: Command<
       id,
       userId: context.principal.id,
       draft: initialCreationDraft({
-        repository:
-          repository === undefined
-            ? null
-            : {
-                fullName: repository.fullName,
-                cloneUrl: cloneUrlFor(
-                  context.manifest.github.webBaseUrl,
-                  repository.fullName,
-                ),
-              },
         targetId: target?.id ?? null,
         // The vessel by name rather than by project id: the draft states which
         // boundary this installation's home is, and a project is one shape a
