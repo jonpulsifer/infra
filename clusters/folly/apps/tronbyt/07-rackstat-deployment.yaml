@@ -24,7 +24,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: rackstat
-          image: ghcr.io/jonpulsifer/rackstat:latest@sha256:8e1d8c577309bc00bf0f15cc4406625546c59d60f236d778685e7062d4d8ef73
+          image: ghcr.io/jonpulsifer/rackstat:latest@sha256:59e9635e537b297cf648928b8e1dcd0bed13170b541404c86af3ce62d0ad596f
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 8080
