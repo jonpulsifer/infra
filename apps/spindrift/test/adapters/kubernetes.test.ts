@@ -577,6 +577,39 @@ describe('the delivery object', () => {
   });
 });
 
+describe('sweeping the App away', () => {
+  test('it deletes the namespace it made, and only that', async () => {
+    // The App's namespace is the one thing `destroy` cannot address: a ref
+    // names a placement, and Flux's `createNamespace` leaves a namespace that
+    // "will not be garbage collected".
+    const { adapter, cluster } = adapterFor();
+    await drain(adapter.apply(target(), desiredState()));
+    expect(cluster.get('namespaces//app-blog')).toBeDefined();
+
+    await adapter.sweepApp(target(), 'blog');
+
+    expect(cluster.get('namespaces//app-blog')).toBeUndefined();
+  });
+
+  test('sweeping what is already gone succeeds', async () => {
+    // `namespaceLabels: {}` is this fake's "the namespace is not there".
+    const { adapter } = adapterFor({ namespaceLabels: {} });
+    await adapter.sweepApp(target(), 'never-deployed');
+  });
+
+  test('it refuses a namespace it did not make', async () => {
+    // The fake answers every namespace read with the operator's declared one,
+    // which carries admission labels and no `managed-by`. That is a namespace
+    // Flux owns, and deleting it would take the whole Target with it.
+    const { adapter, cluster } = adapterFor();
+
+    await expect(adapter.sweepApp(target(), 'blog')).rejects.toThrow(
+      /app.kubernetes.io\/managed-by=spindrift/,
+    );
+    expect(cluster.get('namespaces//app-blog')).toBeUndefined();
+  });
+});
+
 describe('phases come from the controller', () => {
   test('the timeline reports each phase the object moved through, once', async () => {
     const { adapter } = adapterFor({

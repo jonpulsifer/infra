@@ -338,6 +338,47 @@ export class KubernetesDeployAdapter implements DeployAdapter {
     });
   }
 
+  /**
+   * Delete the App's namespace, which is the one thing here no ref names.
+   *
+   * {@link ensureNamespace} creates it — the delivery mechanism cannot, because
+   * `HelmRelease.spec.install.createNamespace` has no field to put the
+   * admission labels in — and Flux's own documentation says a namespace it
+   * created "will not be garbage collected". So every App ever deployed to a
+   * cluster left a namespace behind that nothing was ever going to remove.
+   *
+   * **It deletes only a namespace carrying Spindrift's own label.** The pattern
+   * is refused at the manifest boundary unless it contains `{app}`, so a
+   * namespace is per-App by construction — but a namespace an operator declared
+   * and Spindrift merely deployed into is not Spindrift's to remove, and the
+   * label is the difference. Anything else is refused by name rather than
+   * deleted, and `deleteApp` reports the refusal.
+   *
+   * Deleting the namespace takes the Helm release history secrets with it,
+   * which is the rest of what a placement's `destroy` leaves behind.
+   */
+  async sweepApp(target: DeployTarget, app: string): Promise<void> {
+    const connection = this.connectionOf(target);
+    if (connection === null) return;
+    const name = appNamespaceFor(connection, app);
+    const api = this.api(connection);
+    const namespace = await api.get({
+      apiVersion: 'v1',
+      plural: 'namespaces',
+      name,
+    });
+    // Already gone, or never created — a name too long for a label is refused
+    // on the write path and no namespace was ever made. Idempotent either way.
+    if (namespace === null) return;
+    const labels = (namespace.metadata?.labels ?? {}) as Record<string, string>;
+    if (labels['app.kubernetes.io/managed-by'] !== 'spindrift') {
+      throw new Error(
+        `namespace ${name} carries no app.kubernetes.io/managed-by=spindrift, so it is not Spindrift's to delete`,
+      );
+    }
+    await api.delete({ apiVersion: 'v1', plural: 'namespaces', name });
+  }
+
   async tail(
     target: DeployTarget,
     subject: RuntimeLogSubject,
@@ -1432,8 +1473,13 @@ export class KubernetesDeployAdapter implements DeployAdapter {
         labels,
         values,
         // Argo carries the admission labels itself, so Spindrift writes no
-        // Namespace on this flavour at all (§7, 113).
-        namespaceMetadata: admission,
+        // Namespace on this flavour at all (§7, 113). The managed-by label
+        // rides along so `sweepApp` can tell a namespace this installation
+        // caused to exist from one an operator declared.
+        namespaceMetadata: {
+          ...admission,
+          'app.kubernetes.io/managed-by': 'spindrift',
+        },
       });
     }
 

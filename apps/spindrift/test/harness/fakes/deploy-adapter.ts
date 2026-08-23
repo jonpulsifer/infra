@@ -98,6 +98,8 @@ export interface FakeDeployAdapterOptions {
   runThrows?: string;
   /** When set, `destroy` throws — the far side refusing to tear down what is there. */
   destroyThrows?: string;
+  /** When set, `sweepApp` throws — the container the far side would not remove. */
+  sweepThrows?: string;
   /**
    * When set, `executions` throws while `run` still works.
    *
@@ -146,6 +148,8 @@ export class FakeDeployAdapter implements DeployAdapter {
   readonly applied: RecordedApply[] = [];
   /** Every `destroy`, including the repeats that prove idempotence. */
   readonly destroyed: DeployRef[] = [];
+  /** Every `sweepApp`, by App name — one per Target is what `deleteApp` owes. */
+  readonly swept: string[] = [];
 
   /** Every `inspect`, so a test can prove the loop ran without a reconnect. */
   readonly inspected: DeployTarget[] = [];
@@ -238,6 +242,13 @@ export class FakeDeployAdapter implements DeployAdapter {
       throw new Error(this.options.destroyThrows);
     }
     this.placed.delete(ref);
+  }
+
+  async sweepApp(_target: DeployTarget, app: string): Promise<void> {
+    this.swept.push(app);
+    if (this.options.sweepThrows !== undefined) {
+      throw new Error(this.options.sweepThrows);
+    }
   }
 
   /**

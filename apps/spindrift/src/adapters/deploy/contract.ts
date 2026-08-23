@@ -502,6 +502,28 @@ export interface DeployAdapter {
   destroy(target: DeployTarget, ref: DeployRef): Promise<void>;
 
   /**
+   * Remove what this adapter made for the *App* rather than for a placement,
+   * once every one of its placements is gone (§13).
+   *
+   * `destroy` addresses a ref, and a ref names one placement. An adapter that
+   * also has to mint a container for the App — the Kubernetes one creates the
+   * App's namespace, because `HelmRelease.spec.install.createNamespace` takes
+   * no metadata to put admission labels in — has nothing a ref names to take
+   * that container away with, so deleting every placement leaves it behind
+   * forever. This is the seam for it, and it is optional because it is the
+   * Kubernetes adapter's problem alone: every other backend's refs cover
+   * everything it created.
+   *
+   * **Only `deleteApp` calls it.** `unplaceComponent` removes one Component of
+   * an App that goes on existing, and its siblings live in the same container.
+   *
+   * Idempotent, like `destroy`: sweeping what is already gone succeeds. It
+   * throws to say what it could not remove, and `deleteApp` names that rather
+   * than failing the delete.
+   */
+  sweepApp?(target: DeployTarget, app: string): Promise<void>;
+
+  /**
    * Start one run of the job this ref names, now (§7, §17).
    *
    * **Why a verb and not a mode on `apply`.** §7: "a job always renders a

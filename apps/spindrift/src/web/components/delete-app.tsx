@@ -308,9 +308,8 @@ function Body({ state }: { state: AppDeletion }) {
         {state.retainedWorkloads.length > 0 ? (
           <>
             <p className="mt-2 text-sm text-muted-foreground">
-              These workloads could not be torn down and are still running.
-              Nothing manages them now, so removing them is a manual job on the
-              Target.
+              These could not be removed and are still on the Target. Nothing
+              manages them now, so removing them is a manual job on the Target.
             </p>
             <ul className="mt-1.5 flex flex-col gap-1">
               {state.retainedWorkloads.map((workload) => (
