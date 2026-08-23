@@ -398,7 +398,7 @@ describe('what the wizard says by moving', () => {
     });
     expect(done).toContain('cluster/kubernetes');
     expect(done).toContain('cloud/cloudrun');
-    expect(done).toContain('calc(var(--i) * 90ms)');
+    expect(done).toContain('calc(var(--i) * 60ms)');
   });
 
   test('an installation with no Targets says so, with nothing to stagger', () => {

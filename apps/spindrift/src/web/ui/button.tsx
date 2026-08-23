@@ -15,7 +15,11 @@ import { cn } from './utils.ts';
 const button = cva(
   cn(
     'inline-flex items-center justify-center gap-2 whitespace-nowrap',
-    'rounded-sm font-medium transition-colors',
+    // Feedback lands on the press, not on the release. A control that waits
+    // for `click` to acknowledge a finger already on it reads as a control
+    // that did not notice, and this is the one component every screen presses.
+    'rounded-sm font-medium transition duration-100 ease-out',
+    'active:scale-[0.97]',
     'disabled:pointer-events-none disabled:opacity-50',
     '[&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg]:size-4',
   ),
