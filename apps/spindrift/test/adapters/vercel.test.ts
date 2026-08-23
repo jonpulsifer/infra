@@ -82,6 +82,26 @@ const SITE = tarball([
   { name: 'assets/app.css', bytes: bytes('body{}') },
 ]);
 
+/**
+ * A prebuilt Vercel deployment is two trees at two roots: the Build Output API
+ * tree under `.vercel/output/`, and — at the deployment root beside it — the
+ * files each function's `filePathMap` names (its traced `node_modules`, its
+ * `.next` chunks), which the platform resolves as `join(<deployment root>,
+ * <mapped path>)`. The build route stages exactly that, so the adapter uploads
+ * it verbatim.
+ */
+const OUTPUT_TREE = tarball([
+  { name: '.vercel/output/config.json', bytes: bytes('{"version":3}') },
+  {
+    name: '.vercel/output/functions/index.func/.vc-config.json',
+    bytes: bytes('{"runtime":"nodejs20.x"}'),
+  },
+  {
+    name: 'node_modules/@scope/dep/index.js',
+    bytes: bytes('module.exports = {}'),
+  },
+]);
+
 function adapterFor(options: FakeVercelOptions = {}): {
   api: FakeVercel;
   adapter: VercelDeployAdapter;
@@ -200,16 +220,22 @@ describe('the platform’s own build output deploys prebuilt', () => {
     expect(api.servedPrebuilt(PROJECT)).toBe(true);
   });
 
-  test('the files are addressed where the platform’s reader looks for them', async () => {
-    const { api, adapter } = adapterFor();
+  test('the deployment tree is uploaded verbatim — a mapped file at the root', async () => {
+    const { api, adapter } = adapterFor({
+      bundle: { origin: DEPOT, bytes: OUTPUT_TREE },
+    });
     await drain(adapter.apply(TARGET, buildOutput()));
 
-    // The artifact carries the directory's *contents*; the platform addresses
-    // them by the path its own builder wrote. Both halves have to agree or the
-    // deployment is a pile of files with no `config.json` to route by.
+    // The artifact is already the tree the deployment is, so it is uploaded as
+    // it stands. The platform resolves a function's mapped file as
+    // `join(<deployment root>, <mapped path>)`, so a `node_modules/…` file that
+    // arrived under `.vercel/output/` — the shape before this — is one the
+    // launcher can never `lstat`. The Build Output tree keeps its
+    // `.vercel/output/` prefix; the mapped file stays at the root.
     expect(api.servedPaths(PROJECT)).toEqual([
-      '.vercel/output/assets/app.css',
-      '.vercel/output/index.html',
+      '.vercel/output/config.json',
+      '.vercel/output/functions/index.func/.vc-config.json',
+      'node_modules/@scope/dep/index.js',
     ]);
   });
 

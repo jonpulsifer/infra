@@ -169,17 +169,6 @@ const SERVICE_NAME = 'Vercel';
 export const DEFAULT_ENDPOINT = 'https://api.vercel.com';
 
 /**
- * Where a prebuilt deployment's files are addressed from.
- *
- * The platform's builder writes into `.vercel/output` and its reader expects
- * that path on the deployment, so the two have to agree. The artifact carries
- * the directory's contents rather than the directory, which is what keeps a
- * `vercel-output` artifact readable as the ordinary single-layer tar every
- * other files-shaped artifact is.
- */
-const BUILD_OUTPUT_PREFIX = '.vercel/output/';
-
-/**
  * The `meta` keys `observe` reads what is serving back out of.
  *
  * The platform stores files and has no notion of an artifact, so a deployment
@@ -326,12 +315,7 @@ export class VercelDeployAdapter implements DeployAdapter {
     }
     yield this.events.log(`the bundle holds ${files.length} files`, project);
 
-    const uploaded = await this.upload(
-      http,
-      connection,
-      files,
-      desired.artifact.type === 'vercel-output' ? BUILD_OUTPUT_PREFIX : '',
-    );
+    const uploaded = await this.upload(http, connection, files);
     if (uploaded.ok === false) {
       const failure = cloudWriteFailure(uploaded.failure, ref);
       yield this.events.status('FAILED', {
@@ -621,7 +605,6 @@ export class VercelDeployAdapter implements DeployAdapter {
     http: CloudHttp,
     connection: VercelAdapterConnection,
     files: readonly BundleFile[],
-    prefix: string,
   ): Promise<Outcome<readonly DeploymentFile[]>> {
     const referenced: DeploymentFile[] = [];
     for (const file of files) {
@@ -637,17 +620,14 @@ export class VercelDeployAdapter implements DeployAdapter {
       });
       if (!uploaded.ok) return { ok: false, failure: uploaded };
       // Rooted at the site with a leading slash is what the bundle reader
-      // produces and what the other files backend wants; a deployment path is
-      // relative to the deployment root, so the slash comes off here.
-      //
-      // The prefix is what tells the two shapes apart, and it is the whole of
-      // the difference on this side. A prebuilt deployment is addressed by the
-      // paths the platform's own builder wrote — `.vercel/output/config.json`,
-      // `.vercel/output/functions/…` — because that is where its reader looks
-      // for them; the artifact holds that tree's *contents*, so the prefix goes
-      // back on here rather than being carried through the registry.
+      // produces; a deployment path is relative to the deployment root, so the
+      // slash comes off here. The artifact is already the exact tree the
+      // deployment is — the Build Output API tree under `.vercel/output/`, and
+      // beside it at the root the files each function's `filePathMap` names,
+      // which the platform resolves as `join(<deployment root>, <mapped path>)`
+      // — so the path is uploaded as it stands.
       referenced.push({
-        file: prefix + file.path.replace(/^\/+/, ''),
+        file: file.path.replace(/^\/+/, ''),
         sha,
         size: file.bytes.byteLength,
       });
