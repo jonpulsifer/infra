@@ -3,7 +3,7 @@ module github.com/jonpulsifer/infra/gcp/projects/lolcorp/audit-pipeline
 go 1.25.0
 
 require (
-	cloud.google.com/go/bigquery v1.80.0
+	cloud.google.com/go/bigquery v1.81.0
 	cloud.google.com/go/vertexai v0.19.0
 )
 
