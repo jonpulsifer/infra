@@ -123,3 +123,22 @@ spec:
               app.kubernetes.io/part-of: spindrift
         kinds:
           - kind: HTTPRoute
+    # Public-only like wishin.app. The App at this zone's apex rides the
+    # `http-gateway` listener above, which names no hostname; a wildcard never
+    # matches the apex, and TLS for it is terminated at the edge.
+    - name: spindrift-apps-tls-clankerbanker
+      protocol: HTTPS
+      port: 443
+      hostname: "*.clankerbanker.ca"
+      tls:
+        certificateRefs:
+          - kind: Secret
+            name: wildcard-clankerbanker-ca
+      allowedRoutes:
+        namespaces:
+          from: Selector
+          selector:
+            matchLabels:
+              app.kubernetes.io/part-of: spindrift
+        kinds:
+          - kind: HTTPRoute

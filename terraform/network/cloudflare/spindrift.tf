@@ -44,6 +44,18 @@ module "tunnel_spindrift" {
         hostname = "*.${cloudflare_zone.wishin_app.name}"
         service  = "http://cilium-gateway-spindrift-apps.spindrift-apps.svc.cluster.local"
       },
+      # A cluster-served apex. `*.<zone>` never matches the zone itself, so the
+      # apex is its own rule; the record is the App's vanity `@`, which
+      # Spindrift's DNSEndpoint publishes, so this rule publishes none.
+      {
+        hostname       = cloudflare_zone.clankerbanker_ca.name
+        service        = "http://cilium-gateway-spindrift-apps.spindrift-apps.svc.cluster.local"
+        publish_record = false
+      },
+      {
+        hostname = "*.${cloudflare_zone.clankerbanker_ca.name}"
+        service  = "http://cilium-gateway-spindrift-apps.spindrift-apps.svc.cluster.local"
+      },
       # No rule for embarrassing.ca: the manifest serves that zone off Vercel
       # and Cloudflare Pages, which are their own edge. A rule here would
       # forward it to a cluster gateway holding no listener for it.
