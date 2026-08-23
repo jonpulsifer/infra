@@ -50,6 +50,14 @@ export interface Controller {
   readonly cluster: string;
   /** `--source=…`, as that cluster declares them. */
   readonly sources: readonly string[];
+  /**
+   * `--annotation-prefix=…`, or `null` where the cluster leaves it defaulted.
+   *
+   * `null` is not "the same as pinning it": it is the controller version's
+   * default, which changed in v0.22.0. A record's proxied flag is only read
+   * when this matches the prefix its writer used.
+   */
+  readonly annotationPrefix: string | null;
 }
 
 /** One object a source reads, as loosely typed as the API's own JSON. */

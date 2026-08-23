@@ -35,7 +35,19 @@ spec:
           secretKeyRef:
             name: external-dns-cloud-credentials
             key: api-token
-    extraArgs: []
+    extraArgs:
+      # Pinned, not defaulted. The prefix every proxied record's
+      # `cloudflare-proxied` key is written under is `DefaultAnnotationPrefix`,
+      # and external-dns v0.22.0 changed that default from
+      # `external-dns.alpha.kubernetes.io/` to `external-dns.kubernetes.io/`
+      # with no fallback for the old spelling. Spindrift writes the alpha form
+      # in `apps/spindrift/src/adapters/dns/cluster.ts` and
+      # `packages/charts/spindrift-app/templates/dnsendpoint.yaml`, so a chart
+      # bump past app v0.21.0 would stop the flag being read at all and fall
+      # back to `proxiedByDefault` — every record silently unproxied, which for
+      # an apex CNAME in front of Cloudflare Pages means no zone cache, no WAF,
+      # and the origin exposed. Stating it here makes the bump a no-op instead.
+      - --annotation-prefix=external-dns.alpha.kubernetes.io/
       # - --cloudflare-proxied
       # - --annotation-filter=external-dns/is-public in (true)
     policy: sync

@@ -19,6 +19,36 @@ import type {
 import type { DnsPublisher, DnsRecord } from './contract.ts';
 
 const DNS_ENDPOINT_API_VERSION = 'externaldns.k8s.io/v1alpha1';
+
+/**
+ * The prefix every provider-specific key is written under.
+ *
+ * external-dns reads these under `DefaultAnnotationPrefix`, and v0.22.0 changed
+ * that default from `external-dns.alpha.kubernetes.io/` to
+ * `external-dns.kubernetes.io/` with no fallback for the old spelling — a
+ * controller on the new default would stop finding the proxied key and
+ * quietly fall back to `proxiedByDefault`, publishing every record unproxied.
+ *
+ * So the controller is pinned to this prefix in
+ * `clusters/base/networking/external-dns/helm-release.yaml`, and the two ends
+ * are held together by `test/conformance/reach-publication.test.ts`, which
+ * reads the flag out of that release and fails if it stops matching this.
+ */
+export const PROXIED_KEY =
+  'external-dns.alpha.kubernetes.io/cloudflare-proxied';
+
+/**
+ * The prefix half of it, derived rather than spelled a second time.
+ *
+ * Two literals that must agree are two literals that will not, and this pair is
+ * read by `test/conformance/reach-publication.test.ts` to prove the controller
+ * is pinned to the same prefix — a check that proves nothing if the prefix it
+ * compares is its own separate copy.
+ */
+export const ANNOTATION_PREFIX = PROXIED_KEY.slice(
+  0,
+  PROXIED_KEY.lastIndexOf('/') + 1,
+);
 const DNS_ENDPOINT_PLURAL = 'dnsendpoints';
 
 export interface ClusterDnsPublisherOptions {
@@ -62,7 +92,7 @@ export class ClusterDnsPublisher implements DnsPublisher {
             // annotation on this object would be ignored.
             providerSpecific: [
               {
-                name: 'external-dns.alpha.kubernetes.io/cloudflare-proxied',
+                name: PROXIED_KEY,
                 value: record.proxied ? 'true' : 'false',
               },
             ],
