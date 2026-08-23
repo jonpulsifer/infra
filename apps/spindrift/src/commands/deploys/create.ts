@@ -389,6 +389,11 @@ export async function placeIntent(
         // attempt asked for, and so a rollback to it places what it placed.
         desired: checked.desired,
         configVersion: checked.configVersion,
+        // Who asked. Every intent is written here and nowhere else, so this is
+        // the one line that makes "did I press that or did a push do it?"
+        // answerable — the dispatcher and the build loop carry their own
+        // principal into this context.
+        requestedBy: context.principal.id,
         createdAt: now,
         updatedAt: now,
       })
@@ -433,6 +438,18 @@ export async function placeIntent(
 export async function checkDeployable(
   input: CreateDeployInput,
   context: CommandContext,
+  options: {
+    /**
+     * Go through even where the App is locked.
+     *
+     * `rollbackDeploy` is the one caller, and the only act the lock does not
+     * hold: the lock exists so a rollback is not undone by the next push, and
+     * refusing the rollback itself would be the lock guarding against the
+     * operator. Every other intent — a press, a push, a config change — is
+     * what the lock is for.
+     */
+    readonly bypassLock?: boolean;
+  } = {},
 ): Promise<DeployCheck> {
   const [component] = await context.db
     .select()
@@ -454,6 +471,17 @@ export async function checkDeployable(
     // refusal rather than a `!`: a Component whose App has been deleted is not
     // a state to compose a release document out of.
     return refuse('NOT_FOUND', `Component ${component.name} has no App`);
+  }
+
+  // The App's own hold (`setAppLock`, and what `rollbackDeploy` leaves
+  // behind). First among the refusals because it is the one an operator put
+  // there on purpose, and the sentence is theirs: everything below is a fact
+  // about the Build or the Target, this is a decision about the App.
+  if (app.lockReason !== null && !options.bypassLock) {
+    return refuse(
+      'NOT_DEPLOYABLE',
+      `'${app.name}' is locked — ${app.lockReason}. Unlock it to deploy again; a rollback goes through regardless`,
+    );
   }
 
   // With the boundary, because half of what names a Target lives there.

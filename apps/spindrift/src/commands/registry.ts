@@ -35,6 +35,7 @@ import {
   resolveComponentPlacement,
   resolveComponentPlacementInput,
 } from './apps/resolve-placement.ts';
+import { setAppLock, setAppLockInput } from './apps/set-lock.ts';
 import { getAppSource, getAppSourceInput } from './apps/source.ts';
 import { uploadArchive, uploadArchiveInput } from './apps/upload-archive.ts';
 import { setAppVanity, setAppVanityInput } from './apps/vanity.ts';
@@ -194,6 +195,7 @@ export const commandRegistry = {
     input: setAppAutoDeployInput,
     handler: setAppAutoDeploy,
   },
+  setAppLock: { input: setAppLockInput, handler: setAppLock },
   setAppBuildRoute: { input: setAppBuildRouteInput, handler: setAppBuildRoute },
   setAppZone: { input: setAppZoneInput, handler: setAppZone },
   setAppVanity: { input: setAppVanityInput, handler: setAppVanity },

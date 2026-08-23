@@ -168,7 +168,7 @@ export function DeployLedger({
         rows={deploys}
         rowKey={(deploy) => `deploy:${deploy.id}`}
         rowSearch={(deploy) =>
-          `${deploy.id} ${deploy.app} ${deploy.component} ${deploy.target} ${deploy.buildId} ${deploy.commit} ${deploy.phase} ${deploy.configVersion ?? ''}`
+          `${deploy.id} ${deploy.app} ${deploy.component} ${deploy.target} ${deploy.buildId} ${deploy.commit} ${deploy.phase} ${deploy.configVersion ?? ''} ${deploy.requestedBy ?? ''}`
         }
         filterPlaceholder={`Filter ${deploys.length} Deploys…`}
         caption="Deploys, newest first"
@@ -220,6 +220,10 @@ export function DeployLedger({
                   value: deploy.current
                     ? 'yes — this is desired'
                     : 'superseded',
+                },
+                {
+                  label: 'Requested by',
+                  value: deploy.requestedBy ?? 'not recorded',
                 },
               ]}
             />

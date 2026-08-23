@@ -21,9 +21,11 @@ import {
 import type { VesselLocation } from '../../domain/vessel.ts';
 import { buildRouteFor } from '../builds/route.ts';
 import { configuredKeys } from '../config/set.ts';
+import { principalLabels } from '../principals.ts';
 import { type Command, type CommandContext, failed, ok } from '../types.ts';
 import type {
   ActivityEntry,
+  AppLockView,
   BuildRouteOptionView,
   ComponentView,
   DatastoreView,
@@ -32,6 +34,7 @@ import type {
   DriftView,
   PrerequisiteRowView,
   Runtime,
+  WorkspaceSourceView,
   WorkspaceView,
 } from '../views.ts';
 import { namesUnder, placementsFor } from './names.ts';
@@ -476,6 +479,41 @@ export const getAppWorkspace: Command<
         )
       : [];
 
+  // The hold, with its author named the way the ledger names one.
+  const lock: AppLockView | null =
+    app.lockReason === null || app.lockedAt === null
+      ? null
+      : {
+          reason: app.lockReason,
+          by:
+            (await principalLabels(context.db, [app.lockedBy]))(app.lockedBy) ??
+            'unknown',
+          since: elapsedSince(app.lockedAt, now),
+          at: app.lockedAt.toISOString(),
+        };
+
+  /*
+    Pushed but not live. `repositories.authoritativeCommit` is what §15 adopted
+    and the serving Build's commit is what the hero already prints, and nothing
+    joined them: the Config tab said one thing and the hero another, and the
+    reader did the diff. A rerun's `#<millis>` suffix is a uniqueness device on
+    the Build key, never part of the commit (`deployApp`), so it is stripped
+    before the two are compared.
+  */
+  const servingCommit = latestDeploy?.build.commit.split('#')[0] ?? null;
+  const source: WorkspaceSourceView | null =
+    app.repository === null
+      ? null
+      : {
+          branch: app.repository.defaultBranch,
+          pending:
+            app.repository.authoritativeCommit !== null &&
+            servingCommit !== null &&
+            app.repository.authoritativeCommit !== servingCommit
+              ? { commit: app.repository.authoritativeCommit }
+              : null,
+        };
+
   const workspace: WorkspaceView = {
     app: app.name,
     appId: app.id,
@@ -552,6 +590,8 @@ export const getAppWorkspace: Command<
     ...(diagnosis === null ? {} : { diagnosis }),
     ...(drift === null ? {} : { drift }),
     ...(unmetPrerequisites.length === 0 ? {} : { unmetPrerequisites }),
+    ...(lock === null ? {} : { lock }),
+    ...(source === null ? {} : { source }),
   };
 
   return ok({ workspace });

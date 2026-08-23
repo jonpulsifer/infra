@@ -593,6 +593,12 @@ function Provenance({
           <Fact label="Artifact" value={view.artifactDigest} copy />
           <Fact label="Config version" value={view.configVersion} copy />
           <Fact label="Created" value={view.at} />
+          {/* Who asked: a name, or "auto-deploy on push". A Build-only attempt
+              has no Deploy to have asked for, and a release older than the
+              column records nobody — the dash says so. */}
+          {view.id === null ? null : (
+            <Fact label="Requested by" value={view.requestedBy ?? null} />
+          )}
         </CardContent>
       </Card>
       {view.previousDeployId !== null && onNavigate ? (

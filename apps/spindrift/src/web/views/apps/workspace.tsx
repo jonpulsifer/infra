@@ -37,6 +37,7 @@ import { type ReactNode, useEffect, useState } from 'react';
 import type {
   ActivityEntry,
   AppDomainView,
+  AppLockView,
   BuildRouteOptionView,
   ComponentView,
   DatastoreView,
@@ -71,7 +72,7 @@ import { Button } from '../../ui/button.tsx';
 import { Card, CardContent, CardHeader, Eyebrow } from '../../ui/card.tsx';
 import { Ref } from '../../ui/copy.tsx';
 import { Declaration } from '../../ui/declaration.tsx';
-import { Field } from '../../ui/field.tsx';
+import { Field, Input } from '../../ui/field.tsx';
 import { Logo } from '../../ui/logo.tsx';
 import { Page, PageHeader } from '../../ui/page.tsx';
 import { Tabs } from '../../ui/tabs.tsx';
@@ -216,6 +217,17 @@ export type SetAutoDeploy = (
 >;
 
 /**
+ * Holding this App's deploys with a reason, or letting them through again
+ * (§6, `setAppLock`). `null` unlocks — the one act a rollback leaves for the
+ * operator to do once the cause is fixed.
+ */
+export type SetLock = (
+  reason: string | null,
+) => Promise<
+  { readonly ok: true } | { readonly ok: false; readonly message: string }
+>;
+
+/**
  * An App naming the build route it builds on, or clearing that choice back to
  * rank order (§4, §16), as the screen above needs it answered.
  *
@@ -316,6 +328,7 @@ export function Workspace({
   targets = [],
   onRunJob,
   onSetAutoDeploy,
+  onSetLock,
   onSetBuildRoute,
   onSetDomain,
   onAttachDatastore,
@@ -407,6 +420,12 @@ export function Workspace({
    * at all rather than rendered dead.
    */
   onSetAutoDeploy?: SetAutoDeploy;
+  /**
+   * Absent where the lock is not editable from here, for the same reason
+   * {@link onSetReach} is. The banner still renders read-only: a lock a
+   * rollback set is a fact about the App whether or not this screen can lift it.
+   */
+  onSetLock?: SetLock;
   /**
    * Absent where the build route is not editable from here, for the same
    * reason {@link onSetReach} is. Also absent for an archive App — the view
@@ -513,6 +532,7 @@ export function Workspace({
         {...(selected === undefined ? {} : { component: selected })}
         onNavigate={onNavigate}
         {...(onSetAutoDeploy === undefined ? {} : { onSetAutoDeploy })}
+        {...(onSetLock === undefined ? {} : { onSetLock })}
       />
 
       {/*
@@ -709,12 +729,14 @@ function Hero({
   component,
   onNavigate,
   onSetAutoDeploy,
+  onSetLock,
 }: {
   view: WorkspaceView;
   /** The Component this card is about. Absent for an App with none yet. */
   component?: ComponentView;
   onNavigate?: (path: string) => void;
   onSetAutoDeploy?: SetAutoDeploy;
+  onSetLock?: SetLock;
 }) {
   // What `release` names: the Deploy where there is one, the Build that is
   // still the whole of the attempt where there is not.
@@ -727,6 +749,17 @@ function Hero({
 
   return (
     <Card className="flex flex-wrap items-start gap-6 px-5 py-5">
+      {/*
+        Above both columns, because it is about the App and not about either
+        half: a locked App has a placement and a release like any other, and
+        what has changed is that the Deploy button above will refuse.
+      */}
+      {view.lock ? (
+        <LockBanner
+          lock={view.lock}
+          {...(onSetLock === undefined ? {} : { onSetLock })}
+        />
+      ) : null}
       <div className="flex flex-col gap-2">
         <PhasePill phase={view.phase} />
         <p className="text-xl font-semibold tracking-tight">
@@ -787,6 +820,30 @@ function Hero({
             ) : null}
           </div>
         ) : null}
+        {/*
+          Pushed but not live (§15). The adopted commit and the serving one
+          were on different tabs and nothing joined them. What happens next
+          depends on the switch beside placement: a push App has a deploy on
+          the way unless the lock is holding it, and a manual one needs the
+          Rebuild press — Deploy alone would place the artifact already built.
+        */}
+        {view.source?.pending ? (
+          <p className="flex flex-wrap items-center gap-x-1.5 text-xs text-muted-foreground">
+            <span className="font-mono">{view.source.branch}</span> is at{' '}
+            <Ref value={view.source.pending.commit} kind="commit" />, live is{' '}
+            {view.commit ? (
+              <Ref value={view.commit} kind="commit" />
+            ) : (
+              'nothing'
+            )}
+            {' — '}
+            {view.lock
+              ? 'held by the lock'
+              : view.autoDeploy
+                ? 'a deploy is coming'
+                : 'press Rebuild to ship it'}
+          </p>
+        ) : null}
       </div>
 
       <div className="ml-auto flex flex-col items-end gap-1 text-right">
@@ -818,8 +875,147 @@ function Hero({
             onSetAutoDeploy={onSetAutoDeploy}
           />
         ) : null}
+        {/* The hold, where it can be set by hand. Lifting one is the banner's. */}
+        {view.lock === undefined && onSetLock ? (
+          <LockControl onSetLock={onSetLock} />
+        ) : null}
       </div>
     </Card>
+  );
+}
+
+/**
+ * The hold on this App's deploys, and the one act that lifts it (§6).
+ *
+ * Read-only without `onSetLock`, never hidden: a lock a rollback set is why
+ * the Deploy button is about to refuse, and that is true on every screen that
+ * shows the App, including the ones that wire no acts.
+ */
+function LockBanner({
+  lock,
+  onSetLock,
+}: {
+  lock: AppLockView;
+  onSetLock?: SetLock;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [refusal, setRefusal] = useState<string | null>(null);
+
+  const unlock = async () => {
+    if (onSetLock === undefined) return;
+    setBusy(true);
+    setRefusal(null);
+    try {
+      const result = await onSetLock(null);
+      if (!result.ok) setRefusal(result.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="flex basis-full flex-wrap items-center gap-x-3 gap-y-1 rounded-md border border-warning/40 bg-warning-soft px-3.5 py-2.5 text-[12.5px]">
+      <span className="font-mono text-[13px] font-semibold text-warning">
+        LOCKED
+      </span>
+      <span className="text-foreground">{lock.reason}</span>
+      <span className="text-subtle" title={lock.at}>
+        by {lock.by}, {lock.since}
+      </span>
+      {onSetLock ? (
+        <Button
+          size="sm"
+          variant="outline"
+          className="ml-auto"
+          onClick={unlock}
+          disabled={busy}
+        >
+          {busy ? 'Unlocking…' : 'Unlock'}
+        </Button>
+      ) : null}
+      {refusal ? (
+        <p className="basis-full text-xs text-destructive">{refusal}</p>
+      ) : null}
+    </div>
+  );
+}
+
+/**
+ * Setting the hold by hand — "nothing changes here over the weekend" without
+ * turning deploy-on-push off and forgetting to turn it back on.
+ *
+ * A reason is required because the banner prints it to whoever meets the
+ * refusal next, and that person may not be the one who set it.
+ */
+function LockControl({ onSetLock }: { onSetLock: SetLock }) {
+  const [open, setOpen] = useState(false);
+  const [reason, setReason] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [refusal, setRefusal] = useState<string | null>(null);
+
+  const submit = async () => {
+    setSaving(true);
+    setRefusal(null);
+    try {
+      const result = await onSetLock(reason.trim());
+      if (!result.ok) {
+        setRefusal(result.message);
+      } else {
+        setOpen(false);
+        setReason('');
+      }
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (!open) {
+    return (
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        className="mt-1 text-xs text-muted-foreground hover:text-foreground"
+      >
+        Lock deploys
+      </button>
+    );
+  }
+
+  return (
+    <form
+      className="mt-1 flex flex-col items-end gap-1.5"
+      onSubmit={(event) => {
+        event.preventDefault();
+        void submit();
+      }}
+    >
+      <Input
+        value={reason}
+        onChange={(event) => setReason(event.target.value)}
+        placeholder="why nothing should go out"
+        aria-label="Lock reason"
+        className="w-64"
+      />
+      <div className="flex gap-1.5">
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          onClick={() => setOpen(false)}
+          disabled={saving}
+        >
+          Cancel
+        </Button>
+        <Button type="submit" size="sm" disabled={saving || !reason.trim()}>
+          {saving ? 'Locking…' : 'Lock'}
+        </Button>
+      </div>
+      {refusal ? (
+        <p className="max-w-[22rem] text-left text-xs text-destructive">
+          {refusal}
+        </p>
+      ) : null}
+    </form>
   );
 }
 
@@ -3629,6 +3825,28 @@ function AppWorkspace({
     }
   };
 
+  // The hold (§6). Re-read, unlike the switch above: the banner, the pending
+  // line and the Deploy button's refusal all derive from the lock, and the
+  // control that changed it is not the one showing it.
+  const handleSetLock: SetLock = async (reason) => {
+    const appId = workspace.appId;
+    if (appId === undefined) {
+      return { ok: false, message: 'This App has no id to lock' };
+    }
+    try {
+      const result = await command('setAppLock', { appId, reason });
+      if (!result.ok) return { ok: false, message: result.failure.message };
+      read.reload();
+      return { ok: true };
+    } catch (cause: unknown) {
+      return {
+        ok: false,
+        message:
+          cause instanceof Error ? cause.message : 'Saving the lock failed',
+      };
+    }
+  };
+
   // Which route this App builds on (§4, §16). No re-read, for the same reason
   // `handleSetAutoDeploy` needs none: the picker already holds the answer it
   // just wrote, and this changes exactly the field it is showing.
@@ -3939,6 +4157,7 @@ function AppWorkspace({
         deletion={deletion}
         onSetReach={handleSetReach}
         onSetAutoDeploy={handleSetAutoDeploy}
+        onSetLock={handleSetLock}
         onSetBuildRoute={handleSetAppBuildRoute}
         onSetDomain={handleSetAppDomain}
         onStageArchive={handleStageArchive}

@@ -426,6 +426,12 @@ export interface DeployView {
    * release, which has no history to read.
    */
   readonly expectedDuration?: ExpectedDuration;
+  /**
+   * Who asked for this Deploy, as a screen prints it — a user's name, or
+   * "auto-deploy on push". Absent where nothing recorded it: a Build-only
+   * attempt, or a Deploy written before the column existed.
+   */
+  readonly requestedBy?: string;
 }
 
 /** What {@link DeployView.expectedDuration} carries: the estimate and its evidence. */
@@ -467,6 +473,8 @@ export interface DeployListItem extends CommitHeadlineView {
    * rather than offering it everywhere and refusing half the presses.
    */
   readonly rollbackable: boolean;
+  /** Who asked, as {@link DeployView.requestedBy} prints it. */
+  readonly requestedBy?: string;
 }
 
 /** The lifecycle of one Build attempt, kept distinct from Deploy phases. */
@@ -991,6 +999,50 @@ export interface WorkspaceView extends CommitHeadlineView {
    * be a second answer to a question §13 already answers once.
    */
   readonly unmetPrerequisites?: readonly PrerequisiteRowView[];
+  /**
+   * The hold on this App's deploys (§6, `setAppLock`), absent when there is
+   * none — the same spelling of nothing as {@link diagnosis}.
+   */
+  readonly lock?: AppLockView;
+  /**
+   * What the repository has that this release does not (§15).
+   *
+   * Absent for an archive App and for a repo App whose repository nobody has
+   * connected: there is no branch to be behind. Present with `pending: null`
+   * when the serving release is the adopted commit.
+   */
+  readonly source?: WorkspaceSourceView;
+}
+
+/** A deploy lock as the workspace banner prints it. */
+export interface AppLockView {
+  readonly reason: string;
+  /** Who set it, as {@link DeployView.requestedBy} prints a principal. */
+  readonly by: string;
+  /** How long ago — "2h ago". */
+  readonly since: string;
+  /** The instant behind {@link since}, for the title a reader hovers. */
+  readonly at: string;
+}
+
+/**
+ * Pushed but not live: the adopted commit beside the serving one.
+ *
+ * Both facts existed and were never joined — `repositories.authoritativeCommit`
+ * on the Config tab, the serving Build's commit in the hero. For an
+ * `autoDeploy` App the join reads as "a deploy is coming", and a stalled one
+ * becomes visible for the first time.
+ */
+export interface WorkspaceSourceView {
+  /** The branch §15 adopts from. */
+  readonly branch: string;
+  /**
+   * The adopted commit that is not what is serving, or `null` when it is.
+   *
+   * Also `null` before anything has served at all: the first release is not
+   * "behind", it is the whole App waiting to exist.
+   */
+  readonly pending: { readonly commit: string } | null;
 }
 
 /**

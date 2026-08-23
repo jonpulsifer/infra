@@ -5,6 +5,7 @@ import { attemptEvents, deploys } from '../../db/schema.ts';
 import { elapsedSince } from '../../domain/elapsed.ts';
 import { targetRowLabel } from '../../domain/target.ts';
 import { buildViewOf, sourceViewOf } from '../builds/view.ts';
+import { principalLabels } from '../principals.ts';
 import { type Command, type CommandContext, failed, ok } from '../types.ts';
 import type {
   ChecklistItem,
@@ -263,6 +264,10 @@ export const getDeployDetail: Command<
     headline = `Deploying on ${targetRowLabel(deploy.target)}`;
   }
 
+  const requestedBy = (await principalLabels(context.db, [deploy.requestedBy]))(
+    deploy.requestedBy,
+  );
+
   const view: DeployView = {
     id: deploy.id,
     buildId: deploy.build.id,
@@ -301,6 +306,7 @@ export const getDeployDetail: Command<
     current: desired?.desiredDeployId === deploy.id,
     configVersion: deploy.configVersion,
     artifactDigest: deploy.build.artifactDigest,
+    ...(requestedBy === undefined ? {} : { requestedBy }),
     previousDeployId: previousDeploy?.id ?? null,
     // The same comparison `rollbackDeploy` makes under the lock. It can still
     // refuse for a reason this projection cannot see — a disconnected Target, a

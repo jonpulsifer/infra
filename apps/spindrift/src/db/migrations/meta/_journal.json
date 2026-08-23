@@ -353,6 +353,13 @@
       "breakpoints": true
     },
     {
+      "idx": 50,
+      "version": "7",
+      "when": 1786968720000,
+      "tag": "0050_app_lock_and_deploy_principal",
+      "breakpoints": true
+    },
+    {
       "idx": 52,
       "version": "7",
       "when": 1786968840000,

@@ -462,97 +462,120 @@ export const githubApp = pgTable(
  * never cascades to them (§2, §11) but does cascade to its own Components,
  * Builds, Deploys, and config items — none of those are reattachable.
  */
-export const apps = pgTable('apps', {
-  id: uuid('id').primaryKey().defaultRandom(),
-  name: text('name').notNull(),
-  sourceKind: appSourceKind('source_kind').notNull(),
-  /** Set when `sourceKind = 'repo'`. */
-  sourceRepoUrl: text('source_repo_url'),
-  /** Set when `sourceKind = 'repo'`; the scope is named, never searched (§5). */
-  sourceRepoSubpath: text('source_repo_subpath'),
-  /**
-   * The connected repository this App's scope lives in, when there is one.
-   *
-   * Nullable because an archive App has no repository and a repo App may have
-   * been created before anyone connected its repository — §15 makes Git
-   * integration a thing an operator turns on, not a precondition of authoring.
-   * `restrict` rather than `cascade`: disconnecting a repository must never be
-   * a way to delete an App, which is the same rule §15 states about Deploys.
-   */
-  repositoryId: uuid('repository_id').references(() => repositories.id, {
-    onDelete: 'restrict',
-  }),
-  /** Set when `sourceKind = 'archive'`: the uploaded bundle's digest. */
-  sourceArchiveDigest: text('source_archive_digest'),
-  /**
-   * The build route this App has asked to build on, or null for no opinion.
-   *
-   * §16 settles route selection as "the level is a threshold, then admin rank
-   * wins", and this is the App's say inside that — it narrows the candidates
-   * rather than overriding the threshold, so a route below the Target's minimum
-   * is refused here exactly as it is refused anywhere else. Naming one is not a
-   * way around a policy; it is a way to pick among the routes that already
-   * cleared it.
-   *
-   * Null is not "no route". It is the state every App is in until someone says
-   * otherwise, and it means rank order picks — which is the whole of the
-   * behaviour before this column existed.
-   *
-   * A plain string and not a reference: §4 makes the set of routes an
-   * installation's configuration, so a name here may well name a route that has
-   * been retired. That is not an error and never was — `buildRouteCandidates`
-   * already reports a named-but-absent route as unavailable, which is the
-   * honest reading and the one an operator can act on.
-   */
-  buildRoute: text('build_route'),
-  /**
-   * Opt in to a Deploy dispatched from a push, with no operator at the
-   * keyboard (§15's webhook, `src/reconciler/auto-deploy.ts`).
-   *
-   * `false` by default and on every App that predates this column: auto-deploy
-   * changes what is live without being asked at that moment, so an App gets it
-   * only by a developer turning it on, never by upgrading Spindrift.
-   */
-  autoDeploy: boolean('auto_deploy').notNull().default(false),
-  /**
-   * The zone from `dns.zones` this App's names are minted in, or null for the
-   * installation's default (§9).
-   *
-   * Null is not "no zone". It is the state every App is in until someone says
-   * otherwise, and it means the first zone serving the Component's reach wins —
-   * which is the whole of the behaviour before this column existed, when reach
-   * named the zone directly.
-   *
-   * A plain string and not a reference, for the same reason `buildRoute` above
-   * is one: the set of zones is the installation's configuration, so a name here
-   * may name a zone that has since been retired or one that no longer serves
-   * this Component's reach. `zoneFor` treats it as a preference and falls
-   * through to a zone that can serve the reach, so a retired pin degrades to the
-   * default rather than to a Component with no address.
-   *
-   * On the App and not on the Component, because §9 makes a hostname a property
-   * of the App — "moving an App between backends is one record re-point" only
-   * holds if the name outlives the releases under it, and a Component-level zone
-   * would let one App answer on two domains with no name that covers it.
-   */
-  zone: text('zone'),
-  /**
-   * **No vessel column, deliberately.** An App has placements, and each
-   * placement's Target is a surface on a vessel — that is the boundary the App
-   * is in, and it is derivable. A column here could only be a second, unchecked
-   * answer to the same question; the one that existed was written from
-   * `cloud.homeVesselProject` at creation and read by nothing but two labels.
-   * See `0025_drop_app_vessel_ref.sql`.
-   */
-  /** §9: the flat single-label vanity name, if the developer chose one. */
-  vanityDomain: text('vanity_domain'),
-  createdAt: timestamp('created_at', { withTimezone: true })
-    .notNull()
-    .defaultNow(),
-  updatedAt: timestamp('updated_at', { withTimezone: true })
-    .notNull()
-    .defaultNow(),
-});
+export const apps = pgTable(
+  'apps',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    name: text('name').notNull(),
+    sourceKind: appSourceKind('source_kind').notNull(),
+    /** Set when `sourceKind = 'repo'`. */
+    sourceRepoUrl: text('source_repo_url'),
+    /** Set when `sourceKind = 'repo'`; the scope is named, never searched (§5). */
+    sourceRepoSubpath: text('source_repo_subpath'),
+    /**
+     * The connected repository this App's scope lives in, when there is one.
+     *
+     * Nullable because an archive App has no repository and a repo App may have
+     * been created before anyone connected its repository — §15 makes Git
+     * integration a thing an operator turns on, not a precondition of authoring.
+     * `restrict` rather than `cascade`: disconnecting a repository must never be
+     * a way to delete an App, which is the same rule §15 states about Deploys.
+     */
+    repositoryId: uuid('repository_id').references(() => repositories.id, {
+      onDelete: 'restrict',
+    }),
+    /** Set when `sourceKind = 'archive'`: the uploaded bundle's digest. */
+    sourceArchiveDigest: text('source_archive_digest'),
+    /**
+     * The build route this App has asked to build on, or null for no opinion.
+     *
+     * §16 settles route selection as "the level is a threshold, then admin rank
+     * wins", and this is the App's say inside that — it narrows the candidates
+     * rather than overriding the threshold, so a route below the Target's minimum
+     * is refused here exactly as it is refused anywhere else. Naming one is not a
+     * way around a policy; it is a way to pick among the routes that already
+     * cleared it.
+     *
+     * Null is not "no route". It is the state every App is in until someone says
+     * otherwise, and it means rank order picks — which is the whole of the
+     * behaviour before this column existed.
+     *
+     * A plain string and not a reference: §4 makes the set of routes an
+     * installation's configuration, so a name here may well name a route that has
+     * been retired. That is not an error and never was — `buildRouteCandidates`
+     * already reports a named-but-absent route as unavailable, which is the
+     * honest reading and the one an operator can act on.
+     */
+    buildRoute: text('build_route'),
+    /**
+     * Opt in to a Deploy dispatched from a push, with no operator at the
+     * keyboard (§15's webhook, `src/reconciler/auto-deploy.ts`).
+     *
+     * `false` by default and on every App that predates this column: auto-deploy
+     * changes what is live without being asked at that moment, so an App gets it
+     * only by a developer turning it on, never by upgrading Spindrift.
+     */
+    autoDeploy: boolean('auto_deploy').notNull().default(false),
+    /**
+     * The zone from `dns.zones` this App's names are minted in, or null for the
+     * installation's default (§9).
+     *
+     * Null is not "no zone". It is the state every App is in until someone says
+     * otherwise, and it means the first zone serving the Component's reach wins —
+     * which is the whole of the behaviour before this column existed, when reach
+     * named the zone directly.
+     *
+     * A plain string and not a reference, for the same reason `buildRoute` above
+     * is one: the set of zones is the installation's configuration, so a name here
+     * may name a zone that has since been retired or one that no longer serves
+     * this Component's reach. `zoneFor` treats it as a preference and falls
+     * through to a zone that can serve the reach, so a retired pin degrades to the
+     * default rather than to a Component with no address.
+     *
+     * On the App and not on the Component, because §9 makes a hostname a property
+     * of the App — "moving an App between backends is one record re-point" only
+     * holds if the name outlives the releases under it, and a Component-level zone
+     * would let one App answer on two domains with no name that covers it.
+     */
+    zone: text('zone'),
+    /**
+     * **No vessel column, deliberately.** An App has placements, and each
+     * placement's Target is a surface on a vessel — that is the boundary the App
+     * is in, and it is derivable. A column here could only be a second, unchecked
+     * answer to the same question; the one that existed was written from
+     * `cloud.homeVesselProject` at creation and read by nothing but two labels.
+     * See `0025_drop_app_vessel_ref.sql`.
+     */
+    /** §9: the flat single-label vanity name, if the developer chose one. */
+    vanityDomain: text('vanity_domain'),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    /**
+     * A hold on every new Deploy of this App, with the sentence an operator
+     * reads (§6). Set exactly when `lockedAt` is.
+     *
+     * Columns rather than a noun, for §1's concept count. One reader —
+     * `checkDeployable` — refuses with the reason; `rollbackDeploy` is the one
+     * act that goes through regardless, and sets it on the way, so the next
+     * adopted push does not quietly re-dispatch what was just rolled away from.
+     * `setAppLock` writes and clears it by hand.
+     */
+    lockReason: text('lock_reason'),
+    lockedAt: timestamp('locked_at', { withTimezone: true }),
+    /** The principal's id, as `deploys.requestedBy` records it. */
+    lockedBy: text('locked_by'),
+  },
+  (table) => [
+    check(
+      'apps_lock_has_reason',
+      sql`(${table.lockReason} is null) = (${table.lockedAt} is null)`,
+    ),
+  ],
+);
 
 /**
  * §2: "`schedule` is a field on a job, not a kind. `expose` is a field on a
@@ -950,6 +973,16 @@ export const deploys = pgTable('deploys', {
   updatedAt: timestamp('updated_at', { withTimezone: true })
     .notNull()
     .defaultNow(),
+  /**
+   * Who asked for this Deploy: the principal's id, written by `placeIntent`.
+   *
+   * `AUTO_DEPLOY_PRINCIPAL.id` for a push, a `users` row for a press — which
+   * is the whole question this answers ("did I press that, or did a push do
+   * it?"). Config changes and creation drafts were attributed already; the
+   * more consequential act was not. Null on every row written before the
+   * column existed, and left that way: nobody this can name asked for them.
+   */
+  requestedBy: text('requested_by'),
 });
 
 /**
