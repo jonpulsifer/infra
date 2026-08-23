@@ -93,10 +93,15 @@ if (treasury.length === 0) {
         console.error('ledger write failed; dropped settlement', entry, err);
       }
     });
+  // Cloudflare terminates TLS and the tunnel hands us plain http, so the URL
+  // the middleware would derive advertises `http://` and x402 clients refuse
+  // the quote. Pin the resource to the public origin instead.
+  const origin = env.PUBLIC_ORIGIN ?? 'https://clankerbanker.ca';
   const routes: Record<string, RouteConfig> = {};
   for (const [path, price] of Object.entries(PRICES)) {
     routes[`GET ${path}`] = {
       accepts: treasury.map((t) => ({ scheme: 'exact', price, ...t })),
+      resource: new URL(path, origin).toString(),
       description: `clankerbanker ${path} (${price})`,
       mimeType: 'application/json',
     };

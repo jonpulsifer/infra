@@ -25,6 +25,7 @@ on the public ledger. Live at https://clankerbanker.ca.
 | `PAY_TO_SOLANA` | base58 address; enables the Solana mainnet USDC entry |
 | `DATABASE_URL` | optional Postgres for the ledger; in-memory otherwise |
 | `FACILITATOR_URL` | default `https://facilitator.payai.network` |
+| `PUBLIC_ORIGIN` | origin advertised in the 402 quote, default `https://clankerbanker.ca` |
 
 With neither `PAY_TO_*` set, paid routes answer 503: the bank is not open.
 
