@@ -8,6 +8,7 @@ import type { TargetAdapter } from '../../config/manifest.schema.ts';
 import { artifactSummary } from '../../domain/artifact-name.ts';
 import { runsNothingOn } from '../../domain/capabilities.ts';
 import { elapsedSince } from '../../domain/elapsed.ts';
+import { servesNetwork, vanity, zoneFor } from '../../domain/naming.ts';
 import {
   datastoreVesselLabel,
   deployTargetOf,
@@ -33,6 +34,7 @@ import type {
   Runtime,
   WorkspaceView,
 } from '../views.ts';
+import { namesUnder, placementsFor } from './names.ts';
 
 export const getAppWorkspaceInput = z.object({
   name: z.string().min(1),
@@ -325,13 +327,34 @@ export const getAppWorkspace: Command<
     });
   }
 
+  // Which Components serve, by the same rule the reconciler publishes by.
+  // §9 puts the shared name on the App, and `deploy-loop.ts` refuses to guess
+  // which of two serving Components it means — so an App with two publishes no
+  // vanity record at all.
+  const serving = app.components.filter(servesNetwork);
+  const vanityIsPublished = serving.length === 1;
+  const placements = await placementsFor(context.db, app.id);
+  // The App's shared name as a hostname rather than as the label it is stored
+  // as. `@` is a spelling of "the zone itself" and is not an address; putting
+  // it on a screen that calls the field a url produced a link to `https://@`.
+  const vanityZone =
+    vanityIsPublished && app.vanityDomain !== null && selected !== undefined
+      ? zoneFor(selected.reach, context.manifest.dns.zones, app.zone)
+      : null;
+  const vanityHost =
+    vanityZone === null || app.vanityDomain === null
+      ? ''
+      : vanity(app.vanityDomain, vanityZone);
+
   // The address the selected Component answers on. A job answers on none — no
   // adapter puts a url on a job's Deploy — and the App's vanity domain is not
   // one either: the fallback is for a Component that will serve that domain and
   // has not deployed yet, which a job never is.
-  const url =
-    latestDeploy?.url ??
-    (selected?.kind === 'job' ? '' : (app.vanityDomain ?? ''));
+  //
+  // Nor is it one while two Components serve. The reconciler will never publish
+  // that name, and printing it here as the App's address was the screen
+  // asserting something the thing that publishes had already refused.
+  const url = latestDeploy?.url ?? (selected?.kind === 'job' ? '' : vanityHost);
 
   let runtime: Runtime;
   if (
@@ -489,6 +512,28 @@ export const getAppWorkspace: Command<
     // missing route picker and missing auto-deploy toggle had no explanation on
     // them, and why `deployApp`'s "upload an archive for this Component" named
     // an act nothing offered.
+    // The same preview `setAppZone` and `setAppVanity` answer with, so the
+    // screen that sets the name and the commands that write it cannot state the
+    // outcome two different ways.
+    domain: {
+      label: app.vanityDomain,
+      zone: app.zone,
+      zones: context.manifest.dns.zones.map((zone) => ({
+        name: zone.name,
+        reaches: zone.reaches,
+      })),
+      hostnames: placements.flatMap((placement) =>
+        namesUnder(
+          app.name,
+          placement,
+          context.manifest.dns.zones,
+          app.zone,
+          vanityIsPublished ? app.vanityDomain : null,
+        ),
+      ),
+      ambiguous: serving.length > 1,
+      servedBy: vanityIsPublished ? (serving[0]?.name ?? null) : null,
+    },
     archiveSourced: app.sourceKind !== 'repo',
     buildRoute,
     buildRouteOptions,
