@@ -8,6 +8,8 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -111,36 +113,50 @@ func testLogger() *slog.Logger {
 	return slog.New(slog.NewTextHandler(io.Discard, nil))
 }
 
-func TestUpdateNoChanges(t *testing.T) {
-	fake := &fakeCloudflare{
+// newTestUpdater builds an updater against the fake, exercising the zone
+// lookup that construction performs.
+func newTestUpdater(t *testing.T, fake *fakeCloudflare, name string, proxied bool) *updater {
+	t.Helper()
+	cfg := config{
+		zone:    fake.zoneName,
+		fqdn:    recordName(name, fake.zoneName),
+		proxied: proxied,
+	}
+	u, err := newUpdater(context.Background(), newTestClient(t, fake), cfg, testLogger())
+	if err != nil {
+		t.Fatalf("newUpdater: %v", err)
+	}
+	return u
+}
+
+func hostFake() *fakeCloudflare {
+	return &fakeCloudflare{
 		zoneID:   "zone-123",
 		zoneName: "example.com",
 		records: map[string]fakeRecord{
 			"rec-1": {Type: "A", Name: "host.example.com", Content: "192.0.2.1", Proxied: false},
 		},
 	}
-	api := newTestClient(t, fake)
+}
 
-	if err := update(context.Background(), api, "192.0.2.1", "host", "example.com", false, testLogger()); err != nil {
-		t.Fatalf("update: %v", err)
+func TestReconcileNoChanges(t *testing.T) {
+	fake := hostFake()
+	u := newTestUpdater(t, fake, "host", false)
+
+	if err := u.reconcile(context.Background(), "192.0.2.1", testLogger()); err != nil {
+		t.Fatalf("reconcile: %v", err)
 	}
 	if len(fake.updates) != 0 || len(fake.creates) != 0 {
 		t.Errorf("expected no writes, got %d updates and %d creates", len(fake.updates), len(fake.creates))
 	}
 }
 
-func TestUpdateExistingRecord(t *testing.T) {
-	fake := &fakeCloudflare{
-		zoneID:   "zone-123",
-		zoneName: "example.com",
-		records: map[string]fakeRecord{
-			"rec-1": {Type: "A", Name: "host.example.com", Content: "192.0.2.1", Proxied: false},
-		},
-	}
-	api := newTestClient(t, fake)
+func TestReconcileExistingRecord(t *testing.T) {
+	fake := hostFake()
+	u := newTestUpdater(t, fake, "host", false)
 
-	if err := update(context.Background(), api, "198.51.100.7", "host", "example.com", false, testLogger()); err != nil {
-		t.Fatalf("update: %v", err)
+	if err := u.reconcile(context.Background(), "198.51.100.7", testLogger()); err != nil {
+		t.Fatalf("reconcile: %v", err)
 	}
 	if len(fake.creates) != 0 {
 		t.Fatalf("expected no creates, got %d", len(fake.creates))
@@ -152,24 +168,18 @@ func TestUpdateExistingRecord(t *testing.T) {
 	if got.ID != "rec-1" {
 		t.Errorf("updated wrong record: %s", got.ID)
 	}
-	if got.Type != "A" || got.Name != "host" || got.Content != "198.51.100.7" || got.Proxied {
+	if got.Type != "A" || got.Name != "host.example.com" || got.Content != "198.51.100.7" || got.Proxied {
 		t.Errorf("unexpected update body: %+v", got)
 	}
 }
 
-func TestUpdateProxiedChange(t *testing.T) {
-	fake := &fakeCloudflare{
-		zoneID:   "zone-123",
-		zoneName: "example.com",
-		records: map[string]fakeRecord{
-			"rec-1": {Type: "A", Name: "host.example.com", Content: "192.0.2.1", Proxied: false},
-		},
-	}
-	api := newTestClient(t, fake)
+func TestReconcileProxiedChange(t *testing.T) {
+	fake := hostFake()
+	u := newTestUpdater(t, fake, "host", true)
 
 	// same IP but proxied flipped on: should still update
-	if err := update(context.Background(), api, "192.0.2.1", "host", "example.com", true, testLogger()); err != nil {
-		t.Fatalf("update: %v", err)
+	if err := u.reconcile(context.Background(), "192.0.2.1", testLogger()); err != nil {
+		t.Fatalf("reconcile: %v", err)
 	}
 	if len(fake.updates) != 1 {
 		t.Fatalf("expected 1 update, got %d", len(fake.updates))
@@ -179,16 +189,13 @@ func TestUpdateProxiedChange(t *testing.T) {
 	}
 }
 
-func TestUpdateCreatesMissingRecord(t *testing.T) {
-	fake := &fakeCloudflare{
-		zoneID:   "zone-123",
-		zoneName: "example.com",
-		records:  map[string]fakeRecord{},
-	}
-	api := newTestClient(t, fake)
+func TestReconcileCreatesMissingRecord(t *testing.T) {
+	fake := hostFake()
+	fake.records = map[string]fakeRecord{}
+	u := newTestUpdater(t, fake, "host", false)
 
-	if err := update(context.Background(), api, "203.0.113.9", "host", "example.com", false, testLogger()); err != nil {
-		t.Fatalf("update: %v", err)
+	if err := u.reconcile(context.Background(), "203.0.113.9", testLogger()); err != nil {
+		t.Fatalf("reconcile: %v", err)
 	}
 	if len(fake.updates) != 0 {
 		t.Fatalf("expected no updates, got %d", len(fake.updates))
@@ -197,33 +204,39 @@ func TestUpdateCreatesMissingRecord(t *testing.T) {
 		t.Fatalf("expected 1 create, got %d", len(fake.creates))
 	}
 	got := fake.creates[0]
-	if got.Type != "A" || got.Name != "host" || got.Content != "203.0.113.9" || got.Proxied {
+	if got.Type != "A" || got.Name != "host.example.com" || got.Content != "203.0.113.9" || got.Proxied {
 		t.Errorf("unexpected create body: %+v", got)
 	}
 }
 
-func TestUpdateZoneNameMismatch(t *testing.T) {
-	fake := &fakeCloudflare{
-		zoneID:   "zone-123",
-		zoneName: "other.com",
+// TestReconcileApexMatchesExistingRecord pins the apex fix: the zone apex
+// record is named after the zone, so "@" must resolve to "example.com". Asking
+// for "@.example.com" matched nothing and created a duplicate on every pass.
+func TestReconcileApexMatchesExistingRecord(t *testing.T) {
+	fake := hostFake()
+	fake.records = map[string]fakeRecord{
+		"apex-1": {Type: "A", Name: "example.com", Content: "192.0.2.1", Proxied: false},
 	}
-	api := newTestClient(t, fake)
+	u := newTestUpdater(t, fake, "@", false)
 
-	err := update(context.Background(), api, "192.0.2.1", "host", "example.com", false, testLogger())
-	if err == nil || !strings.Contains(err.Error(), "zone name mismatch") {
-		t.Fatalf("expected zone name mismatch error, got %v", err)
+	if err := u.reconcile(context.Background(), "198.51.100.7", testLogger()); err != nil {
+		t.Fatalf("reconcile: %v", err)
+	}
+	if len(fake.creates) != 0 {
+		t.Fatalf("apex reconcile created a duplicate record: %+v", fake.creates)
+	}
+	if len(fake.updates) != 1 || fake.updates[0].ID != "apex-1" {
+		t.Fatalf("expected the apex record to be updated, got %+v", fake.updates)
 	}
 }
 
-func TestDefaultInterval(t *testing.T) {
-	t.Setenv("DDNSD_INTERVAL", "")
-	if got := defaultInterval(); got != 5*time.Minute {
-		t.Errorf("default: got %v, want 5m", got)
-	}
+func TestNewUpdaterZoneNameMismatch(t *testing.T) {
+	fake := &fakeCloudflare{zoneID: "zone-123", zoneName: "other.com"}
+	cfg := config{zone: "example.com", fqdn: "host.example.com"}
 
-	t.Setenv("DDNSD_INTERVAL", "30s")
-	if got := defaultInterval(); got != 30*time.Second {
-		t.Errorf("DDNSD_INTERVAL=30s: got %v, want 30s", got)
+	_, err := newUpdater(context.Background(), newTestClient(t, fake), cfg, testLogger())
+	if err == nil || !strings.Contains(err.Error(), "zone name mismatch") {
+		t.Fatalf("expected zone name mismatch error, got %v", err)
 	}
 }
 
@@ -231,27 +244,19 @@ func TestDefaultInterval(t *testing.T) {
 // looks the address up again. Reading it once and reusing the value leaves the
 // record pointing at the previous lease forever.
 func TestRefreshReResolves(t *testing.T) {
-	fake := &fakeCloudflare{
-		zoneID:   "zone-123",
-		zoneName: "example.com",
-		records: map[string]fakeRecord{
-			"rec-1": {Type: "A", Name: "host.example.com", Content: "192.0.2.1", Proxied: false},
-		},
-	}
-	api := newTestClient(t, fake)
+	fake := hostFake()
+	u := newTestUpdater(t, fake, "host", false)
 
 	addresses := []string{"192.0.2.1", "198.51.100.7"}
 	resolved := 0
-	original := resolveIP
-	t.Cleanup(func() { resolveIP = original })
-	resolveIP = func(context.Context) (string, error) {
+	u.resolve = func(context.Context) (string, error) {
 		ip := addresses[resolved]
 		resolved++
 		return ip, nil
 	}
 
 	for range addresses {
-		if err := refresh(context.Background(), api, "host", "example.com", false, testLogger()); err != nil {
+		if err := u.Refresh(context.Background()); err != nil {
 			t.Fatalf("refresh: %v", err)
 		}
 	}
@@ -266,5 +271,170 @@ func TestRefreshReResolves(t *testing.T) {
 	}
 	if got := fake.updates[0].Content; got != "198.51.100.7" {
 		t.Errorf("updated to %q, want the freshly resolved address", got)
+	}
+}
+
+// TestNewUpdaterResolvesZoneOnce pins that the zone lookup is construction-time
+// work, not per-pass work.
+func TestNewUpdaterResolvesZoneOnce(t *testing.T) {
+	fake := hostFake()
+	lookups := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/zones" {
+			lookups++
+		}
+		fake.handler(t).ServeHTTP(w, r)
+	}))
+	t.Cleanup(server.Close)
+
+	api := cloudflare.NewClient(
+		option.WithBaseURL(server.URL),
+		option.WithAPIToken("test-token"),
+		option.WithMaxRetries(0),
+	)
+	cfg := config{zone: "example.com", fqdn: "host.example.com"}
+	u, err := newUpdater(context.Background(), api, cfg, testLogger())
+	if err != nil {
+		t.Fatalf("newUpdater: %v", err)
+	}
+	u.resolve = func(context.Context) (string, error) { return "192.0.2.1", nil }
+
+	for range 3 {
+		if err := u.Refresh(context.Background()); err != nil {
+			t.Fatalf("refresh: %v", err)
+		}
+	}
+
+	if lookups != 1 {
+		t.Errorf("zone was looked up %d times, want 1", lookups)
+	}
+}
+
+func TestRecordName(t *testing.T) {
+	for _, tc := range []struct{ name, zone, want string }{
+		{"host", "example.com", "host.example.com"},
+		{"@", "example.com", "example.com"},
+		{"", "example.com", "example.com"},
+		{"example.com", "example.com", "example.com"},
+		{"host.example.com", "example.com", "host.example.com"},
+		{"HOST", "Example.com", "host.example.com"},
+		{"host.", "example.com.", "host.example.com"},
+		{" host ", "example.com", "host.example.com"},
+		{"a.b", "example.com", "a.b.example.com"},
+	} {
+		if got := recordName(tc.name, tc.zone); got != tc.want {
+			t.Errorf("recordName(%q, %q) = %q, want %q", tc.name, tc.zone, got, tc.want)
+		}
+	}
+}
+
+func env(kv map[string]string) func(string) string {
+	return func(k string) string { return kv[k] }
+}
+
+func TestParseConfigDefaults(t *testing.T) {
+	cfg, err := parseConfig(nil, env(map[string]string{
+		"CLOUDFLARE_DNS_ZONE":  "example.com",
+		"CLOUDFLARE_DNS_NAME":  "host",
+		"CLOUDFLARE_API_TOKEN": "tok",
+	}))
+	if err != nil {
+		t.Fatalf("parseConfig: %v", err)
+	}
+	if cfg.fqdn != "host.example.com" || cfg.zone != "example.com" || cfg.token != "tok" {
+		t.Errorf("unexpected config: %+v", cfg)
+	}
+	if cfg.interval != 5*time.Minute {
+		t.Errorf("interval = %v, want 5m", cfg.interval)
+	}
+	if cfg.once || cfg.proxied {
+		t.Errorf("expected once and proxied to default false: %+v", cfg)
+	}
+}
+
+func TestParseConfigFlagsBeatEnv(t *testing.T) {
+	cfg, err := parseConfig(
+		[]string{"-zone", "other.com", "-name", "@", "-token", "flagtok", "-interval", "90s", "-proxied", "-once"},
+		env(map[string]string{
+			"CLOUDFLARE_DNS_ZONE":  "example.com",
+			"CLOUDFLARE_DNS_NAME":  "host",
+			"CLOUDFLARE_API_TOKEN": "envtok",
+			"DDNSD_INTERVAL":       "1h",
+		}),
+	)
+	if err != nil {
+		t.Fatalf("parseConfig: %v", err)
+	}
+	if cfg.zone != "other.com" || cfg.fqdn != "other.com" || cfg.token != "flagtok" {
+		t.Errorf("unexpected config: %+v", cfg)
+	}
+	if cfg.interval != 90*time.Second {
+		t.Errorf("interval = %v, want 90s", cfg.interval)
+	}
+	if !cfg.proxied || !cfg.once {
+		t.Errorf("expected proxied and once set: %+v", cfg)
+	}
+}
+
+func TestParseConfigIntervalFromEnv(t *testing.T) {
+	cfg, err := parseConfig(nil, env(map[string]string{
+		"CLOUDFLARE_DNS_ZONE":  "example.com",
+		"CLOUDFLARE_DNS_NAME":  "host",
+		"CLOUDFLARE_API_TOKEN": "tok",
+		"DDNSD_INTERVAL":       "30s",
+	}))
+	if err != nil {
+		t.Fatalf("parseConfig: %v", err)
+	}
+	if cfg.interval != 30*time.Second {
+		t.Errorf("interval = %v, want 30s", cfg.interval)
+	}
+}
+
+func TestParseConfigTokenFile(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "token")
+	if err := os.WriteFile(path, []byte("  filetok\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := parseConfig(
+		[]string{"-zone", "example.com", "-name", "host", "-token-file", path},
+		env(nil),
+	)
+	if err != nil {
+		t.Fatalf("parseConfig: %v", err)
+	}
+	if cfg.token != "filetok" {
+		t.Errorf("token = %q, want %q", cfg.token, "filetok")
+	}
+}
+
+func TestParseConfigErrors(t *testing.T) {
+	dir := t.TempDir()
+	blank := filepath.Join(dir, "blank")
+	if err := os.WriteFile(blank, []byte("   \n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, tc := range []struct {
+		desc string
+		args []string
+		env  map[string]string
+		want string
+	}{
+		{"no zone", []string{"-token", "tok"}, nil, "zone is required"},
+		{"no token", []string{"-zone", "example.com"}, nil, "token is required"},
+		{"missing token file", []string{"-zone", "example.com", "-token-file", filepath.Join(dir, "nope")}, nil, "reading token file"},
+		{"blank token file", []string{"-zone", "example.com", "-token-file", blank}, nil, "token file is empty"},
+		{"bad env interval", []string{"-zone", "example.com", "-token", "t"}, map[string]string{"DDNSD_INTERVAL": "banana"}, "DDNSD_INTERVAL"},
+		{"zero interval", []string{"-zone", "example.com", "-token", "t", "-interval", "0"}, nil, "interval must be positive"},
+	} {
+		t.Run(tc.desc, func(t *testing.T) {
+			_, err := parseConfig(tc.args, env(tc.env))
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("got %v, want an error containing %q", err, tc.want)
+			}
+		})
 	}
 }
