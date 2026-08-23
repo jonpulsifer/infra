@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"log/slog"
@@ -19,71 +20,41 @@ import (
 	"github.com/cloudflare/cloudflare-go/v7/zones"
 )
 
-var (
-	once      = flag.Bool("once", false, "Run the update once and exit")
-	interval  = flag.Duration("interval", defaultInterval(), "Interval between updates (e.g., 30s, 5m, 1h)")
-	name      = flag.String("name", os.Getenv("CLOUDFLARE_DNS_NAME"), "DNS record name (or @ for the zone apex)")
-	zone      = flag.String("zone", os.Getenv("CLOUDFLARE_DNS_ZONE"), "Cloudflare zone name (required)")
-	token     = flag.String("token", os.Getenv("CLOUDFLARE_API_TOKEN"), "Cloudflare API token (required)")
-	tokenFile = flag.String("token-file", os.Getenv("CLOUDFLARE_API_TOKEN_FILE"), "Path to a file containing Cloudflare API token")
-	proxied   = flag.Bool("proxied", false, "Enable Cloudflare proxy (default false)")
-	verbose   = flag.Bool("verbose", false, "Enable verbose logging")
-)
-
 func main() {
-	flag.Parse()
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
-	if *verbose {
-		slog.SetLogLoggerLevel(slog.LevelDebug)
-	}
 
-	if *token == "" && *tokenFile == "" {
-		logger.Error("Token not found, set CLOUDFLARE_API_TOKEN or CLOUDFLARE_API_TOKEN_FILE environment variable or use -token or -token-file flag")
+	cfg, err := parseConfig(os.Args[1:], os.Getenv)
+	if errors.Is(err, flag.ErrHelp) {
+		return
+	}
+	if err != nil {
+		logger.Error("Invalid configuration", "error", err.Error())
 		os.Exit(1)
 	}
 
-	if *token == "" {
-		tokenBytes, err := os.ReadFile(*tokenFile)
-		if err != nil {
-			logger.Error("Failed to read token file", "error", err.Error())
-			os.Exit(1)
-		}
-
-		if len(tokenBytes) == 0 {
-			logger.Error("Token file is empty", "path", *tokenFile)
-			os.Exit(1)
-		}
-		*token = strings.TrimSpace(string(tokenBytes))
-	}
-
-	if *name == "" {
-		*name = getOSHostname()
-	}
-
-	if *zone == "" {
-		logger.Error("Zone is required")
-		os.Exit(1)
-	}
-
-	logger = logger.With("name", *name, "zone", *zone, "proxied", *proxied)
+	logger = logger.With("name", cfg.fqdn, "zone", cfg.zone, "proxied", cfg.proxied)
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	api := cloudflare.NewClient(
-		option.WithAPIToken(*token),
-	)
+	api := cloudflare.NewClient(option.WithAPIToken(cfg.token))
 
-	if err := refresh(ctx, api, *name, *zone, *proxied, logger); err != nil {
+	u, err := newUpdater(ctx, api, cfg, logger)
+	if err != nil {
+		logger.Error("Startup failed", "error", err.Error())
+		os.Exit(1)
+	}
+
+	if err := u.Refresh(ctx); err != nil {
 		logger.Error("Update failed", "error", err.Error())
 		os.Exit(1)
 	}
 
-	if *once {
+	if cfg.once {
 		return
 	}
 
-	ticker := time.NewTicker(*interval)
+	ticker := time.NewTicker(cfg.interval)
 	defer ticker.Stop()
 	for {
 		select {
@@ -94,51 +65,168 @@ func main() {
 			// A failed tick is not fatal. The address is resolved again from
 			// scratch on the next one, and exiting here would turn a single
 			// DNS timeout into a service restart.
-			if err := refresh(ctx, api, *name, *zone, *proxied, logger); err != nil {
+			if err := u.Refresh(ctx); err != nil {
 				logger.Error("Update failed", "error", err.Error())
 			}
 		}
 	}
 }
 
-// resolveIP is the address lookup refresh uses, swapped out in tests.
-var resolveIP = getIP
+// config is everything ddnsd needs, resolved once before anything talks to the
+// network.
+type config struct {
+	fqdn     string
+	zone     string
+	token    string
+	proxied  bool
+	once     bool
+	interval time.Duration
+}
 
-// refresh resolves the current public address and reconciles the record with
+// parseConfig resolves flags, environment and the token file into a config. It
+// touches the filesystem for -token-file and the OS hostname when no name is
+// given; everything else is a pure read of args and getenv. It returns errors
+// rather than exiting, so main is the only place that ends the process.
+func parseConfig(args []string, getenv func(string) string) (config, error) {
+	interval := 5 * time.Minute
+	if v := getenv("DDNSD_INTERVAL"); v != "" {
+		d, err := time.ParseDuration(v)
+		if err != nil {
+			return config{}, fmt.Errorf("DDNSD_INTERVAL %q: %w", v, err)
+		}
+		interval = d
+	}
+
+	fs := flag.NewFlagSet("ddnsd", flag.ContinueOnError)
+	var (
+		once      = fs.Bool("once", false, "Run the update once and exit")
+		every     = fs.Duration("interval", interval, "Interval between updates (e.g., 30s, 5m, 1h)")
+		name      = fs.String("name", getenv("CLOUDFLARE_DNS_NAME"), "DNS record name, or @ for the zone apex (default: OS hostname)")
+		zone      = fs.String("zone", getenv("CLOUDFLARE_DNS_ZONE"), "Cloudflare zone name (required)")
+		token     = fs.String("token", getenv("CLOUDFLARE_API_TOKEN"), "Cloudflare API token (required)")
+		tokenFile = fs.String("token-file", getenv("CLOUDFLARE_API_TOKEN_FILE"), "Path to a file containing the Cloudflare API token")
+		proxied   = fs.Bool("proxied", false, "Enable Cloudflare proxy")
+	)
+	if err := fs.Parse(args); err != nil {
+		return config{}, err
+	}
+
+	cfg := config{
+		zone:     strings.ToLower(strings.TrimSpace(*zone)),
+		token:    strings.TrimSpace(*token),
+		proxied:  *proxied,
+		once:     *once,
+		interval: *every,
+	}
+
+	if cfg.zone == "" {
+		return config{}, errors.New("zone is required: set -zone or CLOUDFLARE_DNS_ZONE")
+	}
+
+	if cfg.interval <= 0 {
+		return config{}, fmt.Errorf("interval must be positive, got %s", cfg.interval)
+	}
+
+	if cfg.token == "" {
+		if *tokenFile == "" {
+			return config{}, errors.New("token is required: set -token or -token-file (or CLOUDFLARE_API_TOKEN / CLOUDFLARE_API_TOKEN_FILE)")
+		}
+		b, err := os.ReadFile(*tokenFile)
+		if err != nil {
+			return config{}, fmt.Errorf("reading token file: %w", err)
+		}
+		cfg.token = strings.TrimSpace(string(b))
+		if cfg.token == "" {
+			return config{}, fmt.Errorf("token file is empty: %s", *tokenFile)
+		}
+	}
+
+	n := *name
+	if strings.TrimSpace(n) == "" {
+		h, err := os.Hostname()
+		if err != nil {
+			return config{}, fmt.Errorf("no -name given and the OS hostname is unavailable: %w", err)
+		}
+		n = h
+	}
+	cfg.fqdn = recordName(n, cfg.zone)
+
+	return cfg, nil
+}
+
+// recordName resolves the configured name to the fully-qualified name
+// Cloudflare stores the record under. The apex is the zone itself: looking up
+// "@.example.com" matches nothing, so a record configured with @ would never be
+// found and ddnsd would create a duplicate on every pass.
+func recordName(name, zone string) string {
+	normalize := func(s string) string {
+		return strings.Trim(strings.ToLower(strings.TrimSpace(s)), ".")
+	}
+	name, zone = normalize(name), normalize(zone)
+	switch {
+	case name == "" || name == "@" || name == zone:
+		return zone
+	case strings.HasSuffix(name, "."+zone):
+		return name
+	default:
+		return name + "." + zone
+	}
+}
+
+// updater reconciles one A record with the address this host appears to come
+// from. Everything fixed for the process lifetime — the zone ID included — is
+// resolved once, at construction, so a misconfigured zone fails at startup
+// rather than on some tick hours later.
+type updater struct {
+	api     *cloudflare.Client
+	resolve func(context.Context) (string, error)
+	zoneID  string
+	fqdn    string
+	proxied bool
+	logger  *slog.Logger
+}
+
+func newUpdater(ctx context.Context, api *cloudflare.Client, cfg config, logger *slog.Logger) (*updater, error) {
+	list, err := api.Zones.List(ctx, zones.ZoneListParams{
+		Name: cloudflare.String(cfg.zone),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("getting zones: %w", err)
+	}
+	if len(list.Result) == 0 {
+		return nil, fmt.Errorf("zone not found: %s", cfg.zone)
+	}
+	if list.Result[0].Name != cfg.zone {
+		return nil, fmt.Errorf("zone name mismatch: %s != %s", list.Result[0].Name, cfg.zone)
+	}
+
+	return &updater{
+		api:     api,
+		resolve: resolveIP,
+		zoneID:  list.Result[0].ID,
+		fqdn:    cfg.fqdn,
+		proxied: cfg.proxied,
+		logger:  logger,
+	}, nil
+}
+
+// Refresh resolves the current public address and reconciles the record with
 // it. The lookup happens on every pass: an address read once at startup goes
 // stale the moment the ISP hands out a new lease, which is the one thing a
 // dynamic DNS client exists to notice.
-func refresh(ctx context.Context, api *cloudflare.Client, name, zone string, proxied bool, logger *slog.Logger) error {
-	ip, err := resolveIP(ctx)
+func (u *updater) Refresh(ctx context.Context) error {
+	ip, err := u.resolve(ctx)
 	if err != nil {
 		return fmt.Errorf("getting IP address: %w", err)
 	}
-	return update(ctx, api, ip, name, zone, proxied, logger.With("ip", ip))
+	return u.reconcile(ctx, ip, u.logger.With("ip", ip))
 }
 
-func update(ctx context.Context, api *cloudflare.Client, ip, name, zone string, proxied bool, logger *slog.Logger) error {
-	zones, err := api.Zones.List(ctx, zones.ZoneListParams{
-		Name: cloudflare.String(zone),
-	})
-
-	if err != nil {
-		return fmt.Errorf("getting zones: %w", err)
-	}
-
-	if len(zones.Result) == 0 {
-		return fmt.Errorf("zone not found: %s", zone)
-	}
-
-	if zones.Result[0].Name != zone {
-		return fmt.Errorf("zone name mismatch: %s != %s", zones.Result[0].Name, zone)
-	}
-
-	zoneID := zones.Result[0].ID
-
-	records, err := api.DNS.Records.List(ctx, dns.RecordListParams{
-		ZoneID: cloudflare.String(zoneID),
+func (u *updater) reconcile(ctx context.Context, ip string, logger *slog.Logger) error {
+	records, err := u.api.DNS.Records.List(ctx, dns.RecordListParams{
+		ZoneID: cloudflare.String(u.zoneID),
 		Name: cloudflare.F(dns.RecordListParamsName{
-			Exact: cloudflare.String(name + "." + zone),
+			Exact: cloudflare.String(u.fqdn),
 		}),
 		Type: cloudflare.F(dns.RecordListParamsTypeA),
 	})
@@ -146,38 +234,32 @@ func update(ctx context.Context, api *cloudflare.Client, ip, name, zone string, 
 		return fmt.Errorf("listing DNS records: %w", err)
 	}
 
-	desiredName := name + "." + zone
-	var (
-		recordID       string
-		currentIP      string
-		currentProxied bool
-		found          bool
-	)
+	var recordID string
+	var upToDate bool
 	for _, record := range records.Result {
-		if record.Type == "A" && record.Name == desiredName {
-			found = true
-			recordID = record.ID
-			currentIP = record.Content
-			currentProxied = record.Proxied
-			break
+		if record.Name != u.fqdn {
+			continue
 		}
+		recordID = record.ID
+		upToDate = record.Content == ip && record.Proxied == u.proxied
+		break
 	}
 
-	if found && currentIP == ip && currentProxied == proxied {
+	if recordID != "" && upToDate {
 		logger.Info("no changes")
 		return nil
 	}
 
 	comment := "Updated by ddnsd on " + time.Now().Format(time.RFC3339)
 	if recordID != "" {
-		_, err := api.DNS.Records.Update(ctx, recordID, dns.RecordUpdateParams{
-			ZoneID: cloudflare.String(zoneID),
+		_, err := u.api.DNS.Records.Update(ctx, recordID, dns.RecordUpdateParams{
+			ZoneID: cloudflare.String(u.zoneID),
 			Body: dns.RecordUpdateParamsBody{
 				Type:    cloudflare.F(dns.RecordUpdateParamsBodyTypeA),
-				Name:    cloudflare.String(name),
+				Name:    cloudflare.String(u.fqdn),
 				Content: cloudflare.String(ip),
 				Comment: cloudflare.String(comment),
-				Proxied: cloudflare.F(proxied),
+				Proxied: cloudflare.F(u.proxied),
 				TTL:     cloudflare.F(dns.TTL(1)),
 			},
 		})
@@ -185,28 +267,30 @@ func update(ctx context.Context, api *cloudflare.Client, ip, name, zone string, 
 			return fmt.Errorf("updating DNS record: %w", err)
 		}
 		logger.Info("updated DNS record")
-	} else {
-		_, err = api.DNS.Records.New(ctx, dns.RecordNewParams{
-			ZoneID: cloudflare.String(zoneID),
-			Body: dns.RecordNewParamsBody{
-				Type:    cloudflare.F(dns.RecordNewParamsBodyTypeA),
-				Name:    cloudflare.String(name),
-				Content: cloudflare.String(ip),
-				Comment: cloudflare.String(comment),
-				Proxied: cloudflare.F(proxied),
-				TTL:     cloudflare.F(dns.TTL(1)),
-			},
-		})
-		if err != nil {
-			return fmt.Errorf("creating DNS record: %w", err)
-		}
-
-		logger.Info("created DNS record")
+		return nil
 	}
+
+	_, err = u.api.DNS.Records.New(ctx, dns.RecordNewParams{
+		ZoneID: cloudflare.String(u.zoneID),
+		Body: dns.RecordNewParamsBody{
+			Type:    cloudflare.F(dns.RecordNewParamsBodyTypeA),
+			Name:    cloudflare.String(u.fqdn),
+			Content: cloudflare.String(ip),
+			Comment: cloudflare.String(comment),
+			Proxied: cloudflare.F(u.proxied),
+			TTL:     cloudflare.F(dns.TTL(1)),
+		},
+	})
+	if err != nil {
+		return fmt.Errorf("creating DNS record: %w", err)
+	}
+	logger.Info("created DNS record")
 	return nil
 }
 
-func getIP(ctx context.Context) (string, error) {
+// resolveIP asks Cloudflare's whoami service which address this host appears to
+// come from.
+func resolveIP(ctx context.Context) (string, error) {
 	m := dnsclient.NewMsg("whoami.cloudflare.", dnsclient.TypeTXT, dnsclient.ClassCHAOS)
 
 	in, err := dnsclient.Exchange(ctx, m, "udp", "1.1.1.1:53")
@@ -225,26 +309,4 @@ func getIP(ctx context.Context) (string, error) {
 		return ip, fmt.Errorf("could not determine IP address: %s", ip)
 	}
 	return ip, nil
-}
-
-func getOSHostname() string {
-	name, err := os.Hostname()
-	if err != nil {
-		slog.Error("failed to get OS hostname", "error", err.Error())
-		os.Exit(1)
-	}
-	return strings.ToLower(name)
-}
-
-func defaultInterval() time.Duration {
-	envInterval := os.Getenv("DDNSD_INTERVAL")
-	if envInterval == "" {
-		return 5 * time.Minute
-	}
-	d, err := time.ParseDuration(envInterval)
-	if err != nil {
-		slog.Error("invalid interval format", "error", err.Error(), "interval", envInterval)
-		os.Exit(1)
-	}
-	return d
 }

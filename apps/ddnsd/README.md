@@ -35,52 +35,52 @@ go build
 
 ## ⚙ Configuration
 
-Set up the required environment variables or use command-line flags to configure `ddnsd`:
+Configure `ddnsd` with environment variables or flags. Flags win over the
+environment.
 
-- `CLOUDFLARE_DNS_NAME`: DNS record name (or `@` for the zone apex) (e.g. `home`, `server1`, `@`)
-- `CLOUDFLARE_ZONE_NAME`: Your Cloudflare zone name (e.g., yourdomain.com)
-- and one of the following:
-  - `CLOUDFLARE_API_TOKEN`: Your Cloudflare API token
-  - `CLOUDFLARE_API_TOKEN_PATH`: Path to a file containing your Cloudflare API token
+| Environment variable | Flag | Meaning |
+| --- | --- | --- |
+| `CLOUDFLARE_DNS_ZONE` | `-zone` | Cloudflare zone name, e.g. `yourdomain.com` (required) |
+| `CLOUDFLARE_DNS_NAME` | `-name` | Record name, or `@` for the zone apex (default: the OS hostname) |
+| `CLOUDFLARE_API_TOKEN` | `-token` | Cloudflare API token |
+| `CLOUDFLARE_API_TOKEN_FILE` | `-token-file` | Path to a file containing the token |
+| `DDNSD_INTERVAL` | `-interval` | Time between updates, e.g. `30s`, `5m`, `1h` (default `5m`) |
+| — | `-proxied` | Enable the Cloudflare proxy (orange cloud) |
+| — | `-once` | Update once and exit |
 
-Alternatively, you can use flags:
+One of `-token` or `-token-file` is required.
 
 ```bash
-./ddnsd -token-path="/var/secrets/token" -name="home" -zone="yourdomain.com"
+./ddnsd -token-file=/var/secrets/token -name=home -zone=yourdomain.com
 ```
 
 ## 📘 Usage
-
-Start `ddnsd` with the desired configuration.
 
 ```bash
 Usage of ddnsd:
   -interval duration
         Interval between updates (e.g., 30s, 5m, 1h) (default 5m0s)
   -name string
-        DNS record name (or @ for the zone apex)
+        DNS record name, or @ for the zone apex (default: OS hostname)
   -once
-        Run the update once and exit (default true)
+        Run the update once and exit
   -proxied
-        Enable Cloudflare proxy (default false)
+        Enable Cloudflare proxy
   -token string
         Cloudflare API token (required)
-  -token-path string
-        Path to file containing Cloudflare API token
-  -verbose
-        Enable verbose logging
+  -token-file string
+        Path to a file containing the Cloudflare API token
   -zone string
         Cloudflare zone name (required)
-
 ```
 
-To update your DNS record and exit:
+Update the record once and exit:
 
 ```bash
-./ddnsd
+./ddnsd -once
 ```
 
-To run `ddnsd` in a loop with a specified interval (default is 5 minutes):
+Run in a loop with a custom interval:
 
 ```bash
 ./ddnsd -interval=30m
@@ -88,7 +88,13 @@ To run `ddnsd` in a loop with a specified interval (default is 5 minutes):
 
 ## 🔧 Troubleshooting
 
-If you encounter any issues, first ensure your API token has the necessary permissions to list zones and edit DNS records. Check the verbose output (-verbose) for clues and verify your network connectivity.
+`ddnsd` logs JSON to stdout. Startup failures — a missing zone, an unreadable
+token file, a zone the token cannot see — are reported and exit non-zero; a
+failed update mid-loop is logged and retried on the next pass.
+
+If records are not updating, confirm the API token can list zones and edit DNS
+records in the target zone, and that the host can reach `1.1.1.1:53` over UDP —
+that is where `ddnsd` asks for its own address.
 
 ## 🤝 Contributing
 
