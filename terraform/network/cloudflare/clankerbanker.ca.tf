@@ -1,8 +1,9 @@
 # A zone Spindrift mints in with `reaches: [public]`, serving a single App at
-# the apex (`apps/clankerbanker`). The registrar is Porkbun; the zone is
-# created here; the two steps this root cannot do are at the registrar, by
-# hand: point the NS records at `name_servers` below, then publish the
-# `ds_record` output so DNSSEC leaves pending.
+# the apex (`apps/clankerbanker`). The zone already exists in the account —
+# this adopts it rather than creating it, via the `import` block below. The
+# registrar is Porkbun; the two steps this root cannot do are at the
+# registrar, by hand: point the NS records at `name_servers` below, then
+# publish the `ds_record` output so DNSSEC leaves pending.
 locals {
   clankerbanker_ca_zone_settings = {
     always_online            = "on"
@@ -15,6 +16,15 @@ locals {
     tls_1_3                  = "on"
     websockets               = "on"
   }
+}
+
+data "cloudflare_zones" "clankerbanker_ca" {
+  name = "clankerbanker.ca"
+}
+
+import {
+  to = cloudflare_zone.clankerbanker_ca
+  id = data.cloudflare_zones.clankerbanker_ca.result[0].id
 }
 
 resource "cloudflare_zone" "clankerbanker_ca" {
