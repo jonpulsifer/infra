@@ -17,7 +17,7 @@ spec:
           restartPolicy: Never
           containers:
             - name: push
-              image: ghcr.io/jonpulsifer/unifi-cert-push:latest@sha256:0000000000000000000000000000000000000000000000000000000000000000
+              image: ghcr.io/jonpulsifer/unifi-cert-push:latest@sha256:84ce6ecd2e7814ce8184eff7871bd210ba8a9662ac18fbdcdb49c5ff5e8e2d34
               command: ["/bin/sh", "/scripts/push.sh"]
               env:
                 - name: GATEWAY
