@@ -78,6 +78,13 @@ describe('clankerbanker', () => {
     expect(sol.asset).toBe('EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v');
   });
 
+  test('the advertised resource is the https public origin, not the tunnel http', async () => {
+    for (const path of ['/fortune', '/ping']) {
+      const body = await challenge(path);
+      expect(body.resource.url).toBe(`https://clankerbanker.ca${path}`);
+    }
+  });
+
   test('ping costs $0.0001', async () => {
     const body = await challenge('/ping');
     for (const accept of body.accepts) {
