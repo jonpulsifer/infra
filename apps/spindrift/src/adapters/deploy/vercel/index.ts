@@ -43,6 +43,9 @@
  * create rather than blocking the deploy — which is exactly the behaviour a
  * re-run had before the query existed.
  */
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { dirname, join } from 'node:path';
 import type {
   StoreAdapter,
   TargetAdapter,
@@ -151,6 +154,115 @@ export interface VercelAdapterOptions {
   readonly pollIntervalMs?: number;
   /** How long an attempt may run before it is `TIMEOUT` (§6). */
   readonly timeoutMs?: number;
+  /**
+   * How a `vercel-output` artifact is deployed — the platform's own CLI, over
+   * the staged tree. Injected so a test stands a fake in front of the real
+   * `vercel deploy`; unset in production, where {@link runVercelCli} spawns it.
+   */
+  readonly deployPrebuilt?: PrebuiltDeploy;
+}
+
+/** What {@link PrebuiltDeploy} is handed to deploy the staged tree with. */
+export interface PrebuiltDeployInput {
+  /** The extracted deployment tree the CLI runs against — its working directory. */
+  readonly directory: string;
+  readonly project: string;
+  readonly team: string;
+  /** The platform bearer, as `VERCEL_TOKEN` rather than an argv the process list shows. */
+  readonly token: string;
+  /** Stamped onto the deployment, so `findDeployment` can adopt it afterwards. */
+  readonly meta: Readonly<Record<string, string>>;
+}
+
+export type PrebuiltDeployResult = { ok: true } | { ok: false; detail: string };
+
+export type PrebuiltDeploy = (
+  input: PrebuiltDeployInput,
+) => Promise<PrebuiltDeployResult>;
+
+/**
+ * Deploy the staged Build Output tree with the platform's own CLI (§4).
+ *
+ * The CLI is what `vercel deploy --prebuilt` was written to be — it uploads the
+ * `.vercel/output` tree *and* the files each function's `filePathMap` names from
+ * the directory it runs in, which is the whole reason the build stages both
+ * beside each other. Reimplementing that against the raw API is what this
+ * replaces: the CLI batches the upload the API made one request per file, and
+ * `--no-wait` hands the deployment straight back for {@link findDeployment} to
+ * adopt and `awaitVerdict` to poll, so the platform's own answer is still what
+ * the verdict comes from.
+ *
+ * The token rides in the environment rather than `--token`, so it never reaches
+ * a process list; `HOME` is the writable working directory because the CLI
+ * writes a `.vercel` scratch there and the container's root filesystem is
+ * read-only.
+ */
+async function runVercelCli(
+  input: PrebuiltDeployInput,
+): Promise<PrebuiltDeployResult> {
+  const meta = Object.entries(input.meta).flatMap(([key, value]) => [
+    '--meta',
+    `${key}=${value}`,
+  ]);
+  // The tree is named with `--cwd` rather than by spawning in it: `bunx`
+  // resolves `vercel` from the node_modules of the directory it runs in, and the
+  // extracted tree has none — running there would send `bunx` to the network for
+  // a CLI that is already installed. So this inherits the controller's own
+  // directory, where the dependency resolves, and points the CLI at the tree.
+  // `HOME` is the writable tree because the CLI writes a `.vercel` scratch and
+  // the container's root filesystem is read-only.
+  const proc = Bun.spawn(
+    [
+      'bunx',
+      'vercel',
+      'deploy',
+      '--prebuilt',
+      '--prod',
+      '--yes',
+      '--no-wait',
+      '--cwd',
+      input.directory,
+      '--scope',
+      input.team,
+      '--project',
+      input.project,
+      ...meta,
+    ],
+    {
+      env: {
+        ...process.env,
+        VERCEL_TOKEN: input.token,
+        VERCEL_TELEMETRY_DISABLED: '1',
+        HOME: input.directory,
+      },
+      stdout: 'pipe',
+      stderr: 'pipe',
+    },
+  );
+  const stderr = await new Response(proc.stderr).text();
+  const code = await proc.exited;
+  if (code === 0) return { ok: true };
+  return {
+    ok: false,
+    detail: stderr.trim().slice(-2000) || `vercel deploy exited ${code}`,
+  };
+}
+
+/**
+ * Write a fetched artifact's files to a fresh directory the CLI runs against.
+ *
+ * The bundle reader roots every path at the site with a leading slash; a tree
+ * on disk is relative, so the slash comes off — and what lands is the exact
+ * tree the build staged: `.vercel/output/` beside the files a filePathMap names.
+ */
+async function extractTree(files: readonly BundleFile[]): Promise<string> {
+  const dir = await mkdtemp(join(tmpdir(), 'spindrift-vercel-'));
+  for (const file of files) {
+    const path = join(dir, file.path.replace(/^\/+/, ''));
+    await mkdir(dirname(path), { recursive: true });
+    await writeFile(path, file.bytes);
+  }
+  return dir;
 }
 
 /** How the operator would name the platform in a sentence about it. */
@@ -167,17 +279,6 @@ const SERVICE_NAME = 'Vercel';
  * the real API.
  */
 export const DEFAULT_ENDPOINT = 'https://api.vercel.com';
-
-/**
- * Where a prebuilt deployment's files are addressed from.
- *
- * The platform's builder writes into `.vercel/output` and its reader expects
- * that path on the deployment, so the two have to agree. The artifact carries
- * the directory's contents rather than the directory, which is what keeps a
- * `vercel-output` artifact readable as the ordinary single-layer tar every
- * other files-shaped artifact is.
- */
-const BUILD_OUTPUT_PREFIX = '.vercel/output/';
 
 /**
  * The `meta` keys `observe` reads what is serving back out of.
@@ -229,9 +330,11 @@ export class VercelDeployAdapter implements DeployAdapter {
   readonly artifactTypes: readonly ArtifactType[] = ['vercel-output', 'files'];
 
   private readonly events: DeployEvents;
+  private readonly deployPrebuilt: PrebuiltDeploy;
 
   constructor(private readonly options: VercelAdapterOptions) {
     this.events = deployEvents(options.now);
+    this.deployPrebuilt = options.deployPrebuilt ?? runVercelCli;
   }
 
   async *apply(
@@ -326,12 +429,72 @@ export class VercelDeployAdapter implements DeployAdapter {
     }
     yield this.events.log(`the bundle holds ${files.length} files`, project);
 
-    const uploaded = await this.upload(
-      http,
-      connection,
-      files,
-      desired.artifact.type === 'vercel-output' ? BUILD_OUTPUT_PREFIX : '',
-    );
+    // A `vercel-output` artifact is the platform's own Build Output tree, and
+    // the platform's own CLI is what deploys it — it uploads that tree and the
+    // files each function's filePathMap names, both of which the build staged
+    // beside each other. A supplied `files` upload has no such tree and is
+    // uploaded and created against the API directly, served as the files it is.
+    if (desired.artifact.type === 'vercel-output') {
+      const directory = await extractTree(files);
+      let result: PrebuiltDeployResult;
+      try {
+        result = await this.deployPrebuilt({
+          directory,
+          project,
+          team: connection.team,
+          token: await this.options.token(),
+          meta: {
+            [DEPLOY_META]: desired.deploy,
+            [DIGEST_META]: desired.artifact.digest,
+          },
+        });
+      } finally {
+        await rm(directory, { recursive: true, force: true });
+      }
+      if (!result.ok) {
+        yield this.events.status('FAILED', {
+          resource: project,
+          reason: 'INTERNAL',
+        });
+        return internalFailure(result.detail);
+      }
+      // `--no-wait` hands the deployment back before there is an id in hand, so
+      // the one it just stamped with this Deploy's meta is read back — the same
+      // query the idempotency check above runs, now finding what was just made.
+      const made = await this.findDeployment(
+        http,
+        connection,
+        project,
+        desired.deploy,
+      );
+      if (made?.uid === undefined) {
+        const failure = cloudWriteFailure(
+          missing(
+            'vercel deploy created a deployment the API did not then list',
+          ),
+          ref,
+        );
+        yield this.events.status('FAILED', {
+          resource: project,
+          reason: failure.reason,
+        });
+        return failure;
+      }
+      yield this.events.log(
+        `created deployment ${made.uid} via vercel deploy`,
+        project,
+      );
+      return yield* this.release(
+        http,
+        connection,
+        project,
+        made.uid,
+        ref,
+        desired,
+      );
+    }
+
+    const uploaded = await this.upload(http, connection, files);
     if (uploaded.ok === false) {
       const failure = cloudWriteFailure(uploaded.failure, ref);
       yield this.events.status('FAILED', {
@@ -621,7 +784,6 @@ export class VercelDeployAdapter implements DeployAdapter {
     http: CloudHttp,
     connection: VercelAdapterConnection,
     files: readonly BundleFile[],
-    prefix: string,
   ): Promise<Outcome<readonly DeploymentFile[]>> {
     const referenced: DeploymentFile[] = [];
     for (const file of files) {
@@ -637,17 +799,11 @@ export class VercelDeployAdapter implements DeployAdapter {
       });
       if (!uploaded.ok) return { ok: false, failure: uploaded };
       // Rooted at the site with a leading slash is what the bundle reader
-      // produces and what the other files backend wants; a deployment path is
-      // relative to the deployment root, so the slash comes off here.
-      //
-      // The prefix is what tells the two shapes apart, and it is the whole of
-      // the difference on this side. A prebuilt deployment is addressed by the
-      // paths the platform's own builder wrote — `.vercel/output/config.json`,
-      // `.vercel/output/functions/…` — because that is where its reader looks
-      // for them; the artifact holds that tree's *contents*, so the prefix goes
-      // back on here rather than being carried through the registry.
+      // produces; a deployment path is relative to the deployment root, so the
+      // slash comes off. A supplied static upload is the files it is, served at
+      // the root they sit at.
       referenced.push({
-        file: prefix + file.path.replace(/^\/+/, ''),
+        file: file.path.replace(/^\/+/, ''),
         sha,
         size: file.bytes.byteLength,
       });
@@ -655,7 +811,14 @@ export class VercelDeployAdapter implements DeployAdapter {
     return { ok: true, value: referenced };
   }
 
-  /** Create the production deployment these files are. */
+  /**
+   * Create the production deployment a supplied static upload is.
+   *
+   * Only a `files` artifact reaches here — a `vercel-output` build is deployed
+   * by the CLI in `apply` — so this always says "a build did not happen": the
+   * platform is told to detect nothing, install nothing and build nothing, and
+   * serve the uploaded files as they are.
+   */
   private async create(
     http: CloudHttp,
     connection: VercelAdapterConnection,
@@ -673,17 +836,6 @@ export class VercelDeployAdapter implements DeployAdapter {
         // is there to give. What is being deployed is a finished tree, so there
         // is nothing here for detection to be right or wrong about.
         skipAutoDetectionConfirmation: '1',
-        // What `vercel deploy --prebuilt` is, on the wire: the uploaded files
-        // are a Build Output API tree rather than a project, so the platform
-        // serves them as the build it would otherwise have produced —
-        // functions, routing and caching included — instead of trying to build
-        // them.
-        //
-        // A query parameter, and not one the public REST reference documents:
-        // it is what the first-party client sends
-        // (`packages/client/src/utils/query-string.ts`), which is the contract
-        // that actually holds.
-        ...(desired.artifact.type === 'vercel-output' ? { prebuilt: '1' } : {}),
       },
       body: {
         name: project,
@@ -700,26 +852,16 @@ export class VercelDeployAdapter implements DeployAdapter {
         },
         // §4's separation, in the platform's own vocabulary: nothing to detect,
         // nothing to install, nothing to build, and the uploaded tree served as
-        // it is. A build here would be the second build §4 forbids.
-        //
-        // **Only for a plain files artifact.** A prebuilt deployment already
-        // says all of this by being prebuilt — the platform runs no build to
-        // configure — and these are the *project's* persistent settings rather
-        // than this deployment's. Sending them on every prebuilt deploy would
-        // keep resetting the project's framework to "Other", which is the one
-        // setting an operator opening the dashboard would most reasonably
-        // expect to describe what is deployed.
-        ...(desired.artifact.type === 'vercel-output'
-          ? {}
-          : {
-              projectSettings: {
-                framework: null,
-                buildCommand: null,
-                installCommand: null,
-                devCommand: null,
-                outputDirectory: null,
-              },
-            }),
+        // it is. These are the *project's* persistent settings — the framework
+        // an operator opening the dashboard sees — so they are set once for what
+        // is, on this create, a project with no build behind it.
+        projectSettings: {
+          framework: null,
+          buildCommand: null,
+          installCommand: null,
+          devCommand: null,
+          outputDirectory: null,
+        },
       },
     });
     if (!created.ok) return { ok: false, failure: created };
