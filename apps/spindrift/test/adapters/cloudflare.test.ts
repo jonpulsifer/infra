@@ -51,6 +51,8 @@ function read(fetch: (request: Request) => Promise<Response>) {
 describe('readCloudflareAccount', () => {
   test('lists the account’s zones, Workers subdomain and Pages projects', async () => {
     const far = api({
+      'GET /client/v4/accounts/account-1': () =>
+        ok({ id: 'account-1', name: 'Folly Mountain Laboratories' }),
       'GET /client/v4/zones': () =>
         ok([
           { id: 'zone-1', name: 'example.test', status: 'active' },
@@ -66,6 +68,7 @@ describe('readCloudflareAccount', () => {
 
     expect(found).toEqual({
       kind: 'cloudflare-account',
+      accountName: 'Folly Mountain Laboratories',
       zones: [
         { name: 'example.test', id: 'zone-1', status: 'active' },
         { name: 'other.test', id: 'zone-2', status: 'pending' },
@@ -114,6 +117,26 @@ describe('readCloudflareAccount', () => {
     // The other two answered, and one refusal must not take them with it.
     expect(found.workersSubdomain).toBe('acme');
     expect(found.pagesProjects).toEqual(['site']);
+  });
+
+  test('a refused account read costs only the pretty name', async () => {
+    // A token scoped to zones alone cannot read the account object; the
+    // heading falls back to the vessel's name and nothing turns red.
+    const far = api({
+      'GET /client/v4/accounts/account-1': () =>
+        Response.json(
+          { success: false, errors: [{ code: 9109, message: 'unauthorized' }] },
+          { status: 403 },
+        ),
+      'GET /client/v4/zones': () =>
+        ok([{ id: 'zone-1', name: 'example.test', status: 'active' }]),
+    });
+
+    const found = await read(far.fetch);
+
+    expect(found.accountName).toBeNull();
+    expect(found.unreadable).toBeUndefined();
+    expect(found.zones).toHaveLength(1);
   });
 
   test('the Pages listing sends no pagination options', async () => {

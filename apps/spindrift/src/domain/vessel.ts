@@ -443,6 +443,13 @@ export interface CloudflareZone {
  */
 export interface CloudflareAccountDiscovery {
   readonly kind: 'cloudflare-account';
+  /**
+   * The account's own display name, as the platform states it — the vessel's
+   * name is the operator's label for the connection, and the two need not
+   * agree. `null` when the read was refused or the build predates the field;
+   * a missing pretty name is a cosmetic gap, never an `unreadable` entry.
+   */
+  readonly accountName?: string | null;
   /** Every zone in this account, whatever surface serves it. */
   readonly zones: readonly CloudflareZone[] | null;
   /** This account's `workers.dev` subdomain, when Workers is switched on. */
