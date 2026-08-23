@@ -393,6 +393,25 @@ describe('§9: the platform names its own', () => {
   });
 
   test('a name already on the project is the state being asked for', async () => {
+    // The refusal for a duplicate is undocumented, so the adapter does not read
+    // the status code: it reads the domain back. A name that is there and
+    // serving is the state being asked for, whatever the POST answered.
+    const { adapter } = adapterFor({
+      domainAnswer: { status: 409, body: null },
+      domainsAlready: { [PROJECT]: ['shop.example.com'] },
+    });
+    const { verdict } = await drain(
+      adapter.apply(
+        TARGET,
+        desired({ hostname: { canonical: '', vanity: 'shop.example.com' } }),
+      ),
+    );
+    expect(verdict.phase).toBe('LIVE');
+  });
+
+  test('a name that is not there makes the refusal the failure', async () => {
+    // Nothing to read back, so the POST's own refusal is the answer. Reporting
+    // LIVE here would announce a name that is on no project at all.
     const { adapter } = adapterFor({
       domainAnswer: { status: 409, body: null },
     });
@@ -402,7 +421,39 @@ describe('§9: the platform names its own', () => {
         desired({ hostname: { canonical: '', vanity: 'shop.example.com' } }),
       ),
     );
+    expect(verdict.phase).toBe('FAILED');
+  });
+
+  test('a certificate still issuing is said, and does not fail the deploy', async () => {
+    // `initializing` is the status of every first attach. The site is already
+    // serving on its own pages.dev address, so holding the deploy open on
+    // Cloudflare's clock would be waiting for something else — but a log line
+    // saying the name is on the project would be describing one that answers
+    // nothing.
+    const { adapter } = adapterFor({ domainStatus: 'initializing' });
+    const { verdict, events } = await drain(
+      adapter.apply(
+        TARGET,
+        desired({ hostname: { canonical: '', vanity: 'shop.example.com' } }),
+      ),
+    );
     expect(verdict.phase).toBe('LIVE');
+    expect(JSON.stringify(events)).toContain('initializing');
+    expect(JSON.stringify(events)).not.toContain('is serving on this project');
+  });
+
+  test('a domain Cloudflare refused fails the deploy rather than going live', async () => {
+    // The defect this replaces: any non-error HTTP response was success, so a
+    // deploy went LIVE announcing a vanity name that resolved to nothing —
+    // the one failure nobody can debug, because every surface says it worked.
+    const { adapter } = adapterFor({ domainStatus: 'blocked' });
+    const { verdict } = await drain(
+      adapter.apply(
+        TARGET,
+        desired({ hostname: { canonical: '', vanity: 'shop.example.com' } }),
+      ),
+    );
+    expect(verdict.phase).toBe('FAILED');
   });
 });
 
