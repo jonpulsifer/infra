@@ -31,7 +31,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: netbench
-          image: ghcr.io/jonpulsifer/netbench:latest@sha256:e6826e961fbee01f5cdfb53d2a62be8e1395e9e87905ead01049a4a6a8053232
+          image: ghcr.io/jonpulsifer/netbench:latest@sha256:e96e16df6d6fa5cfa404fba886af266e030fb247549ddea23156062bc6dbf793
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
