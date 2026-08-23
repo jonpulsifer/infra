@@ -1,9 +1,10 @@
 /**
  * The hosted-CI build route (§4).
  *
- * §4 puts the default build "somewhere with a fast pipe rather than at home
- * behind Starlink", and §15 puts the run in the connected repository: the
- * connected repo owns its Actions minutes, while a **reusable workflow the
+ * §4 puts the default build somewhere with a fast pipe — an image push is
+ * upload, the direction a home uplink is weakest — and §15 puts the run in
+ * the connected repository: the connected repo owns its Actions minutes,
+ * while a **reusable workflow the
  * manifest names** plus a workflow-ref-scoped cloud identity hold the
  * machinery. Everything awkward about this file follows from that one
  * arrangement.

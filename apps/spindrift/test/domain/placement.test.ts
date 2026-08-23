@@ -274,7 +274,7 @@ describe('an attached datastore constrains where its App can go', () => {
 
   test('at attach time, the cloud becomes a non-candidate', () => {
     // §11: "In-cluster datastores stay cluster-local in v1" — tunnelling a
-    // database over a satellite uplink is the cloud-native path degraded. The
+    // database across sites is the cloud-native path degraded. The
     // consequence lands at attach time, not at deploy time.
     const placement = resolvePlacement(
       [

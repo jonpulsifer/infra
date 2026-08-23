@@ -347,7 +347,7 @@ export interface TargetLoopOptions {
  * Run the loop until aborted.
  *
  * Poll, not watch. Only one of the three backends has a watch to subscribe to,
- * and a watch held across a satellite uplink dies quietly and stops delivering
+ * and a watch held across a WAN tunnel dies quietly and stops delivering
  * without saying so — which is exactly the failure mode a capability refresh
  * must not have.
  */

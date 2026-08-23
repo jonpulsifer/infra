@@ -965,7 +965,7 @@ describe('drift is surfaced, never corrected (§6)', () => {
 
     const pass = await runDeployPass(context(adapter));
     // An uplink blip is not a developer changing something, and reporting it as
-    // drift would make every satellite hiccup look like a person.
+    // drift would make every network hiccup look like a person.
     expect(
       pass.drift.find((entry) => entry.deployId === deploy.id),
     ).toBeUndefined();
