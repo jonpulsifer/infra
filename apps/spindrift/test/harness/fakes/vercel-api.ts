@@ -125,6 +125,32 @@ export class FakeVercel {
     return this.projects.has(project);
   }
 
+  /**
+   * Register the deployment `vercel deploy` would have created.
+   *
+   * The CLI path does not POST `/v13/deployments`, so an injected `deployPrebuilt`
+   * fake calls this to stand up the deployment the adapter then finds by its
+   * meta and polls to `READY` — the same shape `create` produces, without the
+   * upload contract, because the CLI owns the upload on that path.
+   */
+  recordPrebuiltDeploy(input: {
+    project: string;
+    meta: Record<string, string>;
+  }): string {
+    this.projects.add(input.project);
+    const id = `dpl_${this.next++}`;
+    this.deployments.set(id, {
+      id,
+      project: input.project,
+      url: `${input.project}.vercel.app`,
+      meta: input.meta,
+      files: [],
+      prebuilt: true,
+      pending: this.options.pollsBeforeSettling ?? 1,
+    });
+    return id;
+  }
+
   /** The deployment currently serving production on one project, if any. */
   serving(project: string): FakeDeployment | undefined {
     const id = this.production.get(project);

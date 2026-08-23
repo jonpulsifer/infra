@@ -847,69 +847,62 @@ jobs:
             exit 1
           fi
 
-          # **The output is not self-contained, and this makes it so.** Each
-          # function's `.vc-config.json` carries a `filePathMap` naming the files
-          # it reads at runtime — its traced `node_modules`, its `.next` chunks —
-          # and every one of those paths is in the *project*, outside
-          # `.vercel/output` entirely. `vercel deploy --prebuilt` resolves them
-          # by reading the project it is run in; this route ships only
-          # `.vercel/output`, so left as built every reference dangles and the
-          # platform fails to `lstat` it under `/vercel/path0` — a green build
-          # that deploys a function carrying none of its own code. (A Next.js app
-          # with an OpenTelemetry dependency was the first to reach here: 510
-          # referenced files, none of them in the tree.) So copy each named file
-          # in at the path its map gives, `-L` to dereference as the copy below
-          # does, and the tree the deref and push carry becomes the whole of what
-          # the function needs. A named file the build did not leave behind is a
-          # tree that can never be made whole, so it fails here rather than 500ing
-          # in production.
+          # **Stage the tree `vercel deploy --prebuilt` needs to run against.**
+          # The deploy adapter runs the platform's own CLI over this artifact
+          # rather than reimplementing its upload, and the CLI reads two trees
+          # from the directory it runs in. The Build Output API tree —
+          # `config.json`, `functions/`, `static/` — stays under `.vercel/output/`
+          # where the CLI's `--prebuilt` looks for it. But each function's
+          # `.vc-config.json` also carries a `filePathMap` of
+          # <path-in-function> -> <path-in-project>, naming its traced
+          # `node_modules` and `.next` files, which live in the *project* and
+          # outside `.vercel/output`; the CLI resolves each against the project
+          # root, so they are staged at the root beside `.vercel/output`. (A
+          # Next.js app with an OpenTelemetry dependency was the first to reach
+          # here — its functions referenced 510 files none of which were in the
+          # tree.)
+          #
+          # Symlinks are dereferenced (`-L`) throughout because `bundle.ts`
+          # admits regular files only: Next dedups its RSC and not-found
+          # functions with `.func` symlinks, and a filePathMap can name a
+          # symlinked dependency — either one dropped from the artifact would
+          # deploy green and 404 the routes that shared it.
+          staging="${RUNNER_TEMP}/vercel-deploy"
+          rm -rf "$staging"
+          mkdir -p "$staging/.vercel/output"
+          cp -RL "${output}/." "$staging/.vercel/output/"
+
           maps="${RUNNER_TEMP}/vercel-filepathmap.txt"
           : > "$maps"
           # `functions/` is absent for a build that renders no function at all —
-          # a purely static site. Enumerating it then is a `find` error under
-          # `pipefail`, not an empty list, so the guard is what lets a
-          # function-less build reach the deref with nothing to copy rather than
-          # failing here. The empty `$maps` above is what the loop reads then.
+          # a purely static site — where enumerating it is a `find` error under
+          # `pipefail` rather than an empty list. The guard lets that build stage
+          # with nothing extra to copy; the empty `$maps` is what the loop reads.
           if [ -d "${output}/functions" ]; then
-            # `LC_ALL=C`, so the sort is by byte and a directory the map names
-            # sorts before the files beneath it. The skip below no-ops a path
-            # already present, which is only correct when the directory is
-            # copied whole *first*; a localed collation could interleave the two
-            # and drop a directory's contents with no error to show for it.
+            # `LC_ALL=C` so the sort is by byte and a directory the map names
+            # sorts before the files beneath it: the skip below no-ops a path
+            # already staged, which is only correct when the directory is copied
+            # whole first — a localed collation could interleave the two and drop
+            # a directory's contents with no error to show for it.
             find "${output}/functions" -name .vc-config.json -print0 |
               while IFS= read -r -d '' cfg; do
                 node -e 'const fs=require("fs");const m=(JSON.parse(fs.readFileSync(process.argv[1],"utf8")).filePathMap)||{};for(const v of Object.values(m))console.log(v)' "$cfg"
               done | LC_ALL=C sort -u > "$maps"
           fi
           while IFS= read -r dep; do
-            if [ -z "$dep" ] || [ -e "${output}/${dep}" ]; then
+            if [ -z "$dep" ] || [ -e "$staging/${dep}" ]; then
               continue
             fi
             if [ ! -e "${SCOPE}/${dep}" ]; then
-              echo "::error::a function's filePathMap names ${dep}, which vercel build did not leave in the tree — the prebuilt output cannot be made self-contained." >&2
+              echo "::error::a function's filePathMap names ${dep}, which vercel build did not leave in the tree — the prebuilt deployment cannot be assembled." >&2
               exit 1
             fi
-            mkdir -p "${output}/$(dirname "$dep")"
-            cp -RL "${SCOPE}/${dep}" "${output}/${dep}"
+            mkdir -p "$staging/$(dirname "$dep")"
+            cp -RL "${SCOPE}/${dep}" "$staging/${dep}"
           done < "$maps"
 
-          # **Symlinks are resolved here, and they have to be.** A framework
-          # that emits the same function under two routes emits one bundle and
-          # symlinks the other at it — Next.js does exactly this for the RSC
-          # and not-found variants. `bundle.ts` admits regular files only and
-          # deliberately skips everything else, so a symlinked `.func` would be
-          # dropped on the way into the artifact and the deployment would 404
-          # on precisely the routes that shared a bundle, having built and
-          # deployed green. The platform's own file list is flat paths and
-          # content hashes with no notion of a link, so materialising each one
-          # is also what the far side expects.
-          deref="${RUNNER_TEMP}/vercel-output"
-          rm -rf "$deref"
-          mkdir -p "$deref"
-          cp -RL "${output}/." "$deref/"
-
           {
-            printf 'context=%s\n' "$deref"
+            printf 'context=%s\n' "$staging"
             printf 'file=%s\n' "$SCRATCHFILE"
           } >> "$GITHUB_OUTPUT"
 

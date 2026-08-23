@@ -217,7 +217,7 @@ describe('“Build with the platform’s own builder”', () => {
     return step.run;
   }
 
-  test('resolves a symlinked function bundle into the exported tree', async () => {
+  test('stages the two trees and dereferences a symlinked function', async () => {
     const workspace = await mkdtemp(join(tmpdir(), 'spindrift-vercel-arm-'));
     try {
       const scope = join(workspace, 'scope');
@@ -226,9 +226,14 @@ describe('“Build with the platform’s own builder”', () => {
       await mkdir(bin, { recursive: true });
       await writeFile(join(scope, 'package.json'), '{}');
 
+      // A file a function's filePathMap will name. It lives in the project,
+      // outside `.vercel/output`, and has to reach the deployment root.
+      await mkdir(join(scope, 'node_modules', 'dep'), { recursive: true });
+      await writeFile(join(scope, 'node_modules', 'dep', 'index.js'), 'dep');
+
       // Stands in for the platform's builder: writes the tree it would write,
       // including the symlinked second copy of one function that is the whole
-      // point of this test.
+      // point of this test, and a `.vc-config.json` naming a project file.
       await writeFile(
         join(bin, 'npx'),
         [
@@ -238,6 +243,7 @@ describe('“Build with the platform’s own builder”', () => {
           'mkdir -p "$out/functions/index.func" "$out/static"',
           'printf \'{"version":3}\' > "$out/config.json"',
           'printf launcher > "$out/functions/index.func/index.js"',
+          'printf \'{"filePathMap":{"node_modules/dep/index.js":"node_modules/dep/index.js"}}\' > "$out/functions/index.func/.vc-config.json"',
           'printf hello > "$out/static/index.html"',
           'ln -s index.func "$out/functions/index.rsc.func"',
           '',
@@ -274,14 +280,37 @@ describe('“Build with the platform’s own builder”', () => {
       const links =
         await Bun.$`find ${outputs.context as string} -type l`.text();
       expect(links.trim()).toBe('');
-      // Present *and* real: a dereference that dropped the link entirely would
-      // pass the assertion above and lose the route just the same.
+      // The Build Output tree is staged under `.vercel/output/`, and the
+      // symlinked function is present *and* real there: a dereference that
+      // dropped the link entirely would pass the assertion above and lose the
+      // route just the same.
       expect(
         await readFile(
-          join(outputs.context as string, 'functions/index.rsc.func/index.js'),
+          join(
+            outputs.context as string,
+            '.vercel/output/functions/index.rsc.func/index.js',
+          ),
           'utf8',
         ),
       ).toBe('launcher');
+
+      // The mapped file is staged at the deployment root — beside
+      // `.vercel/output`, never inside it, which is the path the platform
+      // resolves a function's filePathMap by.
+      expect(
+        await readFile(
+          join(outputs.context as string, 'node_modules/dep/index.js'),
+          'utf8',
+        ),
+      ).toBe('dep');
+      expect(
+        await Bun.file(
+          join(
+            outputs.context as string,
+            '.vercel/output/node_modules/dep/index.js',
+          ),
+        ).exists(),
+      ).toBe(false);
 
       // The framework core resolved reaches the builder as project settings,
       // which is what stops it building the project as a directory of files.

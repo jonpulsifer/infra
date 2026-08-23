@@ -25,6 +25,8 @@ import type {
 } from '../../src/adapters/deploy/contract.ts';
 import { blameFor } from '../../src/adapters/deploy/contract.ts';
 import {
+  type PrebuiltDeploy,
+  type PrebuiltDeployInput,
   projectName,
   VercelDeployAdapter,
 } from '../../src/adapters/deploy/vercel/index.ts';
@@ -82,7 +84,27 @@ const SITE = tarball([
   { name: 'assets/app.css', bytes: bytes('body{}') },
 ]);
 
-function adapterFor(options: FakeVercelOptions = {}): {
+/**
+ * The tree a `vercel-output` artifact is: the Build Output API tree under
+ * `.vercel/output/`, and beside it at the root the files a function's
+ * `filePathMap` names. The CLI is handed this directory verbatim.
+ */
+const OUTPUT_TREE = tarball([
+  { name: '.vercel/output/config.json', bytes: bytes('{"version":3}') },
+  {
+    name: '.vercel/output/functions/index.func/.vc-config.json',
+    bytes: bytes('{"runtime":"nodejs20.x"}'),
+  },
+  {
+    name: 'node_modules/@scope/dep/index.js',
+    bytes: bytes('module.exports = {}'),
+  },
+]);
+
+function adapterFor(
+  options: FakeVercelOptions = {},
+  deployPrebuilt?: PrebuiltDeploy,
+): {
   api: FakeVercel;
   adapter: VercelDeployAdapter;
 } {
@@ -100,6 +122,7 @@ function adapterFor(options: FakeVercelOptions = {}): {
       fetch: api.fetch,
       pollIntervalMs: 1,
       sleep: async () => {},
+      ...(deployPrebuilt === undefined ? {} : { deployPrebuilt }),
     }),
   };
 }
@@ -189,38 +212,64 @@ describe('the platform’s own build output deploys prebuilt', () => {
       },
     });
 
-  test('the deployment is created prebuilt, so the platform serves rather than builds', async () => {
-    const { api, adapter } = adapterFor();
+  /**
+   * The adapter drives the platform's own CLI on this path; the fake stands in
+   * for `vercel deploy`, capturing the directory and inputs it was handed and
+   * registering the deployment the real CLI would create — which the adapter
+   * then finds by its meta and polls to its verdict.
+   */
+  function cliAdapter(): {
+    api: FakeVercel;
+    adapter: VercelDeployAdapter;
+    calls: PrebuiltDeployInput[];
+    trees: string[][];
+  } {
+    const calls: PrebuiltDeployInput[] = [];
+    const trees: string[][] = [];
+    let api!: FakeVercel;
+    const deploy: PrebuiltDeploy = async (input) => {
+      calls.push(input);
+      trees.push(
+        (
+          await Array.fromAsync(
+            // `dot: true` so `.vercel/output/…` is seen — the tree the CLI reads.
+            new Bun.Glob('**/*').scan({ cwd: input.directory, dot: true }),
+          )
+        ).sort(),
+      );
+      api.recordPrebuiltDeploy({ project: input.project, meta: input.meta });
+      return { ok: true };
+    };
+    const built = adapterFor(
+      { bundle: { origin: DEPOT, bytes: OUTPUT_TREE } },
+      deploy,
+    );
+    api = built.api;
+    return { ...built, calls, trees };
+  }
+
+  test('the CLI deploys the staged tree, and the platform’s answer is the verdict', async () => {
+    const { api, adapter } = cliAdapter();
     const { verdict } = await drain(adapter.apply(TARGET, buildOutput()));
 
     expect(verdict.phase).toBe('LIVE');
-    // Without this the platform treats the upload as a project to build, and
-    // a Build Output API tree is not one — it would install nothing, find no
-    // framework, and serve the tree's own internals as static files.
+    // The deployment the CLI made carries the meta the adapter stamped, so it is
+    // found and adopted rather than a second one created.
     expect(api.servedPrebuilt(PROJECT)).toBe(true);
   });
 
-  test('the files are addressed where the platform’s reader looks for them', async () => {
-    const { api, adapter } = adapterFor();
+  test('the CLI is handed the deployment tree, the project, and this Deploy’s meta', async () => {
+    const { adapter, calls, trees } = cliAdapter();
     await drain(adapter.apply(TARGET, buildOutput()));
 
-    // The artifact carries the directory's *contents*; the platform addresses
-    // them by the path its own builder wrote. Both halves have to agree or the
-    // deployment is a pile of files with no `config.json` to route by.
-    expect(api.servedPaths(PROJECT)).toEqual([
-      '.vercel/output/assets/app.css',
-      '.vercel/output/index.html',
-    ]);
-  });
-
-  test('the project’s settings are left alone, being a build that did not happen', async () => {
-    const { api, adapter } = adapterFor();
-    await drain(adapter.apply(TARGET, buildOutput()));
-
-    // A prebuilt deployment configures no build, and these are the *project's*
-    // standing settings — sending them would reset the framework an operator
-    // sees in the dashboard to "Other" on every deploy.
-    expect(createdBody(api).projectSettings).toBeUndefined();
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.project).toBe(PROJECT);
+    expect(calls[0]?.team).toBe(CONNECTION.team);
+    expect(calls[0]?.meta.spindriftDeploy).toBe('deploy-1');
+    // The directory is the tree the build staged: the Build Output tree under
+    // `.vercel/output/`, and the mapped file at the root beside it.
+    expect(trees[0]).toContain('.vercel/output/config.json');
+    expect(trees[0]).toContain('node_modules/@scope/dep/index.js');
   });
 
   test('a plain files artifact is still deployed the way it always was', async () => {
