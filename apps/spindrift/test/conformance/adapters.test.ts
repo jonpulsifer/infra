@@ -211,7 +211,10 @@ deployAdapterSuite(
         // deployment the adapter then finds by its meta, the same shape the
         // real CLI would leave for it.
         deployPrebuilt: async (input) => {
-          api.recordPrebuiltDeploy({ project: input.project, meta: input.meta });
+          api.recordPrebuiltDeploy({
+            project: input.project,
+            meta: input.meta,
+          });
           return { ok: true };
         },
       }),
