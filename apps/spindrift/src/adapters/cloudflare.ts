@@ -97,7 +97,11 @@ export async function readCloudflareAccount(
   });
   const scope = `/accounts/${encodeURIComponent(account)}`;
 
-  const [zones, subdomain, projects] = await Promise.all([
+  const [named, zones, subdomain, projects] = await Promise.all([
+    http.json<Envelope<{ readonly name?: string }>>({
+      method: 'GET',
+      path: scope,
+    }),
     // Scoped to the account rather than to the token: a token with access to
     // two accounts would otherwise list the other one's zones under this
     // boundary, which is the one way this listing could lie.
@@ -133,8 +137,17 @@ export async function readCloudflareAccount(
     return value(outcome.value);
   };
 
+  // The display name quietly: a token without account-read scope still reads
+  // zones, and a missing pretty name is not a gap an operator should chase.
+  const namedOutcome = unwrap(named);
+  const accountName =
+    namedOutcome.ok && typeof namedOutcome.value?.name === 'string'
+      ? namedOutcome.value.name
+      : null;
+
   const discovery: CloudflareAccountDiscovery = {
     kind: 'cloudflare-account',
+    accountName,
     zones: read('zones', zones, (listed) => zonesOf(listed)),
     workersSubdomain: read(
       'workersSubdomain',

@@ -421,7 +421,7 @@ export function TargetList({
           name="Cloudflare"
           logo="cloudflare"
           description="One account is one connection. Spindrift reads what is in it — zones, Workers, Pages — and each surface it can deploy to becomes a Target."
-          detail={<CloudflareAccountDetail accounts={cloudflareAccounts} />}
+          inventory={<CloudflareAccountDetail accounts={cloudflareAccounts} />}
           targets={cloudflareSurfaces}
           pending={cloudflarePending}
           connecting={connecting}
@@ -538,6 +538,7 @@ function ProviderTargets({
   logo,
   description,
   detail,
+  inventory,
   ...collection
 }: {
   readonly name: string;
@@ -551,6 +552,15 @@ function ProviderTargets({
    * whose zones nothing else lists has nowhere else to say so.
    */
   readonly detail?: ReactNode;
+  /**
+   * The provider's inventory, under the Target cards in the wide column.
+   *
+   * A second slot rather than more `detail`, because the two read at
+   * different widths: a sentence about the boundary fits beside the logo,
+   * while an account's zones are a listing and deserve the space the cards
+   * leave under them.
+   */
+  readonly inventory?: ReactNode;
 } & Parameters<typeof TargetCollection>[0]) {
   const connected = collection.targets.filter(
     (target) => target.status === 'connected',
@@ -580,7 +590,10 @@ function ProviderTargets({
         </p>
         {detail}
       </div>
-      <TargetCollection {...collection} />
+      <div className="min-w-0">
+        <TargetCollection {...collection} />
+        {inventory}
+      </div>
     </section>
   );
 }
@@ -621,12 +634,20 @@ function CloudflareAccountDetail({
       : null;
 
   return (
-    <dl className="mt-4 flex flex-col gap-3 text-xs">
+    <dl className="mt-4 flex flex-col gap-4 border-t border-border pt-4 text-xs">
       {read.map((vessel) => {
         const found = vessel.discovery as CloudflareAccountDiscovery;
+        const heading = found.accountName ?? vessel.name;
         return (
-          <div key={vessel.name} className="flex flex-col gap-1.5">
-            <dt className="font-medium text-foreground">{vessel.name}</dt>
+          <div key={vessel.name} className="flex flex-col gap-2">
+            <dt className="flex items-baseline gap-2">
+              <span className="text-sm font-medium text-foreground">
+                {heading}
+              </span>
+              {heading !== vessel.name && (
+                <span className="text-muted-foreground">{vessel.name}</span>
+              )}
+            </dt>
             <ZonesFact
               zones={found.zones}
               unreadable={found.unreadable?.zones ?? found.unreadable?.account}
@@ -737,7 +758,7 @@ function ZonesFact({
 
   return (
     <dd className="flex gap-2 text-muted-foreground">
-      <span className="w-14 shrink-0 pt-0.5 text-foreground/70">Zones</span>
+      <span className="w-16 shrink-0 pt-0.5 text-foreground/70">Zones</span>
       <span className="flex min-w-0 flex-wrap items-center gap-1.5">
         {zones.map((zone) => {
           const isMinted = minted?.has(zone.name) ?? false;
@@ -817,7 +838,7 @@ function AccountFact({
           : value.join(', ');
   return (
     <dd className="flex gap-2 text-muted-foreground">
-      <span className="w-14 shrink-0 text-foreground/70">{label}</span>
+      <span className="w-16 shrink-0 text-foreground/70">{label}</span>
       <span
         className={
           unreadable === undefined ? 'break-all' : 'break-all text-destructive'
