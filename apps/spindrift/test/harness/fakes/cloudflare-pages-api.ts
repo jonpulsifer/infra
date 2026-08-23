@@ -67,6 +67,17 @@ export interface FakeCloudflarePagesOptions {
   readonly refuseDelete?: { status: number; body?: unknown };
   /** When set, adding a domain answers with this. */
   readonly domainAnswer?: { status: number; body?: unknown };
+  /**
+   * The status a newly added domain reports.
+   *
+   * Cloudflare answers `initializing` on a first attach and settles to
+   * `active` once the certificate is issued; `blocked` and `error` are
+   * terminal. Defaulting to `active` keeps every test that is not about
+   * issuance saying what it meant.
+   */
+  readonly domainStatus?: string;
+  /** Domains already on the project before this adapter touches it. */
+  readonly domainsAlready?: Readonly<Record<string, readonly string[]>>;
   readonly token?: string;
   /** The production branch an already-existing project carries. */
   readonly productionBranch?: string;
@@ -99,7 +110,8 @@ export class FakeCloudflarePages {
   /** Project → its deployments, newest first. */
   private readonly deployments = new Map<string, FakeDeployment[]>();
   /** Domains attached, by project — the assertion surface for §9's re-point. */
-  private readonly domains = new Map<string, string[]>();
+  /** Project -> domain name -> status. */
+  private readonly domains = new Map<string, Map<string, string>>();
   private readonly held: Set<string>;
   private readonly uploaded = new Set<string>();
   private nextDeployment = 1;
@@ -107,6 +119,14 @@ export class FakeCloudflarePages {
   constructor(private readonly options: FakeCloudflarePagesOptions = {}) {
     for (const project of options.projects ?? []) this.projects.add(project);
     this.held = new Set(options.held ?? []);
+    for (const [project, names] of Object.entries(
+      options.domainsAlready ?? {},
+    )) {
+      this.domains.set(
+        project,
+        new Map(names.map((name) => [name, options.domainStatus ?? 'active'])),
+      );
+    }
   }
 
   get account(): string {
@@ -146,7 +166,7 @@ export class FakeCloudflarePages {
 
   /** Domains attached to one project (§9). */
   domainsOf(project: string): string[] {
-    return [...(this.domains.get(project) ?? [])];
+    return [...(this.domains.get(project)?.keys() ?? [])];
   }
 
   pathsOf(method: string): string[] {
@@ -255,8 +275,11 @@ export class FakeCloudflarePages {
       }
     }
 
+    // Two segments, not one: reading a single domain back is
+    // `/domains/{name}`, and a one-segment pattern silently 404s it at the
+    // router rather than at the handler that knows what it means.
     const projectMatch = path.match(
-      new RegExp(`^${quoted(base)}/([^/]+)(/[^/]+)?$`),
+      new RegExp(`^${quoted(base)}/([^/]+)((?:/[^/]+){0,2})$`),
     );
     if (projectMatch === null) {
       return envelope(404, null, [{ message: 'no such path' }]);
@@ -320,8 +343,22 @@ export class FakeCloudflarePages {
         );
       }
       const name = (body as { name?: string })?.name ?? '';
-      this.domains.set(project, [...(this.domains.get(project) ?? []), name]);
-      return envelope(200, { name });
+      const status = this.options.domainStatus ?? 'active';
+      const onProject = this.domains.get(project) ?? new Map<string, string>();
+      onProject.set(name, status);
+      this.domains.set(project, onProject);
+      return envelope(200, { name, status });
+    }
+
+    // Reading one domain back is how the adapter learns what a refused POST
+    // meant: a name already on the project answers here, and one that is not
+    // there does not.
+    if (sub.startsWith('/domains/') && method === 'GET') {
+      const name = decodeURIComponent(sub.slice('/domains/'.length));
+      const status = this.domains.get(project)?.get(name);
+      return status === undefined
+        ? envelope(404, null, [{ message: 'no such domain' }])
+        : envelope(200, { name, status });
     }
 
     return envelope(404, null, [{ message: 'no such path' }]);

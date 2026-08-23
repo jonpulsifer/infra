@@ -36,6 +36,7 @@ import { ChevronRight, ExternalLink } from 'lucide-react';
 import { type ReactNode, useEffect, useState } from 'react';
 import type {
   ActivityEntry,
+  AppDomainView,
   BuildRouteOptionView,
   ComponentView,
   DatastoreView,
@@ -50,6 +51,7 @@ import type {
   ComponentKind,
   Reach,
 } from '../../../domain/desired-state.ts';
+import { isLabel } from '../../../domain/naming.ts';
 import { BUILD_ADAPTER } from '../../client/build-adapters.ts';
 import { command, type InputOf, type TransportFailure } from '../../client.ts';
 import {
@@ -224,6 +226,16 @@ export type SetAutoDeploy = (
  * vs. clear it" distinction, carried through as a value this screen can send
  * rather than a second act.
  */
+/** Naming the App's own shared address, as the screen needs it answered (§9). */
+export type SetDomain = (choice: {
+  /** The label, `@` for the zone itself, or null to have no name of its own. */
+  readonly label: string | null;
+  /** The zone to pin to, or null to take the first that serves. */
+  readonly zone: string | null;
+}) => Promise<
+  { readonly ok: true } | { readonly ok: false; readonly message: string }
+>;
+
 export type SetBuildRoute = (
   route: string | null,
 ) => Promise<
@@ -299,6 +311,7 @@ export function Workspace({
   onRunJob,
   onSetAutoDeploy,
   onSetBuildRoute,
+  onSetDomain,
   onAttachDatastore,
   onFollowExecution,
   executionLines,
@@ -396,6 +409,9 @@ export function Workspace({
    * against.
    */
   onSetBuildRoute?: SetBuildRoute;
+  /** Absent where the App's address is not editable from here — the fixture
+   * screens render this read-only, for the reason the others do. */
+  onSetDomain?: SetDomain;
   /**
    * Attach a Datastore to this App (§11). Absent where the screen wires no
    * acts, for the same reason {@link onSetReach} is.
@@ -613,6 +629,18 @@ export function Workspace({
             may wear one name.
           */}
           {view.appId === undefined ? null : <SourceSection app={view.appId} />}
+          {/*
+            Above the variables and below the source, which is the order this
+            block already argues for: what gets built, then what the result is
+            called, then what it runs with. The address is the App's, and the
+            keys below it are one Component's.
+          */}
+          {view.domain === undefined ? null : (
+            <DomainSection
+              domain={view.domain}
+              {...(onSetDomain === undefined ? {} : { onSetDomain })}
+            />
+          )}
           <ConfigSection
             configKeys={view.configKeys}
             {...(selected === undefined ? {} : { component: selected.name })}
@@ -2175,6 +2203,211 @@ function SourceSection({ app }: { app: string }) {
  * (Component, Target) pair and this App may have several: a heading that said
  * only "Config" was the same list claiming to be the App's.
  */
+/**
+ * The App's own address (§9).
+ *
+ * §9's naming is two layers and only one of them is a decision. The canonical
+ * always resolves and nobody picks it — on a Target that names its own
+ * workloads it *is* the platform's name. The vanity is the name a developer
+ * shares, and until this section existed there was nowhere in the product to
+ * choose one: `setAppVanity` and `setAppZone` were registered commands with no
+ * hand reaching them.
+ *
+ * **Three tiles, and the apex is one of them.** The stored value is one DNS
+ * label or the literal `@`, and a text field that silently accepts `@` is a
+ * puzzle rather than a control — the one non-label choice is the one people
+ * most want, so it is a thing to press. `@` never appears on screen; it is only
+ * what this sends.
+ *
+ * **Two writes, zone first.** The zone is a separate column and a separate
+ * command, and it is the one that can be refused — a zone that cannot serve a
+ * placed Component's reach is not a pin `setAppZone` will take. Landing the
+ * label into a zone that is about to be refused would leave two half-applied
+ * facts, so the label only goes after the zone lands.
+ *
+ * **Nothing here changes what is serving.** The name is attached to the Target
+ * and the record is published during a deploy, so setting it is a statement
+ * about the next one. Said, rather than left to be discovered.
+ */
+function DomainSection({
+  domain,
+  onSetDomain,
+}: {
+  domain: AppDomainView;
+  onSetDomain?: SetDomain;
+}) {
+  const [choice, setChoice] = useState<'none' | 'apex' | 'label'>(
+    domain.label === null ? 'none' : domain.label === '@' ? 'apex' : 'label',
+  );
+  const [label, setLabel] = useState(
+    domain.label === null || domain.label === '@' ? '' : domain.label,
+  );
+  const [zone, setZone] = useState(domain.zone ?? domain.zones[0]?.name ?? '');
+  const [saving, setSaving] = useState(false);
+  const [failure, setFailure] = useState<string | null>(null);
+
+  const issue =
+    choice === 'label' && label !== '' && !isLabel(label)
+      ? 'One lowercase label: letters, numbers and hyphens.'
+      : null;
+  const preview =
+    choice === 'none'
+      ? null
+      : choice === 'apex'
+        ? zone
+        : label === ''
+          ? null
+          : `${label}.${zone}`;
+
+  const save = async () => {
+    if (onSetDomain === undefined || issue !== null) return;
+    setSaving(true);
+    setFailure(null);
+    const result = await onSetDomain({
+      zone: zone === '' ? null : zone,
+      label: choice === 'none' ? null : choice === 'apex' ? '@' : label,
+    });
+    setSaving(false);
+    if (!result.ok) setFailure(result.message);
+  };
+
+  return (
+    <Card>
+      <SectionHeader eyebrow="App address" title="Domain" />
+      <CardContent className="flex flex-col gap-4">
+        {/*
+          Stated before the control, because it is the difference between a
+          name that will be published and one that will not. §9 puts the
+          shared name on the App and the reconciler refuses to guess which of
+          two serving Components it means — so this is not advice, it is what
+          is happening.
+        */}
+        {domain.ambiguous ? (
+          <p className="rounded-md border border-destructive bg-destructive-soft px-3 py-2.5 text-sm text-destructive">
+            Nothing is published under a name of your own. More than one
+            Component serves, and Spindrift will not choose which one the name
+            means. Leave one serving, or the name stays unused.
+          </p>
+        ) : null}
+
+        <div className="grid gap-2 sm:grid-cols-3">
+          <Choice
+            selected={choice === 'none'}
+            title="No name of your own"
+            note="Only the address the Target mints."
+            onClick={() => setChoice('none')}
+          />
+          <Choice
+            selected={choice === 'apex'}
+            title="The domain itself"
+            note={
+              zone === ''
+                ? 'The bare domain, nothing in front of it.'
+                : `${zone} — the bare domain, nothing in front of it.`
+            }
+            onClick={() => setChoice('apex')}
+          />
+          <Choice
+            selected={choice === 'label'}
+            title="A name under it"
+            note={
+              zone === '' ? 'One label under the domain.' : `something.${zone}`
+            }
+            onClick={() => setChoice('label')}
+          />
+        </div>
+
+        {choice === 'label' ? (
+          <Field
+            name="vanityLabel"
+            label="Name"
+            value={label}
+            onChange={(event) => setLabel(event.target.value)}
+            issue={issue}
+            hint="One lowercase label. Letters, numbers and hyphens."
+          />
+        ) : null}
+
+        {/*
+          Offered only where there is a choice to make. One zone is not a
+          question, and a select with one option is a control that teaches
+          somebody the word "zone" for nothing.
+        */}
+        {domain.zones.length > 1 && choice !== 'none' ? (
+          <Field
+            name="zone"
+            label="Which domain"
+            hint="Domains your admin configured, in Settings."
+          >
+            <select
+              id="zone"
+              value={zone}
+              onChange={(event) => setZone(event.target.value)}
+              className="w-full rounded-md border border-border bg-card px-3 py-2 font-mono text-sm"
+            >
+              {domain.zones.map((option) => (
+                <option key={option.name} value={option.name}>
+                  {option.name} — reachable from {option.reaches.join(' and ')}
+                </option>
+              ))}
+            </select>
+          </Field>
+        ) : null}
+
+        {failure ? <p className="text-sm text-destructive">{failure}</p> : null}
+
+        <div className="flex flex-wrap items-center gap-3">
+          <Button
+            disabled={onSetDomain === undefined || saving || issue !== null}
+            onClick={save}
+          >
+            {saving ? 'Saving…' : 'Save domain'}
+          </Button>
+          <p className="text-xs text-muted-foreground">
+            {/*
+              The record is published by a deploy, not by this button —
+              the name is attached during apply and the DNS write happens in the
+              deploy loop. A control that let somebody walk away believing the
+              name was live would be the screen lying by omission.
+
+              And it promises nothing while more than one Component serves: the
+              banner above says that name will not be published, so a sentence
+              here saying the App answers on it is the same screen arguing with
+              itself two inches apart.
+            */}
+            {preview === null
+              ? 'This App answers on the address its Target mints.'
+              : domain.ambiguous
+                ? `Saved as ${preview}, and not published while more than one Component serves.`
+                : `This App answers on ${preview} after its next deploy.`}
+          </p>
+        </div>
+
+        {domain.hostnames.length > 0 ? (
+          <p className="text-xs text-muted-foreground">
+            Publishing now:{' '}
+            <span className="font-mono">{domain.hostnames.join(', ')}</span>
+          </p>
+        ) : null}
+
+        {/*
+          Said where the name is chosen rather than where it is lost. An App has
+          one Component when it is created and grows a second later, so the
+          person who set this name is not the person who will be looking at the
+          Components list when it stops being published.
+        */}
+        {!domain.ambiguous && domain.servedBy !== null && choice !== 'none' ? (
+          <p className="text-xs text-muted-foreground">
+            Carried by {domain.servedBy}, while it is the only Component this
+            App serves. Add a second serving Component and this name stops being
+            published.
+          </p>
+        ) : null}
+      </CardContent>
+    </Card>
+  );
+}
+
 function ConfigSection({
   configKeys,
   component,
@@ -3293,6 +3526,35 @@ function AppWorkspace({
   // Which route this App builds on (§4, §16). No re-read, for the same reason
   // `handleSetAutoDeploy` needs none: the picker already holds the answer it
   // just wrote, and this changes exactly the field it is showing.
+  /**
+   * Two writes, and the zone goes first.
+   *
+   * `setAppZone` is the one that can be refused — it will not pin a zone that
+   * cannot serve a placed Component's reach — so a label written before it
+   * would land in a zone the next call rejects, leaving the App carrying half
+   * an answer nobody gave.
+   */
+  const handleSetAppDomain: SetDomain = async ({ label, zone }) => {
+    const appId = workspace.appId;
+    if (appId === undefined) {
+      return { ok: false, message: 'This App has no id to set a domain on' };
+    }
+    try {
+      const pinned = await command('setAppZone', { appId, zone });
+      if (!pinned.ok) return { ok: false, message: pinned.failure.message };
+      const named = await command('setAppVanity', { appId, label });
+      return named.ok
+        ? { ok: true }
+        : { ok: false, message: named.failure.message };
+    } catch (cause: unknown) {
+      return {
+        ok: false,
+        message:
+          cause instanceof Error ? cause.message : 'Saving the domain failed',
+      };
+    }
+  };
+
   const handleSetAppBuildRoute: SetBuildRoute = async (route) => {
     const appId = workspace.appId;
     if (appId === undefined) {
@@ -3571,6 +3833,7 @@ function AppWorkspace({
         onSetReach={handleSetReach}
         onSetAutoDeploy={handleSetAutoDeploy}
         onSetBuildRoute={handleSetAppBuildRoute}
+        onSetDomain={handleSetAppDomain}
         onStageArchive={handleStageArchive}
         onUploadArchive={handleUploadArchive}
         onSetConfig={handleSetConfig}

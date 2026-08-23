@@ -72,6 +72,7 @@ import {
   coreMintsCanonical,
   displayUrl,
   hostnameFor,
+  servesNetwork,
 } from '../domain/naming.ts';
 import {
   deployTargetOf,
@@ -560,9 +561,7 @@ async function soleServingComponent(
     .from(components)
     .where(eq(components.appId, subject.app.id));
 
-  const serving = siblings.filter(
-    (sibling) => sibling.kind === 'website' || sibling.expose === true,
-  );
+  const serving = siblings.filter(servesNetwork);
   return serving.length === 1 && serving[0]?.id === subject.component.id;
 }
 

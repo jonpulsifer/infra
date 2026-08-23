@@ -38,6 +38,7 @@ import type {
   DeployVerdict,
 } from '../../src/adapters/deploy/contract.ts';
 import { KubernetesDeployAdapter } from '../../src/adapters/deploy/kubernetes/index.ts';
+import { ANNOTATION_PREFIX } from '../../src/adapters/dns/cluster.ts';
 import type { DesiredState } from '../../src/domain/desired-state.ts';
 import { type RenderedObject, renderAppChart } from '../harness/app-chart.ts';
 import {
@@ -378,5 +379,22 @@ describe('the modelled controller is the declared one', () => {
         overlay,
       ),
     ).toThrow(/--annotation-prefix/);
+  });
+
+  test('the prefix Spindrift writes under is the one the controller is pinned to', async () => {
+    // The two ends of one key, held together. external-dns reads
+    // `cloudflare-proxied` under `DefaultAnnotationPrefix`, and v0.22.0 changed
+    // that default with no fallback for the old spelling — so an unpinned
+    // controller stops finding the flag and falls back to `proxiedByDefault`,
+    // which publishes every record unproxied. For an apex CNAME in front of
+    // Cloudflare Pages that is no zone cache, no WAF, and the origin exposed,
+    // and nothing anywhere would have said so: the record still exists and the
+    // deploy still goes green.
+    //
+    // A cluster that leaves it defaulted fails here, which is the point — the
+    // safe state is the pin, not the absence of an argument.
+    for (const controller of CONTROLLERS) {
+      expect(controller.annotationPrefix).toBe(ANNOTATION_PREFIX);
+    }
   });
 });

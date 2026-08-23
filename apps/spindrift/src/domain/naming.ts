@@ -27,7 +27,7 @@
  * second address for something that already had one.
  */
 import type { TargetAdapter } from '../config/manifest.schema.ts';
-import type { Hostname, Reach } from './desired-state.ts';
+import type { ComponentKind, Hostname, Reach } from './desired-state.ts';
 
 /**
  * A single DNS label: what a vanity name is allowed to be, and what a minted
@@ -123,6 +123,23 @@ export function zoneFor(
     serving[0]?.name ??
     null
   );
+}
+
+/**
+ * Whether this Component is one of the App's network-serving ones (§9).
+ *
+ * A job serves nothing, and an unexposed service is a queue worker (§2), so
+ * neither can claim the App's front-door name. Here rather than inline in the
+ * reconciler because two readers need the same answer and they must not drift:
+ * `deploy-loop.ts` decides whether to *publish* the vanity name, and the App's
+ * own screen decides whether to *show* it. A screen that counted differently
+ * would print an address nothing resolves.
+ */
+export function servesNetwork(component: {
+  readonly kind: ComponentKind;
+  readonly expose: boolean | null;
+}): boolean {
+  return component.kind === 'website' || component.expose === true;
 }
 
 /** What a minted name is assembled from. */

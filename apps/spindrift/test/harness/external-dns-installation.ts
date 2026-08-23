@@ -20,6 +20,7 @@
  */
 import { readdir } from 'node:fs/promises';
 import { join } from 'node:path';
+import { ANNOTATION_PREFIX } from '../../src/adapters/dns/cluster.ts';
 import type { Controller } from './fakes/external-dns.ts';
 
 const REPO_ROOT = join(import.meta.dir, '../../../..');
@@ -40,6 +41,24 @@ const overlayPath = (cluster: string) =>
  * — which is itself an argument, so this list is what keeps it absent.
  */
 const INERT_ARGUMENTS = [/^--fqdn-template=/];
+
+/**
+ * The one argument that is read, and only where it says what Spindrift writes.
+ *
+ * `--annotation-prefix` renames every annotation key the controller looks for —
+ * the `cloudflare-proxied` that decides whether a record is proxied, and the
+ * hold-out that keeps a route from claiming its own name — so a foreign value
+ * is still refused, exactly as it was before this argument was read at all.
+ *
+ * What is accepted is the value that pins the controller to the prefix
+ * Spindrift's two writers already use, `ANNOTATION_PREFIX` in
+ * `src/adapters/dns/cluster.ts`. That pin exists because external-dns v0.22.0
+ * changed the default with no fallback for the old spelling: an unpinned
+ * controller on the new default stops finding `cloudflare-proxied` and
+ * publishes every record unproxied. Reading it here rather than listing it
+ * inert is what makes the two ends fail together if either moves.
+ */
+const ANNOTATION_PREFIX_ARGUMENT = /^--annotation-prefix=(.+)$/;
 
 export interface ExternalDnsRelease {
   spec?: { values?: { sources?: unknown; extraArgs?: unknown } };
@@ -105,8 +124,14 @@ export function controllerFor(
     ...strings(release.spec?.values?.extraArgs, `${RELEASE} extraArgs`),
     ...appendedArguments(overlay, origin),
   ];
+  let annotationPrefix: string | null = null;
   for (const argument of argued) {
     if (INERT_ARGUMENTS.some((inert) => inert.test(argument))) continue;
+    const prefixed = ANNOTATION_PREFIX_ARGUMENT.exec(argument);
+    if (prefixed !== null && prefixed[1] === ANNOTATION_PREFIX) {
+      annotationPrefix = prefixed[1];
+      continue;
+    }
     throw new Error(
       `${cluster}'s external-dns runs ${argument}, which this model does not ` +
         'account for: model what it changes about a published record, or list ' +
@@ -116,6 +141,7 @@ export function controllerFor(
   return {
     cluster,
     sources: strings(release.spec?.values?.sources, `${RELEASE} sources`),
+    annotationPrefix,
   };
 }
 

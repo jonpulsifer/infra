@@ -209,6 +209,65 @@ interface PagesProject {
   readonly production_branch?: string;
 }
 
+/**
+ * One custom domain on a project, as much of it as this adapter reads.
+ *
+ * The two `*_data` blocks carry the sentence Cloudflare writes when issuance
+ * goes wrong, and they are the only place it exists — the envelope's own
+ * `errors` array is empty for a domain that was accepted and then failed
+ * validation.
+ */
+interface PagesDomain {
+  readonly name?: string;
+  readonly status?: string;
+  readonly validation_data?: { readonly error_message?: string };
+  readonly verification_data?: { readonly error_message?: string };
+}
+
+/** What a custom domain is doing, once its status has been read. */
+export interface PagesDomainState {
+  /** Whether the name is serving *now*, rather than merely accepted. */
+  readonly serving: boolean;
+  /** Cloudflare's own word for it, for the deploy log. */
+  readonly status: string;
+}
+
+/**
+ * Cloudflare's domain status, split on the only question a deploy has to
+ * answer: is this a state that will become serving on its own, or one somebody
+ * has to act on?
+ *
+ * `initializing` and `pending` resolve themselves once the certificate is
+ * issued. `active` is done. Everything else — `deactivated`, `blocked`,
+ * `error`, and any value Cloudflare adds later — is a refusal, because a status
+ * this adapter does not recognise is not a status it may call healthy.
+ */
+const SETTLING = ['initializing', 'pending'] as const;
+
+function domainState(
+  unwrapped: Outcome<PagesDomain | undefined>,
+): Outcome<PagesDomainState> {
+  if (!unwrapped.ok) return unwrapped;
+  const status = unwrapped.value?.status ?? 'unknown';
+  if (status === 'active')
+    return { ok: true, value: { serving: true, status } };
+  if (SETTLING.some((settling) => settling === status)) {
+    return { ok: true, value: { serving: false, status } };
+  }
+  const said =
+    unwrapped.value?.validation_data?.error_message ??
+    unwrapped.value?.verification_data?.error_message ??
+    'Cloudflare gave no reason.';
+  return {
+    ok: false,
+    failure: {
+      ok: false,
+      kind: 'transport',
+      message: `the custom domain is ${status}: ${said}`,
+    },
+  };
+}
+
 /** One deployment, as much of it as this adapter reads. */
 interface PagesDeployment {
   readonly id?: string;
@@ -387,8 +446,14 @@ export class PagesDeployAdapter implements DeployAdapter {
         });
         return failure;
       }
+      // Said as what it is. `initializing` is the state of every first attach
+      // and the name answers nothing until the certificate lands, so a log line
+      // claiming the name "is on this project" was the deploy's own account of
+      // a domain that did not work yet.
       yield this.events.log(
-        `the vanity name ${desired.hostname.vanity} is on this project`,
+        attached.value.serving
+          ? `${desired.hostname.vanity} is serving on this project`
+          : `${desired.hostname.vanity} is attached and ${attached.value.status} — Cloudflare is issuing its certificate, and it does not answer until that lands`,
         project,
       );
     }
@@ -745,24 +810,48 @@ export class PagesDeployAdapter implements DeployAdapter {
     return { ok: true, value: created.value };
   }
 
-  /** Put the vanity name on this project (§9). An existing one is not an error. */
+  /**
+   * Put the vanity name on this project, and report what Cloudflare made of it.
+   *
+   * **A 200 here does not mean the name serves.** The response carries a
+   * `status` and it is `initializing` on every first attach — the certificate
+   * has not been issued and the domain answers nothing until it is. Two of the
+   * other states, `blocked` and `error`, are terminal refusals. Reading none of
+   * them is what let a deploy go LIVE announcing `the vanity name
+   * embarrassing.ca is on this project` while that name resolved to nothing,
+   * which is the one failure a person pointing an apex at Pages cannot debug:
+   * every surface they can see says it worked.
+   *
+   * Not a poll. Issuance is bounded by DNS propagation and an HTTP challenge
+   * and Cloudflare publishes no duration for it, so waiting would hold a deploy
+   * open on somebody else's clock — and the site is already serving on its own
+   * `pages.dev` address either way. Pending is reported as pending.
+   */
   private async attachDomain(
     http: CloudHttp,
     connection: CloudflarePagesAdapterConnection,
     project: string,
     domain: string,
-  ): Promise<Outcome<void>> {
-    const attached = await http.json<Envelope<unknown>>({
+  ): Promise<Outcome<PagesDomainState>> {
+    const attached = await http.json<Envelope<PagesDomain>>({
       method: 'POST',
       path: `${this.projectPath(connection, project)}/domains`,
       body: { name: domain },
     });
-    if (attached.ok) return { ok: true, value: undefined };
-    // The name is already on this project, which is the state being asked for.
-    if (attached.kind === 'status' && attached.status === 409) {
-      return { ok: true, value: undefined };
-    }
-    return { ok: false, failure: attached };
+    if (attached.ok) return domainState(unwrap(attached));
+    // Already on this project is the state being asked for — but *which* status
+    // it is in still matters, and the refusal for a duplicate is undocumented
+    // (409 is a guess; a 400 with an error code is as likely). So the second
+    // call is the answer rather than the status code: if the name is on the
+    // project, this read says so and says how it is doing. Only a name that is
+    // not there makes the POST's own refusal the failure.
+    const read = await http.json<Envelope<PagesDomain>>({
+      method: 'GET',
+      path: `${this.projectPath(connection, project)}/domains/${encodeURIComponent(domain)}`,
+    });
+    return read.ok
+      ? domainState(unwrap(read))
+      : { ok: false, failure: attached };
   }
 
   // --- inspect's second half -----------------------------------------------

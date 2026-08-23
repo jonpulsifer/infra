@@ -779,9 +779,48 @@ export interface ComponentView {
  * therefore moves what this field says, which is the honest behaviour — the
  * column that used to answer this could not change and could not be checked.
  */
+/** One zone this installation mints in, as the Domain control offers it. */
+export interface ZoneOptionView {
+  readonly name: string;
+  /** Which boundaries it answers on — a zone that cannot serve a placed
+   * Component's reach is offered disabled, wearing that as its reason. */
+  readonly reaches: readonly ('private' | 'public')[];
+}
+
+/** The App's own shared name (§9), as the screen that sets it needs it. */
+export interface AppDomainView {
+  /** The label the App named, `@` for the zone itself, or null for none. */
+  readonly label: string | null;
+  /** The zone the App pinned, or null to take the first that serves. */
+  readonly zone: string | null;
+  /** Every zone this installation mints in, in the order an unpinned App takes. */
+  readonly zones: readonly ZoneOptionView[];
+  /** What the App's placed Components will answer on, once a Deploy publishes. */
+  readonly hostnames: readonly string[];
+  /**
+   * Whether more than one Component serves, which is what stops the name being
+   * published at all.
+   *
+   * §9 puts the shared name on the App and the reconciler will not guess which
+   * Component it means, so an App that grows a second serving Component loses
+   * the name silently. The screen that offers the name is where that has to be
+   * said.
+   */
+  readonly ambiguous: boolean;
+  /** The Component carrying it while there is exactly one, for the sentence. */
+  readonly servedBy: string | null;
+}
+
 export interface WorkspaceView {
   readonly app: string;
   readonly appId?: string;
+  /**
+   * The App's shared name and what it resolves to.
+   *
+   * Optional because every fixture builds this row literally and a required key
+   * would be a required edit in each of them.
+   */
+  readonly domain?: AppDomainView;
   /**
    * Which of {@link components} this view's per-Component half is about — its
    * runtime, its placement, its release and its config keys.
