@@ -42,6 +42,7 @@
     "kernel-builder",
     "openclaw",
     "workstation",
-    "hermes"
+    "hermes",
+    "clankerbanker"
   ]
 }
