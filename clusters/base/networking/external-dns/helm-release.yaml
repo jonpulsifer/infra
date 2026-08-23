@@ -47,7 +47,7 @@ spec:
       # - gateway-udproute
     txtPrefix: "k8s."
     txtOwnerId: "${CLUSTER_NAME}"
-    # Every zone this cluster may publish into. The last three are also the
+    # Every zone this cluster may publish into. The trailing entries are also the
     # zones Spindrift mints App names in, so a zone added to `dns.zones` in the
     # installation manifest that is missing here is an App that deploys green
     # and resolves nowhere.
@@ -57,6 +57,7 @@ spec:
       - "${SPINDRIFT_DOMAIN}"
       - embarrassing.ca
       - wishin.app
+      - clankerbanker.ca
     resources:
       requests:
         memory: 100Mi

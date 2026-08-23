@@ -45,6 +45,7 @@ jobs:
           # inputs together name the same files — a path missing from all
           # three lists is a guard that cannot run in CI.
           files: |
+            apps/clankerbanker/**
             apps/hub/**
             apps/slingshot/**
             apps/spindrift/**
