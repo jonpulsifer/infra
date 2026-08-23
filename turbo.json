@@ -66,6 +66,14 @@
       "env": ["DATABASE_URL"],
       "outputs": []
     },
+    "k6-scripts#typecheck": {
+      "dependsOn": ["^typecheck"],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/clusters/folly/apps/k6/scripts/**"
+      ],
+      "outputs": []
+    },
     "typecheck": {
       "dependsOn": ["^typecheck"],
       "outputs": []

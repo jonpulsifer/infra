@@ -1,0 +1,34 @@
+---
+# The TestRun the CronJob recreates on schedule. It is data, not a declared
+# resource: a TestRun runs once on creation, so declaring it directly would
+# make Flux's drift correction the scheduler.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: k6-testrun
+data:
+  testrun.json: |
+    {
+      "apiVersion": "k6.io/v1alpha1",
+      "kind": "TestRun",
+      "metadata": { "name": "scenarios" },
+      "spec": {
+        "parallelism": 1,
+        "script": { "configMap": { "name": "k6-scenarios", "file": "scenarios.ts" } },
+        "arguments": "-o experimental-prometheus-rw --tag testid=folly-scenarios",
+        "runner": {
+          "image": "grafana/k6:2.2.0",
+          "resources": {
+            "requests": { "cpu": "100m", "memory": "128Mi" },
+            "limits": { "memory": "256Mi" }
+          },
+          "env": [
+            { "name": "K6_PROMETHEUS_RW_SERVER_URL", "value": "http://prom-stack-kube-prometheus-prometheus.monitoring.svc:9090/api/v1/write" },
+            { "name": "K6_PROMETHEUS_RW_TREND_STATS", "value": "p(95),p(99),min,max,avg" },
+            { "name": "TARGET_APP_URL", "value": "https://infra-pair.${SPINDRIFT_DOMAIN}/healthz" },
+            { "name": "TARGET_CONTROL_PLANE_URL", "value": "https://spindrift.${SECRET_DOMAIN}/healthz" },
+            { "name": "TARGET_EDGE_URL", "value": "https://k6-rust-check.${SPINDRIFT_DOMAIN}/" }
+          ]
+        }
+      }
+    }

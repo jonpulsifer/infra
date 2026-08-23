@@ -1,0 +1,75 @@
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: k6-cron
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: k6-cron
+rules:
+  - apiGroups: ["k6.io"]
+    resources: ["testruns"]
+    verbs: ["get", "create", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: k6-cron
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: k6-cron
+subjects:
+  - kind: ServiceAccount
+    name: k6-cron
+---
+# The k6-operator has no scheduler: a TestRun runs once when created. This
+# recreates it daily. A breached threshold exits the runner non-zero, fails
+# its Job (backoffLimit 0), and the stock KubeJobFailed alert pages Discord.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: k6-scenarios
+spec:
+  schedule: "17 9 * * *"
+  timeZone: ${TIMEZONE}
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 1
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      template:
+        spec:
+          restartPolicy: Never
+          serviceAccountName: k6-cron
+          containers:
+            - name: recreate-testrun
+              image: jonpulsifer/bashcurljq:latest
+              command:
+                - /bin/bash
+                - -ec
+                - |
+                  api=https://kubernetes.default.svc/apis/k6.io/v1alpha1/namespaces/k6/testruns
+                  sa=/var/run/secrets/kubernetes.io/serviceaccount
+                  auth=(-sS --cacert "$sa/ca.crt" -H "Authorization: Bearer $(cat "$sa"/token)")
+                  curl "${auth[@]}" -X DELETE "$api/scenarios" -o /dev/null
+                  # A TestRun that will not delete (e.g. an OOMed runner wedged
+                  # it) should fail this Job and page, so the POST is not retried.
+                  for _ in $(seq 30); do
+                    [ "$(curl "${auth[@]}" -o /dev/null -w '%{http_code}' "$api/scenarios")" = 404 ] && break
+                    sleep 2
+                  done
+                  curl "${auth[@]}" --fail-with-body -X POST \
+                    -H 'Content-Type: application/json' \
+                    --data-binary @/config/testrun.json "$api"
+              volumeMounts:
+                - name: testrun
+                  mountPath: /config
+                  readOnly: true
+          volumes:
+            - name: testrun
+              configMap:
+                name: k6-testrun

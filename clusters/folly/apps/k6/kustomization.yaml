@@ -5,4 +5,15 @@ resources:
   - namespace.yaml
   - helm-repository.yaml
   - helm-release.yaml
+  - testrun-configmap.yaml
+  - cronjob.yaml
 namespace: k6
+configMapGenerator:
+  - name: k6-scenarios
+    files:
+      - scripts/scenarios.ts
+generatorOptions:
+  disableNameSuffixHash: true
+  annotations:
+    # The script is JavaScript: its ${} template syntax is not Flux's to fill.
+    kustomize.toolkit.fluxcd.io/substitute: disabled
