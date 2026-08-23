@@ -15,7 +15,7 @@ spec:
         name: infra
         namespace: flux-system
   values:
-    image: ghcr.io/jonpulsifer/ai-agents:latest@sha256:d12227ccd1854878754f4a68ffd83eb103fb32d2a82be88ca9b012114c9c3dfb
+    image: ghcr.io/jonpulsifer/ai-agents:latest@sha256:e9309cc022b010751a97c2aed6b2842a0fc8add6150ff17d73bcc1c58bd7b7da
     port: 18789
     hostname: dave.lolwtf.ca
     storageSize: 2Gi
