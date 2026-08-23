@@ -11,7 +11,8 @@
     "slingshot",
     "spindrift",
     "spindrift-demo",
-    "spindrift-verifier"
+    "spindrift-verifier",
+    "unifi-cert-push"
   ],
   "deploy": {
     "actions-runner": [
@@ -35,6 +36,9 @@
     ],
     "spindrift": [
       "clusters/offsite/apps/spindrift/helm-release.yaml"
+    ],
+    "unifi-cert-push": [
+      "clusters/base/networking/unifi-cert-push/cronjob.yaml"
     ]
   },
   "ignore": [

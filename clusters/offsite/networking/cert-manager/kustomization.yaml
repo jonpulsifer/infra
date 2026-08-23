@@ -2,6 +2,8 @@ apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 resources:
   - ../../../base/networking/cert-manager
+  - ../../../base/networking/unifi-cert-push
   - cloudflare-secret.sops.yaml
+  - gateway-ssh-secret.sops.yaml
   - certificates/gateway.yaml
   - certificates/dave.yaml
