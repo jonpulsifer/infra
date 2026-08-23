@@ -61,6 +61,9 @@ spec:
         pathType: Prefix
       prometheusSpec:
         serviceDiscoveryRole: EndpointSlice
+        # k6 TestRuns push run metrics here (`-o experimental-prometheus-rw`);
+        # the remote-write receiver is off by default.
+        enableRemoteWriteReceiver: true
         retention: 30d
         # riptide's /mnt/disks carries jellyfin's media hostPath as well as
         # every local-path PVC on the node, and leaves ~18G free, so the TSDB
@@ -181,6 +184,10 @@ spec:
           client-insights:
             gnetId: 11315
             revision: 9
+            datasource: Prometheus
+          k6-prometheus:
+            gnetId: 19665
+            revision: 3
             datasource: Prometheus
       ingress:
         enabled: true
