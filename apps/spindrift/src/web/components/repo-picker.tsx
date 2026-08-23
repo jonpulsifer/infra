@@ -174,9 +174,8 @@ export function RepoPicker({
       </div>
 
       <p className="text-xs text-muted-foreground">
-        Selecting reads the repository and writes nothing. A repository GitHub
-        grants gets its row and its configuration pull request when the App is
-        created, and never before.
+        Selecting reads the repository and writes nothing. Nothing is connected
+        until you press Deploy.
       </p>
     </div>
   );

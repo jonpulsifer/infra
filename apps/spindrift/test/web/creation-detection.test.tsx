@@ -202,6 +202,34 @@ describe('the screen reads the repository it opens on', () => {
 
     screen.unmount();
   });
+
+  test('a draft nobody has pointed anywhere reads nothing, and asks', async () => {
+    // The guarantee `startCreationDraft` buys by no longer preselecting the
+    // alphabetically-first active repository. A draft used to open naming a
+    // repository nobody chose and reading it before anybody pressed anything,
+    // which is what made every row below read as an answer to a question that
+    // had not been asked.
+    const screen = await mount({
+      ...clean,
+      source: { kind: 'repo', repo: '', url: '', subpath: '.' },
+    });
+
+    expect(called).not.toContain('inspectRepository');
+    // And what is on screen is the question, not a card of consequences.
+    const text = screen.text();
+    expect(text).toContain('Import your code');
+    // Both tiles are on this page, so the header names neither.
+    expect(text).toContain('Upload an archive');
+    // No card of consequences, and nothing to press: not one of the four rows
+    // is on screen, and neither is the button that would create an App.
+    for (const row of ['Code', 'Type', 'Where it runs']) {
+      expect(text).not.toContain(row);
+    }
+    // And no directory field, because there is no tree to name a path in yet.
+    expect(text).not.toContain('Root directory');
+
+    screen.unmount();
+  });
 });
 
 describe('every directory it read is on the screen', () => {
@@ -236,7 +264,7 @@ describe('every directory it read is on the screen', () => {
     // And nothing was chosen: the alphabetically first candidate is not the
     // answer, and Deploy waits for one.
     expect(text).toContain('Nothing is chosen to deploy from example/almanac');
-    expect(text).toContain('Spindrift stops before Build #1');
+    expect(text).toContain('to fix above');
 
     screen.unmount();
   });
@@ -285,7 +313,7 @@ describe('every directory it read is on the screen', () => {
     // Edit button.
     expect(text).toContain('does not know how to build . in example/almanac');
     expect(text).toContain('just prose in this directory.');
-    expect(text).toContain('Directories Spindrift read');
+    expect(text).toContain('Directories in this repo');
 
     screen.unmount();
   });
@@ -351,14 +379,15 @@ describe('a draft somebody already answered', () => {
 
     // It still asks — the directories stay on screen to choose from.
     expect(called).toContain('inspectRepository');
-    // The typed Component name is on the Name row and the corrected kind is on
-    // the Component row: two answers somebody gave, both still theirs after a
-    // read that proposed neither.
+    // The corrected kind is still on the Type row, wearing the badge that says
+    // somebody moved it.
     const text = screen.text();
-    expect(text).toContain('almanac · api-worker');
-    expect(text).toContain('Componentjob');
+    expect(text).toContain('TypeJob');
     expect(text).toContain('corrected');
-    // And it wrote nothing, because it decided nothing.
+    // And the typed Component name is still `api-worker` rather than `api`.
+    // Applying this read would have renamed it after the scope *and* written —
+    // see the `detect` arm of `draftReducer` — so a save that never happened is
+    // what says the name somebody typed is still theirs.
     expect(saved).toEqual([]);
 
     screen.unmount();

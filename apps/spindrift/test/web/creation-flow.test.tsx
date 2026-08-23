@@ -84,7 +84,7 @@ describe('the preflight', () => {
       CANDIDATES,
     );
     expect(blockers).toHaveLength(1);
-    expect(blockers[0]!.title).toContain('not a candidate');
+    expect(blockers[0]!.title).toContain('Nothing chosen can run this App');
   });
 
   test('a config key with no value blocks, and names the key', () => {
@@ -109,12 +109,12 @@ describe('the screen shows the preflight rather than only obeying it', () => {
   test('a blocked draft states what is wrong and what clears it', () => {
     const markup = render(INITIAL_DRAFT);
 
-    expect(markup).toContain('Spindrift stops before Build #1');
+    expect(markup).toContain('to fix above');
     expect(markup).toContain('DATABASE_URL');
     expect(markup).toContain('Nothing has been created');
     // The draft survives — the rule is "stops before any Build exists", not
     // "discards what the developer entered".
-    expect(markup).toContain('This draft is kept');
+    expect(markup).toContain('this draft is kept');
   });
 
   test('and the button that would start a Build is off', () => {
@@ -124,27 +124,29 @@ describe('the screen shows the preflight rather than only obeying it', () => {
   test('a clean draft offers the Build instead', () => {
     const markup = render(clean);
 
-    expect(markup).toContain('locks its vessel');
+    expect(markup).toContain('locks where it runs');
     expect(markup).toContain('Deploy');
     expect(markup).not.toContain('Nothing has been created');
   });
 });
 
-describe('the whole plan is on one screen', () => {
+describe('the whole plan is four rows', () => {
   const markup = render(clean);
 
   test('every decision is answered before anything is pressed', () => {
-    // Source, Component, Target, URL, Reach, Vessel — the five §18 decisions,
-    // as rows that already say what will happen.
-    for (const label of [
-      'Source',
-      'Component',
-      'Target',
-      'URL',
-      'Reach',
-      'Vessel',
-    ]) {
+    // Code, Type, Name, Where it runs. The five §18 decisions are still all
+    // here; Reach, Auth, Target, URL and Vessel are five facts about one
+    // question, and they are stated as one sentence rather than five rows.
+    for (const label of ['Code', 'Type', 'Name', 'Where it runs']) {
       expect(markup).toContain(label);
+    }
+  });
+
+  test('and the five infrastructure nouns are not on the top line', () => {
+    // The regression this guards is the row count creeping back up. Each of
+    // these is one Edit away, inside `Where it runs`, which is closed here.
+    for (const noun of ['Vessel', 'Adapter', 'rank ', 'Reach']) {
+      expect(markup).not.toContain(noun);
     }
   });
 
@@ -156,24 +158,43 @@ describe('the whole plan is on one screen', () => {
   });
 
   test('the vessel is marked immutable while it is still a choice', () => {
-    expect(markup).toContain('immutable once created');
+    // Inside `Where it runs` now, so the row has to be open to read it — and
+    // what opens it is its own unmet prerequisite, which is the other half of
+    // what this asserts: a row holding a blocker shows the controls that clear
+    // it without anybody pressing Edit.
+    const excluded = TARGET_OPTIONS.find((target) => !target.candidate)!;
+    const markup = render({ ...clean, targetId: excluded.targetId });
+
+    expect(markup).toContain('fixed once the App is created');
+    expect(markup).toContain('Nothing chosen can run this App');
+  });
+});
+
+describe('an App nothing routes to', () => {
+  test('states that it has no address, rather than printing one', () => {
+    // The Target mints a canonical hostname whatever the reach is, so the row
+    // read `no address` on its top line with a hostname directly underneath.
+    // Whether there is an address at all is the draft's answer, not the
+    // Target's — the Target only decides what it would be.
+    const markup = render({ ...clean, reach: 'none' });
+
+    expect(markup).toContain('no address');
+    expect(markup).toContain('Nothing routes to it');
+    expect(markup).not.toContain('.apps.example');
+  });
+
+  test('and an App that is reachable still shows the address it will get', () => {
+    expect(render(clean)).toContain('.apps.example');
   });
 });
 
 describe('while the screen is still loading', () => {
   test('the placeholder is the rows that are coming, not one pulsing line', () => {
-    // A card of six rows arrives as a card of six rows. The alternative is a
+    // A card of four rows arrives as a card of four rows. The alternative is a
     // sentence that says nothing about what will be on the screen, followed by
     // a layout shift that costs the reader their place.
     const markup = renderToStaticMarkup(<CreationSkeleton phase="draft" />);
-    for (const label of [
-      'Source',
-      'Component',
-      'Target',
-      'URL',
-      'Reach',
-      'Vessel',
-    ]) {
+    for (const label of ['Code', 'Type', 'Name', 'Where it runs']) {
       expect(markup).toContain(label);
     }
     expect(markup).toContain('aria-busy="true"');
