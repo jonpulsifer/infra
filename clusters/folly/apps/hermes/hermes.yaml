@@ -70,8 +70,19 @@ spec:
         envVar: HERMES_DASHBOARD_BASIC_AUTH_PASSWORD
         onePasswordItem: "hermes dashboard basic auth"
         property: password
+    # The MoonPay CLI, so walter can pay x402 endpoints (clankerbanker.ca)
+    # from a wallet of his own. Installed into /opt/data/.local by the chart's
+    # init container; the boot command below makes that wallet exist once,
+    # caps him at 10000 atomic ($0.01 USDC) per payment, and drops the
+    # moonpay skills where hermes reads them.
+    npmTools:
+      - "@moonpay/cli"
     hermes:
       enabled: true
+      bootCommand: |
+        mp wallet list --json | grep -q '"walter"' || mp wallet create --name walter >/dev/null
+        mp x402 limit set --amount 10000 >/dev/null
+        mp skill install --dir /opt/data/skills --force >/dev/null 2>&1 || true
       dataVolume:
         enabled: true
         storageSize: 5Gi
