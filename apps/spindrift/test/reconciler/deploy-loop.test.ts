@@ -34,7 +34,7 @@ import {
   deploys,
   targets,
 } from '../../src/db/schema.ts';
-import { zoneFor } from '../../src/domain/naming.ts';
+import { APEX, zoneFor } from '../../src/domain/naming.ts';
 import { targetLabel } from '../../src/domain/target.ts';
 import {
   claimNextDeploy,
@@ -603,6 +603,51 @@ describe('§9: dns publishing on a platform-named Target (ticket 137b)', () => {
       },
     ]);
     expect(dns.withdrawn).toEqual([]);
+  });
+
+  test('an apex is stated as published once, not as a re-point', async () => {
+    // The record goes out the same way a label's does — the difference is only
+    // in what the log claims. external-dns owns a record by a marker it cannot
+    // write for a zone apex, so the create lands and every update after it is
+    // dropped: a second deploy that says `published <zone> -> <new target>`
+    // describes a re-point that did not happen, on a screen where every other
+    // surface says the deploy worked.
+    const { app, deploy } = await claimant();
+    const zone = zoneFor('public', manifest.dns.zones) as string;
+    await database()
+      .db.update(apps)
+      .set({ vanityDomain: APEX })
+      .where(eq(apps.id, app.id));
+
+    const adapter = new FakeDeployAdapter({
+      adapter: 'cloudrun',
+      script: [withAddress],
+    });
+    const dns = new FakeDnsPublisher();
+
+    await runDeployPass(context(adapter, {}, dns));
+
+    // The record itself is unchanged: this is a change of sentence, not of act.
+    expect(dns.published).toEqual([
+      {
+        name: 'shop-web',
+        record: {
+          dnsName: zone,
+          recordType: 'CNAME',
+          target: 'shop-web.a.run.app',
+          proxied: true,
+        },
+      },
+    ]);
+
+    const events = await database()
+      .db.select()
+      .from(attemptEvents)
+      .where(eq(attemptEvents.deployId, deploy.id))
+      .orderBy(asc(attemptEvents.id));
+    const lines = events.map((event) => event.line ?? '').join('\n');
+    expect(lines).toContain('published once and never re-pointed');
+    expect(lines).not.toContain(`published ${zone} ->`);
   });
 
   test('no vanity name withdraws rather than publishing', async () => {

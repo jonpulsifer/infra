@@ -26,6 +26,7 @@ import {
   coreMintsCanonical,
   displayUrl,
   hostnameFor,
+  isApexName,
   isLabel,
   isVanityLabel,
   VANITY_LEG_LOSSES,
@@ -70,6 +71,27 @@ describe('§9: one label under the zone, both layers', () => {
     expect(isVanityLabel('shop')).toBe(true);
     expect(isVanityLabel('shop.web')).toBe(false);
     expect(isVanityLabel('')).toBe(false);
+  });
+
+  test('and it is recognisable as one afterwards, from the name alone', () => {
+    // The screens and the deploy log both have to say that an apex record is
+    // published once and never re-pointed, and neither of them holds the label
+    // it was chosen with — they hold the name it resolved to. So the question
+    // is asked of the name: `@` in this zone and the zone typed out in full are
+    // the same string and the same one-way door.
+    const zones = [
+      { name: VANITY_ZONE, reaches: ['public'] },
+      { name: 'other.example.test', reaches: ['public'] },
+    ] as const;
+
+    expect(isApexName(vanity(APEX, VANITY_ZONE), zones)).toBe(true);
+    expect(isApexName(VANITY_ZONE, zones)).toBe(true);
+    expect(isApexName('other.example.test', zones)).toBe(true);
+    // A label under a zone is not an apex, and neither is a zone this
+    // installation does not hold.
+    expect(isApexName(vanity('shop', VANITY_ZONE), zones)).toBe(false);
+    expect(isApexName('example.test', zones)).toBe(false);
+    expect(isApexName('', zones)).toBe(false);
   });
 });
 

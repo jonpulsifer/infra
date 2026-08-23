@@ -72,6 +72,7 @@ import {
   coreMintsCanonical,
   displayUrl,
   hostnameFor,
+  isApexName,
   servesNetwork,
 } from '../domain/naming.ts';
 import {
@@ -740,6 +741,18 @@ async function publishVanityRecord(
   if (desired.hostname.vanity === undefined) {
     try {
       await dns.withdraw(handle);
+      // Said rather than done in silence. This removes the record Spindrift
+      // *states*; whether the record itself goes depends on external-dns
+      // owning it, and it never owns one at a zone apex (`isApexName`). An App
+      // that was on a bare domain leaves that name resolving to wherever it
+      // last pointed, and a silent success read as though it had not.
+      await recordDeployEvent(context.db, attempt, {
+        type: 'log',
+        line:
+          `stopped stating a DNS record for ${handle}. If this App answered ` +
+          'on a bare domain, that record is not withdrawn by this — remove it ' +
+          'in your DNS provider.',
+      });
     } catch (cause) {
       await recordDeployEvent(context.db, attempt, {
         type: 'log',
@@ -766,9 +779,23 @@ async function publishVanityRecord(
       target: verdict.address.target,
       proxied: verdict.address.proxied,
     });
+    // An apex is create-once, so "published" is only true the first time. On
+    // every deploy after it, external-dns has no ownership marker for the name
+    // and drops the update — the record keeps pointing wherever it first went.
+    // Reporting a re-point that did not happen is the whole of what makes this
+    // dangerous, since every other surface says the deploy worked.
+    const apex = isApexName(
+      desired.hostname.vanity,
+      context.manifest.dns.zones,
+    );
     await recordDeployEvent(context.db, attempt, {
       type: 'log',
-      line: `published ${desired.hostname.vanity} -> ${verdict.address.target}`,
+      line: apex
+        ? `stated ${desired.hostname.vanity} -> ${verdict.address.target}. A ` +
+          'bare domain is published once and never re-pointed or removed ' +
+          'after that: if this name already answered somewhere else, change ' +
+          'it in your DNS provider.'
+        : `published ${desired.hostname.vanity} -> ${verdict.address.target}`,
     });
   } catch (cause) {
     await recordDeployEvent(context.db, attempt, {

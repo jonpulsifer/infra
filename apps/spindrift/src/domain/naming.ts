@@ -186,6 +186,32 @@ export function vanity(label: string, zone: string): string {
 }
 
 /**
+ * Whether a name is a zone's apex rather than a label under one.
+ *
+ * A fact about the name, not about who asked for it: `vanity('@', zone)` and an
+ * operator who typed the zone out in full produce the same string and the same
+ * consequence.
+ *
+ * The consequence is that **an apex record is create-once**. The registry
+ * external-dns tracks ownership in writes its marker by prefixing the record
+ * type onto the name's first label, and an apex's first label belongs to the
+ * zone — so the marker for a bare `example.com` is `<prefix>cname-example.com`,
+ * which is in no zone this installation holds, and it is dropped before it is
+ * written. Upstream documents the `--txt-prefix` shape that avoids this, and
+ * changing that prefix orphans the ownership of every record already published,
+ * so this installation states the limit rather than moving it.
+ *
+ * A record nothing owns is one external-dns creates and then never touches:
+ * both the delete path and the update path filter on an owner it has no marker
+ * for. So nothing re-points an apex and nothing removes it — which is a thing
+ * the deploy log and the screen that offers the name have to say, rather than
+ * reporting a re-point that did not happen.
+ */
+export function isApexName(hostname: string, zones: DnsZones): boolean {
+  return zones.some((zone) => zone.name === hostname);
+}
+
+/**
  * What is lost at a vanity name (§9).
  *
  * §9 records these as a **real loss, absorbed on purpose**: "the vanity leg

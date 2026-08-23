@@ -2297,13 +2297,20 @@ function DomainSection({
             note="Only the address the Target mints."
             onClick={() => setChoice('none')}
           />
+          {/*
+            The one tile that carries a warning, because it is the one choice
+            that is not fully reversible from here. A record at a zone apex is
+            published once and never re-pointed or withdrawn — see `isApexName`
+            for why — so choosing it commits the bare domain to this App until
+            somebody edits DNS by hand.
+          */}
           <Choice
             selected={choice === 'apex'}
             title="The domain itself"
             note={
               zone === ''
-                ? 'The bare domain, nothing in front of it.'
-                : `${zone} — the bare domain, nothing in front of it.`
+                ? 'The bare domain. Published once — moving it later is a hand edit in DNS.'
+                : `${zone} — published once. Moving it later is a hand edit in DNS.`
             }
             onClick={() => setChoice('apex')}
           />
@@ -2379,7 +2386,9 @@ function DomainSection({
               ? 'This App answers on the address its Target mints.'
               : domain.ambiguous
                 ? `Saved as ${preview}, and not published while more than one Component serves.`
-                : `This App answers on ${preview} after its next deploy.`}
+                : choice === 'apex'
+                  ? `This App answers on ${preview} after its next deploy. A bare domain is published once — if it already points somewhere, change it in your DNS provider.`
+                  : `This App answers on ${preview} after its next deploy.`}
           </p>
         </div>
 
