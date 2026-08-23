@@ -36,7 +36,19 @@ describe('reading a repository', () => {
     const { app: github } = await app(fake);
     await expect(
       github.repository({ installationId: fake.installationId }, fake.fullName),
-    ).resolves.toEqual({ defaultBranch: 'trunk' });
+    ).resolves.toEqual({ defaultBranch: 'trunk', fullName: fake.fullName });
+  });
+
+  test('reports the name the host uses now, not the one it was asked by', async () => {
+    const fake = new FakeGitHub();
+    const { app: github } = await app(fake);
+    fake.rename('example/renamed');
+
+    // The old name still answers — the host redirects it — and the body is
+    // the only place the rename shows, which is why the name is returned.
+    await expect(
+      github.repository({ installationId: fake.installationId }, 'example/app'),
+    ).resolves.toEqual({ defaultBranch: 'main', fullName: 'example/renamed' });
   });
 
   test('returns null for a file that is not there, and only for that', async () => {

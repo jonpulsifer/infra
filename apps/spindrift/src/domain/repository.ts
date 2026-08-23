@@ -89,11 +89,18 @@ export interface RepositoryAuthorization {
 
 /** What reconciliation reads (§15). */
 export interface RepositoryReader {
-  /** The repository's own facts. §15 reads the default branch, never assumes it. */
+  /**
+   * The repository's own facts. §15 reads the default branch, never assumes it.
+   *
+   * `fullName` is what the host calls the repository **now**. A renamed
+   * repository still answers under its old name, so a caller addressing it
+   * that way cannot tell from the call succeeding — only from the name coming
+   * back different. The repo loop compares the two and follows the rename.
+   */
   repository(
     ref: RepositoryRef,
     fullName: string,
-  ): Promise<{ readonly defaultBranch: string }>;
+  ): Promise<{ readonly defaultBranch: string; readonly fullName: string }>;
   /** The commit a branch currently points at. */
   branchHead(
     ref: RepositoryRef,

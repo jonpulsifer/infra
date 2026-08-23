@@ -36,6 +36,7 @@ import {
 } from '../../src/integrations/github/config-pr.ts';
 import {
   applyWebhookDelivery,
+  PUSH_LAG_RETRY_MS,
   type RepoLoopContext,
   reconcileAllRepositories,
   reconcileRepository,
@@ -759,5 +760,224 @@ describe('a verified webhook delivery', () => {
         reason: 'ping is not subscribed to',
       }),
     ).toEqual([]);
+  });
+});
+
+/**
+ * A rename is silent: the host keeps answering the old name, so the poll keeps
+ * working, while every push delivery arrives under the new one and matches no
+ * row. §15 makes the poll the truth, so the poll is what notices.
+ */
+describe('a renamed repository', () => {
+  test('the poll follows the rename, and a delivery under the new name then matches', async () => {
+    const fake = new FakeGitHub();
+    fake.commitFiles('main', {
+      'services/api/spindrift.yaml': SPINDRIFT_YAML,
+    });
+    const { repository, app } = await connect(fake);
+    const loop = await context(fake);
+    await reconcileRepository(loop, repository);
+
+    fake.rename('example/renamed');
+    const pushed = fake.commitFiles('main', {
+      'services/api/spindrift.yaml': SPINDRIFT_YAML,
+      'README.md': 'pushed',
+    });
+    const delivery = {
+      kind: 'push' as const,
+      repository: 'example/renamed',
+      ref: 'refs/heads/main',
+      defaultBranch: 'main',
+      head: pushed,
+    };
+
+    // Until the poll has looked, the delivery names a repository no row
+    // carries. Nothing is lost — the poll adopts the same commit.
+    expect(await applyWebhookDelivery(loop, delivery)).toEqual([]);
+
+    const [poll] = await reconcileAllRepositories(loop);
+    expect(poll).toMatchObject({
+      outcome: 'adopted',
+      commit: pushed,
+      fullName: 'example/renamed',
+    });
+    expect((await reload(repository.id)).fullName).toBe('example/renamed');
+    // The App's own source URL names the repository too, and screens read it.
+    const [renamedApp] = await database()
+      .db.select({ url: apps.sourceRepoUrl })
+      .from(apps)
+      .where(eq(apps.id, app.id));
+    expect(renamedApp?.url).toBe('https://git.invalid/example/renamed');
+
+    const again = fake.commitFiles('main', {
+      'services/api/spindrift.yaml': SPINDRIFT_YAML,
+      'README.md': 'again',
+    });
+    const passes = await applyWebhookDelivery(loop, {
+      ...delivery,
+      head: again,
+    });
+    expect(passes).toHaveLength(1);
+    expect(passes[0]).toMatchObject({ outcome: 'adopted', commit: again });
+  });
+
+  test('a rename with nothing pushed still rewrites the row', async () => {
+    const fake = new FakeGitHub();
+    fake.commitFiles('main', { 'README.md': 'hello' });
+    const { repository } = await connect(fake);
+    const loop = await context(fake);
+    await reconcileRepository(loop, repository);
+
+    fake.rename('example/renamed');
+    const pass = await reconcileRepository(loop, await reload(repository.id));
+
+    // The branch never moved, so this is the pass that reports `unchanged` —
+    // and the one a rename without a push has to be caught by.
+    expect(pass).toMatchObject({
+      outcome: 'unchanged',
+      fullName: 'example/renamed',
+    });
+    expect((await reload(repository.id)).fullName).toBe('example/renamed');
+  });
+});
+
+/** Every default-branch ref read the client made — one per pass. */
+function refReads(fake: FakeGitHub) {
+  return fake.requests.filter((request) =>
+    request.path.endsWith('/git/ref/heads/main'),
+  );
+}
+
+/**
+ * A push delivery can arrive before the ref it announces is readable. The
+ * first pass then reads the previous head, and without a second one the pushed
+ * commit costs the full poll interval on the one path that exists to shorten
+ * it. One bounded wait and one re-read, never a loop.
+ */
+describe('a push the API has not caught up to', () => {
+  /** A repository at `adopted`, with `pushed` ahead of it that the ref does not show yet. */
+  async function lagged(fake: FakeGitHub) {
+    const adopted = fake.commitFiles('main', {
+      'services/api/spindrift.yaml': SPINDRIFT_YAML,
+    });
+    const { repository } = await connect(fake);
+    await reconcileRepository(await context(fake), repository);
+    const pushed = fake.commitFiles('main', {
+      'services/api/spindrift.yaml': SPINDRIFT_YAML,
+      'README.md': 'pushed',
+    });
+    fake.setHead('main', adopted);
+    fake.requests.length = 0;
+    const waits: number[] = [];
+    return {
+      repository,
+      pushed,
+      waits,
+      delivery: {
+        kind: 'push' as const,
+        repository: fake.fullName,
+        ref: 'refs/heads/main',
+        defaultBranch: 'main',
+        head: pushed,
+      },
+      /** A loop whose wait is recorded, and during which the far side catches up. */
+      loop: (catchUp: () => void): RepoLoopContext => ({
+        db: database().db,
+        clock,
+        host: host(fake),
+        sleep: async (ms) => {
+          waits.push(ms);
+          catchUp();
+        },
+      }),
+    };
+  }
+
+  test('waits once, re-reads, and carries the delivered commit', async () => {
+    const fake = new FakeGitHub();
+    const { repository, pushed, waits, delivery, loop } = await lagged(fake);
+
+    const passes = await applyWebhookDelivery(
+      loop(() => fake.setHead('main', pushed)),
+      delivery,
+    );
+
+    expect(waits).toEqual([PUSH_LAG_RETRY_MS]);
+    expect(refReads(fake)).toHaveLength(2);
+    // Both passes are handed on: the dispatcher reads `adopted` and ignores
+    // the rest, and a first pass that adopted something of its own is not
+    // dropped on the floor.
+    expect(passes.map((pass) => pass.outcome)).toEqual([
+      'unchanged',
+      'adopted',
+    ]);
+    expect(passes[1]).toMatchObject({ outcome: 'adopted', commit: pushed });
+    expect((await reload(repository.id)).authoritativeCommit).toBe(pushed);
+  });
+
+  test('a far side still behind after the wait is left to the poll', async () => {
+    const fake = new FakeGitHub();
+    const { repository, pushed, waits, delivery, loop } = await lagged(fake);
+
+    const passes = await applyWebhookDelivery(
+      loop(() => {}),
+      delivery,
+    );
+
+    // One retry, not a loop: two reads, one wait, and the poll gets the rest.
+    expect(waits).toEqual([PUSH_LAG_RETRY_MS]);
+    expect(refReads(fake)).toHaveLength(2);
+    expect(passes.map((pass) => pass.outcome)).toEqual([
+      'unchanged',
+      'unchanged',
+    ]);
+    expect((await reload(repository.id)).authoritativeCommit).not.toBe(pushed);
+  });
+
+  test('a delivery matched on the first read never re-reads', async () => {
+    const fake = new FakeGitHub();
+    const { pushed, waits, delivery, loop } = await lagged(fake);
+    fake.setHead('main', pushed);
+
+    const passes = await applyWebhookDelivery(
+      loop(() => {
+        throw new Error('the far side was never behind');
+      }),
+      delivery,
+    );
+
+    expect(waits).toEqual([]);
+    expect(refReads(fake)).toHaveLength(1);
+    expect(passes).toHaveLength(1);
+    expect(passes[0]).toMatchObject({ outcome: 'adopted', commit: pushed });
+  });
+
+  test('a frozen pass never re-reads', async () => {
+    const fake = new FakeGitHub();
+    const { waits, delivery, loop } = await lagged(fake);
+    fake.accessLost = true;
+
+    const passes = await applyWebhookDelivery(
+      loop(() => {}),
+      delivery,
+    );
+
+    expect(waits).toEqual([]);
+    expect(passes.map((pass) => pass.outcome)).toEqual(['frozen']);
+  });
+
+  test('an unavailable pass never re-reads', async () => {
+    const fake = new FakeGitHub();
+    const { waits, delivery, loop } = await lagged(fake);
+    fake.rateLimited = true;
+
+    const passes = await applyWebhookDelivery(
+      loop(() => {}),
+      delivery,
+    );
+
+    // A rate limit is a delay, and retrying into it is what a quota is for.
+    expect(waits).toEqual([]);
+    expect(passes.map((pass) => pass.outcome)).toEqual(['unavailable']);
   });
 });

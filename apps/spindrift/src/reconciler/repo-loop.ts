@@ -28,10 +28,11 @@
  * **Lost access freezes and never destroys.** §15: "Lost access **freezes
  * source-driven changes and never destroys a Deploy**." Mechanically: the only
  * write this file makes on lost access is an `UPDATE` of one `repositories`
- * row. There is no `delete` anywhere in it, and no write to `apps`,
- * `components`, `builds`, or `deploys` at all — so what is running keeps
- * running, and what stops is the one thing that genuinely cannot continue,
- * which is reading new source.
+ * row. There is no `delete` anywhere in it, no write to `components`,
+ * `builds`, or `deploys` at all, and the one write to `apps` is the rename
+ * follow rewriting `source_repo_url` — a display string, on the path that has
+ * just proved access. So what is running keeps running, and what stops is the
+ * one thing that genuinely cannot continue, which is reading new source.
  *
  * What this file's own functions do **not** do is dispatch a build or a
  * Deploy. `reconcileRepository`, `reconcileAllRepositories`, and
@@ -69,7 +70,7 @@
  * Nothing here closes it; the honest statement is that every *writer* is a
  * dispatching path, not that every adoption is dispatched.
  */
-import { and, eq, isNull } from 'drizzle-orm';
+import { and, eq, isNull, sql } from 'drizzle-orm';
 import type { Clock } from '../commands/types.ts';
 import type { Database } from '../db/client.ts';
 import { apps, type Repository, repositories } from '../db/schema.ts';
@@ -83,7 +84,7 @@ import {
 import { SPINDRIFT_FILE } from '../integrations/github/config-pr.ts';
 import { GitHubAccessError } from '../integrations/github/http.ts';
 import type { WebhookDelivery } from '../integrations/github/webhook.ts';
-import { reconcilerLoopDuration } from '../telemetry/index.ts';
+import { logInfo, reconcilerLoopDuration } from '../telemetry/index.ts';
 
 /** What the loop needs. No principal: nobody asked for it to run. */
 export interface RepoLoopContext {
@@ -95,7 +96,23 @@ export interface RepoLoopContext {
    * `RepositoryReader` is.
    */
   readonly host: RepositoryReader;
+  /**
+   * How `applyWebhookDelivery` waits out a push the API has not caught up to.
+   * Injected so a test does not sit through {@link PUSH_LAG_RETRY_MS}; unset
+   * is a real timer.
+   */
+  readonly sleep?: (ms: number) => Promise<void>;
 }
+
+/**
+ * How long a push delivery waits before its one re-read.
+ *
+ * A delivery can arrive before the ref it announces is readable, and the first
+ * pass then reads the previous head. One bounded wait and one more pass is the
+ * whole remedy: the delivery is a shortcut, and a second miss costs exactly
+ * what a dropped delivery costs — the next poll.
+ */
+export const PUSH_LAG_RETRY_MS = 1500;
 
 /** What one scope's Spindrift file said, or why it said nothing. */
 export type ScopeOutcome =
@@ -269,13 +286,14 @@ export interface ReconcileOptions {
  */
 export async function reconcileRepository(
   context: RepoLoopContext,
-  repository: Repository,
+  stored: Repository,
   options: ReconcileOptions = {},
 ): Promise<RepositoryReconciliation> {
   const adopt = options.adopt ?? true;
-  const ref = repositoryRefOf(repository);
+  const ref = repositoryRefOf(stored);
   const now = context.clock.now();
 
+  let fullName: string;
   let defaultBranch: string;
   let head: string;
   // Whether the configuration PR this row still names has been closed since
@@ -288,18 +306,14 @@ export async function reconcileRepository(
   // function reports `unchanged`.
   let configPullRequestClosed = false;
   try {
-    const facts = await context.host.repository(ref, repository.fullName);
-    defaultBranch = facts.defaultBranch;
-    head = await context.host.branchHead(
-      ref,
-      repository.fullName,
-      defaultBranch,
-    );
-    if (repository.configPullRequest !== null) {
+    const facts = await context.host.repository(ref, stored.fullName);
+    ({ fullName, defaultBranch } = facts);
+    head = await context.host.branchHead(ref, fullName, defaultBranch);
+    if (stored.configPullRequest !== null) {
       const state = await context.host.pullRequestState(
         ref,
-        repository.fullName,
-        repository.configPullRequest,
+        fullName,
+        stored.configPullRequest,
       );
       configPullRequestClosed = state === 'closed';
     }
@@ -307,17 +321,26 @@ export async function reconcileRepository(
     if (cause instanceof GitHubAccessError && cause.code === 'ACCESS_LOST') {
       return freeze(
         context,
-        repository,
+        stored,
         'Spindrift can no longer read this repository',
       );
     }
     return {
-      repositoryId: repository.id,
-      fullName: repository.fullName,
+      repositoryId: stored.id,
+      fullName: stored.fullName,
       outcome: 'unavailable',
       detail: cause instanceof Error ? cause.message : String(cause),
     };
   }
+
+  // A rename is silent from here: the host keeps answering the old name, so
+  // this poll keeps working, while every push delivery now arrives under the
+  // new one and `applyWebhookDelivery`'s lookup misses it. The name the host
+  // just answered with is the fact; the row follows it.
+  const repository =
+    fullName === stored.fullName
+      ? stored
+      : await followRename(context, stored, fullName);
 
   // Reaching the repository is what proves access came back. A freeze is
   // cleared here rather than only on a webhook, because §15's periodic
@@ -528,6 +551,43 @@ export async function reconcileRepository(
   };
 }
 
+/**
+ * Follow a repository rename (§15).
+ *
+ * The row's `full_name` is the webhook path's only lookup key, so it is
+ * rewritten first; `apps.source_repo_url` names the same repository for the
+ * screens that render an App's source, and is rewritten by substitution so an
+ * App whose URL was typed some other way is left alone rather than guessed at.
+ * Nothing that decides what runs is touched.
+ *
+ * ponytail: no far-side repository id is stored, so a new repository created
+ * under a vacated name is indistinguishable from the renamed one; storing
+ * `repository.id` from the push payload is the upgrade.
+ */
+async function followRename(
+  context: RepoLoopContext,
+  stored: Repository,
+  fullName: string,
+): Promise<Repository> {
+  const now = context.clock.now();
+  await context.db
+    .update(repositories)
+    .set({ fullName, updatedAt: now })
+    .where(eq(repositories.id, stored.id));
+  await context.db
+    .update(apps)
+    .set({
+      sourceRepoUrl: sql`replace(${apps.sourceRepoUrl}, ${`/${stored.fullName}`}, ${`/${fullName}`})`,
+      updatedAt: now,
+    })
+    .where(eq(apps.repositoryId, stored.id));
+  logInfo('repository renamed; following it', {
+    'spindrift.repository': fullName,
+    'spindrift.repository.previous': stored.fullName,
+  });
+  return { ...stored, fullName };
+}
+
 /** A scope's file at an older commit, or `null` if it was not there either. */
 async function readScopeFile(
   context: RepoLoopContext,
@@ -593,7 +653,21 @@ export async function applyWebhookDelivery(
       .from(repositories)
       .where(eq(repositories.fullName, delivery.repository));
     if (repository === undefined) return [];
-    return [await reconcileRepository(context, repository)];
+    const first = await reconcileRepository(context, repository);
+    if (!lagging(first, delivery.head)) return [first];
+
+    // The delivery named a head the read did not reach: the API lags its own
+    // push notifications by a moment, and without this the pushed commit
+    // costs the full poll interval on the one path that exists to shorten it.
+    // Once, not a loop — and both passes are returned, because the first may
+    // have adopted a commit of its own that the dispatcher still has to see.
+    await (context.sleep ?? sleep)(PUSH_LAG_RETRY_MS);
+    const [fresh] = await context.db
+      .select()
+      .from(repositories)
+      .where(eq(repositories.id, repository.id));
+    if (fresh === undefined) return [first];
+    return [first, await reconcileRepository(context, fresh)];
   }
 
   const affected = await repositoriesOf(
@@ -618,6 +692,22 @@ export async function applyWebhookDelivery(
     passes.push(await reconcileRepository(context, repository));
   }
   return passes;
+}
+
+/**
+ * Whether a push delivery's pass read a head other than the one delivered.
+ *
+ * Only a pass that reached a commit can lag. `frozen` and `unavailable` did
+ * not read one, and `rejected` reached one whose file did not parse — a fact
+ * about the commit, not about the API's timing.
+ */
+function lagging(pass: RepositoryReconciliation, head: string): boolean {
+  return (
+    (pass.outcome === 'unchanged' ||
+      pass.outcome === 'adopted' ||
+      pass.outcome === 'behind') &&
+    pass.commit !== head
+  );
 }
 
 /**

@@ -164,7 +164,8 @@ function acceptsJson(accept: string | null): boolean {
 }
 
 export class FakeGitHub {
-  readonly fullName: string;
+  /** `owner/name` as the host currently knows it; {@link rename} moves it. */
+  fullName: string;
   readonly installationId: string;
   readonly accountLogin: string;
   readonly requests: RecordedRequest[] = [];
@@ -185,6 +186,8 @@ export class FakeGitHub {
   /** Set to answer every call with a quota refusal instead. */
   rateLimited = false;
 
+  /** Names this repository answered to before a {@link rename}. */
+  private readonly previousNames = new Set<string>();
   private readonly blobs = new Map<string, string>();
   private readonly trees = new Map<string, Map<string, string>>();
   private readonly commits = new Map<string, StoredCommit>();
@@ -257,6 +260,25 @@ export class FakeGitHub {
   closePullRequest(number: number): void {
     const pull = this.pulls.find((candidate) => candidate.number === number);
     if (pull !== undefined) pull.state = 'closed';
+  }
+
+  /**
+   * Rename the repository. The old name keeps answering, and every answer
+   * carries the new `full_name` — which is what the real client sees, because
+   * the host's `301` is followed by `fetch` before any body reaches it.
+   */
+  rename(fullName: string): void {
+    this.previousNames.add(this.fullName);
+    this.fullName = fullName;
+  }
+
+  /**
+   * Point a branch at a commit that already exists. Pointing it *back* is how
+   * a test stands in for the API lagging a push: the delivery names the newer
+   * commit while the ref still reads as the older one.
+   */
+  setHead(branch: string, commit: string): void {
+    this.branches.set(branch, commit);
   }
 
   private nextId(): string {
@@ -362,10 +384,14 @@ export class FakeGitHub {
       });
     }
 
-    const prefix = `/repos/${this.fullName}`;
-    if (!url.pathname.startsWith(`${prefix}/`) && url.pathname !== prefix) {
-      return this.notFound();
-    }
+    const prefix = [this.fullName, ...this.previousNames]
+      .map((name) => `/repos/${name}`)
+      .find(
+        (candidate) =>
+          url.pathname === candidate ||
+          url.pathname.startsWith(`${candidate}/`),
+      );
+    if (prefix === undefined) return this.notFound();
     const rest = url.pathname.slice(prefix.length);
 
     if (rest === '' && request.method === 'GET') {

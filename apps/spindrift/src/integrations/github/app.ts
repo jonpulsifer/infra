@@ -146,22 +146,30 @@ export class GitHubApp implements ExactCommitFetcher<InstallationRef> {
   /**
    * The repository's own facts. §15 reads the default branch, never assumes it.
    *
-   * Narrowed to that one field because it is the only one core has a use for —
-   * a wider return would be a promise about a far side's response shape that
-   * `RepositoryReader` does not make.
+   * Narrowed to the two fields core has a use for — a wider return would be a
+   * promise about a far side's response shape that `RepositoryReader` does not
+   * make. `full_name` is there because GitHub answers a renamed repository's
+   * old name with a `301` that `fetch` follows silently, so the body's name is
+   * the only place the rename shows.
    */
   async repository(
     ref: InstallationRef,
     fullName: string,
-  ): Promise<{ readonly defaultBranch: string }> {
-    const repository = await this.http(ref).json<{ default_branch: string }>({
+  ): Promise<{ readonly defaultBranch: string; readonly fullName: string }> {
+    const repository = await this.http(ref).json<{
+      default_branch: string;
+      full_name: string;
+    }>({
       method: 'GET',
       path: `/repos/${fullName}`,
     });
     if (repository === null) {
       throw new TypeError('the repository endpoint tolerates no status');
     }
-    return { defaultBranch: repository.default_branch };
+    return {
+      defaultBranch: repository.default_branch,
+      fullName: repository.full_name,
+    };
   }
 
   /**
