@@ -1988,6 +1988,79 @@ describe('a job is run, and its runs are read', () => {
     ]);
   });
 
+  test("puts this run's parameters on the container after the template's own, and their names on the Job", async () => {
+    // Appended, not merged: the kubelet reads a duplicated name by its last
+    // entry, so "after the template's own" is what makes a parameter the
+    // value the process sees. The names ride on the Job as an annotation and
+    // the values do not — the annotation is what the timeline reads.
+    const template = {
+      metadata: { labels: JOB_LABELS },
+      spec: {
+        backoffLimit: 0,
+        template: {
+          spec: {
+            containers: [
+              { name: 'app', env: [{ name: 'TMPDIR', value: '/tmp' }] },
+            ],
+          },
+        },
+      },
+    };
+    const spec = {
+      suspend: true,
+      schedule: '0 0 31 2 *',
+      jobTemplate: template,
+    };
+    const far = cluster({
+      'cronjobs/apps/blog-nightly': { ...cronJob, spec },
+    });
+
+    const started = await adapterFor(far).run(target(), REF, {
+      env: { SNAPSHOT: 'nightly-2026-08-03', SINCE: '2026-08-01' },
+    });
+
+    expect(started.kind).toBe('started');
+    if (started.kind !== 'started') return;
+    const created = far.get(`jobs/apps/${started.execution.name}`);
+    expect(created?.spec).toEqual({
+      backoffLimit: 0,
+      template: {
+        spec: {
+          containers: [
+            {
+              name: 'app',
+              env: [
+                { name: 'TMPDIR', value: '/tmp' },
+                { name: 'SNAPSHOT', value: 'nightly-2026-08-03' },
+                { name: 'SINCE', value: '2026-08-01' },
+              ],
+            },
+          ],
+        },
+      },
+    });
+    expect(created?.metadata.annotations).toEqual({
+      'cronjob.kubernetes.io/instantiate': 'manual',
+      'lolwtf.ca/run-with': 'SNAPSHOT, SINCE',
+    });
+    // The CronJob's own template is untouched: the parameters were this
+    // run's, and the next scheduled fire must not inherit them.
+    expect(far.get('cronjobs/apps/blog-nightly')?.spec).toEqual(spec);
+  });
+
+  test('a run without parameters is the template, verbatim, with no annotation for them', async () => {
+    const far = cluster();
+    const started = await adapterFor(far).run(target(), REF, { env: {} });
+
+    expect(started.kind).toBe('started');
+    if (started.kind !== 'started') return;
+    const created = far.get(`jobs/apps/${started.execution.name}`);
+    expect(created?.spec).toEqual(jobTemplate.spec);
+    expect(created?.metadata.annotations).toEqual({
+      'cronjob.kubernetes.io/instantiate': 'manual',
+    });
+  });
+
   test('leaves the CronJob suspended — running now is not scheduling', async () => {
     const far = cluster();
     await adapterFor(far).run(target(), REF);
@@ -2130,6 +2203,48 @@ describe('a job is run, and its runs are read', () => {
     await expect(adapterFor(far).executions(target(), REF)).rejects.toThrow(
       /404/,
     );
+  });
+
+  test('reads the names a run was started with back into its line, never the values', async () => {
+    const far = cluster({
+      'jobs/apps/blog-nightly-9': {
+        ...ranJob('blog-nightly-9', {
+          startTime: '2026-08-03T00:00:00Z',
+          conditions: [
+            {
+              type: 'Complete',
+              status: 'True',
+              reason: 'CompletionsReached',
+              message: 'all tasks completed',
+            },
+          ],
+        }),
+        metadata: {
+          name: 'blog-nightly-9',
+          namespace: 'apps',
+          labels: JOB_LABELS,
+          annotations: { 'lolwtf.ca/run-with': 'SNAPSHOT, SINCE' },
+        },
+        spec: {
+          template: {
+            spec: {
+              containers: [
+                { env: [{ name: 'SNAPSHOT', value: 'nightly-2026-08-03' }] },
+              ],
+            },
+          },
+        },
+      },
+    });
+
+    const runs = await adapterFor(far).executions(target(), REF);
+
+    expect(runs.kind).toBe('executions');
+    if (runs.kind !== 'executions') return;
+    expect(runs.executions[0]?.detail).toBe(
+      'ran with SNAPSHOT, SINCE · all tasks completed',
+    );
+    expect(JSON.stringify(runs)).not.toContain('nightly-2026-08-03');
   });
 
   test("reads one run's logs rather than the Component's whole output", async () => {

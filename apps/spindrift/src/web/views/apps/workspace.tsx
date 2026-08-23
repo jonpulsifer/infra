@@ -249,8 +249,14 @@ export type SetBuildRoute = (
  * exactly one thing to say afterwards — it started, or here is the sentence the
  * command refused with — and threading that back as two props would put this
  * card's transient state on the screen that owns the App.
+ *
+ * `env` is this run's parameters, present only when the card has some to send;
+ * what they may be called and what they may not shadow is `runComponent`'s to
+ * refuse, and the sentence comes back through the same arm.
  */
-export type RunJob = () => Promise<
+export type RunJob = (
+  env?: Readonly<Record<string, string>>,
+) => Promise<
   { readonly ok: true } | { readonly ok: false; readonly message: string }
 >;
 
@@ -2828,6 +2834,14 @@ function Runtime({
   const [following, setFollowing] = useState<string | null>(null);
   const [starting, setStarting] = useState(false);
   const [runError, setRunError] = useState<string | null>(null);
+  /**
+   * This run's parameters, as typed (§17's one-off script with an argument).
+   * A row with no name is a row the operator has not filled in, not a variable
+   * called nothing, so it is left out rather than refused.
+   */
+  const [parameters, setParameters] = useState<
+    readonly { id: string; key: string; value: string }[]
+  >([]);
 
   const follow = (execution: string) => {
     const next = following === execution ? null : execution;
@@ -2839,10 +2853,26 @@ function Runtime({
     if (!onRun) return;
     setStarting(true);
     setRunError(null);
-    const result = await onRun();
+    const env = Object.fromEntries(
+      parameters
+        .filter((parameter) => parameter.key.trim() !== '')
+        .map((parameter) => [parameter.key.trim(), parameter.value]),
+    );
+    const result = await onRun(Object.keys(env).length === 0 ? undefined : env);
     setStarting(false);
     if (!result.ok) setRunError(result.message);
+    else setParameters([]);
   };
+
+  const editParameter = (
+    id: string,
+    change: Partial<{ key: string; value: string }>,
+  ) =>
+    setParameters((current) =>
+      current.map((parameter) =>
+        parameter.id === id ? { ...parameter, ...change } : parameter,
+      ),
+    );
 
   return (
     <Card>
@@ -2875,18 +2905,79 @@ function Runtime({
               running is not deploying — nothing about what is placed changes.
             */}
             {onRun ? (
-              <div className="flex items-center gap-3 pb-2">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  disabled={starting}
-                  onClick={() => void start()}
-                >
-                  {starting ? 'Starting...' : 'Run now'}
-                </Button>
-                {runError ? (
-                  <p className="text-xs text-destructive">{runError}</p>
-                ) : null}
+              <div className="flex flex-col gap-2 pb-2">
+                <div className="flex flex-wrap items-center gap-3">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={starting}
+                    onClick={() => void start()}
+                  >
+                    {starting ? 'Starting...' : 'Run now'}
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    disabled={starting}
+                    onClick={() =>
+                      setParameters((current) => [
+                        ...current,
+                        { id: crypto.randomUUID(), key: '', value: '' },
+                      ])
+                    }
+                  >
+                    Add parameter
+                  </Button>
+                  {runError ? (
+                    <p className="text-xs text-destructive">{runError}</p>
+                  ) : null}
+                </div>
+                {/*
+                  `ConfigVarForm`'s grid, minus the password field: a parameter
+                  is an argument to one run, not a secret — a secret goes
+                  through config, and a name config already delivers is what
+                  `runComponent` refuses.
+                */}
+                {parameters.map((parameter) => (
+                  <div
+                    key={parameter.id}
+                    className="grid gap-2 sm:grid-cols-[1fr_1fr_auto]"
+                  >
+                    <Field
+                      name={`run-parameter-${parameter.id}-key`}
+                      label="Name"
+                      value={parameter.key}
+                      onChange={(event) =>
+                        editParameter(parameter.id, { key: event.target.value })
+                      }
+                      placeholder="SNAPSHOT"
+                    />
+                    <Field
+                      name={`run-parameter-${parameter.id}-value`}
+                      label="Value"
+                      value={parameter.value}
+                      onChange={(event) =>
+                        editParameter(parameter.id, {
+                          value: event.target.value,
+                        })
+                      }
+                      placeholder="for this run only"
+                    />
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="self-end"
+                      disabled={starting}
+                      onClick={() =>
+                        setParameters((current) =>
+                          current.filter((row) => row.id !== parameter.id),
+                        )
+                      }
+                    >
+                      Remove
+                    </Button>
+                  </div>
+                ))}
               </div>
             ) : null}
             {/*
@@ -3781,7 +3872,7 @@ function AppWorkspace({
    * before the run existed, and a run that does not appear reads as a press
    * that did nothing.
    */
-  const handleRunJob: RunJob = async () => {
+  const handleRunJob: RunJob = async (env) => {
     if (runs?.componentId === undefined || runs.targetId === undefined) {
       return { ok: false, message: 'This job has not been placed on a Target' };
     }
@@ -3789,6 +3880,7 @@ function AppWorkspace({
       const result = await command('runComponent', {
         componentId: runs.componentId,
         targetId: runs.targetId,
+        ...(env === undefined ? {} : { env }),
       });
       if (!result.ok) return { ok: false, message: result.failure.message };
       read.reload();

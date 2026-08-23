@@ -57,6 +57,7 @@ import type {
   JobExecution,
   JobRuns,
   ObservedState,
+  RunOptions,
   RuntimeLogEntry,
   RuntimeLogPage,
   RuntimeLogSubject,
@@ -189,6 +190,15 @@ const JOB_NAME_LABEL = 'batch.kubernetes.io/job-name';
 
 /** What `kubectl create job --from` marks a run somebody asked for. */
 const MANUAL_RUN = 'cronjob.kubernetes.io/instantiate';
+
+/**
+ * The parameter *names* a run was started with, on the Job itself.
+ *
+ * Names and never values: the Job spec already carries the values, and this
+ * is what `executions` reads back into the timeline, so a value here would be
+ * a value in a status line (§17, {@link RunOptions}).
+ */
+const RUN_WITH = 'lolwtf.ca/run-with';
 
 /**
  * The longest name a run may carry.
@@ -513,7 +523,11 @@ export class KubernetesDeployAdapter implements DeployAdapter {
    * `OwnerReferencesPermissionEnforcement` admission plugin is on, and the
    * garbage collection this wants happens without it.
    */
-  async run(target: DeployTarget, ref: DeployRef): Promise<StartedRun> {
+  async run(
+    target: DeployTarget,
+    ref: DeployRef,
+    options: RunOptions = {},
+  ): Promise<StartedRun> {
     const connection = this.connectionOf(target);
     if (connection === null) {
       return refuse(`${targetLabel(target)} is not a Kubernetes Target`);
@@ -556,6 +570,7 @@ export class KubernetesDeployAdapter implements DeployAdapter {
       RUN_NAME_LIMIT,
     );
     const uid = owner.metadata.uid;
+    const parameters = Object.entries(options.env ?? {});
     const run: KubernetesObject = {
       apiVersion: JOB.apiVersion,
       kind: JOB.kind,
@@ -568,6 +583,9 @@ export class KubernetesDeployAdapter implements DeployAdapter {
         annotations: {
           ...template.metadata?.annotations,
           [MANUAL_RUN]: 'manual',
+          ...(parameters.length === 0
+            ? {}
+            : { [RUN_WITH]: parameters.map(([key]) => key).join(', ') }),
         },
         ...(typeof uid === 'string'
           ? {
@@ -583,7 +601,10 @@ export class KubernetesDeployAdapter implements DeployAdapter {
             }
           : {}),
       },
-      spec: template.spec,
+      spec:
+        parameters.length === 0
+          ? template.spec
+          : withRunEnv(template.spec, parameters),
     };
 
     let created: KubernetesObject;
@@ -1593,6 +1614,39 @@ interface JobTemplate {
   readonly spec?: Record<string, unknown>;
 }
 
+/**
+ * The template's spec with this run's parameters on every container.
+ *
+ * Appended after the template's own `env`, because the kubelet reads a
+ * duplicated name by its last entry — so a parameter is the value the process
+ * sees. Every container rather than the first: the chart renders one, and a
+ * run with a name the operator typed reaching a sidecar is harmless where a
+ * run that guessed which container was the workload is not.
+ */
+function withRunEnv(
+  spec: Record<string, unknown>,
+  parameters: readonly (readonly [string, string])[],
+): Record<string, unknown> {
+  const pod = (spec.template as { spec?: Record<string, unknown> } | undefined)
+    ?.spec;
+  const containers = pod?.containers;
+  if (!Array.isArray(containers)) return spec;
+  const env = parameters.map(([name, value]) => ({ name, value }));
+  return {
+    ...spec,
+    template: {
+      ...(spec.template as Record<string, unknown>),
+      spec: {
+        ...pod,
+        containers: containers.map((container: Record<string, unknown>) => ({
+          ...container,
+          env: [...(Array.isArray(container.env) ? container.env : []), ...env],
+        })),
+      },
+    },
+  };
+}
+
 /** A refusal in the vocabulary both run verbs answer in (§17). */
 function refuse(because: string): Extract<JobRuns, { kind: 'none' }> {
   return { kind: 'none', because };
@@ -1634,7 +1688,12 @@ function jobExecution(job: KubernetesObject): JobExecution {
       (condition.type === 'Complete' || condition.type === 'Failed'),
   );
   const at = status?.startTime ?? job.metadata.creationTimestamp;
-  const detail = terminal?.message ?? terminal?.reason;
+  const ranWith = job.metadata.annotations?.[RUN_WITH];
+  const ended = terminal?.message ?? terminal?.reason;
+  const detail = [
+    ...(ranWith === undefined ? [] : [`ran with ${ranWith}`]),
+    ...(ended === undefined ? [] : [ended]),
+  ].join(' · ');
   return {
     name: job.metadata.name,
     outcome:
@@ -1644,7 +1703,7 @@ function jobExecution(job: KubernetesObject): JobExecution {
           ? 'passed'
           : 'failed',
     startedAt: typeof at === 'string' ? new Date(at) : null,
-    ...(detail === undefined ? {} : { detail }),
+    ...(detail === '' ? {} : { detail }),
   };
 }
 

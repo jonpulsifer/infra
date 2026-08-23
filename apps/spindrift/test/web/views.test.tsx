@@ -719,6 +719,10 @@ describe('the App workspace', () => {
       <Workspace view={job} onRunJob={async () => ({ ok: true })} />,
     );
     expect(withAct).toContain('Run now');
+    // And the one-off script's argument beside it (§17): a run can be given
+    // parameters, and the affordance lives with the act that sends them.
+    expect(withAct).toContain('Add parameter');
+    expect(withoutAct).not.toContain('Add parameter');
   });
 
   describe('an App whose job is not its first Component', () => {

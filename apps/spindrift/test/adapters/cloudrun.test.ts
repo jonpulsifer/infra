@@ -1499,6 +1499,98 @@ describe('a job is run, and its runs are read', () => {
     );
   });
 
+  test("sends this run's parameters as the execution's container override", async () => {
+    // `jobs.run` takes `overrides.containerOverrides[].env` — the runtime's
+    // own per-execution knob, so the Job's template is untouched and the next
+    // scheduled fire does not inherit a parameter this run was given.
+    const { api, adapter } = adapterFor();
+    await drain(adapter.apply(target(), job()));
+
+    const started = await adapter.run(target(), JOB_REF, {
+      env: { SNAPSHOT: 'nightly-2026-08-03', SINCE: '2026-08-01' },
+    });
+
+    expect(started.kind).toBe('started');
+    const run = api.requests.find(
+      (request) =>
+        request.method === 'POST' && request.path.endsWith('shop-nightly:run'),
+    );
+    expect(run?.body).toEqual({
+      overrides: {
+        containerOverrides: [
+          {
+            env: [
+              { name: 'SNAPSHOT', value: 'nightly-2026-08-03' },
+              { name: 'SINCE', value: '2026-08-01' },
+            ],
+          },
+        ],
+      },
+    });
+  });
+
+  test('a run without parameters sends no override at all', async () => {
+    const { api, adapter } = adapterFor();
+    await drain(adapter.apply(target(), job()));
+
+    await adapter.run(target(), JOB_REF, { env: {} });
+
+    const run = api.requests.find(
+      (request) =>
+        request.method === 'POST' && request.path.endsWith('shop-nightly:run'),
+    );
+    expect(run?.body).toEqual({});
+  });
+
+  test('reads the names a run was started with back into its line, never the values', async () => {
+    // The execution's template is the Job's with the override folded in, and
+    // a plain `value` on it can only be a parameter: `workloadContainer`
+    // delivers every variable as a pinned reference (§10).
+    const { adapter } = adapterFor({
+      executions: {
+        'shop-nightly': [
+          execution('shop-nightly-4', {
+            startTime: '2026-08-04T00:00:00Z',
+            succeededCount: 1,
+            conditions: [
+              {
+                type: 'Completed',
+                state: 'CONDITION_SUCCEEDED',
+                message: 'the task exited 0',
+              },
+            ],
+            template: {
+              containers: [
+                {
+                  env: [
+                    {
+                      name: 'DATABASE_URL',
+                      valueSource: {
+                        secretKeyRef: { secret: 's', version: '1' },
+                      },
+                    },
+                    { name: 'SNAPSHOT', value: 'nightly-2026-08-03' },
+                    { name: 'SINCE', value: '2026-08-01' },
+                  ],
+                },
+              ],
+            },
+          }),
+        ],
+      },
+    });
+    await drain(adapter.apply(target(), job()));
+
+    const runs = await adapter.executions(target(), JOB_REF);
+
+    expect(runs.kind).toBe('executions');
+    if (runs.kind !== 'executions') return;
+    expect(runs.executions[0]?.detail).toBe(
+      'ran with SNAPSHOT, SINCE · the task exited 0',
+    );
+    expect(JSON.stringify(runs)).not.toContain('nightly-2026-08-03');
+  });
+
   test('refuses a ref that names a service rather than a job', async () => {
     const { adapter } = adapterFor();
     await drain(adapter.apply(target(), desired()));

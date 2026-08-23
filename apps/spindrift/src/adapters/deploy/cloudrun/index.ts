@@ -71,6 +71,7 @@ import type {
   JobExecution,
   JobRuns,
   ObservedState,
+  RunOptions,
   RuntimeLogPage,
   RuntimeLogSubject,
   RuntimeLogTailOptions,
@@ -673,15 +674,32 @@ export class CloudRunDeployAdapter implements DeployAdapter {
    * A ref naming the other collection is refused rather than run: a Service has
    * no execution, and the alternative to saying so is a 404 from a path that
    * reads as if it should have worked.
+   *
+   * Parameters go as `overrides.containerOverrides[].env` — the runtime's own
+   * per-execution knob, folded into the execution's template, which is where
+   * `executions` reads their names back from. No container is named: the Job
+   * has the one container `workloadContainer` renders, and an unnamed override is applied
+   * to it.
    */
-  async run(target: DeployTarget, ref: DeployRef): Promise<StartedRun> {
+  async run(
+    target: DeployTarget,
+    ref: DeployRef,
+    options: RunOptions = {},
+  ): Promise<StartedRun> {
     const placed = this.placedJob(target, ref);
     if (placed.kind === 'none') return placed;
 
+    const env = Object.entries(options.env ?? {}).map(([name, value]) => ({
+      name,
+      value,
+    }));
     const started = await this.http(placed.connection).json<CloudOperation>({
       method: 'POST',
       path: `${placed.path}:run`,
-      body: {},
+      body:
+        env.length === 0
+          ? {}
+          : { overrides: { containerOverrides: [{ env }] } },
     });
     if (!started.ok) {
       throw new Error(`running job ${placed.id} failed: ${started.message}`);
@@ -1266,6 +1284,15 @@ interface CloudExecution {
     readonly state?: string;
     readonly message?: string;
   }[];
+  /** The task template this run was made from, overrides folded in. */
+  readonly template?: {
+    readonly containers?: readonly {
+      readonly env?: readonly {
+        readonly name?: string;
+        readonly value?: string;
+      }[];
+    }[];
+  };
 }
 
 /**
@@ -1289,11 +1316,22 @@ function cloudRunExecution(execution: CloudExecution): JobExecution {
           (execution.failedCount ?? 0) > 0
         ? 'failed'
         : 'running';
+  // The names this run was started with. A plain `value` on a job's container
+  // can only have arrived as a run override: `workloadContainer` delivers
+  // every variable as a pinned reference (§10), never inline.
+  const ranWith = (execution.template?.containers ?? [])
+    .flatMap((container) => container.env ?? [])
+    .filter((entry) => entry.value !== undefined && entry.name !== undefined)
+    .map((entry) => entry.name);
+  const detail = [
+    ...(ranWith.length === 0 ? [] : [`ran with ${ranWith.join(', ')}`]),
+    ...(completed?.message === undefined ? [] : [completed.message]),
+  ].join(' · ');
   return {
     name: shortName(execution.name ?? ''),
     outcome,
     startedAt: at === undefined ? null : new Date(at),
-    ...(completed?.message === undefined ? {} : { detail: completed.message }),
+    ...(detail === '' ? {} : { detail }),
   };
 }
 

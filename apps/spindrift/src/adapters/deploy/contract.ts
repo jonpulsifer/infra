@@ -364,6 +364,22 @@ export interface JobExecution {
   readonly detail?: string;
 }
 
+/**
+ * What one run is started with, beyond the template it is made from (§17).
+ *
+ * `env` is the job story's "restore from snapshot X" knob: plain variables the
+ * adapter appends to the run's container *after* the template's own, so a
+ * name the template already sets is read as this run's value. Which is why
+ * core refuses a name the placed workload already delivers (§10) before it
+ * gets here — an override of a sealed reference would put the value inline in
+ * a platform object. Adapters report the **names** on the run they started,
+ * never the values: the timeline is read back from the platform and a value
+ * there is a value in every log of it.
+ */
+export interface RunOptions {
+  readonly env?: Readonly<Record<string, string>>;
+}
+
 /** What starting a run produced, or why this backend had nothing to start. */
 export type StartedRun =
   | { readonly kind: 'started'; readonly execution: JobExecution }
@@ -547,8 +563,15 @@ export interface DeployAdapter {
    * backend and not an exception. A far side that *is* asked correctly and
    * fails — the API refused, the cluster is unreachable — throws, exactly as
    * `tail` does, because that is a fault and not an answer.
+   *
+   * `options.env` travels as {@link RunOptions} says; a backend that has no
+   * job to run refuses exactly as it does without it.
    */
-  run(target: DeployTarget, ref: DeployRef): Promise<StartedRun>;
+  run(
+    target: DeployTarget,
+    ref: DeployRef,
+    options?: RunOptions,
+  ): Promise<StartedRun>;
 
   /**
    * The runs that have happened, newest first (§17).

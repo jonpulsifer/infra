@@ -20,6 +20,7 @@ import type {
   JobExecution,
   JobRuns,
   ObservedState,
+  RunOptions,
   RuntimeLogPage,
   RuntimeLogSubject,
   RuntimeLogTailOptions,
@@ -156,6 +157,8 @@ export class FakeDeployAdapter implements DeployAdapter {
 
   /** Every `run`, in call order — what proves a press reached the backend. */
   readonly runsStarted: DeployRef[] = [];
+  /** What each `run` was started with — the parameters a press carried. */
+  readonly runsStartedWith: Readonly<Record<string, string>>[] = [];
 
   private readonly script: readonly ScriptedAttempt[];
   private readonly options: FakeDeployAdapterOptions;
@@ -263,17 +266,26 @@ export class FakeDeployAdapter implements DeployAdapter {
     this.runs.set(ref, [...(this.runs.get(ref) ?? []), execution]);
   }
 
-  async run(_target: DeployTarget, ref: DeployRef): Promise<StartedRun> {
+  async run(
+    _target: DeployTarget,
+    ref: DeployRef,
+    options: RunOptions = {},
+  ): Promise<StartedRun> {
     this.runsStarted.push(ref);
+    this.runsStartedWith.push(options.env ?? {});
     if (this.options.runThrows !== undefined) {
       throw new Error(this.options.runThrows);
     }
     const refusal = this.refusalFor(ref);
     if (refusal !== null) return refusal;
+    // The names and never the values, as every real adapter reports a run it
+    // started with parameters ({@link RunOptions}).
+    const names = Object.keys(options.env ?? {});
     const execution: JobExecution = {
       name: `${ref}-run-${(this.runs.get(ref)?.length ?? 0) + 1}`,
       outcome: 'running',
       startedAt: null,
+      ...(names.length === 0 ? {} : { detail: `ran with ${names.join(', ')}` }),
     };
     this.ran(ref, execution);
     return { kind: 'started', execution };

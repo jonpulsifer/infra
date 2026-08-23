@@ -271,6 +271,9 @@ export function deployAdapterSuite(
       const { adapter } = make();
       const answers = [
         await adapter.run(target, 'never-placed'),
+        // With parameters too: a backend that runs nothing has nothing to put
+        // them on, and the answer is the same sentence rather than a crash.
+        await adapter.run(target, 'never-placed', { env: { SNAPSHOT: 'x' } }),
         await adapter.executions(target, 'never-placed'),
       ];
       for (const answer of answers) {

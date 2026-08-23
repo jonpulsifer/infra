@@ -18,11 +18,19 @@
  * **The ref decides what runs.** It is the handle `apply` returned and core
  * stored (§6), so what starts is the workload that is actually placed — never a
  * description assembled a second time from rows that may have moved since.
+ *
+ * **Parameters are additions, never overrides.** The one-off scripts the Jobs
+ * story promises — restore from snapshot X, reindex since a date — take their
+ * argument as `env`, appended to the run's container after the template's
+ * own. A name the placed workload already delivers is refused: every config
+ * variable is a sealed reference (§10), and letting a run shadow one would put
+ * the value inline in a Job spec, which is the asymmetry §10 exists to avoid.
  */
 import { and, desc, eq } from 'drizzle-orm';
 import { z } from 'zod';
 import type { JobExecution } from '../../adapters/deploy/contract.ts';
 import { deploys, targets, vessels } from '../../db/schema.ts';
+import { VARIABLE_NAME } from '../../domain/config.ts';
 import {
   deployTargetOf,
   hasTargetConnection,
@@ -31,10 +39,22 @@ import {
 } from '../../domain/target.ts';
 import { type Command, failed, ok } from '../types.ts';
 
+/**
+ * The longest value one parameter may carry. A parameter is a snapshot name
+ * or a date, and a Job spec is not the place for a document.
+ */
+export const RUN_PARAMETER_LIMIT = 4_096;
+
 export const runComponentInput = z
   .object({
     componentId: z.uuid(),
     targetId: z.uuid(),
+    /**
+     * Plain variables for this run only. The names are checked in the handler
+     * rather than here: a record's key issue surfaces as "Invalid key in
+     * record", and the person who typed it deserves the sentence config gives.
+     */
+    env: z.record(z.string(), z.string().max(RUN_PARAMETER_LIMIT)).optional(),
   })
   .strict();
 
@@ -67,7 +87,12 @@ export const runComponent: Command<
   }
 
   const [placed] = await context.db
-    .select({ ref: deploys.ref, target: targets, vessel: vessels })
+    .select({
+      ref: deploys.ref,
+      desired: deploys.desired,
+      target: targets,
+      vessel: vessels,
+    })
     .from(deploys)
     .innerJoin(targets, eq(deploys.targetId, targets.id))
     .innerJoin(vessels, eq(targets.vesselId, vessels.id))
@@ -106,6 +131,29 @@ export const runComponent: Command<
     );
   }
 
+  const env = input.env ?? {};
+  const misnamed = Object.keys(env).filter((name) => !VARIABLE_NAME.test(name));
+  if (misnamed.length > 0) {
+    return failed(
+      'INVALID_INPUT',
+      `${misnamed.join(', ')} must be an environment variable name`,
+    );
+  }
+  // What the placed release already delivers, read off the document it was
+  // placed from rather than the config rows: the rows may have moved since,
+  // and the workload the run is made from is the one this document describes.
+  const delivered = new Set([
+    ...placed.desired.config.map((entry) => entry.name),
+    ...(placed.desired.datastores ?? []).map((entry) => entry.name),
+  ]);
+  const shadowed = Object.keys(env).filter((name) => delivered.has(name));
+  if (shadowed.length > 0) {
+    return failed(
+      'INVALID_INPUT',
+      `${shadowed.join(', ')} ${shadowed.length === 1 ? 'is' : 'are'} already delivered to ${component.name} as config; a run's parameters add to that and never override it`,
+    );
+  }
+
   // §17: the adapter refuses in a sentence and throws on a fault, so the two
   // are reported as two things. A refusal is the operator's to act on — the
   // wrong backend, a workload that is gone — and a fault is the far side's.
@@ -114,6 +162,7 @@ export const runComponent: Command<
     started = await adapter.run(
       deployTargetOf(placed.target, placed.vessel),
       placed.ref,
+      Object.keys(env).length === 0 ? undefined : { env },
     );
   } catch (cause) {
     return failed(
