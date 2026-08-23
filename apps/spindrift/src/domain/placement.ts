@@ -115,7 +115,7 @@ export interface PlacementTarget {
  * `datastores` is the field that carries §11's consequence: an attached
  * cluster-local Datastore pins its App to that Datastore's Target, and §11 makes
  * that true "at attach time" rather than at deploy time, because tunnelling a
- * database over a satellite uplink is the cloud-native path degraded.
+ * database across sites is the cloud-native path degraded.
  */
 export interface DerivedRequirements {
   readonly kind: ComponentKind;

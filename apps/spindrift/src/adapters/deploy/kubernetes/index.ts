@@ -10,7 +10,7 @@
  * **Nothing here watches.** `apply` polls the object it just wrote on a fast
  * cadence for a bounded window — an attempt, not a standing watch — and
  * `observe` is one read. The plan's transport shape says why: only one of the
- * three backends has a watch at all, a watch dies across the satellite uplink
+ * three backends has a watch at all, a watch held across a WAN tunnel dies
  * while still looking connected, and any correct watch design needs a resync
  * poll underneath it anyway. So the poll is not the fallback; it is the design.
  *

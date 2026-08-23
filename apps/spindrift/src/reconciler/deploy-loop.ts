@@ -8,7 +8,7 @@
  *
  * **Poll, not watch.** Three reasons, and only the first is about Kubernetes:
  * one of the three backends has a watch and the other two do not, so an
- * event-driven seam would have two shapes; a watch held across a satellite uplink
+ * event-driven seam would have two shapes; a watch held across a WAN tunnel
  * dies while still looking connected, which is the one failure mode a
  * convergence loop must not have; and hand-rolled watch bookkeeping in
  * TypeScript with no informer is real work for no gain at this scale.
