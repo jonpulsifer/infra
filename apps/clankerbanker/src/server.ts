@@ -93,15 +93,18 @@ const bad = (c: Ctx, error: string, status: 400 | 413 | 503 = 400) =>
   c.json({ error }, status);
 const brainGuard: MiddlewareHandler<Env> = async (c, next) =>
   brainReady() ? next() : bad(c, 'no brain configured', 503);
-const TIP_TIERS = ['big', 'whale', 'everything'];
-app.get('/tip/:name/:tier?', (c, next) => {
+// The amount is USD, becomes the exact-scheme price, capped at $10,000.
+const TIP_ANY = 'GET /tip/:name/:amount';
+const tipAmountOk = (a: string) =>
+  /^\d{1,5}(\.\d{1,4})?$/.test(a) &&
+  Number(a) >= 0.0001 &&
+  Number(a) <= 10000;
+app.get('/tip/:name/:amount?', (c, next) => {
   if (!/^[a-z0-9-]{1,24}$/.test(c.req.param('name'))) return bad(c, 'bad name');
-  const tier = c.req.param('tier');
-  // An unknown tier has no price in the routes map, so it would sail past
-  // the paywall unpaid — refuse it here instead.
-  return tier === undefined || TIP_TIERS.includes(tier)
+  const amount = c.req.param('amount');
+  return amount === undefined || tipAmountOk(amount)
     ? next()
-    : bad(c, 'bad tier');
+    : bad(c, 'bad amount: 0.0001-10000 USD');
 });
 app.on(['GET', 'PUT'], '/kv/:key', async (c, next) => {
   if (!/^[a-zA-Z0-9_.-]{1,64}$/.test(c.req.param('key')))
@@ -210,6 +213,7 @@ if (treasury.length === 0) {
   const origin = env.PUBLIC_ORIGIN ?? 'https://clankerbanker.ca';
   const routes: Record<string, RouteConfig> = {};
   for (const [key, [price, description]] of Object.entries(PRICES)) {
+    if (key === TIP_ANY) continue; // priced per request below
     const path = key.split(' ')[1] as string;
     routes[key] = {
       accepts: treasury.map((t) => ({ scheme: 'exact', price, ...t })),
@@ -228,6 +232,33 @@ if (treasury.length === 0) {
     c.req.path.startsWith('/roast/') ||
     (c.req.method === 'PUT' && c.req.path.startsWith('/kv/'));
   app.use((c, next) => (c.get('payer') && !metered(c) ? next() : pay(c, next)));
+  // Any-amount tips: the price comes from the URL, so the static routes map
+  // can't quote it — build a one-route paywall per concrete path instead.
+  // A tip is a payment by definition, so a bearer pass never skips it.
+  const tipPay = new Map<string, MiddlewareHandler<Env>>();
+  app.use('/tip/:name/:amount', (c, next) => {
+    let mw = tipPay.get(c.req.path);
+    if (!mw) {
+      if (tipPay.size >= 1000) tipPay.clear(); // ponytail: crude cap; LRU if it thrashes
+      mw = paymentMiddleware(
+        {
+          [`GET ${c.req.path}`]: {
+            accepts: treasury.map((t) => ({
+              scheme: 'exact' as const,
+              price: `$${c.req.param('amount')}`,
+              ...t,
+            })),
+            resource: new URL(c.req.path, origin).toString(),
+            description: `clankerbanker tip of $${c.req.param('amount')}`,
+            mimeType: 'application/json',
+          },
+        },
+        x402 as x402ResourceServer,
+      );
+      tipPay.set(c.req.path, mw);
+    }
+    return mw(c, next);
+  });
 }
 
 function payerOf(c: Ctx) {
@@ -255,10 +286,10 @@ app.get('/dice', (c) =>
   ),
 );
 app.get('/whoami', async (c) => c.json(await ledger.payer(payerOf(c))));
-app.get('/tip/:name/:tier?', (c) =>
+app.get('/tip/:name/:amount?', (c) =>
   c.json({
     thanks: c.req.param('name'),
-    tier: c.req.param('tier') ?? 'standard',
+    amount: `$${c.req.param('amount') ?? '0.005'}`,
     payer: payerOf(c),
   }),
 );

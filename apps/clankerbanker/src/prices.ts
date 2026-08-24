@@ -12,9 +12,10 @@ export const PRICES: Record<string, [string, string]> = {
   'GET /ping': ['$0.0001', 'pong'],
   'GET /whoami': ['$0.0001', 'your lifetime stats on this ledger'],
   'GET /tip/:name': ['$0.005', 'a name on the tips ticker'],
-  'GET /tip/:name/big': ['$0.25', 'the same ticker, but you meant it'],
-  'GET /tip/:name/whale': ['$5.00', 'a whale-sized thank you'],
-  'GET /tip/:name/everything': ['$100.00', 'your balance, basically; A-OK'],
+  'GET /tip/:name/:amount': [
+    'any',
+    'the same ticker at any amount you like, up to $10,000',
+  ],
   'PUT /kv/:key': ['$0.001', 'stores up to 4 KiB, per payer'],
   'GET /kv/:key': ['$0.0001', 'reads it back'],
   'POST /account': ['$1.00', 'a 24h bearer pass for every route'],

@@ -177,6 +177,7 @@ describe('clankerbanker', () => {
   test('every priced route challenges with its atomic amount', async () => {
     withBrain();
     for (const [key, [price]] of Object.entries(PRICES)) {
+      if (key === 'GET /tip/:name/:amount') continue; // priced per request
       const [method, path] = key.split(' ') as [string, string];
       const body = await challenge(fill(path), { method });
       expect(body.accepts).toHaveLength(2);
@@ -279,18 +280,20 @@ describe('clankerbanker', () => {
     const bad = await app.request('/tip/bad%20name!');
     expect(bad.status).toBe(400);
     expect(facilitatorCalls).toBe(before);
-    const badTier = await app.request('/tip/alice/millions');
-    expect(badTier.status).toBe(400);
+    for (const path of ['/tip/alice/lots', '/tip/alice/0', '/tip/alice/10001'])
+      expect((await app.request(path)).status).toBe(400);
     expect(facilitatorCalls).toBe(before);
     expect((await pay('/tip/alice')).status).toBe(200);
-    const whale = (await (await pay('/tip/bob/whale')).json()) as {
-      tier: string;
+    const custom = (await (await pay('/tip/bob/2.50')).json()) as {
+      amount: string;
     };
-    expect(whale.tier).toBe('whale');
-    const everything = await challenge('/tip/carol/everything');
+    expect(custom.amount).toBe('$2.50');
+    const balance = await challenge('/tip/carol/9999.99');
     expect(
-      everything.accepts.find((a) => a.network === 'eip155:8453')?.amount,
-    ).toBe('100000000');
+      balance.accepts.find(
+        (a: Record<string, string>) => a.network === 'eip155:8453',
+      )?.amount,
+    ).toBe('9999990000');
     const ledger = (await (await app.request('/ledger')).json()) as {
       tips: string[];
     };
