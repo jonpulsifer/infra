@@ -355,10 +355,12 @@ describe('a push reaches a running deploy', () => {
     expect(built?.commit.split('#')[0]).toBe(pushed);
     expect(built?.artifactDigest).not.toBeNull();
     // The route was handed the bundle staged for the pushed commit, so the
-    // artifact about to be deployed is genuinely that commit's.
+    // artifact about to be deployed is genuinely that commit's — and its origin
+    // names the real commit, never the Build row's `#<millis>` uniqueness key,
+    // which is not a ref anything downstream can resolve.
     expect(route.built).toHaveLength(1);
     expect(route.built[0]?.source.origin).toMatchObject({
-      commit: built!.commit,
+      commit: pushed,
     });
 
     // The second half of the push, and the joint that had no coverage: a green

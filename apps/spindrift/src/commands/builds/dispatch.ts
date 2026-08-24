@@ -889,7 +889,14 @@ export const dispatchBuild = async (
       ? {
           kind: 'repo',
           url: repository?.fullName ?? app.sourceRepoUrl ?? '',
-          commit: build.commit,
+          // The real commit, never the row's `<commit>#<millis>` rerun key: this
+          // is a git ref the source is read at — `vercelFrameworkFor` and
+          // `outputDirectoryFor` fetch `package.json`/`spindrift.yaml` from the
+          // repository at it — and the far side cannot resolve one with a suffix,
+          // so a suffixed ref reads as "no framework" and refuses every rerun of
+          // a Vercel-built App. The suffix is a uniqueness device on the Build
+          // row alone (`sourceForRerun`), and never a fact about the source.
+          commit: build.commit.split('#')[0] ?? build.commit,
           // §5: an App is repo plus subpath, and the developer named it there.
           subpath: app.sourceRepoSubpath ?? '.',
           location: build.bundleLocation,
