@@ -2041,7 +2041,7 @@ describe('a job is run, and its runs are read', () => {
     });
     expect(created?.metadata.annotations).toEqual({
       'cronjob.kubernetes.io/instantiate': 'manual',
-      'lolwtf.ca/run-with': 'SNAPSHOT, SINCE',
+      'spindrift.dev/run-with': 'SNAPSHOT, SINCE',
     });
     // The CronJob's own template is untouched: the parameters were this
     // run's, and the next scheduled fire must not inherit them.
@@ -2223,7 +2223,7 @@ describe('a job is run, and its runs are read', () => {
           name: 'blog-nightly-9',
           namespace: 'apps',
           labels: JOB_LABELS,
-          annotations: { 'lolwtf.ca/run-with': 'SNAPSHOT, SINCE' },
+          annotations: { 'spindrift.dev/run-with': 'SNAPSHOT, SINCE' },
         },
         spec: {
           template: {

@@ -200,7 +200,7 @@ const MANUAL_RUN = 'cronjob.kubernetes.io/instantiate';
  * is what `executions` reads back into the timeline, so a value here would be
  * a value in a status line (§17, {@link RunOptions}).
  */
-const RUN_WITH = 'lolwtf.ca/run-with';
+const RUN_WITH = 'spindrift.dev/run-with';
 
 /**
  * The longest name a run may carry.
