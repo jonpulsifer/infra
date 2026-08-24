@@ -121,6 +121,8 @@ interface FakeRun {
   name: string;
   reads: number;
   log: string;
+  /** Set by the cancel endpoint; the run concludes `cancelled` from then on. */
+  cancelled: boolean;
 }
 
 export interface FakeGitHubOptions {
@@ -188,6 +190,8 @@ export class FakeGitHub {
   readonly tarballs: string[] = [];
   /** Every workflow dispatch, in order — the assertion surface for a build. */
   readonly dispatches: RecordedDispatch[] = [];
+  /** Every run id the cancel endpoint was asked to stop, in order. */
+  readonly cancels: number[] = [];
 
   defaultBranch: string;
 
@@ -442,6 +446,16 @@ export class FakeGitHub {
    * makes it visible only after `discoveryDelay` list calls, and finishes it
    * after `duration` status reads.
    */
+  /** Whether a run is over, and how: cancelled wins over the scripted end. */
+  private concluded(run: FakeRun): {
+    done: boolean;
+    conclusion: string | null;
+  } {
+    if (run.cancelled) return { done: true, conclusion: 'cancelled' };
+    const done = run.reads > this.actions.duration;
+    return { done, conclusion: done ? this.actions.conclusion : null };
+  }
+
   private actionsEndpoints(
     rest: string,
     method: string,
@@ -471,6 +485,7 @@ export class FakeGitHub {
         name: `spindrift ${inputs.correlation ?? ''}`,
         reads: 0,
         log: this.actions.log(spec),
+        cancelled: false,
       });
       return new Response(null, { status: 204 });
     }
@@ -489,6 +504,9 @@ export class FakeGitHub {
           name: run.name,
           status: 'queued',
           conclusion: null,
+          // The host's own address for the run, in the layout GitHub serves
+          // — what a cancel from outside the dispatching process reads.
+          html_url: `https://github.com/${this.fullName}/actions/runs/${run.id}`,
         })),
       });
     }
@@ -502,31 +520,45 @@ export class FakeGitHub {
         return this.json({ message: 'Server Error' }, 500);
       }
       run.reads += 1;
-      const done = run.reads > this.actions.duration;
+      const { done, conclusion } = this.concluded(run);
       return this.json({
         id: run.id,
         status: done ? 'completed' : 'in_progress',
-        conclusion: done ? this.actions.conclusion : null,
+        conclusion,
       });
+    }
+
+    const cancel = rest.match(/^\/actions\/runs\/(\d+)\/cancel$/);
+    if (cancel && method === 'POST') {
+      const run = this.runs.find((each) => each.id === Number(cancel[1]));
+      if (run === undefined) return this.notFound();
+      // A concluded run cannot be cancelled, and the host says so with a
+      // `409` rather than a success the caller could mistake for an act.
+      if (this.concluded(run).done) {
+        return this.json({ message: 'Cannot cancel a workflow run' }, 409);
+      }
+      run.cancelled = true;
+      this.cancels.push(run.id);
+      return new Response(null, { status: 202 });
     }
 
     const jobs = rest.match(/^\/actions\/runs\/(\d+)\/jobs$/);
     if (jobs && method === 'GET') {
       const run = this.runs.find((each) => each.id === Number(jobs[1]));
       if (run === undefined) return this.notFound();
-      const done = run.reads > this.actions.duration;
+      const { done, conclusion } = this.concluded(run);
       return this.json({
         jobs: [
           {
             id: run.id,
             name: 'build',
             status: done ? 'completed' : 'in_progress',
-            conclusion: done ? this.actions.conclusion : null,
+            conclusion,
             steps: [
               {
                 name: 'Build and push',
                 status: done ? 'completed' : 'in_progress',
-                conclusion: done ? this.actions.conclusion : null,
+                conclusion,
               },
             ],
           },

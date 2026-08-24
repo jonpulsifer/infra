@@ -476,6 +476,7 @@ describe('creation drafts', () => {
         'ghcr',
         'other',
       ] as const,
+      cancel: async () => {},
       async *build(
         source: Parameters<typeof base.build>[0],
         spec: Parameters<typeof base.build>[1],
@@ -781,6 +782,7 @@ describe('creation drafts', () => {
         'ghcr',
         'other',
       ] as const,
+      cancel: async () => {},
       async *build(): AsyncGenerator<never, never, void> {
         yield* [];
         throw new Error('runner connection vanished');

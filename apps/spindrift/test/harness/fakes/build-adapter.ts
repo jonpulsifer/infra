@@ -11,6 +11,7 @@ import { createHash } from 'node:crypto';
 import type {
   BuildAdapter,
   BuildEvent,
+  BuildHandle,
   BuildLevel,
   BuildResult,
   BuildSource,
@@ -23,6 +24,8 @@ import type { RegistryFlavour } from '../../../src/domain/artifact-name.ts';
 export interface RecordedBuild {
   source: BuildSource;
   spec: BuildSpec;
+  /** The dispatch id core handed the route, or `null` when driven bare. */
+  dispatchId: string | null;
 }
 
 /** One scripted build: what to yield along the way, and how it ends. */
@@ -68,6 +71,8 @@ export class FakeBuildAdapter implements BuildAdapter {
 
   /** Every `build`, in call order. */
   readonly built: RecordedBuild[] = [];
+  /** Every `cancel`, in call order — the far side a test asserts was reached. */
+  readonly cancelled: BuildHandle[] = [];
 
   private readonly script: readonly ScriptedBuild[];
   private builds = 0;
@@ -88,11 +93,16 @@ export class FakeBuildAdapter implements BuildAdapter {
     this.script = options.script?.length ? options.script : [DEFAULT_BUILD];
   }
 
+  async cancel(handle: BuildHandle): Promise<void> {
+    this.cancelled.push(handle);
+  }
+
   async *build(
     source: BuildSource,
     spec: BuildSpec,
+    dispatchId?: string,
   ): AsyncGenerator<BuildEvent, BuildResult, void> {
-    this.built.push({ source, spec });
+    this.built.push({ source, spec, dispatchId: dispatchId ?? null });
 
     const scripted = this.nextBuild();
     for (const event of scripted.events ?? []) yield event;

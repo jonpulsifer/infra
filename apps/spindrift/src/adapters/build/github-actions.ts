@@ -42,6 +42,7 @@ import {
 import type {
   BuildAdapter,
   BuildEvent,
+  BuildHandle,
   BuildLevel,
   BuildResult,
   BuildSource,
@@ -126,6 +127,8 @@ export interface ActionsHost {
     readonly status: string;
     readonly conclusion: string | null;
   } | null>;
+  /** Stop a run. One that already concluded is left as it is. */
+  cancelRun(ref: RepositoryRef, fullName: string, runId: number): Promise<void>;
   runJobs(
     ref: RepositoryRef,
     fullName: string,
@@ -348,9 +351,30 @@ export class GitHubActionsBuildRoute implements BuildAdapter {
     this.carriesHeldSecret = options.sealPublicKey !== undefined;
   }
 
+  /**
+   * Cancel the run at the address the host reported.
+   *
+   * The run id is the host's to assign and which repository the run landed in
+   * was decided at dispatch, so neither is derivable from the dispatch id the
+   * way a Job name is. Both are in the one thing the Build row kept about the
+   * run — the `html_url` the host itself handed back — and reading a host's
+   * own address is not the guess composing one would be.
+   */
+  async cancel(handle: BuildHandle): Promise<void> {
+    const run = runAt(handle.runUrl);
+    if (run === null) {
+      throw new Error(
+        'the host reported no address for this run, so there is nothing to cancel it by',
+      );
+    }
+    const ref = await this.options.host.installationFor(run.repository);
+    await this.options.host.cancelRun(ref, run.repository, run.id);
+  }
+
   async *build(
     source: BuildSource,
     spec: BuildSpec,
+    dispatchId?: string,
   ): AsyncGenerator<BuildEvent, BuildResult, void> {
     const now = this.options.now ?? (() => new Date());
     const logs = { backend: this.name, fidelity: this.logFidelity } as const;
@@ -387,9 +411,10 @@ export class GitHubActionsBuildRoute implements BuildAdapter {
     // committed beside the reusable workflow. Same file name, same inputs.
     const workflow = CALLER_WORKFLOW_FILE;
 
-    const correlation = (
-      this.options.correlation ?? (() => crypto.randomUUID())
-    )();
+    // The dispatch id where there is one, so the run name says which attempt
+    // it is; the injected generator is for a test that drives the route bare.
+    const correlation =
+      dispatchId ?? (this.options.correlation ?? (() => crypto.randomUUID()))();
     const runName = `${RUN_NAME_PREFIX} ${correlation}`;
 
     // `dispatchBuild` already refused a build that needs one where
@@ -573,6 +598,14 @@ export class GitHubActionsBuildRoute implements BuildAdapter {
         };
       }
       if (budget.expired()) {
+        // Best-effort: the Build is failing either way, and a cancel that
+        // did not land leaves a run the host's own limit ends.
+        yield {
+          type: 'log',
+          at: now(),
+          line: `run ${run.id} did not finish within the build budget; cancelling it`,
+        };
+        await host.cancelRun(ref, repository, run.id).catch(() => {});
         return buildFailed(
           logs,
           'TIMEOUT',
@@ -621,6 +654,18 @@ export class GitHubActionsBuildRoute implements BuildAdapter {
         if (line.trim() === '') continue;
         yield { type: 'log', at: now(), line, step: job.name };
       }
+    }
+
+    if (conclusion === 'cancelled') {
+      // Ended before a verdict, by this route's budget or by an operator
+      // through `cancel`; the attempt log already says which. §6's `TIMEOUT`
+      // is the one reason that indicts nobody, and nobody is who this indicts.
+      return buildFailed(
+        logs,
+        'TIMEOUT',
+        `run ${run.id} in ${repository} was cancelled`,
+        { runId: run.id, conclusion },
+      );
     }
 
     if (conclusion !== 'success') {
@@ -772,6 +817,27 @@ export const DEVELOPER_BUILD_STEP = 'Build and push';
  * direction, because claiming platform blame without evidence would mask real
  * build failures behind a chip that says "not your fault".
  */
+/**
+ * The repository and run id a run's `html_url` names, or `null` when the
+ * address is absent or is not one — `https://github.com/<owner>/<repo>/actions/runs/<id>`.
+ */
+function runAt(
+  url: string | null,
+): { readonly repository: string; readonly id: number } | null {
+  if (url === null) return null;
+  let pathname: string;
+  try {
+    pathname = new URL(url).pathname;
+  } catch {
+    return null;
+  }
+  const match = /^\/([^/]+\/[^/]+)\/actions\/runs\/(\d+)(?:\/|$)/.exec(
+    pathname,
+  );
+  if (match === null) return null;
+  return { repository: match[1] as string, id: Number(match[2]) };
+}
+
 function failedScaffoldingStep(jobs: readonly ActionsJob[]): string | null {
   let scaffolding: string | null = null;
   for (const job of jobs) {

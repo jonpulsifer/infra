@@ -259,6 +259,67 @@ async function workflowDecryptScript(): Promise<string> {
 }
 
 describe('the hosted build route', () => {
+  test('a run that outlives the budget is cancelled on the host, and is TIMEOUT', async () => {
+    const { host, route } = hostedRoute(
+      { actions: { duration: 1000 } },
+      { timeoutMs: 5_000 },
+    );
+    const { events, result } = await run(route.build(archiveSource(), spec));
+
+    expect(result.status).toBe('FAILED');
+    if (result.status === 'FAILED') expect(result.reason).toBe('TIMEOUT');
+    expect(host.cancels).toEqual([1]);
+    expect(text(events)).toContain('cancelling it');
+  });
+
+  test('a cancelled run is TIMEOUT: it indicts nobody', async () => {
+    const { result } = await run(
+      hostedRoute({ actions: { conclusion: 'cancelled' } }).route.build(
+        archiveSource(),
+        spec,
+      ),
+    );
+
+    expect(result.status).toBe('FAILED');
+    if (result.status === 'FAILED') expect(result.reason).toBe('TIMEOUT');
+  });
+
+  test('the run name carries the dispatch id, and a cancel from outside finds the run by the address the host reported', async () => {
+    const { host, route } = hostedRoute({ actions: { duration: 1000 } });
+    const stream = route.build(archiveSource(), spec, 'dispatch-1');
+    // Up to the point the host has named the run, and no further.
+    let step = await stream.next();
+    let runUrl: string | null = null;
+    while (!step.done && runUrl === null) {
+      if (step.value.type === 'runner') runUrl = step.value.url;
+      else step = await stream.next();
+    }
+    expect(host.dispatches[0]?.inputs.correlation).toBe('dispatch-1');
+    expect(runUrl).toBe(`https://github.com/${PLATFORM_REPO}/actions/runs/1`);
+
+    await route.cancel({ dispatchId: 'dispatch-1', runUrl });
+    expect(host.cancels).toEqual([1]);
+
+    // And the route polling it settles on what the host now says.
+    const { result } = await run(stream);
+    expect(result.status).toBe('FAILED');
+    if (result.status === 'FAILED') expect(result.reason).toBe('TIMEOUT');
+  });
+
+  test('a cancel with no reported address refuses rather than guessing one', async () => {
+    const { host, route } = hostedRoute();
+    await expect(
+      route.cancel({ dispatchId: 'dispatch-1', runUrl: null }),
+    ).rejects.toThrow('no address');
+    await expect(
+      route.cancel({
+        dispatchId: 'dispatch-1',
+        runUrl: 'https://github.com/example/platform/pull/9',
+      }),
+    ).rejects.toThrow('no address');
+    expect(host.cancels).toEqual([]);
+  });
+
   test('a repo build runs in the connected repository, on its own minutes', async () => {
     // §15: "the connected repo owns its Actions minutes". The workflow it
     // dispatches is the thin caller the configuration PR wrote there, not the
@@ -873,16 +934,55 @@ describe('the cloud build route', () => {
     if (result.status === 'FAILED') expect(result.reason).toBe('TIMEOUT');
   });
 
-  test('a build that never finishes runs out of core’s budget', async () => {
+  test('a build that never finishes runs out of core’s budget, and is cancelled', async () => {
+    const { api, route } = cloudRoute({ duration: 1000 }, { timeoutMs: 5_000 });
+    const { events, result } = await run(route.build(archiveSource(), spec));
+
+    expect(result.status).toBe('FAILED');
+    if (result.status === 'FAILED') expect(result.reason).toBe('TIMEOUT');
+    // The far side is told, not abandoned: a worker left running past the
+    // verdict bills until the service's own limit ends it.
+    expect(api.cancelled).toEqual(['build-1']);
+    expect(text(events)).toContain('cancelling it');
+  });
+
+  test('the service’s CANCELLED indicts nobody either', async () => {
     const { result } = await run(
-      cloudRoute({ duration: 1000 }, { timeoutMs: 5_000 }).route.build(
-        archiveSource(),
-        spec,
-      ),
+      cloudRoute({ status: 'CANCELLED' }).route.build(archiveSource(), spec),
     );
 
     expect(result.status).toBe('FAILED');
     if (result.status === 'FAILED') expect(result.reason).toBe('TIMEOUT');
+  });
+
+  test('the build is tagged by the dispatch id, and a cancel from outside finds it by that tag', async () => {
+    const { api, route } = cloudRoute({ duration: 1000 });
+    const stream = route.build(archiveSource(), spec, 'dispatch-1');
+    // Up to the submit, and no further: the build is now the service's.
+    let step = await stream.next();
+    while (
+      !step.done &&
+      !(step.value.type === 'log' && step.value.line.includes('submitted'))
+    ) {
+      step = await stream.next();
+    }
+    expect((api.requests[0]?.body as { tags?: string[] } | null)?.tags).toEqual(
+      ['spindrift-dispatch-1'],
+    );
+
+    await route.cancel({ dispatchId: 'dispatch-1', runUrl: null });
+    expect(api.cancelled).toEqual(['build-1']);
+
+    // And the route polling it settles on what the service now says.
+    const { result } = await run(stream);
+    expect(result.status).toBe('FAILED');
+    if (result.status === 'FAILED') expect(result.reason).toBe('TIMEOUT');
+  });
+
+  test('a cancel for a dispatch id nothing was submitted under does nothing', async () => {
+    const { api, route } = cloudRoute();
+    await route.cancel({ dispatchId: 'never-submitted', runUrl: null });
+    expect(api.cancelled).toEqual([]);
   });
 
   test('a report ingested only after the build concludes is still read', async () => {
@@ -978,7 +1078,10 @@ describe('the cloud build route', () => {
 
 // --- The in-cluster route ----------------------------------------------
 
-function clusterRoute(options: FakeKubernetesOptions = {}): {
+function clusterRoute(
+  options: FakeKubernetesOptions = {},
+  pacing: { timeoutMs?: number } = {},
+): {
   cluster: FakeKubernetes;
   route: InClusterBuildRoute;
 } {
@@ -1028,9 +1131,17 @@ function clusterRoute(options: FakeKubernetesOptions = {}): {
       zeroConfigFrontend: FRONTEND,
       id: () => 'fixed',
       ...PACING,
+      ...pacing,
       ...fakeClock(),
     }),
   };
+}
+
+/** The Job's own deletion, as the fake recorded it — path and policy. */
+function jobDeletes(cluster: FakeKubernetes): string[] {
+  return cluster.requests
+    .filter((request) => request.method === 'DELETE')
+    .map((request) => `${request.path}${request.query}`);
 }
 
 describe('the in-cluster build route', () => {
@@ -1123,6 +1234,90 @@ describe('the in-cluster build route', () => {
     if (result.status === 'FAILED') expect(result.reason).toBe('BUILD_FAILED');
   });
 
+  test('the Job carries the budget as its own deadline', async () => {
+    const { cluster, route } = clusterRoute({}, { timeoutMs: 90_000 });
+    await run(route.build(archiveSource(), spec));
+
+    const jobSpec = cluster.get('jobs/builds/spindrift-build-fixed')?.spec as {
+      activeDeadlineSeconds: number;
+    };
+    // The cluster ends a runaway build itself, whether or not this process
+    // is still there to — the build lands on a node the control plane shares.
+    expect(jobSpec.activeDeadlineSeconds).toBe(90);
+  });
+
+  test('a Job the cluster ended for its deadline is TIMEOUT, not the developer’s failure', async () => {
+    const { route } = clusterRoute({
+      status: () => ({
+        conditions: [
+          { type: 'Failed', status: 'True', reason: 'DeadlineExceeded' },
+        ],
+      }),
+    });
+    const { events, result } = await run(route.build(archiveSource(), spec));
+
+    expect(result.status).toBe('FAILED');
+    if (result.status === 'FAILED') expect(result.reason).toBe('TIMEOUT');
+    expect(text(events)).toContain('exceeding its deadline');
+  });
+
+  test('a Job that outlives the budget is deleted, pods and all, and is TIMEOUT', async () => {
+    const { cluster, route } = clusterRoute(
+      { status: () => ({}) },
+      { timeoutMs: 3_000 },
+    );
+    const { events, result } = await run(route.build(archiveSource(), spec));
+
+    expect(result.status).toBe('FAILED');
+    if (result.status === 'FAILED') expect(result.reason).toBe('TIMEOUT');
+    expect(text(events)).toContain('deleting it');
+    // Background propagation, or the API orphans the pod and it keeps going.
+    expect(jobDeletes(cluster)).toEqual([
+      '/apis/batch/v1/namespaces/builds/jobs/spindrift-build-fixed?propagationPolicy=Background',
+    ]);
+  });
+
+  test('a Job deleted from elsewhere mid-build is TIMEOUT, and the log says so', async () => {
+    let cluster: FakeKubernetes | null = null;
+    const built = clusterRoute({
+      status: (reads) => {
+        if (reads === 2) cluster?.remove('jobs/builds/spindrift-build-fixed');
+        return {};
+      },
+    });
+    cluster = built.cluster;
+    const { events, result } = await run(
+      built.route.build(archiveSource(), spec),
+    );
+
+    expect(result.status).toBe('FAILED');
+    if (result.status === 'FAILED') expect(result.reason).toBe('TIMEOUT');
+    expect(text(events)).toContain('was deleted before it finished');
+  });
+
+  test('names the Job by the dispatch id, which is what cancel deletes by', async () => {
+    const { cluster, route } = clusterRoute();
+    await run(route.build(archiveSource(), spec, 'dispatch-1'));
+    expect(cluster.get('jobs/builds/spindrift-build-dispatch-1')).toBeDefined();
+
+    await route.cancel({ dispatchId: 'dispatch-1', runUrl: null });
+    expect(jobDeletes(cluster)).toEqual([
+      '/apis/batch/v1/namespaces/builds/jobs/spindrift-build-dispatch-1?propagationPolicy=Background',
+    ]);
+    // Gone, as far as the cluster is concerned — a cancel that only failed
+    // the Job would leave the object for a poll to find.
+    expect(
+      cluster.get('jobs/builds/spindrift-build-dispatch-1'),
+    ).toBeUndefined();
+  });
+
+  test('cancelling a Job that is already gone is not an error', async () => {
+    const { route } = clusterRoute();
+    await expect(
+      route.cancel({ dispatchId: 'never-ran', runUrl: null }),
+    ).resolves.toBeUndefined();
+  });
+
   test('a Job that could not be created is a failure with the reason in the log', async () => {
     const { route } = clusterRoute({
       refuse: { status: 403, body: 'forbidden' },
@@ -1194,6 +1389,21 @@ describe('the BuildKit program', () => {
     zeroConfigFrontend: FRONTEND,
     buildSecretNames: [],
     buildArgs: { PUBLIC_URL: 'https://app.example.test' },
+  });
+
+  test('keeps its layer cache in the registry, beside the first destination', () => {
+    // §4's in-cluster route sits behind an uplink every redownloaded layer
+    // crosses; the cache lives where the image does, under one tag the
+    // registry's own cleanup covers (§12).
+    expect(program).toContain(
+      "--export-cache 'type=registry,ref=registry.example.test/app:buildcache,mode=max'",
+    );
+    expect(program).toContain(
+      "--import-cache 'type=registry,ref=registry.example.test/app:buildcache'",
+    );
+    // And the attestations still ride the same invocation.
+    expect(program).toContain('--opt attest:provenance=mode=max');
+    expect(program).toContain('--opt attest:sbom=');
   });
 
   test('runs §5’s ladder: a Dockerfile settles how to build', () => {

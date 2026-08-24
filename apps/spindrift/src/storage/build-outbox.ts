@@ -105,8 +105,15 @@ export interface BuildRequestResult {
  * directly.
  */
 export interface BuildOutbox {
-  /** Write one intent, `PENDING` until a bosun host claims it. */
+  /**
+   * Write one intent, `PENDING` until a bosun host claims it.
+   *
+   * `id` lets the caller name the row — the bosun route passes its dispatch
+   * id, so a cancel from another process can address the row through the
+   * Build alone. The column is a UUID, which every dispatch id is.
+   */
   enqueue(input: {
+    readonly id?: string;
     readonly class: string;
     readonly request: unknown;
   }): Promise<{ readonly id: string }>;
@@ -198,10 +205,14 @@ export function buildOutbox(
   now: () => Date = () => new Date(),
 ): BuildOutbox {
   return {
-    async enqueue({ class: requestClass, request }) {
+    async enqueue({ id, class: requestClass, request }) {
       const [row] = await db
         .insert(buildRequests)
-        .values({ class: requestClass, request })
+        .values({
+          ...(id === undefined ? {} : { id }),
+          class: requestClass,
+          request,
+        })
         .returning({ id: buildRequests.id });
       return { id: row!.id };
     },

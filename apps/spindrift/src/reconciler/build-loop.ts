@@ -213,9 +213,12 @@ export async function runBuildPass(
       },
       context,
     );
+    // The verdict, so a red build is a series an alert can name — the same
+    // shape the deploy loop records its phase under. `refused` is an attempt
+    // that reached no verdict: a wait, a close, or a lost claim.
     reconcilerAttemptDuration.record((Date.now() - startedAt) / 1000, {
       kind: 'build',
-      outcome: result.ok ? 'ok' : 'refused',
+      outcome: result.ok ? result.value.status : 'refused',
     });
     if (result.ok) {
       dispatched += 1;

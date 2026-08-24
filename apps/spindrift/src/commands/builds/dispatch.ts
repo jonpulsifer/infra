@@ -1303,7 +1303,9 @@ export const dispatchBuild = async (
   reconcilerDispatchAttempts.add(1, { outcome: 'dispatched' });
 
   try {
-    const stream = adapter.build(buildSource, spec);
+    // The claim's id goes with the build so the route names its far side by
+    // it — which is what lets `cancelBuild` reach that far side from the row.
+    const stream = adapter.build(buildSource, spec, activeDispatchId);
     let next = await stream.next();
     while (!next.done) {
       const event = next.value;

@@ -208,6 +208,12 @@ export class FakeKubernetes {
     this.objects.set(key, object);
   }
 
+  /** Take an object away mid-test, as a delete from elsewhere would. */
+  remove(key: string): void {
+    this.objects.delete(key);
+    this.reads.delete(key);
+  }
+
   /**
    * A namespace nobody seeded, as a real Target cluster has one.
    *

@@ -8,7 +8,7 @@
  * where that placement does not take the Build's shape, says so instead of
  * dispatching anywhere.
  */
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, spyOn, test } from 'bun:test';
 import { eq } from 'drizzle-orm';
 import type {
   AdapterRegistry,
@@ -25,6 +25,7 @@ import {
   targets,
 } from '../../src/db/schema.ts';
 import { runBuildPass } from '../../src/reconciler/build-loop.ts';
+import { reconcilerAttemptDuration } from '../../src/telemetry/index.ts';
 import { withIsolatedDatabase } from '../harness/db.ts';
 import { FakeBuildAdapter } from '../harness/fakes/build-adapter.ts';
 import { FakeDeployAdapter } from '../harness/fakes/deploy-adapter.ts';
@@ -319,5 +320,52 @@ describe('a rebuild staged by a move dispatches against the new placement', () =
     expect(row.status).toBe('PENDING');
     expect(route.built).toHaveLength(0);
     expect(row.dispatchWaitingOn).toContain('placed on no Target');
+  });
+});
+
+describe('the attempt histogram', () => {
+  /**
+   * The outcome labels one pass recorded. Under the no-op meter every
+   * histogram is the same instrument, so the pass's other series — pickup
+   * latency, queue depth — land on the same spy and are filtered off by the
+   * one label only an attempt carries.
+   */
+  async function outcomesOf(route: FakeBuildAdapter): Promise<unknown[]> {
+    const record = spyOn(reconcilerAttemptDuration, 'record');
+    try {
+      await runBuildPass(context(registryOf(route)));
+      return record.mock.calls
+        .map(([, labels]) => labels)
+        .filter((labels) => labels !== undefined && 'outcome' in labels);
+    } finally {
+      record.mockRestore();
+    }
+  }
+
+  test('carries the verdict, so a red build is a series an alert can name', async () => {
+    await movedWebsite();
+    const red = new FakeBuildAdapter({
+      script: [{ result: { status: 'FAILED', reason: 'BUILD_FAILED' } }],
+    });
+    expect(await outcomesOf(red)).toEqual([
+      { kind: 'build', outcome: 'FAILED' },
+    ]);
+
+    await movedWebsite();
+    expect(await outcomesOf(new FakeBuildAdapter())).toEqual([
+      { kind: 'build', outcome: 'SUCCEEDED' },
+    ]);
+  });
+
+  test('an attempt that reached no verdict is refused', async () => {
+    const { component } = await movedWebsite();
+    await database()
+      .db.update(components)
+      .set({ placedTargetId: null })
+      .where(eq(components.id, component.id));
+
+    // Nowhere to bind is refused before `dispatchBuild`, and recorded by
+    // nothing: the histogram is the attempt's duration, and there was none.
+    expect(await outcomesOf(new FakeBuildAdapter())).toEqual([]);
   });
 });

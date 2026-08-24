@@ -689,6 +689,23 @@ export class GitHubApp implements ExactCommitFetcher<InstallationRef> {
   }
 
   /**
+   * Cancel a run. `409` is the host saying the run already concluded, which
+   * is the outcome a cancel wanted and not a fault.
+   */
+  async cancelRun(
+    ref: InstallationRef,
+    fullName: string,
+    runId: number,
+  ): Promise<void> {
+    await this.http(ref).send({
+      method: 'POST',
+      path: `/repos/${fullName}/actions/runs/${runId}/cancel`,
+      body: {},
+      tolerate: [409],
+    });
+  }
+
+  /**
    * The jobs of one run and the steps inside them.
    *
    * This is the whole of `LIVE_STATUS` (§4): on a hosted runner the step

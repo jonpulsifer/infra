@@ -497,10 +497,14 @@ function Actions({
     );
   }
 
-  // Only while it is queued. A Build a runner is streaming into ends when that
-  // route writes its verdict and not before, so offering the act here would be
-  // a button that lies — the grammar this whole function is written in.
-  if (onCancel && view.build?.status === 'waiting') {
+  // While it is queued or running. A running Build still ends when its route
+  // writes the verdict and not before — the command stops the far side and the
+  // route reports what became of it, so the screen shows "cancelled by" first
+  // and the verdict a poll later, which is the honest order of events.
+  if (
+    onCancel &&
+    (view.build?.status === 'waiting' || view.build?.status === 'running')
+  ) {
     buttons.push(
       <Button
         key="cancel"
@@ -1415,10 +1419,14 @@ export function BuildScreen({
   };
 
   /**
-   * End a queued Build, then re-read rather than navigate away.
+   * End a queued Build, or stop a running one, then re-read rather than
+   * navigate away.
    *
    * The verdict is the point of the screen: the attempt log now carries who
    * cancelled it, and the reader stays where the sentence they were reading is.
+   * A running Build's verdict follows a poll later, from the route that was
+   * stopped — the re-read shows the line saying who asked, and the next one
+   * shows what became of it.
    */
   const cancel = async () => {
     const parsedId = Number.parseInt(buildId, 10);

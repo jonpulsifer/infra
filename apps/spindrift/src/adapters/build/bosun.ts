@@ -23,6 +23,7 @@ import type { RegistryFlavour } from '../../domain/artifact-name.ts';
 import type {
   BuildAdapter,
   BuildEvent,
+  BuildHandle,
   BuildLevel,
   BuildResult,
   BuildSource,
@@ -69,6 +70,8 @@ export interface BosunOutboxState {
  */
 export interface BosunOutbox {
   enqueue(input: {
+    /** The row's id, when the caller has one to name it by. */
+    readonly id?: string;
     readonly class: string;
     readonly request: unknown;
   }): Promise<{ readonly id: string }>;
@@ -126,6 +129,7 @@ export class BosunBuildRoute implements BuildAdapter {
   async *build(
     source: BuildSource,
     spec: BuildSpec,
+    dispatchId?: string,
   ): AsyncGenerator<BuildEvent, BuildResult, void> {
     const now = this.options.now ?? (() => new Date());
     const logs = { backend: this.name, fidelity: this.logFidelity } as const;
@@ -148,7 +152,13 @@ export class BosunBuildRoute implements BuildAdapter {
       },
     };
 
-    const { id } = await outbox.enqueue({ class: this.options.class, request });
+    // The outbox row is named by the dispatch id so `cancel` can find it from
+    // the Build row alone; a route driven bare lets the outbox mint one.
+    const { id } = await outbox.enqueue({
+      ...(dispatchId === undefined ? {} : { id: dispatchId }),
+      class: this.options.class,
+      request,
+    });
     yield {
       type: 'log',
       at: now(),
@@ -194,15 +204,13 @@ export class BosunBuildRoute implements BuildAdapter {
 
     const result = row.result as BosunOutboxResult | null;
     if (result === null) {
-      // A DONE row with no result is one this route (or an earlier attempt)
-      // gave up on — `cancel`'s own contract. Nothing else writes DONE with a
-      // null result.
-      return buildFailed(
-        logs,
-        'INTERNAL',
-        `build request ${id} was cancelled before a bosun host reported a result`,
-        { id },
-      );
+      // A DONE row with no result is one `cancel` closed — this route's own
+      // on its budget, or an operator's through the Build. Nothing else
+      // writes DONE with a null result, and §6's `TIMEOUT` is the one reason
+      // that indicts nobody, which is who a cancellation indicts.
+      const ending = `build request ${id} was cancelled before a bosun host reported a result`;
+      yield { type: 'log', at: now(), line: ending };
+      return buildFailed(logs, 'TIMEOUT', ending, { id });
     }
 
     for (const line of result.log.split('\n')) {
@@ -231,6 +239,11 @@ export class BosunBuildRoute implements BuildAdapter {
       level: this.buildLevel,
       report,
     });
+  }
+
+  /** Close the outbox row named by the dispatch id; the poll above sees DONE. */
+  cancel(handle: BuildHandle): Promise<void> {
+    return this.options.outbox.cancel(handle.dispatchId);
   }
 }
 
