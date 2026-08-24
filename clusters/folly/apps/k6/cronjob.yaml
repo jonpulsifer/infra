@@ -55,14 +55,14 @@ spec:
                   api=https://kubernetes.default.svc/apis/k6.io/v1alpha1/namespaces/k6/testruns
                   sa=/var/run/secrets/kubernetes.io/serviceaccount
                   auth=(-sS --cacert "$sa/ca.crt" -H "Authorization: Bearer $(cat "$sa"/token)")
-                  curl "${auth[@]}" -X DELETE "$api/scenarios" -o /dev/null
+                  curl "$${auth[@]}" -X DELETE "$api/scenarios" -o /dev/null
                   # A TestRun that will not delete (e.g. an OOMed runner wedged
                   # it) should fail this Job and page, so the POST is not retried.
                   for _ in $(seq 30); do
-                    [ "$(curl "${auth[@]}" -o /dev/null -w '%{http_code}' "$api/scenarios")" = 404 ] && break
+                    [ "$(curl "$${auth[@]}" -o /dev/null -w '%{http_code}' "$api/scenarios")" = 404 ] && break
                     sleep 2
                   done
-                  curl "${auth[@]}" --fail-with-body -X POST \
+                  curl "$${auth[@]}" --fail-with-body -X POST \
                     -H 'Content-Type: application/json' \
                     --data-binary @/config/testrun.json "$api"
               volumeMounts:
