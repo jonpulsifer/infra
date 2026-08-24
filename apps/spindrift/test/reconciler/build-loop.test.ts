@@ -324,19 +324,12 @@ describe('a rebuild staged by a move dispatches against the new placement', () =
 });
 
 describe('the attempt histogram', () => {
-  /**
-   * The outcome labels one pass recorded. Under the no-op meter every
-   * histogram is the same instrument, so the pass's other series — pickup
-   * latency, queue depth — land on the same spy and are filtered off by the
-   * one label only an attempt carries.
-   */
+  /** The outcome labels one pass recorded. */
   async function outcomesOf(route: FakeBuildAdapter): Promise<unknown[]> {
     const record = spyOn(reconcilerAttemptDuration, 'record');
     try {
       await runBuildPass(context(registryOf(route)));
-      return record.mock.calls
-        .map(([, labels]) => labels)
-        .filter((labels) => labels !== undefined && 'outcome' in labels);
+      return record.mock.calls.map(([, labels]) => labels);
     } finally {
       record.mockRestore();
     }
