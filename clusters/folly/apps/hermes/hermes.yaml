@@ -25,6 +25,10 @@ metadata:
   namespace: agents-sandbox
 spec:
   interval: 5m0s
+  # The first boot after a chart change spends minutes in the npm-tools init
+  # container before hermes even starts listening; the default 5m upgrade
+  # timeout expired there and helm-controller rolled the release back.
+  timeout: 20m
   chart:
     spec:
       chart: packages/charts/ai-agent
