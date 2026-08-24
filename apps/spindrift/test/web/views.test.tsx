@@ -725,6 +725,32 @@ describe('the App workspace', () => {
     expect(withoutAct).not.toContain('Add parameter');
   });
 
+  test('restarting a service is offered where its output is, and only there', () => {
+    // §6's one act on a running process sits with the tail for the reason Run
+    // now sits with the runs: nothing about what is placed changes, so it is
+    // not a header button beside Deploy. A job has no process to bounce and
+    // must not be offered one, whatever the screen wires.
+    const service = WORKSPACE_SCENARIOS.service;
+    expect(service.runtime.kind).toBe('stream');
+    expect(workspace(service)).not.toContain('Restart');
+
+    const withAct = renderToStaticMarkup(
+      <Workspace
+        view={service}
+        onRestartService={async () => ({ ok: true })}
+      />,
+    );
+    expect(withAct).toContain('Restart');
+
+    const job = renderToStaticMarkup(
+      <Workspace
+        view={WORKSPACE_SCENARIOS.job}
+        onRestartService={async () => ({ ok: true })}
+      />,
+    );
+    expect(job).not.toContain('Restart');
+  });
+
   describe('an App whose job is not its first Component', () => {
     // The defect this fixture exists for: the screen listed every Component and
     // could act on none but the first, so an App shaped like this one had no

@@ -34,7 +34,7 @@ import type {
   DeployTarget,
   DeployVerdict,
 } from '../../src/adapters/deploy/contract.ts';
-import { blameFor } from '../../src/adapters/deploy/contract.ts';
+import { blameFor, RESTART_STAMP } from '../../src/adapters/deploy/contract.ts';
 import {
   deriveHealth,
   deriveVerifiedDeploy,
@@ -1741,5 +1741,91 @@ describe('a job is run, and its runs are read', () => {
     expect(filters[0]).toContain('resource.type="cloud_run_revision"');
     expect(filters[0]).toContain('resource.labels.service_name="shop-web"');
     expect(filters[0]).not.toContain('execution_name');
+  });
+});
+
+describe('restart', () => {
+  const SERVICE_REF =
+    'projects/example-vessel/locations/somewhere/services/shop-web';
+
+  test('rolls a new revision of the same image by re-writing the template annotations through a mask', async () => {
+    const { api, adapter } = adapterFor();
+    const { verdict } = await drain(adapter.apply(target(), desired()));
+    if (verdict.phase !== 'LIVE') throw new Error('nothing placed to restart');
+
+    const restarted = await adapter.restart(target(), verdict.ref);
+
+    expect(restarted.kind).toBe('restarted');
+    const service = api.service('shop-web') as {
+      template: {
+        annotations?: Record<string, string>;
+        containers: { image: string }[];
+      };
+    };
+    expect(service.template.annotations?.[RESTART_STAMP]).toBeDefined();
+    expect(service.template.containers[0]?.image).toBe(
+      'registry.example.test/shop@sha256:abc',
+    );
+    // One masked write carrying the annotations and nothing else: the
+    // runtime copies the rest of the template forward, so nothing here is a
+    // second render of the revision that could disagree with the first.
+    const masked = api.requests.filter(
+      (request) =>
+        request.method === 'PATCH' && request.url.includes('updateMask'),
+    );
+    expect(masked).toHaveLength(1);
+    expect(masked[0]?.url).toContain('updateMask=template.annotations');
+    const body = masked[0]?.body as { template: Record<string, unknown> };
+    expect(Object.keys(body)).toEqual(['template']);
+    expect(Object.keys(body.template)).toEqual(['annotations']);
+  });
+
+  test('refuses a job ref — a job has runs, not a process', async () => {
+    const { api, adapter } = adapterFor();
+
+    expect(
+      await adapter.restart(
+        target(),
+        'projects/example-vessel/locations/somewhere/jobs/shop-nightly',
+      ),
+    ).toEqual({
+      kind: 'none',
+      because:
+        'this ref names a job, which has runs rather than a process to restart',
+    });
+    expect(api.pathsOf('PATCH')).toEqual([]);
+  });
+
+  test('a ref that names nothing on the Target is refused, not written', async () => {
+    const { api, adapter } = adapterFor();
+
+    expect(await adapter.restart(target(), SERVICE_REF)).toEqual({
+      kind: 'none',
+      because: 'shop-web is no longer on this Target',
+    });
+    expect(api.pathsOf('PATCH')).toEqual([]);
+  });
+
+  test('a refused write is a fault with the runtime’s sentence, not a restart', async () => {
+    const api = new FakeCloudRun();
+    const adapter = new CloudRunDeployAdapter({
+      token: api.token,
+      // The apply lands; only the masked write is refused.
+      fetch: async (request) =>
+        new URL(request.url).searchParams.has('updateMask')
+          ? new Response(JSON.stringify({ error: { message: 'forbidden' } }), {
+              status: 403,
+              headers: { 'content-type': 'application/json' },
+            })
+          : api.fetch(request),
+      pollIntervalMs: 1,
+      sleep: async () => {},
+    });
+    const { verdict } = await drain(adapter.apply(target(), desired()));
+    if (verdict.phase !== 'LIVE') throw new Error('nothing placed to restart');
+
+    await expect(adapter.restart(target(), verdict.ref)).rejects.toThrow(
+      /restarting service shop-web failed/,
+    );
   });
 });

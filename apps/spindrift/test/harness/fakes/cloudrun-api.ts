@@ -853,6 +853,27 @@ export class FakeCloudRun {
     if (this.options.refuse !== undefined) {
       return json(this.options.refuse.status, this.options.refuse.body);
     }
+    // A masked write updates the named fields of a resource that is already
+    // there and leaves the rest as they were. `restart` is the one caller: it
+    // names `template.annotations` and sends only that, so a fake that
+    // replaced the whole document would let a restart drop the image and
+    // still pass. The runtime writes a new revision for any template change,
+    // which here is the read count starting over.
+    const mask = url.searchParams.get('updateMask');
+    if (mask !== null) {
+      const held = this.resources.get(key);
+      if (held === undefined) return json(404, notFound());
+      const rejected = this.schemaProblem(collection, document);
+      if (rejected !== null) return rejected;
+      const merged = structuredClone(held);
+      for (const path of mask.split(',')) {
+        const segments = path.split('.');
+        setPath(merged, segments, getPath(document, segments));
+      }
+      this.resources.set(key, merged);
+      this.reads.set(key, 0);
+      return json(200, this.operation(name, false));
+    }
     // `allowMissing` is what makes the adapter's one call create-or-update. A
     // fake that created regardless would let the adapter drop the parameter
     // and still pass, so the refusal is modelled rather than assumed.
@@ -942,6 +963,36 @@ export class FakeCloudRun {
       },
     };
   }
+}
+
+/** One `updateMask` path read off a document, or `undefined` past its end. */
+function getPath(object: unknown, segments: readonly string[]): unknown {
+  return segments.reduce<unknown>(
+    (value, segment) =>
+      (value as Record<string, unknown> | undefined)?.[segment],
+    object,
+  );
+}
+
+/** The same path written into a document, making the way as it goes. */
+function setPath(
+  object: Record<string, unknown>,
+  segments: readonly string[],
+  value: unknown,
+): void {
+  const [head, ...rest] = segments;
+  if (head === undefined) return;
+  if (rest.length === 0) {
+    object[head] = value;
+    return;
+  }
+  const held = object[head];
+  const next =
+    typeof held === 'object' && held !== null
+      ? (held as Record<string, unknown>)
+      : {};
+  object[head] = next;
+  setPath(next, rest, value);
 }
 
 /** The member a real `google.rpc.ErrorInfo` detail identifies itself by. */

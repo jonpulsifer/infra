@@ -71,12 +71,14 @@ import type {
   JobExecution,
   JobRuns,
   ObservedState,
+  Restarted,
   RunOptions,
   RuntimeLogPage,
   RuntimeLogSubject,
   RuntimeLogTailOptions,
   StartedRun,
 } from '../contract.ts';
+import { RESTART_STAMP } from '../contract.ts';
 import { type DeployEvents, deployEvents, internalFailure } from '../events.ts';
 import { parseScopedRef, scopedRef } from '../ref.ts';
 import { cloudRunJob } from './job.ts';
@@ -716,6 +718,74 @@ export class CloudRunDeployAdapter implements DeployAdapter {
         outcome: 'running',
         startedAt: null,
       },
+    };
+  }
+
+  /**
+   * A new revision of the same image (§6).
+   *
+   * The runtime has no restart verb: a revision is immutable and a Service
+   * rolls only when its template changes. So the template's annotations are
+   * re-written with {@link RESTART_STAMP} through an `updateMask` naming
+   * exactly that field — everything else the revision carries, the image
+   * above all, is left to the runtime to copy forward. The mask is what keeps
+   * this from being a second render: nothing here is assembled from rows, so
+   * nothing here can disagree with what `apply` placed.
+   *
+   * A job is refused for the reason the cluster adapter refuses one: it has
+   * runs, not a process, and its next run reads the template anyway.
+   */
+  async restart(target: DeployTarget, ref: DeployRef): Promise<Restarted> {
+    const connection = this.connectionOf(target);
+    if (connection === null) {
+      return {
+        kind: 'none',
+        because: `${targetLabel(target)} is not a Cloud Run Target`,
+      };
+    }
+    const placed = parseRef(connection, ref);
+    if (placed === null) {
+      return {
+        kind: 'none',
+        because: 'this Deploy carries no handle on what it placed here',
+      };
+    }
+    if (placed.collection === JOBS) {
+      return {
+        kind: 'none',
+        because:
+          'this ref names a job, which has runs rather than a process to restart',
+      };
+    }
+    const http = this.http(connection);
+    const service = await this.read(http, connection, SERVICES, placed.id);
+    if (service === null) {
+      return {
+        kind: 'none',
+        because: `${placed.id} is no longer on this Target`,
+      };
+    }
+
+    const at = new Date(this.events.now()).toISOString();
+    const annotations = (
+      service.template as { annotations?: Record<string, string> } | undefined
+    )?.annotations;
+    const written = await http.json<unknown>({
+      method: 'PATCH',
+      path: `/v2/${parentOf(connection)}/${SERVICES}/${encodeURIComponent(placed.id)}`,
+      query: { updateMask: 'template.annotations' },
+      body: {
+        template: { annotations: { ...annotations, [RESTART_STAMP]: at } },
+      },
+    });
+    if (!written.ok) {
+      throw new Error(
+        `restarting service ${placed.id} failed: ${written.message}`,
+      );
+    }
+    return {
+      kind: 'restarted',
+      detail: `service ${placed.id} stamped ${RESTART_STAMP}=${at}; a new revision of the same image is rolling out`,
     };
   }
 

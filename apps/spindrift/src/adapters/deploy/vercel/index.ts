@@ -96,6 +96,7 @@ import type {
   FailureReason,
   JobRuns,
   ObservedState,
+  Restarted,
   RuntimeLogPage,
   RuntimeLogSubject,
   StartedRun,
@@ -659,6 +660,11 @@ export class VercelDeployAdapter implements DeployAdapter {
 
   /** Nothing here runs, and saying so is the answer (§17). */
   async run(_target: DeployTarget, _ref: DeployRef): Promise<StartedRun> {
+    return { kind: 'none', because: NOTHING_RUNS };
+  }
+
+  /** Nothing runs here, so there is nothing to restart either. */
+  async restart(_target: DeployTarget, _ref: DeployRef): Promise<Restarted> {
     return { kind: 'none', because: NOTHING_RUNS };
   }
 

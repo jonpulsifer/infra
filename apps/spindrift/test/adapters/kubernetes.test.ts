@@ -26,7 +26,7 @@ import type {
   DeployTarget,
   DeployVerdict,
 } from '../../src/adapters/deploy/contract.ts';
-import { blameFor } from '../../src/adapters/deploy/contract.ts';
+import { blameFor, RESTART_STAMP } from '../../src/adapters/deploy/contract.ts';
 import { KubernetesApi } from '../../src/adapters/deploy/kubernetes/api.ts';
 import { KubernetesDeployAdapter } from '../../src/adapters/deploy/kubernetes/index.ts';
 import { VALUES_CONTRACT } from '../../src/adapters/deploy/kubernetes/values.ts';
@@ -2284,4 +2284,211 @@ describe('a job is run, and its runs are read', () => {
       },
     };
   }
+});
+
+describe('restart', () => {
+  const RESTART_AT = Date.UTC(2026, 7, 23, 12, 0, 0);
+  const STAMPED = new Date(RESTART_AT).toISOString();
+  const REF = 'flux-helmrelease:delivery/blog-web';
+
+  /**
+   * A service release as the adapter wrote it and the API now holds it: the
+   * operator's own pod annotation beside Spindrift's classes, a version, and
+   * a status the controller wrote.
+   */
+  const release: FakeObject = {
+    apiVersion: 'helm.toolkit.fluxcd.io/v2',
+    kind: 'HelmRelease',
+    metadata: {
+      name: 'blog-web',
+      namespace: 'delivery',
+      resourceVersion: '12',
+      labels: { 'app.kubernetes.io/managed-by': 'spindrift' },
+    },
+    spec: {
+      targetNamespace: 'apps',
+      values: {
+        app: {
+          name: 'blog',
+          component: 'web',
+          kind: 'service',
+          artifactDigest: 'sha256:feed',
+        },
+        shared: {
+          resources: { requests: { cpu: '250m' } },
+          podAnnotations: { 'example.com/owner': 'ops' },
+        },
+      },
+    },
+    status: { conditions: [{ type: 'Ready', status: 'True' }] },
+  };
+
+  function cluster(objects: Record<string, FakeObject> = {}): FakeKubernetes {
+    return new FakeKubernetes({
+      servedKinds: SERVED,
+      objects: { 'helmreleases/delivery/blog-web': release, ...objects },
+      // Nothing here polls, and the default script would stamp a ready status
+      // onto every read.
+      status: () => null,
+    });
+  }
+
+  function adapterAt(
+    far: FakeKubernetes,
+    now: () => number = () => RESTART_AT,
+  ): KubernetesDeployAdapter {
+    return new KubernetesDeployAdapter({
+      chart: CHART,
+      token: far.token,
+      fetch: far.fetch,
+      now,
+    });
+  }
+
+  function stampOf(far: FakeKubernetes): string | undefined {
+    const values = renderedValues(far) as RenderedValues & {
+      shared: { podAnnotations?: Record<string, string> };
+    };
+    return values.shared.podAnnotations?.[RESTART_STAMP];
+  }
+
+  test('stamps the pod template through the shared values, keeping the operator’s annotation and the digest', async () => {
+    const far = cluster();
+    const restarted = await adapterAt(far).restart(target(), REF);
+
+    expect(restarted.kind).toBe('restarted');
+    if (restarted.kind !== 'restarted') return;
+    expect(restarted.detail).toContain(`${RESTART_STAMP}=${STAMPED}`);
+
+    const values = renderedValues(far) as RenderedValues & {
+      shared: { podAnnotations?: Record<string, string> };
+    };
+    // One key written into the operator's map, never the map over it: the
+    // shared class is either side's to write and the other key is theirs.
+    expect(values.shared.podAnnotations).toEqual({
+      'example.com/owner': 'ops',
+      [RESTART_STAMP]: STAMPED,
+    });
+    expect(values.shared.resources).toEqual({ requests: { cpu: '250m' } });
+    // Nothing else moved: the same digest, so `observe` reads no drift.
+    expect(values.app.artifactDigest).toBe('sha256:feed');
+  });
+
+  test('the write is a server-side apply of what Spindrift owns, under the version it read', async () => {
+    const far = cluster();
+    await adapterAt(far).restart(target(), REF);
+
+    const [patch] = far.requests.filter(
+      (request) => request.method === 'PATCH',
+    );
+    expect(patch?.contentType).toBe('application/apply-patch+yaml');
+    const body = patch?.body as FakeObject;
+    // The precondition: a deploy that landed between the read and this write
+    // has to 409 rather than be reverted to the spec this read.
+    expect(body.metadata.resourceVersion).toBe('12');
+    expect(body.metadata.labels).toEqual({
+      'app.kubernetes.io/managed-by': 'spindrift',
+    });
+    // And nothing the API server owns rides along to be claimed.
+    expect(body).not.toHaveProperty('status');
+  });
+
+  test('a second restart moves the stamp', async () => {
+    const far = cluster();
+    let now = RESTART_AT;
+    const adapter = adapterAt(far, () => {
+      now += 60_000;
+      return now;
+    });
+
+    await adapter.restart(target(), REF);
+    const first = stampOf(far);
+    await adapter.restart(target(), REF);
+
+    expect(first).toBeDefined();
+    expect(stampOf(far)).not.toBe(first);
+  });
+
+  test('refuses a job, in a sentence', async () => {
+    const far = cluster({
+      'helmreleases/delivery/blog-nightly': {
+        apiVersion: 'helm.toolkit.fluxcd.io/v2',
+        kind: 'HelmRelease',
+        metadata: { name: 'blog-nightly', namespace: 'delivery' },
+        spec: {
+          values: { app: { name: 'blog', component: 'nightly', kind: 'job' } },
+        },
+      },
+    });
+
+    expect(
+      await adapterAt(far).restart(
+        target(),
+        'flux-helmrelease:delivery/blog-nightly',
+      ),
+    ).toEqual({
+      kind: 'none',
+      because:
+        'this Component is a job, which has runs rather than a process to restart',
+    });
+    expect(far.pathsOf('PATCH')).toEqual([]);
+  });
+
+  test('a ref that names nothing on the Target is refused, not written', async () => {
+    const far = cluster();
+
+    expect(
+      await adapterAt(far).restart(target(), 'flux-helmrelease:delivery/gone'),
+    ).toEqual({ kind: 'none', because: 'gone is no longer on this Target' });
+    expect(far.pathsOf('PATCH')).toEqual([]);
+  });
+
+  test('the Argo flavour is stamped where it keeps its values', async () => {
+    const far = cluster({
+      'applications/delivery/blog-web': {
+        apiVersion: 'argoproj.io/v1alpha1',
+        kind: 'Application',
+        metadata: { name: 'blog-web', namespace: 'delivery' },
+        spec: {
+          project: 'default',
+          destination: { namespace: 'apps' },
+          source: {
+            repoURL: 'https://git.example.test/infra',
+            path: CHART,
+            helm: {
+              releaseName: 'blog-web',
+              valuesObject: {
+                app: { name: 'blog', component: 'web', kind: 'service' },
+                shared: {},
+              },
+            },
+          },
+        },
+      },
+    });
+
+    const restarted = await adapterAt(far).restart(
+      target({ delivery: ARGO }),
+      'argo-application:delivery/blog-web',
+    );
+
+    expect(restarted.kind).toBe('restarted');
+    const spec = far.get('applications/delivery/blog-web')?.spec as {
+      source: {
+        repoURL: string;
+        path: string;
+        helm: {
+          releaseName: string;
+          valuesObject: { shared: { podAnnotations: Record<string, string> } };
+        };
+      };
+    };
+    expect(spec.source.helm.valuesObject.shared.podAnnotations).toEqual({
+      [RESTART_STAMP]: STAMPED,
+    });
+    // The rest of the source is the same source.
+    expect(spec.source.repoURL).toBe('https://git.example.test/infra');
+    expect(spec.source.path).toBe(CHART);
+    expect(spec.source.helm.releaseName).toBe('blog-web');
+  });
 });

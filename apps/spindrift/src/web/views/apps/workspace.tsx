@@ -273,6 +273,15 @@ export type RunJob = (
 >;
 
 /**
+ * Bouncing the service this screen is showing (§6), as the screen above
+ * needs it answered — {@link RunJob}'s shape, for the same reason: the press
+ * has one thing to say afterwards, and the pair is the screen's to bind.
+ */
+export type RestartService = () => Promise<
+  { readonly ok: true } | { readonly ok: false; readonly message: string }
+>;
+
+/**
  * Writing or removing config for the pair this workspace is showing (§10),
  * as the screen above needs it answered.
  *
@@ -327,6 +336,7 @@ export function Workspace({
   onUnplaceComponent,
   targets = [],
   onRunJob,
+  onRestartService,
   onSetAutoDeploy,
   onSetLock,
   onSetBuildRoute,
@@ -413,6 +423,13 @@ export function Workspace({
    * is what decides, because it is the only branch with runs to start.
    */
   onRunJob?: RunJob;
+  /**
+   * Bounce this App's placed service (§6). Absent where the screen wires no
+   * acts, and absent for every Component without a process — the runtime card
+   * decides, because its stream branch is the only one with a process to
+   * bounce.
+   */
+  onRestartService?: RestartService;
   /**
    * Absent where deploy-on-push is not editable from here, for the same reason
    * {@link onSetReach} is. Also absent for an archive App — but that one the
@@ -627,6 +644,7 @@ export function Workspace({
               {...(selected === undefined ? {} : { component: selected.name })}
               onNavigate={onNavigate}
               {...(onRunJob ? { onRun: onRunJob } : {})}
+              {...(onRestartService ? { onRestart: onRestartService } : {})}
               {...(onFollowExecution ? { onFollowExecution } : {})}
               {...(executionLines ? { executionLines } : {})}
             />
@@ -3004,6 +3022,7 @@ function Runtime({
   component,
   onNavigate,
   onRun,
+  onRestart,
   onFollowExecution,
   executionLines,
 }: {
@@ -3020,6 +3039,12 @@ function Runtime({
    * fixture renders, and any Component that is not a placed job.
    */
   onRun?: RunJob;
+  /**
+   * Bounce the service (§6). Absent where the screen has no act wired, and
+   * for any Component that is not a placed service — only the stream branch
+   * has a process to bounce, so only it renders the control.
+   */
+  onRestart?: RestartService;
   /**
    * Follow one run's output, or nothing when the name is `null`.
    *
@@ -3075,6 +3100,16 @@ function Runtime({
         parameter.id === id ? { ...parameter, ...change } : parameter,
       ),
     );
+  const [restarting, setRestarting] = useState(false);
+  const [restartError, setRestartError] = useState<string | null>(null);
+  const restart = async () => {
+    if (!onRestart) return;
+    setRestarting(true);
+    setRestartError(null);
+    const result = await onRestart();
+    setRestarting(false);
+    if (!result.ok) setRestartError(result.message);
+  };
 
   return (
     <Card>
@@ -3246,6 +3281,28 @@ function Runtime({
           </>
         ) : (
           <>
+            {/*
+              §6's one act on a running process. It sits with the output rather
+              than beside Deploy for the reason Run now sits with the runs:
+              restarting is not deploying — nothing about what is placed
+              changes, the platform replaces the process it already holds — and
+              the sentence it writes lands on this release's own timeline.
+            */}
+            {onRestart ? (
+              <div className="flex items-center gap-3 pb-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={restarting}
+                  onClick={() => void restart()}
+                >
+                  {restarting ? 'Restarting...' : 'Restart'}
+                </Button>
+                {restartError ? (
+                  <p className="text-xs text-destructive">{restartError}</p>
+                ) : null}
+              </div>
+            ) : null}
             <FollowedLog lines={runtime.lines} />
             <p className="pt-2 text-xs text-muted-foreground">
               This Target keeps {runtime.reach} of history. Deploys are markers
@@ -4118,6 +4175,34 @@ function AppWorkspace({
     }
   };
 
+  /**
+   * Bounce the placed service (§6), then re-read: the checkpoint it wrote is
+   * on the timeline this screen shows, and a press that left the screen
+   * unchanged reads as a press that did nothing.
+   */
+  const handleRestartService: RestartService = async () => {
+    if (runtime === null) {
+      return {
+        ok: false,
+        message: 'This service has not been placed on a Target',
+      };
+    }
+    try {
+      const result = await command('restartComponent', {
+        componentId: runtime.componentId,
+        targetId: runtime.targetId,
+      });
+      if (!result.ok) return { ok: false, message: result.failure.message };
+      read.reload();
+      return { ok: true };
+    } catch (cause: unknown) {
+      return {
+        ok: false,
+        message: cause instanceof Error ? cause.message : 'The restart failed',
+      };
+    }
+  };
+
   /*
     The one Datastore act an App has (§11). `handleSetConfig`'s shape: the App
     the screen is showing is bound here so the card does not restate it, the
@@ -4169,6 +4254,9 @@ function AppWorkspace({
         onUnplaceComponent={handleUnplaceComponent}
         targets={targets}
         onAttachDatastore={handleAttachDatastore}
+        {...(runtime === null
+          ? {}
+          : { onRestartService: handleRestartService })}
         {...(runs === null
           ? {}
           : {

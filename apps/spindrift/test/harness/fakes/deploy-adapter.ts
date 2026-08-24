@@ -20,6 +20,7 @@ import type {
   JobExecution,
   JobRuns,
   ObservedState,
+  Restarted,
   RunOptions,
   RuntimeLogPage,
   RuntimeLogSubject,
@@ -97,6 +98,8 @@ export interface FakeDeployAdapterOptions {
   noRuns?: string;
   /** When set, `run` throws — the far side that was asked correctly and failed. */
   runThrows?: string;
+  /** When set, `restart` throws — the same far side, refusing the other verb. */
+  restartThrows?: string;
   /** When set, `destroy` throws — the far side refusing to tear down what is there. */
   destroyThrows?: string;
   /** When set, `sweepApp` throws — the container the far side would not remove. */
@@ -159,6 +162,8 @@ export class FakeDeployAdapter implements DeployAdapter {
   readonly runsStarted: DeployRef[] = [];
   /** What each `run` was started with — the parameters a press carried. */
   readonly runsStartedWith: Readonly<Record<string, string>>[] = [];
+  /** Every `restart`, in call order — the same proof for the other press. */
+  readonly restarted: DeployRef[] = [];
 
   private readonly script: readonly ScriptedAttempt[];
   private readonly options: FakeDeployAdapterOptions;
@@ -289,6 +294,29 @@ export class FakeDeployAdapter implements DeployAdapter {
     };
     this.ran(ref, execution);
     return { kind: 'started', execution };
+  }
+
+  /**
+   * Restart what is placed under this ref, counting the press.
+   *
+   * The same refusals as the run verbs: a `noRuns` fake stands for a backend
+   * with no process at all, and a ref nothing is placed under has nothing to
+   * bounce. The detail carries the count so a test can tell one press from
+   * two, which is the property a real stamp has.
+   */
+  async restart(_target: DeployTarget, ref: DeployRef): Promise<Restarted> {
+    this.restarted.push(ref);
+    if (this.options.restartThrows !== undefined) {
+      throw new Error(this.options.restartThrows);
+    }
+    if (this.options.noRuns !== undefined) {
+      return { kind: 'none', because: this.options.noRuns };
+    }
+    if (!this.placed.has(ref)) {
+      return { kind: 'none', because: `nothing is placed under ${ref}` };
+    }
+    const count = this.restarted.filter((seen) => seen === ref).length;
+    return { kind: 'restarted', detail: `restart ${count} of ${ref}` };
   }
 
   async executions(_target: DeployTarget, ref: DeployRef): Promise<JobRuns> {

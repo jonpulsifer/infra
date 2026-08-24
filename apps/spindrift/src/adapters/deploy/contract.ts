@@ -385,6 +385,27 @@ export type StartedRun =
   | { readonly kind: 'started'; readonly execution: JobExecution }
   | { readonly kind: 'none'; readonly because: string };
 
+/** What a restart did, or why this backend had nothing to restart. */
+export type Restarted =
+  | {
+      readonly kind: 'restarted';
+      /** The sentence the timeline gets: what was stamped, and what rolls. */
+      readonly detail: string;
+    }
+  | { readonly kind: 'none'; readonly because: string };
+
+/**
+ * The annotation a restart stamps on the workload's template.
+ *
+ * One key for both image backends, so an operator reading a pod template or
+ * a revision finds the same word either side of the seam, under the prefix
+ * the chart already stamps its own pod label with. The value is the time the
+ * restart was asked for, which is what makes a second press a second rollout
+ * rather than a no-op: the platforms roll on a template *change*, and a stamp
+ * that stayed equal would be no change at all.
+ */
+export const RESTART_STAMP = 'spindrift.dev/restarted-at';
+
 /** The runs that have happened, or why this backend has none to report. */
 export type JobRuns =
   | {
@@ -572,6 +593,29 @@ export interface DeployAdapter {
     ref: DeployRef,
     options?: RunOptions,
   ): Promise<StartedRun>;
+
+  /**
+   * Replace the running process of what this ref placed, keeping everything
+   * else the same (§6).
+   *
+   * **Why a verb and not a deploy.** A deploy is an intent to change the
+   * desired row, and redeploying what is already desired is refused as
+   * `UNCHANGED` — correctly, because nothing about the description moved. A
+   * wedged process is not a change in what is desired; it is the platform's
+   * copy of it gone stale, and the act that fixes it has to be sayable
+   * without lying about the desired state. So this stamps the workload's
+   * template with {@link RESTART_STAMP} and lets the platform roll: on a
+   * cluster that is the chart's pod-template annotation, on the cloud runtime
+   * a new revision of the same image. Nothing here re-renders the release —
+   * a config or datastore change still arrives on the next Deploy.
+   *
+   * **Same shape as `run`.** A ref rather than a `DesiredState`, because what
+   * is being bounced is what is placed; a refusal in a sentence for a backend
+   * that has nothing to restart — a file tree has no process — and a throw
+   * for a far side that was asked correctly and failed. Every adapter answers
+   * it, so core can call it without asking which one it is holding.
+   */
+  restart(target: DeployTarget, ref: DeployRef): Promise<Restarted>;
 
   /**
    * The runs that have happened, newest first (§17).

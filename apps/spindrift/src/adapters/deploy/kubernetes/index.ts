@@ -57,6 +57,7 @@ import type {
   JobExecution,
   JobRuns,
   ObservedState,
+  Restarted,
   RunOptions,
   RuntimeLogEntry,
   RuntimeLogPage,
@@ -64,6 +65,7 @@ import type {
   RuntimeLogTailOptions,
   StartedRun,
 } from '../contract.ts';
+import { RESTART_STAMP } from '../contract.ts';
 import { type DeployEvents, deployEvents, internalFailure } from '../events.ts';
 import {
   type Fetcher,
@@ -630,6 +632,75 @@ export class KubernetesDeployAdapter implements DeployAdapter {
     // The name the API server stored, not the one that was asked for: `create`
     // now answers with the object or raises, so this reports a run that exists.
     return { kind: 'started', execution: startingRun(created.metadata.name) };
+  }
+
+  /**
+   * Stamp the pod template so the controller replaces the pods (§6).
+   *
+   * The delivery object is read back and re-applied with one value changed:
+   * `shared.podAnnotations[RESTART_STAMP]`, which the chart carries verbatim
+   * onto a Deployment's pod template. One key is written *into* the operator's
+   * map rather than the map over it — the shared class is "either may write"
+   * (`values.ts`), and the operator's other annotations are theirs to keep.
+   * The next ordinary deploy renders `shared` afresh and the stamp drops out
+   * with it, which is right: that deploy rolls the pods on its own account.
+   *
+   * **A job is refused.** A CronJob has runs, not a process: stamping its
+   * template would change nothing until the next run, which picks the
+   * template up anyway.
+   *
+   * **`resourceVersion` rides along.** The read and the write are two calls
+   * and a deploy can land between them; without the precondition this write
+   * would re-apply the spec it read — the old digest — over the new release,
+   * and only the drift clock would notice. With it the API server answers
+   * 409, this throws, and the command reports the sentence.
+   */
+  async restart(target: DeployTarget, ref: DeployRef): Promise<Restarted> {
+    const connection = this.connectionOf(target);
+    if (connection === null) {
+      return refuse(`${targetLabel(target)} is not a Kubernetes Target`);
+    }
+    const parsed = parseRef(ref);
+    if (parsed === null) {
+      return refuse('this Deploy carries no handle on what it placed');
+    }
+    const api = this.api(connection);
+    const object = await api.get({
+      apiVersion: apiVersionOf(parsed.flavour),
+      plural: pluralOf(parsed.flavour),
+      namespace: parsed.namespace,
+      name: parsed.name,
+    });
+    if (object === null) {
+      return refuse(`${parsed.name} is no longer on this Target`);
+    }
+    const values = valuesOf(parsed.flavour, object);
+    if ((values.app as { kind?: unknown } | undefined)?.kind === 'job') {
+      return refuse(
+        'this Component is a job, which has runs rather than a process to restart',
+      );
+    }
+
+    const at = new Date(this.events.now()).toISOString();
+    const shared = (values.shared ?? {}) as Record<string, unknown>;
+    const podAnnotations = (shared.podAnnotations ?? {}) as Record<
+      string,
+      string
+    >;
+    await api.apply(
+      withValues(parsed.flavour, object, {
+        ...values,
+        shared: {
+          ...shared,
+          podAnnotations: { ...podAnnotations, [RESTART_STAMP]: at },
+        },
+      }),
+      pluralOf(parsed.flavour),
+    );
+    return {
+      kind: 'restarted',
+      detail: `${resourceLabel(object)} stamped ${RESTART_STAMP}=${at}; the controller is replacing the pods`,
+    };
   }
 
   /**
@@ -1830,6 +1901,44 @@ function valuesOf(
   return flavour === 'argo-application'
     ? applicationValues(object)
     : helmReleaseValues(object);
+}
+
+/**
+ * The same delivery object with its values replaced — the one write of them,
+ * for the reason {@link valuesOf} is the one read.
+ *
+ * Only what Spindrift owns is sent back: the name, the labels, the spec. The
+ * status, the managed fields and the rest of the server's metadata are the
+ * API server's, and a server-side apply that carried them would be refused
+ * or, worse, would take ownership of them. `resourceVersion` is the one
+ * exception, kept on purpose as the precondition `restart` relies on.
+ */
+function withValues(
+  flavour: Flavour,
+  object: KubernetesObject,
+  values: Record<string, unknown>,
+): KubernetesObject {
+  const { name, namespace, labels, resourceVersion } = object.metadata;
+  const spec = (object.spec ?? {}) as Record<string, unknown>;
+  const source = (spec.source ?? {}) as Record<string, unknown>;
+  const helm = (source.helm ?? {}) as Record<string, unknown>;
+  return {
+    apiVersion: object.apiVersion,
+    kind: object.kind,
+    metadata: {
+      name,
+      ...(namespace === undefined ? {} : { namespace }),
+      ...(labels === undefined ? {} : { labels }),
+      ...(typeof resourceVersion === 'string' ? { resourceVersion } : {}),
+    },
+    spec:
+      flavour === 'argo-application'
+        ? {
+            ...spec,
+            source: { ...source, helm: { ...helm, valuesObject: values } },
+          }
+        : { ...spec, values },
+  };
 }
 
 /**

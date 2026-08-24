@@ -149,6 +149,9 @@ const refuses: DeployAdapter = {
   async run() {
     return { kind: 'none', because: 'nothing was placed here to run' };
   },
+  async restart() {
+    return { kind: 'none', because: 'nothing was placed here to restart' };
+  },
   async executions() {
     return { kind: 'none', because: 'nothing was placed here to run' };
   },

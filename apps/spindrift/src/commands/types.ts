@@ -283,6 +283,14 @@ export type CommandFailureCode =
    */
   | 'NOT_RUNNABLE'
   /**
+   * A restart was asked for and nothing was bounced (§6).
+   *
+   * `NOT_RUNNABLE`'s argument, for the other verb: the Component is a job,
+   * nothing live is placed there, the Target is disconnected, the backend has
+   * no process, or the far side refused — one code, one next move.
+   */
+  | 'NOT_RESTARTABLE'
+  /**
    * `unplaceComponent` could not tear a placement down: the Target is not
    * connected, this installation has no adapter for it, or the adapter's
    * `destroy` itself threw. One code for all three, the same argument

@@ -834,3 +834,35 @@ describe('datastore delivery', () => {
     );
   });
 });
+
+describe('shared pod annotations reach the pod template', () => {
+  // The path a restart rides: `shared.podAnnotations` lands verbatim on the
+  // pod template of both workload objects, so a changed value there is a
+  // rollout and nothing else in the release moves.
+  const STAMP = { 'spindrift.dev/restarted-at': '2026-08-23T12:00:00.000Z' };
+
+  test('on a Deployment, beside the contract annotation', async () => {
+    const deployment = one(
+      await render({ shared: { podAnnotations: STAMP } }),
+      'Deployment',
+    );
+    const annotations = deployment.spec.template.metadata.annotations;
+    expect(annotations).toMatchObject(STAMP);
+    expect(annotations['spindrift.dev/values-contract']).toBeDefined();
+    // The object's own annotations are not the pod's: a stamp there would
+    // change nothing that reschedules.
+    expect(deployment.metadata.annotations).not.toHaveProperty(
+      'spindrift.dev/restarted-at',
+    );
+  });
+
+  test('on a CronJob’s pod template, where the next run reads it', async () => {
+    const cronJob = one(
+      await render({ app: { kind: 'job' }, shared: { podAnnotations: STAMP } }),
+      'CronJob',
+    );
+    expect(
+      cronJob.spec.jobTemplate.spec.template.metadata.annotations,
+    ).toMatchObject(STAMP);
+  });
+});

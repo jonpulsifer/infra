@@ -22,6 +22,8 @@ import {
 } from '../../src/adapters/build/in-cluster.ts';
 import { encodeBuildReport } from '../../src/adapters/build/report.ts';
 import { CloudRunDeployAdapter } from '../../src/adapters/deploy/cloudrun/index.ts';
+import { workloadId } from '../../src/adapters/deploy/cloudrun/service.ts';
+import { RESTART_STAMP } from '../../src/adapters/deploy/contract.ts';
 import { KubernetesApi } from '../../src/adapters/deploy/kubernetes/api.ts';
 import { KubernetesDeployAdapter } from '../../src/adapters/deploy/kubernetes/index.ts';
 import { PagesDeployAdapter } from '../../src/adapters/deploy/pages/index.ts';
@@ -50,6 +52,7 @@ import {
   BUNDLE_DEPOT,
   buildAdapterSuite,
   deployAdapterSuite,
+  desiredState,
   storeAdapterSuite,
 } from './adapter-suite.ts';
 
@@ -83,10 +86,33 @@ deployAdapterSuite(
   'fake',
   () => {
     const adapter = new FakeDeployAdapter();
-    return { adapter, placements: () => adapter.placementCount };
+    return {
+      adapter,
+      placements: () => adapter.placementCount,
+      restartMark: () =>
+        adapter.restarted.length === 0
+          ? null
+          : String(adapter.restarted.length),
+    };
   },
   'files',
 );
+
+/**
+ * A clock that moves on every read, so two restarts stamp two times.
+ *
+ * The real adapters stamp `now()` and the platforms roll on a *change*, which
+ * makes a wall clock the wrong instrument here: two presses inside one
+ * millisecond would stamp one value and the suite would be asserting on how
+ * fast the machine is.
+ */
+function ticking(): () => number {
+  let clock = Date.UTC(2026, 0, 1);
+  return () => {
+    clock += 1_000;
+    return clock;
+  };
+}
 
 deployAdapterSuite(
   'kubernetes',
@@ -141,8 +167,20 @@ deployAdapterSuite(
         fetch: cluster.fetch,
         pollIntervalMs: 1,
         sleep: async () => {},
+        now: ticking(),
       }),
       placements: () => cluster.all('helmreleases').length,
+      // The stamp the chart carries onto the pod template, read off the one
+      // release's inline values.
+      restartMark: () => {
+        const [release] = cluster.all('helmreleases');
+        const spec = release?.spec as
+          | {
+              values?: { shared?: { podAnnotations?: Record<string, string> } };
+            }
+          | undefined;
+        return spec?.values?.shared?.podAnnotations?.[RESTART_STAMP] ?? null;
+      },
     };
   },
   'files',
@@ -158,8 +196,16 @@ deployAdapterSuite(
         fetch: api.fetch,
         pollIntervalMs: 1,
         sleep: async () => {},
+        now: ticking(),
       }),
       placements: () => api.serviceCount,
+      // The stamp on the revision template, which is what makes the runtime
+      // mint a new revision of the same image.
+      restartMark: () => {
+        const template = api.service(workloadId(desiredState('image')))
+          ?.template as { annotations?: Record<string, string> } | undefined;
+        return template?.annotations?.[RESTART_STAMP] ?? null;
+      },
     };
   },
   'files',

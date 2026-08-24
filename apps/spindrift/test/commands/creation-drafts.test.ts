@@ -62,6 +62,10 @@ const adapters: AdapterRegistry = {
       kind: 'none',
       because: 'creation drafts do not run anything',
     }),
+    restart: async () => ({
+      kind: 'none',
+      because: 'creation drafts do not run anything',
+    }),
     executions: async () => ({
       kind: 'none',
       because: 'creation drafts do not run anything',
