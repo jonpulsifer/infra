@@ -643,8 +643,27 @@ async function settle(
     // §9: where the platform names its own, the canonical comes back across the
     // seam. Where core minted one, the adapter has nothing to add and core's
     // name stands.
-    const url =
+    const canonicalUrl =
       verdict.url ?? displayUrl({ canonical: desired.hostname.canonical });
+
+    // And the vanity is the name §9 says a developer shares, so it is the one
+    // every screen reading this row prints — the App list, the workspace
+    // headline, a Deploy's own page. The canonical stays underneath it and is
+    // what the row falls back to.
+    //
+    // Only where this deploy is what publishes the name, which is the same
+    // condition `publishVanityRecord` below applies: a cluster renders the
+    // vanity into its own release (`values.ts` hands the chart both names), and
+    // a platform-named Target needs an `address` for a record to point at —
+    // one that reports none (§6's contract: Firebase Hosting, Cloud Run) leaves
+    // the name unpointed, and the attempt log says to point it by hand. Naming
+    // it as this release's address there would put a name nothing serves on the
+    // row an operator scans for what is up.
+    const publishesVanity =
+      coreMintsCanonical(subject.target.adapter) ||
+      verdict.address !== undefined;
+    const url =
+      (publishesVanity ? displayUrl(desired.hostname) : null) ?? canonicalUrl;
 
     const settled = await context.db
       .update(deploys)

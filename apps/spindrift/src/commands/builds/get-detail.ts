@@ -104,7 +104,9 @@ export const getBuildDetail: Command<
       buildView?.runner ?? null,
       target === null ? null : targetRowLabel(target),
     ),
-    url: build.component.app.vanityDomain ?? '',
+    // A Build has no address at all: the App's `vanityDomain` is a label it
+    // may answer on once something deploys, not a name this Build serves.
+    url: '',
     // A Build never serves anything: §6's exposure is only ever changed by an
     // intent, and there is no intent here.
     urlLive: false,
