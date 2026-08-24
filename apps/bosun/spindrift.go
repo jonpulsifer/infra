@@ -18,6 +18,12 @@ import (
 // progress; runBuild posts nothing for it so the lease can recover the work.
 var errDraining = errors.New("draining")
 
+// errClaimLost is a heartbeat Spindrift refused because the request is no
+// longer this host's -- cancelled, or reclaimed after the lease lapsed. From
+// that moment the guest's work is unwanted: no result of it will be accepted,
+// and a push it makes lands a cancelled build's image under the moving tag.
+var errClaimLost = errors.New("build request no longer claimed by this host")
+
 // spindriftClient is the port bosun talks to a Spindrift outbox through.
 // Spindrift never dials in -- bosun is always the poller, the same shape as
 // githubClient -- so there is one claim call and two calls scoped to the
@@ -103,7 +109,12 @@ func (c *sdClient) ClaimBuild(ctx context.Context, classes []string) (*buildClai
 func (c *sdClient) Heartbeat(ctx context.Context, id, claimant string) error {
 	ctx, cancel := context.WithTimeout(ctx, callTimeout)
 	defer cancel()
-	_, err := c.do(ctx, http.MethodPost, c.base+"/internal/bosun/requests/"+id+"/heartbeat"+claimantQuery(claimant), nil, nil)
+	status, err := c.do(ctx, http.MethodPost, c.base+"/internal/bosun/requests/"+id+"/heartbeat"+claimantQuery(claimant), nil, nil)
+	if status == http.StatusNotFound {
+		// The one answer the far side gives for a row it no longer holds
+		// claimed by this claimant; every other failure is the network's.
+		return fmt.Errorf("%w: %v", errClaimLost, err)
+	}
 	return err
 }
 
@@ -179,6 +190,8 @@ type buildSource struct {
 	spawn  func(ctx context.Context, claim *buildClaim) (*skiff, error)
 	logger *slog.Logger
 	stats  *metrics
+	// heartbeatEvery overrides buildHeartbeatInterval; zero means the default.
+	heartbeatEvery time.Duration
 }
 
 // buildLoop claims and runs one Spindrift build at a time until ctx is
@@ -218,6 +231,12 @@ func (b *buildSource) buildLoop(ctx context.Context, classes []string, pollInter
 // It blocks until the skiff is gone regardless of ctx, so a build in
 // progress at shutdown gets the same drain-then-kill treatment as a busy
 // GitHub runner rather than being abandoned mid-heartbeat.
+//
+// The heartbeat is also the only way Spindrift can reach a running build:
+// it never dials in, so a cancel on its side is a row it stops answering
+// for. A refused heartbeat therefore kills the skiff the way the reaper
+// kills an over-budget one, and posts nothing -- the row is closed or held
+// by another host, and a result would only be refused.
 func (b *buildSource) runBuild(ctx context.Context, claim *buildClaim) {
 	logger := b.logger.With("build_id", claim.ID, "class", claim.Class)
 
@@ -236,17 +255,36 @@ func (b *buildSource) runBuild(ctx context.Context, claim *buildClaim) {
 		return
 	}
 
-	heartbeat := time.NewTicker(buildHeartbeatInterval)
+	interval := b.heartbeatEvery
+	if interval == 0 {
+		interval = buildHeartbeatInterval
+	}
+	heartbeat := time.NewTicker(interval)
 	defer heartbeat.Stop()
+	lost := false
 	for {
 		select {
 		case <-s.done:
+			if lost {
+				logger.Info("build skiff stopped after its claim was lost; no result to post")
+				return
+			}
 			res := readBuildResult(s.paths.diagDir, s.reason(), logger)
 			b.stats.buildResult(res.Status)
 			b.postBuildResult(ctx, claim, res, logger)
 			return
 		case <-heartbeat.C:
-			if err := b.sd.Heartbeat(ctx, claim.ID, claim.Claimant); err != nil {
+			err := b.sd.Heartbeat(ctx, claim.ID, claim.Claimant)
+			switch {
+			case err == nil:
+			case errors.Is(err, errClaimLost):
+				if !lost {
+					lost = true
+					logger.Info("claim lost, killing build skiff", "error", err)
+					s.condemn(exitCancelled)
+					killBestEffort(s.ch, logger, "cancelled build cloud-hypervisor")
+				}
+			default:
 				logger.Warn("heartbeat", "error", err)
 			}
 		}

@@ -43,6 +43,11 @@ const (
 	// drain deadline (so a job was — which is why the reason is visible in
 	// the exit counter rather than folded into "killed").
 	exitDrained = "drained"
+	// exitCancelled is a build skiff killed because Spindrift stopped
+	// answering its heartbeat: the request was cancelled, or its lease was
+	// reclaimed by another host. Nothing wants what the guest was making, and
+	// left alone it would push a cancelled build's image.
+	exitCancelled = "cancelled"
 )
 
 func newMetrics() *metrics {
