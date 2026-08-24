@@ -1828,4 +1828,25 @@ describe('restart', () => {
       /restarting service shop-web failed/,
     );
   });
+
+  test('a read the runtime would not answer is a fault, not an absent service', async () => {
+    const api = new FakeCloudRun();
+    const adapter = new CloudRunDeployAdapter({
+      token: api.token,
+      // Only a 404 says the service is gone; an expired token or a runtime
+      // that is down says nothing about whether it is there.
+      fetch: async (request) =>
+        request.method === 'GET'
+          ? new Response(
+              JSON.stringify({ error: { message: 'unauthenticated' } }),
+              { status: 401, headers: { 'content-type': 'application/json' } },
+            )
+          : api.fetch(request),
+    });
+
+    await expect(adapter.restart(target(), SERVICE_REF)).rejects.toThrow(
+      /reading service shop-web failed: unauthenticated/,
+    );
+    expect(api.pathsOf('PATCH')).toEqual([]);
+  });
 });

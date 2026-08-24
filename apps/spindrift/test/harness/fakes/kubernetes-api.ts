@@ -492,6 +492,25 @@ export class FakeKubernetes {
         status: this.options.refuse.status,
       });
     }
+    // A `resourceVersion` in the body is a precondition: the API server
+    // answers 409 when the version it holds has moved on. A fake that stored
+    // the body anyway would let a restart revert a deploy that landed between
+    // its read and its write and still pass.
+    const expected = object.metadata.resourceVersion;
+    const current = this.objects.get(key)?.metadata.resourceVersion;
+    if (
+      expected !== undefined &&
+      current !== undefined &&
+      expected !== current
+    ) {
+      return json(409, {
+        kind: 'Status',
+        status: 'Failure',
+        reason: 'Conflict',
+        code: 409,
+        message: `Operation cannot be fulfilled on ${key}: the object has been modified; please apply your changes to the latest version and try again`,
+      });
+    }
     const stored = {
       ...object,
       metadata: { ...object.metadata, generation: 1 },

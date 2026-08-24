@@ -2502,6 +2502,33 @@ describe('restart', () => {
     expect(body).not.toHaveProperty('status');
   });
 
+  test('a deploy that lands between the read and the write is a 409, thrown', async () => {
+    const far = cluster();
+    const adapter = new KubernetesDeployAdapter({
+      chart: CHART,
+      token: far.token,
+      fetch: async (request) => {
+        const response = await far.fetch(request);
+        // The concurrent deploy: the object moves on after this read served.
+        if (request.method === 'GET') {
+          far.place('helmreleases/delivery/blog-web', {
+            ...release,
+            metadata: { ...release.metadata, resourceVersion: '13' },
+          });
+        }
+        return response;
+      },
+      now: () => RESTART_AT,
+    });
+
+    await expect(adapter.restart(target(), REF)).rejects.toThrow(
+      /409.*the object has been modified/,
+    );
+    // The write was made under the version it read, and nothing landed.
+    expect(far.pathsOf('PATCH')).toHaveLength(1);
+    expect(stampOf(far)).toBeUndefined();
+  });
+
   test('a second restart moves the stamp', async () => {
     const far = cluster();
     let now = RESTART_AT;

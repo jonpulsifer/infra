@@ -758,21 +758,31 @@ export class CloudRunDeployAdapter implements DeployAdapter {
       };
     }
     const http = this.http(connection);
-    const service = await this.read(http, connection, SERVICES, placed.id);
-    if (service === null) {
-      return {
-        kind: 'none',
-        because: `${placed.id} is no longer on this Target`,
-      };
+    const path = `/v2/${parentOf(connection)}/${SERVICES}/${encodeURIComponent(placed.id)}`;
+    // Read directly rather than through `read`: that helper folds every
+    // failure into "nothing there", and here only a 404 means that. A far
+    // side that would not answer the read is the same fault as one that
+    // refuses the write, and the contract wants it thrown, not refused.
+    const read = await http.json<CloudRunWorkload>({ method: 'GET', path });
+    if (!read.ok) {
+      if (read.kind === 'status' && read.status === 404) {
+        return {
+          kind: 'none',
+          because: `${placed.id} is no longer on this Target`,
+        };
+      }
+      throw new Error(`reading service ${placed.id} failed: ${read.message}`);
     }
 
     const at = new Date(this.events.now()).toISOString();
     const annotations = (
-      service.template as { annotations?: Record<string, string> } | undefined
+      read.value?.template as
+        | { annotations?: Record<string, string> }
+        | undefined
     )?.annotations;
     const written = await http.json<unknown>({
       method: 'PATCH',
-      path: `/v2/${parentOf(connection)}/${SERVICES}/${encodeURIComponent(placed.id)}`,
+      path,
       query: { updateMask: 'template.annotations' },
       body: {
         template: { annotations: { ...annotations, [RESTART_STAMP]: at } },
