@@ -50,12 +50,13 @@ import {
   or,
 } from 'drizzle-orm';
 import { alias } from 'drizzle-orm/pg-core';
-import type {
-  DeployAdapter,
-  DeployEvent,
-  DeployPhase,
-  DeployVerdict,
-  ObservedState,
+import {
+  blameFor,
+  type DeployAdapter,
+  type DeployEvent,
+  type DeployPhase,
+  type DeployVerdict,
+  type ObservedState,
 } from '../adapters/deploy/contract.ts';
 import type { AdapterRegistry, Clock } from '../commands/types.ts';
 import type { InstallationManifest } from '../config/manifest.schema.ts';
@@ -193,7 +194,8 @@ export const DEFAULT_DRIFT_INTERVAL_MS = 5 * 60_000;
  * Deploy with a drift flag some minutes late and no blame. §6 forbids core
  * *reimplementing* readiness, not judging what happens after it: one look at
  * least this long after the verdict, and a `FAILED` observation then is a
- * `faulty` release with a reason and a blame (`judgeSoak`).
+ * `faulty` release, with the reason and blame the adapter could name
+ * (`judgeSoak`).
  *
  * A floor and not a schedule. The look is taken by the drift pass, so it lands
  * on the first observing pass past the window — at least this long after
@@ -483,15 +485,6 @@ export async function runAttempt(
       // somebody else holds, and the next tick asks again.
       () => {},
     );
-    // The same tick is where a cancel request reaches an attempt whose adapter
-    // is silent — a sequential upload or one hung call yields nothing for the
-    // reader below to notice it on.
-    void cancelRequestOn(context, deploy.id, attemptId).then(
-      (by) => {
-        if (by !== null) cancelledBy = by;
-      },
-      () => {},
-    );
   }, DEPLOY_HEARTBEAT_MS);
 
   let verdict: DeployVerdict;
@@ -511,10 +504,11 @@ export async function runAttempt(
         });
         return abandon(context, attempt);
       }
-      // Asked again per event, not only per heartbeat tick: a chatty adapter
-      // is cancelled at its next event rather than up to a minute later. Like
-      // the reclaim above, this can only act between events — an adapter that
-      // never yields is ended by the lease cap, not by a cancel.
+      // Asked per event, because between events is the only place this can
+      // act: `stream.return` cannot interrupt a `next()` in flight, so the
+      // heartbeat tick has no way to end a hung call and does not pretend to.
+      // A chatty adapter is cancelled at its next event; an adapter that never
+      // yields is ended by the lease cap, like the reclaim above.
       cancelledBy ??= await cancelRequestOn(context, deploy.id, attemptId);
       if (cancelledBy !== null) {
         // The same tear-down the reclaim takes, and it is the only one core
@@ -1107,10 +1101,16 @@ const FAULTY_SENTENCE =
  * written once and never revisited, so a release that goes bad an hour later
  * is drift (information, §6) rather than a fault with a blame.
  *
- * The verdict is written the way `settle` writes a red one — `diagnosisOf`
- * derives the blame, the observation is the `debug` payload — but the phase
- * stays `LIVE`: the rollout landed, and the desired pointer still names this
- * release. Said on the attempt log too, so the timeline carries it.
+ * An object mid-rollout under this release's digest — a restart, a reconcile
+ * the controller has not finished — is neither verdict, so nothing is stamped
+ * and the next observing pass judges instead: the window's own "errs toward
+ * judging later" rule, applied to the phase as well as the clock.
+ *
+ * The verdict is written the way `settle` writes a red one — the blame is
+ * §6's derivation from the reason, the observation is the `debug` payload —
+ * but the phase stays `LIVE`: the rollout landed, and the desired pointer
+ * still names this release. Said on the attempt log too, so the timeline
+ * carries it.
  */
 async function judgeSoak(
   context: DeployLoopContext,
@@ -1119,6 +1119,7 @@ async function judgeSoak(
   now: Date,
 ): Promise<void> {
   const { deploy } = subject;
+  if (state?.phase === 'APPLYING' || state?.phase === 'WAITING') return;
   if (
     state === null ||
     state.phase !== 'FAILED' ||
@@ -1131,15 +1132,19 @@ async function judgeSoak(
     return;
   }
 
-  // `UNHEALTHY` where the platform names no reason: what is known is that
-  // readiness held and then did not, and that is the row of §6's table it
-  // lands on.
-  const diagnosis = diagnosisOf({
-    phase: 'FAILED',
-    reason: state.reason ?? 'UNHEALTHY',
+  // The reason is the adapter's or nobody's. `observe` names one where the
+  // platform or the adapter's read on red could; where neither did, no row of
+  // §6's table is guessed — every row but `TIMEOUT` indicts somebody, and an
+  // image that stopped pulling recorded as the developer's `UNHEALTHY` is the
+  // misdirection §6 calls `ARTIFACT_UNAVAILABLE` the hardest-justified blame
+  // to get right. What is known is written: the platform's sentence, no blame.
+  const reason = state.reason ?? null;
+  const diagnosis = {
+    reason,
+    blame: reason === null ? null : blameFor(reason),
     detail: state.detail ?? FAULTY_SENTENCE,
     debug: state,
-  })!;
+  };
   await context.db
     .update(deploys)
     .set({
@@ -1164,7 +1169,7 @@ async function judgeSoak(
   await recordDeployEvent(context.db, attempt, {
     type: 'status',
     phase: 'FAULTY',
-    reason: diagnosis.reason,
+    ...(reason === null ? {} : { reason }),
   });
 }
 

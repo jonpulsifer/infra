@@ -1548,6 +1548,78 @@ describe('the post-LIVE soak (§6)', () => {
     });
   });
 
+  test('a fault the platform names no reason for is recorded in its words, with no blame', async () => {
+    const { deploy } = await pendingDeploy();
+    const adapter = new FakeDeployAdapter({ script: [live] });
+    await runDeployPass(context(adapter));
+
+    // What a Flux upgrade that failed inside the window reads as when the
+    // object's own conditions cannot say why: the read on red is the
+    // adapter's to take, and one that named nothing must not be guessed at —
+    // an image that stopped pulling is not the developer's `UNHEALTHY`.
+    adapter.place('hr/apps/web', {
+      ref: 'hr/apps/web',
+      phase: 'FAILED',
+      artifactDigest: DIGEST,
+      detail: 'Helm upgrade failed: timed out waiting for the condition',
+    });
+    const judged = new Date(FROZEN.getTime() + DEPLOY_SOAK_MS);
+    await runDeployPass(context(adapter, at(DEPLOY_SOAK_MS)));
+
+    const row = await deployRow(deploy.id);
+    expect(row).toMatchObject({
+      phase: 'LIVE',
+      faultyAt: judged,
+      soakedAt: null,
+      reason: null,
+      blame: null,
+      detail: 'Helm upgrade failed: timed out waiting for the condition',
+    });
+
+    const events = await database()
+      .db.select()
+      .from(attemptEvents)
+      .where(eq(attemptEvents.deployId, deploy.id))
+      .orderBy(asc(attemptEvents.id));
+    expect(events.at(-1)).toMatchObject({ phase: 'FAULTY', reason: null });
+  });
+
+  test('an object mid-rollout at the window is judged on the next pass, not closed on transient state', async () => {
+    const { deploy } = await pendingDeploy();
+    const adapter = new FakeDeployAdapter({ script: [live] });
+    await runDeployPass(context(adapter));
+
+    // A restart pressed inside the window: the same digest, the controller
+    // replacing pods. Neither verdict, so neither stamp.
+    adapter.place('hr/apps/web', {
+      ref: 'hr/apps/web',
+      phase: 'WAITING',
+      artifactDigest: DIGEST,
+    });
+    await runDeployPass(context(adapter, at(DEPLOY_SOAK_MS)));
+    expect(await deployRow(deploy.id)).toMatchObject({
+      soakedAt: null,
+      faultyAt: null,
+    });
+
+    // The restarted pods crash-loop: the verdict the soak exists to give.
+    adapter.place('hr/apps/web', {
+      ref: 'hr/apps/web',
+      phase: 'FAILED',
+      artifactDigest: DIGEST,
+      reason: 'STARTUP_FAILED',
+      detail: 'back-off 5m0s restarting failed container',
+    });
+    const judged = new Date(FROZEN.getTime() + DEPLOY_SOAK_MS + 1);
+    await runDeployPass(context(adapter, at(DEPLOY_SOAK_MS + 1)));
+    expect(await deployRow(deploy.id)).toMatchObject({
+      faultyAt: judged,
+      soakedAt: null,
+      reason: 'STARTUP_FAILED',
+      blame: BLAME.STARTUP_FAILED,
+    });
+  });
+
   test('a healthy soak stamps soaked_at once, and a later failure is drift rather than a fault', async () => {
     const { deploy } = await pendingDeploy();
     const adapter = new FakeDeployAdapter({ script: [live] });

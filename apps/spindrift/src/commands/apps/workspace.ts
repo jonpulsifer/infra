@@ -546,8 +546,13 @@ export const getAppWorkspace: Command<
     url,
     // An address that is serving, which is not the same as a release that is
     // live: a placed job is LIVE with nothing to open, and this is the fact the
-    // screen's link and its headline hang off.
-    urlLive: url !== '' && latestDeploy?.phase === 'LIVE',
+    // screen's link and its headline hang off. A faulty release is LIVE too,
+    // and what the soak found is that nothing behind the address answers.
+    urlLive:
+      url !== '' &&
+      latestDeploy?.phase === 'LIVE' &&
+      latestDeploy.faultyAt === null,
+    faulty: latestDeploy?.faultyAt != null,
     release: latestDeploy
       ? `Deploy ${latestDeploy.id}`
       : selected?.builds[0]

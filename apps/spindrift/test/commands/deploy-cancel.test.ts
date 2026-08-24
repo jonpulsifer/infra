@@ -136,7 +136,12 @@ async function pair() {
     return row!;
   };
 
-  return { intent, pointer };
+  return {
+    intent,
+    pointer,
+    componentId: component!.id,
+    targetId: target!.id,
+  };
 }
 
 const rowOf = async (id: number) =>
@@ -249,6 +254,72 @@ describe('cancelling a Deploy', () => {
     if (result.ok) throw new Error('unreachable');
     expect(result.failure.code).toBe('NOT_DEPLOYABLE');
     expect(result.failure.message).toContain('nothing to cancel');
+  });
+
+  /**
+   * The locking read, asserted the way `deploys.test.ts` asserts
+   * `placeIntent`'s: the desired row is **held from another session**, the
+   * command is watched stop, and the claim's write lands under the hold —
+   * from inside it, because `claimNextDeploy` skips a locked pair rather than
+   * waiting on it. Deleting cancel's `FOR UPDATE` fails this: the phase would
+   * be re-read before the claim committed, and the command would report an
+   * attempt it left streaming into the row as cancelled.
+   */
+  test('a claim that lands while the cancel waits on the desired row is what the cancel reads', async () => {
+    const { intent, pointer, componentId, targetId } = await pair();
+    const deploy = await intent('PENDING');
+    const attemptId = crypto.randomUUID();
+
+    const other = database().connect();
+    let release = (): void => {};
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const holding = other.begin(async (tx: typeof other) => {
+      await tx.unsafe(
+        'select * from component_target_desired where component_id = $1 and target_id = $2 for update',
+        [componentId, targetId],
+      );
+      await held;
+      // What `claimNextDeploy` writes under this lock.
+      await tx.unsafe(
+        "update deploys set phase = 'APPLYING', attempt_id = $1, updated_at = now() where id = $2",
+        [attemptId, deploy.id],
+      );
+    });
+    await Bun.sleep(100);
+
+    let settled = false;
+    const contending = cancelDeploy({ id: deploy.id }, context()).then(
+      (result) => {
+        settled = true;
+        return result;
+      },
+    );
+    await Bun.sleep(400);
+    expect(settled).toBe(false);
+
+    release();
+    await holding;
+
+    // Asked, not ended: the claim came first, and the attempt it minted is
+    // what will honour the request.
+    expect(await contending).toMatchObject({
+      ok: true,
+      value: { deployId: deploy.id, phase: 'APPLYING' },
+    });
+    expect(await rowOf(deploy.id)).toMatchObject({
+      phase: 'APPLYING',
+      attemptId,
+      cancelRequestedBy: 'Jordan',
+    });
+    expect(await pointer()).toEqual({
+      desiredBuildId: deploy.buildId,
+      desiredDeployId: deploy.id,
+    });
+    expect(await linesOf(deploy.id)).toEqual([
+      'cancel requested by Jordan; the attempt ends at its next event',
+    ]);
   });
 
   test('a Deploy that does not exist is not found', async () => {

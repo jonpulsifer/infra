@@ -28,6 +28,7 @@ import { deployApp } from '../../src/commands/apps/deploy.ts';
 import { setAppLock } from '../../src/commands/apps/set-lock.ts';
 import { getAppWorkspace } from '../../src/commands/apps/workspace.ts';
 import { setConfig } from '../../src/commands/config/set.ts';
+import { cancelDeploy } from '../../src/commands/deploys/cancel.ts';
 import {
   checkDeployable,
   createDeploy,
@@ -441,6 +442,52 @@ describe('rollback goes through the lock, and sets it', () => {
     expect(forward.ok).toBe(false);
     if (forward.ok) return;
     expect(forward.failure.message).toContain('rollback to Build');
+  });
+
+  test('cancelling a rollback before it is claimed lifts the lock it set', async () => {
+    const { app, component, ctx, pair } = await fixture();
+    const older = await succeededBuild(component.id, 15);
+    const newer = await succeededBuild(component.id, 16);
+    await createDeploy({ ...pair, buildId: older.id }, ctx);
+    const forward = await createDeploy({ ...pair, buildId: newer.id }, ctx);
+    if (!forward.ok) throw new Error(forward.failure.message);
+
+    const rolled = await rollbackDeploy({ ...pair, buildId: older.id }, ctx);
+    if (!rolled.ok) throw new Error(rolled.failure.message);
+    expect((await lockOf(app.id)).lockReason).toContain('rolled back');
+
+    // The wrong Build, noticed before anything claimed it. The pointer goes
+    // back to the release that was serving all along, and a banner asserting
+    // a rollback that never landed goes with it.
+    const cancelled = await cancelDeploy({ id: rolled.value.deployId }, ctx);
+    expect(cancelled).toMatchObject({ ok: true, value: { phase: 'FAILED' } });
+    expect(await lockOf(app.id)).toEqual({
+      lockReason: null,
+      lockedAt: null,
+      lockedBy: null,
+    });
+
+    // The next press is accepted, which is what the lock was refusing.
+    const next = await succeededBuild(component.id, 17);
+    const result = await createDeploy({ ...pair, buildId: next.id }, ctx);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.supersededBuildId).toBe(newer.id);
+  });
+
+  test('a hold set on a forward intent is the operator’s, and cancelling the intent keeps it', async () => {
+    const { app, component, ctx, pair } = await fixture();
+    const first = await succeededBuild(component.id, 18);
+    const second = await succeededBuild(component.id, 19);
+    await createDeploy({ ...pair, buildId: first.id }, ctx);
+    const forward = await createDeploy({ ...pair, buildId: second.id }, ctx);
+    if (!forward.ok) throw new Error(forward.failure.message);
+    await setAppLock({ appId: app.id, reason: 'change freeze' }, ctx);
+
+    expect((await cancelDeploy({ id: forward.value.deployId }, ctx)).ok).toBe(
+      true,
+    );
+    expect((await lockOf(app.id)).lockReason).toBe('change freeze');
   });
 
   test('a refused rollback locks nothing', async () => {

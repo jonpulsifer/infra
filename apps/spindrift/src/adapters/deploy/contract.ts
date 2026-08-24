@@ -286,6 +286,15 @@ export interface ObservedState {
   reason?: FailureReason;
   detail?: string;
   /**
+   * The raw payload behind a `FAILED` observation, kept for the operator.
+   *
+   * §12's reason for storing a diagnosis at all: the platform will not keep
+   * it. A release the soak finds faulty is explained by pods and events that
+   * expire within the hour, so what the adapter read travels with the phase
+   * rather than being re-read by a core that cannot.
+   */
+  debug?: unknown;
+  /**
    * The cadence something is actually firing this placement on (§6, §7).
    *
    * A placement is not always one object. On `cloudrun` a scheduled job is a

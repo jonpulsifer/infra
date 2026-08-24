@@ -980,6 +980,115 @@ describe('observe is the authority on what is running', () => {
     );
     expect(observed?.artifactDigest).toBe('sha256:elsewhere');
   });
+
+  /** The Deployment the chart rendered, as its controller judges it. */
+  function deployment(available: 'True' | 'False'): FakeObject {
+    return {
+      apiVersion: 'apps/v1',
+      kind: 'Deployment',
+      metadata: { name: 'blog-web', namespace: 'apps', labels: POD_LABELS },
+      status: {
+        conditions: [
+          {
+            type: 'Available',
+            status: available,
+            reason:
+              available === 'True'
+                ? 'MinimumReplicasAvailable'
+                : 'MinimumReplicasUnavailable',
+            message:
+              available === 'True'
+                ? 'Deployment has minimum availability.'
+                : 'Deployment does not have minimum availability.',
+          },
+        ],
+      },
+    };
+  }
+
+  test('a ready HelmRelease over a crash-looping workload is FAILED, with the read on red', async () => {
+    // The HelmRelease this adapter renders never reconciles again on its own
+    // after a successful install, so `Ready=True` outlives the pods: the
+    // Deployment's own condition is what still tracks them (§6).
+    const { adapter } = adapterFor({
+      lists: {
+        deployments: [deployment('False')],
+        pods: [pod('CrashLoopBackOff', 'back-off restarting failed container')],
+        events: [],
+      },
+    });
+    const { verdict } = await drain(adapter.apply(target(), desiredState()));
+    if (verdict.phase !== 'LIVE') throw new Error('expected a live deploy');
+
+    const observed = await adapter.observe(target(), verdict.ref);
+    expect(observed?.phase).toBe('FAILED');
+    expect(observed?.reason).toBe('STARTUP_FAILED');
+    expect(observed?.detail).toBe('back-off restarting failed container');
+    // Still the digest the object carries: the release is what failed, not
+    // what is desired, and core's drift comparison must keep telling them apart.
+    expect(observed?.artifactDigest).toBe('sha256:feed');
+    // §12: what the read saw travels with the verdict, because the cluster
+    // will not keep it.
+    expect(observed?.debug).toMatchObject({
+      workload: [{ type: 'Available', status: 'False' }],
+      diagnosis: { pods: [{ kind: 'Pod' }] },
+    });
+  });
+
+  test('an image that stopped pulling after readiness is the platform’s fault', async () => {
+    const { adapter } = adapterFor({
+      lists: {
+        deployments: [deployment('False')],
+        pods: [pod('ImagePullBackOff', 'Back-off pulling image')],
+        events: [],
+      },
+    });
+    const { verdict } = await drain(adapter.apply(target(), desiredState()));
+    if (verdict.phase !== 'LIVE') throw new Error('expected a live deploy');
+
+    const observed = await adapter.observe(target(), verdict.ref);
+    expect(observed?.phase).toBe('FAILED');
+    expect(observed?.reason).toBe('ARTIFACT_UNAVAILABLE');
+    expect(blameFor(observed!.reason!)).toBe('platform');
+  });
+
+  test('an available workload costs one list and reads no pods', async () => {
+    const { adapter, cluster } = adapterFor({
+      lists: {
+        deployments: [deployment('True')],
+        pods: [pod('CrashLoopBackOff', 'a pod from some other rollout')],
+      },
+    });
+    const { verdict } = await drain(adapter.apply(target(), desiredState()));
+    if (verdict.phase !== 'LIVE') throw new Error('expected a live deploy');
+    const before = cluster.pathsOf('GET').length;
+
+    const observed = await adapter.observe(target(), verdict.ref);
+    expect(observed?.phase).toBe('LIVE');
+    // The delivery object and the Deployment — a read on red, not a watch:
+    // nothing was red, so no pods were read.
+    const reads = cluster.pathsOf('GET').slice(before);
+    expect(reads).toHaveLength(2);
+    expect(reads.some((path) => path.endsWith('/pods'))).toBe(false);
+  });
+
+  test('a job has no Deployment to consult, so the delivery object’s word stands', async () => {
+    const { adapter, cluster } = adapterFor({
+      lists: { deployments: [deployment('False')] },
+    });
+    const { verdict } = await drain(
+      adapter.apply(
+        target(),
+        desiredState({ kind: 'job', schedule: '0 * * * *', expose: false }),
+      ),
+    );
+    if (verdict.phase !== 'LIVE') throw new Error('expected a live deploy');
+    const before = cluster.pathsOf('GET').length;
+
+    const observed = await adapter.observe(target(), verdict.ref);
+    expect(observed?.phase).toBe('LIVE');
+    expect(cluster.pathsOf('GET').slice(before)).toHaveLength(1);
+  });
 });
 
 describe('the checklist', () => {

@@ -90,15 +90,20 @@ export const listApps: Command<
       placement would be two answers wearing one line, and the reader has no way
       to tell which Component either half belongs to.
     */
+    // A faulty release ranks with a red one: its phase is still `LIVE`, and
+    // the soak's verdict is exactly the fact a triage scan must not read as
+    // green (§6).
     const ranked = app.components.map((component) => ({
       component,
       deploy: component.deploys[0],
       phase: (component.deploys[0]?.phase ?? 'PENDING') as DeployPhase,
+      faulty: component.deploys[0]?.faultyAt != null,
     }));
+    const severity = (row: (typeof ranked)[number]) =>
+      row.faulty ? SEVERITY.FAILED : SEVERITY[row.phase];
     const worst = ranked.reduce<(typeof ranked)[number] | undefined>(
       (chosen, candidate) =>
-        chosen === undefined ||
-        SEVERITY[candidate.phase] < SEVERITY[chosen.phase]
+        chosen === undefined || severity(candidate) < severity(chosen)
           ? candidate
           : chosen,
       undefined,
@@ -128,9 +133,11 @@ export const listApps: Command<
       // it printed `@` in a column of URLs and linked to `https://@`. An App
       // that has not deployed has no address, and the row says so.
       url: deploy?.url ?? '',
-      urlLive: deploy?.phase === 'LIVE',
+      urlLive: deploy?.phase === 'LIVE' && !worst?.faulty,
+      faulty: worst?.faulty ?? false,
       componentCount: app.components.length,
-      failing: ranked.filter((row) => row.phase === 'FAILED').length,
+      failing: ranked.filter((row) => row.phase === 'FAILED' || row.faulty)
+        .length,
       // Only where a release exists. An App nobody has deployed has no commit
       // and no date, and rendering "just now" over one that has never shipped
       // would date the App by when this query ran.

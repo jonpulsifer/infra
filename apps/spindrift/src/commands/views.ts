@@ -921,6 +921,13 @@ export interface WorkspaceView extends CommitHeadlineView {
   readonly url: string;
   /** That {@link url} is being served. Never true without one. */
   readonly urlLive: boolean;
+  /**
+   * Whether the post-readiness soak found the release behind {@link phase}
+   * failed (§6). {@link phase} stays `LIVE` — the rollout landed — and this is
+   * what stops the hero saying so over a workload the platform reports broken.
+   * Optional the way {@link drift} is: every fixture builds this row literally.
+   */
+  readonly faulty?: boolean;
   readonly release: string;
   readonly components: readonly ComponentView[];
   /**
@@ -1325,6 +1332,11 @@ export interface AppListItem extends CommitHeadlineView {
   readonly vessel: string;
   readonly url: string;
   readonly urlLive: boolean;
+  /**
+   * Whether the soak found the Component behind {@link phase} faulty (§6) —
+   * the one `LIVE` a list must not print green. Absent is not faulty.
+   */
+  readonly faulty?: boolean;
   /**
    * The kind of the Component this row is reporting on — the one whose phase
    * became {@link phase} — for the list's icon.

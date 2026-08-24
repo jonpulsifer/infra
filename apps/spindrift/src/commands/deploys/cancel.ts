@@ -13,15 +13,17 @@
  *   desired pointer when it was written, so cancelling it moves the pointer
  *   back to the release before it: `deployApp` reads that pointer to decide a
  *   Build is "already desired", and a cancelled intent left in it would refuse
- *   the very redeploy the operator presses next.
+ *   the very redeploy the operator presses next. A rollback intent also set
+ *   the App's lock on the way in (`rollbackDeploy`), with a sentence saying
+ *   the rollback happened; cancelled unclaimed, it did not, so the lock goes
+ *   back with the pointer.
  *
  * - **An `APPLYING` or `WAITING` attempt is a generator in one reconciler
  *   process**, and only that process can end it. This command stamps the
- *   request and who made it; the attempt's next event or heartbeat tick reads
- *   it, returns the stream so the adapter's own `finally` runs, and settles
- *   `FAILED` with "cancelled by …" (`deploy-loop.ts`). The row is still in
- *   flight when this returns, and the screen says a cancel is pending rather
- *   than done.
+ *   request and who made it; the attempt reads it at its next event, returns
+ *   the stream so the adapter's own `finally` runs, and settles `FAILED` with
+ *   "cancelled by …" (`deploy-loop.ts`). The row is still in flight when this
+ *   returns, and the screen says a cancel is pending rather than done.
  *
  * `LIVE` and `FAILED` refuse. Cancelling a live release is a rollback with the
  * wrong word on it, and `rollbackDeploy` is one press away. Checked again
@@ -31,10 +33,10 @@
  * No `reason`, for the reason `cancelBuild` gives none: §6's set indicts a
  * developer or the platform, and a cancellation indicts neither.
  */
-import { and, desc, eq, isNotNull, isNull, lt, not } from 'drizzle-orm';
+import { and, desc, eq, gte, isNotNull, isNull, lt, not } from 'drizzle-orm';
 import { z } from 'zod';
 import type { DeployPhase } from '../../adapters/deploy/contract.ts';
-import { componentTargetDesired, deploys } from '../../db/schema.ts';
+import { apps, componentTargetDesired, deploys } from '../../db/schema.ts';
 import { recordDeployEvent } from '../../domain/attempt-log.ts';
 import { type Command, type CommandResult, failed, ok } from '../types.ts';
 
@@ -166,6 +168,33 @@ export const cancelDeploy: Command<
           updatedAt: now,
         })
         .where(eq(componentTargetDesired.id, desired.id));
+
+      // A rollback is an intent naming a Build older than the one it
+      // displaced — `rollbackDeploy`'s own admission rule — and it locked the
+      // App the moment it was written. The release that was serving is what
+      // the pointer just went back to, so a lock written no earlier than this
+      // intent describes a rollback that never landed, and goes with it.
+      // What this cannot reach: `rollbackDeploy` writes the lock after
+      // `placeIntent`'s transaction commits, so a cancel that lands between
+      // the two writes clears nothing and the lock arrives afterwards; and an
+      // operator's own hold set later than the rollback is indistinguishable
+      // from it here and is cleared with it.
+      if (previous !== undefined && deploy.buildId < previous.buildId) {
+        await tx
+          .update(apps)
+          .set({
+            lockReason: null,
+            lockedAt: null,
+            lockedBy: null,
+            updatedAt: now,
+          })
+          .where(
+            and(
+              eq(apps.id, deploy.component.appId),
+              gte(apps.lockedAt, deploy.createdAt),
+            ),
+          );
+      }
     }
     return { kind: 'cancelled' };
   });

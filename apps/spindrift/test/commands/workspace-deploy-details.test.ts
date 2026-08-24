@@ -909,7 +909,9 @@ describe('the workspace as a way into the system', () => {
         buildId: build!.id,
         desired: aDesiredDocument(),
         phase: 'LIVE',
+        url: 'https://faulty-web.apps.example.test',
         faultyAt: new Date(),
+        driftedAt: new Date(),
         reason: 'STARTUP_FAILED',
         blame: 'developer',
         detail: 'crash-looping since readiness',
@@ -921,6 +923,14 @@ describe('the workspace as a way into the system', () => {
     if (!result.ok) return;
 
     const { workspace } = result.value;
+    // The phase is still the platform's verdict on the rollout; what the
+    // hero hangs its pill, headline and link on is the fact beside it.
+    expect(workspace).toMatchObject({
+      phase: 'LIVE',
+      faulty: true,
+      urlLive: false,
+      url: 'https://faulty-web.apps.example.test',
+    });
     expect(workspace.activity[0]).toMatchObject({
       kind: 'deploy',
       title: `Deploy ${deploy!.id} faulty`,

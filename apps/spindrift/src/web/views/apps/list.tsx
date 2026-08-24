@@ -149,7 +149,7 @@ export function AppRow({
         </span>
 
         <span className="justify-self-end lg:justify-self-start">
-          <PhasePill phase={app.phase} />
+          <PhasePill phase={app.phase} faulty={app.faulty} />
         </span>
 
         {/* Below `lg` the four columns after the phase become one muted line

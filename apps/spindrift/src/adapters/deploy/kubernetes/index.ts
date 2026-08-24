@@ -314,7 +314,8 @@ export class KubernetesDeployAdapter implements DeployAdapter {
     const parsed = parseRef(ref);
     if (parsed === null) return null;
 
-    const object = await this.api(connection).get({
+    const api = this.api(connection);
+    const object = await api.get({
       apiVersion: apiVersionOf(parsed.flavour),
       plural: pluralOf(parsed.flavour),
       namespace: parsed.namespace,
@@ -322,7 +323,12 @@ export class KubernetesDeployAdapter implements DeployAdapter {
     });
     if (object === null) return null;
 
-    const status = statusOf(parsed.flavour, object);
+    const status = await this.workloadStatus(
+      api,
+      parsed.flavour,
+      object,
+      statusOf(parsed.flavour, object),
+    );
     return {
       ref,
       phase: status.phase,
@@ -332,6 +338,77 @@ export class KubernetesDeployAdapter implements DeployAdapter {
       artifactDigest: appliedDigest(parsed.flavour, object),
       ...(status.reason === undefined ? {} : { reason: status.reason }),
       ...(status.detail === undefined ? {} : { detail: status.detail }),
+      ...(status.debug === undefined ? {} : { debug: status.debug }),
+    };
+  }
+
+  /**
+   * The workload behind a delivery object that reports itself ready (§6).
+   *
+   * Flux's `Ready` is the verdict on the last reconcile, and the `HelmRelease`
+   * this adapter renders never reconciles again on its own after a successful
+   * one — `interval` re-checks the chart, not the pods — so a workload that
+   * passes readiness and crashes afterwards leaves `Ready=True` standing for
+   * as long as nothing else changes. The Deployment's `Available` condition is
+   * the controller that does keep looking. So a ready delivery object costs
+   * one more read, the workload's, and an unavailable workload is a red: it
+   * takes the same read on red an attempt takes, once, and reports what it
+   * found the way `failed` does. Still a read on red and never a watch — the
+   * one extra list is the price of the delivery object's word being about the
+   * reconcile rather than about the pods.
+   *
+   * A job has no Deployment and no readiness to lose, so the delivery object's
+   * word stands; so does a workload whose Deployment cannot be found, because
+   * "not there" is drift's question and the digest read already asks it.
+   */
+  private async workloadStatus(
+    api: KubernetesApi,
+    flavour: Flavour,
+    object: KubernetesObject,
+    status: DeliveryStatus,
+  ): Promise<DeliveryStatus> {
+    if (status.phase !== 'LIVE') return status;
+    const placed = placedWorkload(flavour, object);
+    if (placed === null || placed.kind === 'job') return status;
+
+    const [deployment] =
+      (await api
+        .list(
+          {
+            apiVersion: 'apps/v1',
+            plural: 'deployments',
+            namespace: placed.namespace,
+          },
+          { labelSelector: placed.selector },
+        )
+        .catch(() => null)) ?? [];
+    if (deployment === undefined) return status;
+    // Only an explicit `False` is the controller saying so. A condition not
+    // yet written is a Deployment nobody has judged, and treating that as red
+    // would have `diagnose` indict the developer over an empty pod list.
+    const available = conditionOf(deployment, 'Available');
+    if (available?.status !== 'False') return status;
+
+    const { pods, events } = await this.readOnRed(
+      api,
+      placed.namespace,
+      placed.selector,
+    );
+    const diagnosis = diagnose(
+      pods,
+      events,
+      available.message ?? 'the workload is no longer available',
+    );
+    return {
+      phase: 'FAILED',
+      reason: diagnosis.reason,
+      detail: diagnosis.detail,
+      // §12, as in `failed`: the events this rests on expire within the hour.
+      debug: {
+        delivery: status.debug,
+        workload: conditionsOf(deployment),
+        diagnosis: diagnosis.debug,
+      },
     };
   }
 
@@ -1040,7 +1117,11 @@ export class KubernetesDeployAdapter implements DeployAdapter {
       };
     }
 
-    const { pods, events } = await this.readOnRed(api, connection, desired);
+    const { pods, events } = await this.readOnRed(
+      api,
+      appNamespaceFor(connection, desired.app),
+      componentSelector(desired.app, desired.component),
+    );
     const diagnosis = diagnose(pods, events, status.detail);
     yield this.events.log(diagnosis.detail);
     return {
@@ -1080,7 +1161,11 @@ export class KubernetesDeployAdapter implements DeployAdapter {
     ref: DeployRef,
     resource: string,
   ): AsyncGenerator<DeployEvent, DeployVerdict, void> {
-    const { pods, events } = await this.readOnRed(api, connection, desired);
+    const { pods, events } = await this.readOnRed(
+      api,
+      appNamespaceFor(connection, desired.app),
+      componentSelector(desired.app, desired.component),
+    );
     const found = evidence(pods, events, status.detail);
 
     yield this.events.status('FAILED', {
@@ -1113,22 +1198,20 @@ export class KubernetesDeployAdapter implements DeployAdapter {
   /**
    * The two lists every diagnosis is made from (§6).
    *
-   * The namespace is the App's own, and the one this apply just used — a read
-   * on red follows the release that failed, and this call placed it. A list
-   * that throws becomes an empty one: a diagnosis is a best effort over what
-   * came back, and losing the verdict because the second read failed would be
-   * the worse outcome.
+   * The namespace is the release's own — the one an apply just used, or the
+   * one the delivery object states — so a read on red follows the release
+   * that failed. A list that throws becomes an empty one: a diagnosis is a
+   * best effort over what came back, and losing the verdict because the
+   * second read failed would be the worse outcome.
    */
   private async readOnRed(
     api: KubernetesApi,
-    connection: KubernetesAdapterConnection,
-    desired: DesiredState,
+    namespace: string,
+    selector: string,
   ): Promise<{
     readonly pods: readonly KubernetesObject[];
     readonly events: readonly KubernetesObject[];
   }> {
-    const namespace = appNamespaceFor(connection, desired.app);
-    const selector = `app.kubernetes.io/name=${desired.component},app.kubernetes.io/part-of=${desired.app}`;
     const [pods, events] = await Promise.all([
       api
         .list(
@@ -1965,6 +2048,66 @@ function workloadNamespace(
       ? spec?.destination?.namespace
       : spec?.targetNamespace;
   return typeof stated === 'string' && stated.length > 0 ? stated : null;
+}
+
+/** `spindrift-app.selectorLabels`: on every object the chart renders. */
+function componentSelector(app: string, component: string): string {
+  return `app.kubernetes.io/name=${component},app.kubernetes.io/part-of=${app}`;
+}
+
+/**
+ * The workload a delivery object renders, as its objects can be listed.
+ *
+ * Read off the values for the reason `placedJob` reads them: the ref names
+ * the release and the chart names the workload, and the values are the one
+ * place both sides agree.
+ */
+function placedWorkload(
+  flavour: Flavour,
+  object: KubernetesObject,
+): {
+  readonly kind: string;
+  readonly namespace: string;
+  readonly selector: string;
+} | null {
+  const app = valuesOf(flavour, object).app as
+    | { name?: unknown; component?: unknown; kind?: unknown }
+    | undefined;
+  const namespace = workloadNamespace(flavour, object);
+  if (
+    typeof app?.name !== 'string' ||
+    typeof app.component !== 'string' ||
+    namespace === null
+  ) {
+    return null;
+  }
+  return {
+    kind: typeof app.kind === 'string' ? app.kind : 'service',
+    namespace,
+    selector: componentSelector(app.name, app.component),
+  };
+}
+
+/** One `status.conditions` entry, the shape every controller writes. */
+interface ObjectCondition {
+  type?: string;
+  status?: string;
+  reason?: string;
+  message?: string;
+}
+
+function conditionsOf(object: KubernetesObject): ObjectCondition[] {
+  const status = object.status as
+    | { conditions?: ObjectCondition[] }
+    | undefined;
+  return status?.conditions ?? [];
+}
+
+function conditionOf(
+  object: KubernetesObject,
+  type: string,
+): ObjectCondition | null {
+  return conditionsOf(object).find((entry) => entry.type === type) ?? null;
 }
 
 /** The digest the delivery object was applied with — what is serving. */

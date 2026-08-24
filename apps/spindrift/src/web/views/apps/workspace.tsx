@@ -572,7 +572,9 @@ export function Workspace({
           url={view.url}
         />
       ) : null}
-      {view.drift ? (
+      {/* As on the release screen: a faulty release's drift is the same
+          observation the soak judged, so the amber panel yields to the red. */}
+      {view.drift && !view.faulty ? (
         <DriftPanel
           drift={view.drift}
           url={view.url}
@@ -731,6 +733,10 @@ const TABS = [
  */
 function heroHeadline(view: WorkspaceView, component?: ComponentView): string {
   const subject = component?.name ?? 'Your App';
+  // The soak's verdict outranks the address: the rollout landed and the
+  // platform has since reported the workload broken, which is the one
+  // sentence "is live" must never stand in for (§6).
+  if (view.faulty) return `${subject} is faulty`;
   if (view.url === '') {
     return view.phase === 'LIVE'
       ? `${subject} is deployed`
@@ -779,7 +785,7 @@ function Hero({
         />
       ) : null}
       <div className="flex flex-col gap-2">
-        <PhasePill phase={view.phase} />
+        <PhasePill phase={view.phase} faulty={view.faulty} />
         <p className="text-xl font-semibold tracking-tight">
           {heroHeadline(view, component)}
         </p>
