@@ -204,17 +204,30 @@ async function runVercelCli(
     '--meta',
     `${key}=${value}`,
   ]);
-  // The tree is named with `--cwd` rather than by spawning in it: `bunx`
-  // resolves `vercel` from the node_modules of the directory it runs in, and the
-  // extracted tree has none — running there would send `bunx` to the network for
-  // a CLI that is already installed. So this inherits the controller's own
-  // directory, where the dependency resolves, and points the CLI at the tree.
-  // `HOME` is the writable tree because the CLI writes a `.vercel` scratch and
-  // the container's root filesystem is read-only.
+  // Run the installed CLI directly rather than through `bunx`. The runtime
+  // image ships `bun` but not the `bunx` shim, and `bunx` would in any case
+  // resolve `vercel` from the working directory's node_modules — which for the
+  // extracted tree is none, sending it to the network for a CLI that is already
+  // a pinned dependency. Resolving the bin from this module's own location finds
+  // the installed one offline; `--cwd` is what points the CLI at the tree, so
+  // the process's own directory does not matter. `HOME` is the writable tree
+  // because the CLI writes a `.vercel` scratch and the root filesystem is
+  // read-only.
+  let cli: string;
+  try {
+    cli = Bun.resolveSync('vercel/dist/vc.js', import.meta.dir);
+  } catch (cause) {
+    return {
+      ok: false,
+      detail: `the vercel CLI is not installed in this image: ${
+        cause instanceof Error ? cause.message : String(cause)
+      }`,
+    };
+  }
   const proc = Bun.spawn(
     [
-      'bunx',
-      'vercel',
+      'bun',
+      cli,
       'deploy',
       '--prebuilt',
       '--prod',
