@@ -4,7 +4,7 @@
 # folder with bun.  The toolchain stays in the builder stage; the runtime
 # image only carries the static files and a bun binary to serve them.
 FROM cgr.dev/chainguard/node:latest-dev@sha256:63476ddf30fd0f79863ee0c8e1b15841ccdf25deac29051cbf166eabd3d80e6e AS base
-ARG BUN_VERSION=1.3.14
+ARG BUN_VERSION=1.4.0
 ENV BUN_INSTALL=/usr/local
 USER root
 RUN apk add --no-cache bash curl \
