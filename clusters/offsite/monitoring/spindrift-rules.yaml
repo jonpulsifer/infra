@@ -1,6 +1,6 @@
 ---
-# Spindrift has no outbound notification of its own (note §4.3 rung 1): these
-# read the reconciler's OTel histogram once it lands in Prometheus via the
+# Spindrift has no outbound notification of its own: these read the
+# reconciler's OTel histogram once it lands in Prometheus via the
 # opentelemetry-collector `prom-metrics` scrape (../../base/monitoring/
 # opentelemetry-collector-servicemonitor.yaml). `reconciler_attempt_duration_seconds`
 # is recorded once per deploy attempt with `{kind, outcome}`
@@ -8,6 +8,18 @@
 # counter of terminal events — an `increase()` over one window is both the
 # query and the dedupe, which is why `for:` stays short here rather than the
 # 15m/30m this file's siblings use for a *sustained* condition.
+#
+# Each expr has two arms because the series is born, not reset. The SDK keeps
+# one point per `{kind, outcome}` set and the collector exports it cumulative,
+# so `outcome="FAILED"` does not exist until the first FAILED of a reconciler
+# process — it then appears already at 1 and stays there. `increase()` is
+# last-minus-first over the samples it can see; it never assumes a counter
+# started at 0, so a series that begins inside the window at 1 reads as 0 and
+# the first red deploy after a restart is silent. With digest CD rolling the
+# reconciler pod several times a day, that first one is the usual one. The
+# second arm — present now, absent one window ago — is that appearance. It
+# also fires once on a fresh scrape target or after a Prometheus gap, which
+# is the right side to err on for a warning.
 apiVersion: monitoring.coreos.com/v1
 kind: PrometheusRule
 metadata:
@@ -25,7 +37,12 @@ spec:
         # its own. §6's FAILED carries reason/blame on the Deploy row itself;
         # this alert only says one happened, not why.
         - alert: SpindriftDeployFailed
-          expr: increase(reconciler_attempt_duration_seconds_count{kind="deploy",outcome="FAILED"}[15m]) > 0
+          expr: |
+            increase(reconciler_attempt_duration_seconds_count{kind="deploy",outcome="FAILED"}[15m]) > 0
+            or (
+              reconciler_attempt_duration_seconds_count{kind="deploy",outcome="FAILED"}
+              unless reconciler_attempt_duration_seconds_count{kind="deploy",outcome="FAILED"} offset 15m
+            )
           for: 0m
           labels:
             severity: warning
@@ -40,7 +57,12 @@ spec:
         # attempt, but a reconciler dying mid-apply is worth knowing about on
         # its own — it is also what a starved control-plane node looks like.
         - alert: SpindriftDeployLost
-          expr: increase(reconciler_attempt_duration_seconds_count{kind="deploy",outcome="LOST"}[15m]) > 0
+          expr: |
+            increase(reconciler_attempt_duration_seconds_count{kind="deploy",outcome="LOST"}[15m]) > 0
+            or (
+              reconciler_attempt_duration_seconds_count{kind="deploy",outcome="LOST"}
+              unless reconciler_attempt_duration_seconds_count{kind="deploy",outcome="LOST"} offset 15m
+            )
           for: 0m
           labels:
             severity: warning
