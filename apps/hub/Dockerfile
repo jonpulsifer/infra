@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1
 FROM node:24-alpine@sha256:d32cdf619f63fe0471182d08996dd516c6275bb5fd31ae06e55a570bd9e1ad43 AS base
-ARG BUN_VERSION=1.3.10
+ARG BUN_VERSION=1.4.0
 ENV BUN_INSTALL=/usr/local \
   TURBO_TELEMETRY_DISABLED=1
 RUN apk add --no-cache bash curl libc6-compat \
