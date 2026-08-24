@@ -90,6 +90,11 @@ hermes:
   dashboardPort: 9119
   env: []
   configFiles: []
+  # Shell run once per boot in the npmTools init container, with the tools on
+  # PATH and HOME=/opt/data — per-agent setup that must not be baked into the
+  # image (a wallet that exists once, a skill install). Only honoured when
+  # npmTools is non-empty.
+  bootCommand: ""
 
 # configFiles: non-secret config. Rendered into a ConfigMap and copied into the
 # config PVC at startup (writable by the agent). Use this when the config has no

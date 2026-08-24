@@ -19,7 +19,20 @@ spec:
     port: 18789
     hostname: dave.lolwtf.ca
     storageSize: 2Gi
-    command: "openclaw gateway --bind=lan --port 18789 --allow-unconfigured --verbose"
+    # The MoonPay CLI keeps its vault at ~/.config/moonpay, on the ephemeral
+    # rootfs; only /home/agent/config survives a restart, so the vault is
+    # symlinked onto it before anything runs. The rest is idempotent per boot:
+    # dave's own wallet exists once, the moonpay skills land where the gateway
+    # reads them, and the x402 spend cap is 10000 atomic ($0.01 USDC) per
+    # payment — a clanker on an allowance.
+    command: |
+      set -e
+      mkdir -p /home/agent/config/.config/moonpay /home/agent/.config
+      ln -sfn /home/agent/config/.config/moonpay /home/agent/.config/moonpay
+      mp wallet list --json | grep -q '"dave"' || mp wallet create --name dave >/dev/null
+      mp x402 limit set --amount 10000 >/dev/null
+      mp skill install --dir openclaw --force >/dev/null 2>&1 || true
+      exec openclaw gateway --bind=lan --port 18789 --allow-unconfigured --verbose
     resources:
       requests:
         memory: 256Mi

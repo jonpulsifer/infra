@@ -81,6 +81,37 @@ spec:
         fsGroup: 0
         seccompProfile:
           type: RuntimeDefault
+      {{- if .Values.npmTools }}
+      # The hermes image ships node but no hook for extra packages, and its
+      # rootfs does not persist. `npmTools` therefore install into the data
+      # volume, where HOME already points, and `hermes.bootCommand` runs once
+      # per boot with them on PATH — the place for idempotent per-agent setup
+      # that must not be baked into the image. Files are handed to the UID the
+      # wrapper remaps hermes to.
+      initContainers:
+        - name: install-npm-tools
+          image: {{ .Values.npmInstallImage | quote }}
+          command:
+            - sh
+            - -c
+            - |
+              set -e
+              npm install -g --prefix /opt/data/.local {{ .Values.npmTools | join " " }}
+              {{- with .Values.hermes.bootCommand }}
+              {{- . | nindent 14 }}
+              {{- end }}
+              chown -R 1000:1000 /opt/data/.local /opt/data/.config 2>/dev/null || true
+          env:
+            - name: HOME
+              value: /opt/data
+            - name: NPM_CONFIG_CACHE
+              value: /opt/data/.npm
+            - name: PATH
+              value: /opt/data/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+          volumeMounts:
+            - name: hermes-data
+              mountPath: /opt/data
+      {{- end }}
       containers:
         - name: agent
           image: {{ .Values.image }}
@@ -119,6 +150,10 @@ spec:
               value: /opt/hermes/ui-tui
             - name: PLAYWRIGHT_BROWSERS_PATH
               value: /opt/hermes/.playwright
+            {{- if .Values.npmTools }}
+            - name: PATH
+              value: /opt/data/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+            {{- end }}
             # Inject envSecrets (1Password-backed ExternalSecrets)
             {{- range .Values.envSecrets }}
             - name: {{ .envVar }}
