@@ -1,11 +1,11 @@
 /**
  * Loading and validating the installation manifest.
  *
- * The manifest is durable in Postgres. A declared document from a mounted file
- * (the chart renders one from values into a ConfigMap) or, for tests and local
- * runs, an inline environment document is reconciled into that row at process
- * start. Without a declaration, a process can still recover from the durable
- * row. Validation failures are fatal and name every offending key at once — a
+ * The manifest is durable in Postgres and the row is the only document there
+ * is. A process reads it at start, joins the deployment's own facts onto it,
+ * and serves that; a row that does not exist yet is seeded with the placeholder
+ * so onboarding has something to edit rather than a null to special-case.
+ * Validation failures are fatal and name every offending key at once — a
  * half-configured installation must not reach the point where it can place a
  * workload.
  */
@@ -84,17 +84,18 @@ export function parseManifest(
  * Validate a parsed or stored manifest and report every bad field together.
  *
  * **Upgrade first, then validate — and that order is the whole of it.** The
- * stored row governs, and `loadStoredManifest` treats a row it cannot parse as
- * a row with no seed in it, re-seeding from the mounted declaration and
- * discarding whatever an operator configured through the UI. Validating a
- * document written under the previous schema before bringing it forward is
- * therefore not a stricter read: it is that discard, fired on a document that
- * was merely old rather than wrong.
+ * stored row is the only document this installation has, so a row this build
+ * cannot parse is a boot with nothing to fall back to. Validating a document
+ * written under the previous schema before bringing it forward is therefore not
+ * a stricter read: it is that fatality, fired on a document that was merely old
+ * rather than wrong.
  *
  * Here rather than at either call site because both need it and neither should
- * have to remember: the row and the mounted declaration are written by
- * different acts at different times, and a rollout routinely has one of them
- * older than the running build. See `manifest-upgrade.ts`.
+ * have to remember: the row and a document submitted through
+ * `configureInstallation` — typed into the settings form, or pasted back from
+ * an export — are written by different acts at different times, and a rollout
+ * routinely has one of them older than the running build. See
+ * `manifest-upgrade.ts`.
  */
 export function validateManifest(
   manifest: unknown,
@@ -231,7 +232,7 @@ export const DEFAULT_PLACEHOLDER_MANIFEST: AuthoredManifest = {
  * Whether nobody has configured this installation yet.
  *
  * **Derived, not flagged**, and that is the whole of the design. `loadStoredManifest`
- * resolves `stored ?? declaration ?? placeholder` and then writes whichever arm
+ * resolves `stored ?? placeholder` and then writes whichever arm
  * it took back to the row — so by the time anything can ask the question, the
  * placeholder arm is no longer distinguishable by *when* it was taken, only by
  * *what it wrote*. A boolean column recording which arm ran would be a second
@@ -269,7 +270,7 @@ export const DEFAULT_PLACEHOLDER_MANIFEST: AuthoredManifest = {
  * installation. `test/config/installation-configured.test.ts` pins the live
  * document against this.
  *
- * **A mounted declaration that answers all three therefore configures an
+ * **A restored document that answers all three therefore configures an
  * installation**, which is right: an operator who chose them has configured this
  * installation by definition, and offering them onboarding would be offering to
  * redo work they already did.

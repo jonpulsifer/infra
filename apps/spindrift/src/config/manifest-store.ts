@@ -1,8 +1,8 @@
 /**
- * Durable storage for the declared installation manifest.
+ * Durable storage for the installation manifest.
  *
  * Parsing and validation stay in `manifest.ts`; this module owns the singleton
- * row and reconciles a deployment declaration — including ordered Target
+ * row and reconciles the document being written — including ordered Target
  * identities — into durable state.
  */
 import { sql } from 'drizzle-orm';
@@ -39,12 +39,10 @@ type Env = Record<string, string | undefined>;
  * second copy of something the deployment declares — which is the whole of why
  * the two types are different.
  *
- * **A row this build cannot parse is fatal.** It used to be survivable by
- * re-seeding from the mounted declaration, at the cost of discarding whatever
- * an operator had configured that the declaration did not carry. There is no
- * declaration to re-seed from, so `manifest-upgrade.ts` is what makes a row
- * written under an older schema readable — and a document that reaches here
- * unparseable is one that module has to learn a step for, not one to boot past.
+ * **A row this build cannot parse is fatal.** There is no second document to
+ * re-seed from, so `manifest-upgrade.ts` is what makes a row written under an
+ * older schema readable — and a document that reaches here unparseable is one
+ * that module has to learn a step for, not one to boot past.
  */
 export async function loadStoredManifest(
   db: Database,
@@ -464,8 +462,8 @@ interface ReconciledVessel {
  *
  * **Two names are governed and every other vessel is seeded.** The vessel this
  * control plane runs on and the vessel holding its shared services take the
- * `declared` treatment on every boot: the row is reconciled from the mounted
- * declaration whether or not it already exists, and a moved boundary reassesses
+ * `declared` treatment on every boot: the row is reconciled from the document
+ * being written whether or not it already exists, and a moved boundary reassesses
  * its surfaces. Every other vessel keeps the module's own rule — a declaration
  * seeds and does not govern — so a boot leaves alone whatever an operator
  * corrected through the connect screen.
