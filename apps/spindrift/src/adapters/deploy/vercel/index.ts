@@ -211,9 +211,7 @@ async function runVercelCli(
   // extracted tree is none, sending it to the network for a CLI that is already
   // a pinned dependency. Resolving the bin from this module's own location finds
   // the installed one offline; `--cwd` is what points the CLI at the tree, so
-  // the process's own directory does not matter. `HOME` is the writable tree
-  // because the CLI writes a `.vercel` scratch and the root filesystem is
-  // read-only.
+  // the process's own directory does not matter.
   let cli: string;
   try {
     cli = Bun.resolveSync('vercel/dist/vc.js', import.meta.dir);
@@ -225,41 +223,53 @@ async function runVercelCli(
       }`,
     };
   }
-  const proc = Bun.spawn(
-    [
-      'bun',
-      cli,
-      'deploy',
-      '--prebuilt',
-      '--prod',
-      '--yes',
-      '--no-wait',
-      '--cwd',
-      input.directory,
-      '--scope',
-      input.team,
-      '--project',
-      input.project,
-      ...meta,
-    ],
-    {
-      env: {
-        ...process.env,
-        VERCEL_TOKEN: input.token,
-        VERCEL_TELEMETRY_DISABLED: '1',
-        HOME: input.directory,
+  // A HOME of its own, and never the tree. The CLI writes a `.vercel` scratch
+  // under HOME and the container's root filesystem is read-only, so HOME has to
+  // be writable — but it must not be the directory being deployed: the CLI
+  // refuses to deploy `$HOME`, and unattended that refusal is a `(y/N)` prompt
+  // it auto-declines while still exiting 0, so the deploy silently does nothing.
+  // Keeping the two apart is what lets `--cwd` name the tree and HOME name only
+  // scratch.
+  const home = await mkdtemp(join(tmpdir(), 'spindrift-vercel-home-'));
+  try {
+    const proc = Bun.spawn(
+      [
+        'bun',
+        cli,
+        'deploy',
+        '--prebuilt',
+        '--prod',
+        '--yes',
+        '--no-wait',
+        '--cwd',
+        input.directory,
+        '--scope',
+        input.team,
+        '--project',
+        input.project,
+        ...meta,
+      ],
+      {
+        env: {
+          ...process.env,
+          VERCEL_TOKEN: input.token,
+          VERCEL_TELEMETRY_DISABLED: '1',
+          HOME: home,
+        },
+        stdout: 'pipe',
+        stderr: 'pipe',
       },
-      stdout: 'pipe',
-      stderr: 'pipe',
-    },
-  );
-  const stderr = await new Response(proc.stderr).text();
-  const code = await proc.exited;
-  if (code === 0) return { ok: true };
-  return {
-    ok: false,
-    detail: stderr.trim().slice(-2000) || `vercel deploy exited ${code}`,
-  };
+    );
+    const stderr = await new Response(proc.stderr).text();
+    const code = await proc.exited;
+    if (code === 0) return { ok: true };
+    return {
+      ok: false,
+      detail: stderr.trim().slice(-2000) || `vercel deploy exited ${code}`,
+    };
+  } finally {
+    await rm(home, { recursive: true, force: true });
+  }
 }
 
 /**
