@@ -43,9 +43,17 @@
  * create rather than blocking the deploy — which is exactly the behaviour a
  * re-run had before the query existed.
  */
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import {
+  mkdir,
+  mkdtemp,
+  readFile,
+  realpath,
+  rm,
+  symlink,
+  writeFile,
+} from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { dirname, join, resolve, sep } from 'node:path';
 import type {
   StoreAdapter,
   TargetAdapter,
@@ -105,6 +113,7 @@ import { type DeployEvents, deployEvents, internalFailure } from '../events.ts';
 import { parseScopedRef, scopedRef } from '../ref.ts';
 import {
   ArtifactUnavailable,
+  BundleError,
   type BundleFile,
   bundleFailure,
   readBundle,
@@ -273,20 +282,67 @@ async function runVercelCli(
 }
 
 /**
- * Write a fetched artifact's files to a fresh directory the CLI runs against.
+ * Where the build wrote the symlinks it lifted out of the Build Output tree.
+ *
+ * The artifact holds regular files only, and a Next tree dedups its routes with
+ * `.func` symlinks — well over a hundred of them at a handful of real functions
+ * — so the build records each as `{ path, target }` relative to the deployment
+ * root instead of copying it out, and {@link extractTree} puts them back. The
+ * writer is the staging half of `.github/workflows/spindrift-build.yml`.
+ */
+const LINKS_MANIFEST = '.vercel/output/__spindrift/func-links.json';
+
+/**
+ * Write a fetched artifact's files into the directory the CLI runs against.
  *
  * The bundle reader roots every path at the site with a leading slash; a tree
  * on disk is relative, so the slash comes off — and what lands is the exact
- * tree the build staged: `.vercel/output/` beside the files a filePathMap names.
+ * tree the build staged: `.vercel/output/` beside the files a filePathMap names,
+ * with the symlinks the build lifted out recreated and the manifest gone.
+ *
+ * Every link is checked to stay inside the tree before it is made. The bundle
+ * is untrusted input, and a link out of it is the one way a deployment could
+ * read a file that is not its own.
  */
-async function extractTree(files: readonly BundleFile[]): Promise<string> {
-  const dir = await mkdtemp(join(tmpdir(), 'spindrift-vercel-'));
+async function extractTree(
+  files: readonly BundleFile[],
+  dir: string,
+): Promise<void> {
   for (const file of files) {
     const path = join(dir, file.path.replace(/^\/+/, ''));
     await mkdir(dirname(path), { recursive: true });
     await writeFile(path, file.bytes);
   }
-  return dir;
+
+  const manifest = join(dir, LINKS_MANIFEST);
+  let links: readonly { path: string; target: string }[];
+  try {
+    links = JSON.parse(await readFile(manifest, 'utf8'));
+  } catch (cause) {
+    if ((cause as NodeJS.ErrnoException).code === 'ENOENT') return;
+    throw cause;
+  }
+  await rm(dirname(manifest), { recursive: true });
+  // Where each link really lands, not where its text says it does: a link
+  // whose target walks through an earlier link resolves somewhere the text
+  // never names, so the check is `realpath` after the link exists. Every link
+  // before it has passed the same check, which is what keeps the `mkdir` on
+  // the way in from following one out.
+  const root = await realpath(dir);
+  const inside = (path: string) => path === root || path.startsWith(root + sep);
+  for (const link of links) {
+    const at = resolve(root, link.path);
+    const escapes = () =>
+      new BundleError(
+        'PATH_ESCAPES_BUNDLE',
+        `the build output links ${link.path} to ${link.target}, which does not resolve inside the deployment`,
+      );
+    if (!inside(at)) throw escapes();
+    await mkdir(dirname(at), { recursive: true });
+    await symlink(link.target, at);
+    const real = await realpath(at).catch(() => null);
+    if (real === null || !inside(real)) throw escapes();
+  }
 }
 
 /** How the operator would name the platform in a sentence about it. */
@@ -459,9 +515,10 @@ export class VercelDeployAdapter implements DeployAdapter {
     // beside each other. A supplied `files` upload has no such tree and is
     // uploaded and created against the API directly, served as the files it is.
     if (desired.artifact.type === 'vercel-output') {
-      const directory = await extractTree(files);
+      const directory = await mkdtemp(join(tmpdir(), 'spindrift-vercel-'));
       let result: PrebuiltDeployResult;
       try {
+        await extractTree(files, directory);
         result = await this.deployPrebuilt({
           directory,
           project,
@@ -472,6 +529,15 @@ export class VercelDeployAdapter implements DeployAdapter {
             [DIGEST_META]: desired.artifact.digest,
           },
         });
+      } catch (cause) {
+        // The tree not assembling is the same kind of failure as the bundle
+        // not reading — the build produced something that cannot be deployed.
+        const failure = bundleFailure(cause, ref);
+        yield this.events.status('FAILED', {
+          resource: project,
+          reason: failure.reason,
+        });
+        return failure;
       } finally {
         await rm(directory, { recursive: true, force: true });
       }
