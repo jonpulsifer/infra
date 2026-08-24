@@ -1,12 +1,7 @@
 {
   "$schema": "https://turbo.build/schema.json",
-  "globalEnv": [
-    "NODE_ENV",
-    "STANDALONE",
-    "npm_package_version",
-    "npm_package_name"
-  ],
-  "globalDependencies": ["**/.env.*local"],
+  "globalEnv": ["NODE_ENV", "STANDALONE"],
+  "globalDependencies": ["**/.env.*local", "biome.json"],
   "tasks": {
     "build": {
       "dependsOn": ["^build"],
@@ -30,8 +25,7 @@
         "NEXT_PUBLIC_VERCEL_ENV",
         "NEXT_PUBLIC_SOME_VARIABLE",
         "NEXT_PUBLIC_ENVIRONMENT_VARIABLE",
-        "WEBHOOK_ALLOWED_OUTGOING_DOMAINS",
-        "GOOGLE_APPLICATION_CREDENTIALS"
+        "WEBHOOK_ALLOWED_OUTGOING_DOMAINS"
       ],
       "outputs": [".next/**", "!.next/cache/**", "dist/**", "build/**"]
     },
@@ -39,7 +33,7 @@
       "dependsOn": ["build"],
       "inputs": ["$TURBO_DEFAULT$"],
       "env": ["DATABASE_URL"],
-      "outputs": [".next/**", "!.next/cache/**", "dist/**"]
+      "outputs": []
     },
     "spindrift#test": {
       "dependsOn": ["build"],
@@ -53,7 +47,7 @@
         "$TURBO_ROOT$/clusters/*/networking/external-dns/kustomization.yaml"
       ],
       "env": ["DATABASE_URL"],
-      "outputs": [".next/**", "!.next/cache/**", "dist/**"]
+      "outputs": []
     },
     "spindrift#test:chart-pins": {
       "inputs": [
