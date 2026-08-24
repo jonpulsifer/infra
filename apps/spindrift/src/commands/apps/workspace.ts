@@ -499,13 +499,16 @@ export const getAppWorkspace: Command<
 
   /*
     Pushed but not live. `repositories.authoritativeCommit` is what §15 adopted
-    and the serving Build's commit is what the hero already prints, and nothing
-    joined them: the Config tab said one thing and the hero another, and the
-    reader did the diff. A rerun's `#<millis>` suffix is a uniqueness device on
-    the Build key, never part of the commit (`deployApp`), so it is stripped
-    before the two are compared.
+    and the serving Build's commit is what the hero already prints; this is
+    the join. A rerun's `#<millis>` suffix is a uniqueness device on the Build
+    key, never part of the commit (`deployApp`), so it is stripped before any
+    two are compared. `dispatched` is evidence rather than a flag: the newest
+    Build is of the adopted commit and has not failed, so a Deploy of it is on
+    its way or already there.
   */
-  const servingCommit = latestDeploy?.build.commit.split('#')[0] ?? null;
+  const commitOf = (ref: string | undefined) => ref?.split('#')[0] ?? null;
+  const servingCommit = commitOf(latestDeploy?.build.commit);
+  const newestBuild = selected?.builds[0];
   const source: WorkspaceSourceView | null =
     app.repository === null
       ? null
@@ -515,7 +518,14 @@ export const getAppWorkspace: Command<
             app.repository.authoritativeCommit !== null &&
             servingCommit !== null &&
             app.repository.authoritativeCommit !== servingCommit
-              ? { commit: app.repository.authoritativeCommit }
+              ? {
+                  commit: app.repository.authoritativeCommit,
+                  dispatched:
+                    newestBuild !== undefined &&
+                    newestBuild.status !== 'FAILED' &&
+                    commitOf(newestBuild.commit) ===
+                      app.repository.authoritativeCommit,
+                }
               : null,
         };
 

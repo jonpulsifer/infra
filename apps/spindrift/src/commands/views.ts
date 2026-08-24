@@ -1058,10 +1058,9 @@ export interface AppLockView {
 /**
  * Pushed but not live: the adopted commit beside the serving one.
  *
- * Both facts existed and were never joined — `repositories.authoritativeCommit`
- * on the Config tab, the serving Build's commit in the hero. For an
- * `autoDeploy` App the join reads as "a deploy is coming", and a stalled one
- * becomes visible for the first time.
+ * `repositories.authoritativeCommit` joined to the serving Build's commit —
+ * the two facts the Config tab and the hero print separately — so the hero
+ * can say what is behind, and whether anything is on its way to fix that.
  */
 export interface WorkspaceSourceView {
   /** The branch §15 adopts from. */
@@ -1072,7 +1071,17 @@ export interface WorkspaceSourceView {
    * Also `null` before anything has served at all: the first release is not
    * "behind", it is the whole App waiting to exist.
    */
-  readonly pending: { readonly commit: string } | null;
+  readonly pending: {
+    readonly commit: string;
+    /**
+     * Whether a Build of this commit exists and has not failed — the one
+     * piece of evidence that a deploy is actually coming. A push to a locked
+     * App is skipped before anything is built and never re-offered, and a
+     * Build that failed writes no Deploy, so `autoDeploy` alone says nothing
+     * about what will happen next; this does.
+     */
+    readonly dispatched: boolean;
+  } | null;
 }
 
 /**

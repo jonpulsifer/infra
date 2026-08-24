@@ -35,6 +35,7 @@
  */
 import { and, eq, isNull } from 'drizzle-orm';
 import { z } from 'zod';
+import type { Database } from '../../db/client.ts';
 import {
   apps,
   builds,
@@ -126,6 +127,12 @@ export interface DeployPreconditions {
   readonly desired: DesiredDocument;
   /** §10's hash over `desired.config`, materialized because the UI lists it. */
   readonly configVersion: string;
+  /**
+   * Go through even where the App is locked — what `checkDeployable` was
+   * asked with, carried so `placeIntent` can ask the lock again under §6's
+   * locking read (see `checkDeployable`'s option of the same name).
+   */
+  readonly bypassLock?: boolean;
 }
 
 /**
@@ -209,6 +216,15 @@ function refuse(code: CommandFailureCode, message: string): DeployCheck {
 }
 
 /**
+ * The lock's refusal, in one place: `checkDeployable` says it before the
+ * transaction and `placeIntent` says it again under the lock, and the two
+ * must be the same sentence.
+ */
+function lockedSentence(appName: string, reason: string): string {
+  return `'${appName}' is locked — ${reason}. Unlock it to deploy again; a rollback goes through regardless`;
+}
+
+/**
  * The Datastores a refusal is about, named the way their owner named them.
  *
  * Every one that is wrong, not the first: a developer who fixes the one the
@@ -239,12 +255,21 @@ export const createDeploy: Command<
  *    `ON CONFLICT DO NOTHING` the loser blocks on the index until the winner
  *    commits and then finds the row, which is the serialization we want.
  * 2. **Lock it.** From here to `COMMIT` no other transaction can read this pair's
- *    desired row for update, so what step 3 reads is what step 5 overwrites.
+ *    desired row for update, so what step 3 reads is what step 6 overwrites.
  * 3. **Read what was desired** — under the lock, so it is current.
- * 4. **Insert the Deploy**, which is the intent itself.
- * 5. **Point the desired row at it.** A newer `desiredDeployId` naming an older
+ * 4. **Ask the App's lock again.** `checkDeployable` asked before the
+ *    transaction, and a lock is the one precondition that changes on purpose:
+ *    an operator sets it, and `unresolvedPins` above is a far-side round trip
+ *    per pinned key, so the gap between the check and the write is network-
+ *    sized. Asked here it is a plain read under the desired row's lock, so a
+ *    rollback's hold — written in this same transaction by `onPlaced` — is
+ *    seen by every intent that serializes behind it.
+ * 5. **Insert the Deploy**, which is the intent itself.
+ * 6. **Point the desired row at it.** A newer `desiredDeployId` naming an older
  *    `desiredBuildId` is exactly what a rollback is; nothing here needs to know
  *    which of the two happened.
+ * 7. **`onPlaced`**, still inside — for the writer that has a row of its own
+ *    to change with the intent and not beside it.
  */
 /**
  * Which of this document's pinned config references no longer resolve, as one
@@ -329,6 +354,22 @@ export async function placeIntent(
   guard?: (
     desiredBuildId: number | null,
   ) => string | null | Promise<string | null>,
+  /**
+   * A write that belongs **with** the intent, run on its transaction after
+   * the desired row points at the new Deploy.
+   *
+   * Rollback is the caller that needs one: the hold it leaves on the App is
+   * only a hold if no forward intent can land between the rollback and it,
+   * and a rollback that is written without its hold is exactly the state the
+   * hold exists to prevent. A throw here rolls the intent back with it.
+   */
+  onPlaced?: (
+    tx: Pick<Database, 'update'>,
+    placed: {
+      readonly appId: string;
+      readonly supersededBuildId: number | null;
+    },
+  ) => Promise<void>,
 ): Promise<CommandResult<CreateDeployResult>> {
   const unresolved = await unresolvedPins(context, checked);
   if (unresolved !== null) return failed('NOT_DEPLOYABLE', unresolved);
@@ -357,6 +398,27 @@ export async function placeIntent(
       .for('update');
 
     const supersededBuildId = desired?.desiredBuildId ?? null;
+
+    // Step 4: the App's hold, as it is now that this pair is locked. A plain
+    // read, not `FOR SHARE`: a rollback takes this same lock and then writes
+    // the App row, and share-locking `apps` from every intent of the App
+    // would put two rollbacks on two pairs into a deadlock with each other.
+    const [app] = await tx
+      .select({
+        id: apps.id,
+        name: apps.name,
+        lockReason: apps.lockReason,
+      })
+      .from(apps)
+      .innerJoin(components, eq(components.appId, apps.id))
+      .where(eq(components.id, checked.componentId));
+    if (app!.lockReason !== null && !checked.bypassLock) {
+      return {
+        vetoed: lockedSentence(app!.name, app!.lockReason),
+        deployId: null,
+        supersededBuildId: null,
+      };
+    }
 
     const vetoed = (await guard?.(supersededBuildId)) ?? null;
     if (vetoed !== null) {
@@ -408,6 +470,8 @@ export async function placeIntent(
       })
       .where(eq(componentTargetDesired.id, desired!.id));
 
+    await onPlaced?.(tx, { appId: app!.id, supersededBuildId });
+
     return { vetoed: null, deployId: deploy!.id, supersededBuildId };
   });
 
@@ -433,7 +497,10 @@ export async function placeIntent(
  * that makes a committed intent wrong — a Build does not un-succeed, a
  * Component's kind does not change — so holding the desired row's lock across
  * them would serialize deploys of *different* pairs behind reads that prove
- * nothing about contention.
+ * nothing about contention. The one exception is the App's lock, which an
+ * operator sets on purpose at any moment: it is refused here so nothing is
+ * staged for a held App, and asked again by `placeIntent` under the lock so
+ * a hold set in the gap still holds.
  */
 export async function checkDeployable(
   input: CreateDeployInput,
@@ -478,10 +545,7 @@ export async function checkDeployable(
   // there on purpose, and the sentence is theirs: everything below is a fact
   // about the Build or the Target, this is a decision about the App.
   if (app.lockReason !== null && !options.bypassLock) {
-    return refuse(
-      'NOT_DEPLOYABLE',
-      `'${app.name}' is locked — ${app.lockReason}. Unlock it to deploy again; a rollback goes through regardless`,
-    );
+    return refuse('NOT_DEPLOYABLE', lockedSentence(app.name, app.lockReason));
   }
 
   // With the boundary, because half of what names a Target lives there.
@@ -685,6 +749,7 @@ export async function checkDeployable(
       targetId: target.id,
       buildId: build.id,
       configVersion: config.version,
+      ...(options.bypassLock ? { bypassLock: true } : {}),
       desired: {
         app: app.name,
         component: component.name,

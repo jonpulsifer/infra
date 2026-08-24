@@ -20,17 +20,21 @@
  * point of one Build to many Deploys (§2) is that the artifact already exists, and
  * nothing on this path looks up a build adapter to run one with.
  *
- * **A rollback locks the App.** It is the one intent that goes through a lock,
- * and the one that sets it: without the lock, the next adopted push — a
- * Renovate merge at 03:00 — goes straight back out through
- * `dispatchAutoDeploys`, and there is no step anywhere where the operator says
- * the cause is fixed. `setAppLock` with `reason: null` is that step. The
- * reason names what was rolled away from and who did it, because that is what
- * the next person reading the banner needs to know.
+ * **A rollback locks the App, in the same transaction as its intent.** It is
+ * the one intent that goes through a lock, and the one that sets it: without
+ * the lock, the next adopted push — a Renovate merge at 03:00 — goes straight
+ * back out through `dispatchAutoDeploys`, and there is no step anywhere where
+ * the operator says the cause is fixed. `setAppLock` with `reason: null` is
+ * that step. One transaction rather than two statements, because the hold is
+ * what makes the rollback stick: a forward intent whose checks passed a moment
+ * earlier serializes behind this one on the desired row and then reads the
+ * App's lock — so it must already be there when this commits. The reason
+ * names what was asked for, what it superseded and who asked, in words that
+ * stay true if the Deploy itself later fails: requested, not done.
  */
 import { and, desc, eq } from 'drizzle-orm';
 import { z } from 'zod';
-import { components, deploys } from '../../db/schema.ts';
+import { deploys } from '../../db/schema.ts';
 import { configVersionOf } from '../../domain/config-version.ts';
 import type { DesiredDocument } from '../../domain/desired-state.ts';
 import { lockApp } from '../apps/set-lock.ts';
@@ -89,36 +93,31 @@ export const rollbackDeploy: Command<
   // beforehand would let a concurrent deploy change the answer in the gap, and
   // the gap is exactly when a rollback happens — during an incident, with
   // somebody else also pressing buttons.
-  const placed = await placeIntent(context, value, (desiredBuildId) => {
-    if (desiredBuildId === null) {
-      return 'nothing has been deployed here yet, so there is nothing to roll back to';
-    }
-    if (input.buildId >= desiredBuildId) {
-      return `Build ${input.buildId} is not older than the Build that is desired here (${desiredBuildId}) — deploy it forward instead`;
-    }
-    return null;
-  });
-  if (!placed.ok) return placed;
-
-  // After the intent and outside its transaction: the lock is about the App,
-  // the lock in `placeIntent` is about one pair, and a rollback that was
-  // written is a rollback whether or not the App row takes the hold. The
-  // superseded Build is read back from the same locking read that wrote the
-  // intent, so the sentence names what was actually rolled away from.
-  const [component] = await context.db
-    .select({ appId: components.appId })
-    .from(components)
-    .where(eq(components.id, input.componentId));
-  if (component !== undefined) {
-    await lockApp(
-      context.db,
-      component.appId,
-      `rolled back from Build ${placed.value.supersededBuildId} to Build ${input.buildId} by ${context.principal.displayName}; unlock once the cause is fixed`,
-      context.principal,
-      context.clock.now(),
-    );
-  }
-  return placed;
+  //
+  // The hold rides the same transaction (`onPlaced`): the superseded Build it
+  // names is the one that locking read returned, and a refused rollback never
+  // reaches it, so a refusal locks nothing.
+  return placeIntent(
+    context,
+    value,
+    (desiredBuildId) => {
+      if (desiredBuildId === null) {
+        return 'nothing has been deployed here yet, so there is nothing to roll back to';
+      }
+      if (input.buildId >= desiredBuildId) {
+        return `Build ${input.buildId} is not older than the Build that is desired here (${desiredBuildId}) — deploy it forward instead`;
+      }
+      return null;
+    },
+    (tx, placed) =>
+      lockApp(
+        tx,
+        placed.appId,
+        `rollback to Build ${input.buildId} requested, superseding Build ${placed.supersededBuildId}, by ${context.principal.displayName}; unlock once the cause is fixed`,
+        context.principal,
+        context.clock.now(),
+      ),
+  );
 };
 
 /**

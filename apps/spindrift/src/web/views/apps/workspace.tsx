@@ -839,11 +839,12 @@ function Hero({
           </div>
         ) : null}
         {/*
-          Pushed but not live (§15). The adopted commit and the serving one
-          were on different tabs and nothing joined them. What happens next
-          depends on the switch beside placement: a push App has a deploy on
-          the way unless the lock is holding it, and a manual one needs the
-          Rebuild press — Deploy alone would place the artifact already built.
+          Pushed but not live (§15). The adopted commit beside the serving
+          one, and what happens next read from evidence rather than from the
+          switch beside placement: a Build of the adopted commit exists and
+          has not failed (`pending.dispatched`), the lock is holding it, or
+          nothing is on its way and the Rebuild press is what ships it —
+          Deploy alone would place the artifact already built.
         */}
         {view.source?.pending ? (
           <p className="flex flex-wrap items-center gap-x-1.5 text-xs text-muted-foreground">
@@ -857,7 +858,7 @@ function Hero({
             {' — '}
             {view.lock
               ? 'held by the lock'
-              : view.autoDeploy
+              : view.source.pending.dispatched
                 ? 'a deploy is coming'
                 : 'press Rebuild to ship it'}
           </p>
