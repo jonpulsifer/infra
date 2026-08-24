@@ -44,7 +44,8 @@ export function leaderboard(entries: Entry[], n = 10): Leader[] {
 
 const sum = (entries: { amount: string }[]) =>
   entries.reduce((t, e) => t + BigInt(e.amount), 0n).toString();
-const tipName = (route: string) => route.slice('/tip/'.length);
+const tipName = (route: string) =>
+  route.slice('/tip/'.length).split('/')[0] as string;
 
 export function openLedger(databaseUrl?: string) {
   if (!databaseUrl) {

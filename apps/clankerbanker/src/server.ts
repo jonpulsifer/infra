@@ -93,9 +93,16 @@ const bad = (c: Ctx, error: string, status: 400 | 413 | 503 = 400) =>
   c.json({ error }, status);
 const brainGuard: MiddlewareHandler<Env> = async (c, next) =>
   brainReady() ? next() : bad(c, 'no brain configured', 503);
-app.get('/tip/:name', (c, next) =>
-  /^[a-z0-9-]{1,24}$/.test(c.req.param('name')) ? next() : bad(c, 'bad name'),
-);
+const TIP_TIERS = ['big', 'whale', 'everything'];
+app.get('/tip/:name/:tier?', (c, next) => {
+  if (!/^[a-z0-9-]{1,24}$/.test(c.req.param('name'))) return bad(c, 'bad name');
+  const tier = c.req.param('tier');
+  // An unknown tier has no price in the routes map, so it would sail past
+  // the paywall unpaid — refuse it here instead.
+  return tier === undefined || TIP_TIERS.includes(tier)
+    ? next()
+    : bad(c, 'bad tier');
+});
 app.on(['GET', 'PUT'], '/kv/:key', async (c, next) => {
   if (!/^[a-zA-Z0-9_.-]{1,64}$/.test(c.req.param('key')))
     return bad(c, 'bad key');
@@ -248,8 +255,12 @@ app.get('/dice', (c) =>
   ),
 );
 app.get('/whoami', async (c) => c.json(await ledger.payer(payerOf(c))));
-app.get('/tip/:name', (c) =>
-  c.json({ thanks: c.req.param('name'), payer: payerOf(c) }),
+app.get('/tip/:name/:tier?', (c) =>
+  c.json({
+    thanks: c.req.param('name'),
+    tier: c.req.param('tier') ?? 'standard',
+    payer: payerOf(c),
+  }),
 );
 app.put('/kv/:key', async (c) => {
   const payer = payerOf(c);

@@ -279,11 +279,22 @@ describe('clankerbanker', () => {
     const bad = await app.request('/tip/bad%20name!');
     expect(bad.status).toBe(400);
     expect(facilitatorCalls).toBe(before);
+    const badTier = await app.request('/tip/alice/millions');
+    expect(badTier.status).toBe(400);
+    expect(facilitatorCalls).toBe(before);
     expect((await pay('/tip/alice')).status).toBe(200);
+    const whale = (await (await pay('/tip/bob/whale')).json()) as {
+      tier: string;
+    };
+    expect(whale.tier).toBe('whale');
+    const everything = await challenge('/tip/carol/everything');
+    expect(
+      everything.accepts.find((a) => a.network === 'eip155:8453')?.amount,
+    ).toBe('100000000');
     const ledger = (await (await app.request('/ledger')).json()) as {
       tips: string[];
     };
-    expect(ledger.tips).toEqual(['alice']);
+    expect(ledger.tips).toEqual(['bob', 'alice']);
     expect(await (await app.request('/')).text()).toContain(
       '<span class="chip">alice</span>',
     );
