@@ -11,6 +11,8 @@ import { describe, expect, test } from 'bun:test';
 import type { BuildProvenance } from '../../src/adapters/build/contract.ts';
 import {
   type BundleDepot,
+  COMMIT_HEADLINE_LIMIT,
+  commitHeadlineOf,
   type ExactCommitFetcher,
   SourceBundleError,
   stageSourceBundle,
@@ -25,11 +27,22 @@ const COMMIT = '0123456789abcdef0123456789abcdef01234567';
 const BYTES = new TextEncoder().encode('the exact source bundle');
 const DIGEST =
   'sha256:20c50fe07e8995fc04d396f4e4b0eeddd221d86e33be9726a17e42f6429d7f95';
+const MESSAGE =
+  'feat(spindrift): keep the headline\n\nA body the ledger never shows.';
+const AUTHORED_AT = new Date('2026-07-27T09:30:00.000Z');
+/** What the bundle keeps of {@link MESSAGE}: the first line only. */
+const HEADLINE = {
+  message: 'feat(spindrift): keep the headline',
+  author: 'octocat',
+  authoredAt: AUTHORED_AT,
+};
 
 function harness(options?: {
   resolvedCommit?: string;
   hasSubmodules?: boolean;
   hasGitLfs?: boolean;
+  message?: string | null;
+  author?: string | null;
 }) {
   const fetches: unknown[] = [];
   const puts: unknown[] = [];
@@ -44,6 +57,9 @@ function harness(options?: {
         resolvedCommit: options?.resolvedCommit ?? input.commit,
         hasSubmodules: options?.hasSubmodules ?? false,
         hasGitLfs: options?.hasGitLfs ?? false,
+        message: options?.message === undefined ? MESSAGE : options.message,
+        author: options?.author === undefined ? 'octocat' : options.author,
+        authoredAt: AUTHORED_AT,
         principal: {
           kind: 'githubApp',
           subject: 'installation:42',
@@ -125,6 +141,7 @@ describe('repository bundle staging', () => {
       digest: DIGEST,
       location: `bundles/${DIGEST}.tar`,
       retention: 'ephemeral',
+      commit: HEADLINE,
     });
     expect(result.receiptLocation).toBe(`receipts/${DIGEST}.json`);
     expect(result.receipt.statement.predicate.source).toEqual({
@@ -253,4 +270,65 @@ describe('archive bundle staging', () => {
       provenance.bundleDigest,
     );
   });
+});
+
+describe('what a bundle keeps of the commit beyond its sha', () => {
+  test('the headline is the first line, and an upload has none', async () => {
+    const farSide = harness();
+    const git = await stageSourceBundle(
+      {
+        kind: 'git',
+        repository: 'owner/repo',
+        commit: COMMIT,
+        credential: { token: 'never-store-this' },
+      },
+      farSide,
+      new Date(),
+    );
+    expect(git.bundle.commit).toEqual(HEADLINE);
+
+    const upload = await stageSourceBundle(
+      {
+        kind: 'upload',
+        bytes: BYTES,
+        name: 'site.tar',
+        principal: { id: 'user-1', displayName: 'Operator' },
+      },
+      farSide,
+      new Date(),
+    );
+    expect(upload.bundle.commit).toBeUndefined();
+  });
+
+  test('a host that reports no message or author stages a bundle that says so', async () => {
+    const farSide = harness({ message: null, author: null });
+    const staged = await stageSourceBundle(
+      {
+        kind: 'git',
+        repository: 'owner/repo',
+        commit: COMMIT,
+        credential: { token: 'never-store-this' },
+      },
+      farSide,
+      new Date(),
+    );
+    expect(staged.bundle.commit).toEqual({
+      message: null,
+      author: null,
+      authoredAt: AUTHORED_AT,
+    });
+  });
+
+  test.each([
+    ['  spaced subject  \nbody', 'spaced subject'],
+    ['\n\nleading blank lines', null],
+    ['', null],
+    [null, null],
+    ['x'.repeat(COMMIT_HEADLINE_LIMIT + 50), 'x'.repeat(COMMIT_HEADLINE_LIMIT)],
+  ])(
+    'commitHeadlineOf(%j) is the trimmed, capped first line',
+    (message, expected) => {
+      expect(commitHeadlineOf(message)).toBe(expected);
+    },
+  );
 });

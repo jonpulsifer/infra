@@ -67,6 +67,9 @@ export function sourceViewOf(app: App, build: Build): SourceView {
       // §2 keys a Build on the commit, so the Build is the authority on which
       // one this release delivers — the App only says where commits come from.
       commit: build.commit,
+      commitMessage: build.commitMessage,
+      commitAuthor: build.commitAuthor,
+      commitAuthoredAt: build.commitAuthoredAt?.toISOString() ?? null,
       subpath,
     };
   }

@@ -138,6 +138,7 @@ export const listApps: Command<
         ? {}
         : {
             commit: deploy.build.commit,
+            commitMessage: deploy.build.commitMessage,
             when: elapsedSince(deploy.createdAt, now),
             at: deploy.createdAt.toISOString(),
             deployId: deploy.id,

@@ -561,7 +561,19 @@ function Provenance({
           {source.kind === 'repo' ? (
             <>
               <Fact label="Repository" value={source.repo} />
-              <Fact label="Commit" value={source.commit} copy />
+              <Fact
+                label="Commit"
+                value={source.commit}
+                note={source.commitMessage ?? undefined}
+                copy
+              />
+              {source.commitAuthor ? (
+                <Fact
+                  label="Author"
+                  value={source.commitAuthor}
+                  note={source.commitAuthoredAt ?? undefined}
+                />
+              ) : null}
             </>
           ) : (
             <>

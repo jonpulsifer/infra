@@ -164,8 +164,14 @@ export function AppRow({
             <span className="text-muted-foreground">not allocated</span>
           )}
         </span>
-        <span className="hidden truncate font-mono text-body text-muted-foreground lg:block">
+        <span
+          className="hidden truncate font-mono text-body text-muted-foreground lg:block"
+          title={app.commitMessage ?? undefined}
+        >
           {app.commit ? app.commit.slice(0, 7) : '—'}
+          {app.commitMessage ? (
+            <span className="ml-2 font-sans">{app.commitMessage}</span>
+          ) : null}
         </span>
         <span className="hidden truncate font-mono text-body text-muted-foreground lg:block">
           {app.target}

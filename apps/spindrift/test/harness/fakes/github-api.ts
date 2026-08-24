@@ -58,6 +58,20 @@ export interface RecordedPullRequest {
 interface StoredCommit {
   tree: string;
   parents: string[];
+  /** What `GET /repos/{r}/commits/{sha}` says beside the sha. */
+  message: string;
+  /** `null` models a commit whose author the host cannot match to a user. */
+  authorLogin: string | null;
+  authorName: string;
+  authoredAt: string;
+}
+
+/** What a test may say about the commit it is making, beyond its files. */
+export interface FakeCommitOptions {
+  readonly message?: string;
+  readonly authorLogin?: string | null;
+  readonly authorName?: string;
+  readonly authoredAt?: string;
 }
 
 /** One dispatch the client asked for. */
@@ -239,7 +253,11 @@ export class FakeGitHub {
   }
 
   /** Put a commit carrying exactly these files on a branch. */
-  commitFiles(branch: string, files: Record<string, string>): string {
+  commitFiles(
+    branch: string,
+    files: Record<string, string>,
+    options: FakeCommitOptions = {},
+  ): string {
     const tree = new Map<string, string>();
     for (const [path, contents] of Object.entries(files)) {
       tree.set(path, this.putBlob(contents));
@@ -251,6 +269,13 @@ export class FakeGitHub {
     this.commits.set(commit, {
       tree: treeId,
       parents: parent === undefined ? [] : [parent],
+      message: options.message ?? `commit ${commit}`,
+      authorLogin:
+        options.authorLogin === undefined
+          ? this.accountLogin
+          : options.authorLogin,
+      authorName: options.authorName ?? 'Example Author',
+      authoredAt: options.authoredAt ?? this.now().toISOString(),
     });
     this.branches.set(branch, commit);
     return commit;
@@ -582,9 +607,22 @@ export class FakeGitHub {
     if (commit) {
       const requested = decodeURIComponent(commit[1] ?? '');
       const resolved = this.branches.get(requested) ?? requested;
-      return this.commits.has(resolved)
-        ? this.json({ sha: resolved })
-        : this.notFound();
+      const stored = this.commits.get(resolved);
+      // The real answer's shape: the git-level commit under `commit`, and the
+      // host's matched user under `author` — `null` when it matched none.
+      return stored === undefined
+        ? this.notFound()
+        : this.json({
+            sha: resolved,
+            commit: {
+              message: stored.message,
+              author: { name: stored.authorName, date: stored.authoredAt },
+            },
+            author:
+              stored.authorLogin === null
+                ? null
+                : { login: stored.authorLogin },
+          });
     }
 
     const contents = rest.match(/^\/contents\/(.+)$/);
@@ -694,6 +732,12 @@ export class FakeGitHub {
       this.commits.set(id, {
         tree: String(body.tree ?? ''),
         parents: (body.parents ?? []) as string[],
+        message: String(body.message ?? ''),
+        // Committed by the App: the host attributes it to the bot, which is
+        // what the configuration pull request's commits look like.
+        authorLogin: `${this.accountLogin}[bot]`,
+        authorName: this.accountLogin,
+        authoredAt: this.now().toISOString(),
       });
       return this.json({ sha: id }, 201);
     }

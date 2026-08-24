@@ -25,11 +25,37 @@ import type { RepositoryRef } from './repository.ts';
 
 export type BundleRetention = 'ephemeral' | 'durable';
 
+/**
+ * What the far side said about a commit beyond its sha — the part of §15's
+ * one fetch a Build keeps so its row is readable without a second lookup.
+ * `message` is the headline only (see {@link commitHeadlineOf}).
+ */
+export interface CommitHeadline {
+  readonly message: string | null;
+  /** The host's login for the author where it knows one, else the name on the commit. */
+  readonly author: string | null;
+  readonly authoredAt: Date | null;
+}
+
 /** A content-addressed bundle that every builder can fetch. */
 export interface StagedSourceBundle {
   readonly digest: string;
   readonly location: string;
   readonly retention: BundleRetention;
+  /** Present for a repository commit; an upload has none. */
+  readonly commit?: CommitHeadline;
+}
+
+/** The longest headline a Build keeps; see `0052_build_commit_headline.sql`. */
+export const COMMIT_HEADLINE_LIMIT = 200;
+
+/**
+ * The first line of a commit message, trimmed and capped — what a ledger
+ * column can carry. Empty in, `null` out, so a blank message reads as none.
+ */
+export function commitHeadlineOf(message: string | null): string | null {
+  const line = message?.split('\n', 1)[0]?.trim() ?? '';
+  return line.length === 0 ? null : line.slice(0, COMMIT_HEADLINE_LIMIT);
 }
 
 /** The only result this seam exposes; credentials cannot fit in it. */
@@ -66,6 +92,13 @@ export interface FetchedCommit {
   readonly resolvedCommit: string;
   readonly hasSubmodules: boolean;
   readonly hasGitLfs: boolean;
+  /**
+   * The commit message as the host holds it; core keeps only its headline.
+   * `null` where the host reported none, never a fabricated one.
+   */
+  readonly message: string | null;
+  readonly author: string | null;
+  readonly authoredAt: Date | null;
   /**
    * Identity authenticated by the repository client that performed the fetch.
    * It comes back from the trusted integration instead of being asserted by the
@@ -162,6 +195,7 @@ export async function stageSourceBundle<Credential>(
             kind: 'user' as const,
             subject: input.principal.id,
           },
+          commit: undefined,
         };
 
   // One owned snapshot feeds both digest and storage. Without it, an upload
@@ -188,6 +222,7 @@ export async function stageSourceBundle<Credential>(
       digest,
       location: stored.location,
       retention: prepared.retention,
+      ...(prepared.commit === undefined ? {} : { commit: prepared.commit }),
     },
     receipt,
     receiptLocation: recorded.location,
@@ -234,6 +269,11 @@ async function prepareGitBundle<Credential>(
       commit: fetched.resolvedCommit,
     },
     principal: fetched.principal,
+    commit: {
+      message: commitHeadlineOf(fetched.message),
+      author: fetched.author,
+      authoredAt: fetched.authoredAt,
+    } satisfies CommitHeadline,
   };
 }
 

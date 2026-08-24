@@ -1696,3 +1696,50 @@ describe('editing config from the workspace (§10)', () => {
     expect(calls).toEqual([{ entries: [], removals: ['DATABASE_URL'] }]);
   });
 });
+
+/**
+ * A commit is a sha nobody can read. Where a screen shows one, the headline
+ * the Build kept goes beside it — and a row that kept none still shows the
+ * sha alone rather than a blank where words would go.
+ */
+describe('a commit shows its headline beside the sha', () => {
+  test('the App hero puts the headline beside the seven characters', () => {
+    const markup = workspace({
+      ...WORKSPACE_SCENARIOS.service,
+      commit: 'a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2',
+      commitMessage: 'feat(web): stop the header wrapping',
+      when: '8m ago',
+      at: '2026-07-28T13:00:00.000Z',
+    });
+    expect(markup).toContain('a1b2c3d');
+    expect(markup).toContain('feat(web): stop the header wrapping');
+  });
+
+  test('the deploy screen names the message and the author under the commit', () => {
+    const source = DEPLOY_SCENARIOS.live.source;
+    if (source.kind !== 'repo') throw new Error('the live scenario is a repo');
+    const markup = deploy({
+      ...DEPLOY_SCENARIOS.live,
+      source: {
+        ...source,
+        commitMessage: 'feat(web): stop the header wrapping',
+        commitAuthor: 'octocat',
+        commitAuthoredAt: '2026-07-28T12:00:00.000Z',
+      },
+    });
+    expect(markup).toContain('feat(web): stop the header wrapping');
+    expect(markup).toContain('octocat');
+    expect(markup).toContain('2026-07-28T12:00:00.000Z');
+  });
+
+  test('a Build that kept no headline still shows its sha', () => {
+    const source = DEPLOY_SCENARIOS.live.source;
+    if (source.kind !== 'repo') throw new Error('the live scenario is a repo');
+    const markup = deploy({
+      ...DEPLOY_SCENARIOS.live,
+      source: { ...source, commitMessage: null, commitAuthor: null },
+    });
+    expect(markup).toContain(source.commit);
+    expect(markup).not.toContain('Author');
+  });
+});

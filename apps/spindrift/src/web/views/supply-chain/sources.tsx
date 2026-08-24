@@ -98,7 +98,11 @@ const COLUMNS: readonly Column<SourceListItem>[] = [
     sortValue: (source) => source.commit ?? '',
     cell: (source) =>
       source.commit ? (
-        <Ref value={source.commit} kind="commit" />
+        <Ref
+          value={source.commit}
+          kind="commit"
+          headline={source.commitMessage}
+        />
       ) : (
         <span className="text-muted-foreground">none</span>
       ),
@@ -227,6 +231,25 @@ export function SourceLedger({
                   title: source.commit ?? undefined,
                   mono: true,
                 },
+                ...(source.commitMessage
+                  ? [{ label: 'Message', value: source.commitMessage }]
+                  : []),
+                ...(source.commitAuthor
+                  ? [
+                      {
+                        label: 'Author',
+                        value: source.commitAuthoredAt ? (
+                          <>
+                            {source.commitAuthor},{' '}
+                            <Timestamp at={source.commitAuthoredAt} />
+                          </>
+                        ) : (
+                          source.commitAuthor
+                        ),
+                        title: source.commitAuthoredAt ?? undefined,
+                      },
+                    ]
+                  : []),
                 {
                   label: 'Staged',
                   value: <Timestamp at={source.at} />,

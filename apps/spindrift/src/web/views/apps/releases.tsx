@@ -161,7 +161,9 @@ export function Releases({
     {
       id: 'commit',
       header: 'Commit',
-      cell: (row) => <Ref value={row.commit} kind="commit" />,
+      cell: (row) => (
+        <Ref value={row.commit} kind="commit" headline={row.commitMessage} />
+      ),
     },
     {
       id: 'config',

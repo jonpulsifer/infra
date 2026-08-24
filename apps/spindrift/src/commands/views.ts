@@ -253,15 +253,29 @@ export interface BuildView {
  * bytes that were staged are the bytes under that path, and a reader comparing
  * two releases of a monorepo needs it as much as the commit.
  */
+/**
+ * What the Build kept of its commit beyond the sha (§15's one fetch, kept on
+ * the row): the headline, the author's login or name, and the authored
+ * instant as ISO text. Every row that shows a commit carries these so the
+ * screen can put words beside the hash. Absent or null for an archive, and for
+ * a Build staged before the columns existed — a bare sha is still the honest
+ * row there.
+ */
+export interface CommitHeadlineView {
+  readonly commitMessage?: string | null;
+  readonly commitAuthor?: string | null;
+  readonly commitAuthoredAt?: string | null;
+}
+
 export type SourceView =
-  | {
+  | ({
       readonly kind: 'repo';
       /** The repository, as the App names it. */
       readonly repo: string;
       /** The exact commit staged (§15). */
       readonly commit: string;
       readonly subpath: string;
-    }
+    } & CommitHeadlineView)
   | {
       readonly kind: 'archive';
       /** §16's join: the digest over the staged bundle, on both arms. */
@@ -429,7 +443,7 @@ export interface ExpectedDuration {
  * ordinary deploy naming an older Build, and choosing which older Build means
  * reading the releases that named them.
  */
-export interface DeployListItem {
+export interface DeployListItem extends CommitHeadlineView {
   readonly id: number;
   readonly buildId: number;
   readonly componentId: string;
@@ -459,7 +473,7 @@ export interface DeployListItem {
 export type BuildStatus = 'PENDING' | 'RUNNING' | 'SUCCEEDED' | 'FAILED';
 
 /** One Build as the global artifact ledger presents it. */
-export interface BuildListItem {
+export interface BuildListItem extends CommitHeadlineView {
   readonly id: number;
   readonly appId: string;
   readonly app: string;
@@ -828,7 +842,7 @@ export interface AppDomainView {
   readonly servedBy: string | null;
 }
 
-export interface WorkspaceView {
+export interface WorkspaceView extends CommitHeadlineView {
   readonly app: string;
   readonly appId?: string;
   /**
@@ -1197,7 +1211,7 @@ export interface LinkedRepoView {
  * Not the workspace — the list is the fast scan of what exists, and clicking
  * one navigates to the workspace.
  */
-export interface AppListItem {
+export interface AppListItem extends CommitHeadlineView {
   /**
    * The App's id, and the only thing on this row that identifies it.
    *

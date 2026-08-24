@@ -139,6 +139,7 @@ export async function releasesOf(
       component: row.component.name,
       target: targetRowLabel(row.target),
       commit: row.build.commit,
+      commitMessage: row.build.commitMessage,
       phase: row.phase as DeployPhase,
       when: elapsedSince(row.createdAt, now),
       at: row.createdAt.toISOString(),

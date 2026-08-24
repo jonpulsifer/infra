@@ -775,7 +775,13 @@ function Hero({
         */}
         {view.commit || view.at ? (
           <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
-            {view.commit ? <Ref value={view.commit} kind="commit" /> : null}
+            {view.commit ? (
+              <Ref
+                value={view.commit}
+                kind="commit"
+                headline={view.commitMessage}
+              />
+            ) : null}
             {view.at ? (
               <Timestamp at={view.at} when={view.when} className="font-mono" />
             ) : null}

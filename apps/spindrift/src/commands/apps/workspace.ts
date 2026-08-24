@@ -545,6 +545,7 @@ export const getAppWorkspace: Command<
       ? {}
       : {
           commit: latestDeploy.build.commit,
+          commitMessage: latestDeploy.build.commitMessage,
           when: elapsedSince(latestDeploy.createdAt, now),
           at: latestDeploy.createdAt.toISOString(),
         }),

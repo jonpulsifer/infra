@@ -792,6 +792,16 @@ export const builds = pgTable(
     createdAt: timestamp('created_at', { withTimezone: true })
       .notNull()
       .defaultNow(),
+    /**
+     * What the far side said about `commit` beyond its sha, kept from §15's
+     * one fetch: the headline (first line, trimmed, at most 200 characters —
+     * `commitHeadlineOf` in `domain/source-bundle.ts`), the author's login or
+     * name, and the authored instant. All null for an archive, and for a Build
+     * staged before the columns existed.
+     */
+    commitMessage: text('commit_message'),
+    commitAuthor: text('commit_author'),
+    commitAuthoredAt: timestamp('commit_authored_at', { withTimezone: true }),
   },
   (table) => [
     unique('builds_component_commit_shape_unique').on(
@@ -1820,6 +1830,13 @@ export const sourceBundles = pgTable(
     stagedAt: timestamp('staged_at', { withTimezone: true })
       .notNull()
       .defaultNow(),
+    /**
+     * The same three `builds` keeps, so a cache hit lands them on a sibling
+     * App's Build exactly as the fetch that wrote this row did.
+     */
+    commitMessage: text('commit_message'),
+    commitAuthor: text('commit_author'),
+    commitAuthoredAt: timestamp('commit_authored_at', { withTimezone: true }),
   },
   (table) => [
     primaryKey({

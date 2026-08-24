@@ -88,7 +88,9 @@ const COLUMNS: readonly Column<BuildListItem>[] = [
     header: 'Commit',
     sortable: true,
     sortValue: (build) => build.commit,
-    cell: (build) => <Ref value={build.commit} kind="commit" />,
+    cell: (build) => (
+      <Ref value={build.commit} kind="commit" headline={build.commitMessage} />
+    ),
   },
   {
     id: 'runner',
@@ -235,6 +237,25 @@ export function BuildLedger({
                   title: build.commit,
                   mono: true,
                 },
+                ...(build.commitMessage
+                  ? [{ label: 'Message', value: build.commitMessage }]
+                  : []),
+                ...(build.commitAuthor
+                  ? [
+                      {
+                        label: 'Author',
+                        value: build.commitAuthoredAt ? (
+                          <>
+                            {build.commitAuthor},{' '}
+                            <Timestamp at={build.commitAuthoredAt} />
+                          </>
+                        ) : (
+                          build.commitAuthor
+                        ),
+                        title: build.commitAuthoredAt ?? undefined,
+                      },
+                    ]
+                  : []),
               ]}
             />
             <BuildEvidence buildId={build.id} />

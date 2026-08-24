@@ -790,13 +790,27 @@ export class GitHubApp implements ExactCommitFetcher<InstallationRef> {
   }): Promise<FetchedCommit> {
     const { repository, commit, credential } = input;
 
-    const resolved = await this.http(credential).json<{ sha: string }>({
+    // The same response that resolves the sha carries the commit's message and
+    // author; keeping them here is what puts a headline on the Build without a
+    // second call or a second code path.
+    const resolved = await this.http(credential).json<{
+      sha: string;
+      commit?: {
+        message?: string | null;
+        author?: { name?: string | null; date?: string | null } | null;
+      };
+      /** The host's user for the author, absent when it cannot match one. */
+      author?: { login?: string | null } | null;
+    }>({
       method: 'GET',
       path: `/repos/${repository}/commits/${encodeURIComponent(commit)}`,
     });
     if (resolved === null) {
       throw new TypeError('the commit endpoint tolerates no status');
     }
+    const authoredAt = resolved.commit?.author?.date
+      ? new Date(resolved.commit.author.date)
+      : null;
 
     const [bytes, gitmodules, gitattributes] = await Promise.all([
       this.http(credential).bytes({
@@ -818,6 +832,12 @@ export class GitHubApp implements ExactCommitFetcher<InstallationRef> {
       // filter is what makes a checkout depend on a second fetch nobody staged.
       hasGitLfs:
         gitattributes !== null && /filter\s*=\s*lfs/.test(gitattributes),
+      message: resolved.commit?.message ?? null,
+      author: resolved.author?.login ?? resolved.commit?.author?.name ?? null,
+      authoredAt:
+        authoredAt !== null && Number.isNaN(authoredAt.getTime())
+          ? null
+          : authoredAt,
       principal: {
         kind: 'githubApp',
         subject: principalSubject,

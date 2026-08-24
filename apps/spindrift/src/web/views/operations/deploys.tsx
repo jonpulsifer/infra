@@ -94,7 +94,13 @@ const COLUMNS: readonly Column<DeployLedgerItem>[] = [
   {
     id: 'commit',
     header: 'Commit',
-    cell: (deploy) => <Ref value={deploy.commit} kind="commit" />,
+    cell: (deploy) => (
+      <Ref
+        value={deploy.commit}
+        kind="commit"
+        headline={deploy.commitMessage}
+      />
+    ),
   },
   {
     id: 'current',
