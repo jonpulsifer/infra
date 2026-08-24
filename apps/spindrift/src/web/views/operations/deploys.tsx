@@ -48,10 +48,19 @@ import { Timestamp } from '../../ui/timestamp.tsx';
 import { notify } from '../../ui/toast.tsx';
 import { LedgerSkeleton, mergeLedger, ScreenFailure } from '../screen.tsx';
 
-export function deployTone(phase: DeployPhase): ExplorerTone {
+/**
+ * The tone a phase reads in. `faulty` is the soak's verdict on a `LIVE` row
+ * (§6) and the one fact beside the phase that changes the answer.
+ */
+export function deployTone(phase: DeployPhase, faulty = false): ExplorerTone {
+  if (faulty || phase === 'FAILED') return 'destructive';
   if (phase === 'LIVE') return 'success';
-  if (phase === 'FAILED') return 'destructive';
   return 'accent';
+}
+
+/** The ledger's lower-case word for a phase, or `faulty` where the soak said so. */
+export function deployWord(phase: DeployPhase, faulty = false): string {
+  return faulty ? 'faulty' : phase.toLowerCase();
 }
 
 const COLUMNS: readonly Column<DeployLedgerItem>[] = [
@@ -120,8 +129,8 @@ const COLUMNS: readonly Column<DeployLedgerItem>[] = [
     sortable: true,
     sortValue: (deploy) => deploy.phase,
     cell: (deploy) => (
-      <Badge tone={deployTone(deploy.phase)}>
-        {deploy.phase.toLowerCase()}
+      <Badge tone={deployTone(deploy.phase, deploy.faulty)}>
+        {deployWord(deploy.phase, deploy.faulty)}
       </Badge>
     ),
   },
@@ -185,8 +194,8 @@ export function DeployLedger({
               <h2 className="text-title font-semibold tracking-tight">
                 {deploy.app} / {deploy.component}
               </h2>
-              <Badge tone={deployTone(deploy.phase)}>
-                {deploy.phase.toLowerCase()}
+              <Badge tone={deployTone(deploy.phase, deploy.faulty)}>
+                {deployWord(deploy.phase, deploy.faulty)}
               </Badge>
               {deploy.current ? <Badge tone="success">current</Badge> : null}
             </div>
@@ -196,7 +205,10 @@ export function DeployLedger({
             </p>
             <DefinitionGrid
               entries={[
-                { label: 'State', value: deploy.phase.toLowerCase() },
+                {
+                  label: 'State',
+                  value: deployWord(deploy.phase, deploy.faulty),
+                },
                 { label: 'Build', value: `#${deploy.buildId}`, mono: true },
                 { label: 'Target', value: deploy.target },
                 {

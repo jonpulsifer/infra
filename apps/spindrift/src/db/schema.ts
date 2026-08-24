@@ -983,6 +983,39 @@ export const deploys = pgTable('deploys', {
    * column existed, and left that way: nobody this can name asked for them.
    */
   requestedBy: text('requested_by'),
+  /**
+   * An operator asked for this Deploy to stop, and when.
+   *
+   * A request rather than a verdict: `cancelDeploy` stamps it and the attempt
+   * holding the claim is what ends the stream and writes `FAILED`, because the
+   * generator is in that process and nowhere else (`deploy-loop.ts`). Only a
+   * `PENDING` intent — nothing streaming into it — is failed by the command
+   * itself. Left set on the finished row so the screen can say who ended it.
+   */
+  cancelRequestedAt: timestamp('cancel_requested_at', { withTimezone: true }),
+  /** The principal behind {@link deploys.cancelRequestedAt}, for the sentence. */
+  cancelRequestedBy: text('cancel_requested_by'),
+  /**
+   * When the post-`LIVE` soak looked and found nothing wrong.
+   *
+   * §6 makes `LIVE` the platform's readiness verdict and forbids core
+   * reimplementing readiness — not judging what happens after it. One
+   * `observe` at least `DEPLOY_SOAK_MS` after the verdict is that judgement,
+   * and this column is what makes it happen once: null while the window is
+   * open, and the release is never re-judged after either stamp is written.
+   */
+  soakedAt: timestamp('soaked_at', { withTimezone: true }),
+  /**
+   * The soak found the platform reporting this release failed after readiness.
+   *
+   * A timestamp beside the phase and not a sixth phase value, for the reason
+   * {@link deploys.orphanedAt} is: the phase stays the platform's verdict on
+   * the rollout, and the desired pointer still names this release. What is
+   * added is a verdict *after* readiness, with `reason`, `blame`, `detail` and
+   * `debug` filled the way a red attempt fills them — the one case those four
+   * columns carry a value on a `LIVE` row.
+   */
+  faultyAt: timestamp('faulty_at', { withTimezone: true }),
 });
 
 /**

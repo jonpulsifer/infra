@@ -18,10 +18,13 @@ import {
 import { Badge, Dot } from '../ui/badge.tsx';
 import { cn } from '../ui/utils.ts';
 
-/** The tone each phase reads in. `LIVE` is the only green state there is. */
-function toneFor(phase: DeployPhase) {
+/**
+ * The tone each phase reads in. `LIVE` is the only green state there is — and
+ * a faulty release is `LIVE` that no longer earns it.
+ */
+function toneFor(phase: DeployPhase, faulty: boolean) {
+  if (faulty || phase === 'FAILED') return 'destructive' as const;
   if (phase === 'LIVE') return 'success' as const;
-  if (phase === 'FAILED') return 'destructive' as const;
   return 'warning' as const;
 }
 
@@ -36,18 +39,24 @@ function toneFor(phase: DeployPhase) {
  * each new screen has to be told about. `children` stays open for the one
  * caller with more context than a phase: the release screen separates a Build
  * that failed from a Deploy that did, and no phase alone can.
+ *
+ * `faulty` is the soak's verdict on a `LIVE` row (§6): the phase is still the
+ * platform's word for the rollout, so it stays the key, and this is the one
+ * fact beside it that changes what the pill says.
  */
 export function PhasePill({
   phase,
+  faulty = false,
   children,
 }: {
   phase: DeployPhase;
+  faulty?: boolean;
   children?: ReactNode;
 }) {
   return (
-    <Badge tone={toneFor(phase)}>
+    <Badge tone={toneFor(phase, faulty)}>
       <Dot pulse={isInFlight(phase)} />
-      {children ?? deployPhaseWord(phase)}
+      {children ?? (faulty ? 'Faulty' : deployPhaseWord(phase))}
     </Badge>
   );
 }

@@ -810,7 +810,11 @@ describe('disconnect strands rather than stops', () => {
     // said it was. What changed is that Spindrift can no longer see it.
     expect(row?.phase).toBe('LIVE');
     expect(
-      deployState({ phase: row!.phase, orphanedAt: row!.orphanedAt }),
+      deployState({
+        phase: row!.phase,
+        orphanedAt: row!.orphanedAt,
+        faultyAt: row!.faultyAt,
+      }),
     ).toBe('orphaned');
     expect((await targetRow('app-cluster'))?.status).toBe('disconnected');
 
@@ -910,7 +914,11 @@ describe('reconnect re-adopts via observe', () => {
       .where(eq(deploys.targetId, target.id));
     expect(row?.orphanedAt).toBeNull();
     expect(
-      deployState({ phase: row!.phase, orphanedAt: row!.orphanedAt }),
+      deployState({
+        phase: row!.phase,
+        orphanedAt: row!.orphanedAt,
+        faultyAt: row!.faultyAt,
+      }),
     ).toBe('live');
   });
 

@@ -365,6 +365,11 @@ export interface DeployView {
    * never mutated by a failed deploy, so on red this is the normal case.
    */
   readonly previousReleaseServing: boolean;
+  /**
+   * What core persisted when the deploy went red — or, on a `LIVE` row, when
+   * the post-readiness soak found the platform reporting it failed
+   * ({@link faultyAt}). One shape, because the screen's next move is the same.
+   */
   readonly diagnosis: Diagnosis | null;
   /**
    * What the platform stopped agreeing with, once this release was `LIVE` (§6).
@@ -375,6 +380,23 @@ export interface DeployView {
    * reach a screen. `null` is the ordinary case: converged.
    */
   readonly drift: DriftView | null;
+  /**
+   * When the soak found this `LIVE` release failed after readiness.
+   *
+   * Beside the phase rather than in it: the rollout landed and `phase` says so;
+   * this is the platform's later opinion, with {@link diagnosis} carrying why.
+   * Absent rather than nullable, the way `WorkspaceView.drift` is: every
+   * fixture builds this row literally, and a Build-only attempt has no soak.
+   */
+  readonly faultyAt?: string;
+  /**
+   * Who asked this attempt to stop, while it is still in flight.
+   *
+   * The attempt holding the claim is what ends it, so between the press and
+   * the verdict the row is in flight with a request on it — and a screen that
+   * showed the button again would invite a second press for nothing.
+   */
+  readonly cancelRequestedBy?: string;
   readonly resources: readonly ChecklistItem[];
   /** Where this release's bytes came from. Always present (§4). */
   readonly source: SourceView;
@@ -475,6 +497,14 @@ export interface DeployListItem extends CommitHeadlineView {
   readonly rollbackable: boolean;
   /** Who asked, as {@link DeployView.requestedBy} prints it. */
   readonly requestedBy?: string;
+  /**
+   * Whether the post-readiness soak found this `LIVE` release failed.
+   *
+   * A row's `phase` alone reads "live" over a release the platform has since
+   * reported broken; this is what lets a list say `faulty` beside it. Absent
+   * is not faulty, so a fixture that never heard of the soak stays honest.
+   */
+  readonly faulty?: boolean;
 }
 
 /** The lifecycle of one Build attempt, kept distinct from Deploy phases. */

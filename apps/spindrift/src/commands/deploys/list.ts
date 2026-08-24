@@ -162,6 +162,7 @@ export async function releasesOf(
         here?.desiredBuildId != null &&
         row.buildId < here.desiredBuildId &&
         row.build.artifactDigest !== null,
+      faulty: row.faultyAt !== null,
     };
   });
 

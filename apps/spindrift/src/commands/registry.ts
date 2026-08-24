@@ -93,6 +93,7 @@ import {
 import { detachDatastore, detachDatastoreInput } from './datastores/detach.ts';
 import { getDatastore, getDatastoreInput } from './datastores/get.ts';
 import { listDatastores, listDatastoresInput } from './datastores/list.ts';
+import { cancelDeploy, cancelDeployInput } from './deploys/cancel.ts';
 import { createDeploy, createDeployInput } from './deploys/create.ts';
 import { getDeployDetail, getDeployDetailInput } from './deploys/get-detail.ts';
 import { listDeploys, listDeploysInput } from './deploys/list.ts';
@@ -291,6 +292,7 @@ export const commandRegistry = {
   dispatchBuild: { input: dispatchBuildInput, handler: dispatchBuild },
   createDeploy: { input: createDeployInput, handler: createDeploy },
   rollbackDeploy: { input: rollbackDeployInput, handler: rollbackDeploy },
+  cancelDeploy: { input: cancelDeployInput, handler: cancelDeploy },
   connectRepository: {
     input: connectRepositoryInput,
     handler: connectRepository,

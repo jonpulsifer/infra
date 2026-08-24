@@ -96,6 +96,8 @@ export interface AttemptActions {
   readonly onDeployBuild?: () => void;
   /** End a queued Build nobody intends to make dispatchable (§4). */
   readonly onCancel?: () => void;
+  /** Stop a Deploy that has not landed — the attempt honours it (§6). */
+  readonly onCancelDeploy?: () => void;
   readonly busy?: 'redeploy' | 'rollback' | 'deploy' | 'cancel' | null;
 }
 
@@ -125,9 +127,11 @@ export function DeployDetail({
         Below the diagnosis, and never instead of it. The two can both be
         absent, and only drift can be present on a green release — but a red
         release that has also drifted leads with why it failed, because that is
-        the older and more actionable fact.
+        the older and more actionable fact. A faulty release is the one case
+        where the two say the same thing — the soak and the drift pass read the
+        same observation — so the amber panel yields to the red one.
       */}
-      {view.drift ? (
+      {view.drift && view.faultyAt === undefined ? (
         <DriftPanel
           drift={view.drift}
           url={view.url}
@@ -294,7 +298,9 @@ function Hero({
       <div className="flex flex-wrap items-center gap-4">
         <div className="flex flex-col gap-2">
           <div className="flex flex-wrap items-center gap-2">
-            <PhasePill phase={view.phase}>{view.phaseWord}</PhasePill>
+            <PhasePill phase={view.phase} faulty={view.faultyAt !== undefined}>
+              {view.phaseWord}
+            </PhasePill>
             {/*
               While it is moving, the number that matters is how long it has
               been moving — a screen whose only time reads "just now" for the
@@ -383,16 +389,20 @@ function stagesOf(view: DeployView): readonly ProgressStage[] {
           ? `usually about ${formatDuration(view.expectedDuration.p90Ms)}, from ${view.expectedDuration.samples} deploys`
           : view.target,
     },
-    view.urlLive
-      ? { name: 'Live', status: 'done', detail: 'serving' }
-      : view.previousReleaseServing
-        ? // Serving, just not this release. Neither green nor red: the App is
-          // up and this attempt did not put it there.
-          { name: 'Live', status: 'waiting', detail: 'previous release' }
-        : {
-            name: 'Live',
-            status: view.phase === 'FAILED' ? 'failed' : 'waiting',
-          },
+    // Faulty is the Live leg going red after it went green: the rollout landed
+    // and the platform has since reported this release failed (§6's soak).
+    view.faultyAt !== undefined
+      ? { name: 'Live', status: 'failed', detail: 'faulty' }
+      : view.urlLive
+        ? { name: 'Live', status: 'done', detail: 'serving' }
+        : view.previousReleaseServing
+          ? // Serving, just not this release. Neither green nor red: the App is
+            // up and this attempt did not put it there.
+            { name: 'Live', status: 'waiting', detail: 'previous release' }
+          : {
+              name: 'Live',
+              status: view.phase === 'FAILED' ? 'failed' : 'waiting',
+            },
   ];
 }
 
@@ -412,7 +422,14 @@ function Actions({
   view: DeployView;
   actions: AttemptActions;
 }) {
-  const { onRedeploy, onRollback, onDeployBuild, onCancel, busy } = actions;
+  const {
+    onRedeploy,
+    onRollback,
+    onDeployBuild,
+    onCancel,
+    onCancelDeploy,
+    busy,
+  } = actions;
   const buttons = [];
 
   // An artifact that exists is deployable, and the button keys on the artifact
@@ -494,6 +511,31 @@ function Actions({
       >
         <Ban aria-hidden="true" className="size-3.5" />
         {busy === 'cancel' ? 'Cancelling…' : 'Cancel build'}
+      </Button>,
+    );
+  }
+
+  // Only while the Deploy has not landed. A request already stamped stays
+  // visible as the pressed state rather than as the button again: the attempt
+  // holding the claim honours it at its next event, and a second press would
+  // ask for what is already asked.
+  if (onCancelDeploy && view.id !== null && isInFlight(view.phase)) {
+    const requested = view.cancelRequestedBy !== undefined;
+    buttons.push(
+      <Button
+        key="cancel-deploy"
+        variant="outline"
+        size="sm"
+        onClick={onCancelDeploy}
+        disabled={requested || (busy !== null && busy !== undefined)}
+        title={
+          requested
+            ? `Cancel requested by ${view.cancelRequestedBy}`
+            : undefined
+        }
+      >
+        <Ban aria-hidden="true" className="size-3.5" />
+        {requested || busy === 'cancel' ? 'Cancelling…' : 'Cancel deploy'}
       </Button>,
     );
   }
@@ -1043,7 +1085,9 @@ export function DeployScreen({
     | { type: 'success'; deploy: DeployView }
   >({ type: 'loading' });
 
-  const [busy, setBusy] = useState<'redeploy' | 'rollback' | null>(null);
+  const [busy, setBusy] = useState<'redeploy' | 'rollback' | 'cancel' | null>(
+    null,
+  );
   const [reloadToken, setReloadToken] = useState(0);
 
   useEffect(() => {
@@ -1185,6 +1229,39 @@ export function DeployScreen({
     }
   };
 
+  /**
+   * Ask the attempt to stop, then re-read rather than navigate away.
+   *
+   * The verdict is the point of the screen: a queued intent is failed on the
+   * spot, and an in-flight one comes back still moving with the request on it
+   * — the attempt log carries who asked, and the poll above carries the
+   * settle when the attempt honours it.
+   */
+  const handleCancel = async () => {
+    if (state.type !== 'success' || state.deploy.id === null) return;
+    setBusy('cancel');
+    try {
+      const result = await command('cancelDeploy', { id: state.deploy.id });
+      if (result.ok) {
+        setReloadToken((token) => token + 1);
+      } else {
+        notify({
+          tone: 'destructive',
+          title: 'Cancel refused',
+          detail: result.failure.message,
+        });
+      }
+    } catch (cause: unknown) {
+      notify({
+        tone: 'destructive',
+        title: 'Cancel failed',
+        detail: cause instanceof Error ? cause.message : 'Server failure',
+      });
+    } finally {
+      setBusy(null);
+    }
+  };
+
   if (state.type === 'loading') return <DetailSkeleton />;
 
   if (state.type === 'not-found') {
@@ -1214,6 +1291,7 @@ export function DeployScreen({
       actions={{
         onRedeploy: handleRedeploy,
         onRollback: handleRollback,
+        onCancelDeploy: () => void handleCancel(),
         busy,
       }}
       onNavigate={onNavigate}

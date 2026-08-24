@@ -7,13 +7,14 @@ import { targetRowLabel } from '../../domain/target.ts';
 import { buildViewOf, sourceViewOf } from '../builds/view.ts';
 import { principalLabels } from '../principals.ts';
 import { type Command, type CommandContext, failed, ok } from '../types.ts';
-import type {
-  ChecklistItem,
-  DeployPhase,
-  DeployView,
-  Diagnosis,
-  ExpectedDuration,
-  LogLine,
+import {
+  type ChecklistItem,
+  type DeployPhase,
+  type DeployView,
+  type Diagnosis,
+  type ExpectedDuration,
+  isInFlight,
+  type LogLine,
 } from '../views.ts';
 
 export const getDeployDetailInput = z.object({
@@ -166,8 +167,13 @@ export const getDeployDetail: Command<
       ),
   });
 
+  // A faulty release carries the same four columns a red attempt does — the
+  // soak writes them the same way — so it reads through the same panel.
   let diagnosis: Diagnosis | null = null;
-  if (deploy.phase === 'FAILED' && deploy.reason) {
+  if (
+    (deploy.phase === 'FAILED' || deploy.faultyAt !== null) &&
+    deploy.reason
+  ) {
     diagnosis = {
       reason: deploy.reason as FailureReason,
       blame: (deploy.blame ?? null) as Blame | null,
@@ -240,8 +246,12 @@ export const getDeployDetail: Command<
   // artifact was uploaded rather than built (§4) is releasing, not building,
   // and a screen that said otherwise would name a step that never ran.
   let phaseWord = build === null ? 'Releasing' : 'Building';
-  if (deploy.phase === 'LIVE') phaseWord = 'Live';
-  else if (deploy.phase === 'FAILED') {
+  // Faulty is neither word: the rollout landed and the platform has since
+  // reported it failed, and "Live" over that is the sentence the soak exists
+  // to stop the screen saying.
+  if (deploy.phase === 'LIVE') {
+    phaseWord = deploy.faultyAt === null ? 'Live' : 'Faulty';
+  } else if (deploy.phase === 'FAILED') {
     // The deploy's own verdict outranks the Build row, and the order is the
     // fix. A Deploy that recorded a reason failed *here* — it was applied, the
     // platform answered, and §6 persisted what it said. Reading the Build
@@ -257,7 +267,10 @@ export const getDeployDetail: Command<
 
   let headline = `Deployed to ${targetRowLabel(deploy.target)}`;
   if (deploy.phase === 'LIVE') {
-    headline = `Reconciled on ${targetRowLabel(deploy.target)}`;
+    headline =
+      deploy.faultyAt === null
+        ? `Reconciled on ${targetRowLabel(deploy.target)}`
+        : (deploy.detail ?? 'Failed after readiness');
   } else if (deploy.phase === 'FAILED') {
     headline = deploy.detail ?? 'Deploy failed';
   } else {
@@ -297,6 +310,14 @@ export const getDeployDetail: Command<
             observedDigest: deploy.observedDigest,
             detail: deploy.driftDetail,
           },
+    ...(deploy.faultyAt === null
+      ? {}
+      : { faultyAt: deploy.faultyAt.toISOString() }),
+    // Only while the attempt has yet to honour it: once the row settles, the
+    // detail says who cancelled it and the button has nothing left to offer.
+    ...(deploy.cancelRequestedBy === null || !isInFlight(deploy.phase)
+      ? {}
+      : { cancelRequestedBy: deploy.cancelRequestedBy }),
     resources,
     source,
     build,
