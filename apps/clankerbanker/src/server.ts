@@ -96,9 +96,7 @@ const brainGuard: MiddlewareHandler<Env> = async (c, next) =>
 // The amount is USD, becomes the exact-scheme price, capped at $10,000.
 const TIP_ANY = 'GET /tip/:name/:amount';
 const tipAmountOk = (a: string) =>
-  /^\d{1,5}(\.\d{1,4})?$/.test(a) &&
-  Number(a) >= 0.0001 &&
-  Number(a) <= 10000;
+  /^\d{1,5}(\.\d{1,4})?$/.test(a) && Number(a) >= 0.0001 && Number(a) <= 10000;
 app.get('/tip/:name/:amount?', (c, next) => {
   if (!/^[a-z0-9-]{1,24}$/.test(c.req.param('name'))) return bad(c, 'bad name');
   const amount = c.req.param('amount');
