@@ -862,15 +862,48 @@ jobs:
           # here — its functions referenced 510 files none of which were in the
           # tree.)
           #
-          # Symlinks are dereferenced (`-L`) throughout because `bundle.ts`
-          # admits regular files only: Next dedups its RSC and not-found
-          # functions with `.func` symlinks, and a filePathMap can name a
-          # symlinked dependency — either one dropped from the artifact would
-          # deploy green and 404 the routes that shared it.
+          # `bundle.ts` admits regular files only, and the Build Output tree is
+          # full of symlinks: Next dedups its RSC and segment routes with
+          # `.func` links — one app carried 117 of them at 4 real functions.
+          # Dereferencing them would ship 117 function copies, which the
+          # platform then counts as 117 functions (past the limit of its
+          # smaller plans) and the artifact carries at 30× the size. So the
+          # links are lifted out instead: each is recorded in a manifest the
+          # deploy adapter's `extractTree` reads back and recreates before the
+          # CLI runs, and the tree the platform sees is the one its builder
+          # wrote. The manifest sits under `.vercel/output/__spindrift/` and
+          # the adapter removes it before the deploy; the adapter is the only
+          # reader, and paths are relative to the deployment root.
+          #
+          # A filePathMap dependency is still dereferenced below: it is a file
+          # a function reads, and one real copy at the root is exactly what
+          # the platform resolves.
           staging="${RUNNER_TEMP}/vercel-deploy"
           rm -rf "$staging"
           mkdir -p "$staging/.vercel/output"
-          cp -RL "${output}/." "$staging/.vercel/output/"
+          cp -R "${output}/." "$staging/.vercel/output/"
+          node -e '
+            const fs = require("node:fs");
+            const path = require("node:path");
+            const root = process.argv[1];
+            const output = path.join(root, ".vercel/output");
+            const links = [];
+            const walk = (dir) => {
+              for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+                const at = path.join(dir, entry.name);
+                if (entry.isSymbolicLink()) {
+                  links.push({ path: path.relative(root, at), target: fs.readlinkSync(at) });
+                  fs.unlinkSync(at);
+                } else if (entry.isDirectory()) {
+                  walk(at);
+                }
+              }
+            };
+            walk(output);
+            if (links.length === 0) process.exit(0);
+            fs.mkdirSync(path.join(output, "__spindrift"), { recursive: true });
+            fs.writeFileSync(path.join(output, "__spindrift/func-links.json"), JSON.stringify(links));
+          ' "$staging"
 
           maps="${RUNNER_TEMP}/vercel-filepathmap.txt"
           : > "$maps"

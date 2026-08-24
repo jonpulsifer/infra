@@ -196,12 +196,14 @@ describe('the files arm of “Choose the frontend”', () => {
 /**
  * The platform builder step, run as the file actually ships it.
  *
- * The one behaviour worth pinning mechanically is the dereference. A framework
- * that serves the same function under two routes emits one bundle and symlinks
- * the other at it, and `bundle.ts` admits regular files only — so a link that
- * survives into the artifact is a route that 404s on a deployment which built,
- * signed and deployed green. Nothing about that failure points back here,
- * which is exactly why it is asserted here.
+ * The one behaviour worth pinning mechanically is what becomes of a symlink. A
+ * framework that serves the same function under two routes emits one bundle
+ * and symlinks the other at it, and `bundle.ts` admits regular files only — so
+ * a link that survives into the artifact is a route that 404s on a deployment
+ * which built, signed and deployed green, and a link copied out is a second
+ * function the platform bills and counts. The step lifts each into a manifest
+ * the deploy adapter recreates it from; nothing about either failure points
+ * back here, which is exactly why it is asserted here.
  */
 describe('“Build with the platform’s own builder”', () => {
   const STEP = "Build with the platform's own builder";
@@ -217,7 +219,7 @@ describe('“Build with the platform’s own builder”', () => {
     return step.run;
   }
 
-  test('stages the two trees and dereferences a symlinked function', async () => {
+  test('stages the two trees and lifts a symlinked function into the manifest', async () => {
     const workspace = await mkdtemp(join(tmpdir(), 'spindrift-vercel-arm-'));
     try {
       const scope = join(workspace, 'scope');
@@ -246,6 +248,8 @@ describe('“Build with the platform’s own builder”', () => {
           'printf \'{"filePathMap":{"node_modules/dep/index.js":"node_modules/dep/index.js"}}\' > "$out/functions/index.func/.vc-config.json"',
           'printf hello > "$out/static/index.html"',
           'ln -s index.func "$out/functions/index.rsc.func"',
+          'mkdir -p "$out/functions/index.segments"',
+          'ln -s ../index.func "$out/functions/index.segments/_tree.segment.rsc.func"',
           '',
         ].join('\n'),
       );
@@ -280,19 +284,49 @@ describe('“Build with the platform’s own builder”', () => {
       const links =
         await Bun.$`find ${outputs.context as string} -type l`.text();
       expect(links.trim()).toBe('');
-      // The Build Output tree is staged under `.vercel/output/`, and the
-      // symlinked function is present *and* real there: a dereference that
-      // dropped the link entirely would pass the assertion above and lose the
-      // route just the same.
+      // The Build Output tree is staged under `.vercel/output/` with the one
+      // real function in it once, and each link recorded where the deploy
+      // adapter reads it back — path from the deployment root, target exactly
+      // as the builder wrote it. A dereference would pass the assertion above
+      // and ship the function twice; a plain drop would lose the route.
       expect(
         await readFile(
           join(
             outputs.context as string,
-            '.vercel/output/functions/index.rsc.func/index.js',
+            '.vercel/output/functions/index.func/index.js',
           ),
           'utf8',
         ),
       ).toBe('launcher');
+      expect(
+        await Bun.file(
+          join(
+            outputs.context as string,
+            '.vercel/output/functions/index.rsc.func',
+          ),
+        ).exists(),
+      ).toBe(false);
+      const manifest = JSON.parse(
+        await readFile(
+          join(
+            outputs.context as string,
+            '.vercel/output/__spindrift/func-links.json',
+          ),
+          'utf8',
+        ),
+      ) as { path: string; target: string }[];
+      expect(
+        [...manifest].sort((a, b) => a.path.localeCompare(b.path)),
+      ).toEqual([
+        {
+          path: '.vercel/output/functions/index.rsc.func',
+          target: 'index.func',
+        },
+        {
+          path: '.vercel/output/functions/index.segments/_tree.segment.rsc.func',
+          target: '../index.func',
+        },
+      ]);
 
       // The mapped file is staged at the deployment root — beside
       // `.vercel/output`, never inside it, which is the path the platform

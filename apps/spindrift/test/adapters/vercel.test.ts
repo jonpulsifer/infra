@@ -18,6 +18,8 @@
  *   call is not.
  */
 import { describe, expect, test } from 'bun:test';
+import { readdir, readlink } from 'node:fs/promises';
+import { join, relative } from 'node:path';
 import type {
   DeployEvent,
   DeployTarget,
@@ -100,6 +102,27 @@ const OUTPUT_TREE = tarball([
     bytes: bytes('module.exports = {}'),
   },
 ]);
+
+/**
+ * The same tree as the build stages it for a framework that dedups routes with
+ * symlinks: the links are gone from the files and recorded in the manifest the
+ * adapter recreates them from, at their path from the deployment root.
+ */
+function linkedTree(
+  links: readonly { path: string; target: string }[],
+): Uint8Array<ArrayBuffer> {
+  return tarball([
+    { name: '.vercel/output/config.json', bytes: bytes('{"version":3}') },
+    {
+      name: '.vercel/output/functions/index.func/.vc-config.json',
+      bytes: bytes('{"runtime":"nodejs20.x"}'),
+    },
+    {
+      name: '.vercel/output/__spindrift/func-links.json',
+      bytes: bytes(JSON.stringify(links)),
+    },
+  ]);
+}
 
 function adapterFor(
   options: FakeVercelOptions = {},
@@ -218,14 +241,17 @@ describe('the platform’s own build output deploys prebuilt', () => {
    * registering the deployment the real CLI would create — which the adapter
    * then finds by its meta and polls to its verdict.
    */
-  function cliAdapter(): {
+  function cliAdapter(tree: Uint8Array<ArrayBuffer> = OUTPUT_TREE): {
     api: FakeVercel;
     adapter: VercelDeployAdapter;
     calls: PrebuiltDeployInput[];
     trees: string[][];
+    /** Every symlink in the tree the CLI was handed, as `path -> target`. */
+    links: Record<string, string>[];
   } {
     const calls: PrebuiltDeployInput[] = [];
     const trees: string[][] = [];
+    const links: Record<string, string>[] = [];
     let api!: FakeVercel;
     const deploy: PrebuiltDeploy = async (input) => {
       calls.push(input);
@@ -237,15 +263,25 @@ describe('the platform’s own build output deploys prebuilt', () => {
           )
         ).sort(),
       );
+      const found: Record<string, string> = {};
+      for (const entry of await readdir(input.directory, {
+        recursive: true,
+        withFileTypes: true,
+      })) {
+        if (!entry.isSymbolicLink()) continue;
+        const at = join(entry.parentPath, entry.name);
+        found[relative(input.directory, at)] = await readlink(at);
+      }
+      links.push(found);
       api.recordPrebuiltDeploy({ project: input.project, meta: input.meta });
       return { ok: true };
     };
     const built = adapterFor(
-      { bundle: { origin: DEPOT, bytes: OUTPUT_TREE } },
+      { bundle: { origin: DEPOT, bytes: tree } },
       deploy,
     );
     api = built.api;
-    return { ...built, calls, trees };
+    return { ...built, calls, trees, links };
   }
 
   test('the CLI deploys the staged tree, and the platform’s answer is the verdict', async () => {
@@ -270,6 +306,62 @@ describe('the platform’s own build output deploys prebuilt', () => {
     // `.vercel/output/`, and the mapped file at the root beside it.
     expect(trees[0]).toContain('.vercel/output/config.json');
     expect(trees[0]).toContain('node_modules/@scope/dep/index.js');
+  });
+
+  test('the symlinks the build lifted out are back before the CLI runs, and the manifest is not', async () => {
+    const { adapter, trees, links } = cliAdapter(
+      linkedTree([
+        { path: '.vercel/output/functions/home.func', target: 'index.func' },
+        {
+          path: '.vercel/output/functions/home.segments/_tree.segment.rsc.func',
+          target: '../index.func',
+        },
+      ]),
+    );
+    const { verdict } = await drain(adapter.apply(TARGET, buildOutput()));
+
+    expect(verdict.phase).toBe('LIVE');
+    // Recreated as links, target verbatim: the platform counts a linked
+    // function as the one it points at, which is the whole reason they were
+    // not copied out at build time.
+    expect(links[0]).toEqual({
+      '.vercel/output/functions/home.func': 'index.func',
+      '.vercel/output/functions/home.segments/_tree.segment.rsc.func':
+        '../index.func',
+    });
+    expect(trees[0]).not.toContain(
+      '.vercel/output/__spindrift/func-links.json',
+    );
+  });
+
+  test('a link out of the deployment is refused as the build’s defect', async () => {
+    const { adapter, calls } = cliAdapter(
+      linkedTree([
+        { path: '.vercel/output/functions/home.func', target: '../../../..' },
+      ]),
+    );
+    const { verdict } = await drain(adapter.apply(TARGET, buildOutput()));
+
+    expect(verdict.phase).toBe('FAILED');
+    expect(verdict.phase === 'FAILED' && verdict.reason).toBe('BUILD_FAILED');
+    expect(calls).toHaveLength(0);
+  });
+
+  test('a chain of links that only escapes once it is followed is refused too', async () => {
+    // Each entry reads as inside on its own: `a` points at the root, so `a/c`
+    // is really `c` at the root, and its target `../secret` is a sibling of
+    // the whole deployment.
+    const { adapter, calls } = cliAdapter(
+      linkedTree([
+        { path: '.vercel/output/a', target: '..' },
+        { path: '.vercel/output/a/c', target: '../secret' },
+      ]),
+    );
+    const { verdict } = await drain(adapter.apply(TARGET, buildOutput()));
+
+    expect(verdict.phase).toBe('FAILED');
+    expect(verdict.phase === 'FAILED' && verdict.reason).toBe('BUILD_FAILED');
+    expect(calls).toHaveLength(0);
   });
 
   test('a plain files artifact is still deployed the way it always was', async () => {
