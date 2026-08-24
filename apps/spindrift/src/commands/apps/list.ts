@@ -123,7 +123,11 @@ export const listApps: Command<
       target:
         target?.adapter ??
         (placed == null ? 'none' : `${placed.adapter} (awaiting first deploy)`),
-      url: deploy?.url ?? app.vanityDomain ?? '',
+      // The address the Deploy published, and nothing else. `vanityDomain`
+      // is a *label* — `@` or `www` — never a hostname, so falling back to
+      // it printed `@` in a column of URLs and linked to `https://@`. An App
+      // that has not deployed has no address, and the row says so.
+      url: deploy?.url ?? '',
       urlLive: deploy?.phase === 'LIVE',
       componentCount: app.components.length,
       failing: ranked.filter((row) => row.phase === 'FAILED').length,

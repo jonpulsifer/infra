@@ -724,6 +724,93 @@ describe('§9: dns publishing on a platform-named Target (ticket 137b)', () => {
   });
 });
 
+describe('§9: a LIVE row states the name a developer shares', () => {
+  // §9's vanity is "the name a developer shares"; the canonical is what always
+  // resolves underneath it. The row every screen reads — the App list, the
+  // workspace headline, a Deploy's own page — has room for one of them, and it
+  // used to be the canonical on every App that had both: `shop-web.<zone>`
+  // where the developer had asked for `shop.<zone>`, and the platform's own
+  // `<project>.pages.dev` where they had asked for the bare domain.
+  const address = {
+    recordType: 'CNAME',
+    target: 'shop-web.a.run.app',
+    proxied: true,
+  } as const;
+  const platformNamed = () =>
+    pendingDeploy({ adapter: 'cloudrun', reach: 'public', auth: 'none' });
+
+  async function named(appId: string, label: string) {
+    await database()
+      .db.update(apps)
+      .set({ vanityDomain: label })
+      .where(eq(apps.id, appId));
+  }
+
+  test('a cluster Target’s row is the vanity, not the canonical it also minted', async () => {
+    // Both names resolve here — the chart is handed both (`values.ts`) — so
+    // this is only ever a question of which one to say.
+    const { app, deploy } = await pendingDeploy();
+    await named(app.id, 'shop');
+
+    await runDeployPass(context(new FakeDeployAdapter()));
+
+    expect((await deployRow(deploy.id))?.url).toBe(
+      `https://shop.${zoneFor('private', manifest.dns.zones)}`,
+    );
+  });
+
+  test('an apex reads as the bare zone, not as the platform’s own name', async () => {
+    const { app, deploy } = await platformNamed();
+    await named(app.id, APEX);
+
+    const adapter = new FakeDeployAdapter({
+      adapter: 'cloudrun',
+      script: [
+        {
+          verdict: {
+            phase: 'LIVE',
+            ref: 'run/shop-web',
+            url: 'https://shop-web.a.run.app',
+            address,
+          },
+        },
+      ],
+    });
+    await runDeployPass(context(adapter, {}, new FakeDnsPublisher()));
+
+    expect((await deployRow(deploy.id))?.url).toBe(
+      `https://${zoneFor('public', manifest.dns.zones)}`,
+    );
+  });
+
+  test('a Target that reports no address keeps the platform’s own name', async () => {
+    // §6's contract: a platform that hands back no address is one nothing can
+    // point a record at, and `publishVanityRecord` says to do it by hand. The
+    // vanity names nothing until someone does, and a row that printed it would
+    // be the scan of what is up asserting an address that does not answer.
+    const { app, deploy } = await platformNamed();
+    await named(app.id, 'shop');
+
+    const adapter = new FakeDeployAdapter({
+      adapter: 'cloudrun',
+      script: [
+        {
+          verdict: {
+            phase: 'LIVE',
+            ref: 'run/shop-web',
+            url: 'https://shop-web.a.run.app',
+          },
+        },
+      ],
+    });
+    await runDeployPass(context(adapter, {}, new FakeDnsPublisher()));
+
+    expect((await deployRow(deploy.id))?.url).toBe(
+      'https://shop-web.a.run.app',
+    );
+  });
+});
+
 describe('§9: reach and auth never mutate on red', () => {
   test('a failed attempt leaves the Component and the Deploy as they were', async () => {
     const { deploy, component } = await pendingDeploy({

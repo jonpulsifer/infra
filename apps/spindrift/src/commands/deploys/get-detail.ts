@@ -218,7 +218,10 @@ export const getDeployDetail: Command<
     phase: deploy.phase as DeployPhase,
     phaseWord,
     headline,
-    url: deploy.url ?? deploy.component.app.vanityDomain ?? '',
+    // Only what this Deploy published. The App's `vanityDomain` is the label
+    // it names — `@` for the zone itself — not an address, and a Deploy that
+    // has not landed has none.
+    url: deploy.url ?? '',
     urlLive: deploy.phase === 'LIVE',
     previousReleaseServing,
     diagnosis,
