@@ -36,7 +36,19 @@ describe('reading a repository', () => {
     const { app: github } = await app(fake);
     await expect(
       github.repository({ installationId: fake.installationId }, fake.fullName),
-    ).resolves.toEqual({ defaultBranch: 'trunk' });
+    ).resolves.toEqual({ defaultBranch: 'trunk', fullName: fake.fullName });
+  });
+
+  test('reports the name the host uses now, not the one it was asked by', async () => {
+    const fake = new FakeGitHub();
+    const { app: github } = await app(fake);
+    fake.rename('example/renamed');
+
+    // The old name still answers — the host redirects it — and the body is
+    // the only place the rename shows, which is why the name is returned.
+    await expect(
+      github.repository({ installationId: fake.installationId }, 'example/app'),
+    ).resolves.toEqual({ defaultBranch: 'main', fullName: 'example/renamed' });
   });
 
   test('returns null for a file that is not there, and only for that', async () => {
@@ -345,5 +357,54 @@ describe('which installations this App operates for', () => {
         request.path.startsWith('/installation/repositories'),
       ),
     ).toBe(false);
+  });
+});
+
+describe('what one exact commit says beyond its sha', () => {
+  test('the message, the login and the authored instant come back with the archive', async () => {
+    const fake = new FakeGitHub();
+    const commit = fake.commitFiles(
+      'main',
+      { 'README.md': 'hello' },
+      {
+        message: 'fix(web): stop the header wrapping\n\nBody text.',
+        authorLogin: 'octocat',
+        authoredAt: '2026-08-20T10:15:00Z',
+      },
+    );
+    const { app: github } = await app(fake);
+
+    const fetched = await github.fetchExactCommit({
+      repository: fake.fullName,
+      commit,
+      credential: { installationId: fake.installationId },
+    });
+
+    // The whole message: reducing it to a headline is core's call, not the
+    // integration's, so a second host reports the same thing.
+    expect(fetched.message).toBe(
+      'fix(web): stop the header wrapping\n\nBody text.',
+    );
+    expect(fetched.author).toBe('octocat');
+    expect(fetched.authoredAt).toEqual(new Date('2026-08-20T10:15:00Z'));
+    // Still one archive: the metadata rides on the resolve call.
+    expect(fake.tarballs).toEqual([commit]);
+  });
+
+  test('an author the host matched to no user is named from the commit itself', async () => {
+    const fake = new FakeGitHub();
+    const commit = fake.commitFiles(
+      'main',
+      { 'README.md': 'hello' },
+      { authorLogin: null, authorName: 'Ada Lovelace' },
+    );
+    const { app: github } = await app(fake);
+
+    const fetched = await github.fetchExactCommit({
+      repository: fake.fullName,
+      commit,
+      credential: { installationId: fake.installationId },
+    });
+    expect(fetched.author).toBe('Ada Lovelace');
   });
 });

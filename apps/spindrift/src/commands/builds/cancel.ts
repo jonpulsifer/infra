@@ -1,5 +1,6 @@
 /**
- * `cancelBuild` — end a Build that is waiting for something that is not coming.
+ * `cancelBuild` — end a Build that is waiting for something that is not coming,
+ * or stop one that is running.
  *
  * The dispatch loop's `waits` arm is deliberately unbounded: a Build refused
  * over a missing route or an unconfigured federation is one an operator can
@@ -19,14 +20,26 @@
  * a cancellation indicts neither. What it carries instead is who did it, on
  * the attempt log where the wait's own sentences are.
  *
- * **A running attempt is not cancellable, and that is not this command's
- * choice.** §4 makes the route's own terminal write what ends an attempt, so
- * nothing here can stop a generator mid-stream — the same fact `deployApp`
- * refuses a rebuild over. What *is* cancellable is a row whose lease has
- * expired: nothing is streaming into it and nothing is coming back for it,
- * which is the same condition that makes it reclaimable. The `WHERE` is the
- * check, not a branch above it, for `deployApp`'s reason: a claim landing
- * between the read and the write would pass an in-memory guard.
+ * **A running attempt is stopped, never settled, from here.** §4 makes the
+ * route's own terminal write what ends an attempt, and that stays true: this
+ * command reaches the route's far side — the Job, the cloud build, the run —
+ * through what the row kept about it, and the generator polling that far side
+ * is what reports `FAILED` through the fenced write. Writing the verdict here
+ * would race it: the attempt's own write would land on `lostClaim` and say a
+ * replica took the row, which nothing did. The row therefore stays `RUNNING`
+ * under its live lease until the route reports, which is a poll interval
+ * away; the log line saying who cancelled it lands now. Matters here because
+ * a runaway build lands on a cluster with one control-plane node, and the
+ * alternative was a 45-minute wait for the budget.
+ *
+ * What *is* settled here is a row no process is renewing: a `PENDING` one, or
+ * a `RUNNING` one whose lease has expired — the same condition that makes it
+ * reclaimable. A live attempt renews its lease on a timer
+ * (`DISPATCH_LEASE_REFRESH_MS`), so an expired one is a replica that died
+ * mid-build — and its far side may well outlive it, a Job on a cluster does,
+ * so the route is told anyway, best effort, after the row is settled. The
+ * `WHERE` is the check, not a branch above it, for `deployApp`'s reason: a
+ * claim landing between the read and the write would pass an in-memory guard.
  *
  * Cancelling strands nothing. `deployApp` treats a `FAILED` newest Build as a
  * reason to stage a fresh one, so the act after a cancel is Deploy, and the
@@ -37,7 +50,7 @@ import { and, eq, isNull, lt, or } from 'drizzle-orm';
 import { z } from 'zod';
 import { builds } from '../../db/schema.ts';
 import { recordBuildEvent } from '../../domain/attempt-log.ts';
-import { type Command, failed, ok } from '../types.ts';
+import { type Command, type CommandResult, failed, ok } from '../types.ts';
 import { DISPATCH_LEASE_TIMEOUT_MS } from './dispatch.ts';
 
 export const cancelBuildInput = z
@@ -50,8 +63,12 @@ export type CancelBuildInput = z.infer<typeof cancelBuildInput>;
 
 export interface CancelBuildResult {
   readonly buildId: number;
-  /** What the row says now, for a caller that renders the ledger's word. */
-  readonly status: 'FAILED';
+  /**
+   * What the row says now, for a caller that renders the ledger's word.
+   * `RUNNING` is a far side that was told to stop and whose route has not yet
+   * reported what became of it.
+   */
+  readonly status: 'FAILED' | 'RUNNING';
 }
 
 export const cancelBuild: Command<CancelBuildInput, CancelBuildResult> = async (
@@ -70,13 +87,20 @@ export const cancelBuild: Command<CancelBuildInput, CancelBuildResult> = async (
   }
 
   if (build.status === 'SUCCEEDED' || build.status === 'FAILED') {
-    return failed(
-      'NOT_BUILDABLE',
-      `Build ${build.id} has already ${
-        build.status === 'SUCCEEDED' ? 'succeeded' : 'failed'
-      }, so there is nothing to cancel`,
-    );
+    return alreadyEnded(build.id, build.status);
   }
+
+  const attempt = {
+    appId: build.component.appId,
+    componentId: build.componentId,
+    buildId: build.id,
+  };
+  const route =
+    build.runner === null ? null : context.adapters.build(build.runner);
+  const handle =
+    build.dispatchId === null
+      ? null
+      : { dispatchId: build.dispatchId, runUrl: build.runUrl ?? null };
 
   const now = context.clock.now();
   const leaseCutoff = new Date(now.getTime() - DISPATCH_LEASE_TIMEOUT_MS);
@@ -108,29 +132,79 @@ export const cancelBuild: Command<CancelBuildInput, CancelBuildResult> = async (
     )
     .returning({ id: builds.id });
 
-  if (cancelled.length === 0) {
+  if (cancelled.length > 0) {
+    // A row that was RUNNING had a far side, and whether it is still going is
+    // not knowable from here — so it is told either way, after the fenced
+    // write: the row is settled whether or not the route answers, and the
+    // abandoned attempt's own reply now matches no row.
+    if (route !== null && handle !== null) {
+      await route.cancel(handle).catch(() => {});
+    }
+    await recordBuildEvent(context.db, attempt, {
+      type: 'log',
+      line: `cancelled by ${context.principal.displayName}`,
+      resource: 'dispatch',
+    });
+    await recordBuildEvent(context.db, attempt, {
+      type: 'status',
+      phase: 'FAILED',
+    });
+    return ok({ buildId: build.id, status: 'FAILED' as const });
+  }
+
+  // A live lease: something is streaming into this row and will settle it.
+  // Stop what it is streaming from, and leave the settling to it.
+  if (route === null || handle === null) {
     return failed(
       'NOT_BUILDABLE',
-      `Build ${build.id} is running: the route that is running it writes the ` +
-        'verdict, so there is nothing here that can stop it — wait for it to ' +
-        'finish, or for its lease to expire',
+      `Build ${build.id} is running on ${build.runner ?? 'a route'} this ` +
+        'installation no longer configures, so nothing here can reach it — ' +
+        'wait for it to finish, or for its lease to expire',
+    );
+  }
+  try {
+    await route.cancel(handle);
+  } catch (cause) {
+    const detail = cause instanceof Error ? cause.message : String(cause);
+    return failed(
+      'NOT_BUILDABLE',
+      `Build ${build.id} is running on ${build.runner}, which could not stop it: ${detail}`,
     );
   }
 
-  const attempt = {
-    appId: build.component.appId,
-    componentId: build.componentId,
-    buildId: build.id,
-  };
+  // The row again, because a far side that finished on its own between the
+  // read above and the cancel is not an error to the route — a build already
+  // over is left alone — and the verdict it landed is the route's. A line
+  // saying it was cancelled would sit under that verdict and contradict it.
+  const [current] = await context.db
+    .select({ status: builds.status })
+    .from(builds)
+    .where(eq(builds.id, build.id));
+  if (current?.status === 'SUCCEEDED' || current?.status === 'FAILED') {
+    return alreadyEnded(build.id, current.status);
+  }
+
+  // "Requested" and not "cancelled": what was stopped is the route's to say.
+  // A far side not yet created when this landed — the claim is seconds ahead
+  // of the Job or the outbox row — runs to its own verdict, and the log then
+  // reads as a request followed by what became of it, which is what happened.
   await recordBuildEvent(context.db, attempt, {
     type: 'log',
-    line: `cancelled by ${context.principal.displayName}`,
+    line: `cancel requested by ${context.principal.displayName}; ${build.runner} reports the verdict`,
     resource: 'dispatch',
   });
-  await recordBuildEvent(context.db, attempt, {
-    type: 'status',
-    phase: 'FAILED',
-  });
 
-  return ok({ buildId: build.id, status: 'FAILED' as const });
+  return ok({ buildId: build.id, status: 'RUNNING' as const });
 };
+
+function alreadyEnded(
+  buildId: number,
+  status: 'SUCCEEDED' | 'FAILED',
+): CommandResult<CancelBuildResult> {
+  return failed(
+    'NOT_BUILDABLE',
+    `Build ${buildId} has already ${
+      status === 'SUCCEEDED' ? 'succeeded' : 'failed'
+    }, so there is nothing to cancel`,
+  );
+}

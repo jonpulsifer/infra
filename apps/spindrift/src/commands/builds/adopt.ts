@@ -130,6 +130,9 @@ export const adoptBuild: Command<AdoptBuildInput, AdoptBuildResult> = async (
       // the input this artifact came out of — rewriting it here would make the
       // adopter's ledger row unjoinable to the source it actually ran.
       commit: source.commit,
+      commitMessage: source.commitMessage,
+      commitAuthor: source.commitAuthor,
+      commitAuthoredAt: source.commitAuthoredAt,
       targetShape: source.targetShape,
       artifactType: source.artifactType,
       artifactDigest,

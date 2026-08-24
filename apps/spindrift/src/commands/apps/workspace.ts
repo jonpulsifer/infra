@@ -21,9 +21,11 @@ import {
 import type { VesselLocation } from '../../domain/vessel.ts';
 import { buildRouteFor } from '../builds/route.ts';
 import { configuredKeys } from '../config/set.ts';
+import { principalLabels } from '../principals.ts';
 import { type Command, type CommandContext, failed, ok } from '../types.ts';
 import type {
   ActivityEntry,
+  AppLockView,
   BuildRouteOptionView,
   ComponentView,
   DatastoreView,
@@ -32,6 +34,7 @@ import type {
   DriftView,
   PrerequisiteRowView,
   Runtime,
+  WorkspaceSourceView,
   WorkspaceView,
 } from '../views.ts';
 import { namesUnder, placementsFor } from './names.ts';
@@ -291,11 +294,12 @@ export const getAppWorkspace: Command<
   } else if (latestDeploy) {
     activity.push({
       kind: 'deploy',
-      title: `Deploy ${latestDeploy.id} ${latestDeploy.phase.toLowerCase()}`,
+      title: `Deploy ${latestDeploy.id} ${latestDeploy.faultyAt ? 'faulty' : latestDeploy.phase.toLowerCase()}`,
       detail: latestDeploy.detail ?? `Target: ${targetRowLabel(latestTarget)}`,
       when: elapsedSince(latestDeploy.createdAt, now),
-      status:
-        latestDeploy.phase === 'LIVE'
+      status: latestDeploy.faultyAt
+        ? 'failed'
+        : latestDeploy.phase === 'LIVE'
           ? 'ok'
           : latestDeploy.phase === 'FAILED'
             ? 'failed'
@@ -398,8 +402,12 @@ export const getAppWorkspace: Command<
     live" over a release the cluster had been refusing for two days. The panels
     that render them were already written and already take exactly these shapes.
   */
+  // A faulty release is the soak's verdict after LIVE (§6): it fills the same
+  // four columns a red attempt does, so the same panel explains it.
   const diagnosis: Diagnosis | null =
-    latestDeploy?.phase === 'FAILED' && latestDeploy.reason
+    latestDeploy &&
+    (latestDeploy.phase === 'FAILED' || latestDeploy.faultyAt !== null) &&
+    latestDeploy.reason
       ? {
           reason: latestDeploy.reason as FailureReason,
           blame: (latestDeploy.blame ?? null) as Blame | null,
@@ -476,6 +484,51 @@ export const getAppWorkspace: Command<
         )
       : [];
 
+  // The hold, with its author named the way the ledger names one.
+  const lock: AppLockView | null =
+    app.lockReason === null || app.lockedAt === null
+      ? null
+      : {
+          reason: app.lockReason,
+          by:
+            (await principalLabels(context.db, [app.lockedBy]))(app.lockedBy) ??
+            'unknown',
+          since: elapsedSince(app.lockedAt, now),
+          at: app.lockedAt.toISOString(),
+        };
+
+  /*
+    Pushed but not live. `repositories.authoritativeCommit` is what §15 adopted
+    and the serving Build's commit is what the hero already prints; this is
+    the join. A rerun's `#<millis>` suffix is a uniqueness device on the Build
+    key, never part of the commit (`deployApp`), so it is stripped before any
+    two are compared. `dispatched` is evidence rather than a flag: the newest
+    Build is of the adopted commit and has not failed, so a Deploy of it is on
+    its way or already there.
+  */
+  const commitOf = (ref: string | undefined) => ref?.split('#')[0] ?? null;
+  const servingCommit = commitOf(latestDeploy?.build.commit);
+  const newestBuild = selected?.builds[0];
+  const source: WorkspaceSourceView | null =
+    app.repository === null
+      ? null
+      : {
+          branch: app.repository.defaultBranch,
+          pending:
+            app.repository.authoritativeCommit !== null &&
+            servingCommit !== null &&
+            app.repository.authoritativeCommit !== servingCommit
+              ? {
+                  commit: app.repository.authoritativeCommit,
+                  dispatched:
+                    newestBuild !== undefined &&
+                    newestBuild.status !== 'FAILED' &&
+                    commitOf(newestBuild.commit) ===
+                      app.repository.authoritativeCommit,
+                }
+              : null,
+        };
+
   const workspace: WorkspaceView = {
     app: app.name,
     appId: app.id,
@@ -493,8 +546,13 @@ export const getAppWorkspace: Command<
     url,
     // An address that is serving, which is not the same as a release that is
     // live: a placed job is LIVE with nothing to open, and this is the fact the
-    // screen's link and its headline hang off.
-    urlLive: url !== '' && latestDeploy?.phase === 'LIVE',
+    // screen's link and its headline hang off. A faulty release is LIVE too,
+    // and what the soak found is that nothing behind the address answers.
+    urlLive:
+      url !== '' &&
+      latestDeploy?.phase === 'LIVE' &&
+      latestDeploy.faultyAt === null,
+    faulty: latestDeploy?.faultyAt != null,
     release: latestDeploy
       ? `Deploy ${latestDeploy.id}`
       : selected?.builds[0]
@@ -545,12 +603,15 @@ export const getAppWorkspace: Command<
       ? {}
       : {
           commit: latestDeploy.build.commit,
+          commitMessage: latestDeploy.build.commitMessage,
           when: elapsedSince(latestDeploy.createdAt, now),
           at: latestDeploy.createdAt.toISOString(),
         }),
     ...(diagnosis === null ? {} : { diagnosis }),
     ...(drift === null ? {} : { drift }),
     ...(unmetPrerequisites.length === 0 ? {} : { unmetPrerequisites }),
+    ...(lock === null ? {} : { lock }),
+    ...(source === null ? {} : { source }),
   };
 
   return ok({ workspace });

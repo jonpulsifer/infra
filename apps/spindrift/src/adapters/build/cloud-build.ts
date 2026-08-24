@@ -48,6 +48,7 @@ import {
 import type {
   BuildAdapter,
   BuildEvent,
+  BuildHandle,
   BuildLevel,
   BuildResult,
   BuildSource,
@@ -220,6 +221,7 @@ export class CloudBuildRoute implements BuildAdapter {
   async *build(
     source: BuildSource,
     spec: BuildSpec,
+    dispatchId?: string,
   ): AsyncGenerator<BuildEvent, BuildResult, void> {
     const now = this.options.now ?? (() => new Date());
     const logs = { backend: this.name, fidelity: this.logFidelity } as const;
@@ -243,7 +245,7 @@ export class CloudBuildRoute implements BuildAdapter {
 
     let build: CloudBuild;
     try {
-      build = await this.submit(program, spec);
+      build = await this.submit(program, spec, dispatchId);
     } catch (error) {
       // §4 story 48: the failure before the build step has to be readable as
       // text, not as an empty log and a spinner.
@@ -274,6 +276,15 @@ export class CloudBuildRoute implements BuildAdapter {
       if (TERMINAL.has(status)) break;
 
       if (budget.expired()) {
+        // Best-effort, like bosun's: the Build is failing either way, and a
+        // cancel that did not land leaves a worker the service's own timeout
+        // reclaims rather than a verdict anything reads.
+        yield {
+          type: 'log',
+          at: now(),
+          line: `build ${build.id} did not finish within the build budget; cancelling it`,
+        };
+        await this.cancelBuild(build.id).catch(() => {});
         return buildFailed(
           logs,
           'TIMEOUT',
@@ -308,10 +319,12 @@ export class CloudBuildRoute implements BuildAdapter {
 
     if (status !== 'SUCCESS') {
       // The service's own `TIMEOUT` is core's `TIMEOUT` — a build that ran out
-      // of its own budget indicts nobody either (§6's dash).
+      // of its own budget indicts nobody either (§6's dash). Nor does one
+      // that was cancelled: by this route's own budget, or by an operator
+      // through `cancel`, and the attempt log already says which.
       return buildFailed(
         logs,
-        status === 'TIMEOUT' || status === 'EXPIRED'
+        status === 'TIMEOUT' || status === 'EXPIRED' || status === 'CANCELLED'
           ? 'TIMEOUT'
           : 'BUILD_FAILED',
         statusDetail ?? `build ${build.id} ended ${status}`,
@@ -344,12 +357,44 @@ export class CloudBuildRoute implements BuildAdapter {
     });
   }
 
+  /**
+   * Cancel every build still going under the dispatch id's tag.
+   *
+   * The service assigns build ids, so the one thing this route can stamp on a
+   * build at submit is a tag — and a tag is what the list endpoint filters on.
+   * Every build under it rather than the first: a dispatch id is one attempt
+   * and one submit, so there is one, and cancelling by the set costs nothing
+   * if that ever stops being true.
+   */
+  async cancel(handle: BuildHandle): Promise<void> {
+    const filter = encodeURIComponent(`tags="${tagFor(handle.dispatchId)}"`);
+    const listed = await this.json<{ builds?: CloudBuild[] }>(
+      `${this.options.endpoint}/v1/${this.parent}/builds?filter=${filter}`,
+      { method: 'GET' },
+    );
+    for (const build of listed?.builds ?? []) {
+      if (TERMINAL.has(build.status ?? '')) continue;
+      await this.cancelBuild(build.id);
+    }
+  }
+
   /** `projects/<p>/locations/<r>` — the parent every call hangs off. */
   private get parent(): string {
     return `projects/${this.options.project}/locations/${this.options.region}`;
   }
 
-  private async submit(program: string, spec: BuildSpec): Promise<CloudBuild> {
+  private cancelBuild(id: string): Promise<unknown> {
+    return this.json(
+      `${this.options.endpoint}/v1/${this.parent}/builds/${encodeURIComponent(id)}:cancel`,
+      { method: 'POST', body: {} },
+    );
+  }
+
+  private async submit(
+    program: string,
+    spec: BuildSpec,
+    dispatchId?: string,
+  ): Promise<CloudBuild> {
     const attest = attestStep(spec.destinations, this.options);
     const dockerConfig = dockerConfigFor(spec.registryAuth);
     // On the step's environment for the same reason the Docker config is —
@@ -393,6 +438,8 @@ export class CloudBuildRoute implements BuildAdapter {
         // Read, never pushed: the build writes to the log service and this
         // route polls it. Nothing is posted back to Spindrift (§4).
         options: { logging: 'CLOUD_LOGGING_ONLY' },
+        // What `cancel` finds the build by, from the Build row alone.
+        ...(dispatchId === undefined ? {} : { tags: [tagFor(dispatchId)] }),
       },
     });
     const build = operation?.metadata?.build;
@@ -515,6 +562,15 @@ export class CloudBuildRoute implements BuildAdapter {
     }
     return (await response.json()) as Result;
   }
+}
+
+/**
+ * The tag a build carries for its dispatch id. A dispatch id is a UUID and a
+ * tag is `[\w][\w.-]{0,127}`, so the prefix is for a person reading the
+ * console, not for validity.
+ */
+function tagFor(dispatchId: string): string {
+  return `spindrift-${dispatchId}`;
 }
 
 /** One step of a submitted build, as much of it as this route composes. */

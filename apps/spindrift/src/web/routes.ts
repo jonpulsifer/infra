@@ -8,7 +8,7 @@
  * to be inline in `server.ts` next to a top-level `Bun.serve` no test can
  * import. So the table moved here and the entries call it.
  *
- * Eleven kinds of route exist, and three of the eleven are generated:
+ * Twelve kinds of route exist, and three of the twelve are generated:
  *
  * 1. **Commands**, from the registry (`dispatch.ts`).
  * 2. **The client**, from whatever built it — `bundle.ts` reading a directory in
@@ -38,6 +38,10 @@
  *     path — §9's page for an App address that nothing is serving yet. It is
  *     last here as well as least specific, so the file reads in the order
  *     `Bun.serve` matches in.
+ * 12. **The plain-text attempt log** (`streams.ts`), the attempt stream's rows
+ *     as one `text/plain` document. Session-authenticated exactly as the
+ *     upgrade beside it is, and a GET rather than a command because what it
+ *     answers is a file a browser opens, not JSON a screen reads (§21).
  *
  * A further hand-authored route is a decision somebody has to make on purpose,
  * in this file, against a test that names it.
@@ -55,7 +59,7 @@ import {
   githubSetupRoutes,
 } from './github-setup-route.ts';
 import { type StatusRouteDeps, statusRoutes } from './status-route.ts';
-import { streamRoutes } from './streams.ts';
+import { attemptLogTextRoutes, streamRoutes } from './streams.ts';
 import { uploadRoutes } from './upload.ts';
 import { type WebhookRouteDeps, webhookRoutes } from './webhook-route.ts';
 
@@ -128,6 +132,7 @@ export function webRoutes<Client extends Record<string, ClientRoute>>(
     ...authRoutes(auth),
     ...commandRoutes(deps),
     ...streamRoutes(deps),
+    ...attemptLogTextRoutes(deps),
     ...uploadRoutes(deps),
     ...webhookRoutes(webhook),
     ...bosunRoutes(bosun),

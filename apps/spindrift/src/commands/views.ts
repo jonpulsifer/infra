@@ -253,15 +253,29 @@ export interface BuildView {
  * bytes that were staged are the bytes under that path, and a reader comparing
  * two releases of a monorepo needs it as much as the commit.
  */
+/**
+ * What the Build kept of its commit beyond the sha (§15's one fetch, kept on
+ * the row): the headline, the author's login or name, and the authored
+ * instant as ISO text. Every row that shows a commit carries these so the
+ * screen can put words beside the hash. Absent or null for an archive, and for
+ * a Build staged before the columns existed — a bare sha is still the honest
+ * row there.
+ */
+export interface CommitHeadlineView {
+  readonly commitMessage?: string | null;
+  readonly commitAuthor?: string | null;
+  readonly commitAuthoredAt?: string | null;
+}
+
 export type SourceView =
-  | {
+  | ({
       readonly kind: 'repo';
       /** The repository, as the App names it. */
       readonly repo: string;
       /** The exact commit staged (§15). */
       readonly commit: string;
       readonly subpath: string;
-    }
+    } & CommitHeadlineView)
   | {
       readonly kind: 'archive';
       /** §16's join: the digest over the staged bundle, on both arms. */
@@ -351,6 +365,11 @@ export interface DeployView {
    * never mutated by a failed deploy, so on red this is the normal case.
    */
   readonly previousReleaseServing: boolean;
+  /**
+   * What core persisted when the deploy went red — or, on a `LIVE` row, when
+   * the post-readiness soak found the platform reporting it failed
+   * ({@link faultyAt}). One shape, because the screen's next move is the same.
+   */
   readonly diagnosis: Diagnosis | null;
   /**
    * What the platform stopped agreeing with, once this release was `LIVE` (§6).
@@ -361,6 +380,23 @@ export interface DeployView {
    * reach a screen. `null` is the ordinary case: converged.
    */
   readonly drift: DriftView | null;
+  /**
+   * When the soak found this `LIVE` release failed after readiness.
+   *
+   * Beside the phase rather than in it: the rollout landed and `phase` says so;
+   * this is the platform's later opinion, with {@link diagnosis} carrying why.
+   * Absent rather than nullable, the way `WorkspaceView.drift` is: every
+   * fixture builds this row literally, and a Build-only attempt has no soak.
+   */
+  readonly faultyAt?: string;
+  /**
+   * Who asked this attempt to stop, while it is still in flight.
+   *
+   * The attempt holding the claim is what ends it, so between the press and
+   * the verdict the row is in flight with a request on it — and a screen that
+   * showed the button again would invite a second press for nothing.
+   */
+  readonly cancelRequestedBy?: string;
   readonly resources: readonly ChecklistItem[];
   /** Where this release's bytes came from. Always present (§4). */
   readonly source: SourceView;
@@ -402,6 +438,29 @@ export interface DeployView {
    * only where the act would be accepted.
    */
   readonly rollbackable: boolean;
+  /**
+   * How long a release here usually takes, from the ones before it.
+   *
+   * The p90 of created-to-LIVE over the last hundred releases of this
+   * Component@Target that reached LIVE, computed at read time from the attempt
+   * log and never stored. Absent under three samples — a percentile of two
+   * numbers is a guess wearing a number — and absent on a Build with no
+   * release, which has no history to read.
+   */
+  readonly expectedDuration?: ExpectedDuration;
+  /**
+   * Who asked for this Deploy, as a screen prints it — a user's name, or
+   * "auto-deploy on push". Absent where nothing recorded it: a Build-only
+   * attempt, or a Deploy written before the column existed.
+   */
+  readonly requestedBy?: string;
+}
+
+/** What {@link DeployView.expectedDuration} carries: the estimate and its evidence. */
+export interface ExpectedDuration {
+  readonly p90Ms: number;
+  /** How many prior releases voted, so the sentence can say how sure it is. */
+  readonly samples: number;
 }
 
 /**
@@ -412,7 +471,7 @@ export interface DeployView {
  * ordinary deploy naming an older Build, and choosing which older Build means
  * reading the releases that named them.
  */
-export interface DeployListItem {
+export interface DeployListItem extends CommitHeadlineView {
   readonly id: number;
   readonly buildId: number;
   readonly componentId: string;
@@ -436,13 +495,23 @@ export interface DeployListItem {
    * rather than offering it everywhere and refusing half the presses.
    */
   readonly rollbackable: boolean;
+  /** Who asked, as {@link DeployView.requestedBy} prints it. */
+  readonly requestedBy?: string;
+  /**
+   * Whether the post-readiness soak found this `LIVE` release failed.
+   *
+   * A row's `phase` alone reads "live" over a release the platform has since
+   * reported broken; this is what lets a list say `faulty` beside it. Absent
+   * is not faulty, so a fixture that never heard of the soak stays honest.
+   */
+  readonly faulty?: boolean;
 }
 
 /** The lifecycle of one Build attempt, kept distinct from Deploy phases. */
 export type BuildStatus = 'PENDING' | 'RUNNING' | 'SUCCEEDED' | 'FAILED';
 
 /** One Build as the global artifact ledger presents it. */
-export interface BuildListItem {
+export interface BuildListItem extends CommitHeadlineView {
   readonly id: number;
   readonly appId: string;
   readonly app: string;
@@ -811,7 +880,7 @@ export interface AppDomainView {
   readonly servedBy: string | null;
 }
 
-export interface WorkspaceView {
+export interface WorkspaceView extends CommitHeadlineView {
   readonly app: string;
   readonly appId?: string;
   /**
@@ -852,6 +921,13 @@ export interface WorkspaceView {
   readonly url: string;
   /** That {@link url} is being served. Never true without one. */
   readonly urlLive: boolean;
+  /**
+   * Whether the post-readiness soak found the release behind {@link phase}
+   * failed (§6). {@link phase} stays `LIVE` — the rollout landed — and this is
+   * what stops the hero saying so over a workload the platform reports broken.
+   * Optional the way {@link drift} is: every fixture builds this row literally.
+   */
+  readonly faulty?: boolean;
   readonly release: string;
   readonly components: readonly ComponentView[];
   /**
@@ -960,6 +1036,59 @@ export interface WorkspaceView {
    * be a second answer to a question §13 already answers once.
    */
   readonly unmetPrerequisites?: readonly PrerequisiteRowView[];
+  /**
+   * The hold on this App's deploys (§6, `setAppLock`), absent when there is
+   * none — the same spelling of nothing as {@link diagnosis}.
+   */
+  readonly lock?: AppLockView;
+  /**
+   * What the repository has that this release does not (§15).
+   *
+   * Absent for an archive App and for a repo App whose repository nobody has
+   * connected: there is no branch to be behind. Present with `pending: null`
+   * when the serving release is the adopted commit.
+   */
+  readonly source?: WorkspaceSourceView;
+}
+
+/** A deploy lock as the workspace banner prints it. */
+export interface AppLockView {
+  readonly reason: string;
+  /** Who set it, as {@link DeployView.requestedBy} prints a principal. */
+  readonly by: string;
+  /** How long ago — "2h ago". */
+  readonly since: string;
+  /** The instant behind {@link since}, for the title a reader hovers. */
+  readonly at: string;
+}
+
+/**
+ * Pushed but not live: the adopted commit beside the serving one.
+ *
+ * `repositories.authoritativeCommit` joined to the serving Build's commit —
+ * the two facts the Config tab and the hero print separately — so the hero
+ * can say what is behind, and whether anything is on its way to fix that.
+ */
+export interface WorkspaceSourceView {
+  /** The branch §15 adopts from. */
+  readonly branch: string;
+  /**
+   * The adopted commit that is not what is serving, or `null` when it is.
+   *
+   * Also `null` before anything has served at all: the first release is not
+   * "behind", it is the whole App waiting to exist.
+   */
+  readonly pending: {
+    readonly commit: string;
+    /**
+     * Whether a Build of this commit exists and has not failed — the one
+     * piece of evidence that a deploy is actually coming. A push to a locked
+     * App is skipped before anything is built and never re-offered, and a
+     * Build that failed writes no Deploy, so `autoDeploy` alone says nothing
+     * about what will happen next; this does.
+     */
+    readonly dispatched: boolean;
+  } | null;
 }
 
 /**
@@ -1180,7 +1309,7 @@ export interface LinkedRepoView {
  * Not the workspace — the list is the fast scan of what exists, and clicking
  * one navigates to the workspace.
  */
-export interface AppListItem {
+export interface AppListItem extends CommitHeadlineView {
   /**
    * The App's id, and the only thing on this row that identifies it.
    *
@@ -1203,6 +1332,11 @@ export interface AppListItem {
   readonly vessel: string;
   readonly url: string;
   readonly urlLive: boolean;
+  /**
+   * Whether the soak found the Component behind {@link phase} faulty (§6) —
+   * the one `LIVE` a list must not print green. Absent is not faulty.
+   */
+  readonly faulty?: boolean;
   /**
    * The kind of the Component this row is reporting on — the one whose phase
    * became {@link phase} — for the list's icon.

@@ -1,15 +1,20 @@
+import { and, desc, eq, lt, min } from 'drizzle-orm';
 import { z } from 'zod';
 import type { Blame, FailureReason } from '../../adapters/deploy/contract.ts';
+import { attemptEvents, deploys } from '../../db/schema.ts';
 import { elapsedSince } from '../../domain/elapsed.ts';
 import { targetRowLabel } from '../../domain/target.ts';
 import { buildViewOf, sourceViewOf } from '../builds/view.ts';
-import { type Command, failed, ok } from '../types.ts';
-import type {
-  ChecklistItem,
-  DeployPhase,
-  DeployView,
-  Diagnosis,
-  LogLine,
+import { principalLabels } from '../principals.ts';
+import { type Command, type CommandContext, failed, ok } from '../types.ts';
+import {
+  type ChecklistItem,
+  type DeployPhase,
+  type DeployView,
+  type Diagnosis,
+  type ExpectedDuration,
+  isInFlight,
+  type LogLine,
 } from '../views.ts';
 
 export const getDeployDetailInput = z.object({
@@ -39,6 +44,60 @@ function evidenceOf(debug: unknown): string | null {
     return null;
   }
   return serialised;
+}
+
+/** How many prior releases the estimate reads. */
+const HISTORY = 100;
+/** Below this a percentile is a guess wearing a number. */
+const MIN_SAMPLES = 3;
+
+/**
+ * How long a release here usually takes, from the ones before it.
+ *
+ * Derived at read time and never stored: created-to-LIVE over the last
+ * {@link HISTORY} releases of this Component@Target, where LIVE is the status
+ * event the deploy loop records on the attempt log — the one instant the
+ * platform's verdict was written down, which no column on `deploys` keeps.
+ * Only releases older than this one vote, so a LIVE release read back later
+ * does not estimate itself.
+ */
+async function expectedDurationOf(
+  context: CommandContext,
+  subject: { id: number; componentId: string; targetId: string },
+): Promise<ExpectedDuration | undefined> {
+  const rows = await context.db
+    .select({
+      startedAt: deploys.createdAt,
+      liveAt: min(attemptEvents.createdAt),
+    })
+    .from(deploys)
+    .innerJoin(
+      attemptEvents,
+      and(
+        eq(attemptEvents.deployId, deploys.id),
+        eq(attemptEvents.eventType, 'status'),
+        eq(attemptEvents.phase, 'LIVE'),
+      ),
+    )
+    .where(
+      and(
+        eq(deploys.componentId, subject.componentId),
+        eq(deploys.targetId, subject.targetId),
+        lt(deploys.id, subject.id),
+      ),
+    )
+    .groupBy(deploys.id)
+    .orderBy(desc(deploys.id))
+    .limit(HISTORY);
+
+  const durations = rows
+    .map((row) => new Date(row.liveAt!).getTime() - row.startedAt.getTime())
+    .filter((ms) => ms >= 0)
+    .sort((a, b) => a - b);
+  if (durations.length < MIN_SAMPLES) return undefined;
+  // Nearest rank, which never invents a value between two samples.
+  const p90Ms = durations[Math.ceil(durations.length * 0.9) - 1]!;
+  return { p90Ms, samples: durations.length };
 }
 
 export const getDeployDetail: Command<
@@ -108,8 +167,13 @@ export const getDeployDetail: Command<
       ),
   });
 
+  // A faulty release carries the same four columns a red attempt does — the
+  // soak writes them the same way — so it reads through the same panel.
   let diagnosis: Diagnosis | null = null;
-  if (deploy.phase === 'FAILED' && deploy.reason) {
+  if (
+    (deploy.phase === 'FAILED' || deploy.faultyAt !== null) &&
+    deploy.reason
+  ) {
     diagnosis = {
       reason: deploy.reason as FailureReason,
       blame: (deploy.blame ?? null) as Blame | null,
@@ -153,6 +217,7 @@ export const getDeployDetail: Command<
 
   const { view: build } = await buildViewOf(context, deploy.build);
   const source = sourceViewOf(deploy.component.app, deploy.build);
+  const expectedDuration = await expectedDurationOf(context, deploy);
 
   const deployLogEvents = await context.db.query.attemptEvents.findMany({
     where: (events, { eq }) => eq(events.deployId, deploy.id),
@@ -181,8 +246,12 @@ export const getDeployDetail: Command<
   // artifact was uploaded rather than built (§4) is releasing, not building,
   // and a screen that said otherwise would name a step that never ran.
   let phaseWord = build === null ? 'Releasing' : 'Building';
-  if (deploy.phase === 'LIVE') phaseWord = 'Live';
-  else if (deploy.phase === 'FAILED') {
+  // Faulty is neither word: the rollout landed and the platform has since
+  // reported it failed, and "Live" over that is the sentence the soak exists
+  // to stop the screen saying.
+  if (deploy.phase === 'LIVE') {
+    phaseWord = deploy.faultyAt === null ? 'Live' : 'Faulty';
+  } else if (deploy.phase === 'FAILED') {
     // The deploy's own verdict outranks the Build row, and the order is the
     // fix. A Deploy that recorded a reason failed *here* — it was applied, the
     // platform answered, and §6 persisted what it said. Reading the Build
@@ -198,12 +267,19 @@ export const getDeployDetail: Command<
 
   let headline = `Deployed to ${targetRowLabel(deploy.target)}`;
   if (deploy.phase === 'LIVE') {
-    headline = `Reconciled on ${targetRowLabel(deploy.target)}`;
+    headline =
+      deploy.faultyAt === null
+        ? `Reconciled on ${targetRowLabel(deploy.target)}`
+        : (deploy.detail ?? 'Failed after readiness');
   } else if (deploy.phase === 'FAILED') {
     headline = deploy.detail ?? 'Deploy failed';
   } else {
     headline = `Deploying on ${targetRowLabel(deploy.target)}`;
   }
+
+  const requestedBy = (await principalLabels(context.db, [deploy.requestedBy]))(
+    deploy.requestedBy,
+  );
 
   const view: DeployView = {
     id: deploy.id,
@@ -234,6 +310,14 @@ export const getDeployDetail: Command<
             observedDigest: deploy.observedDigest,
             detail: deploy.driftDetail,
           },
+    ...(deploy.faultyAt === null
+      ? {}
+      : { faultyAt: deploy.faultyAt.toISOString() }),
+    // Only while the attempt has yet to honour it: once the row settles, the
+    // detail says who cancelled it and the button has nothing left to offer.
+    ...(deploy.cancelRequestedBy === null || !isInFlight(deploy.phase)
+      ? {}
+      : { cancelRequestedBy: deploy.cancelRequestedBy }),
     resources,
     source,
     build,
@@ -243,6 +327,7 @@ export const getDeployDetail: Command<
     current: desired?.desiredDeployId === deploy.id,
     configVersion: deploy.configVersion,
     artifactDigest: deploy.build.artifactDigest,
+    ...(requestedBy === undefined ? {} : { requestedBy }),
     previousDeployId: previousDeploy?.id ?? null,
     // The same comparison `rollbackDeploy` makes under the lock. It can still
     // refuse for a reason this projection cannot see — a disconnected Target, a
@@ -253,6 +338,7 @@ export const getDeployDetail: Command<
       desired?.desiredBuildId != null &&
       deploy.buildId < desired.desiredBuildId &&
       deploy.build.artifactDigest !== null,
+    ...(expectedDuration === undefined ? {} : { expectedDuration }),
   };
 
   return ok({ deploy: view });

@@ -26,7 +26,7 @@ import type {
   DeployTarget,
   DeployVerdict,
 } from '../../src/adapters/deploy/contract.ts';
-import { blameFor } from '../../src/adapters/deploy/contract.ts';
+import { blameFor, RESTART_STAMP } from '../../src/adapters/deploy/contract.ts';
 import { KubernetesApi } from '../../src/adapters/deploy/kubernetes/api.ts';
 import { KubernetesDeployAdapter } from '../../src/adapters/deploy/kubernetes/index.ts';
 import { VALUES_CONTRACT } from '../../src/adapters/deploy/kubernetes/values.ts';
@@ -979,6 +979,115 @@ describe('observe is the authority on what is running', () => {
       'flux-helmrelease:delivery/other-web',
     );
     expect(observed?.artifactDigest).toBe('sha256:elsewhere');
+  });
+
+  /** The Deployment the chart rendered, as its controller judges it. */
+  function deployment(available: 'True' | 'False'): FakeObject {
+    return {
+      apiVersion: 'apps/v1',
+      kind: 'Deployment',
+      metadata: { name: 'blog-web', namespace: 'apps', labels: POD_LABELS },
+      status: {
+        conditions: [
+          {
+            type: 'Available',
+            status: available,
+            reason:
+              available === 'True'
+                ? 'MinimumReplicasAvailable'
+                : 'MinimumReplicasUnavailable',
+            message:
+              available === 'True'
+                ? 'Deployment has minimum availability.'
+                : 'Deployment does not have minimum availability.',
+          },
+        ],
+      },
+    };
+  }
+
+  test('a ready HelmRelease over a crash-looping workload is FAILED, with the read on red', async () => {
+    // The HelmRelease this adapter renders never reconciles again on its own
+    // after a successful install, so `Ready=True` outlives the pods: the
+    // Deployment's own condition is what still tracks them (§6).
+    const { adapter } = adapterFor({
+      lists: {
+        deployments: [deployment('False')],
+        pods: [pod('CrashLoopBackOff', 'back-off restarting failed container')],
+        events: [],
+      },
+    });
+    const { verdict } = await drain(adapter.apply(target(), desiredState()));
+    if (verdict.phase !== 'LIVE') throw new Error('expected a live deploy');
+
+    const observed = await adapter.observe(target(), verdict.ref);
+    expect(observed?.phase).toBe('FAILED');
+    expect(observed?.reason).toBe('STARTUP_FAILED');
+    expect(observed?.detail).toBe('back-off restarting failed container');
+    // Still the digest the object carries: the release is what failed, not
+    // what is desired, and core's drift comparison must keep telling them apart.
+    expect(observed?.artifactDigest).toBe('sha256:feed');
+    // §12: what the read saw travels with the verdict, because the cluster
+    // will not keep it.
+    expect(observed?.debug).toMatchObject({
+      workload: [{ type: 'Available', status: 'False' }],
+      diagnosis: { pods: [{ kind: 'Pod' }] },
+    });
+  });
+
+  test('an image that stopped pulling after readiness is the platform’s fault', async () => {
+    const { adapter } = adapterFor({
+      lists: {
+        deployments: [deployment('False')],
+        pods: [pod('ImagePullBackOff', 'Back-off pulling image')],
+        events: [],
+      },
+    });
+    const { verdict } = await drain(adapter.apply(target(), desiredState()));
+    if (verdict.phase !== 'LIVE') throw new Error('expected a live deploy');
+
+    const observed = await adapter.observe(target(), verdict.ref);
+    expect(observed?.phase).toBe('FAILED');
+    expect(observed?.reason).toBe('ARTIFACT_UNAVAILABLE');
+    expect(blameFor(observed!.reason!)).toBe('platform');
+  });
+
+  test('an available workload costs one list and reads no pods', async () => {
+    const { adapter, cluster } = adapterFor({
+      lists: {
+        deployments: [deployment('True')],
+        pods: [pod('CrashLoopBackOff', 'a pod from some other rollout')],
+      },
+    });
+    const { verdict } = await drain(adapter.apply(target(), desiredState()));
+    if (verdict.phase !== 'LIVE') throw new Error('expected a live deploy');
+    const before = cluster.pathsOf('GET').length;
+
+    const observed = await adapter.observe(target(), verdict.ref);
+    expect(observed?.phase).toBe('LIVE');
+    // The delivery object and the Deployment — a read on red, not a watch:
+    // nothing was red, so no pods were read.
+    const reads = cluster.pathsOf('GET').slice(before);
+    expect(reads).toHaveLength(2);
+    expect(reads.some((path) => path.endsWith('/pods'))).toBe(false);
+  });
+
+  test('a job has no Deployment to consult, so the delivery object’s word stands', async () => {
+    const { adapter, cluster } = adapterFor({
+      lists: { deployments: [deployment('False')] },
+    });
+    const { verdict } = await drain(
+      adapter.apply(
+        target(),
+        desiredState({ kind: 'job', schedule: '0 * * * *', expose: false }),
+      ),
+    );
+    if (verdict.phase !== 'LIVE') throw new Error('expected a live deploy');
+    const before = cluster.pathsOf('GET').length;
+
+    const observed = await adapter.observe(target(), verdict.ref);
+    expect(observed?.phase).toBe('LIVE');
+    expect(cluster.pathsOf('GET').slice(before)).toHaveLength(1);
   });
 });
 
@@ -1988,6 +2097,79 @@ describe('a job is run, and its runs are read', () => {
     ]);
   });
 
+  test("puts this run's parameters on the container after the template's own, and their names on the Job", async () => {
+    // Appended, not merged: the kubelet reads a duplicated name by its last
+    // entry, so "after the template's own" is what makes a parameter the
+    // value the process sees. The names ride on the Job as an annotation and
+    // the values do not — the annotation is what the timeline reads.
+    const template = {
+      metadata: { labels: JOB_LABELS },
+      spec: {
+        backoffLimit: 0,
+        template: {
+          spec: {
+            containers: [
+              { name: 'app', env: [{ name: 'TMPDIR', value: '/tmp' }] },
+            ],
+          },
+        },
+      },
+    };
+    const spec = {
+      suspend: true,
+      schedule: '0 0 31 2 *',
+      jobTemplate: template,
+    };
+    const far = cluster({
+      'cronjobs/apps/blog-nightly': { ...cronJob, spec },
+    });
+
+    const started = await adapterFor(far).run(target(), REF, {
+      env: { SNAPSHOT: 'nightly-2026-08-03', SINCE: '2026-08-01' },
+    });
+
+    expect(started.kind).toBe('started');
+    if (started.kind !== 'started') return;
+    const created = far.get(`jobs/apps/${started.execution.name}`);
+    expect(created?.spec).toEqual({
+      backoffLimit: 0,
+      template: {
+        spec: {
+          containers: [
+            {
+              name: 'app',
+              env: [
+                { name: 'TMPDIR', value: '/tmp' },
+                { name: 'SNAPSHOT', value: 'nightly-2026-08-03' },
+                { name: 'SINCE', value: '2026-08-01' },
+              ],
+            },
+          ],
+        },
+      },
+    });
+    expect(created?.metadata.annotations).toEqual({
+      'cronjob.kubernetes.io/instantiate': 'manual',
+      'spindrift.dev/run-with': 'SNAPSHOT, SINCE',
+    });
+    // The CronJob's own template is untouched: the parameters were this
+    // run's, and the next scheduled fire must not inherit them.
+    expect(far.get('cronjobs/apps/blog-nightly')?.spec).toEqual(spec);
+  });
+
+  test('a run without parameters is the template, verbatim, with no annotation for them', async () => {
+    const far = cluster();
+    const started = await adapterFor(far).run(target(), REF, { env: {} });
+
+    expect(started.kind).toBe('started');
+    if (started.kind !== 'started') return;
+    const created = far.get(`jobs/apps/${started.execution.name}`);
+    expect(created?.spec).toEqual(jobTemplate.spec);
+    expect(created?.metadata.annotations).toEqual({
+      'cronjob.kubernetes.io/instantiate': 'manual',
+    });
+  });
+
   test('leaves the CronJob suspended — running now is not scheduling', async () => {
     const far = cluster();
     await adapterFor(far).run(target(), REF);
@@ -2132,6 +2314,48 @@ describe('a job is run, and its runs are read', () => {
     );
   });
 
+  test('reads the names a run was started with back into its line, never the values', async () => {
+    const far = cluster({
+      'jobs/apps/blog-nightly-9': {
+        ...ranJob('blog-nightly-9', {
+          startTime: '2026-08-03T00:00:00Z',
+          conditions: [
+            {
+              type: 'Complete',
+              status: 'True',
+              reason: 'CompletionsReached',
+              message: 'all tasks completed',
+            },
+          ],
+        }),
+        metadata: {
+          name: 'blog-nightly-9',
+          namespace: 'apps',
+          labels: JOB_LABELS,
+          annotations: { 'spindrift.dev/run-with': 'SNAPSHOT, SINCE' },
+        },
+        spec: {
+          template: {
+            spec: {
+              containers: [
+                { env: [{ name: 'SNAPSHOT', value: 'nightly-2026-08-03' }] },
+              ],
+            },
+          },
+        },
+      },
+    });
+
+    const runs = await adapterFor(far).executions(target(), REF);
+
+    expect(runs.kind).toBe('executions');
+    if (runs.kind !== 'executions') return;
+    expect(runs.executions[0]?.detail).toBe(
+      'ran with SNAPSHOT, SINCE · all tasks completed',
+    );
+    expect(JSON.stringify(runs)).not.toContain('nightly-2026-08-03');
+  });
+
   test("reads one run's logs rather than the Component's whole output", async () => {
     const far = new FakeKubernetes({
       servedKinds: { ...SERVED, 'batch/v1': ['CronJob', 'Job'] },
@@ -2169,4 +2393,238 @@ describe('a job is run, and its runs are read', () => {
       },
     };
   }
+});
+
+describe('restart', () => {
+  const RESTART_AT = Date.UTC(2026, 7, 23, 12, 0, 0);
+  const STAMPED = new Date(RESTART_AT).toISOString();
+  const REF = 'flux-helmrelease:delivery/blog-web';
+
+  /**
+   * A service release as the adapter wrote it and the API now holds it: the
+   * operator's own pod annotation beside Spindrift's classes, a version, and
+   * a status the controller wrote.
+   */
+  const release: FakeObject = {
+    apiVersion: 'helm.toolkit.fluxcd.io/v2',
+    kind: 'HelmRelease',
+    metadata: {
+      name: 'blog-web',
+      namespace: 'delivery',
+      resourceVersion: '12',
+      labels: { 'app.kubernetes.io/managed-by': 'spindrift' },
+    },
+    spec: {
+      targetNamespace: 'apps',
+      values: {
+        app: {
+          name: 'blog',
+          component: 'web',
+          kind: 'service',
+          artifactDigest: 'sha256:feed',
+        },
+        shared: {
+          resources: { requests: { cpu: '250m' } },
+          podAnnotations: { 'example.com/owner': 'ops' },
+        },
+      },
+    },
+    status: { conditions: [{ type: 'Ready', status: 'True' }] },
+  };
+
+  function cluster(objects: Record<string, FakeObject> = {}): FakeKubernetes {
+    return new FakeKubernetes({
+      servedKinds: SERVED,
+      objects: { 'helmreleases/delivery/blog-web': release, ...objects },
+      // Nothing here polls, and the default script would stamp a ready status
+      // onto every read.
+      status: () => null,
+    });
+  }
+
+  function adapterAt(
+    far: FakeKubernetes,
+    now: () => number = () => RESTART_AT,
+  ): KubernetesDeployAdapter {
+    return new KubernetesDeployAdapter({
+      chart: CHART,
+      token: far.token,
+      fetch: far.fetch,
+      now,
+    });
+  }
+
+  function stampOf(far: FakeKubernetes): string | undefined {
+    const values = renderedValues(far) as RenderedValues & {
+      shared: { podAnnotations?: Record<string, string> };
+    };
+    return values.shared.podAnnotations?.[RESTART_STAMP];
+  }
+
+  test('stamps the pod template through the shared values, keeping the operator’s annotation and the digest', async () => {
+    const far = cluster();
+    const restarted = await adapterAt(far).restart(target(), REF);
+
+    expect(restarted.kind).toBe('restarted');
+    if (restarted.kind !== 'restarted') return;
+    expect(restarted.detail).toContain(`${RESTART_STAMP}=${STAMPED}`);
+
+    const values = renderedValues(far) as RenderedValues & {
+      shared: { podAnnotations?: Record<string, string> };
+    };
+    // One key written into the operator's map, never the map over it: the
+    // shared class is either side's to write and the other key is theirs.
+    expect(values.shared.podAnnotations).toEqual({
+      'example.com/owner': 'ops',
+      [RESTART_STAMP]: STAMPED,
+    });
+    expect(values.shared.resources).toEqual({ requests: { cpu: '250m' } });
+    // Nothing else moved: the same digest, so `observe` reads no drift.
+    expect(values.app.artifactDigest).toBe('sha256:feed');
+  });
+
+  test('the write is a server-side apply of what Spindrift owns, under the version it read', async () => {
+    const far = cluster();
+    await adapterAt(far).restart(target(), REF);
+
+    const [patch] = far.requests.filter(
+      (request) => request.method === 'PATCH',
+    );
+    expect(patch?.contentType).toBe('application/apply-patch+yaml');
+    const body = patch?.body as FakeObject;
+    // The precondition: a deploy that landed between the read and this write
+    // has to 409 rather than be reverted to the spec this read.
+    expect(body.metadata.resourceVersion).toBe('12');
+    expect(body.metadata.labels).toEqual({
+      'app.kubernetes.io/managed-by': 'spindrift',
+    });
+    // And nothing the API server owns rides along to be claimed.
+    expect(body).not.toHaveProperty('status');
+  });
+
+  test('a deploy that lands between the read and the write is a 409, thrown', async () => {
+    const far = cluster();
+    const adapter = new KubernetesDeployAdapter({
+      chart: CHART,
+      token: far.token,
+      fetch: async (request) => {
+        const response = await far.fetch(request);
+        // The concurrent deploy: the object moves on after this read served.
+        if (request.method === 'GET') {
+          far.place('helmreleases/delivery/blog-web', {
+            ...release,
+            metadata: { ...release.metadata, resourceVersion: '13' },
+          });
+        }
+        return response;
+      },
+      now: () => RESTART_AT,
+    });
+
+    await expect(adapter.restart(target(), REF)).rejects.toThrow(
+      /409.*the object has been modified/,
+    );
+    // The write was made under the version it read, and nothing landed.
+    expect(far.pathsOf('PATCH')).toHaveLength(1);
+    expect(stampOf(far)).toBeUndefined();
+  });
+
+  test('a second restart moves the stamp', async () => {
+    const far = cluster();
+    let now = RESTART_AT;
+    const adapter = adapterAt(far, () => {
+      now += 60_000;
+      return now;
+    });
+
+    await adapter.restart(target(), REF);
+    const first = stampOf(far);
+    await adapter.restart(target(), REF);
+
+    expect(first).toBeDefined();
+    expect(stampOf(far)).not.toBe(first);
+  });
+
+  test('refuses a job, in a sentence', async () => {
+    const far = cluster({
+      'helmreleases/delivery/blog-nightly': {
+        apiVersion: 'helm.toolkit.fluxcd.io/v2',
+        kind: 'HelmRelease',
+        metadata: { name: 'blog-nightly', namespace: 'delivery' },
+        spec: {
+          values: { app: { name: 'blog', component: 'nightly', kind: 'job' } },
+        },
+      },
+    });
+
+    expect(
+      await adapterAt(far).restart(
+        target(),
+        'flux-helmrelease:delivery/blog-nightly',
+      ),
+    ).toEqual({
+      kind: 'none',
+      because:
+        'this Component is a job, which has runs rather than a process to restart',
+    });
+    expect(far.pathsOf('PATCH')).toEqual([]);
+  });
+
+  test('a ref that names nothing on the Target is refused, not written', async () => {
+    const far = cluster();
+
+    expect(
+      await adapterAt(far).restart(target(), 'flux-helmrelease:delivery/gone'),
+    ).toEqual({ kind: 'none', because: 'gone is no longer on this Target' });
+    expect(far.pathsOf('PATCH')).toEqual([]);
+  });
+
+  test('the Argo flavour is stamped where it keeps its values', async () => {
+    const far = cluster({
+      'applications/delivery/blog-web': {
+        apiVersion: 'argoproj.io/v1alpha1',
+        kind: 'Application',
+        metadata: { name: 'blog-web', namespace: 'delivery' },
+        spec: {
+          project: 'default',
+          destination: { namespace: 'apps' },
+          source: {
+            repoURL: 'https://git.example.test/infra',
+            path: CHART,
+            helm: {
+              releaseName: 'blog-web',
+              valuesObject: {
+                app: { name: 'blog', component: 'web', kind: 'service' },
+                shared: {},
+              },
+            },
+          },
+        },
+      },
+    });
+
+    const restarted = await adapterAt(far).restart(
+      target({ delivery: ARGO }),
+      'argo-application:delivery/blog-web',
+    );
+
+    expect(restarted.kind).toBe('restarted');
+    const spec = far.get('applications/delivery/blog-web')?.spec as {
+      source: {
+        repoURL: string;
+        path: string;
+        helm: {
+          releaseName: string;
+          valuesObject: { shared: { podAnnotations: Record<string, string> } };
+        };
+      };
+    };
+    expect(spec.source.helm.valuesObject.shared.podAnnotations).toEqual({
+      [RESTART_STAMP]: STAMPED,
+    });
+    // The rest of the source is the same source.
+    expect(spec.source.repoURL).toBe('https://git.example.test/infra');
+    expect(spec.source.path).toBe(CHART);
+    expect(spec.source.helm.releaseName).toBe('blog-web');
+  });
 });

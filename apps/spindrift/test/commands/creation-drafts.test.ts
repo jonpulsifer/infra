@@ -24,6 +24,7 @@ import {
 } from '../../src/db/schema.ts';
 import type { Draft } from '../../src/domain/creation-draft.ts';
 import { draftReducer } from '../../src/domain/creation-draft.ts';
+import type { CommitHeadline } from '../../src/domain/source-bundle.ts';
 import { runBuildPass } from '../../src/reconciler/build-loop.ts';
 import { withIsolatedDatabase } from '../harness/db.ts';
 import { FakeBuildAdapter } from '../harness/fakes/build-adapter.ts';
@@ -39,6 +40,12 @@ const database = withIsolatedDatabase();
 const builder = new FakeBuildAdapter({ name: 'hosted' });
 const stagedRepositories: string[] = [];
 const supplyChain = new SupplyChainHarness();
+/** What the stager learned of the commit beyond its sha, for the Build to keep. */
+const HEADLINE: CommitHeadline = {
+  message: 'feat(web): stop the header wrapping',
+  author: 'octocat',
+  authoredAt: new Date('2026-07-27T09:30:00.000Z'),
+};
 
 const adapters: AdapterRegistry = {
   deploy: (adapter) => ({
@@ -62,6 +69,10 @@ const adapters: AdapterRegistry = {
       kind: 'none',
       because: 'creation drafts do not run anything',
     }),
+    restart: async () => ({
+      kind: 'none',
+      because: 'creation drafts do not run anything',
+    }),
     executions: async () => ({
       kind: 'none',
       because: 'creation drafts do not run anything',
@@ -77,6 +88,7 @@ const adapters: AdapterRegistry = {
         digest: `sha256:${'b'.repeat(64)}`,
         location: `https://bundles.example.test/${input.commit}.tar.gz`,
         retention: 'ephemeral',
+        commit: HEADLINE,
       };
     },
   }),
@@ -449,6 +461,33 @@ describe('creation drafts', () => {
     expect(await productCounts()).toEqual([1, 1, 1, 0]);
   });
 
+  test('the first Build of a repository App keeps the headline the stager fetched', async () => {
+    // The wizard is the common way a Build comes to exist, and it stages
+    // through its own path rather than `deployApp`'s — so the headline has to
+    // be carried here too, or every App's first row is a bare sha.
+    await seedCapabilities();
+    const ctx = await context();
+    const started = await startWithRepository(ctx);
+
+    const completed = await completeCreationDraft(
+      { id: started.value.id, revision: started.value.revision },
+      ctx,
+    );
+    if (!completed.ok || completed.value.app === null) {
+      throw new Error('the draft did not complete');
+    }
+
+    const [row] = await database()
+      .db.select()
+      .from(builds)
+      .where(eq(builds.id, completed.value.app.buildId));
+    expect(row).toMatchObject({
+      commitMessage: HEADLINE.message,
+      commitAuthor: HEADLINE.author,
+      commitAuthoredAt: HEADLINE.authoredAt,
+    });
+  });
+
   test('concurrent Review retries hand one durable Build to the runner once', async () => {
     await seedCapabilities();
     let release!: () => void;
@@ -476,6 +515,7 @@ describe('creation drafts', () => {
         'ghcr',
         'other',
       ] as const,
+      cancel: async () => {},
       async *build(
         source: Parameters<typeof base.build>[0],
         spec: Parameters<typeof base.build>[1],
@@ -781,6 +821,7 @@ describe('creation drafts', () => {
         'ghcr',
         'other',
       ] as const,
+      cancel: async () => {},
       async *build(): AsyncGenerator<never, never, void> {
         yield* [];
         throw new Error('runner connection vanished');

@@ -20,6 +20,8 @@ import type {
   JobExecution,
   JobRuns,
   ObservedState,
+  Restarted,
+  RunOptions,
   RuntimeLogPage,
   RuntimeLogSubject,
   RuntimeLogTailOptions,
@@ -96,6 +98,8 @@ export interface FakeDeployAdapterOptions {
   noRuns?: string;
   /** When set, `run` throws — the far side that was asked correctly and failed. */
   runThrows?: string;
+  /** When set, `restart` throws — the same far side, refusing the other verb. */
+  restartThrows?: string;
   /** When set, `destroy` throws — the far side refusing to tear down what is there. */
   destroyThrows?: string;
   /** When set, `sweepApp` throws — the container the far side would not remove. */
@@ -156,6 +160,10 @@ export class FakeDeployAdapter implements DeployAdapter {
 
   /** Every `run`, in call order — what proves a press reached the backend. */
   readonly runsStarted: DeployRef[] = [];
+  /** What each `run` was started with — the parameters a press carried. */
+  readonly runsStartedWith: Readonly<Record<string, string>>[] = [];
+  /** Every `restart`, in call order — the same proof for the other press. */
+  readonly restarted: DeployRef[] = [];
 
   private readonly script: readonly ScriptedAttempt[];
   private readonly options: FakeDeployAdapterOptions;
@@ -263,20 +271,52 @@ export class FakeDeployAdapter implements DeployAdapter {
     this.runs.set(ref, [...(this.runs.get(ref) ?? []), execution]);
   }
 
-  async run(_target: DeployTarget, ref: DeployRef): Promise<StartedRun> {
+  async run(
+    _target: DeployTarget,
+    ref: DeployRef,
+    options: RunOptions = {},
+  ): Promise<StartedRun> {
     this.runsStarted.push(ref);
+    this.runsStartedWith.push(options.env ?? {});
     if (this.options.runThrows !== undefined) {
       throw new Error(this.options.runThrows);
     }
     const refusal = this.refusalFor(ref);
     if (refusal !== null) return refusal;
+    // The names and never the values, as every real adapter reports a run it
+    // started with parameters ({@link RunOptions}).
+    const names = Object.keys(options.env ?? {});
     const execution: JobExecution = {
       name: `${ref}-run-${(this.runs.get(ref)?.length ?? 0) + 1}`,
       outcome: 'running',
       startedAt: null,
+      ...(names.length === 0 ? {} : { detail: `ran with ${names.join(', ')}` }),
     };
     this.ran(ref, execution);
     return { kind: 'started', execution };
+  }
+
+  /**
+   * Restart what is placed under this ref, counting the press.
+   *
+   * The same refusals as the run verbs: a `noRuns` fake stands for a backend
+   * with no process at all, and a ref nothing is placed under has nothing to
+   * bounce. The detail carries the count so a test can tell one press from
+   * two, which is the property a real stamp has.
+   */
+  async restart(_target: DeployTarget, ref: DeployRef): Promise<Restarted> {
+    this.restarted.push(ref);
+    if (this.options.restartThrows !== undefined) {
+      throw new Error(this.options.restartThrows);
+    }
+    if (this.options.noRuns !== undefined) {
+      return { kind: 'none', because: this.options.noRuns };
+    }
+    if (!this.placed.has(ref)) {
+      return { kind: 'none', because: `nothing is placed under ${ref}` };
+    }
+    const count = this.restarted.filter((seen) => seen === ref).length;
+    return { kind: 'restarted', detail: `restart ${count} of ${ref}` };
   }
 
   async executions(_target: DeployTarget, ref: DeployRef): Promise<JobRuns> {

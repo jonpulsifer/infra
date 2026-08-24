@@ -161,4 +161,27 @@ describe('rememberBundle', () => {
       await cachedBundle(database().db, depot, REPOSITORY, COMMIT),
     ).toEqual(restaged);
   });
+
+  test('a hit carries what the fetch knew of the commit, so a sibling App gets the same headline', async () => {
+    const { depot } = present();
+    const headlined = {
+      ...BUNDLE,
+      commit: {
+        message: 'feat: one push, many Apps',
+        author: 'octocat',
+        authoredAt: new Date('2026-08-21T08:00:00.000Z'),
+      },
+    };
+    await rememberBundle(
+      database().db,
+      REPOSITORY,
+      COMMIT,
+      headlined,
+      STAGED_AT,
+    );
+
+    expect(
+      await cachedBundle(database().db, depot, REPOSITORY, COMMIT),
+    ).toEqual(headlined);
+  });
 });

@@ -27,7 +27,10 @@ import {
 } from '../../domain/placement.ts';
 import { repositoryRefOf } from '../../domain/repository.ts';
 import { SUPPLIED_ARTIFACT_TYPE } from '../../domain/source.ts';
-import type { StagedSourceBundle } from '../../domain/source-bundle.ts';
+import type {
+  CommitHeadline,
+  StagedSourceBundle,
+} from '../../domain/source-bundle.ts';
 import { targetRowLabel } from '../../domain/target.ts';
 import { dispatchAutoDeploys } from '../../reconciler/auto-deploy.ts';
 import {
@@ -316,6 +319,9 @@ export const completeCreationDraft: Command<
           bundleDigest: prepared.value.bundleDigest,
           bundleLocation: prepared.value.bundleLocation,
           bundleSubpath: prepared.value.subpath,
+          commitMessage: prepared.value.headline?.message ?? null,
+          commitAuthor: prepared.value.headline?.author ?? null,
+          commitAuthoredAt: prepared.value.headline?.authoredAt ?? null,
           status: prepared.value.supplied ? 'SUCCEEDED' : 'PENDING',
           createdAt: now,
         })
@@ -355,6 +361,8 @@ interface PreparedCreation {
   readonly bundleLocation: string;
   readonly subpath: string;
   readonly supplied: boolean;
+  /** What staging knew of the commit beyond its sha; null for an archive. */
+  readonly headline: CommitHeadline | null;
   /**
    * The configuration pull request this creation opened, if it opened one.
    *
@@ -441,6 +449,7 @@ async function prepareCreation(
       bundleLocation: location,
       subpath: draft.source.subpath ?? '.',
       supplied,
+      headline: null,
       // An archive has no repository, so there is nothing to connect and no
       // pull request to merge.
       configPullRequest: null,
@@ -530,6 +539,7 @@ async function prepareCreation(
     bundleLocation: staged.location,
     subpath: draft.source.subpath,
     supplied: false,
+    headline: staged.commit ?? null,
     configPullRequest,
     configPullRequestError,
   });

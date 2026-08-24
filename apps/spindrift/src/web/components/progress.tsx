@@ -19,7 +19,9 @@
  * settled*, and the stage in flight contributes a half rather than a guess. The
  * sweep across the fill is what says "moving, duration unknown"; a bar that
  * crept toward 90% and waited there would be inventing a number the controller
- * never gave.
+ * never gave. What the running stage's `detail` may carry instead is history —
+ * "usually about 4:10, from 12 deploys" — which is a fact about earlier
+ * releases, stated with its sample size, and not a claim about this one.
  */
 import type { StepStatus } from '../../commands/views.ts';
 import { cn } from '../ui/utils.ts';

@@ -13,7 +13,11 @@
  */
 import { describe, expect, test } from 'bun:test';
 import { renderToStaticMarkup } from 'react-dom/server';
-import type { DeployView, WorkspaceView } from '../../src/commands/views.ts';
+import type {
+  DeployLedgerItem,
+  DeployView,
+  WorkspaceView,
+} from '../../src/commands/views.ts';
 import { logos } from '../../src/web/client/logos/index.ts';
 import { DeployDetail } from '../../src/web/views/apps/deploy-detail.tsx';
 import {
@@ -31,6 +35,7 @@ import {
 import { Gate } from '../../src/web/views/auth/gate.tsx';
 import { CredentialSettingsView } from '../../src/web/views/auth/settings.tsx';
 import { DatastoreLedger } from '../../src/web/views/operations/datastores.tsx';
+import { Overview } from '../../src/web/views/operations/overview.tsx';
 import { RepositoryList } from '../../src/web/views/repos/list.tsx';
 import { TargetList } from '../../src/web/views/targets/list.tsx';
 import {
@@ -719,6 +724,36 @@ describe('the App workspace', () => {
       <Workspace view={job} onRunJob={async () => ({ ok: true })} />,
     );
     expect(withAct).toContain('Run now');
+    // And the one-off script's argument beside it (§17): a run can be given
+    // parameters, and the affordance lives with the act that sends them.
+    expect(withAct).toContain('Add parameter');
+    expect(withoutAct).not.toContain('Add parameter');
+  });
+
+  test('restarting a service is offered where its output is, and only there', () => {
+    // §6's one act on a running process sits with the tail for the reason Run
+    // now sits with the runs: nothing about what is placed changes, so it is
+    // not a header button beside Deploy. A job has no process to bounce and
+    // must not be offered one, whatever the screen wires.
+    const service = WORKSPACE_SCENARIOS.service;
+    expect(service.runtime.kind).toBe('stream');
+    expect(workspace(service)).not.toContain('Restart');
+
+    const withAct = renderToStaticMarkup(
+      <Workspace
+        view={service}
+        onRestartService={async () => ({ ok: true })}
+      />,
+    );
+    expect(withAct).toContain('Restart');
+
+    const job = renderToStaticMarkup(
+      <Workspace
+        view={WORKSPACE_SCENARIOS.job}
+        onRestartService={async () => ({ ok: true })}
+      />,
+    );
+    expect(job).not.toContain('Restart');
   });
 
   describe('an App whose job is not its first Component', () => {
@@ -1690,5 +1725,84 @@ describe('editing config from the workspace (§10)', () => {
     // The exact shape `setConfig` takes: the key named, nothing about the
     // keys left alone — a removal never restates a value it cannot read.
     expect(calls).toEqual([{ entries: [], removals: ['DATABASE_URL'] }]);
+  });
+});
+
+/**
+ * A commit is a sha nobody can read. Where a screen shows one, the headline
+ * the Build kept goes beside it — and a row that kept none still shows the
+ * sha alone rather than a blank where words would go.
+ */
+describe('a commit shows its headline beside the sha', () => {
+  test('the App hero puts the headline beside the seven characters', () => {
+    const markup = workspace({
+      ...WORKSPACE_SCENARIOS.service,
+      commit: 'a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2',
+      commitMessage: 'feat(web): stop the header wrapping',
+      when: '8m ago',
+      at: '2026-07-28T13:00:00.000Z',
+    });
+    expect(markup).toContain('a1b2c3d');
+    expect(markup).toContain('feat(web): stop the header wrapping');
+  });
+
+  test('the deploy screen names the message and the author under the commit', () => {
+    const source = DEPLOY_SCENARIOS.live.source;
+    if (source.kind !== 'repo') throw new Error('the live scenario is a repo');
+    const markup = deploy({
+      ...DEPLOY_SCENARIOS.live,
+      source: {
+        ...source,
+        commitMessage: 'feat(web): stop the header wrapping',
+        commitAuthor: 'octocat',
+        commitAuthoredAt: '2026-07-28T12:00:00.000Z',
+      },
+    });
+    expect(markup).toContain('feat(web): stop the header wrapping');
+    expect(markup).toContain('octocat');
+    expect(markup).toContain('2026-07-28T12:00:00.000Z');
+  });
+
+  test('a Build that kept no headline still shows its sha', () => {
+    const source = DEPLOY_SCENARIOS.live.source;
+    if (source.kind !== 'repo') throw new Error('the live scenario is a repo');
+    const markup = deploy({
+      ...DEPLOY_SCENARIOS.live,
+      source: { ...source, commitMessage: null, commitAuthor: null },
+    });
+    expect(markup).toContain(source.commit);
+    expect(markup).not.toContain('Author');
+  });
+
+  test('the Overview names the release it is serving, not only its sha', () => {
+    const serving: DeployLedgerItem = {
+      id: 993,
+      appId: 'app-morrow',
+      app: 'morrow',
+      buildId: 1837,
+      componentId: 'component-web',
+      component: 'web',
+      targetId: 'target-folly',
+      target: 'Folly',
+      phase: 'LIVE',
+      commit: 'a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2',
+      commitMessage: 'feat(web): stop the header wrapping',
+      configVersion: '9e2bc1',
+      when: '8m ago',
+      at: '2026-07-28T13:00:00.000Z',
+      current: true,
+      rollbackable: false,
+    };
+    const markup = renderToStaticMarkup(
+      <Overview
+        apps={[]}
+        builds={[]}
+        deploys={[serving]}
+        targets={[]}
+        onNavigate={() => undefined}
+      />,
+    );
+    expect(markup).toContain('a1b2c3d');
+    expect(markup).toContain('feat(web): stop the header wrapping');
   });
 });

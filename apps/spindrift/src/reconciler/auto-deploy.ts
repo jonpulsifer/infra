@@ -95,13 +95,13 @@ export async function dispatchAutoDeploys(
   );
   if (appIds.length === 0) return [];
 
-  const optedIn = new Set(
+  const optedIn = new Map(
     (
       await context.db
-        .select({ id: apps.id })
+        .select({ id: apps.id, name: apps.name, lockReason: apps.lockReason })
         .from(apps)
         .where(and(inArray(apps.id, appIds), eq(apps.autoDeploy, true)))
-    ).map((app) => app.id),
+    ).map((app) => [app.id, app]),
   );
 
   // **What still governs, read now rather than when the pass was taken.** The
@@ -133,7 +133,26 @@ export async function dispatchAutoDeploys(
   for (const pass of adopted) {
     if (governing.get(pass.repositoryId) !== pass.commit) continue;
     for (const scope of pass.scopes) {
-      if (!optedIn.has(scope.appId)) continue;
+      const app = optedIn.get(scope.appId);
+      if (app === undefined) continue;
+      // A locked App is skipped before anything is staged or built, not
+      // refused at `checkDeployable` after a Build has run: the lock is the
+      // operator saying nothing goes out here until they say so, and a Build
+      // whose deploy would be refused is CI minutes spent proving that. Said
+      // here for the same reason a refusal is said below — the return value
+      // reaches nobody. Nothing dispatches this commit later either: the loop
+      // calls it `unchanged` from here on, so the workspace says it is pending
+      // and a Rebuild press or the next push after the unlock is what goes out.
+      if (app.lockReason !== null) {
+        logWarn('a push was adopted and its App is locked', {
+          'spindrift.app.id': scope.appId,
+          'spindrift.app.name': app.name,
+          'spindrift.repository': pass.fullName,
+          'spindrift.commit': pass.commit,
+          'spindrift.lock.reason': app.lockReason,
+        });
+        continue;
+      }
       const result = await deployApp(
         { name: scope.appId, commit: pass.commit },
         {

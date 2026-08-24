@@ -43,6 +43,7 @@ import {
   type FunctionTarget,
 } from '../functions/contract.ts';
 import {
+  ATTEMPT_LOG_TEXT_PATH,
   ATTEMPT_STREAM_PATH,
   type AttemptStreamMessage,
   FUNCTION_LOG_STREAM_PATH,
@@ -56,6 +57,7 @@ import {
 } from './stream-path.ts';
 
 export {
+  ATTEMPT_LOG_TEXT_PATH,
   ATTEMPT_STREAM_PATH,
   type AttemptStreamMessage,
   FUNCTION_LOG_STREAM_PATH,
@@ -146,11 +148,26 @@ async function authenticate(
   };
 }
 
-async function upgradeAttempt(
+/**
+ * The attempt a request names, checked the way every read of it is checked:
+ * the session first, then that the Build exists and the Deploy, if named, is
+ * one of its. Shared by the upgrade and the plain-text document so the two
+ * cannot disagree about what a session may read.
+ */
+async function resolveAttempt(
   request: Request,
-  server: Bun.Server<StreamSocketData>,
   deps: StreamDeps,
-): Promise<Response | undefined> {
+): Promise<
+  | {
+      readonly context: CommandContext;
+      readonly component: string;
+      readonly componentId: string;
+      readonly buildId: number;
+      readonly deployId: number | null;
+      readonly after: number | null;
+    }
+  | Response
+> {
   const authenticated = await authenticate(request, deps);
   if (authenticated instanceof Response) return authenticated;
   const url = new URL(request.url);
@@ -186,11 +203,30 @@ async function upgradeAttempt(
     }
   }
 
+  return {
+    context: authenticated.context,
+    component: build.component.name,
+    componentId: build.componentId,
+    buildId,
+    deployId,
+    after,
+  };
+}
+
+async function upgradeAttempt(
+  request: Request,
+  server: Bun.Server<StreamSocketData>,
+  deps: StreamDeps,
+): Promise<Response | undefined> {
+  const attempt = await resolveAttempt(request, deps);
+  if (attempt instanceof Response) return attempt;
+  const { context, componentId, buildId, deployId, after } = attempt;
+
   const upgraded = server.upgrade(request, {
     data: {
       kind: 'attempt',
-      context: authenticated.context,
-      componentId: build.componentId,
+      context,
+      componentId,
       buildId,
       ...(deployId === null ? {} : { deployId }),
       cursor: after === null ? null : after,
@@ -201,6 +237,68 @@ async function upgradeAttempt(
   return upgraded
     ? undefined
     : refusal(400, 'MALFORMED_REQUEST', 'WebSocket upgrade failed');
+}
+
+/**
+ * The attempt log as one `text/plain` document (§21: transport, no domain
+ * logic). The same rows the socket pumps, read to the end through the same
+ * reader, one log line per line and each status event as a bracketed line so
+ * the document still says where each leg ended. Behind {@link resolveAttempt}
+ * exactly as the upgrade is, so the `<a>` in the log pane is the whole client.
+ */
+export function attemptLogTextRoutes(
+  deps: StreamDeps,
+): Record<string, (request: Request) => Promise<Response>> {
+  return {
+    [ATTEMPT_LOG_TEXT_PATH]: (request) => attemptLogText(request, deps),
+  };
+}
+
+const TEXT_PAGE = 500;
+
+async function attemptLogText(
+  request: Request,
+  deps: StreamDeps,
+): Promise<Response> {
+  const attempt = await resolveAttempt(request, deps);
+  if (attempt instanceof Response) return attempt;
+  const { context, component, componentId, buildId, deployId } = attempt;
+  const ref = {
+    componentId,
+    buildId,
+    ...(deployId === null ? {} : { deployId }),
+  };
+
+  const lines: string[] = [];
+  let after: AttemptLogCursor | undefined;
+  for (;;) {
+    const page = await readAttemptStream(context.db, ref, {
+      ...(after === undefined ? {} : { after }),
+      limit: TEXT_PAGE,
+    });
+    for (const entry of page.entries) {
+      lines.push(
+        entry.type === 'log'
+          ? entry.line
+          : `[${entry.at.toISOString()} ${entry.attemptKind} ${entry.phase}${
+              entry.resource === null ? '' : ` ${entry.resource}`
+            }${entry.reason === null ? '' : ` ${entry.reason}`}]`,
+      );
+    }
+    if (page.entries.length < TEXT_PAGE || page.cursor === null) break;
+    after = page.cursor;
+  }
+
+  const name =
+    deployId === null
+      ? `${component}-build-${buildId}`
+      : `${component}-deploy-${deployId}`;
+  return new Response(lines.map((line) => `${line}\n`).join(''), {
+    headers: {
+      'content-type': 'text/plain; charset=utf-8',
+      'content-disposition': `inline; filename="${name}.txt"`,
+    },
+  });
 }
 
 async function upgradeRuntime(

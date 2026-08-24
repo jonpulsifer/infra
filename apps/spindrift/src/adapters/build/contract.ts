@@ -362,6 +362,25 @@ export type BuildResult =
     };
 
 /**
+ * What a Build row keeps about the far side of a running attempt — enough for
+ * a route to find that far side again from a process that never held it.
+ *
+ * Both values are already columns on the row, which is the point: `cancelBuild`
+ * runs in the web process while the route's generator runs in the reconciler,
+ * so the only way an operator's cancel can reach a Job, a cloud build or a
+ * workflow run is through what the row says about it. A route that names its
+ * far side by the dispatch id (a Job name, a build tag, a run correlation) is
+ * reachable by the first field; the hosted route, whose run id is the host's
+ * to assign, is reachable by the address it reported as its `runner` event.
+ */
+export interface BuildHandle {
+  /** The dispatch id core minted for the attempt — what `build` was handed. */
+  readonly dispatchId: string;
+  /** The URL the route yielded as a `runner` event, or `null` if it never did. */
+  readonly runUrl: string | null;
+}
+
+/**
  * One build route.
  *
  * §4 names three: hosted CI on the fast-pipe side, a cloud build service, and
@@ -431,8 +450,29 @@ export interface BuildAdapter {
    */
   readonly selfAuthorizedRegistries: readonly RegistryFlavour[];
 
+  /**
+   * `dispatchId` is the attempt's durable identity, minted by `dispatchBuild`
+   * and stored on the Build row before this is called. A route names its far
+   * side by it so that {@link cancel} can find that far side from the row
+   * alone. Absent only when a route is driven outside `dispatchBuild`; it then
+   * mints a token of its own, and nothing stored can reach what it started.
+   */
   build(
     source: BuildSource,
     spec: BuildSpec,
+    dispatchId?: string,
   ): AsyncGenerator<BuildEvent, BuildResult, void>;
+
+  /**
+   * Stop the far side of a build this route dispatched, if it is still going.
+   *
+   * **Never the verdict.** §4 makes the route's own terminal write what ends an
+   * attempt, and this keeps that true: it kills what is running and returns,
+   * and the generator polling that far side is what reports `FAILED` through
+   * the fenced write — the same path a build the budget ended takes. A build
+   * that already finished is left alone; a far side that is already gone is
+   * not an error. What *is* an error is a far side this route cannot address
+   * at all, which the caller reports rather than pretending to have stopped.
+   */
+  cancel(handle: BuildHandle): Promise<void>;
 }

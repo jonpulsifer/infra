@@ -885,6 +885,61 @@ describe('the workspace as a way into the system', () => {
       buildId: build!.id,
     });
   });
+  test("a faulty release reads as failed, with the soak's diagnosis", async () => {
+    const ctx = context();
+    const { appName, componentId, target } = await scaffold(ctx, {
+      prefix: 'faulty',
+    });
+
+    const [build] = await ctx.db
+      .insert(builds)
+      .values({
+        componentId,
+        commit: 'bad1dea',
+        targetShape: 'image',
+        artifactType: 'image',
+        status: 'SUCCEEDED',
+      })
+      .returning();
+    const [deploy] = await ctx.db
+      .insert(deploys)
+      .values({
+        componentId,
+        targetId: target.id,
+        buildId: build!.id,
+        desired: aDesiredDocument(),
+        phase: 'LIVE',
+        url: 'https://faulty-web.apps.example.test',
+        faultyAt: new Date(),
+        driftedAt: new Date(),
+        reason: 'STARTUP_FAILED',
+        blame: 'developer',
+        detail: 'crash-looping since readiness',
+      })
+      .returning();
+
+    const result = await getAppWorkspace({ name: appName }, ctx);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    const { workspace } = result.value;
+    // The phase is still the platform's verdict on the rollout; what the
+    // hero hangs its pill, headline and link on is the fact beside it.
+    expect(workspace).toMatchObject({
+      phase: 'LIVE',
+      faulty: true,
+      urlLive: false,
+      url: 'https://faulty-web.apps.example.test',
+    });
+    expect(workspace.activity[0]).toMatchObject({
+      kind: 'deploy',
+      title: `Deploy ${deploy!.id} faulty`,
+      status: 'failed',
+      deployId: deploy!.id,
+    });
+    expect(workspace.diagnosis?.reason).toBe('STARTUP_FAILED');
+    expect(workspace.diagnosis?.blame).toBe('developer');
+  });
 });
 
 describe('getDeployDetail command', () => {

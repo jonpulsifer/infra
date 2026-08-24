@@ -1,17 +1,27 @@
 import { describe, expect, test } from 'bun:test';
+import { isValidElement, type ReactElement, type ReactNode } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import type {
+  AppListItem,
   BuildListItem,
   DeployLedgerItem,
 } from '../../src/commands/views.ts';
+import type {
+  AppDeletion,
+  AppDeletionControls,
+} from '../../src/web/components/delete-app.tsx';
 import { ObjectExplorer } from '../../src/web/components/object-explorer.tsx';
 import { AppShell } from '../../src/web/components/shell.tsx';
+import { AppList } from '../../src/web/views/apps/list.tsx';
 import { DeployLedger } from '../../src/web/views/operations/deploys.tsx';
 import { Overview } from '../../src/web/views/operations/overview.tsx';
 import { SettingsLayout } from '../../src/web/views/settings/layout.tsx';
 import { ArtifactLedger } from '../../src/web/views/supply-chain/artifacts.tsx';
 import { BuildLedger } from '../../src/web/views/supply-chain/builds.tsx';
-import { SourceLedger } from '../../src/web/views/supply-chain/sources.tsx';
+import {
+  SourceLedger,
+  type SourceListItem,
+} from '../../src/web/views/supply-chain/sources.tsx';
 
 describe('the object-first shell', () => {
   test('keeps the operational ledgers and Settings in the primary rail', () => {
@@ -166,6 +176,9 @@ describe('the global operation ledgers', () => {
             origin: 'upload',
             repository: null,
             commit: null,
+            commitMessage: null,
+            commitAuthor: null,
+            commitAuthoredAt: null,
             location: `upload://${'a'.repeat(64)}`,
             fetchable: false,
             retention: 'durable',
@@ -289,5 +302,144 @@ describe('the global operation ledgers', () => {
     );
     expect(builds).toContain('Load older Builds');
     expect(deploys).toContain('Load older Deploys');
+  });
+});
+
+/** Every element in a tree, depth first — the tree as returned, not rendered. */
+function* elements(node: ReactNode): Generator<ReactElement> {
+  if (Array.isArray(node)) {
+    for (const child of node) yield* elements(child as ReactNode);
+    return;
+  }
+  if (!isValidElement(node)) return;
+  yield node;
+  yield* elements((node.props as { children?: ReactNode }).children);
+}
+
+/** The `rowSearch` a ledger hands its explorer, read off the tree it returns. */
+function rowSearchOf<T>(tree: ReactNode): (row: T) => string {
+  for (const element of elements(tree)) {
+    const { rowSearch } = element.props as { rowSearch?: (row: T) => string };
+    if (rowSearch) return rowSearch;
+  }
+  throw new Error('the ledger rendered no explorer');
+}
+
+/**
+ * A filter matches the words a row shows. The explorer never reads rendered
+ * cells — `rowSearch` is its whole haystack — so a headline printed beside the
+ * sha has to be in that string too, or the one thing on the screen an operator
+ * would type is the one thing typing cannot find.
+ */
+describe('a ledger filter matches the headline it shows', () => {
+  const HEADLINE = 'feat(web): stop the header wrapping';
+  const commit = 'a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2';
+
+  test('Builds, Deploys and Sources hand the headline to their explorer', () => {
+    const build: BuildListItem = {
+      id: 1837,
+      appId: 'app-morrow',
+      app: 'morrow',
+      componentId: 'component-web',
+      component: 'web',
+      commit,
+      commitMessage: HEADLINE,
+      commitAuthor: 'octocat',
+      targetShape: 'image',
+      artifactType: 'image',
+      artifactDigest: null,
+      status: 'PENDING',
+      runner: null,
+      when: 'now',
+      at: '2026-08-03T12:31:00.000Z',
+      deployId: null,
+      dispatchWaitingOn: null,
+    };
+    const deploy: DeployLedgerItem = {
+      id: 993,
+      appId: build.appId,
+      app: build.app,
+      buildId: build.id,
+      componentId: build.componentId,
+      component: build.component,
+      targetId: 'target-folly',
+      target: 'Folly',
+      phase: 'LIVE',
+      commit,
+      commitMessage: HEADLINE,
+      configVersion: null,
+      when: 'now',
+      at: '2026-08-03T12:44:00.000Z',
+      current: true,
+      rollbackable: false,
+    };
+    const source: SourceListItem = {
+      digest: `sha256:${'a'.repeat(64)}`,
+      origin: 'repo',
+      repository: 'jonpulsifer/morrow',
+      commit,
+      commitMessage: HEADLINE,
+      commitAuthor: 'octocat',
+      commitAuthoredAt: '2026-07-27T09:30:00.000Z',
+      location: `gs://bucket/ephemeral/${'a'.repeat(64)}.tgz`,
+      fetchable: true,
+      retention: 'ephemeral',
+      app: build.app,
+      component: build.component,
+      builds: 1,
+      latestBuildId: build.id,
+      supplied: false,
+      at: '2026-08-03T12:31:00.000Z',
+    };
+    const noop = () => undefined;
+
+    expect(
+      rowSearchOf<BuildListItem>(
+        BuildLedger({ builds: [build], onNavigate: noop }),
+      )(build),
+    ).toContain(HEADLINE);
+    expect(
+      rowSearchOf<DeployLedgerItem>(
+        DeployLedger({ deploys: [deploy], onNavigate: noop }),
+      )(deploy),
+    ).toContain(HEADLINE);
+    expect(
+      rowSearchOf<SourceListItem>(
+        SourceLedger({ sources: [source], limit: 50, onNavigate: noop }),
+      )(source),
+    ).toContain(HEADLINE);
+  });
+
+  test('the App list keeps the row whose headline is typed', () => {
+    const app: AppListItem = {
+      id: '00000000-0000-4000-8000-0000000000a1',
+      name: 'morrow',
+      phase: 'LIVE',
+      target: 'Folly',
+      vessel: 'driftwood',
+      url: 'morrow.apps.example',
+      urlLive: true,
+      kind: 'service',
+      source: 'jonpulsifer/morrow',
+      artifact: 'image · a1b2c3d4e5f6',
+      commit,
+      commitMessage: HEADLINE,
+    };
+    const deletion: AppDeletionControls = {
+      state: { kind: 'idle' } as AppDeletion,
+      review: () => undefined,
+      confirm: () => undefined,
+      dismiss: () => undefined,
+    };
+    const markup = renderToStaticMarkup(
+      <AppList
+        apps={[app]}
+        filter="header wrapping"
+        deletion={deletion}
+        onNavigate={() => undefined}
+      />,
+    );
+    expect(markup).not.toContain('No App matches');
+    expect(markup).toContain('morrow');
   });
 });

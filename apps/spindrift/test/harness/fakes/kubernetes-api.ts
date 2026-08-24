@@ -208,6 +208,12 @@ export class FakeKubernetes {
     this.objects.set(key, object);
   }
 
+  /** Take an object away mid-test, as a delete from elsewhere would. */
+  remove(key: string): void {
+    this.objects.delete(key);
+    this.reads.delete(key);
+  }
+
   /**
    * A namespace nobody seeded, as a real Target cluster has one.
    *
@@ -484,6 +490,25 @@ export class FakeKubernetes {
     if (this.options.refuse !== undefined) {
       return new Response(this.options.refuse.body, {
         status: this.options.refuse.status,
+      });
+    }
+    // A `resourceVersion` in the body is a precondition: the API server
+    // answers 409 when the version it holds has moved on. A fake that stored
+    // the body anyway would let a restart revert a deploy that landed between
+    // its read and its write and still pass.
+    const expected = object.metadata.resourceVersion;
+    const current = this.objects.get(key)?.metadata.resourceVersion;
+    if (
+      expected !== undefined &&
+      current !== undefined &&
+      expected !== current
+    ) {
+      return json(409, {
+        kind: 'Status',
+        status: 'Failure',
+        reason: 'Conflict',
+        code: 409,
+        message: `Operation cannot be fulfilled on ${key}: the object has been modified; please apply your changes to the latest version and try again`,
       });
     }
     const stored = {

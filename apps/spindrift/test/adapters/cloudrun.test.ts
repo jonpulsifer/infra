@@ -34,7 +34,7 @@ import type {
   DeployTarget,
   DeployVerdict,
 } from '../../src/adapters/deploy/contract.ts';
-import { blameFor } from '../../src/adapters/deploy/contract.ts';
+import { blameFor, RESTART_STAMP } from '../../src/adapters/deploy/contract.ts';
 import {
   deriveHealth,
   deriveVerifiedDeploy,
@@ -1499,6 +1499,98 @@ describe('a job is run, and its runs are read', () => {
     );
   });
 
+  test("sends this run's parameters as the execution's container override", async () => {
+    // `jobs.run` takes `overrides.containerOverrides[].env` — the runtime's
+    // own per-execution knob, so the Job's template is untouched and the next
+    // scheduled fire does not inherit a parameter this run was given.
+    const { api, adapter } = adapterFor();
+    await drain(adapter.apply(target(), job()));
+
+    const started = await adapter.run(target(), JOB_REF, {
+      env: { SNAPSHOT: 'nightly-2026-08-03', SINCE: '2026-08-01' },
+    });
+
+    expect(started.kind).toBe('started');
+    const run = api.requests.find(
+      (request) =>
+        request.method === 'POST' && request.path.endsWith('shop-nightly:run'),
+    );
+    expect(run?.body).toEqual({
+      overrides: {
+        containerOverrides: [
+          {
+            env: [
+              { name: 'SNAPSHOT', value: 'nightly-2026-08-03' },
+              { name: 'SINCE', value: '2026-08-01' },
+            ],
+          },
+        ],
+      },
+    });
+  });
+
+  test('a run without parameters sends no override at all', async () => {
+    const { api, adapter } = adapterFor();
+    await drain(adapter.apply(target(), job()));
+
+    await adapter.run(target(), JOB_REF, { env: {} });
+
+    const run = api.requests.find(
+      (request) =>
+        request.method === 'POST' && request.path.endsWith('shop-nightly:run'),
+    );
+    expect(run?.body).toEqual({});
+  });
+
+  test('reads the names a run was started with back into its line, never the values', async () => {
+    // The execution's template is the Job's with the override folded in, and
+    // a plain `value` on it can only be a parameter: `workloadContainer`
+    // delivers every variable as a pinned reference (§10).
+    const { adapter } = adapterFor({
+      executions: {
+        'shop-nightly': [
+          execution('shop-nightly-4', {
+            startTime: '2026-08-04T00:00:00Z',
+            succeededCount: 1,
+            conditions: [
+              {
+                type: 'Completed',
+                state: 'CONDITION_SUCCEEDED',
+                message: 'the task exited 0',
+              },
+            ],
+            template: {
+              containers: [
+                {
+                  env: [
+                    {
+                      name: 'DATABASE_URL',
+                      valueSource: {
+                        secretKeyRef: { secret: 's', version: '1' },
+                      },
+                    },
+                    { name: 'SNAPSHOT', value: 'nightly-2026-08-03' },
+                    { name: 'SINCE', value: '2026-08-01' },
+                  ],
+                },
+              ],
+            },
+          }),
+        ],
+      },
+    });
+    await drain(adapter.apply(target(), job()));
+
+    const runs = await adapter.executions(target(), JOB_REF);
+
+    expect(runs.kind).toBe('executions');
+    if (runs.kind !== 'executions') return;
+    expect(runs.executions[0]?.detail).toBe(
+      'ran with SNAPSHOT, SINCE · the task exited 0',
+    );
+    expect(JSON.stringify(runs)).not.toContain('nightly-2026-08-03');
+  });
+
   test('refuses a ref that names a service rather than a job', async () => {
     const { adapter } = adapterFor();
     await drain(adapter.apply(target(), desired()));
@@ -1649,5 +1741,112 @@ describe('a job is run, and its runs are read', () => {
     expect(filters[0]).toContain('resource.type="cloud_run_revision"');
     expect(filters[0]).toContain('resource.labels.service_name="shop-web"');
     expect(filters[0]).not.toContain('execution_name');
+  });
+});
+
+describe('restart', () => {
+  const SERVICE_REF =
+    'projects/example-vessel/locations/somewhere/services/shop-web';
+
+  test('rolls a new revision of the same image by re-writing the template annotations through a mask', async () => {
+    const { api, adapter } = adapterFor();
+    const { verdict } = await drain(adapter.apply(target(), desired()));
+    if (verdict.phase !== 'LIVE') throw new Error('nothing placed to restart');
+
+    const restarted = await adapter.restart(target(), verdict.ref);
+
+    expect(restarted.kind).toBe('restarted');
+    const service = api.service('shop-web') as {
+      template: {
+        annotations?: Record<string, string>;
+        containers: { image: string }[];
+      };
+    };
+    expect(service.template.annotations?.[RESTART_STAMP]).toBeDefined();
+    expect(service.template.containers[0]?.image).toBe(
+      'registry.example.test/shop@sha256:abc',
+    );
+    // One masked write carrying the annotations and nothing else: the
+    // runtime copies the rest of the template forward, so nothing here is a
+    // second render of the revision that could disagree with the first.
+    const masked = api.requests.filter(
+      (request) =>
+        request.method === 'PATCH' && request.url.includes('updateMask'),
+    );
+    expect(masked).toHaveLength(1);
+    expect(masked[0]?.url).toContain('updateMask=template.annotations');
+    const body = masked[0]?.body as { template: Record<string, unknown> };
+    expect(Object.keys(body)).toEqual(['template']);
+    expect(Object.keys(body.template)).toEqual(['annotations']);
+  });
+
+  test('refuses a job ref — a job has runs, not a process', async () => {
+    const { api, adapter } = adapterFor();
+
+    expect(
+      await adapter.restart(
+        target(),
+        'projects/example-vessel/locations/somewhere/jobs/shop-nightly',
+      ),
+    ).toEqual({
+      kind: 'none',
+      because:
+        'this ref names a job, which has runs rather than a process to restart',
+    });
+    expect(api.pathsOf('PATCH')).toEqual([]);
+  });
+
+  test('a ref that names nothing on the Target is refused, not written', async () => {
+    const { api, adapter } = adapterFor();
+
+    expect(await adapter.restart(target(), SERVICE_REF)).toEqual({
+      kind: 'none',
+      because: 'shop-web is no longer on this Target',
+    });
+    expect(api.pathsOf('PATCH')).toEqual([]);
+  });
+
+  test('a refused write is a fault with the runtime’s sentence, not a restart', async () => {
+    const api = new FakeCloudRun();
+    const adapter = new CloudRunDeployAdapter({
+      token: api.token,
+      // The apply lands; only the masked write is refused.
+      fetch: async (request) =>
+        new URL(request.url).searchParams.has('updateMask')
+          ? new Response(JSON.stringify({ error: { message: 'forbidden' } }), {
+              status: 403,
+              headers: { 'content-type': 'application/json' },
+            })
+          : api.fetch(request),
+      pollIntervalMs: 1,
+      sleep: async () => {},
+    });
+    const { verdict } = await drain(adapter.apply(target(), desired()));
+    if (verdict.phase !== 'LIVE') throw new Error('nothing placed to restart');
+
+    await expect(adapter.restart(target(), verdict.ref)).rejects.toThrow(
+      /restarting service shop-web failed/,
+    );
+  });
+
+  test('a read the runtime would not answer is a fault, not an absent service', async () => {
+    const api = new FakeCloudRun();
+    const adapter = new CloudRunDeployAdapter({
+      token: api.token,
+      // Only a 404 says the service is gone; an expired token or a runtime
+      // that is down says nothing about whether it is there.
+      fetch: async (request) =>
+        request.method === 'GET'
+          ? new Response(
+              JSON.stringify({ error: { message: 'unauthenticated' } }),
+              { status: 401, headers: { 'content-type': 'application/json' } },
+            )
+          : api.fetch(request),
+    });
+
+    await expect(adapter.restart(target(), SERVICE_REF)).rejects.toThrow(
+      /reading service shop-web failed: unauthenticated/,
+    );
+    expect(api.pathsOf('PATCH')).toEqual([]);
   });
 });

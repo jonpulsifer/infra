@@ -15,6 +15,7 @@ import { eq } from 'drizzle-orm';
 import type { DeployAdapter } from '../../src/adapters/deploy/contract.ts';
 import { deployApp } from '../../src/commands/apps/deploy.ts';
 import { listApps } from '../../src/commands/apps/list.ts';
+import { setAppLock } from '../../src/commands/apps/set-lock.ts';
 import { getAppWorkspace } from '../../src/commands/apps/workspace.ts';
 import { placeComponent } from '../../src/commands/components/place.ts';
 import { unplaceComponent } from '../../src/commands/components/unplace.ts';
@@ -210,6 +211,13 @@ describe('an intent addressed at the old pair does not move the placement', () =
     expect(workspace.ok).toBe(true);
     if (!workspace.ok) return;
     expect(workspace.value.workspace.targetId).toBe(to.target.id);
+
+    // A rollback holds the App's deploys until the operator says the cause is
+    // fixed (§6) — that hold is another test's subject; here it is lifted so
+    // the press below is answered on placement alone.
+    expect((await setAppLock({ appId: app.id, reason: null }, ctx)).ok).toBe(
+      true,
+    );
 
     const pressed = await deployApp({ name: app.name }, ctx);
     expect(pressed.ok).toBe(true);

@@ -112,21 +112,32 @@ function shorten(value: string, kind: RefKind): string {
 export function Ref({
   value,
   kind,
+  headline,
   className,
 }: {
   readonly value: string;
   readonly kind: RefKind;
+  /**
+   * Words to put beside the hash — a commit's headline. The hash stays the
+   * value that is copied and sorted; this is only what makes it readable.
+   */
+  readonly headline?: string | null;
   readonly className?: string;
 }) {
   if (!value) return null;
   return (
-    <span className={cn('inline-flex items-center gap-1', className)}>
+    <span className={cn('inline-flex min-w-0 items-center gap-1', className)}>
       {/* The full value is the title, so a hover answers what the ellipsis ate
           even where the clipboard is unavailable. */}
       <span className="truncate font-mono text-body" title={value}>
         {shorten(value, kind)}
       </span>
       <CopyButton value={value} label={kind} />
+      {headline ? (
+        <span className="truncate text-body text-subtle" title={headline}>
+          {headline}
+        </span>
+      ) : null}
     </span>
   );
 }

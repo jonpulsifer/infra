@@ -65,6 +65,10 @@ export interface SourceView {
   readonly repository: string | null;
   /** The exact commit staged, or `null` for an upload. */
   readonly commit: string | null;
+  /** The commit's headline, author and authored instant, where the Build kept them. */
+  readonly commitMessage: string | null;
+  readonly commitAuthor: string | null;
+  readonly commitAuthoredAt: string | null;
   /** Where it is fetched from, or `null` for a Build that recorded none. */
   readonly location: string | null;
   /** Whether any build route could actually be handed that location. */
@@ -138,6 +142,11 @@ export const listSources: Command<ListSourcesInput, ListSourcesResult> = async (
           origin: isRepo ? ('repo' as const) : ('upload' as const),
           repository: app.sourceRepoUrl,
           commit: isRepo ? row.commit : null,
+          commitMessage: isRepo ? row.commitMessage : null,
+          commitAuthor: isRepo ? row.commitAuthor : null,
+          commitAuthoredAt: isRepo
+            ? (row.commitAuthoredAt?.toISOString() ?? null)
+            : null,
           location: row.bundleLocation,
           fetchable: isFetchableBundleLocation(row.bundleLocation),
           retention: isRepo ? ('ephemeral' as const) : ('durable' as const),

@@ -34,6 +34,7 @@ import {
 import type {
   BuildAdapter,
   BuildEvent,
+  BuildHandle,
   BuildLevel,
   BuildResult,
   BuildSource,
@@ -45,6 +46,7 @@ import { parseBuildReport } from './report.ts';
 import {
   buildFailed,
   buildSucceeded,
+  DEFAULT_BUILD_TIMEOUT_MS,
   deadlineFrom,
   type PollingOptions,
 } from './route.ts';
@@ -83,6 +85,14 @@ export const JOB_TTL_SECONDS = 3600;
 /** The label a build Job carries so its pod can be found. */
 export const JOB_LABEL = 'spindrift.dev/build';
 
+/** How a Job ended: a verdict, the cluster's deadline, or a delete. */
+type JobOutcome = 'succeeded' | 'failed' | 'deadline' | 'gone';
+
+/** One name from one token, so `build` and `cancel` cannot disagree on it. */
+function jobNameFor(id: string): string {
+  return `spindrift-build-${id}`;
+}
+
 export class InClusterBuildRoute implements BuildAdapter {
   readonly name: string;
   readonly logFidelity: LogFidelity = 'LIVE_TEXT';
@@ -110,13 +120,18 @@ export class InClusterBuildRoute implements BuildAdapter {
   async *build(
     source: BuildSource,
     spec: BuildSpec,
+    dispatchId?: string,
   ): AsyncGenerator<BuildEvent, BuildResult, void> {
     const now = this.options.now ?? (() => new Date());
     const logs = { backend: this.name, fidelity: this.logFidelity } as const;
     const { api, namespace } = this.options;
 
-    const id = (this.options.id ?? (() => crypto.randomUUID().slice(0, 8)))();
-    const name = `spindrift-build-${id}`;
+    // Named by the dispatch id so `cancel` can address the Job from the Build
+    // row alone; the injected `id` is for a test that drives the route bare.
+    const id =
+      dispatchId ??
+      (this.options.id ?? (() => crypto.randomUUID().slice(0, 8)))();
+    const name = jobNameFor(id);
     const job = this.job(
       name,
       buildKitProgramFor(source, spec, this.options.zeroConfigFrontend),
@@ -151,7 +166,7 @@ export class InClusterBuildRoute implements BuildAdapter {
     const budget = deadlineFrom(this.options);
     let delivered = 0;
     let log = '';
-    let outcome: 'succeeded' | 'failed' | null = null;
+    let outcome: JobOutcome | null = null;
 
     for (;;) {
       log = (await this.readLog(name)) ?? log;
@@ -169,6 +184,17 @@ export class InClusterBuildRoute implements BuildAdapter {
       if (outcome !== null) break;
 
       if (budget.expired()) {
+        // The Job carries the same budget as `activeDeadlineSeconds`, so the
+        // cluster ordinarily ends it first; this is the route's own copy of
+        // that act for the case where it did not, because a TIMEOUT that left
+        // the pod building would hold the node it landed on for as long as
+        // the build cared to run.
+        yield {
+          type: 'log',
+          at: now(),
+          line: `Job ${name} did not finish within the build budget; deleting it`,
+        };
+        await this.kill(name).catch(() => {});
         return buildFailed(
           logs,
           'TIMEOUT',
@@ -191,6 +217,17 @@ export class InClusterBuildRoute implements BuildAdapter {
       return buildFailed(logs, 'BUILD_FAILED', `Job ${name} failed`, {
         job: name,
       });
+    }
+    if (outcome !== 'succeeded') {
+      // Ended before a verdict — the cluster's deadline, or a delete, which
+      // now that `cancel` exists is most often an operator's. §6's `TIMEOUT`
+      // is the one reason that indicts nobody, and nobody is who this indicts.
+      const ending =
+        outcome === 'deadline'
+          ? `Job ${name} was ended by the cluster for exceeding its deadline`
+          : `Job ${name} was deleted before it finished`;
+      yield { type: 'log', at: now(), line: ending };
+      return buildFailed(logs, 'TIMEOUT', ending, { job: name });
     }
 
     const report = parseBuildReport(log);
@@ -215,12 +252,22 @@ export class InClusterBuildRoute implements BuildAdapter {
     });
   }
 
+  /** Delete the Job named by the dispatch id, and the pod under it. */
+  cancel(handle: BuildHandle): Promise<void> {
+    return this.kill(jobNameFor(handle.dispatchId));
+  }
+
   /**
    * The Job one build runs as.
    *
    * `backoffLimit: 0` because a retry is core's to decide, not the cluster's: a
    * Job that retried itself would push a second artifact for one Build row, and
    * §4's "no ordinal" rests on a Build recording one artifact.
+   *
+   * `activeDeadlineSeconds` is the route's own budget, handed to the cluster:
+   * the Job controller kills the pod and fails the Job when it passes, so a
+   * runaway build ends even when this process is not there to end it — and
+   * it lands on the control-plane node of a cluster that has exactly one.
    *
    * ponytail: a registry credential rides as a plain container environment
    * variable, so it is readable by anyone with `get jobs` in the build
@@ -260,6 +307,9 @@ export class InClusterBuildRoute implements BuildAdapter {
       },
       spec: {
         backoffLimit: 0,
+        activeDeadlineSeconds: Math.ceil(
+          (this.options.timeoutMs ?? DEFAULT_BUILD_TIMEOUT_MS) / 1000,
+        ),
         ttlSecondsAfterFinished: JOB_TTL_SECONDS,
         template: {
           metadata: { labels: { [JOB_LABEL]: name } },
@@ -313,25 +363,50 @@ export class InClusterBuildRoute implements BuildAdapter {
   }
 
   /** Whether the Job is over, and how. `null` while it is still going. */
-  private async outcome(name: string): Promise<'succeeded' | 'failed' | null> {
+  private async outcome(name: string): Promise<JobOutcome | null> {
     const job = await this.options.api.get({
       apiVersion: 'batch/v1',
       plural: 'jobs',
       namespace: this.options.namespace,
       name,
     });
-    // A Job that is gone is a Job something else deleted mid-build. Reporting
-    // it as failed is the honest reading: nothing pushed an artifact, and there
-    // is no longer anything to wait for.
-    if (job === null) return 'failed';
+    // A Job that is gone is a Job something deleted mid-build — `cancel`, or
+    // an operator. Nothing pushed an artifact and nothing is left to wait for.
+    if (job === null) return 'gone';
 
     const status = (job.status ?? {}) as {
       succeeded?: number;
       failed?: number;
+      conditions?: readonly { type: string; status: string; reason?: string }[];
     };
     if ((status.succeeded ?? 0) > 0) return 'succeeded';
+    // Before the failed count: the controller deletes the pod it ends, so a
+    // Job past its deadline may carry the condition and no failed pod at all.
+    if (
+      (status.conditions ?? []).some(
+        (condition) =>
+          condition.type === 'Failed' &&
+          condition.status === 'True' &&
+          condition.reason === 'DeadlineExceeded',
+      )
+    ) {
+      return 'deadline';
+    }
     if ((status.failed ?? 0) > 0) return 'failed';
     return null;
+  }
+
+  /** Background propagation, or the pod keeps building under a deleted Job. */
+  private kill(name: string): Promise<void> {
+    return this.options.api.delete(
+      {
+        apiVersion: 'batch/v1',
+        plural: 'jobs',
+        namespace: this.options.namespace,
+        name,
+      },
+      { propagation: 'Background' },
+    );
   }
 
   /** The build pod's log, or `null` while there is no pod or no output yet. */

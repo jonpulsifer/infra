@@ -1069,6 +1069,15 @@ export type InstallationManifest = AuthoredManifest & {
      * credentials rather than update them.
      */
     readonly hostname: string;
+    /**
+     * What this process is running, as the deployment states it —
+     * `SPINDRIFT_VERSION`, the same value telemetry reports as
+     * `service.version`. Digest-pinned delivery means a browser cannot
+     * otherwise tell which image answered it, so the shell repeats this in
+     * its footer. `null` where the deployment says nothing: an honest absence,
+     * not a placeholder a footer would then repeat as fact.
+     */
+    readonly version: string | null;
   };
 };
 

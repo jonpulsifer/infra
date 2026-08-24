@@ -23,7 +23,12 @@ import {
   FAILURE_REASONS,
 } from '../../src/adapters/deploy/contract.ts';
 import type { DnsPublisher } from '../../src/adapters/dns/contract.ts';
-import type { AdapterRegistry, Clock } from '../../src/commands/types.ts';
+import { cancelDeploy } from '../../src/commands/deploys/cancel.ts';
+import type {
+  AdapterRegistry,
+  Clock,
+  CommandContext,
+} from '../../src/commands/types.ts';
 import { createDb } from '../../src/db/client.ts';
 import {
   apps,
@@ -41,6 +46,7 @@ import {
   DEFAULT_CLAIM_TIMEOUT_MS,
   DEFAULT_INTERVALS,
   DEPLOY_ATTEMPT_MAX_MS,
+  DEPLOY_SOAK_MS,
   type DeployLoopContext,
   heartbeatAttempt,
   intervalFor,
@@ -1272,5 +1278,399 @@ describe('the attempt fence (ticket 129)', () => {
         false,
       ),
     ).toBe(false);
+  });
+});
+
+describe('cancelling an attempt (§6)', () => {
+  /** The press itself, over the same isolated schema the loop runs against. */
+  function operator(): CommandContext {
+    return {
+      principal: { id: crypto.randomUUID(), displayName: 'Jordan' },
+      clock,
+      db: database().db,
+      adapters: {
+        deploy: () => null,
+        build: () => null,
+        store: () => {
+          throw new Error('cancelling reached the secret store');
+        },
+        repository: () => null,
+        supplyChain: () => {
+          throw new Error('cancelling reached the supply chain');
+        },
+      } as unknown as AdapterRegistry,
+      manifest,
+    };
+  }
+
+  async function eventsOf(deployId: number) {
+    return database()
+      .db.select()
+      .from(attemptEvents)
+      .where(eq(attemptEvents.deployId, deployId))
+      .orderBy(asc(attemptEvents.id));
+  }
+
+  test('a request during APPLYING ends the stream and settles FAILED with who asked', async () => {
+    const { deploy } = await pendingDeploy();
+    const adapter = new FakeDeployAdapter();
+    let finished = false;
+    let resumed = 0;
+    // The press lands between the adapter's own events — arranged inside the
+    // stream so no timer is involved, and so the second event is the one the
+    // loop must never absorb.
+    adapter.apply = async function* () {
+      try {
+        yield { type: 'status', at: FROZEN, phase: 'APPLYING' };
+        resumed += 1;
+        const pressed = await cancelDeploy({ id: deploy.id }, operator());
+        expect(pressed.ok && pressed.value.phase).toBe('APPLYING');
+        yield { type: 'status', at: FROZEN, phase: 'WAITING' };
+        resumed += 1;
+        return { phase: 'LIVE', ref: 'hr/apps/web' };
+      } finally {
+        finished = true;
+      }
+    };
+
+    const claimed = await claimNextDeploy(context(adapter));
+    const outcome = await runAttempt(context(adapter), claimed!);
+
+    expect(outcome?.phase).toBe('FAILED');
+    // `return`, not abandonment: the adapter's own `finally` ran, and the
+    // generator was never resumed past the event the cancel arrived on.
+    expect(finished).toBe(true);
+    expect(resumed).toBe(1);
+
+    const row = await deployRow(deploy.id);
+    expect(row).toMatchObject({
+      phase: 'FAILED',
+      // No reason and no blame: §6's set indicts a developer or the platform,
+      // and a cancellation indicts neither.
+      reason: null,
+      blame: null,
+      detail: 'cancelled by Jordan',
+      cancelRequestedBy: 'Jordan',
+      // Settled by the attempt that held the claim, through its fence.
+      attemptId: claimed!.attemptId,
+    });
+
+    const events = await eventsOf(deploy.id);
+    expect(events.map((event) => event.phase ?? event.line)).toEqual([
+      'APPLYING',
+      'cancel requested by Jordan; the attempt ends at its next event',
+      'cancelled by Jordan',
+      'FAILED',
+    ]);
+    expect(events.at(-1)?.reason).toBeNull();
+  });
+
+  test('the fence holds: a reclaimed attempt abandons the request, and the holder honours it', async () => {
+    const { deploy } = await pendingDeploy();
+    const script: ScriptedAttempt = {
+      events: [{ type: 'status', at: FROZEN, phase: 'APPLYING' }],
+      verdict: { phase: 'LIVE', ref: 'hr/apps/web' },
+    };
+    const first = new FakeDeployAdapter({ script: [script] });
+    const second = new FakeDeployAdapter({ script: [script] });
+    const otherDb = createDb(database().connect());
+
+    const held = await claimNextDeploy(context(first));
+    const reclaimed = await claimNextDeploy(
+      context(second, {
+        db: otherDb,
+        clock: {
+          now: () => new Date(FROZEN.getTime() + DEFAULT_CLAIM_TIMEOUT_MS + 1),
+        },
+      }),
+    );
+    expect(reclaimed?.attemptId).not.toBe(held?.attemptId);
+
+    // The press lands on a row the second attempt now holds.
+    const pressed = await cancelDeploy({ id: deploy.id }, operator());
+    expect(pressed.ok).toBe(true);
+
+    // The first attempt reads the request through its fence, which no longer
+    // matches — so it is not its request to honour, and the verdict it
+    // arrives at is not its to write either.
+    const late = await runAttempt(context(first), held!);
+    expect(late?.phase).toBe('LOST');
+    const stranded = await deployRow(deploy.id);
+    expect(stranded?.phase).toBe('APPLYING');
+    expect(stranded?.attemptId).toBe(reclaimed!.attemptId!);
+
+    const landed = await runAttempt(
+      context(second, { db: otherDb }),
+      reclaimed!,
+    );
+    expect(landed?.phase).toBe('FAILED');
+    expect(await deployRow(deploy.id)).toMatchObject({
+      phase: 'FAILED',
+      detail: 'cancelled by Jordan',
+      attemptId: reclaimed!.attemptId,
+    });
+  });
+
+  test('a PENDING intent is failed on the spot, the desired pointer goes back, and nothing claims it', async () => {
+    const first = await pendingDeploy();
+    await runDeployPass(context(new FakeDeployAdapter()));
+    expect((await deployRow(first.deploy.id))?.phase).toBe('LIVE');
+
+    // A second intent for the same pair, and the pointer moved onto it the way
+    // `placeIntent` moves it.
+    const db = database().db;
+    const [newer] = await db
+      .insert(builds)
+      .values({
+        componentId: first.component.id,
+        commit: 'bcdef01',
+        targetShape: 'image',
+        artifactType: 'image',
+        artifactDigest: `sha256:${'b'.repeat(64)}`,
+        status: 'SUCCEEDED',
+      })
+      .returning();
+    const [later] = await db
+      .insert(deploys)
+      .values({
+        componentId: first.component.id,
+        desired: aDesiredDocument(),
+        targetId: first.target.id,
+        buildId: newer!.id,
+        phase: 'PENDING',
+      })
+      .returning();
+    await db
+      .update(componentTargetDesired)
+      .set({ desiredBuildId: newer!.id, desiredDeployId: later!.id })
+      .where(eq(componentTargetDesired.componentId, first.component.id));
+
+    const pressed = await cancelDeploy({ id: later!.id }, operator());
+    expect(pressed).toMatchObject({
+      ok: true,
+      value: { deployId: later!.id, phase: 'FAILED' },
+    });
+
+    // Back to the release that was desired before the intent — which is what
+    // `deployApp` reads to decide the newer Build is not "already desired".
+    const [desired] = await db
+      .select()
+      .from(componentTargetDesired)
+      .where(eq(componentTargetDesired.componentId, first.component.id));
+    expect(desired?.desiredDeployId).toBe(first.deploy.id);
+    expect(desired?.desiredBuildId).toBe(first.build.id);
+
+    expect(await deployRow(later!.id)).toMatchObject({
+      phase: 'FAILED',
+      reason: null,
+      detail: 'cancelled by Jordan',
+      attemptId: null,
+    });
+    // Nothing is owed work: the loop never takes it.
+    expect(await claimNextDeploy(context(new FakeDeployAdapter()))).toBeNull();
+
+    const events = await eventsOf(later!.id);
+    expect(events.map((event) => event.phase ?? event.line)).toEqual([
+      'cancelled by Jordan',
+      'FAILED',
+    ]);
+  });
+});
+
+describe('the post-LIVE soak (§6)', () => {
+  const live: ScriptedAttempt = {
+    verdict: { phase: 'LIVE', ref: 'hr/apps/web' },
+  };
+  const at = (offsetMs: number) => ({
+    clock: { now: () => new Date(FROZEN.getTime() + offsetMs) },
+  });
+
+  test('a release the platform reports failed inside the window is faulty, with blame and a status line', async () => {
+    const { deploy } = await pendingDeploy();
+    const adapter = new FakeDeployAdapter({ script: [live] });
+    await runDeployPass(context(adapter));
+
+    // Inside the window nothing is judged, however many passes look.
+    await runDeployPass(context(adapter, at(DEPLOY_SOAK_MS - 1)));
+    expect(await deployRow(deploy.id)).toMatchObject({
+      soakedAt: null,
+      faultyAt: null,
+    });
+
+    // Readiness held, then did not — the case a green row with a late drift
+    // flag used to be the whole answer to.
+    adapter.place('hr/apps/web', {
+      ref: 'hr/apps/web',
+      phase: 'FAILED',
+      artifactDigest: DIGEST,
+      reason: 'STARTUP_FAILED',
+      detail: 'back-off 5m0s restarting failed container',
+    });
+    const judged = new Date(FROZEN.getTime() + DEPLOY_SOAK_MS);
+    await runDeployPass(context(adapter, at(DEPLOY_SOAK_MS)));
+
+    const row = await deployRow(deploy.id);
+    // Still the platform's verdict on the rollout, and still what is desired.
+    expect(row?.phase).toBe('LIVE');
+    expect(row?.faultyAt).toEqual(judged);
+    expect(row?.soakedAt).toBeNull();
+    // Filled the way a red attempt is filled: the blame is core's derivation.
+    expect(row?.reason).toBe('STARTUP_FAILED');
+    expect(row?.blame).toBe(BLAME.STARTUP_FAILED);
+    expect(row?.detail).toContain('back-off');
+    expect(row?.debug).toMatchObject({ phase: 'FAILED' });
+
+    const events = await database()
+      .db.select()
+      .from(attemptEvents)
+      .where(eq(attemptEvents.deployId, deploy.id))
+      .orderBy(asc(attemptEvents.id));
+    expect(events.at(-1)).toMatchObject({
+      phase: 'FAULTY',
+      reason: 'STARTUP_FAILED',
+    });
+    expect(
+      events.some((event) => event.line?.includes('faulty after readiness')),
+    ).toBe(true);
+
+    // Judged once. The platform later agreeing again is drift clearing, and
+    // the verdict the soak drew stays what it was.
+    adapter.place('hr/apps/web', {
+      ref: 'hr/apps/web',
+      phase: 'LIVE',
+      artifactDigest: DIGEST,
+    });
+    await runDeployPass(context(adapter, at(DEPLOY_SOAK_MS * 10)));
+    expect(await deployRow(deploy.id)).toMatchObject({
+      faultyAt: judged,
+      reason: 'STARTUP_FAILED',
+      driftedAt: null,
+    });
+  });
+
+  test('a fault the platform names no reason for is recorded in its words, with no blame', async () => {
+    const { deploy } = await pendingDeploy();
+    const adapter = new FakeDeployAdapter({ script: [live] });
+    await runDeployPass(context(adapter));
+
+    // What a Flux upgrade that failed inside the window reads as when the
+    // object's own conditions cannot say why: the read on red is the
+    // adapter's to take, and one that named nothing must not be guessed at —
+    // an image that stopped pulling is not the developer's `UNHEALTHY`.
+    adapter.place('hr/apps/web', {
+      ref: 'hr/apps/web',
+      phase: 'FAILED',
+      artifactDigest: DIGEST,
+      detail: 'Helm upgrade failed: timed out waiting for the condition',
+    });
+    const judged = new Date(FROZEN.getTime() + DEPLOY_SOAK_MS);
+    await runDeployPass(context(adapter, at(DEPLOY_SOAK_MS)));
+
+    const row = await deployRow(deploy.id);
+    expect(row).toMatchObject({
+      phase: 'LIVE',
+      faultyAt: judged,
+      soakedAt: null,
+      reason: null,
+      blame: null,
+      detail: 'Helm upgrade failed: timed out waiting for the condition',
+    });
+
+    const events = await database()
+      .db.select()
+      .from(attemptEvents)
+      .where(eq(attemptEvents.deployId, deploy.id))
+      .orderBy(asc(attemptEvents.id));
+    expect(events.at(-1)).toMatchObject({ phase: 'FAULTY', reason: null });
+  });
+
+  test('an object mid-rollout at the window is judged on the next pass, not closed on transient state', async () => {
+    const { deploy } = await pendingDeploy();
+    const adapter = new FakeDeployAdapter({ script: [live] });
+    await runDeployPass(context(adapter));
+
+    // A restart pressed inside the window: the same digest, the controller
+    // replacing pods. Neither verdict, so neither stamp.
+    adapter.place('hr/apps/web', {
+      ref: 'hr/apps/web',
+      phase: 'WAITING',
+      artifactDigest: DIGEST,
+    });
+    await runDeployPass(context(adapter, at(DEPLOY_SOAK_MS)));
+    expect(await deployRow(deploy.id)).toMatchObject({
+      soakedAt: null,
+      faultyAt: null,
+    });
+
+    // The restarted pods crash-loop: the verdict the soak exists to give.
+    adapter.place('hr/apps/web', {
+      ref: 'hr/apps/web',
+      phase: 'FAILED',
+      artifactDigest: DIGEST,
+      reason: 'STARTUP_FAILED',
+      detail: 'back-off 5m0s restarting failed container',
+    });
+    const judged = new Date(FROZEN.getTime() + DEPLOY_SOAK_MS + 1);
+    await runDeployPass(context(adapter, at(DEPLOY_SOAK_MS + 1)));
+    expect(await deployRow(deploy.id)).toMatchObject({
+      faultyAt: judged,
+      soakedAt: null,
+      reason: 'STARTUP_FAILED',
+      blame: BLAME.STARTUP_FAILED,
+    });
+  });
+
+  test('a healthy soak stamps soaked_at once, and a later failure is drift rather than a fault', async () => {
+    const { deploy } = await pendingDeploy();
+    const adapter = new FakeDeployAdapter({ script: [live] });
+    await runDeployPass(context(adapter));
+
+    const judged = new Date(FROZEN.getTime() + DEPLOY_SOAK_MS);
+    await runDeployPass(context(adapter, at(DEPLOY_SOAK_MS)));
+    expect(await deployRow(deploy.id)).toMatchObject({
+      phase: 'LIVE',
+      soakedAt: judged,
+      faultyAt: null,
+      reason: null,
+    });
+
+    // Well past the window: the same observation that would have been a
+    // fault inside it is now §6's drift — information, with no blame.
+    adapter.place('hr/apps/web', {
+      ref: 'hr/apps/web',
+      phase: 'FAILED',
+      artifactDigest: DIGEST,
+      reason: 'STARTUP_FAILED',
+      detail: 'crash loop',
+    });
+    await runDeployPass(context(adapter, at(DEPLOY_SOAK_MS * 10)));
+    const row = await deployRow(deploy.id);
+    expect(row?.soakedAt).toEqual(judged);
+    expect(row?.faultyAt).toBeNull();
+    expect(row?.reason).toBeNull();
+    expect(row?.driftedAt).not.toBeNull();
+  });
+
+  test('an object that now carries a newer release is not judged on this one’s behalf', async () => {
+    const { deploy } = await pendingDeploy();
+    const adapter = new FakeDeployAdapter({ script: [live] });
+    await runDeployPass(context(adapter));
+
+    // The same delivery object, re-applied by a later intent and failing under
+    // that release's digest. Whatever it says is the newer row's to carry.
+    adapter.place('hr/apps/web', {
+      ref: 'hr/apps/web',
+      phase: 'FAILED',
+      artifactDigest: `sha256:${'b'.repeat(64)}`,
+      reason: 'STARTUP_FAILED',
+    });
+    const judged = new Date(FROZEN.getTime() + DEPLOY_SOAK_MS);
+    await runDeployPass(context(adapter, at(DEPLOY_SOAK_MS)));
+
+    expect(await deployRow(deploy.id)).toMatchObject({
+      soakedAt: judged,
+      faultyAt: null,
+      reason: null,
+    });
   });
 });

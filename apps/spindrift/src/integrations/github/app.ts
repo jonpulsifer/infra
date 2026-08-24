@@ -146,22 +146,30 @@ export class GitHubApp implements ExactCommitFetcher<InstallationRef> {
   /**
    * The repository's own facts. §15 reads the default branch, never assumes it.
    *
-   * Narrowed to that one field because it is the only one core has a use for —
-   * a wider return would be a promise about a far side's response shape that
-   * `RepositoryReader` does not make.
+   * Narrowed to the two fields core has a use for — a wider return would be a
+   * promise about a far side's response shape that `RepositoryReader` does not
+   * make. `full_name` is there because GitHub answers a renamed repository's
+   * old name with a `301` that `fetch` follows silently, so the body's name is
+   * the only place the rename shows.
    */
   async repository(
     ref: InstallationRef,
     fullName: string,
-  ): Promise<{ readonly defaultBranch: string }> {
-    const repository = await this.http(ref).json<{ default_branch: string }>({
+  ): Promise<{ readonly defaultBranch: string; readonly fullName: string }> {
+    const repository = await this.http(ref).json<{
+      default_branch: string;
+      full_name: string;
+    }>({
       method: 'GET',
       path: `/repos/${fullName}`,
     });
     if (repository === null) {
       throw new TypeError('the repository endpoint tolerates no status');
     }
-    return { defaultBranch: repository.default_branch };
+    return {
+      defaultBranch: repository.default_branch,
+      fullName: repository.full_name,
+    };
   }
 
   /**
@@ -681,6 +689,23 @@ export class GitHubApp implements ExactCommitFetcher<InstallationRef> {
   }
 
   /**
+   * Cancel a run. `409` is the host saying the run already concluded, which
+   * is the outcome a cancel wanted and not a fault.
+   */
+  async cancelRun(
+    ref: InstallationRef,
+    fullName: string,
+    runId: number,
+  ): Promise<void> {
+    await this.http(ref).send({
+      method: 'POST',
+      path: `/repos/${fullName}/actions/runs/${runId}/cancel`,
+      body: {},
+      tolerate: [409],
+    });
+  }
+
+  /**
    * The jobs of one run and the steps inside them.
    *
    * This is the whole of `LIVE_STATUS` (§4): on a hosted runner the step
@@ -782,13 +807,27 @@ export class GitHubApp implements ExactCommitFetcher<InstallationRef> {
   }): Promise<FetchedCommit> {
     const { repository, commit, credential } = input;
 
-    const resolved = await this.http(credential).json<{ sha: string }>({
+    // The same response that resolves the sha carries the commit's message and
+    // author; keeping them here is what puts a headline on the Build without a
+    // second call or a second code path.
+    const resolved = await this.http(credential).json<{
+      sha: string;
+      commit?: {
+        message?: string | null;
+        author?: { name?: string | null; date?: string | null } | null;
+      };
+      /** The host's user for the author, absent when it cannot match one. */
+      author?: { login?: string | null } | null;
+    }>({
       method: 'GET',
       path: `/repos/${repository}/commits/${encodeURIComponent(commit)}`,
     });
     if (resolved === null) {
       throw new TypeError('the commit endpoint tolerates no status');
     }
+    const authoredAt = resolved.commit?.author?.date
+      ? new Date(resolved.commit.author.date)
+      : null;
 
     const [bytes, gitmodules, gitattributes] = await Promise.all([
       this.http(credential).bytes({
@@ -810,6 +849,12 @@ export class GitHubApp implements ExactCommitFetcher<InstallationRef> {
       // filter is what makes a checkout depend on a second fetch nobody staged.
       hasGitLfs:
         gitattributes !== null && /filter\s*=\s*lfs/.test(gitattributes),
+      message: resolved.commit?.message ?? null,
+      author: resolved.author?.login ?? resolved.commit?.author?.name ?? null,
+      authoredAt:
+        authoredAt !== null && Number.isNaN(authoredAt.getTime())
+          ? null
+          : authoredAt,
       principal: {
         kind: 'githubApp',
         subject: principalSubject,

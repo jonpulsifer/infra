@@ -57,6 +57,9 @@ export async function cachedBundle(
       .select({
         digest: sourceBundles.digest,
         location: sourceBundles.location,
+        commitMessage: sourceBundles.commitMessage,
+        commitAuthor: sourceBundles.commitAuthor,
+        commitAuthoredAt: sourceBundles.commitAuthoredAt,
       })
       .from(sourceBundles)
       .where(
@@ -78,6 +81,21 @@ export async function cachedBundle(
     });
     if (!present) return null;
 
+    // A row written before the headline columns existed says nothing about
+    // the commit, and a hit from it should look like one — not like a commit
+    // whose message was blank.
+    const headline =
+      row.commitMessage === null &&
+      row.commitAuthor === null &&
+      row.commitAuthoredAt === null
+        ? {}
+        : {
+            commit: {
+              message: row.commitMessage,
+              author: row.commitAuthor,
+              authoredAt: row.commitAuthoredAt,
+            },
+          };
     return {
       digest: row.digest,
       location: row.location,
@@ -85,6 +103,7 @@ export async function cachedBundle(
       // ago or read back from here. The retention is a property of the object,
       // not of how this call found it.
       retention: 'ephemeral',
+      ...headline,
     };
   } catch {
     return null;
@@ -108,6 +127,9 @@ export async function rememberBundle(
         digest: bundle.digest,
         location: bundle.location,
         stagedAt,
+        commitMessage: bundle.commit?.message ?? null,
+        commitAuthor: bundle.commit?.author ?? null,
+        commitAuthoredAt: bundle.commit?.authoredAt ?? null,
       })
       // The same commit re-staged writes the same content-addressed object, so
       // the conflicting row is not stale — but `staged_at` is, and it is the
@@ -118,6 +140,9 @@ export async function rememberBundle(
           digest: sql`excluded.digest`,
           location: sql`excluded.location`,
           stagedAt: sql`excluded.staged_at`,
+          commitMessage: sql`excluded.commit_message`,
+          commitAuthor: sql`excluded.commit_author`,
+          commitAuthoredAt: sql`excluded.commit_authored_at`,
         },
       });
   } catch {

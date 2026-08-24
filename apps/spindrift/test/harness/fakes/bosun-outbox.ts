@@ -25,13 +25,14 @@ const NEVER_CLAIMED: BosunOutboxState = { state: 'PENDING', result: null };
 
 export class FakeBosunOutbox implements BosunOutbox {
   /** Every `enqueue`, in call order. */
-  readonly enqueued: { class: string; request: unknown }[] = [];
+  readonly enqueued: { id?: string; class: string; request: unknown }[] = [];
   /** Every id `cancel` was called with, in call order. */
   readonly cancelled: string[] = [];
 
   private readonly states: readonly BosunOutboxState[];
   private reads = 0;
-  private readonly id: string;
+  /** The one row this fake holds — named by the caller when it names one. */
+  private id: string;
 
   constructor(options: FakeBosunOutboxOptions = {}) {
     this.states = options.states?.length ? options.states : [NEVER_CLAIMED];
@@ -39,10 +40,12 @@ export class FakeBosunOutbox implements BosunOutbox {
   }
 
   async enqueue(input: {
+    readonly id?: string;
     readonly class: string;
     readonly request: unknown;
   }): Promise<{ readonly id: string }> {
     this.enqueued.push(input);
+    if (input.id !== undefined) this.id = input.id;
     return { id: this.id };
   }
 

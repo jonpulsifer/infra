@@ -35,6 +35,7 @@ import {
   resolveComponentPlacement,
   resolveComponentPlacementInput,
 } from './apps/resolve-placement.ts';
+import { setAppLock, setAppLockInput } from './apps/set-lock.ts';
 import { getAppSource, getAppSourceInput } from './apps/source.ts';
 import { uploadArchive, uploadArchiveInput } from './apps/upload-archive.ts';
 import { setAppVanity, setAppVanityInput } from './apps/vanity.ts';
@@ -58,6 +59,10 @@ import {
   setComponentReach,
   setComponentReachInput,
 } from './components/reach.ts';
+import {
+  restartComponent,
+  restartComponentInput,
+} from './components/restart.ts';
 import { runComponent, runComponentInput } from './components/run.ts';
 import {
   setComponentSchedule,
@@ -92,6 +97,7 @@ import {
 import { detachDatastore, detachDatastoreInput } from './datastores/detach.ts';
 import { getDatastore, getDatastoreInput } from './datastores/get.ts';
 import { listDatastores, listDatastoresInput } from './datastores/list.ts';
+import { cancelDeploy, cancelDeployInput } from './deploys/cancel.ts';
 import { createDeploy, createDeployInput } from './deploys/create.ts';
 import { getDeployDetail, getDeployDetailInput } from './deploys/get-detail.ts';
 import { listDeploys, listDeploysInput } from './deploys/list.ts';
@@ -194,6 +200,7 @@ export const commandRegistry = {
     input: setAppAutoDeployInput,
     handler: setAppAutoDeploy,
   },
+  setAppLock: { input: setAppLockInput, handler: setAppLock },
   setAppBuildRoute: { input: setAppBuildRouteInput, handler: setAppBuildRoute },
   setAppZone: { input: setAppZoneInput, handler: setAppZone },
   setAppVanity: { input: setAppVanityInput, handler: setAppVanity },
@@ -237,6 +244,10 @@ export const commandRegistry = {
     handler: setComponentReach,
   },
   runComponent: { input: runComponentInput, handler: runComponent },
+  restartComponent: {
+    input: restartComponentInput,
+    handler: restartComponent,
+  },
   setComponentSchedule: {
     input: setComponentScheduleInput,
     handler: setComponentSchedule,
@@ -289,6 +300,7 @@ export const commandRegistry = {
   dispatchBuild: { input: dispatchBuildInput, handler: dispatchBuild },
   createDeploy: { input: createDeployInput, handler: createDeploy },
   rollbackDeploy: { input: rollbackDeployInput, handler: rollbackDeploy },
+  cancelDeploy: { input: cancelDeployInput, handler: cancelDeploy },
   connectRepository: {
     input: connectRepositoryInput,
     handler: connectRepository,

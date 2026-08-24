@@ -351,6 +351,34 @@
       "when": 1786968660000,
       "tag": "0049_build_route_names",
       "breakpoints": true
+    },
+    {
+      "idx": 50,
+      "version": "7",
+      "when": 1786968720000,
+      "tag": "0050_app_lock_and_deploy_principal",
+      "breakpoints": true
+    },
+    {
+      "idx": 51,
+      "version": "7",
+      "when": 1786968780000,
+      "tag": "0051_deploy_cancel_and_soak",
+      "breakpoints": true
+    },
+    {
+      "idx": 52,
+      "version": "7",
+      "when": 1786968840000,
+      "tag": "0052_build_commit_headline",
+      "breakpoints": true
+    },
+    {
+      "idx": 53,
+      "version": "7",
+      "when": 1786968900000,
+      "tag": "0053_attempt_events_leg_index",
+      "breakpoints": true
     }
   ]
 }

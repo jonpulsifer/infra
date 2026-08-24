@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -216,6 +217,71 @@ func TestSDClientPostResultSendsBodyAndAuth(t *testing.T) {
 	}
 	if gotBody["status"] != buildSucceeded || gotBody["log"] != "ok" {
 		t.Fatalf("unexpected posted result: %v", gotBody)
+	}
+}
+
+// A 404 on the heartbeat is Spindrift saying the row is no longer this
+// host's -- the one answer runBuild has to act on rather than log.
+func TestSDClientHeartbeatReportsALostClaim(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /internal/bosun/requests/build-1/heartbeat", func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, `{"code":"NOT_FOUND"}`, http.StatusNotFound)
+	})
+	server := httptest.NewServer(mux)
+	defer server.Close()
+
+	c := &sdClient{httpClient: server.Client(), token: "t", base: server.URL}
+	err := c.Heartbeat(context.Background(), "build-1", "claim-1")
+	if !errors.Is(err, errClaimLost) {
+		t.Fatalf("want errClaimLost, got %v", err)
+	}
+}
+
+// Spindrift never dials in, so a cancel on its side reaches the skiff only
+// as a refused heartbeat. The skiff is killed rather than left to finish and
+// push, and nothing is posted for a row nobody would accept a result on.
+func TestRunBuildKillsTheSkiffWhenTheClaimIsLost(t *testing.T) {
+	ch := newFakeProc()
+	s := &skiff{build: true, paths: skiffPaths{diagDir: t.TempDir()}, ch: ch, done: make(chan struct{})}
+	sd := &fakeSpindrift{heartbeatErr: errClaimLost}
+	b := &buildSource{
+		sd:             sd,
+		spawn:          func(context.Context, *buildClaim) (*skiff, error) { return s, nil },
+		logger:         testLogger(),
+		stats:          newMetrics(),
+		heartbeatEvery: 5 * time.Millisecond,
+	}
+
+	done := make(chan struct{})
+	go func() {
+		b.runBuild(context.Background(), &buildClaim{ID: "build-1", Claimant: "claim-1"})
+		close(done)
+	}()
+
+	// awaitExit's half of the choreography: the VMM exits under the kill, and
+	// retire closes done once the skiff is gone.
+	waited := make(chan error, 1)
+	go func() { waited <- ch.Wait() }()
+	select {
+	case err := <-waited:
+		if !errors.Is(err, errFakeKilled) {
+			t.Fatalf("the skiff exited on its own rather than under the kill: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("the skiff was not killed after the claim was lost")
+	}
+	close(s.done)
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("runBuild did not return after the skiff was gone")
+	}
+	if got := s.reason(); got != exitCancelled {
+		t.Fatalf("exit reason: got %q, want %q", got, exitCancelled)
+	}
+	if got := sd.postedResults(); len(got) != 0 {
+		t.Fatalf("a lost claim should post nothing, got %+v", got)
 	}
 }
 

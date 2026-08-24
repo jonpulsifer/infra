@@ -112,6 +112,15 @@ spec:
               value: /tmp
             - name: PORT
               value: {{ $top.Values.port | quote }}
+            {{- if contains "@" $top.Values.image }}
+            # What the footer says is running: the digest CD pinned, shortened
+            # the way the product already prints digests — `sha256:` and the
+            # twelve hex characters its `Ref` and `shortDigest` keep. A
+            # tag-only image states no version, so the footer stays hidden
+            # rather than lying.
+            - name: SPINDRIFT_VERSION
+              value: {{ $top.Values.image | splitList "@" | last | trunc 19 | quote }}
+            {{- end }}
             {{- if $process.federates }}
             - name: SPINDRIFT_IDENTITY_TOKEN_PATH
               value: {{ printf "%s/token" $top.Values.serviceAccount.token.mountPath | quote }}

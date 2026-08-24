@@ -201,6 +201,7 @@ function AccountMenu({
 export function AppShell({
   path,
   principal,
+  version = null,
   onNavigate,
   onSignOut,
   themeControl,
@@ -208,6 +209,13 @@ export function AppShell({
 }: {
   readonly path: string;
   readonly principal: Principal;
+  /**
+   * What the answering process is running (`SPINDRIFT_VERSION`), or `null`
+   * where the deployment states nothing. Digest-pinned delivery rolls pods
+   * without a version anybody typed, so this is the one line that says which
+   * image the browser is talking to.
+   */
+  readonly version?: string | null;
   readonly onNavigate: (path: string) => void;
   readonly onSignOut: () => void;
   readonly themeControl: ReactNode;
@@ -359,6 +367,15 @@ export function AppShell({
           </div>
         ) : null}
         <main className="min-w-0 pb-20 md:pb-0">{children}</main>
+        {version ? (
+          // Below the phone bar's clearance on small screens, so the line is
+          // reachable rather than hidden behind the fixed navigation.
+          <footer className="px-4 pb-24 pt-2 text-[11px] text-muted-foreground sm:px-6 md:pb-3">
+            <span className="font-mono" title={`Running ${version}`}>
+              Spindrift {version}
+            </span>
+          </footer>
+        ) : null}
       </div>
 
       <nav

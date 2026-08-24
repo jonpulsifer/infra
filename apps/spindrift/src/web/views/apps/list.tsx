@@ -106,7 +106,7 @@ function rowDetail(app: AppListItem): string {
 
 /** Everything a row matches on, including the facts it does not print. */
 function haystack(app: AppListItem): string {
-  return `${app.name} ${app.kind} ${app.target} ${app.vessel} ${app.source} ${app.url} ${app.artifact} ${app.commit ?? ''}`.toLowerCase();
+  return `${app.name} ${app.kind} ${app.target} ${app.vessel} ${app.source} ${app.url} ${app.artifact} ${app.commit ?? ''} ${app.commitMessage ?? ''}`.toLowerCase();
 }
 
 /**
@@ -149,7 +149,7 @@ export function AppRow({
         </span>
 
         <span className="justify-self-end lg:justify-self-start">
-          <PhasePill phase={app.phase} />
+          <PhasePill phase={app.phase} faulty={app.faulty} />
         </span>
 
         {/* Below `lg` the four columns after the phase become one muted line
@@ -164,8 +164,14 @@ export function AppRow({
             <span className="text-muted-foreground">not allocated</span>
           )}
         </span>
-        <span className="hidden truncate font-mono text-body text-muted-foreground lg:block">
+        <span
+          className="hidden truncate font-mono text-body text-muted-foreground lg:block"
+          title={app.commitMessage ?? undefined}
+        >
           {app.commit ? app.commit.slice(0, 7) : '—'}
+          {app.commitMessage ? (
+            <span className="ml-2 font-sans">{app.commitMessage}</span>
+          ) : null}
         </span>
         <span className="hidden truncate font-mono text-body text-muted-foreground lg:block">
           {app.target}

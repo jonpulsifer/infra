@@ -39,6 +39,7 @@ import {
   Ban,
   ChevronRight,
   ExternalLink,
+  FileText,
   RefreshCw,
   Rocket,
   Undo2,
@@ -60,9 +61,10 @@ import {
   type Stage as ProgressStage,
   StageProgress,
 } from '../../components/progress.tsx';
-import { RunningTime } from '../../components/running-time.tsx';
+import { formatDuration, RunningTime } from '../../components/running-time.tsx';
 import { PhasePill, StepGlyph, statusWord } from '../../components/status.tsx';
 import { subscribeAttempt } from '../../stream-client.ts';
+import { ATTEMPT_LOG_TEXT_PATH } from '../../stream-path.ts';
 import { Button } from '../../ui/button.tsx';
 import { Card, CardContent, Eyebrow } from '../../ui/card.tsx';
 import {
@@ -94,6 +96,14 @@ export interface AttemptActions {
   readonly onDeployBuild?: () => void;
   /** End a queued Build nobody intends to make dispatchable (§4). */
   readonly onCancel?: () => void;
+  /** Stop a Deploy that has not landed — the attempt honours it (§6). */
+  readonly onCancelDeploy?: () => void;
+  /**
+   * A cancel this screen already asked of the running Build, which its route
+   * reports on at its next poll. Shown as the pressed state rather than the
+   * act again, the way the Deploy button is on `cancelRequestedBy`.
+   */
+  readonly cancelRequested?: boolean;
   readonly busy?: 'redeploy' | 'rollback' | 'deploy' | 'cancel' | null;
 }
 
@@ -123,9 +133,11 @@ export function DeployDetail({
         Below the diagnosis, and never instead of it. The two can both be
         absent, and only drift can be present on a green release — but a red
         release that has also drifted leads with why it failed, because that is
-        the older and more actionable fact.
+        the older and more actionable fact. A faulty release is the one case
+        where the two say the same thing — the soak and the drift pass read the
+        same observation — so the amber panel yields to the red one.
       */}
-      {view.drift ? (
+      {view.drift && view.faultyAt === undefined ? (
         <DriftPanel
           drift={view.drift}
           url={view.url}
@@ -292,7 +304,9 @@ function Hero({
       <div className="flex flex-wrap items-center gap-4">
         <div className="flex flex-col gap-2">
           <div className="flex flex-wrap items-center gap-2">
-            <PhasePill phase={view.phase}>{view.phaseWord}</PhasePill>
+            <PhasePill phase={view.phase} faulty={view.faultyAt !== undefined}>
+              {view.phaseWord}
+            </PhasePill>
             {/*
               While it is moving, the number that matters is how long it has
               been moving — a screen whose only time reads "just now" for the
@@ -370,17 +384,31 @@ function stagesOf(view: DeployView): readonly ProgressStage[] {
           status: build.status,
           ...(build.duration === undefined ? {} : { detail: build.duration }),
         },
-    { name: 'Deploy', status: deployStatus, detail: view.target },
-    view.urlLive
-      ? { name: 'Live', status: 'done', detail: 'serving' }
-      : view.previousReleaseServing
-        ? // Serving, just not this release. Neither green nor red: the App is
-          // up and this attempt did not put it there.
-          { name: 'Live', status: 'waiting', detail: 'previous release' }
-        : {
-            name: 'Live',
-            status: view.phase === 'FAILED' ? 'failed' : 'waiting',
-          },
+    {
+      name: 'Deploy',
+      status: deployStatus,
+      // While it is moving, what the strip cannot say is when it will stop —
+      // so it says what the history says instead, which is a fact rather than
+      // the fraction `progress.tsx` refuses to invent.
+      detail:
+        view.id !== null && isInFlight(view.phase) && view.expectedDuration
+          ? `usually about ${formatDuration(view.expectedDuration.p90Ms)}, from ${view.expectedDuration.samples} deploys`
+          : view.target,
+    },
+    // Faulty is the Live leg going red after it went green: the rollout landed
+    // and the platform has since reported this release failed (§6's soak).
+    view.faultyAt !== undefined
+      ? { name: 'Live', status: 'failed', detail: 'faulty' }
+      : view.urlLive
+        ? { name: 'Live', status: 'done', detail: 'serving' }
+        : view.previousReleaseServing
+          ? // Serving, just not this release. Neither green nor red: the App is
+            // up and this attempt did not put it there.
+            { name: 'Live', status: 'waiting', detail: 'previous release' }
+          : {
+              name: 'Live',
+              status: view.phase === 'FAILED' ? 'failed' : 'waiting',
+            },
   ];
 }
 
@@ -400,7 +428,15 @@ function Actions({
   view: DeployView;
   actions: AttemptActions;
 }) {
-  const { onRedeploy, onRollback, onDeployBuild, onCancel, busy } = actions;
+  const {
+    onRedeploy,
+    onRollback,
+    onDeployBuild,
+    onCancel,
+    onCancelDeploy,
+    cancelRequested,
+    busy,
+  } = actions;
   const buttons = [];
 
   // An artifact that exists is deployable, and the button keys on the artifact
@@ -468,20 +504,58 @@ function Actions({
     );
   }
 
-  // Only while it is queued. A Build a runner is streaming into ends when that
-  // route writes its verdict and not before, so offering the act here would be
-  // a button that lies — the grammar this whole function is written in.
-  if (onCancel && view.build?.status === 'waiting') {
+  // While it is queued or running. A running Build still ends when its route
+  // writes the verdict and not before — the command stops the far side and the
+  // route reports what became of it, so the screen shows "cancel requested by"
+  // first and the verdict a poll later, which is the honest order of events.
+  // Until that verdict the button holds the pressed state: the row itself does
+  // not change, so nothing else on the screen would say the ask was made.
+  if (
+    onCancel &&
+    (view.build?.status === 'waiting' || view.build?.status === 'running')
+  ) {
+    const requested =
+      cancelRequested === true && view.build?.status === 'running';
     buttons.push(
       <Button
         key="cancel"
         variant="outline"
         size="sm"
         onClick={onCancel}
-        disabled={busy !== null && busy !== undefined}
+        disabled={requested || (busy !== null && busy !== undefined)}
+        title={
+          requested
+            ? 'Cancel requested; the route reports the verdict'
+            : undefined
+        }
       >
         <Ban aria-hidden="true" className="size-3.5" />
-        {busy === 'cancel' ? 'Cancelling…' : 'Cancel build'}
+        {requested || busy === 'cancel' ? 'Cancelling…' : 'Cancel build'}
+      </Button>,
+    );
+  }
+
+  // Only while the Deploy has not landed. A request already stamped stays
+  // visible as the pressed state rather than as the button again: the attempt
+  // holding the claim honours it at its next event, and a second press would
+  // ask for what is already asked.
+  if (onCancelDeploy && view.id !== null && isInFlight(view.phase)) {
+    const requested = view.cancelRequestedBy !== undefined;
+    buttons.push(
+      <Button
+        key="cancel-deploy"
+        variant="outline"
+        size="sm"
+        onClick={onCancelDeploy}
+        disabled={requested || (busy !== null && busy !== undefined)}
+        title={
+          requested
+            ? `Cancel requested by ${view.cancelRequestedBy}`
+            : undefined
+        }
+      >
+        <Ban aria-hidden="true" className="size-3.5" />
+        {requested || busy === 'cancel' ? 'Cancelling…' : 'Cancel deploy'}
       </Button>,
     );
   }
@@ -549,7 +623,19 @@ function Provenance({
           {source.kind === 'repo' ? (
             <>
               <Fact label="Repository" value={source.repo} />
-              <Fact label="Commit" value={source.commit} copy />
+              <Fact
+                label="Commit"
+                value={source.commit}
+                note={source.commitMessage ?? undefined}
+                copy
+              />
+              {source.commitAuthor ? (
+                <Fact
+                  label="Author"
+                  value={source.commitAuthor}
+                  note={source.commitAuthoredAt ?? undefined}
+                />
+              ) : null}
             </>
           ) : (
             <>
@@ -569,6 +655,12 @@ function Provenance({
           <Fact label="Artifact" value={view.artifactDigest} copy />
           <Fact label="Config version" value={view.configVersion} copy />
           <Fact label="Created" value={view.at} />
+          {/* Who asked: a name, or "auto-deploy on push". A Build-only attempt
+              has no Deploy to have asked for, and a release older than the
+              column records nobody — the dash says so. */}
+          {view.id === null ? null : (
+            <Fact label="Requested by" value={view.requestedBy ?? null} />
+          )}
         </CardContent>
       </Card>
       {view.previousDeployId !== null && onNavigate ? (
@@ -772,7 +864,7 @@ function BuildOutput({ view }: { view: DeployView }) {
   const build = view.build;
   if (build === null) return null;
   if (build.log !== null) {
-    return <Transcript build={build} />;
+    return <Transcript build={build} buildId={view.buildId} />;
   }
 
   if (build.fidelity === 'LIVE_STATUS') {
@@ -828,7 +920,13 @@ function BuildOutput({ view }: { view: DeployView }) {
  * lands on a drawer that never sprang open. Same shape as `BuildDrawer`'s
  * prior-status effect above, for the same reason.
  */
-function Transcript({ build }: { build: NonNullable<DeployView['build']> }) {
+function Transcript({
+  build,
+  buildId,
+}: {
+  build: NonNullable<DeployView['build']>;
+  buildId: number;
+}) {
   const lines = build.log ?? [];
   const [open, setOpen] = useState(build.status === 'failed');
   const priorStatus = useRef(build.status);
@@ -864,10 +962,43 @@ function Transcript({ build }: { build: NonNullable<DeployView['build']> }) {
               the full transcript stays on the runner.
             </p>
           ) : null}
-          <RunLink url={build.runUrl} />
+          <div className="flex flex-wrap gap-4">
+            <PlainTextLink buildId={buildId} />
+            <RunLink url={build.runUrl} />
+          </div>
         </div>
       </CollapsibleContent>
     </Collapsible>
+  );
+}
+
+/**
+ * The whole attempt log as one text document, for a terminal or a paste.
+ *
+ * A plain `<a>` and nothing more: the route sits behind the same session the
+ * stream does (`streams.ts`), and the browser sends that cookie by itself. With
+ * a `deployId` the document is both legs of the attempt; without one, the
+ * build's.
+ */
+function PlainTextLink({
+  buildId,
+  deployId,
+}: {
+  buildId: number;
+  deployId?: number;
+}) {
+  const query = new URLSearchParams({ buildId: String(buildId) });
+  if (deployId !== undefined) query.set('deployId', String(deployId));
+  return (
+    <a
+      href={`${ATTEMPT_LOG_TEXT_PATH}?${query}`}
+      target="_blank"
+      rel="noreferrer noopener"
+      className="inline-flex items-center gap-1 self-start text-[12.5px] font-medium text-accent-foreground hover:underline"
+    >
+      <FileText aria-hidden className="size-3" />
+      Plain text
+    </a>
   );
 }
 
@@ -939,7 +1070,13 @@ function DeployDrawer({ view }: { view: DeployView }) {
           yet.
         </Notice>
       ) : (
-        <LogPane lines={view.deployLog} follow={isInFlight(view.phase)} />
+        <>
+          <LogPane lines={view.deployLog} follow={isInFlight(view.phase)} />
+          <PlainTextLink
+            buildId={view.buildId}
+            deployId={view.id ?? undefined}
+          />
+        </>
       )}
     </Stage>
   );
@@ -968,7 +1105,9 @@ export function DeployScreen({
     | { type: 'success'; deploy: DeployView }
   >({ type: 'loading' });
 
-  const [busy, setBusy] = useState<'redeploy' | 'rollback' | null>(null);
+  const [busy, setBusy] = useState<'redeploy' | 'rollback' | 'cancel' | null>(
+    null,
+  );
   const [reloadToken, setReloadToken] = useState(0);
 
   useEffect(() => {
@@ -1110,6 +1249,39 @@ export function DeployScreen({
     }
   };
 
+  /**
+   * Ask the attempt to stop, then re-read rather than navigate away.
+   *
+   * The verdict is the point of the screen: a queued intent is failed on the
+   * spot, and an in-flight one comes back still moving with the request on it
+   * — the attempt log carries who asked, and the poll above carries the
+   * settle when the attempt honours it.
+   */
+  const handleCancel = async () => {
+    if (state.type !== 'success' || state.deploy.id === null) return;
+    setBusy('cancel');
+    try {
+      const result = await command('cancelDeploy', { id: state.deploy.id });
+      if (result.ok) {
+        setReloadToken((token) => token + 1);
+      } else {
+        notify({
+          tone: 'destructive',
+          title: 'Cancel refused',
+          detail: result.failure.message,
+        });
+      }
+    } catch (cause: unknown) {
+      notify({
+        tone: 'destructive',
+        title: 'Cancel failed',
+        detail: cause instanceof Error ? cause.message : 'Server failure',
+      });
+    } finally {
+      setBusy(null);
+    }
+  };
+
   if (state.type === 'loading') return <DetailSkeleton />;
 
   if (state.type === 'not-found') {
@@ -1139,6 +1311,7 @@ export function DeployScreen({
       actions={{
         onRedeploy: handleRedeploy,
         onRollback: handleRollback,
+        onCancelDeploy: () => void handleCancel(),
         busy,
       }}
       onNavigate={onNavigate}
@@ -1168,6 +1341,7 @@ export function BuildScreen({
   const [busy, setBusy] = useState<'redeploy' | 'deploy' | 'cancel' | null>(
     null,
   );
+  const [cancelRequested, setCancelRequested] = useState(false);
   const [reloadToken, setReloadToken] = useState(0);
 
   useEffect(() => {
@@ -1194,6 +1368,11 @@ export function BuildScreen({
         attempt: result.value.attempt,
         deployId: result.value.deployId,
       });
+      // The ask is scoped to the run it was made of: a verdict, or a
+      // re-arm that queues a fresh attempt, is a Build the button offers again.
+      if (result.value.attempt.build?.status !== 'running') {
+        setCancelRequested(false);
+      }
     };
 
     read()
@@ -1262,10 +1441,14 @@ export function BuildScreen({
   };
 
   /**
-   * End a queued Build, then re-read rather than navigate away.
+   * End a queued Build, or stop a running one, then re-read rather than
+   * navigate away.
    *
    * The verdict is the point of the screen: the attempt log now carries who
    * cancelled it, and the reader stays where the sentence they were reading is.
+   * A running Build's verdict follows a poll later, from the route that was
+   * stopped — the re-read shows the line saying who asked, and the next one
+   * shows what became of it.
    */
   const cancel = async () => {
     const parsedId = Number.parseInt(buildId, 10);
@@ -1273,6 +1456,7 @@ export function BuildScreen({
     try {
       const result = await command('cancelBuild', { id: parsedId });
       if (result.ok) {
+        if (result.value.status === 'RUNNING') setCancelRequested(true);
         setReloadToken((token) => token + 1);
       } else {
         notify({
@@ -1336,6 +1520,7 @@ export function BuildScreen({
           onDeployBuild: () => void act('deploy'),
           onRedeploy: () => void act('redeploy'),
           onCancel: () => void cancel(),
+          cancelRequested,
           busy,
         }}
         onNavigate={onNavigate}

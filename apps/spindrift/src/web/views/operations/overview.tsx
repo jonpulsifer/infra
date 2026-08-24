@@ -64,7 +64,7 @@ import { Timestamp } from '../../ui/timestamp.tsx';
 import { appHref } from '../apps/list.tsx';
 import { ScreenFailure } from '../screen.tsx';
 import { buildTone } from '../supply-chain/builds.tsx';
-import { deployTone } from './deploys.tsx';
+import { deployTone, deployWord } from './deploys.tsx';
 
 /** One Build or one Deploy in the feed, with what its inspector needs. */
 interface Entry extends ExplorerItem {
@@ -240,8 +240,8 @@ export function Overview({
         kind: 'deploy',
         title: `Deploy ${deploy.id}`,
         detail: `${deploy.app} / ${deploy.component} · ${deploy.target}`,
-        status: deploy.phase.toLowerCase(),
-        tone: deployTone(deploy.phase),
+        status: deployWord(deploy.phase, deploy.faulty),
+        tone: deployTone(deploy.phase, deploy.faulty),
         when: deploy.when,
         at: deploy.at,
         active: deploy.phase !== 'LIVE' && deploy.phase !== 'FAILED',
@@ -596,7 +596,11 @@ function Serving({
           <span className="font-mono text-muted-foreground">
             #{deploy.buildId}
           </span>
-          <Ref value={deploy.commit} kind="commit" />
+          <Ref
+            value={deploy.commit}
+            kind="commit"
+            headline={deploy.commitMessage}
+          />
         </span>
       ),
     },
@@ -606,8 +610,8 @@ function Serving({
       sortable: true,
       sortValue: (deploy) => deploy.phase,
       cell: (deploy) => (
-        <Badge tone={deployTone(deploy.phase)}>
-          {deploy.phase.toLowerCase()}
+        <Badge tone={deployTone(deploy.phase, deploy.faulty)}>
+          {deployWord(deploy.phase, deploy.faulty)}
         </Badge>
       ),
     },

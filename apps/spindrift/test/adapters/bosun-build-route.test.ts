@@ -226,12 +226,40 @@ describe('a failed build', () => {
     }
   });
 
-  test('a cancelled row — DONE with no result — is INTERNAL', async () => {
+  test('a cancelled row — DONE with no result — is TIMEOUT, indicting nobody', async () => {
     const outbox = fakeOutbox({ states: [{ state: 'DONE', result: null }] });
-    const { result } = await run(route(outbox).build(archiveSource(), spec));
+    const { events, result } = await run(
+      route(outbox).build(archiveSource(), spec),
+    );
 
     expect(result.status).toBe('FAILED');
-    if (result.status === 'FAILED') expect(result.reason).toBe('INTERNAL');
+    if (result.status === 'FAILED') expect(result.reason).toBe('TIMEOUT');
+    expect(text(events)).toContain('was cancelled before a bosun host');
+  });
+});
+
+describe('cancelling from outside the dispatch', () => {
+  test('the row is named by the dispatch id, and cancel closes it by that name', async () => {
+    const outbox = fakeOutbox({
+      states: [
+        {
+          state: 'DONE',
+          result: { status: 'SUCCEEDED', log: encodeBuildReport(report) },
+        },
+      ],
+    });
+    const built = route(outbox);
+    await run(built.build(archiveSource(), spec, 'dispatch-1'));
+    expect(outbox.enqueued[0]?.id).toBe('dispatch-1');
+
+    await built.cancel({ dispatchId: 'dispatch-1', runUrl: null });
+    expect(outbox.cancelled).toEqual(['dispatch-1']);
+  });
+
+  test('a route driven bare lets the outbox name the row', async () => {
+    const outbox = fakeOutbox({ states: [{ state: 'DONE', result: null }] });
+    await run(route(outbox).build(archiveSource(), spec));
+    expect(outbox.enqueued[0]?.id).toBeUndefined();
   });
 });
 

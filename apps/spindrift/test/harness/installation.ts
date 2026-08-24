@@ -26,6 +26,7 @@ import {
   type InstallationManifest,
   parseManifest,
   resolveManifest,
+  VERSION_VAR,
 } from '../../src/config/manifest.ts';
 import type { Database } from '../../src/db/client.ts';
 import {
@@ -63,6 +64,10 @@ export const FIXTURE_DEPLOYMENT_ENV: Record<string, string> = {
   // reason: the chart renders it from the one `hostname` that also renders the
   // Gateway and the HTTPRoute, so no authored document carries it.
   [HOSTNAME_VAR]: 'spindrift.example.test',
+  // What the fixture deployment runs: the chart renders it from the image
+  // digest CD pinned, and a command answering the footer forwards it. Set so a
+  // test can tell a forwarded value from a hard-coded null.
+  [VERSION_VAR]: 'sha256:deadbeef0123',
 };
 
 let cached: InstallationManifest | null = null;

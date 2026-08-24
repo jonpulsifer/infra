@@ -66,6 +66,7 @@ import {
 } from '../../db/schema.ts';
 import { artifactTypeFor, placementTargetOf } from '../../domain/placement.ts';
 import { repositoryRefOf } from '../../domain/repository.ts';
+import type { CommitHeadline } from '../../domain/source-bundle.ts';
 import {
   isEphemeralBundleLocation,
   isFetchableBundleLocation,
@@ -177,6 +178,8 @@ interface RerunSource {
   readonly commit: string;
   readonly bundleDigest: string | null;
   readonly bundleLocation: string | null;
+  /** What staging (or the inherited row) knew of the commit beyond its sha. */
+  readonly headline: CommitHeadline | null;
 }
 
 /**
@@ -217,7 +220,12 @@ async function sourceForRerun(
   componentName: string,
   previous: Pick<
     typeof builds.$inferSelect,
-    'commit' | 'bundleDigest' | 'bundleLocation'
+    | 'commit'
+    | 'bundleDigest'
+    | 'bundleLocation'
+    | 'commitMessage'
+    | 'commitAuthor'
+    | 'commitAuthoredAt'
   > | null,
   /**
    * The commit the caller's act is about, where it named one.
@@ -282,6 +290,15 @@ async function sourceForRerun(
       commit: baseCommit,
       bundleDigest: inheritedDigest,
       bundleLocation: inherited,
+      // The same commit, so the same headline: what the inherited row kept.
+      headline:
+        previous === null
+          ? null
+          : {
+              message: previous.commitMessage,
+              author: previous.commitAuthor,
+              authoredAt: previous.commitAuthoredAt,
+            },
     });
   }
 
@@ -362,6 +379,7 @@ async function sourceForRerun(
       commit,
       bundleDigest: staged.digest,
       bundleLocation: staged.location,
+      headline: staged.commit ?? null,
     });
   } catch (cause) {
     const detail = cause instanceof Error ? cause.message : String(cause);
@@ -671,6 +689,9 @@ export const deployApp: Command<DeployAppInput, DeployAppResult> = async (
         artifactType: shape,
         bundleDigest: rerun.value.bundleDigest,
         bundleLocation: rerun.value.bundleLocation,
+        commitMessage: rerun.value.headline?.message ?? null,
+        commitAuthor: rerun.value.headline?.author ?? null,
+        commitAuthoredAt: rerun.value.headline?.authoredAt ?? null,
         // A repo Build's subpath is the App's declared subpath, never an
         // inheritance: the bundle is the staged source root, '.' would build
         // the monorepo's root instead of the App, and a predecessor row that
@@ -694,12 +715,13 @@ export const deployApp: Command<DeployAppInput, DeployAppResult> = async (
   } else {
     // `RUNNING` under a live lease is a generator streaming into this attempt's
     // log right now. Nulling `dispatchId` and `leasedAt` under it does not stop
-    // it — nothing here can — it only makes the build loop dispatch a second
-    // one on its next 500ms tick, so two generators write one attempt log and
-    // whichever finishes last lands the verdict. Refused rather than cancelled
-    // because there is no cancel to offer: the route's own terminal write is
-    // what ends an attempt, and the lease expiring is what makes this row
-    // reclaimable, which is the wait this sentence names.
+    // it — it only makes the build loop dispatch a second one on its next
+    // 500ms tick, so two generators write one attempt log and whichever
+    // finishes last lands the verdict. Refused rather than cancelled because
+    // stopping a live attempt is `cancelBuild`'s act: it reaches the route's
+    // far side and leaves the route's own terminal write to end the attempt.
+    // The lease expiring is what makes this row reclaimable, which is the wait
+    // this sentence names.
     //
     // **The condition is the `WHERE`, not a check above it.** `buildToRun` was
     // read at the top of this command, several awaits and a network staging

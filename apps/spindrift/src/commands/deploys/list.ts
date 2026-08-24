@@ -19,6 +19,7 @@ import { inArray } from 'drizzle-orm';
 import { z } from 'zod';
 import { elapsedSince } from '../../domain/elapsed.ts';
 import { targetRowLabel } from '../../domain/target.ts';
+import { principalLabels } from '../principals.ts';
 import { type Command, type CommandContext, failed, ok } from '../types.ts';
 import type { DeployLedgerItem, DeployPhase } from '../views.ts';
 
@@ -125,10 +126,15 @@ export async function releasesOf(
   );
 
   const now = context.clock.now();
+  const requestedBy = await principalLabels(
+    context.db,
+    page.map((row) => row.requestedBy),
+  );
 
   const deploys = page.map((row) => {
     const here = desired.get(`${row.componentId}@${row.targetId}`);
     const current = here?.desiredDeployId === row.id;
+    const by = requestedBy(row.requestedBy);
     return {
       id: row.id,
       appId: row.component.app.id,
@@ -139,11 +145,13 @@ export async function releasesOf(
       component: row.component.name,
       target: targetRowLabel(row.target),
       commit: row.build.commit,
+      commitMessage: row.build.commitMessage,
       phase: row.phase as DeployPhase,
       when: elapsedSince(row.createdAt, now),
       at: row.createdAt.toISOString(),
       current,
       configVersion: row.configVersion,
+      ...(by === undefined ? {} : { requestedBy: by }),
       // The same comparison `rollbackDeploy` makes under the lock, so the
       // affordance appears only where the act would be accepted. It can still
       // refuse for a reason this list cannot see — a disconnected Target, a
@@ -154,6 +162,7 @@ export async function releasesOf(
         here?.desiredBuildId != null &&
         row.buildId < here.desiredBuildId &&
         row.build.artifactDigest !== null,
+      faulty: row.faultyAt !== null,
     };
   });
 

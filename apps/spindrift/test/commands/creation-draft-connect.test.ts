@@ -90,6 +90,7 @@ async function context(fake: FakeGitHub): Promise<CommandContext> {
         reach: 0,
       }),
       run: async () => ({ kind: 'none', because: 'nothing runs here' }),
+      restart: async () => ({ kind: 'none', because: 'nothing runs here' }),
       executions: async () => ({ kind: 'none', because: 'nothing runs here' }),
     }),
     build: (name) => (name === builder.name ? builder : null),

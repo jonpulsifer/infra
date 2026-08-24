@@ -5,6 +5,7 @@ resources:
   - secret.sops.yaml
   - kube-prometheus.yaml
   - tempo.yaml
+  - spindrift-rules.yaml
   - ../../base/monitoring
 patches:
   - target:

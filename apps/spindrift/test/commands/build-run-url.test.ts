@@ -185,6 +185,38 @@ describe('the run link dispatch records', () => {
     expect(stored?.runUrl).toBeNull();
   });
 
+  test('a re-armed Build sheds the previous attempt\u2019s link at the claim', async () => {
+    const context = routing(
+      new FakeBuildAdapter({
+        name: 'hosted',
+        logFidelity: 'LIVE_STATUS',
+        script: [
+          {
+            events: [{ type: 'log', at: new Date(0), line: 'run starting' }],
+            result: { status: 'SUCCEEDED' },
+          },
+        ],
+      }),
+    );
+    const build = await seedBuild();
+    // What an earlier attempt left on the row before its lease lapsed and a
+    // Deploy press re-armed it: a run that already concluded.
+    await ctx.db
+      .update(builds)
+      .set({ runUrl: 'https://vcs.example/acme/widgets/actions/runs/8' })
+      .where(eq(builds.id, build.id));
+
+    await dispatchBuild({ buildId: build.id, route: 'hosted' }, context);
+
+    // Not this attempt's run, so `cancelBuild` must not be handed it: the
+    // column names nothing until the route discovers the new one.
+    const [stored] = await ctx.db
+      .select({ runUrl: builds.runUrl })
+      .from(builds)
+      .where(eq(builds.id, build.id));
+    expect(stored?.runUrl).toBeNull();
+  });
+
   test('a failed build keeps its run link, which is when it is most wanted', async () => {
     const context = routing(
       new FakeBuildAdapter({

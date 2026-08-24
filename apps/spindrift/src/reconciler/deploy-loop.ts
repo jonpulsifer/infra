@@ -38,14 +38,25 @@
  * `test/reconciler/deploy-loop.test.ts` runs the whole convergence with
  * notifications disabled to keep that true.
  */
-import { and, asc, eq, gt, inArray, lte, notExists, or } from 'drizzle-orm';
+import {
+  and,
+  asc,
+  eq,
+  gt,
+  inArray,
+  isNotNull,
+  lte,
+  notExists,
+  or,
+} from 'drizzle-orm';
 import { alias } from 'drizzle-orm/pg-core';
-import type {
-  DeployAdapter,
-  DeployEvent,
-  DeployPhase,
-  DeployVerdict,
-  ObservedState,
+import {
+  blameFor,
+  type DeployAdapter,
+  type DeployEvent,
+  type DeployPhase,
+  type DeployVerdict,
+  type ObservedState,
 } from '../adapters/deploy/contract.ts';
 import type { AdapterRegistry, Clock } from '../commands/types.ts';
 import type { InstallationManifest } from '../config/manifest.schema.ts';
@@ -174,6 +185,26 @@ export const DEFAULT_INTERVALS: LoopIntervals = {
  * stays slow.
  */
 export const DEFAULT_DRIFT_INTERVAL_MS = 5 * 60_000;
+
+/**
+ * How long a `LIVE` release is left alone before its soak is judged.
+ *
+ * §6 makes `LIVE` the platform's readiness verdict and the attempt ends there —
+ * so a workload that passes readiness and crashes two minutes later is a green
+ * Deploy with a drift flag some minutes late and no blame. §6 forbids core
+ * *reimplementing* readiness, not judging what happens after it: one look at
+ * least this long after the verdict, and a `FAILED` observation then is a
+ * `faulty` release, with the reason and blame the adapter could name
+ * (`judgeSoak`).
+ *
+ * A floor and not a schedule. The look is taken by the drift pass, so it lands
+ * on the first observing pass past the window — at least this long after
+ * `LIVE`, and up to one {@link DEFAULT_DRIFT_INTERVAL_MS} later.
+ * ponytail: a soak that must land closer to the window needs the pass to pull
+ * the next observation forward to the earliest open window, which is one more
+ * select per pass; add it if the drift interval ever stops being acceptable.
+ */
+export const DEPLOY_SOAK_MS = 2 * 60_000;
 
 /**
  * The interval to wait before looking for work again.
@@ -432,6 +463,7 @@ export async function runAttempt(
   const targetRef = deployTargetOf(subject.target, subject.vessel);
 
   let lost = false;
+  let cancelledBy: string | null = null;
   const refreshUntil = context.clock.now().getTime() + DEPLOY_ATTEMPT_MAX_MS;
   const heartbeat = setInterval(() => {
     // The tick has two jobs and the cap ends only one of them. Refreshing
@@ -472,6 +504,28 @@ export async function runAttempt(
         });
         return abandon(context, attempt);
       }
+      // Asked per event, because between events is the only place this can
+      // act: `stream.return` cannot interrupt a `next()` in flight, so the
+      // heartbeat tick has no way to end a hung call and does not pretend to.
+      // A chatty adapter is cancelled at its next event; an adapter that never
+      // yields is ended by the lease cap, like the reclaim above.
+      cancelledBy ??= await cancelRequestOn(context, deploy.id, attemptId);
+      if (cancelledBy !== null) {
+        // The same tear-down the reclaim takes, and it is the only one core
+        // has: the adapter's `finally` blocks run, and what the platform does
+        // next is the platform's. `kubernetes` and `cloudrun` apply under the
+        // Component's own name, so the next intent converges over whatever
+        // this one left. `vercel` and `cloudflare-pages` mint a deployment per
+        // create with nothing to converge on (contract.ts, `apply`): a cancel
+        // there stops Spindrift watching, and the platform may still finish
+        // the deployment on its own.
+        await stream.return({
+          phase: 'FAILED',
+          reason: 'INTERNAL',
+          detail: cancelledSentence(cancelledBy),
+        });
+        return settleCancelled(context, subject, cancelledBy);
+      }
       await absorb(context, attempt, deploy.id, attemptId, next.value);
       next = await stream.next();
     }
@@ -510,6 +564,79 @@ async function abandon(
     line: RECLAIMED_SENTENCE,
   });
   return { deployId: attempt.deployId, phase: 'LOST', url: null };
+}
+
+/** The one sentence a cancelled Deploy carries, on the row and on the log. */
+function cancelledSentence(by: string): string {
+  return `cancelled by ${by}`;
+}
+
+/**
+ * Who asked this attempt to stop, or `null` while nobody has.
+ *
+ * Read through the same fence every other read of the row takes: a request
+ * stamped on a row this attempt no longer holds is the reclaiming attempt's to
+ * honour, and answering it here would have two attempts tearing down one apply.
+ */
+async function cancelRequestOn(
+  context: DeployLoopContext,
+  deployId: number,
+  attemptId: string | null,
+): Promise<string | null> {
+  const [row] = await context.db
+    .select({ by: deploys.cancelRequestedBy })
+    .from(deploys)
+    .where(
+      and(fencedOn(deployId, attemptId), isNotNull(deploys.cancelRequestedAt)),
+    );
+  return row?.by ?? null;
+}
+
+/**
+ * Settle a cancelled attempt: `FAILED`, with who asked and nothing else.
+ *
+ * No `reason`, for the reason `cancelBuild` gives none: §6's closed set
+ * indicts a developer or the platform, and a cancellation indicts neither — so
+ * nothing derives a blame from it either. The detail carries the sentence and
+ * the log carries it again, which is where a reader looking for "why did this
+ * stop" already looks. Fenced like every other settle, so an attempt whose
+ * lease was reclaimed while it was being cancelled abandons instead of writing
+ * a verdict over the holder's.
+ */
+async function settleCancelled(
+  context: DeployLoopContext,
+  subject: AttemptSubject,
+  by: string,
+): Promise<AttemptOutcome> {
+  const deployId = subject.deploy.id;
+  const attempt = {
+    appId: subject.app.id,
+    componentId: subject.component.id,
+    deployId,
+  };
+  const settled = await context.db
+    .update(deploys)
+    .set({
+      phase: 'FAILED',
+      reason: null,
+      blame: null,
+      detail: cancelledSentence(by),
+      debug: null,
+      updatedAt: context.clock.now(),
+    })
+    .where(fencedOn(deployId, subject.deploy.attemptId))
+    .returning({ id: deploys.id });
+  if (settled.length === 0) return abandon(context, attempt);
+
+  await recordDeployEvent(context.db, attempt, {
+    type: 'log',
+    line: cancelledSentence(by),
+  });
+  await recordDeployEvent(context.db, attempt, {
+    type: 'status',
+    phase: 'FAILED',
+  });
+  return { deployId, phase: 'FAILED', url: null };
 }
 
 /**
@@ -885,6 +1012,19 @@ async function observeOne(
   }
   const observed = state?.artifactDigest ?? null;
 
+  // The soak, judged off the read this pass already paid for. Measured from
+  // the row's last write, which for a release that just landed is the `LIVE`
+  // verdict; the drift write below can move it, so a finding inside the
+  // window errs toward judging later, never sooner. Before that write, so
+  // this pass judges against the window as it stood when the pass began.
+  if (
+    deploy.soakedAt === null &&
+    deploy.faultyAt === null &&
+    now.getTime() >= deploy.updatedAt.getTime() + DEPLOY_SOAK_MS
+  ) {
+    await judgeSoak(context, subject, state, now);
+  }
+
   // The cadence half of the same comparison, where the backend reports one.
   // Read off the Component rather than the Deploy: `schedule` is what the
   // developer declares now, and a cadence they changed since this Deploy is a
@@ -945,6 +1085,92 @@ async function observeOne(
     observedDigest: observed,
     driftDetail,
   };
+}
+
+/** Core's sentence for a faulty release whose platform gave none. */
+const FAULTY_SENTENCE =
+  'the platform reports this release failed after it had passed readiness';
+
+/**
+ * Judge one release's soak off the observation the drift pass already took.
+ *
+ * The platform reporting `FAILED` on the object that still carries this
+ * release's digest is the whole test. A digest that has moved on belongs to a
+ * newer release, which is judged on its own row; nothing there, or a platform
+ * that says it is fine, closes the window with `soakedAt`. Either stamp is
+ * written once and never revisited, so a release that goes bad an hour later
+ * is drift (information, §6) rather than a fault with a blame.
+ *
+ * An object mid-rollout under this release's digest — a restart, a reconcile
+ * the controller has not finished — is neither verdict, so nothing is stamped
+ * and the next observing pass judges instead: the window's own "errs toward
+ * judging later" rule, applied to the phase as well as the clock.
+ *
+ * The verdict is written the way `settle` writes a red one — the blame is
+ * §6's derivation from the reason, the observation is the `debug` payload —
+ * but the phase stays `LIVE`: the rollout landed, and the desired pointer
+ * still names this release. Said on the attempt log too, so the timeline
+ * carries it.
+ */
+async function judgeSoak(
+  context: DeployLoopContext,
+  subject: AttemptSubject,
+  state: ObservedState | null,
+  now: Date,
+): Promise<void> {
+  const { deploy } = subject;
+  if (state?.phase === 'APPLYING' || state?.phase === 'WAITING') return;
+  if (
+    state === null ||
+    state.phase !== 'FAILED' ||
+    state.artifactDigest !== (subject.build.artifactDigest ?? '')
+  ) {
+    await context.db
+      .update(deploys)
+      .set({ soakedAt: now })
+      .where(eq(deploys.id, deploy.id));
+    return;
+  }
+
+  // The reason is the adapter's or nobody's. `observe` names one where the
+  // platform or the adapter's read on red could; where neither did, no row of
+  // §6's table is guessed — every row but `TIMEOUT` indicts somebody, and an
+  // image that stopped pulling recorded as the developer's `UNHEALTHY` is the
+  // misdirection §6 calls `ARTIFACT_UNAVAILABLE` the hardest-justified blame
+  // to get right. What is known is written: the platform's sentence, no blame.
+  const reason = state.reason ?? null;
+  const diagnosis = {
+    reason,
+    blame: reason === null ? null : blameFor(reason),
+    detail: state.detail ?? FAULTY_SENTENCE,
+    debug: state,
+  };
+  await context.db
+    .update(deploys)
+    .set({
+      reason: diagnosis.reason,
+      blame: diagnosis.blame,
+      detail: diagnosis.detail,
+      debug: diagnosis.debug,
+      faultyAt: now,
+      updatedAt: now,
+    })
+    .where(eq(deploys.id, deploy.id));
+
+  const attempt = {
+    appId: subject.app.id,
+    componentId: subject.component.id,
+    deployId: deploy.id,
+  };
+  await recordDeployEvent(context.db, attempt, {
+    type: 'log',
+    line: `faulty after readiness: ${diagnosis.detail}`,
+  });
+  await recordDeployEvent(context.db, attempt, {
+    type: 'status',
+    phase: 'FAULTY',
+    ...(reason === null ? {} : { reason }),
+  });
 }
 
 /** Read everything one Deploy refers to, or `null` if it is not runnable. */

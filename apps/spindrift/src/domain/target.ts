@@ -580,12 +580,14 @@ export type TargetHealth = 'healthy' | 'unhealthy';
  * observe it. So orphaning is a core-side timestamp beside the phase, and
  * `deployState` below is the one place the two are read together.
  */
-export type DeployState = 'orphaned' | 'live' | 'pending' | 'failed';
+export type DeployState = 'orphaned' | 'live' | 'faulty' | 'pending' | 'failed';
 
-/** The two fields {@link deployState} reads. */
+/** The three fields {@link deployState} reads. */
 export interface DeployStateInput {
   phase: 'PENDING' | 'APPLYING' | 'WAITING' | 'LIVE' | 'FAILED';
   orphanedAt: Date | null;
+  /** The soak's verdict after readiness — the same timestamp-beside-phase shape. */
+  faultyAt: Date | null;
 }
 
 /**
@@ -593,13 +595,15 @@ export interface DeployStateInput {
  *
  * Orphaning wins over the phase, because it is the more recent fact: a Deploy
  * that reads `LIVE` on a disconnected Target is telling the truth about the last
- * thing Spindrift saw and nothing about what is running now.
+ * thing Spindrift saw and nothing about what is running now. A fault is read
+ * the same way: `LIVE` is still the rollout's verdict, and `faulty` is what the
+ * platform said about it afterwards.
  */
 export function deployState(deploy: DeployStateInput): DeployState {
   if (deploy.orphanedAt !== null) return 'orphaned';
   switch (deploy.phase) {
     case 'LIVE':
-      return 'live';
+      return deploy.faultyAt === null ? 'live' : 'faulty';
     case 'FAILED':
       return 'failed';
     default:

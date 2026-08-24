@@ -370,6 +370,16 @@ ${input.buildSecretNames
   .join('\n')}
 `;
 
+  // §4 puts the in-cluster route behind an uplink every redownloaded layer
+  // crosses, so the build's cache lives in the registry beside the image: one
+  // tag on the first destination, overwritten by every build of it, which is
+  // what makes §12's "the registry's own cleanup deletes" cover it without a
+  // second policy. `mode=max` exports every layer's cache and not only the
+  // final image's, which is the difference between a cache hit on `RUN npm
+  // ci` and none. A first build finds no cache to import and says so in its
+  // log; the engine treats that as a miss, not a failure.
+  const cacheRef = `${input.destinations[0] ?? ''}:buildcache`;
+
   return `set -eu
 workspace=$(mktemp -d)
 
@@ -443,6 +453,8 @@ fi
 buildctl-daemonless.sh build "$@" \\
 ${args}${secretFlags}  --opt attest:provenance=mode=max \\
   --opt attest:sbom= \\
+  --export-cache ${quote(`type=registry,ref=${cacheRef},mode=max`)} \\
+  --import-cache ${quote(`type=registry,ref=${cacheRef}`)} \\
   --output ${quote(`type=image,${imageNames(input)},push=true`)} \\
   --metadata-file "$workspace/metadata.json"
 

@@ -37,6 +37,7 @@ import { type ReactNode, useEffect, useState } from 'react';
 import type {
   ActivityEntry,
   AppDomainView,
+  AppLockView,
   BuildRouteOptionView,
   ComponentView,
   DatastoreView,
@@ -71,7 +72,7 @@ import { Button } from '../../ui/button.tsx';
 import { Card, CardContent, CardHeader, Eyebrow } from '../../ui/card.tsx';
 import { Ref } from '../../ui/copy.tsx';
 import { Declaration } from '../../ui/declaration.tsx';
-import { Field } from '../../ui/field.tsx';
+import { Field, Input } from '../../ui/field.tsx';
 import { Logo } from '../../ui/logo.tsx';
 import { Page, PageHeader } from '../../ui/page.tsx';
 import { Tabs } from '../../ui/tabs.tsx';
@@ -216,6 +217,17 @@ export type SetAutoDeploy = (
 >;
 
 /**
+ * Holding this App's deploys with a reason, or letting them through again
+ * (§6, `setAppLock`). `null` unlocks — the one act a rollback leaves for the
+ * operator to do once the cause is fixed.
+ */
+export type SetLock = (
+  reason: string | null,
+) => Promise<
+  { readonly ok: true } | { readonly ok: false; readonly message: string }
+>;
+
+/**
  * An App naming the build route it builds on, or clearing that choice back to
  * rank order (§4, §16), as the screen above needs it answered.
  *
@@ -249,8 +261,23 @@ export type SetBuildRoute = (
  * exactly one thing to say afterwards — it started, or here is the sentence the
  * command refused with — and threading that back as two props would put this
  * card's transient state on the screen that owns the App.
+ *
+ * `env` is this run's parameters, present only when the card has some to send;
+ * what they may be called and what they may not shadow is `runComponent`'s to
+ * refuse, and the sentence comes back through the same arm.
  */
-export type RunJob = () => Promise<
+export type RunJob = (
+  env?: Readonly<Record<string, string>>,
+) => Promise<
+  { readonly ok: true } | { readonly ok: false; readonly message: string }
+>;
+
+/**
+ * Bouncing the service this screen is showing (§6), as the screen above
+ * needs it answered — {@link RunJob}'s shape, for the same reason: the press
+ * has one thing to say afterwards, and the pair is the screen's to bind.
+ */
+export type RestartService = () => Promise<
   { readonly ok: true } | { readonly ok: false; readonly message: string }
 >;
 
@@ -309,7 +336,9 @@ export function Workspace({
   onUnplaceComponent,
   targets = [],
   onRunJob,
+  onRestartService,
   onSetAutoDeploy,
+  onSetLock,
   onSetBuildRoute,
   onSetDomain,
   onAttachDatastore,
@@ -395,12 +424,25 @@ export function Workspace({
    */
   onRunJob?: RunJob;
   /**
+   * Bounce this App's placed service (§6). Absent where the screen wires no
+   * acts, and absent for every Component without a process — the runtime card
+   * decides, because its stream branch is the only one with a process to
+   * bounce.
+   */
+  onRestartService?: RestartService;
+  /**
    * Absent where deploy-on-push is not editable from here, for the same reason
    * {@link onSetReach} is. Also absent for an archive App — but that one the
    * view already says with `autoDeploy: null`, so the control is not rendered
    * at all rather than rendered dead.
    */
   onSetAutoDeploy?: SetAutoDeploy;
+  /**
+   * Absent where the lock is not editable from here, for the same reason
+   * {@link onSetReach} is. The banner still renders read-only: a lock a
+   * rollback set is a fact about the App whether or not this screen can lift it.
+   */
+  onSetLock?: SetLock;
   /**
    * Absent where the build route is not editable from here, for the same
    * reason {@link onSetReach} is. Also absent for an archive App — the view
@@ -507,6 +549,7 @@ export function Workspace({
         {...(selected === undefined ? {} : { component: selected })}
         onNavigate={onNavigate}
         {...(onSetAutoDeploy === undefined ? {} : { onSetAutoDeploy })}
+        {...(onSetLock === undefined ? {} : { onSetLock })}
       />
 
       {/*
@@ -529,7 +572,9 @@ export function Workspace({
           url={view.url}
         />
       ) : null}
-      {view.drift ? (
+      {/* As on the release screen: a faulty release's drift is the same
+          observation the soak judged, so the amber panel yields to the red. */}
+      {view.drift && !view.faulty ? (
         <DriftPanel
           drift={view.drift}
           url={view.url}
@@ -601,6 +646,7 @@ export function Workspace({
               {...(selected === undefined ? {} : { component: selected.name })}
               onNavigate={onNavigate}
               {...(onRunJob ? { onRun: onRunJob } : {})}
+              {...(onRestartService ? { onRestart: onRestartService } : {})}
               {...(onFollowExecution ? { onFollowExecution } : {})}
               {...(executionLines ? { executionLines } : {})}
             />
@@ -687,6 +733,10 @@ const TABS = [
  */
 function heroHeadline(view: WorkspaceView, component?: ComponentView): string {
   const subject = component?.name ?? 'Your App';
+  // The soak's verdict outranks the address: the rollout landed and the
+  // platform has since reported the workload broken, which is the one
+  // sentence "is live" must never stand in for (§6).
+  if (view.faulty) return `${subject} is faulty`;
   if (view.url === '') {
     return view.phase === 'LIVE'
       ? `${subject} is deployed`
@@ -703,12 +753,14 @@ function Hero({
   component,
   onNavigate,
   onSetAutoDeploy,
+  onSetLock,
 }: {
   view: WorkspaceView;
   /** The Component this card is about. Absent for an App with none yet. */
   component?: ComponentView;
   onNavigate?: (path: string) => void;
   onSetAutoDeploy?: SetAutoDeploy;
+  onSetLock?: SetLock;
 }) {
   // What `release` names: the Deploy where there is one, the Build that is
   // still the whole of the attempt where there is not.
@@ -721,8 +773,19 @@ function Hero({
 
   return (
     <Card className="flex flex-wrap items-start gap-6 px-5 py-5">
+      {/*
+        Above both columns, because it is about the App and not about either
+        half: a locked App has a placement and a release like any other, and
+        what has changed is that the Deploy button above will refuse.
+      */}
+      {view.lock ? (
+        <LockBanner
+          lock={view.lock}
+          {...(onSetLock === undefined ? {} : { onSetLock })}
+        />
+      ) : null}
       <div className="flex flex-col gap-2">
-        <PhasePill phase={view.phase} />
+        <PhasePill phase={view.phase} faulty={view.faulty} />
         <p className="text-xl font-semibold tracking-tight">
           {heroHeadline(view, component)}
         </p>
@@ -769,11 +832,42 @@ function Hero({
         */}
         {view.commit || view.at ? (
           <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
-            {view.commit ? <Ref value={view.commit} kind="commit" /> : null}
+            {view.commit ? (
+              <Ref
+                value={view.commit}
+                kind="commit"
+                headline={view.commitMessage}
+              />
+            ) : null}
             {view.at ? (
               <Timestamp at={view.at} when={view.when} className="font-mono" />
             ) : null}
           </div>
+        ) : null}
+        {/*
+          Pushed but not live (§15). The adopted commit beside the serving
+          one, and what happens next read from evidence rather than from the
+          switch beside placement: a Build of the adopted commit exists and
+          has not failed (`pending.dispatched`), the lock is holding it, or
+          nothing is on its way and the Rebuild press is what ships it —
+          Deploy alone would place the artifact already built.
+        */}
+        {view.source?.pending ? (
+          <p className="flex flex-wrap items-center gap-x-1.5 text-xs text-muted-foreground">
+            <span className="font-mono">{view.source.branch}</span> is at{' '}
+            <Ref value={view.source.pending.commit} kind="commit" />, live is{' '}
+            {view.commit ? (
+              <Ref value={view.commit} kind="commit" />
+            ) : (
+              'nothing'
+            )}
+            {' — '}
+            {view.lock
+              ? 'held by the lock'
+              : view.source.pending.dispatched
+                ? 'a deploy is coming'
+                : 'press Rebuild to ship it'}
+          </p>
         ) : null}
       </div>
 
@@ -806,8 +900,147 @@ function Hero({
             onSetAutoDeploy={onSetAutoDeploy}
           />
         ) : null}
+        {/* The hold, where it can be set by hand. Lifting one is the banner's. */}
+        {view.lock === undefined && onSetLock ? (
+          <LockControl onSetLock={onSetLock} />
+        ) : null}
       </div>
     </Card>
+  );
+}
+
+/**
+ * The hold on this App's deploys, and the one act that lifts it (§6).
+ *
+ * Read-only without `onSetLock`, never hidden: a lock a rollback set is why
+ * the Deploy button is about to refuse, and that is true on every screen that
+ * shows the App, including the ones that wire no acts.
+ */
+function LockBanner({
+  lock,
+  onSetLock,
+}: {
+  lock: AppLockView;
+  onSetLock?: SetLock;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [refusal, setRefusal] = useState<string | null>(null);
+
+  const unlock = async () => {
+    if (onSetLock === undefined) return;
+    setBusy(true);
+    setRefusal(null);
+    try {
+      const result = await onSetLock(null);
+      if (!result.ok) setRefusal(result.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="flex basis-full flex-wrap items-center gap-x-3 gap-y-1 rounded-md border border-warning/40 bg-warning-soft px-3.5 py-2.5 text-[12.5px]">
+      <span className="font-mono text-[13px] font-semibold text-warning">
+        LOCKED
+      </span>
+      <span className="text-foreground">{lock.reason}</span>
+      <span className="text-subtle" title={lock.at}>
+        by {lock.by}, {lock.since}
+      </span>
+      {onSetLock ? (
+        <Button
+          size="sm"
+          variant="outline"
+          className="ml-auto"
+          onClick={unlock}
+          disabled={busy}
+        >
+          {busy ? 'Unlocking…' : 'Unlock'}
+        </Button>
+      ) : null}
+      {refusal ? (
+        <p className="basis-full text-xs text-destructive">{refusal}</p>
+      ) : null}
+    </div>
+  );
+}
+
+/**
+ * Setting the hold by hand — "nothing changes here over the weekend" without
+ * turning deploy-on-push off and forgetting to turn it back on.
+ *
+ * A reason is required because the banner prints it to whoever meets the
+ * refusal next, and that person may not be the one who set it.
+ */
+function LockControl({ onSetLock }: { onSetLock: SetLock }) {
+  const [open, setOpen] = useState(false);
+  const [reason, setReason] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [refusal, setRefusal] = useState<string | null>(null);
+
+  const submit = async () => {
+    setSaving(true);
+    setRefusal(null);
+    try {
+      const result = await onSetLock(reason.trim());
+      if (!result.ok) {
+        setRefusal(result.message);
+      } else {
+        setOpen(false);
+        setReason('');
+      }
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (!open) {
+    return (
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        className="mt-1 text-xs text-muted-foreground hover:text-foreground"
+      >
+        Lock deploys
+      </button>
+    );
+  }
+
+  return (
+    <form
+      className="mt-1 flex flex-col items-end gap-1.5"
+      onSubmit={(event) => {
+        event.preventDefault();
+        void submit();
+      }}
+    >
+      <Input
+        value={reason}
+        onChange={(event) => setReason(event.target.value)}
+        placeholder="why nothing should go out"
+        aria-label="Lock reason"
+        className="w-64"
+      />
+      <div className="flex gap-1.5">
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          onClick={() => setOpen(false)}
+          disabled={saving}
+        >
+          Cancel
+        </Button>
+        <Button type="submit" size="sm" disabled={saving || !reason.trim()}>
+          {saving ? 'Locking…' : 'Lock'}
+        </Button>
+      </div>
+      {refusal ? (
+        <p className="max-w-[22rem] text-left text-xs text-destructive">
+          {refusal}
+        </p>
+      ) : null}
+    </form>
   );
 }
 
@@ -2796,6 +3029,7 @@ function Runtime({
   component,
   onNavigate,
   onRun,
+  onRestart,
   onFollowExecution,
   executionLines,
 }: {
@@ -2813,6 +3047,12 @@ function Runtime({
    */
   onRun?: RunJob;
   /**
+   * Bounce the service (§6). Absent where the screen has no act wired, and
+   * for any Component that is not a placed service — only the stream branch
+   * has a process to bounce, so only it renders the control.
+   */
+  onRestart?: RestartService;
+  /**
    * Follow one run's output, or nothing when the name is `null`.
    *
    * The lines come back as {@link executionLines} rather than through this
@@ -2828,6 +3068,14 @@ function Runtime({
   const [following, setFollowing] = useState<string | null>(null);
   const [starting, setStarting] = useState(false);
   const [runError, setRunError] = useState<string | null>(null);
+  /**
+   * This run's parameters, as typed (§17's one-off script with an argument).
+   * A row with no name is a row the operator has not filled in, not a variable
+   * called nothing, so it is left out rather than refused.
+   */
+  const [parameters, setParameters] = useState<
+    readonly { id: string; key: string; value: string }[]
+  >([]);
 
   const follow = (execution: string) => {
     const next = following === execution ? null : execution;
@@ -2839,9 +3087,35 @@ function Runtime({
     if (!onRun) return;
     setStarting(true);
     setRunError(null);
-    const result = await onRun();
+    const env = Object.fromEntries(
+      parameters
+        .filter((parameter) => parameter.key.trim() !== '')
+        .map((parameter) => [parameter.key.trim(), parameter.value]),
+    );
+    const result = await onRun(Object.keys(env).length === 0 ? undefined : env);
     setStarting(false);
     if (!result.ok) setRunError(result.message);
+    else setParameters([]);
+  };
+
+  const editParameter = (
+    id: string,
+    change: Partial<{ key: string; value: string }>,
+  ) =>
+    setParameters((current) =>
+      current.map((parameter) =>
+        parameter.id === id ? { ...parameter, ...change } : parameter,
+      ),
+    );
+  const [restarting, setRestarting] = useState(false);
+  const [restartError, setRestartError] = useState<string | null>(null);
+  const restart = async () => {
+    if (!onRestart) return;
+    setRestarting(true);
+    setRestartError(null);
+    const result = await onRestart();
+    setRestarting(false);
+    if (!result.ok) setRestartError(result.message);
   };
 
   return (
@@ -2875,18 +3149,79 @@ function Runtime({
               running is not deploying — nothing about what is placed changes.
             */}
             {onRun ? (
-              <div className="flex items-center gap-3 pb-2">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  disabled={starting}
-                  onClick={() => void start()}
-                >
-                  {starting ? 'Starting...' : 'Run now'}
-                </Button>
-                {runError ? (
-                  <p className="text-xs text-destructive">{runError}</p>
-                ) : null}
+              <div className="flex flex-col gap-2 pb-2">
+                <div className="flex flex-wrap items-center gap-3">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={starting}
+                    onClick={() => void start()}
+                  >
+                    {starting ? 'Starting...' : 'Run now'}
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    disabled={starting}
+                    onClick={() =>
+                      setParameters((current) => [
+                        ...current,
+                        { id: crypto.randomUUID(), key: '', value: '' },
+                      ])
+                    }
+                  >
+                    Add parameter
+                  </Button>
+                  {runError ? (
+                    <p className="text-xs text-destructive">{runError}</p>
+                  ) : null}
+                </div>
+                {/*
+                  `ConfigVarForm`'s grid, minus the password field: a parameter
+                  is an argument to one run, not a secret — a secret goes
+                  through config, and a name config already delivers is what
+                  `runComponent` refuses.
+                */}
+                {parameters.map((parameter) => (
+                  <div
+                    key={parameter.id}
+                    className="grid gap-2 sm:grid-cols-[1fr_1fr_auto]"
+                  >
+                    <Field
+                      name={`run-parameter-${parameter.id}-key`}
+                      label="Name"
+                      value={parameter.key}
+                      onChange={(event) =>
+                        editParameter(parameter.id, { key: event.target.value })
+                      }
+                      placeholder="SNAPSHOT"
+                    />
+                    <Field
+                      name={`run-parameter-${parameter.id}-value`}
+                      label="Value"
+                      value={parameter.value}
+                      onChange={(event) =>
+                        editParameter(parameter.id, {
+                          value: event.target.value,
+                        })
+                      }
+                      placeholder="for this run only"
+                    />
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="self-end"
+                      disabled={starting}
+                      onClick={() =>
+                        setParameters((current) =>
+                          current.filter((row) => row.id !== parameter.id),
+                        )
+                      }
+                    >
+                      Remove
+                    </Button>
+                  </div>
+                ))}
               </div>
             ) : null}
             {/*
@@ -2953,6 +3288,28 @@ function Runtime({
           </>
         ) : (
           <>
+            {/*
+              §6's one act on a running process. It sits with the output rather
+              than beside Deploy for the reason Run now sits with the runs:
+              restarting is not deploying — nothing about what is placed
+              changes, the platform replaces the process it already holds — and
+              the sentence it writes lands on this release's own timeline.
+            */}
+            {onRestart ? (
+              <div className="flex items-center gap-3 pb-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={restarting}
+                  onClick={() => void restart()}
+                >
+                  {restarting ? 'Restarting...' : 'Restart'}
+                </Button>
+                {restartError ? (
+                  <p className="text-xs text-destructive">{restartError}</p>
+                ) : null}
+              </div>
+            ) : null}
             <FollowedLog lines={runtime.lines} />
             <p className="pt-2 text-xs text-muted-foreground">
               This Target keeps {runtime.reach} of history. Deploys are markers
@@ -3532,6 +3889,28 @@ function AppWorkspace({
     }
   };
 
+  // The hold (§6). Re-read, unlike the switch above: the banner, the pending
+  // line and the Deploy button's refusal all derive from the lock, and the
+  // control that changed it is not the one showing it.
+  const handleSetLock: SetLock = async (reason) => {
+    const appId = workspace.appId;
+    if (appId === undefined) {
+      return { ok: false, message: 'This App has no id to lock' };
+    }
+    try {
+      const result = await command('setAppLock', { appId, reason });
+      if (!result.ok) return { ok: false, message: result.failure.message };
+      read.reload();
+      return { ok: true };
+    } catch (cause: unknown) {
+      return {
+        ok: false,
+        message:
+          cause instanceof Error ? cause.message : 'Saving the lock failed',
+      };
+    }
+  };
+
   // Which route this App builds on (§4, §16). No re-read, for the same reason
   // `handleSetAutoDeploy` needs none: the picker already holds the answer it
   // just wrote, and this changes exactly the field it is showing.
@@ -3781,7 +4160,7 @@ function AppWorkspace({
    * before the run existed, and a run that does not appear reads as a press
    * that did nothing.
    */
-  const handleRunJob: RunJob = async () => {
+  const handleRunJob: RunJob = async (env) => {
     if (runs?.componentId === undefined || runs.targetId === undefined) {
       return { ok: false, message: 'This job has not been placed on a Target' };
     }
@@ -3789,6 +4168,7 @@ function AppWorkspace({
       const result = await command('runComponent', {
         componentId: runs.componentId,
         targetId: runs.targetId,
+        ...(env === undefined ? {} : { env }),
       });
       if (!result.ok) return { ok: false, message: result.failure.message };
       read.reload();
@@ -3798,6 +4178,34 @@ function AppWorkspace({
         ok: false,
         message:
           cause instanceof Error ? cause.message : 'Starting the run failed',
+      };
+    }
+  };
+
+  /**
+   * Bounce the placed service (§6), then re-read: the checkpoint it wrote is
+   * on the timeline this screen shows, and a press that left the screen
+   * unchanged reads as a press that did nothing.
+   */
+  const handleRestartService: RestartService = async () => {
+    if (runtime === null) {
+      return {
+        ok: false,
+        message: 'This service has not been placed on a Target',
+      };
+    }
+    try {
+      const result = await command('restartComponent', {
+        componentId: runtime.componentId,
+        targetId: runtime.targetId,
+      });
+      if (!result.ok) return { ok: false, message: result.failure.message };
+      read.reload();
+      return { ok: true };
+    } catch (cause: unknown) {
+      return {
+        ok: false,
+        message: cause instanceof Error ? cause.message : 'The restart failed',
       };
     }
   };
@@ -3841,6 +4249,7 @@ function AppWorkspace({
         deletion={deletion}
         onSetReach={handleSetReach}
         onSetAutoDeploy={handleSetAutoDeploy}
+        onSetLock={handleSetLock}
         onSetBuildRoute={handleSetAppBuildRoute}
         onSetDomain={handleSetAppDomain}
         onStageArchive={handleStageArchive}
@@ -3852,6 +4261,9 @@ function AppWorkspace({
         onUnplaceComponent={handleUnplaceComponent}
         targets={targets}
         onAttachDatastore={handleAttachDatastore}
+        {...(runtime === null
+          ? {}
+          : { onRestartService: handleRestartService })}
         {...(runs === null
           ? {}
           : {

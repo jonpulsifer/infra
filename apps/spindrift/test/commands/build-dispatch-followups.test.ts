@@ -5,11 +5,14 @@
  * 3. Atomic per-App concurrency limit across reconciler replicas
  * 4. Fallback to available eligible build route
  */
-import { beforeEach, describe, expect, test } from 'bun:test';
+import { beforeEach, describe, expect, jest, test } from 'bun:test';
+import { eq } from 'drizzle-orm';
 import {
   CONCURRENT_BUILDS_PER_APP,
+  DISPATCH_LEASE_REFRESH_MS,
   DISPATCH_LEASE_TIMEOUT_MS,
   dispatchBuild,
+  dispatchBuildInput,
 } from '../../src/commands/builds/dispatch.ts';
 import { routeForTarget } from '../../src/commands/builds/route.ts';
 import type {
@@ -161,6 +164,108 @@ describe('build dispatch follow-ups', () => {
     expect(result3.ok).toBe(true);
     if (result3.ok) {
       expect(result3.value.dispatchId).toBe(dispatchId2);
+    }
+  });
+
+  test('a dispatch id is a UUID, because the routes name their far side by it', () => {
+    const input = { buildId: 1, route: 'hosted' };
+    expect(dispatchBuildInput.safeParse(input).success).toBe(true);
+    expect(
+      dispatchBuildInput.safeParse({ ...input, dispatchId: 'retry-1' }).success,
+    ).toBe(false);
+    expect(
+      dispatchBuildInput.safeParse({
+        ...input,
+        dispatchId: crypto.randomUUID(),
+      }).success,
+    ).toBe(true);
+  });
+
+  test('a live attempt renews its lease on a timer, so a quiet far side never reads as abandoned', async () => {
+    const [app] = await ctx.db
+      .insert(apps)
+      .values({ name: 'quiet-app', sourceKind: 'archive' })
+      .returning();
+    const [comp] = await ctx.db
+      .insert(components)
+      .values({ appId: app!.id, name: 'web', kind: 'service' })
+      .returning();
+    const [target] = await ctx.db.select().from(targets).limit(1);
+    await ctx.db
+      .insert(componentTargetDesired)
+      .values({ componentId: comp!.id, targetId: target!.id });
+    const [build] = await ctx.db
+      .insert(builds)
+      .values({
+        componentId: comp!.id,
+        commit: 'a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2',
+        targetShape: 'image',
+        artifactType: 'image',
+        bundleDigest:
+          'sha256:1111111111111111111111111111111111111111111111111111111111111111',
+        bundleLocation: 'https://staging.lolwtf.ca/bundle.tar.gz',
+      })
+      .returning();
+
+    // A far side that yields nothing for the whole of its run — a bosun host
+    // reports only when it posts — held open until the test lets it finish.
+    let finish!: () => void;
+    const held = new Promise<void>((resolve) => {
+      finish = resolve;
+    });
+    let started = false;
+    const route = new FakeBuildAdapter({ name: 'hosted' });
+    const scripted = route.build.bind(route);
+    route.build = async function* (source, spec, dispatchId) {
+      started = true;
+      await held;
+      return yield* scripted(source, spec, dispatchId);
+    };
+    const context = {
+      ...ctx,
+      adapters: { ...ctx.adapters, build: () => route },
+    } as typeof ctx;
+
+    const leasedAt = ctx.clock.now();
+    const row = () =>
+      ctx.db
+        .select({ leasedAt: builds.leasedAt, status: builds.status })
+        .from(builds)
+        .where(eq(builds.id, build!.id))
+        .then((rows) => rows[0]!);
+
+    jest.useFakeTimers();
+    try {
+      const attempt = dispatchBuild(
+        { buildId: build!.id, route: 'hosted' },
+        context,
+      );
+      // Each read is real I/O, which is what lets the claim land meanwhile.
+      for (let i = 0; i < 200 && !started; i += 1) await row();
+      expect(started).toBe(true);
+      expect((await row()).leasedAt).toEqual(leasedAt);
+
+      const renewedAt = new Date(leasedAt.getTime() + 5 * 60_000);
+      (ctx as any).setSimulatedTime(renewedAt);
+      jest.advanceTimersByTime(DISPATCH_LEASE_REFRESH_MS);
+      let current = await row();
+      for (
+        let i = 0;
+        i < 200 && current.leasedAt?.getTime() !== renewedAt.getTime();
+        i += 1
+      ) {
+        current = await row();
+      }
+      // Renewed under the claim while nothing was said: the row reads as live
+      // to a re-claim and to `cancelBuild`, which is what it is.
+      expect(current.status).toBe('RUNNING');
+      expect(current.leasedAt).toEqual(renewedAt);
+
+      finish();
+      const result = await attempt;
+      expect(result.ok).toBe(true);
+    } finally {
+      jest.useRealTimers();
     }
   });
 

@@ -71,11 +71,14 @@ import type {
   JobExecution,
   JobRuns,
   ObservedState,
+  Restarted,
+  RunOptions,
   RuntimeLogPage,
   RuntimeLogSubject,
   RuntimeLogTailOptions,
   StartedRun,
 } from '../contract.ts';
+import { RESTART_STAMP } from '../contract.ts';
 import { type DeployEvents, deployEvents, internalFailure } from '../events.ts';
 import { parseScopedRef, scopedRef } from '../ref.ts';
 import { cloudRunJob } from './job.ts';
@@ -673,15 +676,32 @@ export class CloudRunDeployAdapter implements DeployAdapter {
    * A ref naming the other collection is refused rather than run: a Service has
    * no execution, and the alternative to saying so is a 404 from a path that
    * reads as if it should have worked.
+   *
+   * Parameters go as `overrides.containerOverrides[].env` — the runtime's own
+   * per-execution knob, folded into the execution's template, which is where
+   * `executions` reads their names back from. No container is named: the Job
+   * has the one container `workloadContainer` renders, and an unnamed override is applied
+   * to it.
    */
-  async run(target: DeployTarget, ref: DeployRef): Promise<StartedRun> {
+  async run(
+    target: DeployTarget,
+    ref: DeployRef,
+    options: RunOptions = {},
+  ): Promise<StartedRun> {
     const placed = this.placedJob(target, ref);
     if (placed.kind === 'none') return placed;
 
+    const env = Object.entries(options.env ?? {}).map(([name, value]) => ({
+      name,
+      value,
+    }));
     const started = await this.http(placed.connection).json<CloudOperation>({
       method: 'POST',
       path: `${placed.path}:run`,
-      body: {},
+      body:
+        env.length === 0
+          ? {}
+          : { overrides: { containerOverrides: [{ env }] } },
     });
     if (!started.ok) {
       throw new Error(`running job ${placed.id} failed: ${started.message}`);
@@ -698,6 +718,84 @@ export class CloudRunDeployAdapter implements DeployAdapter {
         outcome: 'running',
         startedAt: null,
       },
+    };
+  }
+
+  /**
+   * A new revision of the same image (§6).
+   *
+   * The runtime has no restart verb: a revision is immutable and a Service
+   * rolls only when its template changes. So the template's annotations are
+   * re-written with {@link RESTART_STAMP} through an `updateMask` naming
+   * exactly that field — everything else the revision carries, the image
+   * above all, is left to the runtime to copy forward. The mask is what keeps
+   * this from being a second render: nothing here is assembled from rows, so
+   * nothing here can disagree with what `apply` placed.
+   *
+   * A job is refused for the reason the cluster adapter refuses one: it has
+   * runs, not a process, and its next run reads the template anyway.
+   */
+  async restart(target: DeployTarget, ref: DeployRef): Promise<Restarted> {
+    const connection = this.connectionOf(target);
+    if (connection === null) {
+      return {
+        kind: 'none',
+        because: `${targetLabel(target)} is not a Cloud Run Target`,
+      };
+    }
+    const placed = parseRef(connection, ref);
+    if (placed === null) {
+      return {
+        kind: 'none',
+        because: 'this Deploy carries no handle on what it placed here',
+      };
+    }
+    if (placed.collection === JOBS) {
+      return {
+        kind: 'none',
+        because:
+          'this ref names a job, which has runs rather than a process to restart',
+      };
+    }
+    const http = this.http(connection);
+    const path = `/v2/${parentOf(connection)}/${SERVICES}/${encodeURIComponent(placed.id)}`;
+    // Read directly rather than through `read`: that helper folds every
+    // failure into "nothing there", and here only a 404 means that. A far
+    // side that would not answer the read is the same fault as one that
+    // refuses the write, and the contract wants it thrown, not refused.
+    const read = await http.json<CloudRunWorkload>({ method: 'GET', path });
+    if (!read.ok) {
+      if (read.kind === 'status' && read.status === 404) {
+        return {
+          kind: 'none',
+          because: `${placed.id} is no longer on this Target`,
+        };
+      }
+      throw new Error(`reading service ${placed.id} failed: ${read.message}`);
+    }
+
+    const at = new Date(this.events.now()).toISOString();
+    const annotations = (
+      read.value?.template as
+        | { annotations?: Record<string, string> }
+        | undefined
+    )?.annotations;
+    const written = await http.json<unknown>({
+      method: 'PATCH',
+      path,
+      query: { updateMask: 'template.annotations' },
+      body: {
+        template: { annotations: { ...annotations, [RESTART_STAMP]: at } },
+      },
+    });
+    if (!written.ok) {
+      throw new Error(
+        `restarting service ${placed.id} failed: ${written.message}`,
+      );
+    }
+    return {
+      kind: 'restarted',
+      detail: `service ${placed.id} stamped ${RESTART_STAMP}=${at}; a new revision of the same image is rolling out`,
     };
   }
 
@@ -1266,6 +1364,15 @@ interface CloudExecution {
     readonly state?: string;
     readonly message?: string;
   }[];
+  /** The task template this run was made from, overrides folded in. */
+  readonly template?: {
+    readonly containers?: readonly {
+      readonly env?: readonly {
+        readonly name?: string;
+        readonly value?: string;
+      }[];
+    }[];
+  };
 }
 
 /**
@@ -1289,11 +1396,22 @@ function cloudRunExecution(execution: CloudExecution): JobExecution {
           (execution.failedCount ?? 0) > 0
         ? 'failed'
         : 'running';
+  // The names this run was started with. A plain `value` on a job's container
+  // can only have arrived as a run override: `workloadContainer` delivers
+  // every variable as a pinned reference (§10), never inline.
+  const ranWith = (execution.template?.containers ?? [])
+    .flatMap((container) => container.env ?? [])
+    .filter((entry) => entry.value !== undefined && entry.name !== undefined)
+    .map((entry) => entry.name);
+  const detail = [
+    ...(ranWith.length === 0 ? [] : [`ran with ${ranWith.join(', ')}`]),
+    ...(completed?.message === undefined ? [] : [completed.message]),
+  ].join(' · ');
   return {
     name: shortName(execution.name ?? ''),
     outcome,
     startedAt: at === undefined ? null : new Date(at),
-    ...(completed?.message === undefined ? {} : { detail: completed.message }),
+    ...(detail === '' ? {} : { detail }),
   };
 }
 

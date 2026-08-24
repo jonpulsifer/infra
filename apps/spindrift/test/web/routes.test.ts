@@ -27,7 +27,7 @@ import {
   STATUS_PATH,
   type StatusRouteDeps,
 } from '../../src/web/status-route.ts';
-import { STREAM_PATHS } from '../../src/web/streams.ts';
+import { ATTEMPT_LOG_TEXT_PATH, STREAM_PATHS } from '../../src/web/streams.ts';
 import { UPLOAD_PATH } from '../../src/web/upload.ts';
 import {
   WEBHOOK_PATH,
@@ -161,6 +161,7 @@ describe('what the web process serves', () => {
         ...AUTH_PATHS,
         ...commandNames.map(pathFor),
         ...STREAM_PATHS,
+        ATTEMPT_LOG_TEXT_PATH,
         UPLOAD_PATH,
         WEBHOOK_PATH,
         ...BOSUN_PATHS,
@@ -186,6 +187,7 @@ describe('what the web process serves', () => {
         READY_PATH,
         ...AUTH_PATHS,
         ...STREAM_PATHS,
+        ATTEMPT_LOG_TEXT_PATH,
         UPLOAD_PATH,
         WEBHOOK_PATH,
         ...BOSUN_PATHS,

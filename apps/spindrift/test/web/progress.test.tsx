@@ -32,6 +32,27 @@ const width = (markup: string) => /width:\s*([0-9]+)%/.exec(markup)?.[1];
 const summary = (markup: string) =>
   /aria-label="Progress: ([^"]*)"/.exec(markup)?.[1];
 
+describe('the running stage says what history says, never a fraction', () => {
+  test('a release in flight carries the history sentence on its Deploy leg', () => {
+    const markup = screen({
+      ...DEPLOY_SCENARIOS.building,
+      expectedDuration: { p90Ms: 250_000, samples: 12 },
+    });
+
+    expect(markup).toContain('usually about 4:10, from 12 deploys');
+  });
+
+  test('without history the leg names the Target, and a settled release never estimates', () => {
+    expect(screen(DEPLOY_SCENARIOS.building)).not.toContain('usually about');
+    expect(
+      screen({
+        ...DEPLOY_SCENARIOS.live,
+        expectedDuration: { p90Ms: 250_000, samples: 12 },
+      }),
+    ).not.toContain('usually about');
+  });
+});
+
 describe('the bar reports settled work, never a guess', () => {
   test('a stage in flight counts a half, not a hopeful fraction', () => {
     expect(

@@ -77,6 +77,32 @@ describe('the shell names where it goes', () => {
   });
 });
 
+describe('the footer says what is running', () => {
+  test('the version the deployment states, verbatim', () => {
+    // Digest-pinned delivery rolls pods without a version anybody typed; this
+    // line is how a browser tells which image it is talking to.
+    const markup = renderToStaticMarkup(
+      <AppShell
+        path="/"
+        principal={OPERATOR}
+        version="sha256:57fa33c28109"
+        onNavigate={() => undefined}
+        onSignOut={() => undefined}
+        themeControl={<span>theme</span>}
+      >
+        <p>screen</p>
+      </AppShell>,
+    );
+
+    expect(markup).toContain('<footer');
+    expect(markup).toContain('Spindrift sha256:57fa33c28109');
+  });
+
+  test('and nothing where the deployment states none', () => {
+    expect(shell('/')).not.toContain('<footer');
+  });
+});
+
 describe('the crumb carries the object', () => {
   test('a detail route says which one, under the product name', () => {
     const markup = shell('/deploys/1187');

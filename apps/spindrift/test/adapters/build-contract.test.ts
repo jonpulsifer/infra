@@ -57,6 +57,7 @@ const route: BuildAdapter = {
   provenanceBuilderId: 'https://spindrift.dev/builders/example',
   carriesHeldSecret: true,
   selfAuthorizedRegistries: ['ghcr'],
+  cancel: async () => {},
   async *build(
     given: BuildSource,
   ): AsyncGenerator<BuildEvent, BuildResult, void> {

@@ -75,6 +75,7 @@ import type {
   DeployVerdict,
   JobRuns,
   ObservedState,
+  Restarted,
   RuntimeLogPage,
   RuntimeLogSubject,
   StartedRun,
@@ -433,6 +434,11 @@ export class StaticDeployAdapter implements DeployAdapter {
    * that forgot to check the kind fail as a crash instead of as a sentence.
    */
   async run(_target: DeployTarget, _ref: DeployRef): Promise<StartedRun> {
+    return { kind: 'none', because: NOTHING_RUNS };
+  }
+
+  /** Nothing runs here, so there is nothing to restart either. */
+  async restart(_target: DeployTarget, _ref: DeployRef): Promise<Restarted> {
     return { kind: 'none', because: NOTHING_RUNS };
   }
 

@@ -185,9 +185,26 @@ export class KubernetesApi {
     return created;
   }
 
-  /** Idempotent: deleting what is already gone succeeds (§6). */
-  async delete(ref: ResourceRef): Promise<void> {
-    await this.send('DELETE', resourcePath(ref), { tolerate: [404] });
+  /**
+   * Idempotent: deleting what is already gone succeeds (§6).
+   *
+   * `propagation` is for a caller that means to stop what the object is
+   * running, not only to remove it: a `batch/v1` Job deleted through the API
+   * orphans its pods unless a policy says otherwise (`kubectl` sets one; the
+   * API's own default for that version is to orphan), so a build Job deleted
+   * without it keeps building.
+   */
+  async delete(
+    ref: ResourceRef,
+    options: { readonly propagation?: 'Background' | 'Foreground' } = {},
+  ): Promise<void> {
+    const query =
+      options.propagation === undefined
+        ? ''
+        : `?propagationPolicy=${options.propagation}`;
+    await this.send('DELETE', `${resourcePath(ref)}${query}`, {
+      tolerate: [404],
+    });
   }
 
   /**

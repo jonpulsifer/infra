@@ -161,7 +161,9 @@ export function Releases({
     {
       id: 'commit',
       header: 'Commit',
-      cell: (row) => <Ref value={row.commit} kind="commit" />,
+      cell: (row) => (
+        <Ref value={row.commit} kind="commit" headline={row.commitMessage} />
+      ),
     },
     {
       id: 'config',
@@ -178,7 +180,17 @@ export function Releases({
     {
       id: 'phase',
       header: 'State',
-      cell: (row) => <PhasePill phase={row.phase} />,
+      cell: (row) => <PhasePill phase={row.phase} faulty={row.faulty} />,
+    },
+    {
+      id: 'by',
+      header: 'By',
+      // "Did I press that or did a push do it?" — the one question a list of
+      // releases could not answer. A dash is a release older than the record.
+      cell: (row) =>
+        row.requestedBy ?? <span className="text-muted-foreground">—</span>,
+      sortable: true,
+      sortValue: (row) => row.requestedBy ?? '',
     },
     {
       id: 'when',

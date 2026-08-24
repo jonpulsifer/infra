@@ -83,6 +83,10 @@ interface FakeEntry {
 interface FakeBuild {
   id: string;
   reads: number;
+  /** What the submit stamped on it — what the list endpoint filters by. */
+  tags: readonly string[];
+  /** Set by the cancel endpoint; the next status read reports `CANCELLED`. */
+  cancelled: boolean;
   lines: readonly string[];
   /** Lines the build has written. Not yet what the log service will serve. */
   written: number;
@@ -110,6 +114,8 @@ export class FakeCloudBuild {
    * against {@link programs} alone.
    */
   readonly steps: BuildStep[][] = [];
+  /** Every build id the cancel endpoint was asked to stop, in order. */
+  readonly cancelled: string[] = [];
 
   private readonly builds = new Map<string, FakeBuild>();
   private readonly searches = new Map<string, FakeSearch>();
@@ -161,7 +167,15 @@ export class FakeCloudBuild {
     if (url.origin !== BUILD_HOST) return json(404, { error: 'no such host' });
 
     if (request.method === 'POST' && url.pathname.endsWith('/builds')) {
-      return this.submit(body as { steps?: BuildStep[] });
+      return this.submit(body as { steps?: BuildStep[]; tags?: string[] });
+    }
+    if (request.method === 'GET' && url.pathname.endsWith('/builds')) {
+      return this.list(url.searchParams.get('filter'));
+    }
+
+    const cancel = url.pathname.match(/\/builds\/([^/:]+):cancel$/);
+    if (cancel !== null && request.method === 'POST') {
+      return this.cancel(cancel[1] ?? '');
     }
 
     const read = url.pathname.match(/\/builds\/([^/]+)$/);
@@ -171,7 +185,7 @@ export class FakeCloudBuild {
     return json(404, { error: 'no such path' });
   };
 
-  private submit(body: { steps?: BuildStep[] }): Response {
+  private submit(body: { steps?: BuildStep[]; tags?: string[] }): Response {
     if (this.options.refuseSubmit !== undefined) {
       return json(this.options.refuseSubmit, { error: 'refused' });
     }
@@ -184,11 +198,47 @@ export class FakeCloudBuild {
     this.builds.set(id, {
       id,
       reads: 0,
+      tags: body.tags ?? [],
+      cancelled: false,
       lines: this.options.log(program),
       written: 0,
       ingested: [],
     });
     return json(200, { metadata: { build: { id, status: 'QUEUED' } } });
+  }
+
+  /**
+   * The builds under one tag. A list with no filter is refused rather than
+   * answered with everything: a route that dropped the filter would cancel
+   * every build in the project, and this is where that has to fail.
+   */
+  private list(filter: string | null): Response {
+    const tag = /^tags="([^"]+)"$/.exec(filter ?? '')?.[1];
+    if (tag === undefined) return json(400, { error: 'unsupported filter' });
+    return json(200, {
+      builds: [...this.builds.values()]
+        .filter((build) => build.tags.includes(tag))
+        .map((build) => ({ id: build.id, status: this.statusOf(build) })),
+    });
+  }
+
+  /** A build that already ended cannot be cancelled, as the service says. */
+  private cancel(id: string): Response {
+    const build = this.builds.get(id);
+    if (build === undefined) return json(404, { error: 'no such build' });
+    if (build.reads > this.options.duration) {
+      return json(400, { error: 'build is already finished' });
+    }
+    build.cancelled = true;
+    this.cancelled.push(id);
+    return json(200, { id, status: 'CANCELLED' });
+  }
+
+  private statusOf(build: FakeBuild): string {
+    if (build.cancelled) return 'CANCELLED';
+    return build.reads > this.options.duration
+      ? this.options.status
+      : 'WORKING';
   }
 
   /**
@@ -213,10 +263,7 @@ export class FakeCloudBuild {
             (build.lines.length * build.reads) / (this.options.duration + 1),
           ),
         );
-    return json(200, {
-      id,
-      status: terminal ? this.options.status : 'WORKING',
-    });
+    return json(200, { id, status: this.statusOf(build) });
   }
 
   /**

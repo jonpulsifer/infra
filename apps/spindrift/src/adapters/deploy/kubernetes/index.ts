@@ -57,12 +57,15 @@ import type {
   JobExecution,
   JobRuns,
   ObservedState,
+  Restarted,
+  RunOptions,
   RuntimeLogEntry,
   RuntimeLogPage,
   RuntimeLogSubject,
   RuntimeLogTailOptions,
   StartedRun,
 } from '../contract.ts';
+import { RESTART_STAMP } from '../contract.ts';
 import { type DeployEvents, deployEvents, internalFailure } from '../events.ts';
 import {
   type Fetcher,
@@ -191,6 +194,15 @@ const JOB_NAME_LABEL = 'batch.kubernetes.io/job-name';
 const MANUAL_RUN = 'cronjob.kubernetes.io/instantiate';
 
 /**
+ * The parameter *names* a run was started with, on the Job itself.
+ *
+ * Names and never values: the Job spec already carries the values, and this
+ * is what `executions` reads back into the timeline, so a value here would be
+ * a value in a status line (§17, {@link RunOptions}).
+ */
+const RUN_WITH = 'spindrift.dev/run-with';
+
+/**
  * The longest name a run may carry.
  *
  * A Job's pods are named `<job>-<five random characters>`, and a pod's hostname
@@ -302,7 +314,8 @@ export class KubernetesDeployAdapter implements DeployAdapter {
     const parsed = parseRef(ref);
     if (parsed === null) return null;
 
-    const object = await this.api(connection).get({
+    const api = this.api(connection);
+    const object = await api.get({
       apiVersion: apiVersionOf(parsed.flavour),
       plural: pluralOf(parsed.flavour),
       namespace: parsed.namespace,
@@ -310,7 +323,12 @@ export class KubernetesDeployAdapter implements DeployAdapter {
     });
     if (object === null) return null;
 
-    const status = statusOf(parsed.flavour, object);
+    const status = await this.workloadStatus(
+      api,
+      parsed.flavour,
+      object,
+      statusOf(parsed.flavour, object),
+    );
     return {
       ref,
       phase: status.phase,
@@ -320,6 +338,77 @@ export class KubernetesDeployAdapter implements DeployAdapter {
       artifactDigest: appliedDigest(parsed.flavour, object),
       ...(status.reason === undefined ? {} : { reason: status.reason }),
       ...(status.detail === undefined ? {} : { detail: status.detail }),
+      ...(status.debug === undefined ? {} : { debug: status.debug }),
+    };
+  }
+
+  /**
+   * The workload behind a delivery object that reports itself ready (§6).
+   *
+   * Flux's `Ready` is the verdict on the last reconcile, and the `HelmRelease`
+   * this adapter renders never reconciles again on its own after a successful
+   * one — `interval` re-checks the chart, not the pods — so a workload that
+   * passes readiness and crashes afterwards leaves `Ready=True` standing for
+   * as long as nothing else changes. The Deployment's `Available` condition is
+   * the controller that does keep looking. So a ready delivery object costs
+   * one more read, the workload's, and an unavailable workload is a red: it
+   * takes the same read on red an attempt takes, once, and reports what it
+   * found the way `failed` does. Still a read on red and never a watch — the
+   * one extra list is the price of the delivery object's word being about the
+   * reconcile rather than about the pods.
+   *
+   * A job has no Deployment and no readiness to lose, so the delivery object's
+   * word stands; so does a workload whose Deployment cannot be found, because
+   * "not there" is drift's question and the digest read already asks it.
+   */
+  private async workloadStatus(
+    api: KubernetesApi,
+    flavour: Flavour,
+    object: KubernetesObject,
+    status: DeliveryStatus,
+  ): Promise<DeliveryStatus> {
+    if (status.phase !== 'LIVE') return status;
+    const placed = placedWorkload(flavour, object);
+    if (placed === null || placed.kind === 'job') return status;
+
+    const [deployment] =
+      (await api
+        .list(
+          {
+            apiVersion: 'apps/v1',
+            plural: 'deployments',
+            namespace: placed.namespace,
+          },
+          { labelSelector: placed.selector },
+        )
+        .catch(() => null)) ?? [];
+    if (deployment === undefined) return status;
+    // Only an explicit `False` is the controller saying so. A condition not
+    // yet written is a Deployment nobody has judged, and treating that as red
+    // would have `diagnose` indict the developer over an empty pod list.
+    const available = conditionOf(deployment, 'Available');
+    if (available?.status !== 'False') return status;
+
+    const { pods, events } = await this.readOnRed(
+      api,
+      placed.namespace,
+      placed.selector,
+    );
+    const diagnosis = diagnose(
+      pods,
+      events,
+      available.message ?? 'the workload is no longer available',
+    );
+    return {
+      phase: 'FAILED',
+      reason: diagnosis.reason,
+      detail: diagnosis.detail,
+      // §12, as in `failed`: the events this rests on expire within the hour.
+      debug: {
+        delivery: status.debug,
+        workload: conditionsOf(deployment),
+        diagnosis: diagnosis.debug,
+      },
     };
   }
 
@@ -513,7 +602,11 @@ export class KubernetesDeployAdapter implements DeployAdapter {
    * `OwnerReferencesPermissionEnforcement` admission plugin is on, and the
    * garbage collection this wants happens without it.
    */
-  async run(target: DeployTarget, ref: DeployRef): Promise<StartedRun> {
+  async run(
+    target: DeployTarget,
+    ref: DeployRef,
+    options: RunOptions = {},
+  ): Promise<StartedRun> {
     const connection = this.connectionOf(target);
     if (connection === null) {
       return refuse(`${targetLabel(target)} is not a Kubernetes Target`);
@@ -556,6 +649,7 @@ export class KubernetesDeployAdapter implements DeployAdapter {
       RUN_NAME_LIMIT,
     );
     const uid = owner.metadata.uid;
+    const parameters = Object.entries(options.env ?? {});
     const run: KubernetesObject = {
       apiVersion: JOB.apiVersion,
       kind: JOB.kind,
@@ -568,6 +662,9 @@ export class KubernetesDeployAdapter implements DeployAdapter {
         annotations: {
           ...template.metadata?.annotations,
           [MANUAL_RUN]: 'manual',
+          ...(parameters.length === 0
+            ? {}
+            : { [RUN_WITH]: parameters.map(([key]) => key).join(', ') }),
         },
         ...(typeof uid === 'string'
           ? {
@@ -583,7 +680,10 @@ export class KubernetesDeployAdapter implements DeployAdapter {
             }
           : {}),
       },
-      spec: template.spec,
+      spec:
+        parameters.length === 0
+          ? template.spec
+          : withRunEnv(template.spec, parameters),
     };
 
     let created: KubernetesObject;
@@ -609,6 +709,75 @@ export class KubernetesDeployAdapter implements DeployAdapter {
     // The name the API server stored, not the one that was asked for: `create`
     // now answers with the object or raises, so this reports a run that exists.
     return { kind: 'started', execution: startingRun(created.metadata.name) };
+  }
+
+  /**
+   * Stamp the pod template so the controller replaces the pods (§6).
+   *
+   * The delivery object is read back and re-applied with one value changed:
+   * `shared.podAnnotations[RESTART_STAMP]`, which the chart carries verbatim
+   * onto a Deployment's pod template. One key is written *into* the operator's
+   * map rather than the map over it — the shared class is "either may write"
+   * (`values.ts`), and the operator's other annotations are theirs to keep.
+   * The next ordinary deploy renders `shared` afresh and the stamp drops out
+   * with it, which is right: that deploy rolls the pods on its own account.
+   *
+   * **A job is refused.** A CronJob has runs, not a process: stamping its
+   * template would change nothing until the next run, which picks the
+   * template up anyway.
+   *
+   * **`resourceVersion` rides along.** The read and the write are two calls
+   * and a deploy can land between them; without the precondition this write
+   * would re-apply the spec it read — the old digest — over the new release,
+   * and only the drift clock would notice. With it the API server answers
+   * 409, this throws, and the command reports the sentence.
+   */
+  async restart(target: DeployTarget, ref: DeployRef): Promise<Restarted> {
+    const connection = this.connectionOf(target);
+    if (connection === null) {
+      return refuse(`${targetLabel(target)} is not a Kubernetes Target`);
+    }
+    const parsed = parseRef(ref);
+    if (parsed === null) {
+      return refuse('this Deploy carries no handle on what it placed');
+    }
+    const api = this.api(connection);
+    const object = await api.get({
+      apiVersion: apiVersionOf(parsed.flavour),
+      plural: pluralOf(parsed.flavour),
+      namespace: parsed.namespace,
+      name: parsed.name,
+    });
+    if (object === null) {
+      return refuse(`${parsed.name} is no longer on this Target`);
+    }
+    const values = valuesOf(parsed.flavour, object);
+    if ((values.app as { kind?: unknown } | undefined)?.kind === 'job') {
+      return refuse(
+        'this Component is a job, which has runs rather than a process to restart',
+      );
+    }
+
+    const at = new Date(this.events.now()).toISOString();
+    const shared = (values.shared ?? {}) as Record<string, unknown>;
+    const podAnnotations = (shared.podAnnotations ?? {}) as Record<
+      string,
+      string
+    >;
+    await api.apply(
+      withValues(parsed.flavour, object, {
+        ...values,
+        shared: {
+          ...shared,
+          podAnnotations: { ...podAnnotations, [RESTART_STAMP]: at },
+        },
+      }),
+      pluralOf(parsed.flavour),
+    );
+    return {
+      kind: 'restarted',
+      detail: `${resourceLabel(object)} stamped ${RESTART_STAMP}=${at}; the controller is replacing the pods`,
+    };
   }
 
   /**
@@ -948,7 +1117,11 @@ export class KubernetesDeployAdapter implements DeployAdapter {
       };
     }
 
-    const { pods, events } = await this.readOnRed(api, connection, desired);
+    const { pods, events } = await this.readOnRed(
+      api,
+      appNamespaceFor(connection, desired.app),
+      componentSelector(desired.app, desired.component),
+    );
     const diagnosis = diagnose(pods, events, status.detail);
     yield this.events.log(diagnosis.detail);
     return {
@@ -988,7 +1161,11 @@ export class KubernetesDeployAdapter implements DeployAdapter {
     ref: DeployRef,
     resource: string,
   ): AsyncGenerator<DeployEvent, DeployVerdict, void> {
-    const { pods, events } = await this.readOnRed(api, connection, desired);
+    const { pods, events } = await this.readOnRed(
+      api,
+      appNamespaceFor(connection, desired.app),
+      componentSelector(desired.app, desired.component),
+    );
     const found = evidence(pods, events, status.detail);
 
     yield this.events.status('FAILED', {
@@ -1021,22 +1198,20 @@ export class KubernetesDeployAdapter implements DeployAdapter {
   /**
    * The two lists every diagnosis is made from (§6).
    *
-   * The namespace is the App's own, and the one this apply just used — a read
-   * on red follows the release that failed, and this call placed it. A list
-   * that throws becomes an empty one: a diagnosis is a best effort over what
-   * came back, and losing the verdict because the second read failed would be
-   * the worse outcome.
+   * The namespace is the release's own — the one an apply just used, or the
+   * one the delivery object states — so a read on red follows the release
+   * that failed. A list that throws becomes an empty one: a diagnosis is a
+   * best effort over what came back, and losing the verdict because the
+   * second read failed would be the worse outcome.
    */
   private async readOnRed(
     api: KubernetesApi,
-    connection: KubernetesAdapterConnection,
-    desired: DesiredState,
+    namespace: string,
+    selector: string,
   ): Promise<{
     readonly pods: readonly KubernetesObject[];
     readonly events: readonly KubernetesObject[];
   }> {
-    const namespace = appNamespaceFor(connection, desired.app);
-    const selector = `app.kubernetes.io/name=${desired.component},app.kubernetes.io/part-of=${desired.app}`;
     const [pods, events] = await Promise.all([
       api
         .list(
@@ -1593,6 +1768,39 @@ interface JobTemplate {
   readonly spec?: Record<string, unknown>;
 }
 
+/**
+ * The template's spec with this run's parameters on every container.
+ *
+ * Appended after the template's own `env`, because the kubelet reads a
+ * duplicated name by its last entry — so a parameter is the value the process
+ * sees. Every container rather than the first: the chart renders one, and a
+ * run with a name the operator typed reaching a sidecar is harmless where a
+ * run that guessed which container was the workload is not.
+ */
+function withRunEnv(
+  spec: Record<string, unknown>,
+  parameters: readonly (readonly [string, string])[],
+): Record<string, unknown> {
+  const pod = (spec.template as { spec?: Record<string, unknown> } | undefined)
+    ?.spec;
+  const containers = pod?.containers;
+  if (!Array.isArray(containers)) return spec;
+  const env = parameters.map(([name, value]) => ({ name, value }));
+  return {
+    ...spec,
+    template: {
+      ...(spec.template as Record<string, unknown>),
+      spec: {
+        ...pod,
+        containers: containers.map((container: Record<string, unknown>) => ({
+          ...container,
+          env: [...(Array.isArray(container.env) ? container.env : []), ...env],
+        })),
+      },
+    },
+  };
+}
+
 /** A refusal in the vocabulary both run verbs answer in (§17). */
 function refuse(because: string): Extract<JobRuns, { kind: 'none' }> {
   return { kind: 'none', because };
@@ -1634,7 +1842,12 @@ function jobExecution(job: KubernetesObject): JobExecution {
       (condition.type === 'Complete' || condition.type === 'Failed'),
   );
   const at = status?.startTime ?? job.metadata.creationTimestamp;
-  const detail = terminal?.message ?? terminal?.reason;
+  const ranWith = job.metadata.annotations?.[RUN_WITH];
+  const ended = terminal?.message ?? terminal?.reason;
+  const detail = [
+    ...(ranWith === undefined ? [] : [`ran with ${ranWith}`]),
+    ...(ended === undefined ? [] : [ended]),
+  ].join(' · ');
   return {
     name: job.metadata.name,
     outcome:
@@ -1644,7 +1857,7 @@ function jobExecution(job: KubernetesObject): JobExecution {
           ? 'passed'
           : 'failed',
     startedAt: typeof at === 'string' ? new Date(at) : null,
-    ...(detail === undefined ? {} : { detail }),
+    ...(detail === '' ? {} : { detail }),
   };
 }
 
@@ -1774,6 +1987,44 @@ function valuesOf(
 }
 
 /**
+ * The same delivery object with its values replaced — the one write of them,
+ * for the reason {@link valuesOf} is the one read.
+ *
+ * Only what Spindrift owns is sent back: the name, the labels, the spec. The
+ * status, the managed fields and the rest of the server's metadata are the
+ * API server's, and a server-side apply that carried them would be refused
+ * or, worse, would take ownership of them. `resourceVersion` is the one
+ * exception, kept on purpose as the precondition `restart` relies on.
+ */
+function withValues(
+  flavour: Flavour,
+  object: KubernetesObject,
+  values: Record<string, unknown>,
+): KubernetesObject {
+  const { name, namespace, labels, resourceVersion } = object.metadata;
+  const spec = (object.spec ?? {}) as Record<string, unknown>;
+  const source = (spec.source ?? {}) as Record<string, unknown>;
+  const helm = (source.helm ?? {}) as Record<string, unknown>;
+  return {
+    apiVersion: object.apiVersion,
+    kind: object.kind,
+    metadata: {
+      name,
+      ...(namespace === undefined ? {} : { namespace }),
+      ...(labels === undefined ? {} : { labels }),
+      ...(typeof resourceVersion === 'string' ? { resourceVersion } : {}),
+    },
+    spec:
+      flavour === 'argo-application'
+        ? {
+            ...spec,
+            source: { ...source, helm: { ...helm, valuesObject: values } },
+          }
+        : { ...spec, values },
+  };
+}
+
+/**
  * The namespace a delivery object's workloads land in, as it states itself.
  *
  * Read off the object rather than derived from the App, because the two
@@ -1797,6 +2048,66 @@ function workloadNamespace(
       ? spec?.destination?.namespace
       : spec?.targetNamespace;
   return typeof stated === 'string' && stated.length > 0 ? stated : null;
+}
+
+/** `spindrift-app.selectorLabels`: on every object the chart renders. */
+function componentSelector(app: string, component: string): string {
+  return `app.kubernetes.io/name=${component},app.kubernetes.io/part-of=${app}`;
+}
+
+/**
+ * The workload a delivery object renders, as its objects can be listed.
+ *
+ * Read off the values for the reason `placedJob` reads them: the ref names
+ * the release and the chart names the workload, and the values are the one
+ * place both sides agree.
+ */
+function placedWorkload(
+  flavour: Flavour,
+  object: KubernetesObject,
+): {
+  readonly kind: string;
+  readonly namespace: string;
+  readonly selector: string;
+} | null {
+  const app = valuesOf(flavour, object).app as
+    | { name?: unknown; component?: unknown; kind?: unknown }
+    | undefined;
+  const namespace = workloadNamespace(flavour, object);
+  if (
+    typeof app?.name !== 'string' ||
+    typeof app.component !== 'string' ||
+    namespace === null
+  ) {
+    return null;
+  }
+  return {
+    kind: typeof app.kind === 'string' ? app.kind : 'service',
+    namespace,
+    selector: componentSelector(app.name, app.component),
+  };
+}
+
+/** One `status.conditions` entry, the shape every controller writes. */
+interface ObjectCondition {
+  type?: string;
+  status?: string;
+  reason?: string;
+  message?: string;
+}
+
+function conditionsOf(object: KubernetesObject): ObjectCondition[] {
+  const status = object.status as
+    | { conditions?: ObjectCondition[] }
+    | undefined;
+  return status?.conditions ?? [];
+}
+
+function conditionOf(
+  object: KubernetesObject,
+  type: string,
+): ObjectCondition | null {
+  return conditionsOf(object).find((entry) => entry.type === type) ?? null;
 }
 
 /** The digest the delivery object was applied with — what is serving. */

@@ -119,6 +119,18 @@ export interface EnrolledDeployAdapter {
    * placements and must not be counted.
    */
   readonly placements: () => number;
+  /**
+   * The far side's evidence of the latest restart, or `null` while nothing
+   * has been asked to restart.
+   *
+   * What the evidence *is* belongs to the backend — a pod-template stamp on a
+   * HelmRelease's values, a revision template's annotation, a count on the
+   * fake — so each enrolment reads its own and the suite asserts only that it
+   * appears and then moves. Absent for a backend whose `restart` refuses: a
+   * file tree has no process, and the suite holds that backend to the
+   * refusal instead.
+   */
+  readonly restartMark?: () => string | null;
 }
 
 /**
@@ -271,6 +283,9 @@ export function deployAdapterSuite(
       const { adapter } = make();
       const answers = [
         await adapter.run(target, 'never-placed'),
+        // With parameters too: a backend that runs nothing has nothing to put
+        // them on, and the answer is the same sentence rather than a crash.
+        await adapter.run(target, 'never-placed', { env: { SNAPSHOT: 'x' } }),
         await adapter.executions(target, 'never-placed'),
       ];
       for (const answer of answers) {
@@ -279,6 +294,76 @@ export function deployAdapterSuite(
         expect(answer.because.length).toBeGreaterThan(0);
       }
     });
+
+    test('answers restart about a ref it never placed', async () => {
+      // The same rule the run verbs are held to: a ref naming nothing is an
+      // answer in a sentence, never a throw, because core holds a
+      // `DeployAdapter` without knowing which backend is behind it.
+      const answer = await make().adapter.restart(target, 'never-placed');
+      expect(answer.kind).toBe('none');
+      if (answer.kind === 'none') {
+        expect(answer.because.length).toBeGreaterThan(0);
+      }
+    });
+
+    // Whether a backend has a process to bounce is the one thing the
+    // enrolments genuinely differ on, so it is asserted per backend rather
+    // than skipped for the ones that cannot. Both arms are positive claims.
+    if (make().restartMark !== undefined) {
+      test('a restart marks the far side and leaves the placement as it was', async () => {
+        const { adapter, placements, restartMark } = make();
+        if (restartMark === undefined)
+          throw new Error('enrolment lost its mark');
+        const digest = 'sha256:restarted';
+        const { verdict } = await drain(
+          adapter.apply(
+            target,
+            desiredState(adapter.artifactTypes[0] as ArtifactType, digest),
+          ),
+        );
+        if (verdict.phase !== 'LIVE') {
+          throw new Error('adapter did not place anything to restart');
+        }
+        expect(restartMark()).toBeNull();
+
+        const first = await adapter.restart(target, verdict.ref);
+        expect(first.kind).toBe('restarted');
+        const mark = restartMark();
+        expect(mark).not.toBeNull();
+
+        // A second press is a second rollout. Every platform here rolls on a
+        // template *change*, so a mark that stayed equal would be a press
+        // that did nothing while reporting that it did.
+        const second = await adapter.restart(target, verdict.ref);
+        expect(second.kind).toBe('restarted');
+        expect(restartMark()).not.toBe(mark);
+
+        // What is placed is what was placed: the same ref, the same digest,
+        // one placement. A restart that minted a sibling or moved the digest
+        // would be a deploy wearing the wrong name.
+        const observed = await adapter.observe(target, verdict.ref);
+        expect(observed?.artifactDigest).toBe(digest);
+        expect(placements()).toBe(1);
+      });
+    } else {
+      test('restart refuses what it has no process for, in a sentence', async () => {
+        const { adapter } = make();
+        const { verdict } = await drain(
+          adapter.apply(
+            target,
+            desiredState(adapter.artifactTypes[0] as ArtifactType),
+          ),
+        );
+        if (verdict.phase !== 'LIVE') {
+          throw new Error('adapter did not place anything to refuse');
+        }
+        const answer = await adapter.restart(target, verdict.ref);
+        expect(answer.kind).toBe('none');
+        if (answer.kind === 'none') {
+          expect(answer.because.length).toBeGreaterThan(0);
+        }
+      });
+    }
 
     test('refuses an artifact type it did not declare', async () => {
       const { adapter } = make();

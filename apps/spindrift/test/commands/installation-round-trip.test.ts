@@ -107,6 +107,17 @@ describe('the installation settings round trip', () => {
     expect(result.value.manifest).not.toHaveProperty('cloud');
   });
 
+  test('says what the answering process runs, beside the document', async () => {
+    await seed();
+
+    const result = await getInstallationManifest({}, context());
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    expect(result.value.version).toBe('sha256:deadbeef0123');
+    expect(result.value.version).toBe(manifest.controlPlane.version);
+  });
+
   test('a value edited on what the read answers writes back', async () => {
     await seed();
 

@@ -103,6 +103,7 @@ import type {
   FailureReason,
   JobRuns,
   ObservedState,
+  Restarted,
   RuntimeLogPage,
   RuntimeLogSubject,
   StartedRun,
@@ -589,6 +590,11 @@ export class PagesDeployAdapter implements DeployAdapter {
    * contract core can call without asking which one it is holding.
    */
   async run(_target: DeployTarget, _ref: DeployRef): Promise<StartedRun> {
+    return { kind: 'none', because: NOTHING_RUNS };
+  }
+
+  /** Nothing runs here, so there is nothing to restart either. */
+  async restart(_target: DeployTarget, _ref: DeployRef): Promise<Restarted> {
     return { kind: 'none', because: NOTHING_RUNS };
   }
 

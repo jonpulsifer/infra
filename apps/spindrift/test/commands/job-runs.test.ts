@@ -66,7 +66,12 @@ function context(deploy: FakeDeployAdapter | null): CommandContext {
 async function scaffold(
   ctx: CommandContext,
   backend: FakeDeployAdapter,
-  options: { kind?: 'job' | 'service'; ref?: string | null } = {},
+  options: {
+    kind?: 'job' | 'service';
+    ref?: string | null;
+    /** Variable names the placed release already delivers (§10). */
+    delivering?: readonly string[];
+  } = {},
 ) {
   const name = `runs-${crypto.randomUUID().slice(0, 8)}`;
   const app = await createApp(
@@ -115,7 +120,12 @@ async function scaffold(
     .insert(deploys)
     .values({
       componentId: component.value.componentId,
-      desired: aDesiredDocument(),
+      desired: aDesiredDocument({
+        config: (options.delivering ?? []).map((name) => ({
+          name,
+          secret: { key: `${name}-item`, version: '1' },
+        })),
+      }),
       targetId: target?.id as string,
       buildId: await buildFor(ctx, component.value.componentId),
       phase: 'LIVE',
@@ -212,6 +222,90 @@ describe('runComponent', () => {
     expect(refused.failure.message).toContain('nothing to run');
   });
 
+  test("carries this run's parameters to the backend, and nowhere else", async () => {
+    // The one-off script with an argument (§17): the names and values reach
+    // the adapter as the run's own env, and core writes none of it — a run is
+    // not an attempt, and the timeline is the platform's.
+    const backend = new FakeDeployAdapter();
+    const ctx = context(backend);
+    const { componentId, targetId } = await scaffold(ctx, backend);
+
+    const started = await runComponent(
+      {
+        componentId,
+        targetId,
+        env: { SNAPSHOT: 'nightly-2026-08-03', SINCE: '2026-08-01' },
+      },
+      ctx,
+    );
+
+    expect(started.ok).toBe(true);
+    expect(backend.runsStartedWith).toEqual([
+      { SNAPSHOT: 'nightly-2026-08-03', SINCE: '2026-08-01' },
+    ]);
+  });
+
+  test('a press without parameters sends none', async () => {
+    const backend = new FakeDeployAdapter();
+    const ctx = context(backend);
+    const { componentId, targetId } = await scaffold(ctx, backend);
+
+    await runComponent({ componentId, targetId, env: {} }, ctx);
+
+    expect(backend.runsStartedWith).toEqual([{}]);
+  });
+
+  test('a parameter that is not a variable name is refused in a sentence, and never reaches the backend', async () => {
+    // The same rule config keys answer to, because the same process reads
+    // both: a name the environment cannot carry is refused where the person
+    // who typed it is still looking.
+    const backend = new FakeDeployAdapter();
+    const ctx = context(backend);
+    const { componentId, targetId } = await scaffold(ctx, backend);
+
+    const refused = await runComponent(
+      { componentId, targetId, env: { 'not a name': 'x', SNAPSHOT: 'y' } },
+      ctx,
+    );
+
+    expect(refused.ok).toBe(false);
+    if (refused.ok) return;
+    expect(refused.failure.code).toBe('INVALID_INPUT');
+    expect(refused.failure.message).toBe(
+      'not a name must be an environment variable name',
+    );
+    expect(backend.runsStarted).toEqual([]);
+  });
+
+  test('a parameter that would shadow delivered config is refused, and never reaches the backend', async () => {
+    // §10: every config variable is a sealed reference. A run that set
+    // `DATABASE_URL` inline would put a value where the reference was — in a
+    // Job spec, readable by anyone who can read Jobs — so the parameters are
+    // additions to what the release delivers, never overrides of it.
+    const backend = new FakeDeployAdapter();
+    const ctx = context(backend);
+    const { componentId, targetId } = await scaffold(ctx, backend, {
+      delivering: ['DATABASE_URL', 'RETENTION_DAYS'],
+    });
+
+    const refused = await runComponent(
+      {
+        componentId,
+        targetId,
+        env: { DATABASE_URL: 'postgres://elsewhere', SNAPSHOT: 'x' },
+      },
+      ctx,
+    );
+
+    expect(refused.ok).toBe(false);
+    if (refused.ok) return;
+    expect(refused.failure.code).toBe('INVALID_INPUT');
+    expect(refused.failure.message).toBe(
+      "DATABASE_URL is already delivered to nightly as config; a run's parameters add to that and never override it",
+    );
+    expect(backend.runsStarted).toEqual([]);
+  });
+
   test('a far side that fails is a refusal with its sentence, not a crash', async () => {
     const backend = new FakeDeployAdapter({
       runThrows: 'the API server answered 403',
@@ -285,6 +379,34 @@ describe('the App screen lists the runs that happened', () => {
     if (runtime.kind !== 'executions') return;
     expect(runtime.executions).toHaveLength(1);
     expect(runtime.executions[0]?.outcome).toBe('running');
+  });
+
+  test('a run started with parameters says which, and never their values', async () => {
+    // What the timeline reads back is the platform's record of the run, and
+    // a value on it is a value in every log of the screen. The names are what
+    // make "last night's restore" legible; the values are the run's alone.
+    const backend = new FakeDeployAdapter();
+    const ctx = context(backend);
+    const { appName, componentId, targetId } = await scaffold(ctx, backend);
+
+    await runComponent(
+      {
+        componentId,
+        targetId,
+        env: { SNAPSHOT: 'nightly-2026-08-03', SINCE: '2026-08-01' },
+      },
+      ctx,
+    );
+    const workspace = await getAppWorkspace({ name: appName }, ctx);
+
+    expect(workspace.ok).toBe(true);
+    if (!workspace.ok) return;
+    const runtime = workspace.value.workspace.runtime;
+    expect(runtime.kind).toBe('executions');
+    if (runtime.kind !== 'executions') return;
+    expect(runtime.executions[0]?.detail).toBe('ran with SNAPSHOT, SINCE');
+    expect(JSON.stringify(workspace.value)).not.toContain('nightly-2026-08-03');
+    expect(JSON.stringify(workspace.value)).not.toContain('2026-08-01');
   });
 
   test('a backend that will not answer is one empty card, not a failed screen', async () => {

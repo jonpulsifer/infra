@@ -58,6 +58,15 @@ describe('enqueue and claim', () => {
     expect((await store.claim(['skiff-a']))?.id).toBe(older);
   });
 
+  test('enqueue takes the caller’s id, so a row can be found by it later', async () => {
+    const store = buildOutbox(database().db);
+    const id = crypto.randomUUID();
+    expect(await store.enqueue({ id, class: 'skiff-a', request: {} })).toEqual({
+      id,
+    });
+    expect(await store.get(id)).toMatchObject({ state: 'PENDING' });
+  });
+
   test('nothing to claim answers null', async () => {
     const store = buildOutbox(database().db);
     expect(await store.claim(['skiff-a'])).toBeNull();
