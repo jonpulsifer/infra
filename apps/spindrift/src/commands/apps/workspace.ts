@@ -294,11 +294,12 @@ export const getAppWorkspace: Command<
   } else if (latestDeploy) {
     activity.push({
       kind: 'deploy',
-      title: `Deploy ${latestDeploy.id} ${latestDeploy.phase.toLowerCase()}`,
+      title: `Deploy ${latestDeploy.id} ${latestDeploy.faultyAt ? 'faulty' : latestDeploy.phase.toLowerCase()}`,
       detail: latestDeploy.detail ?? `Target: ${targetRowLabel(latestTarget)}`,
       when: elapsedSince(latestDeploy.createdAt, now),
-      status:
-        latestDeploy.phase === 'LIVE'
+      status: latestDeploy.faultyAt
+        ? 'failed'
+        : latestDeploy.phase === 'LIVE'
           ? 'ok'
           : latestDeploy.phase === 'FAILED'
             ? 'failed'
@@ -401,8 +402,12 @@ export const getAppWorkspace: Command<
     live" over a release the cluster had been refusing for two days. The panels
     that render them were already written and already take exactly these shapes.
   */
+  // A faulty release is the soak's verdict after LIVE (§6): it fills the same
+  // four columns a red attempt does, so the same panel explains it.
   const diagnosis: Diagnosis | null =
-    latestDeploy?.phase === 'FAILED' && latestDeploy.reason
+    latestDeploy &&
+    (latestDeploy.phase === 'FAILED' || latestDeploy.faultyAt !== null) &&
+    latestDeploy.reason
       ? {
           reason: latestDeploy.reason as FailureReason,
           blame: (latestDeploy.blame ?? null) as Blame | null,

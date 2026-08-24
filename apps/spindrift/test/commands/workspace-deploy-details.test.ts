@@ -885,6 +885,51 @@ describe('the workspace as a way into the system', () => {
       buildId: build!.id,
     });
   });
+  test("a faulty release reads as failed, with the soak's diagnosis", async () => {
+    const ctx = context();
+    const { appName, componentId, target } = await scaffold(ctx, {
+      prefix: 'faulty',
+    });
+
+    const [build] = await ctx.db
+      .insert(builds)
+      .values({
+        componentId,
+        commit: 'bad1dea',
+        targetShape: 'image',
+        artifactType: 'image',
+        status: 'SUCCEEDED',
+      })
+      .returning();
+    const [deploy] = await ctx.db
+      .insert(deploys)
+      .values({
+        componentId,
+        targetId: target.id,
+        buildId: build!.id,
+        desired: aDesiredDocument(),
+        phase: 'LIVE',
+        faultyAt: new Date(),
+        reason: 'STARTUP_FAILED',
+        blame: 'developer',
+        detail: 'crash-looping since readiness',
+      })
+      .returning();
+
+    const result = await getAppWorkspace({ name: appName }, ctx);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    const { workspace } = result.value;
+    expect(workspace.activity[0]).toMatchObject({
+      kind: 'deploy',
+      title: `Deploy ${deploy!.id} faulty`,
+      status: 'failed',
+      deployId: deploy!.id,
+    });
+    expect(workspace.diagnosis?.reason).toBe('STARTUP_FAILED');
+    expect(workspace.diagnosis?.blame).toBe('developer');
+  });
 });
 
 describe('getDeployDetail command', () => {

@@ -1693,6 +1693,14 @@ export const attemptEvents = pgTable(
       'attempt_events_kind_matches_reference',
       sql`(${table.attemptKind} = 'build' and ${table.buildId} is not null) or (${table.attemptKind} = 'deploy' and ${table.deployId} is not null)`,
     ),
+    // One partial index per leg: every log read and the ceiling's seed COUNT
+    // walk a single leg in `id` order (`domain/attempt-log.ts`).
+    index('attempt_events_build_id_id_idx')
+      .on(table.buildId, table.id)
+      .where(sql`${table.buildId} is not null`),
+    index('attempt_events_deploy_id_id_idx')
+      .on(table.deployId, table.id)
+      .where(sql`${table.deployId} is not null`),
   ],
 );
 
