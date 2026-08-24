@@ -98,6 +98,12 @@ export interface AttemptActions {
   readonly onCancel?: () => void;
   /** Stop a Deploy that has not landed — the attempt honours it (§6). */
   readonly onCancelDeploy?: () => void;
+  /**
+   * A cancel this screen already asked of the running Build, which its route
+   * reports on at its next poll. Shown as the pressed state rather than the
+   * act again, the way the Deploy button is on `cancelRequestedBy`.
+   */
+  readonly cancelRequested?: boolean;
   readonly busy?: 'redeploy' | 'rollback' | 'deploy' | 'cancel' | null;
 }
 
@@ -428,6 +434,7 @@ function Actions({
     onDeployBuild,
     onCancel,
     onCancelDeploy,
+    cancelRequested,
     busy,
   } = actions;
   const buttons = [];
@@ -499,22 +506,31 @@ function Actions({
 
   // While it is queued or running. A running Build still ends when its route
   // writes the verdict and not before — the command stops the far side and the
-  // route reports what became of it, so the screen shows "cancelled by" first
-  // and the verdict a poll later, which is the honest order of events.
+  // route reports what became of it, so the screen shows "cancel requested by"
+  // first and the verdict a poll later, which is the honest order of events.
+  // Until that verdict the button holds the pressed state: the row itself does
+  // not change, so nothing else on the screen would say the ask was made.
   if (
     onCancel &&
     (view.build?.status === 'waiting' || view.build?.status === 'running')
   ) {
+    const requested =
+      cancelRequested === true && view.build?.status === 'running';
     buttons.push(
       <Button
         key="cancel"
         variant="outline"
         size="sm"
         onClick={onCancel}
-        disabled={busy !== null && busy !== undefined}
+        disabled={requested || (busy !== null && busy !== undefined)}
+        title={
+          requested
+            ? 'Cancel requested; the route reports the verdict'
+            : undefined
+        }
       >
         <Ban aria-hidden="true" className="size-3.5" />
-        {busy === 'cancel' ? 'Cancelling…' : 'Cancel build'}
+        {requested || busy === 'cancel' ? 'Cancelling…' : 'Cancel build'}
       </Button>,
     );
   }
@@ -1325,6 +1341,7 @@ export function BuildScreen({
   const [busy, setBusy] = useState<'redeploy' | 'deploy' | 'cancel' | null>(
     null,
   );
+  const [cancelRequested, setCancelRequested] = useState(false);
   const [reloadToken, setReloadToken] = useState(0);
 
   useEffect(() => {
@@ -1351,6 +1368,11 @@ export function BuildScreen({
         attempt: result.value.attempt,
         deployId: result.value.deployId,
       });
+      // The ask is scoped to the run it was made of: a verdict, or a
+      // re-arm that queues a fresh attempt, is a Build the button offers again.
+      if (result.value.attempt.build?.status !== 'running') {
+        setCancelRequested(false);
+      }
     };
 
     read()
@@ -1434,6 +1456,7 @@ export function BuildScreen({
     try {
       const result = await command('cancelBuild', { id: parsedId });
       if (result.ok) {
+        if (result.value.status === 'RUNNING') setCancelRequested(true);
         setReloadToken((token) => token + 1);
       } else {
         notify({
@@ -1497,6 +1520,7 @@ export function BuildScreen({
           onDeployBuild: () => void act('deploy'),
           onRedeploy: () => void act('redeploy'),
           onCancel: () => void cancel(),
+          cancelRequested,
           busy,
         }}
         onNavigate={onNavigate}

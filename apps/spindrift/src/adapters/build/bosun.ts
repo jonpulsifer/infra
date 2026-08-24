@@ -241,7 +241,11 @@ export class BosunBuildRoute implements BuildAdapter {
     });
   }
 
-  /** Close the outbox row named by the dispatch id; the poll above sees DONE. */
+  /**
+   * Close the outbox row named by the dispatch id. The poll above sees DONE;
+   * the host that claimed it sees its next heartbeat refused and kills the
+   * skiff, so the image a cancelled build was making is never pushed.
+   */
   cancel(handle: BuildHandle): Promise<void> {
     return this.options.outbox.cancel(handle.dispatchId);
   }

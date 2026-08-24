@@ -715,12 +715,13 @@ export const deployApp: Command<DeployAppInput, DeployAppResult> = async (
   } else {
     // `RUNNING` under a live lease is a generator streaming into this attempt's
     // log right now. Nulling `dispatchId` and `leasedAt` under it does not stop
-    // it — nothing here can — it only makes the build loop dispatch a second
-    // one on its next 500ms tick, so two generators write one attempt log and
-    // whichever finishes last lands the verdict. Refused rather than cancelled
-    // because there is no cancel to offer: the route's own terminal write is
-    // what ends an attempt, and the lease expiring is what makes this row
-    // reclaimable, which is the wait this sentence names.
+    // it — it only makes the build loop dispatch a second one on its next
+    // 500ms tick, so two generators write one attempt log and whichever
+    // finishes last lands the verdict. Refused rather than cancelled because
+    // stopping a live attempt is `cancelBuild`'s act: it reaches the route's
+    // far side and leaves the route's own terminal write to end the attempt.
+    // The lease expiring is what makes this row reclaimable, which is the wait
+    // this sentence names.
     //
     // **The condition is the `WHERE`, not a check above it.** `buildToRun` was
     // read at the top of this command, several awaits and a network staging

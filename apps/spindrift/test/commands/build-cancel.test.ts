@@ -12,12 +12,16 @@
  *   makes the route's own terminal write what ends an attempt, so the command
  *   kills the far side and writes no verdict: the row stays `RUNNING` under
  *   its live lease, the route's fenced write is what will end it, and the log
- *   says who asked.
+ *   says who asked — as a request, because what was stopped is the route's to
+ *   say.
  * - **A running Build nothing here can reach is refused.** A route this
  *   installation no longer configures, or one whose far side would not stop,
- *   is a cancel that did not happen — and the row is left as it was.
- * - **A running Build whose lease has expired is not that case.** Nothing is
- *   coming back for it, which is the same condition that makes it reclaimable.
+ *   is a cancel that did not happen — and the row is left as it was. So is one
+ *   whose far side finished while the cancel was in flight: the verdict it
+ *   landed is the route's, and no line contradicts it.
+ * - **A running Build whose lease has expired is settled here, and its far
+ *   side is told anyway.** A live attempt renews its lease, so an expired one
+ *   is a process that died — and the Job it started did not die with it.
  */
 import { describe, expect, test } from 'bun:test';
 import { eq } from 'drizzle-orm';
@@ -192,9 +196,32 @@ describe('cancelling a running Build', () => {
 
     const log = await logOf(build.id);
     expect(log.map((event) => event.line ?? '').join('\n')).toContain(
-      'cancelled by Jordan',
+      'cancel requested by Jordan',
     );
     expect(log.some((event) => event.phase === 'FAILED')).toBe(false);
+  });
+
+  test('is refused when the far side finished while the cancel was in flight, and the verdict stands', async () => {
+    const route = new FakeBuildAdapter({ name: 'hosted' });
+    const build = await aBuild({
+      status: 'RUNNING',
+      leasedAt: FROZEN,
+      runner: 'hosted',
+    });
+    // The route reports a green verdict in the window between the command's
+    // read and its cancel — which the route treats as nothing to stop.
+    route.cancel = async () => {
+      await database()
+        .db.update(builds)
+        .set({ status: 'SUCCEEDED' })
+        .where(eq(builds.id, build.id));
+    };
+
+    const result = await cancelBuild({ id: build.id }, context(route));
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.failure.message).toContain('succeeded');
+    expect((await rowOf(build.id)).status).toBe('SUCCEEDED');
+    expect(await logOf(build.id)).toHaveLength(0);
   });
 
   test('is refused when its route is not configured here, and the row is untouched', async () => {
@@ -231,7 +258,7 @@ describe('cancelling a running Build', () => {
     expect(await logOf(build.id)).toHaveLength(0);
   });
 
-  test('whose lease has expired settles here: nothing is coming back for it', async () => {
+  test('whose lease has expired settles here, and the far side is told anyway', async () => {
     const route = new FakeBuildAdapter({ name: 'hosted' });
     const build = await aBuild({
       status: 'RUNNING',
@@ -248,8 +275,26 @@ describe('cancelling a running Build', () => {
     // Fenced out: the abandoned attempt's terminal write names a dispatch id
     // this row no longer carries, so it cannot overwrite the verdict.
     expect(row.dispatchId).toBeNull();
-    // And nothing reached the route: whatever it was running is not coming
-    // back, which is the condition that made the row settle here.
-    expect(route.cancelled).toEqual([]);
+    // The process that held the lease is gone; the Job it started may not be,
+    // so the route is handed what the row kept about it.
+    expect(route.cancelled).toEqual([
+      { dispatchId: build.dispatchId!, runUrl: null },
+    ]);
+  });
+
+  test('whose lease has expired settles here even when the route will not answer', async () => {
+    const route = new FakeBuildAdapter({ name: 'hosted' });
+    route.cancel = async () => {
+      throw new Error('the host is unreachable');
+    };
+    const build = await aBuild({
+      status: 'RUNNING',
+      leasedAt: new Date(FROZEN.getTime() - DISPATCH_LEASE_TIMEOUT_MS - 1),
+      runner: 'hosted',
+    });
+
+    const result = await cancelBuild({ id: build.id }, context(route));
+    expect(result.ok).toBe(true);
+    expect((await rowOf(build.id)).status).toBe('FAILED');
   });
 });

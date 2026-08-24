@@ -93,6 +93,13 @@ export const CONCURRENT_BUILDS_PER_APP = 3;
 export const DISPATCH_LEASE_TIMEOUT_MS = 10 * 60 * 1000;
 
 /**
+ * How often a live attempt renews its lease. A quarter of the timeout, so a
+ * renewal can miss twice — a slow query, a paused replica — before the row
+ * reads as abandoned.
+ */
+export const DISPATCH_LEASE_REFRESH_MS = DISPATCH_LEASE_TIMEOUT_MS / 4;
+
+/**
  * How a refused row's next attempt is paced (story 101).
  *
  * The first refusal costs one second, which a developer watching the screen
@@ -142,10 +149,12 @@ export const dispatchBuildInput = z
      */
     placementTargetId: z.uuid().optional(),
     /**
-     * Optional durable identity for this dispatch attempt/lease.
-     * When omitted, a unique ID is generated for the claim.
+     * Optional durable identity for this dispatch attempt/lease. When omitted,
+     * a unique ID is generated for the claim. A UUID and nothing looser: the
+     * routes name their far side by it — the bosun outbox row's primary key,
+     * the in-cluster Job's name — and either rejects anything else.
      */
-    dispatchId: z.string().trim().min(1).optional(),
+    dispatchId: z.uuid().optional(),
   })
   .strict();
 
@@ -1122,6 +1131,11 @@ export const dispatchBuild = async (
         logFidelity: adapter.logFidelity,
         dispatchId,
         leasedAt: now,
+        // A previous attempt's address, where the row kept one, names a run
+        // this attempt is not. `cancelBuild` hands the column to the route,
+        // so until this run is discovered it names nothing rather than the
+        // run that already ended.
+        runUrl: null,
         // Story 112: which secrets this run could read — names only, written
         // at the claim so a build that fails still records what it held. A
         // provenance that does not mention a credential the build had is a
@@ -1302,6 +1316,22 @@ export const dispatchBuild = async (
   };
   reconcilerDispatchAttempts.add(1, { outcome: 'dispatched' });
 
+  // The lease is a liveness signal for this process, not a clock on the
+  // build: a route's budget is 45 minutes against a 10-minute lease, and a
+  // quiet far side — a cold `RUN npm ci`, a bosun host that reports nothing
+  // until it posts — yields no event to renew on. Renewed on a timer instead,
+  // so a row whose lease has expired is one whose process is gone, which is
+  // the only case the re-claim and `cancelBuild` are allowed to treat it as.
+  // Fire-and-forget under the claim: a renewal that fails is one the next
+  // tick makes again, and one that lands after the verdict matches no row.
+  const renewal = setInterval(() => {
+    void context.db
+      .update(builds)
+      .set({ leasedAt: context.clock?.now() ?? new Date() })
+      .where(and(mine, eq(builds.status, 'RUNNING')))
+      .catch(() => {});
+  }, DISPATCH_LEASE_REFRESH_MS);
+
   try {
     // The claim's id goes with the build so the route names its far side by
     // it — which is what lets `cancelBuild` reach that far side from the row.
@@ -1451,5 +1481,7 @@ export const dispatchBuild = async (
       runner: adapter.name,
       dispatchId: activeDispatchId,
     });
+  } finally {
+    clearInterval(renewal);
   }
 };
