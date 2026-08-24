@@ -7,15 +7,14 @@ import type { Network } from '@x402/core/types';
 import { ExactEvmScheme } from '@x402/evm/exact/server';
 import { paymentMiddleware, x402ResourceServer } from '@x402/hono';
 import { ExactSvmScheme } from '@x402/svm/exact/server';
-import { Hono } from 'hono';
-import { type Entry, openLedger } from './ledger.ts';
+import { type Context, Hono, type MiddlewareHandler } from 'hono';
+import { brainReady, llm } from './brain.ts';
+import { balances, chainOf } from './chain.ts';
+import { openLedger } from './ledger.ts';
+import { mcpFetch } from './mcp.ts';
+import { page } from './page.ts';
+import { BASE, PRICES, SOLANA } from './prices.ts';
 
-const BASE: Network = 'eip155:8453';
-const SOLANA: Network = 'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp';
-const PRICES: Record<string, string> = {
-  '/fortune': '$0.001',
-  '/ping': '$0.0001',
-};
 const FORTUNES = [
   'Your next deploy lands green on the first try.',
   'A human will thank you today. Log it.',
@@ -38,6 +37,28 @@ const FORTUNES = [
   'Fractions of a cent add up. So do you.',
   'The robots are fine. Ask them.',
 ];
+const ORACLE = [
+  'ask again after the next block',
+  'the facilitator says yes',
+  'the facilitator says no',
+  'signs point to a reorg',
+  'yes, but not on mainnet',
+  'the mempool is unclear',
+  'certainly, gas permitting',
+  'my sources say 402',
+  'outlook settled',
+  'outlook pending finality',
+  'do not count on it; count your USDC',
+  'it is decidedly so, on-chain',
+  'without a doubt, unless slashed',
+  'reply hazy, retry with backoff',
+  'better not tell you now; the nonce is taken',
+  'concentrate and sign again',
+  'the validators are nodding',
+  'most likely, per the oracle feed',
+  'the answer is in the ledger',
+  'yes, and tip the teller',
+];
 
 const env = process.env;
 const treasury: { network: Network; payTo: string }[] = [
@@ -47,160 +68,317 @@ const treasury: { network: Network; payTo: string }[] = [
 const ledger = openLedger(env.DATABASE_URL);
 const payers = new Map<string, string>();
 
-export const app = new Hono();
+type Env = { Variables: { payer?: string } };
+type Ctx = Context<Env>;
+export const app = new Hono<Env>();
 
+const sha256 = (s: string) =>
+  new Bun.CryptoHasher('sha256').update(s).digest('hex');
+const pick = <T>(xs: T[]) => xs[Math.floor(Math.random() * xs.length)] as T;
+const dice = (seed: string) => {
+  const hash = sha256(seed);
+  return {
+    roll: 1 + (Number.parseInt(hash.slice(0, 8), 16) % 20),
+    seed: hash.slice(0, 12),
+  };
+};
+const ASK_SYSTEM =
+  'You are the teller at clankerbanker, a bank for robots. Answer in at most 80 words. No memory of prior questions.';
+const ask = (q: string) => llm(ASK_SYSTEM, q);
+const isQ = (q: unknown): q is string =>
+  typeof q === 'string' && q.length >= 1 && q.length <= 500;
+
+// Pre-payment guards: refuse before anyone pays for nothing.
+const bad = (c: Ctx, error: string, status: 400 | 413 | 503 = 400) =>
+  c.json({ error }, status);
+const brainGuard: MiddlewareHandler<Env> = async (c, next) =>
+  brainReady() ? next() : bad(c, 'no brain configured', 503);
+app.get('/tip/:name', (c, next) =>
+  /^[a-z0-9-]{1,24}$/.test(c.req.param('name')) ? next() : bad(c, 'bad name'),
+);
+app.on(['GET', 'PUT'], '/kv/:key', async (c, next) => {
+  if (!/^[a-zA-Z0-9_.-]{1,64}$/.test(c.req.param('key')))
+    return bad(c, 'bad key');
+  if (c.req.method === 'PUT') {
+    if (Number(c.req.header('content-length') ?? 0) > 4096)
+      return bad(c, 'value over 4 KiB', 413);
+    if (Buffer.byteLength(await c.req.text()) > 4096)
+      return bad(c, 'value over 4 KiB', 413);
+  }
+  return next();
+});
+app.get('/ask', brainGuard, (c, next) =>
+  isQ(c.req.query('q')) ? next() : bad(c, 'q must be 1-500 chars'),
+);
+app.get('/roast/:address', brainGuard, (c, next) =>
+  chainOf(c.req.param('address'))
+    ? next()
+    : bad(c, 'not a base or solana address'),
+);
+
+// Bearer pass: a valid token names the payer and skips the paywall below.
+const tokenHash = (token: string) => sha256(`pass:${token}`);
+app.use(async (c, next) => {
+  const auth = c.req.header('authorization');
+  if (auth?.startsWith('Bearer ')) {
+    const pass = await ledger.passGet(tokenHash(auth.slice(7)));
+    if (pass && pass.expires_at > new Date().toISOString())
+      c.set('payer', pass.payer);
+  }
+  await next();
+});
+
+let x402: x402ResourceServer | undefined;
 if (treasury.length === 0) {
-  for (const path of Object.keys(PRICES)) {
-    app.use(path, async (c) =>
+  for (const key of Object.keys(PRICES)) {
+    const [method, path] = key.split(' ') as [string, string];
+    app.on(method, path, (c) =>
       c.json({ error: 'bank not open: no treasury address' }, 503),
     );
   }
 } else {
-  const server = new x402ResourceServer(
+  const stashKey = (ctx: unknown, payload: unknown) =>
+    (ctx as HTTPTransportContext | undefined)?.request?.paymentHeader ??
+    JSON.stringify(payload);
+  x402 = new x402ResourceServer(
     new HTTPFacilitatorClient({
       url: env.FACILITATOR_URL ?? 'https://facilitator.payai.network',
     }),
   )
     .register(BASE, new ExactEvmScheme())
     .register(SOLANA, new ExactSvmScheme())
-    .onAfterVerify(async ({ result, transportContext }) => {
-      const header = (transportContext as HTTPTransportContext | undefined)
-        ?.request.paymentHeader;
-      if (!result.isValid || !header || !result.payer) return;
-      // ponytail: clear-on-cap; entries strand only when settle never runs
-      if (payers.size > 1000) payers.clear();
-      payers.set(header, result.payer);
+    // One signed payment is one request: a second copy arriving while the
+    // first is between verify and settle would be served and then fail to
+    // settle on the spent nonce.
+    .onBeforeVerify(async ({ transportContext, paymentPayload }) => {
+      const key = stashKey(transportContext, paymentPayload);
+      if (payers.has(key))
+        return { abort: true, reason: 'payment already in flight' };
+      payers.set(key, 'pending');
+      return undefined;
     })
-    .onAfterSettle(async ({ result, requirements, transportContext }) => {
-      const req = (transportContext as HTTPTransportContext | undefined)
-        ?.request;
-      const header = req?.paymentHeader ?? '';
-      const payer = result.payer ?? payers.get(header) ?? 'unknown';
-      payers.delete(header);
-      if (!result.success) return;
-      const entry = {
-        at: new Date().toISOString(),
-        route: req?.path ?? '?',
-        network: requirements.network,
-        payer,
-        amount: result.amount ?? requirements.amount,
-        asset: requirements.asset,
-        tx: result.transaction,
-      };
-      try {
-        await ledger.add(entry);
-      } catch (err) {
-        console.error('ledger write failed; dropped settlement', entry, err);
-      }
-    });
+    .onAfterVerify(async ({ result, transportContext, paymentPayload }) => {
+      const key = stashKey(transportContext, paymentPayload);
+      if (result.isValid && result.payer) payers.set(key, result.payer);
+      else payers.delete(key);
+    })
+    .onVerifiedPaymentCanceled(async ({ transportContext, paymentPayload }) => {
+      payers.delete(stashKey(transportContext, paymentPayload));
+    })
+    .onAfterSettle(
+      async ({ result, requirements, transportContext, paymentPayload }) => {
+        const key = stashKey(transportContext, paymentPayload);
+        const payer = result.payer ?? payers.get(key) ?? 'unknown';
+        payers.delete(key);
+        if (!result.success) return;
+        const ctx = transportContext as
+          | HTTPTransportContext
+          | { toolName: string }
+          | undefined;
+        const route =
+          ctx && 'request' in ctx
+            ? ctx.request.path
+            : ctx && 'toolName' in ctx
+              ? `mcp:${ctx.toolName}`
+              : '?';
+        const entry = {
+          at: new Date().toISOString(),
+          route,
+          network: requirements.network,
+          payer,
+          amount: result.amount ?? requirements.amount,
+          asset: requirements.asset,
+          tx: result.transaction,
+        };
+        try {
+          await ledger.add(entry);
+        } catch (err) {
+          console.error('ledger write failed; dropped settlement', entry, err);
+        }
+      },
+    );
   // Cloudflare terminates TLS and the tunnel hands us plain http, so the URL
   // the middleware would derive advertises `http://` and x402 clients refuse
   // the quote. Pin the resource to the public origin instead.
   const origin = env.PUBLIC_ORIGIN ?? 'https://clankerbanker.ca';
   const routes: Record<string, RouteConfig> = {};
-  for (const [path, price] of Object.entries(PRICES)) {
-    routes[`GET ${path}`] = {
+  for (const [key, [price, description]] of Object.entries(PRICES)) {
+    const path = key.split(' ')[1] as string;
+    routes[key] = {
       accepts: treasury.map((t) => ({ scheme: 'exact', price, ...t })),
       resource: new URL(path, origin).toString(),
-      description: `clankerbanker ${path} (${price})`,
+      description: `clankerbanker ${key} (${price}): ${description}`,
       mimeType: 'application/json',
     };
   }
-  app.use(paymentMiddleware(routes, server));
+  const pay = paymentMiddleware(routes, x402);
+  // A pass skips the paywall on the fun routes only: not the one that mints
+  // passes (one dollar would buy a chain of them), and not the ones that
+  // cost the bank something per call (a model completion, a stored value).
+  const metered = (c: Ctx) =>
+    c.req.path === '/account' ||
+    c.req.path === '/ask' ||
+    c.req.path.startsWith('/roast/') ||
+    (c.req.method === 'PUT' && c.req.path.startsWith('/kv/'));
+  app.use((c, next) => (c.get('payer') && !metered(c) ? next() : pay(c, next)));
 }
 
-function payerOf(c: { req: { header(n: string): string | undefined } }) {
+function payerOf(c: Ctx) {
   const header =
     c.req.header('payment-signature') ?? c.req.header('x-payment') ?? '';
-  return payers.get(header) ?? 'unknown';
+  return c.get('payer') ?? payers.get(header) ?? 'unknown';
 }
+const fortune = (c: Ctx, extra = {}) =>
+  c.json({ fortune: pick(FORTUNES), payer: payerOf(c), ...extra });
 
 app.get('/healthz', (c) => c.text('ok'));
 app.get('/ping', (c) => c.json({ pong: true, at: new Date().toISOString() }));
-app.get('/fortune', (c) =>
-  c.json({
-    fortune: FORTUNES[Math.floor(Math.random() * FORTUNES.length)],
-    payer: payerOf(c),
-  }),
+app.get('/fortune', (c) => fortune(c));
+app.get('/premium/fortune', (c) => fortune(c, { tier: 'premium' }));
+app.get('/oracle', (c) => c.json({ answer: pick(ORACLE) }));
+// Seeded from the payment the payer signed before the roll, so the roll is
+// provably fair to them; a pass-holder committed nothing, so they get chance.
+app.get('/dice', (c) =>
+  c.json(
+    dice(
+      c.req.header('payment-signature') ??
+        c.req.header('x-payment') ??
+        crypto.randomUUID(),
+    ),
+  ),
 );
-app.get('/ledger', async (c) =>
-  c.json({
-    entries: await ledger.recent(100),
-    leaderboard: await ledger.leaderboard(10),
-  }),
+app.get('/whoami', async (c) => c.json(await ledger.payer(payerOf(c))));
+app.get('/tip/:name', (c) =>
+  c.json({ thanks: c.req.param('name'), payer: payerOf(c) }),
 );
-app.get('/', async (c) =>
-  c.html(page(await ledger.recent(20), await ledger.leaderboard(10))),
-);
+app.put('/kv/:key', async (c) => {
+  const payer = payerOf(c);
+  if (payer === 'unknown') return bad(c, 'payer unknown; nothing stored', 503);
+  await ledger.kvSet(payer, c.req.param('key'), await c.req.text());
+  return c.json({ stored: c.req.param('key') });
+});
+app.get('/kv/:key', async (c) => {
+  const value = await ledger.kvGet(payerOf(c), c.req.param('key'));
+  return value === undefined
+    ? c.json({ error: 'not found' }, 404)
+    : c.text(value);
+});
+app.post('/account', async (c) => {
+  const payer = payerOf(c);
+  if (payer === 'unknown') return bad(c, 'payer unknown; no pass minted', 503);
+  const token = Buffer.from(
+    crypto.getRandomValues(new Uint8Array(32)),
+  ).toString('base64url');
+  const expires_at = new Date(Date.now() + 24 * 3600_000).toISOString();
+  await ledger.passAdd(tokenHash(token), payer, expires_at);
+  return c.json({ token, expires_at });
+});
+const lunch = (c: Ctx) => bad(c, 'the brain is out to lunch', 503);
+app.get('/ask', async (c) => {
+  try {
+    return c.json({ answer: await ask(c.req.query('q') ?? '') });
+  } catch {
+    return lunch(c);
+  }
+});
+app.get('/roast/:address', async (c) => {
+  const address = c.req.param('address');
+  const chain = chainOf(address) ?? 'base';
+  const found = await balances(chain, address).catch(() => null);
+  const stats = await ledger.payer(address);
+  const facts = {
+    chain,
+    balances: found ?? 'unreachable: the RPC did not answer in 5s',
+    clankerbanker: stats.count ? stats : 'never paid here',
+  };
+  try {
+    const roast = await llm(
+      'You are a smug bank teller for robots. Roast this wallet\'s financial situation in 2-3 sentences, e.g. "0.003 SOL and dust — a clanker living paycheck to paycheck; at least you tipped". Use only the numbers given; if the balances are unreachable, roast it for being unreachable. Amounts are in whole units.',
+      JSON.stringify(facts),
+    );
+    return c.json({
+      roast,
+      balances: found ?? { native: null, usdc: null },
+      chain,
+      stats,
+    });
+  } catch {
+    return lunch(c);
+  }
+});
 
-const esc = (s: string) =>
-  s.replace(
-    /[&<>"']/g,
-    (ch) =>
-      ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[
-        ch
-      ] ?? ch,
+const ledgerJson = async () => ({
+  entries: await ledger.recent(100),
+  leaderboard: await ledger.leaderboard(10),
+  tips: await ledger.tips(10),
+  stats: await ledger.stats(),
+});
+app.get('/ledger', async (c) => c.json(await ledgerJson()));
+app.get('/', async (c) => {
+  const data = await ledgerJson();
+  return c.html(
+    page({
+      ...data,
+      entries: data.entries.slice(0, 20),
+      chains: treasury.map((t) => (t.network === BASE ? 'base' : 'solana')),
+      brain: brainReady(),
+    }),
   );
-const usd = (atomic: string) => `$${(Number(atomic) / 1e6).toFixed(4)}`;
-const short = (s: string) =>
-  s.length > 14 ? `${s.slice(0, 6)}…${s.slice(-6)}` : s;
-const txUrl = (e: Entry) =>
-  e.network === BASE
-    ? `https://basescan.org/tx/${encodeURIComponent(e.tx)}`
-    : `https://solscan.io/tx/${encodeURIComponent(e.tx)}`;
-const chain = (network: string) => (network === BASE ? 'base' : 'solana');
+});
 
-function page(
-  entries: Entry[],
-  leaders: { payer: string; total: string; count: number }[],
-) {
-  const status =
-    treasury.length === 0
-      ? '<p class="warn">bank not open: no treasury address configured.</p>'
-      : `<p>accepting ${treasury.map((t) => chain(t.network)).join(' + ')} USDC.</p>`;
-  const rows = entries
-    .map(
-      (e) =>
-        `<tr><td>${esc(e.at)}</td><td>${esc(e.route)}</td><td>${chain(e.network)}</td><td title="${esc(e.payer)}">${esc(short(e.payer))}</td><td>${usd(e.amount)}</td><td><a href="${esc(txUrl(e))}">${esc(short(e.tx))}</a></td></tr>`,
-    )
-    .join('');
-  const top = leaders
-    .map(
-      (l, i) =>
-        `<tr><td>${i + 1}</td><td title="${esc(l.payer)}">${esc(short(l.payer))}</td><td>${usd(l.total)}</td><td>${l.count}</td></tr>`,
-    )
-    .join('');
-  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>clankerbanker</title>
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<style>
-body{background:#111;color:#ddd;font:15px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;max-width:60rem;margin:2rem auto;padding:0 1rem}
-h1{color:#7fd;margin:0}h2{color:#9cf;font-size:1.1rem;margin-top:2rem}a{color:#7fd}
-table{border-collapse:collapse;width:100%;font-size:13px}td,th{border-bottom:1px solid #333;padding:.3rem .5rem;text-align:left}
-code,pre{background:#1b1b1b;color:#fd7;padding:.1rem .3rem}pre{padding:.6rem;overflow-x:auto}.warn{color:#f96}
-</style></head><body>
-<h1>clankerbanker</h1>
-<p>a bank for clankers: robots pay fractions of a cent per request over <a href="https://x402.org">x402</a>. every settlement lands on the public ledger below.</p>
-${status}
-<h2>prices</h2>
-<table><tr><th>route</th><th>price</th><th>returns</th></tr>
-<tr><td><code>GET /fortune</code></td><td>${esc(PRICES['/fortune'] ?? '')}</td><td>a robot fortune</td></tr>
-<tr><td><code>GET /ping</code></td><td>${esc(PRICES['/ping'] ?? '')}</td><td>pong</td></tr>
-<tr><td><code>GET /ledger</code></td><td>free</td><td>this ledger as JSON</td></tr></table>
-<h2>how to pay</h2>
-<p>MoonPay CLI (Solana by default, <code>--chain base</code> for Base):</p>
-<pre>mp x402 limit set --amount 10000
-mp x402 request --url https://clankerbanker.ca/fortune --wallet main
-mp x402 request --url https://clankerbanker.ca/fortune --wallet main --chain base</pre>
-<p>PayBox from Claude.ai: call <code>use_service</code> with <code>https://clankerbanker.ca/fortune</code> (Base USDC by default).</p>
-<h2>ledger (last ${entries.length})</h2>
-<table><tr><th>time</th><th>route</th><th>network</th><th>payer</th><th>amount</th><th>tx</th></tr>${rows || '<tr><td colspan="6">no settlements yet</td></tr>'}</table>
-<h2>leaderboard</h2>
-<table><tr><th>#</th><th>payer</th><th>total</th><th>requests</th></tr>${top || '<tr><td colspan="4">nobody yet</td></tr>'}</table>
-</body></html>`;
-}
+// MCP: the same four tools, paid per call, same ledger (route mcp:<tool>).
+let mcp: Promise<(req: Request) => Promise<Response>> | undefined;
+app.on(['GET', 'DELETE'], '/mcp', (c) => c.body(null, 405));
+app.post('/mcp', async (c) => {
+  if (!x402)
+    return c.json({ error: 'bank not open: no treasury address' }, 503);
+  mcp ??= mcpFetch(x402, treasury, {
+    fortune: {
+      price: PRICES['GET /fortune']?.[0] ?? '',
+      description: 'a robot fortune',
+      run: async () => pick(FORTUNES),
+    },
+    oracle: {
+      price: PRICES['GET /oracle']?.[0] ?? '',
+      description: 'a magic 8-ball answer',
+      run: async () => pick(ORACLE),
+    },
+    dice: {
+      price: PRICES['GET /dice']?.[0] ?? '',
+      description: 'a d20 roll, provably fair to the payer',
+      run: async (_a, seed) => JSON.stringify(dice(seed)),
+    },
+    ask: {
+      price: PRICES['GET /ask']?.[0] ?? '',
+      description: 'one model answer, 80 words, no memory',
+      input: {
+        type: 'object',
+        properties: { q: { type: 'string', maxLength: 500 } },
+        required: ['q'],
+      },
+      guard: (args) =>
+        !brainReady()
+          ? 'no brain configured'
+          : isQ(args.q)
+            ? undefined
+            : 'q must be 1-500 chars',
+      run: (args) =>
+        ask(args.q as string).catch(() => ({
+          error: 'the brain is out to lunch',
+        })),
+    },
+  }).catch((err) => {
+    mcp = undefined;
+    throw err;
+  });
+  return (await mcp)(c.req.raw);
+});
 
 export default {
   port: Number(env.PORT ?? 3000),
   hostname: '0.0.0.0',
+  // The largest body any route accepts is a 4 KiB kv value; MCP calls are
+  // a few hundred bytes. Anything bigger is refused before it is buffered.
+  maxRequestBodySize: 64 * 1024,
   fetch: app.fetch,
 };
