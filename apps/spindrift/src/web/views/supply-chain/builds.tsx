@@ -177,7 +177,7 @@ export function BuildLedger({
         rows={builds}
         rowKey={(build) => `build:${build.id}`}
         rowSearch={(build) =>
-          `${build.id} ${build.app} ${build.component} ${build.commit} ${build.status} ${build.runner ?? ''} ${build.targetShape} ${build.artifactType} ${build.artifactDigest ?? ''} ${build.dispatchWaitingOn ?? ''}`
+          `${build.id} ${build.app} ${build.component} ${build.commit} ${build.status} ${build.runner ?? ''} ${build.targetShape} ${build.artifactType} ${build.artifactDigest ?? ''} ${build.dispatchWaitingOn ?? ''} ${build.commitMessage ?? ''} ${build.commitAuthor ?? ''}`
         }
         filterPlaceholder={`Filter ${builds.length} Builds…`}
         caption="Builds, newest first"

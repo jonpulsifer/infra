@@ -13,7 +13,11 @@
  */
 import { describe, expect, test } from 'bun:test';
 import { renderToStaticMarkup } from 'react-dom/server';
-import type { DeployView, WorkspaceView } from '../../src/commands/views.ts';
+import type {
+  DeployLedgerItem,
+  DeployView,
+  WorkspaceView,
+} from '../../src/commands/views.ts';
 import { logos } from '../../src/web/client/logos/index.ts';
 import { DeployDetail } from '../../src/web/views/apps/deploy-detail.tsx';
 import {
@@ -31,6 +35,7 @@ import {
 import { Gate } from '../../src/web/views/auth/gate.tsx';
 import { CredentialSettingsView } from '../../src/web/views/auth/settings.tsx';
 import { DatastoreLedger } from '../../src/web/views/operations/datastores.tsx';
+import { Overview } from '../../src/web/views/operations/overview.tsx';
 import { RepositoryList } from '../../src/web/views/repos/list.tsx';
 import { TargetList } from '../../src/web/views/targets/list.tsx';
 import {
@@ -1767,5 +1772,37 @@ describe('a commit shows its headline beside the sha', () => {
     });
     expect(markup).toContain(source.commit);
     expect(markup).not.toContain('Author');
+  });
+
+  test('the Overview names the release it is serving, not only its sha', () => {
+    const serving: DeployLedgerItem = {
+      id: 993,
+      appId: 'app-morrow',
+      app: 'morrow',
+      buildId: 1837,
+      componentId: 'component-web',
+      component: 'web',
+      targetId: 'target-folly',
+      target: 'Folly',
+      phase: 'LIVE',
+      commit: 'a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2',
+      commitMessage: 'feat(web): stop the header wrapping',
+      configVersion: '9e2bc1',
+      when: '8m ago',
+      at: '2026-07-28T13:00:00.000Z',
+      current: true,
+      rollbackable: false,
+    };
+    const markup = renderToStaticMarkup(
+      <Overview
+        apps={[]}
+        builds={[]}
+        deploys={[serving]}
+        targets={[]}
+        onNavigate={() => undefined}
+      />,
+    );
+    expect(markup).toContain('a1b2c3d');
+    expect(markup).toContain('feat(web): stop the header wrapping');
   });
 });

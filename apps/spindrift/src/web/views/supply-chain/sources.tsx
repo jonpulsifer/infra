@@ -176,7 +176,7 @@ export function SourceLedger({
         rows={sources}
         rowKey={(source) => source.digest}
         rowSearch={(source) =>
-          `${source.digest} ${source.app} ${source.component} ${source.origin} ${source.repository ?? ''} ${source.commit ?? ''} ${source.location ?? ''} ${source.retention} ${source.fetchable ? 'fetchable' : 'unfetchable'}`
+          `${source.digest} ${source.app} ${source.component} ${source.origin} ${source.repository ?? ''} ${source.commit ?? ''} ${source.location ?? ''} ${source.retention} ${source.fetchable ? 'fetchable' : 'unfetchable'} ${source.commitMessage ?? ''} ${source.commitAuthor ?? ''}`
         }
         filterPlaceholder={`Filter ${sources.length} Sources…`}
         caption="Sources, newest first"

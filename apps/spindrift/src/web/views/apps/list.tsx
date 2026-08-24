@@ -106,7 +106,7 @@ function rowDetail(app: AppListItem): string {
 
 /** Everything a row matches on, including the facts it does not print. */
 function haystack(app: AppListItem): string {
-  return `${app.name} ${app.kind} ${app.target} ${app.vessel} ${app.source} ${app.url} ${app.artifact} ${app.commit ?? ''}`.toLowerCase();
+  return `${app.name} ${app.kind} ${app.target} ${app.vessel} ${app.source} ${app.url} ${app.artifact} ${app.commit ?? ''} ${app.commitMessage ?? ''}`.toLowerCase();
 }
 
 /**

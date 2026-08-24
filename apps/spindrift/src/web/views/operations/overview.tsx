@@ -596,7 +596,11 @@ function Serving({
           <span className="font-mono text-muted-foreground">
             #{deploy.buildId}
           </span>
-          <Ref value={deploy.commit} kind="commit" />
+          <Ref
+            value={deploy.commit}
+            kind="commit"
+            headline={deploy.commitMessage}
+          />
         </span>
       ),
     },

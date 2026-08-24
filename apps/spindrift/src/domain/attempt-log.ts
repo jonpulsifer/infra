@@ -42,7 +42,7 @@ import {
 } from '../adapters/deploy/contract.ts';
 import type { Database } from '../db/client.ts';
 import { notifyAttemptEvent } from '../db/notify.ts';
-import { attemptEvents } from '../db/schema.ts';
+import { attemptEvents, builds } from '../db/schema.ts';
 
 /**
  * How many log lines one attempt keeps.
@@ -51,8 +51,9 @@ import { attemptEvents } from '../db/schema.ts';
  * `buildctl` run is tens of thousands of them on the one Postgres the estate
  * runs on — and `buildViewOf` reads all of an attempt's rows to draw its
  * checklist. Past this many, a log line is not written; exactly one final line
- * says so and points at the runner, whose `runUrl` the Build row already
- * carries. Status events are never dropped: the verdict, and the terminal
+ * says so and points at the runner — by the `runUrl` the Build row carries
+ * where the route reported one, so the exported text log needs no screen to
+ * follow it. Status events are never dropped: the verdict, and the terminal
  * phase the stream pump ends a page on, land after the ceiling as before.
  */
 export const MAX_ATTEMPT_LOG_LINES = 20_000;
@@ -65,14 +66,22 @@ export const MAX_ATTEMPT_LOG_LINES = 20_000;
  * per line. Keyed by connection because the test harness pins each test's
  * `Database` to its own schema, where a build id repeats; production has one.
  * A writer resurrected in another process seeds from the rows the first one
- * left, so the ceiling holds across a restart and the marker is still written
- * once — the count includes it.
+ * left, so the ceiling holds across a restart and a marker already on the leg
+ * is counted — none is written after it.
+ *
+ * The count is per process, and the build fence does not keep it honest: the
+ * fence (`mine` in `dispatch.ts`) covers the Build row's verdict, not the
+ * lines streamed before it. Exactly one marker rests on one reconciler
+ * dispatching a Build — `reconciler.replicas: 1` in the chart, which
+ * `clusters/offsite/apps/spindrift/helm-release.yaml` keeps — since two
+ * dispatchers on one attempt would each count and each write one. A line
+ * another process appends under the ceiling, such as a cancel from the web
+ * process, is outside this count, so the kept lines can run a line or two
+ * past it.
  */
 const lineCounts = new WeakMap<Database, Map<string, number>>();
 // ponytail: bounded by dropping the oldest attempt; a dropped one re-seeds
-// with one count on its next line. Two writers on one attempt in two
-// processes could each write the marker, which the build fence already
-// refuses to let happen.
+// with one count on its next line.
 const COUNTED_ATTEMPTS = 512;
 
 async function logLinesWritten(
@@ -87,6 +96,14 @@ async function logLinesWritten(
     .from(attemptEvents)
     .where(and(eq(attemptEvents.eventType, 'log'), leg));
   return row?.lines ?? 0;
+}
+
+async function runUrlOf(db: Database, buildId: number): Promise<string | null> {
+  const [row] = await db
+    .select({ runUrl: builds.runUrl })
+    .from(builds)
+    .where(eq(builds.id, buildId));
+  return row?.runUrl ?? null;
 }
 
 function rememberLines(db: Database, key: string, lines: number): void {
@@ -267,9 +284,13 @@ async function insertEvent(
     // it is written. Only a status event reaches the table from here on.
     if (lines > MAX_ATTEMPT_LOG_LINES) return;
     if (lines === MAX_ATTEMPT_LOG_LINES) {
+      // Read off the row here rather than carried on every write: the URL is
+      // needed once per attempt, and only a build leg can have one.
+      const runUrl =
+        args.buildId === null ? null : await runUrlOf(db, args.buildId);
       event = {
         type: 'log',
-        line: `output truncated after ${MAX_ATTEMPT_LOG_LINES} lines; the runner keeps the rest`,
+        line: `output truncated after ${MAX_ATTEMPT_LOG_LINES} lines; the runner keeps the rest${runUrl === null ? '' : ` at ${runUrl}`}`,
       };
     }
   }

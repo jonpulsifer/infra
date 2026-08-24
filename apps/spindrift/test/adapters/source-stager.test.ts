@@ -17,6 +17,7 @@ import type { FederationOptions } from '../../src/adapters/deploy/cloud/federati
 import { createAdapterRegistry } from '../../src/adapters/registry.ts';
 import type { InstallationManifest } from '../../src/config/manifest.ts';
 import { parseManifest, resolveManifest } from '../../src/config/manifest.ts';
+import type { CommitHeadline } from '../../src/domain/source-bundle.ts';
 import { withIsolatedDatabase } from '../harness/db.ts';
 import { FakeGitHub, testAppKey } from '../harness/fakes/github-api.ts';
 
@@ -43,7 +44,11 @@ interface Depot {
  * shape written for a test's convenience.
  */
 async function stagerAgainst(fake: FakeGitHub): Promise<{
-  stage: (commit: string) => Promise<{ digest: string; location: string }>;
+  stage: (commit: string) => Promise<{
+    digest: string;
+    location: string;
+    commit: CommitHeadline | undefined;
+  }>;
   depot: Depot;
 }> {
   const objects = new Map<string, number>();
@@ -114,7 +119,11 @@ async function stagerAgainst(fake: FakeGitHub): Promise<{
         commit,
         stagedAt: new Date('2026-08-22T00:00:00.000Z'),
       });
-      return { digest: bundle.digest, location: bundle.location };
+      return {
+        digest: bundle.digest,
+        location: bundle.location,
+        commit: bundle.commit,
+      };
     },
   };
 }
@@ -140,13 +149,28 @@ describe('the default source stager', () => {
   test('the same commit staged again costs one metadata read, not a fetch', async () => {
     // §15's "once", across the Apps a single push fans out to.
     const fake = new FakeGitHub();
-    const commit = fake.commitFiles('main', { 'README.md': 'hello' });
+    const commit = fake.commitFiles(
+      'main',
+      { 'README.md': 'hello' },
+      {
+        message: 'feat(web): stop the header wrapping\n\nAnd a body.',
+        authorLogin: 'octocat',
+        authoredAt: '2026-07-27T09:30:00.000Z',
+      },
+    );
     const { stage, depot } = await stagerAgainst(fake);
 
     const first = await stage(commit);
     const writesAfterFirst = depot.writes.length;
     const second = await stage(commit);
 
+    // The hit answers with the headline the fetch kept, so a Build staged
+    // from it reads the same as one staged from the tarball.
+    expect(first.commit).toEqual({
+      message: 'feat(web): stop the header wrapping',
+      author: 'octocat',
+      authoredAt: new Date('2026-07-27T09:30:00.000Z'),
+    });
     expect(second).toEqual(first);
     expect(fake.tarballs).toEqual([commit]);
     expect(depot.writes.length).toBe(writesAfterFirst);

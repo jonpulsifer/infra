@@ -17,7 +17,7 @@
  * harness (`test/harness/db.ts`).
  */
 import { describe, expect, test } from 'bun:test';
-import { sql } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 import {
   BLAME,
   type FailureReason,
@@ -334,10 +334,17 @@ describe('attempt log: line ceiling', () => {
     `);
   }
 
-  test('the line past the ceiling becomes one marker; later lines are dropped; a status still lands', async () => {
+  test('the line past the ceiling becomes one marker naming the run; later lines are dropped; a status still lands', async () => {
     const { app, component, build } = await seedAttempt();
     const scope = { appId: app.id, componentId: component.id };
     const attempt = { ...scope, buildId: build.id };
+    // The route reported where the run is before the log reached the ceiling,
+    // the way a runner event lands ahead of the text on a hosted route.
+    const runUrl = 'https://github.com/example/app/actions/runs/1234';
+    await database()
+      .db.update(builds)
+      .set({ runUrl })
+      .where(eq(builds.id, build.id));
     await fillToCeiling(scope, { buildId: build.id });
 
     await recordBuildEvent(database().db, attempt, {
@@ -371,8 +378,15 @@ describe('attempt log: line ceiling', () => {
     expect(entries).toHaveLength(MAX_ATTEMPT_LOG_LINES + 2);
     const lines = entries.filter((entry) => entry.type === 'log');
     expect(lines).toHaveLength(MAX_ATTEMPT_LOG_LINES + 1);
-    expect(lines.at(-1)).toMatchObject({ line: MARKER, resource: null });
-    expect(lines.filter((entry) => entry.line === MARKER)).toHaveLength(1);
+    // The exported text log carries no row facts, so the marker itself says
+    // where the rest is.
+    expect(lines.at(-1)).toMatchObject({
+      line: `${MARKER} at ${runUrl}`,
+      resource: null,
+    });
+    expect(lines.filter((entry) => entry.line.startsWith(MARKER))).toHaveLength(
+      1,
+    );
     expect(entries.at(-1)).toMatchObject({
       type: 'status',
       phase: 'FAILED',

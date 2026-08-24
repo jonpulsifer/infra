@@ -177,7 +177,7 @@ export function DeployLedger({
         rows={deploys}
         rowKey={(deploy) => `deploy:${deploy.id}`}
         rowSearch={(deploy) =>
-          `${deploy.id} ${deploy.app} ${deploy.component} ${deploy.target} ${deploy.buildId} ${deploy.commit} ${deploy.phase} ${deploy.configVersion ?? ''} ${deploy.requestedBy ?? ''}`
+          `${deploy.id} ${deploy.app} ${deploy.component} ${deploy.target} ${deploy.buildId} ${deploy.commit} ${deploy.phase} ${deploy.configVersion ?? ''} ${deploy.requestedBy ?? ''} ${deploy.commitMessage ?? ''}`
         }
         filterPlaceholder={`Filter ${deploys.length} Deploys…`}
         caption="Deploys, newest first"
