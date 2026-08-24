@@ -114,6 +114,7 @@ describe('the installation settings round trip', () => {
     expect(result.ok).toBe(true);
     if (!result.ok) return;
 
+    expect(result.value.version).toBe('sha256:deadbeef0123');
     expect(result.value.version).toBe(manifest.controlPlane.version);
   });
 

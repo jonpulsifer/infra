@@ -85,7 +85,7 @@ describe('the footer says what is running', () => {
       <AppShell
         path="/"
         principal={OPERATOR}
-        version="sha256:57fa33c2"
+        version="sha256:57fa33c28109"
         onNavigate={() => undefined}
         onSignOut={() => undefined}
         themeControl={<span>theme</span>}
@@ -95,7 +95,7 @@ describe('the footer says what is running', () => {
     );
 
     expect(markup).toContain('<footer');
-    expect(markup).toContain('Spindrift sha256:57fa33c2');
+    expect(markup).toContain('Spindrift sha256:57fa33c28109');
   });
 
   test('and nothing where the deployment states none', () => {

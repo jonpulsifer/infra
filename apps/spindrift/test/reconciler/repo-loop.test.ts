@@ -839,6 +839,31 @@ describe('a renamed repository', () => {
     });
     expect((await reload(repository.id)).fullName).toBe('example/renamed');
   });
+
+  test('a rename onto a name another row holds is not followed, and every other pass still runs', async () => {
+    const fake = new FakeGitHub();
+    fake.commitFiles('main', { 'README.md': 'hello' });
+    const { repository } = await connect(fake);
+    // The new name, connected before this poll looked.
+    await database().db.insert(repositories).values({
+      fullName: 'example/renamed',
+      installationId: fake.installationId,
+      defaultBranch: fake.defaultBranch,
+    });
+    const loop = await context(fake);
+    await reconcileRepository(loop, repository);
+
+    fake.rename('example/renamed');
+    const passes = await reconcileAllRepositories(loop);
+
+    // `full_name` is unique, so the rename cannot land; the pass keeps working
+    // under the stored name rather than throwing the whole fleet's pass away.
+    expect(passes).toHaveLength(2);
+    expect(
+      passes.find((pass) => pass.repositoryId === repository.id),
+    ).toMatchObject({ outcome: 'unchanged', fullName: 'example/app' });
+    expect((await reload(repository.id)).fullName).toBe('example/app');
+  });
 });
 
 /** Every default-branch ref read the client made — one per pass. */

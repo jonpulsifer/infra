@@ -158,6 +158,30 @@ describe('connecting a repository', () => {
     expect(await database().db.select().from(repositories)).toHaveLength(1);
   });
 
+  test('keys the row on the name the host answers with, not the one typed', async () => {
+    // The host answers any spelling — and a renamed repository's old name —
+    // with the canonical `full_name` in the body. The row's unique key is
+    // neither case-insensitive nor rename-aware, and the repo loop rewrites it
+    // to the host's spelling on its next pass; a row keyed on the typed one
+    // would be a second row for the same repository, and the one that pass
+    // then cannot rename onto.
+    const fake = new FakeGitHub({ fullName: 'Example/App' });
+    fake.commitFiles('main', { 'README.md': 'unconnected' });
+    fake.rename('example/app');
+
+    const typed = await connectRepository(
+      { ...input(fake), fullName: 'Example/App' },
+      await context(fake),
+    );
+    const canonical = await connectRepository(input(fake), await context(fake));
+
+    expect(typed.ok && canonical.ok).toBe(true);
+    if (!(typed.ok && canonical.ok)) return;
+    expect(typed.value.fullName).toBe('example/app');
+    expect(canonical.value.repositoryId).toBe(typed.value.repositoryId);
+    expect(await database().db.select().from(repositories)).toHaveLength(1);
+  });
+
   test('refuses a repository the App installation cannot see', async () => {
     const fake = new FakeGitHub();
     fake.accessLost = true;

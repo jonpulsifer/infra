@@ -251,9 +251,16 @@ export const connectRepository: Command<
     return unreadable(input.fullName, cause);
   }
 
+  // The name the host answers with is the row's key, not the one typed. The
+  // host is case-insensitive and follows a rename; the `repositories` unique
+  // index is neither, and the repo loop rewrites `full_name` to the host's
+  // spelling on its next pass — so a row keyed on the typed spelling would be
+  // a second row for the same repository, and the one the loop then cannot
+  // rename onto.
+  let fullName: string;
   let defaultBranch: string;
   try {
-    ({ defaultBranch } = await host.repository(ref, input.fullName));
+    ({ fullName, defaultBranch } = await host.repository(ref, input.fullName));
   } catch (cause) {
     return unreadable(input.fullName, cause);
   }
@@ -288,7 +295,7 @@ export const connectRepository: Command<
   const [row] = await context.db
     .insert(repositories)
     .values({
-      fullName: input.fullName,
+      fullName,
       installationId: ref.installationId,
       defaultBranch,
       createdAt: now,
@@ -323,7 +330,7 @@ export const connectRepository: Command<
 
   try {
     const opened = await openConfigurationPullRequest(host, ref, {
-      fullName: input.fullName,
+      fullName,
       defaultBranch,
       transaction,
     });

@@ -84,7 +84,11 @@ import {
 import { SPINDRIFT_FILE } from '../integrations/github/config-pr.ts';
 import { GitHubAccessError } from '../integrations/github/http.ts';
 import type { WebhookDelivery } from '../integrations/github/webhook.ts';
-import { logInfo, reconcilerLoopDuration } from '../telemetry/index.ts';
+import {
+  logInfo,
+  logWarn,
+  reconcilerLoopDuration,
+} from '../telemetry/index.ts';
 
 /** What the loop needs. No principal: nobody asked for it to run. */
 export interface RepoLoopContext {
@@ -337,10 +341,25 @@ export async function reconcileRepository(
   // this poll keeps working, while every push delivery now arrives under the
   // new one and `applyWebhookDelivery`'s lookup misses it. The name the host
   // just answered with is the fact; the row follows it.
-  const repository =
-    fullName === stored.fullName
-      ? stored
-      : await followRename(context, stored, fullName);
+  let repository = stored;
+  if (fullName !== stored.fullName) {
+    try {
+      repository = await followRename(context, stored, fullName);
+    } catch (cause) {
+      // Another row already holds that name — the new name was connected
+      // before this poll looked, or the same repository was connected twice
+      // under a spelling the host does not answer with. `full_name` is unique
+      // and the two rows are somebody's to merge, not this pass's: it keeps
+      // working under the stored name, as it did before the rename, rather
+      // than taking every other repository's pass down with the throw.
+      logWarn('repository renamed; not followed', {
+        'spindrift.repository': stored.fullName,
+        'spindrift.repository.renamed': fullName,
+        'spindrift.error':
+          cause instanceof Error ? cause.message : String(cause),
+      });
+    }
+  }
 
   // Reaching the repository is what proves access came back. A freeze is
   // cleared here rather than only on a webhook, because §15's periodic
