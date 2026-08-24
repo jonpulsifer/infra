@@ -72,9 +72,8 @@ export const MAX_ATTEMPT_LOG_LINES = 20_000;
  * The count is per process, and the build fence does not keep it honest: the
  * fence (`mine` in `dispatch.ts`) covers the Build row's verdict, not the
  * lines streamed before it. Exactly one marker rests on one reconciler
- * dispatching a Build — `reconciler.replicas: 1` in the chart, which
- * `clusters/offsite/apps/spindrift/helm-release.yaml` keeps — since two
- * dispatchers on one attempt would each count and each write one. A line
+ * dispatching a Build — the installer chart's `reconciler.replicas: 1` — since
+ * two dispatchers on one attempt would each count and each write one. A line
  * another process appends under the ceiling, such as a cancel from the web
  * process, is outside this count, so the kept lines can run a line or two
  * past it.

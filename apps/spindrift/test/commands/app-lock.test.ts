@@ -454,7 +454,7 @@ describe('rollback goes through the lock, and sets it', () => {
 
     const rolled = await rollbackDeploy({ ...pair, buildId: older.id }, ctx);
     if (!rolled.ok) throw new Error(rolled.failure.message);
-    expect((await lockOf(app.id)).lockReason).toContain('rolled back');
+    expect((await lockOf(app.id)).lockReason).toContain('rollback to Build');
 
     // The wrong Build, noticed before anything claimed it. The pointer goes
     // back to the release that was serving all along, and a banner asserting
