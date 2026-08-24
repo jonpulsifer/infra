@@ -34,7 +34,7 @@
  * back while a later write with a higher `id` commits first. That is what
  * lets `ORDER BY id` stand in for "the order they happened" for this table.
  */
-import { and, asc, eq, gt, or } from 'drizzle-orm';
+import { and, asc, count, eq, gt, or, type SQL } from 'drizzle-orm';
 import {
   type Blame,
   blameFor,
@@ -43,6 +43,65 @@ import {
 import type { Database } from '../db/client.ts';
 import { notifyAttemptEvent } from '../db/notify.ts';
 import { attemptEvents } from '../db/schema.ts';
+
+/**
+ * How many log lines one attempt keeps.
+ *
+ * §12 keeps every row and every build line is a row, so a verbose `npm` or
+ * `buildctl` run is tens of thousands of them on the one Postgres the estate
+ * runs on — and `buildViewOf` reads all of an attempt's rows to draw its
+ * checklist. Past this many, a log line is not written; exactly one final line
+ * says so and points at the runner, whose `runUrl` the Build row already
+ * carries. Status events are never dropped: the verdict, and the terminal
+ * phase the stream pump ends a page on, land after the ceiling as before.
+ */
+export const MAX_ATTEMPT_LOG_LINES = 20_000;
+
+/**
+ * Log lines written per attempt, as this process has counted them.
+ *
+ * Seeded from the table the first time an attempt is written to here, then
+ * kept in memory so the ceiling costs one count per attempt rather than one
+ * per line. Keyed by connection because the test harness pins each test's
+ * `Database` to its own schema, where a build id repeats; production has one.
+ * A writer resurrected in another process seeds from the rows the first one
+ * left, so the ceiling holds across a restart and the marker is still written
+ * once — the count includes it.
+ */
+const lineCounts = new WeakMap<Database, Map<string, number>>();
+// ponytail: bounded by dropping the oldest attempt; a dropped one re-seeds
+// with one count on its next line. Two writers on one attempt in two
+// processes could each write the marker, which the build fence already
+// refuses to let happen.
+const COUNTED_ATTEMPTS = 512;
+
+async function logLinesWritten(
+  db: Database,
+  key: string,
+  leg: SQL,
+): Promise<number> {
+  const known = lineCounts.get(db)?.get(key);
+  if (known !== undefined) return known;
+  const [row] = await db
+    .select({ lines: count() })
+    .from(attemptEvents)
+    .where(and(eq(attemptEvents.eventType, 'log'), leg));
+  return row?.lines ?? 0;
+}
+
+function rememberLines(db: Database, key: string, lines: number): void {
+  let counts = lineCounts.get(db);
+  if (counts === undefined) {
+    counts = new Map();
+    lineCounts.set(db, counts);
+  }
+  counts.delete(key);
+  counts.set(key, lines);
+  if (counts.size > COUNTED_ATTEMPTS) {
+    const oldest = counts.keys().next().value;
+    if (oldest !== undefined) counts.delete(oldest);
+  }
+}
 
 /** The cursor a resumed read starts after — an `attemptEvents.id` value. */
 export type AttemptLogCursor = number;
@@ -189,7 +248,31 @@ async function insertEvent(
     event: AttemptLogEvent;
   },
 ): Promise<void> {
-  const { event } = args;
+  let { event } = args;
+  let lines: number | null = null;
+  let key = '';
+  if (event.type === 'log') {
+    const attemptId = (
+      args.attemptKind === 'build' ? args.buildId : args.deployId
+    ) as number;
+    key = `${args.attemptKind}:${attemptId}`;
+    lines = await logLinesWritten(
+      db,
+      key,
+      args.attemptKind === 'build'
+        ? eq(attemptEvents.buildId, attemptId)
+        : eq(attemptEvents.deployId, attemptId),
+    );
+    // Over the ceiling: the marker is already the last line, and nothing after
+    // it is written. Only a status event reaches the table from here on.
+    if (lines > MAX_ATTEMPT_LOG_LINES) return;
+    if (lines === MAX_ATTEMPT_LOG_LINES) {
+      event = {
+        type: 'log',
+        line: `output truncated after ${MAX_ATTEMPT_LOG_LINES} lines; the runner keeps the rest`,
+      };
+    }
+  }
   // §6: blame is derived here, from the shared BLAME table — never accepted
   // as a caller-supplied field (see AttemptLogEvent's doc comment).
   const reason = event.type === 'status' ? (event.reason ?? null) : null;
@@ -206,6 +289,8 @@ async function insertEvent(
     reason: reason ?? null,
     blame: reason ? blameFor(reason) : null,
   });
+  // Counted after the row is in: a failed insert is not a line written.
+  if (lines !== null) rememberLines(db, key, lines + 1);
 
   // Wake any WebSocket pump loops watching this component (Transport shape).
   // Fire-and-forget: a lost notification only delays the next poll.

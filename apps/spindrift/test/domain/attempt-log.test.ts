@@ -17,10 +17,12 @@
  * harness (`test/harness/db.ts`).
  */
 import { describe, expect, test } from 'bun:test';
+import { sql } from 'drizzle-orm';
 import {
   BLAME,
   type FailureReason,
 } from '../../src/adapters/deploy/contract.ts';
+import { createDb } from '../../src/db/client.ts';
 import {
   apps,
   builds,
@@ -30,6 +32,9 @@ import {
 } from '../../src/db/schema.ts';
 import {
   type AttemptLogCursor,
+  type AttemptLogEntry,
+  type AttemptStreamRef,
+  MAX_ATTEMPT_LOG_LINES,
   readAttemptStream,
   recordBuildEvent,
   recordDeployEvent,
@@ -290,5 +295,147 @@ describe('attempt log: resume cursor', () => {
     expect(fullReplay.entries.map((e) => (e as { line: string }).line)).toEqual(
       ['line 1', 'line 2', 'line 3', 'line 4'],
     );
+  });
+});
+
+describe('attempt log: line ceiling', () => {
+  const MARKER = `output truncated after ${MAX_ATTEMPT_LOG_LINES} lines; the runner keeps the rest`;
+
+  /** Every page of the stream, read the way the pump reads it — 500 at a time. */
+  async function everything(ref: AttemptStreamRef): Promise<AttemptLogEntry[]> {
+    const entries: AttemptLogEntry[] = [];
+    let after: AttemptLogCursor | undefined;
+    for (;;) {
+      const page = await readAttemptStream(
+        database().db,
+        ref,
+        after === undefined ? {} : { after },
+      );
+      if (page.entries.length === 0) return entries;
+      entries.push(...page.entries);
+      after = page.cursor as AttemptLogCursor;
+    }
+  }
+
+  /** A runner that has already printed exactly the ceiling's worth of lines. */
+  async function fillToCeiling(
+    scope: { appId: string; componentId: string },
+    leg: { buildId: number } | { deployId: number },
+  ) {
+    const buildId = 'buildId' in leg ? leg.buildId : null;
+    const deployId = 'deployId' in leg ? leg.deployId : null;
+    await database().db.execute(sql`
+      insert into attempt_events
+        (app_id, component_id, attempt_kind, build_id, deploy_id, event_type, line)
+      select ${scope.appId}::uuid, ${scope.componentId}::uuid,
+        ${buildId === null ? 'deploy' : 'build'}::attempt_kind,
+        ${buildId}::bigint, ${deployId}::bigint, 'log', 'line ' || g
+      from generate_series(1, ${MAX_ATTEMPT_LOG_LINES}) as g
+    `);
+  }
+
+  test('the line past the ceiling becomes one marker; later lines are dropped; a status still lands', async () => {
+    const { app, component, build } = await seedAttempt();
+    const scope = { appId: app.id, componentId: component.id };
+    const attempt = { ...scope, buildId: build.id };
+    await fillToCeiling(scope, { buildId: build.id });
+
+    await recordBuildEvent(database().db, attempt, {
+      type: 'log',
+      line: 'one past the ceiling',
+      resource: 'build',
+    });
+    await recordBuildEvent(database().db, attempt, {
+      type: 'log',
+      line: 'two past the ceiling',
+    });
+    // A writer in another process — a re-dispatched build after a restart —
+    // starts from the rows this one left, so it drops rather than writing a
+    // second marker.
+    const resurrected = createDb(database().connect());
+    await recordBuildEvent(resurrected, attempt, {
+      type: 'log',
+      line: 'three past the ceiling, from a fresh process',
+    });
+    await recordBuildEvent(database().db, attempt, {
+      type: 'status',
+      phase: 'FAILED',
+      reason: 'BUILD_FAILED',
+    });
+
+    const entries = await everything({
+      componentId: component.id,
+      buildId: build.id,
+    });
+    // The ceiling's worth, the marker, the verdict — and nothing in between.
+    expect(entries).toHaveLength(MAX_ATTEMPT_LOG_LINES + 2);
+    const lines = entries.filter((entry) => entry.type === 'log');
+    expect(lines).toHaveLength(MAX_ATTEMPT_LOG_LINES + 1);
+    expect(lines.at(-1)).toMatchObject({ line: MARKER, resource: null });
+    expect(lines.filter((entry) => entry.line === MARKER)).toHaveLength(1);
+    expect(entries.at(-1)).toMatchObject({
+      type: 'status',
+      phase: 'FAILED',
+      reason: 'BUILD_FAILED',
+    });
+  });
+
+  test('a deploy leg is capped the same way, through the same writer', async () => {
+    const { app, component, build, deploy } = await seedAttempt();
+    const scope = { appId: app.id, componentId: component.id };
+    const attempt = { ...scope, deployId: deploy.id };
+    await fillToCeiling(scope, { deployId: deploy.id });
+
+    await recordDeployEvent(database().db, attempt, {
+      type: 'log',
+      line: 'one past the ceiling',
+    });
+    await recordDeployEvent(database().db, attempt, {
+      type: 'log',
+      line: 'two past the ceiling',
+    });
+    await recordDeployEvent(database().db, attempt, {
+      type: 'status',
+      phase: 'LIVE',
+    });
+
+    const entries = await everything({
+      componentId: component.id,
+      buildId: build.id,
+      deployId: deploy.id,
+    });
+    expect(entries).toHaveLength(MAX_ATTEMPT_LOG_LINES + 2);
+    expect(entries.at(-2)).toMatchObject({
+      attemptKind: 'deploy',
+      type: 'log',
+      line: MARKER,
+    });
+    expect(entries.at(-1)).toMatchObject({ type: 'status', phase: 'LIVE' });
+  });
+
+  test('under the ceiling every line is kept, counted from where the table already was', async () => {
+    const { app, component, build } = await seedAttempt();
+    const attempt = {
+      appId: app.id,
+      componentId: component.id,
+      buildId: build.id,
+    };
+    // Written by "another process": this one has never counted this attempt.
+    await database().db.execute(sql`
+      insert into attempt_events (app_id, component_id, attempt_kind, build_id, event_type, line)
+      values (${app.id}::uuid, ${component.id}::uuid, 'build', ${build.id}, 'log', 'already there')
+    `);
+    await recordBuildEvent(database().db, attempt, {
+      type: 'log',
+      line: 'and one more',
+    });
+
+    const page = await readAttemptStream(database().db, {
+      componentId: component.id,
+      buildId: build.id,
+    });
+    expect(
+      page.entries.map((entry) => (entry as { line: string }).line),
+    ).toEqual(['already there', 'and one more']);
   });
 });
