@@ -35,7 +35,7 @@
 import { afterEach, beforeEach } from 'bun:test';
 import { readdir } from 'node:fs/promises';
 import { join } from 'node:path';
-import type { SQL } from 'bun';
+import { SQL } from 'bun';
 import {
   createClient,
   createDb,
@@ -247,7 +247,14 @@ export async function createIsolatedDatabase(): Promise<IsolatedDatabase> {
   const url = schemaUrl(schema);
   const opened: SQL[] = [];
   const connect = (): SQL => {
-    const client = createClient({ DATABASE_URL: url });
+    // `max: 1`, rather than `createClient`'s pool of ten. A schema belongs to
+    // one test and one test talks to it from one session, so the other nine
+    // backends are opened, counted against `max_connections`, and never used.
+    // That is affordable in a single-process run and is not once the files run
+    // in parallel: the ceiling is reached by idle connections long before it is
+    // reached by work. Tests needing a genuinely concurrent second session call
+    // `connect()` again and get their own client.
+    const client = new SQL(url, { max: 1 });
     opened.push(client);
     return client;
   };
