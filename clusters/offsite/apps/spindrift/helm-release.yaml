@@ -79,6 +79,18 @@ spec:
         enabled: true
     reconciler:
       enabled: true
+      # The deploy loop shells out to `vercel deploy --prebuilt` for a Vercel
+      # Target — a Node CLI that, alongside the prebuilt artifact it uploads
+      # (~100MB for a Next.js app), needs far more than the chart's default.
+      # 512Mi OOM-killed the reconciler mid-deploy, which abandoned the attempt
+      # in APPLYING; the CLI is the memory floor here, so the limit follows it.
+      resources:
+        requests:
+          memory: 512Mi
+          cpu: 100m
+        limits:
+          memory: 2Gi
+          cpu: 1000m
     web:
       resources:
         requests:
