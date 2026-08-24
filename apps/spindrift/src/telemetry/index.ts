@@ -3,6 +3,8 @@ import {
   type Gauge,
   type Histogram,
   type Meter,
+  type MeterProvider,
+  type MetricOptions,
   metrics,
   type Tracer,
   trace,
@@ -94,16 +96,63 @@ export function initTelemetry(component = 'web'): NodeSDK | null {
 }
 
 export const tracer: Tracer = trace.getTracer('spindrift');
-export const meter: Meter = metrics.getMeter('spindrift');
 
-export const httpRequestCounter: Counter = meter.createCounter(
-  'http_requests_total',
-  {
-    description: 'Total number of HTTP requests received',
-  },
-);
+/**
+ * The instruments below are created when this module is imported, which is
+ * always before `initTelemetry` registers the SDK's MeterProvider: both
+ * entrypoints import that function from here, so this module body runs first.
+ *
+ * Traces and logs survive that order because their APIs each keep a proxy
+ * provider that re-binds on registration. The metrics API keeps none —
+ * `metrics.getMeter` falls straight through to the no-op provider, and a no-op
+ * instrument stays one for the life of the process without ever saying so.
+ *
+ * So an instrument holds the provider it was minted from and re-mints when the
+ * global one changes. Registration order stops mattering, in either direction,
+ * without a call site knowing.
+ */
+function lazily<T>(mint: (meter: Meter) => T): () => T {
+  let mintedFrom: MeterProvider | undefined;
+  let instrument!: T;
+  return () => {
+    const provider = metrics.getMeterProvider();
+    if (provider !== mintedFrom) {
+      mintedFrom = provider;
+      instrument = mint(provider.getMeter('spindrift'));
+    }
+    return instrument;
+  };
+}
 
-export const httpRequestDuration: Histogram = meter.createHistogram(
+function counter(name: string, options: MetricOptions): Counter {
+  const instrument = lazily((meter) => meter.createCounter(name, options));
+  return {
+    add: (value, attributes, context) =>
+      instrument().add(value, attributes, context),
+  };
+}
+
+function histogram(name: string, options: MetricOptions): Histogram {
+  const instrument = lazily((meter) => meter.createHistogram(name, options));
+  return {
+    record: (value, attributes, context) =>
+      instrument().record(value, attributes, context),
+  };
+}
+
+function gauge(name: string, options: MetricOptions): Gauge {
+  const instrument = lazily((meter) => meter.createGauge(name, options));
+  return {
+    record: (value, attributes, context) =>
+      instrument().record(value, attributes, context),
+  };
+}
+
+export const httpRequestCounter: Counter = counter('http_requests_total', {
+  description: 'Total number of HTTP requests received',
+});
+
+export const httpRequestDuration: Histogram = histogram(
   'http_request_duration_seconds',
   {
     description: 'HTTP request duration in seconds',
@@ -111,14 +160,11 @@ export const httpRequestDuration: Histogram = meter.createHistogram(
   },
 );
 
-export const reconcilerLoopCounter: Counter = meter.createCounter(
-  'reconciler_loop_total',
-  {
-    description: 'Total reconciler loop executions',
-  },
-);
+export const reconcilerLoopCounter: Counter = counter('reconciler_loop_total', {
+  description: 'Total reconciler loop executions',
+});
 
-export const reconcilerLoopDuration: Histogram = meter.createHistogram(
+export const reconcilerLoopDuration: Histogram = histogram(
   'reconciler_loop_duration_seconds',
   {
     description: 'Reconciler loop execution duration in seconds',
@@ -126,7 +172,7 @@ export const reconcilerLoopDuration: Histogram = meter.createHistogram(
   },
 );
 
-export const reconcilerErrorCounter: Counter = meter.createCounter(
+export const reconcilerErrorCounter: Counter = counter(
   'reconciler_errors_total',
   {
     description: 'Total reconciler loop errors',
@@ -140,7 +186,7 @@ export const reconcilerErrorCounter: Counter = meter.createCounter(
  * interval. `kind` distinguishes 'build' from 'deploy'; `outcome` carries
  * whatever each loop already knows the attempt ended as.
  */
-export const reconcilerAttemptDuration: Histogram = meter.createHistogram(
+export const reconcilerAttemptDuration: Histogram = histogram(
   'reconciler_attempt_duration_seconds',
   {
     description: 'Duration of one build or deploy attempt',
@@ -152,7 +198,7 @@ export const reconcilerAttemptDuration: Histogram = meter.createHistogram(
  * How long a build or deploy row sat before the reconciler first claimed it —
  * the wait a developer who just pressed the button actually feels.
  */
-export const reconcilerPickupLatency: Histogram = meter.createHistogram(
+export const reconcilerPickupLatency: Histogram = histogram(
   'reconciler_pickup_latency_seconds',
   {
     description:
@@ -165,12 +211,9 @@ export const reconcilerPickupLatency: Histogram = meter.createHistogram(
  * How many build or deploy rows were still unclaimed at the end of one pass.
  * A gauge, not a counter: the loop reports the level, not an increment.
  */
-export const reconcilerQueueDepth: Gauge = meter.createGauge(
-  'reconciler_queue_depth',
-  {
-    description: 'Rows still awaiting reconciliation at the end of one pass',
-  },
-);
+export const reconcilerQueueDepth: Gauge = gauge('reconciler_queue_depth', {
+  description: 'Rows still awaiting reconciliation at the end of one pass',
+});
 
 /**
  * Every dispatch attempt a Build row consumes, labelled by what it ended as —
@@ -182,7 +225,7 @@ export const reconcilerQueueDepth: Gauge = meter.createGauge(
  * rate is the same loop, visible in telemetry instead. The per-row count lives
  * on `builds.dispatch_attempts`, so this stays free of per-row attributes.
  */
-export const reconcilerDispatchAttempts: Counter = meter.createCounter(
+export const reconcilerDispatchAttempts: Counter = counter(
   'reconciler_dispatch_attempts_total',
   {
     description: 'Build dispatch attempts, labelled by outcome',
@@ -201,7 +244,7 @@ export const reconcilerDispatchAttempts: Counter = meter.createCounter(
  * Guessing at that from a calendar date would be guessing at when somebody
  * else's auto-upgrade ran.
  */
-export const bosunUnfencedCalls: Counter = meter.createCounter(
+export const bosunUnfencedCalls: Counter = counter(
   'bosun_unfenced_calls_total',
   {
     description: 'Bosun heartbeat/result calls that carried no claimant',
@@ -212,7 +255,7 @@ export const bosunUnfencedCalls: Counter = meter.createCounter(
  * How many live deploys are currently drifted from their desired artifact, as
  * of the deploy loop's last drift-observing pass (§6's "visible state").
  */
-export const reconcilerDriftedDeploys: Gauge = meter.createGauge(
+export const reconcilerDriftedDeploys: Gauge = gauge(
   'reconciler_drifted_deploys',
   {
     description:
