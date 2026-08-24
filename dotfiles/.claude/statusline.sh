@@ -1,12 +1,20 @@
 #!/usr/bin/env bash
 # shellcheck disable=SC2154
 # Claude Code status line — receives JSON on stdin; outputs a three-line status bar.
-# Line 1: repo · branch · changed files · +additions/-deletions
-# Line 2: model · agent · rank+cost · tokens · context meter · duration · fuse
+#
+# Every segment renders as a chip: [label value], where the brackets and the value
+# carry the segment's accent colour and the label stays dim. A segment whose data
+# is missing is dropped entirely rather than rendered empty.
+#
+# Line 1: repo, git (branch/dirty/ahead-behind/changed/±lines), wallet balance
+# Line 2: model (+effort, +agent), cost (+rank, +tokens), context meter, duration
 # Line 3: 5-hour and 7-day plan quotas (omitted when the plan has no rate limits).
-#         Quota meters carry a ╎ pace marker at "% of the window elapsed": fill left
-#         of it means burning under budget, right of it means the quota runs out
-#         before it resets.
+#
+# Meters fill in eighths of a cell. The quota meters carry a pace marker at "% of
+# the window elapsed": fill left of it means burning under budget, right of it
+# means the quota runs out before it resets. Their accent, and the context meter's,
+# escalates mint -> gold -> orange -> red.
+#
 # Requires a Nerd Font for glyph rendering.
 
 input=$(cat)
@@ -35,55 +43,58 @@ eval "$(echo "$input" | jq -r '
   @sh "rl_7d_reset=\(.rate_limits.seven_day.resets_at // "")"
 ')"
 
+# jq's own `//` fallbacks live inside the jq program, so they are lost when jq is
+# missing or fails and `eval ""` leaves everything unset. Restate them here.
+model=${model:-Claude}
+cwd=${cwd:-$PWD}
+
+# Every numeric field is validated once, here at the boundary, rather than at each
+# printf and $(( )) downstream. Anything that is not a plain number becomes empty,
+# which the `-n` guards below already read as "absent" and omit the chip.
+for _f in used_pct total_in total_out cost_usd duration_ms lines_add lines_rm \
+          rl_5h_pct rl_5h_reset rl_7d_pct rl_7d_reset; do
+  [[ ${!_f} =~ ^-?[0-9]+(\.[0-9]+)?$ ]] || printf -v "$_f" '%s' ""
+done
+
 dir_name=$(basename "$cwd")
 NOW=$(date +%s)
 QUOTA_W=14
 
 # -- 256-color ANSI palette ----------------------------------------------------
-RST='\033[0m'
-B='\033[1m'
+# Escapes are real bytes, never literal backslash sequences: everything is printed
+# with %s, so a backslash in a branch name or cwd stays a backslash.
+RST=$'\033[0m'
+B=$'\033[1m'
 c() { printf '\033[38;5;%dm' "$1"; }
-C_PURPLE=$(c 141)
-C_PINK=$(c 204)
+C_PURPLE=$(c 141)   # model
+C_LAVEN=$(c 183)    # repo
+C_SKY=$(c 75)       # git, and the pace marker inside a meter
+C_MINT=$(c 114)     # wallet, and the "under budget" end of every meter
+C_GOLD=$(c 220)     # cost
 C_ORANGE=$(c 208)
-C_GOLD=$(c 220)
-C_SKY=$(c 75)
-C_MINT=$(c 114)
-C_CORAL=$(c 203)
-C_TEAL=$(c 73)
-C_LAVEN=$(c 183)
-C_GRAY=$(c 245)
-C_DGRAY=$(c 239)
 C_RED=$(c 196)
-C_GREEN=$(c 82)
-C_CYAN=$(c 51)
+C_GRAY=$(c 245)     # chip labels
+C_DGRAY=$(c 239)    # de-emphasised values (duration, countdowns)
 
 # -- Nerd Font glyphs (raw UTF-8 for bash 3.2 compat) -------------------------
-G_BRANCH=$'\xEE\x9C\xA5'       # U+E725 nf-dev-git_branch
-G_FOLDER=$'\xEF\x81\xBC'       # U+F07C nf-fa-folder_open
-G_DOLLAR=$'\xEF\x85\x95'       # U+F155 nf-fa-dollar
-G_CLOCK=$'\xEF\x80\x97'        # U+F017 nf-fa-clock_o
-G_CODE=$'\xEF\x84\xA1'         # U+F121 nf-fa-code
-G_COG=$'\xEF\x82\x85'          # U+F085 nf-fa-cogs
+# Only glyphs that say something the chip's label does not. A folder beside the
+# label "repo", or a clock beside "dur", is the label twice — those are gone.
+G_COG=$'\xEF\x82\x85'          # U+F085 nf-fa-cogs — marks the model name
+G_GAUGE=$'\xEF\x83\xA4'        # U+F0E4 nf-fa-tachometer — marks the effort level
+G_AGENT=$'\xEF\x91\xAA'        # U+F46A nf-oct-hubot — marks the subagent name
+G_FILE=$'\xEF\x80\x96'         # U+F016 nf-fa-file_o — marks the changed-file count
 G_PLUS=$'\xEF\x91\x97'         # U+F457 nf-oct-diff_added
 G_MINUS=$'\xEF\x91\x98'        # U+F458 nf-oct-diff_removed
-G_AGENT=$'\xEF\x91\xAA'        # U+F46A nf-oct-hubot
-G_FILE=$'\xEF\x80\x96'         # U+F016 nf-fa-file_o
-G_HOURGLASS=$'\xEF\x89\x92'    # U+F252 nf-fa-hourglass_half
-G_CALENDAR=$'\xEF\x81\xB3'     # U+F073 nf-fa-calendar
-G_GAUGE=$'\xEF\x83\xA4'        # U+F0E4 nf-fa-tachometer
-if [ "${MISE_ENV:-personal}" = "work" ]; then
-  G_WALLET='🌕'                 # Full moon for MoonPay
-fi
+G_WALLET='🌕'                  # Full moon for MoonPay — brand, not a wallet icon
 
 # -- Helper: human-readable token counts --------------------------------------
 fmt_tok() {
   local n=$1
   if [ -z "$n" ] || [ "$n" = "null" ]; then echo "0"; return; fi
   if [ "$n" -ge 1000000 ]; then
-    awk "BEGIN{printf \"%.1fM\", $n/1000000}"
+    awk -v n="$n" 'BEGIN{printf "%.1fM", n/1000000}'
   elif [ "$n" -ge 1000 ]; then
-    awk "BEGIN{printf \"%.1fk\", $n/1000}"
+    awk -v n="$n" 'BEGIN{printf "%.1fk", n/1000}'
   else
     echo "$n"
   fi
@@ -133,37 +144,65 @@ fmt_left() {
   fi
 }
 
-# -- Helper: quota segment — bar with burn-pace marker, pct, reset countdown ---
-# $1 glyph  $2 used_percentage  $3 resets_at (epoch)  $4 window seconds
+# -- Helper: boxed chip — accent-colored bracket border, dim label, accent value
+# $1 color  $2 label  $3 value
+chip() {
+  local color=$1 label=$2 value=$3
+  printf '%s[%s%s%s %s%s%s%s]%s' \
+    "$color" "$RST$C_GRAY" "$label" "$RST" \
+    "$color" "$value" "$RST" "$color" "$RST"
+}
+
+# -- Helper: quota segment — chip wrapping a bar with burn-pace marker, pct,
+# reset countdown. $1 used_percentage  $2 resets_at (epoch)
+# $3 window seconds  $4 label
 quota_seg() {
-  local glyph=$1 pct_raw=$2 reset=$3 window=$4
+  local pct_raw=$1 reset=$2 window=$3 label=$4
   [ -z "$pct_raw" ] || [ "$pct_raw" = "null" ] && return 0
 
-  local pct left elapsed pace mark
+  local pct left elapsed pace mark left_txt
   pct=$(printf '%.0f' "$pct_raw")
-  left=$(( ${reset:-0} - NOW ))
-  [ "$left" -lt 0 ] && left=0
 
-  # Linear-pace marker: how far through the window we are. Burn left of it =
-  # ahead of budget, right of it = on track to run out before the reset.
-  elapsed=$(( window - left ))
-  [ "$elapsed" -lt 0 ] && elapsed=0
-  pace=$(( elapsed * 100 / window ))
-  mark=$(( pace * QUOTA_W / 100 ))
-  [ "$mark" -ge "$QUOTA_W" ] && mark=$(( QUOTA_W - 1 ))
+  if [ -z "$reset" ] || [ "$reset" = "null" ]; then
+    # No reset time: there is no window position to compare a burn rate against,
+    # so drop the pace marker and countdown rather than inventing epoch 0.
+    mark=-1
+    left_txt=""
+    pace=-1
+  else
+    left=$(( reset - NOW ))
+    [ "$left" -lt 0 ] && left=0
+    # A reset further out than one window means the window has only just started;
+    # clamping keeps pace honest and the countdown inside its 4-column budget.
+    [ "$left" -gt "$window" ] && left=$window
+
+    # Linear-pace marker: how far through the window we are. Burn left of it =
+    # ahead of budget, right of it = on track to run out before the reset.
+    elapsed=$(( window - left ))
+    pace=$(( elapsed * 100 / window ))
+    mark=$(( pace * QUOTA_W / 100 ))
+    [ "$mark" -ge "$QUOTA_W" ] && mark=$(( QUOTA_W - 1 ))
+    left_txt=$(fmt_left "$left")
+  fi
 
   if [ "$pct" -ge 90 ]; then bar_color="$C_RED"
+  elif [ "$pace" -lt 0 ]; then
+    # Pace unknown — colour on usage alone.
+    if [ "$pct" -ge 75 ]; then bar_color="$C_ORANGE"
+    elif [ "$pct" -ge 50 ]; then bar_color="$C_GOLD"
+    else bar_color="$C_MINT"; fi
   elif [ "$pct" -gt $(( pace + 15 )) ]; then bar_color="$C_ORANGE"
   elif [ "$pct" -gt "$pace" ]; then bar_color="$C_GOLD"
   else bar_color="$C_MINT"; fi
 
-  printf '%s%s %s %s%d%%%s %s%s%s' \
-    "$bar_color" "$glyph" "$(mkbar "$pct_raw" "$QUOTA_W" "$mark")" \
-    "$B" "$pct" "$RST" \
-    "$C_DGRAY" "$(fmt_left "$left")" "$RST"
+  local val
+  val=$(printf '%s %s%d%%%s' \
+    "$(mkbar "$pct_raw" "$QUOTA_W" "$mark")" \
+    "$B" "$pct" "$RST$bar_color")
+  [ -n "$left_txt" ] && val+="${C_DGRAY} ${left_txt}${RST}${bar_color}"
+  chip "$bar_color" "$label" "$val"
 }
 
-if [ "${MISE_ENV:-personal}" = "work" ]; then
 # -- MoonPay wallet balance (cached, non-blocking) ----------------------------
 MP_CACHE="${TMPDIR:-/tmp}/claude-statusline-mp-balance"
 MP_CACHE_LOCK="${MP_CACHE}.lock"
@@ -191,7 +230,7 @@ _refresh_wallet_cache() {
   echo $$ > "$MP_CACHE_LOCK" 2>/dev/null || return 1
   trap 'rm -f "$MP_CACHE_LOCK"' EXIT
 
-  local wallets wallet_name balances
+  local wallets wallet_name
   wallets=$(mp wallet list --json 2>/dev/null) || { rm -f "$MP_CACHE_LOCK"; return 1; }
   wallet_name=$(echo "$wallets" | jq -r '.[0].name // empty' 2>/dev/null)
   [ -z "$wallet_name" ] && { rm -f "$MP_CACHE_LOCK"; return 1; }
@@ -237,25 +276,29 @@ get_wallet_balance() {
     local age=$(( now - mtime ))
     cat "$MP_CACHE"
     if [ "$age" -ge "$MP_CACHE_TTL" ]; then
-      _refresh_wallet_cache &
+      # Detach the child's fds — it otherwise inherits the caller's command-
+      # substitution pipe, and $(...) blocks until every writer closes.
+      _refresh_wallet_cache >/dev/null 2>&1 </dev/null &
       disown 2>/dev/null
     fi
     return 0
   fi
 
-  _refresh_wallet_cache &
+  _refresh_wallet_cache >/dev/null 2>&1 </dev/null &
   disown 2>/dev/null
   return 1
 }
-fi
-# -- Git info ------------------------------------------------------------------
-GIT="git --no-optional-locks -C $cwd"
-GIT_BRANCH="" GIT_REMOTE_URL="" GIT_CHANGED=0
-if $GIT rev-parse --is-inside-work-tree &>/dev/null; then
-  GIT_BRANCH=$($GIT symbolic-ref --short HEAD 2>/dev/null \
-    || $GIT rev-parse --short HEAD 2>/dev/null || echo "")
 
-  porcelain=$($GIT status --porcelain 2>/dev/null)
+# -- Git info ------------------------------------------------------------------
+# A function, not a string: $cwd may contain spaces or glob characters, and an
+# unquoted "$GIT" expansion would split or expand them and lose the repo.
+git_() { git --no-optional-locks -C "$cwd" "$@"; }
+GIT_BRANCH="" GIT_REMOTE_URL="" GIT_CHANGED=0
+if git_ rev-parse --is-inside-work-tree &>/dev/null; then
+  GIT_BRANCH=$(git_ symbolic-ref --short HEAD 2>/dev/null \
+    || git_ rev-parse --short HEAD 2>/dev/null || echo "")
+
+  porcelain=$(git_ status --porcelain 2>/dev/null)
   DIRTY=""
   if [ -n "$porcelain" ]; then
     DIRTY="*"
@@ -263,15 +306,15 @@ if $GIT rev-parse --is-inside-work-tree &>/dev/null; then
   fi
 
   AHEAD_BEHIND=""
-  UPSTREAM=$($GIT rev-parse --abbrev-ref '@{upstream}' 2>/dev/null || echo "")
+  UPSTREAM=$(git_ rev-parse --abbrev-ref '@{upstream}' 2>/dev/null || echo "")
   if [ -n "$UPSTREAM" ]; then
-    AHEAD=$($GIT rev-list --count '@{upstream}..HEAD' 2>/dev/null || echo "0")
-    BEHIND=$($GIT rev-list --count 'HEAD..@{upstream}' 2>/dev/null || echo "0")
+    AHEAD=$(git_ rev-list --count '@{upstream}..HEAD' 2>/dev/null || echo "0")
+    BEHIND=$(git_ rev-list --count 'HEAD..@{upstream}' 2>/dev/null || echo "0")
     [ "$AHEAD" -gt 0 ] 2>/dev/null && AHEAD_BEHIND+="↑${AHEAD}"
     [ "$BEHIND" -gt 0 ] 2>/dev/null && AHEAD_BEHIND+="↓${BEHIND}"
   fi
 
-  GIT_REMOTE_URL=$($GIT remote get-url origin 2>/dev/null \
+  GIT_REMOTE_URL=$(git_ remote get-url origin 2>/dev/null \
     | sed 's|git@github\.com:|https://github.com/|' \
     | sed 's|\.git$||')
 fi
@@ -279,145 +322,62 @@ fi
 # -- Line 1 segments ----------------------------------------------------------
 
 # Repo: clickable OSC 8 link if we have a remote
-repo_seg=""
+repo_val=""
 if [ -n "$GIT_REMOTE_URL" ]; then
   repo_name=$(basename "$GIT_REMOTE_URL")
-  repo_seg="${C_PINK}${B}${G_FOLDER} \033]8;;${GIT_REMOTE_URL}\a${repo_name}\033]8;;\a${RST}"
+  repo_val="${B}"$'\033]8;;'"${GIT_REMOTE_URL}"$'\a'"${repo_name}"$'\033]8;;\a'
 else
-  repo_seg="${C_PINK}${B}${G_FOLDER} ${dir_name}${RST}"
+  repo_val="${B}${dir_name}"
 fi
+repo_seg=$(chip "$C_LAVEN" repo "$repo_val")
 
-# Branch + dirty + ahead/behind
-branch_seg=""
+# Git: branch + dirty + ahead/behind + changed file count + lines added/removed
+git_seg=""
 if [ -n "$GIT_BRANCH" ]; then
-  branch_seg="${C_CYAN}${G_BRANCH} ${GIT_BRANCH}${DIRTY}${RST}"
-  [ -n "$AHEAD_BEHIND" ] && branch_seg+=" ${C_ORANGE}${AHEAD_BEHIND}${RST}"
-fi
-
-# Changed file count
-changed_seg=""
-if [ "$GIT_CHANGED" -gt 0 ]; then
-  changed_seg="${C_GOLD}${G_FILE} ${GIT_CHANGED}${RST}"
-fi
-
-# Lines added/removed (from Claude session)
-lines_seg=""
-if [ -n "$lines_add" ] && [ "$lines_add" != "null" ] && [ -n "$lines_rm" ] && [ "$lines_rm" != "null" ]; then
-  if [ "$lines_add" -gt 0 ] || [ "$lines_rm" -gt 0 ]; then
-    lines_seg="${C_GREEN}${G_PLUS}${lines_add}${RST} ${C_CORAL}${G_MINUS}${lines_rm}${RST}"
+  git_val="${GIT_BRANCH}${DIRTY}"
+  [ -n "$AHEAD_BEHIND" ] && git_val+=" ${AHEAD_BEHIND}"
+  [ "$GIT_CHANGED" -gt 0 ] && git_val+=" ${G_FILE}${GIT_CHANGED}"
+  if [ -n "$lines_add" ] && [ "$lines_add" != "null" ] && [ -n "$lines_rm" ] && [ "$lines_rm" != "null" ]; then
+    if [ "$lines_add" -gt 0 ] || [ "$lines_rm" -gt 0 ]; then
+      git_val+=" ${G_PLUS}${lines_add}${G_MINUS}${lines_rm}"
+    fi
   fi
+  git_seg=$(chip "$C_SKY" git "$git_val")
 fi
 
 wallet_seg=""
-if [ "${MISE_ENV:-personal}" = "work" ]; then
-  # Wallet balance (MoonPay MPC — Solana)
-  if wallet_data=$(get_wallet_balance 2>/dev/null); then
-    if [ -n "$wallet_data" ] && [ "$wallet_data" != "EMPTY" ]; then
-      tokens=""
-      while IFS=: read -r sym amt val; do
-        [ -z "$sym" ] && continue
-        amt_fmt=$(awk "BEGIN{v=$amt; if(v>=1) printf \"%.2f\",v; else if(v>=0.001) printf \"%.4f\",v; else printf \"%.6f\",v}")
-        val_fmt=$(awk "BEGIN{printf \"%.2f\", $val}")
-        [ -n "$tokens" ] && tokens+=" ${C_DGRAY}|${RST} "
-        tokens+="${C_MINT}${B}${sym}${RST}${C_GRAY}: ${amt_fmt} ${C_GOLD}(\$${val_fmt})${RST}"
-      done <<< "$wallet_data"
-      [ -n "$tokens" ] && wallet_seg="${C_LAVEN}${G_WALLET}${RST} ${tokens}"
-    else
-      wallet_seg="${C_LAVEN}${G_WALLET}${RST} ${C_GOLD}\$0.00${RST} ${C_GRAY}— fund me! 💸💰${RST}"
-    fi
+# Wallet balance (MoonPay MPC — Solana) — total across tokens, not a per-token breakdown
+if wallet_data=$(get_wallet_balance 2>/dev/null); then
+  if [ -n "$wallet_data" ] && [ "$wallet_data" != "EMPTY" ]; then
+    total=$(awk -F: '{sum+=$3} END{printf "%.2f", sum}' <<< "$wallet_data")
+    wallet_seg=$(chip "$C_MINT" wallet "${G_WALLET} \$${total}")
+  else
+    wallet_seg=$(chip "$C_DGRAY" wallet "🌚 ~\$0")
   fi
 fi
 
 # Plan quotas: 5-hour session window and 7-day weekly window
-quota_5h_seg=$(quota_seg "$G_HOURGLASS" "$rl_5h_pct" "$rl_5h_reset" 18000)
-quota_7d_seg=$(quota_seg "$G_CALENDAR" "$rl_7d_pct" "$rl_7d_reset" 604800)
+quota_5h_seg=$(quota_seg "$rl_5h_pct" "$rl_5h_reset" 18000 5h)
+quota_7d_seg=$(quota_seg "$rl_7d_pct" "$rl_7d_reset" 604800 7d)
 
 # -- Line 2 segments ----------------------------------------------------------
 
 # Model + reasoning effort (absent on models that don't take an effort level)
-model_seg="${C_PURPLE}${B}${G_COG} ${model}${RST}"
+model_val="${G_COG} ${model}"
 case "$effort" in
-  low)    model_seg+=" ${C_GRAY}${G_GAUGE} low${RST}" ;;
-  medium) model_seg+=" ${C_SKY}${G_GAUGE} med${RST}" ;;
-  high)   model_seg+=" ${C_GOLD}${G_GAUGE} high${RST}" ;;
-  xhigh)  model_seg+=" ${C_ORANGE}${B}${G_GAUGE} xhigh${RST}" ;;
-  max)    model_seg+=" ${C_RED}${B}${G_GAUGE} max${RST}" ;;
+  low)    model_val+=" ${G_GAUGE} low" ;;
+  medium) model_val+=" ${G_GAUGE} med" ;;
+  high)   model_val+=" ${G_GAUGE} high" ;;
+  xhigh)  model_val+=" ${G_GAUGE} xhigh" ;;
+  max)    model_val+=" ${G_GAUGE} max" ;;
 esac
-
-# Agent
-agent_seg=""
-[ -n "$agent_name" ] && agent_seg="${C_LAVEN}${G_AGENT} ${agent_name}${RST}"
-
-# Cost
-cost_seg=""
-if [ -n "$cost_usd" ] && [ "$cost_usd" != "null" ]; then
-  cost_fmt=$(printf '%.2f' "$cost_usd")
-  cost_seg="${C_GOLD}${B}${G_DOLLAR}${cost_fmt}${RST}"
-fi
-
-# Token totals
-tok_seg=""
-if [ -n "$total_in" ] && [ "$total_in" != "null" ]; then
-  total_out_safe=${total_out:-0}
-  [ "$total_out_safe" = "null" ] && total_out_safe=0
-  grand_total=$(( total_in + total_out_safe ))
-  grand_fmt=$(fmt_tok "$grand_total")
-  in_fmt=$(fmt_tok "$total_in")
-  out_fmt=$(fmt_tok "$total_out_safe")
-  tok_seg="${C_TEAL}${G_CODE} ${B}${grand_fmt}${RST} ${C_GRAY}(${C_MINT}${in_fmt}↓${RST} ${C_CORAL}${out_fmt}↑${RST}${C_GRAY})${RST}"
-fi
-
-# Context bar
-ctx_seg=""
-if [ -n "$used_pct" ] && [ "$used_pct" != "null" ]; then
-  pct_int=$(printf "%.0f" "$used_pct")
-  if [ "$pct_int" -ge 90 ]; then bar_color="$C_RED"
-  elif [ "$pct_int" -ge 70 ]; then bar_color="$C_ORANGE"
-  elif [ "$pct_int" -ge 50 ]; then bar_color="$C_GOLD"
-  else bar_color="$C_MINT"; fi
-
-  ctx_seg="${bar_color}$(mkbar "$used_pct" 10 -1) ${B}${pct_int}%${RST}"
-fi
-
-
-# Duration
-dur_seg=""
-if [ -n "$duration_ms" ] && [ "$duration_ms" != "null" ]; then
-  dur_s=$(( ${duration_ms%.*} / 1000 ))
-  mins=$(( dur_s / 60 ))
-  secs=$(( dur_s % 60 ))
-  if [ "$mins" -gt 0 ]; then
-    dur_seg="${C_SKY}${G_CLOCK} ${mins}m${secs}s${RST}"
-  else
-    dur_seg="${C_SKY}${G_CLOCK} ${secs}s${RST}"
-  fi
-fi
-
-# Bomb fuse — burns down as context fills, then BOOM
-fuse_seg=""
-if [ -n "$used_pct" ] && [ "$used_pct" != "null" ]; then
-  pct_int=$(printf "%.0f" "$used_pct")
-  if [ "$pct_int" -ge 95 ]; then
-    fuse_seg="☠️"
-  elif [ "$pct_int" -ge 88 ]; then
-    fuse_seg="💥"
-  elif [ "$pct_int" -ge 78 ]; then
-    fuse_seg="${C_RED}🧨━${RST}"
-  elif [ "$pct_int" -ge 65 ]; then
-    fuse_seg="${C_ORANGE}💣━━✨${RST}"
-  elif [ "$pct_int" -ge 45 ]; then
-    fuse_seg="${C_GOLD}💣━━━━${RST}"
-  elif [ "$pct_int" -ge 25 ]; then
-    fuse_seg="${C_MINT}💣━━━━━━${RST}"
-  else
-    fuse_seg="${C_MINT}💣━━━━━━━━${RST}"
-  fi
-fi
+[ -n "$agent_name" ] && model_val+=" ${G_AGENT} ${agent_name}"
+model_seg=$(chip "$C_PURPLE" model "$model_val")
 
 # Session rank — gamified cost tier
 rank_seg=""
 if [ -n "$cost_usd" ] && [ "$cost_usd" != "null" ]; then
-  cost_cents=$(awk "BEGIN{printf \"%d\", $cost_usd * 100}")
+  cost_cents=$(awk -v c="$cost_usd" 'BEGIN{printf "%d", c*100}')
   if [ "$cost_cents" -ge 2500 ]; then rank_seg="👑"
   elif [ "$cost_cents" -ge 1000 ]; then rank_seg="💎"
   elif [ "$cost_cents" -ge 500 ]; then rank_seg="🔥"
@@ -426,26 +386,79 @@ if [ -n "$cost_usd" ] && [ "$cost_usd" != "null" ]; then
   else rank_seg="🌱"; fi
 fi
 
-# -- Assemble ------------------------------------------------------------------
-SEP="${C_DGRAY} │ ${RST}"
+# Cost + token totals, one chip
+cost_seg=""
+if [ -n "$cost_usd" ] && [ "$cost_usd" != "null" ]; then
+  cost_fmt=$(printf '%.2f' "$cost_usd")
+  cost_val="\$${cost_fmt}"
+  [ -n "$rank_seg" ] && cost_val="${rank_seg} ${cost_val}"
+  if [ -n "$total_in" ] && [ "$total_in" != "null" ]; then
+    total_out_safe=${total_out:-0}
+    [ "$total_out_safe" = "null" ] && total_out_safe=0
+    # via awk, not $(( )) — these arrive as JSON numbers and may be non-integer
+    grand_fmt=$(fmt_tok "$(awk -v a="$total_in" -v b="$total_out_safe" 'BEGIN{printf "%d", a+b}')")
+    cost_val+=" · ${grand_fmt} tok"
+  fi
+  cost_seg=$(chip "$C_GOLD" cost "$cost_val")
+fi
 
-# Join non-empty segments with SEP
+# Duration
+dur_seg=""
+if [ -n "$duration_ms" ] && [ "$duration_ms" != "null" ]; then
+  dur_s=$(awk -v m="$duration_ms" 'BEGIN{printf "%d", m/1000}')
+  mins=$(( dur_s / 60 ))
+  secs=$(( dur_s % 60 ))
+  if [ "$mins" -gt 0 ]; then
+    dur_seg=$(chip "$C_DGRAY" dur "${mins}m${secs}s")
+  else
+    dur_seg=$(chip "$C_DGRAY" dur "${secs}s")
+  fi
+fi
+
+# Context bar + bomb fuse, one chip. Fuse burns down as context fills, then BOOM
+ctx_seg=""
+if [ -n "$used_pct" ] && [ "$used_pct" != "null" ]; then
+  pct_int=$(printf "%.0f" "$used_pct")
+  if [ "$pct_int" -ge 90 ]; then bar_color="$C_RED"
+  elif [ "$pct_int" -ge 70 ]; then bar_color="$C_ORANGE"
+  elif [ "$pct_int" -ge 50 ]; then bar_color="$C_GOLD"
+  else bar_color="$C_MINT"; fi
+
+  if [ "$pct_int" -ge 95 ]; then
+    fuse="☠️"
+  elif [ "$pct_int" -ge 88 ]; then
+    fuse="💥"
+  elif [ "$pct_int" -ge 78 ]; then
+    fuse="🧨━"
+  elif [ "$pct_int" -ge 65 ]; then
+    fuse="💣━━✨"
+  elif [ "$pct_int" -ge 45 ]; then
+    fuse="💣━━━━"
+  elif [ "$pct_int" -ge 25 ]; then
+    fuse="💣━━━━━━"
+  else
+    fuse="💣━━━━━━━━"
+  fi
+
+  ctx_seg=$(chip "$bar_color" ctx "$(mkbar "$used_pct" 10 -1) ${pct_int}% ${fuse}")
+fi
+
+# -- Assemble ------------------------------------------------------------------
+
+# Join non-empty segments with a single space — each is already a bracketed chip
 join_segs() {
   local out="" s
   for s in "$@"; do
     [ -z "$s" ] && continue
-    [ -n "$out" ] && out+="$SEP"
+    [ -n "$out" ] && out+=" "
     out+="$s"
   done
   printf '%s' "$out"
 }
 
-[ -n "$rank_seg" ] && [ -n "$cost_seg" ] && cost_seg="${rank_seg} ${cost_seg}"
-
-# $wallet_seg is only ever set in the work render; join_segs drops it when unset.
-line1=$(join_segs "$repo_seg" "$branch_seg" "$changed_seg" "$lines_seg" "$wallet_seg")
-line2=$(join_segs "$model_seg" "$agent_seg" "$cost_seg" "$tok_seg" "$ctx_seg" "$dur_seg" "$fuse_seg")
+line1=$(join_segs "$repo_seg" "$git_seg" "$wallet_seg")
+line2=$(join_segs "$model_seg" "$cost_seg" "$ctx_seg" "$dur_seg")
 line3=$(join_segs "$quota_5h_seg" "$quota_7d_seg")
 
-printf '%b\n%b\n' "$line1" "$line2"
-[ -n "$line3" ] && printf '%b\n' "$line3"
+printf '%s\n%s\n' "$line1" "$line2"
+[ -n "$line3" ] && printf '%s\n' "$line3"
