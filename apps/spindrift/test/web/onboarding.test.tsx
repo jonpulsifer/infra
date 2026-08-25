@@ -41,6 +41,7 @@ import { DEFAULT_PLACEHOLDER_MANIFEST } from '../../src/config/manifest.ts';
 import { SignedIn } from '../../src/web/app.tsx';
 import { manifestFieldAt } from '../../src/web/forms/manifest.ts';
 import type { FieldErrors } from '../../src/web/forms/render.tsx';
+import { DiscoveryPanel } from '../../src/web/views/auth/discovery.tsx';
 import type { SaveOutcome } from '../../src/web/views/auth/installation.tsx';
 import {
   ONBOARDING_ASKS,
@@ -405,5 +406,42 @@ describe('what the wizard says by moving', () => {
     const done = screen({ outcome: { kind: 'saved', targets: [] } });
     expect(done).toContain('declares no Targets yet');
     expect(done).not.toContain('calc(var(--i)');
+  });
+
+  test('one row at a time carries the name the highlight travels under', () => {
+    // What makes `startViewTransition` worth calling: the browser treats the
+    // old row and the new one as the same box and moves it. Exactly one row
+    // may hold the name — a second aborts the transition — so the count is the
+    // claim, not the presence.
+    const rail = (current: number) =>
+      renderToStaticMarkup(
+        <StepRail
+          steps={[
+            { title: 'First', status: 'done', value: 'yes' },
+            { title: 'Second', status: 'running' },
+            { title: 'Third', status: 'waiting' },
+          ]}
+          current={current}
+        />,
+      );
+    const named = (markup: string) =>
+      markup.split('view-transition-name').length - 1;
+
+    expect(named(rail(1))).toBe(1);
+    // And it is the row the operator is on, which is what makes it travel:
+    // the same rail at a different step names a different row.
+    expect(rail(1)).not.toBe(rail(2));
+    expect(named(rail(2))).toBe(1);
+  });
+
+  test('the cloud panel is a closed track before it has an answer', () => {
+    // Five rows arriving at once moved the form up the page in one frame. The
+    // track is rendered whether or not there is anything in it, because a
+    // transition needs an element that existed at both ends.
+    const panel = renderToStaticMarkup(
+      <DiscoveryPanel document={UNCONFIGURED} onChange={() => undefined} />,
+    );
+    expect(panel).toContain('grid-rows-[0fr]');
+    expect(panel).not.toContain('grid-rows-[1fr]');
   });
 });

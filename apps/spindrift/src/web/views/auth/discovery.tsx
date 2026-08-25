@@ -224,15 +224,41 @@ export function DiscoveryPanel({
           </div>
         </form>
         {refusal === null ? null : <DiscoveryRefusal reason={refusal} />}
-        {facts === null ? null : (
-          <DiscoveredFactList
-            facts={facts}
-            document={document}
-            disabled={disabled || busy}
-            unwritable={(fact) => unwritable(fact, document)}
-            onApply={apply}
-          />
-        )}
+        {/* The card grows by five rows the first time the cloud answers, and
+            it used to do it in one frame — the form jumped up the page while
+            the operator was still reading the button they had just pressed.
+            The rows' own stagger cannot fix that: `animate-rise` moves opacity
+            and four pixels, so the rows are in the layout at full height from
+            the first frame and the height is what snaps.
+
+            A grid whose single row track goes `0fr` → `1fr` is the one way to
+            transition to a content height without naming one: the track
+            resolves to what the content needs, and `fr` is a length the
+            browser will interpolate where `auto` is not. The inner element
+            carries the `overflow-hidden` that makes the closed state hide
+            rather than spill.
+
+            Rendered on every state rather than beside the conditional, because
+            a transition needs both ends: an element that only exists once the
+            facts do has nothing to have grown from. */}
+        <div
+          className={cn(
+            'grid transition-[grid-template-rows] duration-200 ease-out',
+            facts === null ? 'grid-rows-[0fr]' : 'grid-rows-[1fr]',
+          )}
+        >
+          <div className="overflow-hidden">
+            {facts === null ? null : (
+              <DiscoveredFactList
+                facts={facts}
+                document={document}
+                disabled={disabled || busy}
+                unwritable={(fact) => unwritable(fact, document)}
+                onApply={apply}
+              />
+            )}
+          </div>
+        </div>
       </CardContent>
     </Card>
   );

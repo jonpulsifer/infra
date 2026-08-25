@@ -24,6 +24,7 @@
  * so a wizard step and a deploy step do not read as two different vocabularies.
  */
 
+import type { CSSProperties } from 'react';
 import type { StepStatus } from '../../../commands/views.ts';
 import { StepGlyph, statusWord } from '../../components/status.tsx';
 import { cn } from '../../ui/utils.ts';
@@ -90,6 +91,26 @@ export function StepRail({
             ) : (
               <div
                 aria-current={here ? 'step' : undefined}
+                // The one thing on this rail that moves between questions, and
+                // the reason `onboarding.tsx` wraps the step change in
+                // `startViewTransition` at all: without a name the browser
+                // cross-fades the whole page and the highlight blinks from one
+                // row to another. Named, the old row and the new one are the
+                // same box to the browser, so it travels — the rail says which
+                // question you moved to by moving to it.
+                //
+                // On the current row only, because a name has to be unique
+                // while a transition is capturing: two elements holding it at
+                // once abort the transition and the swap is instant, which is
+                // the failure this would have shipped with had the name gone on
+                // every row. The reduced-motion reset reaches it through
+                // `::view-transition-group(*)`, which matches a named group as
+                // readily as the default one.
+                style={
+                  here
+                    ? ({ viewTransitionName: 'setup-step' } as CSSProperties)
+                    : undefined
+                }
                 className={cn(
                   'flex w-full items-start gap-2 rounded-sm px-2 py-1.5',
                   here && 'bg-secondary',
