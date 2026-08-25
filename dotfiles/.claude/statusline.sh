@@ -461,4 +461,6 @@ line2=$(join_segs "$model_seg" "$cost_seg" "$ctx_seg" "$dur_seg")
 line3=$(join_segs "$quota_5h_seg" "$quota_7d_seg")
 
 printf '%s\n%s\n' "$line1" "$line2"
-[ -n "$line3" ] && printf '%s\n' "$line3"
+if [ -n "$line3" ]; then
+  printf '%s\n' "$line3"
+fi
