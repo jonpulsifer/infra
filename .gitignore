@@ -86,3 +86,6 @@ terraform/pki/certs/staging/
 
 # go build ./... in a main package drops the binary beside the source
 apps/fml-pki/fml-pki
+
+# google-github-actions/auth writes its credential file into the workspace.
+gha-creds-*.json

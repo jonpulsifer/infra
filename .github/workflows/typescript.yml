@@ -118,6 +118,25 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      # Turbo's remote cache, served out of GitHub's own cache service by a
+      # localhost proxy. It replaces an `actions/cache` step that tarred the
+      # whole of `.turbo` under a key ending in `github.sha` — a key that can
+      # never hit, so every run wrote a fresh ~580 MB entry and read back some
+      # older branch's snapshot. A hash that snapshot did not happen to contain
+      # was a miss even when this repo's own CI had already computed it, which
+      # is how a PR touching only one app came to re-run spindrift's suite.
+      # Content-addressed per task hash instead: one small entry each, evicted
+      # one at a time rather than as an indivisible 580 MB block, and readable
+      # from any branch. Nothing leaves GitHub.
+      #
+      # `use-relative-cache-path` makes the archive path — which GitHub folds
+      # into the cache version — independent of the runner's temp directory, so
+      # the hosted pool and the self-hosted ARC pools share one set of entries.
+      - name: Turbo remote cache
+        uses: rharkor/caching-for-turbo@2238fae6eb9a9936f92356f54cb3660200d105e7 # v2.5.1
+        with:
+          provider: github
+          use-relative-cache-path: true
       # A `services:` container blocks every step in the job — including
       # Checkout — behind its health check, even though nothing before `Test`
       # touches the database. Starting it here instead lets it boot in the
@@ -166,21 +185,6 @@ jobs:
           key: bun-store-${{ runner.os }}-${{ hashFiles('bun.lock') }}
           restore-keys: |
             bun-store-${{ runner.os }}-
-      - name: Cache Turborepo
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: |
-            .turbo
-            node_modules/.cache/turbo
-            apps/*/.turbo
-            packages/*/.turbo
-            apps/*/.next/cache
-          key: turbo-${{ runner.os }}-${{ github.ref_name }}-${{ hashFiles('bun.lock') }}-${{ github.sha }}
-          restore-keys: |
-            turbo-${{ runner.os }}-${{ github.ref_name }}-${{ hashFiles('bun.lock') }}-
-            turbo-${{ runner.os }}-${{ github.ref_name }}-
-            turbo-${{ runner.os }}-main-
-            turbo-${{ runner.os }}-
       # The App chart's goldens run `helm template` under `bun test`, where the
       # chart lives (packages/charts). spindrift's own suite templates the same
       # chart to assert what the record `reach` publishes ends up being, so the
