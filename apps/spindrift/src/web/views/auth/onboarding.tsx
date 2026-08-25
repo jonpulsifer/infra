@@ -3,8 +3,8 @@
  *
  * `loadStoredManifest` seeds an unseeded row with a placeholder document, and
  * every value in it is a stand-in — the registry is somebody else's namespace,
- * the signer names a key ring that does not exist, the control plane is served
- * at an example hostname. An installation in that state does not *fail*; it
+ * the signer names a key ring that does not exist. An installation in that
+ * state does not *fail*; it
  * comes up, renders an Overview of nothing, and refuses the first act an
  * operator attempts, with a message about whichever placeholder that act
  * happened to read first. This screen is what stands in front of that.
@@ -54,21 +54,19 @@
  *
  * **What an operator can authenticate as before any of this.** Nothing here is
  * reachable without a session, and a session is a passkey ceremony scoped to
- * `controlPlane.hostname` — bound once at boot, deliberately (`serve.ts`). An
- * installation holding nothing but the placeholder has `spindrift.example.com`
- * there, and a browser refuses a ceremony whose relying party is not a suffix of
- * the origin it is on, so *that* installation cannot enrol anybody and this
- * screen sits behind a door it cannot open. The chart's own default —
- * `manifest: {}`, which renders no ConfigMap — is exactly that installation.
- * Closing it is not this screen's: the hostname is a deployment fact the chart
- * already knows and the manifest is not given, and moving where the relying
- * party resolves from changes which origins ceremonies are accepted at, a change
- * whose only honest proof is a live enrolment.
+ * `controlPlane.hostname` — bound once at boot, deliberately (`serve.ts`). That
+ * hostname is a deployment fact rather than an authored one: `resolveManifest`
+ * takes it from `SPINDRIFT_HOSTNAME`, the same value the chart renders the
+ * Gateway and the HTTPRoute from, so an installation whose document is nothing
+ * but stand-ins is still served at its own real origin and can enrol somebody.
+ * That is what makes this screen reachable rather than academic.
  *
- * So what is reachable today is the installation whose declaration seeds the
- * deployment facts — a real hostname above all — and leaves the genuine choices
- * at their stand-ins. That one can enrol somebody, and this is what it shows
- * them first.
+ * The one installation that still cannot is the one with no origin at all —
+ * reachable only in-cluster, no Gateway, nothing to scope a relying party to,
+ * so `resolveManifest` falls back to `UNSERVED_HOSTNAME` and a browser
+ * refuses the ceremony. That is the missing Gateway saying so, not this screen,
+ * and there is nothing here to close: an installation nobody can reach is not
+ * an installation waiting on a wizard.
  */
 import { CircleAlert, PartyPopper, Rocket } from 'lucide-react';
 import { type CSSProperties, type ReactNode, useEffect, useState } from 'react';
