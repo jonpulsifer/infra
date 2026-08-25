@@ -1,23 +1,22 @@
 /**
  * Bringing a manifest document written under an older schema up to this one.
  *
- * **This is what stands between a schema change and a silently re-seeded
- * installation.** The stored row governs — `loadStoredManifest` resolves
- * `stored ?? declaration ?? placeholder` — and a row this build cannot parse is
- * a row this build treats as having no seed at all, so it re-seeds from the
- * mounted declaration and discards everything an operator configured through
- * the UI. That fallback is right for a genuinely corrupt document and wrong for
- * a merely old one, and validation alone cannot tell them apart. This module
- * is what makes the difference: run before validation, an old document becomes
- * a current one and never reaches the fallback, and a document that still fails
- * afterwards is a real fault.
+ * **This is what stands between a schema change and an installation that
+ * cannot boot.** The stored row is the only document this installation has —
+ * `loadStoredManifest` resolves `stored ?? placeholder` — so a row this build
+ * cannot parse is a boot with nothing left to read. That refusal is right for a
+ * genuinely corrupt document and wrong for a merely old one, and validation
+ * alone cannot tell them apart. This module is what makes the difference: run
+ * before validation, an old document becomes a current one and never reaches
+ * the refusal, and a document that still fails afterwards is a real fault.
  *
  * It runs inside {@link validateManifest}, which is the one gate every document
- * passes through — the stored row, the mounted declaration, and the document
- * `configureInstallation` accepts. The mounted declaration matters as much as
- * the row here: a declaration and the image that understands it land in
- * separate merges, so for the window between them an installation is reading a
- * document written for the other schema, whichever direction the skew runs in.
+ * passes through — the stored row, the placeholder seed, and the document
+ * `configureInstallation` accepts, typed into the settings form or pasted back
+ * from an export. A restored document matters as much as the row here: an
+ * export and the image that later reads it are taken at different times, so a
+ * restore routinely carries a document written for the other schema, whichever
+ * direction the skew runs in.
  *
  * Every upgrade here is a **pure function of the document**, never of the
  * database or the environment. That is what lets `loadStoredManifest` persist
@@ -26,7 +25,7 @@
  *
  * `test/config/manifest-upgrade.test.ts` holds a fixture per historical shape
  * and boots each one; adding a shape to that corpus is how a future schema
- * change proves it did not make the re-seed reachable.
+ * change proves it did not make the refusal reachable.
  */
 import { unionOfClaims, type VesselKind } from '../domain/vessel.ts';
 
@@ -149,10 +148,9 @@ function listDnsZones(document: unknown): unknown {
  * clone URLs and install links are composed from, so it becomes `webBaseUrl`
  * unless the document already states one.
  *
- * This step is what makes the rollout order between the clusters declaration
- * and the image advisory rather than load-bearing: whichever lands first,
- * neither a stored row still carrying the legacy keys nor a declaration
- * missing them can fail a parse.
+ * This step is what makes the skew between a stored row and the image reading
+ * it advisory rather than load-bearing: a row still carrying the legacy keys
+ * cannot fail a parse, and neither can a document that never had them.
  */
 function dropDeviceFlowIdentity(document: unknown): unknown {
   const manifest = asDocument(document);
@@ -190,11 +188,10 @@ const SEED_PINNED_WORKFLOW_REF = '@0a7d0ea0ca5c9963eea1104c5802a8af2901d4b6';
  *
  * The reusable workflow ref may move — see the `buildWorkflow` docblock in
  * `manifest.schema.ts`: a branch keeps every written caller current, and the
- * platform repository's merge gate is the version gate. The seed declarations
- * state `@main` now, but an installation seeded before that edit holds the pin
- * where no mounted correction can reach it — the stored row governs — and
- * every caller it writes into a connected repository copies a workflow frozen
- * at that commit. The repository half of the value is kept, not restated:
+ * platform repository's merge gate is the version gate. An installation seeded
+ * before that edit holds the pin where nothing outside the product can reach
+ * it — the row is the only document there is — and every caller it writes into
+ * a connected repository copies a workflow frozen at that commit. The repository half of the value is kept, not restated:
  * which repository publishes the workflow is the installation's fact, and the
  * document already carries it.
  *
@@ -227,9 +224,9 @@ function movePinnedBuildWorkflowToMain(document: unknown): unknown {
 /**
  * The one placeholder workflow ref a seed document ever carried, nulled.
  *
- * The chart's seed document stated this exact value where it now states null,
- * and the stored row keeps whatever seeded it — so an installation seeded from
- * that document holds the value where no mounted correction can reach it. It
+ * The chart's seed document stated this exact value, and the stored row keeps
+ * whatever seeded it — so an installation seeded from that document holds the
+ * value where nothing outside the product can reach it. It
  * is not inert the way `spindrift.example.com` is: `connectRepository` writes
  * it into a caller workflow inside connected repositories, and it names a
  * repository this project does not own. Null is the schema's own word for "no
@@ -278,7 +275,7 @@ function scrubPlaceholderBuildWorkflow(document: unknown): unknown {
  * position (`reconcileManifestTargets`), the control plane's own cluster is its
  * in-cluster destination, and rank 0 is where every document written so far put
  * it. It is a recovery of one fact from one document shape, run once — after
- * this the declaration states it and nothing derives it again.
+ * this the document states it and nothing derives it again.
  *
  * Runs last, because it reads `vessels` and `targets[].vessel`, which the two
  * steps above are what put there.
@@ -446,8 +443,8 @@ function dropTargetNames(document: unknown): unknown {
  * boundary: it is what this installation's vessel row already says, and
  * disagreeing with it would mint a second vessel beside the migrated one.
  * Declaring nothing would be worse than either — `vessels` is required, so the
- * document would fail validation and `loadStoredManifest` would re-seed from
- * the mounted declaration, which is the loss this module stands between.
+ * document would fail validation and the boot would have nothing left to read,
+ * which is the loss this module stands between.
  */
 function addDeclaredVessels(document: unknown): unknown {
   const manifest = asDocument(document);
