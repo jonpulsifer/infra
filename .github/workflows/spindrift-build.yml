@@ -875,35 +875,21 @@ jobs:
           # the adapter removes it before the deploy; the adapter is the only
           # reader, and paths are relative to the deployment root.
           #
-          # A filePathMap dependency is still dereferenced below: it is a file
-          # a function reads, and one real copy at the root is exactly what
-          # the platform resolves.
+          # A filePathMap dependency is copied the same way, and for the same
+          # reason. Next aliases an external package by writing a *symlinked*
+          # directory under `.next/node_modules` — `@prisma/client-<hash>`,
+          # `pg-<hash>`, `require-in-the-middle-<hash>` — and names the link in
+          # the map. Dereferencing one turns it into a real directory, and the
+          # CLI adds a filePathMap entry to the upload verbatim without walking
+          # into it (`buildFileTree`), while `--prebuilt` ignores everything
+          # outside `.vercel/output` — so the directory contributes *nothing*
+          # and the function dies at `Cannot find module`. Left as a link it is
+          # uploaded as a link, exactly as a deploy from the project would, and
+          # resolves against the real package the map names separately.
           staging="${RUNNER_TEMP}/vercel-deploy"
           rm -rf "$staging"
           mkdir -p "$staging/.vercel/output"
           cp -R "${output}/." "$staging/.vercel/output/"
-          node -e '
-            const fs = require("node:fs");
-            const path = require("node:path");
-            const root = process.argv[1];
-            const output = path.join(root, ".vercel/output");
-            const links = [];
-            const walk = (dir) => {
-              for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-                const at = path.join(dir, entry.name);
-                if (entry.isSymbolicLink()) {
-                  links.push({ path: path.relative(root, at), target: fs.readlinkSync(at) });
-                  fs.unlinkSync(at);
-                } else if (entry.isDirectory()) {
-                  walk(at);
-                }
-              }
-            };
-            walk(output);
-            if (links.length === 0) process.exit(0);
-            fs.mkdirSync(path.join(output, "__spindrift"), { recursive: true });
-            fs.writeFileSync(path.join(output, "__spindrift/func-links.json"), JSON.stringify(links));
-          ' "$staging"
 
           maps="${RUNNER_TEMP}/vercel-filepathmap.txt"
           : > "$maps"
@@ -923,16 +909,48 @@ jobs:
               done | LC_ALL=C sort -u > "$maps"
           fi
           while IFS= read -r dep; do
-            if [ -z "$dep" ] || [ -e "$staging/${dep}" ]; then
+            # `-L` as well as `-e`, because a staged entry may now be a symlink
+            # whose target the loop has not reached yet: `-e` alone reads that
+            # as absent and copies a second time, on top of the link.
+            if [ -z "$dep" ] || [ -e "$staging/${dep}" ] || [ -L "$staging/${dep}" ]; then
               continue
             fi
-            if [ ! -e "${SCOPE}/${dep}" ]; then
+            if [ ! -e "${SCOPE}/${dep}" ] && [ ! -L "${SCOPE}/${dep}" ]; then
               echo "::error::a function's filePathMap names ${dep}, which vercel build did not leave in the tree — the prebuilt deployment cannot be assembled." >&2
               exit 1
             fi
             mkdir -p "$staging/$(dirname "$dep")"
-            cp -RL "${SCOPE}/${dep}" "$staging/${dep}"
+            cp -R "${SCOPE}/${dep}" "$staging/${dep}"
           done < "$maps"
+
+          # Every symlink in the staged tree, from both copies above, lifted
+          # into the manifest the deploy adapter recreates them from. Run once
+          # here rather than per-copy so there is one walker and one manifest;
+          # `__spindrift/` is inside `.vercel/output` so `--prebuilt` carries
+          # it, and the adapter deletes it before the CLI runs.
+          node -e '
+            const fs = require("node:fs");
+            const path = require("node:path");
+            const root = process.argv[1];
+            const links = [];
+            const walk = (dir) => {
+              for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+                const at = path.join(dir, entry.name);
+                if (entry.isSymbolicLink()) {
+                  links.push({ path: path.relative(root, at), target: fs.readlinkSync(at) });
+                  fs.unlinkSync(at);
+                } else if (entry.isDirectory()) {
+                  walk(at);
+                }
+              }
+            };
+            walk(root);
+            if (links.length === 0) process.exit(0);
+            const output = path.join(root, ".vercel/output/__spindrift");
+            fs.mkdirSync(output, { recursive: true });
+            fs.writeFileSync(path.join(output, "func-links.json"), JSON.stringify(links));
+            console.log(`lifted ${links.length} symlinks out of the deployment tree`);
+          ' "$staging"
 
           {
             printf 'context=%s\n' "$staging"
