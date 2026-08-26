@@ -1483,6 +1483,26 @@ export const sessions = pgTable(
       .notNull()
       .defaultNow(),
     expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+    /**
+     * When this credential was last presented, and what presented it.
+     *
+     * Written on the agent path only. A browser session is looked up on every
+     * request the UI makes, and stamping it would be a write per page view for
+     * a row nothing lists; an agent token is long-lived, lives in a file on a
+     * machine, and is listed precisely so it can be revoked — which is a
+     * decision an operator cannot make from a mint date alone.
+     *
+     * Null is "never presented", which is a real state and the one worth
+     * finding: a token minted and never used is the one to revoke first.
+     *
+     * The two strings are what the caller *said*, not what was observed —
+     * `X-Forwarded-For`'s first hop and `User-Agent`, both self-reported and
+     * both spoofable by whoever holds the token. They tell one machine from
+     * another; they prove nothing, and nothing may authorise on them.
+     */
+    lastUsedAt: timestamp('last_used_at', { withTimezone: true }),
+    lastUsedIp: text('last_used_ip'),
+    lastUsedAgent: text('last_used_agent'),
   },
   (table) => [unique('sessions_token_hash_unique').on(table.tokenHash)],
 );

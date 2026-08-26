@@ -12,8 +12,10 @@
  *
  * The token is returned exactly once, by {@link mintAgentToken}, and never
  * again by anything: `sessions.token_hash` is a SHA-256 and there is nothing to
- * read back. {@link listAgentTokens} answers with ids and dates, which is all
- * {@link revokeAgentToken} needs.
+ * read back. {@link listAgentTokens} answers with ids, dates and last use,
+ * which is what {@link revokeAgentToken} needs an operator to be able to
+ * decide on: a mint date alone cannot tell the machine in front of you from
+ * the one you set up months ago and forgot.
  *
  * The session-layer functions are imported under different local names: a
  * command's exported identifier must equal the name it is registered under
@@ -62,6 +64,20 @@ export interface AgentTokenListItem {
   readonly expiresAt: string;
   /** Whether it is past its expiry — a dead row is still a row to clean up. */
   readonly expired: boolean;
+  /**
+   * When this token was last presented at `/mcp`, and what presented it.
+   *
+   * `null` throughout for a token nobody has used, which is one answer and not
+   * three: a row with no last use has no address and no agent either, and
+   * spelling that as three separate absences would ask the screen to
+   * distinguish them.
+   *
+   * The address and the agent are the caller's own headers — they say which
+   * machine, and they are not evidence. The screen renders them as such.
+   */
+  readonly lastUsedAt: string | null;
+  readonly lastUsedIp: string | null;
+  readonly lastUsedAgent: string | null;
 }
 
 export const listAgentTokens: Command<
@@ -76,6 +92,9 @@ export const listAgentTokens: Command<
       createdAt: row.createdAt.toISOString(),
       expiresAt: row.expiresAt.toISOString(),
       expired: row.expiresAt <= now,
+      lastUsedAt: row.lastUsedAt?.toISOString() ?? null,
+      lastUsedIp: row.lastUsedIp,
+      lastUsedAgent: row.lastUsedAgent,
     })),
   });
 };
