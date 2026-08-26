@@ -4,7 +4,8 @@
   "type": "module",
   "scripts": {
     "build": "bun run build.ts",
-    "dev": "bun run build.ts && bun run serve.ts"
+    "dev": "bun run build.ts && bun run serve.ts",
+    "test": "bun test functions/"
   },
   "dependencies": {
     "shiki": "^4.0.0"
