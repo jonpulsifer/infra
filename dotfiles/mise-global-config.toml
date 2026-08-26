@@ -2,6 +2,9 @@
 experimental = true
 minimum_release_age_excludes = ["claude-code", "codex", "pi", "opencode"]
 
+[env]
+_.file = { path = '~/.config/mise/secrets.env', redact = true }
+
 [tools]
 bun = "latest"
 helix = "latest"
