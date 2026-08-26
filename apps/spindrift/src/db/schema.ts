@@ -1466,8 +1466,19 @@ export const sessions = pgTable(
     userId: uuid('user_id')
       .notNull()
       .references(() => users.id, { onDelete: 'cascade' }),
-    /** SHA-256 of the opaque cookie value, base64url. Never the value itself. */
+    /** SHA-256 of the opaque token value, base64url. Never the value itself. */
     tokenHash: text('token_hash').notNull(),
+    /**
+     * Which credential this row is: a browser cookie or an agent bearer token.
+     *
+     * The two are the same mechanism and must never be the same key. Every read
+     * filters on it, so a value lifted out of one surface is not accepted at
+     * the other — see `src/auth/session.ts`.
+     */
+    kind: text('kind')
+      .$type<'browser' | 'agent'>()
+      .notNull()
+      .default('browser'),
     createdAt: timestamp('created_at', { withTimezone: true })
       .notNull()
       .defaultNow(),

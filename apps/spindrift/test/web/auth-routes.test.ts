@@ -110,6 +110,12 @@ function serve() {
         throw new Error('an auth-route test read the installation');
       },
     },
+    {
+      authenticate: async () => ({ kind: 'anonymous' as const }),
+      context: () => {
+        throw new Error('an auth-route test reached the MCP surface');
+      },
+    },
   );
 
   return { auth, routes };

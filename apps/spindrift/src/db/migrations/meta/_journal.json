@@ -386,6 +386,13 @@
       "when": 1786968960000,
       "tag": "0054_clear_superseded_drift",
       "breakpoints": true
+    },
+    {
+      "idx": 55,
+      "version": "7",
+      "when": 1786969020000,
+      "tag": "0055_session_kind",
+      "breakpoints": true
     }
   ]
 }

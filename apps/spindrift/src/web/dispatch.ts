@@ -15,10 +15,24 @@
  * 2. **Explicitly unversioned and internal**, the same status as the webhook
  *    and build callbacks. The prefix says so. No stability promise, no docs
  *    page, and nothing outside this repo may depend on it.
- * 3. **Session-authenticated only, never a token.** A token is what turns an
- *    internal protocol into an API somebody scripts against, so there is no
- *    code path here that reads one — {@link DispatchDeps.authenticate} returns
- *    a principal or a typed refusal.
+ * 3. **Session-authenticated only.** There is no code path in this file that
+ *    reads a bearer token — {@link DispatchDeps.authenticate} resolves a
+ *    browser session (and, where configured, a trusted Gateway header) or
+ *    returns a typed refusal.
+ *
+ *    This rule used to read "never a token", on the argument that a token is
+ *    what turns an internal protocol into an API somebody scripts against.
+ *    `mcp-route.ts` is that argument's answer: an agent driving this
+ *    installation is a thing the operator wants, and what makes it an API is
+ *    the *endpoint*, not the credential. So the surface an agent scripts
+ *    against is its own route, with its own credential, and this one is
+ *    unchanged — a bearer token presented here is not read, and a browser
+ *    cookie presented there is not read either. Two doors, two keys, and
+ *    neither key turns the other lock (`src/auth/session.ts`).
+ *
+ *    What has *not* changed is the reason: the browser boundary stays
+ *    unversioned and internal, with no stability promise and nothing outside
+ *    this repo depending on it.
  *
  * There is no domain logic in this file, and §21 requires that there be none.
  * What is left is transport: decode JSON, find a principal, call `dispatch`,

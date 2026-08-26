@@ -22,6 +22,7 @@ import { BOSUN_PATHS, type BosunRouteDeps } from '../../src/web/bosun-route.ts';
 import { BundleMissingError, bundleRoutes } from '../../src/web/bundle.ts';
 import { pathFor } from '../../src/web/dispatch.ts';
 import { GITHUB_SETUP_PATH } from '../../src/web/github-setup-route.ts';
+import { MCP_PATH } from '../../src/web/mcp-route.ts';
 import { HEALTH_PATH, READY_PATH, webRoutes } from '../../src/web/routes.ts';
 import {
   STATUS_PATH,
@@ -147,6 +148,9 @@ const served = webRoutes(
   noBosun,
   noGitHubSetup,
   noStatus,
+  // `/mcp` takes the same deps shape the dispatch surface does; this table test
+  // asserts the path exists, not what it will accept.
+  noSession,
 );
 
 const AUTH_PATHS = AUTH_ACTS.map(authPathFor);
@@ -166,6 +170,7 @@ describe('what the web process serves', () => {
         WEBHOOK_PATH,
         ...BOSUN_PATHS,
         GITHUB_SETUP_PATH,
+        MCP_PATH,
         STATUS_PATH,
       ].sort(),
     );
@@ -192,6 +197,10 @@ describe('what the web process serves', () => {
         WEBHOOK_PATH,
         ...BOSUN_PATHS,
         GITHUB_SETUP_PATH,
+        // One path, and the tools behind it are generated from `commandNames`
+        // exactly as the dispatch routes are — see `mcp-route.test.ts` for the
+        // set equality. What is hand-authored is the endpoint, not the surface.
+        MCP_PATH,
         STATUS_PATH,
       ].sort(),
     );
