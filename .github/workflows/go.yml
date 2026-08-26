@@ -18,15 +18,23 @@ on:
     paths:
       - 'apps/bosun/**'
       - 'apps/ddnsd/**'
+      - 'apps/fml-attest/**'
+      - 'apps/fml-ceremony/**'
       - 'apps/fml-pki/**'
       - 'apps/spindrift-verifier/**'
+      - 'terraform/pki/certs/**'
+      - 'terraform/pki/oidc/**'
       - '.github/workflows/go.yml'
   pull_request:
     paths:
       - 'apps/bosun/**'
       - 'apps/ddnsd/**'
+      - 'apps/fml-attest/**'
+      - 'apps/fml-ceremony/**'
       - 'apps/fml-pki/**'
       - 'apps/spindrift-verifier/**'
+      - 'terraform/pki/certs/**'
+      - 'terraform/pki/oidc/**'
       - '.github/workflows/go.yml'
 
 permissions:
@@ -45,6 +53,8 @@ jobs:
         module:
           - apps/bosun
           - apps/ddnsd
+          - apps/fml-attest
+          - apps/fml-ceremony
           - apps/fml-pki
           - apps/spindrift-verifier
     defaults:
@@ -66,3 +76,18 @@ jobs:
       # "requires cgo", which reads as a broken suite rather than a missing
       # compiler.
       - run: go test -race ./...
+
+  # `mise run pki:verify` had no workflow entry, so a change to
+  # terraform/pki/certs matched no path filter anywhere, ran zero jobs and
+  # reported green -- while every host auto-upgrades its trust store from main.
+  # The committed chain is the one artifact of a root re-birth; it gets a gate.
+  pki-verify:
+    name: pki:verify
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version-file: apps/fml-pki/go.mod
+          cache: false
+      - run: go -C apps/fml-pki run . verify

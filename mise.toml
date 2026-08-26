@@ -19,6 +19,7 @@ jq = "latest"
 k9s = "latest"
 kubectl = "latest"
 kustomize = "latest"
+rust = "1.98.0"
 shellcheck = "latest"
 shfmt = "latest"
 sops = "latest"
@@ -49,6 +50,12 @@ run = "nix develop -c nix fmt"
 [tasks."tf:fmt"]
 description = "Format Terraform files"
 run = "tofu fmt -recursive"
+
+[tasks."rust:test"]
+description = "Differential tests for the FML derivation spec (apps/fml-derive-rs)"
+# Through the nix dev shell: mise's rust ships no C toolchain, and rustc needs
+# a linker.
+run = "nix develop -c cargo test --locked --manifest-path apps/fml-derive-rs/Cargo.toml"
 
 [tasks."validation-impact:test"]
 description = "Test validation-impact routing"
@@ -112,6 +119,24 @@ run = "bash -lc 'find . -name node_modules -prune -o -name .git -prune -o -name 
 [tasks."pki:verify"]
 description = "Assert the committed FML PKI chain links, anchors on a self-signed root, and admits its own depth"
 run = "go -C apps/fml-pki run . verify"
+
+[tasks."pki:cutover"]
+description = "Search every ordering of the root + intermediate re-birth for one that locks a cluster out"
+run = "go -C apps/fml-ceremony test ./cutover/ -v"
+
+[tasks."pki:crosscheck"]
+description = "Differential-check the Go derivation against the independent Rust one, byte for byte"
+# The Rust binary goes through the nix dev shell for a linker; the Go test then
+# runs it directly. FML_DERIVE_RS is what un-skips the harness.
+run = """
+nix develop -c cargo build --release --locked --manifest-path apps/fml-derive-rs/Cargo.toml
+FML_DERIVE_RS="$PWD/apps/fml-derive-rs/target/release/fml-derive" \
+  go -C apps/fml-ceremony test ./derive/ -run TestDifferentialAgainstRust -v -count=1
+"""
+
+[tasks."pki:attest"]
+description = "Check a ceremony transcript: canonical form, hash chain, share structure, certificate chain (set TRANSCRIPT)"
+run = "go -C apps/fml-attest run . ${TRANSCRIPT:-../fml-ceremony/testdata/transcript.example.json}"
 
 [tasks."docs:check"]
 description = "Docs contract: wikilinks resolve, referenced paths exist, no archaeology"

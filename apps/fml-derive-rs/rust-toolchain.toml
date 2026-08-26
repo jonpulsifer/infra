@@ -1,0 +1,5 @@
+# Pinned so CI and the dev machine run the same compiler. Keep in step with
+# the `rust` entry in the repo-root mise.toml.
+[toolchain]
+channel = "1.98.0"
+components = ["clippy", "rustfmt"]
