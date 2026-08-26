@@ -4,16 +4,9 @@ tags:: runbook
 - Spindrift serves its command registry over the Model Context Protocol at `https://spindrift-control.lolwtf.dev/mcp`, so an agent can drive the platform — list apps, dispatch a build, deploy, roll back — through the same commands the UI dispatches. Unlike [[Runbooks/Connect an Agent to the Wiki]] this surface is **authenticated and it writes**. Every tool is an act.
 - ## Mint a token
 	- The MCP endpoint takes an **agent token**, never the browser session cookie. They are both rows in `sessions` and the `kind` column keeps them apart: a cookie presented as a bearer token is refused, and an agent token presented as a cookie is refused. That is deliberate — a cookie loses `HttpOnly`, `Secure` and `SameSite=Lax` the moment it is copied into a config file, so the credential that lives in a file is a different credential.
-	- Sign in with your passkey, then dispatch `mintAgentToken`. There is no screen for it yet, so from the browser console on the Spindrift tab:
-		- ```js
-		  await (await fetch('/internal/commands/mintAgentToken', {
-		    method: 'POST',
-		    headers: { 'content-type': 'application/json' },
-		    body: '{}',
-		  })).json()
-		  ```
-	- The `token` in the reply is shown once and never again — the row holds only its SHA-256. It lasts ninety days.
-	- `listAgentTokens` names the rows you hold by id and date, and `revokeAgentToken` takes one of those ids. Revoking an agent token does not touch your browser session, which is the reason they are separate rows.
+	- Sign in with your passkey, then **Settings → Identity → Agent tokens → Mint an agent token**.
+	- The value is shown once and never again — the row holds only its SHA-256. Copy it from the panel before dismissing it. It lasts ninety days.
+	- The same card lists the tokens you hold by mint date and revokes any of them. Revoking an agent token does not touch your browser session, which is the reason they are separate rows.
 - ## Connect
 	- Claude Code: `claude mcp add --transport http spindrift https://spindrift-control.lolwtf.dev/mcp --header "Authorization: Bearer $TOKEN"`
 	- Anything reading a JSON config file:
@@ -41,4 +34,4 @@ tags:: runbook
 	- A `401` means the token is not an agent token — a browser cookie will get exactly this. A `405` means the request was not a POST; this endpoint has no SSE stream to open.
 - ## Changing it
 	- The endpoint is `apps/spindrift/src/web/mcp-route.ts`, tested in `apps/spindrift/test/web/mcp-route.test.ts`. It holds no domain logic: `tools/list` renders each command's Zod input as JSON Schema and `tools/call` is `dispatch`. Adding a tool means adding a command.
-	- The credential lives in `apps/spindrift/src/auth/session.ts` with its crossed-key tests in `apps/spindrift/test/auth/agent-token.test.ts`. The three commands behind it are `apps/spindrift/src/commands/agent-tokens.ts`.
+	- The credential lives in `apps/spindrift/src/auth/session.ts` with its crossed-key tests in `apps/spindrift/test/auth/agent-token.test.ts`. The three commands behind it are `apps/spindrift/src/commands/agent-tokens.ts` and the card is `apps/spindrift/src/web/views/auth/agent-tokens.tsx`.

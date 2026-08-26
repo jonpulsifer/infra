@@ -19,6 +19,7 @@
 import type { ReactNode } from 'react';
 import { Eyebrow } from '../../ui/card.tsx';
 import { Tabs } from '../../ui/tabs.tsx';
+import { AgentTokens } from '../auth/agent-tokens.tsx';
 import { InstallationSettings } from '../auth/installation.tsx';
 import { IdentitySettings } from '../auth/settings.tsx';
 import { RepositoriesScreen } from '../repos/list.tsx';
@@ -132,7 +133,13 @@ export function SettingsScreen({
       {section === 'connections' ? (
         <ConnectionsSettings onNavigate={onNavigate} />
       ) : section === 'identity' ? (
-        <IdentitySettings />
+        // Agent tokens are a third credential, not a third thing about
+        // passkeys, so they are a sibling card rather than a section inside a
+        // view whose every act needs a ceremony.
+        <div className="flex flex-col gap-6">
+          <IdentitySettings />
+          <AgentTokens />
+        </div>
       ) : section === 'installation' ? (
         <InstallationSettings />
       ) : section === 'notifications' ? (
