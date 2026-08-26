@@ -7,6 +7,7 @@ tags:: architecture
 	- `clusters/offsite/` — independent, fully capable remote-site cluster. Nodes: `retrofit` (control-plane), `oldschool` (worker).
 	- `clusters/base/` — resources shared by both clusters, referenced by relative path from each cluster's manifests.
 	- Hardware, serials, and per-host quirks for all five nodes: [[Fleet]].
+	- The workloads each cluster reconciles: [[Architecture/Cluster Applications]].
 - ## The base/ sharing pattern
 	- A cluster's `flux-system/kustomization.yaml` lists `../../base/flux-system` as a resource alongside its own per-domain Kustomizations. That pulls in the shared platform layer — `arc-system`, `external-secrets-operator`, `onepassword-connect`, `sandbox` (agent-sandbox), `valkey-operator` — from `clusters/base/flux-system/`.
 	- Individual per-cluster manifests also reference specific `base/` subtrees directly wherever an app or component is identical across sites: `clusters/folly/apps/kustomization.yaml` lists `../../base/apps/iperf3` and `../../base/apps/reloader` next to its cluster-only app directories; `clusters/folly/storage/kustomization.yaml` lists `../../base/storage` next to `nfs-provisioner`; `clusters/folly/networking/cloudflare/kustomization.yaml` lists `../../../base/networking/cloudflare` next to its own tunnel credentials.
