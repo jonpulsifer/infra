@@ -28,6 +28,43 @@ function toneFor(phase: DeployPhase, faulty: boolean) {
   return 'warning' as const;
 }
 
+/** The three tones, as the text colour a bare dot inherits its fill from. */
+const DOT = {
+  success: 'text-success',
+  warning: 'text-warning',
+  destructive: 'text-destructive',
+} as const satisfies Record<ReturnType<typeof toneFor>, string>;
+
+/**
+ * The phase, as a coloured dot alone — for the one place a word will not fit.
+ *
+ * The topology boxes are 184 pixels wide and already carry a kind, a name and
+ * a placement; a `PhasePill` beside those is the fourth thing competing in a
+ * box whose whole job is to be recognised at a glance. What the list of
+ * Components used to state per row, the picture now has to, and this is the
+ * smallest shape that still states it.
+ *
+ * The word goes to a screen reader rather than being dropped: colour is the
+ * only encoding here, and colour alone is never an answer.
+ */
+export function PhaseDot({
+  phase,
+  faulty = false,
+}: {
+  phase: DeployPhase;
+  faulty?: boolean;
+}) {
+  const word = faulty ? 'Faulty' : deployPhaseWord(phase);
+  return (
+    <span
+      className={cn('inline-flex items-center', DOT[toneFor(phase, faulty)])}
+    >
+      <Dot pulse={isInFlight(phase)} title={word} />
+      <span className="sr-only">{word}</span>
+    </span>
+  );
+}
+
 /**
  * The phase marker: a tone, a word, and a dot that pulses only while the phase
  * is still moving.

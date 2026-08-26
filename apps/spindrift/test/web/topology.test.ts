@@ -226,6 +226,47 @@ describe('the geometry holds', () => {
   });
 });
 
+describe('the highlight only fires where it separates something', () => {
+  // The rule the picture is read by: a wire is emphasised *against* other
+  // wires, so a colour every wire wears distinguishes nothing.
+  const touches = (edge: { from: string; to: string }, id: string) =>
+    edge.from === id || edge.to === id;
+  const emphasises = (
+    edges: readonly { from: string; to: string }[],
+    id: string,
+  ) =>
+    edges.some((edge) => touches(edge, id)) &&
+    !edges.every((edge) => touches(edge, id));
+
+  test('the one-Component App lights nothing, because every wire is its own', () => {
+    // The common App, and the case a naive "does it touch the selection"
+    // check turns into a canvas of solid accent.
+    const { edges } = topology(
+      [component('web', { reach: 'public' })],
+      [datastore('primary')],
+    );
+    expect(emphasises(edges, 'component:component-web')).toBe(false);
+  });
+
+  test('a Component with no wires at all lights nothing either', () => {
+    // Dimming every wire on the canvas to announce that this box has none of
+    // them is a picture of the wrong thing.
+    const { edges } = topology(
+      [component('web', { reach: 'public' }), component('worker')],
+      [],
+    );
+    expect(emphasises(edges, 'component:component-worker')).toBe(false);
+  });
+
+  test('and a Component sharing a canvas with wires that are not its own does', () => {
+    const { edges } = topology(
+      [component('web', { reach: 'public' }), component('worker')],
+      [datastore('primary')],
+    );
+    expect(emphasises(edges, 'component:component-web')).toBe(true);
+  });
+});
+
 describe('the degenerate cases', () => {
   test('no Components is no canvas', () => {
     const { nodes, edges, height } = topology([], []);

@@ -675,6 +675,7 @@ describe('unlocking resumes the push the lock held back', () => {
     if (!workspace.ok) return;
     expect(workspace.value.workspace.source).toEqual({
       branch: 'main',
+      url: `${ctx.manifest.github.webBaseUrl}/${repository.fullName}`,
       pending: { commit: 'bbb2222', dispatched: true },
     });
     expect(workspace.value.workspace.lock).toBeUndefined();
@@ -837,8 +838,11 @@ describe('the workspace says what is pushed but not live', () => {
     const inStep = await getAppWorkspace({ name: app.id }, ctx);
     expect(inStep.ok).toBe(true);
     if (!inStep.ok) return;
+    // The origin the hero composes a commit link from — §20 keeps the host in
+    // the manifest, so the browser cannot know it and the read carries it.
     expect(inStep.value.workspace.source).toEqual({
       branch: 'main',
+      url: `${ctx.manifest.github.webBaseUrl}/${repository.fullName}`,
       pending: null,
     });
     expect(inStep.value.workspace.lock).toBeUndefined();
@@ -852,6 +856,7 @@ describe('the workspace says what is pushed but not live', () => {
     if (!behind.ok) return;
     expect(behind.value.workspace.source).toEqual({
       branch: 'main',
+      url: `${ctx.manifest.github.webBaseUrl}/${repository.fullName}`,
       pending: { commit: 'bbb2222', dispatched: false },
     });
     expect(behind.value.workspace.commit).toBe('aaa1111');

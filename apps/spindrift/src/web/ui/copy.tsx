@@ -113,6 +113,7 @@ export function Ref({
   value,
   kind,
   headline,
+  href,
   className,
 }: {
   readonly value: string;
@@ -122,16 +123,40 @@ export function Ref({
    * value that is copied and sorted; this is only what makes it readable.
    */
   readonly headline?: string | null;
+  /**
+   * Where this reference is a thing rather than a string — a commit's page on
+   * the repository host, an artifact's page on the registry.
+   *
+   * Optional because most callers have no origin to compose one from: a
+   * reference is a value first, and a hash rendered as a dead link would
+   * promise a destination the screen does not have. The copy button stays
+   * beside it either way — the clipboard is what a digest is *for*, and a link
+   * does not replace it.
+   */
+  readonly href?: string;
   readonly className?: string;
 }) {
   if (!value) return null;
+  // The full value is the title, so a hover answers what the ellipsis ate even
+  // where the clipboard is unavailable.
+  const short = shorten(value, kind);
   return (
     <span className={cn('inline-flex min-w-0 items-center gap-1', className)}>
-      {/* The full value is the title, so a hover answers what the ellipsis ate
-          even where the clipboard is unavailable. */}
-      <span className="truncate font-mono text-body" title={value}>
-        {shorten(value, kind)}
-      </span>
+      {href ? (
+        <a
+          href={href}
+          target="_blank"
+          rel="noreferrer noopener"
+          title={value}
+          className="truncate font-mono text-body underline decoration-border underline-offset-2 transition-colors duration-100 ease-out hover:decoration-current hover:text-accent-foreground"
+        >
+          {short}
+        </a>
+      ) : (
+        <span className="truncate font-mono text-body" title={value}>
+          {short}
+        </span>
+      )}
       <CopyButton value={value} label={kind} />
       {headline ? (
         <span className="truncate text-body text-subtle" title={headline}>
