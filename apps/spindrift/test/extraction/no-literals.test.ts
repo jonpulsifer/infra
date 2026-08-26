@@ -143,6 +143,12 @@ const PROJECT_ID_ALLOWLIST = new Set<string>([
   // the places a real installation literal could hide. Naming the specific
   // header keeps the scanner at full strength over the rest of the file.
   'set-cookie',
+  // The two headers an agent token's last use is recorded from. Standard
+  // header names, identical in every installation — and read on the auth
+  // surface rather than in a browser bundle, which is why they are named here
+  // one at a time rather than the file being scoped out.
+  'x-forwarded-for',
+  'user-agent',
   // The header the edge platform checks an uploaded file's integrity with.
   // Same kind of thing again: a vendor's own header name, identical for every
   // installation, written by a deploy adapter rather than by a browser bundle.

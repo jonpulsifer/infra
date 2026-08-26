@@ -14,6 +14,7 @@
  * credential you cannot revoke.
  */
 import { describe, expect, test } from 'bun:test';
+import { eq } from 'drizzle-orm';
 import {
   beginEnrolment,
   completeEnrolment,
@@ -29,6 +30,7 @@ import {
   SESSION_COOKIE,
   SESSION_LIFETIME_MS,
 } from '../../src/auth/session.ts';
+import { sessions } from '../../src/db/schema.ts';
 import { createAuthenticator } from '../harness/authenticator.ts';
 import { withIsolatedDatabase } from '../harness/db.ts';
 
@@ -85,9 +87,16 @@ async function enrolled(clock: { now: () => Date }): Promise<{
 }
 
 /** A request as an MCP client sends one. */
-function bearer(token: string | null): Request {
+function bearer(
+  token: string | null,
+  trace: { ip?: string; agent?: string } = {},
+): Request {
   return new Request(RELYING_PARTY.origin, {
-    headers: token === null ? {} : { authorization: `Bearer ${token}` },
+    headers: {
+      ...(token === null ? {} : { authorization: `Bearer ${token}` }),
+      ...(trace.ip === undefined ? {} : { 'x-forwarded-for': trace.ip }),
+      ...(trace.agent === undefined ? {} : { 'user-agent': trace.agent }),
+    },
   });
 }
 
@@ -219,5 +228,121 @@ describe('a token you cannot list is a token you cannot revoke', () => {
     const someoneElse = crypto.randomUUID();
     expect(await revokeAgentToken(deps, someoneElse, row!.id)).toBe(false);
     expect(await resolveAgentToken(bearer(token), deps)).not.toBeNull();
+  });
+
+  describe('what a row remembers about being used', () => {
+    test('a token nobody has presented has no last use at all', async () => {
+      // Three nulls rather than a zero date: "never" is a state, and a row
+      // that claimed to have been used at the epoch would sort as the oldest
+      // thing in the list rather than as the thing to revoke.
+      const clock = movableClock();
+      const { deps, principal } = await enrolled(clock);
+      await openAgentToken(deps, principal);
+
+      const [row] = await listAgentTokens(deps, principal.id);
+      expect(row!.lastUsedAt).toBeNull();
+      expect(row!.lastUsedIp).toBeNull();
+      expect(row!.lastUsedAgent).toBeNull();
+    });
+
+    test('presenting it records when, from where, and what', async () => {
+      const clock = movableClock();
+      const { deps, principal } = await enrolled(clock);
+      const { token } = await openAgentToken(deps, principal);
+
+      clock.advance(60_000);
+      const at = clock.now();
+      expect(
+        await resolveAgentToken(
+          bearer(token, { ip: '203.0.113.7', agent: 'claude-code/1.4.0' }),
+          deps,
+        ),
+      ).not.toBeNull();
+
+      const [row] = await listAgentTokens(deps, principal.id);
+      expect(row!.lastUsedAt).toEqual(at);
+      expect(row!.lastUsedIp).toBe('203.0.113.7');
+      expect(row!.lastUsedAgent).toBe('claude-code/1.4.0');
+    });
+
+    test('the newest use replaces the last, because this is not a log', async () => {
+      // The column answers "is this token still in use, and from where" — the
+      // history behind it is the audit trail's job, not this row's.
+      const clock = movableClock();
+      const { deps, principal } = await enrolled(clock);
+      const { token } = await openAgentToken(deps, principal);
+
+      await resolveAgentToken(bearer(token, { ip: '203.0.113.7' }), deps);
+      clock.advance(3_600_000);
+      const later = clock.now();
+      await resolveAgentToken(bearer(token, { ip: '198.51.100.4' }), deps);
+
+      const [row] = await listAgentTokens(deps, principal.id);
+      expect(row!.lastUsedAt).toEqual(later);
+      expect(row!.lastUsedIp).toBe('198.51.100.4');
+    });
+
+    test('the caller cannot spend the column on an unbounded header', async () => {
+      // Both values are attacker-chosen: whoever holds the token writes them.
+      // A header has no length a client is obliged to respect, so the bound is
+      // here rather than in a hope about well-behaved clients.
+      const clock = movableClock();
+      const { deps, principal } = await enrolled(clock);
+      const { token } = await openAgentToken(deps, principal);
+
+      await resolveAgentToken(
+        bearer(token, { ip: '9'.repeat(500), agent: 'x'.repeat(5_000) }),
+        deps,
+      );
+
+      const [row] = await listAgentTokens(deps, principal.id);
+      expect(row!.lastUsedIp!.length).toBeLessThanOrEqual(45);
+      expect(row!.lastUsedAgent!.length).toBeLessThanOrEqual(200);
+    });
+
+    test('a proxy chain is read at its first hop, which is the client', async () => {
+      const clock = movableClock();
+      const { deps, principal } = await enrolled(clock);
+      const { token } = await openAgentToken(deps, principal);
+
+      await resolveAgentToken(
+        bearer(token, { ip: '203.0.113.7, 10.0.0.1, 10.0.0.2' }),
+        deps,
+      );
+
+      const [row] = await listAgentTokens(deps, principal.id);
+      expect(row!.lastUsedIp).toBe('203.0.113.7');
+    });
+
+    test('a token that does not resolve stamps nothing', async () => {
+      // The update is by the primary key the select just matched, so a
+      // credential that authenticated nothing cannot touch a row — including
+      // an expired one, which is still a row waiting to be cleaned up.
+      const clock = movableClock();
+      const { deps, principal } = await enrolled(clock);
+      const { token } = await openAgentToken(deps, principal);
+
+      clock.advance(AGENT_TOKEN_LIFETIME_MS + 1);
+      expect(
+        await resolveAgentToken(bearer(token, { ip: '203.0.113.7' }), deps),
+      ).toBeNull();
+
+      const [row] = await listAgentTokens(deps, principal.id);
+      expect(row!.lastUsedAt).toBeNull();
+    });
+
+    test('a browser session is never stamped, because nothing lists one', async () => {
+      // A cookie is resolved on every request the UI makes. Stamping it would
+      // be a write per page view for a row no screen can show.
+      const clock = movableClock();
+      const { deps, sessionToken } = await enrolled(clock);
+      await resolveSession(cookie(sessionToken), deps);
+
+      const [row] = await deps.db
+        .select()
+        .from(sessions)
+        .where(eq(sessions.kind, 'browser'));
+      expect(row!.lastUsedAt).toBeNull();
+    });
   });
 });

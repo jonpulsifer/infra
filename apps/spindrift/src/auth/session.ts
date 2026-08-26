@@ -221,13 +221,17 @@ export function openAgentToken(
  * The kind is part of the `where` rather than something a caller checks
  * afterwards, because "afterwards" is where somebody eventually forgets.
  */
-async function resolveToken(
+async function resolveRow(
   deps: SessionStore,
   token: string,
   kind: SessionKind,
-): Promise<Principal | null> {
+): Promise<{ sessionId: string; principal: Principal } | null> {
   const [row] = await deps.db
-    .select({ id: users.id, displayName: users.displayName })
+    .select({
+      sessionId: sessions.id,
+      id: users.id,
+      displayName: users.displayName,
+    })
     .from(sessions)
     .innerJoin(users, eq(sessions.userId, users.id))
     .where(
@@ -240,7 +244,26 @@ async function resolveToken(
 
   return row === undefined
     ? null
-    : { id: row.id, displayName: row.displayName };
+    : {
+        sessionId: row.sessionId,
+        principal: { id: row.id, displayName: row.displayName },
+      };
+}
+
+/**
+ * The principal alone, for the callers with no row to stamp.
+ *
+ * The row id exists on {@link resolveRow} because the agent path writes back to
+ * the row it just matched. Browser sessions do not, so they get the narrower
+ * answer rather than an id every caller would have to know to ignore.
+ */
+async function resolveToken(
+  deps: SessionStore,
+  token: string,
+  kind: SessionKind,
+): Promise<Principal | null> {
+  const resolved = await resolveRow(deps, token, kind);
+  return resolved === null ? null : resolved.principal;
 }
 
 /**
@@ -292,7 +315,66 @@ export async function resolveAgentToken(
   deps: SessionStore,
 ): Promise<Principal | null> {
   const token = bearerTokenOf(request);
-  return token === null ? null : resolveToken(deps, token, 'agent');
+  if (token === null) return null;
+  const resolved = await resolveRow(deps, token, 'agent');
+  if (resolved === null) return null;
+  await stampUse(deps, resolved.sessionId, request);
+  return resolved.principal;
+}
+
+/** The longest an IPv6 address gets, written out in full. */
+const IP_MAX = 45;
+/** Enough of a `User-Agent` to tell two clients apart, and no more. */
+const AGENT_MAX = 200;
+
+/**
+ * What the caller says it is, clipped to what a column should hold.
+ *
+ * Both values arrive in headers the caller controls, so both are bounded here
+ * rather than trusted to be sane — a header has no length a client is obliged
+ * to respect, and an unbounded write of one into a `text` column is the caller
+ * choosing how much of the database to spend.
+ *
+ * `X-Forwarded-For` is read at its first hop, which is the client as the
+ * nearest proxy saw it. Whether that proxy is trustworthy is a deployment
+ * fact this module does not get to assert — which is exactly why nothing
+ * authorises on the result. It is a label on a list row.
+ */
+function callerTrace(request: Request): {
+  ip: string | null;
+  agent: string | null;
+} {
+  const clip = (value: string | null | undefined, max: number) => {
+    const trimmed = value?.trim();
+    return trimmed ? trimmed.slice(0, max) : null;
+  };
+  return {
+    ip: clip(request.headers.get('x-forwarded-for')?.split(',')[0], IP_MAX),
+    agent: clip(request.headers.get('user-agent'), AGENT_MAX),
+  };
+}
+
+/**
+ * Record that this token was just presented, and by what.
+ *
+ * By primary key, on a row the select above already matched, so it is one
+ * indexed write and it cannot touch a token that did not authenticate.
+ *
+ * ponytail: a write on every `/mcp` call, which is the right cost while an
+ * agent makes a handful of tool calls at a time. If that stops being true,
+ * the cheap next step is to skip the write when `last_used_at` is already
+ * within a minute — not to drop it.
+ */
+async function stampUse(
+  deps: SessionStore,
+  sessionId: string,
+  request: Request,
+): Promise<void> {
+  const { ip, agent } = callerTrace(request);
+  await deps.db
+    .update(sessions)
+    .set({ lastUsedAt: deps.clock.now(), lastUsedIp: ip, lastUsedAgent: agent })
+    .where(eq(sessions.id, sessionId));
 }
 
 /** One agent token, as a screen or an operator lists them. */
@@ -300,6 +382,10 @@ export interface AgentTokenRow {
   readonly id: string;
   readonly createdAt: Date;
   readonly expiresAt: Date;
+  /** Null until it has been presented once. See `sessions.lastUsedAt`. */
+  readonly lastUsedAt: Date | null;
+  readonly lastUsedIp: string | null;
+  readonly lastUsedAgent: string | null;
 }
 
 /**
@@ -320,6 +406,9 @@ export async function listAgentTokens(
       id: sessions.id,
       createdAt: sessions.createdAt,
       expiresAt: sessions.expiresAt,
+      lastUsedAt: sessions.lastUsedAt,
+      lastUsedIp: sessions.lastUsedIp,
+      lastUsedAgent: sessions.lastUsedAgent,
     })
     .from(sessions)
     .where(and(eq(sessions.userId, userId), eq(sessions.kind, 'agent')))

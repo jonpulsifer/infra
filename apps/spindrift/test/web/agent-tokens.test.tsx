@@ -22,6 +22,11 @@ function row(over: Partial<AgentTokenListItem> = {}): AgentTokenListItem {
     createdAt: '2026-06-01T00:00:00.000Z',
     expiresAt: '2026-08-30T00:00:00.000Z',
     expired: false,
+    // The default row is a token nobody has presented, because that is the
+    // state every token is in the moment it is minted.
+    lastUsedAt: null,
+    lastUsedIp: null,
+    lastUsedAgent: null,
     ...over,
   };
 }
@@ -104,5 +109,54 @@ describe('the card explains why this is not a cookie', () => {
     expect(screen({ error: 'no agent token of yours has that id' })).toContain(
       'no agent token of yours has that id',
     );
+  });
+});
+
+describe('when a token was last used', () => {
+  test('a token nobody has presented says so, rather than leaving a blank', () => {
+    // The row an operator most wants to find, and the one an empty space where
+    // a date goes hides — a gap reads as a screen that has not loaded.
+    expect(screen()).toContain('Never used');
+  });
+
+  test('a used token names when, where from, and what', () => {
+    const markup = screen({
+      tokens: [
+        row({
+          lastUsedAt: '2026-08-25T09:00:00.000Z',
+          lastUsedIp: '203.0.113.7',
+          lastUsedAgent: 'claude-code/1.4.0',
+        }),
+      ],
+    });
+    expect(markup).not.toContain('Never used');
+    expect(markup).toContain('Last used');
+    expect(markup).toContain('203.0.113.7');
+    expect(markup).toContain('claude-code/1.4.0');
+  });
+
+  test('and says the address is only what the caller reported', () => {
+    // Whoever holds the token sets `X-Forwarded-For` and `User-Agent`. The
+    // qualifier is the difference between a hint and a claim, and dropping it
+    // would invite an operator to trust the one thing here that cannot be.
+    expect(
+      screen({
+        tokens: [
+          row({
+            lastUsedAt: '2026-08-25T09:00:00.000Z',
+            lastUsedIp: '203.0.113.7',
+          }),
+        ],
+      }),
+    ).toContain('as reported');
+  });
+
+  test('a used token with no headers to show still says when', () => {
+    // A caller that sent neither header is not a caller that never came.
+    const markup = screen({
+      tokens: [row({ lastUsedAt: '2026-08-25T09:00:00.000Z' })],
+    });
+    expect(markup).toContain('Last used');
+    expect(markup).not.toContain('as reported');
   });
 });

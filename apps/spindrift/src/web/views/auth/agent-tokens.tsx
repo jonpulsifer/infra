@@ -18,10 +18,16 @@
  * own — it goes when the operator dismisses it, which is the only moment
  * anybody can be sure they are done with it.
  *
- * The rows carry dates and no nickname, because the row has no nickname column
- * (`src/commands/agent-tokens.ts`). Mint date is what separates them, which is
- * thin and is honest: it is the same argument the passkey card makes with
- * `lastUsedAt`, minus a column nobody has needed yet.
+ * **A row says when it was last used, and from where.** That is what a revoke
+ * decision is actually made on: a mint date tells two tokens apart only if the
+ * operator remembers which day was which, and the one row worth finding — a
+ * token minted and never presented — is invisible without it. The address and
+ * the agent are the caller's own headers, so the card says so rather than
+ * dressing them up as evidence; they answer "which machine", not "who".
+ *
+ * The rows still carry no nickname, because the row has no nickname column
+ * (`src/commands/agent-tokens.ts`) — last use is the fact that made one
+ * unnecessary for now.
  */
 import { KeyRound, Plus, Trash2, TriangleAlert } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
@@ -99,6 +105,61 @@ export function AgentTokens() {
       onRevoke={onRevoke}
       onDismissMinted={() => setMinted(null)}
     />
+  );
+}
+
+/**
+ * When this token was last presented, and by what.
+ *
+ * Its own line rather than more of the dates above, because it is the line the
+ * eye goes to: minted-and-expires are facts about the row, and this is a fact
+ * about whether the row is doing anything.
+ *
+ * **Never used is stated, not left blank.** A token nobody has presented is the
+ * one an operator most wants to revoke, and an empty space where a date goes
+ * reads as a screen that has not loaded rather than as an answer.
+ *
+ * The address and the agent are the caller's own headers and the copy says so.
+ * Whoever holds the token chooses both, so a row that presented them as
+ * provenance would be inviting an operator to trust the one thing here that
+ * cannot be trusted.
+ */
+function LastUsed({ token }: { readonly token: AgentTokenListItem }) {
+  if (token.lastUsedAt === null) {
+    return (
+      <p className="mt-1 text-xs text-muted-foreground">
+        Never used — nothing has presented this token.
+      </p>
+    );
+  }
+  return (
+    <p className="mt-1 flex flex-wrap items-center gap-x-2 text-xs text-muted-foreground">
+      <span className="flex items-center gap-1">
+        Last used <Timestamp at={token.lastUsedAt} />
+      </span>
+      {token.lastUsedIp === null ? null : (
+        <>
+          <span aria-hidden="true">·</span>
+          {/* "as reported": the caller sets both of these headers, so the
+              qualifier is the difference between a hint and a claim. */}
+          <span>
+            from <span className="font-mono">{token.lastUsedIp}</span> as
+            reported
+          </span>
+        </>
+      )}
+      {token.lastUsedAgent === null ? null : (
+        <>
+          <span aria-hidden="true">·</span>
+          <span
+            className="max-w-[22rem] truncate font-mono"
+            title={token.lastUsedAgent}
+          >
+            {token.lastUsedAgent}
+          </span>
+        </>
+      )}
+    </p>
   );
 }
 
@@ -201,6 +262,7 @@ export function AgentTokensView({
                       <Timestamp at={token.expiresAt} />
                     </span>
                   </p>
+                  <LastUsed token={token} />
                 </div>
                 <Button
                   size="sm"
