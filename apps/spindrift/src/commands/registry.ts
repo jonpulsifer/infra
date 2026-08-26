@@ -26,6 +26,14 @@
  * nothing left for a route to decide.
  */
 import type { z } from 'zod';
+import {
+  listAgentTokens,
+  listAgentTokensInput,
+  mintAgentToken,
+  mintAgentTokenInput,
+  revokeAgentToken,
+  revokeAgentTokenInput,
+} from './agent-tokens.ts';
 import { setAppAutoDeploy, setAppAutoDeployInput } from './apps/auto-deploy.ts';
 import { setAppBuildRoute, setAppBuildRouteInput } from './apps/build-route.ts';
 import { deleteApp, deleteAppInput } from './apps/delete.ts';
@@ -194,6 +202,12 @@ export type AnyCommandDescriptor = CommandDescriptor<any, any>;
 
 /** Every command, by the name it is dispatched under. */
 export const commandRegistry = {
+  mintAgentToken: { input: mintAgentTokenInput, handler: mintAgentToken },
+  listAgentTokens: { input: listAgentTokensInput, handler: listAgentTokens },
+  revokeAgentToken: {
+    input: revokeAgentTokenInput,
+    handler: revokeAgentToken,
+  },
   deleteApp: { input: deleteAppInput, handler: deleteApp },
   deployApp: { input: deployAppRequestInput, handler: deployApp },
   setAppAutoDeploy: {

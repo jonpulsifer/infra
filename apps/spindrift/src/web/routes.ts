@@ -8,7 +8,7 @@
  * to be inline in `server.ts` next to a top-level `Bun.serve` no test can
  * import. So the table moved here and the entries call it.
  *
- * Twelve kinds of route exist, and three of the twelve are generated:
+ * Thirteen kinds of route exist, and four of the thirteen are generated:
  *
  * 1. **Commands**, from the registry (`dispatch.ts`).
  * 2. **The client**, from whatever built it — `bundle.ts` reading a directory in
@@ -42,6 +42,11 @@
  *     as one `text/plain` document. Session-authenticated exactly as the
  *     upgrade beside it is, and a GET rather than a command because what it
  *     answers is a file a browser opens, not JSON a screen reads (§21).
+ * 13. **`/mcp`** (`mcp-route.ts`), the command registry over the
+ *     Model Context Protocol — the fourth generated entry, and the only one
+ *     authenticated by a bearer token rather than a session. It reads `agent`
+ *     rows from `Authorization` and browser cookies never reach it; the file
+ *     carries why that separation is the feature.
  *
  * A further hand-authored route is a decision somebody has to make on purpose,
  * in this file, against a test that names it.
@@ -58,6 +63,7 @@ import {
   type GitHubSetupRouteDeps,
   githubSetupRoutes,
 } from './github-setup-route.ts';
+import { type McpRouteDeps, mcpRoutes } from './mcp-route.ts';
 import { type StatusRouteDeps, statusRoutes } from './status-route.ts';
 import { attemptLogTextRoutes, streamRoutes } from './streams.ts';
 import { uploadRoutes } from './upload.ts';
@@ -124,6 +130,7 @@ export function webRoutes<Client extends Record<string, ClientRoute>>(
   bosun: BosunRouteDeps,
   githubSetup: GitHubSetupRouteDeps,
   status: StatusRouteDeps,
+  mcp: McpRouteDeps,
 ) {
   return {
     ...client,
@@ -137,6 +144,7 @@ export function webRoutes<Client extends Record<string, ClientRoute>>(
     ...webhookRoutes(webhook),
     ...bosunRoutes(bosun),
     ...githubSetupRoutes(githubSetup),
+    ...mcpRoutes(mcp),
     ...statusRoutes(status),
   };
 }

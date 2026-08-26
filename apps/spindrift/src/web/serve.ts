@@ -21,7 +21,8 @@
 import { createAdapterRegistry } from '../adapters/registry.ts';
 import type { EnrolmentDeps } from '../auth/enrol.ts';
 import { authenticateRequest, type GatewayDeps } from '../auth/gateway.ts';
-import { systemClock } from '../commands/types.ts';
+import { resolveAgentToken } from '../auth/session.ts';
+import { type Principal, systemClock } from '../commands/types.ts';
 import { assertTrustedGatewayBoundary } from '../config/manifest.ts';
 import {
   currentStoredManifest,
@@ -175,6 +176,25 @@ export async function start(
     return current;
   };
 
+  /**
+   * What every command runs against, whichever transport reached it.
+   *
+   * One function rather than one per surface: the dispatch endpoint and `/mcp`
+   * differ in who they will accept and in nothing else, and two copies of this
+   * would be two chances for a command to see a different world depending on
+   * which door it came through.
+   */
+  const commandContext = async (principal: Principal) => {
+    const installation = await installationNow();
+    return {
+      principal,
+      clock: systemClock,
+      db,
+      adapters: installation.adapters,
+      manifest: installation.manifest,
+    };
+  };
+
   const auth: EnrolmentDeps & GatewayDeps = {
     db,
     clock: systemClock,
@@ -199,16 +219,7 @@ export async function start(
     client,
     {
       authenticate: (request) => authenticateRequest(request, auth),
-      context: async (principal) => {
-        const installation = await installationNow();
-        return {
-          principal,
-          clock: systemClock,
-          db,
-          adapters: installation.adapters,
-          manifest: installation.manifest,
-        };
-      },
+      context: commandContext,
     },
     auth,
     {
@@ -244,6 +255,20 @@ export async function start(
       },
     },
     { db, current: installationNow },
+    {
+      // Deliberately *not* `authenticateRequest`: that resolver reads the
+      // session cookie and, where a Gateway is configured, a trusted header.
+      // Neither belongs on `/mcp`. An agent presents a token it was minted,
+      // and a cookie copied out of a browser must not open this surface —
+      // `src/auth/session.ts` carries why.
+      authenticate: async (request) => {
+        const principal = await resolveAgentToken(request, auth);
+        return principal === null
+          ? { kind: 'anonymous' as const }
+          : { kind: 'authenticated' as const, principal };
+      },
+      context: commandContext,
+    },
   );
 
   const server = Bun.serve<StreamSocketData>({

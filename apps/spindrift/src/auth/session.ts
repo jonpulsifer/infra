@@ -23,8 +23,9 @@
  * the front door's identity "does not become the user model", so nothing here
  * reads a header from the proxy.
  */
-import { and, eq, gt } from 'drizzle-orm';
-import type { Principal } from '../commands/types.ts';
+import { and, desc, eq, gt } from 'drizzle-orm';
+import type { Clock, Principal } from '../commands/types.ts';
+import type { Database } from '../db/client.ts';
 import { credentials, sessions, users } from '../db/schema.ts';
 import {
   type ChallengePurpose,
@@ -43,6 +44,52 @@ export const SESSION_COOKIE = 'spindrift_session';
 
 /** §"First run" story 3: a day. Stated once, asserted against once. */
 export const SESSION_LIFETIME_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * What a `sessions` row is a credential *for*.
+ *
+ * Both kinds are 32 opaque bytes stored as a SHA-256, because that mechanism
+ * was already right. What differs is the surface each is presented at and the
+ * lifetime each carries, and those differences are only real if the lookup
+ * enforces them: {@link resolveSession} reads `browser` rows from a `Cookie`
+ * header and {@link resolveAgentToken} reads `agent` rows from `Authorization`,
+ * and neither will accept the other's row no matter which header carries it.
+ *
+ * That is the whole reason this is a column rather than a convention. A copied
+ * cookie in an agent's config file cannot reach `/mcp`, and a leaked agent
+ * token cannot open the UI — by construction, not by review.
+ */
+export const SESSION_KINDS = ['browser', 'agent'] as const;
+export type SessionKind = (typeof SESSION_KINDS)[number];
+
+/**
+ * How long an agent token lasts: ninety days.
+ *
+ * Longer than a browser session on purpose, and the reason is the honest one —
+ * a credential pasted into a config file is re-pasted by hand, so a day would
+ * mean an operator who re-mints daily forever, and an operator who automates
+ * around that has built a worse credential than this one. Ninety days is short
+ * enough that an abandoned token dies on its own and long enough that nobody is
+ * tempted to route around it.
+ *
+ * ponytail: one lifetime for every agent token. Take it as a mint parameter if
+ * an operator ever wants a short-lived one for a shared machine.
+ */
+export const AGENT_TOKEN_LIFETIME_MS = 90 * 24 * 60 * 60 * 1000;
+
+/**
+ * The narrow slice of {@link AuthDeps} a token read or write actually needs.
+ *
+ * Named separately because minting and revoking are *commands* — they run
+ * against a `CommandContext`, which carries a db and a clock and no relying
+ * party, since no ceremony happens at that point. A command that had to
+ * construct a `RelyingParty` to write a row would be constructing a fact it has
+ * no business knowing.
+ */
+export interface SessionStore {
+  readonly db: Database;
+  readonly clock: Clock;
+}
 
 /** 32 bytes: the same width as a challenge, and past any brute force. */
 const TOKEN_BYTES = 32;
@@ -113,28 +160,104 @@ export interface OpenedSession {
   readonly principal: Principal;
 }
 
-/** Mint a session for an enrolled user. */
-export async function openSession(
-  deps: AuthDeps,
+/**
+ * Mint a row of either kind. The token exists in the return value and nowhere
+ * else, here and for {@link openAgentToken} alike.
+ */
+async function mint(
+  deps: SessionStore,
   user: { id: string; displayName: string },
-): Promise<OpenedSession> {
+  kind: SessionKind,
+  lifetimeMs: number,
+): Promise<OpenedSession & { readonly expiresAt: Date }> {
   const token = base64urlEncode(
     crypto.getRandomValues(new Uint8Array(TOKEN_BYTES)),
   );
   const now = deps.clock.now();
-  const expiresAt = new Date(now.getTime() + SESSION_LIFETIME_MS);
+  const expiresAt = new Date(now.getTime() + lifetimeMs);
 
   await deps.db.insert(sessions).values({
     userId: user.id,
     tokenHash: await hashToken(token),
+    kind,
     createdAt: now,
     expiresAt,
   });
 
   return {
     token,
+    expiresAt,
     principal: { id: user.id, displayName: user.displayName },
   };
+}
+
+/** Mint a browser session for an enrolled user. */
+export function openSession(
+  deps: AuthDeps,
+  user: { id: string; displayName: string },
+): Promise<OpenedSession> {
+  return mint(deps, user, 'browser', SESSION_LIFETIME_MS);
+}
+
+/**
+ * Mint an agent token for an enrolled user.
+ *
+ * Deliberately *not* reachable without an existing browser session: the command
+ * that calls this runs on the session-authenticated dispatch surface, so a
+ * passkey assertion is upstream of every token that exists. The token is what
+ * an agent presents; the session is what authorises its creation, and the two
+ * never swap roles.
+ */
+export function openAgentToken(
+  deps: SessionStore,
+  user: { id: string; displayName: string },
+): Promise<OpenedSession & { readonly expiresAt: Date }> {
+  return mint(deps, user, 'agent', AGENT_TOKEN_LIFETIME_MS);
+}
+
+/**
+ * Look one token up, of one kind, unexpired.
+ *
+ * The kind is part of the `where` rather than something a caller checks
+ * afterwards, because "afterwards" is where somebody eventually forgets.
+ */
+async function resolveToken(
+  deps: SessionStore,
+  token: string,
+  kind: SessionKind,
+): Promise<Principal | null> {
+  const [row] = await deps.db
+    .select({ id: users.id, displayName: users.displayName })
+    .from(sessions)
+    .innerJoin(users, eq(sessions.userId, users.id))
+    .where(
+      and(
+        eq(sessions.tokenHash, await hashToken(token)),
+        eq(sessions.kind, kind),
+        gt(sessions.expiresAt, deps.clock.now()),
+      ),
+    );
+
+  return row === undefined
+    ? null
+    : { id: row.id, displayName: row.displayName };
+}
+
+/**
+ * Pull a bearer token out of a request's `Authorization` header, if it has one.
+ *
+ * The mirror of {@link sessionTokenOf}, and separate from it on purpose: these
+ * two functions are the only places a credential enters this module, and each
+ * reads exactly one header. A single reader that fell back from one to the
+ * other is how the two surfaces would quietly become one again.
+ */
+export function bearerTokenOf(request: Request): string | null {
+  const header = request.headers.get('authorization');
+  if (header === null) return null;
+  const [scheme, ...rest] = header.trim().split(/\s+/);
+  if (scheme?.toLowerCase() !== 'bearer') return null;
+  const value = rest.join(' ');
+  return value === '' ? null : value;
 }
 
 /**
@@ -151,22 +274,82 @@ export async function resolveSession(
   deps: AuthDeps,
 ): Promise<Principal | null> {
   const token = sessionTokenOf(request);
-  if (token === null) return null;
+  return token === null ? null : resolveToken(deps, token, 'browser');
+}
 
-  const [row] = await deps.db
-    .select({ id: users.id, displayName: users.displayName })
+/**
+ * Who is calling `/mcp`, or nobody.
+ *
+ * Reads `Authorization: Bearer` and `agent` rows, and nothing else. An operator
+ * who pastes their browser cookie here gets 401, which is the point: the value
+ * that opens the UI has `HttpOnly`, `Secure` and `SameSite=Lax` protecting it
+ * inside a browser and none of them once it is sitting in a config file, so the
+ * one thing worse than asking an operator to mint a second credential is
+ * letting them not.
+ */
+export async function resolveAgentToken(
+  request: Request,
+  deps: SessionStore,
+): Promise<Principal | null> {
+  const token = bearerTokenOf(request);
+  return token === null ? null : resolveToken(deps, token, 'agent');
+}
+
+/** One agent token, as a screen or an operator lists them. */
+export interface AgentTokenRow {
+  readonly id: string;
+  readonly createdAt: Date;
+  readonly expiresAt: Date;
+}
+
+/**
+ * Every agent token this user holds, newest first.
+ *
+ * The header comment's "no list-my-sessions screen without a second index"
+ * applies to *browser* sessions and stays true of them. An agent token is a
+ * different object: it is long-lived, it lives in a file, and a credential you
+ * cannot enumerate is a credential you cannot revoke — so this read exists, by
+ * `user_id`, and returns no token material because there is none to return.
+ */
+export async function listAgentTokens(
+  deps: SessionStore,
+  userId: string,
+): Promise<readonly AgentTokenRow[]> {
+  return deps.db
+    .select({
+      id: sessions.id,
+      createdAt: sessions.createdAt,
+      expiresAt: sessions.expiresAt,
+    })
     .from(sessions)
-    .innerJoin(users, eq(sessions.userId, users.id))
+    .where(and(eq(sessions.userId, userId), eq(sessions.kind, 'agent')))
+    .orderBy(desc(sessions.createdAt));
+}
+
+/**
+ * Revoke one agent token by its row id.
+ *
+ * Scoped to the caller's own `user_id` as well as to `agent`, so the id — which
+ * is the one thing about a token that *is* enumerable — cannot be spent against
+ * somebody else's row or against a browser session. Returns whether a row went,
+ * so a caller can tell "revoked" from "already gone".
+ */
+export async function revokeAgentToken(
+  deps: SessionStore,
+  userId: string,
+  id: string,
+): Promise<boolean> {
+  const gone = await deps.db
+    .delete(sessions)
     .where(
       and(
-        eq(sessions.tokenHash, await hashToken(token)),
-        gt(sessions.expiresAt, deps.clock.now()),
+        eq(sessions.id, id),
+        eq(sessions.userId, userId),
+        eq(sessions.kind, 'agent'),
       ),
-    );
-
-  return row === undefined
-    ? null
-    : { id: row.id, displayName: row.displayName };
+    )
+    .returning({ id: sessions.id });
+  return gone.length > 0;
 }
 
 /**
@@ -182,9 +365,15 @@ export async function closeSession(
 ): Promise<void> {
   const token = sessionTokenOf(request);
   if (token === null) return;
-  await deps.db
-    .delete(sessions)
-    .where(eq(sessions.tokenHash, await hashToken(token)));
+  await deps.db.delete(sessions).where(
+    and(
+      eq(sessions.tokenHash, await hashToken(token)),
+      // Signing out ends a browser session and never an agent token: the two
+      // are revoked from different places on purpose, and a cookie header is
+      // not where a token is meant to arrive anyway.
+      eq(sessions.kind, 'browser'),
+    ),
+  );
 }
 
 /**
