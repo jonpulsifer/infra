@@ -973,17 +973,33 @@ export async function observeConverged(
   context: DeployLoopContext,
 ): Promise<readonly DriftReport[]> {
   const now = context.clock.now();
+  // The release each placement's desired row names, not every row that reached
+  // LIVE. `phase` is the platform's verdict on one attempt and is never edited
+  // afterwards, so "a LIVE Deploy that a newer intent superseded is still LIVE"
+  // (`commands/deploys/list.ts`) — and a superseded row's own Build is by
+  // construction not what is serving, because something newer replaced it.
+  // Observing one asks the platform what is running and compares it against a
+  // release that stopped being desired, which is drift every time and forever:
+  // an installation's drift count grew by one on every redeploy and named
+  // releases nobody had asked for since. `componentTargetDesired` is §6's own
+  // answer to which release should be running, and it is one row per pair.
+  //
+  // It also bounds the fan-out below, which is the same fact from the other
+  // side: one round trip per placement rather than one per release ever made.
   const live = await context.db
-    .select()
-    .from(deploys)
+    .select({ deploy: deploys })
+    .from(componentTargetDesired)
+    .innerJoin(deploys, eq(deploys.id, componentTargetDesired.desiredDeployId))
     .where(eq(deploys.phase, 'LIVE'));
 
   // One adapter round trip each, and they do not depend on one another — so
   // the pass costs the slowest Target rather than the sum of every Target.
   // ponytail: unbounded fan-out, add a concurrency cap if an installation ever
-  // carries enough live releases to make that a thundering herd.
+  // carries enough placements to make that a thundering herd.
   const reports = (
-    await Promise.all(live.map((deploy) => observeOne(context, deploy, now)))
+    await Promise.all(
+      live.map(({ deploy }) => observeOne(context, deploy, now)),
+    )
   ).filter((report): report is DriftReport => report !== null);
   return reports;
 }

@@ -1108,6 +1108,64 @@ describe('drift is surfaced, never corrected (§6)', () => {
       pass.drift.find((entry) => entry.deployId === deploy.id),
     ).toBeUndefined();
   });
+
+  test('a release a newer intent superseded is not observed at all', async () => {
+    // The live shape this was found in: eleven LIVE rows for one Component,
+    // ten of them superseded, every one reporting drift against the digest the
+    // newest one put there. `phase` is the platform's verdict on one attempt
+    // and is never edited afterwards, so a superseded release stays LIVE — and
+    // its own Build is by construction not what is serving. Observing it asks
+    // the platform what is running and compares it against a release nobody
+    // has desired since, which is drift on every pass, forever, and one more
+    // adapter round trip per redeploy ever made.
+    const { component, target, deploy: older } = await pendingDeploy();
+    const adapter = new FakeDeployAdapter({
+      script: [
+        { verdict: { phase: 'LIVE', ref: 'hr/apps/web' } },
+        { verdict: { phase: 'LIVE', ref: 'hr/apps/web' } },
+      ],
+    });
+    await runDeployPass(context(adapter));
+
+    const db = database().db;
+    const nextDigest = `sha256:${'c'.repeat(64)}`;
+    const [build] = await db
+      .insert(builds)
+      .values({
+        componentId: component.id,
+        commit: 'bcdef01',
+        targetShape: 'image',
+        artifactType: 'image',
+        artifactDigest: nextDigest,
+        status: 'SUCCEEDED',
+      })
+      .returning();
+    const [newer] = await db
+      .insert(deploys)
+      .values({
+        componentId: component.id,
+        desired: aDesiredDocument(),
+        targetId: target.id,
+        buildId: build!.id,
+        phase: 'PENDING',
+      })
+      .returning();
+    await db
+      .update(componentTargetDesired)
+      .set({ desiredBuildId: build!.id, desiredDeployId: newer!.id })
+      .where(eq(componentTargetDesired.componentId, component.id));
+
+    const pass = await runDeployPass(context(adapter));
+
+    // Both rows are LIVE, and only the desired one was asked about.
+    expect((await deployRow(older.id))?.phase).toBe('LIVE');
+    expect((await deployRow(newer!.id))?.phase).toBe('LIVE');
+    expect(pass.drift.map((entry) => entry.deployId)).toEqual([newer!.id]);
+
+    // And the superseded row carries no finding, which is what the ledger and
+    // the drift gauge both read.
+    expect((await deployRow(older.id))?.driftedAt).toBeNull();
+  });
 });
 
 describe('the poll is the correctness path (plan, Transport shape)', () => {
