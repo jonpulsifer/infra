@@ -6,6 +6,7 @@ icon:: 🏡
 	- [[Architecture]] — the four layers and how they fit together
 	- [[Runbooks]] — operational procedures for when things misbehave
 	- [[Fleet]] — every host, its hardware, and its quirks
+	- [[Runbooks/Connect an Agent to the Wiki]] — this wiki is also an MCP server at `wiki.lolwtf.ca/mcp`
 - ## The stack in one breath
 	- **Bare metal** — [[Architecture/NixOS]] configuration for every host, deployed with `nixos-rebuild` and kept honest by auto-upgrades from `main`.
 	- **Kubernetes** — two fully capable clusters, `folly` on-site and `offsite` at the remote site, reconciled by FluxCD. See [[Architecture/Kubernetes]].

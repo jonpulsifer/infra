@@ -15,6 +15,7 @@ icon:: 🚒
 	- [[Runbooks/Kiosk]] — the Raspberry Pi kiosk hosts: Cage/Wayland, Firefox, container-backed apps
 	- [[Runbooks/Adopt Folly Prometheus Operator CRDs]] — the one-time live ownership stamp and Kustomization wiring that lets folly join `monitoring-crds`
 	- [[Runbooks/Install Spindrift]] — from nothing to an enrolled, Target-connected Spindrift installation: Terraform bootstrap, chart declaration, first-operator enrolment
+	- [[Runbooks/Connect an Agent to the Wiki]] — point Claude Desktop or any MCP client at `wiki.lolwtf.ca/mcp` so an agent can read the homelab docs
 	- [[Runbooks/Developer Connect GitHub OAuth]] — one-time browser authorization that moves the trusted-builds GitHub connection from PENDING_USER_OAUTH to COMPLETE
 - ## Conventions
 	- Tag runbook pages `#runbook`, lead with quick checks, then symptom-shaped sections ("If X…"), each with copy-pasteable commands and expected output.

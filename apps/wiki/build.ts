@@ -546,6 +546,14 @@ async function build() {
     ),
   );
 
+  // full-text dump for the MCP endpoint (functions/mcp.ts)
+  await Bun.write(
+    join(OUT, "pages.json"),
+    JSON.stringify(
+      ids.map((p) => ({ t: p.name, u: p.url, x: plainText(p.blocks).join("\n") })),
+    ),
+  );
+
   // 404
   await Bun.write(
     join(OUT, "404.html"),
