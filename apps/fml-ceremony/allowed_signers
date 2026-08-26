@@ -1,0 +1,11 @@
+# The key that countersigns a ceremony transcript. Public by design: this file
+# is what a stranger needs to run the ssh-keygen -Y verify command TRANSCRIPT.md
+# prints, and a public key is not a secret.
+#
+# The namespace restriction is load-bearing. Without it, any signature this key
+# ever made over any content would verify here -- including a git commit -- and
+# a transcript signature would stop meaning "signed as a transcript".
+#
+# What this proves is accountability, not provenance: nothing on the ceremony
+# host measured the running code. See TRANSCRIPT.md.
+jonathan@pulsifer.ca namespaces="fml-ceremony-transcript" ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIJewr6lJtffl+uZpnWXTIE5Sd3VeytQRGXKMBv1s5R/v
