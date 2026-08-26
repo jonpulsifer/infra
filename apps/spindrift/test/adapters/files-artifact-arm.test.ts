@@ -8,7 +8,14 @@
  * `run:` script can (the same reasoning as `build-report-statement.test.ts`).
  */
 import { describe, expect, test } from 'bun:test';
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import {
+  mkdir,
+  mkdtemp,
+  readFile,
+  rm,
+  symlink,
+  writeFile,
+} from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -233,6 +240,18 @@ describe('“Build with the platform’s own builder”', () => {
       await mkdir(join(scope, 'node_modules', 'dep'), { recursive: true });
       await writeFile(join(scope, 'node_modules', 'dep', 'index.js'), 'dep');
 
+      // What Next writes for an external package: a hashed alias under
+      // `.next/node_modules` that is a *symlink to a directory*, named in the
+      // filePathMap. Dereferencing it is what took production down — the CLI
+      // adds a map entry to the upload without walking into it, so a real
+      // directory there contributes nothing and the function cannot resolve
+      // the module.
+      await mkdir(join(scope, '.next', 'node_modules'), { recursive: true });
+      await symlink(
+        '../../node_modules/dep',
+        join(scope, '.next', 'node_modules', 'dep-a1b2c3'),
+      );
+
       // Stands in for the platform's builder: writes the tree it would write,
       // including the symlinked second copy of one function that is the whole
       // point of this test, and a `.vc-config.json` naming a project file.
@@ -245,7 +264,7 @@ describe('“Build with the platform’s own builder”', () => {
           'mkdir -p "$out/functions/index.func" "$out/static"',
           'printf \'{"version":3}\' > "$out/config.json"',
           'printf launcher > "$out/functions/index.func/index.js"',
-          'printf \'{"filePathMap":{"node_modules/dep/index.js":"node_modules/dep/index.js"}}\' > "$out/functions/index.func/.vc-config.json"',
+          'printf \'{"filePathMap":{"node_modules/dep/index.js":"node_modules/dep/index.js","x":".next/node_modules/dep-a1b2c3"}}\' > "$out/functions/index.func/.vc-config.json"',
           'printf hello > "$out/static/index.html"',
           'ln -s index.func "$out/functions/index.rsc.func"',
           'mkdir -p "$out/functions/index.segments"',
@@ -318,6 +337,11 @@ describe('“Build with the platform’s own builder”', () => {
       expect(
         [...manifest].sort((a, b) => a.path.localeCompare(b.path)),
       ).toEqual([
+        // The filePathMap alias, carried as a link rather than copied out.
+        {
+          path: '.next/node_modules/dep-a1b2c3',
+          target: '../../node_modules/dep',
+        },
         {
           path: '.vercel/output/functions/index.rsc.func',
           target: 'index.func',
@@ -327,6 +351,12 @@ describe('“Build with the platform’s own builder”', () => {
           target: '../index.func',
         },
       ]);
+      // Never a real directory: that is the shape the CLI drops silently.
+      expect(
+        await Bun.file(
+          join(outputs.context as string, '.next/node_modules/dep-a1b2c3'),
+        ).exists(),
+      ).toBe(false);
 
       // The mapped file is staged at the deployment root — beside
       // `.vercel/output`, never inside it, which is the path the platform
