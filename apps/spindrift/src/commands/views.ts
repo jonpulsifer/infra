@@ -1073,6 +1073,19 @@ export interface WorkspaceSourceView {
   /** The branch §15 adopts from. */
   readonly branch: string;
   /**
+   * The repository's web origin — what a commit on this screen links to.
+   *
+   * The hero prints two commits and neither led anywhere: the one that is
+   * serving and the one the branch is at, both of which are pages on the
+   * repository host one composition away. `{url}/commit/{sha}` is that
+   * composition, and this is the half of it the browser cannot know — §20
+   * keeps the host's origin in the installation manifest, never in the client.
+   *
+   * Optional because every fixture builds this row literally, and absent where
+   * this installation knows no web origin for the host.
+   */
+  readonly url?: string;
+  /**
    * The adopted commit that is not what is serving, or `null` when it is.
    *
    * Also `null` before anything has served at all: the first release is not

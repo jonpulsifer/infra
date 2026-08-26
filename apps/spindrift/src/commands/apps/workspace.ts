@@ -514,6 +514,7 @@ export const getAppWorkspace: Command<
       ? null
       : {
           branch: app.repository.defaultBranch,
+          url: `${context.manifest.github.webBaseUrl}/${app.repository.fullName}`,
           pending:
             app.repository.authoritativeCommit !== null &&
             servingCommit !== null &&

@@ -800,18 +800,29 @@ describe('the App workspace', () => {
       expect(workspace(view)).toContain('job · nightly');
     });
 
-    test('makes the Components list the selector, and marks the selection', () => {
+    test('makes the diagram the selector, and marks the selection', () => {
       const markup = renderToStaticMarkup(
         <Workspace view={view} onSelectComponent={() => undefined} />,
       );
 
-      // Both rows are pressable — the list is what there is to look at, so it
-      // is also how another one is chosen — and exactly one is pressed.
+      // Both boxes are pressable — the picture is what there is to look at, so
+      // it is also how another one is chosen — and exactly one is pressed.
       expect(markup.split('aria-pressed="true"').length - 1).toBe(1);
       expect(markup.split('aria-pressed="false"').length - 1).toBe(1);
       for (const component of view.components) {
         expect(markup).toContain(component.name);
       }
+    });
+
+    test('and states the chosen one beneath the picture', () => {
+      // What the rows under the diagram used to say, now said once — the four
+      // facts that are this Component's alone and nowhere else on the screen.
+      const markup = renderToStaticMarkup(
+        <Workspace view={view} onSelectComponent={() => undefined} />,
+      );
+      expect(markup).toContain('Reach');
+      expect(markup).toContain('Artifact');
+      expect(markup).toContain('Placement');
     });
 
     test('renders no selector where the screen wires no selection', () => {
@@ -887,8 +898,13 @@ describe('the App workspace', () => {
     expect(markup).not.toContain('immutable');
   });
 
-  test('Components own the width of the overview', () => {
-    const markup = workspace(WORKSPACE_SCENARIOS.service);
+  test('Components own the width of the Config tab', () => {
+    // The list is where the acts on a Component are, and every one of them
+    // writes something the next release picks up — so it sits with the rest of
+    // what a release is made of, and the Overview keeps only the picture.
+    const markup = renderToStaticMarkup(
+      <Workspace view={WORKSPACE_SCENARIOS.service} tab="config" />,
+    );
     expect(markup).toContain('App structure');
     // The card that made a Datastore a peer of the Components is gone: what
     // is left is one line inside this one, and the lifetime acts are the
@@ -904,7 +920,9 @@ describe('the App workspace', () => {
       // The both-or-neither rule: no handler, no picker — a select that
       // cannot be submitted reads as a broken control rather than an absent
       // one.
-      const markup = workspace(WORKSPACE_SCENARIOS.service);
+      const markup = renderToStaticMarkup(
+        <Workspace view={WORKSPACE_SCENARIOS.service} tab="config" />,
+      );
       expect(markup).toContain('Datastores');
       expect(markup).toContain('DATABASE_URL');
       expect(markup).not.toContain('>Attach<');
@@ -916,6 +934,7 @@ describe('the App workspace', () => {
       const markup = renderToStaticMarkup(
         <Workspace
           view={WORKSPACE_SCENARIOS.service}
+          tab="config"
           onAttachDatastore={async () => ({ ok: true }) as const}
         />,
       );
@@ -1485,6 +1504,7 @@ describe('moving a placed Component from the App workspace (§3, §10)', () => {
       renderToStaticMarkup(
         <Workspace
           view={placed}
+          tab="config"
           onMoveComponent={move}
           onUnplaceComponent={unplace}
         />,
@@ -1495,6 +1515,7 @@ describe('moving a placed Component from the App workspace (§3, §10)', () => {
       renderToStaticMarkup(
         <Workspace
           view={placed}
+          tab="config"
           onMoveComponent={move}
           onUnplaceComponent={unplace}
           targets={TARGET_LIST}
@@ -1511,6 +1532,7 @@ describe('moving a placed Component from the App workspace (§3, §10)', () => {
       renderToStaticMarkup(
         <Workspace
           view={view}
+          tab="config"
           onMoveComponent={move}
           onUnplaceComponent={unplace}
           targets={TARGET_LIST}
@@ -1618,10 +1640,16 @@ describe('adding a Component from the App it belongs to (§2)', () => {
     // The both-or-neither rule `SectionHeader` enforces, from the side that
     // made it necessary: "Add Component" shipped for months as a control that
     // did nothing on press.
-    expect(workspace(view)).not.toContain('Add Component');
+    expect(
+      renderToStaticMarkup(<Workspace view={view} tab="config" />),
+    ).not.toContain('Add Component');
 
     const markup = renderToStaticMarkup(
-      <Workspace view={view} onCreateComponent={async () => ({ ok: true })} />,
+      <Workspace
+        view={view}
+        tab="config"
+        onCreateComponent={async () => ({ ok: true })}
+      />,
     );
     expect(markup).toContain('Add Component');
   });

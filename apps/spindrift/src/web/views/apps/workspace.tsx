@@ -2,9 +2,16 @@
  * The App workspace (Task 40, §18).
  *
  * **Live state and URL lead**, then the placement — Target and the vessel it
- * is a surface on — then the Components this App is made of, then a dense
- * activity timeline. Components own the full width: they are what this screen
- * is a list of, and every act it offers is about one of them.
+ * is a surface on — then the standing policy about this App's deploys, banded
+ * at the foot of the hero because neither half of it is an act. Under the
+ * tabs, Overview is the picture of what this App is made of and the Component
+ * it is pointed at; every verb that writes is on Config.
+ *
+ * **Overview observes and Config writes.** That is the line the two tabs are
+ * split on, and it is why the Components list, the Builder picker and the
+ * Datastore attach all sit on the second one: each of them changes what the
+ * *next* release will be, and none of them changes what is running. Overview
+ * is what is running, read two ways — as a shape, and as a timeline.
  *
  * A Datastore is a top-level noun (§11) with its own screens under
  * `/datastores`, which is where its lifetime lives. What this screen keeps is
@@ -32,7 +39,7 @@
  * The hero and its diagnosis stay above the strip on every tab, because the
  * answer to "is my App up" is not a tab you can be on the wrong one of.
  */
-import { ChevronRight, ExternalLink } from 'lucide-react';
+import { ChevronRight, ExternalLink, Lock } from 'lucide-react';
 import { type ReactNode, useEffect, useState } from 'react';
 import type {
   ActivityEntry,
@@ -593,46 +600,39 @@ export function Workspace({
       {current === 'overview' ? (
         <>
           {/*
-            Above the Components list rather than below it, and this is the one
-            place `components/flow.tsx`'s "the operator came for the rows" does
-            not apply: that objection is about a *static explainer* stacked on
-            top of live data. This is the live data, read a second way, and the
-            question it answers — what is this App made of and what does it
-            talk to — is the one you orient with before reading any row.
+            The picture, and under it whichever Component it is pointed at.
+
+            There used to be a list of rows below this saying the same names a
+            second time, and pressing a row was what chose the Component the
+            hero, the runtime card and the config keys are about. One list is
+            enough, and the one with the edges in it is the one worth keeping —
+            so the boxes are the selector and the strip beneath is what the
+            rows said. Every act that *writes* went with them, to Config.
           */}
-          <Topology components={view.components} datastores={view.datastores} />
-          <Components
-            components={view.components}
-            archiveSourced={view.archiveSourced === true}
-            {...(onStageArchive ? { onStageArchive } : {})}
-            {...(onUploadArchive ? { onUploadArchive } : {})}
-            {...(selected === undefined ? {} : { selectedId: selected.id })}
-            {...(onSetReach === undefined ? {} : { onSetReach })}
-            {...(onSelectComponent === undefined ? {} : { onSelectComponent })}
-            {...(onCreateComponent === undefined ? {} : { onCreateComponent })}
-            {...(onMoveComponent === undefined ? {} : { onMoveComponent })}
-            {...(onUnplaceComponent === undefined
-              ? {}
-              : { onUnplaceComponent })}
-            targets={targets}
-            datastores={view.datastores}
-            {...(onNavigate ? { onNavigate } : {})}
-            {...(onAttachDatastore ? { onAttachDatastore } : {})}
-          />
-          {/*
-            Empty rather than optional-and-absent for an archive App and for
-            one with no Target placed yet — `getAppWorkspace` says so with
-            `buildRouteOptions: []`, and the card is not rendered on nothing
-            to pick from rather than rendered with a lone "Rank order" tile
-            that has no other routes to rank against.
-          */}
-          {view.buildRouteOptions.length > 0 && onSetBuildRoute ? (
-            <BuildRoutePicker
-              buildRoute={view.buildRoute}
-              options={view.buildRouteOptions}
-              onSetBuildRoute={onSetBuildRoute}
-            />
-          ) : null}
+          {view.components.length === 0 ? (
+            <Card>
+              <CardContent>
+                <EmptyState title="This App has no Components yet.">
+                  A Component is what gets built and placed. The Config tab
+                  declares one.
+                </EmptyState>
+              </CardContent>
+            </Card>
+          ) : (
+            <Topology
+              components={view.components}
+              datastores={view.datastores}
+              {...(selected === undefined ? {} : { selectedId: selected.id })}
+              {...(onSelectComponent === undefined
+                ? {}
+                : { onSelect: onSelectComponent })}
+              {...(onNavigate ? { onNavigate } : {})}
+            >
+              {selected === undefined ? null : (
+                <SelectedComponent key={selected.id} component={selected} />
+              )}
+            </Topology>
+          )}
           <div className="grid gap-4 md:grid-cols-2">
             {/*
               Every entry the view carries, un-sliced. `getAppWorkspace` bounds
@@ -668,19 +668,48 @@ export function Workspace({
       {current === 'config' ? (
         <>
           {/*
-            Above the variables, because it is the configuration that decides
-            what gets built at all — §5's scope and its `spindrift.yaml` — and
-            §10's keys only decide what the result runs with. Keyed by id, not
-            by name, for the reason `getAppWorkspace` resolves by id: two Apps
-            may wear one name.
+            One order, and it is a sentence: what this App is built *from*, how
+            it is built, what it is made of, what the result is called, and what
+            that result runs with. Every card here writes something that takes
+            effect on the next release — which is the line between this tab and
+            Overview, where nothing is written at all.
+
+            Keyed by id, not by name, for the reason `getAppWorkspace` resolves
+            by id: two Apps may wear one name.
           */}
           {view.appId === undefined ? null : <SourceSection app={view.appId} />}
           {/*
-            Above the variables and below the source, which is the order this
-            block already argues for: what gets built, then what the result is
-            called, then what it runs with. The address is the App's, and the
-            keys below it are one Component's.
+            Empty rather than optional-and-absent for an archive App and for
+            one with no Target placed yet — `getAppWorkspace` says so with
+            `buildRouteOptions: []`, and the card is not rendered on nothing
+            to pick from rather than rendered with a lone "Rank order" tile
+            that has no other routes to rank against.
           */}
+          {view.buildRouteOptions.length > 0 && onSetBuildRoute ? (
+            <BuildRoutePicker
+              buildRoute={view.buildRoute}
+              options={view.buildRouteOptions}
+              onSetBuildRoute={onSetBuildRoute}
+            />
+          ) : null}
+          <Components
+            components={view.components}
+            archiveSourced={view.archiveSourced === true}
+            {...(onStageArchive ? { onStageArchive } : {})}
+            {...(onUploadArchive ? { onUploadArchive } : {})}
+            {...(selected === undefined ? {} : { selectedId: selected.id })}
+            {...(onSetReach === undefined ? {} : { onSetReach })}
+            {...(onSelectComponent === undefined ? {} : { onSelectComponent })}
+            {...(onCreateComponent === undefined ? {} : { onCreateComponent })}
+            {...(onMoveComponent === undefined ? {} : { onMoveComponent })}
+            {...(onUnplaceComponent === undefined
+              ? {}
+              : { onUnplaceComponent })}
+            targets={targets}
+            datastores={view.datastores}
+            {...(onNavigate ? { onNavigate } : {})}
+            {...(onAttachDatastore ? { onAttachDatastore } : {})}
+          />
           {view.domain === undefined ? null : (
             <DomainSection
               domain={view.domain}
@@ -771,6 +800,35 @@ function Hero({
         ? `/builds/${view.latestBuildId}`
         : null;
 
+  /*
+    Where a commit goes when it is pressed.
+
+    A seven-character hash is a thing on the repository host, and both of the
+    ones this card prints — what is serving, and what the branch is at — were
+    text you had to retype into a URL bar. `source.url` is the origin the
+    installation knows for that host; an App with no repository connected has
+    none, and there the hash stays a value with a copy button and no promise.
+  */
+  const repo = view.source?.url;
+  const commitUrl = (sha: string) =>
+    repo === undefined ? {} : { href: `${repo}/commit/${sha}` };
+
+  /*
+    The two standing policies about this App's deploys, banded together at the
+    foot of the card.
+
+    Neither is an act — one changes what happens on the *next* push and the
+    other stops the next press — and neither belongs beside placement, which is
+    a fact about where the App runs and not a control at all. They are also not
+    header material: the header holds the two buttons that make something
+    happen now, and a switch that arms a future deploy sitting between them is
+    the one misread that costs a surprise release. So: their own band, below
+    everything the card states, labelled with what they are about.
+  */
+  const policy =
+    (view.autoDeploy !== null && onSetAutoDeploy) ||
+    (view.lock === undefined && onSetLock);
+
   return (
     <Card className="flex flex-wrap items-start gap-6 px-5 py-5">
       {/*
@@ -837,6 +895,7 @@ function Hero({
                 value={view.commit}
                 kind="commit"
                 headline={view.commitMessage}
+                {...commitUrl(view.commit)}
               />
             ) : null}
             {view.at ? (
@@ -855,9 +914,18 @@ function Hero({
         {view.source?.pending ? (
           <p className="flex flex-wrap items-center gap-x-1.5 text-xs text-muted-foreground">
             <span className="font-mono">{view.source.branch}</span> is at{' '}
-            <Ref value={view.source.pending.commit} kind="commit" />, live is{' '}
+            <Ref
+              value={view.source.pending.commit}
+              kind="commit"
+              {...commitUrl(view.source.pending.commit)}
+            />
+            , live is{' '}
             {view.commit ? (
-              <Ref value={view.commit} kind="commit" />
+              <Ref
+                value={view.commit}
+                kind="commit"
+                {...commitUrl(view.commit)}
+              />
             ) : (
               'nothing'
             )}
@@ -884,27 +952,37 @@ function Hero({
             ? { onOpenTarget: () => onNavigate('/targets') }
             : {})}
         />
-        {/*
-          Beside placement rather than in the header, because it is not an act:
-          the header holds the two buttons that make something happen now, and
-          a switch that changes what happens *next time* sitting between them
-          is the one misread that costs a surprise deploy.
-
-          Rendered only where the App can receive a push at all — `autoDeploy`
-          is `null` for an archive App, and a disabled switch would offer a
-          choice that does not exist.
-        */}
-        {view.autoDeploy !== null && onSetAutoDeploy ? (
-          <AutoDeployToggle
-            autoDeploy={view.autoDeploy}
-            onSetAutoDeploy={onSetAutoDeploy}
-          />
-        ) : null}
-        {/* The hold, where it can be set by hand. Lifting one is the banner's. */}
-        {view.lock === undefined && onSetLock ? (
-          <LockControl onSetLock={onSetLock} />
-        ) : null}
       </div>
+
+      {/*
+        The deploy policy band. Full width and hairline-topped, so it reads as
+        a footer to the whole card rather than as more of either column — and
+        `-mx-5 -mb-5` so the rule reaches the card's edges instead of floating
+        inside its padding.
+      */}
+      {policy ? (
+        <div className="-mx-5 -mb-5 mt-1 flex basis-full flex-wrap items-center gap-3 border-t border-border-soft px-5 py-3">
+          <Eyebrow>Deploy policy</Eyebrow>
+          <div className="ml-auto flex flex-wrap items-center gap-2">
+            {/*
+              Rendered only where the App can receive a push at all —
+              `autoDeploy` is `null` for an archive App, and a dead switch
+              would offer a choice that does not exist.
+            */}
+            {view.autoDeploy !== null && onSetAutoDeploy ? (
+              <AutoDeployToggle
+                autoDeploy={view.autoDeploy}
+                onSetAutoDeploy={onSetAutoDeploy}
+              />
+            ) : null}
+            {/* The hold, where it can be set by hand. Lifting one is the
+                banner's, at the top of this card. */}
+            {view.lock === undefined && onSetLock ? (
+              <LockControl onSetLock={onSetLock} />
+            ) : null}
+          </div>
+        </div>
+      ) : null}
     </Card>
   );
 }
@@ -971,6 +1049,11 @@ function LockBanner({
  *
  * A reason is required because the banner prints it to whoever meets the
  * refusal next, and that person may not be the one who set it.
+ *
+ * A `Button`, not the bare text link this used to be. What it does — stop
+ * every deploy of this App, including somebody else's — is the heaviest thing
+ * on the card, and it was drawn lighter than the "View all" beside the
+ * timeline. Weight on a control is a claim about consequence.
  */
 function LockControl({ onSetLock }: { onSetLock: SetLock }) {
   const [open, setOpen] = useState(false);
@@ -996,19 +1079,16 @@ function LockControl({ onSetLock }: { onSetLock: SetLock }) {
 
   if (!open) {
     return (
-      <button
-        type="button"
-        onClick={() => setOpen(true)}
-        className="mt-1 text-xs text-muted-foreground hover:text-foreground"
-      >
+      <Button variant="outline" size="sm" onClick={() => setOpen(true)}>
+        <Lock aria-hidden="true" />
         Lock deploys
-      </button>
+      </Button>
     );
   }
 
   return (
     <form
-      className="mt-1 flex flex-col items-end gap-1.5"
+      className="flex flex-col items-end gap-1.5"
       onSubmit={(event) => {
         event.preventDefault();
         void submit();
@@ -1166,19 +1246,43 @@ function AutoDeployToggle({
   };
 
   return (
-    <div className="mt-1 flex flex-col items-end gap-1">
+    <div className="flex flex-col items-end gap-1">
       <button
         type="button"
         onClick={flip}
         disabled={saving}
-        aria-pressed={on}
+        // `switch`, not `aria-pressed`: this is a state that stays on, not a
+        // press that happened, and the two are read out differently.
+        role="switch"
+        aria-checked={on}
         className={cn(
-          'rounded-md border px-2 py-1 text-xs transition-colors',
+          'inline-flex h-8 items-center gap-2 rounded-sm border px-2.5 text-xs',
+          'transition-colors duration-100 ease-out disabled:opacity-50',
           on
-            ? 'border-accent/40 bg-accent-soft text-accent-foreground'
-            : 'border-border-soft text-muted-foreground hover:text-foreground',
+            ? 'border-primary/40 bg-accent text-accent-foreground'
+            : 'border-border text-muted-foreground hover:border-primary hover:text-foreground',
         )}
       >
+        {/*
+          The track and its thumb — the same two elements every switch in every
+          product is, at the size this row's type is set in. `transform` and
+          `background-color` only: both are compositor-cheap, and the label
+          beside them never moves, so the row does not reflow on a press.
+        */}
+        <span
+          aria-hidden="true"
+          className={cn(
+            'relative inline-block h-4 w-7 shrink-0 rounded-full transition-colors duration-150 ease-out',
+            on ? 'bg-primary' : 'bg-border',
+          )}
+        >
+          <span
+            className={cn(
+              'absolute top-0.5 left-0.5 size-3 rounded-full bg-card transition-transform duration-150 ease-out',
+              on && 'translate-x-3',
+            )}
+          />
+        </span>
         Deploy on push: {on ? 'on' : 'off'}
       </button>
       {refusal ? (
@@ -1407,14 +1511,18 @@ function Row({
 }
 
 /**
- * Every Component of this App, and which one the screen is showing.
+ * Every Component of this App, and every act that changes one.
  *
- * **The list is the selector.** The runtime card, the Run now control and the
- * config keys all belong to one Component, and this is the only place that says
- * which — an App whose `job` sits behind its `service` reaches that job's runs
- * by the row being pressed here, and reaches them nowhere else. The row being
- * shown is marked, because a screen rendering a second Component's runs with
- * nothing saying whose they are is worse than one that cannot render them.
+ * **The acts are what this list is for.** Reach, a move, an upload, a new
+ * Component, a Datastore attached — all of them write a row that the next
+ * release picks up, which is what puts this card on Config beside the source,
+ * the builder and the variables rather than on Overview beside the picture.
+ *
+ * It still selects, and still marks what is selected. The Component this
+ * card's siblings are about is the one the config keys below it belong to, and
+ * a screen listing a second Component's keys with nothing saying whose they
+ * are is worse than one that cannot list them. The picture on Overview is the
+ * other end of the same selection — both write it, neither owns it.
  */
 /**
  * What one Component's row says, now that the row knows where it is.
@@ -1436,6 +1544,72 @@ function componentDetail(component: ComponentView): string {
   if (component.url) parts.push(component.url);
   if (component.when) parts.push(component.when);
   return parts.join(' · ');
+}
+
+/** One labelled fact in the strip under the diagram. */
+function Fact({
+  label,
+  value,
+  mono = false,
+}: {
+  label: string;
+  value: ReactNode;
+  mono?: boolean;
+}) {
+  return (
+    <div className="min-w-0">
+      <Eyebrow>{label}</Eyebrow>
+      <p className={cn('truncate text-body', mono && 'font-mono')}>{value}</p>
+    </div>
+  );
+}
+
+/**
+ * The Component the picture is pointed at, in words.
+ *
+ * What is here is exactly what the box above cannot fit and the hero does not
+ * say. The hero is about the *App as it is running* — its phase, its address,
+ * the commit that is serving — and three of its five lines happen to be this
+ * Component's; these four are the ones that are only ever this Component's, and
+ * they were readable before only as a `·`-joined sentence on a row.
+ *
+ * Read-only, deliberately. Every act that used to sit on that row writes
+ * something that takes effect on the next release, and those all live on the
+ * Config tab now — one place per act, and the picture is not it.
+ *
+ * The caller keys this on the Component's id, so choosing another box remounts
+ * it and the strip rises rather than swapping its words in place. That is the
+ * one animation on this card that marks a *change* rather than an arrival: four
+ * values silently becoming four other values is the jarring change §7 of the
+ * motion vocabulary exists to bridge.
+ */
+function SelectedComponent({ component }: { component: ComponentView }) {
+  return (
+    <div className="flex flex-wrap items-start gap-x-8 gap-y-3 motion-safe:animate-rise">
+      <div className="min-w-0">
+        <Eyebrow>{component.kind}</Eyebrow>
+        <p className="truncate text-ui font-semibold tracking-tight">
+          {component.name}
+        </p>
+      </div>
+      <Fact
+        label="Reach"
+        value={
+          component.auth === 'proxy'
+            ? `${component.reach} · proxy`
+            : component.reach
+        }
+        mono
+      />
+      <Fact label="Artifact" value={component.artifact} mono />
+      <Fact
+        label="Placement"
+        value={component.target ?? 'not placed yet'}
+        mono
+      />
+      {component.when ? <Fact label="Released" value={component.when} /> : null}
+    </div>
+  );
 }
 
 function Components({
