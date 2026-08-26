@@ -40,6 +40,9 @@ if [[ "${MISE_ENV:-personal}" == "work" ]]; then
   export WORK_ENV=1
 fi
 
+# --- History ---
+setopt HIST_IGNORE_SPACE
+
 # --- Early zstyles (before prompt/plugins) ---
 setopt TRANSIENT_RPROMPT
 zstyle ':autocomplete:tab:*' fzf-completion
