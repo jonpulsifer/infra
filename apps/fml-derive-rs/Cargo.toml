@@ -14,7 +14,7 @@ path = "src/main.rs"
 # its standard library. Pinned exactly: a differential check that silently
 # floats its own primitives is not a check.
 [dependencies]
-hkdf = "=0.12.4"
+hkdf = "=0.13.0"
 sha2 = "=0.10.9"
 ed25519-dalek = "=2.2.0"
 x25519-dalek = "=3.0.0"
