@@ -2,6 +2,7 @@ import { describe, expect, setSystemTime, test } from 'bun:test';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { leaderboard } from '../src/ledger.ts';
+import { qr } from '../src/page.ts';
 import { PRICES } from '../src/prices.ts';
 
 // Offline fake facilitator: the middleware syncs /supported before answering
@@ -209,6 +210,19 @@ describe('clankerbanker', () => {
     expect(html).toContain('prefers-reduced-motion');
     expect(html).toContain('.shine{animation:none}');
     expect(html).toContain('no brain configured');
+  });
+
+  test('the walk-up window plates each treasury address, not the same one twice', async () => {
+    const html = await (await app.request('/')).text();
+    for (const address of [
+      process.env.PAY_TO_EVM as string,
+      process.env.PAY_TO_SOLANA as string,
+    ]) {
+      expect(html).toContain(`data-copy="${address}"`);
+      expect(html).toContain(qr(address)); // the plate encodes that address
+    }
+    expect(html).toContain('https://basescan.org/address/');
+    expect(html).toContain('https://solscan.io/account/');
   });
 
   test('a settled payment serves content, lands on the ledger, and is escaped on /', async () => {
