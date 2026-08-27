@@ -44,6 +44,19 @@ handler answers as that payer and writes no ledger row. It does not cover
 `/roast`, or `PUT /kv` (each costs the bank something per call). An unknown or
 expired token falls through to the normal 402.
 
+### The walk-up window
+
+The landing page renders one QR plate per configured treasury address, so a
+human with a phone can send USDC (or the native coin) straight to the bank
+without x402, a facilitator, or an agent. The plate encodes the **bare
+address** rather than an EIP-681 or Solana Pay URI: a wallet that does not
+parse those schemes still sends to the right place, and no naive parser can
+mistake a token contract for the recipient. Each plate carries the address as
+copyable text and a block-explorer link to the vault.
+
+Over-the-counter deposits never reach the ledger — nothing indexes the chain,
+so `/ledger`, the standings, and the wall only ever show x402 settlements.
+
 ### Brain routes
 
 `/ask` and `/roast` call any OpenAI-compatible chat endpoint over raw
@@ -108,3 +121,5 @@ mp x402 request --url https://clankerbanker.ca/fortune --wallet main
 ```
 
 PayBox from Claude.ai: call `use_service` with the route URL (Base USDC).
+
+No agent at all: open <https://clankerbanker.ca> and scan a walk-up plate.

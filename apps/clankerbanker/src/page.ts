@@ -1,3 +1,4 @@
+import { renderSVG } from 'uqr';
 import type { Entry, Leader, Stats } from './ledger.ts';
 import { BASE, PRICES } from './prices.ts';
 
@@ -16,6 +17,10 @@ export const txUrl = (e: Entry) =>
   e.network === BASE
     ? `https://basescan.org/tx/${encodeURIComponent(e.tx)}`
     : `https://solscan.io/tx/${encodeURIComponent(e.tx)}`;
+export const addrUrl = (chain: string, address: string) =>
+  chain === 'base'
+    ? `https://basescan.org/address/${encodeURIComponent(address)}`
+    : `https://solscan.io/account/${encodeURIComponent(address)}`;
 const chain = (network: string) => (network === BASE ? 'base' : 'solana');
 
 const num = (n: number) => n.toLocaleString('en-US');
@@ -27,8 +32,31 @@ const MP =
 const CMDS = ['mp x402 limit set --amount 10000', MP, `${MP} --chain base`];
 const ROMAN = ['I', 'II', 'III', 'IV', 'V'];
 
-const cmd = (s: string) =>
-  `<div class="cmd"><code>${esc(s)}</code><button type="button" data-copy="${esc(s)}" aria-label="Copy command: ${esc(s)}">Copy</button></div>`;
+const cmd = (s: string, what = 'command') =>
+  `<div class="cmd"><code>${esc(s)}</code><button type="button" data-copy="${esc(s)}" aria-label="Copy ${esc(what)}: ${esc(s)}">Copy</button></div>`;
+
+/** The plate a phone scans: the bare address, so a wallet that speaks neither
+ * EIP-681 nor Solana Pay still sends to the right place. Keyed by address, and
+ * the only addresses are the treasury's, so this holds at most two. */
+const plates = new Map<string, string>();
+export const qr = (address: string) => {
+  let svg = plates.get(address);
+  if (!svg) {
+    svg = renderSVG(address, {
+      border: 4, // the quiet zone the spec asks for; uqr defaults to 1
+      ecc: 'M',
+      pixelSize: 1,
+      whiteColor: 'transparent',
+      blackColor: 'currentColor',
+    });
+    plates.set(address, svg);
+  }
+  return svg;
+};
+
+export type Till = { chain: string; address: string };
+const tillCard = (t: Till) =>
+  `<figure class="tillcard"><div class="qr" aria-hidden="true">${qr(t.address)}</div><figcaption><b>${esc(t.chain)} &middot; USDC or ${t.chain === 'base' ? 'ETH' : 'SOL'}</b>${cmd(t.address, `${t.chain} address`)}<a class="vault" href="${esc(addrUrl(t.chain, t.address))}" rel="noopener noreferrer" target="_blank">Audit the vault</a></figcaption></figure>`;
 
 const FRAME = `<div class="frame ink" aria-hidden="true"><span class="inner"></span><svg class="band t" data-band="h" preserveAspectRatio="none"></svg><svg class="band b" data-band="h" preserveAspectRatio="none"></svg><svg class="band l" data-band="v" preserveAspectRatio="none"></svg><svg class="band r" data-band="v" preserveAspectRatio="none"></svg><svg class="cnr tl" data-cnr="1" viewBox="0 0 60 60"></svg><svg class="cnr tr" data-cnr="1" viewBox="0 0 60 60"></svg><svg class="cnr bl" data-cnr="1" viewBox="0 0 60 60"></svg><svg class="cnr br" data-cnr="1" viewBox="0 0 60 60"></svg></div>`;
 const DENS = `<span class="den tl" aria-hidden="true">402</span><span class="den tr" aria-hidden="true">402</span><span class="den bl" aria-hidden="true">402</span><span class="den br" aria-hidden="true">402</span>`;
@@ -84,11 +112,12 @@ export function page(d: {
   leaderboard: Leader[];
   tips: string[];
   stats: Stats;
-  chains: string[];
+  treasury: Till[];
   brain: boolean;
 }) {
-  const status = d.chains.length
-    ? `<p><span class="status"><span class="pip" aria-hidden="true"></span>Accepting ${esc(d.chains.join(' + '))} USDC<span class="pip two" aria-hidden="true"></span></span></p>${d.brain ? '' : '<p class="fine warn">no brain configured: /ask and /roast answer 503 before the paywall.</p>'}`
+  const chains = d.treasury.map((t) => t.chain);
+  const status = chains.length
+    ? `<p><span class="status"><span class="pip" aria-hidden="true"></span>Accepting ${esc(chains.join(' + '))} USDC<span class="pip two" aria-hidden="true"></span></span></p>${d.brain ? '' : '<p class="fine warn">no brain configured: /ask and /roast answer 503 before the paywall.</p>'}`
     : '<p class="fine warn">bank not open: no treasury address configured.</p>';
 
   const routes = Object.entries(PRICES) as [string, [string, string]][];
@@ -116,7 +145,13 @@ export function page(d: {
 <div class="schedule"><div class="col"><div class="scroll"><table><caption>Schedule A</caption>${PRICE_HEAD}<tbody>${scheduleA}</tbody></table></div></div><div class="col"><div class="scroll"><table><caption>Schedule B</caption>${PRICE_HEAD}<tbody>${scheduleB}</tbody></table></div></div></div>`;
 
   const n3 = `<h2 id="cb-h2b">Instructions to the payer</h2>${RULE}<p class="sub">Set a limit, then ask. The facilitator does the rest. MoonPay CLI settles on Solana unless told otherwise.</p>
-<div class="cmds">${CMDS.map(cmd).join('')}</div>
+<div class="cmds">${CMDS.map((s) => cmd(s)).join('')}</div>
+${
+  d.treasury.length
+    ? `<h2 class="wallhead">The walk-up window</h2><p class="sub">No agent, no 402, no facilitator. Scan the plate and send what you like. Over-the-counter deposits are not posted to the ledger &mdash; the teller counts those by hand.</p>
+<div class="till">${d.treasury.map(tillCard).join('')}</div>`
+    : ''
+}
 <div class="clauses"><p class="clause"><b>From Claude.ai</b>PayBox calls <code>use_service</code> with <code>https://clankerbanker.ca/fortune</code> and settles the quote for you.</p><p class="clause"><b>Bearer pass</b><code>POST /account</code> costs $1.00 and returns a 24h token. Send it as <code>Authorization: Bearer</code> to skip the paywall on the fun routes &mdash; not <code>/ask</code>, <code>/roast</code>, <code>PUT /kv</code>, or another pass.</p><p class="clause"><b>Tool surface</b><code>POST /mcp</code> serves <code>fortune</code>, <code>oracle</code>, <code>dice</code> and <code>ask</code> as paid MCP tools, quoted in <code>_meta</code>.</p></div>`;
 
   const n4 = `<h2 id="cb-h2c">The ledger &middot; deposit slip</h2>
@@ -426,6 +461,28 @@ a:focus-visible,button:focus-visible{outline:2px solid var(--ink);outline-offset
   font-weight:700;font-size:12px;letter-spacing:.15em;text-transform:uppercase;color:var(--ink);
 }
 .clause code{font-family:var(--mono);font-size:14px;font-weight:500;color:var(--ink)}
+.till{
+  max-width:82ch;margin:14px auto 0;
+  display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));
+  gap:clamp(16px,3vw,32px);justify-items:center;
+}
+.tillcard{margin:0;display:grid;gap:10px;justify-items:center;width:100%;max-width:280px}
+/* a solid stock field under the plate: the grain and laid lines behind it
+   would otherwise eat the contrast a scanner needs */
+.tillcard .qr{
+  width:min(190px,62vw);padding:10px;
+  background:var(--stock);color:var(--ink);border:1px solid var(--ink);
+}
+.tillcard .qr svg{display:block;width:100%;height:auto}
+.tillcard figcaption{display:grid;gap:8px;justify-items:center;width:100%}
+.tillcard b{
+  font-weight:700;font-size:12px;letter-spacing:.15em;
+  text-transform:uppercase;color:var(--ink);
+}
+.tillcard .cmd{flex-direction:column;width:100%}
+.tillcard .cmd code{font-size:12px;text-align:center;padding:8px 10px}
+.tillcard .cmd button{border-left:0;border-top:1px solid var(--ink);min-height:36px;padding:7px 12px}
+.vault{font-size:14px;color:var(--sec)}
 
 /* ---------- NOTE IV — the deposit slip ---------- */
 .n4{--lh:24px}

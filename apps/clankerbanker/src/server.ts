@@ -360,7 +360,10 @@ app.get('/', async (c) => {
     page({
       ...data,
       entries: data.entries.slice(0, 20),
-      chains: treasury.map((t) => (t.network === BASE ? 'base' : 'solana')),
+      treasury: treasury.map((t) => ({
+        chain: t.network === BASE ? 'base' : 'solana',
+        address: t.payTo,
+      })),
       brain: brainReady(),
     }),
   );
