@@ -17,7 +17,7 @@ path = "src/main.rs"
 hkdf = "=0.12.4"
 sha2 = "=0.10.9"
 ed25519-dalek = "=2.2.0"
-x25519-dalek = "=2.0.1"
+x25519-dalek = "=3.0.0"
 
 [profile.release]
 opt-level = 2
