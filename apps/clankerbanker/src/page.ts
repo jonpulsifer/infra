@@ -64,6 +64,7 @@ const WATERMARK = '<span class="watermark" aria-hidden="true">402</span>';
 const RULE =
   '<svg class="wrule ink" data-rule="1" preserveAspectRatio="none" aria-hidden="true"></svg>';
 const SEAL = `<div class="sealwrap" aria-hidden="true"><svg class="seal" viewBox="0 0 200 200" role="presentation" focusable="false"><defs><path id="cb-sealArc" d="M100,100 m-73,0 a73,73 0 1,1 146,0 a73,73 0 1,1 -146,0"></path><path id="cb-sealArcIn" d="M100,100 m56,0 a56,56 0 1,0 -112,0 a56,56 0 1,0 112,0"></path></defs><g class="relief"><circle cx="100" cy="100" r="88" fill="none" stroke-width="2.4"></circle><circle cx="100" cy="100" r="83" fill="none" stroke-width="1"></circle><circle cx="100" cy="100" r="47" fill="none" stroke-width="1.4"></circle><text font-family="Source Serif 4, Georgia, serif" font-size="13.5" font-weight="600" letter-spacing="3.1" stroke="none"><textPath href="#cb-sealArc" startOffset="50%" text-anchor="middle">BANQUE CLANKER &#183; CHARTERED FOR MACHINES</textPath></text><text font-family="Source Serif 4, Georgia, serif" font-size="9" font-weight="600" letter-spacing="2.4" stroke="none"><textPath href="#cb-sealArcIn" startOffset="50%" text-anchor="middle">CDIC AVOIDANT</textPath></text><text x="100" y="112" text-anchor="middle" stroke="none" font-family="Source Serif 4, Georgia, serif" font-size="40" font-weight="700" letter-spacing="-1">402</text></g></svg></div>`;
+const WAX = `<div class="waxwrap" aria-hidden="true"><svg class="wax" viewBox="0 0 200 200" role="presentation" focusable="false"><defs><radialGradient id="cb-waxFill" cx="38%" cy="30%" r="80%"><stop offset="0" stop-color="#b8452f"></stop><stop offset=".52" stop-color="#8c221c"></stop><stop offset="1" stop-color="#57110d"></stop></radialGradient><filter id="cb-waxEdge" x="-25%" y="-25%" width="150%" height="150%"><feTurbulence type="fractalNoise" baseFrequency="0.031" numOctaves="3" seed="7" result="n"></feTurbulence><feDisplacementMap in="SourceGraphic" in2="n" scale="13" xChannelSelector="R" yChannelSelector="G"></feDisplacementMap></filter></defs><circle class="blob" cx="100" cy="100" r="74" fill="url(#cb-waxFill)"></circle><g class="press"><circle cx="100" cy="100" r="60" fill="none" stroke-width="2.2"></circle><circle cx="100" cy="100" r="55" fill="none" stroke-width="1"></circle><text x="100" y="99" text-anchor="middle" font-family="Playfair Display, Georgia, serif" font-size="36" font-weight="900" letter-spacing="1">PAID</text><text x="100" y="126" text-anchor="middle" font-family="Source Serif 4, Georgia, serif" font-size="16" font-weight="700" letter-spacing="2.4">IN FULL</text></g></svg></div>`;
 const EMPTY_REG =
   '<tr class="empty"><td colspan="6">no settlements yet</td></tr>';
 const EMPTY_BOARD = '<tr class="empty"><td colspan="3">nobody yet</td></tr>';
@@ -137,7 +138,7 @@ export function page(d: {
   const latest = d.entries[0];
 
   const n1 = `<p class="micro" aria-hidden="true">BANQUE CLANKER&middot;CHARTERED FOR MACHINES&middot;SETTLEMENT IS FINAL&middot;NO CASH VALUE&middot;DO NOT EAT&middot;CHARGES QUOTED IN USDC&middot;WE DID NOT ASK ANY OF THEM FOR PHOTO ID&middot;BANQUE CLANKER&middot;CHARTERED FOR MACHINES&middot;SETTLEMENT IS FINAL&middot;NO CASH VALUE&middot;DO NOT EAT&middot;CHARGES QUOTED IN USDC&middot;</p>
-<div class="hero">${SEAL}<div class="heroText"><h1 id="cb-h1">Banque Clanker</h1><p class="domain">clankerbanker.ca</p><p class="charter">CDIC avoidant &middot; Series 402</p><p class="pitch">A bank that charges clankers. An agent asks for a route, the route answers <strong>402</strong>, the agent pays in USDC over <a href="https://x402.org">x402</a>, and the receipt is posted here. A 402 is just a 200 that wants lunch.</p>${status}</div></div>
+<div class="hero">${SEAL}<div class="heroText"><h1 id="cb-h1">Banque Clanker</h1><p class="domain">clankerbanker.ca</p><p class="charter">CDIC avoidant &middot; Series 402</p><p class="pitch">A bank that charges clankers. An agent asks for a route, the route answers <strong>402</strong>, the agent pays in USDC over <a href="https://x402.org">x402</a>, and the receipt is posted here. A 402 is just a 200 that wants lunch.</p>${status}</div>${WAX}</div>
 <div class="figures"><div class="fig"><span class="v" id="s-count">${num(d.stats.count)}</span><span class="k">Settlements</span></div><div class="fig"><span class="v" id="s-total">${usd(d.stats.total)}</span><span class="k">USDC cleared</span></div><div class="fig"><span class="v" id="s-payers">${num(d.stats.payers)}</span><span class="k">Unique clankers</span></div></div>
 <p class="fine">Charges are exact, quoted in USDC, and revised whenever the operator&rsquo;s power bill is.</p>`;
 
@@ -261,10 +262,13 @@ body{
 .frame{position:absolute;inset:var(--inset);pointer-events:none;border:1px solid var(--rule)}
 .frame .inner{position:absolute;inset:var(--band);border:1px solid var(--rule);opacity:.72;display:block}
 .frame .band{position:absolute;display:block}
-.frame .band.t{top:0;left:0;right:0;height:var(--band)}
-.frame .band.b{bottom:0;left:0;right:0;height:var(--band)}
-.frame .band.l{left:0;top:0;bottom:0;width:var(--band)}
-.frame .band.r{right:0;top:0;bottom:0;width:var(--band)}
+/* an <svg> carrying only a viewBox is a replaced element with an intrinsic
+   ratio: left+right (or top+bottom) will not stretch it, so the band has to be
+   sized outright or the guilloche stops short of the corner it runs to */
+.frame .band.t{top:0;left:0;width:100%;height:var(--band)}
+.frame .band.b{bottom:0;left:0;width:100%;height:var(--band)}
+.frame .band.l{left:0;top:0;width:var(--band);height:100%}
+.frame .band.r{right:0;top:0;width:var(--band);height:100%}
 .frame .cnr{position:absolute;width:calc(var(--band) + 9px);height:calc(var(--band) + 9px);background:var(--stock)}
 .frame .cnr.tl{top:-4px;left:-4px}
 .frame .cnr.tr{top:-4px;right:-4px}
@@ -277,6 +281,7 @@ body{
   stroke-dasharray:1;stroke-dashoffset:1;
 }
 .note.inked .ink path,.note.inked .ink circle{animation:cb-ink 1400ms var(--eo) forwards}
+.note.inked .ink.drawn path{stroke-dashoffset:0;animation:none}
 @keyframes cb-ink{to{stroke-dashoffset:0}}
 
 /* ---------- corner denominations + serials ---------- */
@@ -323,13 +328,17 @@ body{
 
 /* ---------- NOTE I — the hero ---------- */
 .hero{
+  --sealw:clamp(116px,15vw,156px);
   display:grid;
-  grid-template-columns:auto minmax(0,1fr);
+  /* equal gutters: the emboss on the left and the wax on the right are the
+     same column width, so the title centres on the note rather than on its
+     own column */
+  grid-template-columns:var(--sealw) minmax(0,1fr) var(--sealw);
   align-items:center;
   gap:clamp(18px,3.4vw,40px);
 }
 .sealwrap{
-  width:clamp(116px,15vw,156px);height:clamp(116px,15vw,156px);
+  width:var(--sealw);height:var(--sealw);
   display:grid;place-items:center;justify-self:center;
 }
 .seal{
@@ -343,6 +352,23 @@ body{
 }
 .seal .relief{fill:var(--stock);stroke:var(--stock)}
 @keyframes cb-emboss{from{opacity:0}to{opacity:1}}
+
+.waxwrap{width:var(--sealw);height:var(--sealw);display:grid;place-items:center;justify-self:center}
+.wax{
+  width:82%;height:82%;overflow:visible;
+  filter:drop-shadow(1px 2px 2px rgba(23,32,26,.34));
+  animation:cb-wax 620ms var(--eo) 620ms both;
+}
+/* pressed, not printed: the device is cut into the wax, so it carries the
+   shadow of the die on one side and the light off the ridge on the other */
+.wax .press{
+  fill:#57110d;stroke:#57110d;opacity:.62;
+  filter:drop-shadow(0 1px 0 rgba(255,196,176,.42));
+}
+@keyframes cb-wax{
+  from{opacity:0;transform:rotate(7deg) scale(1.22)}
+  to{opacity:1;transform:rotate(7deg) scale(1)}
+}
 
 .heroText{text-align:center;min-width:0}
 h1{
@@ -462,15 +488,15 @@ a:focus-visible,button:focus-visible{outline:2px solid var(--ink);outline-offset
 }
 .clause code{font-family:var(--mono);font-size:14px;font-weight:500;color:var(--ink)}
 .till{
-  max-width:82ch;margin:14px auto 0;
-  display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));
-  gap:clamp(16px,3vw,32px);justify-items:center;
+  margin:14px auto 0;
+  display:flex;flex-wrap:wrap;justify-content:center;
+  gap:clamp(18px,3.4vw,40px);
 }
-.tillcard{margin:0;display:grid;gap:10px;justify-items:center;width:100%;max-width:280px}
+.tillcard{margin:0;display:grid;gap:10px;justify-items:center;width:min(232px,76vw)}
 /* a solid stock field under the plate: the grain and laid lines behind it
    would otherwise eat the contrast a scanner needs */
 .tillcard .qr{
-  width:min(190px,62vw);padding:10px;
+  width:100%;padding:12px;
   background:var(--stock);color:var(--ink);border:1px solid var(--ink);
 }
 .tillcard .qr svg{display:block;width:100%;height:auto}
@@ -666,6 +692,7 @@ a:focus-visible,button:focus-visible{outline:2px solid var(--ink);outline-offset
   .ink path,.ink circle{stroke-dashoffset:0}
   .note.inked .ink path,.note.inked .ink circle{animation:none;stroke-dashoffset:0}
   .seal{animation:cb-emboss 420ms var(--eo) both;transition:none}
+  .wax{animation:cb-emboss 420ms var(--eo) both;transform:rotate(7deg)}
   .strike{animation:none}
   .stamp.landed{animation:cb-thunk-flat 300ms linear both;transform:rotate(-7.4deg)}
   .reg tbody tr{transition:opacity 240ms linear}
@@ -714,7 +741,7 @@ function rosette(R,r,d,radius,cx,cy){
 }
 function interference(len,thick,n,c1,c2,vert){
   const amp=thick*0.30,mid=thick/2;
-  const steps=Math.max(120,Math.min(190,Math.round(len/7)));
+  const steps=Math.max(120,Math.min(320,Math.round(len/5)));
   const out=[];
   for(let i=0;i<n;i++){
     const ph=(i/n)*Math.PI*2;
@@ -742,25 +769,52 @@ function path(d,w,op,delay){
 
 const notes=qa('.note');
 notes.forEach(note=>{
-  note.querySelectorAll('.band').forEach((svg,idx)=>{
-    const vert=svg.getAttribute('data-band')==='v';
-    const len=vert?900:1400,thick=40;
-    svg.setAttribute('viewBox',vert?'0 0 '+thick+' '+len:'0 0 '+len+' '+thick);
-    interference(len,thick,4,26,17,vert).forEach((d,i)=>svg.appendChild(path(d,0.55,0.5,130+idx*80+i*45)));
-    interference(len,thick,1,7,11,vert).forEach(d=>svg.appendChild(path(d,0.7,0.7,100+idx*80)));
-  });
   note.querySelectorAll('.cnr').forEach((svg,i)=>{
     svg.appendChild(path(rosette(9,4,7,26,30,30),0.6,0.75,300+i*60));
     svg.appendChild(path(rosette(7,3,5,17,30,30),0.6,0.6,360+i*60));
   });
-  note.querySelectorAll('.wrule').forEach((svg,i)=>{
-    const len=1200,thick=22;
-    svg.setAttribute('viewBox','0 0 '+len+' '+thick);
-    interference(len,thick,4,34,21,false).forEach((d,j)=>svg.appendChild(path(d,0.6,0.55,440+i*70+j*50)));
-    const mid=path('M0 '+(thick/2)+'L'+len+' '+(thick/2),0.8,0.35,420+i*70);
-    svg.appendChild(mid);
-  });
 });
+
+/* Engraving is drawn at the element's real pixel size and at a fixed
+   wavelength, so a tall note's border is the same engraving as a short one's
+   rather than the same drawing stretched to fit. Transforms do not touch the
+   used width, so measure the box rather than its client rect. */
+const px=(svg,prop)=>parseFloat(getComputedStyle(svg)[prop])||0;
+const cyc=(len,wave)=>Math.max(3,Math.round(len/wave));
+function reset(svg,len,thick,vert){
+  const was=Number(svg.dataset.len||0);
+  if(len<8||thick<4||Math.abs(was-len)<6)return false;
+  const redraw=was>0;
+  svg.dataset.len=len;
+  while(svg.firstChild)svg.removeChild(svg.firstChild);
+  svg.setAttribute('viewBox',vert?'0 0 '+thick+' '+len:'0 0 '+len+' '+thick);
+  // a resize is not a fresh sheet: re-inking it every time would flicker
+  if(redraw)svg.classList.add('drawn');
+  return true;
+}
+function engrave(note){
+  note.querySelectorAll('.band').forEach((svg,idx)=>{
+    const vert=svg.getAttribute('data-band')==='v';
+    const len=Math.round(px(svg,vert?'height':'width'));
+    const thick=Math.round(px(svg,vert?'width':'height'));
+    if(!reset(svg,len,thick,vert))return;
+    interference(len,thick,4,cyc(len,40),cyc(len,62),vert).forEach((d,i)=>svg.appendChild(path(d,0.55,0.5,130+idx*80+i*45)));
+    interference(len,thick,1,cyc(len,150),cyc(len,95),vert).forEach(d=>svg.appendChild(path(d,0.7,0.7,100+idx*80)));
+  });
+  note.querySelectorAll('.wrule').forEach((svg,i)=>{
+    const len=Math.round(px(svg,'width')),thick=Math.round(px(svg,'height'));
+    if(!reset(svg,len,thick,false))return;
+    interference(len,thick,4,cyc(len,31),cyc(len,50),false).forEach((d,j)=>svg.appendChild(path(d,0.6,0.55,440+i*70+j*50)));
+    svg.appendChild(path('M0 '+(thick/2)+'L'+len+' '+(thick/2),0.8,0.35,420+i*70));
+  });
+}
+notes.forEach(engrave);
+// the ledger ticker changes note IV's height every few seconds, and the
+// window changes all of them; either way the border is re-cut to fit
+if(typeof window.ResizeObserver==='function'){
+  const ro=new ResizeObserver(items=>items.forEach(it=>engrave(it.target)));
+  notes.forEach(n=>ro.observe(n));
+}
 
 /* ---------- sheets laid down + plates inking up ---------- */
 if(typeof window.IntersectionObserver==='function'){
