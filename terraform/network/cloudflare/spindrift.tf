@@ -44,6 +44,10 @@ module "tunnel_spindrift" {
         hostname = "*.${cloudflare_zone.wishin_app.name}"
         service  = "http://cilium-gateway-spindrift-apps.spindrift-apps.svc.cluster.local"
       },
+      {
+        hostname = "*.${cloudflare_zone.kthx_dev.name}"
+        service  = "http://cilium-gateway-spindrift-apps.spindrift-apps.svc.cluster.local"
+      },
       # A cluster-served apex. `*.<zone>` never matches the zone itself, so the
       # apex is its own rule; the record is the App's vanity `@`, which
       # Spindrift's DNSEndpoint publishes, so this rule publishes none.
