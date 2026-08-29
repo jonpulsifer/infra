@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>kthx.dev</title>
+<link rel="icon" href="/favicon.ico">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Orbitron:wght@900&family=DM+Mono:wght@400;500&family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,700&display=swap">
@@ -310,10 +311,10 @@ pre.sh .p{color:var(--hot)}
   <div class="horizon"></div>
   <pre class="copter" id="copter"><span class="body"><span class="rotor" id="rotor">ROFL:ROFL:LOL:ROFL:ROFL</span>
          ___^___ _
- L    __/      [] \
-LOL===__           \
- L      \___ ___ ___]
-             <span id="tail">I   I</span>
+<span id="tr1"> L </span>   __/      [] \
+<span id="tr2">LoL</span>===__           \
+<span id="tr3"> L </span>     \___ ___ ___]
+             I   I
          ----------/</span></pre>
 </div>
 
@@ -478,14 +479,19 @@ async function loadAll() {
   $("#jack").classList.add("on");
 }
 
-/* the copter: rotor text scrolls, tail rotor flicks; the sweep across the sky is CSS */
+/* the copter: the main rotor's text scrolls, the tail rotor turns; the sweep
+   across the sky is CSS. The tail rotor is the L-O-L at the back: four blades
+   around the hub, so half a turn swaps the upright cross for the diagonal one
+   and the three cells stay three characters wide. */
 const ROT = "ROFL:ROFL:LOL:ROFL:ROFL:";
+const TAIL = [[" L ", "LoL", " L "], ["L L", " o ", "L L"]];
 let rk = 0;
 setInterval(() => {
   if (document.hidden || REDUCE.matches) return;
   rk = (rk + 1) % ROT.length;
   $("#rotor").textContent = (ROT.slice(rk) + ROT.slice(0, rk)).slice(0, 23);
-  $("#tail").textContent = rk % 2 ? "I   I" : "-   -";
+  const t = TAIL[(rk >> 1) % TAIL.length];
+  $("#tr1").textContent = t[0]; $("#tr2").textContent = t[1]; $("#tr3").textContent = t[2];
 }, 70);
 $("#copter").classList.add("fly");
 function flyover() { const c = $("#copter"); c.classList.remove("fly"); void c.offsetWidth; c.classList.add("fly"); }

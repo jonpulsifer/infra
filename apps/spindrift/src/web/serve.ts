@@ -34,7 +34,12 @@ import {
   GitHubAppAuth,
   githubAppWebhookSecret,
 } from '../integrations/github/app-auth.ts';
-import { type KthxDeps, kthxZone, withKthxHost } from '../kthx/serve.ts';
+import {
+  type KthxDeps,
+  kthxDepot,
+  kthxZone,
+  withKthxHost,
+} from '../kthx/serve.ts';
 import { sourceDepotFor } from '../storage/archives.ts';
 import { BOSUN_SECRET_VAR } from './bosun-route.ts';
 import { type ClientRoute, webRoutes } from './routes.ts';
@@ -218,13 +223,18 @@ export async function start(
   const keyring = CredentialKeyring.fromEnvironment(Bun.env);
 
   /**
-   * kthx sites stage into the same depot `/internal/upload` does, read per
-   * request through the accessor above for the same reason the routes do.
+   * kthx sites stage into the depot `KTHX_BUCKET` names, and otherwise into
+   * the same one `/internal/upload` uses — read per request through the
+   * accessor above for the same reason the routes do. The variable is what
+   * lets a site serve without the installation manifest; the fallback is what
+   * keeps a deployment that sets none serving exactly as it does today.
    */
   const kthx: KthxDeps = {
     db,
     zone: kthxZone(Bun.env),
-    depot: async () => sourceDepotFor((await installationNow()).manifest),
+    depot: async () =>
+      (await kthxDepot(Bun.env)) ??
+      sourceDepotFor((await installationNow()).manifest),
   };
 
   const rawRoutes = webRoutes(

@@ -64,6 +64,18 @@ export interface UploadToGcsInput {
   readonly federation: FederationOptions;
 }
 
+/**
+ * How long an upload may stall before it is abandoned.
+ *
+ * `fetch` has no deadline of its own, so a connection that dies mid-PUT holds
+ * everything its caller is holding for as long as the kernel keeps the socket.
+ * That is not only a leaked request: a kthx release holds one of `MAX_UPLOADS`
+ * slots and the unpacked site behind it across this call, so two stuck sockets
+ * would refuse every release until the pod restarted. Long enough that a slow
+ * link finishes a bundle, short enough that a wedged one clears itself.
+ */
+const UPLOAD_TIMEOUT_MS = 5 * 60 * 1000;
+
 /** Upload an archive bundle directly to a GCS bucket using WIF token authentication. */
 export async function uploadToGcsBucket({
   bucketName,
@@ -84,6 +96,7 @@ export async function uploadToGcsBucket({
         'Content-Type': 'application/octet-stream',
       },
       body: bytes as unknown as BodyInit,
+      signal: AbortSignal.timeout(UPLOAD_TIMEOUT_MS),
     }),
   );
 

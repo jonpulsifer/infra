@@ -8,6 +8,7 @@
     "no-cache-filters": "runner",
     "watch": [
       "apps/spindrift",
+      "packages/kthx",
       "packages/typescript-config",
       "package.json",
       "bun.lock",

@@ -6,14 +6,15 @@
  */
 import { readdirSync, statSync } from 'node:fs';
 import { join, resolve, sep } from 'node:path';
-import sdk from '../../spindrift/src/kthx/sdk.js' with { type: 'text' };
 import {
   type KthxSocketData,
   type KthxStore,
   kthxSocket,
   MAX_LIST,
   underscoreResponse,
-} from '../../spindrift/src/kthx/underscore.ts';
+} from '@repo/kthx';
+import { FAVICON, FAVICON_PATH } from '@repo/kthx/favicon';
+import sdk from '@repo/kthx/sdk.js' with { type: 'text' };
 import { included } from './tar.ts';
 
 export const PORT = 4321;
@@ -120,7 +121,10 @@ function unwrap(root: string): string {
     : root;
 }
 
-/** The bytes at `pathname`: `/dir` is `dir/index.html`, missing is `404.html`. */
+/**
+ * The bytes at `pathname`: `/dir` is `dir/index.html`, missing is `404.html`.
+ * A directory with no icon answers the generic favicon, as production does.
+ */
 function file(root: string, pathname: string, method: string): Response {
   const path = pathname.endsWith('/') ? `${pathname}index.html` : pathname;
   const candidates = path.endsWith('/index.html')
@@ -131,6 +135,11 @@ function file(root: string, pathname: string, method: string): Response {
     const relative = full.slice(root.length + 1).replaceAll(sep, '/');
     if (!full.startsWith(root + sep) || !included(relative)) continue;
     if (isFile(full)) return serve(full, 200, method);
+  }
+  if (path === FAVICON_PATH) {
+    return new Response(method === 'HEAD' ? null : FAVICON.bytes, {
+      headers: { 'content-type': FAVICON.type, 'cache-control': 'no-store' },
+    });
   }
   const fallback = join(root, '404.html');
   if (isFile(fallback)) return serve(fallback, 404, method);
