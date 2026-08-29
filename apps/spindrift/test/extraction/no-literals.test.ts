@@ -233,17 +233,18 @@ const OBJECT_ID = /^[0-9a-f]{6,40}$/;
  *   endpoints or project identifiers; anything installation-specific the UI
  *   shows arrives from the manifest, which is where §20 puts it.
  *
- * An HTML document anywhere under `src/` is browser source for the same
- * reason — `src/kthx/landing.html` is nothing but class names and headers —
- * and is scoped out with it, as is the one script a kthx site loads.
+ * An HTML document anywhere in the scan is browser source for the same
+ * reason — it is nothing but class names and headers — and is scoped out with
+ * it.
  */
 const BROWSER_SOURCE = (path: string): boolean =>
-  path.startsWith('src/web/') ||
-  path.endsWith('.html') ||
-  path === 'src/kthx/sdk.js';
+  path.startsWith('src/web/') || path.endsWith('.html');
 
 /** Files that are not text, and would only produce noise. */
 const BINARY = /\.(png|jpe?g|gif|ico|webp|avif|woff2?|ttf|otf|pdf|zip|gz)$/i;
+
+/** Installed or generated trees a walk finds beside a package's own source. */
+const NOT_SOURCE = /\/(node_modules|\.turbo)\//;
 
 type SourceFile = { path: string; source: string };
 
@@ -385,7 +386,7 @@ async function readSource(dir: string): Promise<SourceFile[]> {
   const paths = entries
     .filter((entry) => entry.isFile())
     .map((entry) => join(entry.parentPath, entry.name))
-    .filter((path) => !BINARY.test(path))
+    .filter((path) => !BINARY.test(path) && !NOT_SOURCE.test(path))
     .sort();
   return Promise.all(
     paths.map(async (path) => ({
@@ -404,25 +405,30 @@ async function readFiles(...paths: string[]): Promise<SourceFile[]> {
   );
 }
 
-/** The literal rule polices `src/`; the import rule polices the package. */
+/**
+ * The literal rule polices `src/` and `packages/kthx`, which is source this
+ * image ships and serves; the import rule polices this package alone.
+ */
 const src = await readSource('src');
+const shipped = [...src, ...(await readSource('../../packages/kthx'))];
 const everything = [
   ...src,
   ...(await readSource('test')),
   ...(await readFiles('build.ts')),
 ];
 
-describe('the real src/', () => {
+describe('the shipped source', () => {
   test('has source to scan', () => {
     expect(src.length).toBeGreaterThan(0);
+    expect(shipped.length).toBeGreaterThan(src.length);
   });
 
   test('names no installation', () => {
-    expect(findLiterals(src)).toEqual([]);
+    expect(findLiterals(shipped)).toEqual([]);
   });
 
   test('holds no string shaped like a cloud project id', () => {
-    expect(findProjectIds(src)).toEqual([]);
+    expect(findProjectIds(shipped)).toEqual([]);
   });
 
   test('leaves the installation-specific values to the fixture manifest', async () => {

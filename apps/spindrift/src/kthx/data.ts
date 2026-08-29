@@ -4,21 +4,19 @@
  * and writes, one statement per write so the row decides a race, plus the
  * SDK that fronts it all as `window.kthx`.
  */
-import { join as pathJoin } from 'node:path';
-import { and, asc, eq, sql } from 'drizzle-orm';
-import { kthxKv } from '../db/schema.ts';
-import type { KthxDeps } from './serve.ts';
 import {
   underscoreResponse as answer,
   type KthxStore,
   MAX_LIST,
-} from './underscore.ts';
-
-const SDK = pathJoin(import.meta.dir, 'sdk.js');
+} from '@repo/kthx';
+import { SDK_PATH } from '@repo/kthx/assets';
+import { and, asc, eq, sql } from 'drizzle-orm';
+import { kthxKv } from '../db/schema.ts';
+import type { KthxDeps } from './serve.ts';
 
 /** The SDK, the same bytes at apex `/sdk.js` and every site's `/_/sdk.js`. */
 export function sdkResponse(): Response {
-  return new Response(Bun.file(SDK), {
+  return new Response(Bun.file(SDK_PATH), {
     headers: {
       'content-type': 'text/javascript; charset=utf-8',
       'cache-control': 'public, max-age=300',

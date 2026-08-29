@@ -39,6 +39,10 @@ describe('files', () => {
     const css = await fetch(url('/style.css'));
     expect(css.headers.get('content-type')).toStartWith('text/css');
     expect(css.headers.get('x-content-type-options')).toBe('nosniff');
+    const icon = await fetch(url('/favicon.ico'));
+    expect(icon.status).toBe(200);
+    expect(icon.headers.get('content-type')).toBe('image/x-icon');
+    expect((await icon.bytes()).byteLength).toBe(230);
     const lost = await fetch(url('/nope'));
     expect(lost.status).toBe(404);
     expect(await lost.text()).toBe('<h1>lost</h1>');

@@ -3,9 +3,9 @@
  * loops over — reached through the same Host dispatch a site's files are.
  */
 import { describe, expect, test } from 'bun:test';
+import { MAX_VALUE_BYTES } from '@repo/kthx';
 import { type KthxDeps, withKthxHost } from '../../src/kthx/serve.ts';
 import { KTHX_PATHS, kthxRoutes } from '../../src/kthx/sites.ts';
-import { MAX_VALUE_BYTES } from '../../src/kthx/underscore.ts';
 import { withIsolatedDatabase } from '../harness/db.ts';
 
 const database = withIsolatedDatabase();

@@ -17,6 +17,7 @@
  * database layer into the browser bundle. `test/web/client-bundle.test.ts`
  * guards against that edge coming back.
  */
+import { type KthxSocketData, kthxSocket } from '@repo/kthx';
 import { and, eq } from 'drizzle-orm';
 import type {
   DeployAdapter,
@@ -42,7 +43,6 @@ import {
   type FunctionDeployer,
   type FunctionTarget,
 } from '../functions/contract.ts';
-import { type KthxSocketData, kthxSocket } from '../kthx/underscore.ts';
 import {
   ATTEMPT_LOG_TEXT_PATH,
   ATTEMPT_STREAM_PATH,
