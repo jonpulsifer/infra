@@ -310,10 +310,10 @@ pre.sh .p{color:var(--hot)}
   <div class="horizon"></div>
   <pre class="copter" id="copter"><span class="body"><span class="rotor" id="rotor">ROFL:ROFL:LOL:ROFL:ROFL</span>
          ___^___ _
- L    __/      [] \
-LOL===__           \
- L      \___ ___ ___]
-             <span id="tail">I   I</span>
+<span id="tr1"> L </span>   __/      [] \
+<span id="tr2">LOL</span>===__           \
+<span id="tr3"> L </span>     \___ ___ ___]
+             I   I
          ----------/</span></pre>
 </div>
 
@@ -478,17 +478,19 @@ async function loadAll() {
   $("#jack").classList.add("on");
 }
 
-/* the copter: rotor text scrolls, the tail rotor turns; the sweep across the sky is CSS */
+/* the copter: the main rotor's text scrolls, the tail rotor turns; the sweep
+   across the sky is CSS. The tail rotor is the L-O-L at the back: four blades
+   around the hub, so half a turn swaps the upright cross for the diagonal one
+   and the three cells stay three characters wide. */
 const ROT = "ROFL:ROFL:LOL:ROFL:ROFL:";
-/* four phases of one blade pair, a quarter turn apart. ROT is 24 characters,
-   a multiple of 4, so the turn stays continuous across the scroll's wrap. */
-const TAIL = ["I   I", "/   /", "-   -", "\\   \\"];
+const TAIL = [[" L ", "LOL", " L "], ["L L", " O ", "L L"]];
 let rk = 0;
 setInterval(() => {
   if (document.hidden || REDUCE.matches) return;
   rk = (rk + 1) % ROT.length;
   $("#rotor").textContent = (ROT.slice(rk) + ROT.slice(0, rk)).slice(0, 23);
-  $("#tail").textContent = TAIL[rk % TAIL.length];
+  const t = TAIL[(rk >> 1) % TAIL.length];
+  $("#tr1").textContent = t[0]; $("#tr2").textContent = t[1]; $("#tr3").textContent = t[2];
 }, 70);
 $("#copter").classList.add("fly");
 function flyover() { const c = $("#copter"); c.classList.remove("fly"); void c.offsetWidth; c.classList.add("fly"); }
