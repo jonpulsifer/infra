@@ -8,10 +8,9 @@
 # publish the `ds_record` output so DNSSEC leaves pending.
 
 # Two of these settings are caching decisions. `always_online` is off because
-# it serves Internet Archive copies of pages the crawler has never seen here,
-# and enabling it makes Cloudflare ignore the `stale-if-error` and
-# `stale-while-revalidate` directives, which serve the edge's own copy when
-# the origin 5xxes. `browser_cache_ttl = 0` is "Respect Existing Headers":
+# it has nothing to serve: a site here is a name the Internet Archive has
+# never crawled, so the feature can only turn a down origin into a 404 from
+# somebody else's cache. `browser_cache_ttl = 0` is "Respect Existing Headers":
 # the zone default of four hours otherwise overrides the origin's `max-age`
 # on every extension Cloudflare caches by default, so a 60-second asset TTL
 # reaches browsers as 14400.
@@ -81,7 +80,8 @@ resource "cloudflare_dns_record" "www_kthx_dev" {
 # Cloudflare caches by extension and never caches HTML on its own, so every
 # site document pays a full origin round-trip. These rules cache what the
 # origin says is cacheable and keep the data plane out of it. Cache rules
-# stack and the last match wins per setting, so the bypass rule is last.
+# stack and the last match wins per setting, so the bypass rule is last —
+# which is also why it has to spell out that `/_/sdk.js` is not data.
 resource "cloudflare_ruleset" "kthx_dev_cache" {
   zone_id     = cloudflare_zone.kthx_dev.id
   name        = "cache"
@@ -110,8 +110,8 @@ resource "cloudflare_ruleset" "kthx_dev_cache" {
       }
     },
     {
-      description = "the data plane and the API are never cached"
-      expression  = "(starts_with(http.request.uri.path, \"/_/\")) or (http.host eq \"kthx.dev\" and starts_with(http.request.uri.path, \"/kthx/\"))"
+      description = "the data plane and the API are never cached; the SDK is not data"
+      expression  = "(starts_with(http.request.uri.path, \"/_/\") and http.request.uri.path ne \"/_/sdk.js\") or (http.host eq \"kthx.dev\" and starts_with(http.request.uri.path, \"/kthx/\"))"
       action      = "set_cache_settings"
       enabled     = true
       action_parameters = {
