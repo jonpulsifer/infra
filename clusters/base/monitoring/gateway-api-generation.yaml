@@ -1,0 +1,155 @@
+---
+# A controller that stops reconciling reports nothing: the objects it owns keep
+# serving whatever it last programmed, and every readiness condition on them
+# stays True because it was true when it was written. On 2026-08-24 the leader
+# cilium-operator lost an RBAC race with a restarting API server, failed to
+# start its Gateway API controller, and logged the start as successful. For
+# five days the Gateway was Programmed, the HTTPRoute was Accepted, all 30 Flux
+# Kustomizations were Ready at the newest revision, and an edited HTTPRoute
+# never reached Envoy. The one field that disagreed was the route's
+# `metadata.generation: 2` against its `observedGeneration: 1`.
+#
+# Nothing in kube-state-metrics' built-in collectors reads a CRD, so this
+# config is what turns that field into a series and the rule below is what
+# reads it. Both clusters point their prom-stack at this ConfigMap by name
+# (`kube-state-metrics.customResourceState` in clusters/*/monitoring/
+# kube-prometheus.yaml), which also carries the list/watch RBAC it needs.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: kube-state-metrics-gateway-api
+  namespace: monitoring
+data:
+  # `config.yaml` is the key name the chart passes on the command line.
+  # kube-state-metrics reads it once at startup and does not watch it, so an
+  # edit here only takes effect when its pod next starts.
+  config.yaml: |
+    spec:
+      resources:
+        - groupVersionKind:
+            group: gateway.networking.k8s.io
+            version: v1
+            kind: Gateway
+          labelsFromPath:
+            namespace: [metadata, namespace]
+            name: [metadata, name]
+          metrics:
+            - name: gateway_generation
+              help: metadata.generation of a Gateway
+              each:
+                type: Gauge
+                gauge:
+                  path: [metadata, generation]
+            - name: gateway_observed_generation
+              help: The Gateway generation its controller last programmed
+              each:
+                type: Gauge
+                gauge:
+                  path: [status, conditions, "[type=Programmed]"]
+                  valueFrom: [observedGeneration]
+        - groupVersionKind:
+            group: gateway.networking.k8s.io
+            version: v1
+            kind: HTTPRoute
+          labelsFromPath:
+            namespace: [metadata, namespace]
+            name: [metadata, name]
+          metrics:
+            - name: httproute_generation
+              help: metadata.generation of an HTTPRoute
+              each:
+                type: Gauge
+                gauge:
+                  path: [metadata, generation]
+            - name: httproute_observed_generation
+              help: The HTTPRoute generation its controller last accepted
+              each:
+                type: Gauge
+                gauge:
+                  # One series per parent that has written status. The
+                  # `min by` in the rule below collapses them to the
+                  # most-behind parent that reported; a parent that never
+                  # wrote status at all has no series and is invisible to
+                  # both arms. Every route on both clusters is single-parent,
+                  # so that gap is latent.
+                  path: [status, parents]
+                  labelsFromPath:
+                    controller: [controllerName]
+                  valueFrom: [conditions, "[type=Accepted]", observedGeneration]
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: gateway-api
+  namespace: monitoring
+  labels:
+    lolwtf.ca/service: gateway-api
+    release: prom-stack
+spec:
+  groups:
+    - name: gateway-api
+      rules:
+        # Two arms, because an unreconciled object fails in two shapes. The
+        # second is the lag: the controller wrote a status once and has not
+        # come back for the newer spec. The first is an object it has never
+        # touched at all — `status.parents` is empty, so there is no observed
+        # series to subtract from and the join alone would drop it silently.
+        # A route created while the controller is wedged is exactly that case.
+        #
+        # `>` binds tighter than `unless`, which binds tighter than `or`, so
+        # the comparison applies to the arithmetic arm only. The arms carry
+        # different values — a generation and a lag — so neither annotation
+        # templates `$value`.
+        #
+        # 10m is far past the seconds Cilium takes on a healthy route and far
+        # short of noticing this five days later.
+        - alert: HTTPRouteNotReconciled
+          expr: |
+            kube_customresource_httproute_generation
+              unless on (namespace, name)
+            kube_customresource_httproute_observed_generation
+            or
+            kube_customresource_httproute_generation
+              - on (namespace, name) group_left ()
+            min by (namespace, name) (kube_customresource_httproute_observed_generation)
+              > 0
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            message: "HTTPRoute {{ $labels.namespace }}/{{ $labels.name }} has not been reconciled by its controller"
+            description: "The route's spec has moved past what any controller wrote back into its status, so Envoy still serves the previous hostnames and backends while the object reports Accepted. Compare `kubectl get httproute -n {{ $labels.namespace }} {{ $labels.name }} -o jsonpath='{.metadata.generation} {.status.parents[*].conditions[*].observedGeneration}'`, then check whether the leader cilium-operator (lease kube-system/cilium-operator-resource-lock) logged `initGatewayAPIController` without an error."
+
+        - alert: GatewayNotReconciled
+          expr: |
+            kube_customresource_gateway_generation
+              unless on (namespace, name)
+            kube_customresource_gateway_observed_generation
+            or
+            kube_customresource_gateway_generation
+              - on (namespace, name) group_left ()
+            min by (namespace, name) (kube_customresource_gateway_observed_generation)
+              > 0
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            message: "Gateway {{ $labels.namespace }}/{{ $labels.name }} has not been reconciled by its controller"
+            description: "The Gateway's listeners, addresses or TLS config have moved past what the controller last programmed, while its Programmed condition still reports the older generation as True. Same first check as HTTPRouteNotReconciled: the leader cilium-operator."
+
+        # Both alerts above are readings of one kube-state-metrics config. If
+        # its RBAC is wrong or a CRD is gone, the series disappear and the
+        # silence reads exactly like a fleet with nothing wrong. Each kind is
+        # its own resource block with its own RBAC, so either family can go
+        # quiet alone — every cluster here serves its apps through a Gateway
+        # and HTTPRoutes, so neither is ever legitimately absent. `absent()`
+        # over a bare metric name carries no labels, so the alert cannot say
+        # which family went; the description says where to look.
+        - alert: GatewayAPIMetricsMissing
+          expr: absent(kube_customresource_httproute_generation) or absent(kube_customresource_gateway_generation)
+          for: 15m
+          labels:
+            severity: critical
+          annotations:
+            message: kube-state-metrics has stopped exporting Gateway API generations
+            description: "kube_customresource_httproute_generation or kube_customresource_gateway_generation has had no series for 15 minutes. The reconciliation alert reading whichever is gone is blind until it returns — check the kube-state-metrics pod's logs in monitoring for a custom-resource-state config or RBAC error, then that it still mounts the kube-state-metrics-gateway-api ConfigMap."

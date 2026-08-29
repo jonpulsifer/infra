@@ -30,21 +30,21 @@ targets() {
   while IFS= read -r path; do
     [[ -n "$path" ]] || continue
     case "$path" in
-      flake.nix|flake.lock|nix/*|apps/ddnsd/*|dotfiles/*|clusters/folly/config/cluster-topology.json|clusters/offsite/config/cluster-topology.json|clusters/folly/config/lab-topology.json|.github/workflows/nix-ci.yaml)
-        target_set[nix:flake-check]=1
+      flake.nix | flake.lock | nix/* | apps/ddnsd/* | dotfiles/* | clusters/folly/config/cluster-topology.json | clusters/offsite/config/cluster-topology.json | clusters/folly/config/lab-topology.json | .github/workflows/nix-ci.yaml)
+        target_set["nix:flake-check"]=1
         ;;
     esac
 
     case "$path" in
-      .github/scripts/validation-impact.sh|.github/workflows/terraform.yml)
+      .github/scripts/validation-impact.sh | .github/workflows/terraform.yml)
         while IFS= read -r root; do
           target_set["terraform:$root"]=1
         done < <(terraform_roots)
         ;;
-      clusters/folly/config/lab-topology.json|terraform/network/unifi/folly/clients.yaml)
-        target_set[terraform:terraform/network/unifi/folly]=1
+      clusters/folly/config/lab-topology.json | terraform/network/unifi/folly/clients.yaml)
+        target_set["terraform:terraform/network/unifi/folly"]=1
         ;;
-      *.tf|*/.terraform.lock.hcl)
+      *.tf | */.terraform.lock.hcl)
         target=$(terraform_root_for_path "$path" || true)
         [[ -n "${target:-}" ]] && target_set["$target"]=1
         ;;

@@ -171,6 +171,22 @@ spec:
         enabled: true
         storageClassName: local-path
         size: 1Gi
+    kube-state-metrics:
+      # Turns Gateway API generations into series; the config and the alerts
+      # that read them are in ../../base/monitoring/gateway-api-generation.yaml.
+      customResourceState:
+        enabled: true
+        create: false
+        name: kube-state-metrics-gateway-api
+      rbac:
+        # The chart grants the built-in collectors' RBAC and nothing else, so a
+        # custom-resource-state config with no matching rule here starts clean
+        # and exports an empty set. GatewayAPIMetricsMissing is what catches
+        # that.
+        extraRules:
+          - apiGroups: [gateway.networking.k8s.io]
+            resources: [gateways, httproutes]
+            verbs: [list, watch]
     prometheus-node-exporter:
       # A host service that wants metrics scraped drops a .prom file in
       # /var/lib/prometheus-node-exporter-text-files, and this picks it up

@@ -47,20 +47,20 @@ assert_targets 'a bootstrap Terraform file validates its bootstrap root' \
 
 roots=$("$script" terraform-roots)
 for root in clusters/folly/bootstrap clusters/offsite/bootstrap; do
-  if ! grep -qxF "$root" <<< "$roots"; then
+  if ! grep -qxF "$root" <<<"$roots"; then
     printf 'FAIL: Terraform root list omits %s\n' "$root" >&2
     exit 1
   fi
 done
 
-if grep -qxF terraform/modules/gce-vpc <<< "$roots"; then
+if grep -qxF terraform/modules/gce-vpc <<<"$roots"; then
   echo 'FAIL: reusable Terraform modules are not validation roots' >&2
   exit 1
 fi
 
 script_targets=$(printf '%s\n' '.github/scripts/validation-impact.sh' | "$script" targets)
 for root in clusters/folly/bootstrap clusters/offsite/bootstrap; do
-  if ! grep -qxF "terraform:$root" <<< "$script_targets"; then
+  if ! grep -qxF "terraform:$root" <<<"$script_targets"; then
     printf 'FAIL: routing module changes do not validate %s\n' "$root" >&2
     exit 1
   fi

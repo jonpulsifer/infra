@@ -19,6 +19,7 @@ jq = "latest"
 k9s = "latest"
 kubectl = "latest"
 kustomize = "latest"
+promtool = "latest"
 rust = "1.98.0"
 shellcheck = "latest"
 shfmt = "latest"
@@ -68,6 +69,10 @@ run = "bash scripts/alerts.sh"
 [tasks."k8s:render-apps"]
 description = "Render shared cluster app overlays and each cluster's monitoring overlay, then template referenced in-repo charts"
 run = "bash .github/scripts/render-cluster-apps.sh"
+
+[tasks."k8s:check-rules"]
+description = "Lint every rendered PrometheusRule and run the alert unit tests"
+run = "bash .github/scripts/check-prometheus-rules.sh"
 
 [tasks."tf:init"]
 description = "Initialize Terraform modules without backends"
@@ -155,7 +160,7 @@ run = [
 description = "List shell scripts in this repo"
 hide = true
 run = """
-grep -rl '^#!/usr/bin/env bash' dotfiles/.local/bin/* dotfiles/scripts/* scripts/* 2>/dev/null
+grep -rl '^#!/usr/bin/env bash' dotfiles/.local/bin/* dotfiles/scripts/* scripts/* .github/scripts/* 2>/dev/null
 """
 
 [tasks.format]
