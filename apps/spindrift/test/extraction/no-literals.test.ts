@@ -178,6 +178,7 @@ const PROJECT_ID_ALLOWLIST = new Set<string>([
   'cache-control',
   'content-type',
   'x-content-type-options',
+  'content-length',
   'if-none-match',
   'if-match',
   'x-filename',
