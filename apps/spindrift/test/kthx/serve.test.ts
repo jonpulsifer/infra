@@ -248,7 +248,7 @@ describe('the generic favicon', () => {
     const icon = await get('notes.kthx.test', '/favicon.ico');
     expect(icon!.status).toBe(200);
     expect(icon!.headers.get('content-type')).toBe('image/x-icon');
-    expect(icon!.headers.get('cache-control')).toBe('public, max-age=86400');
+    expect(icon!.headers.get('cache-control')).toBe('public, max-age=60');
     expect(icon!.headers.get('x-content-type-options')).toBe('nosniff');
     const bytes = await bytesOf(icon!);
     expect(Array.from(bytes.slice(0, 4))).toEqual([0, 0, 1, 0]); // an ICO directory

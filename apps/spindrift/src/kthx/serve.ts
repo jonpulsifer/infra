@@ -24,6 +24,7 @@ import { kthxReleases, kthxSites } from '../db/schema.ts';
 import { readStagedArchive, type SourceDepot } from '../storage/archives.ts';
 import { fetchableBundleUrl } from '../storage/signed-url.ts';
 import { sdkResponse, underscoreResponse } from './data.ts';
+import { FAVICON, FAVICON_DIGEST, FAVICON_PATH } from './favicon.ts';
 
 /** The zone kthx sites live in. `kthx.localhost` resolves to loopback for a local run. */
 export const KTHX_ZONE_VAR = 'KTHX_ZONE';
@@ -117,7 +118,10 @@ export function withKthxHost<T extends Record<string, unknown>>(
 
 const LANDING = join(import.meta.dir, 'landing.html');
 
-/** The apex: the landing page at `/`, the SDK at `/sdk.js`, nothing else. */
+/**
+ * The apex: the landing page at `/`, the SDK at `/sdk.js`, the generic
+ * favicon, nothing else.
+ */
 function apexResponse(request: Request, zone: string): Response {
   const pathname = new URL(request.url).pathname;
   if (pathname === '/sdk.js') return sdkResponse();
@@ -380,15 +384,16 @@ function file(
   path: string,
   found: SiteFile,
   status: number,
-  cache = 'public, max-age=60',
 ): Response {
   const etag = `"${digest}:${path}"`;
   const headers = {
     etag,
     'content-type': found.type,
-    'cache-control': cache,
+    'cache-control': 'public, max-age=60',
     'x-content-type-options': 'nosniff',
   };
+  // ponytail: exact match only, so a weak or multi-valued `if-none-match`
+  // refetches the body. Parse per RFC 9110 if an intermediary ever sends one.
   if (request.headers.get('if-none-match') === etag) {
     return new Response(null, { status: 304, headers });
   }
@@ -398,44 +403,8 @@ function file(
   });
 }
 
-// --- the generic favicon ----------------------------------------------------
-
-/**
- * The kthx dot, 32x32, `--hot` on `--paper`: what a kthx host answers at
- * `/favicon.ico` when it has none of its own.
- *
- * Base64 in the source rather than a file in the tree — 230 bytes of binary
- * is not worth a blob in a text repo, and every host serves the same bytes.
- */
-const FAVICON_PATH = '/favicon.ico';
-const FAVICON: SiteFile = {
-  bytes: Uint8Array.from(
-    atob(
-      'AAABAAEAICAAAAEAIADQAAAAFgAAAIlQTkcNChoKAAAADUlIRFIAAAAgAAAAIAgCAAAA/BjtowAAAJdJREFUeNpj4GUXoyliGLVg1ILhY4EMl0KkhEebchoQARlALtUsAJq1RKvyv/1WNAQUJMYaAhZYCZl8sFmNaToEAaWACsi3AOhAPKbD7cDvD3wWYA0ZrGFFjgVAdxFjOgTh8QROC4BJhXgLgIpJtgCYHIm3AKh48FlA8yCieSTTPJnSI6PRvKigR2FHj+J6tMoctWD4WwAAHXTjlJaX5F4AAAAASUVORK5CYII=',
-    ),
-    (character) => character.charCodeAt(0),
-  ),
-  type: 'image/x-icon',
-};
-
-/** Its own hash: there is no release digest behind these bytes to etag by. */
-const FAVICON_DIGEST = `sha256:${new Bun.CryptoHasher('sha256').update(FAVICON.bytes).digest('hex')}`;
-
-/**
- * A day, not a year and never `immutable`: the bytes never change, but the
- * answer for this URL does the moment a bundle ships an icon of its own.
- */
-const FAVICON_CACHE = 'public, max-age=86400';
-
 function faviconResponse(request: Request): Response {
-  return file(
-    request,
-    FAVICON_DIGEST,
-    FAVICON_PATH,
-    FAVICON,
-    200,
-    FAVICON_CACHE,
-  );
+  return file(request, FAVICON_DIGEST, FAVICON_PATH, FAVICON, 200);
 }
 
 // --- the page for a name nothing answers ----------------------------------
