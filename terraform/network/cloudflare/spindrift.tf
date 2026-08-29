@@ -44,6 +44,13 @@ module "tunnel_spindrift" {
         hostname = "*.${cloudflare_zone.wishin_app.name}"
         service  = "http://cilium-gateway-spindrift-apps.spindrift-apps.svc.cluster.local"
       },
+      # kthx.dev: the apex is the landing page and every `<name>.kthx.dev` is
+      # a site, both answered by the control plane behind the Apps gateway.
+      # No App owns the apex, so the module publishes its record here.
+      {
+        hostname = cloudflare_zone.kthx_dev.name
+        service  = "http://cilium-gateway-spindrift-apps.spindrift-apps.svc.cluster.local"
+      },
       {
         hostname = "*.${cloudflare_zone.kthx_dev.name}"
         service  = "http://cilium-gateway-spindrift-apps.spindrift-apps.svc.cluster.local"
@@ -92,6 +99,19 @@ resource "cloudflare_dns_record" "spindrift_apps_wildcard" {
   zone_id = cloudflare_zone.lolwtf_dev.id
   comment = "terraform managed"
   name    = "*.${cloudflare_zone.lolwtf_dev.name}"
+  content = module.tunnel_spindrift.cloudflare_tunnel_url
+  type    = "CNAME"
+  proxied = true
+  ttl     = 1
+}
+
+# kthx.dev is the second dedicated zone: nothing in it is hand-managed, every
+# name is a site the control plane serves, so the objection to a wildcard
+# record does not apply here either.
+resource "cloudflare_dns_record" "kthx_sites_wildcard" {
+  zone_id = cloudflare_zone.kthx_dev.id
+  comment = "terraform managed"
+  name    = "*.${cloudflare_zone.kthx_dev.name}"
   content = module.tunnel_spindrift.cloudflare_tunnel_url
   type    = "CNAME"
   proxied = true
