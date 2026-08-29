@@ -179,6 +179,7 @@ const PROJECT_ID_ALLOWLIST = new Set<string>([
   'content-type',
   'x-content-type-options',
   'if-none-match',
+  'if-match',
   'x-filename',
   'cf-connecting-ip',
   'no-cache',
@@ -233,10 +234,12 @@ const OBJECT_ID = /^[0-9a-f]{6,40}$/;
  *
  * An HTML document anywhere under `src/` is browser source for the same
  * reason — `src/kthx/landing.html` is nothing but class names and headers —
- * and is scoped out with it.
+ * and is scoped out with it, as is the one script a kthx site loads.
  */
 const BROWSER_SOURCE = (path: string): boolean =>
-  path.startsWith('src/web/') || path.endsWith('.html');
+  path.startsWith('src/web/') ||
+  path.endsWith('.html') ||
+  path === 'src/kthx/sdk.js';
 
 /** Files that are not text, and would only produce noise. */
 const BINARY = /\.(png|jpe?g|gif|ico|webp|avif|woff2?|ttf|otf|pdf|zip|gz)$/i;

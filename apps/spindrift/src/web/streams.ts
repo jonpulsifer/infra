@@ -42,6 +42,7 @@ import {
   type FunctionDeployer,
   type FunctionTarget,
 } from '../functions/contract.ts';
+import { type KthxSocketData, kthxSocket } from '../kthx/data.ts';
 import {
   ATTEMPT_LOG_TEXT_PATH,
   ATTEMPT_STREAM_PATH,
@@ -108,10 +109,17 @@ interface FunctionSocketData {
   closed: boolean;
 }
 
+/**
+ * A kthx site's socket (`src/kthx/data.ts`) — the one kind here that is
+ * client-driven and unauthenticated, reached on a site host rather than
+ * under `/internal/streams/`. It shares this union only because `Bun.serve`
+ * takes one `websocket` handler per server.
+ */
 export type StreamSocketData =
   | AttemptSocketData
   | RuntimeSocketData
-  | FunctionSocketData;
+  | FunctionSocketData
+  | KthxSocketData;
 
 type StreamHandler = (
   request: Request,
@@ -502,10 +510,10 @@ export async function readStreamPage(
       limit: 200,
     });
   }
-  if (data.kind === 'function') {
-    // A function-log socket runs its own `tail` loop from `open`, never the
-    // pump below — this is not a page it can read.
-    throw new Error('readStreamPage does not serve function-log sockets');
+  if (data.kind === 'function' || data.kind === 'kthx') {
+    // A function-log socket runs its own `tail` loop from `open`, and a kthx
+    // socket is driven by its client — neither is a page to read.
+    throw new Error(`readStreamPage does not serve ${data.kind} sockets`);
   }
 
   const page = await readAttemptStream(
@@ -537,6 +545,8 @@ export async function readStreamPage(
 
 export const streamWebSocket: Bun.WebSocketHandler<StreamSocketData> = {
   open(socket) {
+    // A kthx socket waits to be told what to watch or join.
+    if (socket.data.kind === 'kthx') return;
     // A function-log socket has no page to pump — it drives the deployer's
     // own `tail` generator for as long as the connection lives.
     if (socket.data.kind === 'function') {
@@ -553,10 +563,18 @@ export const streamWebSocket: Bun.WebSocketHandler<StreamSocketData> = {
     }
     void pump(socket);
   },
-  message() {
-    // Server-to-client only. A cursor is established by the authenticated URL.
+  message(socket, message) {
+    // The streams are server-to-client only: a cursor is established by the
+    // authenticated URL. A kthx socket is the one that listens.
+    if (socket.data.kind === 'kthx') {
+      kthxSocket.message(socket, socket.data, message);
+    }
   },
   close(socket) {
+    if (socket.data.kind === 'kthx') {
+      kthxSocket.close(socket, socket.data);
+      return;
+    }
     socket.data.closed = true;
     if (socket.data.kind === 'attempt') {
       socket.data.unsubscribe?.();
@@ -604,11 +622,11 @@ async function tailFunctionLogs(
 async function pump(
   socket: Bun.ServerWebSocket<StreamSocketData>,
 ): Promise<void> {
+  // Neither a function-log socket nor a kthx one reaches `pump` — `open`
+  // routes them elsewhere — but the type is shared, so this narrows the rest
+  // of the function back to the two kinds `readStreamPage` serves.
+  if (socket.data.kind === 'function' || socket.data.kind === 'kthx') return;
   if (socket.data.closed) return;
-  // A function-log socket never reaches `pump` — `open` routes it to
-  // `tailFunctionLogs` instead — but the type is shared, so this narrows the
-  // rest of the function back to the two kinds `readStreamPage` serves.
-  if (socket.data.kind === 'function') return;
   try {
     const page = await readStreamPage(socket.data);
     if (page.kind === 'attempt') {

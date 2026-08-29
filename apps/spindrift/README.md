@@ -872,8 +872,14 @@ gets a file from its serving release, and the five `/kthx/*` paths in
 `src/kthx/sites.ts` are the API. The zone is **`KTHX_ZONE`** (default
 `kthx.dev`; `kthx.localhost` for a local run, since `*.localhost` resolves to
 loopback). The edge's part — the zone, the tunnel, and the wildcard route to
-this process — lives outside this app. The landing page's SDK tab describes
-`/_/sdk.js`, which is not built yet; the route answers 404 until it is.
+this process — lives outside this app.
+
+Every site also answers under `/_/` (`src/kthx/data.ts`): `db` is JSON by key
+in `kthx_kv`, written by anyone on the site's origin and compared-and-swapped
+through `if-match`; `me` is the anonymous `kthx_me` cookie; `ws` is the one
+socket a tab opens, fanning store writes and room messages out through Bun's
+pub/sub. `src/kthx/sdk.js` fronts the three as `window.kthx`, served as
+`/_/sdk.js` on a site and `/sdk.js` on the apex.
 
 ## Testing
 
