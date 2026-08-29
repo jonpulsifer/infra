@@ -35,7 +35,14 @@ metadata:
     # an RFC1918 A record over the whole zone, claimed by a second source. The
     # wildcard record this route needs is the one Terraform owns
     # (`terraform/network/cloudflare/spindrift.tf`), pointed at the tunnel.
+    #
+    # Both spellings: external-dns v0.22.0 moved the default annotation prefix
+    # with no fallback, and a controller reads exactly one of them. Carrying the
+    # pair means the pin in
+    # `clusters/base/networking/external-dns/helm-release.yaml` can move without
+    # this route losing its hold-out and claiming the wildcard.
     external-dns.alpha.kubernetes.io/controller: lolwtf.ca/spindrift-dnsendpoint
+    external-dns.kubernetes.io/controller: lolwtf.ca/spindrift-dnsendpoint
 spec:
   parentRefs:
     - name: spindrift-apps

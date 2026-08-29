@@ -60,9 +60,19 @@ spec:
       The proxy flag travels as provider config rather than an annotation
       because the `crd` source passes `providerSpecific` through untouched,
       where an annotation on this object would be ignored.
+
+      Both spellings of the prefix, because external-dns builds this key as
+      `AnnotationKeyPrefix + "cloudflare-proxied"` and v0.22.0 moved that
+      default with no fallback — a controller reads one and is blind to the
+      other. The unmatched entry costs nothing (`shouldBeProxied` scans for its
+      one name and ignores the rest), and carrying the pair is what lets the
+      pin in `clusters/base/networking/external-dns/helm-release.yaml` move
+      without every record silently losing its proxy.
       */}}
       providerSpecific:
         - name: external-dns.alpha.kubernetes.io/cloudflare-proxied
+          value: {{ $proxied | quote }}
+        - name: external-dns.kubernetes.io/cloudflare-proxied
           value: {{ $proxied | quote }}
     {{- end }}
 {{- end }}

@@ -86,7 +86,15 @@ metadata:
     {{- include "spindrift-app.labels" . | nindent 4 }}
   annotations:
     {{- include "spindrift-app.contractAnnotations" . | nindent 4 }}
+    {{/*
+    Both spellings: external-dns v0.22.0 moved the default annotation prefix
+    with no fallback, and a controller reads exactly one of them. A hold-out
+    written under the prefix the controller is not pinned to is no hold-out at
+    all — the route source would claim this Component's own name at the shared
+    gateway's address. Carrying the pair makes moving the pin inert.
+    */}}
     external-dns.alpha.kubernetes.io/controller: lolwtf.ca/spindrift-dnsendpoint
+    external-dns.kubernetes.io/controller: lolwtf.ca/spindrift-dnsendpoint
 spec:
   parentRefs:
     - name: {{ .Values.platform.gateway.name }}
