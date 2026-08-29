@@ -66,9 +66,41 @@ export const RESERVED_NAMES: ReadonlySet<string> = new Set([
 ]);
 
 export const MAX_ARCHIVE_BYTES = 25 * 1024 * 1024;
-/** What an archive may unpack to; the compressed size says nothing about it. */
-export const MAX_UNPACKED_BYTES = 100 * 1024 * 1024;
+/**
+ * What an archive may unpack to; the compressed size says nothing about it.
+ *
+ * A memory ceiling before it is a product one, and measured rather than added
+ * up from the buffers. Unpacking costs about seven times the unpacked size in
+ * resident memory: the ZIP path inflates every entry, builds a tar from them
+ * and gzips it, `siteFiles` gunzips that tar again to build the Map, and none
+ * of those pages come back — `Bun.gc(true)` moves the number not at all, and
+ * the cgroup counts resident memory rather than the live set. At 32 MiB the
+ * process peaks around 400 MiB above idle with the cache full, which is what
+ * the 768 MiB web pod holds; at 100 MiB a single upload peaked past 1 GiB.
+ */
+export const MAX_UNPACKED_BYTES = 32 * 1024 * 1024;
 export const MAX_FILES = 2000;
+
+/**
+ * How many uploads may be unpacking at once, for the whole process.
+ *
+ * The token bucket below counts requests per address and says nothing about
+ * what one of them costs: thirty in a burst is thirty archives inflating
+ * together. Two rather than one because the second is nearly free — it
+ * inflates into pages the first already took from the kernel, so two measure
+ * within about 15 MiB of one. What buys the headroom is `MAX_UNPACKED_BYTES`,
+ * not this number: about 104 MiB idle, the ~400 MiB peak above it, and
+ * `CACHE_BYTES` in `serve.ts` leave roughly a quarter of the pod spare.
+ */
+// ponytail: a counter, so an upload that finds it full is refused rather than
+// queued — what it would wait for is memory, and a queue holds the bytes it is
+// queueing. The slot is held across the depot upload too, which is why that
+// upload carries a deadline (`UPLOAD_TIMEOUT_MS` in `storage/cloud.ts`): the
+// counter alone would let two stalled sockets refuse every release until the
+// pod restarted. Streaming the archive to disk instead of holding it is what
+// would let the ceiling above grow.
+export const MAX_UPLOADS = 2;
+let uploading = 0;
 
 /** Why a name cannot be claimed, or `null`. */
 export function nameProblem(name: string): 'INVALID_NAME' | 'RESERVED' | null {
@@ -302,14 +334,7 @@ const BUNDLE_CODES = {
   TOO_LARGE: 'TOO_LARGE',
 } as const;
 
-const release: OwnedAct = async (request, deps, site, server) => {
-  if (limited(request, server)) {
-    return refuse(
-      429,
-      'RATE_LIMITED',
-      'too many uploads from here; wait a minute',
-    );
-  }
+const stage: OwnedAct = async (request, deps, site) => {
   const filename = request.headers.get('x-filename')?.trim() || 'site.zip';
   const bytes = new Uint8Array(await request.arrayBuffer());
   if (bytes.byteLength > MAX_ARCHIVE_BYTES) {
@@ -410,6 +435,35 @@ const release: OwnedAct = async (request, deps, site, server) => {
     },
     { status: 201 },
   );
+};
+
+const release: OwnedAct = async (request, deps, site, server) => {
+  // Ahead of the rate limit, because a refusal this caller did not cause must
+  // not spend its allowance: the message says to come back in a moment, and a
+  // client that obeys would otherwise burn its burst on a neighbour's uploads
+  // and land on 429. Not 429 itself either — the process is full, which is a
+  // state that clears on its own, and 503 is the status a client comes back
+  // from.
+  if (uploading >= MAX_UPLOADS) {
+    return refuse(
+      503,
+      'BUSY',
+      `${MAX_UPLOADS} uploads are already unpacking; try again in a moment`,
+    );
+  }
+  if (limited(request, server)) {
+    return refuse(
+      429,
+      'RATE_LIMITED',
+      'too many uploads from here; wait a minute',
+    );
+  }
+  uploading += 1;
+  try {
+    return await stage(request, deps, site);
+  } finally {
+    uploading -= 1;
+  }
 };
 
 const serve: OwnedAct = async (request, deps, site) => {

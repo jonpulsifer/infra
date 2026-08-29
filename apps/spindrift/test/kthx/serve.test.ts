@@ -3,8 +3,12 @@
  * and what a site answers with from a bundle staged through the API.
  */
 import { describe, expect, test } from 'bun:test';
+import { join } from 'node:path';
+import { GCP_CREDENTIALS_VAR } from '../../src/config/federation-credential.ts';
 import {
+  KTHX_BUCKET_VAR,
   type KthxDeps,
+  kthxDepot,
   kthxZone,
   siteOf,
   withKthxHost,
@@ -108,6 +112,36 @@ describe('the zone', () => {
     expect(at('spindrift.example.test')).toBeNull();
     expect(at('kthx.test.example')).toBeNull();
     expect(at('')).toBeNull();
+  });
+});
+
+describe('the depot', () => {
+  const CREDENTIAL = join(import.meta.dir, '../fixtures/gcp-credentials.json');
+
+  test('is the named bucket and the mounted credential, and no manifest', async () => {
+    expect(
+      await kthxDepot({
+        [KTHX_BUCKET_VAR]: ' sites-bundles ',
+        [GCP_CREDENTIALS_VAR]: CREDENTIAL,
+      }),
+    ).toEqual({
+      bucket: 'sites-bundles',
+      federation: {
+        audience:
+          '//iam.example.test/projects/1/locations/global/workloadIdentityPools/example/providers/cluster',
+        tokenUrl: 'https://sts.example.test/v1/token',
+        tokenPath: '/var/run/secrets/cloud/token',
+        impersonationUrl:
+          'https://iamcredentials.example.test/v1/projects/-/serviceAccounts/spindrift@example-home.example.test:generateAccessToken',
+      },
+    });
+  });
+
+  test('is null where the deployment names none, so the caller keeps its fallback', async () => {
+    expect(await kthxDepot({ [GCP_CREDENTIALS_VAR]: CREDENTIAL })).toBeNull();
+    expect(await kthxDepot({ [KTHX_BUCKET_VAR]: '  ' })).toBeNull();
+    // A bucket with nothing to federate with is not a depot either.
+    expect(await kthxDepot({ [KTHX_BUCKET_VAR]: 'sites-bundles' })).toBeNull();
   });
 });
 
