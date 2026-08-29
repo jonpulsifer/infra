@@ -42,7 +42,7 @@ import {
   type FunctionDeployer,
   type FunctionTarget,
 } from '../functions/contract.ts';
-import { type KthxSocketData, kthxSocket } from '../kthx/data.ts';
+import { type KthxSocketData, kthxSocket } from '../kthx/underscore.ts';
 import {
   ATTEMPT_LOG_TEXT_PATH,
   ATTEMPT_STREAM_PATH,

@@ -1,0 +1,12 @@
+{
+  "extends": "@repo/typescript-config/base.json",
+  "compilerOptions": {
+    "module": "Preserve",
+    "moduleResolution": "bundler",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "types": ["bun"],
+    "allowImportingTsExtensions": true
+  },
+  "include": ["cli/**/*", "test/**/*"],
+  "exclude": ["node_modules"]
+}

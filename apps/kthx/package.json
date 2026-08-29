@@ -1,0 +1,19 @@
+{
+  "name": "kthx",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "kthx": "cli/main.ts"
+  },
+  "scripts": {
+    "lint": "biome check .",
+    "lint:fix": "biome check . --write",
+    "typecheck": "tsc --noEmit",
+    "test": "bun test"
+  },
+  "devDependencies": {
+    "@repo/typescript-config": "workspace:*",
+    "@types/bun": "1.4.0",
+    "typescript": "5.9.3"
+  }
+}

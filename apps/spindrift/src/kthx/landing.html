@@ -350,7 +350,8 @@ LOL===__           \
     <div class="sechead">Or use the command line <span class="sp"></span></div>
     <div class="term">
       <div class="termbar"><i></i><i></i><i></i><span>~/notes</span></div>
-      <pre class="sh"><span class="p">$</span> <b>bun add -g kthx</b>
+      <!-- ponytail: the CLI lives in the repo and is not published; `bun add -g kthx` is the upgrade path once it is. -->
+      <pre class="sh"><span class="p">$</span> <b>alias kthx="bun ~/src/infra/apps/kthx/cli/main.ts"</b>  <i># apps/kthx, from a checkout of this repo</i>
 
 <span class="p">$</span> <b>kthx dev</b>
 <i>  serves ./ on http://localhost:4321 — sdk in local mode, data stays on this machine</i>
@@ -358,10 +359,11 @@ LOL===__           \
 <span class="p">$</span> <b>kthx deploy</b>
 <i>  no name set — uses</i> <u>plum-otter-41</u>
 <i>  6 files &middot; 214 KB &middot; sha256:8c1f…d902</i>
-<i>  →</i> <u id="cli1"></u>  <i>(3.1s)</i>
+<i>  →</i> <u id="cli1"></u>  <i>(3.1s) — v1</i>
 
 <span class="p">$</span> <b>kthx deploy</b>
-<i>  →</i> <u id="cli2"></u>  <i>(1.4s, 2 files changed) — v2</i>
+<i>  6 files &middot; 214 KB &middot; sha256:2a77…f0c4</i>
+<i>  →</i> <u id="cli2"></u>  <i>(1.4s) — v2</i>
 
 <span class="p">$</span> <b>kthx rollback</b>
 <i>  v2 → v1 · held: new uploads do not replace v1 until you run</i> <b>kthx release</b></pre>
