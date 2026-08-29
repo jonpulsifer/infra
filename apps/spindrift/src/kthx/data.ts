@@ -24,6 +24,9 @@ export const MAX_KEY_CHARS = 256;
 export const MAX_VALUE_BYTES = 64 * 1024;
 export const MAX_LIST = 500;
 const MAX_ROOM_CHARS = 128;
+// ponytail: flat per-socket ceilings; per-site quotas when a site outgrows them.
+const MAX_ROOMS = 32;
+const MAX_FRAME_BYTES = 16 * 1024;
 
 const SDK = pathJoin(import.meta.dir, 'sdk.js');
 
@@ -123,6 +126,9 @@ async function list(
     return refuse(405, 'METHOD_NOT_ALLOWED', '/_/db is read with GET');
   }
   const prefix = new URL(request.url).searchParams.get('prefix') ?? '';
+  if (prefix.includes('\0')) {
+    return refuse(400, 'INVALID_KEY', 'a prefix has no NUL');
+  }
   const rows = await deps.db
     .select({ key: kthxKv.key, value: VALUE_TEXT })
     .from(kthxKv)
@@ -145,11 +151,11 @@ async function kv(
   deps: KthxDeps,
   server: Bun.Server<unknown> | undefined,
 ): Promise<Response> {
-  if (key.length === 0 || key.length > MAX_KEY_CHARS) {
+  if (key.length === 0 || key.length > MAX_KEY_CHARS || key.includes('\0')) {
     return refuse(
       400,
       'INVALID_KEY',
-      `a key is 1 to ${MAX_KEY_CHARS} characters`,
+      `a key is 1 to ${MAX_KEY_CHARS} characters, none of them NUL`,
     );
   }
   const at = and(eq(kthxKv.site, site), eq(kthxKv.key, key));
@@ -171,27 +177,38 @@ async function kv(
       });
     }
     case 'PUT': {
+      const tooLarge = refuse(
+        413,
+        'TOO_LARGE',
+        `a value is at most ${MAX_VALUE_BYTES / 1024} KiB`,
+      );
+      // Canonical JSON only drops whitespace, so a body over twice the cap
+      // cannot fit under it; refusing here keeps a huge body out of the parser.
+      if (Number(request.headers.get('content-length')) > 2 * MAX_VALUE_BYTES) {
+        return tooLarge;
+      }
+      const body = await request.text();
+      if (Buffer.byteLength(body) > 2 * MAX_VALUE_BYTES) return tooLarge;
       let value: unknown;
+      let text: string;
       try {
-        value = JSON.parse(await request.text());
+        value = JSON.parse(body);
+        text = canonical(value);
       } catch {
         return refuse(400, 'INVALID_VALUE', 'the body is not JSON');
       }
-      if (value === null) {
+      if (text === 'null') {
         return refuse(
           400,
           'INVALID_VALUE',
           'a value is not null; DELETE removes a key',
         );
       }
-      const text = canonical(value);
-      if (Buffer.byteLength(text) > MAX_VALUE_BYTES) {
-        return refuse(
-          413,
-          'TOO_LARGE',
-          `a value is at most ${MAX_VALUE_BYTES / 1024} KiB`,
-        );
+      // jsonb has no NUL; `JSON.stringify` writes one as an unescaped `\u0000`.
+      if (/(^|[^\\])(\\\\)*\\u0000/.test(text)) {
+        return refuse(400, 'INVALID_VALUE', 'a value has no NUL');
       }
+      if (Buffer.byteLength(text) > MAX_VALUE_BYTES) return tooLarge;
       const etag = `"${createHash('sha256').update(text).digest('hex')}"`;
       const expected = request.headers.get('if-match');
       const written =
@@ -199,7 +216,7 @@ async function kv(
           ? await deps.db
               .update(kthxKv)
               .set({ value, etag, updatedAt: new Date() })
-              .where(and(at, eq(kthxKv.etag, expected)))
+              .where(expected === '*' ? at : and(at, eq(kthxKv.etag, expected)))
               .returning({ key: kthxKv.key })
           : request.headers.get('if-none-match') === '*'
             ? await deps.db
@@ -283,6 +300,7 @@ type Socket = Bun.ServerWebSocket<unknown>;
 /** The socket handlers `streamWebSocket` hands a `kthx` socket to. */
 export const kthxSocket = {
   message(socket: Socket, data: KthxSocketData, raw: string | Buffer): void {
+    if (raw.length > MAX_FRAME_BYTES) return;
     let frame: unknown;
     try {
       frame = JSON.parse(String(raw));
@@ -302,8 +320,11 @@ export const kthxSocket = {
     ) {
       return;
     }
-    if (t === 'join') join(socket, data, room);
-    else if (t === 'leave') leave(socket, data, room);
+    if (t === 'join') {
+      if (data.rooms.size < MAX_ROOMS || data.rooms.has(room)) {
+        join(socket, data, room);
+      }
+    } else if (t === 'leave') leave(socket, data, room);
     else if (t === 'send' && data.rooms.has(room)) {
       socket.publish(
         roomTopic(data.site, room),

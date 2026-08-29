@@ -96,6 +96,8 @@
   const rooms = new Map();
   let socket = null;
   let backoff = 500;
+  /** Frames sent before the socket is open, in order, behind the replayed watch and joins. */
+  const pending = [];
 
   function connect() {
     if (socket !== null) return;
@@ -108,6 +110,7 @@
         socket.send(JSON.stringify({ t: 'watch', prefix: '' }));
       for (const room of rooms.keys())
         socket.send(JSON.stringify({ t: 'join', room }));
+      for (const frame of pending.splice(0)) socket.send(frame);
     };
     socket.onmessage = (event) => dispatch(JSON.parse(event.data));
     socket.onclose = () => {
@@ -122,8 +125,12 @@
   function send(frame) {
     ready.then(() => {
       connect();
+      // `onopen` replays watches and joins from their own state; only what
+      // is not derivable from it waits.
       if (socket.readyState === WebSocket.OPEN)
         socket.send(JSON.stringify(frame));
+      else if (frame.t === 'send' || frame.t === 'leave')
+        pending.push(JSON.stringify(frame));
     });
   }
 

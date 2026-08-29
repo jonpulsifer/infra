@@ -142,6 +142,29 @@ describe('/_/db', () => {
     expect(
       (await call('/_/db/big', json('x'.repeat(MAX_VALUE_BYTES)))).status,
     ).toBe(413);
+    expect(
+      (await call('/_/db/votes', { method: 'PUT', body: '1e400' })).status,
+    ).toBe(400);
+    expect((await call('/_/db/a%00b', json(1))).status).toBe(400);
+    expect((await call('/_/db/votes', json('a\0b'))).status).toBe(400);
+    expect((await call('/_/db/votes', json('a\\u0000b'))).status).toBe(200);
+    expect((await call('/_/db?prefix=%00')).status).toBe(400);
+    expect(
+      (
+        await call('/_/db/deep', {
+          method: 'PUT',
+          body: '['.repeat(20000),
+        })
+      ).status,
+    ).toBe(400);
+    expect(
+      (
+        await call('/_/db/big', {
+          method: 'PUT',
+          body: ' '.repeat(3 * MAX_VALUE_BYTES),
+        })
+      ).status,
+    ).toBe(413);
     expect((await call('/_/db/votes', { method: 'POST' })).status).toBe(405);
     const nope = await call('/_/nope');
     expect(nope.status).toBe(404);

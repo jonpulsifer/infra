@@ -52,6 +52,7 @@ const SITE_ZIP = zipOf([
   { path: 'about/index.html', text: '<h1>about</h1>' },
   { path: '404.html', text: '<h1>lost</h1>' },
   { path: '_/secret.txt', text: 'reserved' },
+  { path: '_/index.html', text: 'reserved' },
 ]);
 
 /** A site claimed and uploaded through the API, so serving reads real rows. */
@@ -178,9 +179,11 @@ describe('a site', () => {
     expect(lost!.status).toBe(404);
     expect(await lost!.text()).toBe('<h1>lost</h1>');
 
-    const reserved = await get('notes.kthx.test', '/_/secret.txt');
-    expect(reserved!.status).toBe(404);
-    expect(await reserved!.text()).toContain('No site here yet.');
+    for (const path of ['/_/secret.txt', '/_']) {
+      const reserved = await get('notes.kthx.test', path);
+      expect(reserved!.status).toBe(404);
+      expect(await reserved!.text()).toContain('No site here yet.');
+    }
   });
 
   test('a wrapper directory is unwrapped, and an upload without 404.html gets the kthx page', async () => {

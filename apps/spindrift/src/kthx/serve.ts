@@ -323,7 +323,7 @@ async function siteResponse(
   }
   // `/_/` is kthx's on every site — `data.ts` answers it, a bundle file under
   // it is never served, and a claimed name has a `db` before it has a release.
-  if (pathname.startsWith('/_/')) {
+  if (pathname === '/_' || pathname.startsWith('/_/')) {
     const answered = await underscoreResponse(
       request,
       pathname,
