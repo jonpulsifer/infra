@@ -16,7 +16,8 @@
  * wildcard for the zone reaches this process, and a name is live the moment
  * its row says which release to serve.
  */
-import { join } from 'node:path';
+import { LANDING_PATH } from '@repo/kthx/assets';
+import { FAVICON, FAVICON_DIGEST, FAVICON_PATH } from '@repo/kthx/favicon';
 import { and, eq } from 'drizzle-orm';
 import { readBundle } from '../adapters/deploy/static/bundle.ts';
 import type { Database } from '../db/client.ts';
@@ -24,7 +25,6 @@ import { kthxReleases, kthxSites } from '../db/schema.ts';
 import { readStagedArchive, type SourceDepot } from '../storage/archives.ts';
 import { fetchableBundleUrl } from '../storage/signed-url.ts';
 import { sdkResponse, underscoreResponse } from './data.ts';
-import { FAVICON, FAVICON_DIGEST, FAVICON_PATH } from './favicon.ts';
 
 /** The zone kthx sites live in. `kthx.localhost` resolves to loopback for a local run. */
 export const KTHX_ZONE_VAR = 'KTHX_ZONE';
@@ -116,8 +116,6 @@ export function withKthxHost<T extends Record<string, unknown>>(
   return wrapped as T;
 }
 
-const LANDING = join(import.meta.dir, 'landing.html');
-
 /**
  * The apex: the landing page at `/`, the SDK at `/sdk.js`, the generic
  * favicon, nothing else.
@@ -127,7 +125,7 @@ function apexResponse(request: Request, zone: string): Response {
   if (pathname === '/sdk.js') return sdkResponse();
   if (pathname === FAVICON_PATH) return faviconResponse(request);
   if (pathname !== '/') return notHere(request, zone, 404);
-  return new Response(Bun.file(LANDING), {
+  return new Response(Bun.file(LANDING_PATH), {
     headers: {
       'content-type': 'text/html; charset=utf-8',
       'cache-control': 'no-cache',

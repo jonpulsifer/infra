@@ -57,6 +57,7 @@ jobs:
             clusters/*/networking/external-dns/kustomization.yaml
             packages/k6/**
             clusters/folly/apps/k6/**
+            packages/kthx/**
             packages/typescript-config/**
             package.json
             bun.lock

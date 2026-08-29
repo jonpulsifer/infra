@@ -234,13 +234,11 @@ const OBJECT_ID = /^[0-9a-f]{6,40}$/;
  *   shows arrives from the manifest, which is where §20 puts it.
  *
  * An HTML document anywhere under `src/` is browser source for the same
- * reason — `src/kthx/landing.html` is nothing but class names and headers —
- * and is scoped out with it, as is the one script a kthx site loads.
+ * reason — it is nothing but class names and headers — and is scoped out with
+ * it.
  */
 const BROWSER_SOURCE = (path: string): boolean =>
-  path.startsWith('src/web/') ||
-  path.endsWith('.html') ||
-  path === 'src/kthx/sdk.js';
+  path.startsWith('src/web/') || path.endsWith('.html');
 
 /** Files that are not text, and would only produce noise. */
 const BINARY = /\.(png|jpe?g|gif|ico|webp|avif|woff2?|ttf|otf|pdf|zip|gz)$/i;
