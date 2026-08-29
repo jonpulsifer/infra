@@ -36,8 +36,8 @@ metadata:
     # publish every hostname below at the parent Gateway's status address —
     # RFC1918 A records over whole zones, claimed by a second source. The
     # wildcard records this route needs are the ones Terraform owns
-    # (`terraform/network/cloudflare/spindrift.tf` and `kthx.dev.tf`), pointed
-    # at the tunnel.
+    # (`terraform/network/cloudflare/spindrift.tf`, one per zone plus the
+    # `kthx.dev` apex the tunnel module mints), pointed at the tunnel.
     #
     # Both spellings: external-dns v0.22.0 moved the default annotation prefix
     # with no fallback, and a controller reads exactly one of them. Carrying the
@@ -49,9 +49,10 @@ metadata:
 spec:
   parentRefs:
     - name: spindrift-apps
-  # No `sectionName`: the name arrives on the TLS listener from the lab and on
-  # the plain HTTP one from the tunnel, and the page is the same answer either
-  # way.
+  # No `sectionName`: a `${SPINDRIFT_DOMAIN}` name arrives on the TLS listener
+  # from the lab and on the plain HTTP one from the tunnel, and the page is the
+  # same answer either way. The `kthx.dev` names have no TLS listener and only
+  # ever arrive from the tunnel.
   hostnames:
     - "*.${SPINDRIFT_DOMAIN}"
     - kthx.dev
