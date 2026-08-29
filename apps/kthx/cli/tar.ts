@@ -3,8 +3,9 @@
  * of a staged bundle opens, written the one way (ustar, GNU long names, no
  * timestamps) so the same files always upload as the same bytes.
  */
-import { readFileSync } from 'node:fs';
+import { readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
+import { KthxError } from './error.ts';
 
 /** What a site carries: no dotfiles, no `node_modules`, and never `kthx.json`. */
 export function included(path: string): boolean {
@@ -25,9 +26,28 @@ export interface Packed {
 
 /** The files under `dir` that a site carries, as one gzipped tar. */
 export function pack(dir: string): Packed {
-  const paths = [...new Bun.Glob('**/*').scanSync({ cwd: dir, dot: true })]
+  // Glob's own file filter skips symlinks; a linked file is a file here, and a
+  // dangling one is an error rather than a quietly smaller site.
+  const paths = [
+    ...new Bun.Glob('**/*').scanSync({
+      cwd: dir,
+      dot: true,
+      followSymlinks: true,
+      onlyFiles: false,
+    }),
+  ]
     .map((path) => path.replaceAll('\\', '/'))
     .filter(included)
+    .filter((path) => {
+      try {
+        return statSync(join(dir, path)).isFile();
+      } catch {
+        throw new KthxError(
+          'DANGLING_LINK',
+          `${join(dir, path)} points nowhere`,
+        );
+      }
+    })
     .sort();
   const entries = paths.map((path) => ({
     path,

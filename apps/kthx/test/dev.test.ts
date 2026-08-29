@@ -25,6 +25,12 @@ const server = dev(dir, 0);
 const url = (path: string) => `${server.url.origin}${path}`;
 afterAll(() => server.stop(true));
 
+/** Fan-out is asynchronous; wait for it rather than guess at it. */
+async function delivered(frames: unknown[], count: number): Promise<void> {
+  const deadline = Date.now() + 2000;
+  while (frames.length < count && Date.now() < deadline) await Bun.sleep(5);
+}
+
 describe('files', () => {
   test('resolve like production: directories, 404.html, nothing reserved', async () => {
     expect(await (await fetch(url('/'))).text()).toBe('<h1>home</h1>');
@@ -45,6 +51,21 @@ describe('files', () => {
       expect((await fetch(url(path))).status).toBe(404);
     }
     expect((await fetch(url('/'), { method: 'POST' })).status).toBe(405);
+  });
+
+  test('treats a lone top-level directory as the site, like a release', async () => {
+    const wrapped = mkdtempSync(join(tmpdir(), 'kthx-dev-'));
+    mkdirSync(join(wrapped, 'dist'));
+    writeFileSync(join(wrapped, 'dist', 'index.html'), '<h1>dist</h1>');
+    writeFileSync(join(wrapped, 'kthx.json'), '{}');
+    const inner = dev(wrapped, 0);
+    try {
+      expect(await (await fetch(`${inner.url.origin}/`)).text()).toBe(
+        '<h1>dist</h1>',
+      );
+    } finally {
+      inner.stop(true);
+    }
   });
 
   test('serves the real SDK and a cookie identity', async () => {
@@ -104,7 +125,7 @@ describe('db', () => {
     );
     expect((await fetch(url('/_/db/votes'))).status).toBe(404);
 
-    await Bun.sleep(20);
+    await delivered(frames, 4);
     expect(frames).toEqual([
       { t: 'put', key: 'votes', value: { b: 1, a: 2 } },
       { t: 'put', key: 'votes', value: 3 },
@@ -129,13 +150,13 @@ describe('live', () => {
     const a = await open();
     const b = await open();
     a.socket.send(JSON.stringify({ t: 'join', room: 'lobby' }));
-    await Bun.sleep(20);
+    await delivered(a.frames, 1);
     b.socket.send(JSON.stringify({ t: 'join', room: 'lobby' }));
-    await Bun.sleep(20);
+    await delivered(a.frames, 2);
     b.socket.send(JSON.stringify({ t: 'send', room: 'lobby', data: 'hi' }));
-    await Bun.sleep(20);
+    await delivered(a.frames, 3);
     b.socket.close();
-    await Bun.sleep(20);
+    await delivered(a.frames, 4);
 
     // Neither socket sent a cookie, so each was given an id on upgrade.
     const [A] = (a.frames[0] as { peers: string[] }).peers;

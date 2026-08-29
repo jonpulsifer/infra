@@ -11,21 +11,20 @@
  * `$XDG_CONFIG_HOME/kthx/sites.json`, never in the directory — the directory
  * is what gets uploaded. `KTHX_ORIGIN` points the client somewhere else.
  */
-import { chmodSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  writeFileSync,
+} from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { parseArgs } from 'node:util';
+import { KthxError } from './error.ts';
 import { pack } from './tar.ts';
 
-export class KthxError extends Error {
-  constructor(
-    readonly code: string,
-    message: string,
-  ) {
-    super(message);
-    this.name = 'KthxError';
-  }
-}
+export { KthxError } from './error.ts';
 
 const origin = () =>
   (process.env.KTHX_ORIGIN?.trim() || 'https://kthx.dev').replace(/\/+$/, '');
@@ -42,11 +41,13 @@ export const sitesFile = () =>
 /** origin → name → token */
 type Tokens = Record<string, Record<string, string>>;
 
+/** The file's JSON, `fallback` when there is no file, and never a guess at a broken one. */
 function readJson<T>(path: string, fallback: T): T {
+  if (!existsSync(path)) return fallback;
   try {
     return JSON.parse(readFileSync(path, 'utf8')) as T;
-  } catch {
-    return fallback;
+  } catch (error) {
+    throw new KthxError('UNREADABLE', `${path}: ${(error as Error).message}`);
   }
 }
 
@@ -91,7 +92,12 @@ async function api<T>(
   const { token, ...rest } = init;
   const headers = new Headers(rest.headers);
   if (token !== undefined) headers.set('authorization', `Bearer ${token}`);
-  const response = await fetch(`${origin()}${path}`, { ...rest, headers });
+  const response = await fetch(`${origin()}${path}`, {
+    ...rest,
+    headers,
+  }).catch((cause: Error) => {
+    throw new KthxError('UNREACHABLE', `${origin()}: ${cause.message}`);
+  });
   const body = (await response.json().catch(() => ({}))) as Record<
     string,
     unknown
@@ -158,6 +164,12 @@ export async function deploy(
 ): Promise<Release> {
   const started = Date.now();
   const named = readJson<{ name?: unknown }>(join(dir, 'kthx.json'), {}).name;
+  if (named !== undefined && typeof named !== 'string') {
+    throw new KthxError(
+      'INVALID_NAME',
+      `${join(dir, 'kthx.json')} names ${JSON.stringify(named)}, which is not a name`,
+    );
+  }
   if (
     options.name !== undefined &&
     named !== undefined &&
@@ -168,8 +180,7 @@ export async function deploy(
       `${join(dir, 'kthx.json')} already names ${String(named)}; remove it to claim ${options.name}`,
     );
   }
-  const name =
-    typeof named === 'string' ? named : await claim(dir, options.name);
+  const name = named ?? (await claim(dir, options.name));
   const token = tokenFor(name);
   const packed = pack(dir);
   console.log(
@@ -269,12 +280,15 @@ if (import.meta.main) {
       case 'dev':
         (await import('./dev.ts')).dev(argument ?? '.');
         break;
-      case 'rollback':
-        await rollback(
-          '.',
-          argument === undefined ? undefined : Number(argument),
-        );
+      case 'rollback': {
+        const n = argument === undefined ? undefined : Number(argument);
+        if (n !== undefined && !(Number.isInteger(n) && n > 0)) {
+          console.error(USAGE);
+          process.exit(2);
+        }
+        await rollback('.', n);
         break;
+      }
       case 'release':
         await release('.');
         break;
