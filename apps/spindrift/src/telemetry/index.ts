@@ -81,6 +81,13 @@ export function initTelemetry(component = 'web'): NodeSDK | null {
     console.error('[Telemetry] Failed to initialize OpenTelemetry SDK:', error);
   }
 
+  // Registering a listener replaces SIGTERM's default disposition, so nothing
+  // ends the process once this returns: `Bun.serve` holds the loop open and
+  // the pod sits until the kubelet's grace period runs out and SIGKILLs it.
+  // Flushing the exporter is the only reason to delay, so exit as soon as it
+  // is flushed. Without this the process outlives every rollout by the full
+  // 30s default, which is what put two of a single-replica process side by
+  // side — see the deployment's `maxSurge`.
   process.on('SIGTERM', async () => {
     if (sdkInstance) {
       try {
@@ -90,6 +97,7 @@ export function initTelemetry(component = 'web'): NodeSDK | null {
         console.error('[Telemetry] Error shutting down SDK', err);
       }
     }
+    process.exit(0);
   });
 
   return sdkInstance;
