@@ -121,6 +121,7 @@ const LANDING = join(import.meta.dir, 'landing.html');
 function apexResponse(request: Request, zone: string): Response {
   const pathname = new URL(request.url).pathname;
   if (pathname === '/sdk.js') return sdkResponse();
+  if (pathname === FAVICON_PATH) return faviconResponse(request);
   if (pathname !== '/') return notHere(request, zone, 404);
   return new Response(Bun.file(LANDING), {
     headers: {
@@ -361,6 +362,11 @@ async function siteResponse(
       : files.get(`${path}/index.html`));
   if (found !== undefined) return file(request, row.digest, path, found, 200);
 
+  // Before `404.html`, because a whole HTML error page is not an icon. A
+  // bundle that ships its own `/favicon.ico` was found above and never
+  // reaches this.
+  if (path === FAVICON_PATH) return faviconResponse(request);
+
   const fallback = files.get('/404.html');
   if (fallback !== undefined) {
     return file(request, row.digest, '/404.html', fallback, 404);
@@ -374,12 +380,13 @@ function file(
   path: string,
   found: SiteFile,
   status: number,
+  cache = 'public, max-age=60',
 ): Response {
   const etag = `"${digest}:${path}"`;
   const headers = {
     etag,
     'content-type': found.type,
-    'cache-control': 'public, max-age=60',
+    'cache-control': cache,
     'x-content-type-options': 'nosniff',
   };
   if (request.headers.get('if-none-match') === etag) {
@@ -389,6 +396,46 @@ function file(
     status,
     headers,
   });
+}
+
+// --- the generic favicon ----------------------------------------------------
+
+/**
+ * The kthx dot, 32x32, `--hot` on `--paper`: what a kthx host answers at
+ * `/favicon.ico` when it has none of its own.
+ *
+ * Base64 in the source rather than a file in the tree — 230 bytes of binary
+ * is not worth a blob in a text repo, and every host serves the same bytes.
+ */
+const FAVICON_PATH = '/favicon.ico';
+const FAVICON: SiteFile = {
+  bytes: Uint8Array.from(
+    atob(
+      'AAABAAEAICAAAAEAIADQAAAAFgAAAIlQTkcNChoKAAAADUlIRFIAAAAgAAAAIAgCAAAA/BjtowAAAJdJREFUeNpj4GUXoyliGLVg1ILhY4EMl0KkhEebchoQARlALtUsAJq1RKvyv/1WNAQUJMYaAhZYCZl8sFmNaToEAaWACsi3AOhAPKbD7cDvD3wWYA0ZrGFFjgVAdxFjOgTh8QROC4BJhXgLgIpJtgCYHIm3AKh48FlA8yCieSTTPJnSI6PRvKigR2FHj+J6tMoctWD4WwAAHXTjlJaX5F4AAAAASUVORK5CYII=',
+    ),
+    (character) => character.charCodeAt(0),
+  ),
+  type: 'image/x-icon',
+};
+
+/** Its own hash: there is no release digest behind these bytes to etag by. */
+const FAVICON_DIGEST = `sha256:${new Bun.CryptoHasher('sha256').update(FAVICON.bytes).digest('hex')}`;
+
+/**
+ * A day, not a year and never `immutable`: the bytes never change, but the
+ * answer for this URL does the moment a bundle ships an icon of its own.
+ */
+const FAVICON_CACHE = 'public, max-age=86400';
+
+function faviconResponse(request: Request): Response {
+  return file(
+    request,
+    FAVICON_DIGEST,
+    FAVICON_PATH,
+    FAVICON,
+    200,
+    FAVICON_CACHE,
+  );
 }
 
 // --- the page for a name nothing answers ----------------------------------

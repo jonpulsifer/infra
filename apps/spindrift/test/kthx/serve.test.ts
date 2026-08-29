@@ -38,11 +38,15 @@ function get(
   host: string,
   path: string,
   headers: Record<string, string> = {},
+  method = 'GET',
 ): Promise<Response> | Response | undefined {
   const routes = table();
   const entry = (routes as Record<string, unknown>)[path] ?? routes['/*'];
   return (entry as (request: Request) => Response)(
-    new Request(`http://${host}${path}`, { headers: { host, ...headers } }),
+    new Request(`http://${host}${path}`, {
+      method,
+      headers: { host, ...headers },
+    }),
   );
 }
 
@@ -232,5 +236,59 @@ describe('a site', () => {
     const response = await get('empty.kthx.test', '/');
     expect(response!.status).toBe(404);
     expect(await response!.text()).toContain('No site here yet.');
+  });
+});
+
+describe('the generic favicon', () => {
+  const bytesOf = async (response: Response) =>
+    new Uint8Array(await response.arrayBuffer());
+
+  test('a site with no icon of its own gets it, ahead of 404.html', async () => {
+    await live('notes'); // SITE_ZIP ships a 404.html and no favicon
+    const icon = await get('notes.kthx.test', '/favicon.ico');
+    expect(icon!.status).toBe(200);
+    expect(icon!.headers.get('content-type')).toBe('image/x-icon');
+    expect(icon!.headers.get('cache-control')).toBe('public, max-age=86400');
+    expect(icon!.headers.get('x-content-type-options')).toBe('nosniff');
+    const bytes = await bytesOf(icon!);
+    expect(Array.from(bytes.slice(0, 4))).toEqual([0, 0, 1, 0]); // an ICO directory
+    expect(bytes.byteLength).toBe(230);
+
+    // The apex has no bundle at all and answers with the same bytes.
+    const apex = await get(ZONE, '/favicon.ico');
+    expect(apex!.status).toBe(200);
+    expect(await bytesOf(apex!)).toEqual(bytes);
+  });
+
+  test('a bundle that ships its own keeps serving it', async () => {
+    await live(
+      'own',
+      zipOf([
+        { path: 'index.html', text: '<h1>home</h1>' },
+        { path: 'favicon.ico', text: 'the bundle icon' },
+      ]),
+    );
+    const icon = await get('own.kthx.test', '/favicon.ico');
+    expect(icon!.status).toBe(200);
+    expect(await icon!.text()).toBe('the bundle icon');
+    expect(icon!.headers.get('cache-control')).toBe('public, max-age=60');
+  });
+
+  test('it revalidates and answers HEAD like any other file', async () => {
+    await live('notes');
+    const icon = await get('notes.kthx.test', '/favicon.ico');
+    const etag = icon!.headers.get('etag')!;
+    expect(etag).toMatch(/^"sha256:[0-9a-f]{64}:\/favicon\.ico"$/);
+
+    const cached = await get('notes.kthx.test', '/favicon.ico', {
+      'if-none-match': etag,
+    });
+    expect(cached!.status).toBe(304);
+    expect(await cached!.text()).toBe('');
+
+    const head = await get(ZONE, '/favicon.ico', {}, 'HEAD');
+    expect(head!.status).toBe(200);
+    expect(head!.headers.get('etag')).toBe(etag);
+    expect(await head!.text()).toBe('');
   });
 });
