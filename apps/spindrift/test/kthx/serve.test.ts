@@ -100,7 +100,7 @@ describe('the zone', () => {
     expect(at('kthx.test')).toBe('');
     expect(at('KTHX.test:3000')).toBe('');
     expect(at('notes.kthx.test')).toBe('notes');
-    expect(at('a.b.kthx.test')).toBeNull();
+    expect(at('a.b.kthx.test')).toBe('a.b');
     expect(at('spindrift.example.test')).toBeNull();
     expect(at('kthx.test.example')).toBeNull();
     expect(at('')).toBeNull();

@@ -42,13 +42,16 @@ export interface KthxDeps {
   depot(): Promise<SourceDepot | null>;
 }
 
-/** The kthx name a request is for: `''` for the apex, `null` for a host that is not kthx's. */
+/**
+ * The kthx name a request is for: `''` for the apex, `null` for a host that is
+ * not kthx's. Anything under the zone is kthx's, so `a.b.<zone>` is a site
+ * name that no row can match and answers 404 here — never the console.
+ */
 export function siteOf(request: Request, zone: string): string | null {
   const host = (request.headers.get('host') ?? '').split(':')[0]!.toLowerCase();
   if (host === zone) return '';
   if (!host.endsWith(`.${zone}`)) return null;
-  const name = host.slice(0, -zone.length - 1);
-  return name.includes('.') ? null : name;
+  return host.slice(0, -zone.length - 1);
 }
 
 /**
