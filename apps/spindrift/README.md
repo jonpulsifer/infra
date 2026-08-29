@@ -862,12 +862,17 @@ which is a bundle staged through the same `normalizeArchive` →
 at claim and shown once; the row holds its SHA-256. Rolling back is pointing
 the row at an older release, which also sets `held`, so the next upload is
 stored rather than served until the hold is released. An upload is at most
-25 MiB compressed and 100 MiB unpacked (`MAX_ARCHIVE_BYTES`,
+25 MiB compressed and 32 MiB unpacked (`MAX_ARCHIVE_BYTES`,
 `MAX_UNPACKED_BYTES` in `src/kthx/sites.ts`); the server itself refuses any
 request body over 32 MiB, `/internal/upload` included, with a socket-level 413.
-Two of them unpack at a time (`MAX_UPLOADS`) and a third is refused `503 BUSY`
-rather than queued — what it would wait for is memory, and a queue holds the
-bytes it is queueing.
+The unpacked ceiling is a memory number, measured rather than reasoned about:
+inflating a ZIP, re-taring it and reading that tar back costs about seven
+times the unpacked size in resident memory, none of which comes back, so
+32 MiB is what the 768 MiB web pod holds. Two of them unpack at a time
+(`MAX_UPLOADS`) and a third is refused `503 BUSY` rather than queued — what it
+would wait for is memory, and a queue holds the bytes it is queueing. That
+refusal is checked ahead of the rate limiter, so a neighbour's uploads cost
+the caller nothing.
 
 `src/kthx/serve.ts` wraps the whole route table so a kthx `Host` is answered
 before any path route runs — the apex gets `src/kthx/landing.html`, a site

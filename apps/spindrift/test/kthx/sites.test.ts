@@ -65,14 +65,29 @@ async function upload(
   token: string,
   bytes: Uint8Array<ArrayBuffer> = SITE_ZIP,
   filename = 'site.zip',
+  address?: string,
 ) {
   const response = await call(RELEASES, `/kthx/sites/${name}/releases`, {
     method: 'POST',
     token,
-    headers: { 'x-filename': filename },
+    headers: {
+      'x-filename': filename,
+      ...(address === undefined ? {} : { 'cf-connecting-ip': address }),
+    },
     body: bytes,
   });
   return { status: response.status, body: await response.json() };
+}
+
+/** How many more requests an address may make before the bucket refuses it. */
+function budgetOf(address: string): number {
+  const from = () =>
+    new Request(`http://${ZONE}/kthx/sites`, {
+      headers: { 'cf-connecting-ip': address },
+    });
+  let left = 0;
+  while (!limited(from(), undefined)) left += 1;
+  return left;
 }
 
 async function inspect(name: string, token?: string) {
@@ -318,6 +333,8 @@ describe('releases', () => {
 
   test('only MAX_UPLOADS unpack at once; the rest are told the process is full', async () => {
     const site = await mine();
+    // Fresh addresses: '203.0.113.7' is drained by the burst test above.
+    const address = '198.51.100.20';
     // Fired together so every one of them is past ownership and inside the
     // handler before the first finishes staging.
     const statuses = await Promise.all(
@@ -326,6 +343,8 @@ describe('releases', () => {
           site.name,
           site.token,
           zipOf([{ path: 'index.html', text: `<h1>v${i}</h1>` }]),
+          'site.zip',
+          address,
         ),
       ),
     );
@@ -334,6 +353,10 @@ describe('releases', () => {
     expect(taken).toHaveLength(MAX_UPLOADS);
     expect(refused).toHaveLength(1);
     expect(refused[0]).toMatchObject({ status: 503, body: { code: 'BUSY' } });
+
+    // Only the uploads that actually unpacked spent a token: a client told to
+    // come back in a moment must not walk into 429 for a neighbour's fault.
+    expect(budgetOf('198.51.100.21') - budgetOf(address)).toBe(MAX_UPLOADS);
 
     // The slot is given back, so the site takes uploads again afterwards.
     expect((await upload(site.name, site.token)).status).toBe(201);

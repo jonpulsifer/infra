@@ -245,11 +245,11 @@ export function siteFiles(
 // this one look cold.
 //
 // The size is what the uploads leave: 768 MiB of pod, about 104 MiB of it
-// idle, and `MAX_UPLOADS` releases holding roughly 230 MiB each while they
-// unpack. `trim` keeps one entry that is over the cap on its own, so the
-// worst resident here is this plus one whole bundle — 164 MiB against the
-// ~200 MiB left. Raising `MAX_UPLOADS` or the pod's limit is what would let
-// it grow.
+// idle, and unpacking bounded by `MAX_UNPACKED_BYTES` peaking around 400 MiB
+// above that — measured with this cache full, because filling an entry runs
+// the same unpack a release does. `trim` keeps one entry that is over the cap
+// on its own, so what stays resident here is this plus at most one bundle.
+// Raising `MAX_UNPACKED_BYTES` or the pod's limit is what would let it grow.
 const CACHE_BYTES = 64 * 1024 * 1024;
 const cache = new Map<string, { files: Promise<SiteFiles>; bytes: number }>();
 let cached = 0;
