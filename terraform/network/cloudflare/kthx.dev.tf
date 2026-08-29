@@ -6,10 +6,20 @@
 # opaque Cloudflare identifier. The two steps this root cannot do are at the
 # registrar, by hand: point the NS records at `name_servers` below, then
 # publish the `ds_record` output so DNSSEC leaves pending.
+
+# Two of these settings are caching decisions. `always_online` is off because
+# it serves Internet Archive copies of pages the crawler has never seen here,
+# and enabling it makes Cloudflare ignore the `stale-if-error` and
+# `stale-while-revalidate` directives, which serve the edge's own copy when
+# the origin 5xxes. `browser_cache_ttl = 0` is "Respect Existing Headers":
+# the zone default of four hours otherwise overrides the origin's `max-age`
+# on every extension Cloudflare caches by default, so a 60-second asset TTL
+# reaches browsers as 14400.
 locals {
   kthx_dev_zone_settings = {
-    always_online            = "on"
+    always_online            = "off"
     always_use_https         = "on"
+    browser_cache_ttl        = 0
     brotli                   = "on"
     http3                    = "on"
     min_tls_version          = "1.2"
@@ -66,6 +76,49 @@ resource "cloudflare_dns_record" "www_kthx_dev" {
   content = "kthx.dev"
   proxied = true
   ttl     = 1
+}
+
+# Cloudflare caches by extension and never caches HTML on its own, so every
+# site document pays a full origin round-trip. These rules cache what the
+# origin says is cacheable and keep the data plane out of it. Cache rules
+# stack and the last match wins per setting, so the bypass rule is last.
+resource "cloudflare_ruleset" "kthx_dev_cache" {
+  zone_id     = cloudflare_zone.kthx_dev.id
+  name        = "cache"
+  description = "sites cache on the origin's terms; the data plane never does"
+  kind        = "zone"
+  phase       = "http_request_cache_settings"
+
+  rules = [
+    {
+      description = "sites cache on the origin's terms"
+      expression  = "(ends_with(http.host, \".kthx.dev\"))"
+      action      = "set_cache_settings"
+      enabled     = true
+      action_parameters = {
+        cache                = true
+        respect_strong_etags = true
+        edge_ttl = {
+          mode = "respect_origin"
+        }
+        browser_ttl = {
+          mode = "respect_origin"
+        }
+        serve_stale = {
+          disable_stale_while_updating = false
+        }
+      }
+    },
+    {
+      description = "the data plane and the API are never cached"
+      expression  = "(starts_with(http.request.uri.path, \"/_/\")) or (http.host eq \"kthx.dev\" and starts_with(http.request.uri.path, \"/kthx/\"))"
+      action      = "set_cache_settings"
+      enabled     = true
+      action_parameters = {
+        cache = false
+      }
+    },
+  ]
 }
 
 resource "cloudflare_ruleset" "kthx_dev_redirects" {
