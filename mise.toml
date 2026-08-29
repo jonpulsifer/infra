@@ -160,7 +160,7 @@ run = [
 description = "List shell scripts in this repo"
 hide = true
 run = """
-grep -rl '^#!/usr/bin/env bash' dotfiles/.local/bin/* dotfiles/scripts/* scripts/* 2>/dev/null
+grep -rl '^#!/usr/bin/env bash' dotfiles/.local/bin/* dotfiles/scripts/* scripts/* .github/scripts/* 2>/dev/null
 """
 
 [tasks.format]

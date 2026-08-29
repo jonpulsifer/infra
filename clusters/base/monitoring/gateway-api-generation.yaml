@@ -66,9 +66,12 @@ data:
               each:
                 type: Gauge
                 gauge:
-                  # One series per parent. A route attached to two Gateways is
-                  # only as reconciled as its most-behind parent, which is what
-                  # the `min by` in the rule below collapses it to.
+                  # One series per parent that has written status. The
+                  # `min by` in the rule below collapses them to the
+                  # most-behind parent that reported; a parent that never
+                  # wrote status at all has no series and is invisible to
+                  # both arms. Every route on both clusters is single-parent,
+                  # so that gap is latent.
                   path: [status, parents]
                   labelsFromPath:
                     controller: [controllerName]
@@ -135,15 +138,18 @@ spec:
             description: "The Gateway's listeners, addresses or TLS config have moved past what the controller last programmed, while its Programmed condition still reports the older generation as True. Same first check as HTTPRouteNotReconciled: the leader cilium-operator."
 
         # Both alerts above are readings of one kube-state-metrics config. If
-        # its RBAC is wrong or the CRD is gone, the series disappear and the
-        # silence reads exactly like a fleet with nothing behind. Every cluster
-        # here serves its apps through HTTPRoutes, so none is ever legitimately
-        # absent.
+        # its RBAC is wrong or a CRD is gone, the series disappear and the
+        # silence reads exactly like a fleet with nothing wrong. Each kind is
+        # its own resource block with its own RBAC, so either family can go
+        # quiet alone — every cluster here serves its apps through a Gateway
+        # and HTTPRoutes, so neither is ever legitimately absent. `absent()`
+        # over a bare metric name carries no labels, so the alert cannot say
+        # which family went; the description says where to look.
         - alert: GatewayAPIMetricsMissing
-          expr: absent(kube_customresource_httproute_generation)
+          expr: absent(kube_customresource_httproute_generation) or absent(kube_customresource_gateway_generation)
           for: 15m
           labels:
             severity: critical
           annotations:
             message: kube-state-metrics has stopped exporting Gateway API generations
-            description: "No kube_customresource_httproute_generation series for 15 minutes. Both reconciliation alerts are blind until it returns — check the kube-state-metrics pod's logs in monitoring for a custom-resource-state config or RBAC error, then that it still mounts the kube-state-metrics-gateway-api ConfigMap."
+            description: "kube_customresource_httproute_generation or kube_customresource_gateway_generation has had no series for 15 minutes. The reconciliation alert reading whichever is gone is blind until it returns — check the kube-state-metrics pod's logs in monitoring for a custom-resource-state config or RBAC error, then that it still mounts the kube-state-metrics-gateway-api ConfigMap."
