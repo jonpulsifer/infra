@@ -47,6 +47,7 @@ jobs:
           files: |
             apps/clankerbanker/**
             apps/hub/**
+            apps/kthx/**
             apps/slingshot/**
             apps/spindrift/**
             packages/charts/**

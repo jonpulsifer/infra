@@ -1994,6 +1994,54 @@ export const kthxReleases = pgTable(
   ],
 );
 
+/**
+ * A `jsonb` column holding any JSON value — a string, a number, an array.
+ *
+ * Not {@link jsonbDocument}: that type passes the value through, which binds
+ * a JS string as a JSON string on the way in and would parse it back on the
+ * way out, so a value that is legitimately `"hello"` cannot round-trip. Here
+ * the value is bound as its JSON text and cast; `data.ts` reads it back as
+ * `::text` and parses that, because the driver hands a `jsonb` column back
+ * parsed on one path and as text on another. `null` still never reaches
+ * `toDriver` — a kthx key holds a value or does not exist, and `data.ts`
+ * refuses a null one.
+ */
+const jsonbValue = customType<{ data: unknown; driverData: unknown }>({
+  dataType() {
+    return 'jsonb';
+  },
+  toDriver(value) {
+    // `::text` first: a parameter cast straight to `jsonb` is inferred as
+    // one, and the driver then JSON-encodes the text a second time.
+    return sql`${JSON.stringify(value)}::text::jsonb`;
+  },
+  fromDriver(value) {
+    return value;
+  },
+});
+
+/** kthx `db`: one JSON value per key, per site, with the etag a CAS compares. */
+export const kthxKv = pgTable(
+  'kthx_kv',
+  {
+    site: text('site')
+      .notNull()
+      .references(() => kthxSites.name, { onDelete: 'cascade' }),
+    key: text('key').notNull(),
+    value: jsonbValue('value').notNull(),
+    etag: text('etag').notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    primaryKey({
+      name: 'kthx_kv_site_key_pk',
+      columns: [table.site, table.key],
+    }),
+  ],
+);
+
 // --- Relations (query-builder convenience; no schema effect) ---------------
 
 export const appsRelations = relations(apps, ({ one, many }) => ({
@@ -2183,3 +2231,4 @@ export type SourceBundle = typeof sourceBundles.$inferSelect;
 export type NewSourceBundle = typeof sourceBundles.$inferInsert;
 export type KthxSite = typeof kthxSites.$inferSelect;
 export type KthxRelease = typeof kthxReleases.$inferSelect;
+export type KthxKv = typeof kthxKv.$inferSelect;

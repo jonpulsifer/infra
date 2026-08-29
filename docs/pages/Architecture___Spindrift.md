@@ -59,6 +59,8 @@ tags:: architecture
 	- The Cloudflare bearer is the Pages token widened by hand to Workers scopes — Account: Workers Scripts Edit, Workers Tail Read; zone: Workers Routes Edit, SSL and Certificates Edit, Zone Read — and still holds no DNS permission: the custom-domain record is Cloudflare's own side effect of the Workers API. `terraform/network/cloudflare/spindrift.tf` declares the ownership boundary and `terraform/gcp/projects/bluenose/` holds the Cloud Functions prerequisites.
 	- A function carries an **environment** the handler reads as `env.NAME`. Values are write-only — set once in the editor and never shown again by it, though a Run executes the editor's code against them — and rest as one envelope sealed with the installation keyring (`SPINDRIFT_CREDENTIAL_KEYRING`; without it the command refuses to keep values). Workers receive them as `secret_text` bindings; a Cloud Run function receives them as plain Service environment, visible to anyone who can read the project.
 	- Schedules and history are not part of it. A function that needs either becomes a Component.
+- ## kthx
+	- Quick static sites — a name, a bearer, and an uploaded bundle served straight from the web process, with no App behind them — are [[Architecture/kthx]]. They reuse the archive pipeline, the source depot, and the `spindrift-status` route; what they add is two tables and a `Host` dispatch ahead of the path routes.
 - ## Control-plane shape
 	- ![Pressing Deploy, as a timeline: the intent commits under one lock, the reconciler claims it under another](/assets/deploy.svg)
 		- Source is `apps/spindrift/src/web/client/diagrams/deploy.d2`, shared with the product's Deploys screen the same way.

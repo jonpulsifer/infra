@@ -350,7 +350,8 @@ LOL===__           \
     <div class="sechead">Or use the command line <span class="sp"></span></div>
     <div class="term">
       <div class="termbar"><i></i><i></i><i></i><span>~/notes</span></div>
-      <pre class="sh"><span class="p">$</span> <b>bun add -g kthx</b>
+      <!-- ponytail: the CLI lives in the repo and is not published; `bun add -g kthx` is the upgrade path once it is. -->
+      <pre class="sh"><span class="p">$</span> <b>alias kthx="bun ~/src/infra/apps/kthx/cli/main.ts"</b>  <i># apps/kthx, from a checkout of this repo</i>
 
 <span class="p">$</span> <b>kthx dev</b>
 <i>  serves ./ on http://localhost:4321 — sdk in local mode, data stays on this machine</i>
@@ -358,10 +359,11 @@ LOL===__           \
 <span class="p">$</span> <b>kthx deploy</b>
 <i>  no name set — uses</i> <u>plum-otter-41</u>
 <i>  6 files &middot; 214 KB &middot; sha256:8c1f…d902</i>
-<i>  →</i> <u id="cli1"></u>  <i>(3.1s)</i>
+<i>  →</i> <u id="cli1"></u>  <i>(3.1s) — v1</i>
 
 <span class="p">$</span> <b>kthx deploy</b>
-<i>  →</i> <u id="cli2"></u>  <i>(1.4s, 2 files changed) — v2</i>
+<i>  6 files &middot; 214 KB &middot; sha256:2a77…f0c4</i>
+<i>  →</i> <u id="cli2"></u>  <i>(1.4s) — v2</i>
 
 <span class="p">$</span> <b>kthx rollback</b>
 <i>  v2 → v1 · held: new uploads do not replace v1 until you run</i> <b>kthx release</b></pre>
@@ -385,15 +387,15 @@ LOL===__           \
 <b>await</b> kthx.db.list(<u>'rsvp/'</u>)             <i>// [{ key, value }, …]</i>
 <b>await</b> kthx.db.del(<u>'votes'</u>)
 
-<b>await</b> kthx.db.update(<u>'votes'</u>, v => ({ ...v, riptide: v.riptide + 1 }))
-                                          <i>// read, change, write — retried if another tab wrote first</i></pre>
+<b>await</b> kthx.db.update(<u>'votes'</u>, v => ({ ...v, riptide: (v?.riptide ?? 0) + 1 }))
+                                          <i>// read, change, write — retried if another tab wrote first; v is null for a new key</i></pre>
         <div class="sdknote"><b>JSON by key, scoped to the site.</b> There is no schema. There is no connection string. Use <code>update</code> when two tabs write to the same key. <code>get</code> and <code>set</code> can lose a write. A poll is the first thing that most people build.</div>
       </div>
 
       <div class="sdkpane" id="sdk-live" hidden>
-<pre class="sh"><i>// each write to the store goes to each open tab</i>
-kthx.db.watch(<u>'votes'</u>, ({ value }) => render(value))
-kthx.db.watch(<u>'rsvp/'</u>, ({ key, value }) => addRow(key, value))   <i>// prefix</i>
+<pre class="sh"><i>// each write to the store goes to each open tab; value is null after del</i>
+<b>const</b> stop = kthx.db.watch(<u>'votes'</u>, ({ value }) => render(value))
+kthx.db.watch(<u>'rsvp/'</u>, ({ key, value }) => addRow(key, value))   <i>// a trailing / is a prefix</i>
 
 <i>// or skip the store: a room is a socket with a name</i>
 <b>const</b> room = kthx.live.join(<u>'cursors'</u>)
@@ -401,13 +403,14 @@ room.send({ x, y })                                <i>// to each other member of
 room.on(<u>'message'</u>, ({ from, data }) => draw(from, data))
 room.on(<u>'join'</u>, peer => ...)
 room.on(<u>'leave'</u>, peer => ...)
-room.peers()                                       <i>// the members that are here now</i></pre>
-        <div class="sdknote"><b>One websocket for each tab.</b> The socket opens on first use. <code>watch</code> sends each write in the store to all open tabs. This is the durable path. <code>live.join</code> is for data that must not go to the store: cursors, typing, presence, a game tick. Rooms are scoped to the site.</div>
+room.peers()                                       <i>// the me.id of each member here now</i>
+room.leave()</pre>
+        <div class="sdknote"><b>One websocket for each tab.</b> The socket opens on first use and reconnects on its own. <code>watch</code> sends each write in the store to all open tabs and returns a function that stops it. This is the durable path. <code>live.join</code> is for data that must not go to the store: cursors, typing, presence, a game tick. Rooms are scoped to the site.</div>
       </div>
 
       <div class="sdkpane" id="sdk-me" hidden>
 <pre class="sh"><b>await</b> kthx.ready
-kthx.me.id               <i>// stable for each browser, anonymous, always set</i></pre>
+kthx.me.id               <i>// stable for each browser, anonymous, null before ready</i></pre>
         <div class="sdknote"><b>Each visitor is anonymous.</b> With <code>me.id</code>, a poll knows that a visitor voted before. The visitor does not log in. The id is a cookie on the site, set on first use.</div>
       </div>
     </div>

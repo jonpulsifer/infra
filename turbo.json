@@ -35,6 +35,16 @@
       "env": ["DATABASE_URL"],
       "outputs": []
     },
+    "kthx#test": {
+      "dependsOn": ["build"],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/apps/spindrift/src/adapters/deploy/static/bundle.ts",
+        "$TURBO_ROOT$/apps/spindrift/src/kthx/underscore.ts",
+        "$TURBO_ROOT$/apps/spindrift/src/kthx/sdk.js"
+      ],
+      "outputs": []
+    },
     "spindrift#test": {
       "dependsOn": ["build"],
       "inputs": [

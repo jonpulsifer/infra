@@ -18,7 +18,7 @@ import { createHash, timingSafeEqual } from 'node:crypto';
 import { and, desc, eq, max } from 'drizzle-orm';
 import { BundleError } from '../adapters/deploy/static/bundle.ts';
 import { base64urlEncode } from '../auth/bytes.ts';
-import { kthxReleases, kthxSites } from '../db/schema.ts';
+import { kthxKv, kthxReleases, kthxSites } from '../db/schema.ts';
 import {
   ArchiveFormatError,
   normalizeArchive,
@@ -447,6 +447,7 @@ const unhold: OwnedAct = async (_request, deps, site) => {
 };
 
 const remove: OwnedAct = async (_request, deps, site) => {
+  await deps.db.delete(kthxKv).where(eq(kthxKv.site, site.name));
   await deps.db
     .update(kthxSites)
     .set({ deletedAt: new Date() })

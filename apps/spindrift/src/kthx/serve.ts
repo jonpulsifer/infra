@@ -23,6 +23,7 @@ import type { Database } from '../db/client.ts';
 import { kthxReleases, kthxSites } from '../db/schema.ts';
 import { readStagedArchive, type SourceDepot } from '../storage/archives.ts';
 import { fetchableBundleUrl } from '../storage/signed-url.ts';
+import { sdkResponse, underscoreResponse } from './data.ts';
 
 /** The zone kthx sites live in. `kthx.localhost` resolves to loopback for a local run. */
 export const KTHX_ZONE_VAR = 'KTHX_ZONE';
@@ -41,13 +42,16 @@ export interface KthxDeps {
   depot(): Promise<SourceDepot | null>;
 }
 
-/** The kthx name a request is for: `''` for the apex, `null` for a host that is not kthx's. */
+/**
+ * The kthx name a request is for: `''` for the apex, `null` for a host that is
+ * not kthx's. Anything under the zone is kthx's, so `a.b.<zone>` is a site
+ * name that no row can match and answers 404 here — never the console.
+ */
 export function siteOf(request: Request, zone: string): string | null {
   const host = (request.headers.get('host') ?? '').split(':')[0]!.toLowerCase();
   if (host === zone) return '';
   if (!host.endsWith(`.${zone}`)) return null;
-  const name = host.slice(0, -zone.length - 1);
-  return name.includes('.') ? null : name;
+  return host.slice(0, -zone.length - 1);
 }
 
 /**
@@ -105,7 +109,7 @@ export function withKthxHost<T extends Record<string, unknown>>(
           ? passThrough(request, server)
           : apexResponse(request, deps.zone);
       }
-      return siteResponse(request, site, deps);
+      return siteResponse(request, site, deps, server);
     };
   }
   return wrapped as T;
@@ -113,9 +117,11 @@ export function withKthxHost<T extends Record<string, unknown>>(
 
 const LANDING = join(import.meta.dir, 'landing.html');
 
-/** The apex: the landing page at `/`, nothing else. `/sdk.js` is not built yet. */
+/** The apex: the landing page at `/`, the SDK at `/sdk.js`, nothing else. */
 function apexResponse(request: Request, zone: string): Response {
-  if (new URL(request.url).pathname !== '/') return notHere(request, zone, 404);
+  const pathname = new URL(request.url).pathname;
+  if (pathname === '/sdk.js') return sdkResponse();
+  if (pathname !== '/') return notHere(request, zone, 404);
   return new Response(Bun.file(LANDING), {
     headers: {
       'content-type': 'text/html; charset=utf-8',
@@ -291,10 +297,8 @@ async function siteResponse(
   request: Request,
   name: string,
   deps: KthxDeps,
-): Promise<Response> {
-  if (request.method !== 'GET' && request.method !== 'HEAD') {
-    return new Response('method not allowed\n', { status: 405 });
-  }
+  server: Bun.Server<unknown> | undefined,
+): Promise<Response | undefined> {
   const [row] = await deps.db
     .select({
       deletedAt: kthxSites.deletedAt,
@@ -313,9 +317,6 @@ async function siteResponse(
     .limit(1);
   if (row === undefined) return notHere(request, deps.zone, 404);
   if (row.deletedAt !== null) return notHere(request, deps.zone, 410);
-  if (row.digest === null || row.location === null) {
-    return notHere(request, deps.zone, 404);
-  }
 
   let pathname: string;
   try {
@@ -323,8 +324,22 @@ async function siteResponse(
   } catch {
     return notHere(request, deps.zone, 404);
   }
-  // `/_/` is kthx's on every site; a bundle file under it is never served.
+  // `/_/` is kthx's on every site — `data.ts` answers it, a bundle file under
+  // it is never served, and a claimed name has a `db` before it has a release.
   if (pathname === '/_' || pathname.startsWith('/_/')) {
+    const answered = await underscoreResponse(
+      request,
+      pathname,
+      name,
+      deps,
+      server,
+    );
+    return answered === null ? notHere(request, deps.zone, 404) : answered;
+  }
+  if (request.method !== 'GET' && request.method !== 'HEAD') {
+    return new Response('method not allowed\n', { status: 405 });
+  }
+  if (row.digest === null || row.location === null) {
     return notHere(request, deps.zone, 404);
   }
 
