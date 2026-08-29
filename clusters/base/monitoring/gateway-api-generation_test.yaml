@@ -1,0 +1,98 @@
+---
+# Unit test for the alerts in gateway-api-generation.yaml, run by
+# `mise run k8s:check-rules` against the rendered PrometheusRule. Not a
+# manifest: kustomization.yaml does not list it, so nothing applies it.
+rule_files:
+  - gateway-api.yaml
+
+evaluation_interval: 1m
+
+tests:
+  # The 2026-08-24 wedge, plus the shapes around it that must stay quiet.
+  - interval: 1m
+    input_series:
+      # Reconciled: generation and observedGeneration agree.
+      - series: 'kube_customresource_httproute_generation{namespace="default",name="sonarr"}'
+        values: 1x20
+      - series: 'kube_customresource_httproute_observed_generation{namespace="default",name="sonarr",controller="io.cilium/gateway-controller"}'
+        values: 1x20
+      # The incident: the route gained two hostnames, the controller never
+      # came back for generation 2.
+      - series: 'kube_customresource_httproute_generation{namespace="spindrift-apps",name="spindrift-status"}'
+        values: 2x20
+      - series: 'kube_customresource_httproute_observed_generation{namespace="spindrift-apps",name="spindrift-status",controller="io.cilium/gateway-controller"}'
+        values: 1x20
+      # Created while the controller was wedged: status.parents never written,
+      # so there is no observed series at all.
+      - series: 'kube_customresource_httproute_generation{namespace="hub",name="hub-http-route"}'
+        values: 1x20
+      # Two parents, one of them behind. `min by` is what makes this fire.
+      - series: 'kube_customresource_httproute_generation{namespace="default",name="bazarr"}'
+        values: 5x20
+      - series: 'kube_customresource_httproute_observed_generation{namespace="default",name="bazarr",controller="io.cilium/gateway-controller"}'
+        values: 5x20
+      - series: 'kube_customresource_httproute_observed_generation{namespace="default",name="bazarr",controller="example.com/other"}'
+        values: 4x20
+      - series: 'kube_customresource_gateway_generation{namespace="default",name="cluster-gateway"}'
+        values: 6x20
+      - series: 'kube_customresource_gateway_observed_generation{namespace="default",name="cluster-gateway"}'
+        values: 5x20
+    alert_rule_test:
+      # Nothing has held for 10m yet.
+      - eval_time: 9m
+        alertname: HTTPRouteNotReconciled
+        exp_alerts: []
+      - eval_time: 11m
+        alertname: HTTPRouteNotReconciled
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              namespace: default
+              name: bazarr
+            exp_annotations:
+              message: HTTPRoute default/bazarr has not been reconciled by its controller
+              description: "The route's spec has moved past what any controller wrote back into its status, so Envoy still serves the previous hostnames and backends while the object reports Accepted. Compare `kubectl get httproute -n default bazarr -o jsonpath='{.metadata.generation} {.status.parents[*].conditions[*].observedGeneration}'`, then check whether the leader cilium-operator (lease kube-system/cilium-operator-resource-lock) logged `initGatewayAPIController` without an error."
+          - exp_labels:
+              severity: warning
+              namespace: hub
+              name: hub-http-route
+            exp_annotations:
+              message: HTTPRoute hub/hub-http-route has not been reconciled by its controller
+              description: "The route's spec has moved past what any controller wrote back into its status, so Envoy still serves the previous hostnames and backends while the object reports Accepted. Compare `kubectl get httproute -n hub hub-http-route -o jsonpath='{.metadata.generation} {.status.parents[*].conditions[*].observedGeneration}'`, then check whether the leader cilium-operator (lease kube-system/cilium-operator-resource-lock) logged `initGatewayAPIController` without an error."
+          - exp_labels:
+              severity: warning
+              namespace: spindrift-apps
+              name: spindrift-status
+            exp_annotations:
+              message: HTTPRoute spindrift-apps/spindrift-status has not been reconciled by its controller
+              description: "The route's spec has moved past what any controller wrote back into its status, so Envoy still serves the previous hostnames and backends while the object reports Accepted. Compare `kubectl get httproute -n spindrift-apps spindrift-status -o jsonpath='{.metadata.generation} {.status.parents[*].conditions[*].observedGeneration}'`, then check whether the leader cilium-operator (lease kube-system/cilium-operator-resource-lock) logged `initGatewayAPIController` without an error."
+      - eval_time: 11m
+        alertname: GatewayNotReconciled
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              namespace: default
+              name: cluster-gateway
+            exp_annotations:
+              message: Gateway default/cluster-gateway has not been reconciled by its controller
+              description: "The Gateway's listeners, addresses or TLS config have moved past what the controller last programmed, while its Programmed condition still reports the older generation as True. Same first check as HTTPRouteNotReconciled: the leader cilium-operator."
+      # The series are being scraped, so the deadman stays quiet.
+      - eval_time: 16m
+        alertname: GatewayAPIMetricsMissing
+        exp_alerts: []
+
+  # kube-state-metrics stops exporting: both alerts above go silent, and that
+  # silence is what the deadman is for.
+  - interval: 1m
+    input_series:
+      - series: 'up{job="kube-state-metrics"}'
+        values: 1x20
+    alert_rule_test:
+      - eval_time: 16m
+        alertname: GatewayAPIMetricsMissing
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+            exp_annotations:
+              message: kube-state-metrics has stopped exporting Gateway API generations
+              description: "No kube_customresource_httproute_generation series for 15 minutes. Both reconciliation alerts are blind until it returns — check the kube-state-metrics pod's logs in monitoring for a custom-resource-state config or RBAC error, then that it still mounts the kube-state-metrics-gateway-api ConfigMap."

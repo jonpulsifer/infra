@@ -12,8 +12,10 @@ on:
       - 'clusters/folly/monitoring/**'
       - 'clusters/folly/config/lab-topology.json'
       - 'clusters/offsite/apps/**'
+      - 'clusters/offsite/monitoring/**'
       - 'packages/charts/**'
       - '.github/scripts/render-cluster-apps.sh'
+      - '.github/scripts/check-prometheus-rules.sh'
       - '.github/workflows/kustomize.yml'
   pull_request:
     paths:
@@ -22,8 +24,10 @@ on:
       - 'clusters/folly/monitoring/**'
       - 'clusters/folly/config/lab-topology.json'
       - 'clusters/offsite/apps/**'
+      - 'clusters/offsite/monitoring/**'
       - 'packages/charts/**'
       - '.github/scripts/render-cluster-apps.sh'
+      - '.github/scripts/check-prometheus-rules.sh'
       - '.github/workflows/kustomize.yml'
   workflow_dispatch:
     inputs:
@@ -43,5 +47,6 @@ jobs:
       # pulls each release's values back out of the rendered stream.
       - uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4.3.0
         with:
-          install_args: helm kubectl yq
+          install_args: helm kubectl yq promtool
       - run: bash .github/scripts/render-cluster-apps.sh
+      - run: bash .github/scripts/check-prometheus-rules.sh
