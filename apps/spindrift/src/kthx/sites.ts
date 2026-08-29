@@ -70,6 +70,25 @@ export const MAX_ARCHIVE_BYTES = 25 * 1024 * 1024;
 export const MAX_UNPACKED_BYTES = 100 * 1024 * 1024;
 export const MAX_FILES = 2000;
 
+/**
+ * How many uploads may be unpacking at once, for the whole process.
+ *
+ * The token bucket below counts requests per address and says nothing about
+ * what one of them costs: thirty in a burst is thirty archives inflating
+ * together. One release at the ceiling holds about 230 MiB — the request body
+ * the server lets through (32 MiB), and on the ZIP path every inflated entry
+ * (`MAX_UNPACKED_BYTES`) plus the tar built from them, both alive at once
+ * inside `normalizeArchive`. The web pod is limited to 768 MiB and idles at
+ * about 104 MiB, so two of those plus `CACHE_BYTES` in `serve.ts` is the
+ * whole budget, and two is what fits.
+ */
+// ponytail: a counter, so an upload that finds it full is refused rather than
+// queued — what it would wait for is memory, and a queue holds the bytes it is
+// queueing. Streaming the archive to disk instead of holding it is what would
+// let this number grow.
+export const MAX_UPLOADS = 2;
+let uploading = 0;
+
 /** Why a name cannot be claimed, or `null`. */
 export function nameProblem(name: string): 'INVALID_NAME' | 'RESERVED' | null {
   if (name.length < 3 || name.length > 40 || !NAME_PATTERN.test(name)) {
@@ -302,14 +321,7 @@ const BUNDLE_CODES = {
   TOO_LARGE: 'TOO_LARGE',
 } as const;
 
-const release: OwnedAct = async (request, deps, site, server) => {
-  if (limited(request, server)) {
-    return refuse(
-      429,
-      'RATE_LIMITED',
-      'too many uploads from here; wait a minute',
-    );
-  }
+const stage: OwnedAct = async (request, deps, site) => {
   const filename = request.headers.get('x-filename')?.trim() || 'site.zip';
   const bytes = new Uint8Array(await request.arrayBuffer());
   if (bytes.byteLength > MAX_ARCHIVE_BYTES) {
@@ -410,6 +422,32 @@ const release: OwnedAct = async (request, deps, site, server) => {
     },
     { status: 201 },
   );
+};
+
+const release: OwnedAct = async (request, deps, site, server) => {
+  if (limited(request, server)) {
+    return refuse(
+      429,
+      'RATE_LIMITED',
+      'too many uploads from here; wait a minute',
+    );
+  }
+  // Not 429: this caller is inside its own allowance and its archive is not
+  // too large. The process is full, which is a state that clears on its own,
+  // and 503 is the one status a client is expected to come back from.
+  if (uploading >= MAX_UPLOADS) {
+    return refuse(
+      503,
+      'BUSY',
+      `${MAX_UPLOADS} uploads are already unpacking; try again in a moment`,
+    );
+  }
+  uploading += 1;
+  try {
+    return await stage(request, deps, site);
+  } finally {
+    uploading -= 1;
+  }
 };
 
 const serve: OwnedAct = async (request, deps, site) => {

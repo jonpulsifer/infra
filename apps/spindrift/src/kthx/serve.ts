@@ -19,6 +19,7 @@
 import { join } from 'node:path';
 import { and, eq } from 'drizzle-orm';
 import { readBundle } from '../adapters/deploy/static/bundle.ts';
+import { loadDeploymentFederation } from '../config/federation-credential.ts';
 import type { Database } from '../db/client.ts';
 import { kthxReleases, kthxSites } from '../db/schema.ts';
 import { readStagedArchive, type SourceDepot } from '../storage/archives.ts';
@@ -31,6 +32,32 @@ export const KTHX_ZONE_VAR = 'KTHX_ZONE';
 
 export function kthxZone(env: Record<string, string | undefined>): string {
   return env[KTHX_ZONE_VAR]?.trim().toLowerCase() || 'kthx.dev';
+}
+
+/** The bucket kthx stages releases into, where the deployment names one. */
+export const KTHX_BUCKET_VAR = 'KTHX_BUCKET';
+
+/**
+ * The depot this deployment gives kthx, or `null` when it gives it none.
+ *
+ * kthx's one hard dependency on Spindrift was the depot: it came from
+ * `sourceDepotFor(manifest)`, so no site served a byte until the installation
+ * manifest loaded — a document kthx reads nothing else out of. The bucket
+ * name is all it ever wanted from it, and federation was never the manifest's
+ * either: `cloud.federation` is itself the mounted credential, read by
+ * `loadDeploymentFederation`. Naming the bucket here leaves kthx wanting a
+ * variable and a mounted credential, and nothing else.
+ *
+ * `null` when the variable is unset, which is what lets a caller keep the
+ * manifest lookup as its fallback rather than this deciding for it.
+ */
+export async function kthxDepot(
+  env: Record<string, string | undefined>,
+): Promise<SourceDepot | null> {
+  const bucket = env[KTHX_BUCKET_VAR]?.trim();
+  if (!bucket) return null;
+  const federation = await loadDeploymentFederation(env);
+  return federation === null ? null : { bucket, federation };
 }
 
 /** Where the API lives on the apex; the host wrapper lets these paths through. */
@@ -213,10 +240,17 @@ export function siteFiles(
  * fetches the bundle once. A failed load is dropped so the next request
  * tries again.
  */
-// ponytail: per-replica, 128 MiB of unpacked files, refilled from the depot
-// on a miss. The upgrade path is a shared cache in front of the depot if a
-// second web replica ever makes this one look cold.
-const CACHE_BYTES = 128 * 1024 * 1024;
+// ponytail: per-replica, refilled from the depot on a miss. The upgrade path
+// is a shared cache in front of the depot if a second web replica ever makes
+// this one look cold.
+//
+// The size is what the uploads leave: 768 MiB of pod, about 104 MiB of it
+// idle, and `MAX_UPLOADS` releases holding roughly 230 MiB each while they
+// unpack. `trim` keeps one entry that is over the cap on its own, so the
+// worst resident here is this plus one whole bundle — 164 MiB against the
+// ~200 MiB left. Raising `MAX_UPLOADS` or the pod's limit is what would let
+// it grow.
+const CACHE_BYTES = 64 * 1024 * 1024;
 const cache = new Map<string, { files: Promise<SiteFiles>; bytes: number }>();
 let cached = 0;
 

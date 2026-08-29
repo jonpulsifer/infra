@@ -9,6 +9,7 @@ import {
   kthxRoutes,
   limited,
   MAX_UNPACKED_BYTES,
+  MAX_UPLOADS,
   nameProblem,
   RESERVED_NAMES,
 } from '../../src/kthx/sites.ts';
@@ -313,6 +314,29 @@ describe('releases', () => {
     view.setUint32(central + 24, MAX_UNPACKED_BYTES + 1, true);
     const zipped = await upload(site.name, site.token, lying);
     expect(zipped).toMatchObject({ status: 413, body: { code: 'TOO_LARGE' } });
+  });
+
+  test('only MAX_UPLOADS unpack at once; the rest are told the process is full', async () => {
+    const site = await mine();
+    // Fired together so every one of them is past ownership and inside the
+    // handler before the first finishes staging.
+    const statuses = await Promise.all(
+      Array.from({ length: MAX_UPLOADS + 1 }, (_, i) =>
+        upload(
+          site.name,
+          site.token,
+          zipOf([{ path: 'index.html', text: `<h1>v${i}</h1>` }]),
+        ),
+      ),
+    );
+    const taken = statuses.filter((r) => r.status === 201);
+    const refused = statuses.filter((r) => r.status !== 201);
+    expect(taken).toHaveLength(MAX_UPLOADS);
+    expect(refused).toHaveLength(1);
+    expect(refused[0]).toMatchObject({ status: 503, body: { code: 'BUSY' } });
+
+    // The slot is given back, so the site takes uploads again afterwards.
+    expect((await upload(site.name, site.token)).status).toBe(201);
   });
 });
 
