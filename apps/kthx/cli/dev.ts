@@ -6,15 +6,15 @@
  */
 import { readdirSync, statSync } from 'node:fs';
 import { join, resolve, sep } from 'node:path';
-import { FAVICON, FAVICON_PATH } from '../../spindrift/src/kthx/favicon.ts';
-import sdk from '../../spindrift/src/kthx/sdk.js' with { type: 'text' };
 import {
   type KthxSocketData,
   type KthxStore,
   kthxSocket,
   MAX_LIST,
   underscoreResponse,
-} from '../../spindrift/src/kthx/underscore.ts';
+} from '@repo/kthx';
+import { FAVICON, FAVICON_PATH } from '@repo/kthx/favicon';
+import sdk from '@repo/kthx/sdk.js' with { type: 'text' };
 import { included } from './tar.ts';
 
 export const PORT = 4321;

@@ -867,7 +867,7 @@ stored rather than served until the hold is released. An upload is at most
 request body over 32 MiB, `/internal/upload` included, with a socket-level 413.
 
 `src/kthx/serve.ts` wraps the whole route table so a kthx `Host` is answered
-before any path route runs — the apex gets `src/kthx/landing.html`, a site
+before any path route runs — the apex gets `packages/kthx/landing.html`, a site
 gets a file from its serving release, and the five `/kthx/*` paths in
 `src/kthx/sites.ts` are the API. The zone is **`KTHX_ZONE`** (default
 `kthx.dev`; `kthx.localhost` for a local run, since `*.localhost` resolves to
@@ -878,7 +878,7 @@ Every site also answers under `/_/` (`src/kthx/data.ts`): `db` is JSON by key
 in `kthx_kv`, written by anyone on the site's origin and compared-and-swapped
 through `if-match`; `me` is the anonymous `kthx_me` cookie; `ws` is the one
 socket a tab opens, fanning store writes and room messages out through Bun's
-pub/sub. `src/kthx/sdk.js` fronts the three as `window.kthx`, served as
+pub/sub. `packages/kthx/sdk.js` fronts the three as `window.kthx`, served as
 `/_/sdk.js` on a site and `/sdk.js` on the apex.
 
 ## Testing
