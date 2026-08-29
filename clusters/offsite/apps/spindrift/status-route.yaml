@@ -13,13 +13,15 @@
 # its name, and it starts seeing it again if that route is removed. Nothing here
 # has to be told, and no ordering annotation exists to get wrong.
 #
-# **One zone, and it is the dedicated one.** `${SPINDRIFT_DOMAIN}` is disjoint
-# from any hand-managed flat space, so a catch-all over it can only ever answer
-# for a name Spindrift itself would mint. The other three zones the installation
-# mints in are deliberately absent: `${SECRET_DOMAIN}` is hand-managed and a
-# wildcard there would answer for names Terraform owns, and `embarrassing.ca`
-# and `wishin.app` reach this gateway for Components that are not cluster
-# workloads at all.
+# **Two zones, and both are dedicated ones.** `${SPINDRIFT_DOMAIN}` and
+# `kthx.dev` are each disjoint from any hand-managed flat space, so a catch-all
+# over either can only ever answer for a name the control plane itself minted.
+# `kthx.dev` also carries its apex, which a wildcard never matches and which is
+# where a site is claimed. The control plane tells the zones apart by `Host`.
+# The other three zones the installation mints in are deliberately absent:
+# `${SECRET_DOMAIN}` is hand-managed and a wildcard there would answer for
+# names Terraform owns, and `embarrassing.ca` and `wishin.app` reach this
+# gateway for Components that are not cluster workloads at all.
 #
 # It is a vessel resource for the same reason the Gateway beside it is: no
 # release owns it, and a `destroy()` cannot take it with the App it removes.
@@ -31,10 +33,11 @@ metadata:
   annotations:
     # The same hold-out the App chart's routes carry, and load-bearing for the
     # same reason: external-dns's `gateway-httproute` source would otherwise
-    # publish `*.${SPINDRIFT_DOMAIN}` at the parent Gateway's status address —
-    # an RFC1918 A record over the whole zone, claimed by a second source. The
-    # wildcard record this route needs is the one Terraform owns
-    # (`terraform/network/cloudflare/spindrift.tf`), pointed at the tunnel.
+    # publish every hostname below at the parent Gateway's status address —
+    # RFC1918 A records over whole zones, claimed by a second source. The
+    # wildcard records this route needs are the ones Terraform owns
+    # (`terraform/network/cloudflare/spindrift.tf` and `kthx.dev.tf`), pointed
+    # at the tunnel.
     #
     # Both spellings: external-dns v0.22.0 moved the default annotation prefix
     # with no fallback, and a controller reads exactly one of them. Carrying the
@@ -51,6 +54,8 @@ spec:
   # way.
   hostnames:
     - "*.${SPINDRIFT_DOMAIN}"
+    - kthx.dev
+    - "*.kthx.dev"
   rules:
     - backendRefs:
         # The control plane, across the namespace boundary — granted below. It
