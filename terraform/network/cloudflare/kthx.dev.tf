@@ -55,9 +55,9 @@ resource "cloudflare_zone_setting" "kthx_dev" {
   value      = each.value
 }
 
-# The apex record is published by the Apps tunnel's `hostname = "kthx.dev"`
-# ingress rule (`spindrift.tf`), since cloudflared's `*.<zone>` never matches
-# the apex. `www` is a redirect to the apex, not a site name.
+# The apex and wildcard records live beside the Apps tunnel (`spindrift.tf`,
+# `kthx_apex` and `kthx_sites_wildcard`). `www` is a redirect to the apex,
+# not a site name.
 resource "cloudflare_dns_record" "www_kthx_dev" {
   zone_id = cloudflare_zone.kthx_dev.id
   comment = "terraform managed"
