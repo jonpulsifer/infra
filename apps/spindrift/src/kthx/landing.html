@@ -478,14 +478,17 @@ async function loadAll() {
   $("#jack").classList.add("on");
 }
 
-/* the copter: rotor text scrolls, tail rotor flicks; the sweep across the sky is CSS */
+/* the copter: rotor text scrolls, the tail rotor turns; the sweep across the sky is CSS */
 const ROT = "ROFL:ROFL:LOL:ROFL:ROFL:";
+/* four phases of one blade pair, a quarter turn apart. ROT is 24 characters,
+   a multiple of 4, so the turn stays continuous across the scroll's wrap. */
+const TAIL = ["I   I", "/   /", "-   -", "\\   \\"];
 let rk = 0;
 setInterval(() => {
   if (document.hidden || REDUCE.matches) return;
   rk = (rk + 1) % ROT.length;
   $("#rotor").textContent = (ROT.slice(rk) + ROT.slice(0, rk)).slice(0, 23);
-  $("#tail").textContent = rk % 2 ? "I   I" : "-   -";
+  $("#tail").textContent = TAIL[rk % TAIL.length];
 }, 70);
 $("#copter").classList.add("fly");
 function flyover() { const c = $("#copter"); c.classList.remove("fly"); void c.offsetWidth; c.classList.add("fly"); }
