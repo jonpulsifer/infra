@@ -175,8 +175,11 @@ function typeOf(path: string): string {
  * case and `notes/index.html` is not a site — the same way the landing page's
  * own reader unwraps one before it counts files.
  */
-export function siteFiles(bundle: Uint8Array<ArrayBuffer>): SiteFiles {
-  const read = readBundle(bundle);
+export function siteFiles(
+  bundle: Uint8Array<ArrayBuffer>,
+  maxBytes?: number,
+): SiteFiles {
+  const read = readBundle(bundle, maxBytes);
   const tops = new Set(read.map((file) => file.path.split('/')[1]));
   const wrapped =
     tops.size === 1 && read.every((file) => file.path.split('/').length > 2);
@@ -199,24 +202,40 @@ export function siteFiles(bundle: Uint8Array<ArrayBuffer>): SiteFiles {
  * fetches the bundle once. A failed load is dropped so the next request
  * tries again.
  */
-// ponytail: per-replica, 64 bundles, refilled from the depot on a miss. The
-// upgrade path is a shared cache in front of the depot if a second web
-// replica ever makes this one look cold.
-const CACHE_LIMIT = 64;
-const cache = new Map<string, Promise<SiteFiles>>();
+// ponytail: per-replica, 128 MiB of unpacked files, refilled from the depot
+// on a miss. The upgrade path is a shared cache in front of the depot if a
+// second web replica ever makes this one look cold.
+const CACHE_BYTES = 128 * 1024 * 1024;
+const cache = new Map<string, { files: Promise<SiteFiles>; bytes: number }>();
+let cached = 0;
+
+function sizeOf(files: SiteFiles): number {
+  let total = 0;
+  for (const file of files.values()) total += file.bytes.byteLength;
+  return total;
+}
 
 /** Remember a bundle that was just parsed, so its first request is warm. */
 export function rememberSiteFiles(digest: string, files: SiteFiles): void {
-  cache.delete(digest);
-  cache.set(digest, Promise.resolve(files));
+  drop(digest);
+  const bytes = sizeOf(files);
+  cache.set(digest, { files: Promise.resolve(files), bytes });
+  cached += bytes;
   trim();
 }
 
+function drop(digest: string): void {
+  const entry = cache.get(digest);
+  if (entry === undefined) return;
+  cache.delete(digest);
+  cached -= entry.bytes;
+}
+
 function trim(): void {
-  while (cache.size > CACHE_LIMIT) {
+  while (cached > CACHE_BYTES && cache.size > 1) {
     const oldest = cache.keys().next().value;
     if (oldest === undefined) break;
-    cache.delete(oldest);
+    drop(oldest);
   }
 }
 
@@ -228,13 +247,22 @@ async function filesFor(
   if (hit !== undefined) {
     cache.delete(release.digest);
     cache.set(release.digest, hit);
-    return hit;
+    return hit.files;
   }
-  const loading = loadBundle(release, deps).then(siteFiles);
-  cache.set(release.digest, loading);
-  trim();
-  loading.catch(() => cache.delete(release.digest));
-  return loading;
+  const entry = {
+    files: loadBundle(release, deps).then((bundle) => siteFiles(bundle)),
+    bytes: 0,
+  };
+  cache.set(release.digest, entry);
+  entry.files.then(
+    (files) => {
+      entry.bytes = sizeOf(files);
+      cached += entry.bytes;
+      trim();
+    },
+    () => drop(release.digest),
+  );
+  return entry.files;
 }
 
 async function loadBundle(

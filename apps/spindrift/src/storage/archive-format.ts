@@ -51,7 +51,8 @@ export type ArchiveFormatErrorCode =
   | 'UNKNOWN_FORMAT'
   | 'UNSUPPORTED_ZIP'
   | 'MALFORMED_ZIP'
-  | 'PATH_ESCAPES_ARCHIVE';
+  | 'PATH_ESCAPES_ARCHIVE'
+  | 'TOO_LARGE';
 
 export class ArchiveFormatError extends Error {
   constructor(
@@ -99,10 +100,14 @@ export interface NormalizedArchive {
  * Throws {@link ArchiveFormatError} for anything else, which is the whole point
  * of the function: the refusal belongs here, in front of the depot, rather than
  * inside a runner log nobody is watching.
+ *
+ * `maxBytes` bounds what a ZIP declares it unpacks to; an untrusted upload is
+ * refused as `TOO_LARGE` before any entry is inflated.
  */
 export function normalizeArchive(
   filename: string,
   bytes: Uint8Array,
+  maxBytes = Number.POSITIVE_INFINITY,
 ): NormalizedArchive {
   const format = sniffArchiveFormat(bytes);
   if (format === null) {
@@ -113,7 +118,7 @@ export function normalizeArchive(
   }
   if (format === 'gzip') return { bytes, filename, from: 'gzip' };
   return {
-    bytes: tarGzOf(readZipEntries(bytes, filename)),
+    bytes: tarGzOf(readZipEntries(bytes, filename, maxBytes)),
     filename: `${filename.replace(/\.zip$/i, '')}.tar.gz`,
     from: 'zip',
   };
@@ -168,7 +173,11 @@ const EOCD_MAX = 22 + 0xffff;
 const STORED = 0;
 const DEFLATED = 8;
 
-function readZipEntries(zip: Uint8Array, filename: string): ZipEntry[] {
+function readZipEntries(
+  zip: Uint8Array,
+  filename: string,
+  maxBytes: number,
+): ZipEntry[] {
   const view = new DataView(zip.buffer, zip.byteOffset, zip.byteLength);
   const eocd = findEndOfCentralDirectory(view, zip.length, filename);
 
@@ -181,6 +190,25 @@ function readZipEntries(zip: Uint8Array, filename: string): ZipEntry[] {
     throw new ArchiveFormatError(
       'UNSUPPORTED_ZIP',
       `${filename} is a Zip64 archive, which this boundary does not read — upload it as a gzipped tar instead.`,
+    );
+  }
+
+  // Declared sizes first, so a bomb is refused before a byte of it inflates;
+  // `inflateEntry` holds each entry to its declaration.
+  let declared = 0;
+  for (let index = 0, scan = start; index < count; index += 1) {
+    if (scan + 46 > zip.length) break;
+    declared += view.getUint32(scan + 24, true);
+    scan +=
+      46 +
+      view.getUint16(scan + 28, true) +
+      view.getUint16(scan + 30, true) +
+      view.getUint16(scan + 32, true);
+  }
+  if (declared > maxBytes) {
+    throw new ArchiveFormatError(
+      'TOO_LARGE',
+      `${filename} declares ${declared} bytes unpacked, over the ${maxBytes} this boundary holds.`,
     );
   }
 
@@ -279,10 +307,20 @@ function inflateEntry(
   const from = localHeader + 30 + nameLength + extraLength;
   const raw = zip.subarray(from, from + compressedSize);
 
-  const bytes =
-    method === STORED
-      ? new Uint8Array(raw)
-      : new Uint8Array(inflateRawSync(raw));
+  let bytes: Uint8Array;
+  try {
+    bytes =
+      method === STORED
+        ? new Uint8Array(raw)
+        : new Uint8Array(
+            inflateRawSync(raw, {
+              maxOutputLength: Math.max(1, uncompressedSize),
+            }),
+          );
+  } catch (cause) {
+    if (!(cause instanceof RangeError)) throw cause;
+    bytes = new Uint8Array(uncompressedSize + 1);
+  }
   if (bytes.length !== uncompressedSize) {
     throw new ArchiveFormatError(
       'MALFORMED_ZIP',

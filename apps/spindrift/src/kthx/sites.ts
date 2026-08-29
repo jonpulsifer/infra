@@ -66,6 +66,8 @@ export const RESERVED_NAMES: ReadonlySet<string> = new Set([
 ]);
 
 export const MAX_ARCHIVE_BYTES = 25 * 1024 * 1024;
+/** What an archive may unpack to; the compressed size says nothing about it. */
+export const MAX_UNPACKED_BYTES = 100 * 1024 * 1024;
 export const MAX_FILES = 2000;
 
 /** Why a name cannot be claimed, or `null`. */
@@ -153,9 +155,14 @@ type OwnedAct = (
 /** The site the path names, if its bearer is the one presented. */
 function owned(act: OwnedAct): Act {
   return async (request, deps, server) => {
-    const name = decodeURIComponent(
-      new URL(request.url).pathname.split('/')[3] ?? '',
-    );
+    let name: string;
+    try {
+      name = decodeURIComponent(
+        new URL(request.url).pathname.split('/')[3] ?? '',
+      );
+    } catch {
+      return refuse(404, 'NOT_FOUND', 'that is not a site name');
+    }
     const [site] = await deps.db
       .select()
       .from(kthxSites)
@@ -199,7 +206,6 @@ export function limited(
     server?.requestIP(request)?.address ??
     null;
   if (address === null) return false;
-  if (buckets.size > 10_000) buckets.clear();
   const now = Date.now();
   const bucket = buckets.get(address) ?? { tokens: BUCKET.capacity, at: now };
   bucket.tokens = Math.min(
@@ -208,9 +214,25 @@ export function limited(
   );
   bucket.at = now;
   buckets.set(address, bucket);
+  if (buckets.size > 10_000) evict();
   if (bucket.tokens < 1) return true;
   bucket.tokens -= 1;
   return false;
+}
+
+/**
+ * Make room by dropping a bucket that is still near full — one a flood of
+ * fresh addresses left behind — so the flood evicts only itself and never
+ * resets an address that is being held.
+ */
+function evict(): void {
+  for (const [address, bucket] of buckets) {
+    if (bucket.tokens >= BUCKET.capacity - 1) {
+      buckets.delete(address);
+      return;
+    }
+  }
+  buckets.delete(buckets.keys().next().value as string);
 }
 
 // --- acts -------------------------------------------------------------------
@@ -277,6 +299,7 @@ const BUNDLE_CODES = {
   NOT_GZIP: 'UNKNOWN_FORMAT',
   MALFORMED_TAR: 'MALFORMED_ZIP',
   PATH_ESCAPES_BUNDLE: 'PATH_ESCAPES_ARCHIVE',
+  TOO_LARGE: 'TOO_LARGE',
 } as const;
 
 const release: OwnedAct = async (request, deps, site, server) => {
@@ -299,20 +322,28 @@ const release: OwnedAct = async (request, deps, site, server) => {
 
   let archive: ReturnType<typeof normalizeArchive>;
   try {
-    archive = normalizeArchive(filename, bytes);
+    archive = normalizeArchive(filename, bytes, MAX_UNPACKED_BYTES);
   } catch (cause) {
     if (cause instanceof ArchiveFormatError) {
-      return refuse(400, cause.code, cause.message);
+      return refuse(
+        cause.code === 'TOO_LARGE' ? 413 : 400,
+        cause.code,
+        cause.message,
+      );
     }
     throw cause;
   }
 
   let files: ReturnType<typeof siteFiles>;
   try {
-    files = siteFiles(new Uint8Array(archive.bytes));
+    files = siteFiles(new Uint8Array(archive.bytes), MAX_UNPACKED_BYTES);
   } catch (cause) {
     if (cause instanceof BundleError) {
-      return refuse(400, BUNDLE_CODES[cause.code], cause.message);
+      return refuse(
+        cause.code === 'TOO_LARGE' ? 413 : 400,
+        BUNDLE_CODES[cause.code],
+        cause.message,
+      );
     }
     throw cause;
   }

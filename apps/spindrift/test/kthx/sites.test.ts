@@ -7,6 +7,8 @@ import type { KthxDeps } from '../../src/kthx/serve.ts';
 import {
   KTHX_PATHS,
   kthxRoutes,
+  limited,
+  MAX_UNPACKED_BYTES,
   nameProblem,
   RESERVED_NAMES,
 } from '../../src/kthx/sites.ts';
@@ -172,6 +174,19 @@ describe('claiming', () => {
     expect(statuses.slice(0, 30).every((status) => status === 201)).toBe(true);
     expect(statuses[30]).toBe(429);
   });
+
+  test('a flood of fresh addresses does not reset one being held', () => {
+    const from = (address: string) =>
+      new Request(`http://${ZONE}/kthx/sites`, {
+        headers: { 'cf-connecting-ip': address },
+      });
+    while (!limited(from('198.51.100.9'), undefined)) {
+      // drain it
+    }
+    for (let i = 0; i < 10_001; i += 1)
+      limited(from(`10.0.${i >> 8}.${i & 255}`), undefined);
+    expect(limited(from('198.51.100.9'), undefined)).toBe(true);
+  });
 });
 
 describe('ownership', () => {
@@ -183,6 +198,8 @@ describe('ownership', () => {
     expect(wrong.status).toBe(403);
     expect(wrong.body.code).toBe('FORBIDDEN');
     expect((await inspect('nobody', site.token)).status).toBe(404);
+    const garbled = await inspect('%E0', site.token);
+    expect(garbled).toMatchObject({ status: 404, body: { code: 'NOT_FOUND' } });
   });
 });
 
@@ -272,6 +289,30 @@ describe('releases', () => {
       new Uint8Array(25 * 1024 * 1024 + 1),
     );
     expect(huge).toMatchObject({ status: 413, body: { code: 'TOO_LARGE' } });
+  });
+
+  test('an archive that unpacks over the limit is 413, as gzip and as zip', async () => {
+    const site = await mine();
+    const zeros = new Uint8Array(MAX_UNPACKED_BYTES + 1);
+    const gzipped = await upload(
+      site.name,
+      site.token,
+      Bun.gzipSync(zeros),
+      'site.tar.gz',
+    );
+    expect(gzipped).toMatchObject({
+      status: 413,
+      body: { code: 'TOO_LARGE' },
+    });
+    // A ZIP is refused on what its central directory declares, before any
+    // entry inflates: a small archive claiming a huge entry is enough.
+    const lying = zipOf([{ path: 'index.html', text: '<h1>v1</h1>' }]);
+    const view = new DataView(lying.buffer);
+    let central = 0;
+    while (view.getUint32(central, true) !== 0x02014b50) central += 1;
+    view.setUint32(central + 24, MAX_UNPACKED_BYTES + 1, true);
+    const zipped = await upload(site.name, site.token, lying);
+    expect(zipped).toMatchObject({ status: 413, body: { code: 'TOO_LARGE' } });
   });
 });
 
