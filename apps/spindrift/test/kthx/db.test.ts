@@ -3,7 +3,8 @@
  * loops over — reached through the same Host dispatch a site's files are.
  */
 import { describe, expect, test } from 'bun:test';
-import { MAX_VALUE_BYTES } from '@repo/kthx';
+import { MAX_KEYS, MAX_VALUE_BYTES } from '@repo/kthx';
+import { kthxKv } from '../../src/db/schema.ts';
 import { type KthxDeps, withKthxHost } from '../../src/kthx/serve.ts';
 import { KTHX_PATHS, kthxRoutes } from '../../src/kthx/sites.ts';
 import { withIsolatedDatabase } from '../harness/db.ts';
@@ -181,6 +182,72 @@ describe('/_/db', () => {
     const nobody = await call('/_/db/votes', { host: `nobody.${ZONE}` });
     expect(nobody.status).toBe(404);
     expect(await nobody.text()).toContain('No site here yet.');
+  });
+
+  test('a full site refuses a new key but still takes a write to an old one', async () => {
+    await claim();
+    // Fill it underneath the handler: the ceiling is what is being tested,
+    // not a thousand round trips through it.
+    await database()
+      .db.insert(kthxKv)
+      .values(
+        Array.from({ length: MAX_KEYS }, (_, n) => ({
+          site: 'notes',
+          key: `k${n}`,
+          value: n,
+          etag: `"${n}"`,
+        })),
+      );
+
+    const fresh = await call('/_/db/one-too-many', json({ over: true }));
+    expect(fresh.status).toBe(507);
+    expect(await fresh.json()).toMatchObject({ code: 'SITE_FULL' });
+
+    // A key that already exists adds no row, so the ceiling does not apply.
+    const existing = await call('/_/db/k0', json({ still: 'writable' }));
+    expect(existing.status).toBe(200);
+    expect(await (await call('/_/db/k0')).json()).toEqual({
+      still: 'writable',
+    });
+
+    // And deleting one makes room again.
+    expect((await call('/_/db/k1', { method: 'DELETE' })).status).toBe(204);
+    expect(
+      (await call('/_/db/one-too-many', json({ now: 'fits' }))).status,
+    ).toBe(200);
+  });
+
+  test('writes are held by address; reads and me are not', async () => {
+    await claim();
+    const from = (address: string, path: string, init: RequestInit = {}) =>
+      call(path, {
+        ...init,
+        headers: {
+          ...(init.headers as Record<string, string>),
+          'cf-connecting-ip': address,
+        },
+      });
+
+    // The bucket is 30 deep, so the 31st write from one address is refused.
+    let refused: Response | undefined;
+    for (let n = 0; n < 40; n++) {
+      const response = await from('203.0.113.9', `/_/db/n${n}`, json({ n }));
+      if (response.status === 429) {
+        refused = response;
+        break;
+      }
+    }
+    expect(refused).toBeDefined();
+    expect(await refused!.json()).toMatchObject({ code: 'RATE_LIMITED' });
+
+    // Reading is not spent against it — `db.watch` on a busy site must work.
+    expect((await from('203.0.113.9', '/_/db/n0')).status).toBe(200);
+    expect((await from('203.0.113.9', '/_/me')).status).toBe(200);
+
+    // And the hold is per address, not per site.
+    expect(
+      (await from('203.0.113.10', '/_/db/other', json({ ok: true }))).status,
+    ).toBe(200);
   });
 });
 

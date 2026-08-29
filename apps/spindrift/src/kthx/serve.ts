@@ -26,6 +26,7 @@ import { kthxReleases, kthxSites } from '../db/schema.ts';
 import { readStagedArchive, type SourceDepot } from '../storage/archives.ts';
 import { fetchableBundleUrl } from '../storage/signed-url.ts';
 import { sdkResponse, underscoreResponse } from './data.ts';
+import { limited } from './sites.ts';
 
 /** The zone kthx sites live in. `kthx.localhost` resolves to loopback for a local run. */
 export const KTHX_ZONE_VAR = 'KTHX_ZONE';
@@ -364,6 +365,21 @@ async function siteResponse(
   // `/_/` is kthx's on every site — `data.ts` answers it, a bundle file under
   // it is never served, and a claimed name has a `db` before it has a release.
   if (pathname === '/_' || pathname.startsWith('/_/')) {
+    // Nobody signs in to write a key, so the address is the only thing to
+    // hold. Reads, `me`, and the `ws` upgrade are not spent against it —
+    // rate-limiting those would break `db.watch` on a site people are using.
+    // `MAX_KEYS` bounds what one site can hold; this bounds how fast anyone
+    // fills it, and how much WAL a rewritten key can churn.
+    if (
+      request.method !== 'GET' &&
+      request.method !== 'HEAD' &&
+      limited(request, server)
+    ) {
+      return Response.json(
+        { code: 'RATE_LIMITED', message: 'too many writes from here; wait' },
+        { status: 429 },
+      );
+    }
     const answered = await underscoreResponse(
       request,
       pathname,

@@ -7,6 +7,7 @@
 import {
   underscoreResponse as answer,
   type KthxStore,
+  MAX_KEYS,
   MAX_LIST,
 } from '@repo/kthx';
 import { SDK_PATH } from '@repo/kthx/assets';
@@ -46,6 +47,23 @@ const VALUE_TEXT = sql<string>`${kthxKv.value}::text`;
 
 function storeFor(site: string, deps: KthxDeps): KthxStore {
   const at = (key: string) => and(eq(kthxKv.site, site), eq(kthxKv.key, key));
+  /**
+   * Whether this key may be written: an existing key always may, since
+   * rewriting it adds no row, and a new one only while the site is under
+   * `MAX_KEYS`.
+   *
+   * ponytail: read-then-write, so two inserts racing at the ceiling can both
+   * pass and overshoot by however many are in flight. It bounds the disk,
+   * which is the point; an exact ceiling wants the count inside the insert.
+   */
+  const roomFor = async (key: string): Promise<boolean> => {
+    const [row] = await deps.db
+      .select({ keys: sql<number>`count(*)::int` })
+      .from(kthxKv)
+      .where(eq(kthxKv.site, site));
+    if ((row?.keys ?? 0) < MAX_KEYS) return true;
+    return (await deps.db.$count(kthxKv, at(key))) > 0;
+  };
   return {
     list: (prefix) =>
       deps.db
@@ -68,32 +86,36 @@ function storeFor(site: string, deps: KthxDeps): KthxStore {
       return row;
     },
     async put(key, value, _text, etag, { ifMatch, ifNoneMatch }) {
-      const written =
-        ifMatch !== null
-          ? await deps.db
-              .update(kthxKv)
-              .set({ value, etag, updatedAt: new Date() })
-              .where(
-                ifMatch === '*'
-                  ? at(key)
-                  : and(at(key), eq(kthxKv.etag, ifMatch)),
-              )
-              .returning({ key: kthxKv.key })
-          : ifNoneMatch
-            ? await deps.db
-                .insert(kthxKv)
-                .values({ site, key, value, etag })
-                .onConflictDoNothing()
-                .returning({ key: kthxKv.key })
-            : await deps.db
-                .insert(kthxKv)
-                .values({ site, key, value, etag })
-                .onConflictDoUpdate({
-                  target: [kthxKv.site, kthxKv.key],
-                  set: { value, etag, updatedAt: new Date() },
-                })
-                .returning({ key: kthxKv.key });
-      return written.length > 0;
+      // `ifMatch` is an update against a row that already exists, so it adds
+      // nothing to the site's count and the ceiling does not apply to it.
+      if (ifMatch !== null) {
+        const written = await deps.db
+          .update(kthxKv)
+          .set({ value, etag, updatedAt: new Date() })
+          .where(
+            ifMatch === '*' ? at(key) : and(at(key), eq(kthxKv.etag, ifMatch)),
+          )
+          .returning({ key: kthxKv.key });
+        return written.length > 0 ? 'written' : 'stale';
+      }
+      if (!(await roomFor(key))) return 'full';
+      const written = ifNoneMatch
+        ? await deps.db
+            .insert(kthxKv)
+            .values({ site, key, value, etag })
+            .onConflictDoNothing()
+            .returning({ key: kthxKv.key })
+        : await deps.db
+            .insert(kthxKv)
+            .values({ site, key, value, etag })
+            .onConflictDoUpdate({
+              target: [kthxKv.site, kthxKv.key],
+              set: { value, etag, updatedAt: new Date() },
+            })
+            .returning({ key: kthxKv.key });
+      // The upsert always writes, so an empty return is `ifNoneMatch` finding
+      // the row already there.
+      return written.length > 0 ? 'written' : 'stale';
     },
     async del(key) {
       await deps.db.delete(kthxKv).where(at(key));

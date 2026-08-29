@@ -20,6 +20,17 @@ import { createHash } from 'node:crypto';
 export const MAX_KEY_CHARS = 256;
 export const MAX_VALUE_BYTES = 64 * 1024;
 export const MAX_LIST = 500;
+/**
+ * Keys one site may hold. Nobody signs in to write, so this is what stands
+ * between a visitor's `for` loop and the control plane's disk: at most
+ * `MAX_KEYS * MAX_VALUE_BYTES` — 64 MiB — per claimed name. Only a write that
+ * adds a row is refused; overwriting and deleting keep working at the ceiling.
+ *
+ * ponytail: rows, not bytes, and per site rather than over the whole store.
+ * A running byte total per site is the upgrade path when a legitimate site
+ * gets near it, or when the count of sites is what needs bounding.
+ */
+export const MAX_KEYS = 1000;
 const MAX_ROOM_CHARS = 128;
 // ponytail: flat per-socket ceilings; per-site quotas when a site outgrows them.
 const MAX_ROOMS = 32;
@@ -32,7 +43,9 @@ export interface KthxStore {
   /**
    * Writes when the precondition holds — `ifMatch` against the stored etag
    * (`*` against there being any row), `ifNoneMatch` against there being no
-   * row — and says whether it did.
+   * row — and says what happened: `stale` is a precondition the store
+   * refused, `full` is a new key the site has no room for. The two are
+   * different answers, so they cannot share one `false`.
    */
   put(
     key: string,
@@ -40,7 +53,7 @@ export interface KthxStore {
     text: string,
     etag: string,
     precondition: { ifMatch: string | null; ifNoneMatch: boolean },
-  ): Promise<boolean>;
+  ): Promise<'written' | 'stale' | 'full'>;
   del(key: string): Promise<void>;
 }
 
@@ -209,11 +222,18 @@ async function kv(
         ifMatch: request.headers.get('if-match'),
         ifNoneMatch: request.headers.get('if-none-match') === '*',
       });
-      if (!written) {
+      if (written === 'stale') {
         return refuse(
           412,
           'PRECONDITION_FAILED',
           `${key} changed since it was read`,
+        );
+      }
+      if (written === 'full') {
+        return refuse(
+          507,
+          'SITE_FULL',
+          `this site holds ${MAX_KEYS} keys; delete one to add another`,
         );
       }
       server?.publish(dbTopic(site), JSON.stringify({ t: 'put', key, value }));

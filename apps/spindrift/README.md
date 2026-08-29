@@ -896,6 +896,16 @@ socket a tab opens, fanning store writes and room messages out through Bun's
 pub/sub. `packages/kthx/sdk.js` fronts the three as `window.kthx`, served as
 `/_/sdk.js` on a site and `/sdk.js` on the apex.
 
+Nobody signs in to write a key, so two ceilings stand between a visitor and this
+installation's disk. A site holds at most `MAX_KEYS` keys — checked only where a
+write would add a row, so overwriting and deleting keep working once a site is
+full and a new key answers `507 SITE_FULL`. And writes under `/_/` are held by
+the same per-address bucket the apex claim path uses; reads, `me`, and the `ws`
+upgrade are not spent against it, because rate-limiting those would break
+`db.watch` on a site people are using. Both are per replica and in memory, and
+the bound is rows rather than bytes — a running byte total per site is the
+upgrade path.
+
 ## Testing
 
 Tests run against a real Postgres — the concurrency design is a claim about
