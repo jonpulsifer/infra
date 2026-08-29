@@ -1951,6 +1951,49 @@ export const sourceBundles = pgTable(
   ],
 );
 
+/**
+ * A kthx site: one name in the kthx zone, owned by whoever holds the bearer
+ * whose hash is here, serving one of its releases (`src/kthx/`).
+ *
+ * Not an App on purpose — see `0057_kthx.sql`. `serving` is a release number
+ * or `null` before the first upload; `held` is the rollback latch that keeps
+ * a new release from going live on arrival.
+ */
+export const kthxSites = pgTable('kthx_sites', {
+  name: text('name').primaryKey(),
+  tokenHash: text('token_hash').notNull(),
+  serving: integer('serving'),
+  held: boolean('held').notNull().default(false),
+  createdAt: timestamp('created_at', { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+  deletedAt: timestamp('deleted_at', { withTimezone: true }),
+});
+
+/** One uploaded bundle of a kthx site, numbered from 1 in upload order. */
+export const kthxReleases = pgTable(
+  'kthx_releases',
+  {
+    site: text('site')
+      .notNull()
+      .references(() => kthxSites.name, { onDelete: 'cascade' }),
+    n: integer('n').notNull(),
+    digest: text('digest').notNull(),
+    /** Where the staged bundle is: a depot object, or a local handle. */
+    location: text('location').notNull(),
+    size: integer('size').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    primaryKey({
+      name: 'kthx_releases_site_n_pk',
+      columns: [table.site, table.n],
+    }),
+  ],
+);
+
 // --- Relations (query-builder convenience; no schema effect) ---------------
 
 export const appsRelations = relations(apps, ({ one, many }) => ({
@@ -2138,3 +2181,5 @@ export type FunctionRow = typeof functions.$inferSelect;
 export type NewFunctionRow = typeof functions.$inferInsert;
 export type SourceBundle = typeof sourceBundles.$inferSelect;
 export type NewSourceBundle = typeof sourceBundles.$inferInsert;
+export type KthxSite = typeof kthxSites.$inferSelect;
+export type KthxRelease = typeof kthxReleases.$inferSelect;

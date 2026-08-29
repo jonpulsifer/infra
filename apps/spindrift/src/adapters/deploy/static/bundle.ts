@@ -20,6 +20,7 @@
  * outside its own site would be the only path in this system by which one App
  * could reach another's.
  */
+import { gunzipSync } from 'node:zlib';
 import type { DeployRef, DeployVerdict } from '../contract.ts';
 
 /** One file the bundle holds, at the path it will be served from. */
@@ -40,7 +41,8 @@ export interface BundleFile {
 export type BundleErrorCode =
   | 'NOT_GZIP'
   | 'MALFORMED_TAR'
-  | 'PATH_ESCAPES_BUNDLE';
+  | 'PATH_ESCAPES_BUNDLE'
+  | 'TOO_LARGE';
 
 export class BundleError extends Error {
   constructor(
@@ -138,14 +140,26 @@ const PAX_HEADER = 'x';
  *
  * Directories are dropped rather than represented: hosting has no directories,
  * only paths, and a bundle's empty directory has nothing to serve.
+ *
+ * `maxBytes` bounds the inflated tar, because the compressed size says nothing
+ * about it: an untrusted upload is refused as `TOO_LARGE` before it is held.
  */
 export function readBundle(
   gzipped: Uint8Array<ArrayBuffer>,
+  maxBytes = Number.POSITIVE_INFINITY,
 ): readonly BundleFile[] {
   let tar: Uint8Array;
   try {
-    tar = Bun.gunzipSync(gzipped);
+    tar = gunzipSync(gzipped, {
+      maxOutputLength: Number.isFinite(maxBytes) ? maxBytes : undefined,
+    });
   } catch (cause) {
+    if (cause instanceof RangeError) {
+      throw new BundleError(
+        'TOO_LARGE',
+        `the archive unpacks to more than ${maxBytes} bytes`,
+      );
+    }
     throw new BundleError(
       'NOT_GZIP',
       `the artifact is not a gzipped tar: ${

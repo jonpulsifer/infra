@@ -851,6 +851,30 @@ serving Component and otherwise to none, because putting one hostname on two
 routes lets the platform pick a winner arbitrarily. Which Component is the front
 door is the developer's to say, and there is nowhere to say it yet.
 
+## kthx
+
+Quick static sites: pick a name, drop a zip or an `index.html`, and it is
+served at `https://<name>.<zone>` from this process. A site is **not an App**
+— it is a row in `kthx_sites` pointing at one of its `kthx_releases`, each of
+which is a bundle staged through the same `normalizeArchive` →
+`stageArchiveBytes` path `/internal/upload` takes and read back with the same
+`readBundle` the static backends use. Ownership is one bearer per site, minted
+at claim and shown once; the row holds its SHA-256. Rolling back is pointing
+the row at an older release, which also sets `held`, so the next upload is
+stored rather than served until the hold is released. An upload is at most
+25 MiB compressed and 100 MiB unpacked (`MAX_ARCHIVE_BYTES`,
+`MAX_UNPACKED_BYTES` in `src/kthx/sites.ts`); the server itself refuses any
+request body over 32 MiB, `/internal/upload` included, with a socket-level 413.
+
+`src/kthx/serve.ts` wraps the whole route table so a kthx `Host` is answered
+before any path route runs — the apex gets `src/kthx/landing.html`, a site
+gets a file from its serving release, and the five `/kthx/*` paths in
+`src/kthx/sites.ts` are the API. The zone is **`KTHX_ZONE`** (default
+`kthx.dev`; `kthx.localhost` for a local run, since `*.localhost` resolves to
+loopback). The edge's part — the zone, the tunnel, and the wildcard route to
+this process — lives outside this app. The landing page's SDK tab describes
+`/_/sdk.js`, which is not built yet; the route answers 404 until it is.
+
 ## Testing
 
 Tests run against a real Postgres — the concurrency design is a claim about
