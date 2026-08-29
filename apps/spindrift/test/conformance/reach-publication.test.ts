@@ -38,7 +38,7 @@ import type {
   DeployVerdict,
 } from '../../src/adapters/deploy/contract.ts';
 import { KubernetesDeployAdapter } from '../../src/adapters/deploy/kubernetes/index.ts';
-import { ANNOTATION_PREFIX } from '../../src/adapters/dns/cluster.ts';
+import { ANNOTATION_PREFIXES } from '../../src/adapters/dns/cluster.ts';
 import type { DesiredState } from '../../src/domain/desired-state.ts';
 import { type RenderedObject, renderAppChart } from '../harness/app-chart.ts';
 import {
@@ -46,7 +46,7 @@ import {
   installedControllers,
 } from '../harness/external-dns-installation.ts';
 import {
-  CONTROLLER,
+  CONTROLLER_KEYS,
   type GatewayStatus,
   publish,
 } from '../harness/fakes/external-dns.ts';
@@ -275,8 +275,11 @@ describe.each(PER_CLUSTER)(
     function unheldOut(objects: readonly RenderedObject[]): RenderedObject[] {
       return objects.map((object) => {
         if (object.kind !== 'HTTPRoute') return object;
-        const { [CONTROLLER]: _held, ...annotations } =
-          object.metadata.annotations ?? {};
+        // Every spelling of it. Removing one and leaving the other is not the
+        // damage this stands in for — it is the migration's own halfway state,
+        // which is supposed to keep working.
+        const annotations = { ...object.metadata.annotations };
+        for (const key of CONTROLLER_KEYS) delete annotations[key];
         return { ...object, metadata: { ...object.metadata, annotations } };
       });
     }
@@ -381,7 +384,7 @@ describe('the modelled controller is the declared one', () => {
     ).toThrow(/--annotation-prefix/);
   });
 
-  test('the prefix Spindrift writes under is the one the controller is pinned to', async () => {
+  test('every controller is pinned to a prefix Spindrift actually writes', async () => {
     // The two ends of one key, held together. external-dns reads
     // `cloudflare-proxied` under `DefaultAnnotationPrefix`, and v0.22.0 changed
     // that default with no fallback for the old spelling — so an unpinned
@@ -392,9 +395,40 @@ describe('the modelled controller is the declared one', () => {
     // deploy still goes green.
     //
     // A cluster that leaves it defaulted fails here, which is the point — the
-    // safe state is the pin, not the absence of an argument.
+    // safe state is the pin, not the absence of an argument. Membership rather
+    // than one value, because every object carries every spelling; which member
+    // is pinned is settled by the test below, not by this one.
     for (const controller of CONTROLLERS) {
-      expect(controller.annotationPrefix).toBe(ANNOTATION_PREFIX);
+      // Cast, not a narrowing: a cluster that leaves the flag defaulted carries
+      // `null` here, and `null` failing this membership is the assertion.
+      expect(ANNOTATION_PREFIXES).toContain(
+        controller.annotationPrefix as string,
+      );
     }
   });
+
+  test.each(ANNOTATION_PREFIXES)(
+    'the same records publish with the pin moved to %s',
+    async (annotationPrefix: string) => {
+      // What makes moving `--annotation-prefix` an edit to one flag rather than
+      // a flag day across two clusters and every live object. external-dns
+      // reads exactly one prefix and is blind to the others, so the only way a
+      // pin can move safely is if every object already carries the key the new
+      // pin will look for — and the only way to know that is to run the whole
+      // publication under each one and get the same zone back.
+      //
+      // This fails the moment a writer carries fewer prefixes than a cluster
+      // may be pinned to, which is the halfway state that would otherwise
+      // publish every record unproxied and let the route claim its own name.
+      for (const controller of CONTROLLERS) {
+        const rendered = await renderRelease({
+          reach: 'public',
+          hostname: { canonical: CANONICAL, vanity: VANITY },
+        });
+        expect(
+          publish(rendered, [GATEWAY], { ...controller, annotationPrefix }),
+        ).toEqual(publish(rendered, [GATEWAY], controller));
+      }
+    },
+  );
 });

@@ -36,17 +36,25 @@ spec:
             name: external-dns-cloud-credentials
             key: api-token
     extraArgs:
-      # Pinned, not defaulted. The prefix every proxied record's
-      # `cloudflare-proxied` key is written under is `DefaultAnnotationPrefix`,
-      # and external-dns v0.22.0 changed that default from
+      # Pinned, not defaulted. external-dns builds every key it reads as
+      # `AnnotationKeyPrefix + suffix` — `cloudflare-proxied`, and the
+      # `controller` hold-out that keeps the `gateway-httproute` source off a
+      # name a DNSEndpoint already states. v0.22.0 changed that default from
       # `external-dns.alpha.kubernetes.io/` to `external-dns.kubernetes.io/`
-      # with no fallback for the old spelling. Spindrift writes the alpha form
-      # in `apps/spindrift/src/adapters/dns/cluster.ts` and
-      # `packages/charts/spindrift-app/templates/dnsendpoint.yaml`, so a chart
-      # bump past app v0.21.0 would stop the flag being read at all and fall
-      # back to `proxiedByDefault` — every record silently unproxied, which for
-      # an apex CNAME in front of Cloudflare Pages means no zone cache, no WAF,
-      # and the origin exposed. Stating it here makes the bump a no-op instead.
+      # with no fallback, so a controller reads exactly one prefix and is blind
+      # to the other. Unpinned, a chart bump past app v0.21.0 would silently
+      # stop finding both: every record falls back to `proxiedByDefault` — for
+      # an apex CNAME in front of Cloudflare Pages that is no zone cache, no
+      # WAF, and the origin exposed — and every route stops holding itself out,
+      # claiming its own name at the gateway's RFC1918 address.
+      #
+      # Every object this repo renders now carries *both* spellings, so this
+      # value can move to `external-dns.kubernetes.io/` as a one-line change.
+      # Do that in its own commit, once every live object actually carries the
+      # new key — the App chart reaches a cluster through its own OCIRepository
+      # (`clusters/base/platform/spindrift-target/oci-repository.yaml`) on an
+      # interval, not with this file. A controller reading the new prefix
+      # before the objects carry it is exactly the outage described above.
       - --annotation-prefix=external-dns.alpha.kubernetes.io/
       # - --cloudflare-proxied
       # - --annotation-filter=external-dns/is-public in (true)

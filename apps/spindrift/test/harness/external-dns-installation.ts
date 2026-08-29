@@ -20,7 +20,7 @@
  */
 import { readdir } from 'node:fs/promises';
 import { join } from 'node:path';
-import { ANNOTATION_PREFIX } from '../../src/adapters/dns/cluster.ts';
+import { ANNOTATION_PREFIXES } from '../../src/adapters/dns/cluster.ts';
 import type { Controller } from './fakes/external-dns.ts';
 
 const REPO_ROOT = join(import.meta.dir, '../../../..');
@@ -50,13 +50,14 @@ const INERT_ARGUMENTS = [/^--fqdn-template=/];
  * hold-out that keeps a route from claiming its own name — so a foreign value
  * is still refused, exactly as it was before this argument was read at all.
  *
- * What is accepted is the value that pins the controller to the prefix
- * Spindrift's two writers already use, `ANNOTATION_PREFIX` in
- * `src/adapters/dns/cluster.ts`. That pin exists because external-dns v0.22.0
- * changed the default with no fallback for the old spelling: an unpinned
- * controller on the new default stops finding `cloudflare-proxied` and
- * publishes every record unproxied. Reading it here rather than listing it
- * inert is what makes the two ends fail together if either moves.
+ * What is accepted is any prefix Spindrift's two writers actually write —
+ * `ANNOTATION_PREFIXES` in `src/adapters/dns/cluster.ts`, every one of them, on
+ * every object. A pin exists at all because external-dns v0.22.0 changed the
+ * default with no fallback for the old spelling: an unpinned controller on the
+ * new default stops finding `cloudflare-proxied` and publishes every record
+ * unproxied. Accepting the whole set rather than one member is what makes
+ * moving the pin a one-line change to a flag instead of a flag day — and it
+ * still refuses a prefix nothing writes, which is the failure this guards.
  */
 const ANNOTATION_PREFIX_ARGUMENT = /^--annotation-prefix=(.+)$/;
 
@@ -128,8 +129,9 @@ export function controllerFor(
   for (const argument of argued) {
     if (INERT_ARGUMENTS.some((inert) => inert.test(argument))) continue;
     const prefixed = ANNOTATION_PREFIX_ARGUMENT.exec(argument);
-    if (prefixed !== null && prefixed[1] === ANNOTATION_PREFIX) {
-      annotationPrefix = prefixed[1];
+    const value = prefixed?.[1];
+    if (value !== undefined && ANNOTATION_PREFIXES.includes(value)) {
+      annotationPrefix = value;
       continue;
     }
     throw new Error(

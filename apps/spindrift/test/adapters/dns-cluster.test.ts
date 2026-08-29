@@ -70,6 +70,10 @@ describe('publish', () => {
               name: 'external-dns.alpha.kubernetes.io/cloudflare-proxied',
               value: 'true',
             },
+            {
+              name: 'external-dns.kubernetes.io/cloudflare-proxied',
+              value: 'true',
+            },
           ],
         },
       ],
@@ -93,6 +97,10 @@ describe('publish', () => {
           providerSpecific: [
             {
               name: 'external-dns.alpha.kubernetes.io/cloudflare-proxied',
+              value: 'false',
+            },
+            {
+              name: 'external-dns.kubernetes.io/cloudflare-proxied',
               value: 'false',
             },
           ],

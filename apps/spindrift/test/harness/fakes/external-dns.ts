@@ -21,7 +21,7 @@
  *   the *route*. A route can never state its own target, so every Component on
  *   one shared gateway gets that gateway's address whatever its reach is.
  *
- * Both are modelled skipping any object whose {@link CONTROLLER} annotation
+ * Both are modelled skipping any object whose {@link CONTROLLER_KEYS} annotation
  * names something other than {@link CONTROLLER_ID}. The route source is where
  * that check is documented, and applying it to the CRD source too is the
  * conservative direction: it makes the model publish *less* than the
@@ -33,6 +33,7 @@
  * hostname on an attached route matches one, and modelling the negotiation
  * would only re-derive that.
  */
+import { ANNOTATION_PREFIXES } from '../../../src/adapters/dns/cluster.ts';
 
 /**
  * The controller as an installation configures it, not as this file assumes.
@@ -59,6 +60,25 @@ export interface Controller {
    */
   readonly annotationPrefix: string | null;
 }
+
+/** The keys one controller reads, built the way external-dns builds them. */
+function keysOf(controller: Controller) {
+  const prefix = controller.annotationPrefix;
+  if (prefix === null) {
+    throw new Error(
+      `${controller.cluster}'s external-dns leaves --annotation-prefix ` +
+        'defaulted, and that default changed in v0.22.0: which keys it reads ' +
+        'is a fact about the image tag, which this model cannot see',
+    );
+  }
+  return {
+    controller: `${prefix}controller`,
+    target: `${prefix}target`,
+    proxied: `${prefix}cloudflare-proxied`,
+  };
+}
+
+type Keys = ReturnType<typeof keysOf>;
 
 /** One object a source reads, as loosely typed as the API's own JSON. */
 export interface ClusterObject {
@@ -103,8 +123,18 @@ export interface Publication {
   readonly contended: readonly string[];
 }
 
-/** The annotation a source honours to leave an object alone. */
-export const CONTROLLER = 'external-dns.alpha.kubernetes.io/controller';
+/**
+ * The annotation a source honours to leave an object alone, under each prefix.
+ *
+ * Not one constant, because the key *is* `AnnotationKeyPrefix + "controller"`
+ * and that prefix is what {@link Controller.annotationPrefix} pins — a model
+ * that hardcoded one spelling would keep passing across the very change it
+ * exists to cover. Every writer in this repo carries all of these, so a test
+ * removing "the hold-out" has to remove all of them.
+ */
+export const CONTROLLER_KEYS = ANNOTATION_PREFIXES.map(
+  (prefix) => `${prefix}controller`,
+);
 
 /**
  * The only value that means "this one is mine".
@@ -116,9 +146,6 @@ export const CONTROLLER = 'external-dns.alpha.kubernetes.io/controller';
  */
 export const CONTROLLER_ID = 'dns-controller';
 
-const TARGET = 'external-dns.alpha.kubernetes.io/target';
-const PROXIED = 'external-dns.alpha.kubernetes.io/cloudflare-proxied';
-
 const IPV4 = /^\d{1,3}(\.\d{1,3}){3}$/;
 
 /** What the controller would publish for one namespace's objects. */
@@ -127,10 +154,11 @@ export function publish(
   gateways: readonly GatewayStatus[],
   controller: Controller,
 ): Publication {
+  const keys = keysOf(controller);
   const records = [
-    ...(controller.sources.includes('crd') ? fromEndpoints(objects) : []),
+    ...(controller.sources.includes('crd') ? fromEndpoints(objects, keys) : []),
     ...(controller.sources.includes('gateway-httproute')
-      ? fromRoutes(objects, gateways)
+      ? fromRoutes(objects, gateways, keys)
       : []),
   ];
   const claimants = new Map<string, number>();
@@ -146,10 +174,13 @@ export function publish(
 }
 
 /** The `crd` source: `spec.endpoints`, verbatim. */
-function fromEndpoints(objects: readonly ClusterObject[]): PublishedRecord[] {
+function fromEndpoints(
+  objects: readonly ClusterObject[],
+  keys: Keys,
+): PublishedRecord[] {
   const records: PublishedRecord[] = [];
   for (const object of objects) {
-    if (object.kind !== 'DNSEndpoint' || heldOut(object)) continue;
+    if (object.kind !== 'DNSEndpoint' || heldOut(object, keys)) continue;
     for (const endpoint of object.spec?.endpoints ?? []) {
       records.push({
         dnsName: endpoint.dnsName,
@@ -164,6 +195,7 @@ function fromEndpoints(objects: readonly ClusterObject[]): PublishedRecord[] {
               ],
             ),
           ),
+          keys,
         ),
         claimedBy: `crd/${object.metadata.name}`,
       });
@@ -176,11 +208,12 @@ function fromEndpoints(objects: readonly ClusterObject[]): PublishedRecord[] {
 function fromRoutes(
   objects: readonly ClusterObject[],
   gateways: readonly GatewayStatus[],
+  keys: Keys,
 ): PublishedRecord[] {
   const records: PublishedRecord[] = [];
   for (const object of objects) {
-    if (object.kind !== 'HTTPRoute' || heldOut(object)) continue;
-    const targets = parentTargets(object, gateways);
+    if (object.kind !== 'HTTPRoute' || heldOut(object, keys)) continue;
+    const targets = parentTargets(object, gateways, keys);
     if (targets.length === 0) continue;
     for (const hostname of object.spec?.hostnames ?? []) {
       records.push({
@@ -189,7 +222,7 @@ function fromRoutes(
         // targets come from one parent, so they are all addresses or all names.
         recordType: suitableType(targets[0] as string),
         targets,
-        proxied: proxied(object.metadata.annotations),
+        proxied: proxied(object.metadata.annotations, keys),
         claimedBy: `httproute/${object.metadata.name}`,
       });
     }
@@ -201,6 +234,7 @@ function fromRoutes(
 function parentTargets(
   route: ClusterObject,
   gateways: readonly GatewayStatus[],
+  keys: Keys,
 ): readonly string[] {
   const targets: string[] = [];
   for (const parent of route.spec?.parentRefs ?? []) {
@@ -210,7 +244,7 @@ function parentTargets(
         candidate.namespace === (parent.namespace ?? route.metadata.namespace),
     );
     if (gateway === undefined) continue;
-    const stated = gateway.annotations?.[TARGET];
+    const stated = gateway.annotations?.[keys.target];
     targets.push(
       ...(stated === undefined ? gateway.addresses : stated.split(',')),
     );
@@ -218,13 +252,16 @@ function parentTargets(
   return targets;
 }
 
-function heldOut(object: ClusterObject): boolean {
-  const claimed = object.metadata.annotations?.[CONTROLLER];
+function heldOut(object: ClusterObject, keys: Keys): boolean {
+  const claimed = object.metadata.annotations?.[keys.controller];
   return claimed !== undefined && claimed !== CONTROLLER_ID;
 }
 
-function proxied(config: Record<string, string> | undefined): boolean {
-  return config?.[PROXIED] === 'true';
+function proxied(
+  config: Record<string, string> | undefined,
+  keys: Keys,
+): boolean {
+  return config?.[keys.proxied] === 'true';
 }
 
 /** An address is an address record; anything else is a name. */

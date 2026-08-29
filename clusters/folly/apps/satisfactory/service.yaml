@@ -6,7 +6,12 @@ metadata:
   labels:
     app: satisfactory
   annotations:
+    # Inert today: `service` is not in the controller's `--source` list
+    # (`clusters/base/networking/external-dns/helm-release.yaml`), so nothing
+    # publishes this name. Both prefixes, so re-enabling the app does not also
+    # depend on which one the controller is pinned to.
     external-dns.alpha.kubernetes.io/hostname: satisfactory.lolwtf.ca
+    external-dns.kubernetes.io/hostname: satisfactory.lolwtf.ca
 spec:
   selector:
     app: satisfactory

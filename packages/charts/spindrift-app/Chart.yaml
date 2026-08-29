@@ -2,7 +2,7 @@ apiVersion: v2
 name: spindrift-app
 description: The one chart every Component Spindrift deploys to a Kubernetes Target renders through
 type: application
-version: 0.4.0
+version: 0.5.0
 appVersion: "1"
 annotations:
   # The value contract this chart speaks, read when a Target is pinned. Helm

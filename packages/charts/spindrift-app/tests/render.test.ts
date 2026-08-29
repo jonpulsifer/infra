@@ -14,6 +14,29 @@
 import { describe, expect, test } from 'bun:test';
 import { chartMetadata, kinds, one, render } from './render.ts';
 
+/**
+ * Both spellings external-dns may read a key under, and the reason every object
+ * this chart renders carries all of them.
+ *
+ * The key is `AnnotationKeyPrefix + suffix`, and v0.22.0 moved that default
+ * from the `alpha` spelling with no fallback — a controller reads one prefix
+ * and is blind to the other. Asserting the pair rather than one member is what
+ * makes this suite fail on the halfway state, where a record still renders but
+ * loses its proxy the moment the controller's pin moves.
+ */
+const PREFIXES = [
+  'external-dns.alpha.kubernetes.io/',
+  'external-dns.kubernetes.io/',
+];
+
+/** `cloudflare-proxied` under every prefix, as the chart states it. */
+function proxiedSpec(value: string) {
+  return PREFIXES.map((prefix) => ({
+    name: `${prefix}cloudflare-proxied`,
+    value,
+  }));
+}
+
 describe('kind branches', () => {
   test('a service renders a Deployment, a Service, and a route', async () => {
     const objects = await render();
@@ -323,9 +346,9 @@ describe('the route', () => {
     expect(route.spec.hostnames).toEqual(['blog-web.apps.example.test']);
     // The blanket exclude is gone: publishing the address is the mechanism now
     // rather than a leak, and the bypass concern moved to the NetworkPolicy.
-    expect(
-      route.metadata.annotations?.['external-dns.alpha.kubernetes.io/exclude'],
-    ).toBeUndefined();
+    for (const prefix of PREFIXES) {
+      expect(route.metadata.annotations?.[`${prefix}exclude`]).toBeUndefined();
+    }
   });
 
   test('the vanity name rides the same route as the canonical one', async () => {
@@ -440,12 +463,13 @@ describe('the route', () => {
     // has to differ from `dns-controller` for the source to skip the object.
     for (const reach of ['private', 'public'] as const) {
       const route = one(await render({ app: { reach } }), 'HTTPRoute');
-      const controller =
-        route.metadata.annotations?.[
-          'external-dns.alpha.kubernetes.io/controller'
-        ];
-      expect(controller).toBeDefined();
-      expect(controller).not.toBe('dns-controller');
+      // Under every prefix: a hold-out written only under the one the
+      // controller is not pinned to is no hold-out at all.
+      for (const prefix of PREFIXES) {
+        const controller = route.metadata.annotations?.[`${prefix}controller`];
+        expect(controller).toBeDefined();
+        expect(controller).not.toBe('dns-controller');
+      }
     }
   });
 
@@ -473,12 +497,7 @@ describe('the published record', () => {
         dnsName: 'blog-web.apps.example.test',
         recordType: 'A',
         targets: ['10.89.0.67'],
-        providerSpecific: [
-          {
-            name: 'external-dns.alpha.kubernetes.io/cloudflare-proxied',
-            value: 'false',
-          },
-        ],
+        providerSpecific: proxiedSpec('false'),
       },
     ]);
 
@@ -491,12 +510,7 @@ describe('the published record', () => {
         dnsName: 'blog-web.apps.example.test',
         recordType: 'CNAME',
         targets: ['tunnel.example.test'],
-        providerSpecific: [
-          {
-            name: 'external-dns.alpha.kubernetes.io/cloudflare-proxied',
-            value: 'true',
-          },
-        ],
+        providerSpecific: proxiedSpec('true'),
       },
     ]);
   });
@@ -563,12 +577,7 @@ describe('the published record', () => {
       dnsName: 'apps.example.test',
       recordType: 'CNAME',
       targets: ['tunnel.example.test'],
-      providerSpecific: [
-        {
-          name: 'external-dns.alpha.kubernetes.io/cloudflare-proxied',
-          value: 'true',
-        },
-      ],
+      providerSpecific: proxiedSpec('true'),
     });
   });
 
