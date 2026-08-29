@@ -47,6 +47,11 @@
  *     authenticated by a bearer token rather than a session. It reads `agent`
  *     rows from `Authorization` and browser cookies never reach it; the file
  *     carries why that separation is the feature.
+ * 14. **kthx** (`src/kthx/sites.ts`), the five paths under `/kthx/` that
+ *     claim a name, upload a release, and choose which one serves. The only
+ *     routes owned by a per-site bearer rather than a session, and answered
+ *     on the kthx apex only — `src/kthx/serve.ts` wraps this whole table so
+ *     that a kthx `Host` never reaches anything else in it.
  *
  * A further hand-authored route is a decision somebody has to make on purpose,
  * in this file, against a test that names it.
@@ -57,6 +62,8 @@ import type { EnrolmentDeps } from '../auth/enrol.ts';
 import type { GatewayDeps } from '../auth/gateway.ts';
 import { authRoutes } from '../auth/routes.ts';
 import type { Database } from '../db/client.ts';
+import type { KthxDeps } from '../kthx/serve.ts';
+import { kthxRoutes } from '../kthx/sites.ts';
 import { type BosunRouteDeps, bosunRoutes } from './bosun-route.ts';
 import { commandRoutes, type DispatchDeps } from './dispatch.ts';
 import {
@@ -131,6 +138,7 @@ export function webRoutes<Client extends Record<string, ClientRoute>>(
   githubSetup: GitHubSetupRouteDeps,
   status: StatusRouteDeps,
   mcp: McpRouteDeps,
+  kthx: KthxDeps,
 ) {
   return {
     ...client,
@@ -145,6 +153,7 @@ export function webRoutes<Client extends Record<string, ClientRoute>>(
     ...bosunRoutes(bosun),
     ...githubSetupRoutes(githubSetup),
     ...mcpRoutes(mcp),
+    ...kthxRoutes(kthx),
     ...statusRoutes(status),
   };
 }

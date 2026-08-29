@@ -34,6 +34,8 @@ import {
   GitHubAppAuth,
   githubAppWebhookSecret,
 } from '../integrations/github/app-auth.ts';
+import { type KthxDeps, kthxZone, withKthxHost } from '../kthx/serve.ts';
+import { sourceDepotFor } from '../storage/archives.ts';
 import { BOSUN_SECRET_VAR } from './bosun-route.ts';
 import { type ClientRoute, webRoutes } from './routes.ts';
 import { type StreamSocketData, streamWebSocket } from './streams.ts';
@@ -215,6 +217,16 @@ export async function start(
    */
   const keyring = CredentialKeyring.fromEnvironment(Bun.env);
 
+  /**
+   * kthx sites stage into the same depot `/internal/upload` does, read per
+   * request through the accessor above for the same reason the routes do.
+   */
+  const kthx: KthxDeps = {
+    db,
+    zone: kthxZone(Bun.env),
+    depot: async () => sourceDepotFor((await installationNow()).manifest),
+  };
+
   const rawRoutes = webRoutes(
     client,
     {
@@ -269,13 +281,21 @@ export async function start(
       },
       context: commandContext,
     },
+    kthx,
   );
 
   const server = Bun.serve<StreamSocketData>({
     port: Number(Bun.env.PORT ?? 3000),
     development,
-    routes: instrumentRoutes(rawRoutes),
+    // A kthx `Host` is answered before any path in the table is consulted;
+    // the wrapper sits inside the instrumentation so those requests are
+    // counted under the path they would otherwise have reached.
+    routes: instrumentRoutes(withKthxHost(rawRoutes, kthx)),
     websocket: streamWebSocket,
+    // The abuse floor for a surface anybody can post bytes to. A kthx archive
+    // is refused above 25 MiB before this is reached; a console upload has
+    // never been near it.
+    maxRequestBodySize: 32 * 1024 * 1024,
   });
 
   logInfo(`spindrift web → ${server.url} (${manifest.installation.name})`, {

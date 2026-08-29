@@ -116,6 +116,13 @@ function serve() {
         throw new Error('an auth-route test reached the MCP surface');
       },
     },
+    {
+      db: auth.db,
+      zone: 'kthx.example.test',
+      depot: () => {
+        throw new Error('an auth-route test read the depot');
+      },
+    },
   );
 
   return { auth, routes };

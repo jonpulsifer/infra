@@ -171,6 +171,18 @@ const PROJECT_ID_ALLOWLIST = new Set<string>([
   // for everybody, written by a deployer rather than by a browser bundle.
   'nodejs22',
   'trace-v1',
+  // The headers a kthx site is served with and an upload arrives under, plus
+  // the one the edge stamps a caller's address in. Standard names, written
+  // outside `src/web/` because kthx answers on its own hosts rather than
+  // through the browser bundle.
+  'cache-control',
+  'content-type',
+  'x-content-type-options',
+  'if-none-match',
+  'x-filename',
+  'cf-connecting-ip',
+  'no-cache',
+  'no-store',
 ]);
 
 /**
@@ -218,8 +230,13 @@ const OBJECT_ID = /^[0-9a-f]{6,40}$/;
  *   generated dispatch surface (Task 36b) that carries command names, never
  *   endpoints or project identifiers; anything installation-specific the UI
  *   shows arrives from the manifest, which is where §20 puts it.
+ *
+ * An HTML document anywhere under `src/` is browser source for the same
+ * reason — `src/kthx/landing.html` is nothing but class names and headers —
+ * and is scoped out with it.
  */
-const BROWSER_SOURCE = 'src/web/';
+const BROWSER_SOURCE = (path: string): boolean =>
+  path.startsWith('src/web/') || path.endsWith('.html');
 
 /** Files that are not text, and would only produce noise. */
 const BINARY = /\.(png|jpe?g|gif|ico|webp|avif|woff2?|ttf|otf|pdf|zip|gz)$/i;
@@ -275,7 +292,7 @@ const QUOTED = /['"`]([^'"`\n]{6,30})['"`]/g;
 function findProjectIds(files: SourceFile[]): string[] {
   const offenders: string[] = [];
   for (const file of files) {
-    if (file.path.startsWith(BROWSER_SOURCE)) continue;
+    if (BROWSER_SOURCE(file.path)) continue;
     const source = scannable(file);
     // A package name is not an identity. `drizzle-orm` and `bun-sql` wear the
     // same shape as a project id, so the file's own import specifiers are
