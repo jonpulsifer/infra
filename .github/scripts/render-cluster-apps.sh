@@ -19,23 +19,33 @@ cd "$ROOT"
 # own `spec.path` belongs here in its own right — being under `clusters/*/apps`
 # does not mean the aggregate overlay includes it. oauth2-proxy is exactly that
 # case, and it was rendered by nothing until it was listed.
-OVERLAYS=(
-  clusters/folly/apps
-  clusters/offsite/apps
-  clusters/folly/apps/arc
-  clusters/offsite/apps/arc
-  clusters/folly/apps/oauth2-proxy
-  clusters/offsite/apps/oauth2-proxy
-  clusters/folly/monitoring
-  clusters/offsite/monitoring
-  clusters/offsite/monitoring-crds
-  # Shared platform operators. Each is one path both clusters reconcile from its
-  # own Flux Kustomization, so neither is reached by the aggregate overlays
-  # above — cloudnative-pg dropped out of every render the moment it moved out
-  # of clusters/*/apps, and valkey-operator was never in one to begin with.
-  clusters/base/platform/cloudnative-pg
-  clusters/base/platform/valkey-operator
+# Every path a Flux Kustomization in this repo names, derived rather than
+# listed.
+#
+# This was a hand-maintained array, and it had drifted to 11 of the 46 paths the
+# two clusters actually reconcile. Everything else — kyverno,
+# external-secrets-operator, onepassword-connect, both `flux-system` overlays,
+# every `networking` overlay, folly's `storage` and `nodes` — was rendered by
+# nothing and merged green. The array's own comment records oauth2-proxy and
+# cloudnative-pg being missed the same way; the lesson kept being applied to one
+# directory at a time instead of to the list.
+#
+# A path is included when a `Kustomization` declares it and the directory is in
+# this repo. Paths from other sources (upstream `k8s/`, `config/crd/...`) are
+# not ours to render.
+mapfile -t OVERLAYS < <(
+  grep -rl 'kustomize.toolkit.fluxcd.io' clusters/ --include='*.yaml' \
+    | xargs -r yq eval-all 'select(.kind == "Kustomization") | .spec.path' \
+    | sed 's|^\./||' \
+    | grep -v '^null$' \
+    | sort -u \
+    | while read -r path; do [[ -d $path ]] && printf '%s\n' "$path"; done
 )
+
+if ((${#OVERLAYS[@]} == 0)); then
+  printf 'derived no overlays; the Kustomization declarations or yq broke.\n' >&2
+  exit 1
+fi
 
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
@@ -145,8 +155,13 @@ cookie_scope_contract() {
     else
       printf '  cookie scope %s/%s: "%s" covers "%s"\n' "$ns" "$name" "$domain" "$host"
     fi
+    # `extraArgs` is a map for oauth2-proxy and a sequence for external-dns and
+    # cert-manager. Indexing a sequence by name is a hard yq error rather than an
+    # empty result, so the shape is checked before the key — nothing caught that
+    # while those overlays were rendered by nobody.
   done < <(yq eval-all '
     select(.kind == "HelmRelease")
+    | select(.spec.values.extraArgs | type == "!!map")
     | select(.spec.values.extraArgs."redirect-url" // "" | length > 0)
     | [[ (.metadata.namespace // "default"),
          .metadata.name,
@@ -207,9 +222,36 @@ authz_redirect_contract() {
   esac
 }
 
+# Flux generates a kustomization for a directory that has none, so a path with
+# only plain manifests in it still renders. `kubectl kustomize` refuses one, so
+# the same thing is done here against a copy rather than skipping the directory
+# — which is how `cert-manager/issuers` and `external-dns/endpoints` would
+# otherwise stay unrendered.
+render_overlay() {
+  local overlay="$1" out="$2" copy
+  if [[ -f $overlay/kustomization.yaml || -f $overlay/kustomization.yml ]]; then
+    kubectl kustomize "$overlay" >"$out"
+    return
+  fi
+  copy="$WORK/gen-${overlay//\//_}"
+  mkdir -p "$copy"
+  cp -r "$overlay"/. "$copy"/
+  # Every manifest listed by name rather than `kustomize create --autodetect`,
+  # which silently drops a file it cannot parse — the render then succeeds while
+  # quietly missing that resource, which is worse than not rendering at all. A
+  # file that is listed and unparseable fails the build, which is the point.
+  {
+    printf 'apiVersion: kustomize.config.k8s.io/v1beta1\nkind: Kustomization\nresources:\n'
+    (cd "$copy" && find . -type f \( -name '*.yaml' -o -name '*.yml' \) \
+      ! -name kustomization.yaml ! -name kustomization.yml \
+      | sed 's|^\./||' | sort | sed 's|^|  - |')
+  } >"$copy/kustomization.yaml"
+  kubectl kustomize "$copy" >"$out"
+}
+
 for overlay in "${OVERLAYS[@]}"; do
   rendered="$WORK/${overlay//\//_}.yaml"
-  kubectl kustomize "$overlay" >"$rendered"
+  render_overlay "$overlay" "$rendered"
   printf 'rendered %s\n' "$overlay"
   template_releases "$rendered" "$overlay"
   cookie_scope_contract "$rendered" "$overlay"

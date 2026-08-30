@@ -7,24 +7,20 @@ on:
   push:
     branches: [main]
     paths:
-      - 'clusters/base/**'
-      - 'clusters/folly/apps/**'
-      - 'clusters/folly/monitoring/**'
-      - 'clusters/folly/config/lab-topology.json'
-      - 'clusters/offsite/apps/**'
-      - 'clusters/offsite/monitoring/**'
+      # Every cluster path, not a list of the ones someone remembered. The
+      # enumerated form had drifted to a third of what Flux reconciles, so a
+      # broken networking, storage, nodes or platform overlay merged green.
+      - 'clusters/**'
       - 'packages/charts/**'
       - '.github/scripts/render-cluster-apps.sh'
       - '.github/scripts/check-prometheus-rules.sh'
       - '.github/workflows/kustomize.yml'
   pull_request:
     paths:
-      - 'clusters/base/**'
-      - 'clusters/folly/apps/**'
-      - 'clusters/folly/monitoring/**'
-      - 'clusters/folly/config/lab-topology.json'
-      - 'clusters/offsite/apps/**'
-      - 'clusters/offsite/monitoring/**'
+      # Every cluster path, not a list of the ones someone remembered. The
+      # enumerated form had drifted to a third of what Flux reconciles, so a
+      # broken networking, storage, nodes or platform overlay merged green.
+      - 'clusters/**'
       - 'packages/charts/**'
       - '.github/scripts/render-cluster-apps.sh'
       - '.github/scripts/check-prometheus-rules.sh'
