@@ -126,13 +126,38 @@ jobs:
           ignore-unfixed: true
           exit-code: 0
           severity: CRITICAL,HIGH
+      # A pull request opened with GITHUB_TOKEN does not get its checks run.
+      # GitHub reports every workflow on the branch as `action_required` and
+      # waits for a human to press "Approve and run", so the required `validate`
+      # context is never created, `--auto` can never fire, and the digest sits
+      # unmerged while every step of this job reports green. Measured on merged
+      # CD pull requests before this: 4.2h, 12.3h, 15.7h, 18.1h of deploy
+      # latency, and 10 of 10 `cd/*` runs gated against 35 of 35 `renovate/*`
+      # runs clean — renovate being an App is the whole difference.
+      #
+      # An App installation token is a different actor, so its pull request runs
+      # like anyone else's. `if` guards on a **variable** rather than a secret
+      # because secrets are not available to step conditions; when the variable
+      # is unset this step is skipped and the token falls back to
+      # GITHUB_TOKEN — exactly today's behaviour, so this is safe to merge
+      # before the App exists.
+      - name: Mint a continuous-delivery App token
+        id: cd-app-token
+        if: >-
+          github.event_name == 'push' && github.ref == 'refs/heads/main'
+          && vars.CD_APP_ID != ''
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          app-id: ${{ vars.CD_APP_ID }}
+          private-key: ${{ secrets.CD_APP_PRIVATE_KEY }}
       - name: Update manifest digest for selective continuous delivery
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         env:
           IMAGE_NAME: ${{ matrix.image }}
           DIGEST: ${{ steps.push.outputs.digest }}
           MANIFESTS: ${{ toJson(matrix.manifests) }}
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ steps.cd-app-token.outputs.token || secrets.GITHUB_TOKEN }}
+          CD_ACTOR: ${{ steps.cd-app-token.outputs.app-slug }}
         run: |
           set -euo pipefail
           mapfile -t targets < <(jq -r '.[]' <<<"$MANIFESTS")
@@ -211,8 +236,22 @@ jobs:
           BRANCH_NAME="cd/update-${IMAGE_NAME}-digest"
           git checkout -b "$BRANCH_NAME"
 
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
+          # Commit as whoever is actually pushing, so the author matches the
+          # token and the pull request is attributed to the App when there is
+          # one.
+          if [ -n "${CD_ACTOR:-}" ]; then
+            git config user.name "${CD_ACTOR}[bot]"
+            git config user.email "${CD_ACTOR}[bot]@users.noreply.github.com"
+          else
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+          fi
+          # `actions/checkout` left GITHUB_TOKEN in the remote's auth header, so
+          # a push would use it whatever GH_TOKEN says. Carry the token that
+          # opens the pull request through to the push as well, or the branch is
+          # pushed by one identity and the pull request opened by another.
+          git remote set-url origin \
+            "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
           # Stage only the manifests this step edited. A blanket `git add .`
           # also sweeps up whatever the build and scan steps left behind — the
           # Trivy action's multi-gigabyte vulnerability DB under .cache/ is
