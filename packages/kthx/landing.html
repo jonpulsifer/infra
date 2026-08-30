@@ -659,7 +659,13 @@ async function take(file) {
     if (/\.zip$/i.test(file.name)) {
       const files = unwrap(await readZip(await file.arrayBuffer()));
       if (!files.some(f => /^index\.html?$/i.test(f[0]))) throw new Error("This zip file has no index.html. kthx needs one.");
-      body = file; what = `${files.length} file${files.length === 1 ? "" : "s"} · ${KB(files.reduce((s, f) => s + f[1], 0))}`;
+      // The server refuses on the unpacked size, and text compresses hard
+      // enough that a zip well under 25 MB can pass that check and still be
+      // refused after the whole upload. This is the same total the label
+      // below shows, so the refusal costs the upload rather than following it.
+      const unpacked = files.reduce((s, f) => s + f[1], 0);
+      if (unpacked > 32 * 1048576) throw new Error(`Those files are ${KB(unpacked)} unpacked. kthx takes 32 MB at most once unpacked.`);
+      body = file; what = `${files.length} file${files.length === 1 ? "" : "s"} · ${KB(unpacked)}`;
     } else if (/\.(tar\.gz|tgz)$/i.test(file.name)) {
       body = file; what = KB(file.size);
     } else if (/\.html?$/i.test(file.name)) {
@@ -722,7 +728,7 @@ function resetStage() {
   $("#stage2").innerHTML = `<button class="drop" id="drop">
       <span class="arrow" aria-hidden="true">&darr;</span>
       <h2>Drop a zip file or an index.html file</h2>
-      <p>Static files only. <code>.zip</code>, <code>.tar.gz</code>, or <code>.html</code>. Maximum 25 MB.</p>
+      <p>Static files only. <code>.zip</code>, <code>.tar.gz</code>, or <code>.html</code>. Maximum 25 MB, or 32 MB unpacked.</p>
       <input type="file" id="file" accept=".html,.htm,.zip,.tgz,.gz" hidden></button>`;
 }
 
