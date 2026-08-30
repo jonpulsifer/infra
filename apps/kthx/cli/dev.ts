@@ -10,6 +10,7 @@ import {
   type KthxSocketData,
   type KthxStore,
   kthxSocket,
+  MAX_KEYS,
   MAX_LIST,
   underscoreResponse,
 } from '@repo/kthx';
@@ -99,10 +100,13 @@ function memory(): KthxStore {
             : row?.etag !== ifMatch
           : ifNoneMatch && row !== undefined;
       if (stale) {
-        return false;
+        return 'stale';
+      }
+      if (row === undefined && rows.size >= MAX_KEYS) {
+        return 'full';
       }
       rows.set(key, { text, etag });
-      return true;
+      return 'written';
     },
     async del(key) {
       rows.delete(key);
