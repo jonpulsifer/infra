@@ -45,6 +45,21 @@ metadata:
     {{- end }}
 spec:
   replicas: {{ $process.replicas }}
+  # Both processes are singletons, and each one's correctness says so: `web`
+  # keeps kthx presence, room fan-out, rate-limit buckets and the bundle cache
+  # in its own memory, and `reconciler` claims intents. The default `maxSurge`
+  # rounds up to 1, so a rollout ran a second one alongside the old for as long
+  # as it took the old to exit. Take the old one down first instead: a rollout
+  # is then a short gap rather than a window with two.
+  #
+  # Stays `RollingUpdate` rather than becoming `Recreate` on purpose — swapping
+  # the strategy on a live Deployment cannot prune the defaulted `rollingUpdate`
+  # fields through server-side apply, and the HelmRelease wedges on it.
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 0
+      maxUnavailable: 1
   selector:
     matchLabels:
       {{- include "spindrift.selectorLabels" (dict "Release" $top.Release "Values" $top.Values "Chart" $top.Chart "component" $process.name) | nindent 6 }}
