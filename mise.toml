@@ -74,6 +74,10 @@ run = "bash .github/scripts/render-cluster-apps.sh"
 description = "Lint every rendered PrometheusRule and run the alert unit tests"
 run = "bash .github/scripts/check-prometheus-rules.sh"
 
+[tasks."k8s:refresh-admin"]
+description = "Copy each cluster's renewed cluster-admin cert into the kubeconfig (optional cluster name)"
+run = "bash scripts/refresh-admin-kubeconfig.sh"
+
 [tasks."tf:init"]
 description = "Initialize Terraform modules without backends"
 run = [
