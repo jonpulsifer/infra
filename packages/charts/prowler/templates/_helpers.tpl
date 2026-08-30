@@ -38,8 +38,23 @@ already carries left to it. Emitting `prowler.labels` and `prowler.selectorLabel
 together would repeat `name` and `instance`, and a duplicate mapping key is a
 parse error on the way into the API server, not a cosmetic one.
 */}}
+{{/*
+`helm.sh/chart` is deliberately NOT here, though it is on every other object.
+
+This chart is reconciled `Revision` from a GitRepository, so source-controller
+stamps the git head sha into `.Chart.Version` — the version changes on every
+commit to main, not when this chart changes. A label on a pod template is part
+of the pod template, so that made every unrelated commit a new
+pod-template-hash, a new ReplicaSet, and a full rollout of the api, ui, worker,
+valkey and neo4j: about fourteen a day, each one killing in-flight scans and
+bouncing the Celery broker. Only the CNPG-owned database survived, because
+CNPG does not template it.
+
+Keep it off anything with a pod template. `ChartVersion` is not the fix — the
+tree routinely changes templates and values without touching `Chart.yaml`, and
+those changes would then never ship.
+*/}}
 {{- define "prowler.podLabels" -}}
-helm.sh/chart: {{ include "prowler.name" .root }}-{{ .root.Chart.Version | replace "+" "_" }}
 app.kubernetes.io/managed-by: {{ .root.Release.Service }}
 {{ include "prowler.selectorLabels" . }}
 {{- end }}
