@@ -12,6 +12,7 @@ icon:: 🚒
 	- [[Runbooks/Validate Infra Changes]] — validation commands by change area
 	- [[Runbooks/Inspect UniFi Network]] — read-only UniFi discovery before making changes
 	- [[Runbooks/SOPS Secrets and Age Keys]] — operator age key, harmonia keypairs, two-stage sops-nix recipient setup, decryption-failure triage
+	- [[Runbooks/Cluster Admin Access]] — JIT tokens for day-to-day kubectl, the break-glass certificate, and how to withdraw access
 	- [[Runbooks/Kiosk]] — the Raspberry Pi kiosk hosts: Cage/Wayland, Firefox, container-backed apps
 	- [[Runbooks/Adopt Folly Prometheus Operator CRDs]] — the one-time live ownership stamp and Kustomization wiring that lets folly join `monitoring-crds`
 	- [[Runbooks/Install Spindrift]] — from nothing to an enrolled, Target-connected Spindrift installation: Terraform bootstrap, chart declaration, first-operator enrolment

@@ -1,0 +1,45 @@
+# The operator's own identity on every cluster.
+#
+# The workstation used to authenticate as `O=system:masters, CN=cluster-admin`,
+# copied off a control plane by hand. That credential is not an identity — it is
+# the RBAC bypass — and the apiserver has no certificate revocation, so the only
+# way to withdraw it is to rotate the cluster CA and every leaf under it. Its
+# 30-day lifetime was the whole of its revocability, which is why it kept
+# expiring and why extending it was never an option.
+#
+# This is a named subject instead, bound to the `cluster-admin` ClusterRole
+# rather than to the `system:masters` group, so authorization is decided by RBAC
+# and can be taken away by deleting one object.
+#
+# There is deliberately **no** token Secret here. `kubectl create token` mints a
+# short-lived one on demand through the control plane (see
+# `dotfiles/.local/bin/kube-jit-token`), so nothing durable sits on the
+# workstation and a stolen laptop is worth at most the rest of one token's hour.
+# The credential that reaches the cluster is ssh, which is already the operator's
+# root of trust and already revocable.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: operator
+  namespace: kube-system
+  labels:
+    app.kubernetes.io/part-of: cluster-access
+---
+# `cluster-admin` the ClusterRole, not `system:masters` the group. The two grant
+# the same access today; only this one can be revoked without a CA rotation, and
+# only this one shows up in an audit log as a distinct subject rather than as the
+# one certificate every operator action has shared.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: operator
+  labels:
+    app.kubernetes.io/part-of: cluster-access
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: cluster-admin
+subjects:
+  - kind: ServiceAccount
+    name: operator
+    namespace: kube-system
