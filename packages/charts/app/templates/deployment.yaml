@@ -20,7 +20,7 @@ spec:
   template:
     metadata:
       labels:
-        {{- include "app.labels" . | nindent 8 }}
+        {{- include "app.podLabels" . | nindent 8 }}
     spec:
       {{- if .Values.sandbox }}
       runtimeClassName: gvisor
