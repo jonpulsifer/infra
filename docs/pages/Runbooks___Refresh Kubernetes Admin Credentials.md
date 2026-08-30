@@ -4,8 +4,8 @@ tags:: runbook
 - The operator's `cluster-admin` certificate is the one credential in the estate with no automation carrying it to where it is used. certmgr renews the control plane's own copy on the host; nothing copies that into `~/.kube/config`, so the operator's copy lapses every 30 days and `kubectl` stops working with an expired-certificate error.
 - ## Refresh it
 	- ```bash
-	  mise run k8s:refresh-admin           # every cluster that has something newer
-	  mise run k8s:refresh-admin folly     # one cluster
+	  mise run k8s:refresh-admin              # every cluster that has something newer
+	  mise run k8s:refresh-admin -- folly     # one cluster; mise needs the `--` to pass an argument
 	  ```
 	- It backs up `~/.kube/config` first, reads `cluster-admin.pem` and its key off each cluster's control-plane node over ssh, and writes them in with `--embed-certs`. It reports one line per cluster.
 	- `unchanged` means the installed copy is already the current generation — either it was refreshed already, or certmgr has not reached its renewal window. Nothing is written. This is the case worth understanding: reinstalling the same certificate would look like success and buy nothing.
