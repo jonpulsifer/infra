@@ -1,0 +1,78 @@
+#!/usr/bin/env bash
+# A kubectl credential plugin that mints a short-lived token instead of holding
+# a long-lived one.
+#
+#   kube-jit-token <control-plane-host> [serviceaccount] [namespace] [ttl]
+#
+# kubectl runs this itself, through the `exec` block `update-kubeconfigs` writes
+# into each user entry. It prints an ExecCredential, kubectl caches the token
+# until the expiry it carries, and asks again after that.
+#
+# What this replaces: a 30-day `O=system:masters` client certificate copied off
+# a control plane and left on disk. The apiserver cannot revoke a certificate,
+# so that credential's only limit was its expiry — and it kept lapsing. Here the
+# thing on disk is a hostname, the credential that reaches the cluster is ssh,
+# and the token is worth at most one TTL.
+#
+# The token is minted by the apiserver's TokenRequest API, so it is bound to the
+# ServiceAccount's lifetime: deleting the ServiceAccount or its ClusterRoleBinding
+# (`clusters/base/operator-rbac.yaml`) withdraws access immediately, which is the
+# thing the certificate could never do.
+set -euo pipefail
+
+host=${1:?the control-plane host to mint through, e.g. optiplex.lolwtf.ca}
+account=${2:-operator}
+namespace=${3:-kube-system}
+ttl=${4:-8h}
+
+fail() {
+  # kubectl surfaces stderr from a credential plugin, so this is what the
+  # operator actually sees when the mint fails.
+  printf 'kube-jit-token: %s\n' "$1" >&2
+  exit 1
+}
+
+# stderr is kept rather than discarded: the two failures worth telling apart —
+# ssh or sudo refusing, and the apiserver refusing the request — are otherwise
+# the same empty output. The apiserver enforces a minimum expiry of 10 minutes,
+# so a shorter ttl fails here and not in `date`.
+if ! response=$(
+  ssh -o BatchMode=yes -o ConnectTimeout=15 "$host" \
+    "sudo kubectl create token ${account@Q} -n ${namespace@Q} --duration=${ttl@Q}" 2>&1
+); then
+  fail "minting through ${host} failed: ${response:-ssh gave no output; is the host reachable?}"
+fi
+
+token=$response
+[[ $token == ey* ]] || fail "${host} returned no token: ${token:0:200}"
+
+# The expiry kubectl caches against.
+#
+# `--duration` takes a Go duration and `date` does not parse one — `date -d +8h`
+# is fine but `-d +10m` is not, because `m` there is months, not minutes. So the
+# TTL is converted to seconds here rather than handed to `date` as written.
+case $ttl in
+  *h) seconds=$((${ttl%h} * 3600)) ;;
+  *m) seconds=$((${ttl%m} * 60)) ;;
+  *s) seconds=${ttl%s} ;;
+  *) fail "the ttl must end in h, m or s (got: ${ttl})" ;;
+esac
+
+# Refresh a little before the token actually dies, so a renewal happens ahead of
+# the request that would otherwise fail with it — but never claim an expiry in
+# the past, which is what a naive subtraction does to a short TTL.
+margin=300
+((seconds > margin * 2)) || margin=$((seconds / 10))
+expiry=$(date -u -d "+$((seconds - margin)) seconds" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null) \
+  || fail "could not compute an expiry for a ttl of ${ttl}"
+
+cat <<EOF
+{
+  "apiVersion": "client.authentication.k8s.io/v1",
+  "kind": "ExecCredential",
+  "status": {
+    "token": "${token}",
+    "expirationTimestamp": "${expiry}"
+  }
+}
+EOF
