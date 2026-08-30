@@ -26,7 +26,7 @@ import { kthxReleases, kthxSites } from '../db/schema.ts';
 import { readStagedArchive, type SourceDepot } from '../storage/archives.ts';
 import { fetchableBundleUrl } from '../storage/signed-url.ts';
 import { sdkResponse, underscoreResponse } from './data.ts';
-import { limited } from './sites.ts';
+import { limited, MAX_UNPACKED_BYTES } from './sites.ts';
 
 /** The zone kthx sites live in. `kthx.localhost` resolves to loopback for a local run. */
 export const KTHX_ZONE_VAR = 'KTHX_ZONE';
@@ -294,12 +294,26 @@ async function filesFor(
     return hit.files;
   }
   const entry = {
-    files: loadBundle(release, deps).then((bundle) => siteFiles(bundle)),
+    // Bounded here as well as on upload. `MAX_UPLOADS` caps how many releases
+    // unpack at once; nothing capped how many *reads* did, and a read of a
+    // cold digest runs the same unpack. Without a ceiling a bundle staged
+    // before the limit dropped — or one from a depot this process did not
+    // write — inflates without one in a 768 MiB pod.
+    files: loadBundle(release, deps).then((bundle) =>
+      siteFiles(bundle, MAX_UNPACKED_BYTES),
+    ),
     bytes: 0,
   };
   cache.set(release.digest, entry);
   entry.files.then(
     (files) => {
+      // Only account for an entry still in the map. It goes in at `bytes: 0`,
+      // so a concurrent settle can `trim()` this one out before it lands here
+      // and subtract nothing; adding its size afterwards would leave `cached`
+      // counting bytes nobody holds. The drift is one-way, and it ends with
+      // `trim` evicting to a single entry on every insert — a cache that
+      // refetches from the depot every request while reporting itself full.
+      if (cache.get(release.digest) !== entry) return;
       entry.bytes = sizeOf(files);
       cached += entry.bytes;
       trim();

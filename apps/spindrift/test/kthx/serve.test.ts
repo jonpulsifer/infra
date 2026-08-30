@@ -10,12 +10,18 @@ import {
   type KthxDeps,
   kthxDepot,
   kthxZone,
+  siteFiles,
   siteOf,
   withKthxHost,
 } from '../../src/kthx/serve.ts';
-import { KTHX_PATHS, kthxRoutes } from '../../src/kthx/sites.ts';
+import {
+  KTHX_PATHS,
+  kthxRoutes,
+  MAX_UNPACKED_BYTES,
+} from '../../src/kthx/sites.ts';
 import { zipOf } from '../fixtures/zip.ts';
 import { withIsolatedDatabase } from '../harness/db.ts';
+import { tarball } from '../harness/tar.ts';
 
 const database = withIsolatedDatabase();
 const ZONE = 'kthx.test';
@@ -324,5 +330,32 @@ describe('the generic favicon', () => {
     expect(head!.status).toBe(200);
     expect(head!.headers.get('etag')).toBe(etag);
     expect(await head!.text()).toBe('');
+  });
+});
+
+describe('the serving path unpacks under a ceiling', () => {
+  /**
+   * `MAX_UPLOADS` bounds how many releases unpack at once. Nothing bounded how
+   * many *reads* did, and a read of a cold digest runs the same unpack — so a
+   * bundle staged before the ceiling dropped, or one written to the depot by
+   * something other than this handler, inflated with no limit in a 768 MiB pod.
+   *
+   * The mechanism is what is pinned here: `siteFiles` refuses past the ceiling
+   * the serving path now passes it. What is *not* covered is the cache's byte
+   * accounting, whose one-way drift needs two cold loads racing across a
+   * `trim()` — that wants more than `CACHE_BYTES` of live bundles to force,
+   * which is machinery out of proportion to a one-line guard.
+   */
+  test('siteFiles refuses a bundle that unpacks past the ceiling it is given', () => {
+    // Highly compressible, so an over-ceiling bundle costs little to build.
+    const huge = new Uint8Array(MAX_UNPACKED_BYTES + 1024);
+    const bundle = tarball([
+      { name: 'index.html', bytes: new TextEncoder().encode('<h1>home</h1>') },
+      { name: 'big.bin', bytes: huge },
+    ]);
+
+    expect(() => siteFiles(bundle, MAX_UNPACKED_BYTES)).toThrow();
+    // Unbounded — the call the serving path used to make — reads it happily.
+    expect(siteFiles(bundle).size).toBe(2);
   });
 });
