@@ -407,11 +407,11 @@ async function siteApi(
     return cookied(await dbApi(request, ctx, name, segments, owner), me);
   }
   if (segments[2] === 'ai') {
-    // Reading what this site has spent is not spending it.
-    const refusal =
-      path === '/api/ai/usage'
-        ? null
-        : charge(ctx, name, me, owner, address, true);
+    // The two GETs here — `usage` and the model list — are this server's own
+    // numbers, reach no upstream and cost nothing. Charging them would leave a
+    // foreign page able to spend a victim site's day on a `no-cors` GET, which
+    // carries no `Origin` for the guard above to catch.
+    const refusal = read ? null : charge(ctx, name, me, owner, address, true);
     if (refusal !== null) return refusal;
     // A model thinks for longer than Bun's 10 s connection idle timeout, which
     // would otherwise cut a streaming completion off mid-answer.

@@ -13,7 +13,9 @@
 import { afterAll, beforeEach, describe, expect, test } from 'bun:test';
 import {
   MAX_AI_BODY_BYTES,
+  MAX_AI_IN_FLIGHT_SITE,
   MAX_AI_REQUESTS_DAY,
+  MAX_AI_TOKENS_DAY,
   utcDay,
 } from '../../server/ai.ts';
 import { ask, withServer, ZONE } from '../harness/server.ts';
@@ -26,7 +28,8 @@ interface Seen {
 }
 
 let seen: Seen | null = null;
-let reply: (request: Request) => Response = () => Response.json({});
+let reply: (request: Request) => Response | Promise<Response> = () =>
+  Response.json({});
 
 /** The upstream, near enough: it records what it was sent and answers to order. */
 const upstream = Bun.serve({
@@ -79,9 +82,9 @@ interface Site {
   readonly token: string;
 }
 
-async function claimed(label: string): Promise<Site> {
-  const name = kthx().name(label);
-  const response = await kthx().fetch(
+async function claimed(label: string, at = kthx): Promise<Site> {
+  const name = at().name(label);
+  const response = await at().fetch(
     ask('/api/sites', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -98,8 +101,9 @@ function chat(
   site: Site,
   body: unknown,
   init: Parameters<typeof ask>[1] = {},
+  at = kthx,
 ): Promise<Response> {
-  return kthx().fetch(
+  return at().fetch(
     ask('/api/ai/v1/chat/completions', {
       host: site.host,
       method: 'POST',
@@ -211,6 +215,22 @@ describe('the passthrough', () => {
     expect(sent().max_tokens).toBe(100);
   });
 
+  test('clamps both token spellings, and bills the higher of the two', async () => {
+    const site = await claimed('ai-both-keys');
+    reply = () => Response.json({ choices: [{ message: { content: 'hi' } }] });
+    // One key clamped and the other forwarded verbatim is the whole ceiling
+    // gone, and the smaller of the two would then be the billing floor.
+    const response = await chat(site, {
+      messages: [],
+      max_tokens: 999_999,
+      max_completion_tokens: 5,
+    });
+    await response.json();
+    expect(sent().max_tokens).toBe(100);
+    expect(sent().max_completion_tokens).toBe(5);
+    expect(await spent(site)).toEqual({ requests: 1, tokens: 100 });
+  });
+
   test('refuses a model outside the allow-list before calling anyone', async () => {
     const site = await claimed('ai-model');
     const response = await chat(site, { messages: [], model: 'expensive-1' });
@@ -259,15 +279,28 @@ describe('the passthrough', () => {
 });
 
 describe('the allow-list of paths', () => {
-  test('models and embeddings are relayed', async () => {
-    const site = await claimed('ai-paths');
-    reply = () => Response.json({ data: [{ id: 'test-model' }] });
-    const models = await kthx().fetch(
+  test('the model list is answered here, unmetered, and reaches no upstream', async () => {
+    const site = await claimed('ai-models');
+    const response = await kthx().fetch(
       ask('/api/ai/v1/models', { host: site.host }),
     );
-    expect(models.status).toBe(200);
-    expect(seen?.url).toBe(`http://127.0.0.1:${upstream.port}/v1/models`);
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as { data: { id: string }[] };
+    expect(body.data.map((entry) => entry.id)).toEqual([
+      'test-model',
+      'other-model',
+    ]);
+    // A cross-origin `no-cors` GET carries no `Origin` for the guard to catch,
+    // so a metered model list is a foreign page spending a site's whole day.
+    expect(seen).toBeNull();
+    const rows = (await kthx().sql`
+      select requests from ai_usage where site = ${site.name}
+    `) as { requests: number }[];
+    expect(rows).toHaveLength(0);
+  });
 
+  test('embeddings are relayed with the model defaulted', async () => {
+    const site = await claimed('ai-paths');
     reply = () => Response.json({ data: [{ embedding: [0.1] }], usage: {} });
     const embeddings = await kthx().fetch(
       ask('/api/ai/embeddings', {
@@ -280,6 +313,23 @@ describe('the allow-list of paths', () => {
     expect(embeddings.status).toBe(200);
     expect(seen?.url).toBe(`http://127.0.0.1:${upstream.port}/v1/embeddings`);
     expect(sent().model).toBe('test-model');
+  });
+
+  test('an embeddings reply with no usage is billed its input, not zero', async () => {
+    const site = await claimed('ai-embed-bill');
+    // There is no `max_tokens` on this path, so a silent upstream used to make
+    // the whole call free — the one door without a billing floor.
+    reply = () => Response.json({ data: [] });
+    const response = await kthx().fetch(
+      ask('/api/ai/embeddings', {
+        host: site.host,
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ input: 'x'.repeat(4000) }),
+      }),
+    );
+    await response.json();
+    expect((await spent(site)).tokens).toBeGreaterThan(900);
   });
 
   test('anything else is 404 and reaches no upstream', async () => {
@@ -361,6 +411,18 @@ describe('the budget', () => {
     expect(seen).toBeNull();
   });
 
+  test('a day past the token ceiling is 429 too, not only the request one', async () => {
+    const site = await claimed('ai-tokens');
+    await kthx().sql`
+      insert into ai_usage (site, day, requests, tokens)
+      values (${site.name}, ${utcDay()}, 1, ${MAX_AI_TOKENS_DAY})
+    `;
+    const response = await chat(site, { messages: [] });
+    expect(response.status).toBe(429);
+    expect((await response.json()).code).toBe('AI_BUDGET');
+    expect(seen).toBeNull();
+  });
+
   test('/api/ai/usage reports today and does not spend it', async () => {
     const site = await claimed('ai-usage');
     await (await chat(site, { messages: [] })).json();
@@ -395,5 +457,59 @@ describe('the budget', () => {
     };
     expect(body.usage.ai_requests_today).toBe(1);
     expect(body.usage.ai_tokens_today).toBe(42);
+  });
+});
+
+describe('concurrency', () => {
+  test('a call past the per-site in-flight cap is 429 with a retry-after', async () => {
+    const site = await claimed('ai-inflight');
+    let start = (): void => {};
+    const held = new Promise<void>((resolve) => {
+      start = resolve;
+    });
+    reply = async () => {
+      await held;
+      return Response.json({ choices: [], usage: { total_tokens: 1 } });
+    };
+
+    const waiting = Array.from({ length: MAX_AI_IN_FLIGHT_SITE }, () =>
+      chat(site, { messages: [] }),
+    );
+    // They hold their slots while the upstream sits on the answer, which is
+    // the only cost a concurrency cap is there to bound.
+    await Bun.sleep(100);
+    const refused = await chat(site, { messages: [] });
+    expect(refused.status).toBe(429);
+    expect((await refused.json()).code).toBe('RATE_LIMITED');
+    expect(Number(refused.headers.get('retry-after'))).toBeGreaterThan(0);
+
+    start();
+    for (const call of await Promise.all(waiting)) {
+      expect(call.status).toBe(200);
+      await call.text();
+    }
+    // And the slot comes back with the answer, not with the last byte a client
+    // bothers to read: the next call is served immediately.
+    const after = await chat(site, { messages: [] });
+    expect(after.status).toBe(200);
+    await after.text();
+  });
+});
+
+describe('without a key', () => {
+  const keyless = withServer({
+    aiUrl: `http://127.0.0.1:${upstream.port}/v1`,
+    aiKey: null,
+    aiModel: 'test-model',
+    aiModels: ['test-model'],
+    aiMaxTokens: 100,
+  });
+
+  test('a deployment with no KTHX_AI_KEY is 502, and calls nobody', async () => {
+    const site = await claimed('ai-keyless', keyless);
+    const response = await chat(site, { messages: [] }, {}, keyless);
+    expect(response.status).toBe(502);
+    expect((await response.json()).code).toBe('AI_UPSTREAM');
+    expect(seen).toBeNull();
   });
 });

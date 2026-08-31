@@ -80,6 +80,18 @@ function required(env: Env, name: string): string {
   return value;
 }
 
+/**
+ * A positive number, or the default.
+ *
+ * `Number('four')` is `NaN`, and a `NaN` ceiling is no ceiling: it serialises
+ * as `null` on the wire and turns the token billing into a statement Postgres
+ * refuses. A typo in a chart value must not quietly remove a spend control.
+ */
+function positive(raw: string | undefined, fallback: number): number {
+  const asked = Number(raw?.trim() ?? '');
+  return Number.isFinite(asked) && asked > 0 ? asked : fallback;
+}
+
 function longEnough(name: string, value: string): string {
   if (new TextEncoder().encode(value).byteLength < KEY_BYTES) {
     throw new ConfigError(`${name} is shorter than ${KEY_BYTES} bytes`);
@@ -113,7 +125,7 @@ export function readConfig(env: Env = Bun.env): Config {
       .split(',')
       .map((entry) => entry.trim())
       .filter((entry) => entry !== ''),
-    aiMaxTokens: Number(env.KTHX_AI_MAX_TOKENS?.trim() || 4096),
+    aiMaxTokens: positive(env.KTHX_AI_MAX_TOKENS, 4096),
     trustedProxies: (env.KTHX_TRUSTED_PROXIES ?? '')
       .split(',')
       .map((entry) => entry.trim())

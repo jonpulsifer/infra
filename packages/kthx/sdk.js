@@ -407,34 +407,44 @@
     },
   };
 
-  /** The SSE frames as the strings a page wants: one delta at a time. */
+  /**
+   * The SSE frames as the strings a page wants: one delta at a time.
+   *
+   * The `finally` is the stop button: breaking out of the loop must cancel the
+   * body, because that is what aborts the request and lets the server stop
+   * paying for an answer nobody is reading any more.
+   */
   async function* deltas(response) {
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
     let buffer = '';
-    for (;;) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
-      // A frame ends on a blank line; whatever follows the last one is half a
-      // frame and waits for the next chunk.
-      const frames = buffer.split('\n\n');
-      buffer = frames.pop() ?? '';
-      for (const frame of frames) {
-        for (const line of frame.split('\n')) {
-          if (!line.startsWith('data:')) continue;
-          const payload = line.slice(5).trim();
-          if (payload === '' || payload === '[DONE]') continue;
-          let parsed;
-          try {
-            parsed = JSON.parse(payload);
-          } catch {
-            continue;
+    try {
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        // A frame ends on a blank line; whatever follows the last one is half a
+        // frame and waits for the next chunk.
+        const frames = buffer.split('\n\n');
+        buffer = frames.pop() ?? '';
+        for (const frame of frames) {
+          for (const line of frame.split('\n')) {
+            if (!line.startsWith('data:')) continue;
+            const payload = line.slice(5).trim();
+            if (payload === '' || payload === '[DONE]') continue;
+            let parsed;
+            try {
+              parsed = JSON.parse(payload);
+            } catch {
+              continue;
+            }
+            const delta = parsed.choices?.[0]?.delta?.content;
+            if (delta) yield delta;
           }
-          const delta = parsed.choices?.[0]?.delta?.content;
-          if (delta) yield delta;
         }
       }
+    } finally {
+      await reader.cancel().catch(() => {});
     }
   }
 

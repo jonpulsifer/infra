@@ -426,7 +426,7 @@ room.leave()</pre>
 <b>const</b> openai = <b>new</b> OpenAI({ baseURL: kthx.ai.baseURL, apiKey: <u>'kthx'</u>, dangerouslyAllowBrowser: <b>true</b> })
 
 <b>await</b> fetch(<u>'/api/ai/usage'</u>)                       <i>// { day, requests, tokens, quotas }</i></pre>
-        <div class="sdknote"><b>A model, without a key on the page.</b> The site calls its own origin and the server adds the credential, so there is nothing to leak and nothing to rotate. <code>chat/completions</code>, <code>models</code> and <code>embeddings</code> are the paths it forwards. Each site gets a daily budget; past it every call is <code>429 AI_BUDGET</code> until UTC midnight.</div>
+        <div class="sdknote"><b>A model, without a key on the page.</b> The site calls its own origin and the server adds the credential, so there is nothing to leak and nothing to rotate. <code>chat/completions</code> and <code>embeddings</code> are the paths it forwards; <code>models</code> is answered from the server's own allow-list, free. Each site gets a daily budget; past it every call is <code>429 AI_BUDGET</code> until UTC midnight.</div>
       </div>
 
       <div class="sdkpane" id="sdk-me" hidden>

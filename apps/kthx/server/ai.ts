@@ -21,10 +21,12 @@
  * one as free.
  *
  * Bytes are relayed as they arrive — an SSE stream reaches the page token by
- * token — while a copy is scanned for the `usage` the last chunk carries. That
- * copy is capped: past it the request is billed its clamped ceiling, which is
- * also what an aborted stream is billed. Never zero.
+ * token — while a bounded *tail* of the answer is kept, because `usage` is in
+ * the last chunk and keeping the head would silently under-bill every long
+ * stream. An answer that states no usage is billed its clamped ceiling, which
+ * is also what an aborted stream is billed. Never zero.
  */
+import { bodyOf } from './documents.ts';
 import { isJson, logCause, ok, refuse } from './http.ts';
 import { secondsToMidnight } from './limits.ts';
 import type { Ctx } from './sites.ts';
@@ -42,8 +44,10 @@ export const AI_IDLE_SECONDS = 120;
 /** Concurrency, which is the cost ceiling a daily budget cannot express. */
 export const MAX_AI_IN_FLIGHT_SITE = 4;
 export const MAX_AI_IN_FLIGHT_ADDRESS = 2;
-/** How much of an answer is kept, to read `usage` out of its tail. */
+/** How much of an answer's tail is kept, to read `usage` out of it. */
 const MAX_SCAN_BYTES = 1024 * 1024;
+/** A crude proxy for tokenisation, used only where nothing better is on offer. */
+const BYTES_PER_TOKEN = 4;
 
 /** The upstream paths this server has. Everything else is a 404. */
 const UPSTREAM = {
@@ -162,14 +166,8 @@ interface Prepared {
 function prepare(
   ctx: Ctx,
   path: UpstreamPath,
-  raw: string,
+  parsed: unknown,
 ): Prepared | 'MALFORMED_REQUEST' | 'INVALID_MODEL' {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(raw);
-  } catch {
-    return 'MALFORMED_REQUEST';
-  }
   if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
     return 'MALFORMED_REQUEST';
   }
@@ -184,25 +182,43 @@ function prepare(
   }
   const out: Record<string, unknown> = { ...body, model };
   if (path === '/embeddings') {
-    return { body: JSON.stringify(out), fallbackTokens: 0 };
+    // There is no `max_tokens` here and no completion to cap: what an embedding
+    // costs is the input it was handed. A reply carrying no `usage` is billed a
+    // byte-count proxy for that input rather than nothing — this was the one
+    // door the never-billed-zero floor was missing.
+    const serialised = JSON.stringify(out);
+    return {
+      body: serialised,
+      fallbackTokens: Math.ceil(
+        Buffer.byteLength(serialised) / BYTES_PER_TOKEN,
+      ),
+    };
   }
 
   // One completion per call. `n` multiplies the bill by a number the budget
   // cannot see until it has already been spent.
   if (body.n !== undefined && Number(body.n) !== 1) return 'MALFORMED_REQUEST';
 
-  // Whichever spelling the caller used, clamped; neither, and the ceiling is
-  // stated rather than left to the upstream's own default.
-  const key =
-    body.max_completion_tokens === undefined
-      ? 'max_tokens'
-      : 'max_completion_tokens';
-  const asked = Number(body[key]);
-  const maxTokens =
-    Number.isFinite(asked) && asked > 0
-      ? Math.min(asked, ctx.config.aiMaxTokens)
-      : ctx.config.aiMaxTokens;
-  out[key] = maxTokens;
+  // Both spellings, independently. Clamping only the one this server picked and
+  // writing only that back forwarded the other verbatim, so a body carrying
+  // both bought a ceiling nobody here agreed to.
+  let ceiling = 0;
+  for (const key of ['max_tokens', 'max_completion_tokens'] as const) {
+    if (body[key] === undefined) continue;
+    const asked = Number(body[key]);
+    const clamped =
+      Number.isFinite(asked) && asked > 0
+        ? Math.min(asked, ctx.config.aiMaxTokens)
+        : ctx.config.aiMaxTokens;
+    out[key] = clamped;
+    ceiling = Math.max(ceiling, clamped);
+  }
+  // Neither spelling was sent: the ceiling is stated rather than left to the
+  // upstream's own default.
+  if (ceiling === 0) {
+    out.max_tokens = ctx.config.aiMaxTokens;
+    ceiling = ctx.config.aiMaxTokens;
+  }
 
   if (body.stream === true) {
     const options =
@@ -211,15 +227,18 @@ function prepare(
         : {};
     out.stream_options = { ...options, include_usage: true };
   }
-  return { body: JSON.stringify(out), fallbackTokens: maxTokens };
+  // The most either spelling could have bought, so a body carrying both cannot
+  // talk the billing floor down to the smaller of the two.
+  return { body: JSON.stringify(out), fallbackTokens: ceiling };
 }
 
 /**
  * `usage.total_tokens` out of an answer, or `null`.
  *
  * A stream carries it in the last `data:` frame and a single response carries it
- * at the top level, so both are tried; a copy truncated at
- * {@link MAX_SCAN_BYTES} parses as neither and falls back.
+ * at the top level, so both are tried. The scan keeps the tail, so a stream past
+ * {@link MAX_SCAN_BYTES} still reports its real usage; only a single response
+ * that long parses as neither and falls back.
  */
 export function tokensIn(text: string): number | null {
   let last: number | null = null;
@@ -276,19 +295,19 @@ export async function aiApi(
   if (request.method !== UPSTREAM[route]) {
     return refuse('METHOD_NOT_ALLOWED', ctx.id);
   }
+  // Answered here, and never relayed. A `no-cors` GET carries no `Origin`, so
+  // the same-origin guard cannot see one either way: relaying this would leave
+  // any third-party page able to spend a victim site's whole day on `<img
+  // src=…/models>`. The allow-list is the whole truth about what this site may
+  // ask for, so the local answer is also the more honest one.
+  if (route === '/models') return models(ctx);
 
   let sent: Prepared = { body: '', fallbackTokens: 0 };
   if (UPSTREAM[route] === 'POST') {
     if (!isJson(request)) return refuse('MALFORMED_REQUEST', ctx.id);
-    const declared = Number(request.headers.get('content-length') ?? 0);
-    if (declared > MAX_AI_BODY_BYTES) {
-      return refuse('TOO_LARGE', ctx.id);
-    }
-    const raw = await request.text();
-    if (Buffer.byteLength(raw) > MAX_AI_BODY_BYTES) {
-      return refuse('TOO_LARGE', ctx.id);
-    }
-    const prepared = prepare(ctx, route, raw);
+    const body = await bodyOf(request, MAX_AI_BODY_BYTES);
+    if ('code' in body) return refuse(body.code, ctx.id);
+    const prepared = prepare(ctx, route, body.json);
     if (typeof prepared === 'string') return refuse(prepared, ctx.id);
     sent = prepared;
   }
@@ -327,6 +346,25 @@ export async function aiApi(
   }
 }
 
+/**
+ * The models a site may name, in the shape the OpenAI SDK expects.
+ *
+ * Free and unmetered because it is this server's own list: a model outside
+ * `KTHX_AI_MODELS` is a 400 anyway, so relaying the upstream's catalogue would
+ * advertise models no site here can ask for and cost money to read.
+ */
+function models(ctx: Ctx): Response {
+  const ids =
+    ctx.config.aiModels.length > 0 ? ctx.config.aiModels : [ctx.config.aiModel];
+  return ok(
+    {
+      object: 'list',
+      data: ids.map((id) => ({ id, object: 'model', owned_by: 'kthx' })),
+    },
+    ctx.id,
+  );
+}
+
 /** Today's numbers and the ceilings they are counted against. */
 async function today(ctx: Ctx, name: string): Promise<Response> {
   const day = utcDay();
@@ -348,9 +386,11 @@ async function today(ctx: Ctx, name: string): Promise<Response> {
 /**
  * The call itself: rebuilt headers out, relayed bytes back, tokens billed once.
  *
- * Every way this ends — the last chunk, a 90 s gap, the page navigating away,
- * an upstream that never answers — runs through {@link settle}, so the day is
- * charged exactly once and the slot is always given back.
+ * Every way this ends — the last chunk, a cancelled read, a 90 s gap, the page
+ * navigating away, an upstream that never answers — runs through `settle`, so
+ * the day is charged exactly once. The in-flight slot is given back as soon as
+ * the response is handed off, because it bounds calls to the upstream and not
+ * how long a client takes to read one.
  */
 async function forward(
   request: Request,
@@ -444,22 +484,42 @@ async function forward(
   const decoder = new TextDecoder();
   let scanned = '';
   deadline = setTimeout(cut, AI_GAP_MS);
-  const relayed = answer.body.pipeThrough(
-    new TransformStream<Uint8Array, Uint8Array>({
-      transform(chunk, controller) {
-        // Enqueued first: nothing this file does may sit between a token the
-        // upstream produced and the page waiting for it.
-        controller.enqueue(chunk);
-        clearTimeout(deadline);
-        deadline = setTimeout(cut, AI_GAP_MS);
-        if (scanned.length < MAX_SCAN_BYTES) {
-          scanned += decoder.decode(chunk, { stream: true });
-        }
-      },
-      flush() {
-        settle(tokensIn(scanned) ?? fallback);
-      },
-    }),
-  );
-  return new Response(relayed, { status: answer.status, headers: out });
+  // `cancel` is in the Streams standard and in Bun; the DOM lib's `Transformer`
+  // predates it, so the type is widened rather than the handler dropped.
+  const meter: Transformer<Uint8Array, Uint8Array> & { cancel(): void } = {
+    transform(chunk, controller) {
+      // Enqueued first: nothing this file does may sit between a token the
+      // upstream produced and the page waiting for it.
+      controller.enqueue(chunk);
+      clearTimeout(deadline);
+      deadline = setTimeout(cut, AI_GAP_MS);
+      scanned += decoder.decode(chunk, { stream: true });
+      // The tail, because `usage` is in the last frame and keeping the head
+      // billed every long stream its fallback instead. Halved rather than
+      // trimmed every chunk, so a long answer still copies O(1) per byte.
+      if (scanned.length > MAX_SCAN_BYTES) {
+        scanned = scanned.slice(-MAX_SCAN_BYTES / 2);
+      }
+    },
+    flush() {
+      settle(tokensIn(scanned) ?? fallback);
+    },
+    // An upstream that errors mid-stream, or a client that cancels its read,
+    // never reaches `flush`; without this the day is charged only once the
+    // 90 s gap timer fires.
+    cancel() {
+      cut();
+    },
+  };
+  const relayed = answer.body.pipeThrough(new TransformStream(meter));
+  const response = new Response(relayed, {
+    status: answer.status,
+    headers: out,
+  });
+  // The slot bounds calls to the upstream, not how slowly a client reads its
+  // answer: held until `flush`, four stalled readers closed a site's AI for
+  // 90 s at a time. The timers and the abort listener still run, so the tokens
+  // are billed exactly once whenever the stream actually ends.
+  slot();
+  return response;
 }
