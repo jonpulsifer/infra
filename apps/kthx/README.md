@@ -16,12 +16,20 @@ One Bun process on `:8080`, behind the Cilium Gateway. It dispatches on `Host`:
 | apex `/`, `/sdk.js`, `/skill.md`, `/favicon.ico` | the files `@repo/kthx` carries |
 | apex `/cli/kthx.tgz` | the command line, packed into the image by `pack.ts` |
 | `<name>.kthx.dev/*` | the release the site's row says it serves |
+| `<name>.kthx.dev/api/*` | the site's own backends — `me`, `db`, `ws`, `files` |
+| `<name>.kthx.dev/files/*` | the site's file store, served with its stored type |
 
 A release is read once (`@repo/archive`: a ZIP is transcoded to the gzipped tar
 everything downstream opens), stored in the depot under its own sha256, unpacked
 to `$KTHX_SITES_DIR/<name>/<n>/`, and numbered under the site row's lock. The
 directory is a cache of the depot object: a release whose directory is gone is
 refilled from its `location`, so losing the volume costs latency and never data.
+
+Files are the same deal one level over: `$KTHX_SITES_DIR/<name>/files/<path>`,
+never inside a release, written through to `files/<name>/<path>` in the depot
+and refilled from it. Anyone on the site origin may `PUT` one; the visitor who
+created a path owns it, and the content-type allowlist is what keeps a public
+store from becoming a page on the site's own origin.
 
 Configuration: `KTHX_ZONE`, `KTHX_BUCKET` (unset uses an on-disk depot),
 `KTHX_SITES_DIR`, `DATABASE_URL`, `KTHX_ME_KEY` (+ optional

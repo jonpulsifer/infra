@@ -24,6 +24,8 @@ export type Code =
   | 'INVALID_ID'
   | 'INVALID_DOCUMENT'
   | 'INVALID_QUERY'
+  | 'INVALID_PATH'
+  | 'UNSUPPORTED_TYPE'
   | 'MALFORMED_REQUEST'
   | 'UNAUTHENTICATED'
   | 'FORBIDDEN'
@@ -61,6 +63,14 @@ const ERRORS: Record<Code, readonly [number, string]> = {
     'a document is a JSON object, at most 32 deep, without NUL',
   ],
   INVALID_QUERY: [400, 'that is not a query this collection takes'],
+  INVALID_PATH: [
+    400,
+    'a file path is up to 256 of A-Z, a-z, 0-9, ., _, - and /, and no segment starts with a dot',
+  ],
+  UNSUPPORTED_TYPE: [
+    400,
+    'files take image, audio, video, application/pdf, application/json, text/plain, text/csv and text/markdown',
+  ],
   MALFORMED_REQUEST: [
     400,
     'the request body or content type is not what this path takes',
@@ -150,6 +160,33 @@ export function empty(id: string): Response {
       'cache-control': 'no-store',
     },
   });
+}
+
+/**
+ * The whole body, or a rejection once the deadline passes.
+ *
+ * `fetch` has no deadline of its own, so a caller that opens a `PUT` and then
+ * sends a byte a minute holds a slot — an unpack slot for a release, one of the
+ * eight file writes — for as long as the kernel keeps the socket.
+ */
+export async function bodyWithin(
+  request: Request,
+  ms: number,
+): Promise<ArrayBuffer> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      request.arrayBuffer(),
+      new Promise<never>((_resolve, reject) => {
+        timer = setTimeout(
+          () => reject(new Error('the body did not arrive in time')),
+          ms,
+        );
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 /** What the caller is told nothing about, written where an operator can find it. */

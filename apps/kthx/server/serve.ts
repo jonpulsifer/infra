@@ -61,7 +61,10 @@ export function decodePath(url: string): string | null {
 }
 
 /** The one regular file at this path under the root, or `null`. */
-async function fileAt(root: string, path: string): Promise<string | null> {
+export async function fileAt(
+  root: string,
+  path: string,
+): Promise<string | null> {
   const resolved = normalize(join(root, path));
   if (resolved !== root && !resolved.startsWith(`${root}/`)) return null;
   try {

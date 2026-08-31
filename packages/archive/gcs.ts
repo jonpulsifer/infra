@@ -207,3 +207,33 @@ export async function readGcsObject(
   // nothing rather than a caller's problem to distinguish.
   return response.body ?? new Blob([]).stream();
 }
+
+/**
+ * One object, gone.
+ *
+ * `404` is a value rather than a refusal for the same reason it is above: a
+ * caller deleting something it believes is there wanted "not there any more",
+ * and an object already swept is that.
+ */
+export async function deleteGcsObject({
+  bucketName,
+  objectName,
+  federation,
+  timeoutMs,
+}: GcsObjectInput): Promise<void> {
+  const token = await workloadIdentityToken(federation)();
+  const send = federation.fetch ?? ((request: Request) => fetch(request));
+  const url = `https://storage.googleapis.com/storage/v1/b/${encodeURIComponent(bucketName)}/o/${encodeURIComponent(objectName)}`;
+  const response = await send(
+    new Request(url, {
+      method: 'DELETE',
+      headers: { Authorization: `Bearer ${token}` },
+      signal: AbortSignal.timeout(timeoutMs ?? READ_TIMEOUT_MS),
+    }),
+  );
+  if (response.status !== 404 && !response.ok) {
+    throw new FederationError(
+      `Deleting gs://${bucketName}/${objectName} failed (${response.status}): ${await response.text()}`,
+    );
+  }
+}

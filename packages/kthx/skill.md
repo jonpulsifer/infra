@@ -141,6 +141,19 @@ lone wrapping directory is stripped. Resolution: the exact file, then
 SPA fallback), then `/404.html` (served 404). `/api/`, `/files/` and `/_/` are
 the server's on every site — a bundle file under one of them is never served.
 
+## The file store
+
+`/files/*` is the site's own store, separate from its releases. Anyone on the
+site may `PUT` a file; the path then belongs to that visitor, and only they or
+the site's bearer may overwrite or delete it (else 403). `content-type` is
+required and is the stored type — nothing sniffs the bytes. Allowed:
+`image/*` except SVG, `audio/*`, `video/*`, `application/pdf`,
+`application/json`, `text/plain`, `text/csv`, `text/markdown`. Everything else,
+HTML and script above all, is 400 `UNSUPPORTED_TYPE`: a file is never a page on
+this origin. A path is `A-Za-z0-9._-` in `/`-separated segments, none starting
+with a dot. Served with the stored type, `nosniff`, a strong etag and
+`max-age=60`; anything not meant to be rendered comes back as an attachment.
+
 ## Limits
 
 | What | Limit |

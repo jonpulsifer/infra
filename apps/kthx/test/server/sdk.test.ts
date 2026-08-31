@@ -64,7 +64,16 @@ interface Sdk {
     collections(): Promise<{ name: string; count: number }[]>;
   };
   ai: { baseURL: string; chat(): unknown };
-  files: { url(path: string): string; upload(): unknown };
+  files: {
+    url(path: string): string;
+    upload(
+      path: unknown,
+      body?: unknown,
+      options?: { type?: string },
+    ): Promise<{ path: string; url: string; size: number; type: string }>;
+    list(): Promise<{ path: string; type: string; size: number }[]>;
+    delete(path: string): Promise<undefined>;
+  };
 }
 
 /** `sdk.js` run as a classic script over the `fetch` it is given. */
@@ -232,7 +241,43 @@ describe('sdk.js', () => {
       `https://${kthx().name('stubs')}.${ZONE}/api/ai/v1`,
     );
     expect(() => sdk.ai.chat()).toThrow(/not on this site yet/);
-    expect(() => sdk.files.upload()).toThrow(/not on this site yet/);
-    expect(sdk.files.url('a.png')).toEndWith('/files/a.png');
+  });
+
+  test('files: a type per body kind, and the url the upload answered', async () => {
+    const sdk = await loaded('files');
+    const text = await sdk.files.upload('notes/a.txt', 'hello');
+    expect(text).toEqual({
+      path: 'notes/a.txt',
+      url: `${sdk.site.url}/files/notes/a.txt`,
+      size: 5,
+      type: 'text/plain',
+    });
+    expect(sdk.files.url('notes/a.txt')).toBe(text.url);
+
+    // An object is JSON, and a Blob carries its own type.
+    const json = await sdk.files.upload('data.json', { a: 1 });
+    expect(json.type).toBe('application/json');
+    const blob = await sdk.files.upload(
+      'cover.png',
+      new Blob([new Uint8Array([1, 2])], { type: 'image/png' }),
+    );
+    expect(blob).toMatchObject({ type: 'image/png', size: 2 });
+    // A File brings its own name, so the path is the whole of what is left out.
+    const named = await sdk.files.upload(
+      new File(['x,y'], 'table.csv', { type: 'text/csv' }),
+    );
+    expect(named.path).toBe('table.csv');
+
+    expect((await sdk.files.list()).map((item) => item.path)).toEqual([
+      'cover.png',
+      'data.json',
+      'notes/a.txt',
+      'table.csv',
+    ]);
+    expect(await sdk.files.delete('data.json')).toBeUndefined();
+    expect((await sdk.files.list()).length).toBe(3);
+    await expect(
+      sdk.files.upload('page.html', '<h1>hi</h1>', { type: 'text/html' }),
+    ).rejects.toMatchObject({ code: 'UNSUPPORTED_TYPE', status: 400 });
   });
 });

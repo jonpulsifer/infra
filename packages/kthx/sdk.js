@@ -319,6 +319,47 @@
     },
   };
 
+  // --- files ---------------------------------------------------------------
+
+  const filesPath = (name) =>
+    `/api/files/${String(name).split('/').map(encodeURIComponent).join('/')}`;
+
+  const files = {
+    /**
+     * The bytes at a path, uploaded.
+     *
+     * A `File` carries its own name and type, so `upload(file)` is the whole
+     * call; a string is `text/plain` and anything else is serialised as
+     * `application/json` unless a `type` says otherwise. The server takes
+     * images, audio, video, PDF, JSON and text — never HTML, SVG or script,
+     * which on this origin would be a page rather than a file.
+     */
+    async upload(path, body, options = {}) {
+      if (body === undefined && path && typeof path.name === 'string') {
+        body = path;
+        path = path.name;
+      }
+      let type = options.type ?? (body instanceof Blob ? body.type : '');
+      if (
+        typeof body !== 'string' &&
+        !(body instanceof Blob) &&
+        !(body instanceof ArrayBuffer) &&
+        !ArrayBuffer.isView(body)
+      ) {
+        body = JSON.stringify(body);
+        type ||= 'application/json';
+      }
+      return call(filesPath(path), {
+        method: 'PUT',
+        headers: { 'content-type': type || 'text/plain' },
+        body,
+      });
+    },
+    list: async () => (await call('/api/files')).items,
+    delete: (path) => call(filesPath(path), { method: 'DELETE' }),
+    url: (name) => `${location.origin}/files/${name}`,
+  };
+
   // --- not yet -------------------------------------------------------------
 
   /** A named backend this build does not carry, said plainly rather than as a 404. */
@@ -330,13 +371,6 @@
     // Absolute: the OpenAI SDK rejects a relative baseURL at request time.
     baseURL: `${location.origin}/api/ai/v1`,
     chat: soon('ai.chat'),
-  };
-
-  const files = {
-    upload: soon('files.upload'),
-    list: soon('files.list'),
-    delete: soon('files.delete'),
-    url: (name) => `${location.origin}/files/${name}`,
   };
 
   window.kthx = { db, live, ai, files, me, site, ready };
