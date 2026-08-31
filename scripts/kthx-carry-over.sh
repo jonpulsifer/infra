@@ -49,6 +49,7 @@ TARGET_CLUSTER=${KTHX_TARGET_CLUSTER:-kthx-db}
 TARGET_NAMESPACE=${KTHX_TARGET_NAMESPACE:-kthx}
 TARGET_DATABASE=${KTHX_TARGET_DATABASE:-kthx}
 BUCKET=${KTHX_BUCKET:-bluenose-kthx}
+ZONE=${KTHX_ZONE:-kthx.dev}
 
 apply=false
 case ${1:-} in
@@ -83,7 +84,11 @@ target_psql() {
 
 # --- pre-flight -------------------------------------------------------------
 
-[[ $(target_psql "select to_regclass('public.sites') is not null") == t ]] \
+# Two different failures, so two different messages: `[[ ]]` swallows a non-zero
+# status, and an unreachable cluster reads exactly like an un-migrated one.
+booted=$(target_psql "select to_regclass('public.sites') is not null") \
+  || die "cannot reach $TARGET_CLUSTER in $TARGET_NAMESPACE on context $CONTEXT"
+[[ $booted == t ]] \
   || die "$TARGET_DATABASE has no sites table -- the kthx server has not booted yet"
 
 names=$(source_psql "select string_agg(quote_literal(name), ',' order by name) from kthx_sites")
@@ -106,8 +111,11 @@ collisions=$(target_psql "
 
 # One line per distinct release object: where it is now, and the digest that
 # names it in the kthx depot. v1 stores `sha256:<hex>`; v2 stores the bare hex.
+# Tab separated with the digest first: a v1 object name can carry a space
+# (`x-filename` was taken unsanitised), and the address has to be the unsplit
+# remainder of the line.
 copies=$(source_psql "
-  select distinct location || ' ' || regexp_replace(digest, '^sha256:', '')
+  select distinct regexp_replace(digest, '^sha256:', '') || E'\t' || location
   from kthx_releases order by 1")
 
 sites_sql=$(source_psql "
@@ -129,17 +137,28 @@ releases_sql=$(source_psql "
   from kthx_releases order by site, n")
 
 echo "# objects to copy into gs://$BUCKET/releases/"
-while read -r location hex; do
+while IFS=$'\t' read -r hex location; do
   [[ -n $location ]] || continue
   [[ $location == gs://* ]] \
     || die "release object $location is not a gs:// address -- it was staged with no depot and cannot be carried"
   echo "gcloud storage cp --no-clobber $location gs://$BUCKET/releases/$hex.tar.gz"
 done <<<"$copies"
 
+# The plan is what gets pasted into a transcript, so it shows which names, which
+# release and which object -- not the insert text, which carries every site's
+# `token_hash`.
 echo
-echo "# rows to insert into $TARGET_DATABASE"
-echo "$sites_sql"
-echo "$releases_sql"
+echo "# sites to insert into $TARGET_DATABASE (name | serving | held | state)"
+source_psql "
+  select name || ' | ' || coalesce(serving::text, '-') || ' | ' || held
+    || ' | ' || case when deleted_at is null then 'live' else 'deleted' end
+  from kthx_sites order by name"
+
+echo
+echo "# releases to insert (site | n | digest)"
+source_psql "
+  select site || ' | ' || n || ' | ' || regexp_replace(digest, '^sha256:', '')
+  from kthx_releases order by site, n"
 
 if ! "$apply"; then
   echo
@@ -150,7 +169,7 @@ fi
 # --- apply ------------------------------------------------------------------
 
 echo
-while read -r location hex; do
+while IFS=$'\t' read -r hex location; do
   [[ -n $location ]] || continue
   gcloud storage cp --no-clobber "$location" "gs://$BUCKET/releases/$hex.tar.gz"
 done <<<"$copies"
@@ -168,10 +187,28 @@ target_psql "select
   || ' releases=' || (select count(*) from releases)
   || ' awaiting-database=' || (select count(*) from sites where deleted_at is null and provisioned_at is null)"
 
+# v2's `readTree` is stricter than anything v1 applied on the way in (it refuses
+# a control byte in a name, and a path that is both a file and a directory), so
+# a carried object can be one this boundary would not have written. That failure
+# surfaces as a 503 on the site host and nowhere else, so read it back here
+# rather than leaving it for a visitor to find.
+echo
+echo "# carried sites, as the zone answers them"
+while read -r name; do
+  [[ -n $name ]] || continue
+  printf '  %-24s %s\n' "$name" \
+    "$(curl -sS -o /dev/null -w '%{http_code}' "https://$name.$ZONE/?carried=$$")"
+done <<<"$(target_psql "
+  select name from sites
+  where deleted_at is null and serving is not null order by name")"
+
 cat <<'NEXT'
 
 Carried sites keep serving their files immediately -- static bytes never touch a
 site database. The first `/api/*` request to each one answers 503 BUSY once
 while its database and role are created, and works from then on; restarting the
-server does the same thing up front. Nothing else has to be done.
+server does the same thing up front.
+
+A 200 above is a carried release this server unpacks. A 503 is one it refuses:
+re-upload that site's files and nothing else changes.
 NEXT

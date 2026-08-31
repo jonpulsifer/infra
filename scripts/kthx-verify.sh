@@ -252,12 +252,12 @@ check '  /nope is now the SPA fallback' 200 "$(req GET "$(fresh "$SITE/nope")")"
   || cat "$tmp/rollback.log"
 req GET "$APEX/api/sites/$NAME" -H "authorization: Bearer $TOKEN" >/dev/null
 check 'kthx rollback 1 serves' 1 "$(jq -r '.serving // empty' <"$body")"
-check '  and holds' true "$(jq -r '.held // empty' <"$body")"
+check '  and holds' true "$(jq -r '.held' <"$body")"
 check '  release 1 answers 404 again' 404 "$(req GET "$(fresh "$SITE/nope")")"
 
 (cd "$tmp/v2" && kthx release) >"$tmp/release.log" 2>&1 || cat "$tmp/release.log"
 req GET "$APEX/api/sites/$NAME" -H "authorization: Bearer $TOKEN" >/dev/null
-check 'kthx release drops the hold' false "$(jq -r '.held // empty' <"$body")"
+check 'kthx release drops the hold' false "$(jq -r '.held' <"$body")"
 check '  the newest release serves' 2 "$(jq -r '.serving // empty' <"$body")"
 
 # --- the bearer, and the end ------------------------------------------------
