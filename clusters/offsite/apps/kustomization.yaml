@@ -6,6 +6,7 @@ resources:
   - atlantis
   - descheduler
   - hub
+  - kthx
   - prowler
   - spindrift
   - ../../base/platform/spindrift-target

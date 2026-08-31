@@ -1,0 +1,182 @@
+{{/*
+The Postgres every site gets a database inside.
+
+One instance, one node, one disk. The server creates a DATABASE and a LOGIN role
+per site over SQL, which is why the control role needs `CREATEDB CREATEROLE` and
+why that grant is made exactly once, by initdb, rather than declared:
+
+  `spec.managed.roles` would reconcile this role continuously, and reconciling it
+  strips the ADMIN OPTION the server takes on every site role it creates
+  (`GRANT "<name>" TO CURRENT_USER WITH INHERIT TRUE, SET FALSE`). Without that
+  option `pg_terminate_backend` is refused for a non-superuser, and
+  `DROP DATABASE … WITH (FORCE)` — the whole of site delete — fails with
+  `permission denied to terminate process`. Measured, not theoretical.
+
+`keep`, because a Helm uninstall taking this Cluster with it would take every
+site's documents. The nightly dump below is the only undo path there is.
+*/}}
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: {{ include "kthx.databaseName" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "kthx.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/resource-policy: keep
+spec:
+  instances: 1
+  # The fallback the runbook needs when the control role has locked itself out
+  # of a site database it owns; nothing in the normal path uses it.
+  enableSuperuserAccess: true
+  storage:
+    {{- with .Values.database.storageClass }}
+    storageClass: {{ . | quote }}
+    {{- end }}
+    size: {{ .Values.database.size }}
+  {{- with .Values.node }}
+  affinity:
+    nodeSelector:
+      kubernetes.io/hostname: {{ . | quote }}
+  {{- end }}
+  resources:
+    {{- toYaml .Values.database.resources | nindent 4 }}
+  postgresql:
+    parameters:
+      {{- toYaml .Values.database.parameters | nindent 6 }}
+  monitoring:
+    # Scraped by this cluster's Prometheus, which selects every PodMonitor
+    # rather than only the ones carrying its release label — CNPG renders this
+    # one itself and there is nowhere to put that label. See
+    # `clusters/offsite/monitoring/kube-prometheus.yaml`.
+    enablePodMonitor: true
+  bootstrap:
+    initdb:
+      database: {{ .Values.database.name }}
+      owner: {{ .Values.database.name }}
+      encoding: UTF8
+      localeCollate: C
+      localeCType: C
+      dataChecksums: true
+      postInitApplicationSQL:
+        # Runs as the superuser, once, against the freshly created application
+        # database. CREATEDB and CREATEROLE are the two privileges a claim needs
+        # and the two the control role is not born with.
+        - ALTER ROLE {{ .Values.database.name }} CREATEDB CREATEROLE
+---
+{{/*
+The nightly dump. Not PITR: this is one `pg_dumpall` of the whole cluster, which
+is the granularity a restore needs anyway — a site's database is recreated from
+the dump and its role's password is re-derived by the server's start-up repair.
+
+Two containers because no one image can do both halves. `pg_dumpall` lives in
+the Postgres image, which carries no GCS client; `gcloud` lives in the CLI
+image, which carries no Postgres client. The dump lands on an emptyDir between
+them.
+
+`--no-role-passwords` is what lets a non-superuser run this at all: it reads
+`pg_roles` instead of `pg_authid`. Nothing is lost — every site role's password
+is derived from `KTHX_PG_KEY`, never stored.
+
+Retention is the bucket's, not this job's: a lifecycle rule expires `backups/`
+at 30 days (`terraform/gcp/projects/bluenose`).
+*/}}
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ include "kthx.databaseName" . }}-backup
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "kthx.labels" . | nindent 4 }}
+spec:
+  schedule: {{ .Values.database.backup.schedule | quote }}
+  timeZone: Etc/UTC
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  # A missed window is not worth catching up on: the next night's dump is the
+  # same data plus a day.
+  startingDeadlineSeconds: 3600
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      template:
+        metadata:
+          labels:
+            {{- include "kthx.labels" . | nindent 12 }}
+        spec:
+          restartPolicy: OnFailure
+          serviceAccountName: {{ include "kthx.fullname" . }}
+          automountServiceAccountToken: false
+          securityContext:
+            {{- include "kthx.podSecurityContext" . | nindent 12 }}
+          initContainers:
+            - name: dump
+              image: {{ .Values.database.backup.image | quote }}
+              command:
+                - bash
+                - -c
+                - set -euo pipefail; pg_dumpall --no-role-passwords -d "$DATABASE_URL" | gzip -9 > /dump/pg.sql.gz
+              env:
+                - name: DATABASE_URL
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ include "kthx.databaseName" . }}-app
+                      key: uri
+                - name: HOME
+                  value: /tmp
+              volumeMounts:
+                - name: dump
+                  mountPath: /dump
+                - name: tmp
+                  mountPath: /tmp
+              resources:
+                requests: {cpu: 50m, memory: 128Mi}
+                limits: {memory: 512Mi}
+              securityContext:
+                {{- include "kthx.containerSecurityContext" . | nindent 16 }}
+          containers:
+            - name: upload
+              image: {{ .Values.database.backup.uploaderImage | quote }}
+              # gcloud does not read GOOGLE_APPLICATION_CREDENTIALS on its own —
+              # it keeps its own credential store — so the ADC document has to be
+              # handed to it explicitly. It understands `external_account`, so
+              # this is the same keyless federation the server uses.
+              command:
+                - bash
+                - -c
+                - |
+                  set -euo pipefail
+                  gcloud --quiet auth login --cred-file="$GOOGLE_APPLICATION_CREDENTIALS"
+                  exec gcloud --quiet storage cp /dump/pg.sql.gz \
+                    "gs://$KTHX_BUCKET/backups/pg/$(date -u +%F).sql.gz"
+              env:
+                - name: KTHX_BUCKET
+                  value: {{ .Values.bucket | quote }}
+                - name: GOOGLE_APPLICATION_CREDENTIALS
+                  value: {{ printf "%s/gcp-credentials.json" .Values.gcp.tokenMountPath | quote }}
+                - name: HOME
+                  value: /tmp
+                # gcloud writes its credential store and its logs under this
+                # path, and the root filesystem is read-only.
+                - name: CLOUDSDK_CONFIG
+                  value: /tmp/gcloud
+              volumeMounts:
+                - name: dump
+                  mountPath: /dump
+                  readOnly: true
+                - name: tmp
+                  mountPath: /tmp
+                {{- include "kthx.gcpVolumeMount" . | nindent 16 }}
+              resources:
+                requests: {cpu: 50m, memory: 256Mi}
+                limits: {memory: 1Gi}
+              securityContext:
+                {{- include "kthx.containerSecurityContext" . | nindent 16 }}
+          volumes:
+            - name: dump
+              emptyDir:
+                sizeLimit: {{ .Values.database.backup.scratchSize }}
+            - name: tmp
+              emptyDir: {}
+            {{- include "kthx.gcpVolume" . | nindent 12 }}

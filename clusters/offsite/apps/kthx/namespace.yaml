@@ -1,0 +1,22 @@
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: kthx
+  labels:
+    kustomize.toolkit.fluxcd.io/prune: enabled
+    # What lets the HTTPRoute in this namespace attach to the `spindrift-apps`
+    # Gateway: every listener there admits routes by namespace label, never by
+    # name (`clusters/offsite/apps/spindrift/gateway.yaml`). kthx is not a
+    # Spindrift App and never becomes one — this label buys the edge, nothing
+    # else. Kyverno's image policy matches `spindrift-apps` and `app-*`, so it
+    # does not reach here.
+    app.kubernetes.io/part-of: spindrift
+    # Restricted, not baseline: this namespace runs a public anonymous-write
+    # process and nothing in it needs a capability, a host mount or root.
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/enforce-version: latest
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/audit-version: latest
+    pod-security.kubernetes.io/warn: restricted
+    pod-security.kubernetes.io/warn-version: latest

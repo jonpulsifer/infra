@@ -6,6 +6,7 @@ resources:
   - kube-prometheus.yaml
   - tempo.yaml
   - spindrift-rules.yaml
+  - kthx-rules.yaml
   - ../../base/monitoring
 patches:
   - target:

@@ -1,0 +1,64 @@
+---
+# kthx has no outbound notification of its own, and its whole surface is public:
+# a name that stops answering is somebody else's broken link, not a lab service
+# nobody notices. These three cover the ways it stops answering.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: kthx
+  namespace: monitoring
+  labels:
+    lolwtf.ca/service: kthx
+    release: prom-stack
+spec:
+  groups:
+    - name: kthx
+      rules:
+        # Single replica by construction, `Recreate` strategy, ReadWriteOnce
+        # volume — so "no available replica" is the whole zone down, not a
+        # degraded one. The second arm is the case the first cannot see: a
+        # Deployment that has been deleted exports no series at all.
+        - alert: KthxServerDown
+          expr: |
+            kube_deployment_status_replicas_available{namespace="kthx",deployment="kthx"} == 0
+            or absent(kube_deployment_status_replicas_available{namespace="kthx",deployment="kthx"})
+          for: 10m
+          labels:
+            severity: critical
+          annotations:
+            message: "kthx.dev has no serving pod"
+            description: "The kthx Deployment has no available replica, so every kthx.dev name is answered by the gateway's 503. A `Recreate` rollout takes the old pod down first, so a few minutes of this is a normal deploy; ten is not."
+
+        # The CNPG instance's own exporter, which only exists once the PodMonitor
+        # is being scraped — so `absent` here covers the instance being gone, the
+        # scrape being broken, and the PodMonitor never having been selected.
+        # `/api/db` on every site is what this outage looks like from outside.
+        - alert: KthxDatabaseDown
+          expr: |
+            cnpg_collector_up{namespace="kthx"} == 0
+            or absent(cnpg_collector_up{namespace="kthx"})
+          for: 10m
+          labels:
+            severity: critical
+          annotations:
+            message: "The kthx Postgres instance is not reporting"
+            description: "`cnpg_collector_up` for the kthx-db cluster is 0 or missing: the instance is down, or the PodMonitor it exports through is not being scraped. Site databases are unreachable while this holds; static bytes still serve."
+
+        # `local-path` is a directory on a node's disk, so nothing enforces the
+        # 20Gi the claim asks for and `kubelet_volume_stats_*` does not exist for
+        # it — the requested size is a budget, and this alert is what makes it
+        # one. Databases only; WAL and the catalog are on top, so real headroom
+        # is smaller than this reads. `NodeFilesystemAlmostOutOfSpace` covers the
+        # disk itself, far too late to be the first warning.
+        - alert: KthxDatabaseVolumeFilling
+          expr: |
+            sum(cnpg_pg_database_size_bytes{namespace="kthx"})
+            /
+            sum(kube_persistentvolumeclaim_resource_requests_storage_bytes{namespace="kthx",persistentvolumeclaim=~"kthx-db-.*"})
+            > 0.8
+          for: 30m
+          labels:
+            severity: warning
+          annotations:
+            message: "kthx site databases are past 80% of the kthx-db volume"
+            description: "Site databases sum to more than 80% of what the kthx-db claim asks for. Each site is capped at 256 MiB, so this is site count, not one runaway: expand the claim (allowed live) or delete dead sites."

@@ -27,6 +27,9 @@
     "hub": [
       "clusters/offsite/apps/hub/helm-release.yaml"
     ],
+    "kthx": [
+      "clusters/offsite/apps/kthx/helm-release.yaml"
+    ],
     "netbench": [
       "clusters/base/apps/iperf3/iperf3-daemonset.yaml",
       "clusters/folly/apps/netbench/03-deployment.yaml"

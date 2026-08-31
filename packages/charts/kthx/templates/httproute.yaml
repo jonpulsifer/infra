@@ -1,0 +1,47 @@
+{{/*
+Every kthx name, on one route, to one process.
+
+The apex and the wildcard both, because the apex is where a site is claimed and
+a wildcard never matches it. The process tells them apart by `Host`, which is
+also the only thing that names a site.
+
+No `sectionName`: these names have no TLS listener anywhere — Cloudflare
+terminates at the edge and the tunnel reaches this gateway on plain HTTP — so
+the HTTP listener is the only one they can arrive on.
+
+The route lives in this namespace and the gateway does not; the listener admits
+routes by namespace label (`app.kubernetes.io/part-of: spindrift`), which is why
+`clusters/offsite/apps/kthx/namespace.yaml` carries it. The backend is in this
+namespace too, so no ReferenceGrant is involved.
+*/}}
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: {{ include "kthx.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "kthx.labels" . | nindent 4 }}
+  annotations:
+    # The hold-out every route on this gateway carries, and load-bearing for the
+    # same reason: external-dns's `gateway-httproute` source would otherwise
+    # publish `kthx.dev` and a wildcard for the zone at the gateway's RFC1918
+    # address, over records Terraform owns and points at the tunnel
+    # (`terraform/network/cloudflare/kthx.dev.tf`).
+    #
+    # Both spellings: external-dns v0.22.0 moved the default annotation prefix
+    # with no fallback and a controller reads exactly one of them, so carrying
+    # the pair means the pin in the external-dns release can move without this
+    # route losing its hold-out.
+    external-dns.alpha.kubernetes.io/controller: lolwtf.ca/spindrift-dnsendpoint
+    external-dns.kubernetes.io/controller: lolwtf.ca/spindrift-dnsendpoint
+spec:
+  parentRefs:
+    - name: {{ .Values.gateway.name }}
+      namespace: {{ .Values.gateway.namespace }}
+  hostnames:
+    - {{ .Values.zone | quote }}
+    - {{ printf "*.%s" .Values.zone | quote }}
+  rules:
+    - backendRefs:
+        - name: {{ include "kthx.fullname" . }}
+          port: {{ .Values.port }}

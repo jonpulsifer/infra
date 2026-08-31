@@ -1,0 +1,52 @@
+---
+# kthx on offsite: one Bun process answering `kthx.dev` and every
+# `<name>.kthx.dev`, its release volume, and the Postgres each site gets a
+# database inside.
+#
+# It is a platform workload, not a Spindrift App — Flux owns this namespace the
+# way it owns hub's and Atlantis's. The only thing it borrows from Spindrift is
+# the `spindrift-apps` Gateway, which is where the tunnel already lands.
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: kthx
+  namespace: kthx
+spec:
+  interval: 1h
+  chart:
+    spec:
+      chart: packages/charts/kthx
+      reconcileStrategy: Revision
+      sourceRef:
+        kind: GitRepository
+        name: infra
+        namespace: flux-system
+  values:
+    # The containers workflow rewrites this digest on every kthx build that
+    # lands on main (`.github/containers.json`, `deploy.kthx`).
+    image: ghcr.io/jonpulsifer/kthx:latest@sha256:0000000000000000000000000000000000000000000000000000000000000000
+    zone: kthx.dev
+    # Terraform output `kthx_bucket` from `terraform/gcp/projects/bluenose`.
+    # `objectAdmin` on this bucket is the whole of what kthx can do in GCP —
+    # notably not `storage.buckets.get`, so nothing here may preflight it.
+    bucket: bluenose-kthx
+    # Both HMAC keys, from 1Password through external-secret.yaml beside this.
+    envFromSecret: kthx-env
+    # Substituted from the cluster topology ConfigMap rather than restated: the
+    # `cf-connecting-ip` a rate-limit bucket is keyed by is only believed from
+    # the gateway hop, which is a host-networked Envoy on a node address. The
+    # pod CIDR covers the case where it is not.
+    trustedProxies: ${K8S_NODE_CIDR},${CILIUM_POD_CIDR}
+    # The release volume and the database volume are both `local-path`, which is
+    # a directory on one node's disk. oldschool: it has the free space and
+    # carries nothing else stateful, while retrofit already holds the control
+    # plane and every other CNPG volume.
+    node: oldschool
+    # The whole of the federation. The pool principal is
+    # `offsite:system:serviceaccount:kthx:kthx` and it holds
+    # `roles/iam.workloadIdentityUser` on this account and nothing else — no
+    # `serviceAccountTokenCreator`, so signed URLs are refused by design.
+    # Declared in `terraform/gcp/projects/bluenose/iam.tf`.
+    gcp:
+      audience: //iam.googleapis.com/projects/629296473058/locations/global/workloadIdentityPools/fml-pool/providers/offsite
+      impersonationUrl: https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/kthx-server@bluenose.iam.gserviceaccount.com:generateAccessToken
