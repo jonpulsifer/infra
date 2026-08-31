@@ -185,6 +185,9 @@ const PROJECT_ID_ALLOWLIST = new Set<string>([
   'cf-connecting-ip',
   'no-cache',
   'no-store',
+  // The header every kthx refusal that can be retried carries, written by the
+  // server and read by its SDK. Same kind of thing as the rest of this block.
+  'retry-after',
 ]);
 
 /**

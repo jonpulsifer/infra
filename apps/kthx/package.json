@@ -6,6 +6,7 @@
     "kthx": "cli/main.ts"
   },
   "scripts": {
+    "start": "bun run server/index.ts",
     "lint": "biome check .",
     "lint:fix": "biome check . --write",
     "typecheck": "tsc --noEmit",

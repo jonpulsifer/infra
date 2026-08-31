@@ -1,30 +1,40 @@
 /*
- * kthx: `window.kthx` for a site, one classic script, no build step.
+ * kthx: `window.kthx` for a site. One classic script, no build step.
  *
- *   kthx.db.get(key) → value|null     kthx.db.set(key, value)    kthx.db.del(key)
- *   kthx.db.list(prefix) → [{key,value}]
- *   kthx.db.update(key, fn)           read, change, write; retried if another tab wrote first
- *   kthx.db.watch(keyOrPrefix, cb)    cb({key, value|null}); a trailing "/" watches a prefix; returns unsubscribe
- *   kthx.live.join(room) → { send(data), on("message"|"join"|"leave", cb), peers(), leave() }
- *   kthx.me.id                        after kthx.ready
- *   kthx.ready                        resolved once /_/me has answered
+ *   const c = kthx.db.collection('votes')
+ *   await c.create({ host: 'optiplex' })          // → the document, with an id
+ *   await c.get(id) / c.findById(id)              // → the document, or null
+ *   await c.update(id, patch, { overwrite, ifMatch })   // SHALLOW MERGE
+ *   await c.put(id, doc, { ifMatch, ifNoneMatch })      // upsert
+ *   await c.delete(id)
+ *   await c.find({ where, orderBy, limit, offset })     // → [documents]
+ *   await c.where({ host: 'optiplex' }).orderBy('created_at', 'desc').limit(20).find()
+ *   await c.count({ host: 'optiplex' })           // → a number
+ *   c.subscribe({ onCreate, onUpdate, onDelete }) // → unsubscribe
+ *   await kthx.db.collections()                   // → [{ name, count }]
+ *   const room = kthx.live.join('cursors')        // → { send, on, peers, leave }
+ *   await kthx.ready; kthx.me.id; kthx.site.name
  *
- * The socket opens on the first watch or join, reconnects with backoff, and
- * re-subscribes on its own. Everything is scoped to the site by its origin.
+ * The socket opens on the first subscribe or join, pings every 30 s, and
+ * reconnects with backoff, re-sending its subscriptions and rooms. Everything
+ * is scoped to the site by its origin. Every rejection is an Error carrying
+ * `.code`, `.status`, `.message` and, on a 429, `.retryAfter` in seconds.
  */
 (() => {
-  // --- me ------------------------------------------------------------------
-
   const me = { id: null };
-  const ready = fetch('/_/me')
-    .then((response) => response.json())
-    .then(({ id }) => {
-      me.id = id;
+  const site = { name: null, url: null };
+  const ready = fetch('/api/me')
+    .then((response) => {
+      if (!response.ok)
+        throw new Error(`kthx: /api/me answered ${response.status}`);
+      return response.json();
+    })
+    .then((body) => {
+      me.id = body.id;
+      site.name = body.site.name;
+      site.url = body.site.url;
     });
 
-  // --- db ------------------------------------------------------------------
-
-  const url = (key) => `/_/db/${encodeURIComponent(key)}`;
   const JSON_BODY = { 'content-type': 'application/json' };
 
   async function failed(response) {
@@ -32,62 +42,148 @@
     const error = new Error(body.message || response.statusText);
     error.code = body.code;
     error.status = response.status;
+    const wait = response.headers.get('retry-after');
+    if (wait !== null) error.retryAfter = Number(wait);
     return error;
   }
 
-  /** The stored value and its etag, or `null` and no etag for a key that is not there. */
-  async function read(key) {
-    const response = await fetch(url(key));
-    if (response.status === 404) return { value: null, etag: null };
+  /** A call to this site's API: JSON in, JSON or nothing out. */
+  async function call(path, init = {}) {
+    const response = await fetch(path, init);
     if (!response.ok) throw await failed(response);
-    return { value: await response.json(), etag: response.headers.get('etag') };
+    if (response.status === 204) return undefined;
+    return response.json();
   }
 
-  async function write(key, value, headers) {
-    const response = await fetch(url(key), {
-      method: 'PUT',
+  const send = (method, path, body, headers) =>
+    call(path, {
+      method,
       headers: { ...JSON_BODY, ...headers },
-      body: JSON.stringify(value),
+      body: JSON.stringify(body),
     });
-    if (!response.ok) throw await failed(response);
-    return value;
+
+  // --- db ------------------------------------------------------------------
+
+  const path = (collection, id) =>
+    `/api/db/${encodeURIComponent(collection)}${
+      id === undefined ? '' : `/${encodeURIComponent(id)}`
+    }`;
+
+  /** The immutable builder: every step is a new query, `find` runs it. */
+  function query(collection, spec) {
+    return {
+      where: (where) => query(collection, { ...spec, where }),
+      orderBy: (field, direction) =>
+        query(collection, {
+          ...spec,
+          orderBy: direction === 'desc' ? `${field} desc` : field,
+        }),
+      limit: (limit) => query(collection, { ...spec, limit }),
+      offset: (offset) => query(collection, { ...spec, offset }),
+      find: async () =>
+        (await send('POST', `${path(collection)}/query`, spec)).items,
+      count: async () =>
+        (
+          await send('POST', `${path(collection)}/query`, {
+            ...spec,
+            limit: 0,
+            count: true,
+          })
+        ).count,
+    };
+  }
+
+  function collection(name) {
+    const runner = query(name, {});
+    /** One document by id. `findById` is the same call under Quick's name. */
+    const get = async (id) => {
+      const response = await fetch(path(name, id));
+      if (response.status === 404) return null;
+      if (!response.ok) throw await failed(response);
+      return response.json();
+    };
+    return {
+      name,
+
+      /** One document, or an array of up to 100 written all or nothing. */
+      async create(document) {
+        const answer = await send('POST', path(name), document);
+        return Array.isArray(document) ? answer.items : answer;
+      },
+
+      get,
+      findById: get,
+
+      /**
+       * A SHALLOW MERGE of top-level keys.
+       *
+       * A nested object or array in `patch` replaces the stored one whole; a
+       * key set to `null` is stored as `null`, not deleted; a key you leave out
+       * is kept. `{overwrite: true}` replaces the whole document, which is the
+       * only way to drop a key. Pass `{ifMatch: doc.etag}` and a concurrent
+       * write rejects with 412 instead of silently winning.
+       */
+      update(id, patch, options = {}) {
+        const url = options.overwrite
+          ? `${path(name, id)}?overwrite=1`
+          : path(name, id);
+        return send('PATCH', url, patch, ifHeaders(options));
+      },
+
+      put(id, document, options = {}) {
+        return send('PUT', path(name, id), document, ifHeaders(options));
+      },
+
+      delete(id, options = {}) {
+        return call(path(name, id), {
+          method: 'DELETE',
+          headers: ifHeaders(options),
+        });
+      },
+
+      list: (spec = {}) =>
+        send('POST', `${path(name)}/query`, spec).then((b) => b.items),
+      find: (spec = {}) =>
+        send('POST', `${path(name)}/query`, spec).then((b) => b.items),
+      count: (where) =>
+        send('POST', `${path(name)}/query`, {
+          where,
+          limit: 0,
+          count: true,
+        }).then((b) => b.count),
+
+      where: runner.where,
+      orderBy: runner.orderBy,
+      limit: runner.limit,
+      offset: runner.offset,
+
+      /** Every write to this collection, this tab's own included. */
+      subscribe(handlers) {
+        const watcher = { collection: name, handlers };
+        watchers.add(watcher);
+        frame({ t: 'sub', collection: name });
+        return () => {
+          watchers.delete(watcher);
+          if (![...watchers].some((w) => w.collection === name)) {
+            frame({ t: 'unsub', collection: name });
+          }
+        };
+      },
+    };
+  }
+
+  function ifHeaders({ ifMatch, ifNoneMatch }) {
+    const headers = {};
+    if (ifMatch) headers['if-match'] = ifMatch;
+    if (ifNoneMatch)
+      headers['if-none-match'] = ifNoneMatch === true ? '*' : ifNoneMatch;
+    return headers;
   }
 
   const db = {
-    get: async (key) => (await read(key)).value,
-    set: (key, value) => write(key, value, {}),
-    async del(key) {
-      const response = await fetch(url(key), { method: 'DELETE' });
-      if (!response.ok) throw await failed(response);
-    },
-    async list(prefix = '') {
-      const response = await fetch(
-        `/_/db?prefix=${encodeURIComponent(prefix)}`,
-      );
-      if (!response.ok) throw await failed(response);
-      return (await response.json()).items;
-    },
-    async update(key, fn) {
-      for (;;) {
-        const { value, etag } = await read(key);
-        const next = await fn(value);
-        try {
-          return await write(
-            key,
-            next,
-            etag ? { 'if-match': etag } : { 'if-none-match': '*' },
-          );
-        } catch (error) {
-          if (error.status !== 412) throw error;
-        }
-      }
-    },
-    watch(keyOrPrefix, cb) {
-      const watcher = { on: keyOrPrefix, cb };
-      watchers.add(watcher);
-      send({ t: 'watch', prefix: '' });
-      return () => watchers.delete(watcher);
-    },
+    collection,
+    collections: () => call('/api/db').then((body) => body.collections),
+    getCollections: () => call('/api/db').then((body) => body.collections),
   };
 
   // --- the socket ----------------------------------------------------------
@@ -96,68 +192,108 @@
   const rooms = new Map();
   let socket = null;
   let backoff = 500;
-  /** Frames sent before the socket is open, in order, behind the replayed watch and joins. */
+  let heartbeat = null;
+  /** Frames sent before the socket was open, behind the replayed state. */
   const pending = [];
 
   function connect() {
     if (socket !== null) return;
     socket = new WebSocket(
-      `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/_/ws`,
+      `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/api/ws`,
     );
     socket.onopen = () => {
       backoff = 500;
-      if (watchers.size > 0)
-        socket.send(JSON.stringify({ t: 'watch', prefix: '' }));
-      for (const room of rooms.keys())
+      for (const name of new Set([...watchers].map((w) => w.collection))) {
+        socket.send(JSON.stringify({ t: 'sub', collection: name }));
+      }
+      for (const room of rooms.keys()) {
         socket.send(JSON.stringify({ t: 'join', room }));
-      for (const frame of pending.splice(0)) socket.send(frame);
+      }
+      for (const queued of pending.splice(0)) socket.send(queued);
+      // Cloudflare cuts an idle socket at 100 s; the server closes at 120.
+      clearInterval(heartbeat);
+      heartbeat = setInterval(() => {
+        if (socket && socket.readyState === WebSocket.OPEN) {
+          socket.send('{"t":"ping"}');
+        }
+      }, 30000);
     };
     socket.onmessage = (event) => dispatch(JSON.parse(event.data));
     socket.onclose = () => {
       socket = null;
+      clearInterval(heartbeat);
       if (watchers.size === 0 && rooms.size === 0) return;
       setTimeout(connect, backoff);
       backoff = Math.min(backoff * 2, 15000);
     };
   }
 
-  /** Queue a frame behind `ready` — the cookie the socket is identified by has to exist first. */
-  function send(frame) {
-    ready.then(() => {
-      connect();
-      // `onopen` replays watches and joins from their own state; only what
-      // is not derivable from it waits.
-      if (socket.readyState === WebSocket.OPEN)
-        socket.send(JSON.stringify(frame));
-      else if (frame.t === 'send' || frame.t === 'leave')
-        pending.push(JSON.stringify(frame));
-    });
+  /** Queue a frame behind `ready`: the cookie identifying it must exist first. */
+  function frame(body) {
+    // `ready` rejects when /api/me does — a site still provisioning answers 503
+    // — and this derived promise is not the one a page can catch, so it says so
+    // here rather than surfacing as an unhandled rejection per frame.
+    ready.then(
+      () => {
+        connect();
+        // `onopen` replays subscriptions and joins from their own state; only
+        // what cannot be derived from it waits here.
+        if (socket.readyState === WebSocket.OPEN) {
+          socket.send(JSON.stringify(body));
+        } else if (
+          body.t === 'send' ||
+          body.t === 'leave' ||
+          body.t === 'unsub'
+        ) {
+          pending.push(JSON.stringify(body));
+        }
+      },
+      (cause) => console.error('kthx: the socket cannot open', cause),
+    );
   }
 
-  function dispatch(frame) {
-    if (frame.t === 'put' || frame.t === 'del') {
-      const value = frame.t === 'put' ? frame.value : null;
-      for (const { on, cb } of watchers) {
-        if (
-          frame.key === on ||
-          (on.endsWith('/') && frame.key.startsWith(on))
-        ) {
-          cb({ key: frame.key, value });
+  function dispatch(body) {
+    if (body.t === 'pong') return;
+    if (body.t === 'create' || body.t === 'update' || body.t === 'delete') {
+      for (const { collection: name, handlers } of watchers) {
+        if (name !== body.collection) continue;
+        if (body.t === 'delete') {
+          handlers.onDelete?.(body.id);
+        } else if (body.doc !== undefined) {
+          (body.t === 'create' ? handlers.onCreate : handlers.onUpdate)?.(
+            body.doc,
+          );
+        } else {
+          // Too large to ride along: fetch what the frame only named.
+          db.collection(name)
+            .get(body.id)
+            .then((document) => {
+              if (document !== null) {
+                (body.t === 'create' ? handlers.onCreate : handlers.onUpdate)?.(
+                  document,
+                );
+              }
+            })
+            .catch(() => {});
         }
       }
       return;
     }
-    const room = rooms.get(frame.room);
+    const room = rooms.get(body.room);
     if (room === undefined) return;
-    if (frame.t === 'peers') room.members = frame.peers;
-    if (frame.t === 'join' && !room.members.includes(frame.peer))
-      room.members.push(frame.peer);
-    if (frame.t === 'leave')
-      room.members = room.members.filter((peer) => peer !== frame.peer);
-    const event = frame.t === 'msg' ? 'message' : frame.t;
+    if (body.t === 'peers') room.members = body.peers;
+    if (body.t === 'join' && !room.members.includes(body.peer)) {
+      room.members.push(body.peer);
+    }
+    if (body.t === 'leave') {
+      room.members = room.members.filter((peer) => peer !== body.peer);
+    }
+    const event = body.t === 'msg' ? 'message' : body.t;
     const payload =
-      frame.t === 'msg' ? { from: frame.from, data: frame.data } : frame.peer;
-    for (const cb of room.handlers[event] ?? []) cb(payload);
+      body.t === 'msg' ? { from: body.from, data: body.data } : body.peer;
+    for (const handler of room.handlers[event] ?? []) {
+      handler(body.t === 'peers' ? body.peers : payload);
+    }
   }
 
   const live = {
@@ -166,22 +302,42 @@
       if (existing !== undefined) return existing.handle;
       const room = { members: [], handlers: {} };
       room.handle = {
-        send: (data) => send({ t: 'send', room: name, data }),
-        on(event, cb) {
-          room.handlers[event] = [...(room.handlers[event] ?? []), cb];
+        send: (data) => frame({ t: 'send', room: name, data }),
+        on(event, handler) {
+          room.handlers[event] = [...(room.handlers[event] ?? []), handler];
           return room.handle;
         },
         peers: () => [...room.members],
         leave() {
           rooms.delete(name);
-          send({ t: 'leave', room: name });
+          frame({ t: 'leave', room: name });
         },
       };
       rooms.set(name, room);
-      send({ t: 'join', room: name });
+      frame({ t: 'join', room: name });
       return room.handle;
     },
   };
 
-  window.kthx = { db, live, me, ready };
+  // --- not yet -------------------------------------------------------------
+
+  /** A named backend this build does not carry, said plainly rather than as a 404. */
+  const soon = (what) => () => {
+    throw new Error(`kthx.${what} is not on this site yet`);
+  };
+
+  const ai = {
+    // Absolute: the OpenAI SDK rejects a relative baseURL at request time.
+    baseURL: `${location.origin}/api/ai/v1`,
+    chat: soon('ai.chat'),
+  };
+
+  const files = {
+    upload: soon('files.upload'),
+    list: soon('files.list'),
+    delete: soon('files.delete'),
+    url: (name) => `${location.origin}/files/${name}`,
+  };
+
+  window.kthx = { db, live, ai, files, me, site, ready };
 })();
