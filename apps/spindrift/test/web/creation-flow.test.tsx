@@ -13,8 +13,8 @@
  * navigate to is a preflight somebody can be surprised by.
  */
 import { describe, expect, test } from 'bun:test';
-import { renderToStaticMarkup } from 'react-dom/server';
 import { sniffArchiveFormat } from '@repo/archive/archive-format';
+import { renderToStaticMarkup } from 'react-dom/server';
 import {
   blockersFor,
   type Draft,
