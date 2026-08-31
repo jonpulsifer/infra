@@ -9,7 +9,6 @@
     "watch": [
       "apps/spindrift",
       "packages/archive",
-      "packages/kthx",
       "packages/typescript-config",
       "package.json",
       "bun.lock",

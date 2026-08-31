@@ -46,8 +46,8 @@ metadata:
 spec:
   replicas: {{ $process.replicas }}
   # Both processes are singletons, and each one's correctness says so: `web`
-  # keeps kthx presence, room fan-out, rate-limit buckets and the bundle cache
-  # in its own memory, and `reconciler` claims intents. The default `maxSurge`
+  # keeps its rate-limit buckets and its bundle cache in its own memory, and
+  # `reconciler` claims intents. The default `maxSurge`
   # rounds up to 1, so a rollout ran a second one alongside the old for as long
   # as it took the old to exit. Take the old one down first instead: a rollout
   # is then a short gap rather than a window with two.

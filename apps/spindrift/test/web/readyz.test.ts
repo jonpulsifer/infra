@@ -87,13 +87,6 @@ async function readyz(db: Database): Promise<Response> {
       },
     },
     noSession,
-    {
-      db,
-      zone: 'kthx.example.test',
-      depot: () => {
-        throw new Error('a readiness test read the depot');
-      },
-    },
   );
   const handler = routes[READY_PATH] as () => Promise<Response>;
   return handler();

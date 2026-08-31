@@ -1,8 +1,8 @@
 # @repo/kthx
 
 The half of [kthx](../../docs/pages/Architecture___kthx.md) that has no runtime
-behind it: the files a host serves as bytes, and the `/_/` contract two hosts
-still share.
+behind it: the files a host serves as bytes, and the `/_/` contract `kthx dev`
+answers.
 
 | File | What it is |
 | --- | --- |
@@ -13,6 +13,6 @@ still share.
 | `assets.ts` | where the three files above are on disk, for a server that reads them |
 | `underscore.ts` | the `/_/` key→JSON contract |
 
-`apps/kthx` serves the assets from its own process. `apps/spindrift` serves
-`/_/` over Postgres and `kthx dev` serves it over a `Map`; a `KthxStore` is all
-either has to supply.
+`apps/kthx` serves the assets from its own process, and answers `/_/` with 410
+on every site host. `kthx dev` answers `/_/` over a `Map`, which is all a
+`KthxStore` takes.

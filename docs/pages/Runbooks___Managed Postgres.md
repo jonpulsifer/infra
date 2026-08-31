@@ -10,7 +10,7 @@ tags:: runbook, kubernetes, postgres, cnpg
 	- Same rule for the rest of the verbs — prefer the native tool over an equivalent assembled by hand.
 - # Where the databases are
 	- The operator is declared once for both clusters under `clusters/base/platform/cloudnative-pg/`. The `Cluster` objects themselves live with the app that owns them, in `clusters/` or in a chart under `packages/charts/`.
-	- One set is not authored in git: a `Cluster` in `spindrift-apps` is a Datastore Spindrift provisioned through the cluster API, and the row in its database is the desired state. Inspect it like any other; change it through the product. See [[Architecture/Spindrift]].
+	- One set is not authored in git: a `Cluster` in `spindrift-datastores` is a Datastore Spindrift provisioned through the cluster API, and the row in its database is the desired state. It lives in a namespace of its own because a Datastore outlives every App attached to it. Inspect it like any other; change it through the product. See [[Architecture/Spindrift]].
 	- ```bash
 	  kubectl --context folly cnpg status tronbyt -n tronbyt
 	  kubectl --context folly get cluster.postgresql.cnpg.io -A

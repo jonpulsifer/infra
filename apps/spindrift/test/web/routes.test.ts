@@ -18,8 +18,6 @@ import type { GatewayDeps } from '../../src/auth/gateway.ts';
 import { AUTH_ACTS, authPathFor } from '../../src/auth/routes.ts';
 import { commandNames } from '../../src/commands/registry.ts';
 import type { Database } from '../../src/db/client.ts';
-import type { KthxDeps } from '../../src/kthx/serve.ts';
-import { KTHX_PATHS } from '../../src/kthx/sites.ts';
 import { BOSUN_PATHS, type BosunRouteDeps } from '../../src/web/bosun-route.ts';
 import { BundleMissingError, bundleRoutes } from '../../src/web/bundle.ts';
 import { pathFor } from '../../src/web/dispatch.ts';
@@ -142,15 +140,6 @@ const noStatus: StatusRouteDeps = {
   },
 };
 
-/** Inert like the rest: kthx reads its rows and its depot only per request. */
-const noKthx: KthxDeps = {
-  db: noAuth.db,
-  zone: 'kthx.example.test',
-  depot: () => {
-    throw new Error('a route-table test read the depot');
-  },
-};
-
 const served = webRoutes(
   CLIENT,
   noSession,
@@ -162,7 +151,6 @@ const served = webRoutes(
   // `/mcp` takes the same deps shape the dispatch surface does; this table test
   // asserts the path exists, not what it will accept.
   noSession,
-  noKthx,
 );
 
 const AUTH_PATHS = AUTH_ACTS.map(authPathFor);
@@ -183,7 +171,6 @@ describe('what the web process serves', () => {
         ...BOSUN_PATHS,
         GITHUB_SETUP_PATH,
         MCP_PATH,
-        ...KTHX_PATHS,
         STATUS_PATH,
       ].sort(),
     );
@@ -214,8 +201,6 @@ describe('what the web process serves', () => {
         // exactly as the dispatch routes are — see `mcp-route.test.ts` for the
         // set equality. What is hand-authored is the endpoint, not the surface.
         MCP_PATH,
-        // Five paths, one bearer per site, apex only — `src/kthx/sites.ts`.
-        ...KTHX_PATHS,
         STATUS_PATH,
       ].sort(),
     );

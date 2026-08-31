@@ -351,11 +351,14 @@ pre.sh .p{color:var(--hot)}
     <div class="sechead">Or use the command line <span class="sp"></span></div>
     <div class="term">
       <div class="termbar"><i></i><i></i><i></i><span>~/notes</span></div>
-      <!-- ponytail: the CLI lives in the repo and is not published; `bun add -g kthx` is the upgrade path once it is. -->
-      <pre class="sh"><span class="p">$</span> <b>alias kthx="bun ~/src/infra/apps/kthx/cli/main.ts"</b>  <i># apps/kthx, from a checkout of this repo</i>
+      <pre class="sh"><span class="p">$</span> <b>bun add -g https://kthx.dev/cli/kthx.tgz</b>  <i># the only install; there is no npm package</i>
+
+<span class="p">$</span> <b>kthx init</b>
+<i>  quiet-lynx-73 — kthx.json, SKILL.md and index.html written; run kthx deploy</i>
 
 <span class="p">$</span> <b>kthx dev</b>
-<i>  serves ./ on http://localhost:4321 — sdk in local mode, data stays on this machine</i>
+<i>  serves ./ on http://localhost:4321</i>
+<i>  /api and /files go to</i> <u>https://quiet-lynx-73.kthx.dev</u> <i>— the live database, not a copy</i>
 
 <span class="p">$</span> <b>kthx deploy</b>
 <i>  no name set — uses</i> <u>plum-otter-41</u>
@@ -382,7 +385,7 @@ pre.sh .p{color:var(--hot)}
       </div>
 
       <div class="sdkpane" id="sdk-db">
-<pre class="sh">&lt;script src=<u>"/_/sdk.js"</u>&gt;&lt;/script&gt;
+<pre class="sh">&lt;script src=<u>"/api/sdk.js"</u>&gt;&lt;/script&gt;
 
 <b>const</b> votes = kthx.db.collection(<u>'votes'</u>)
 
@@ -441,7 +444,7 @@ kthx.site.name           <i>// this site's name, right even under kthx dev</i></
   <div class="foot">
     <span>Each site is one name in <code id="footzone"></code>.</span>
     <span class="sp"></span>
-    <span>Releases and rollbacks come from Spindrift.</span>
+    <span>Every site keeps its releases; <code>kthx rollback</code> serves an earlier one.</span>
   </div>
 </div>
 
@@ -449,7 +452,7 @@ kthx.site.name           <i>// this site's name, right even under kthx dev</i></
 "use strict";
 /* the apex is the zone: this page is only ever served at https://<zone>/ */
 const ZONE = location.hostname;
-const API = "/kthx/sites";
+const API = "/api/sites";
 const $ = (s, r = document) => r.querySelector(s);
 const KB = n => n < 1024 ? `${n} B` : n < 1048576 ? `${(n / 1024).toFixed(1)} KB` : `${(n / 1048576).toFixed(1)} MB`;
 const ago = t => { const s = (Date.now() - t) / 1000;
