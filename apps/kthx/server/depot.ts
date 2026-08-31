@@ -11,10 +11,11 @@
  * the same bundle stores nothing new and two sites shipping identical bytes
  * share one object.
  */
-import { mkdir } from 'node:fs/promises';
+import { mkdir, rm } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { loadDeploymentFederation } from '@repo/archive/federation-credential';
 import {
+  deleteGcsObject,
   parseGcsLocation,
   readGcsObject,
   uploadToGcsBucket,
@@ -28,6 +29,17 @@ export interface Depot {
   put(objectName: string, bytes: Uint8Array): Promise<string>;
   /** The bytes at a stored location, or `null` when the depot no longer holds them. */
   get(location: string, maxBytes: number): Promise<Uint8Array | null>;
+  /**
+   * Where an object name lives here, without storing anything.
+   *
+   * A release row keeps the `location` {@link put} answered — v1's objects live
+   * in another bucket and only the row knows. A file's object is derived from
+   * its site and path instead, so the metadata row carries no location and this
+   * is what turns one back into something {@link get} reads.
+   */
+  locate(objectName: string): string;
+  /** Remove an object; already gone is the outcome, not a failure. */
+  delete(objectName: string): Promise<void>;
 }
 
 /**
@@ -74,6 +86,14 @@ export function bucketDepot(
       });
       return stream === null ? null : await drain(stream, maxBytes);
     },
+    locate: (objectName) => `gs://${bucket}/${objectName}`,
+    async delete(objectName) {
+      await deleteGcsObject({
+        bucketName: bucket,
+        objectName,
+        federation: await federationOf(),
+      });
+    },
   };
 }
 
@@ -95,6 +115,9 @@ export function diskDepot(root: string): Depot {
       return `file://${path}`;
     },
     get: (location, maxBytes) => localBytes(location, maxBytes),
+    locate: (objectName) => `file://${join(root, objectName)}`,
+    delete: (objectName) =>
+      rm(join(root, objectName), { force: true }).catch(() => {}),
   };
 }
 

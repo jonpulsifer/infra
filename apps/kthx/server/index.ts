@@ -16,6 +16,7 @@ import { createClient, migrate } from './db.ts';
 import { bucketDepot, type Depot, diskDepot } from './depot.ts';
 import { dbApi } from './documents.ts';
 import { type Config, readConfig } from './env.ts';
+import { filesApi, serveFile } from './files.ts';
 import {
   addressOf,
   hostOf,
@@ -286,7 +287,11 @@ async function site(
  * and a backend that would reach for one answers 503 rather than 500 while it
  * catches up.
  *
- * `ai` and `files` are their own tickets; until one lands its path is a route
+ * `files` sits ahead of the provisioning wait on purpose: its rows are in the
+ * control database, so a site's bytes keep being served while its own database
+ * is being made or repaired.
+ *
+ * `ai` is its own ticket; until it lands its path is a route
  * this server does not have, which is a 404 and not a promise.
  */
 async function siteApi(
@@ -305,12 +310,34 @@ async function siteApi(
     );
   }
 
+  // Public bytes: no cookie is minted on them, because a `set-cookie` would
+  // take every one out of the edge cache, and no same-site guard either —
+  // there is nothing here a foreign page could not fetch as an image anyway.
+  if (path === '/files' || path.startsWith('/files/')) {
+    return serveFile(request, ctx, name, path);
+  }
+
   const owner = opensSite(request, row.token_hash);
   // The upgrade is a `GET` and is guarded all the same: a socket is a write
   // channel, and a foreign page opening one is exactly what this stops.
   const guarded = request.method !== 'GET' || path === '/api/ws';
   if (guarded && !owner && !sameOrigin(request, ctx.host, ctx.port)) {
     return refuse('FORBIDDEN', ctx.id);
+  }
+
+  const me = meOf(request, name, ctx.config.meKey, ctx.config.mePreviousKey);
+
+  if (path === '/api/files' || path.startsWith('/api/files/')) {
+    const refusal = charge(
+      request,
+      ctx,
+      name,
+      me,
+      owner,
+      request.method === 'PUT' || request.method === 'DELETE',
+    );
+    if (refusal !== null) return refusal;
+    return cookied(await filesApi(request, ctx, name, path, me, owner), me);
   }
 
   if (row.provisioned_at === null) {
@@ -332,8 +359,6 @@ async function siteApi(
       ctx.id,
     );
   }
-
-  const me = meOf(request, name, ctx.config.meKey, ctx.config.mePreviousKey);
 
   if (path === '/api/me') {
     if (!read) return refuse('METHOD_NOT_ALLOWED', ctx.id);
@@ -374,7 +399,11 @@ async function siteApi(
   }
 
   if (segments[2] === 'db') {
-    const refusal = charge(request, ctx, name, me, owner, segments);
+    // A bulk `POST` is one unit, and `POST …/query` is a read spelled with a
+    // body — neither is the thing the write buckets are counting.
+    const metered =
+      !READ_METHODS.has(request.method) && segments[4] !== 'query';
+    const refusal = charge(request, ctx, name, me, owner, metered);
     if (refusal !== null) return refusal;
     return cookied(await dbApi(request, ctx, name, segments, owner), me);
   }
@@ -392,9 +421,10 @@ function cookied(response: Response, me: Me): Response {
 /**
  * Spend the write buckets, or say why not.
  *
- * Reads and `POST …/query` are unmetered; a bulk `POST` is one unit. An owner
- * bearer skips the visitor and address buckets and never the site one, so a
- * token that leaks cannot outrun the site's own ceiling.
+ * Reads are unmetered, and the caller says which of its own calls is a write —
+ * `POST …/query` is one spelled with a body, and a `GET /api/files` is a
+ * listing. An owner bearer skips the visitor and address buckets and never the
+ * site one, so a token that leaks cannot outrun the site's own ceiling.
  */
 function charge(
   request: Request,
@@ -402,15 +432,9 @@ function charge(
   name: string,
   me: Me,
   owner: boolean,
-  segments: readonly string[],
+  metered: boolean,
 ): Response | null {
-  const method = request.method;
-  const metered =
-    method === 'POST' ||
-    method === 'PATCH' ||
-    method === 'PUT' ||
-    method === 'DELETE';
-  if (!metered || segments[4] === 'query') return null;
+  if (!metered) return null;
   const address = addressOf(request, ctx.server, ctx.config.trustedProxies);
   const spent = spendAll([
     // A request that arrived without a cookie is keyed by the two things it

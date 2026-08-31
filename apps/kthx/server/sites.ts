@@ -22,7 +22,14 @@ import type { Depot } from './depot.ts';
 import { isPlainObject } from './documents.ts';
 import type { Config } from './env.ts';
 import {
+  dropFiles,
+  filesBytes,
+  MAX_FILE_BYTES,
+  MAX_FILES_BYTES,
+} from './files.ts';
+import {
   addressOf,
+  bodyWithin,
   type Code,
   empty,
   isJson,
@@ -265,8 +272,8 @@ async function jsonBody(request: Request): Promise<Record<string, unknown>> {
 const QUOTAS = {
   doc_bytes: 1024 * 1024,
   db_bytes: 256 * 1024 * 1024,
-  file_bytes: 25 * 1024 * 1024,
-  files_bytes: 256 * 1024 * 1024,
+  file_bytes: MAX_FILE_BYTES,
+  files_bytes: MAX_FILES_BYTES,
   ai_requests_day: 200,
   ai_tokens_day: 500_000,
 } as const;
@@ -288,11 +295,11 @@ const inspect: Act = async (_request, ctx, site) => {
         size: Number(row.size),
         at: row.at.toISOString(),
       })),
-      // `files_bytes` and the AI counters land with the backends that meter
-      // them; the database is here already and reports its own size.
+      // The AI counters land with the backend that meters them; the database
+      // reports its own size and the file rows carry theirs.
       usage: {
         db_bytes: await ctx.pg.bytes(site.name),
-        files_bytes: 0,
+        files_bytes: await filesBytes(ctx.sql, site.name),
         ai_requests_today: 0,
         ai_tokens_today: 0,
       },
@@ -342,14 +349,14 @@ async function stage(
   const declared = Number(request.headers.get('content-length') ?? 0);
   if (declared > MAX_ARCHIVE_BYTES) return refuse('TOO_LARGE', ctx.id);
 
-  let bytes: Uint8Array;
+  let bytes: Uint8Array | null;
   try {
-    bytes = new Uint8Array(await withDeadline(request));
+    bytes = await bodyWithin(request, BODY_TIMEOUT_MS, MAX_ARCHIVE_BYTES);
   } catch (cause) {
     logCause(ctx.id, 'reading the upload', cause);
     return refuse('TIMEOUT', ctx.id);
   }
-  if (bytes.byteLength > MAX_ARCHIVE_BYTES) return refuse('TOO_LARGE', ctx.id);
+  if (bytes === null) return refuse('TOO_LARGE', ctx.id);
 
   // Only now: a slot is a share of the process's memory and its disk, and a
   // caller that trickles a body for two minutes must not hold one of the two
@@ -446,24 +453,6 @@ async function unpack(
   );
 }
 
-/** The body, or a rejection once the contract's deadline passes. */
-async function withDeadline(request: Request): Promise<ArrayBuffer> {
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  try {
-    return await Promise.race([
-      request.arrayBuffer(),
-      new Promise<never>((_resolve, reject) => {
-        timer = setTimeout(
-          () => reject(new Error('the body did not arrive in time')),
-          BODY_TIMEOUT_MS,
-        );
-      }),
-    ]);
-  } finally {
-    clearTimeout(timer);
-  }
-}
-
 /**
  * Drop the rows past {@link KEEP_RELEASES} and the directories nothing needs.
  *
@@ -536,8 +525,10 @@ const remove: Act = async (_request, ctx, site) => {
   // and it has to say so before the pool closes under the requests in flight.
   await ctx.pg.drop(site.name);
   // The release rows and their content-addressed objects stay — they may be
-  // shared, and the nightly dump is the undo path. The bytes on this volume are
-  // not, so they go now.
+  // shared, and the nightly dump is the undo path. A file's object is this
+  // site's alone and is nobody's undo path, so the rows and the objects both
+  // go; then the volume, which carries the bytes of both.
+  await dropFiles(ctx, site.name);
   await rm(siteDir(ctx.config.sitesDir, site.name), {
     recursive: true,
     force: true,
