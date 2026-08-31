@@ -182,7 +182,6 @@ bun add -g https://kthx.dev/cli/kthx.tgz
 | `kthx release` | drops the hold; the newest release serves |
 | `kthx ls` | releases, what is serving, usage against the quotas |
 | `kthx rm` | deletes the site |
-| `kthx mcp [dir]` | a stdio MCP shim over the site's `/api/mcp` |
 
 The token lives in `$XDG_CONFIG_HOME/kthx/sites.json`, never in the project
 directory — which is what gets uploaded. `kthx.json` holds `{name}` and nothing
@@ -191,10 +190,9 @@ secret.
 ## MCP
 
 An editor that speaks Streamable HTTP with headers connects to
-`https://<name>.kthx.dev/api/mcp` with `Authorization: Bearer <token>`. One that
-does not runs `kthx mcp` as a stdio server; `kthx mcp --print-config` prints the
-snippet. Tools: `site_info`, `db_collections`, `db_query`, `db_get`,
-`db_create`, `db_update`, `db_delete`, `files_list`.
+`https://<name>.kthx.dev/api/mcp` with `Authorization: Bearer <token>`; the
+token is the one in `sites.json`. Tools: `site_info`, `db_collections`,
+`db_query`, `db_get`, `db_create`, `db_update`, `db_delete`.
 
 ## Owning a site
 

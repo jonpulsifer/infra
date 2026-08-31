@@ -27,13 +27,8 @@ import {
   siteOf,
   siteUrl,
 } from './http.ts';
-import {
-  spendAll,
-  TokenBucket,
-  WRITE_ADDRESS,
-  WRITE_SITE,
-  WRITE_VISITOR,
-} from './limits.ts';
+import { spendAll, writes } from './limits.ts';
+import { mcpApi } from './mcp.ts';
 import { type Me, meOf } from './me.ts';
 import { Pg } from './pg.ts';
 import { type SocketData, socketsFull, websocket } from './realtime.ts';
@@ -165,13 +160,6 @@ interface Serving {
   readonly location: string | null;
 }
 
-/** The three buckets a write to a site's backends spends. */
-const writes = {
-  visitor: new TokenBucket(WRITE_VISITOR),
-  address: new TokenBucket(WRITE_ADDRESS),
-  site: new TokenBucket(WRITE_SITE),
-};
-
 async function site(
   request: Request,
   ctx: Ctx,
@@ -266,8 +254,8 @@ async function site(
  * and a backend that would reach for one answers 503 rather than 500 while it
  * catches up.
  *
- * `ai`, `files` and `mcp` are their own tickets; until one lands its path is a
- * route this server does not have, which is a 404 and not a promise.
+ * `ai` and `files` are their own tickets; until one lands its path is a route
+ * this server does not have, which is a 404 and not a promise.
  */
 async function siteApi(
   request: Request,
@@ -335,6 +323,24 @@ async function siteApi(
   }
 
   const segments = path.split('/');
+
+  if (path === '/api/mcp') {
+    // No stream to open, so nothing but `POST` is a message.
+    if (request.method !== 'POST') return refuse('METHOD_NOT_ALLOWED', ctx.id);
+    if (!owner) {
+      return refuse(
+        request.headers.get('authorization') === null
+          ? 'UNAUTHENTICATED'
+          : 'FORBIDDEN',
+        ctx.id,
+      );
+    }
+    // The bucket is spent inside, per tool: a `tools/list` or a `db_query` is
+    // a read, and the contract leaves reads unmetered over every transport.
+    // No cookie: this surface has a bearer, and a visitor id it never uses.
+    return mcpApi(request, ctx, name);
+  }
+
   if (segments[2] === 'db') {
     const refusal = charge(request, ctx, name, me, owner, segments);
     if (refusal !== null) return refusal;

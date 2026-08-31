@@ -329,7 +329,9 @@ function compile(
 
 // --- documents --------------------------------------------------------------
 
-function isPlainObject(value: unknown): value is Record<string, unknown> {
+export function isPlainObject(
+  value: unknown,
+): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
@@ -409,7 +411,7 @@ function withEtag(
  * ceiling is 32 MiB, so materialising first would let every anonymous write
  * pin sixteen times what this route allows.
  */
-async function bodyOf(
+export async function bodyOf(
   request: Request,
 ): Promise<{ json: unknown } | { code: Code }> {
   if (Number(request.headers.get('content-length') ?? 0) > MAX_BODY_BYTES) {

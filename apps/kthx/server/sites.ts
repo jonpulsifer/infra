@@ -19,6 +19,7 @@ import { base64urlEncode } from '@repo/archive/bytes';
 import type { SQL } from 'bun';
 import type { ReleaseRow, SiteRow } from './db.ts';
 import type { Depot } from './depot.ts';
+import { isPlainObject } from './documents.ts';
 import type { Config } from './env.ts';
 import {
   addressOf,
@@ -306,9 +307,7 @@ async function claim(request: Request, ctx: Ctx): Promise<Response> {
 
 async function jsonBody(request: Request): Promise<Record<string, unknown>> {
   const body: unknown = await request.json().catch(() => null);
-  return typeof body === 'object' && body !== null && !Array.isArray(body)
-    ? (body as Record<string, unknown>)
-    : {};
+  return isPlainObject(body) ? body : {};
 }
 
 // --- inspect ----------------------------------------------------------------
