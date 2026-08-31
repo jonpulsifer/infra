@@ -288,7 +288,7 @@ describe('a site that never answers', () => {
     socket: { data: () => {}, open: () => {} },
   });
   const gone = `http://127.0.0.1:${deaf.port}`;
-  const loop = dev(dir, { name: 'notes', token: 't', site: gone }, 0, 300);
+  const loop = dev(dir, { name: 'notes', token: 't', site: gone }, 0, 300, 900);
   afterAll(() => {
     loop.stop(true);
     deaf.stop();
@@ -311,6 +311,34 @@ describe('a site that never answers', () => {
       '<h1>home</h1>',
     );
     expect((await fetch(`${loop.url.origin}/api/db/notes`)).status).toBe(504);
+  });
+
+  test('waits longer for a model call than for a write', async () => {
+    // A completion is answered when the model has finished thinking; a write
+    // to a document is not, and a page that posts one to a dark route should
+    // hear about it on the read bound like everything else.
+    const write = await fetch(`${loop.url.origin}/api/db/notes`, {
+      method: 'POST',
+      body: '{"text":"hi"}',
+      headers: { 'content-type': 'application/json' },
+    });
+    expect(write.status).toBe(504);
+    expect((await write.json()).message).toBe(`${gone} did not answer in 0.3s`);
+
+    const started = Date.now();
+    const thinking = await fetch(
+      `${loop.url.origin}/api/ai/v1/chat/completions`,
+      {
+        method: 'POST',
+        body: '{"messages":[]}',
+        headers: { 'content-type': 'application/json' },
+      },
+    );
+    expect(thinking.status).toBe(504);
+    expect((await thinking.json()).message).toBe(
+      `${gone} did not answer in 0.9s`,
+    );
+    expect(Date.now() - started).toBeGreaterThanOrEqual(300);
   });
 
   test('closes the tab socket rather than leaving it open forever', async () => {

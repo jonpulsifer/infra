@@ -10,9 +10,10 @@
  * resolver `fetch` goes through — does not. So the bound is the fix, and it is
  * the whole fix: a bounded call fails out loud.
  *
- * The clock runs until the answer's headers arrive, not until the body ends. A
- * proxied download is as long as it is; what must never happen is waiting on a
- * site that is not going to speak.
+ * The clock runs until the caller has the whole answer, headers and body, since
+ * a socket that goes quiet mid-body hangs exactly as well as one that never
+ * answers. The proxy is the exception and says so: a download it is passing
+ * onward is as long as it is.
  */
 import { KthxError } from './error.ts';
 
@@ -56,35 +57,53 @@ export const unreachable = (
 /**
  * One call, bounded, tried twice when a repeat is safe.
  *
- * How many goes is this function's decision, because it is about safety: a
- * request carrying a body is sent once, since a stream cannot be replayed and
- * a repeated write is a second write. Everything else gets two that share the
- * same total bound, which costs nothing and is the difference between failing
- * and succeeding when a route comes back between them. How long is the
- * caller's, because it is about patience — see `REACH_MS` and `SEND_MS`.
+ * How many goes is this function's decision, because it is about safety, and
+ * safety is the method: only `GET` and `HEAD` are repeated. A deadline is the
+ * one failure the site may already have carried out, and "does this carry a
+ * body" answers whether a repeat is *possible*, not whether it is *harmless* —
+ * `DELETE /api/sites/:name` carries none and destroys a site. The two attempts
+ * share one wall-clock bound rather than half of it each, so the first gets all
+ * the patience the caller asked for and a second happens only when the first
+ * failed fast enough to leave some: a refused or unroutable connect, which is
+ * the flap this exists for. How long is the caller's decision, because it is
+ * about patience — see `REACH_MS` and `SEND_MS`.
+ *
+ * The bound covers the answer's body too: a connection that goes dark one
+ * packet after the headers is the same hang wearing a 200. `stream` opts out
+ * for the one caller that hands the body onward and cannot know how long the
+ * site means it to be.
  */
 export async function reach(
   url: string | URL,
   init: RequestInit = {},
   ms = REACH_MS,
+  /** Whether the caller passes the body on rather than reading it here. */
+  stream = false,
 ): Promise<Response> {
-  const attempts = init.body === undefined || init.body === null ? 2 : 1;
-  const each = Math.ceil(ms / attempts);
+  const method = init.method ?? 'GET';
+  const attempts = method === 'GET' || method === 'HEAD' ? 2 : 1;
+  const until = Date.now() + ms;
   let last: unknown;
   for (let attempt = 0; attempt < attempts; attempt += 1) {
-    // Not `AbortSignal.timeout`: that one cannot be called off, and it would go
-    // on to cut the response body short at the same deadline.
+    const left = until - Date.now();
+    if (left <= 0) break;
+    // Not `AbortSignal.timeout`: that one cannot be called off, and the proxy
+    // needs the bound lifted once the answer is on its way through.
     const controller = new AbortController();
     const timer = setTimeout(
       () => controller.abort(new DOMException('timed out', 'TimeoutError')),
-      each,
+      left,
     );
     try {
-      return await fetch(url, { ...init, signal: controller.signal });
+      const answer = await fetch(url, { ...init, signal: controller.signal });
+      // Unref rather than clear: the reader is still on this clock, and a call
+      // that is done must not hold the process open until the deadline.
+      if (stream) clearTimeout(timer);
+      else timer.unref();
+      return answer;
     } catch (cause) {
-      last = cause;
-    } finally {
       clearTimeout(timer);
+      last = cause;
     }
   }
   throw last;

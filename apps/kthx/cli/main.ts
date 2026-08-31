@@ -31,7 +31,7 @@ import bundledSkill from '@repo/kthx/skill.md' with { type: 'text' };
 import { nameProblem } from '../server/names.ts';
 import { KthxError, refusal } from './error.ts';
 import { banner, faint, link, rainbow, tint } from './paint.ts';
-import { REACH_MS, reach, SEND_MS, unreachable } from './reach.ts';
+import { REACH_MS, reach, SEND_MS, timedOut, unreachable } from './reach.ts';
 import { pack } from './tar.ts';
 import {
   buildId,
@@ -168,7 +168,13 @@ async function api<T>(
     throw unreachable(origin(), cause, bound);
   });
   if (!response.ok) throw await refusal(response);
-  return (await response.json().catch(() => ({}))) as T;
+  // The empty fallback is for a 200 that carries nothing, not for a body that
+  // stops halfway: that is the same silence the bound exists to end, and it
+  // must not read as an answer.
+  return (await response.json().catch((cause: unknown) => {
+    if (timedOut(cause)) throw unreachable(origin(), cause, bound);
+    return {};
+  })) as T;
 }
 
 const json = (body: unknown) => ({

@@ -60,6 +60,8 @@ interface SocketData {
   readonly inbound: string[];
   tab: Bun.ServerWebSocket<SocketData> | null;
   closed: boolean;
+  /** Why the site's end went, when there is more to say than "it closed". */
+  why: string | null;
 }
 
 export function dev(
@@ -68,6 +70,8 @@ export function dev(
   port = PORT,
   /** How long the site gets to answer before the loop stops waiting on it. */
   deadline = REACH_MS,
+  /** The same, for a model call, which is answered when it is thought out. */
+  send = SEND_MS,
 ): Bun.Server<SocketData> {
   const root = unwrap(resolve(dir));
 
@@ -85,7 +89,7 @@ export function dev(
       if (reserved(path)) {
         return path === '/api/ws'
           ? upgrade(request, server, site, deadline)
-          : proxy(request, path, site, deadline);
+          : proxy(request, path, site, deadline, send);
       }
       if (request.method !== 'GET' && request.method !== 'HEAD') {
         return Response.json(
@@ -168,6 +172,7 @@ async function proxy(
   path: string,
   site: Site,
   deadline: number,
+  send: number,
 ): Promise<Response> {
   const target = new URL(request.url);
   const upstream = new URL(site.site);
@@ -186,9 +191,11 @@ async function proxy(
     headers.set('authorization', `Bearer ${site.token}`);
   }
 
-  // An upload or a model call is answered when the site has the whole request,
-  // so the read bound would refuse work that is going fine.
-  const bound = request.body === null ? deadline : SEND_MS;
+  // A model call is answered when the model has finished thinking, which is
+  // minutes on a long completion — the read bound would refuse work that is
+  // going fine. Nothing else on the loop earns that patience: a document write
+  // to a route that has gone dark should fail as fast as a read does.
+  const bound = path.startsWith('/api/ai') ? send : deadline;
   const answer = await reach(
     target,
     {
@@ -200,6 +207,9 @@ async function proxy(
       duplex: 'half',
     } as RequestInit,
     bound,
+    // The answer is handed to the tab as it arrives; how long the site means it
+    // to be — a completion streamed token by token — is not this hop's call.
+    true,
   ).catch((cause: Error) =>
     // A site that never answers is the loop's worst failure: nothing prints,
     // the tab spins, and the network is the last place anyone looks. Say so.
@@ -276,16 +286,18 @@ function upgrade(
     inbound: [],
     tab: null,
     closed: false,
+    why: null,
   };
   // The same silence the proxy guards against, on the socket: an upgrade to a
   // site that has gone dark neither opens nor fails, and a tab left holding a
   // socket that does neither is the loop hanging by another name.
   const timer = setTimeout(() => {
     data.closed = true;
-    data.tab?.close(
-      1013,
-      `${site.site} did not answer in ${seconds(deadline)}`,
-    );
+    // Kept on the data as well as sent: the tab's socket may not have been
+    // handed over yet, and `pipe` closes it with this rather than with a bare
+    // 1000, which would tell the page the site answered and then said goodbye.
+    data.why = `${site.site} did not answer in ${seconds(deadline)}`;
+    data.tab?.close(1013, data.why);
     upstream.close();
   }, deadline);
   upstream.onopen = () => {
@@ -321,7 +333,9 @@ function upgrade(
 function pipe(socket: Bun.ServerWebSocket<SocketData>): void {
   socket.data.tab = socket;
   for (const frame of socket.data.inbound.splice(0)) socket.send(frame);
-  if (socket.data.closed) socket.close();
+  if (!socket.data.closed) return;
+  if (socket.data.why === null) socket.close();
+  else socket.close(1013, socket.data.why);
 }
 
 // --- files ------------------------------------------------------------------

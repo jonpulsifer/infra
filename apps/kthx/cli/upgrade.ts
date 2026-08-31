@@ -176,7 +176,8 @@ export async function upgrade(origin: string): Promise<void> {
   // this copy answers `buildId()` from.
   const from = buildId() ?? `${version}+dev`;
   const url = `${origin}/cli/kthx.tgz`;
-  // The bound is on the apex answering, not on the megabytes that follow.
+  // The bound covers the download too — the tarball is tens of kilobytes, and
+  // a half-sent one hangs the upgrade as surely as an apex that never answers.
   const response = await reach(url).catch((cause: Error) => {
     throw unreachable(url, cause);
   });
@@ -187,7 +188,10 @@ export async function upgrade(origin: string): Promise<void> {
   const dir = mkdtempSync(join(tmpdir(), 'kthx-'));
   const file = join(dir, 'kthx.tgz');
   try {
-    await Bun.write(file, await response.arrayBuffer());
+    const tarball = await response.arrayBuffer().catch((cause: Error) => {
+      throw unreachable(url, cause);
+    });
+    await Bun.write(file, tarball);
     await Bun.$`bun add -g ${file}`.quiet().catch((cause: Error) => {
       // The shell captured why; `cause.message` is only the exit code.
       const why = (cause as { stderr?: Buffer }).stderr?.toString().trim();
