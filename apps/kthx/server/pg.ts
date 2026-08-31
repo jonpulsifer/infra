@@ -244,8 +244,12 @@ export class Pg {
     await this.control`
       update sites set provisioned_at = now() where name = ${name}
     `;
+    // Whatever pool was open held the password this just replaced, so it is
+    // closed rather than dropped: an abandoned Bun `SQL` keeps its sockets.
+    const stale = this.pools.get(name);
     this.pools.delete(name);
     this.snapshots.delete(name);
+    await stale?.close({ timeout: 5 }).catch(() => {});
   }
 
   /** Whether this name is already a database or a role, which makes it taken. */
