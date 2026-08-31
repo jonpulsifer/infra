@@ -278,6 +278,8 @@ describe('/_/me and the SDK', () => {
     }
     const script = await site.text();
     expect(script).toBe(await apex.text());
-    expect(script).toContain('window.kthx = { db, live, me, ready }');
+    // What it exports is the SDK's business and changes with it; what this
+    // route promises is that both paths are the same script.
+    expect(script).toContain('window.kthx =');
   });
 });

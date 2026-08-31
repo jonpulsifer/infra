@@ -29,8 +29,11 @@ function bundle(files: Record<string, string>): Uint8Array<ArrayBuffer> {
 /** A claimed name serving these files. */
 async function published(
   files: Record<string, string>,
-  name = 'notes',
+  label = 'notes',
 ): Promise<{ name: string; token: string; host: string }> {
+  // Prefixed: a claim makes a Postgres database and role of this name on a
+  // server this suite shares.
+  const name = kthx().name(label);
   const claimed = await kthx()
     .fetch(
       ask('/api/sites', {
@@ -284,8 +287,8 @@ describe('the paths a site does not own', () => {
     const api = await get(site.host, '/api');
     expect(api.status).toBe(200);
     expect(await api.json()).toEqual({
-      name: 'known',
-      url: 'https://known.kthx.test',
+      name: site.name,
+      url: `https://${site.name}.kthx.test`,
       docs: 'https://kthx.test/skill.md',
     });
     expect(api.headers.get('cache-control')).toBe('no-store');
@@ -295,6 +298,6 @@ describe('the paths a site does not own', () => {
     expect(sdk.headers.get('cache-control')).toBe('public, max-age=300');
 
     // The control API is the apex's alone.
-    expect((await get(site.host, '/api/sites/known')).status).toBe(404);
+    expect((await get(site.host, `/api/sites/${site.name}`)).status).toBe(404);
   });
 });

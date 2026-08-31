@@ -13,17 +13,30 @@ import { LANDING_PATH, SDK_PATH, SKILL_PATH } from '@repo/kthx/assets';
 import { FAVICON_PATH } from '@repo/kthx/favicon';
 import { createClient, migrate } from './db.ts';
 import { bucketDepot, type Depot, diskDepot } from './depot.ts';
+import { dbApi } from './documents.ts';
 import { type Config, readConfig } from './env.ts';
 import {
+  addressOf,
   hostOf,
   logCause,
   ok,
   portOf,
   refuse,
   requestId,
+  sameOrigin,
   siteOf,
   siteUrl,
 } from './http.ts';
+import {
+  spendAll,
+  TokenBucket,
+  WRITE_ADDRESS,
+  WRITE_SITE,
+  WRITE_VISITOR,
+} from './limits.ts';
+import { type Me, meOf } from './me.ts';
+import { Pg } from './pg.ts';
+import { type SocketData, socketsFull, websocket } from './realtime.ts';
 import { ensureRelease, releaseDir } from './releases.ts';
 import {
   decodePath,
@@ -31,7 +44,7 @@ import {
   notHere,
   staticResponse,
 } from './serve.ts';
-import { type Ctx, sitesApi } from './sites.ts';
+import { type Ctx, opensSite, sitesApi } from './sites.ts';
 
 /** The one sentence a v1 site's old calls get. No shim: they fail loudly. */
 const RETIRED = 'the /_/ API is retired; use /api/ — https://kthx.dev/skill.md';
@@ -145,17 +158,26 @@ async function apex(
 
 interface Serving {
   readonly deleted_at: Date | null;
+  readonly provisioned_at: Date | null;
+  readonly token_hash: string;
   readonly serving: number | null;
   readonly digest: string | null;
   readonly location: string | null;
 }
+
+/** The three buckets a write to a site's backends spends. */
+const writes = {
+  visitor: new TokenBucket(WRITE_VISITOR),
+  address: new TokenBucket(WRITE_ADDRESS),
+  site: new TokenBucket(WRITE_SITE),
+};
 
 async function site(
   request: Request,
   ctx: Ctx,
   name: string,
   path: string,
-): Promise<Response> {
+): Promise<Response | undefined> {
   // `/_/` is retired on every name in the zone, claimed or not: it is a
   // statement about the API, not about this site.
   if (path === '/_' || path.startsWith('/_/')) {
@@ -186,7 +208,8 @@ async function site(
   let row: Serving | undefined;
   try {
     [row] = (await ctx.sql`
-      select s.deleted_at, s.serving, r.digest, r.location
+      select s.deleted_at, s.provisioned_at, s.token_hash, s.serving,
+             r.digest, r.location
       from sites s
       left join releases r on r.site = s.name and r.n = s.serving
       where s.name = ${name} limit 1
@@ -199,7 +222,7 @@ async function site(
   if (reserved) {
     if (row === undefined) return refuse('NOT_FOUND', ctx.id);
     if (row.deleted_at !== null) return refuse('GONE', ctx.id);
-    return siteApi(request, ctx, name, path);
+    return siteApi(request, ctx, name, path, row);
   }
 
   if (row === undefined) return page(404);
@@ -233,19 +256,53 @@ async function site(
 }
 
 /**
- * What `/api` on a site answers today.
+ * What `/api` on a site answers.
  *
- * `db`, `ws`, `me`, `ai`, `files` and `mcp` are their own tickets; until one
- * lands its path is a route this server does not have, which is a 404 and not a
- * promise.
+ * The order matters. `/api/sdk.js` is the one path here that is cacheable and
+ * must never carry a cookie, so it is served before anything that mints one.
+ * The same-site guard comes next, because `kthx.dev` is not on the Public
+ * Suffix List and `SameSite=Lax` therefore separates none of these hosts from
+ * one another. Then provisioning: a name has a row before it has a database,
+ * and a backend that would reach for one answers 503 rather than 500 while it
+ * catches up.
+ *
+ * `ai`, `files` and `mcp` are their own tickets; until one lands its path is a
+ * route this server does not have, which is a 404 and not a promise.
  */
-function siteApi(
+async function siteApi(
   request: Request,
   ctx: Ctx,
   name: string,
   path: string,
-): Response {
-  if (path === '/api' && READ_METHODS.has(request.method)) {
+  row: Serving,
+): Promise<Response | undefined> {
+  const read = READ_METHODS.has(request.method);
+  if (path === '/api/sdk.js' && read) {
+    return asset(
+      SDK_PATH,
+      'text/javascript; charset=utf-8',
+      'public, max-age=300',
+    );
+  }
+
+  const owner = opensSite(request, row.token_hash);
+  // The upgrade is a `GET` and is guarded all the same: a socket is a write
+  // channel, and a foreign page opening one is exactly what this stops.
+  const guarded = request.method !== 'GET' || path === '/api/ws';
+  if (guarded && !owner && !sameOrigin(request, ctx.host, ctx.port)) {
+    return refuse('FORBIDDEN', ctx.id);
+  }
+
+  if (row.provisioned_at === null) {
+    // Idempotent, deduplicated, and not waited for: the caller is told to come
+    // back, and the site is repaired by the time it does.
+    void ctx.pg.repair(name).catch((cause: unknown) => {
+      logCause(ctx.id, `repairing ${name}`, cause);
+    });
+    return refuse('BUSY', ctx.id);
+  }
+
+  if (path === '/api' && read) {
     return ok(
       {
         name,
@@ -255,27 +312,129 @@ function siteApi(
       ctx.id,
     );
   }
-  if (path === '/api/sdk.js' && READ_METHODS.has(request.method)) {
-    return asset(
-      SDK_PATH,
-      'text/javascript; charset=utf-8',
-      'public, max-age=300',
+
+  const me = meOf(request, name, ctx.config.meKey, ctx.config.mePreviousKey);
+
+  if (path === '/api/me') {
+    if (!read) return refuse('METHOD_NOT_ALLOWED', ctx.id);
+    return cookied(
+      ok(
+        {
+          id: me.id,
+          site: { name, url: siteUrl(ctx.config.zone, name, ctx.port) },
+        },
+        ctx.id,
+      ),
+      me,
     );
+  }
+
+  if (path === '/api/ws') {
+    if (!read) return refuse('METHOD_NOT_ALLOWED', ctx.id);
+    return upgrade(request, ctx, name, me);
+  }
+
+  const segments = path.split('/');
+  if (segments[2] === 'db') {
+    const refusal = charge(request, ctx, name, me, owner, segments);
+    if (refusal !== null) return refusal;
+    return cookied(await dbApi(request, ctx, name, segments, owner), me);
   }
   return refuse('NOT_FOUND', ctx.id);
 }
 
+/** Set the cookie on the responses that may carry one, and never cache them. */
+function cookied(response: Response, me: Me): Response {
+  if (me.setCookie === null) return response;
+  response.headers.append('set-cookie', me.setCookie);
+  response.headers.set('cache-control', 'no-store');
+  return response;
+}
+
+/**
+ * Spend the write buckets, or say why not.
+ *
+ * Reads and `POST …/query` are unmetered; a bulk `POST` is one unit. An owner
+ * bearer skips the visitor and address buckets and never the site one, so a
+ * token that leaks cannot outrun the site's own ceiling.
+ */
+function charge(
+  request: Request,
+  ctx: Ctx,
+  name: string,
+  me: Me,
+  owner: boolean,
+  segments: readonly string[],
+): Response | null {
+  const method = request.method;
+  const metered =
+    method === 'POST' ||
+    method === 'PATCH' ||
+    method === 'PUT' ||
+    method === 'DELETE';
+  if (!metered || segments[4] === 'query') return null;
+  const address = addressOf(request, ctx.server, ctx.config.trustedProxies);
+  const spent = spendAll([
+    // A request that arrived without a cookie is keyed by the two things it
+    // did have: the cookie it is about to receive is not a fresh allowance.
+    [
+      writes.visitor,
+      owner || me.setCookie !== null ? null : `${name}:${me.id}`,
+    ],
+    [writes.address, owner || address === null ? null : `${name}:${address}`],
+    [writes.site, name],
+  ]);
+  return spent ? refuse('RATE_LIMITED', ctx.id, { 'retry-after': '60' }) : null;
+}
+
+/** The socket a tab opens, once it is inside both of the upgrade's caps. */
+function upgrade(
+  request: Request,
+  ctx: Ctx,
+  name: string,
+  me: Me,
+): Response | undefined {
+  const address = addressOf(request, ctx.server, ctx.config.trustedProxies);
+  if (socketsFull(name, me.id, address)) {
+    return refuse('RATE_LIMITED', ctx.id, { 'retry-after': '60' });
+  }
+  const data: SocketData = {
+    kind: 'kthx',
+    site: name,
+    me: me.id,
+    address,
+    rooms: new Set(),
+    subscriptions: new Set(),
+    budget: { tokens: 20, at: Date.now() },
+  };
+  const headers = new Headers();
+  if (me.setCookie !== null) headers.append('set-cookie', me.setCookie);
+  const upgraded = ctx.server?.upgrade(request, { data, headers }) ?? false;
+  return upgraded ? undefined : refuse('MALFORMED_REQUEST', ctx.id);
+}
+
 // --- the process ------------------------------------------------------------
+
+/** The server as a function, plus the pools it opened along the way. */
+export interface Kthx {
+  (
+    request: Request,
+    server?: Bun.Server<unknown>,
+  ): Promise<Response | undefined>;
+  /** Closes every site pool. The control connection is the caller's. */
+  close(): Promise<void>;
+}
 
 export function handler(
   config: Config,
   sql: ReturnType<typeof createClient>,
   depot: Depot,
-) {
-  return async (
+  pg: Pg = new Pg(config, sql),
+): Kthx {
+  const answer = async (
     request: Request,
     server?: Bun.Server<unknown>,
-  ): Promise<Response> => {
+  ): Promise<Response | undefined> => {
     const id = requestId();
     const host = hostOf(request);
     const name = siteOf(host, config.zone);
@@ -286,6 +445,7 @@ export function handler(
     const ctx: Ctx = {
       config,
       sql,
+      pg,
       depot,
       server,
       id,
@@ -308,7 +468,13 @@ export function handler(
       return refuse('STORAGE_FAILURE', id);
     }
   };
+  const kthx = answer as Kthx;
+  kthx.close = () => pg.close();
+  return kthx;
 }
+
+/** Once a day: databases and roles no live site row names any more. */
+const SWEEP_MS = 24 * 60 * 60 * 1000;
 
 export async function start(): Promise<Bun.Server<unknown>> {
   const config = readConfig();
@@ -316,11 +482,15 @@ export async function start(): Promise<Bun.Server<unknown>> {
   const ran = await migrate(sql);
   if (ran.length > 0) console.log(`migrated: ${ran.join(', ')}`);
 
+  const pg = new Pg(config, sql);
+  // The template and the group role, before a claim can want them.
+  await pg.bootstrap();
+
   const depot =
     config.bucket === null
       ? diskDepot(`${config.sitesDir}/.depot`)
       : bucketDepot(config.bucket);
-  const fetch = handler(config, sql, depot);
+  const fetch = handler(config, sql, depot, pg);
 
   const server = Bun.serve({
     port: config.port,
@@ -332,8 +502,31 @@ export async function start(): Promise<Bun.Server<unknown>> {
     // handler sees a byte.
     maxRequestBodySize: MAX_BODY_BYTES,
     fetch,
+    websocket,
   });
   console.log(`kthx serving ${config.zone} on :${server.port}`);
+
+  // Not awaited: after a restore or a `KTHX_PG_KEY` rotation every site needs
+  // its role's password re-applied, and a site that is asked for first is
+  // repaired on the way in anyway. Serving must not wait on the whole estate.
+  void pg
+    .repairAll()
+    .then((failed) => {
+      if (failed.length > 0) {
+        console.error(`sites still to repair: ${failed.join(', ')}`);
+      }
+    })
+    .catch((cause: unknown) => logCause('boot', 'repairing sites', cause));
+
+  const sweep = setInterval(() => {
+    void pg
+      .sweep()
+      .then((dropped) => {
+        if (dropped.length > 0) console.log(`swept: ${dropped.join(', ')}`);
+      })
+      .catch((cause: unknown) => logCause('sweep', 'dropping orphans', cause));
+  }, SWEEP_MS);
+  sweep.unref();
   return server;
 }
 

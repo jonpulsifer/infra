@@ -8,7 +8,11 @@ import {
   CLAIM_BUCKET,
   DailyCap,
   secondsToMidnight,
+  spendAll,
   TokenBucket,
+  WRITE_ADDRESS,
+  WRITE_SITE,
+  WRITE_VISITOR,
 } from '../../server/limits.ts';
 
 function from(address: string): Request {
@@ -44,6 +48,49 @@ describe('the token bucket', () => {
       bucket.spend(`10.0.${i >> 8}.${i & 255}`, now);
     }
     expect(bucket.spend('held', now)).toBe(true);
+  });
+});
+
+describe('the three write buckets', () => {
+  test('a request refused by one has not spent the others', () => {
+    const visitor = new TokenBucket(WRITE_VISITOR);
+    const site = new TokenBucket({ capacity: 1, perSecond: 0 });
+    const now = Date.now();
+    expect(
+      spendAll(
+        [
+          [visitor, 'v'],
+          [site, 's'],
+        ],
+        now,
+      ),
+    ).toBe(false);
+    // The site bucket is empty now, so the next call is refused — and the
+    // visitor must come out of it with the allowance it went in with.
+    expect(
+      spendAll(
+        [
+          [visitor, 'v'],
+          [site, 's'],
+        ],
+        now,
+      ),
+    ).toBe(true);
+    expect(visitor.tokens('v', now)).toBe(WRITE_VISITOR.capacity - 1);
+  });
+
+  test('a bucket this request cannot be keyed by is skipped, not refused', () => {
+    // No cookie yet, and no address behind an untrusted proxy: what remains
+    // still bounds the call.
+    const address = new TokenBucket(WRITE_ADDRESS);
+    const site = new TokenBucket(WRITE_SITE);
+    expect(
+      spendAll([
+        [address, null],
+        [site, 'notes'],
+      ]),
+    ).toBe(false);
+    expect(address.tokens('anything')).toBe(WRITE_ADDRESS.capacity);
   });
 });
 

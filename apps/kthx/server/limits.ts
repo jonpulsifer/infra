@@ -21,6 +21,18 @@ export interface BucketSpec {
 /** Thirty in a burst, then six a minute (v1), per address, on claim and upload. */
 export const CLAIM_BUCKET: BucketSpec = { capacity: 30, perSecond: 0.1 };
 
+/**
+ * The three buckets every write to a site's backends must have a token in.
+ *
+ * Three because each alone is bypassable: a cookie is free to throw away, an
+ * address is free for anyone with a /64 to rotate inside, and a site-wide
+ * bucket alone would let one visitor spend everyone else's allowance. The
+ * visitor bucket is the tightest and the site bucket is the one nothing skips.
+ */
+export const WRITE_VISITOR: BucketSpec = { capacity: 60, perSecond: 0.5 };
+export const WRITE_ADDRESS: BucketSpec = { capacity: 240, perSecond: 2 };
+export const WRITE_SITE: BucketSpec = { capacity: 600, perSecond: 5 };
+
 /** Beyond this many keys the map is a memory leak rather than a limiter. */
 const MAX_KEYS = 10_000;
 
@@ -32,6 +44,19 @@ export class TokenBucket {
   /** True when the key has no token left — the caller refuses. */
   spend(key: string | null, now = Date.now()): boolean {
     if (key === null) return false;
+    if (this.tokens(key, now) < 1) return true;
+    this.take(key);
+    return false;
+  }
+
+  /**
+   * What the key has right now, refilled by the clock.
+   *
+   * Separate from {@link spend} so {@link spendAll} can ask every bucket before
+   * any of them is charged: a request refused by the third must not have spent
+   * the first two.
+   */
+  tokens(key: string, now = Date.now()): number {
     const bucket = this.held.get(key) ?? {
       tokens: this.spec.capacity,
       at: now,
@@ -43,9 +68,12 @@ export class TokenBucket {
     bucket.at = now;
     this.held.set(key, bucket);
     if (this.held.size > MAX_KEYS) this.evict();
-    if (bucket.tokens < 1) return true;
-    bucket.tokens -= 1;
-    return false;
+    return bucket.tokens;
+  }
+
+  take(key: string): void {
+    const bucket = this.held.get(key);
+    if (bucket !== undefined) bucket.tokens -= 1;
   }
 
   /**
@@ -113,4 +141,24 @@ function today(): number {
 /** Seconds until the caps reset, for `retry-after` on a daily refusal. */
 export function secondsToMidnight(now = Date.now()): number {
   return Math.ceil((86_400_000 - (now % 86_400_000)) / 1000);
+}
+
+/**
+ * Spend one token in each of several buckets, all or nothing.
+ *
+ * A `null` key is a bucket this request cannot be keyed by — no cookie, or no
+ * address behind a proxy that is not trusted — and is skipped rather than
+ * refused: the cookie a cookieless caller is about to be handed is not a fresh
+ * allowance, and the buckets that remain still bound it.
+ */
+export function spendAll(
+  pairs: readonly (readonly [TokenBucket, string | null])[],
+  now = Date.now(),
+): boolean {
+  const keyed = pairs.filter(
+    (pair): pair is readonly [TokenBucket, string] => pair[1] !== null,
+  );
+  if (keyed.some(([bucket, key]) => bucket.tokens(key, now) < 1)) return true;
+  for (const [bucket, key] of keyed) bucket.take(key);
+  return false;
 }

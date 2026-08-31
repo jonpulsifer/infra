@@ -37,6 +37,7 @@ import {
   secondsToMidnight,
   TokenBucket,
 } from './limits.ts';
+import type { Pg } from './pg.ts';
 import {
   KEEP_RELEASES,
   MAX_ARCHIVE_BYTES,
@@ -124,6 +125,8 @@ export function nameProblem(name: string): 'INVALID_NAME' | 'RESERVED' | null {
 export interface Ctx {
   readonly config: Config;
   readonly sql: SQL;
+  /** The site databases: provisioning, pools, quotas. */
+  readonly pg: Pg;
   readonly depot: Depot;
   readonly server: Bun.Server<unknown> | undefined;
   readonly id: string;
@@ -144,6 +147,20 @@ function sameHash(a: string, b: string): boolean {
 
 function retryAfter(seconds: number): Record<string, string> {
   return { 'retry-after': String(seconds) };
+}
+
+/**
+ * Whether this request carries the bearer that opens this site.
+ *
+ * On a site host a bearer that is not this site's is *ignored* rather than
+ * refused — the OpenAI SDK puts one on every call to `/api/ai` — so this
+ * answers a question, not a challenge.
+ */
+export function opensSite(request: Request, tokenHash: string): boolean {
+  const bearer = /^Bearer\s+(\S+)$/i.exec(
+    request.headers.get('authorization') ?? '',
+  )?.[1];
+  return bearer !== undefined && sameHash(hash(bearer), tokenHash);
 }
 
 /**
@@ -216,11 +233,10 @@ async function siteFor(
   if (row === undefined) return { code: 'NOT_FOUND' };
   if (row.deleted_at !== null) return { code: 'GONE' };
 
-  const bearer = /^Bearer\s+(\S+)$/i.exec(
-    request.headers.get('authorization') ?? '',
-  )?.[1];
-  if (bearer === undefined) return { code: 'UNAUTHENTICATED' };
-  if (!sameHash(hash(bearer), row.token_hash)) return { code: 'FORBIDDEN' };
+  if (request.headers.get('authorization') === null) {
+    return { code: 'UNAUTHENTICATED' };
+  }
+  if (!opensSite(request, row.token_hash)) return { code: 'FORBIDDEN' };
   return { row };
 }
 
@@ -258,6 +274,11 @@ async function claim(request: Request, ctx: Ctx): Promise<Response> {
   `) as { live: number }[];
   if ((live?.live ?? 0) >= MAX_LIVE_SITES) return refuse('BUSY', ctx.id);
 
+  // A name that is already a database or a role is taken even with no row: it
+  // is the residue of a claim that failed after `CREATE DATABASE`, and handing
+  // it out again would hand its documents to someone else.
+  if (await ctx.pg.inUse(name)) return refuse('TAKEN', ctx.id);
+
   const token = base64urlEncode(crypto.getRandomValues(new Uint8Array(32)));
   // A deleted name stays taken: the row is what makes it answer 410.
   const claimed = (await ctx.sql`
@@ -265,6 +286,20 @@ async function claim(request: Request, ctx: Ctx): Promise<Response> {
     on conflict do nothing returning name
   `) as { name: string }[];
   if (claimed.length === 0) return refuse('TAKEN', ctx.id);
+
+  // The row holds the name while this runs. A failure takes the row with it,
+  // so the caller is told the name is *not* taken — which the check above then
+  // keeps honest about whatever was left behind.
+  try {
+    await ctx.pg.provision(name);
+  } catch (cause) {
+    logCause(ctx.id, `provisioning ${name}`, cause);
+    await ctx.sql`delete from sites where name = ${name}`.catch(
+      (second: unknown) =>
+        logCause(ctx.id, 'unclaiming after a failure', second),
+    );
+    return refuse('STORAGE_FAILURE', ctx.id);
+  }
 
   if (address !== null) claimsPerDay.count(address);
   return ok(
@@ -310,11 +345,10 @@ const inspect: Act = async (_request, ctx, site) => {
         size: Number(row.size),
         at: row.at.toISOString(),
       })),
-      // The meters land with the backends they measure: `db_bytes` with
-      // `/api/db`, the rest with `/api/files` and `/api/ai`. A site with none of
-      // them yet has spent none of them.
+      // `files_bytes` and the AI counters land with the backends that meter
+      // them; the database is here already and reports its own size.
       usage: {
-        db_bytes: 0,
+        db_bytes: await ctx.pg.bytes(site.name),
         files_bytes: 0,
         ai_requests_today: 0,
         ai_tokens_today: 0,
@@ -555,6 +589,9 @@ const remove: Act = async (_request, ctx, site) => {
   await ctx.sql`
     update sites set deleted_at = now(), serving = null where name = ${site.name}
   `;
+  // Marked first, then dropped: the row is what makes every later request 410,
+  // and it has to say so before the pool closes under the requests in flight.
+  await ctx.pg.drop(site.name);
   // The release rows and their content-addressed objects stay — they may be
   // shared, and the nightly dump is the undo path. The bytes on this volume are
   // not, so they go now.

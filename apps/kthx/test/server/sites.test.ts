@@ -55,8 +55,14 @@ async function claim(name: string, init: Parameters<typeof ask>[1] = {}) {
   return { status: response.status, body: await response.json() };
 }
 
-/** A site of ours: claimed, with its token in hand. */
-async function mine(name = 'notes') {
+/**
+ * A site of ours: claimed, with its token in hand.
+ *
+ * The label is prefixed, because a claim now creates a Postgres database and a
+ * role of that name on the server this suite shares with everything else.
+ */
+async function mine(label = 'notes') {
+  const name = kthx().name(label);
   const claimed = await claim(name);
   expect(claimed.status).toBe(201);
   return { name, token: claimed.body.token as string };
@@ -136,15 +142,18 @@ describe('names', () => {
 
 describe('claiming', () => {
   test('a free name answers 201 with the token, shown once', async () => {
-    const claimed = await claim('notes');
+    const name = kthx().name('notes');
+    const claimed = await claim(name);
     expect(claimed.status).toBe(201);
-    expect(claimed.body.name).toBe('notes');
-    expect(claimed.body.url).toBe('https://notes.kthx.test');
+    expect(claimed.body.name).toBe(name);
+    expect(claimed.body.url).toBe(`https://${name}.kthx.test`);
     expect(claimed.body.token).toMatch(/^[A-Za-z0-9_-]{43}$/);
 
     // The token is not stored: nothing but its hash is on the row.
     const [row] = await kthx()
-      .sql`select token_hash from sites where name = 'notes'`;
+      .sql`select token_hash, provisioned_at from sites where name = ${name}`;
+    // And the name is a database of its own before it is a website.
+    expect(row.provisioned_at).not.toBeNull();
     expect(row.token_hash).toMatch(/^[0-9a-f]{64}$/);
     expect(row.token_hash).not.toBe(claimed.body.token);
   });
@@ -158,8 +167,9 @@ describe('claiming', () => {
       status: 400,
       body: { code: 'INVALID_NAME' },
     });
-    expect((await claim('notes')).status).toBe(201);
-    expect(await claim('notes')).toMatchObject({
+    const taken = kthx().name('taken');
+    expect((await claim(taken)).status).toBe(201);
+    expect(await claim(taken)).toMatchObject({
       status: 409,
       body: { code: 'TAKEN' },
     });
@@ -176,14 +186,15 @@ describe('claiming', () => {
   });
 
   test('a browser on another kthx host cannot claim through this one', async () => {
-    const foreign = await claim('notes', {
+    const name = kthx().name('origin');
+    const foreign = await claim(name, {
       headers: {
         'content-type': 'application/json',
         origin: 'https://evil.kthx.test',
       },
     });
     expect(foreign).toMatchObject({ status: 403, body: { code: 'FORBIDDEN' } });
-    const own = await claim('notes', {
+    const own = await claim(name, {
       headers: {
         'content-type': 'application/json',
         origin: `https://${ZONE}`,
@@ -213,7 +224,7 @@ describe('claiming', () => {
         ask('/api/sites', {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ name: `burst-${i}` }),
+          body: JSON.stringify({ name: kthx().name(`burst-${i}`) }),
           address: from,
         }),
       );
@@ -258,7 +269,7 @@ describe('releases', () => {
     expect(first.body).toMatchObject({
       n: 1,
       serving: 1,
-      url: 'https://notes.kthx.test',
+      url: `https://${owned.name}.kthx.test`,
     });
     expect(first.body.digest).toMatch(/^[0-9a-f]{64}$/);
 
@@ -276,10 +287,12 @@ describe('releases', () => {
 
     const shown = await inspect(owned.name, owned.token);
     expect(shown.body).toMatchObject({
-      name: 'notes',
+      name: owned.name,
       serving: 2,
       held: false,
     });
+    // The site's own database is the meter, and an empty clone is not nothing.
+    expect(shown.body.usage.db_bytes).toBeGreaterThan(0);
     expect(shown.body.releases.map((r: { n: number }) => r.n)).toEqual([2, 1]);
     expect(shown.body.releases[0].size).toBeGreaterThan(0);
     expect(shown.body.quotas.db_bytes).toBe(256 * 1024 * 1024);

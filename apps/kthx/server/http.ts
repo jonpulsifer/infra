@@ -19,6 +19,10 @@ export type Code =
   | 'MALFORMED_ZIP'
   | 'PATH_ESCAPES_ARCHIVE'
   | 'NO_INDEX'
+  | 'INVALID_COLLECTION'
+  | 'INVALID_ID'
+  | 'INVALID_DOCUMENT'
+  | 'INVALID_QUERY'
   | 'MALFORMED_REQUEST'
   | 'UNAUTHENTICATED'
   | 'FORBIDDEN'
@@ -26,11 +30,14 @@ export type Code =
   | 'METHOD_NOT_ALLOWED'
   | 'TIMEOUT'
   | 'TAKEN'
+  | 'EXISTS'
   | 'GONE'
+  | 'PRECONDITION_FAILED'
   | 'TOO_LARGE'
   | 'RATE_LIMITED'
   | 'STORAGE_FAILURE'
-  | 'BUSY';
+  | 'BUSY'
+  | 'SITE_FULL';
 
 const ERRORS: Record<Code, readonly [number, string]> = {
   INVALID_NAME: [
@@ -46,6 +53,13 @@ const ERRORS: Record<Code, readonly [number, string]> = {
   MALFORMED_ZIP: [400, 'the archive could not be read'],
   PATH_ESCAPES_ARCHIVE: [400, 'the archive names a path outside itself'],
   NO_INDEX: [400, 'the archive has no index.html or 200.html at its root'],
+  INVALID_COLLECTION: [400, 'a collection is 1 to 64 of a-z, 0-9, - and _'],
+  INVALID_ID: [400, 'an id is 1 to 128 of A-Z, a-z, 0-9, - and _'],
+  INVALID_DOCUMENT: [
+    400,
+    'a document is a JSON object, at most 32 deep, without NUL',
+  ],
+  INVALID_QUERY: [400, 'that is not a query this collection takes'],
   MALFORMED_REQUEST: [
     400,
     'the request body or content type is not what this path takes',
@@ -59,11 +73,14 @@ const ERRORS: Record<Code, readonly [number, string]> = {
   METHOD_NOT_ALLOWED: [405, 'that is not something this path does'],
   TIMEOUT: [408, 'the body was not sent within the time this path waits'],
   TAKEN: [409, 'that name is taken'],
+  EXISTS: [409, 'that id is already in this collection'],
   GONE: [410, 'that site is gone'],
+  PRECONDITION_FAILED: [412, 'it changed since it was read'],
   TOO_LARGE: [413, 'that is larger than this path accepts'],
   RATE_LIMITED: [429, 'too many requests; wait'],
   STORAGE_FAILURE: [500, 'storing the release failed'],
   BUSY: [503, 'the server is full right now; try again in a moment'],
+  SITE_FULL: [507, 'this site is full; delete something to add something'],
 };
 
 /** Never absent: a caller with no cause to read still gets one to quote. */
@@ -98,11 +115,13 @@ export function ok(
   id: string,
   status = 200,
   cacheControl = 'no-store',
+  extra: Record<string, string> = {},
 ): Response {
   return Response.json(body, {
     status,
     headers: {
       ...BASE_HEADERS,
+      ...extra,
       'x-request-id': id,
       'cache-control': cacheControl,
     },

@@ -28,8 +28,21 @@ export interface Config {
   readonly meKey: string;
   /** Verification only, so a rotation re-mints lazily instead of logging out. */
   readonly mePreviousKey: string | null;
-  /** Derives per-site Postgres passwords (used from ticket 03 on). */
+  /** Derives per-site Postgres passwords. */
   readonly pgKey: string;
+  /**
+   * What the template database and the group role are called: `template_kthx`
+   * and `kthx_site`.
+   *
+   * ponytail: a knob only because both are cluster-wide names, so two test
+   * runs against one Postgres would otherwise fight over the template — a
+   * clone fails while any session is on it. Production never sets it.
+   */
+  readonly pgPrefix: string;
+  /** The site database ceiling, measured by `pg_database_size`. */
+  readonly maxDbBytes: number;
+  /** Collections one site may hold. */
+  readonly maxCollections: number;
   /**
    * The peers whose `cf-connecting-ip` is believed: the Gateway hop in front of
    * this pod. Empty means no peer is, so every address-keyed bucket falls back
@@ -71,6 +84,9 @@ export function readConfig(env: Env = Bun.env): Config {
         ? null
         : longEnough('KTHX_ME_KEY_PREVIOUS', previous),
     pgKey: longEnough('KTHX_PG_KEY', required(env, 'KTHX_PG_KEY')),
+    pgPrefix: 'kthx',
+    maxDbBytes: 256 * 1024 * 1024,
+    maxCollections: 256,
     trustedProxies: (env.KTHX_TRUSTED_PROXIES ?? '')
       .split(',')
       .map((entry) => entry.trim())
