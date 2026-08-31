@@ -6,9 +6,9 @@
  * dependencies are `workspace:*`, which `bun pm pack` rewrites to `0.0.0` and
  * `bun add` then looks for on the public registry, where `@repo/archive` and
  * `@repo/kthx` are not and will never be. So the CLI is bundled to one file
- * first — `bun build` inlines both workspace packages and the agent reference —
- * and the tarball carries that file and a package.json with no dependencies at
- * all. `bun add -g https://kthx.dev/cli/kthx.tgz` installs it on a machine that
+ * first — `bun build` inlines what it imports, which is `@repo/kthx`'s agent
+ * reference and favicon — and the tarball carries that file and a package.json
+ * with no dependencies at all. `bun add -g https://kthx.dev/cli/kthx.tgz` installs it on a machine that
  * has only Bun.
  *
  * `bun build --compile` was the alternative and is the bigger story: one ~60 MB

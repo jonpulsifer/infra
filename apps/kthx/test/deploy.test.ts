@@ -25,6 +25,7 @@ import {
   init,
   KthxError,
   ls,
+  openSite,
   release,
   rm,
   rollback,
@@ -290,6 +291,12 @@ describe('init', () => {
     );
   });
 
+  test('keeps a SKILL.md somebody wrote', async () => {
+    const dir = site({ 'index.html': '<h1>mine</h1>', 'SKILL.md': '# mine\n' });
+    await init(dir, { name: 'notes' });
+    expect(readFileSync(join(dir, 'SKILL.md'), 'utf8')).toBe('# mine\n');
+  });
+
   test('leaves a directory that has files alone, and falls back when the apex is away', async () => {
     const dir = site({ 'index.html': '<h1>mine</h1>' });
     process.env.KTHX_ORIGIN = stub.url.origin;
@@ -354,6 +361,23 @@ describe('rollback, release, ls and rm', () => {
     process.chdir(dir);
     for (const command of [rollback, release, ls]) {
       await expect(command('.')).rejects.toMatchObject({ code: 'NO_NAME' });
+    }
+  });
+
+  test('refuses a kthx.json that names something no site can be called', async () => {
+    // The file is committed and cloned; the string in it becomes a host to open
+    // and a path to call, so it is checked before either is built.
+    for (const [name, code] of [
+      ['evil.example/#', 'INVALID_NAME'],
+      ['ab', 'INVALID_NAME'],
+      ['api', 'RESERVED'],
+    ] as const) {
+      const dir = site({ 'kthx.json': JSON.stringify({ name }) });
+      process.chdir(dir);
+      expect(() => openSite('.')).toThrowError(
+        expect.objectContaining({ code }),
+      );
+      await expect(ls('.')).rejects.toMatchObject({ code });
     }
   });
 });

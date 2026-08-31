@@ -11,7 +11,12 @@
  * `http://localhost` and the site is `https://<name>.kthx.dev`: the `Origin`
  * header, which the server compares against its own host, and the visitor
  * cookie, whose `__Host-` prefix and `Secure` attribute a browser refuses over
- * plain HTTP.
+ * plain HTTP. Only that one cookie goes up — `localhost` holds whatever every
+ * other local server has ever set, and none of it belongs on the internet.
+ *
+ * One thing the loop cannot reproduce: Bun hands over the tab's socket before
+ * the site has answered the upgrade, so a site that refuses one — a rate limit
+ * — reaches the page as an open that closes, not as the status it sent.
  */
 import { readdirSync, statSync } from 'node:fs';
 import { join, resolve } from 'node:path';
@@ -30,8 +35,12 @@ const RESERVED = ['api', 'files', '_'];
 export interface Site {
   /** The claimed name. */
   readonly name: string;
-  /** The bearer, attached to owner-scoped calls and to nothing else. */
-  readonly token: string;
+  /**
+   * The bearer, attached to owner-scoped calls and to nothing else. Absent on a
+   * machine that never claimed the name — the loop still serves the files and
+   * still proxies everything a visitor may call.
+   */
+  readonly token?: string | undefined;
   /** `https://<name>.kthx.dev` — where `/api` and `/files` really are. */
   readonly site: string;
 }
@@ -61,6 +70,10 @@ export function dev(
 
   const server = Bun.serve<SocketData>({
     port,
+    // The loop carries the site's owner bearer. A wildcard bind would hand
+    // `POST /api/mcp` and `DELETE /api/db/:c` against the live site to anything
+    // that can reach this port.
+    hostname: '127.0.0.1',
     // A proxied upload or model call takes as long as the site takes.
     idleTimeout: 120,
     async fetch(request, server) {
@@ -112,6 +125,9 @@ export function dev(
   console.log(
     `  /api and /files go to ${site.site} — this is ${site.name}'s live database, not a copy`,
   );
+  if (site.token === undefined) {
+    console.log('  no token here — /api/mcp and DELETE /api/db/:c answer 401');
+  }
   return server;
 }
 
@@ -157,9 +173,10 @@ async function proxy(
   const headers = new Headers(request.headers);
   for (const header of HOP) headers.delete(header);
   if (headers.has('origin')) headers.set('origin', site.site);
-  const cookie = headers.get('cookie');
-  if (cookie !== null) headers.set('cookie', toSite(cookie));
-  if (ownerScoped(request.method, path)) {
+  const cookie = visitorCookie(headers.get('cookie'));
+  if (cookie === null) headers.delete('cookie');
+  else headers.set('cookie', cookie);
+  if (site.token !== undefined && ownerScoped(request.method, path)) {
     headers.set('authorization', `Bearer ${site.token}`);
   }
 
@@ -173,7 +190,7 @@ async function proxy(
   } as RequestInit).catch((cause: Error) =>
     Response.json(
       { code: 'UNREACHABLE', message: `${site.site}: ${cause.message}` },
-      { status: 502 },
+      { status: 502, headers: { 'cache-control': 'no-store' } },
     ),
   );
 
@@ -187,9 +204,19 @@ async function proxy(
   return new Response(answer.body, { status: answer.status, headers: out });
 }
 
-/** `kthx_me=…` on the way up becomes the cookie the server signs and reads. */
-const toSite = (cookie: string): string =>
-  cookie.replace(new RegExp(`(^|;\\s*)${DEV_COOKIE}=`), `$1${ME_COOKIE}=`);
+/**
+ * The one cookie that goes up: `kthx_me`, under the name the server signs and
+ * reads. Cookies ignore ports, so a browser sends this loop every cookie any
+ * other `localhost` server has ever set — none of which the site asked for.
+ */
+function visitorCookie(header: string | null): string | null {
+  const value = header
+    ?.split(';')
+    .map((pair) => pair.trim())
+    .find((pair) => pair.startsWith(`${DEV_COOKIE}=`))
+    ?.slice(DEV_COOKIE.length + 1);
+  return value === undefined || value === '' ? null : `${ME_COOKIE}=${value}`;
+}
 
 /**
  * `__Host-` and `Secure` on the way back: a browser silently drops both over
@@ -209,10 +236,11 @@ function upgrade(
   const target = new URL(site.site);
   target.protocol = target.protocol === 'https:' ? 'wss:' : 'ws:';
   target.pathname = '/api/ws';
+  target.search = new URL(request.url).search;
 
   const headers: Record<string, string> = { origin: site.site };
-  const cookie = request.headers.get('cookie');
-  if (cookie !== null) headers.cookie = toSite(cookie);
+  const cookie = visitorCookie(request.headers.get('cookie'));
+  if (cookie !== null) headers.cookie = cookie;
 
   const upstream = new WebSocket(target, { headers } as never);
   // Attached now rather than in `open`: on the loop the site can answer before

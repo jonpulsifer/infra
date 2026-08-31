@@ -54,7 +54,7 @@ bun add -g https://kthx.dev/cli/kthx.tgz
 ```
 
 `bun run pack` builds that tarball into `dist/`: `cli/main.ts` bundled to one
-file — `@repo/archive`, `@repo/kthx` and the agent reference are inlined — beside
+file — `@repo/kthx`'s agent reference and favicon inlined with it — beside
 a manifest with no dependencies. Packing this workspace directly cannot work:
 `bun pm pack` rewrites `workspace:*` to `0.0.0`, and `bun add` then looks for
 `@repo/archive@0.0.0` on the public registry. The image carries the tarball and

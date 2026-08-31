@@ -113,15 +113,9 @@ function landingHtml(): Promise<string> {
 const TARBALL = join(import.meta.dir, '..', 'dist', 'kthx.tgz');
 
 async function tarball(id: string): Promise<Response> {
-  const file = Bun.file(TARBALL);
-  if (!(await file.exists())) return refuse('NOT_FOUND', id);
-  return new Response(file, {
-    headers: {
-      'content-type': 'application/gzip',
-      'cache-control': 'public, max-age=300',
-      'x-content-type-options': 'nosniff',
-    },
-  });
+  return (await Bun.file(TARBALL).exists())
+    ? asset(TARBALL, 'application/gzip', 'public, max-age=300')
+    : refuse('NOT_FOUND', id);
 }
 
 // --- the apex ---------------------------------------------------------------

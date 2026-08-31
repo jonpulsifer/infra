@@ -29,6 +29,7 @@ import { dirname, join, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
 import bundledSkill from '@repo/kthx/skill.md' with { type: 'text' };
 import { version } from '../package.json' with { type: 'json' };
+import { nameProblem } from '../server/names.ts';
 import { KthxError } from './error.ts';
 import { pack } from './tar.ts';
 
@@ -116,6 +117,16 @@ function named(dir: string): string | undefined {
       throw new KthxError(
         'INVALID_NAME',
         `${at} names ${JSON.stringify(name)}, which is not a name`,
+      );
+    }
+    // `kthx.json` is committed and cloned, and the string in it becomes a
+    // hostname to open and a path to call. The server's own rule, checked here
+    // before either is built.
+    const problem = nameProblem(name);
+    if (problem !== null) {
+      throw new KthxError(
+        problem,
+        `${at} names ${JSON.stringify(name)}, which is not a name a site can have`,
       );
     }
     return name;
@@ -261,10 +272,12 @@ export async function init(
   mkdirSync(dir, { recursive: true });
   const empty = readdirSync(dir).length === 0;
   const name = await nameFor(dir, options.name, dir);
-  writeFileSync(join(dir, 'SKILL.md'), await skill());
+  // A hand-written SKILL.md is somebody's work, and there is no undo here.
+  const kept = !empty && existsSync(join(dir, 'SKILL.md'));
+  if (!kept) writeFileSync(join(dir, 'SKILL.md'), await skill());
   if (empty) writeFileSync(join(dir, 'index.html'), STARTER);
   console.log(
-    `  ${name} — kthx.json, SKILL.md${empty ? ' and index.html' : ''} written; run kthx deploy`,
+    `  ${name} — kthx.json${kept ? ' written; SKILL.md kept' : `, SKILL.md${empty ? ' and index.html' : ''} written`}; run kthx deploy`,
   );
   return name;
 }
@@ -471,9 +484,11 @@ if (import.meta.main) {
           break;
         case 'dev': {
           const name = await nameFor(dir, values.name, '.');
+          // Not `tokenFor`: `kthx.json` is committed and the token is not, so a
+          // clone of the project must still be able to run the loop.
           (await import('./dev.ts')).dev(dir, {
             name,
-            token: tokenFor(name),
+            token: knownToken(name),
             site: siteOrigin(name),
           });
           break;
@@ -498,6 +513,14 @@ if (import.meta.main) {
           break;
         case 'open':
           openSite(dir);
+          break;
+        case 'mcp':
+          // The reference this CLI writes names it; the stdio bridge is not in
+          // this build. One honest line beats usage and exit 2.
+          console.error(
+            `MCP: not in this build — point the editor at ${siteOrigin(nameOf(dir))}/api/mcp with the bearer from ${sitesFile()}`,
+          );
+          process.exitCode = 1;
           break;
         default:
           console.error(USAGE);

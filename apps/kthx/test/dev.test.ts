@@ -12,6 +12,7 @@ import { ME_COOKIE } from '../server/me.ts';
 interface Seen {
   readonly method: string;
   readonly path: string;
+  readonly search: string;
   readonly origin: string | null;
   readonly cookie: string | null;
   readonly authorization: string | null;
@@ -20,13 +21,16 @@ interface Seen {
 }
 
 const seen: Seen[] = [];
+/** The query string the last upgrade arrived with. */
+let wsSearch = '';
 
 /** The site host: it records what arrived and answers like the server does. */
 const upstream = Bun.serve<{ echo: true }>({
   port: 0,
   async fetch(request, server) {
-    const { pathname } = new URL(request.url);
+    const { pathname, search } = new URL(request.url);
     if (pathname === '/api/ws') {
+      wsSearch = search;
       return server.upgrade(request, { data: { echo: true } })
         ? undefined
         : new Response('no', { status: 400 });
@@ -34,6 +38,7 @@ const upstream = Bun.serve<{ echo: true }>({
     seen.push({
       method: request.method,
       path: pathname,
+      search,
       origin: request.headers.get('origin'),
       cookie: request.headers.get('cookie'),
       authorization: request.headers.get('authorization'),
@@ -157,8 +162,10 @@ describe('the proxy', () => {
     expect(call!.host).toBe(new URL(upstream.url.origin).host);
     // The server compares `Origin` to its own host, and rejects a foreign one.
     expect(call!.origin).toBe(upstream.url.origin);
-    // The cookie a browser will keep over http, under the name the server signs.
-    expect(call!.cookie).toBe(`other=1; ${ME_COOKIE}=abc.def`);
+    // The cookie a browser will keep over http, under the name the server signs
+    // — and nothing else: `localhost` holds every other local server's cookies,
+    // and none of them belong on the internet.
+    expect(call!.cookie).toBe(`${ME_COOKIE}=abc.def`);
     // A page is a visitor here exactly as it is in production.
     expect(call!.authorization).toBeNull();
 
@@ -209,8 +216,25 @@ describe('the proxy', () => {
     ]);
   });
 
+  test('sends no cookie header when the tab holds no visitor cookie', async () => {
+    seen.length = 0;
+    await fetch(url('/api/db/notes'), { headers: { cookie: 'grafana=DEAD' } });
+    expect(seen[0]!.cookie).toBeNull();
+  });
+
+  test('runs without a token, and then signs nothing', async () => {
+    seen.length = 0;
+    const loose = dev(dir, { name: 'notes', site: upstream.url.origin }, 0);
+    try {
+      await fetch(`${loose.url.origin}/api/db/notes`, { method: 'DELETE' });
+      expect(seen[0]!.authorization).toBeNull();
+    } finally {
+      loose.stop(true);
+    }
+  });
+
   test('carries the websocket', async () => {
-    const socket = new WebSocket(url('/api/ws').replace('http', 'ws'));
+    const socket = new WebSocket(url('/api/ws?room=a').replace('http', 'ws'));
     const frames: string[] = [];
     socket.onmessage = (event) => frames.push(String(event.data));
     await new Promise((resolve, reject) => {
@@ -221,6 +245,8 @@ describe('the proxy', () => {
     const deadline = Date.now() + 2000;
     while (frames.length === 0 && Date.now() < deadline) await Bun.sleep(5);
     expect(frames).toEqual(['echo:{"t":"ping"}']);
+    // Whatever the page put on the URL reaches the site, as it does on /api/*.
+    expect(wsSearch).toBe('?room=a');
     socket.close();
   });
 });

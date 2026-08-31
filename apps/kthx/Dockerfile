@@ -34,11 +34,12 @@ RUN bun install --frozen-lockfile --production
 # here so the command line an owner installs always matches the server that
 # answers them, and so the artifact needs no second place to live. `deps` has
 # the workspace symlinks; the sources they point at come from `pruner`, which
-# has had no install run in it.
+# has had no install run in it. Only `@repo/kthx` is copied: the bundle reaches
+# the agent reference and the favicon, and nothing in the CLI's graph imports
+# `@repo/archive`.
 FROM deps AS cli
 WORKDIR /app
 COPY --from=pruner /app/out/full/apps/kthx ./apps/kthx
-COPY --from=pruner /app/out/full/packages/archive ./packages/archive
 COPY --from=pruner /app/out/full/packages/kthx ./packages/kthx
 RUN cd /app/apps/kthx && bun run pack
 
