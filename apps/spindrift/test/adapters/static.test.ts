@@ -18,16 +18,13 @@
  * - **A bundle is untrusted input**: a path that leaves the bundle is refused.
  */
 import { describe, expect, test } from 'bun:test';
+import { BundleError, readBundle } from '@repo/archive/bundle';
 import type {
   DeployEvent,
   DeployTarget,
   DeployVerdict,
 } from '../../src/adapters/deploy/contract.ts';
 import { blameFor } from '../../src/adapters/deploy/contract.ts';
-import {
-  BundleError,
-  readBundle,
-} from '../../src/adapters/deploy/static/bundle.ts';
 import {
   StaticDeployAdapter,
   siteId,

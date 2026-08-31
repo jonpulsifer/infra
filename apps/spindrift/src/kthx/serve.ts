@@ -16,11 +16,12 @@
  * wildcard for the zone reaches this process, and a name is live the moment
  * its row says which release to serve.
  */
+
+import { readBundle } from '@repo/archive/bundle';
+import { loadDeploymentFederation } from '@repo/archive/federation-credential';
 import { LANDING_PATH } from '@repo/kthx/assets';
 import { FAVICON, FAVICON_DIGEST, FAVICON_PATH } from '@repo/kthx/favicon';
 import { and, eq } from 'drizzle-orm';
-import { readBundle } from '../adapters/deploy/static/bundle.ts';
-import { loadDeploymentFederation } from '../config/federation-credential.ts';
 import type { Database } from '../db/client.ts';
 import { kthxReleases, kthxSites } from '../db/schema.ts';
 import { readStagedArchive, type SourceDepot } from '../storage/archives.ts';

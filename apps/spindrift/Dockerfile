@@ -56,24 +56,27 @@ WORKDIR /app
 COPY --from=deps --chmod=755 /app ./
 COPY --from=builder --chmod=755 /app/apps/spindrift/src ./apps/spindrift/src
 COPY --from=builder --chmod=755 /app/apps/spindrift/dist ./apps/spindrift/dist
-# `deps` carries this workspace's package.json and the symlink to it, never its
-# source, and the server reads `landing.html` and `sdk.js` off this directory.
-# From `pruner` rather than `builder` because that tree has had no install run
-# in it, so no `node_modules` rides along.
+# `deps` carries each workspace's package.json and the symlink to it, never its
+# source — and the server imports `@repo/archive`'s modules and reads
+# `landing.html` and `sdk.js` off `@repo/kthx` at run time. From `pruner` rather
+# than `builder` because that tree has had no install run in it, so no
+# `node_modules` rides along.
+COPY --from=pruner --chmod=755 /app/out/full/packages/archive ./packages/archive
 COPY --from=pruner --chmod=755 /app/out/full/packages/kthx ./packages/kthx
 COPY --from=base /usr/local/bin/bun /usr/local/bin/bun
 COPY --from=supply-chain-tools /spindrift-verifier /usr/local/bin/spindrift-verifier
 # Fail the image build at the packaging seam rather than shipping a chart
-# command whose module the runtime image does not contain. The kthx assets are
-# asserted through the workspace symlink `deps` left behind, because that is
-# how the server resolves them and a bare `packages/kthx` check would pass
-# without it.
+# command whose module the runtime image does not contain. The workspace
+# packages are asserted through the symlinks `deps` left behind, because that is
+# how the server resolves them and a bare `packages/<name>` check would pass
+# without one.
 RUN test -f /app/apps/spindrift/src/web/server.ts \
   && test -f /app/apps/spindrift/src/reconciler/main.ts \
   && test -f /app/apps/spindrift/src/db/migrate.ts \
   && test -f /app/apps/spindrift/src/db/wait-for-schema.ts \
   && test -f /app/apps/spindrift/src/db/migrations/meta/_journal.json \
-  && test -f /app/apps/spindrift/node_modules/@repo/kthx/landing.html
+  && test -f /app/apps/spindrift/node_modules/@repo/kthx/landing.html \
+  && test -f /app/apps/spindrift/node_modules/@repo/archive/archive-format.ts
 WORKDIR /app/apps/spindrift
 USER 65532:65532
 EXPOSE 3000

@@ -6,7 +6,7 @@ import { describe, expect, test } from 'bun:test';
 import { mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { readBundle } from '../../spindrift/src/adapters/deploy/static/bundle.ts';
+import { readBundle } from '@repo/archive/bundle';
 import { KthxError } from '../cli/error.ts';
 import { included, pack, tarGz } from '../cli/tar.ts';
 

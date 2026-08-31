@@ -20,7 +20,7 @@ import { describe, expect, test } from 'bun:test';
 import {
   FederationError,
   workloadIdentityToken,
-} from '../../src/adapters/deploy/cloud/federation.ts';
+} from '@repo/archive/federation';
 
 const AUDIENCE = '//iam.example.test/projects/1/pools/example/providers/one';
 const TOKEN_URL = 'https://sts.example.test/v1/token';

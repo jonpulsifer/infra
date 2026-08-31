@@ -21,7 +21,7 @@
  * them is one this installation would rather refuse than half-support.
  */
 
-import { base64urlDecode, base64urlEncode } from '../auth/bytes.ts';
+import { base64urlDecode, base64urlEncode } from '@repo/archive/bytes';
 import type {
   AddPasskeyChallenge,
   CredentialSettings,

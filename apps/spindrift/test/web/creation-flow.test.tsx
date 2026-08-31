@@ -14,7 +14,7 @@
  */
 import { describe, expect, test } from 'bun:test';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { sniffArchiveFormat } from '../../src/storage/archive-format.ts';
+import { sniffArchiveFormat } from '@repo/archive/archive-format';
 import {
   blockersFor,
   type Draft,

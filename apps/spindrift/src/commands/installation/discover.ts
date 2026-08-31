@@ -33,12 +33,13 @@
  * `installation/get.ts` names: the browser bundle reaches this layer's types,
  * and a command that pulls in a database module breaks the client build.
  */
+
+import type { FederationConfig } from '@repo/archive/federation';
 import { z } from 'zod';
 import type {
   Discovered,
   GcpDiscovery,
 } from '../../adapters/cloud-discovery.ts';
-import type { FederationConfig } from '../../adapters/deploy/cloud/federation.ts';
 import { type Command, failed, ok } from '../types.ts';
 
 export const discoverInstallationFactsInput = z

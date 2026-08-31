@@ -36,7 +36,7 @@ import {
   FederationError,
   type FederationOptions,
   workloadIdentityToken,
-} from '../adapters/deploy/cloud/federation.ts';
+} from '@repo/archive/federation';
 
 /** Where a signed URL points. GCS serves signed requests on this host. */
 const STORAGE_HOST = 'storage.googleapis.com';

@@ -34,13 +34,13 @@
  * union for the same reason §6's failure reasons are: a refusal has to have an
  * identity a test can key on.
  */
-import { type Bytes, base64urlDecode, equalBytes } from './bytes.ts';
+import { type Bytes, base64urlDecode, equalBytes } from '@repo/archive/bytes';
 
 export {
   type Bytes,
   base64urlDecode,
   base64urlEncode,
-} from './bytes.ts';
+} from '@repo/archive/bytes';
 
 /**
  * The two COSE algorithms this installation enrols.

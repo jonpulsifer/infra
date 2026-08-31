@@ -406,11 +406,15 @@ async function readFiles(...paths: string[]): Promise<SourceFile[]> {
 }
 
 /**
- * The literal rule polices `src/` and `packages/kthx`, which is source this
- * image ships and serves; the import rule polices this package alone.
+ * The literal rule polices `src/` and the workspace packages this image
+ * ships and serves; the import rule polices this package alone.
  */
 const src = await readSource('src');
-const shipped = [...src, ...(await readSource('../../packages/kthx'))];
+const shipped = [
+  ...src,
+  ...(await readSource('../../packages/archive')),
+  ...(await readSource('../../packages/kthx')),
+];
 const everything = [
   ...src,
   ...(await readSource('test')),

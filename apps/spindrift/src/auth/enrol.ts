@@ -26,9 +26,10 @@
  * an operator to write by hand and hand around, while this is a credential that
  * claims one.
  */
+
+import { equalText } from '@repo/archive/bytes';
 import { eq } from 'drizzle-orm';
 import { credentials, enrolments, sessions, users } from '../db/schema.ts';
-import { equalText } from './bytes.ts';
 import { issueChallenge, spendChallenge } from './challenge.ts';
 import {
   hashToken,

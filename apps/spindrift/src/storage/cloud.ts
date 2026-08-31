@@ -1,14 +1,16 @@
 /**
- * Credential-less Google Cloud Storage (GCS) operations using Workload Identity Federation (§13).
+ * Credential-less Google Cloud Storage (GCS) operations using Workload Identity
+ * Federation (§13).
  *
- * Uploads archive bundles to GCS buckets using federated tokens minted on the fly.
- * Tests bucket access permissions via WIF without static service account keys.
+ * What this app asks of a bucket beyond putting bytes in it and reading them
+ * back — those two are `@repo/archive/gcs`, because the kthx server makes the
+ * same two calls against the same API and there is one way to make them.
  */
 import {
   FederationError,
   type FederationOptions,
   workloadIdentityToken,
-} from '../adapters/deploy/cloud/federation.ts';
+} from '@repo/archive/federation';
 
 export interface TestBucketPermissionsInput {
   readonly bucketName: string;
@@ -54,62 +56,6 @@ export async function testGcsBucketPermissions({
     accessible: true,
     location: `gs://${bucketName}`,
     permissions: ['storage.objects.create', 'storage.objects.get'],
-  };
-}
-
-export interface UploadToGcsInput {
-  readonly bucketName: string;
-  readonly objectName: string;
-  readonly bytes: Uint8Array;
-  readonly federation: FederationOptions;
-}
-
-/**
- * How long an upload may stall before it is abandoned.
- *
- * `fetch` has no deadline of its own, so a connection that dies mid-PUT holds
- * everything its caller is holding for as long as the kernel keeps the socket.
- * That is not only a leaked request: a kthx release holds one of `MAX_UPLOADS`
- * slots and the unpacked site behind it across this call, so two stuck sockets
- * would refuse every release until the pod restarted. Long enough that a slow
- * link finishes a bundle, short enough that a wedged one clears itself.
- */
-const UPLOAD_TIMEOUT_MS = 5 * 60 * 1000;
-
-/** Upload an archive bundle directly to a GCS bucket using WIF token authentication. */
-export async function uploadToGcsBucket({
-  bucketName,
-  objectName,
-  bytes,
-  federation,
-}: UploadToGcsInput): Promise<{ location: string; size: number }> {
-  const getToken = workloadIdentityToken(federation);
-  const token = await getToken();
-
-  const send = federation.fetch ?? ((request: Request) => fetch(request));
-  const url = `https://storage.googleapis.com/upload/storage/v1/b/${encodeURIComponent(bucketName)}/o?uploadType=media&name=${encodeURIComponent(objectName)}`;
-  const response = await send(
-    new Request(url, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${token}`,
-        'Content-Type': 'application/octet-stream',
-      },
-      body: bytes as unknown as BodyInit,
-      signal: AbortSignal.timeout(UPLOAD_TIMEOUT_MS),
-    }),
-  );
-
-  if (!response.ok) {
-    const errorText = await response.text();
-    throw new FederationError(
-      `Uploading archive to gs://${bucketName}/${objectName} failed (${response.status}): ${errorText}`,
-    );
-  }
-
-  return {
-    location: `gs://${bucketName}/${objectName}`,
-    size: bytes.byteLength,
   };
 }
 

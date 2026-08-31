@@ -39,7 +39,7 @@
       "dependsOn": ["build"],
       "inputs": [
         "$TURBO_DEFAULT$",
-        "$TURBO_ROOT$/apps/spindrift/src/adapters/deploy/static/bundle.ts",
+        "$TURBO_ROOT$/packages/archive/**",
         "$TURBO_ROOT$/packages/kthx/**"
       ],
       "outputs": []
@@ -48,6 +48,7 @@
       "dependsOn": ["build"],
       "inputs": [
         "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/packages/archive/**",
         "$TURBO_ROOT$/packages/kthx/**",
         "$TURBO_ROOT$/packages/charts/spindrift-app/Chart.yaml",
         "$TURBO_ROOT$/packages/charts/spindrift-app/values.yaml",

@@ -11,7 +11,7 @@
 import {
   ArchiveFormatError,
   normalizeArchive,
-} from '../storage/archive-format.ts';
+} from '@repo/archive/archive-format';
 import {
   type StagedArchive,
   sourceDepotFor,

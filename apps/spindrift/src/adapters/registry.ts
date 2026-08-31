@@ -25,6 +25,8 @@
  */
 
 import { createHash } from 'node:crypto';
+import { canonicalGzip } from '@repo/archive/archive-format';
+import { workloadIdentityToken } from '@repo/archive/federation';
 import type { AdapterRegistry } from '../commands/types.ts';
 import {
   type BuildRouteConfig,
@@ -52,7 +54,6 @@ import {
   hasGitHubAppEnvIdentity,
 } from '../integrations/github/app-auth.ts';
 import { type Fetcher, retryTransient } from '../integrations/github/http.ts';
-import { canonicalGzip } from '../storage/archive-format.ts';
 import { sourceDepotFor, stageArchiveBytes } from '../storage/archives.ts';
 import { buildOutbox } from '../storage/build-outbox.ts';
 import { cachedBundle, rememberBundle } from '../storage/bundle-cache.ts';
@@ -68,7 +69,6 @@ import { type CloudflareAccounts, cloudflareAccounts } from './cloudflare.ts';
 import type { DatastoreAdapter } from './datastore/contract.ts';
 import { CloudDatastoreAdapter } from './datastore/gcp.ts';
 import { KubernetesDatastoreAdapter } from './datastore/kubernetes.ts';
-import { workloadIdentityToken } from './deploy/cloud/federation.ts';
 import { CloudRunDeployAdapter } from './deploy/cloudrun/index.ts';
 import type { DeployAdapter } from './deploy/contract.ts';
 import { KubernetesApi, type TokenProvider } from './deploy/kubernetes/api.ts';

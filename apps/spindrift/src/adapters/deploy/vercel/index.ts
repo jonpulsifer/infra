@@ -54,6 +54,8 @@ import {
 } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve, sep } from 'node:path';
+import { BundleError, type BundleFile, readBundle } from '@repo/archive/bundle';
+import type { FederationOptions } from '@repo/archive/federation';
 import type {
   StoreAdapter,
   TargetAdapter,
@@ -81,7 +83,6 @@ import {
   tokenChecklist,
   tokenSurfaceProbe,
 } from '../cloud/checklist.ts';
-import type { FederationOptions } from '../cloud/federation.ts';
 import {
   CloudHttp,
   type CloudResponse,
@@ -111,13 +112,7 @@ import type {
 } from '../contract.ts';
 import { type DeployEvents, deployEvents, internalFailure } from '../events.ts';
 import { parseScopedRef, scopedRef } from '../ref.ts';
-import {
-  ArtifactUnavailable,
-  BundleError,
-  type BundleFile,
-  bundleFailure,
-  readBundle,
-} from '../static/bundle.ts';
+import { ArtifactUnavailable, bundleFailure } from '../static/bundle.ts';
 import { fetchableStagedAddress, STAGED_SCHEME } from '../static/index.ts';
 import {
   googleRegistryRef,

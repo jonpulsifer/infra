@@ -30,9 +30,9 @@
  */
 import { blake3 } from '@noble/hashes/blake3.js';
 import { bytesToHex } from '@noble/hashes/utils.js';
+import type { BundleFile } from '@repo/archive/bundle';
 import { CloudHttp, type CloudResponse, type Fetcher } from '../cloud/http.ts';
 import { missing, type Outcome } from '../cloud/verdict.ts';
-import type { BundleFile } from '../static/bundle.ts';
 
 /**
  * How many characters of the digest the store keys on.

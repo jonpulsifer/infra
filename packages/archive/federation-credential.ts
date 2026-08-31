@@ -29,7 +29,7 @@
  * true the moment the credential is re-rendered.
  */
 import { z } from 'zod';
-import type { FederationConfig } from '../adapters/deploy/cloud/federation.ts';
+import type { FederationConfig } from './federation.ts';
 
 /**
  * Where the credential document is. The name is Google's own ADC variable, not
