@@ -16,8 +16,9 @@
  * agent holding the bearer is the owner by definition, and there is no visitor
  * to mint a cookie for.
  */
-import { bodyOf, dbApi } from './documents.ts';
+import { bodyOf, dbApi, isPlainObject } from './documents.ts';
 import { type Code, isJson, ok, refuse } from './http.ts';
+import { spendAll, writes } from './limits.ts';
 import { type Ctx, sitesApi } from './sites.ts';
 
 /** The revision this endpoint speaks. */
@@ -67,8 +68,23 @@ function schema(
   return { type: 'object', properties, required, additionalProperties: false };
 }
 
-const string = (value: unknown): string | null =>
-  typeof value === 'string' ? value : null;
+/**
+ * The contract's own names and etag, checked before a tool argument becomes
+ * path text or a header value.
+ *
+ * Both matter here in a way they do not on the HTTP route. `new URL` collapses
+ * `.` and `..` before the router splits the path, and `encodeURIComponent`
+ * leaves `.` alone, so `{collection:".."}` would otherwise answer a `db_get`
+ * with the collection list. And `Headers` throws on a control character, so a
+ * `\r\n` in `ifMatch` would leave the JSON-RPC call as an HTTP 500.
+ */
+const COLLECTION_RE = /^[a-z0-9_-]{1,64}$/;
+const ID_RE = /^[A-Za-z0-9_-]{1,128}$/;
+/** Lowercase sha256 hex, bare or quoted, or `*` for "exists". */
+const ETAG_RE = /^(\*|[0-9a-f]{64}|"[0-9a-f]{64}")$/;
+
+const matching = (value: unknown, pattern: RegExp): string | null =>
+  typeof value === 'string' && pattern.test(value) ? value : null;
 
 /** `/api/db/<collection>[/<id>]`, with both parts encoded for the router. */
 function dbPath(collection: string, id?: string): string {
@@ -122,7 +138,7 @@ const TOOLS: readonly Tool[] = [
       ['collection'],
     ),
     plan: (args) => {
-      const collection = string(args.collection);
+      const collection = matching(args.collection, COLLECTION_RE);
       if (collection === null) return 'INVALID_COLLECTION';
       const { collection: _named, ...query } = args;
       return {
@@ -140,9 +156,9 @@ const TOOLS: readonly Tool[] = [
       'id',
     ]),
     plan: (args) => {
-      const collection = string(args.collection);
+      const collection = matching(args.collection, COLLECTION_RE);
       if (collection === null) return 'INVALID_COLLECTION';
-      const id = string(args.id);
+      const id = matching(args.id, ID_RE);
       if (id === null) return 'INVALID_ID';
       return { method: 'GET', path: dbPath(collection, id) };
     },
@@ -156,7 +172,7 @@ const TOOLS: readonly Tool[] = [
       'doc',
     ]),
     plan: (args) => {
-      const collection = string(args.collection);
+      const collection = matching(args.collection, COLLECTION_RE);
       if (collection === null) return 'INVALID_COLLECTION';
       return { method: 'POST', path: dbPath(collection), body: args.doc };
     },
@@ -176,12 +192,17 @@ const TOOLS: readonly Tool[] = [
       ['collection', 'id', 'patch'],
     ),
     plan: (args) => {
-      const collection = string(args.collection);
+      const collection = matching(args.collection, COLLECTION_RE);
       if (collection === null) return 'INVALID_COLLECTION';
-      const id = string(args.id);
+      const id = matching(args.id, ID_RE);
       if (id === null) return 'INVALID_ID';
       const overwrite = args.overwrite === true ? '?overwrite=1' : '';
-      const ifMatch = string(args.ifMatch);
+      // Refused, never dropped: a discarded `If-Match` turns the caller's
+      // compare-and-set into an unconditional write.
+      const ifMatch = matching(args.ifMatch, ETAG_RE);
+      if (args.ifMatch !== undefined && ifMatch === null) {
+        return 'PRECONDITION_FAILED';
+      }
       return {
         method: 'PATCH',
         path: `${dbPath(collection, id)}${overwrite}`,
@@ -198,14 +219,17 @@ const TOOLS: readonly Tool[] = [
       'id',
     ]),
     plan: (args) => {
-      const collection = string(args.collection);
+      const collection = matching(args.collection, COLLECTION_RE);
       if (collection === null) return 'INVALID_COLLECTION';
-      const id = string(args.id);
+      const id = matching(args.id, ID_RE);
       if (id === null) return 'INVALID_ID';
       return { method: 'DELETE', path: dbPath(collection, id) };
     },
   },
 ];
+
+/** The tools that spend the site write bucket; the rest are reads. */
+const WRITING = new Set(['db_create', 'db_update', 'db_delete']);
 
 const LISTED = TOOLS.map(({ name, description, inputSchema }) => ({
   name,
@@ -213,14 +237,7 @@ const LISTED = TOOLS.map(({ name, description, inputSchema }) => ({
   inputSchema,
 }));
 
-/** Exported for the test that keeps this list and the contract in step. */
-export const mcpToolNames: readonly string[] = TOOLS.map((tool) => tool.name);
-
 // --- tool calls -------------------------------------------------------------
-
-function isObject(value: unknown): value is Args {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
 
 /** The one shape a tool answers with. */
 function content(text: string, isError = false) {
@@ -292,8 +309,8 @@ interface Rpc {
 /**
  * `POST /api/mcp`, already known to carry this site's bearer.
  *
- * The caller checks the method, the bearer and the write bucket; what is left
- * here is the framing.
+ * The caller checks the method and the bearer; what is left here is the framing
+ * and, for a writing tool, the one bucket an owner never skips.
  */
 export async function mcpApi(
   request: Request,
@@ -305,7 +322,7 @@ export async function mcpApi(
   if ('code' in body) return refuse(body.code, ctx.id);
   // One message per request: a batch is a second framing to hold, and this
   // revision does not require one.
-  if (!isObject(body.json)) return refuse('MALFORMED_REQUEST', ctx.id);
+  if (!isPlainObject(body.json)) return refuse('MALFORMED_REQUEST', ctx.id);
   const rpc = body.json as Rpc;
 
   // A notification carries no id and is owed no response — `initialized` is the
@@ -343,15 +360,25 @@ export async function mcpApi(
           content(`NOT_FOUND: there is no tool called ${String(name)}`, true),
         );
       }
-      const args = isObject(rpc.params?.arguments) ? rpc.params.arguments : {};
+      const args = isPlainObject(rpc.params?.arguments)
+        ? rpc.params.arguments
+        : {};
       const call = tool.plan(args, site);
       // A refusal this file decided is still built by `refuse`, so its sentence
       // comes from the one error table.
-      const answer =
-        typeof call === 'string'
-          ? refuse(call, ctx.id)
-          : await forward(request, ctx, site, call);
-      return reply(await resultOf(answer));
+      if (typeof call === 'string') {
+        return reply(await resultOf(refuse(call, ctx.id)));
+      }
+      // A writing tool spends one unit of the site bucket — the one an owner
+      // never skips. Arguments are checked first so a refused call is free.
+      if (WRITING.has(tool.name) && spendAll([[writes.site, site]])) {
+        return reply(
+          await resultOf(
+            refuse('RATE_LIMITED', ctx.id, { 'retry-after': '60' }),
+          ),
+        );
+      }
+      return reply(await resultOf(await forward(request, ctx, site, call)));
     }
     default:
       return ok(

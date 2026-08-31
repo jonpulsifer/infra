@@ -27,13 +27,7 @@ import {
   siteOf,
   siteUrl,
 } from './http.ts';
-import {
-  spendAll,
-  TokenBucket,
-  WRITE_ADDRESS,
-  WRITE_SITE,
-  WRITE_VISITOR,
-} from './limits.ts';
+import { spendAll, writes } from './limits.ts';
 import { mcpApi } from './mcp.ts';
 import { type Me, meOf } from './me.ts';
 import { Pg } from './pg.ts';
@@ -165,13 +159,6 @@ interface Serving {
   readonly digest: string | null;
   readonly location: string | null;
 }
-
-/** The three buckets a write to a site's backends spends. */
-const writes = {
-  visitor: new TokenBucket(WRITE_VISITOR),
-  address: new TokenBucket(WRITE_ADDRESS),
-  site: new TokenBucket(WRITE_SITE),
-};
 
 async function site(
   request: Request,
@@ -348,10 +335,8 @@ async function siteApi(
         ctx.id,
       );
     }
-    // One unit of the site bucket per message, owner rates: the tools write,
-    // and the bucket an owner never skips is the one that bounds them.
-    const refusal = charge(request, ctx, name, me, owner, segments);
-    if (refusal !== null) return refusal;
+    // The bucket is spent inside, per tool: a `tools/list` or a `db_query` is
+    // a read, and the contract leaves reads unmetered over every transport.
     // No cookie: this surface has a bearer, and a visitor id it never uses.
     return mcpApi(request, ctx, name);
   }

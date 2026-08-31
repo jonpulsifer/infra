@@ -93,6 +93,18 @@ export class TokenBucket {
 }
 
 /**
+ * The three buckets a write to a site's backends spends.
+ *
+ * They live here rather than beside the router because `/api/mcp` spends the
+ * site one too, and a bucket that is two objects is two allowances.
+ */
+export const writes = {
+  visitor: new TokenBucket(WRITE_VISITOR),
+  address: new TokenBucket(WRITE_ADDRESS),
+  site: new TokenBucket(WRITE_SITE),
+};
+
+/**
  * A count per key per UTC day, for the caps a token bucket cannot express: 20
  * claims per /64 a day, 60 uploads per site a day.
  *

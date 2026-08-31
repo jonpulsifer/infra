@@ -9,8 +9,19 @@
  * the real `/api/db` statement does.
  */
 import { describe, expect, test } from 'bun:test';
-import { mcpToolNames } from '../../server/mcp.ts';
+import { writes } from '../../server/limits.ts';
 import { ask, withServer, ZONE } from '../harness/server.ts';
+
+/** The contract's tool table, written out so the server cannot define it. */
+const TOOLS = [
+  'site_info',
+  'db_collections',
+  'db_query',
+  'db_get',
+  'db_create',
+  'db_update',
+  'db_delete',
+];
 
 const kthx = withServer();
 
@@ -131,7 +142,7 @@ describe('the protocol', () => {
     const site = await claimed('mcp-list');
     const answer = await send(site, { method: 'tools/list' });
     const tools = (answer.result as { tools: { name: string }[] }).tools;
-    expect(tools.map((tool) => tool.name)).toEqual([...mcpToolNames]);
+    expect(tools.map((tool) => tool.name)).toEqual(TOOLS);
     for (const tool of tools) {
       expect(tool).toMatchObject({
         description: expect.any(String),
@@ -302,5 +313,73 @@ describe('the tools', () => {
         })
       ).text,
     ).toStartWith('INVALID_QUERY:');
+  });
+
+  test('an argument never becomes path text', async () => {
+    const site = await claimed('mcp-path');
+    // `new URL` collapses these before the router splits the path: `..` used to
+    // answer a db_get with the collection list, `.` with an empty query.
+    for (const collection of ['..', '.', 'a/b', 'Notes']) {
+      const answer = await call(site, 'db_get', { collection, id: 'zzz' });
+      expect(answer.isError).toBe(true);
+      expect(answer.text).toStartWith('INVALID_COLLECTION:');
+    }
+    const dotted = await call(site, 'db_get', {
+      collection: 'notes',
+      id: '../..',
+    });
+    expect(dotted.text).toStartWith('INVALID_ID:');
+  });
+
+  test('a malformed ifMatch is refused, not dropped', async () => {
+    const site = await claimed('mcp-etag');
+    const doc = await json(site, 'db_create', {
+      collection: 'notes',
+      doc: { title: 'one' },
+    });
+    // A control character used to throw out of `Headers` and land as a 500.
+    for (const ifMatch of ['x\r\nX-Evil: 1', 'not-an-etag', 7]) {
+      const answer = await call(site, 'db_update', {
+        collection: 'notes',
+        id: doc.id,
+        patch: { title: 'two' },
+        ifMatch,
+      });
+      expect(answer.isError).toBe(true);
+      expect(answer.text).toStartWith('PRECONDITION_FAILED:');
+    }
+    // And the write it guarded did not happen.
+    expect(
+      (await json(site, 'db_get', { collection: 'notes', id: doc.id })).title,
+    ).toBe('one');
+    // A real etag still holds.
+    expect(
+      (
+        await json(site, 'db_update', {
+          collection: 'notes',
+          id: doc.id,
+          patch: { title: 'two' },
+          ifMatch: String(doc.etag),
+        })
+      ).title,
+    ).toBe('two');
+  });
+
+  test('reads are unmetered, writes spend the site bucket', async () => {
+    const site = await claimed('mcp-meter');
+    await json(site, 'db_create', { collection: 'notes', doc: { a: 1 } });
+    while (!writes.site.spend(site.name)) {
+      // drain this site's bucket
+    }
+    expect((await send(site, { method: 'ping' })).result).toEqual({});
+    expect(
+      (await call(site, 'db_query', { collection: 'notes' })).isError,
+    ).toBe(false);
+    const refused = await call(site, 'db_create', {
+      collection: 'notes',
+      doc: { a: 2 },
+    });
+    expect(refused.isError).toBe(true);
+    expect(refused.text).toStartWith('RATE_LIMITED:');
   });
 });
