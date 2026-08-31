@@ -94,13 +94,29 @@ export async function identityOf(
 }
 
 /**
+ * The subject IAP writes beside the address it writes.
+ *
+ * ponytail: a constant, not a second env var. The seam is IAP's header pair and
+ * `KTHX_TRUSTED_IDENTITY_HEADER` names the half that varies; a proxy front that
+ * spells the subject some other way can have a knob the day there is one.
+ */
+const SUBJECT_HEADER = 'x-goog-authenticated-user-id';
+
+/**
  * The identity a trusted hop asserts in a header — the IAP future, off until
  * `KTHX_TRUSTED_IDENTITY_HEADER` names one.
  *
- * Two things have to hold: the deployment names the header, and the request
- * came from a peer in `KTHX_TRUSTED_PROXIES`. A header alone is worth nothing,
- * because this pod is reachable on the LAN and the tailnet as well as through
- * the Gateway — the same reason `cf-connecting-ip` is not believed on its own.
+ * Three things have to hold: the deployment names the header, the request came
+ * from a peer in `KTHX_TRUSTED_PROXIES`, and the hop asserts a subject as well
+ * as an address. A header alone is worth nothing, because this pod is reachable
+ * on the LAN and the tailnet as well as through the Gateway — the same reason
+ * `cf-connecting-ip` is not believed on its own.
+ *
+ * The subject is not optional and is not the address: `owner_sub` is what
+ * ownership compares, an address can change hands, and a seam that asserted the
+ * address as the subject would lock every account out of the sites it claimed
+ * with a token the day it was switched on. IAP's subject is the same Google
+ * `sub` an ID token carries, so the two ways in agree on who the caller is.
  */
 export function assertedIdentity(
   request: Request,
@@ -109,16 +125,22 @@ export function assertedIdentity(
 ): Identity | null {
   const header = config.trustedIdentityHeader;
   if (header === null) return null;
-  const raw = request.headers.get(header)?.trim();
-  if (!raw) return null;
+  // IAP writes `accounts.google.com:someone@example.com` and
+  // `accounts.google.com:1234…`; the issuer prefix is the same on both.
+  const email = asserted(request, header)?.toLowerCase();
+  const sub = asserted(request, SUBJECT_HEADER);
+  if (email === undefined || sub === undefined) return null;
   if (!fromTrustedProxy(request, server, config.trustedProxies)) return null;
-  // IAP writes `accounts.google.com:someone@example.com`; the address is the
-  // whole of the identity a header can carry, so it is both fields.
-  const email = raw
-    .replace(/^accounts\.google\.com:/i, '')
-    .trim()
-    .toLowerCase();
-  return email === '' ? null : { sub: email, email };
+  return { sub, email };
+}
+
+/** One header a hop asserts, without the issuer prefix, or nothing. */
+function asserted(request: Request, header: string): string | undefined {
+  const value = request.headers
+    .get(header)
+    ?.replace(/^accounts\.google\.com:/i, '')
+    .trim();
+  return value ? value : undefined;
 }
 
 /** A Google ID token, or `null` when any check fails. Throws only on the JWKS. */

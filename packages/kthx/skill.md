@@ -240,6 +240,8 @@ site's is ignored and the caller proceeds as a visitor. Writes default to anyone
 on the site's own origin, bounded by the quotas above — a kthx link is meant to
 be sendable to anyone.
 
-A site claimed before accounts still answers to its old bearer, until
-`kthx adopt` trades it for an account: `POST /api/sites/:name/adopt` with the ID
-token and `{token: "<the old bearer>"}` writes the owner and spends the string.
+A site claimed before accounts still answers to its old bearer over the API,
+until `kthx adopt` trades it for an account: `POST /api/sites/:name/adopt` with
+the ID token and `{token: "<the old bearer>"}` writes the owner and spends the
+string. The CLI sends the account and not the bearer, so `kthx deploy` on an
+unadopted site is `FORBIDDEN` until `kthx adopt` has run once.

@@ -19,6 +19,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { forgetIdentity, identityToken } from '../cli/identity.ts';
 import { level, rainbow, tint } from '../cli/paint.ts';
+import { REACH_MS } from '../cli/reach.ts';
 import { updateNudge, upgrade } from '../cli/upgrade.ts';
 
 const APP = join(import.meta.dir, '..');
@@ -308,6 +309,64 @@ describe('the CLI', () => {
     expect(err).toContain('NO_IDENTITY');
     expect(err).toContain('gcloud auth login');
     expect(Date.now() - started).toBeLessThan(10_000);
+  }, 30_000);
+
+  test('an apex that never answers ends the command, it does not hang it', async () => {
+    // The one command that reaches the network with no identity at all, so
+    // this is the request path itself against a socket that accepts and stays
+    // quiet: `REACH_MS` is what ends it, and it ends.
+    const started = Date.now();
+    const child = run(['ls', '--all']);
+    const [code, err] = await Promise.all([
+      child.exited,
+      new Response(child.stderr).text(),
+    ]);
+    expect(code).toBe(1);
+    expect(err).toContain('UNREACHABLE');
+    expect(Date.now() - started).toBeLessThan(REACH_MS + 10_000);
+  }, 45_000);
+
+  test('a refused owner call on an unadopted site says how to take it', async () => {
+    // The CLI sends the account, so a site that still answers its old bearer
+    // refuses it — and the bearer that ends that is on this machine.
+    const refusing = Bun.serve({
+      port: 0,
+      fetch: () =>
+        Response.json(
+          { code: 'FORBIDDEN', message: 'that does not open this site' },
+          { status: 403 },
+        ),
+    });
+    const project = mkdtempSync(join(tmpdir(), 'kthx-site-'));
+    writeFileSync(
+      join(project, 'kthx.json'),
+      JSON.stringify({ name: 'old-site' }),
+    );
+    mkdirSync(join(config, 'kthx'), { recursive: true });
+    writeFileSync(
+      join(config, 'kthx', 'sites.json'),
+      JSON.stringify({ [refusing.url.origin]: { 'old-site': 'a-bearer' } }),
+    );
+    // `release` acts on the working directory, so this one is spawned in it.
+    const child = Bun.spawn([process.execPath, CLI, 'release'], {
+      cwd: project,
+      env: {
+        ...process.env,
+        XDG_CONFIG_HOME: config,
+        KTHX_ORIGIN: refusing.url.origin,
+        KTHX_IDENTITY_TOKEN: 'a.token.the-apex-refuses',
+      },
+      stdout: 'pipe',
+      stderr: 'pipe',
+    });
+    const [code, err] = await Promise.all([
+      child.exited,
+      new Response(child.stderr).text(),
+    ]);
+    refusing.stop(true);
+    expect(code).toBe(1);
+    expect(err).toContain('FORBIDDEN');
+    expect(err).toContain('kthx adopt');
   }, 30_000);
 });
 

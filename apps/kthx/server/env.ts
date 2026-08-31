@@ -69,17 +69,20 @@ export interface Config {
    */
   readonly oidcAudiences: readonly string[];
   /**
-   * Where the RSA public keys come from.
-   *
-   * ponytail: a knob only so a test, or a run against something that is not
-   * Google, can serve its own JWKS; production leaves it alone.
+   * Where the RSA public keys come from: Google, and no environment says
+   * otherwise. A test hands this field its own JWKS directly; an operator
+   * cannot point the verifier at keys nobody chose.
    */
   readonly jwksUrl: string;
   /**
-   * The header a trusted hop uses to say who the caller is, or `null`.
+   * The header a trusted hop uses to say which address the caller is, or
+   * `null`.
    *
    * The IAP / pass-through seam, off by default: with nothing named here the
-   * only identity this server believes is one it verified itself.
+   * only identity this server believes is one it verified itself. Naming one
+   * asks for IAP's pair — the hop must also send the subject in
+   * `x-goog-authenticated-user-id`, because `owner_sub` is what ownership
+   * compares and an asserted address alone would open nothing.
    */
   readonly trustedIdentityHeader: string | null;
   /**
@@ -161,7 +164,7 @@ export function readConfig(env: Env = Bun.env): Config {
     aiModels: list(env.KTHX_AI_MODELS),
     aiMaxTokens: positive(env.KTHX_AI_MAX_TOKENS, 4096),
     oidcAudiences: audiences.length === 0 ? [GCLOUD_CLIENT_ID] : audiences,
-    jwksUrl: env.KTHX_OIDC_JWKS?.trim() || GOOGLE_JWKS,
+    jwksUrl: GOOGLE_JWKS,
     trustedIdentityHeader:
       env.KTHX_TRUSTED_IDENTITY_HEADER?.trim().toLowerCase() || null,
     trustedProxies: list(env.KTHX_TRUSTED_PROXIES),

@@ -511,12 +511,18 @@ async function adopt(
     return refuse('FORBIDDEN', ctx.id);
   }
 
-  await ctx.sql`
+  // The row read above is a moment old, so the `owner_sub is null` guard is
+  // what actually decides it: two callers holding the same bearer both get
+  // here, and only one changes a row. The other is told what it would have been
+  // told a moment later — 409, not a 204 for a site it does not own.
+  const took = (await ctx.sql`
     update sites
     set owner_sub = ${identity.sub}, owner_email = ${identity.email},
         token_hash = null
     where name = ${name} and owner_sub is null
-  `;
+    returning name
+  `) as { name: string }[];
+  if (took.length === 0) return refuse('OWNED', ctx.id);
   forgetPages();
   return empty(ctx.id);
 }

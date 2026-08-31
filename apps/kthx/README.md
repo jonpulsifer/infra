@@ -41,9 +41,11 @@ An owner is a Google account. `server/identity.ts` verifies the ID token the
 CLI sends — RS256 over `crypto.subtle` against Google's JWKS, then the issuer,
 the audience, the expiry and `email_verified` — and the site row keeps the
 account's `sub` beside the address it displays. `KTHX_TRUSTED_IDENTITY_HEADER`
-is the seam for an IAP-style proxy front: name a header and a request from a
-peer in `KTHX_TRUSTED_PROXIES` carrying it *is* that identity, no token. It is
-unset, so today nothing but a verified token is believed. A site claimed before
+is the seam for an IAP-style proxy front: name the address header and a request
+from a peer in `KTHX_TRUSTED_PROXIES` carrying it, *and* the subject in
+`x-goog-authenticated-user-id`, is that identity, no token. Both halves are
+required because ownership compares `sub`. It is unset, so today nothing but a
+verified token is believed. A site claimed before
 accounts keeps its bearer until `POST /api/sites/:name/adopt` trades it for one.
 
 Configuration: `KTHX_ZONE`, `KTHX_BUCKET` (unset uses an on-disk depot),

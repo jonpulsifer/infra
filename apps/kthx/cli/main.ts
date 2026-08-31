@@ -96,6 +96,17 @@ function forget(name: string): void {
 const knownToken = (name: string): string | undefined =>
   readJson<Tokens>(sitesFile(), {})[origin()]?.[name];
 
+/** Whether this directory names a site this machine still holds a bearer for. */
+function unadopted(dir: string): boolean {
+  try {
+    const name = named(dir);
+    return name !== undefined && knownToken(name) !== undefined;
+  } catch {
+    // Reading a hint must not replace the failure being reported.
+    return false;
+  }
+}
+
 function tokenFor(name: string): string {
   const token = knownToken(name);
   if (token === undefined) {
@@ -449,8 +460,8 @@ async function listMySites(): Promise<void> {
   for (let page = 0; page < MAX_DIRECTORY_PAGES; page += 1) {
     const asked: Page = await api<Page>(
       after === null
-        ? '/api/sites'
-        : `/api/sites?after=${encodeURIComponent(after)}`,
+        ? `/api/sites?limit=${DIRECTORY_PAGE}`
+        : `/api/sites?limit=${DIRECTORY_PAGE}&after=${encodeURIComponent(after)}`,
     );
     mine.push(...asked.items.filter((found) => found.owner === email));
     after = asked.next;
@@ -475,6 +486,8 @@ interface Page {
   readonly next: string | null;
 }
 
+/** The largest page the apex answers, asked for by name rather than defaulted. */
+const DIRECTORY_PAGE = 500;
 /** 500 names a page against a 5000-site zone: the whole of it, and no more. */
 const MAX_DIRECTORY_PAGES = 10;
 
@@ -705,6 +718,14 @@ if (import.meta.main) {
   } catch (error) {
     if (!(error instanceof KthxError)) throw error;
     console.error(`${error.code}: ${error.message}`);
+    // A site claimed before identities answers its old bearer and not this
+    // account, and the bearer that fixes it is on this machine: say so rather
+    // than leave "that does not open this site" as the whole of the news.
+    if (error.code === 'FORBIDDEN' && unadopted(dir)) {
+      console.error(
+        '  this site was claimed before accounts; run kthx adopt to take it',
+      );
+    }
     process.exit(1);
   }
   const available = await nudge;

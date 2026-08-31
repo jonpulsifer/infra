@@ -317,9 +317,9 @@ export function addressOf(
 /**
  * Whether this request arrived from a peer this deployment believes.
  *
- * The same rule {@link addressOf} uses, and for the same reason: a header is
- * worth what the peer that sent it is worth. No socket peer at all is a handler
- * called directly, which is a test and not a network.
+ * A header is worth what the peer that sent it is worth, so an unknown peer is
+ * not a trusted one: this is the check that turns a header into an owner, and
+ * the only safe answer to "who sent this" being unanswerable is no.
  */
 export function fromTrustedProxy(
   request: Request,
@@ -327,7 +327,7 @@ export function fromTrustedProxy(
   trusted: readonly string[],
 ): boolean {
   const peer = server?.requestIP(request)?.address?.trim() ?? null;
-  return peer === null || trustedPeer(peer, trusted);
+  return peer !== null && trustedPeer(peer, trusted);
 }
 
 let warned = false;

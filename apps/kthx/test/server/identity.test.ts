@@ -289,6 +289,26 @@ describe('adopt', () => {
     ).toBe(409);
   });
 
+  test('two accounts adopting at once: one takes it, one is told 409', async () => {
+    // Both read an unowned row before either writes one, so the pre-check
+    // passes twice and the UPDATE is what decides it. A 204 means the row is
+    // this caller's; the loser must not be told it owns a site it does not.
+    const site = await legacy('racing', BEARER);
+    const stranger = await idToken('stranger@example.com');
+    const answers = await Promise.all([
+      adopt(site.name, { token: BEARER }, { token: site.token }),
+      adopt(site.name, { token: BEARER }, { token: stranger }),
+    ]);
+    const codes = answers.map((answer) => answer.status).sort();
+    expect(codes).toEqual([204, 409]);
+    const [row] = await kthx()
+      .sql`select owner_email from sites where name = ${site.name}`;
+    const won = answers.findIndex((answer) => answer.status === 204);
+    expect(row.owner_email).toBe(
+      won === 0 ? site.email : 'stranger@example.com',
+    );
+  });
+
   test('a name with no row is 404, and a deleted one is 410', async () => {
     const site = await legacy('gone', BEARER);
     expect(
@@ -327,6 +347,7 @@ describe('adopt', () => {
 
 describe('a trusted identity header', () => {
   const HEADER = 'x-goog-authenticated-user-email';
+  const SUBJECT = 'x-goog-authenticated-user-id';
 
   /** A request that arrived from this address, as far as the server can tell. */
   const from = (peer: string) =>
@@ -356,48 +377,82 @@ describe('a trusted identity header', () => {
       trustedProxies: ['192.0.2.7'],
     });
 
-    const claim = (name: string, header: string | null, peer: string) =>
+    const claim = (
+      name: string,
+      asserted: Record<string, string>,
+      peer: string | null,
+    ) =>
       seam().fetch(
         ask('/api/sites', {
           method: 'POST',
-          headers: {
-            'content-type': 'application/json',
-            ...(header === null ? {} : { [HEADER]: header }),
-          },
+          headers: { 'content-type': 'application/json', ...asserted },
           body: JSON.stringify({ name }),
           address: address(),
         }),
-        from(peer),
+        peer === null ? undefined : from(peer),
       );
+
+    /** What IAP writes: both halves, each with the issuer in front of it. */
+    const iap = (email: string, sub: string) => ({
+      [HEADER]: `accounts.google.com:${email}`,
+      [SUBJECT]: `accounts.google.com:${sub}`,
+    });
 
     test('a trusted hop says who the caller is, prefix and all', async () => {
       const name = seam().name('iap');
-      // What IAP writes, which is the address with the issuer in front of it.
       expect(
-        (await claim(name, 'accounts.google.com:Iap@Example.com', '192.0.2.7'))
+        (await claim(name, iap('Iap@Example.com', '1234567890'), '192.0.2.7'))
           .status,
       ).toBe(201);
       const [row] = await seam()
         .sql`select owner_email, owner_sub from sites where name = ${name}`;
       expect(row.owner_email).toBe('iap@example.com');
-      expect(row.owner_sub).toBe('iap@example.com');
+      // The subject the hop asserts, not the address: it is what an ID token
+      // carries too, so a site claimed either way answers the other.
+      expect(row.owner_sub).toBe('1234567890');
     });
 
-    test('the same header from any other peer is worth nothing', async () => {
+    test('the same headers from any other peer are worth nothing', async () => {
       const refused = await claim(
         seam().name('spoof'),
-        'iap@example.com',
+        iap('iap@example.com', '1234567890'),
         '198.51.100.9',
       );
       expect(refused.status).toBe(401);
     });
 
+    test('the same headers from no peer at all are worth nothing', async () => {
+      // No socket peer is not the trusted peer. A handler reached some other
+      // way than through the Gateway must not be the Gateway.
+      const refused = await claim(
+        seam().name('peerless'),
+        iap('iap@example.com', '1234567890'),
+        null,
+      );
+      expect(refused.status).toBe(401);
+    });
+
     test('a trusted hop that asserts nothing is still anonymous', async () => {
+      expect((await claim(seam().name('quiet'), {}, '192.0.2.7')).status).toBe(
+        401,
+      );
       expect(
-        (await claim(seam().name('quiet'), null, '192.0.2.7')).status,
+        (await claim(seam().name('blank'), iap('   ', '   '), '192.0.2.7'))
+          .status,
       ).toBe(401);
+    });
+
+    test('an address with no subject beside it opens nothing', async () => {
+      // Ownership compares `sub`. A hop that asserts only the address would
+      // hand every token-claimed site to a stranger with the same address.
       expect(
-        (await claim(seam().name('blank'), '   ', '192.0.2.7')).status,
+        (
+          await claim(
+            seam().name('halved'),
+            { [HEADER]: 'accounts.google.com:iap@example.com' },
+            '192.0.2.7',
+          )
+        ).status,
       ).toBe(401);
     });
   });
