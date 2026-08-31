@@ -404,17 +404,19 @@ function withEtag(
 }
 
 /**
- * The request's JSON, refusing anything past 2 MiB without holding it.
+ * The request's JSON, refusing anything past `limit` without holding it.
  *
  * `content-length` is the fast path; a chunked body has none, so the stream is
  * read a chunk at a time and cancelled the moment it goes over. The server-wide
  * ceiling is 32 MiB, so materialising first would let every anonymous write
- * pin sixteen times what this route allows.
+ * pin sixteen times what this route allows. `/api/ai` passes its own, smaller
+ * limit rather than owning a second copy of this.
  */
 export async function bodyOf(
   request: Request,
+  limit = MAX_BODY_BYTES,
 ): Promise<{ json: unknown } | { code: Code }> {
-  if (Number(request.headers.get('content-length') ?? 0) > MAX_BODY_BYTES) {
+  if (Number(request.headers.get('content-length') ?? 0) > limit) {
     return { code: 'TOO_LARGE' };
   }
   const reader = request.body?.getReader();
@@ -424,7 +426,7 @@ export async function bodyOf(
     const { done, value } = await reader.read();
     if (done) break;
     seen += value.byteLength;
-    if (seen > MAX_BODY_BYTES) {
+    if (seen > limit) {
       await reader.cancel().catch(() => {});
       return { code: 'TOO_LARGE' };
     }

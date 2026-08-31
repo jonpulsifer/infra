@@ -43,6 +43,22 @@ export interface Config {
   readonly maxDbBytes: number;
   /** Collections one site may hold. */
   readonly maxCollections: number;
+  /** The OpenAI-compatible upstream `/api/ai` forwards to. */
+  readonly aiUrl: string;
+  /**
+   * The upstream's key, or `null` when this deployment has none.
+   *
+   * Null is not a disabled route: `/api/ai` answers 502 `AI_UPSTREAM`, which is
+   * what an upstream with no key would have answered anyway, one round trip
+   * later and on the operator's bill.
+   */
+  readonly aiKey: string | null;
+  /** What a request that names no model gets. */
+  readonly aiModel: string;
+  /** The models a site may name. Empty is every model the upstream has. */
+  readonly aiModels: readonly string[];
+  /** The ceiling `max_tokens` is clamped to, named or not. */
+  readonly aiMaxTokens: number;
   /**
    * The peers whose `cf-connecting-ip` is believed: the Gateway hop in front of
    * this pod. Empty means no peer is, so every address-keyed bucket falls back
@@ -62,6 +78,18 @@ function required(env: Env, name: string): string {
   const value = env[name]?.trim();
   if (!value) throw new ConfigError(`${name} is not set`);
   return value;
+}
+
+/**
+ * A positive number, or the default.
+ *
+ * `Number('four')` is `NaN`, and a `NaN` ceiling is no ceiling: it serialises
+ * as `null` on the wire and turns the token billing into a statement Postgres
+ * refuses. A typo in a chart value must not quietly remove a spend control.
+ */
+function positive(raw: string | undefined, fallback: number): number {
+  const asked = Number(raw?.trim() ?? '');
+  return Number.isFinite(asked) && asked > 0 ? asked : fallback;
 }
 
 function longEnough(name: string, value: string): string {
@@ -87,6 +115,17 @@ export function readConfig(env: Env = Bun.env): Config {
     pgPrefix: 'kthx',
     maxDbBytes: 256 * 1024 * 1024,
     maxCollections: 256,
+    aiUrl: (env.KTHX_AI_URL?.trim() || 'https://opencode.ai/zen/v1').replace(
+      /\/+$/,
+      '',
+    ),
+    aiKey: env.KTHX_AI_KEY?.trim() || null,
+    aiModel: env.KTHX_AI_MODEL?.trim() || 'minimax-m3',
+    aiModels: (env.KTHX_AI_MODELS ?? '')
+      .split(',')
+      .map((entry) => entry.trim())
+      .filter((entry) => entry !== ''),
+    aiMaxTokens: positive(env.KTHX_AI_MAX_TOKENS, 4096),
     trustedProxies: (env.KTHX_TRUSTED_PROXIES ?? '')
       .split(',')
       .map((entry) => entry.trim())

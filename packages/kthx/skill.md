@@ -111,7 +111,8 @@ The SDK is a convenience; the routes are the product. `<site>` is
 | DELETE | `/api/db/:collection/:id` | 204 |
 | DELETE | `/api/db/:collection` | 204 — owner bearer only; drops every document |
 | GET | `/api/ws` | websocket |
-| POST | `/api/ai/v1/chat/completions` | OpenAI-compatible; also `/models`, `/embeddings` |
+| POST | `/api/ai/v1/chat/completions` | OpenAI-compatible; also `/models`, `/embeddings`. `/v1` is optional; nothing else under `/api/ai` exists |
+| GET | `/api/ai/usage` | `{day, requests, tokens, quotas}` — today, against the daily budget |
 | PUT | `/api/files/<path>` | `{path, url, size, type}` |
 | GET | `/api/files` | `{items}` |
 | DELETE | `/api/files/<path>` | 204 |

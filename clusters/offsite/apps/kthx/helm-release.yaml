@@ -30,7 +30,8 @@ spec:
     # `objectAdmin` on this bucket is the whole of what kthx can do in GCP —
     # notably not `storage.buckets.get`, so nothing here may preflight it.
     bucket: bluenose-kthx
-    # Both HMAC keys, from 1Password through external-secret.yaml beside this.
+    # Both HMAC keys and the AI upstream key, from 1Password through
+    # external-secret.yaml beside this.
     envFromSecret: kthx-env
     # Substituted from the cluster topology ConfigMap rather than restated: the
     # `cf-connecting-ip` a rate-limit bucket is keyed by is only believed from

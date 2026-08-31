@@ -13,6 +13,9 @@
  *   c.subscribe({ onCreate, onUpdate, onDelete }) // → unsubscribe
  *   await kthx.db.collections()                   // → [{ name, count }]
  *   const room = kthx.live.join('cursors')        // → { send, on, peers, leave }
+ *   await kthx.ai.chat('summarise this')          // → a string
+ *   for await (const d of await kthx.ai.chat(msgs, { stream: true })) {}
+ *   kthx.ai.baseURL                               // absolute; for the OpenAI SDK
  *   await kthx.ready; kthx.me.id; kthx.site.name
  *
  * The socket opens on the first subscribe or join, pings every 30 s, and
@@ -363,15 +366,87 @@
   // --- not yet -------------------------------------------------------------
 
   /** A named backend this build does not carry, said plainly rather than as a 404. */
-  const soon = (what) => () => {
-    throw new Error(`kthx.${what} is not on this site yet`);
-  };
-
+  /**
+   * A model, on the operator's key, through this site's own origin.
+   *
+   * `chat` is the whole of the convenience: one prompt in, one string out, and
+   * with `{stream: true}` an async iterator of the deltas. Anything the OpenAI
+   * API takes that this does not — tools, images, a second choice — is
+   * `baseURL` and the real SDK, which this exists beside rather than in front
+   * of.
+   */
   const ai = {
     // Absolute: the OpenAI SDK rejects a relative baseURL at request time.
     baseURL: `${location.origin}/api/ai/v1`,
-    chat: soon('ai.chat'),
+
+    /** Relative, like every other call here; `baseURL` is absolute for the SDK. */
+    async chat(input, options = {}) {
+      const { model, stream, ...rest } = options;
+      const body = {
+        ...rest,
+        messages:
+          typeof input === 'string'
+            ? [{ role: 'user', content: input }]
+            : input,
+      };
+      // Left out rather than sent empty: the server fills in its own default,
+      // and a `model: undefined` on the wire is a model named `null`.
+      if (model) body.model = model;
+      if (stream) body.stream = true;
+      const response = await fetch('/api/ai/v1/chat/completions', {
+        method: 'POST',
+        headers: JSON_BODY,
+        body: JSON.stringify(body),
+      });
+      if (!response.ok) throw await failed(response);
+      if (!stream) {
+        const answer = await response.json();
+        return answer.choices?.[0]?.message?.content ?? '';
+      }
+      return deltas(response);
+    },
   };
+
+  /**
+   * The SSE frames as the strings a page wants: one delta at a time.
+   *
+   * The `finally` is the stop button: breaking out of the loop must cancel the
+   * body, because that is what aborts the request and lets the server stop
+   * paying for an answer nobody is reading any more.
+   */
+  async function* deltas(response) {
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    try {
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        // A frame ends on a blank line; whatever follows the last one is half a
+        // frame and waits for the next chunk.
+        const frames = buffer.split('\n\n');
+        buffer = frames.pop() ?? '';
+        for (const frame of frames) {
+          for (const line of frame.split('\n')) {
+            if (!line.startsWith('data:')) continue;
+            const payload = line.slice(5).trim();
+            if (payload === '' || payload === '[DONE]') continue;
+            let parsed;
+            try {
+              parsed = JSON.parse(payload);
+            } catch {
+              continue;
+            }
+            const delta = parsed.choices?.[0]?.delta?.content;
+            if (delta) yield delta;
+          }
+        }
+      }
+    } finally {
+      await reader.cancel().catch(() => {});
+    }
+  }
 
   window.kthx = { db, live, ai, files, me, site, ready };
 })();

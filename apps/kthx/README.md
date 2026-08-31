@@ -31,14 +31,21 @@ and refilled from it. Anyone on the site origin may `PUT` one; the visitor who
 created a path owns it, and the content-type allowlist is what keeps a public
 store from becoming a page on the site's own origin.
 
+`/api/ai` is an OpenAI-compatible passthrough on the operator's key: three
+upstream paths by name, the client's `Authorization` dropped, and a per-site
+daily budget in the control database that a restart cannot reset. Without
+`KTHX_AI_KEY` it answers 502 and nothing else changes.
+
 Configuration: `KTHX_ZONE`, `KTHX_BUCKET` (unset uses an on-disk depot),
 `KTHX_SITES_DIR`, `DATABASE_URL`, `KTHX_ME_KEY` (+ optional
-`KTHX_ME_KEY_PREVIOUS`) and `KTHX_PG_KEY`, both at least 32 bytes, and
+`KTHX_ME_KEY_PREVIOUS`) and `KTHX_PG_KEY`, both at least 32 bytes,
 `KTHX_TRUSTED_PROXIES` — the comma-separated peers whose `cf-connecting-ip` the
-rate limits believe. Unset, no peer is believed and every address-keyed bucket
-keys on the socket address, which behind a proxy is one key for the whole zone.
-The control database's schema is the numbered SQL in `server/migrations/`,
-applied at boot.
+rate limits believe — and the AI upstream's `KTHX_AI_URL`, `KTHX_AI_KEY`,
+`KTHX_AI_MODEL`, `KTHX_AI_MODELS` (a comma list; empty is every model the
+upstream sells) and `KTHX_AI_MAX_TOKENS`. With `KTHX_TRUSTED_PROXIES` unset, no
+peer is believed and every address-keyed bucket keys on the socket address,
+which behind a proxy is one key for the whole zone. The control database's
+schema is the numbered SQL in `server/migrations/`, applied at boot.
 
 ```
 bun run apps/kthx/server      # or `bun run start` from this directory

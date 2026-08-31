@@ -12,6 +12,7 @@
 import { join } from 'node:path';
 import { LANDING_PATH, SDK_PATH, SKILL_PATH } from '@repo/kthx/assets';
 import { FAVICON_PATH } from '@repo/kthx/favicon';
+import { AI_IDLE_SECONDS, aiApi } from './ai.ts';
 import { createClient, migrate } from './db.ts';
 import { bucketDepot, type Depot, diskDepot } from './depot.ts';
 import { dbApi } from './documents.ts';
@@ -290,9 +291,6 @@ async function site(
  * `files` sits ahead of the provisioning wait on purpose: its rows are in the
  * control database, so a site's bytes keep being served while its own database
  * is being made or repaired.
- *
- * `ai` is its own ticket; until it lands its path is a route
- * this server does not have, which is a 404 and not a promise.
  */
 async function siteApi(
   request: Request,
@@ -326,14 +324,15 @@ async function siteApi(
   }
 
   const me = meOf(request, name, ctx.config.meKey, ctx.config.mePreviousKey);
+  const address = addressOf(request, ctx.server, ctx.config.trustedProxies);
 
   if (path === '/api/files' || path.startsWith('/api/files/')) {
     const refusal = charge(
-      request,
       ctx,
       name,
       me,
       owner,
+      address,
       request.method === 'PUT' || request.method === 'DELETE',
     );
     if (refusal !== null) return refusal;
@@ -403,9 +402,21 @@ async function siteApi(
     // body — neither is the thing the write buckets are counting.
     const metered =
       !READ_METHODS.has(request.method) && segments[4] !== 'query';
-    const refusal = charge(request, ctx, name, me, owner, metered);
+    const refusal = charge(ctx, name, me, owner, address, metered);
     if (refusal !== null) return refusal;
     return cookied(await dbApi(request, ctx, name, segments, owner), me);
+  }
+  if (segments[2] === 'ai') {
+    // The two GETs here — `usage` and the model list — are this server's own
+    // numbers, reach no upstream and cost nothing. Charging them would leave a
+    // foreign page able to spend a victim site's day on a `no-cors` GET, which
+    // carries no `Origin` for the guard above to catch.
+    const refusal = read ? null : charge(ctx, name, me, owner, address, true);
+    if (refusal !== null) return refusal;
+    // A model thinks for longer than Bun's 10 s connection idle timeout, which
+    // would otherwise cut a streaming completion off mid-answer.
+    ctx.server?.timeout(request, AI_IDLE_SECONDS);
+    return cookied(await aiApi(request, ctx, name, segments, address), me);
   }
   return refuse('NOT_FOUND', ctx.id);
 }
@@ -421,21 +432,22 @@ function cookied(response: Response, me: Me): Response {
 /**
  * Spend the write buckets, or say why not.
  *
- * Reads are unmetered, and the caller says which of its own calls is a write —
- * `POST …/query` is one spelled with a body, and a `GET /api/files` is a
- * listing. An owner bearer skips the visitor and address buckets and never the
- * site one, so a token that leaks cannot outrun the site's own ceiling.
+ * `metered` is the caller's to decide, because it is not the same question on
+ * every backend: reads and `POST …/query` are free on `/api/db` (a bulk `POST`
+ * is one unit), a `GET /api/files` is a listing, and every `/api/ai` call costs
+ * the operator money and is charged whatever its method. An owner bearer skips
+ * the visitor and address buckets and never the site one, so a token that leaks
+ * cannot outrun the site's own ceiling.
  */
 function charge(
-  request: Request,
   ctx: Ctx,
   name: string,
   me: Me,
   owner: boolean,
+  address: string | null,
   metered: boolean,
 ): Response | null {
   if (!metered) return null;
-  const address = addressOf(request, ctx.server, ctx.config.trustedProxies);
   const spent = spendAll([
     // A request that arrived without a cookie is keyed by the two things it
     // did have: the cookie it is about to receive is not a fresh allowance.
