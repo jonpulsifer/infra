@@ -17,6 +17,7 @@ import { createHash } from 'node:crypto';
 import { rm } from 'node:fs/promises';
 import { base64urlEncode } from '@repo/archive/bytes';
 import type { SQL } from 'bun';
+import { aiUsage, MAX_AI_REQUESTS_DAY, MAX_AI_TOKENS_DAY } from './ai.ts';
 import type { ReleaseRow, SiteRow } from './db.ts';
 import type { Depot } from './depot.ts';
 import { isPlainObject } from './documents.ts';
@@ -274,8 +275,8 @@ const QUOTAS = {
   db_bytes: 256 * 1024 * 1024,
   file_bytes: MAX_FILE_BYTES,
   files_bytes: MAX_FILES_BYTES,
-  ai_requests_day: 200,
-  ai_tokens_day: 500_000,
+  ai_requests_day: MAX_AI_REQUESTS_DAY,
+  ai_tokens_day: MAX_AI_TOKENS_DAY,
 } as const;
 
 const inspect: Act = async (_request, ctx, site) => {
@@ -283,6 +284,7 @@ const inspect: Act = async (_request, ctx, site) => {
     select n, digest, size, at from releases
     where site = ${site.name} order by n desc
   `) as ReleaseRow[];
+  const spent = await aiUsage(ctx, site.name);
   return ok(
     {
       name: site.name,
@@ -295,13 +297,13 @@ const inspect: Act = async (_request, ctx, site) => {
         size: Number(row.size),
         at: row.at.toISOString(),
       })),
-      // The AI counters land with the backend that meters them; the database
-      // reports its own size and the file rows carry theirs.
+      // The database reports its own size, the file rows carry theirs, and
+      // the AI budget is here already.
       usage: {
         db_bytes: await ctx.pg.bytes(site.name),
         files_bytes: await filesBytes(ctx.sql, site.name),
-        ai_requests_today: 0,
-        ai_tokens_today: 0,
+        ai_requests_today: spent.requests,
+        ai_tokens_today: spent.tokens,
       },
       quotas: QUOTAS,
     },

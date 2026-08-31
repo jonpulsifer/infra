@@ -11,11 +11,47 @@
  * client half is reconnection logic that wants a browser; the day that breaks,
  * a headless page is the way to find out.
  */
-import { describe, expect, test } from 'bun:test';
+import { afterAll, describe, expect, test } from 'bun:test';
 import { SDK_PATH } from '@repo/kthx/assets';
 import { ask, withServer, ZONE } from '../harness/server.ts';
 
-const kthx = withServer();
+/** Enough of an upstream for `ai.chat` to have something to read a string out of. */
+const upstream = Bun.serve({
+  port: 0,
+  async fetch(request) {
+    if (!JSON.parse(await request.text()).stream) {
+      return Response.json({
+        choices: [{ message: { role: 'assistant', content: 'an answer' } }],
+        usage: { total_tokens: 9 },
+      });
+    }
+    // Split across the frame boundary on purpose: the reader has to hold half
+    // a frame back rather than parse it.
+    return new Response(
+      new ReadableStream<Uint8Array>({
+        start(controller) {
+          const encoder = new TextEncoder();
+          controller.enqueue(
+            encoder.encode('data: {"choices":[{"delta":{"content":"an "}}]}\n'),
+          );
+          controller.enqueue(
+            encoder.encode(
+              '\ndata: {"choices":[{"delta":{"content":"answer"}}]}\n\ndata: [DONE]\n\n',
+            ),
+          );
+          controller.close();
+        },
+      }),
+      { headers: { 'content-type': 'text/event-stream' } },
+    );
+  },
+});
+
+afterAll(() => {
+  upstream.stop(true);
+});
+
+const kthx = withServer({ aiUrl: `http://127.0.0.1:${upstream.port}/v1` });
 
 let nextAddress = 0;
 function address(): string {
@@ -63,7 +99,10 @@ interface Sdk {
     };
     collections(): Promise<{ name: string; count: number }[]>;
   };
-  ai: { baseURL: string; chat(): unknown };
+  ai: {
+    baseURL: string;
+    chat(input: unknown, options?: unknown): Promise<unknown>;
+  };
   files: {
     url(path: string): string;
     upload(
@@ -235,12 +274,23 @@ describe('sdk.js', () => {
     }
   });
 
-  test('the backends that are not here yet say so', async () => {
-    const sdk = await loaded('stubs');
+  test('ai.chat reaches the passthrough, and baseURL is absolute', async () => {
+    const sdk = await loaded('ai');
+    // Absolute because the OpenAI SDK throws on a relative one at request time.
     expect(sdk.ai.baseURL).toBe(
-      `https://${kthx().name('stubs')}.${ZONE}/api/ai/v1`,
+      `https://${kthx().name('ai')}.${ZONE}/api/ai/v1`,
     );
-    expect(() => sdk.ai.chat()).toThrow(/not on this site yet/);
+    // A string prompt becomes one user message, and what comes back is the
+    // content rather than the envelope around it.
+    expect(await sdk.ai.chat('hello')).toBe('an answer');
+
+    const deltas: string[] = [];
+    for await (const delta of (await sdk.ai.chat([{ role: 'user' }], {
+      stream: true,
+    })) as AsyncIterable<string>) {
+      deltas.push(delta);
+    }
+    expect(deltas).toEqual(['an ', 'answer']);
   });
 
   test('files: a type per body kind, and the url the upload answered', async () => {

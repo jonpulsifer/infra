@@ -131,6 +131,14 @@ export function withServer(overrides: Partial<Config> = {}): () => Harness {
       pgPrefix: prefix,
       maxDbBytes: 256 * 1024 * 1024,
       maxCollections: 256,
+      // Nowhere by default, and nowhere that resolves: a test that means to
+      // call the AI upstream points this at its own stub, and one that does not
+      // must fail on DNS rather than sit on the 90 s first-byte deadline.
+      aiUrl: 'http://upstream.invalid/v1',
+      aiKey: 'stub',
+      aiModel: 'test-model',
+      aiModels: [],
+      aiMaxTokens: 4096,
       trustedProxies: [],
       port: 0,
       ...overrides,

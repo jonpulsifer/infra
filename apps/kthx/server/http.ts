@@ -26,6 +26,7 @@ export type Code =
   | 'INVALID_QUERY'
   | 'INVALID_PATH'
   | 'UNSUPPORTED_TYPE'
+  | 'INVALID_MODEL'
   | 'MALFORMED_REQUEST'
   | 'UNAUTHENTICATED'
   | 'FORBIDDEN'
@@ -38,7 +39,9 @@ export type Code =
   | 'PRECONDITION_FAILED'
   | 'TOO_LARGE'
   | 'RATE_LIMITED'
+  | 'AI_BUDGET'
   | 'STORAGE_FAILURE'
+  | 'AI_UPSTREAM'
   | 'BUSY'
   | 'SITE_FULL';
 
@@ -71,6 +74,7 @@ const ERRORS: Record<Code, readonly [number, string]> = {
     400,
     'files take image, audio, video, application/pdf, application/json, text/plain, text/csv and text/markdown',
   ],
+  INVALID_MODEL: [400, 'that model is not one this site may ask for'],
   MALFORMED_REQUEST: [
     400,
     'the request body or content type is not what this path takes',
@@ -89,7 +93,9 @@ const ERRORS: Record<Code, readonly [number, string]> = {
   PRECONDITION_FAILED: [412, 'it changed since it was read'],
   TOO_LARGE: [413, 'that is larger than this path accepts'],
   RATE_LIMITED: [429, 'too many requests; wait'],
+  AI_BUDGET: [429, "this site has spent today's ai budget"],
   STORAGE_FAILURE: [500, 'storing the release failed'],
+  AI_UPSTREAM: [502, 'the ai upstream did not answer'],
   BUSY: [503, 'the server is full right now; try again in a moment'],
   SITE_FULL: [507, 'this site is full; delete something to add something'],
 };

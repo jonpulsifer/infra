@@ -24,8 +24,26 @@ bucket: ""
 # is not. Both come from the cluster topology ConfigMap.
 trustedProxies: ""
 
-# `KTHX_ME_KEY` and `KTHX_PG_KEY`. The process refuses to boot without them and
-# a chart that generated them would rotate every visitor cookie and every site's
+# The AI passthrough. The key is not here: it arrives with the HMAC keys through
+# `envFromSecret`, because a chart value is rendered into a HelmRelease in a
+# public repository.
+#
+# `models` is an allow-list, and an empty one is every model the upstream sells
+# — including the ones priced ten times the rest. The operator pays for every
+# call any anonymous visitor makes, so this is a spend decision, not tuning.
+ai:
+  url: https://opencode.ai/zen/v1
+  # What a request that names no model gets.
+  model: minimax-m3
+  # Comma-separated, and deliberately short: OpenAI-compatible, cheap, and
+  # enough to build something with. `GET /api/ai/v1/models` lists what the
+  # upstream has; adding one here is what makes it askable.
+  models: minimax-m3,kimi-k2.5,glm-5,deepseek-v4-flash,nemotron-3.5-lightning-free
+  maxTokens: 4096
+
+# `KTHX_ME_KEY`, `KTHX_PG_KEY` and `KTHX_AI_KEY`. The process refuses to boot
+# without the first two and answers 502 on `/api/ai` without the third, and a
+# chart that generated them would rotate every visitor cookie and every site's
 # database password on each upgrade, so they arrive from 1Password through an
 # ExternalSecret the installation owns. `required` at the point of use, because
 # an omitted name renders a valid Deployment that dies on ConfigError.

@@ -377,6 +377,7 @@ pre.sh .p{color:var(--hot)}
       <div class="sdktabs" role="tablist">
         <button type="button" role="tab" aria-selected="true" data-t="db">db</button>
         <button type="button" role="tab" aria-selected="false" data-t="live">live</button>
+        <button type="button" role="tab" aria-selected="false" data-t="ai">ai</button>
         <button type="button" role="tab" aria-selected="false" data-t="me">me</button>
       </div>
 
@@ -413,6 +414,19 @@ room.on(<u>'leave'</u>, peer => ...)
 room.peers()                                       <i>// the me.id of each member here now</i>
 room.leave()</pre>
         <div class="sdknote"><b>One websocket for each tab.</b> The socket opens on first use and reconnects on its own. <code>subscribe</code> sends each write to that collection to all open tabs and returns a function that stops it. This is the durable path. <code>live.join</code> is for data that must not be stored: cursors, typing, presence, a game tick. Rooms are scoped to the site.</div>
+      </div>
+
+      <div class="sdkpane" id="sdk-ai" hidden>
+<pre class="sh"><b>const</b> answer = <b>await</b> kthx.ai.chat(<u>'name three things to do with a raspberry pi'</u>)
+
+<i>// or a conversation, streamed a piece at a time</i>
+<b>for</b> <b>await</b> (<b>const</b> delta <b>of</b> <b>await</b> kthx.ai.chat(messages, { stream: <b>true</b> })) out.textContent += delta
+
+<i>// or the real OpenAI SDK, pointed at this site</i>
+<b>const</b> openai = <b>new</b> OpenAI({ baseURL: kthx.ai.baseURL, apiKey: <u>'kthx'</u>, dangerouslyAllowBrowser: <b>true</b> })
+
+<b>await</b> fetch(<u>'/api/ai/usage'</u>)                       <i>// { day, requests, tokens, quotas }</i></pre>
+        <div class="sdknote"><b>A model, without a key on the page.</b> The site calls its own origin and the server adds the credential, so there is nothing to leak and nothing to rotate. <code>chat/completions</code>, <code>models</code> and <code>embeddings</code> are the paths it forwards. Each site gets a daily budget; past it every call is <code>429 AI_BUDGET</code> until UTC midnight.</div>
       </div>
 
       <div class="sdkpane" id="sdk-me" hidden>
