@@ -22,6 +22,15 @@ export interface BucketSpec {
 export const CLAIM_BUCKET: BucketSpec = { capacity: 30, perSecond: 0.1 };
 
 /**
+ * Sixty in a burst, then sixty a minute, per address, on the public directory.
+ *
+ * Only the pages the 10 s cache cannot answer spend a token: the caller writes
+ * the cursor and the page size, so an anonymous request that asks for a shape
+ * nothing keeps is one control-database query, and that is the thing to bound.
+ */
+export const DIRECTORY_BUCKET: BucketSpec = { capacity: 60, perSecond: 1 };
+
+/**
  * The three buckets every write to a site's backends must have a token in.
  *
  * Three because each alone is bypassable: a cookie is free to throw away, an
