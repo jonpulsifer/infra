@@ -7,6 +7,10 @@
     ".": "./underscore.ts",
     "./assets": "./assets.ts",
     "./favicon": "./favicon.ts",
+    "./skill.md": {
+      "types": "./skill.d.ts",
+      "default": "./skill.md"
+    },
     "./sdk.js": {
       "types": "./sdk.d.ts",
       "default": "./sdk.js"

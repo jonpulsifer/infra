@@ -30,6 +30,19 @@ COPY --from=pruner /app/out/json/ .
 COPY --from=pruner /app/out/bun.lock ./bun.lock
 RUN bun install --frozen-lockfile --production
 
+# The CLI as `dist/kthx.tgz`, which the apex serves at `/cli/kthx.tgz`. Built
+# here so the command line an owner installs always matches the server that
+# answers them, and so the artifact needs no second place to live. `deps` has
+# the workspace symlinks; the sources they point at come from `pruner`, which
+# has had no install run in it. Only `@repo/kthx` is copied: the bundle reaches
+# the agent reference and the favicon, and nothing in the CLI's graph imports
+# `@repo/archive`.
+FROM deps AS cli
+WORKDIR /app
+COPY --from=pruner /app/out/full/apps/kthx ./apps/kthx
+COPY --from=pruner /app/out/full/packages/kthx ./packages/kthx
+RUN cd /app/apps/kthx && bun run pack
+
 FROM cgr.dev/chainguard/node:latest@sha256:a422ef283675c760d801378646f2a7fdc96f4e2023121a247e215ed3cd39f199 AS runner
 ENV NODE_ENV=production \
   PORT=8080 \
@@ -47,6 +60,7 @@ COPY --from=pruner --chmod=755 /app/out/full/apps/kthx/cli ./apps/kthx/cli
 # it, so no `node_modules` rides along.
 COPY --from=pruner --chmod=755 /app/out/full/packages/archive ./packages/archive
 COPY --from=pruner --chmod=755 /app/out/full/packages/kthx ./packages/kthx
+COPY --from=cli --chmod=755 /app/apps/kthx/dist/kthx.tgz ./apps/kthx/dist/kthx.tgz
 COPY --from=base /usr/local/bin/bun /usr/local/bin/bun
 # Fail the build at the packaging seam rather than shipping an image whose
 # entrypoint or assets are not in it. The workspace packages are asserted
@@ -56,7 +70,8 @@ RUN test -f /app/apps/kthx/server/index.ts \
   && test -f /app/apps/kthx/server/migrations/0001_sites_and_releases.sql \
   && test -f /app/apps/kthx/node_modules/@repo/kthx/landing.html \
   && test -f /app/apps/kthx/node_modules/@repo/kthx/skill.md \
-  && test -f /app/apps/kthx/node_modules/@repo/archive/archive-format.ts
+  && test -f /app/apps/kthx/node_modules/@repo/archive/archive-format.ts \
+  && test -s /app/apps/kthx/dist/kthx.tgz
 WORKDIR /app/apps/kthx
 USER 65532:65532
 EXPOSE 8080

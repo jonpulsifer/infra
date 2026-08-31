@@ -39,6 +39,7 @@ import {
   secondsToMidnight,
   TokenBucket,
 } from './limits.ts';
+import { nameProblem } from './names.ts';
 import type { Pg } from './pg.ts';
 import {
   KEEP_RELEASES,
@@ -54,51 +55,7 @@ import {
   writeTree,
 } from './releases.ts';
 
-export const NAME_PATTERN = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/;
-
-/**
- * Names nobody may claim.
- *
- * Three groups: the hostnames a zone owes itself, the path prefixes reserved on
- * every site host (a site called `files` would still be reachable, but the
- * confusion is not worth the label), and the Postgres identifiers a site name
- * becomes — a name is also a database and a role, so `postgres` and the
- * templates are taken before anyone asks.
- */
-export const RESERVED_NAMES: ReadonlySet<string> = new Set([
-  'www',
-  'api',
-  'app',
-  'admin',
-  'mail',
-  'ftp',
-  'sdk',
-  'static',
-  'assets',
-  'cdn',
-  'fn',
-  'dev',
-  'test',
-  'staging',
-  'kthx',
-  'lolwtf',
-  'spindrift',
-  'root',
-  'internal',
-  '_',
-  'files',
-  'client',
-  'ai',
-  'mcp',
-  'cli',
-  'postgres',
-  'template0',
-  'template1',
-  'template_kthx',
-  'kthx_site',
-  'public',
-  'none',
-]);
+export { NAME_PATTERN, nameProblem, RESERVED_NAMES } from './names.ts';
 
 /** How many live sites this process carries before it stops taking names. */
 export const MAX_LIVE_SITES = 5000;
@@ -114,14 +71,6 @@ const MAX_CLAIM_BYTES = 64 * 1024;
 const claims = new TokenBucket(CLAIM_BUCKET);
 const claimsPerDay = new DailyCap(MAX_CLAIMS_PER_DAY);
 const uploadsPerDay = new DailyCap(MAX_UPLOADS_PER_DAY);
-
-/** Why a name cannot be claimed, or `null`. */
-export function nameProblem(name: string): 'INVALID_NAME' | 'RESERVED' | null {
-  if (name.length < 3 || name.length > 40 || !NAME_PATTERN.test(name)) {
-    return 'INVALID_NAME';
-  }
-  return RESERVED_NAMES.has(name) ? 'RESERVED' : null;
-}
 
 /** Everything a handler is given: the deployment, the stores, this request. */
 export interface Ctx {

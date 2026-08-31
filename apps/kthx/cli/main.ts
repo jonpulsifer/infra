@@ -2,32 +2,51 @@
 /**
  * kthx: a directory becomes `https://<name>.kthx.dev`.
  *
- *   kthx deploy [dir] [--name n]   upload the directory; mints a name if none is set
- *   kthx dev [dir]                 serve it on :4321 with a local `/_/`
- *   kthx rollback [n]              serve release n (default: the one before) and hold
+ *   kthx init [dir]                claim a name, write kthx.json and SKILL.md
+ *   kthx deploy [dir] [--name n]   upload the directory
+ *   kthx dev [dir]                 serve it on :4321 against the live backends
+ *   kthx rollback [n]              serve release n (default: the one before)
  *   kthx release                   drop the hold; the newest release serves
+ *   kthx ls                        what the site is serving, and what it uses
+ *   kthx rm                        delete the site
+ *   kthx open                      open the site in a browser
  *
- * The name is `<dir>/kthx.json`. The token that opens it is in
- * `$XDG_CONFIG_HOME/kthx/sites.json`, never in the directory — the directory
- * is what gets uploaded. `KTHX_ORIGIN` points the client somewhere else.
+ * The name is `kthx.json`, read from the directory and then from here. The
+ * token that opens it is in `$XDG_CONFIG_HOME/kthx/sites.json`, never in the
+ * directory — the directory is what gets uploaded. `KTHX_ORIGIN` points the
+ * client somewhere else.
  */
 import {
   chmodSync,
   existsSync,
   mkdirSync,
+  readdirSync,
   readFileSync,
   writeFileSync,
 } from 'node:fs';
 import { homedir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
+import bundledSkill from '@repo/kthx/skill.md' with { type: 'text' };
+import { version } from '../package.json' with { type: 'json' };
+import { nameProblem } from '../server/names.ts';
 import { KthxError } from './error.ts';
 import { pack } from './tar.ts';
 
 export { KthxError } from './error.ts';
 
-const origin = () =>
+export const origin = () =>
   (process.env.KTHX_ORIGIN?.trim() || 'https://kthx.dev').replace(/\/+$/, '');
+
+/**
+ * Where the site's own backends answer: the apex origin with the name as a
+ * label in front of it. Every site is a host, so this is the only address
+ * `kthx dev` needs to proxy to.
+ */
+export function siteOrigin(name: string): string {
+  const { protocol, host } = new URL(origin());
+  return `${protocol}//${name}.${host}`;
+}
 
 // --- what is remembered -----------------------------------------------------
 
@@ -61,8 +80,21 @@ function remember(name: string, token: string): void {
   chmodSync(path, 0o600);
 }
 
+function forget(name: string): void {
+  const path = sitesFile();
+  const tokens = readJson<Tokens>(path, {});
+  const known = tokens[origin()];
+  if (known === undefined) return;
+  delete known[name];
+  writeFileSync(path, `${JSON.stringify(tokens, null, 2)}\n`, { mode: 0o600 });
+  chmodSync(path, 0o600);
+}
+
+const knownToken = (name: string): string | undefined =>
+  readJson<Tokens>(sitesFile(), {})[origin()]?.[name];
+
 function tokenFor(name: string): string {
-  const token = readJson<Tokens>(sitesFile(), {})[origin()]?.[name];
+  const token = knownToken(name);
   if (token === undefined) {
     throw new KthxError(
       'NO_TOKEN',
@@ -72,12 +104,42 @@ function tokenFor(name: string): string {
   return token;
 }
 
+/**
+ * The name for `dir`, from `<dir>/kthx.json` and then from the current
+ * directory's — so `kthx deploy dist` inside a project root deploys the
+ * project's site rather than claiming a second name for its build output.
+ */
+function named(dir: string): string | undefined {
+  for (const at of [join(dir, 'kthx.json'), 'kthx.json']) {
+    const { name } = readJson<{ name?: unknown }>(at, {});
+    if (name === undefined) continue;
+    if (typeof name !== 'string') {
+      throw new KthxError(
+        'INVALID_NAME',
+        `${at} names ${JSON.stringify(name)}, which is not a name`,
+      );
+    }
+    // `kthx.json` is committed and cloned, and the string in it becomes a
+    // hostname to open and a path to call. The server's own rule, checked here
+    // before either is built.
+    const problem = nameProblem(name);
+    if (problem !== null) {
+      throw new KthxError(
+        problem,
+        `${at} names ${JSON.stringify(name)}, which is not a name a site can have`,
+      );
+    }
+    return name;
+  }
+  return undefined;
+}
+
 function nameOf(dir: string): string {
-  const { name } = readJson<{ name?: unknown }>(join(dir, 'kthx.json'), {});
-  if (typeof name !== 'string') {
+  const name = named(dir);
+  if (name === undefined) {
     throw new KthxError(
       'NO_NAME',
-      `${join(dir, 'kthx.json')} names no site; run kthx deploy first`,
+      `no kthx.json in ${resolve(dir)} or here; run kthx init to claim a name`,
     );
   }
   return name;
@@ -127,19 +189,44 @@ const pick = (list: readonly string[]) =>
 export const mint = () =>
   `${pick(ADJ)}-${pick(ANI)}-${10 + Math.floor(Math.random() * 89)}`;
 
-async function claim(dir: string, chosen?: string): Promise<string> {
+/**
+ * The name `dir` deploys to, claiming one when nothing names it yet.
+ *
+ * `kthx.json` is written where the name was asked for: the directory for
+ * `init`, which is about making that directory a site, and the current one for
+ * `deploy` and `dev`, so a build output directory that is rebuilt from scratch
+ * does not lose the name with it.
+ */
+async function nameFor(
+  dir: string,
+  chosen: string | undefined,
+  writeTo: string,
+): Promise<string> {
+  const already = named(dir);
+  if (already !== undefined) {
+    if (chosen !== undefined && chosen !== already) {
+      throw new KthxError(
+        'NAMED',
+        `kthx.json already names ${already}; remove it to claim ${chosen}`,
+      );
+    }
+    return already;
+  }
+  // A name whose token is already here is one this machine claimed before:
+  // reuse it rather than spend a claim finding out it is taken.
+  if (chosen !== undefined && knownToken(chosen) !== undefined) {
+    write(writeTo, chosen);
+    return chosen;
+  }
   for (let attempt = 1; ; attempt += 1) {
     const name = chosen ?? mint();
     try {
-      const { token } = await api<{ token: string }>('/kthx/sites', {
+      const { token } = await api<{ token: string }>('/api/sites', {
         method: 'POST',
         ...json({ name }),
       });
       remember(name, token);
-      writeFileSync(
-        join(dir, 'kthx.json'),
-        `${JSON.stringify({ name }, null, 2)}\n`,
-      );
+      write(writeTo, name);
       if (chosen === undefined) console.log(`  no name set — uses ${name}`);
       return name;
     } catch (error) {
@@ -149,7 +236,51 @@ async function claim(dir: string, chosen?: string): Promise<string> {
   }
 }
 
+function write(dir: string, name: string): void {
+  writeFileSync(
+    join(dir, 'kthx.json'),
+    `${JSON.stringify({ name }, null, 2)}\n`,
+  );
+}
+
 // --- commands ---------------------------------------------------------------
+
+/** The agent reference the apex publishes, or the copy this build carries. */
+async function skill(): Promise<string> {
+  const response = await fetch(`${origin()}/skill.md`, {
+    signal: AbortSignal.timeout(10_000),
+  }).catch(() => null);
+  if (response === null || !response.ok) return bundledSkill;
+  const text = await response.text().catch(() => '');
+  return text.trim() === '' ? bundledSkill : text;
+}
+
+const STARTER = `<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>kthx</title>
+<script src="/api/sdk.js"></script>
+<h1>It works.</h1>
+<p>Edit index.html, then run <code>kthx deploy</code>.</p>
+`;
+
+export async function init(
+  dir = '.',
+  options: { name?: string } = {},
+): Promise<string> {
+  mkdirSync(dir, { recursive: true });
+  const empty = readdirSync(dir).length === 0;
+  const name = await nameFor(dir, options.name, dir);
+  // A hand-written SKILL.md is somebody's work, and there is no undo here.
+  const kept = !empty && existsSync(join(dir, 'SKILL.md'));
+  if (!kept) writeFileSync(join(dir, 'SKILL.md'), await skill());
+  if (empty) writeFileSync(join(dir, 'index.html'), STARTER);
+  console.log(
+    `  ${name} — kthx.json${kept ? ' written; SKILL.md kept' : `, SKILL.md${empty ? ' and index.html' : ''} written`}; run kthx deploy`,
+  );
+  return name;
+}
 
 interface Release {
   readonly n: number;
@@ -163,30 +294,13 @@ export async function deploy(
   options: { name?: string } = {},
 ): Promise<Release> {
   const started = Date.now();
-  const named = readJson<{ name?: unknown }>(join(dir, 'kthx.json'), {}).name;
-  if (named !== undefined && typeof named !== 'string') {
-    throw new KthxError(
-      'INVALID_NAME',
-      `${join(dir, 'kthx.json')} names ${JSON.stringify(named)}, which is not a name`,
-    );
-  }
-  if (
-    options.name !== undefined &&
-    named !== undefined &&
-    named !== options.name
-  ) {
-    throw new KthxError(
-      'NAMED',
-      `${join(dir, 'kthx.json')} already names ${String(named)}; remove it to claim ${options.name}`,
-    );
-  }
-  const name = named ?? (await claim(dir, options.name));
+  const name = await nameFor(dir, options.name, '.');
   const token = tokenFor(name);
   const packed = pack(dir);
   console.log(
     `  ${packed.files} files · ${kb(packed.size)} · ${short(digestOf(packed.bytes))}`,
   );
-  const release = await api<Release>(`/kthx/sites/${name}/releases`, {
+  const release = await api<Release>(`/api/sites/${name}/releases`, {
     method: 'POST',
     token,
     headers: {
@@ -203,28 +317,39 @@ export async function deploy(
 }
 
 interface Site {
+  readonly name: string;
+  readonly url: string;
   readonly serving: number | null;
   readonly held: boolean;
-  readonly releases: readonly { readonly n: number }[];
+  readonly releases: readonly {
+    readonly n: number;
+    readonly digest: string;
+    readonly size: number;
+    readonly at: string;
+  }[];
+  readonly usage: Record<string, number>;
+  readonly quotas: Record<string, number>;
 }
+
+const site = (name: string) =>
+  api<Site>(`/api/sites/${name}`, { token: tokenFor(name) });
 
 export async function rollback(dir = '.', n?: number): Promise<number> {
   const name = nameOf(dir);
-  const token = tokenFor(name);
-  const site = await api<Site>(`/kthx/sites/${name}`, { token });
-  const target = n ?? site.releases.find((r) => r.n < (site.serving ?? 0))?.n;
+  const found = await site(name);
+  const target = n ?? found.releases.find((r) => r.n < (found.serving ?? 0))?.n;
   if (target === undefined) {
     throw new KthxError(
       'NOT_FOUND',
-      `${name} has no release before v${site.serving}`,
+      `${name} has no release before v${found.serving}`,
     );
   }
   const { serving } = await api<{ serving: number }>(
-    `/kthx/sites/${name}/serve`,
-    { method: 'POST', token, ...json({ n: target }) },
+    `/api/sites/${name}/serve`,
+    { method: 'POST', token: tokenFor(name), ...json({ n: target }) },
   );
   console.log(
-    `  v${site.serving} → v${serving} · held: new uploads do not replace v${serving} until you run kthx release`,
+    `  v${found.serving} → v${serving} · held: new uploads do not replace v${serving} until you run kthx release`,
   );
   return serving;
 }
@@ -232,13 +357,76 @@ export async function rollback(dir = '.', n?: number): Promise<number> {
 export async function release(dir = '.'): Promise<number | null> {
   const name = nameOf(dir);
   const { serving } = await api<{ serving: number | null }>(
-    `/kthx/sites/${name}/hold`,
+    `/api/sites/${name}/hold`,
     { method: 'DELETE', token: tokenFor(name) },
   );
   console.log(
     `  released: v${serving} serves, and the next upload replaces it`,
   );
   return serving;
+}
+
+export async function ls(dir = '.'): Promise<Site> {
+  const found = await site(nameOf(dir));
+  const held = found.held ? ' (held)' : '';
+  console.log(`  ${found.name}  ${found.url}`);
+  console.log(
+    found.serving === null
+      ? '  serving nothing yet'
+      : `  serving v${found.serving}${held}`,
+  );
+  for (const r of found.releases) {
+    const mark = r.n === found.serving ? '→' : ' ';
+    console.log(
+      `  ${mark} v${String(r.n).padEnd(4)} ${r.at}  ${kb(r.size).padStart(9)}  ${short(r.digest)}`,
+    );
+  }
+  for (const [what, used, limit] of [
+    ['db', found.usage.db_bytes, found.quotas.db_bytes],
+    ['files', found.usage.files_bytes, found.quotas.files_bytes],
+  ] as const) {
+    if (used === undefined || limit === undefined) continue;
+    console.log(`  ${what.padEnd(6)} ${kb(used)} of ${kb(limit)}`);
+  }
+  const { ai_requests_today, ai_tokens_today } = found.usage;
+  if (ai_requests_today !== undefined && ai_tokens_today !== undefined) {
+    console.log(
+      `  ai     ${ai_requests_today} of ${found.quotas.ai_requests_day} requests, ${ai_tokens_today} of ${found.quotas.ai_tokens_day} tokens today`,
+    );
+  }
+  return found;
+}
+
+/**
+ * Delete the site, once its name has been typed back.
+ *
+ * There is no undo and no account to restore from: the confirmation is the
+ * only thing between a typo and a name that answers 410 forever.
+ */
+export async function rm(dir = '.', confirm = prompt): Promise<void> {
+  const name = nameOf(dir);
+  const typed = confirm(`  type ${name} to delete it, and everything in it: `);
+  if (typed?.trim() !== name) {
+    console.log('  nothing deleted');
+    return;
+  }
+  await api(`/api/sites/${name}`, { method: 'DELETE', token: tokenFor(name) });
+  forget(name);
+  console.log(`  ${name} is gone; the name stays taken`);
+}
+
+export function openSite(dir = '.'): string {
+  const url = siteOrigin(nameOf(dir));
+  console.log(`  ${url}`);
+  const opener = process.platform === 'darwin' ? 'open' : 'xdg-open';
+  try {
+    // Unreferenced: the browser it starts outlives this command, and the
+    // command must not wait for it to be closed.
+    Bun.spawn([opener, url], { stdio: ['ignore', 'ignore', 'ignore'] }).unref();
+  } catch {
+    // No opener on this machine: the URL is printed, which is the point.
+  }
+  return url;
 }
 
 // --- printing ---------------------------------------------------------------
@@ -254,17 +442,27 @@ function digestOf(bytes: Uint8Array): string {
   return new Bun.CryptoHasher('sha256').update(bytes).digest('hex');
 }
 
-const short = (hex: string) => `sha256:${hex.slice(0, 4)}…${hex.slice(-4)}`;
+const short = (hex: string) => {
+  const bare = hex.replace(/^sha256:/, '');
+  return `sha256:${bare.slice(0, 4)}…${bare.slice(-4)}`;
+};
 
-const USAGE =
-  'usage: kthx deploy [dir] [--name <name>] | dev [dir] | rollback [n] | release';
+const USAGE = `usage: kthx <command> [dir] [--name <name>]
+  init      claim a name; write kthx.json, SKILL.md and a starter page
+  deploy    upload the directory as a release
+  dev       serve the directory on :4321 against the site's live backends
+  rollback  serve an earlier release and hold it
+  release   drop the hold; the newest release serves
+  ls        what the site serves, and what it uses
+  rm        delete the site
+  open      open the site in a browser`;
 
 if (import.meta.main) {
-  let values: { name?: string } = {};
+  let values: { name?: string; version?: boolean } = {};
   let positionals: string[] = [];
   try {
     ({ values, positionals } = parseArgs({
-      options: { name: { type: 'string' } },
+      options: { name: { type: 'string' }, version: { type: 'boolean' } },
       allowPositionals: true,
     }));
   } catch {
@@ -272,29 +470,62 @@ if (import.meta.main) {
     process.exit(2);
   }
   const [command, argument] = positionals;
+  const dir = argument ?? '.';
   try {
-    switch (command) {
-      case 'deploy':
-        await deploy(argument ?? '.', values);
-        break;
-      case 'dev':
-        (await import('./dev.ts')).dev(argument ?? '.');
-        break;
-      case 'rollback': {
-        const n = argument === undefined ? undefined : Number(argument);
-        if (n !== undefined && !(Number.isInteger(n) && n > 0)) {
+    if (values.version === true && command === undefined) {
+      console.log(version);
+    } else {
+      switch (command) {
+        case 'init':
+          await init(dir, values);
+          break;
+        case 'deploy':
+          await deploy(dir, values);
+          break;
+        case 'dev': {
+          const name = await nameFor(dir, values.name, '.');
+          // Not `tokenFor`: `kthx.json` is committed and the token is not, so a
+          // clone of the project must still be able to run the loop.
+          (await import('./dev.ts')).dev(dir, {
+            name,
+            token: knownToken(name),
+            site: siteOrigin(name),
+          });
+          break;
+        }
+        case 'rollback': {
+          const n = argument === undefined ? undefined : Number(argument);
+          if (n !== undefined && !(Number.isInteger(n) && n > 0)) {
+            console.error(USAGE);
+            process.exit(2);
+          }
+          await rollback('.', n);
+          break;
+        }
+        case 'release':
+          await release('.');
+          break;
+        case 'ls':
+          await ls(dir);
+          break;
+        case 'rm':
+          await rm(dir);
+          break;
+        case 'open':
+          openSite(dir);
+          break;
+        case 'mcp':
+          // The reference this CLI writes names it; the stdio bridge is not in
+          // this build. One honest line beats usage and exit 2.
+          console.error(
+            `MCP: not in this build — point the editor at ${siteOrigin(nameOf(dir))}/api/mcp with the bearer from ${sitesFile()}`,
+          );
+          process.exitCode = 1;
+          break;
+        default:
           console.error(USAGE);
           process.exit(2);
-        }
-        await rollback('.', n);
-        break;
       }
-      case 'release':
-        await release('.');
-        break;
-      default:
-        console.error(USAGE);
-        process.exit(2);
     }
   } catch (error) {
     if (!(error instanceof KthxError)) throw error;
