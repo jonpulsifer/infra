@@ -1,0 +1,107 @@
+# The image is digest-pinned by the installation, not by this chart — the
+# containers workflow rewrites the pin on the HelmRelease the same way it does
+# for every other first-party workload. `required` at the point of use, so an
+# installation that forgets it fails to render rather than to pull.
+image: ""
+port: 8080
+
+# The zone sites live under. `Host === zone` is the apex; `<name>.zone` is a
+# site host. It is the whole of what the route publishes, what the process
+# dispatches on, and what the readiness probe has to send as `Host` — one fact,
+# stated once.
+zone: kthx.dev
+
+# The depot: every release tar.gz, every uploaded file, and the nightly dump.
+# `terraform/gcp/projects/bluenose` owns it and outputs the name. `required` at
+# the point of use: empty is not "no depot yet", it is every release archive
+# living on one node's disk with no durable copy and nothing to notice.
+bucket: ""
+
+# The peers whose `cf-connecting-ip` this process believes. Empty means none,
+# which behind a gateway is one rate-limit key for the whole zone — so this is
+# load-bearing, not tuning. Cilium terminates the listener in a host-networked
+# Envoy, so the peer is a node address; the pod CIDR covers the case where it
+# is not. Both come from the cluster topology ConfigMap.
+trustedProxies: ""
+
+# `KTHX_ME_KEY` and `KTHX_PG_KEY`. The process refuses to boot without them and
+# a chart that generated them would rotate every visitor cookie and every site's
+# database password on each upgrade, so they arrive from 1Password through an
+# ExternalSecret the installation owns. `required` at the point of use, because
+# an omitted name renders a valid Deployment that dies on ConfigError.
+envFromSecret: ""
+
+# Both volumes are `local-path`, which is a directory on one node's disk, so the
+# pod and the Postgres instance have to be pinned to that node or they bind to a
+# volume that is not there. Empty means unpinned, which is only correct for a
+# `helm template` run.
+node: ""
+
+resources:
+  requests:
+    cpu: 250m
+    memory: 512Mi
+  limits:
+    memory: 1Gi
+
+sites:
+  # Release directories, unpacked. Losing it costs latency, never data: a
+  # release with no directory is refetched from the depot. Expansion is allowed
+  # live, so this starts at what the disk can spare rather than at a guess.
+  size: 50Gi
+  mountPath: /sites
+  # Unset: offsite has exactly one storage class and it is the default, so
+  # naming it here would put an installation fact in the chart.
+  storageClass: ""
+
+database:
+  size: 20Gi
+  storageClass: ""
+  # The control database and the role that owns every site database. The role
+  # gets `CREATEDB CREATEROLE` from `postInitApplicationSQL` and deliberately
+  # does NOT appear under `managed.roles` — see the comment in database.yaml.
+  name: kthx
+  resources:
+    requests: {cpu: 100m, memory: 512Mi}
+    limits: {memory: 2Gi}
+  parameters:
+    # 64 site pools of 2 connections, the control pool, the dump and the
+    # operator's own probes, with room left over.
+    max_connections: "300"
+    shared_buffers: 256MB
+  backup:
+    # 04:23 UTC: after the server's own daily sweeps, before anyone is awake.
+    schedule: "23 4 * * *"
+    # The Bun image has no `pg_dumpall`, so the dump runs in the same image
+    # family the instance does. The Cluster sets no `imageName`, so the
+    # operator's defaulting webhook picks the server's — bump this major with
+    # the operator's, or the day that default moves `pg_dumpall` refuses the
+    # server with a version mismatch and the only symptom is a failed Job.
+    # `KthxBackupFailing` in `clusters/offsite/monitoring/kthx-rules.yaml` is
+    # what makes that audible.
+    image: ghcr.io/cloudnative-pg/postgresql:18
+    # ...and that image has no GCS client, so the upload is its own step. gcloud
+    # reads an `external_account` document through `auth login --cred-file`, so
+    # the same federation the server uses covers this with no key anywhere.
+    uploaderImage: gcr.io/google.com/cloudsdktool/google-cloud-cli:582.0.0-slim
+    # The gzipped dump lands here before it is uploaded. A cap rather than an
+    # unbounded emptyDir, because this shares the node's disk with both PVCs.
+    scratchSize: 10Gi
+
+# The kthx names have no TLS listener: Cloudflare terminates and the tunnel
+# reaches this gateway on plain HTTP. No `sectionName` — the HTTP listener is
+# the only one a kthx name ever arrives on.
+gateway:
+  name: spindrift-apps
+  namespace: spindrift-apps
+
+# Keyless GCP, exactly as the spindrift chart does it: the pod projects a
+# ServiceAccount token for this cluster's own OIDC issuer and mounts an ordinary
+# ADC `external_account` document beside it. The pool principal is
+# `offsite:system:serviceaccount:kthx:kthx`, so the ServiceAccount's name and
+# namespace are part of the credential.
+gcp:
+  audience: ""
+  impersonationUrl: ""
+  tokenMountPath: /var/run/secrets/gcp
+  expirationSeconds: 3600

@@ -1,0 +1,199 @@
+{{/*
+The one process, the volume it serves from, and the identity it reaches Google
+with. Everything a request touches is in this file.
+*/}}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ include "kthx.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "kthx.labels" . | nindent 4 }}
+# The pod projects the tokens it needs with the audiences it needs. An
+# automounted API token is neither, and this process never calls Kubernetes.
+automountServiceAccountToken: false
+---
+{{/*
+The whole of the process's GCP federation, in one ordinary ADC
+`external_account` document — the audience, the token url, the impersonation
+url, and the path the projected token is written to. Any Google client in any
+process that mounts this finds the same credential; no service-account key
+exists anywhere in the path, which is what the organization policy requires.
+*/}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "kthx.fullname" . }}-gcp
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "kthx.labels" . | nindent 4 }}
+data:
+  gcp-credentials.json: |-
+    {
+      "type": "external_account",
+      "audience": {{ .Values.gcp.audience | quote }},
+      "subject_token_type": "urn:ietf:params:oauth:token-type:jwt",
+      "token_url": "https://sts.googleapis.com/v1/token",
+      {{- with .Values.gcp.impersonationUrl }}
+      "service_account_impersonation_url": {{ . | quote }},
+      {{- end }}
+      "credential_source": {
+        "file": {{ printf "%s/gcp-token" .Values.gcp.tokenMountPath | quote }},
+        "format": {
+          "type": "text"
+        }
+      }
+    }
+---
+{{/*
+Unpacked release directories. `keep`, because Helm deleting this claim would
+delete every site's bytes — recoverable from the depot, but only lazily and one
+404 at a time.
+*/}}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "kthx.fullname" . }}-sites
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "kthx.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/resource-policy: keep
+spec:
+  accessModes:
+    - ReadWriteOnce
+  {{- with .Values.sites.storageClass }}
+  storageClassName: {{ . | quote }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ .Values.sites.size }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "kthx.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "kthx.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  {{/*
+  One replica by construction, not by configuration: the abuse buckets and the
+  realtime rooms are in-process, and the release directories are a ReadWriteOnce
+  volume. `Recreate` because a rolling update would ask for a second pod holding
+  the same volume, which never schedules — the rollout would hang rather than
+  fail, with the old pod still serving and the new digest nowhere.
+  */}}
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "kthx.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "kthx.labels" . | nindent 8 }}
+    spec:
+      serviceAccountName: {{ include "kthx.fullname" . }}
+      automountServiceAccountToken: false
+      {{- with .Values.node }}
+      # Both volumes are a directory on this node's disk.
+      nodeSelector:
+        kubernetes.io/hostname: {{ . | quote }}
+      {{- end }}
+      securityContext:
+        {{- include "kthx.podSecurityContext" . | nindent 8 }}
+      containers:
+        - name: kthx
+          image: {{ required "image is required: the digest-pinned kthx image the installation carries" .Values.image | quote }}
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: {{ .Values.port }}
+              protocol: TCP
+          env:
+            # The sites volume and /tmp are the only writable paths.
+            - name: TMPDIR
+              value: /tmp
+            - name: HOME
+              value: /tmp
+            - name: PORT
+              value: {{ .Values.port | quote }}
+            - name: KTHX_ZONE
+              value: {{ .Values.zone | quote }}
+            - name: KTHX_BUCKET
+              # `required`, because an empty bucket is not a degraded mode: the
+              # process reads it as "no depot" and silently keeps every release
+              # archive on the local volume only, with nothing durable anywhere
+              # and no error to notice.
+              value: {{ required "bucket is required: it is the depot every release archive is durable in" .Values.bucket | quote }}
+            - name: KTHX_SITES_DIR
+              value: {{ .Values.sites.mountPath | quote }}
+            - name: KTHX_TRUSTED_PROXIES
+              value: {{ .Values.trustedProxies | quote }}
+            - name: GOOGLE_APPLICATION_CREDENTIALS
+              value: {{ printf "%s/gcp-credentials.json" .Values.gcp.tokenMountPath | quote }}
+            # The control database. The role is `initdb`'s owner, given
+            # `CREATEDB CREATEROLE` once — see database.yaml.
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "kthx.databaseName" . }}-app
+                  key: uri
+          # `required` rather than `with`: an omitted name would drop `envFrom`
+          # entirely and render a Deployment that boots and dies on ConfigError,
+          # which is a template error deferred to a crash loop.
+          envFrom:
+            - secretRef:
+                name: {{ required "envFromSecret is required: it carries KTHX_ME_KEY and KTHX_PG_KEY" .Values.envFromSecret }}
+          {{/*
+          Readiness only. The slow path here is Postgres, and a liveness probe
+          would restart the process exactly when it is least able to recover.
+
+          The `Host` header is the whole probe: this process dispatches on it and
+          answers 404 to any name outside the zone, so a probe sending the pod IP
+          — which no configuration can predict — would never see `/healthz`.
+          */}}
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: {{ .Values.port }}
+              httpHeaders:
+                - name: Host
+                  value: {{ .Values.zone | quote }}
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            - name: sites
+              mountPath: {{ .Values.sites.mountPath }}
+            {{- include "kthx.gcpVolumeMount" . | nindent 12 }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          securityContext:
+            {{- include "kthx.containerSecurityContext" . | nindent 12 }}
+      volumes:
+        - name: tmp
+          emptyDir: {}
+        - name: sites
+          persistentVolumeClaim:
+            claimName: {{ include "kthx.fullname" . }}-sites
+        {{- include "kthx.gcpVolume" . | nindent 8 }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "kthx.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "kthx.labels" . | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "kthx.selectorLabels" . | nindent 4 }}
+  ports:
+    - name: http
+      protocol: TCP
+      port: {{ .Values.port }}
+      targetPort: {{ .Values.port }}

@@ -1,0 +1,75 @@
+{{/*
+Ingress to the server is default-deny with two exceptions.
+
+This process is a public, anonymous-write surface reached through Cloudflare and
+the gateway; without a policy any pod in any namespace could reach it directly
+and skip the edge — the rate limiting, the cache rules and the `Origin` guard
+all assume the request came the long way round.
+
+Same-namespace siblings are the first exception, because the nightly dump and
+anything else this release grows cannot be named ahead of time.
+
+The Postgres instance is deliberately NOT selected here. It needs the CNPG
+operator, the Prometheus scrape and its own probes, none of which a portable
+selector can name, and getting that list wrong is a database that reads healthy
+while the operator cannot reach it. Its exposure is a password on a ClusterIP,
+same as every other CNPG cluster in this repo.
+*/}}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "kthx.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "kthx.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "kthx.selectorLabels" . | nindent 6 }}
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector: {}
+      ports:
+        - port: {{ .Values.port }}
+          protocol: TCP
+---
+{{/*
+The gateway's own admission, which the policy above cannot express.
+
+Cilium terminates a Gateway listener in the host-networked `cilium-envoy`
+DaemonSet, so the connection to a routed workload arrives carrying the `ingress`
+identity rather than from any namespace or pod a selector can name. No
+`namespaceSelector` matches an identity, so the one caller this route exists for
+is the one a NetworkPolicy alone denies — and the symptom is the listener
+answering 503 while the route reads `Accepted`, the endpoint reads `ready` and
+the pod reads healthy.
+
+ponytail: `fromEntities` is Cilium vocabulary and this is the only
+implementation-specific object in the chart. Offsite is Cilium; a cluster that
+is not fails on an unresolvable CRD, which is louder than serving 503.
+*/}}
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: {{ include "kthx.fullname" . }}-gateway
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "kthx.labels" . | nindent 4 }}
+spec:
+  endpointSelector:
+    matchLabels:
+      {{- include "kthx.selectorLabels" . | nindent 6 }}
+  ingress:
+    - fromEntities:
+        - ingress
+        # The kubelet's readiness probe, which arrives from the node and matches
+        # no selector either. Cilium's default `allow-localhost=auto` already
+        # permits it; naming it means a cluster running `allow-localhost=policy`
+        # does not silently keep this pod out of its own Service.
+        - host
+      toPorts:
+        - ports:
+            - port: {{ .Values.port | quote }}
+              protocol: TCP

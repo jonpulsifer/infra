@@ -13,15 +13,19 @@
 # its name, and it starts seeing it again if that route is removed. Nothing here
 # has to be told, and no ordering annotation exists to get wrong.
 #
-# **Two zones, and both are dedicated ones.** `${SPINDRIFT_DOMAIN}` and
-# `kthx.dev` are each disjoint from any hand-managed flat space, so a catch-all
-# over either can only ever answer for a name the control plane itself minted.
-# `kthx.dev` also carries its apex, which a wildcard never matches and which is
-# where a site is claimed. The control plane tells the zones apart by `Host`.
-# The other three zones the installation mints in are deliberately absent:
-# `${SECRET_DOMAIN}` is hand-managed and a wildcard there would answer for
-# names Terraform owns, and `embarrassing.ca` and `wishin.app` reach this
-# gateway for Components that are not cluster workloads at all.
+# **One zone, and it is a dedicated one.** `${SPINDRIFT_DOMAIN}` is disjoint
+# from any hand-managed flat space, so a catch-all over it can only ever answer
+# for a name the control plane itself minted. The other zones the installation
+# mints in are deliberately absent: `${SECRET_DOMAIN}` is hand-managed and a
+# wildcard there would answer for names Terraform owns, and `embarrassing.ca`
+# and `wishin.app` reach this gateway for Components that are not cluster
+# workloads at all.
+#
+# `kthx.dev` is served by its own workload on this same gateway
+# (`clusters/offsite/apps/kthx`), which owns both `kthx.dev` and `*.kthx.dev`.
+# The wildcard cannot be carried in both places: Cilium 1.20.1 merges two routes
+# matching one wildcard into a 50/50 `weighted_clusters` split rather than
+# tie-breaking, so half of every site's traffic would land here.
 #
 # It is a vessel resource for the same reason the Gateway beside it is: no
 # release owns it, and a `destroy()` cannot take it with the App it removes.
@@ -36,8 +40,8 @@ metadata:
     # publish every hostname below at the parent Gateway's status address —
     # RFC1918 A records over whole zones, claimed by a second source. The
     # wildcard records this route needs are the ones Terraform owns
-    # (`terraform/network/cloudflare/spindrift.tf`, one per zone plus the
-    # `kthx.dev` apex the tunnel module mints), pointed at the tunnel.
+    # (`terraform/network/cloudflare/spindrift.tf`, one per zone), pointed at
+    # the tunnel.
     #
     # Both spellings: external-dns v0.22.0 moved the default annotation prefix
     # with no fallback, and a controller reads exactly one of them. Carrying the
@@ -51,12 +55,9 @@ spec:
     - name: spindrift-apps
   # No `sectionName`: a `${SPINDRIFT_DOMAIN}` name arrives on the TLS listener
   # from the lab and on the plain HTTP one from the tunnel, and the page is the
-  # same answer either way. The `kthx.dev` names have no TLS listener and only
-  # ever arrive from the tunnel.
+  # same answer either way.
   hostnames:
     - "*.${SPINDRIFT_DOMAIN}"
-    - kthx.dev
-    - "*.kthx.dev"
   rules:
     - backendRefs:
         # The control plane, across the namespace boundary — granted below. It

@@ -78,6 +78,13 @@ spec:
         # Pick up the opentelemetry-collector ServiceMonitor from base/monitoring
         # and any ServiceMonitors this chart ships, via the release label.
         serviceMonitorSelectorNilUsesShards: false
+        # PodMonitors are selected by existing, not by carrying `release:
+        # prom-stack`. CloudNativePG renders the PodMonitor for a Cluster with
+        # `enablePodMonitor` itself and offers nowhere to add a label to it, so
+        # with the chart's default selector every CNPG instance in this cluster
+        # is scraped by nothing — and the alert that says the database is gone
+        # is indistinguishable from the metric never arriving.
+        podMonitorSelectorNilUsesHelmValues: false
     alertmanager:
       # The chart's stock route sends everything to a receiver named "null",
       # which accepts alerts and discards them. Without this block the whole
