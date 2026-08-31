@@ -140,11 +140,11 @@ resource "google_project_iam_member" "cluster_secret_reader" {
   member  = "principal://${local.fml_pool}/subject/${each.key}:system:serviceaccount:external-secrets:gcp-secret-manager"
 }
 
-# kthx is one Bun process in its own namespace on offsite. It holds no project
-# role at all — its whole GCP surface is object access to the depot bucket
-# storage.tf grants it, plus read on the source depot for the v1 release
-# archives still living there. That is why it federates to an account of its
-# own rather than borrowing the controller's, which is project-admin shaped.
+# kthx is one Bun process in its own namespace on offsite, serving a public
+# zone that takes anonymous writes. It holds no project role at all and reads
+# no other bucket — its whole GCP surface is object access to the depot bucket
+# storage.tf grants it. That is why it federates to an account of its own
+# rather than borrowing the controller's, which is project-admin shaped.
 #
 # `roles/iam.serviceAccountTokenCreator` is deliberately absent, unlike the
 # controller above: kthx reads a release with an authenticated GET as this

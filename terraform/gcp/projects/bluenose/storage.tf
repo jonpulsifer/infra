@@ -78,7 +78,7 @@ resource "google_storage_bucket" "kthx" {
     enabled = true
   }
 
-  # Backups are the only prefix that expires. Release archives are
+  # Backups are the only prefix that expires on age. Release archives are
   # content-addressed and a release row points at one by digest, so nothing
   # here may delete them on age; the server's own sweep is what drops the ones
   # no row references.
@@ -93,12 +93,16 @@ resource "google_storage_bucket" "kthx" {
     }
   }
 
-  # Deleting a live object only archives it while versioning is on, so without
-  # this the rule above keeps every dump forever instead of 30 days of them.
+  # Deleting or overwriting a live object only archives it while versioning is
+  # on, so without this nothing in the bucket ever reclaims a byte. Bucket-wide
+  # rather than scoped to a prefix: deleting a site has to actually delete the
+  # files uploaded to it, the server's release sweep has to actually reclaim,
+  # and `PUT /api/files/<path>` takes anonymous writes — overwrites of one path
+  # would otherwise grow the bucket without bound under a per-site quota that
+  # only ever meters live objects.
   lifecycle_rule {
     condition {
       days_since_noncurrent_time = 7
-      matches_prefix             = ["backups/"]
       with_state                 = "ARCHIVED"
     }
     action {
@@ -112,14 +116,5 @@ resource "google_storage_bucket" "kthx" {
 resource "google_storage_bucket_iam_member" "kthx" {
   bucket = google_storage_bucket.kthx.name
   role   = "roles/storage.objectAdmin"
-  member = google_service_account.kthx.member
-}
-
-# Release rows carried over from the v1 control plane keep their existing
-# `gs://bluenose-spindrift-source/…` location, so the server rehydrates those
-# releases from where they already are. Read-only, and only on that bucket.
-resource "google_storage_bucket_iam_member" "kthx_spindrift_source" {
-  bucket = google_storage_bucket.spindrift_source.name
-  role   = "roles/storage.objectViewer"
   member = google_service_account.kthx.member
 }
