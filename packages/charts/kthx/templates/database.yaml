@@ -102,8 +102,16 @@ spec:
       backoffLimit: 2
       template:
         metadata:
+          # Deliberately not `kthx.labels`. Those are a superset of the
+          # Service's selector, so a dump pod wearing them is admitted to the
+          # Service as a second endpoint — Ready the moment it starts, because
+          # it has no readiness probe, and listening on nothing — and the
+          # gateway load-balances roughly half of every kthx.dev request into
+          # it for as long as the Job lives. Nothing selects the labels below.
           labels:
-            {{- include "kthx.labels" . | nindent 12 }}
+            app.kubernetes.io/name: {{ include "kthx.databaseName" . }}-backup
+            app.kubernetes.io/instance: {{ .Release.Name }}
+            app.kubernetes.io/managed-by: {{ .Release.Service }}
         spec:
           restartPolicy: OnFailure
           serviceAccountName: {{ include "kthx.fullname" . }}
@@ -142,6 +150,15 @@ spec:
               # it keeps its own credential store — so the ADC document has to be
               # handed to it explicitly. It understands `external_account`, so
               # this is the same keyless federation the server uses.
+              #
+              # Unproven: `gcloud storage` resolves a destination bucket before
+              # writing to it on several paths, which wants
+              # `storage.buckets.get`, and the only grant this principal holds
+              # is `roles/storage.objectAdmin` on the depot, which does not
+              # include it. If the first scheduled run 403s, the fix is a
+              # `roles/storage.legacyBucketReader` member on the same bucket in
+              # `terraform/gcp/projects/bluenose/storage.tf` — bucket metadata
+              # only. `KthxBackupFailing` is what says so.
               command:
                 - bash
                 - -c
@@ -152,7 +169,7 @@ spec:
                     "gs://$KTHX_BUCKET/backups/pg/$(date -u +%F).sql.gz"
               env:
                 - name: KTHX_BUCKET
-                  value: {{ .Values.bucket | quote }}
+                  value: {{ required "bucket is required: it is the depot every release archive is durable in" .Values.bucket | quote }}
                 - name: GOOGLE_APPLICATION_CREDENTIALS
                   value: {{ printf "%s/gcp-credentials.json" .Values.gcp.tokenMountPath | quote }}
                 - name: HOME

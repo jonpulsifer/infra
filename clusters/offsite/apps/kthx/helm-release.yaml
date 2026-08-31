@@ -36,6 +36,14 @@ spec:
     # `cf-connecting-ip` a rate-limit bucket is keyed by is only believed from
     # the gateway hop, which is a host-networked Envoy on a node address. The
     # pod CIDR covers the case where it is not.
+    #
+    # What this trusts is the gateway hop, not the tunnel. The `spindrift-apps`
+    # Gateway also carries a lab-reachable LoadBalancer address, so anything on
+    # the LAN or the tailnet can reach port 80 with a kthx `Host` and a forged
+    # `CF-Connecting-IP` and be believed — worth a per-caller claim allowance
+    # and a write bucket each, nothing more. Making it enforceable means
+    # requiring cloudflared's own address in `x-forwarded-for` before believing
+    # the header, which is a change in the server, not here.
     trustedProxies: ${K8S_NODE_CIDR},${CILIUM_POD_CIDR}
     # The release volume and the database volume are both `local-path`, which is
     # a directory on one node's disk. oldschool: it has the free space and

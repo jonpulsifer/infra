@@ -62,3 +62,39 @@ spec:
           annotations:
             message: "kthx site databases are past 80% of the kthx-db volume"
             description: "Site databases sum to more than 80% of what the kthx-db claim asks for. Each site is capped at 256 MiB, so this is site count, not one runaway: expand the claim (allowed live) or delete dead sites."
+
+        # The claim above is the only budget the sites volume has, and nothing
+        # enforces it: `local-path` hands out a directory on `/mnt/disks`, so
+        # the process reading `/sites` sees that whole filesystem — shared with
+        # kthx-db, tempo, prometheus, atlantis-data and every valkey. The
+        # server's own eviction of unguaranteed release directories is keyed off
+        # the same reading, so it does not fire until the disk itself is 80%
+        # used. This is the warning that arrives first, and node-exporter is the
+        # only thing that can see it: `kubelet_volume_stats_*` does not exist
+        # for hostPath volumes.
+        - alert: KthxSitesDiskFilling
+          expr: |
+            node_filesystem_avail_bytes{instance="oldschool",mountpoint="/mnt/disks"}
+            /
+            node_filesystem_size_bytes{instance="oldschool",mountpoint="/mnt/disks"}
+            < 0.25
+          for: 30m
+          labels:
+            severity: warning
+          annotations:
+            message: "oldschool /mnt/disks is under 25% free"
+            description: "Every local-path volume on oldschool lives here, and the one that grows from anonymous public uploads is the kthx sites volume. Measure that directory first, then the other claims on this disk. At 20% free the server starts evicting release directories that are neither serving nor previous; at 5% NodeFilesystemAlmostOutOfSpace fires and every workload on the node is already in trouble."
+
+        # A dump that never runs is indistinguishable from one that runs, until
+        # a restore is needed. Two failure modes have no other signal: the
+        # upload needs `storage.buckets.get`, which `roles/storage.objectAdmin`
+        # does not grant, and the dump client major is pinned in the chart while
+        # the server major comes from the operator defaulting webhook.
+        - alert: KthxBackupFailing
+          expr: kube_job_status_failed{namespace="kthx",job_name=~"kthx-db-backup-.*"} > 0
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            message: "The nightly kthx database dump failed"
+            description: "A kthx-db-backup Job exhausted its retries, so the depot has no dump under backups/pg for today and the only undo path for a site database is stale. Read both containers of the Job — dump is pg_dumpall, upload is gcloud — before the next window rotates the history away (3 failures are kept)."

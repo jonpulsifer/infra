@@ -106,7 +106,7 @@ spec:
         {{- include "kthx.podSecurityContext" . | nindent 8 }}
       containers:
         - name: kthx
-          image: {{ .Values.image | quote }}
+          image: {{ required "image is required: the digest-pinned kthx image the installation carries" .Values.image | quote }}
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: {{ .Values.port }}
@@ -122,7 +122,11 @@ spec:
             - name: KTHX_ZONE
               value: {{ .Values.zone | quote }}
             - name: KTHX_BUCKET
-              value: {{ .Values.bucket | quote }}
+              # `required`, because an empty bucket is not a degraded mode: the
+              # process reads it as "no depot" and silently keeps every release
+              # archive on the local volume only, with nothing durable anywhere
+              # and no error to notice.
+              value: {{ required "bucket is required: it is the depot every release archive is durable in" .Values.bucket | quote }}
             - name: KTHX_SITES_DIR
               value: {{ .Values.sites.mountPath | quote }}
             - name: KTHX_TRUSTED_PROXIES
@@ -136,11 +140,12 @@ spec:
                 secretKeyRef:
                   name: {{ include "kthx.databaseName" . }}-app
                   key: uri
-          {{- with .Values.envFromSecret }}
+          # `required` rather than `with`: an omitted name would drop `envFrom`
+          # entirely and render a Deployment that boots and dies on ConfigError,
+          # which is a template error deferred to a crash loop.
           envFrom:
             - secretRef:
-                name: {{ . }}
-          {{- end }}
+                name: {{ required "envFromSecret is required: it carries KTHX_ME_KEY and KTHX_PG_KEY" .Values.envFromSecret }}
           {{/*
           Readiness only. The slow path here is Postgres, and a liveness probe
           would restart the process exactly when it is least able to recover.

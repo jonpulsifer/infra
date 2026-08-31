@@ -1,6 +1,7 @@
 # The image is digest-pinned by the installation, not by this chart — the
 # containers workflow rewrites the pin on the HelmRelease the same way it does
-# for every other first-party workload.
+# for every other first-party workload. `required` at the point of use, so an
+# installation that forgets it fails to render rather than to pull.
 image: ""
 port: 8080
 
@@ -11,7 +12,9 @@ port: 8080
 zone: kthx.dev
 
 # The depot: every release tar.gz, every uploaded file, and the nightly dump.
-# `terraform/gcp/projects/bluenose` owns it and outputs the name.
+# `terraform/gcp/projects/bluenose` owns it and outputs the name. `required` at
+# the point of use: empty is not "no depot yet", it is every release archive
+# living on one node's disk with no durable copy and nothing to notice.
 bucket: ""
 
 # The peers whose `cf-connecting-ip` this process believes. Empty means none,
@@ -24,7 +27,8 @@ trustedProxies: ""
 # `KTHX_ME_KEY` and `KTHX_PG_KEY`. The process refuses to boot without them and
 # a chart that generated them would rotate every visitor cookie and every site's
 # database password on each upgrade, so they arrive from 1Password through an
-# ExternalSecret the installation owns.
+# ExternalSecret the installation owns. `required` at the point of use, because
+# an omitted name renders a valid Deployment that dies on ConfigError.
 envFromSecret: ""
 
 # Both volumes are `local-path`, which is a directory on one node's disk, so the
@@ -69,7 +73,12 @@ database:
     # 04:23 UTC: after the server's own daily sweeps, before anyone is awake.
     schedule: "23 4 * * *"
     # The Bun image has no `pg_dumpall`, so the dump runs in the same image
-    # family the instance does.
+    # family the instance does. The Cluster sets no `imageName`, so the
+    # operator's defaulting webhook picks the server's — bump this major with
+    # the operator's, or the day that default moves `pg_dumpall` refuses the
+    # server with a version mismatch and the only symptom is a failed Job.
+    # `KthxBackupFailing` in `clusters/offsite/monitoring/kthx-rules.yaml` is
+    # what makes that audible.
     image: ghcr.io/cloudnative-pg/postgresql:18
     # ...and that image has no GCS client, so the upload is its own step. gcloud
     # reads an `external_account` document through `auth login --cred-file`, so
