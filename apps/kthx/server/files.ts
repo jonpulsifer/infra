@@ -33,6 +33,8 @@ export const MAX_FILES = 1000;
 
 /** How many bodies may be arriving at once, process-wide. */
 const MAX_PUTS = 8;
+/** How many of a site's depot objects its teardown removes at once. */
+const DELETE_WIDTH = 16;
 /** The same deadline a release body gets. */
 const BODY_TIMEOUT_MS = 120_000;
 
@@ -59,12 +61,6 @@ const ALLOWED_FAMILIES: ReadonlySet<string> = new Set([
   'video',
 ]);
 
-/**
- * The one type inside an allowed family that is a document with script in it.
- * `image/svg+xml` on the site's own origin is a stored XSS, not a picture.
- */
-const REFUSED_TYPES: ReadonlySet<string> = new Set(['image/svg+xml']);
-
 /** Rendered rather than downloaded — everything else is an attachment. */
 function inline(type: string): boolean {
   const family = type.split('/')[0] ?? '';
@@ -86,9 +82,14 @@ function inline(type: string): boolean {
  */
 export function allowedType(header: string | null): string | null {
   const media = (header ?? '').split(';')[0]?.trim().toLowerCase() ?? '';
-  if (!MEDIA_TYPE.test(media) || REFUSED_TYPES.has(media)) return null;
+  if (!MEDIA_TYPE.test(media)) return null;
+  const [family = '', subtype = ''] = media.split('/');
+  // A rule rather than a list, because `image/svg+xml` is not the only spelling
+  // of it: anything XML-ish inside an allowed family is a document with script
+  // in it, and a list of one is a typo away from taking the thing it refuses.
+  if (subtype.includes('svg') || subtype.endsWith('+xml')) return null;
   if (ALLOWED_TYPES.has(media)) return media;
-  return ALLOWED_FAMILIES.has(media.split('/')[0] ?? '') ? media : null;
+  return ALLOWED_FAMILIES.has(family) ? media : null;
 }
 
 /** Whether this is a path a file may have. */
@@ -111,6 +112,12 @@ interface FileRow {
   readonly sha256: string;
   readonly updated_at: Date;
 }
+
+/** What a listing answers with, and nothing more. */
+type Listed = Omit<FileRow, 'owner' | 'sha256'>;
+
+/** What a `PUT` has to put back when it cannot finish. */
+type Existing = Omit<FileRow, 'path'>;
 
 /** Where a site's files live: beside its release directories, never inside one. */
 export function filesDir(sitesDir: string, site: string): string {
@@ -142,12 +149,16 @@ export async function dropFiles(ctx: Ctx, site: string): Promise<void> {
     select path from files where site = ${site}
   `) as { path: string }[];
   await ctx.sql`delete from files where site = ${site}`;
-  for (const row of rows) {
-    await ctx.depot
-      .delete(objectName(site, row.path))
-      .catch((cause: unknown) => {
-        logCause(ctx.id, `deleting ${objectName(site, row.path)}`, cause);
-      });
+  // In batches, because a site at the file ceiling is a thousand round trips to
+  // the depot: one at a time is minutes inside a request the edge gives 100 s.
+  for (let at = 0; at < rows.length; at += DELETE_WIDTH) {
+    await Promise.all(
+      rows.slice(at, at + DELETE_WIDTH).map((row) =>
+        ctx.depot.delete(objectName(site, row.path)).catch((cause: unknown) => {
+          logCause(ctx.id, `deleting ${objectName(site, row.path)}`, cause);
+        }),
+      ),
+    );
   }
 }
 
@@ -228,9 +239,7 @@ export async function filesApi(
 ): Promise<Response> {
   const method = request.method;
   if (path === '/api/files' || path === '/api/files/') {
-    if (method !== 'GET' && method !== 'HEAD') {
-      return refuse('METHOD_NOT_ALLOWED', ctx.id);
-    }
+    if (method !== 'GET') return refuse('METHOD_NOT_ALLOWED', ctx.id);
     return list(ctx, site);
   }
   const file = path.slice('/api/files/'.length);
@@ -240,10 +249,12 @@ export async function filesApi(
 }
 
 async function list(ctx: Ctx, site: string): Promise<Response> {
+  // Not `owner`: a listing is public on the site origin, and a visitor id is
+  // the one column here that names somebody.
   const rows = (await ctx.sql`
-    select path, owner, size, type, sha256, updated_at from files
+    select path, size, type, updated_at from files
     where site = ${site} order by path
-  `) as FileRow[];
+  `) as Listed[];
   return ok(
     {
       items: rows.map((row) => ({
@@ -284,16 +295,17 @@ async function put(
     // Bun's connection idle timeout is 10 s, which a 25 MiB body over a phone
     // does not fit inside.
     ctx.server?.timeout(request, BODY_TIMEOUT_MS / 1000 + 10);
-    let bytes: Uint8Array;
+    let bytes: Uint8Array | null;
     try {
-      bytes = new Uint8Array(await bodyWithin(request, BODY_TIMEOUT_MS));
+      bytes = await bodyWithin(request, BODY_TIMEOUT_MS, MAX_FILE_BYTES);
     } catch (cause) {
       logCause(ctx.id, 'reading a file body', cause);
       return refuse('TIMEOUT', ctx.id);
     }
-    if (bytes.byteLength > MAX_FILE_BYTES) return refuse('TOO_LARGE', ctx.id);
+    if (bytes === null) return refuse('TOO_LARGE', ctx.id);
+    const body = bytes;
     return await underLock(`${site}/${path}`, () =>
-      store(ctx, site, path, me, owner, bytes, type),
+      store(ctx, site, path, me, owner, body, type),
     );
   } finally {
     slot();
@@ -311,8 +323,9 @@ async function store(
   type: string,
 ): Promise<Response> {
   const [existing] = (await ctx.sql`
-    select owner, size from files where site = ${site} and path = ${path} limit 1
-  `) as { owner: string; size: string | number }[];
+    select owner, size, type, sha256, updated_at from files
+    where site = ${site} and path = ${path} limit 1
+  `) as Existing[];
   if (existing !== undefined && existing.owner !== me.id && !owner) {
     return refuse('FORBIDDEN', ctx.id);
   }
@@ -327,31 +340,37 @@ async function store(
   }
   if ((usage?.files ?? 0) >= MAX_FILES) return refuse('SITE_FULL', ctx.id);
 
+  const sha256 = new Bun.CryptoHasher('sha256').update(bytes).digest('hex');
   const release = reserve(site, bytes.byteLength);
   const target = join(filesDir(ctx.config.sitesDir, site), path);
+  // The row goes first and is put back if the bytes do not land. The other
+  // order breaks on a database blip between two writes that did land: the row
+  // then names the old digest and the old type over the new bytes, which is a
+  // strong etag lying to every cache that honours it and a `content-type` that
+  // no longer describes what `/files/*` serves.
   try {
+    await ctx.sql`
+      insert into files (site, path, owner, size, type, sha256, updated_at)
+      values (${site}, ${path}, ${existing?.owner ?? me.id}, ${bytes.byteLength},
+              ${type}, ${sha256}, now())
+      on conflict (site, path) do update
+        set size = excluded.size, type = excluded.type,
+            sha256 = excluded.sha256, updated_at = excluded.updated_at
+    `;
     await write(ctx.config.sitesDir, site, target, bytes);
     await ctx.depot.put(objectName(site, path), bytes);
   } catch (cause) {
+    await undo(ctx, site, path, existing, target);
+    // A path that names a directory, or that walks through a file as if it were
+    // one, is the caller's to fix and repeats for free. It is a 400, not a 500,
+    // and not a stack in the operator's log every time.
+    if (COLLIDES.has(errno(cause))) return refuse('INVALID_PATH', ctx.id);
     logCause(ctx.id, `storing files/${site}/${path}`, cause);
-    // Whatever landed on disk is not what any row describes. Removing it puts
-    // the file back where the row says it is: absent, or a rehydrate of the
-    // bytes the depot still holds.
-    await rm(target, { force: true }).catch(() => undefined);
     return refuse('STORAGE_FAILURE', ctx.id);
   } finally {
     release();
   }
 
-  const sha256 = new Bun.CryptoHasher('sha256').update(bytes).digest('hex');
-  await ctx.sql`
-    insert into files (site, path, owner, size, type, sha256, updated_at)
-    values (${site}, ${path}, ${existing?.owner ?? me.id}, ${bytes.byteLength},
-            ${type}, ${sha256}, now())
-    on conflict (site, path) do update
-      set size = excluded.size, type = excluded.type,
-          sha256 = excluded.sha256, updated_at = excluded.updated_at
-  `;
   return ok(
     {
       path,
@@ -362,6 +381,47 @@ async function store(
     ctx.id,
     existing === undefined ? 201 : 200,
   );
+}
+
+/** `write` failing because the path is already something else on the volume. */
+const COLLIDES: ReadonlySet<string> = new Set(['EISDIR', 'ENOTDIR', 'EEXIST']);
+
+/** The errno a filesystem refusal carries, or `''` for anything else. */
+function errno(cause: unknown): string {
+  return typeof cause === 'object' && cause !== null && 'code' in cause
+    ? String((cause as { code: unknown }).code)
+    : '';
+}
+
+/**
+ * The row back to the bytes it described, and the bytes that were to replace
+ * them gone from the volume.
+ *
+ * This is what pays for writing the row first: the worst a failed `PUT` leaves
+ * is a row that briefly names bytes which never landed, which `serveFile`
+ * already answers as a 404.
+ */
+async function undo(
+  ctx: Ctx,
+  site: string,
+  path: string,
+  existing: Existing | undefined,
+  target: string,
+): Promise<void> {
+  await rm(target, { force: true }).catch(() => undefined);
+  try {
+    if (existing === undefined) {
+      await ctx.sql`delete from files where site = ${site} and path = ${path}`;
+      return;
+    }
+    await ctx.sql`
+      update files set size = ${Number(existing.size)}, type = ${existing.type},
+        sha256 = ${existing.sha256}, updated_at = ${existing.updated_at}
+      where site = ${site} and path = ${path}
+    `;
+  } catch (cause) {
+    logCause(ctx.id, `undoing files/${site}/${path}`, cause);
+  }
 }
 
 /**

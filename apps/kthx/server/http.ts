@@ -163,30 +163,52 @@ export function empty(id: string): Response {
 }
 
 /**
- * The whole body, or a rejection once the deadline passes.
+ * The whole body, `null` once it goes past `maxBytes`, or a rejection once the
+ * deadline passes.
  *
  * `fetch` has no deadline of its own, so a caller that opens a `PUT` and then
  * sends a byte a minute holds a slot — an unpack slot for a release, one of the
  * eight file writes — for as long as the kernel keeps the socket.
+ *
+ * Read a chunk at a time and cancelled the moment it goes over, because
+ * `content-length` is absent on a chunked body and the server-wide ceiling is
+ * 32 MiB: materialising first would let every caller pin more than its own
+ * route allows, times however many the route runs at once.
  */
 export async function bodyWithin(
   request: Request,
   ms: number,
-): Promise<ArrayBuffer> {
+  maxBytes: number,
+): Promise<Uint8Array | null> {
+  const reader = request.body?.getReader();
+  if (reader === undefined) return new Uint8Array();
   let timer: ReturnType<typeof setTimeout> | undefined;
+  const expired = new Promise<never>((_resolve, reject) => {
+    timer = setTimeout(
+      () => reject(new Error('the body did not arrive in time')),
+      ms,
+    );
+  });
+  const parts: Uint8Array[] = [];
+  let seen = 0;
   try {
-    return await Promise.race([
-      request.arrayBuffer(),
-      new Promise<never>((_resolve, reject) => {
-        timer = setTimeout(
-          () => reject(new Error('the body did not arrive in time')),
-          ms,
-        );
-      }),
-    ]);
+    for (;;) {
+      const { done, value } = await Promise.race([reader.read(), expired]);
+      if (done === true || value === undefined) break;
+      seen += value.byteLength;
+      if (seen > maxBytes) {
+        await reader.cancel().catch(() => undefined);
+        return null;
+      }
+      parts.push(value);
+    }
+  } catch (cause) {
+    await reader.cancel().catch(() => undefined);
+    throw cause;
   } finally {
     clearTimeout(timer);
   }
+  return Buffer.concat(parts);
 }
 
 /** What the caller is told nothing about, written where an operator can find it. */

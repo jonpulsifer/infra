@@ -349,14 +349,14 @@ async function stage(
   const declared = Number(request.headers.get('content-length') ?? 0);
   if (declared > MAX_ARCHIVE_BYTES) return refuse('TOO_LARGE', ctx.id);
 
-  let bytes: Uint8Array;
+  let bytes: Uint8Array | null;
   try {
-    bytes = new Uint8Array(await bodyWithin(request, BODY_TIMEOUT_MS));
+    bytes = await bodyWithin(request, BODY_TIMEOUT_MS, MAX_ARCHIVE_BYTES);
   } catch (cause) {
     logCause(ctx.id, 'reading the upload', cause);
     return refuse('TIMEOUT', ctx.id);
   }
-  if (bytes.byteLength > MAX_ARCHIVE_BYTES) return refuse('TOO_LARGE', ctx.id);
+  if (bytes === null) return refuse('TOO_LARGE', ctx.id);
 
   // Only now: a slot is a share of the process's memory and its disk, and a
   // caller that trickles a body for two minutes must not hold one of the two

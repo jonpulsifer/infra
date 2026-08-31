@@ -10,8 +10,45 @@
 import {
   FederationError,
   type FederationOptions,
+  type TokenProvider,
   workloadIdentityToken,
 } from './federation.ts';
+
+/**
+ * One token provider per credential, so the cache it already keeps is kept.
+ *
+ * A provider built per call discards its cache with itself, and every call here
+ * then pays a whole exchange — the projected-token read, the token POST, the
+ * impersonation POST — before the request it wanted to make. That is three
+ * round trips per object, which a caller deleting a thousand of them feels as
+ * minutes. The credential is a deploy-time document, so keying on what it says
+ * is keying on the installation; the projected token underneath it is re-read
+ * on every exchange, which is what rotation actually turns on.
+ */
+const providers = new Map<string, TokenProvider>();
+
+function tokenFor(federation: FederationOptions): TokenProvider {
+  // A test stands its own clock, reader and transport behind the client, and
+  // those belong to that test rather than to the process.
+  if (
+    federation.fetch !== undefined ||
+    federation.now !== undefined ||
+    federation.readToken !== undefined
+  ) {
+    return workloadIdentityToken(federation);
+  }
+  const key = [
+    federation.tokenPath,
+    federation.audience,
+    federation.tokenUrl,
+    federation.impersonationUrl ?? '',
+  ].join('\u0000');
+  const known = providers.get(key);
+  if (known !== undefined) return known;
+  const provider = workloadIdentityToken(federation);
+  providers.set(key, provider);
+  return provider;
+}
 
 /**
  * How long an upload may stall before it is abandoned.
@@ -55,7 +92,7 @@ export async function uploadToGcsBucket({
   federation,
   timeoutMs,
 }: UploadToGcsInput): Promise<{ location: string; size: number }> {
-  const getToken = workloadIdentityToken(federation);
+  const getToken = tokenFor(federation);
   const token = await getToken();
 
   const send = federation.fetch ?? ((request: Request) => fetch(request));
@@ -133,7 +170,7 @@ async function getObject(
   { bucketName, objectName, federation, timeoutMs }: GcsObjectInput,
   query: string,
 ): Promise<Response> {
-  const getToken = workloadIdentityToken(federation);
+  const getToken = tokenFor(federation);
   const token = await getToken();
 
   const send = federation.fetch ?? ((request: Request) => fetch(request));
@@ -221,7 +258,7 @@ export async function deleteGcsObject({
   federation,
   timeoutMs,
 }: GcsObjectInput): Promise<void> {
-  const token = await workloadIdentityToken(federation)();
+  const token = await tokenFor(federation)();
   const send = federation.fetch ?? ((request: Request) => fetch(request));
   const url = `https://storage.googleapis.com/storage/v1/b/${encodeURIComponent(bucketName)}/o/${encodeURIComponent(objectName)}`;
   const response = await send(

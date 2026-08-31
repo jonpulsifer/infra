@@ -9,7 +9,7 @@
  * the release path it lives beside.
  */
 import { describe, expect, test } from 'bun:test';
-import { rm, stat } from 'node:fs/promises';
+import { mkdir, rm, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tarGz } from '../../cli/tar.ts';
 import {
@@ -17,6 +17,7 @@ import {
   MAX_FILES,
   MAX_FILES_BYTES,
 } from '../../server/files.ts';
+import { bodyWithin } from '../../server/http.ts';
 import { ME_COOKIE } from '../../server/me.ts';
 import { ask, withServer, ZONE } from '../harness/server.ts';
 
@@ -201,6 +202,8 @@ describe('the content-type allowlist', () => {
     for (const type of [
       'text/html',
       'image/svg+xml',
+      'image/svg',
+      'image/svg+xml.',
       'application/xhtml+xml',
       'text/javascript',
       'application/javascript',
@@ -517,5 +520,157 @@ describe('the reserved prefix', () => {
     const sneaky = await get(site, '/files/sneaky.html');
     expect(sneaky.status).toBe(404);
     expect(sneaky.headers.get('content-type')).toContain('application/json');
+  });
+});
+
+describe('the bounds a body meets', () => {
+  test('refuses more than the cap without holding it, and gives up on a stall', async () => {
+    // A chunked body carries no `content-length`, so the reader is the only
+    // thing between an anonymous caller and the server-wide 32 MiB.
+    let cancelled = false;
+    const trickle = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        controller.enqueue(new Uint8Array(64));
+      },
+      cancel() {
+        cancelled = true;
+      },
+    });
+    const over = await bodyWithin(
+      new Request('http://x/', { method: 'PUT', body: trickle }),
+      60_000,
+      256,
+    );
+    expect(over).toBeNull();
+    expect(cancelled).toBe(true);
+
+    const stalled = new ReadableStream<Uint8Array>({ start() {} });
+    await expect(
+      bodyWithin(
+        new Request('http://x/', { method: 'PUT', body: stalled }),
+        20,
+        1024,
+      ),
+    ).rejects.toThrow(/did not arrive in time/);
+  });
+
+  test('takes eight bodies at once and refuses the ninth', async () => {
+    const site = await claimed('inflight');
+    const gates: (() => void)[] = [];
+    const held = Array.from({ length: 8 }, (_unused, n) =>
+      kthx().fetch(
+        ask(`/api/files/held-${n}.png`, {
+          host: site.host,
+          method: 'PUT',
+          headers: { 'content-type': 'image/png' },
+          body: new ReadableStream<Uint8Array>({
+            start(controller) {
+              controller.enqueue(PNG);
+            },
+            pull(controller) {
+              return new Promise<void>((resolve) => {
+                gates.push(() => {
+                  controller.close();
+                  resolve();
+                });
+              });
+            },
+          }),
+          address: address(),
+        }),
+      ),
+    );
+    // Every slot is held only once each body is actually arriving.
+    for (let waited = 0; gates.length < 8 && waited < 2000; waited += 1) {
+      await Bun.sleep(1);
+    }
+    expect(gates).toHaveLength(8);
+
+    const ninth = await put(site, 'ninth.png', PNG, { type: 'image/png' });
+    expect(ninth.status).toBe(503);
+    expect((await ninth.json()).code).toBe('BUSY');
+
+    for (const open of gates) open();
+    expect(
+      (await Promise.all(held)).map((response) => response.status),
+    ).toEqual(Array.from({ length: 8 }, () => 201));
+  });
+
+  test('is not something a foreign page may write', async () => {
+    const site = await claimed('foreign');
+    const refused = await kthx().fetch(
+      ask('/api/files/theirs.png', {
+        host: site.host,
+        method: 'PUT',
+        headers: {
+          'content-type': 'image/png',
+          origin: 'https://evil.example',
+        },
+        body: PNG,
+        address: address(),
+      }),
+    );
+    expect(refused.status).toBe(403);
+    expect((await refused.json()).code).toBe('FORBIDDEN');
+  });
+});
+
+describe('a path already taken by something else on the volume', () => {
+  test("is the caller's to fix, and leaves no row behind", async () => {
+    const site = await claimed('collide');
+    expect(
+      (await put(site, 'a/b.txt', 'x', { type: 'text/plain' })).status,
+    ).toBe(201);
+    const onADirectory = await put(site, 'a', 'x', { type: 'text/plain' });
+    expect(onADirectory.status).toBe(400);
+    expect((await onADirectory.json()).code).toBe('INVALID_PATH');
+
+    expect((await put(site, 'c.txt', 'x', { type: 'text/plain' })).status).toBe(
+      201,
+    );
+    const throughAFile = await put(site, 'c.txt/deep.txt', 'x', {
+      type: 'text/plain',
+    });
+    expect(throughAFile.status).toBe(400);
+    expect((await throughAFile.json()).code).toBe('INVALID_PATH');
+
+    // The row is written before the bytes, so a refusal has to take it back.
+    const listed = await get(site, '/api/files').then((r) => r.json());
+    expect(listed.items.map((item: { path: string }) => item.path)).toEqual([
+      'a/b.txt',
+      'c.txt',
+    ]);
+  });
+
+  test('leaves the row it could not replace describing the bytes still there', async () => {
+    const site = await claimed('rollback');
+    const visitor: Visitor = {};
+    await put(site, 'one.txt', 'ORIGINAL', { type: 'text/plain', as: visitor });
+    const first = await get(site, '/files/one.txt');
+    const etag = first.headers.get('etag');
+
+    // The volume refuses the second write the way a full disk would: the path
+    // it renames onto is a directory now.
+    await rm(join(kthx().sitesDir, site.name, 'files/one.txt'));
+    await mkdir(join(kthx().sitesDir, site.name, 'files/one.txt'));
+    const failed = await put(site, 'one.txt', 'REPLACED', {
+      type: 'text/plain',
+      as: visitor,
+    });
+    expect(failed.status).toBe(400);
+
+    // Not a strong etag over changed bytes: the row still says what the depot
+    // still holds, and that is what serves.
+    // With the placeholder gone the volume misses and the depot answers, which
+    // is the same path a lost volume takes.
+    await rm(join(kthx().sitesDir, site.name, 'files/one.txt'), {
+      recursive: true,
+    });
+    const again = await get(site, '/files/one.txt');
+    expect(again.headers.get('etag')).toBe(etag);
+    expect(await again.text()).toBe('ORIGINAL');
+    expect(
+      (await get(site, '/api/files').then((r) => r.json())).items[0].size,
+    ).toBe('ORIGINAL'.length);
   });
 });
