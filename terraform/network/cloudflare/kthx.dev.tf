@@ -81,7 +81,17 @@ resource "cloudflare_dns_record" "www_kthx_dev" {
 # site document pays a full origin round-trip. These rules cache what the
 # origin says is cacheable and keep the data plane out of it. Cache rules
 # stack and the last match wins per setting, so the bypass rule is last —
-# which is also why it has to spell out that `/_/sdk.js` is not data.
+# which is also why it has to spell out that `/api/sdk.js` is not data.
+#
+# Neither rule carries a real host test: the ruleset is scoped to this zone, so
+# both already cover the apex and every `*.kthx.dev` site host. The apex needs
+# rule 1 as much as a site host does — `/skill.md` and `/cli/kthx.tgz` are
+# apex-only and neither extension is on Cloudflare's default cached list — and
+# needs rule 2 for `/api/sites…`. The landing page's own `no-cache` is what
+# keeps it revalidated under `respect_origin`. `/kthx/` is the one exception:
+# that path only ever existed on the apex, and it goes when the retired v1 API
+# does. The bare `/api` is spelled out because `starts_with(…, "/api")` would
+# also swallow `/apifoo`.
 resource "cloudflare_ruleset" "kthx_dev_cache" {
   zone_id     = cloudflare_zone.kthx_dev.id
   name        = "cache"
@@ -92,7 +102,7 @@ resource "cloudflare_ruleset" "kthx_dev_cache" {
   rules = [
     {
       description = "sites cache on the origin's terms"
-      expression  = "(ends_with(http.host, \".kthx.dev\"))"
+      expression  = "(ends_with(http.host, \"kthx.dev\"))"
       action      = "set_cache_settings"
       enabled     = true
       action_parameters = {
@@ -111,7 +121,7 @@ resource "cloudflare_ruleset" "kthx_dev_cache" {
     },
     {
       description = "the data plane and the API are never cached; the SDK is not data"
-      expression  = "(starts_with(http.request.uri.path, \"/_/\") and http.request.uri.path ne \"/_/sdk.js\") or (http.host eq \"kthx.dev\" and starts_with(http.request.uri.path, \"/kthx/\"))"
+      expression  = "((http.request.uri.path eq \"/api\" or starts_with(http.request.uri.path, \"/api/\")) and http.request.uri.path ne \"/api/sdk.js\") or starts_with(http.request.uri.path, \"/files/\") or (starts_with(http.request.uri.path, \"/_/\") and http.request.uri.path ne \"/_/sdk.js\") or (http.host eq \"kthx.dev\" and starts_with(http.request.uri.path, \"/kthx/\"))"
       action      = "set_cache_settings"
       enabled     = true
       action_parameters = {

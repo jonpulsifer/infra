@@ -8,3 +8,8 @@ output "vessel_network_block" {
     region = module.network.region
   }
 }
+
+output "kthx_bucket" {
+  description = "The kthx depot bucket — KTHX_BUCKET on the kthx server."
+  value       = google_storage_bucket.kthx.name
+}
