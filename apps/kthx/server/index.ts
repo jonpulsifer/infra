@@ -79,11 +79,66 @@ function landingHtml(): Promise<string> {
  * that is not there.
  */
 const TARBALL = join(import.meta.dir, '..', 'dist', 'kthx.tgz');
+const TARBALL_VERSION = join(import.meta.dir, '..', 'dist', 'version.json');
 
-async function tarball(id: string): Promise<Response> {
-  return (await Bun.file(TARBALL).exists())
-    ? asset(TARBALL, 'application/gzip', 'public, max-age=300')
-    : refuse('NOT_FOUND', id);
+/**
+ * The tarball's identity, hashed once per file rather than once per request:
+ * nothing in a running image changes it, and a checkout that repacks between
+ * requests is keyed out by size and mtime rather than served a stale digest.
+ *
+ * `x-kthx-build` is what an installed CLI compares itself against with one
+ * `HEAD`, and it is the id `pack.ts` wrote *into* the tarball as well, so the
+ * two are the same bytes rather than two guesses at the same thing. The etag is
+ * the digest of what is served, which is what a cache wants and a build id is
+ * not.
+ */
+interface Tarball {
+  readonly etag: string;
+  readonly build: string | null;
+}
+
+let tarballFacts: { key: string; facts: Promise<Tarball> } | null = null;
+
+async function readTarballFacts(): Promise<Tarball | null> {
+  const file = Bun.file(TARBALL);
+  const stat = await file.stat().catch(() => null);
+  if (stat === null) return null;
+  const key = `${stat.size}:${stat.mtimeMs}`;
+  if (tarballFacts?.key !== key) {
+    tarballFacts = {
+      key,
+      facts: (async () => {
+        const etag = `"${new Bun.CryptoHasher('sha256')
+          .update(new Uint8Array(await file.arrayBuffer()))
+          .digest('hex')}"`;
+        const read = (await Bun.file(TARBALL_VERSION)
+          .json()
+          .catch(() => null)) as { version?: unknown; build?: unknown } | null;
+        const build =
+          typeof read?.version === 'string' && typeof read.build === 'string'
+            ? `${read.version}+${read.build}`
+            : null;
+        return { etag, build };
+      })(),
+    };
+  }
+  return tarballFacts.facts;
+}
+
+async function tarball(request: Request, id: string): Promise<Response> {
+  const facts = await readTarballFacts();
+  if (facts === null) return refuse('NOT_FOUND', id);
+  const headers: Record<string, string> = {
+    'content-type': 'application/gzip',
+    'cache-control': 'public, max-age=300',
+    'x-content-type-options': 'nosniff',
+    etag: facts.etag,
+  };
+  if (facts.build !== null) headers['x-kthx-build'] = facts.build;
+  if (request.headers.get('if-none-match') === facts.etag) {
+    return new Response(null, { status: 304, headers });
+  }
+  return new Response(Bun.file(TARBALL), { headers });
 }
 
 // --- the apex ---------------------------------------------------------------
@@ -145,7 +200,7 @@ async function apex(
     );
   }
   if (path === FAVICON_PATH) return faviconResponse(request);
-  if (path === '/cli/kthx.tgz') return tarball(ctx.id);
+  if (path === '/cli/kthx.tgz') return tarball(request, ctx.id);
   return notHere(ctx.host, ctx.config.zone, 404, ctx.id, ctx.port);
 }
 

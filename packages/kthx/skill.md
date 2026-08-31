@@ -205,10 +205,16 @@ bun add -g https://kthx.dev/cli/kthx.tgz
 | `kthx ls --all` | the public directory: every site on the apex |
 | `kthx rm` | deletes the site |
 | `kthx open` | opens `https://<name>.kthx.dev` |
+| `kthx upgrade` | replaces this copy with the one the apex serves |
 
 The token lives in `$XDG_CONFIG_HOME/kthx/sites.json`, never in the project
 directory — which is what gets uploaded. `kthx.json` holds `{name}` and nothing
 secret.
+
+`kthx upgrade` re-runs `bun add -g` on the apex tarball. It replaces only a
+`bun add -g` install. `kthx --version` prints the version and the build id; set
+`KTHX_NO_UPDATE_CHECK=1` to stop the daily check for a newer one, and `NO_COLOR`
+to turn the colour off.
 
 ## MCP
 

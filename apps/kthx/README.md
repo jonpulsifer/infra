@@ -63,6 +63,7 @@ bun run apps/kthx/server      # or `bun run start` from this directory
 | `kthx ls` | what the site serves, and what it uses against its quotas |
 | `kthx rm` | deletes the site, once its name is typed back |
 | `kthx open` | opens the site |
+| `kthx upgrade` | re-runs `bun add -g` on the apex tarball |
 
 ```
 bun add -g https://kthx.dev/cli/kthx.tgz
@@ -75,6 +76,25 @@ a manifest with no dependencies. Packing this workspace directly cannot work:
 `@repo/archive@0.0.0` on the public registry. The image carries the tarball and
 the apex serves it at `/cli/kthx.tgz`, so the command line always matches the
 server it talks to.
+
+`dist/version.json` is packed with the bundle and copied beside the tarball in
+the image, so `x-kthx-build` on `/cli/kthx.tgz` and an installed copy's own
+`--version` read the same bytes. Its build id is the first twelve hex of the
+bundle's sha256 rather than a git sha, which is not available where `pack` runs:
+the Dockerfile packs from a `turbo prune` tree, which has no `.git`. The content
+hash is also the identity the update check wants — it changes exactly when the
+command line does.
+
+Every command but `upgrade` and `--version` asks once a day whether the apex has
+a different build: one `HEAD /cli/kthx.tgz` capped at 1.5 s, started beside the
+command and remembered in `$XDG_CONFIG_HOME/kthx/update.json`. It prints one
+line and can do nothing else — it never fails a command, delays it past the cap,
+or changes an exit code — and it is skipped outright over a pipe, with
+`KTHX_NO_UPDATE_CHECK=1`, and in a checkout, which has no build of its own.
+
+`cli/paint.ts` is the only file that knows an escape code. Colour is off when
+stdout is not a TTY, `NO_COLOR` is set, or `TERM=dumb`, and drops from truecolor
+to the 256-colour cube without `COLORTERM`.
 
 `kthx dev` does not simulate the backends. It proxies `/api/*` (the websocket
 included) and `/files/*` to `https://<name>.kthx.dev`, rewriting `Origin` to the

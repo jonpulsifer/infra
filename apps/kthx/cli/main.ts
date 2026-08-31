@@ -10,6 +10,7 @@
  *   kthx ls [--all]                this site, or every site of yours, or all
  *   kthx rm                        delete the site
  *   kthx open                      open the site in a browser
+ *   kthx upgrade                   replace this copy with the apex's
  *
  * The name is `kthx.json`, read from the directory and then from here. The
  * token that opens it is in `$XDG_CONFIG_HOME/kthx/sites.json`, never in the
@@ -24,14 +25,20 @@ import {
   readFileSync,
   writeFileSync,
 } from 'node:fs';
-import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
 import bundledSkill from '@repo/kthx/skill.md' with { type: 'text' };
-import { version } from '../package.json' with { type: 'json' };
 import { nameProblem } from '../server/names.ts';
 import { KthxError } from './error.ts';
+import { banner, faint, link, rainbow, tint } from './paint.ts';
 import { pack } from './tar.ts';
+import {
+  buildId,
+  configDir,
+  updateNudge,
+  upgrade,
+  versionLine,
+} from './upgrade.ts';
 
 export { KthxError } from './error.ts';
 
@@ -50,12 +57,7 @@ export function siteOrigin(name: string): string {
 
 // --- what is remembered -----------------------------------------------------
 
-export const sitesFile = () =>
-  join(
-    process.env.XDG_CONFIG_HOME?.trim() || join(homedir(), '.config'),
-    'kthx',
-    'sites.json',
-  );
+export const sitesFile = () => join(configDir(), 'sites.json');
 
 /** origin → name → token */
 type Tokens = Record<string, Record<string, string>>;
@@ -276,8 +278,9 @@ export async function init(
   const kept = !empty && existsSync(join(dir, 'SKILL.md'));
   if (!kept) writeFileSync(join(dir, 'SKILL.md'), await skill());
   if (empty) writeFileSync(join(dir, 'index.html'), STARTER);
+  console.log(hello());
   console.log(
-    `  ${name} — kthx.json${kept ? ' written; SKILL.md kept' : `, SKILL.md${empty ? ' and index.html' : ''} written`}; run kthx deploy`,
+    `  ${rainbow(name)} — kthx.json${kept ? ' written; SKILL.md kept' : `, SKILL.md${empty ? ' and index.html' : ''} written`}; run kthx deploy`,
   );
   return name;
 }
@@ -311,7 +314,7 @@ export async function deploy(
   });
   const held = release.serving !== release.n ? ' — held' : '';
   console.log(
-    `  → ${release.url}  (${((Date.now() - started) / 1000).toFixed(1)}s) — v${release.n}${held}`,
+    `  ${tint('→', 0.9)} ${link(release.url)}  ${faint(`(${((Date.now() - started) / 1000).toFixed(1)}s)`)} — v${release.n}${held}`,
   );
   return release;
 }
@@ -397,16 +400,17 @@ export async function ls(
   }
   const found = await site(name);
   const held = found.held ? ' (held)' : '';
-  console.log(`  ${found.name}  ${found.url}`);
+  console.log(`  ${rainbow(found.name)}  ${link(found.url)}`);
   console.log(
     found.serving === null
       ? '  serving nothing yet'
       : `  serving v${found.serving}${held}`,
   );
   for (const r of found.releases) {
-    const mark = r.n === found.serving ? '→' : ' ';
+    const serving = r.n === found.serving;
+    const row = `v${String(r.n).padEnd(4)} ${r.at}  ${kb(r.size).padStart(9)}  ${short(r.digest)}`;
     console.log(
-      `  ${mark} v${String(r.n).padEnd(4)} ${r.at}  ${kb(r.size).padStart(9)}  ${short(r.digest)}`,
+      serving ? `  ${tint('→', 0.9)} ${tint(row, 0.9)}` : `    ${faint(row)}`,
     );
   }
   for (const [what, used, limit] of [
@@ -446,7 +450,7 @@ async function listMySites(): Promise<void> {
     names.map(async (name) => {
       try {
         const found = await site(name);
-        return `${found.url}  ${serves(found.serving)}${found.held ? ' (held)' : ''}`;
+        return `${link(found.url)}  ${serves(found.serving)}${found.held ? ' (held)' : ''}`;
       } catch (error) {
         return error instanceof KthxError ? error.code : String(error);
       }
@@ -468,7 +472,7 @@ async function listEverySite(): Promise<void> {
   }
   for (const found of page.items) {
     console.log(
-      `  ${found.name.padEnd(24)} ${found.url.padEnd(32)} ${serves(found.serving).padEnd(12)} ${found.releases} releases  ${found.at}`,
+      `  ${found.name.padEnd(24)} ${link(found.url.padEnd(32))} ${serves(found.serving).padEnd(12)} ${found.releases} releases  ${found.at}`,
     );
   }
   if (page.next !== null) {
@@ -498,7 +502,7 @@ export async function rm(dir = '.', confirm = prompt): Promise<void> {
 
 export function openSite(dir = '.'): string {
   const url = siteOrigin(nameOf(dir));
-  console.log(`  ${url}`);
+  console.log(`  ${link(url)}`);
   const opener = process.platform === 'darwin' ? 'open' : 'xdg-open';
   try {
     // Unreferenced: the browser it starts outlives this command, and the
@@ -528,7 +532,16 @@ const short = (hex: string) => {
   return `sha256:${bare.slice(0, 4)}…${bare.slice(-4)}`;
 };
 
-const USAGE = `usage: kthx <command> [dir] [--name <name>] [--all]
+/**
+ * The banner and the one line under it: which build this is, how to replace it,
+ * and how someone reading over a shoulder installs their own.
+ */
+const hello = () =>
+  banner(
+    `${versionLine()} — kthx upgrade · bun add -g ${origin()}/cli/kthx.tgz`,
+  );
+
+const USAGE = `usage: kthx <command> [dir] [--name <name>] [--all] [--version]
   init      claim a name; write kthx.json, SKILL.md and a starter page
   deploy    upload the directory as a release
   dev       serve the directory on :4321 against the site's live backends
@@ -537,10 +550,16 @@ const USAGE = `usage: kthx <command> [dir] [--name <name>] [--all]
   ls        what the site serves; with no kthx.json, every site of yours
   ls --all  every site on the apex
   rm        delete the site
-  open      open the site in a browser`;
+  open      open the site in a browser
+  upgrade   replace this copy with the one the apex serves`;
 
 if (import.meta.main) {
-  let values: { name?: string; version?: boolean; all?: boolean } = {};
+  let values: {
+    name?: string;
+    version?: boolean;
+    all?: boolean;
+    help?: boolean;
+  } = {};
   let positionals: string[] = [];
   try {
     ({ values, positionals } = parseArgs({
@@ -548,6 +567,7 @@ if (import.meta.main) {
         name: { type: 'string' },
         version: { type: 'boolean' },
         all: { type: 'boolean' },
+        help: { type: 'boolean', short: 'h' },
       },
       allowPositionals: true,
     }));
@@ -557,9 +577,23 @@ if (import.meta.main) {
   }
   const [command, argument] = positionals;
   const dir = argument ?? '.';
+  // Started here and awaited at the end, so the request overlaps the command
+  // instead of following it. It resolves to `null` on every failure, including
+  // its own 1.5 s cap, and cannot change what the command prints or exits with.
+  const nudge = updateNudge({
+    origin: origin(),
+    mine: buildId(),
+    command,
+    versionAsked: values.version === true,
+  });
   try {
     if (values.version === true && command === undefined) {
-      console.log(version);
+      console.log(versionLine());
+    } else if (command === undefined || values.help === true) {
+      // Nobody typed `kthx` to be told the usage is wrong. Exit 0: this is the
+      // answer to the question, not a refusal.
+      console.log(hello());
+      console.log(USAGE);
     } else {
       switch (command) {
         case 'init':
@@ -600,6 +634,9 @@ if (import.meta.main) {
         case 'open':
           openSite(dir);
           break;
+        case 'upgrade':
+          await upgrade(origin());
+          break;
         case 'mcp':
           // The reference this CLI writes names it; the stdio bridge is not in
           // this build. One honest line beats usage and exit 2.
@@ -618,4 +655,6 @@ if (import.meta.main) {
     console.error(`${error.code}: ${error.message}`);
     process.exit(1);
   }
+  const available = await nudge;
+  if (available !== null) console.log(available);
 }
