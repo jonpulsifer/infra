@@ -312,9 +312,12 @@ check 'the identity does not own it yet' 403 "$(req GET "$APEX/api/sites/$NAME" 
   "${auth[@]}")"
 check 'the old bearer still opens it' 200 "$(req GET "$APEX/api/sites/$NAME" \
   -H "authorization: Bearer $BEARER")"
+# Not the default page: that one is kept in process for ten seconds, and the
+# row above was changed behind the server's back.
+req GET "$APEX/api/sites?limit=500" >/dev/null
 check '  and the directory says unadopted' null \
-  "$(req GET "$APEX/api/sites?limit=500" >/dev/null; \
-     jq -r --arg n "$NAME" '.items[] | select(.name == $n) | .owner // "null"' <"$body")"
+  "$(jq -r --arg n "$NAME" \
+    '.items[] | select(.name == $n) | .owner // "null"' <"$body")"
 
 adopt='content-type: application/json'
 check 'POST …/adopt anonymous' 401 "$(req POST "$APEX/api/sites/$NAME/adopt" \
