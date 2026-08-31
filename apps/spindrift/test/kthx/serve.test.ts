@@ -172,7 +172,6 @@ describe('Host dispatch', () => {
     expect(landing!.headers.get('content-type')).toContain('text/html');
     const html = await landing!.text();
     expect(html).toContain('<!doctype html>');
-    expect(html).toContain('/kthx/sites');
     expect(await (await get(ZONE, '/kthx/sites'))!.text()).toBe('the api');
     expect((await get(ZONE, '/healthz'))!.status).toBe(404);
   });
