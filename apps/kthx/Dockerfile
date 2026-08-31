@@ -61,6 +61,9 @@ COPY --from=pruner --chmod=755 /app/out/full/apps/kthx/cli ./apps/kthx/cli
 COPY --from=pruner --chmod=755 /app/out/full/packages/archive ./packages/archive
 COPY --from=pruner --chmod=755 /app/out/full/packages/kthx ./packages/kthx
 COPY --from=cli --chmod=755 /app/apps/kthx/dist/kthx.tgz ./apps/kthx/dist/kthx.tgz
+# The build id the CLI compares itself against, written into the tarball and
+# copied beside it so `x-kthx-build` and the installed copy read the same bytes.
+COPY --from=cli --chmod=755 /app/apps/kthx/dist/version.json ./apps/kthx/dist/version.json
 COPY --from=base /usr/local/bin/bun /usr/local/bin/bun
 # Fail the build at the packaging seam rather than shipping an image whose
 # entrypoint or assets are not in it. The workspace packages are asserted
@@ -71,7 +74,8 @@ RUN test -f /app/apps/kthx/server/index.ts \
   && test -f /app/apps/kthx/node_modules/@repo/kthx/landing.html \
   && test -f /app/apps/kthx/node_modules/@repo/kthx/skill.md \
   && test -f /app/apps/kthx/node_modules/@repo/archive/archive-format.ts \
-  && test -s /app/apps/kthx/dist/kthx.tgz
+  && test -s /app/apps/kthx/dist/kthx.tgz \
+  && test -s /app/apps/kthx/dist/version.json
 WORKDIR /app/apps/kthx
 USER 65532:65532
 EXPOSE 8080

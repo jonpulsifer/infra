@@ -142,6 +142,25 @@ describe('the apex', () => {
     expect(tarball.headers.get('content-type')).toBe('application/gzip');
     expect(tarball.headers.get('cache-control')).toBe('public, max-age=300');
 
+    // The two headers the installed CLI's update check reads. `HEAD` is what it
+    // actually sends, and it must carry both without the body.
+    const build = tarball.headers.get('x-kthx-build');
+    const etag = tarball.headers.get('etag');
+    expect(build).toMatch(/^\d+\.\d+\.\d+\+[0-9a-f]{12}$/);
+    expect(etag).toMatch(/^"[0-9a-f]{64}"$/);
+    const head = await get(ZONE, '/cli/kthx.tgz', { method: 'HEAD' });
+    expect(head.status).toBe(200);
+    expect(head.headers.get('x-kthx-build')).toBe(build);
+    expect(head.headers.get('etag')).toBe(etag);
+    expect(head.headers.get('content-type')).toBe('application/gzip');
+    // The body is not asserted: this calls the handler directly, and dropping
+    // it for a HEAD is `Bun.serve`'s job rather than this code's.
+
+    const cached = await get(ZONE, '/cli/kthx.tgz', {
+      headers: { 'if-none-match': etag ?? '' },
+    });
+    expect(cached.status).toBe(304);
+
     const packed = readBundle(new Uint8Array(await tarball.arrayBuffer()));
     const text = (path: string) =>
       new TextDecoder().decode(
@@ -151,17 +170,30 @@ describe('the apex', () => {
     const manifest = JSON.parse(text('package.json')) as {
       version: string;
       bin: Record<string, string>;
+      files: string[];
       dependencies?: unknown;
     };
     expect(manifest.version).toBe(version);
     expect(manifest.bin).toEqual({ kthx: 'kthx.js' });
     expect(manifest.dependencies).toBeUndefined();
 
+    // `version.json` rides along in the tarball so an installed copy knows which
+    // build it is without asking. It has to be the build the header names, or
+    // the update check nags for ever.
     const bin = join(kthx().sitesDir, 'kthx.js');
     await writeFile(bin, text('kthx.js'));
-    expect((await Bun.$`bun ${bin} --version`.quiet().text()).trim()).toBe(
-      version,
+    await writeFile(
+      join(kthx().sitesDir, 'version.json'),
+      text('version.json'),
     );
+    expect(manifest.files).toEqual(['kthx.js', 'version.json']);
+    const printed = (
+      await Bun.$`bun ${bin} --version`
+        .env({ ...process.env, KTHX_NO_UPDATE_CHECK: '1' })
+        .quiet()
+        .text()
+    ).trim();
+    expect(printed).toBe(`${version} · ${build?.split('+')[1]}`);
   }, 60_000);
 
   test('a host outside the zone learns nothing', async () => {
