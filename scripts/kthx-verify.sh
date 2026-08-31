@@ -201,7 +201,7 @@ echo "realtime"
 # process and single replica by construction, so this is the whole of it.
 # shellcheck disable=SC2016 # the single quotes are the point: this is JavaScript
 saw=$(bun -e '
-const [site, cookie] = Bun.argv.slice(2);
+const [site, cookie] = Bun.argv.slice(-2);
 const socket = new WebSocket(`${site.replace(/^http/, "ws")}/api/ws`, {
   headers: { origin: site, cookie },
 });
