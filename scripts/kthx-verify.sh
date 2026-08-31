@@ -70,6 +70,17 @@ check() {
   fi
 }
 
+# Cloudflare caches a site's static responses on the origin's terms, and the
+# origin says `public, max-age=60`. A check that runs straight after a release
+# change or a delete would otherwise read the previous release out of the edge.
+# A unique query string is a different cache key and the server ignores it — it
+# dispatches on the path alone.
+nonce=0
+fresh() {
+  nonce=$((nonce + 1))
+  printf '%s?cachebust=%s-%s' "$1" "$$" "$nonce"
+}
+
 site_psql() {
   kubectl cnpg psql -i=false -t=false --context "$CONTEXT" -n "$NAMESPACE" \
     "$CLUSTER" -- -d "$DATABASE" -Atq -v ON_ERROR_STOP=1 -c "$1"
@@ -233,7 +244,7 @@ else
 fi
 req GET "$APEX/api/sites/$NAME" -H "authorization: Bearer $TOKEN" >/dev/null
 check '  serving' 2 "$(jq -r '.serving // empty' <"$body")"
-check '  /nope is now the SPA fallback' 200 "$(req GET "$SITE/nope")"
+check '  /nope is now the SPA fallback' 200 "$(req GET "$(fresh "$SITE/nope")")"
 
 # `kthx rollback` and `kthx release` read `kthx.json` from the working
 # directory, not from an argument.
@@ -242,7 +253,7 @@ check '  /nope is now the SPA fallback' 200 "$(req GET "$SITE/nope")"
 req GET "$APEX/api/sites/$NAME" -H "authorization: Bearer $TOKEN" >/dev/null
 check 'kthx rollback 1 serves' 1 "$(jq -r '.serving // empty' <"$body")"
 check '  and holds' true "$(jq -r '.held // empty' <"$body")"
-check '  release 1 answers 404 again' 404 "$(req GET "$SITE/nope")"
+check '  release 1 answers 404 again' 404 "$(req GET "$(fresh "$SITE/nope")")"
 
 (cd "$tmp/v2" && kthx release) >"$tmp/release.log" 2>&1 || cat "$tmp/release.log"
 req GET "$APEX/api/sites/$NAME" -H "authorization: Bearer $TOKEN" >/dev/null
@@ -259,7 +270,7 @@ check 'DELETE /api/sites/:name' 204 "$(req DELETE "$APEX/api/sites/$NAME" \
   -H "authorization: Bearer $TOKEN")"
 check '  the apex answers 410' 410 "$(req GET "$APEX/api/sites/$NAME" \
   -H "authorization: Bearer $TOKEN")"
-check '  the site host answers 410' 410 "$(req GET "$SITE/")"
+check '  the site host answers 410' 410 "$(req GET "$(fresh "$SITE/")")"
 check '  the site database is dropped' 0 \
   "$(site_psql "select count(*) from pg_database where datname = '$NAME'")"
 check '  the site role is dropped' 0 \
