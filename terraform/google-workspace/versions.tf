@@ -49,7 +49,7 @@ terraform {
   required_providers {
     google = {
       source  = "hashicorp/google"
-      version = "~> 7.0"
+      version = "~> 8.0"
     }
     googleworkspace = {
       source  = "hashicorp/googleworkspace"
