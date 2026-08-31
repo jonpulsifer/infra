@@ -1,0 +1,208 @@
+/**
+ * The shape every refusal takes, and the three facts every handler needs from
+ * a request: which host, which id, and whether the caller is same-origin.
+ *
+ * One fixed sentence per code, from the contract's error table. Fixed because
+ * the cause is not the caller's to read: an upload that fails because the depot
+ * answered 403 and one that fails because the disk is full are both
+ * `STORAGE_FAILURE` on the wire, and the difference goes to the log under the
+ * `x-request-id` the caller was handed. An `x-filename` a caller sent is never
+ * echoed anywhere.
+ */
+
+/** The codes this process answers with. Later tickets add their own rows. */
+export type Code =
+  | 'INVALID_NAME'
+  | 'RESERVED'
+  | 'UNKNOWN_FORMAT'
+  | 'UNSUPPORTED_ZIP'
+  | 'MALFORMED_ZIP'
+  | 'PATH_ESCAPES_ARCHIVE'
+  | 'NO_INDEX'
+  | 'MALFORMED_REQUEST'
+  | 'UNAUTHENTICATED'
+  | 'FORBIDDEN'
+  | 'NOT_FOUND'
+  | 'METHOD_NOT_ALLOWED'
+  | 'TIMEOUT'
+  | 'TAKEN'
+  | 'GONE'
+  | 'TOO_LARGE'
+  | 'RATE_LIMITED'
+  | 'STORAGE_FAILURE'
+  | 'BUSY';
+
+const ERRORS: Record<Code, readonly [number, string]> = {
+  INVALID_NAME: [
+    400,
+    'a name is 3 to 40 of a-z, 0-9 and -, and does not start or end with -',
+  ],
+  RESERVED: [400, 'that name is reserved'],
+  UNKNOWN_FORMAT: [400, 'the upload is neither a gzipped tar nor a ZIP'],
+  UNSUPPORTED_ZIP: [
+    400,
+    'this ZIP uses a feature the upload boundary does not read',
+  ],
+  MALFORMED_ZIP: [400, 'the archive could not be read'],
+  PATH_ESCAPES_ARCHIVE: [400, 'the archive names a path outside itself'],
+  NO_INDEX: [400, 'the archive has no index.html or 200.html at its root'],
+  MALFORMED_REQUEST: [
+    400,
+    'the request body or content type is not what this path takes',
+  ],
+  UNAUTHENTICATED: [
+    401,
+    'this site is opened with its token: Authorization: Bearer <token>',
+  ],
+  FORBIDDEN: [403, 'that does not open this site'],
+  NOT_FOUND: [404, 'there is nothing here'],
+  METHOD_NOT_ALLOWED: [405, 'that is not something this path does'],
+  TIMEOUT: [408, 'the body was not sent within the time this path waits'],
+  TAKEN: [409, 'that name is taken'],
+  GONE: [410, 'that site is gone'],
+  TOO_LARGE: [413, 'that is larger than this path accepts'],
+  RATE_LIMITED: [429, 'too many requests; wait'],
+  STORAGE_FAILURE: [500, 'storing the release failed'],
+  BUSY: [503, 'the server is full right now; try again in a moment'],
+};
+
+/** Never absent: a caller with no cause to read still gets one to quote. */
+export function requestId(): string {
+  return crypto.randomUUID();
+}
+
+const BASE_HEADERS = { 'x-content-type-options': 'nosniff' } as const;
+
+export function refuse(
+  code: Code,
+  id: string,
+  extra: Record<string, string> = {},
+): Response {
+  const [status, message] = ERRORS[code];
+  return Response.json(
+    { code, message },
+    {
+      status,
+      headers: {
+        ...BASE_HEADERS,
+        ...extra,
+        'x-request-id': id,
+        'cache-control': 'no-store',
+      },
+    },
+  );
+}
+
+export function ok(
+  body: unknown,
+  id: string,
+  status = 200,
+  cacheControl = 'no-store',
+): Response {
+  return Response.json(body, {
+    status,
+    headers: {
+      ...BASE_HEADERS,
+      'x-request-id': id,
+      'cache-control': cacheControl,
+    },
+  });
+}
+
+export function empty(id: string): Response {
+  return new Response(null, {
+    status: 204,
+    headers: {
+      ...BASE_HEADERS,
+      'x-request-id': id,
+      'cache-control': 'no-store',
+    },
+  });
+}
+
+/** What the caller is told nothing about, written where an operator can find it. */
+export function logCause(id: string, what: string, cause: unknown): void {
+  console.error(
+    `[${id}] ${what}: ${cause instanceof Error ? (cause.stack ?? cause.message) : String(cause)}`,
+  );
+}
+
+// --- the host ---------------------------------------------------------------
+
+/** Lowercased, trailing dot and port stripped — the only name a site has. */
+export function hostOf(request: Request): string {
+  return (request.headers.get('host') ?? '')
+    .trim()
+    .toLowerCase()
+    .replace(/:\d+$/, '')
+    .replace(/\.$/, '');
+}
+
+/**
+ * The kthx name this host is: `''` for the apex, the label for a site, `null`
+ * for a host outside the zone.
+ *
+ * A deeper label (`a.b.<zone>`) comes back as `a.b`, which no row can match and
+ * which therefore answers the 404 page rather than leaking that the zone has a
+ * wildcard behind it.
+ */
+export function siteOf(host: string, zone: string): string | null {
+  if (host === zone) return '';
+  if (!host.endsWith(`.${zone}`)) return null;
+  return host.slice(0, -zone.length - 1);
+}
+
+/**
+ * `https://<label>.<zone>` — or plain http on the port a local run listens on,
+ * because nothing terminates TLS in front of `kthx.localhost` and a URL a
+ * developer cannot open is not a URL.
+ */
+export function siteUrl(zone: string, label?: string, port?: string): string {
+  const host = label === undefined ? zone : `${label}.${zone}`;
+  if (!zone.endsWith('.localhost')) return `https://${host}`;
+  return `http://${host}${port ? `:${port}` : ''}`;
+}
+
+/** The port the request named, for the URL a local run hands back. */
+export function portOf(request: Request): string {
+  return /:(\d+)$/.exec(request.headers.get('host')?.trim() ?? '')?.[1] ?? '';
+}
+
+/**
+ * The same-site guard.
+ *
+ * `kthx.dev` is not on the Public Suffix List, so a browser treats every
+ * `*.kthx.dev` as one site and `SameSite=Lax` protects nothing between
+ * siblings. A non-browser client sends no `Origin` at all and is let through;
+ * a browser must be on this exact host.
+ */
+export function sameOrigin(request: Request, host: string): boolean {
+  const origin = request.headers.get('origin');
+  if (origin === null) return true;
+  return origin === `https://${host}` || origin === `http://${host}`;
+}
+
+/** JSON routes take JSON, parameters ignored. */
+export function isJson(request: Request): boolean {
+  const type = request.headers.get('content-type') ?? '';
+  return type.split(';')[0]?.trim().toLowerCase() === 'application/json';
+}
+
+/**
+ * The address a bucket is keyed by, IPv6 truncated to its /64.
+ *
+ * `cf-connecting-ip` is trusted because nothing but the cluster's cloudflared
+ * reaches this pod; the socket address is the fallback for a direct call.
+ */
+export function addressOf(
+  request: Request,
+  server: Bun.Server<unknown> | undefined,
+): string | null {
+  const raw =
+    request.headers.get('cf-connecting-ip')?.trim() ||
+    server?.requestIP(request)?.address ||
+    null;
+  if (raw === null || raw === '') return null;
+  if (!raw.includes(':')) return raw;
+  return raw.split(':').slice(0, 4).join(':');
+}

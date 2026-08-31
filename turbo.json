@@ -42,6 +42,7 @@
         "$TURBO_ROOT$/packages/archive/**",
         "$TURBO_ROOT$/packages/kthx/**"
       ],
+      "env": ["DATABASE_URL"],
       "outputs": []
     },
     "spindrift#test": {
