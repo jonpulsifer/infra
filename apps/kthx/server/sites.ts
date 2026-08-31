@@ -128,6 +128,7 @@ export async function sitesApi(
   segments: readonly string[],
 ): Promise<Response | null> {
   if (segments.length === 3) {
+    if (request.method === 'GET') return directory(request, ctx);
     if (request.method !== 'POST') return refuse('METHOD_NOT_ALLOWED', ctx.id);
     return claim(request, ctx);
   }
@@ -195,6 +196,137 @@ async function siteFor(
 
 type Act = (request: Request, ctx: Ctx, site: SiteRow) => Promise<Response>;
 
+// --- the directory ----------------------------------------------------------
+
+/** How many sites a page of the directory holds, and what it may be asked for. */
+const DIRECTORY_PAGE = 200;
+const MAX_DIRECTORY_PAGE = 500;
+/** How long a page is answered from memory rather than from the database. */
+const DIRECTORY_CACHE_MS = 10_000;
+/** Beyond this many kept pages the map is a leak rather than a cache. */
+const MAX_CACHED_PAGES = 64;
+
+/** One site as the directory shows it: no token hash, no usage, no hold. */
+interface Listed {
+  readonly name: string;
+  readonly serving: number | null;
+  readonly releases: number;
+  readonly at: Date;
+}
+
+interface Page {
+  readonly rows: readonly Listed[];
+  readonly next: string | null;
+  readonly at: number;
+}
+
+/**
+ * The pages this process has answered lately.
+ *
+ * ponytail: process-wide and in memory, like every other counter here — there
+ * is one replica by construction. Cleared whenever the set of names changes,
+ * so "I claimed a site and it is not on the list" is never the cache's doing;
+ * a release or a rollback is left to age out, because what those move is a
+ * number beside a name rather than the list of names.
+ */
+const pages = new Map<string, Page>();
+
+/** Every page is stale: a name was claimed or deleted. */
+function forgetPages(): void {
+  pages.clear();
+}
+
+/**
+ * Every live site, newest claim first — the public directory.
+ *
+ * Public by construction: a name answers on `<name>.<zone>` to anyone who
+ * dials it, so listing the names gives away nothing a walk of the zone would
+ * not. What stays behind the bearer is everything about *owning* a site: the
+ * token hash, the usage, the hold, the release digests.
+ *
+ * One statement, whatever the page: the cursor names the last site of the
+ * previous one and the query finds its place itself, so a caller paging to the
+ * end costs one indexed lookup a page rather than a growing `offset`.
+ */
+async function directory(request: Request, ctx: Ctx): Promise<Response> {
+  const query = new URL(request.url).searchParams;
+  const after = query.get('after');
+  if (after !== null && nameProblem(after) !== null) {
+    return refuse('INVALID_QUERY', ctx.id);
+  }
+  const asked = Number(query.get('limit') ?? DIRECTORY_PAGE);
+  const limit = Number.isFinite(asked)
+    ? Math.min(Math.max(Math.trunc(asked), 1), MAX_DIRECTORY_PAGE)
+    : DIRECTORY_PAGE;
+
+  const key = `${limit}:${after ?? ''}`;
+  const now = Date.now();
+  let page = pages.get(key);
+  if (page === undefined || now - page.at > DIRECTORY_CACHE_MS) {
+    page = await listSites(ctx, limit, after, now);
+    // Bounded, because the key carries a caller's cursor: a flood of invented
+    // cursors evicts itself rather than growing without end.
+    if (pages.size > MAX_CACHED_PAGES) forgetPages();
+    pages.set(key, page);
+  }
+
+  return ok(
+    {
+      items: page.rows.map((row) => ({
+        name: row.name,
+        url: siteUrl(ctx.config.zone, row.name, ctx.port),
+        serving: row.serving,
+        releases: row.releases,
+        at: row.at.toISOString(),
+      })),
+      next: page.next,
+    },
+    ctx.id,
+    200,
+    'public, max-age=30',
+  );
+}
+
+/**
+ * One page of live sites, and the cursor for the page after it.
+ *
+ * The keyset is `(at, name)` under the order the list is in, resolved from the
+ * cursor's own name inside the same statement. A cursor naming a site that
+ * never existed matches nothing and ends the walk; one naming a *deleted* site
+ * still pages correctly, because that row keeps its claim time and only drops
+ * out of the list itself.
+ */
+async function listSites(
+  ctx: Ctx,
+  limit: number,
+  after: string | null,
+  at: number,
+): Promise<Page> {
+  const rows = (await ctx.sql`
+    with mark as (
+      select created_at, name from sites where name = ${after}
+    )
+    select s.name, s.serving, s.created_at as at,
+           (select count(*)::int from releases r where r.site = s.name)
+             as releases
+    from sites s
+    where s.deleted_at is null
+      and (${after}::text is null or exists (
+        select 1 from mark m
+        where s.created_at < m.created_at
+           or (s.created_at = m.created_at and s.name > m.name)
+      ))
+    order by s.created_at desc, s.name asc
+    limit ${limit + 1}
+  `) as Listed[];
+  const kept = rows.slice(0, limit);
+  return {
+    rows: kept,
+    next: rows.length > limit ? (kept.at(-1)?.name ?? null) : null,
+    at,
+  };
+}
+
 // --- claim ------------------------------------------------------------------
 
 async function claim(request: Request, ctx: Ctx): Promise<Response> {
@@ -255,6 +387,7 @@ async function claim(request: Request, ctx: Ctx): Promise<Response> {
   }
 
   if (address !== null) claimsPerDay.count(address);
+  forgetPages();
   return ok(
     { name, url: siteUrl(ctx.config.zone, name, ctx.port), token },
     ctx.id,
@@ -535,5 +668,6 @@ const remove: Act = async (_request, ctx, site) => {
     recursive: true,
     force: true,
   });
+  forgetPages();
   return empty(ctx.id);
 };

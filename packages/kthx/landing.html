@@ -228,6 +228,38 @@ pre.sh u{color:var(--ok);text-decoration:none}
 
 .hint{font-size:13px;color:var(--ink-2);text-align:center;padding:26px 16px}
 
+/* the directory: one row for each name in the zone, and the box that filters them */
+.filter{
+  width:100%;margin-bottom:8px;padding:9px 12px;outline:0;
+  background:var(--sunk);border:1px solid var(--line);border-radius:var(--r-sm);
+  font-family:var(--mono);font-size:13px;
+}
+.filter::placeholder{color:var(--ink-3)}
+.filter:focus{border-color:var(--hot-line)}
+.pub{
+  display:grid;grid-template-columns:minmax(0,1fr) auto;gap:14px;align-items:center;
+  padding:10px 16px;border-bottom:1px solid var(--line-soft);transition:background-color .13s;
+}
+.pub:last-child{border-bottom:0}
+.pub:hover{background:var(--sunk)}
+.more{padding:14px 16px;text-align:center;border-top:1px solid var(--line-soft)}
+
+/* link a site this browser has no token for */
+.link{
+  display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr) auto;gap:8px;
+  margin-top:10px;padding:14px 16px;background:var(--card);
+  border:1px solid var(--line);border-radius:var(--r);box-shadow:var(--shade);
+}
+.link p{grid-column:1 / -1;margin:0;font-size:13px;color:var(--ink-2)}
+.link input{
+  min-width:0;padding:9px 11px;outline:0;
+  background:var(--sunk);border:1px solid var(--line);border-radius:var(--r-sm);
+  font-family:var(--mono);font-size:13px;
+}
+.link input::placeholder{color:var(--ink-3)}
+.link input:focus{border-color:var(--hot-line)}
+@media (max-width:560px){.link{grid-template-columns:minmax(0,1fr)}}
+
 /* terminal */
 .term{border:1px solid var(--line);border-radius:var(--r);overflow:hidden;box-shadow:var(--shade)}
 .termbar{display:flex;gap:5px;align-items:center;padding:9px 13px;background:var(--sunk);border-bottom:1px solid var(--line-soft)}
@@ -345,6 +377,18 @@ pre.sh .p{color:var(--hot)}
     <div class="sechead">Your properties <span class="sp"></span><span id="count"></span></div>
     <div class="props" id="props"></div>
     <p class="hint" id="keep">Your sites are kept in this browser. Keep the token safe: there is no account and no password reset.</p>
+    <form class="link" id="link">
+      <p>Enter a name and its token to add a site that you claimed on the command line.</p>
+      <input id="linkname" autocomplete="off" spellcheck="false" placeholder="notes" aria-label="Name of the site to link" maxlength="40">
+      <input id="linktoken" type="password" autocomplete="off" spellcheck="false" placeholder="token" aria-label="Token of the site to link">
+      <button type="submit" class="tiny">Link the site</button>
+    </form>
+  </section>
+
+  <section class="sec">
+    <div class="sechead">Every site <span class="sp"></span><span id="dircount"></span></div>
+    <input class="filter" id="filter" autocomplete="off" spellcheck="false" placeholder="Filter the names" aria-label="Filter the names" hidden>
+    <div class="props" id="dir"></div>
   </section>
 
   <section class="sec">
@@ -474,9 +518,10 @@ function forget(name) { delete tokens[name]; store(); sites = sites.filter(s => 
 let sites = [];   /* [{ name, url, serving, held, releases: [{ n, digest, size, at }] }] newest first */
 let open = null;
 
-async function api(method, path, { json, body, name, filename } = {}) {
+async function api(method, path, { json, body, name, token, filename } = {}) {
   const headers = {};
-  if (name) headers.authorization = `Bearer ${tokens[name]}`;
+  /* `token` is the one being tried: a site is linked before it is stored */
+  if (name) headers.authorization = `Bearer ${token || tokens[name]}`;
   if (json !== undefined) { headers["content-type"] = "application/json"; body = JSON.stringify(json); }
   if (filename) headers["x-filename"] = filename;
   const r = await fetch(path, { method, headers, body });
@@ -502,6 +547,36 @@ async function loadAll() {
   $("#jackText").textContent = `connected · ${sites.length} site${sites.length === 1 ? "" : "s"}`;
   $("#jack").classList.add("on");
 }
+
+/* the directory: every live site in the zone, newest claim first. Names are
+   public — each one answers on its own host to anyone — so the list carries
+   nothing a walk of the zone would not give. Sites of this browser are shown
+   above instead, with their releases. */
+let listed = [];
+let more = null;
+async function loadDir(after) {
+  const page = await api("GET", after ? `${API}?after=${encodeURIComponent(after)}` : API);
+  listed = after ? [...listed, ...page.items] : page.items;
+  more = page.next;
+  renderDir();
+}
+function renderDir() {
+  const q = $("#filter").value.trim().toLowerCase();
+  const rows = listed.filter(s => !tokens[s.name] && s.name.includes(q));
+  $("#filter").hidden = listed.length === 0;
+  $("#dircount").textContent = listed.length === 0 ? ""
+    : q ? `${rows.length} of ${listed.length}` : `${listed.length} site${listed.length === 1 ? "" : "s"}`;
+  $("#dir").innerHTML = (rows.length ? rows.map(s => `<div class="pub">
+      <a class="addr" href="${esc(s.url)}" target="_blank" rel="noopener"><span class="lb">${esc(s.name)}</span><span class="zn">.${ZONE}</span></a>
+      <span class="pmeta">
+        <span class="hide">${s.serving === null ? "claimed, nothing yet" : `v${s.serving} · ${s.releases} release${s.releases === 1 ? "" : "s"}`}</span>
+        <span>${ago(Date.parse(s.at))}</span>
+        <span class="dot${s.serving === null ? " off" : ""}" title="${s.serving === null ? "nothing served yet" : "live"}"></span>
+      </span>
+    </div>`).join("") : `<div class="hint">${listed.length ? "No name matches." : "No other site yet."}</div>`)
+    + (more && !q ? `<div class="more"><button class="tiny" id="dirmore">Show more sites</button></div>` : "");
+}
+$("#filter").addEventListener("input", renderDir);
 
 /* the copter: the main rotor's text scrolls, the tail rotor turns; the sweep
    across the sky is CSS. The tail rotor is the L-O-L at the back: four blades
@@ -743,7 +818,7 @@ async function deploy(name, body, filename, what) {
       <a href="${esc(result.url)}" target="_blank" rel="noopener">${name}.${ZONE}</a>
       <button class="tiny" data-copy="${esc(result.url)}">Copy the URL</button>
       <span class="sp"></span><button class="tiny" id="again">Deploy another site</button></div>`);
-  nameInput.value = ""; verdict(); open = name; renderProps(name);
+  nameInput.value = ""; verdict(); open = name; renderProps(name); renderDir();
   deployed();
   if (site?.held && result.serving !== result.n) toast(`v${result.n} is stored. ${name} is held at v${result.serving}.`);
   else toast(`${result.url} is live.`);
@@ -846,7 +921,8 @@ document.addEventListener("click", async e => {
       const n = d.dataset.del;
       if (!confirm(`${n}.${ZONE} will stop serving and the name stays taken. Delete it?`)) return;
       await api("DELETE", `${API}/${n}`, { name: n });
-      forget(n); open = null; renderProps(); toast(`${n}.${ZONE} is deleted.`);
+      forget(n); open = null; renderProps(); renderDir(); toast(`${n}.${ZONE} is deleted.`);
+      loadDir().catch(() => {});
       return;
     }
   } catch (err) { toast(err.message || String(err)); return; }
@@ -861,7 +937,29 @@ document.addEventListener("click", async e => {
     return;
   }
 
+  if (t.id === "dirmore") { loadDir(more).catch(err => toast(err.message || String(err))); return; }
+
   if (t.id === "again") { resetStage(); nameInput.focus(); }
+});
+
+/* linking: the token is tried against the site before it is written down, so a
+   typed token that opens nothing never becomes a row that says it does */
+$("#link").addEventListener("submit", async e => {
+  e.preventDefault();
+  const name = $("#linkname").value.trim().toLowerCase();
+  const token = $("#linktoken").value.trim();
+  if (!name || !token) { toast("Enter the name and the token."); return; }
+  try {
+    await api("GET", `${API}/${name}`, { name, token });
+  } catch (err) {
+    toast(err.status === 404 ? `${name}.${ZONE} is not claimed.` : err.message);
+    return;
+  }
+  tokens[name] = token; store();
+  await refresh(name);
+  $("#linkname").value = ""; $("#linktoken").value = "";
+  open = name; renderProps(name); renderDir();
+  toast(`${name}.${ZONE} is linked.`);
 });
 
 let toastEl;
@@ -875,8 +973,9 @@ function toast(msg) {
   toastTimer = setTimeout(() => { el.classList.add("bye"); setTimeout(() => el.remove(), 180); }, 2800);
 }
 
-resetStage(); renderProps(); verdict();
+resetStage(); renderProps(); renderDir(); verdict();
 loadAll().catch(() => { $("#jackText").textContent = "offline"; $("#jack").classList.add("on"); });
+loadDir().catch(() => { $("#dir").innerHTML = `<div class="hint">The list of sites is not available.</div>`; });
 document.fonts?.ready.then(() => placePin());
 </script>
 </body>

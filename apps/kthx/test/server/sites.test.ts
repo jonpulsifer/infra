@@ -562,3 +562,140 @@ describe('deleting', () => {
     });
   });
 });
+
+describe('the directory', () => {
+  interface Item {
+    readonly name: string;
+    readonly url: string;
+    readonly serving: number | null;
+    readonly releases: number;
+    readonly at: string;
+  }
+
+  async function directory(query = '') {
+    const response = await kthx().fetch(ask(`/api/sites${query}`));
+    return {
+      status: response.status,
+      cache: response.headers.get('cache-control'),
+      body: (await response.json()) as { items: Item[]; next: string | null },
+    };
+  }
+
+  /** Distinct claim times, so the order under test is not the clock's guess. */
+  async function claimedAt(name: string, iso: string) {
+    await kthx().sql`
+      update sites set created_at = ${iso}::timestamptz where name = ${name}
+    `;
+  }
+
+  /** Only the names of this test: the zone is shared with everything else. */
+  const names = (items: readonly Item[], mine: readonly string[]) =>
+    items.map((item) => item.name).filter((name) => mine.includes(name));
+
+  test('lists every live site newest first, and nothing an owner alone may see', async () => {
+    const first = await mine('first');
+    const second = await mine('second');
+    const gone = await mine('gone');
+    await upload(second.name, second.token);
+    await claimedAt(first.name, '2026-08-01T00:00:00Z');
+    await claimedAt(second.name, '2026-08-02T00:00:00Z');
+    await claimedAt(gone.name, '2026-08-03T00:00:00Z');
+    const removed = await kthx().fetch(
+      ask(`/api/sites/${gone.name}`, { method: 'DELETE', token: gone.token }),
+    );
+    expect(removed.status).toBe(204);
+
+    const listed = await directory();
+    expect(listed.status).toBe(200);
+    expect(listed.cache).toBe('public, max-age=30');
+    // Newest claim first, and a deleted name is not in the list at all.
+    expect(
+      names(listed.body.items, [first.name, second.name, gone.name]),
+    ).toEqual([second.name, first.name]);
+    expect(listed.body.next).toBeNull();
+
+    const served = listed.body.items.find((item) => item.name === second.name);
+    expect(served).toEqual({
+      name: second.name,
+      url: `https://${second.name}.${ZONE}`,
+      serving: 1,
+      releases: 1,
+      at: '2026-08-02T00:00:00.000Z',
+    });
+    // A claimed name with no upload is in the list, serving nothing.
+    expect(listed.body.items).toContainEqual(
+      expect.objectContaining({ name: first.name, serving: null, releases: 0 }),
+    );
+    // Owning a site is what the bearer is for: none of it is here.
+    for (const item of listed.body.items) {
+      expect(Object.keys(item).sort()).toEqual([
+        'at',
+        'name',
+        'releases',
+        'serving',
+        'url',
+      ]);
+    }
+  });
+
+  test('walks the whole list with the cursor, one page at a time', async () => {
+    const owned = [
+      await mine('walk-a'),
+      await mine('walk-b'),
+      await mine('walk-c'),
+    ].map((site) => site.name);
+    for (const [index, name] of owned.entries()) {
+      await claimedAt(name, `2026-07-0${index + 1}T00:00:00Z`);
+    }
+
+    const seen: string[] = [];
+    let after: string | null = null;
+    for (let page = 0; page < 20; page += 1) {
+      const listed: Awaited<ReturnType<typeof directory>> = await directory(
+        after === null ? '?limit=1' : `?limit=1&after=${after}`,
+      );
+      expect(listed.body.items).toHaveLength(1);
+      seen.push(...names(listed.body.items, owned));
+      after = listed.body.next;
+      if (after === null) break;
+    }
+    // Newest claim first, every name once, and the walk ends on its own.
+    expect(seen).toEqual([...owned].reverse());
+    expect(after).toBeNull();
+  });
+
+  test('clamps the page size and refuses a cursor that is not a name', async () => {
+    await mine('clamp');
+    expect((await directory('?limit=99999')).status).toBe(200);
+    expect((await directory('?limit=nonsense')).status).toBe(200);
+    expect(await directory('?after=Not%20A%20Name')).toMatchObject({
+      status: 400,
+      body: { code: 'INVALID_QUERY' },
+    });
+    // A cursor naming a site that never existed is the end of the walk.
+    expect((await directory('?after=nobody-here-at-all')).body.items).toEqual(
+      [],
+    );
+  });
+
+  test('answers a hot page from memory, and forgets it when a name is claimed', async () => {
+    const owned = await mine('cached');
+    const before = await directory();
+    expect(names(before.body.items, [owned.name])).toEqual([owned.name]);
+
+    // Straight into the table, so nothing tells the cache to let go.
+    const smuggled = kthx().name('smuggled');
+    await kthx().sql`
+      insert into sites (name, token_hash) values (${smuggled}, ${'0'.repeat(64)})
+    `;
+    expect((await directory()).body.items.map((item) => item.name)).toEqual(
+      before.body.items.map((item) => item.name),
+    );
+
+    // A claim is the one thing that must never be missing from the list.
+    const fresh = await mine('fresh');
+    expect(
+      names((await directory()).body.items, [fresh.name, smuggled]),
+    ).toEqual([fresh.name, smuggled]);
+  });
+});

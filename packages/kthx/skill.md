@@ -119,6 +119,12 @@ The SDK is a convenience; the routes are the product. `<site>` is
 | GET | `/files/<path>` | the bytes |
 | POST | `/api/mcp` | JSON-RPC 2.0, one message per request |
 
+The apex has one route no token opens: `GET https://kthx.dev/api/sites` is the
+public directory — `{items: [{name, url, serving, releases, at}], next}`, newest
+claim first, `limit` up to 500 and `after=<name>` for the page after that. It
+names sites and nothing else; a site's releases, usage and hold stay behind its
+bearer.
+
 Every non-`GET` `/api/*` from a browser must send `Origin` equal to the site's
 own; a non-browser client sends none. JSON routes require `content-type:
 application/json`. Errors are `{code, message}` with `x-request-id` on the
@@ -194,7 +200,8 @@ bun add -g https://kthx.dev/cli/kthx.tgz
 | `kthx dev [dir]` | serves the directory on `:4321` against the site's live `/api` |
 | `kthx rollback [n]` | serves release `n` and holds it there |
 | `kthx release` | drops the hold; the newest release serves |
-| `kthx ls` | releases, what is serving, usage against the quotas |
+| `kthx ls` | releases, what is serving, usage against the quotas; with no `kthx.json`, every site in `sites.json` |
+| `kthx ls --all` | the public directory: every site on the apex |
 | `kthx rm` | deletes the site |
 | `kthx open` | opens `https://<name>.kthx.dev` |
 
