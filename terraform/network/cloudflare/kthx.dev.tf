@@ -81,7 +81,13 @@ resource "cloudflare_dns_record" "www_kthx_dev" {
 # site document pays a full origin round-trip. These rules cache what the
 # origin says is cacheable and keep the data plane out of it. Cache rules
 # stack and the last match wins per setting, so the bypass rule is last —
-# which is also why it has to spell out that `/_/sdk.js` is not data.
+# which is also why it has to spell out that `/api/sdk.js` is not data.
+#
+# The bypass clauses carry no host test: the ruleset is scoped to this zone, so
+# they already cover the apex and every `*.kthx.dev` site host, which is what
+# `/api/` needs (`/api/sites…` on the apex, everything else on a site host).
+# `/kthx/` is the one exception — that path only ever existed on the apex, and
+# it goes when the retired v1 API does.
 resource "cloudflare_ruleset" "kthx_dev_cache" {
   zone_id     = cloudflare_zone.kthx_dev.id
   name        = "cache"
@@ -111,7 +117,7 @@ resource "cloudflare_ruleset" "kthx_dev_cache" {
     },
     {
       description = "the data plane and the API are never cached; the SDK is not data"
-      expression  = "(starts_with(http.request.uri.path, \"/_/\") and http.request.uri.path ne \"/_/sdk.js\") or (http.host eq \"kthx.dev\" and starts_with(http.request.uri.path, \"/kthx/\"))"
+      expression  = "(starts_with(http.request.uri.path, \"/api/\") and http.request.uri.path ne \"/api/sdk.js\") or starts_with(http.request.uri.path, \"/files/\") or (starts_with(http.request.uri.path, \"/_/\") and http.request.uri.path ne \"/_/sdk.js\") or (http.host eq \"kthx.dev\" and starts_with(http.request.uri.path, \"/kthx/\"))"
       action      = "set_cache_settings"
       enabled     = true
       action_parameters = {

@@ -63,3 +63,63 @@ resource "google_storage_bucket_iam_member" "trusted_builder_source" {
   role   = "roles/storage.objectViewer"
   member = "serviceAccount:${data.google_project.trusted_builds.number}@cloudbuild.gserviceaccount.com"
 }
+
+# The kthx depot: every release archive under `releases/<digest>.tar.gz`, every
+# site's uploaded files under `files/<site>/`, and the nightly `pg_dumpall`
+# under `backups/pg/`. Same region as the source depot above — both are read
+# from offsite.
+resource "google_storage_bucket" "kthx" {
+  name                        = "bluenose-kthx"
+  location                    = local.region
+  force_destroy               = false
+  uniform_bucket_level_access = true
+
+  versioning {
+    enabled = true
+  }
+
+  # Backups are the only prefix that expires. Release archives are
+  # content-addressed and a release row points at one by digest, so nothing
+  # here may delete them on age; the server's own sweep is what drops the ones
+  # no row references.
+  lifecycle_rule {
+    condition {
+      age            = 30
+      matches_prefix = ["backups/"]
+      with_state     = "LIVE"
+    }
+    action {
+      type = "Delete"
+    }
+  }
+
+  # Deleting a live object only archives it while versioning is on, so without
+  # this the rule above keeps every dump forever instead of 30 days of them.
+  lifecycle_rule {
+    condition {
+      days_since_noncurrent_time = 7
+      matches_prefix             = ["backups/"]
+      with_state                 = "ARCHIVED"
+    }
+    action {
+      type = "Delete"
+    }
+  }
+
+  depends_on = [module.vessel]
+}
+
+resource "google_storage_bucket_iam_member" "kthx" {
+  bucket = google_storage_bucket.kthx.name
+  role   = "roles/storage.objectAdmin"
+  member = google_service_account.kthx.member
+}
+
+# Release rows carried over from the v1 control plane keep their existing
+# `gs://bluenose-spindrift-source/…` location, so the server rehydrates those
+# releases from where they already are. Read-only, and only on that bucket.
+resource "google_storage_bucket_iam_member" "kthx_spindrift_source" {
+  bucket = google_storage_bucket.spindrift_source.name
+  role   = "roles/storage.objectViewer"
+  member = google_service_account.kthx.member
+}
