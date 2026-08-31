@@ -414,6 +414,13 @@
       "when": 1786969200000,
       "tag": "0058_kthx_kv",
       "breakpoints": true
+    },
+    {
+      "idx": 59,
+      "version": "7",
+      "when": 1786969260000,
+      "tag": "0059_drop_kthx",
+      "breakpoints": true
     }
   ]
 }

@@ -34,13 +34,6 @@ import {
   GitHubAppAuth,
   githubAppWebhookSecret,
 } from '../integrations/github/app-auth.ts';
-import {
-  type KthxDeps,
-  kthxDepot,
-  kthxZone,
-  withKthxHost,
-} from '../kthx/serve.ts';
-import { sourceDepotFor } from '../storage/archives.ts';
 import { BOSUN_SECRET_VAR } from './bosun-route.ts';
 import { type ClientRoute, webRoutes } from './routes.ts';
 import { type StreamSocketData, streamWebSocket } from './streams.ts';
@@ -222,21 +215,6 @@ export async function start(
    */
   const keyring = CredentialKeyring.fromEnvironment(Bun.env);
 
-  /**
-   * kthx sites stage into the depot `KTHX_BUCKET` names, and otherwise into
-   * the same one `/internal/upload` uses — read per request through the
-   * accessor above for the same reason the routes do. The variable is what
-   * lets a site serve without the installation manifest; the fallback is what
-   * keeps a deployment that sets none serving exactly as it does today.
-   */
-  const kthx: KthxDeps = {
-    db,
-    zone: kthxZone(Bun.env),
-    depot: async () =>
-      (await kthxDepot(Bun.env)) ??
-      sourceDepotFor((await installationNow()).manifest),
-  };
-
   const rawRoutes = webRoutes(
     client,
     {
@@ -291,20 +269,15 @@ export async function start(
       },
       context: commandContext,
     },
-    kthx,
   );
 
   const server = Bun.serve<StreamSocketData>({
     port: Number(Bun.env.PORT ?? 3000),
     development,
-    // A kthx `Host` is answered before any path in the table is consulted;
-    // the wrapper sits inside the instrumentation so those requests are
-    // counted under the path they would otherwise have reached.
-    routes: instrumentRoutes(withKthxHost(rawRoutes, kthx)),
+    routes: instrumentRoutes(rawRoutes),
     websocket: streamWebSocket,
-    // The abuse floor for a surface anybody can post bytes to. A kthx archive
-    // is refused above 25 MiB before this is reached; a console upload has
-    // never been near it.
+    // The abuse floor for a surface anybody can post bytes to. A console
+    // upload has never been near it.
     maxRequestBodySize: 32 * 1024 * 1024,
   });
 

@@ -50,7 +50,6 @@
       "inputs": [
         "$TURBO_DEFAULT$",
         "$TURBO_ROOT$/packages/archive/**",
-        "$TURBO_ROOT$/packages/kthx/**",
         "$TURBO_ROOT$/packages/charts/spindrift-app/Chart.yaml",
         "$TURBO_ROOT$/packages/charts/spindrift-app/values.yaml",
         "$TURBO_ROOT$/packages/charts/spindrift-app/templates/**",

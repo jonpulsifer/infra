@@ -851,61 +851,6 @@ serving Component and otherwise to none, because putting one hostname on two
 routes lets the platform pick a winner arbitrarily. Which Component is the front
 door is the developer's to say, and there is nowhere to say it yet.
 
-## kthx
-
-Quick static sites: pick a name, drop a zip or an `index.html`, and it is
-served at `https://<name>.<zone>` from this process. A site is **not an App**
-— it is a row in `kthx_sites` pointing at one of its `kthx_releases`, each of
-which is a bundle staged through the same `normalizeArchive` →
-`stageArchiveBytes` path `/internal/upload` takes and read back with the same
-`readBundle` the static backends use. Ownership is one bearer per site, minted
-at claim and shown once; the row holds its SHA-256. Rolling back is pointing
-the row at an older release, which also sets `held`, so the next upload is
-stored rather than served until the hold is released. An upload is at most
-25 MiB compressed and 32 MiB unpacked (`MAX_ARCHIVE_BYTES`,
-`MAX_UNPACKED_BYTES` in `src/kthx/sites.ts`); the server itself refuses any
-request body over 32 MiB, `/internal/upload` included, with a socket-level 413.
-The unpacked ceiling is a memory number, measured rather than reasoned about:
-inflating a ZIP, re-taring it and reading that tar back costs about seven
-times the unpacked size in resident memory, none of which comes back, so
-32 MiB is what the 768 MiB web pod holds. Two of them unpack at a time
-(`MAX_UPLOADS`) and a third is refused `503 BUSY` rather than queued — what it
-would wait for is memory, and a queue holds the bytes it is queueing. That
-refusal is checked ahead of the rate limiter, so a neighbour's uploads cost
-the caller nothing.
-
-`src/kthx/serve.ts` wraps the whole route table so a kthx `Host` is answered
-before any path route runs — the apex gets `packages/kthx/landing.html`, a site
-gets a file from its serving release, and the five `/kthx/*` paths in
-`src/kthx/sites.ts` are the API. The zone is **`KTHX_ZONE`** (default
-`kthx.dev`; `kthx.localhost` for a local run, since `*.localhost` resolves to
-loopback). The edge's part — the zone, the tunnel, and the wildcard route to
-this process — lives outside this app.
-
-Releases stage into the bucket **`KTHX_BUCKET`** names, federated by the
-credential `GOOGLE_APPLICATION_CREDENTIALS` mounts. Setting it is what makes
-kthx standalone: a site serves on a variable and a mounted credential, with no
-installation manifest behind it. Unset, the depot is the manifest's source
-bucket — the one every other upload stages into — so a deployment that names
-none is unchanged.
-
-Every site also answers under `/_/` (`src/kthx/data.ts`): `db` is JSON by key
-in `kthx_kv`, written by anyone on the site's origin and compared-and-swapped
-through `if-match`; `me` is the anonymous `kthx_me` cookie; `ws` is the one
-socket a tab opens, fanning store writes and room messages out through Bun's
-pub/sub. `packages/kthx/sdk.js` fronts the three as `window.kthx`, served as
-`/_/sdk.js` on a site and `/sdk.js` on the apex.
-
-Nobody signs in to write a key, so two ceilings stand between a visitor and this
-installation's disk. A site holds at most `MAX_KEYS` keys — checked only where a
-write would add a row, so overwriting and deleting keep working once a site is
-full and a new key answers `507 SITE_FULL`. And writes under `/_/` are held by
-the same per-address bucket the apex claim path uses; reads, `me`, and the `ws`
-upgrade are not spent against it, because rate-limiting those would break
-`db.watch` on a site people are using. Both are per replica and in memory, and
-the bound is rows rather than bytes — a running byte total per site is the
-upgrade path.
-
 ## Testing
 
 Tests run against a real Postgres — the concurrency design is a claim about

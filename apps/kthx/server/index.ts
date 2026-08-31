@@ -62,45 +62,11 @@ function asset(path: string, type: string, cacheControl: string): Response {
   });
 }
 
-/**
- * The landing page, as v2 tells it.
- *
- * `packages/kthx/landing.html` is one file served by two processes: the v1 apex
- * Spindrift still answers reads the same asset, and every button on it would
- * break the moment a republished image carried v2's paths. So the file on disk
- * stays v1's and this process rewrites it as it serves.
- *
- * ponytail: a list of literal swaps, applied once. The whole table is deleted
- * with `apps/spindrift/src/kthx/` in the migration ticket, which is what makes
- * the asset ours to edit in place.
- */
-const V2: readonly (readonly [string, string])[] = [
-  ['const API = "/kthx/sites"', 'const API = "/api/sites"'],
-  ['"/_/sdk.js"', '"/api/sdk.js"'],
-  [
-    '<b>alias kthx="bun ~/src/infra/apps/kthx/cli/main.ts"</b>  <i># apps/kthx, from a checkout of this repo</i>',
-    '<b>bun add -g https://kthx.dev/cli/kthx.tgz</b>  <i># the only install; there is no npm package</i>',
-  ],
-  [
-    '<span class="p">$</span> <b>kthx dev</b>\n<i>  serves ./ on http://localhost:4321 — sdk in local mode, data stays on this machine</i>',
-    '<span class="p">$</span> <b>kthx init</b>\n<i>  quiet-lynx-73 — kthx.json, SKILL.md and index.html written; run kthx deploy</i>\n\n<span class="p">$</span> <b>kthx dev</b>\n<i>  serves ./ on http://localhost:4321</i>\n<i>  /api and /files go to</i> <u>https://quiet-lynx-73.kthx.dev</u> <i>— the live database, not a copy</i>',
-  ],
-  [
-    '<span>Releases and rollbacks come from Spindrift.</span>',
-    '<span>Every site keeps its releases; <code>kthx rollback</code> serves an earlier one.</span>',
-  ],
-];
-
+/** The apex page, read once. This process is the only one that serves it. */
 let landing: Promise<string> | null = null;
 
 function landingHtml(): Promise<string> {
-  landing ??= Bun.file(LANDING_PATH)
-    .text()
-    .then((html) => {
-      let out = html;
-      for (const [from, to] of V2) out = out.replace(from, to);
-      return out;
-    });
+  landing ??= Bun.file(LANDING_PATH).text();
   return landing;
 }
 

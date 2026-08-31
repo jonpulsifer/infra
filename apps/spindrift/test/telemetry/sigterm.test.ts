@@ -8,8 +8,8 @@ import { expect, test } from 'bun:test';
  * process once the handler returns, and `Bun.serve` holds the loop open. The
  * pod then sat for the full 30s grace period and left on a SIGKILL, which put
  * a second copy of a single-replica process beside the old one for the whole
- * window. `web` keeps kthx presence, room fan-out, rate-limit buckets and the
- * bundle cache in its own memory, so two of it is two of all of those.
+ * window. `web` keeps its rate-limit buckets and its bundle cache in its own
+ * memory, so two of it is two of both.
  *
  * Driven as a subprocess, because the assertion is that the process exits and
  * a test runner cannot make that claim about itself.

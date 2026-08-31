@@ -162,6 +162,11 @@ const PROJECT_ID_ALLOWLIST = new Set<string>([
   // why the registry-credential table names it as an example of a username a
   // typo in would otherwise be undiagnosable.
   'oauth2accesstoken',
+  // The one HTTP header name in `packages/archive`, which this image ships and
+  // which is scanned as shipped source. Standard, identical in every
+  // installation, and written by a depot reader rather than a browser bundle —
+  // `src/web/` is scoped out of this scanner and that package is not.
+  'content-length',
   // The two surfaces a function deploys to. Vocabulary read from the feature's
   // own contract rather than restated, so adding a surface does not break a
   // test here.
@@ -171,23 +176,6 @@ const PROJECT_ID_ALLOWLIST = new Set<string>([
   // for everybody, written by a deployer rather than by a browser bundle.
   'nodejs22',
   'trace-v1',
-  // The headers a kthx site is served with and an upload arrives under, plus
-  // the one the edge stamps a caller's address in. Standard names, written
-  // outside `src/web/` because kthx answers on its own hosts rather than
-  // through the browser bundle.
-  'cache-control',
-  'content-type',
-  'x-content-type-options',
-  'content-length',
-  'if-none-match',
-  'if-match',
-  'x-filename',
-  'cf-connecting-ip',
-  'no-cache',
-  'no-store',
-  // The header every kthx refusal that can be retried carries, written by the
-  // server and read by its SDK. Same kind of thing as the rest of this block.
-  'retry-after',
 ]);
 
 /**
@@ -424,11 +412,7 @@ async function readFiles(...paths: string[]): Promise<SourceFile[]> {
  * ships and serves; the import rule polices this package alone.
  */
 const src = await readSource('src');
-const shipped = [
-  ...src,
-  ...(await packageSource('../../packages/archive')),
-  ...(await packageSource('../../packages/kthx')),
-];
+const shipped = [...src, ...(await packageSource('../../packages/archive'))];
 const everything = [
   ...src,
   ...(await readSource('test')),
