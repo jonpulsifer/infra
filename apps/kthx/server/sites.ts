@@ -44,6 +44,7 @@ import {
 import {
   CLAIM_BUCKET,
   DailyCap,
+  DIRECTORY_BUCKET,
   secondsToMidnight,
   TokenBucket,
 } from './limits.ts';
@@ -201,10 +202,8 @@ type Act = (request: Request, ctx: Ctx, site: SiteRow) => Promise<Response>;
 /** How many sites a page of the directory holds, and what it may be asked for. */
 const DIRECTORY_PAGE = 200;
 const MAX_DIRECTORY_PAGE = 500;
-/** How long a page is answered from memory rather than from the database. */
+/** How long the default page is answered from memory rather than the database. */
 const DIRECTORY_CACHE_MS = 10_000;
-/** Beyond this many kept pages the map is a leak rather than a cache. */
-const MAX_CACHED_PAGES = 64;
 
 /** One site as the directory shows it: no token hash, no usage, no hold. */
 interface Listed {
@@ -221,19 +220,27 @@ interface Page {
 }
 
 /**
- * The pages this process has answered lately.
+ * The default page, as this process last answered it.
+ *
+ * One entry rather than a map keyed by the query, because the caller writes
+ * both halves of such a key: invented cursors would fill it, evict what every
+ * other visitor is reading, and still cost a query each. Every other shape
+ * goes to the database, behind {@link directoryReads}.
  *
  * ponytail: process-wide and in memory, like every other counter here — there
- * is one replica by construction. Cleared whenever the set of names changes,
+ * is one replica by construction. Dropped whenever the set of names changes,
  * so "I claimed a site and it is not on the list" is never the cache's doing;
  * a release or a rollback is left to age out, because what those move is a
  * number beside a name rather than the list of names.
  */
-const pages = new Map<string, Page>();
+let cachedPage: Page | null = null;
 
-/** Every page is stale: a name was claimed or deleted. */
+/** How fast one address may ask for a page the cache does not hold. */
+const directoryReads = new TokenBucket(DIRECTORY_BUCKET);
+
+/** The kept page is stale: a name was claimed or deleted. */
 function forgetPages(): void {
-  pages.clear();
+  cachedPage = null;
 }
 
 /**
@@ -251,23 +258,31 @@ function forgetPages(): void {
 async function directory(request: Request, ctx: Ctx): Promise<Response> {
   const query = new URL(request.url).searchParams;
   const after = query.get('after');
-  if (after !== null && nameProblem(after) !== null) {
+  // A reserved name is a name: it matches no row, so it ends the walk rather
+  // than being refused. Only a string that is not a name at all is a bad query.
+  if (after !== null && nameProblem(after) === 'INVALID_NAME') {
     return refuse('INVALID_QUERY', ctx.id);
   }
-  const asked = Number(query.get('limit') ?? DIRECTORY_PAGE);
+  // `?limit=` is the parameter left empty, which is the default, not zero.
+  const raw = query.get('limit');
+  const asked = raw ? Number(raw) : DIRECTORY_PAGE;
   const limit = Number.isFinite(asked)
     ? Math.min(Math.max(Math.trunc(asked), 1), MAX_DIRECTORY_PAGE)
     : DIRECTORY_PAGE;
 
-  const key = `${limit}:${after ?? ''}`;
   const now = Date.now();
-  let page = pages.get(key);
-  if (page === undefined || now - page.at > DIRECTORY_CACHE_MS) {
+  const canonical = after === null && limit === DIRECTORY_PAGE;
+  let page = canonical ? cachedPage : null;
+  if (page === null || now - page.at > DIRECTORY_CACHE_MS) {
+    // Spent on the query, not on the request: the page everyone lands on stays
+    // free while it is hot, and what is bounded is work on the control
+    // database — the same connection every site host serves its files through.
+    const address = addressOf(request, ctx.server, ctx.config.trustedProxies);
+    if (directoryReads.spend(address)) {
+      return refuse('RATE_LIMITED', ctx.id, retryAfter(60));
+    }
     page = await listSites(ctx, limit, after, now);
-    // Bounded, because the key carries a caller's cursor: a flood of invented
-    // cursors evicts itself rather than growing without end.
-    if (pages.size > MAX_CACHED_PAGES) forgetPages();
-    pages.set(key, page);
+    if (canonical) cachedPage = page;
   }
 
   return ok(

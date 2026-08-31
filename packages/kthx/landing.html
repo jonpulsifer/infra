@@ -507,8 +507,9 @@ $("#cli1").textContent = $("#cli2").textContent = `https://plum-otter-41.${ZONE}
 
 /* the tokens are the sites: whoever holds one owns the name */
 const STORE = "kthx.sites";
-let tokens = {};
-try { tokens = JSON.parse(localStorage.getItem(STORE) || "{}") || {}; } catch {}
+/* no prototype: `tokens["constructor"]` must be a site of this browser or nothing */
+const tokens = Object.create(null);
+try { Object.assign(tokens, JSON.parse(localStorage.getItem(STORE) || "{}")); } catch {}
 function store() { try { localStorage.setItem(STORE, JSON.stringify(tokens)); } catch {} }
 function forget(name) { delete tokens[name]; store(); sites = sites.filter(s => s.name !== name); }
 let sites = [];   /* [{ name, url, serving, held, releases: [{ n, digest, size, at }] }] newest first */
@@ -548,20 +549,23 @@ async function loadAll() {
    public — each one answers on its own host to anyone — so the list carries
    nothing a walk of the zone would not give. Sites of this browser are shown
    above instead, with their releases. */
-let listed = [];
+let listed = null;   /* null until the directory answers: nothing is asserted before it does */
 let more = null;
 async function loadDir(after) {
   const page = await api("GET", after ? `${API}?after=${encodeURIComponent(after)}` : API);
-  listed = after ? [...listed, ...page.items] : page.items;
+  listed = after && listed ? [...listed, ...page.items] : page.items;
   more = page.next;
   renderDir();
 }
 function renderDir() {
+  if (listed === null) return;
   const q = $("#filter").value.trim().toLowerCase();
-  const rows = listed.filter(s => !tokens[s.name] && s.name.includes(q));
-  $("#filter").hidden = listed.length === 0;
-  $("#dircount").textContent = listed.length === 0 ? ""
-    : q ? `${rows.length} of ${listed.length}` : `${listed.length} site${listed.length === 1 ? "" : "s"}`;
+  /* the sites of this browser are rendered above, with their releases */
+  const others = listed.filter(s => !Object.hasOwn(tokens, s.name));
+  const rows = others.filter(s => s.name.includes(q));
+  $("#filter").hidden = others.length === 0;
+  $("#dircount").textContent = others.length === 0 ? ""
+    : q ? `${rows.length} of ${others.length}` : `${others.length} site${others.length === 1 ? "" : "s"}`;
   $("#dir").innerHTML = (rows.length ? rows.map(s => `<div class="pub">
       <a class="addr" href="${esc(s.url)}" target="_blank" rel="noopener"><span class="lb">${esc(s.name)}</span><span class="zn">.${ZONE}</span></a>
       <span class="pmeta">
@@ -569,7 +573,7 @@ function renderDir() {
         <span>${ago(Date.parse(s.at))}</span>
         <span class="dot${s.serving === null ? " off" : ""}" title="${s.serving === null ? "nothing served yet" : "live"}"></span>
       </span>
-    </div>`).join("") : `<div class="hint">${listed.length ? "No name matches." : "No other site yet."}</div>`)
+    </div>`).join("") : `<div class="hint">${q ? "No name matches." : "No other site yet."}</div>`)
     + (more && !q ? `<div class="more"><button class="tiny" id="dirmore">Show more sites</button></div>` : "");
 }
 $("#filter").addEventListener("input", renderDir);
@@ -609,7 +613,7 @@ function check(n) {
   if (n.length > 40) return { ok: false, why: "Too long", cls: "taken" };
   if (!LABEL.test(n)) return { ok: false, why: "Use a-z, 0-9, -", cls: "taken" };
   if (RESERVED.includes(n)) return { ok: false, why: "Reserved", cls: "taken" };
-  if (tokens[n]) return { ok: true, why: "Yours · will update", cls: "free" };
+  if (Object.hasOwn(tokens, n)) return { ok: true, why: "Yours · will update", cls: "free" };
   return { ok: true, why: "Available", cls: "free" };
 }
 const nameInput = $("#name");
@@ -630,7 +634,7 @@ function verdict() {
   const n = nameInput.value.trim().toLowerCase();
   const v = check(n);
   say(v.cls, v.why);
-  if (v.ok && !tokens[n]) probe(n);
+  if (v.ok && !Object.hasOwn(tokens, n)) probe(n);
   return v;
 }
 nameInput.addEventListener("input", () => { abort(); nameInput.value = nameInput.value.toLowerCase().replace(/[^a-z0-9-]/g, ""); verdict(); });
@@ -945,8 +949,11 @@ $("#link").addEventListener("submit", async e => {
   const name = $("#linkname").value.trim().toLowerCase();
   const token = $("#linktoken").value.trim();
   if (!name || !token) { toast("Enter the name and the token."); return; }
+  /* the name must be a name: a typed `/` asks for one site and files the token under another */
+  const v = check(name);
+  if (!v.ok) { toast(v.why); return; }
   try {
-    await api("GET", `${API}/${name}`, { name, token });
+    await api("GET", `${API}/${encodeURIComponent(name)}`, { name, token });
   } catch (err) {
     toast(err.status === 404 ? `${name}.${ZONE} is not claimed.` : err.message);
     return;

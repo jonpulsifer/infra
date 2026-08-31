@@ -123,7 +123,8 @@ The apex has one route no token opens: `GET https://kthx.dev/api/sites` is the
 public directory — `{items: [{name, url, serving, releases, at}], next}`, newest
 claim first, `limit` up to 500 and `after=<name>` for the page after that. It
 names sites and nothing else; a site's releases, usage and hold stay behind its
-bearer.
+bearer. The first page is cached; ask for more than sixty other pages a minute
+from one address and the answer is 429 `RATE_LIMITED`.
 
 Every non-`GET` `/api/*` from a browser must send `Origin` equal to the site's
 own; a non-browser client sends none. JSON routes require `content-type:

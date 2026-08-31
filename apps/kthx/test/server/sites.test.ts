@@ -6,7 +6,7 @@ import { describe, expect, test } from 'bun:test';
 import { readdir, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tarGz } from '../../cli/tar.ts';
-import { secondsToMidnight } from '../../server/limits.ts';
+import { DIRECTORY_BUCKET, secondsToMidnight } from '../../server/limits.ts';
 import {
   MAX_ARCHIVE_BYTES,
   MAX_UNPACKED_BYTES,
@@ -665,17 +665,55 @@ describe('the directory', () => {
   });
 
   test('clamps the page size and refuses a cursor that is not a name', async () => {
-    await mine('clamp');
+    const first = await mine('clamp');
+    const second = await mine('clamp-two');
     expect((await directory('?limit=99999')).status).toBe(200);
     expect((await directory('?limit=nonsense')).status).toBe(200);
+    // The parameter left empty is the parameter left out: the default page.
+    expect(
+      names((await directory('?limit=')).body.items, [first.name, second.name]),
+    ).toHaveLength(2);
     expect(await directory('?after=Not%20A%20Name')).toMatchObject({
       status: 400,
       body: { code: 'INVALID_QUERY' },
     });
-    // A cursor naming a site that never existed is the end of the walk.
+    // A cursor naming a site that never existed is the end of the walk, and a
+    // reserved name is a name — it matches no row, so it ends it the same way.
     expect((await directory('?after=nobody-here-at-all')).body.items).toEqual(
       [],
     );
+    expect(await directory('?after=admin')).toMatchObject({
+      status: 200,
+      body: { items: [], next: null },
+    });
+  });
+
+  test('bounds how fast one address asks for a page the cache cannot hold', async () => {
+    const from = address();
+    // The page everyone lands on, warmed by somebody else before the burst.
+    const warm = await kthx().fetch(ask('/api/sites', { address: address() }));
+    expect(warm.status).toBe(200);
+    await warm.json();
+
+    // A cursor or a page size the cache does not keep costs a query each.
+    for (let asked = 0; asked < DIRECTORY_BUCKET.capacity; asked += 1) {
+      const paged = await kthx().fetch(
+        ask('/api/sites?limit=1', { address: from }),
+      );
+      expect(paged.status).toBe(200);
+      await paged.json();
+    }
+    const refused = await kthx().fetch(
+      ask('/api/sites?limit=1', { address: from }),
+    );
+    expect(refused.status).toBe(429);
+    expect((await refused.json()).code).toBe('RATE_LIMITED');
+    expect(Number(refused.headers.get('retry-after'))).toBeGreaterThan(0);
+
+    // And the hot page is still free: it spends nothing to answer.
+    const landing = await kthx().fetch(ask('/api/sites', { address: from }));
+    expect(landing.status).toBe(200);
+    await landing.json();
   });
 
   test('answers a hot page from memory, and forgets it when a name is claimed', async () => {
