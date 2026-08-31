@@ -17,6 +17,7 @@ interface Seen {
   readonly cookie: string | null;
   readonly authorization: string | null;
   readonly host: string | null;
+  readonly encoding: string | null;
   readonly body: string;
 }
 
@@ -43,8 +44,21 @@ const upstream = Bun.serve<{ echo: true }>({
       cookie: request.headers.get('cookie'),
       authorization: request.headers.get('authorization'),
       host: request.headers.get('host'),
+      encoding: request.headers.get('accept-encoding'),
       body: await request.text(),
     });
+    if (pathname === '/api/zstd') {
+      // A site that compresses anyway, whatever the proxy asked for.
+      const zipped = new Uint8Array(
+        Bun.zstdCompressSync(new TextEncoder().encode('{"items":[7]}')),
+      );
+      return new Response(zipped, {
+        headers: {
+          'content-encoding': 'zstd',
+          'content-type': 'application/json',
+        },
+      });
+    }
     if (pathname.startsWith('/_/')) {
       return Response.json(
         { code: 'GONE', message: 'retired' },
@@ -233,6 +247,17 @@ describe('the proxy', () => {
     }
   });
 
+  test('asks the site for no encoding, and passes one back anyway', async () => {
+    seen.length = 0;
+    const answer = await fetch(url('/api/zstd'));
+    // A proxy hands the bytes on rather than negotiating an encoding of its
+    // own — and when the site encodes regardless, what comes out is readable
+    // and not labelled with an encoding this hop already undid.
+    expect(seen[0]!.encoding).toBe('identity');
+    expect(await answer.json()).toEqual({ items: [7] });
+    expect(answer.headers.get('content-encoding')).toBeNull();
+  });
+
   test('carries the websocket', async () => {
     const socket = new WebSocket(url('/api/ws?room=a').replace('http', 'ws'));
     const frames: string[] = [];
@@ -248,5 +273,55 @@ describe('the proxy', () => {
     // Whatever the page put on the URL reaches the site, as it does on /api/*.
     expect(wsSearch).toBe('?room=a');
     socket.close();
+  });
+});
+
+describe('a site that never answers', () => {
+  /**
+   * The shape of the failure that made the loop look hung: a socket that
+   * accepts and then says nothing. No RST, so a connect with no deadline waits
+   * on the OS — minutes, on the route that prompted this.
+   */
+  const deaf = Bun.listen({
+    hostname: '127.0.0.1',
+    port: 0,
+    socket: { data: () => {}, open: () => {} },
+  });
+  const gone = `http://127.0.0.1:${deaf.port}`;
+  const loop = dev(dir, { name: 'notes', token: 't', site: gone }, 0, 300);
+  afterAll(() => {
+    loop.stop(true);
+    deaf.stop();
+  });
+
+  test('answers 504 inside the deadline and keeps serving', async () => {
+    const started = Date.now();
+    const answer = await fetch(`${loop.url.origin}/api/db/notes`);
+    expect(answer.status).toBe(504);
+    expect(await answer.json()).toEqual({
+      code: 'UNREACHABLE',
+      message: `${gone} did not answer in 0.3s`,
+    });
+    // The bound is the whole bound, the retry inside it — not one per attempt.
+    expect(Date.now() - started).toBeLessThan(2000);
+
+    // The loop is still up: the files still serve, and the next call answers
+    // the same way instead of hanging.
+    expect(await (await fetch(`${loop.url.origin}/`)).text()).toBe(
+      '<h1>home</h1>',
+    );
+    expect((await fetch(`${loop.url.origin}/api/db/notes`)).status).toBe(504);
+  });
+
+  test('closes the tab socket rather than leaving it open forever', async () => {
+    const socket = new WebSocket(
+      `${loop.url.origin}/api/ws`.replace('http', 'ws'),
+    );
+    const closed = await new Promise<CloseEvent>((resolve, reject) => {
+      socket.onclose = resolve;
+      setTimeout(() => reject(new Error('still open')), 2000);
+    });
+    expect(closed.code).toBe(1013);
+    expect(closed.reason).toBe(`${gone} did not answer in 0.3s`);
   });
 });

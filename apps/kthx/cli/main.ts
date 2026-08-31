@@ -31,6 +31,7 @@ import bundledSkill from '@repo/kthx/skill.md' with { type: 'text' };
 import { nameProblem } from '../server/names.ts';
 import { KthxError, refusal } from './error.ts';
 import { banner, faint, link, rainbow, tint } from './paint.ts';
+import { REACH_MS, reach, SEND_MS, unreachable } from './reach.ts';
 import { pack } from './tar.ts';
 import {
   buildId,
@@ -156,11 +157,15 @@ async function api<T>(
   const { token, ...rest } = init;
   const headers = new Headers(rest.headers);
   if (token !== undefined) headers.set('authorization', `Bearer ${token}`);
-  const response = await fetch(`${origin()}${path}`, {
-    ...rest,
-    headers,
-  }).catch((cause: Error) => {
-    throw new KthxError('UNREACHABLE', `${origin()}: ${cause.message}`);
+  // A release upload is answered once the apex has the whole tarball, so the
+  // read bound would refuse a deploy that is going fine.
+  const bound = rest.body === undefined ? REACH_MS : SEND_MS;
+  const response = await reach(
+    `${origin()}${path}`,
+    { ...rest, headers },
+    bound,
+  ).catch((cause: Error) => {
+    throw unreachable(origin(), cause, bound);
   });
   if (!response.ok) throw await refusal(response);
   return (await response.json().catch(() => ({}))) as T;

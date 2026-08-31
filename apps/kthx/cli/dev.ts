@@ -22,6 +22,7 @@ import { readdirSync, statSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { ME_COOKIE } from '../server/me.ts';
 import { decodePath, notHere, staticResponse } from '../server/serve.ts';
+import { REACH_MS, reach, SEND_MS, seconds, timedOut } from './reach.ts';
 import { included } from './tar.ts';
 
 export const PORT = 4321;
@@ -65,6 +66,8 @@ export function dev(
   dir: string,
   site: Site,
   port = PORT,
+  /** How long the site gets to answer before the loop stops waiting on it. */
+  deadline = REACH_MS,
 ): Bun.Server<SocketData> {
   const root = unwrap(resolve(dir));
 
@@ -81,8 +84,8 @@ export function dev(
       if (path === null) return notHere('localhost', 'kthx.dev', 404, 'dev');
       if (reserved(path)) {
         return path === '/api/ws'
-          ? upgrade(request, server, site)
-          : proxy(request, path, site);
+          ? upgrade(request, server, site, deadline)
+          : proxy(request, path, site, deadline);
       }
       if (request.method !== 'GET' && request.method !== 'HEAD') {
         return Response.json(
@@ -164,6 +167,7 @@ async function proxy(
   request: Request,
   path: string,
   site: Site,
+  deadline: number,
 ): Promise<Response> {
   const target = new URL(request.url);
   const upstream = new URL(site.site);
@@ -172,6 +176,8 @@ async function proxy(
 
   const headers = new Headers(request.headers);
   for (const header of HOP) headers.delete(header);
+  // A proxy hands the bytes on; it does not negotiate an encoding of its own.
+  headers.set('accept-encoding', 'identity');
   if (headers.has('origin')) headers.set('origin', site.site);
   const cookie = visitorCookie(headers.get('cookie'));
   if (cookie === null) headers.delete('cookie');
@@ -180,18 +186,35 @@ async function proxy(
     headers.set('authorization', `Bearer ${site.token}`);
   }
 
-  const answer = await fetch(target, {
-    method: request.method,
-    headers,
-    body: request.body,
-    redirect: 'manual',
-    // A streamed body needs the half-duplex opt-out; an upload is one.
-    duplex: 'half',
-  } as RequestInit).catch((cause: Error) =>
-    Response.json(
-      { code: 'UNREACHABLE', message: `${site.site}: ${cause.message}` },
-      { status: 502, headers: { 'cache-control': 'no-store' } },
-    ),
+  // An upload or a model call is answered when the site has the whole request,
+  // so the read bound would refuse work that is going fine.
+  const bound = request.body === null ? deadline : SEND_MS;
+  const answer = await reach(
+    target,
+    {
+      method: request.method,
+      headers,
+      body: request.body,
+      redirect: 'manual',
+      // A streamed body needs the half-duplex opt-out; an upload is one.
+      duplex: 'half',
+    } as RequestInit,
+    bound,
+  ).catch((cause: Error) =>
+    // A site that never answers is the loop's worst failure: nothing prints,
+    // the tab spins, and the network is the last place anyone looks. Say so.
+    timedOut(cause)
+      ? Response.json(
+          {
+            code: 'UNREACHABLE',
+            message: `${site.site} did not answer in ${seconds(bound)}`,
+          },
+          { status: 504, headers: { 'cache-control': 'no-store' } },
+        )
+      : Response.json(
+          { code: 'UNREACHABLE', message: `${site.site}: ${cause.message}` },
+          { status: 502, headers: { 'cache-control': 'no-store' } },
+        ),
   );
 
   const out = new Headers(answer.headers);
@@ -232,6 +255,7 @@ function upgrade(
   request: Request,
   server: Bun.Server<SocketData>,
   site: Site,
+  deadline: number,
 ): Response | undefined {
   const target = new URL(site.site);
   target.protocol = target.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -253,7 +277,19 @@ function upgrade(
     tab: null,
     closed: false,
   };
+  // The same silence the proxy guards against, on the socket: an upgrade to a
+  // site that has gone dark neither opens nor fails, and a tab left holding a
+  // socket that does neither is the loop hanging by another name.
+  const timer = setTimeout(() => {
+    data.closed = true;
+    data.tab?.close(
+      1013,
+      `${site.site} did not answer in ${seconds(deadline)}`,
+    );
+    upstream.close();
+  }, deadline);
   upstream.onopen = () => {
+    clearTimeout(timer);
     for (const frame of data.pending.splice(0)) upstream.send(frame);
   };
   upstream.onmessage = (event: MessageEvent) => {
@@ -262,6 +298,7 @@ function upgrade(
     else data.tab.send(frame);
   };
   const gone = () => {
+    clearTimeout(timer);
     data.closed = true;
     data.tab?.close();
   };
@@ -269,6 +306,7 @@ function upgrade(
   upstream.onerror = gone;
   if (server.upgrade(request, { data })) return undefined;
 
+  clearTimeout(timer);
   upstream.close();
   return Response.json(
     {

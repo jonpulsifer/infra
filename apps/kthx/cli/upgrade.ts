@@ -20,6 +20,7 @@ import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { version } from '../package.json' with { type: 'json' };
 import { KthxError, refusal } from './error.ts';
+import { reach, unreachable } from './reach.ts';
 
 /** What `pack.ts` writes and the server serves as `x-kthx-build`. */
 export interface Build {
@@ -175,8 +176,9 @@ export async function upgrade(origin: string): Promise<void> {
   // this copy answers `buildId()` from.
   const from = buildId() ?? `${version}+dev`;
   const url = `${origin}/cli/kthx.tgz`;
-  const response = await fetch(url).catch((cause: Error) => {
-    throw new KthxError('UNREACHABLE', `${url}: ${cause.message}`);
+  // The bound is on the apex answering, not on the megabytes that follow.
+  const response = await reach(url).catch((cause: Error) => {
+    throw unreachable(url, cause);
   });
   if (!response.ok) throw await refusal(response);
   const to = response.headers.get('x-kthx-build');
