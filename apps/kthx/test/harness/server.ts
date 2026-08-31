@@ -84,6 +84,7 @@ export function withServer(): () => Harness {
       meKey: 'k'.repeat(32),
       mePreviousKey: null,
       pgKey: 'p'.repeat(32),
+      trustedProxies: [],
       port: 0,
     };
     const fetch = handler(config, sql, diskDepot(join(sitesDir, '.depot')));

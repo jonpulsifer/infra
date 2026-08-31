@@ -24,8 +24,12 @@ refilled from its `location`, so losing the volume costs latency and never data.
 
 Configuration: `KTHX_ZONE`, `KTHX_BUCKET` (unset uses an on-disk depot),
 `KTHX_SITES_DIR`, `DATABASE_URL`, `KTHX_ME_KEY` (+ optional
-`KTHX_ME_KEY_PREVIOUS`) and `KTHX_PG_KEY`, both at least 32 bytes. The control
-database's schema is the numbered SQL in `server/migrations/`, applied at boot.
+`KTHX_ME_KEY_PREVIOUS`) and `KTHX_PG_KEY`, both at least 32 bytes, and
+`KTHX_TRUSTED_PROXIES` — the comma-separated peers whose `cf-connecting-ip` the
+rate limits believe. Unset, no peer is believed and every address-keyed bucket
+keys on the socket address, which behind a proxy is one key for the whole zone.
+The control database's schema is the numbered SQL in `server/migrations/`,
+applied at boot.
 
 ```
 bun run apps/kthx/server      # or `bun run start` from this directory

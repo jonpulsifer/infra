@@ -45,6 +45,7 @@ import {
   readRelease,
   releaseDir,
   siteDir,
+  slotsFull,
   takeSlot,
   UploadRefused,
   writeTree,
@@ -104,6 +105,8 @@ export const MAX_CLAIMS_PER_DAY = 20;
 export const MAX_UPLOADS_PER_DAY = 60;
 /** How long a release body may take to arrive. */
 export const BODY_TIMEOUT_MS = 120_000;
+/** Far more than any legal `{name}` body, and far less than the server's cap. */
+const MAX_CLAIM_BYTES = 64 * 1024;
 
 const claims = new TokenBucket(CLAIM_BUCKET);
 const claimsPerDay = new DailyCap(MAX_CLAIMS_PER_DAY);
@@ -226,10 +229,17 @@ type Act = (request: Request, ctx: Ctx, site: SiteRow) => Promise<Response>;
 // --- claim ------------------------------------------------------------------
 
 async function claim(request: Request, ctx: Ctx): Promise<Response> {
-  if (!sameOrigin(request, ctx.host)) return refuse('FORBIDDEN', ctx.id);
+  if (!sameOrigin(request, ctx.host, ctx.port)) {
+    return refuse('FORBIDDEN', ctx.id);
+  }
   if (!isJson(request)) return refuse('MALFORMED_REQUEST', ctx.id);
+  // A claim is `{"name":"notes"}`. Anything near this size is not one, and
+  // this route is anonymous, so it is refused before a byte is buffered.
+  if (Number(request.headers.get('content-length') ?? 0) > MAX_CLAIM_BYTES) {
+    return refuse('TOO_LARGE', ctx.id);
+  }
 
-  const address = addressOf(request, ctx.server);
+  const address = addressOf(request, ctx.server, ctx.config.trustedProxies);
   if (claims.spend(address)) {
     return refuse('RATE_LIMITED', ctx.id, retryAfter(60));
   }
@@ -321,21 +331,21 @@ const release: Act = async (request, ctx, site) => {
   // Ahead of the rate limit, because a refusal this caller did not cause must
   // not spend its allowance: a client that obeys "come back in a moment" would
   // otherwise burn its burst on a neighbour's uploads and land on 429. Not 429
-  // itself either — the process is full, which clears on its own.
-  const slot = takeSlot();
-  if (slot === null) return refuse('BUSY', ctx.id);
-  try {
-    if (claims.spend(addressOf(request, ctx.server))) {
-      return refuse('RATE_LIMITED', ctx.id, retryAfter(60));
-    }
-    if (uploadsPerDay.full(site.name)) {
-      return refuse('RATE_LIMITED', ctx.id, retryAfter(secondsToMidnight()));
-    }
-    uploadsPerDay.count(site.name);
-    return await stage(request, ctx, site);
-  } finally {
-    slot();
+  // itself either — the process is full, which clears on its own. A probe and
+  // not a slot: the slot is taken in `stage`, once the body is in hand.
+  if (slotsFull()) return refuse('BUSY', ctx.id);
+  if (claims.spend(addressOf(request, ctx.server, ctx.config.trustedProxies))) {
+    return refuse('RATE_LIMITED', ctx.id, retryAfter(60));
   }
+  if (uploadsPerDay.full(site.name)) {
+    return refuse('RATE_LIMITED', ctx.id, retryAfter(secondsToMidnight()));
+  }
+  const answer = await stage(request, ctx, site);
+  // The day is charged for a release that happened, not for an archive this
+  // boundary refused: sixty builds with no `index.html` must not lock a site
+  // out until UTC midnight.
+  if (answer.status === 201) uploadsPerDay.count(site.name);
+  return answer;
 };
 
 /** The number a release took, and what the site serves once it has it. */
@@ -364,14 +374,30 @@ async function stage(
   }
   if (bytes.byteLength > MAX_ARCHIVE_BYTES) return refuse('TOO_LARGE', ctx.id);
 
+  // Only now: a slot is a share of the process's memory and its disk, and a
+  // caller that trickles a body for two minutes must not hold one of the two
+  // while sending nothing.
+  const slot = takeSlot();
+  if (slot === null) return refuse('BUSY', ctx.id);
+  try {
+    return await unpack(ctx, site, bytes, request.headers.get('x-filename'));
+  } finally {
+    slot();
+  }
+}
+
+/** The archive in hand, from bytes to a numbered directory this site serves. */
+async function unpack(
+  ctx: Ctx,
+  site: SiteRow,
+  bytes: Uint8Array,
+  filename: string | null,
+): Promise<Response> {
   let read: ReturnType<typeof readRelease>;
   try {
     // The filename is a caller's assertion used only to name the container in a
     // log line; it is never echoed and never becomes a path.
-    read = readRelease(
-      request.headers.get('x-filename')?.trim() || 'site.zip',
-      bytes,
-    );
+    read = readRelease(filename?.trim() || 'site.zip', bytes);
   } catch (cause) {
     if (cause instanceof UploadRefused) {
       logCause(ctx.id, 'reading the archive', cause.why);
@@ -401,7 +427,7 @@ async function stage(
       async (temp): Promise<Numbered> => {
         // One site's uploads are numbered under its own lock, so two arriving
         // at once take two numbers rather than one losing the primary key.
-        const taken: Numbered = await ctx.sql.begin(async (tx: SQL) => {
+        return await ctx.sql.begin(async (tx: SQL) => {
           const [locked] = (await tx`
             select held, serving from sites where name = ${site.name} for update
           `) as { held: boolean; serving: number | null }[];
@@ -413,15 +439,16 @@ async function stage(
             insert into releases (site, n, digest, size, location)
             values (${site.name}, ${n}, ${read.digest}, ${size}, ${location})
           `;
-          if (locked?.held) return { n, serving: locked.serving };
-          await tx`update sites set serving = ${n} where name = ${site.name}`;
-          return { n, serving: n };
+          const serving = locked?.held ? locked.serving : n;
+          if (!locked?.held) {
+            await tx`update sites set serving = ${n} where name = ${site.name}`;
+          }
+          // Inside the transaction, so a rename that cannot happen rolls the
+          // row back: a site must never say it serves a release whose directory
+          // never landed. `writeTree` sweeps the temp tree either way.
+          await placeTree(temp, releaseDir(ctx.config.sitesDir, site.name, n));
+          return { n, serving };
         });
-        await placeTree(
-          temp,
-          releaseDir(ctx.config.sitesDir, site.name, taken.n),
-        );
-        return taken;
       },
     );
   } catch (cause) {

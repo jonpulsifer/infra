@@ -176,10 +176,13 @@ export function portOf(request: Request): string {
  * siblings. A non-browser client sends no `Origin` at all and is let through;
  * a browser must be on this exact host.
  */
-export function sameOrigin(request: Request, host: string): boolean {
+export function sameOrigin(request: Request, host: string, port = ''): boolean {
   const origin = request.headers.get('origin');
   if (origin === null) return true;
-  return origin === `https://${host}` || origin === `http://${host}`;
+  // With the port, because an `Origin` carries one whenever the browser is on
+  // a non-default port and a local run is the whole reason that happens.
+  const authority = port === '' ? host : `${host}:${port}`;
+  return origin === `https://${authority}` || origin === `http://${authority}`;
 }
 
 /** JSON routes take JSON, parameters ignored. */
@@ -191,18 +194,95 @@ export function isJson(request: Request): boolean {
 /**
  * The address a bucket is keyed by, IPv6 truncated to its /64.
  *
- * `cf-connecting-ip` is trusted because nothing but the cluster's cloudflared
- * reaches this pod; the socket address is the fallback for a direct call.
+ * `cf-connecting-ip` is a header, so it is worth exactly as much as the peer
+ * that sent it: the Gateway is reachable on the LAN and the tailnet as well as
+ * through cloudflared, and a client that arrives that way would otherwise
+ * rotate one header and defeat every address-keyed bucket. It is honoured only
+ * from a peer in `KTHX_TRUSTED_PROXIES`, or when there is no socket peer at all
+ * (a handler called directly, which is a test and not a network).
  */
 export function addressOf(
   request: Request,
   server: Bun.Server<unknown> | undefined,
+  trusted: readonly string[] = [],
 ): string | null {
-  const raw =
-    request.headers.get('cf-connecting-ip')?.trim() ||
-    server?.requestIP(request)?.address ||
-    null;
-  if (raw === null || raw === '') return null;
-  if (!raw.includes(':')) return raw;
-  return raw.split(':').slice(0, 4).join(':');
+  const peer = server?.requestIP(request)?.address?.trim() ?? null;
+  const forwarded = request.headers.get('cf-connecting-ip')?.trim() || null;
+  if (forwarded !== null && (peer === null || trustedPeer(peer, trusted))) {
+    return prefix(forwarded);
+  }
+  if (forwarded !== null) warnIgnored(peer ?? 'an unknown peer');
+  return peer === null || peer === '' ? null : prefix(peer);
+}
+
+let warned = false;
+
+/** Once per process: a line an operator can find, not one per request. */
+function warnIgnored(peer: string): void {
+  if (warned) return;
+  warned = true;
+  console.error(
+    `cf-connecting-ip from ${peer} ignored: not in KTHX_TRUSTED_PROXIES`,
+  );
+}
+
+/**
+ * The /64 an address belongs to, which is what one residential customer gets
+ * and therefore what a bucket has to be keyed by. IPv4 keys by itself.
+ */
+export function prefix(raw: string): string {
+  const address = (raw.split('%')[0] ?? raw).trim().toLowerCase();
+  // No colon is IPv4; a dot inside a colon form is a v4-mapped address, whose
+  // /64 is meaningless — key it whole.
+  if (!address.includes(':') || address.includes('.')) return address;
+  const [head = '', tail] = address.split('::');
+  const left = head === '' ? [] : head.split(':');
+  const right = tail === undefined || tail === '' ? [] : tail.split(':');
+  const groups = address.includes('::')
+    ? [
+        ...left,
+        ...Array<string>(Math.max(0, 8 - left.length - right.length)).fill('0'),
+        ...right,
+      ]
+    : left;
+  return groups
+    .slice(0, 4)
+    .map((group) => group.replace(/^0+(?=.)/, ''))
+    .join(':');
+}
+
+/**
+ * Whether this socket peer may speak for someone else.
+ *
+ * ponytail: IPv4 CIDRs and exact addresses. The Gateway and cloudflared are
+ * IPv4 in this cluster, so a prefix is only ever needed for v4; an IPv6 entry
+ * has to be written out in full. Widen the day the pod network is dual-stack.
+ */
+function trustedPeer(peer: string, trusted: readonly string[]): boolean {
+  const address = peer.startsWith('::ffff:') ? peer.slice(7) : peer;
+  return trusted.some((entry) => {
+    const [network = '', bits] = entry.split('/');
+    if (bits === undefined) return network === address;
+    const width = Number(bits);
+    const left = v4(network);
+    const right = v4(address);
+    if (left === null || right === null) return false;
+    if (!Number.isInteger(width) || width < 0 || width > 32) return false;
+    const mask = width === 0 ? 0 : (-1 << (32 - width)) >>> 0;
+    return (left & mask) >>> 0 === (right & mask) >>> 0;
+  });
+}
+
+function v4(raw: string): number | null {
+  const parts = raw.split('.');
+  if (parts.length !== 4) return null;
+  let value = 0;
+  for (const part of parts) {
+    const byte = Number(part);
+    if (part === '' || !Number.isInteger(byte) || byte < 0 || byte > 255) {
+      return null;
+    }
+    value = value * 256 + byte;
+  }
+  return value;
 }

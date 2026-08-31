@@ -38,6 +38,9 @@ const RETIRED = 'the /_/ API is retired; use /api/ — https://kthx.dev/skill.md
 
 const READ_METHODS = new Set(['GET', 'HEAD']);
 
+/** The server-wide body ceiling; every route caps below it. */
+const MAX_BODY_BYTES = 32 * 1024 * 1024;
+
 function asset(path: string, type: string, cacheControl: string): Response {
   return new Response(Bun.file(path), {
     headers: {
@@ -46,6 +49,31 @@ function asset(path: string, type: string, cacheControl: string): Response {
       'x-content-type-options': 'nosniff',
     },
   });
+}
+
+/**
+ * The landing page, with its two endpoint literals moved to this API.
+ *
+ * `packages/kthx/landing.html` is one file served by two processes: the v1 apex
+ * Spindrift still answers reads the same asset, and every button on it would
+ * break the moment a republished image carried v2's paths. So the file on disk
+ * stays v1's and this process rewrites it as it serves.
+ *
+ * ponytail: two string replacements, read once. They are deleted with
+ * `apps/spindrift/src/kthx/` in the migration ticket, which is what makes the
+ * asset ours to edit.
+ */
+let landing: Promise<string> | null = null;
+
+function landingHtml(): Promise<string> {
+  landing ??= Bun.file(LANDING_PATH)
+    .text()
+    .then((html) =>
+      html
+        .replace('const API = "/kthx/sites"', 'const API = "/api/sites"')
+        .replace('"/_/sdk.js"', '"/api/sdk.js"'),
+    );
+  return landing;
 }
 
 // --- the apex ---------------------------------------------------------------
@@ -68,7 +96,12 @@ async function apex(
   }
   if (path === '/healthz') {
     return new Response('ok\n', {
-      headers: { 'content-type': 'text/plain', 'cache-control': 'no-store' },
+      headers: {
+        'content-type': 'text/plain',
+        'cache-control': 'no-store',
+        'x-content-type-options': 'nosniff',
+        'x-request-id': ctx.id,
+      },
     });
   }
   if (path === '/api' || path.startsWith('/api/')) {
@@ -79,7 +112,13 @@ async function apex(
     return refuse('METHOD_NOT_ALLOWED', ctx.id);
   }
   if (path === '/') {
-    return asset(LANDING_PATH, 'text/html; charset=utf-8', 'no-cache');
+    return new Response(await landingHtml(), {
+      headers: {
+        'content-type': 'text/html; charset=utf-8',
+        'cache-control': 'no-cache',
+        'x-content-type-options': 'nosniff',
+      },
+    });
   }
   if (path === '/sdk.js') {
     return asset(
@@ -136,18 +175,27 @@ async function site(
   const page = (status: 404 | 410 | 503) =>
     notHere(ctx.host, ctx.config.zone, status, ctx.id, ctx.port);
 
-  const [row] = (await ctx.sql`
-    select s.deleted_at, s.serving, r.digest, r.location
-    from sites s
-    left join releases r on r.site = s.name and r.n = s.serving
-    where s.name = ${name} limit 1
-  `) as Serving[];
-
   const reserved =
     path === '/api' ||
     path.startsWith('/api/') ||
     path === '/files' ||
     path.startsWith('/files/');
+
+  // Every static byte costs this read, so a database that is briefly away must
+  // read as "not here yet" rather than as a JSON 500 in the middle of a page.
+  let row: Serving | undefined;
+  try {
+    [row] = (await ctx.sql`
+      select s.deleted_at, s.serving, r.digest, r.location
+      from sites s
+      left join releases r on r.site = s.name and r.n = s.serving
+      where s.name = ${name} limit 1
+    `) as Serving[];
+  } catch (cause) {
+    logCause(ctx.id, 'reading the serving release', cause);
+    return reserved ? refuse('BUSY', ctx.id) : page(503);
+  }
+
   if (reserved) {
     if (row === undefined) return refuse('NOT_FOUND', ctx.id);
     if (row.deleted_at !== null) return refuse('GONE', ctx.id);
@@ -279,6 +327,10 @@ export async function start(): Promise<Bun.Server<unknown>> {
     // Raised per request for an upload; this is the floor every other route
     // lives inside.
     idleTimeout: 30,
+    // The contract's server-wide ceiling. Bun's default is 128 MiB, which is
+    // four times what the largest route here takes and is buffered before any
+    // handler sees a byte.
+    maxRequestBodySize: MAX_BODY_BYTES,
     fetch,
   });
   console.log(`kthx serving ${config.zone} on :${server.port}`);

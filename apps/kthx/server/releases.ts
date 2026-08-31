@@ -62,6 +62,11 @@ const VOLUME_FULL = 0.8;
 
 let unpacking = 0;
 
+/** Whether every slot is held — a cheap probe that takes nothing. */
+export function slotsFull(): boolean {
+  return unpacking >= MAX_UNPACKS;
+}
+
 /** Take one of the process-wide unpack slots, or `null` when they are full. */
 export function takeSlot(): (() => void) | null {
   if (unpacking >= MAX_UNPACKS) return null;
@@ -118,11 +123,7 @@ export function readRelease(filename: string, bytes: Uint8Array): Release {
     throw cause;
   }
 
-  const files = unwrap(readFiles(archive.bytes));
-  if (files.length > MAX_FILES) {
-    throw new UploadRefused('TOO_LARGE', `${files.length} files`);
-  }
-  checkTree(files);
+  const files = readTree(archive.bytes);
   const entry = files.some(
     (file) => file.path === '/index.html' || file.path === '/200.html',
   );
@@ -138,6 +139,24 @@ export function readRelease(filename: string, bytes: Uint8Array): Release {
     files,
     digest: new Bun.CryptoHasher('sha256').update(archive.bytes).digest('hex'),
   };
+}
+
+/**
+ * The one reader an upload and a rehydrate share: what a bundle unpacks to,
+ * once every rule about it holds.
+ *
+ * Shared because a stored object is not automatically a trustworthy one — the
+ * migration ticket carries in objects this boundary never wrote, and one of
+ * those failing `mkdir` halfway through an unpack is a site that answers the
+ * 503 page forever rather than an archive refused at the door.
+ */
+function readTree(bytes: Uint8Array): readonly BundleFile[] {
+  const files = unwrap(readFiles(bytes));
+  if (files.length > MAX_FILES) {
+    throw new UploadRefused('TOO_LARGE', `${files.length} files`);
+  }
+  checkTree(files);
+  return files;
 }
 
 function readFiles(bytes: Uint8Array): readonly BundleFile[] {
@@ -289,7 +308,7 @@ export async function ensureRelease(
     try {
       const bytes = await depot.get(location, MAX_ARCHIVE_BYTES);
       if (bytes === null) return false;
-      const files = unwrap(readFiles(bytes));
+      const files = readTree(bytes);
       await writeTree(sitesDir, name, files, (temp) => placeTree(temp, dir));
       return true;
     } finally {

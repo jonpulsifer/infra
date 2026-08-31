@@ -30,6 +30,13 @@ export interface Config {
   readonly mePreviousKey: string | null;
   /** Derives per-site Postgres passwords (used from ticket 03 on). */
   readonly pgKey: string;
+  /**
+   * The peers whose `cf-connecting-ip` is believed: the Gateway hop in front of
+   * this pod. Empty means no peer is, so every address-keyed bucket falls back
+   * to the socket address — which behind a proxy is one key for the whole zone.
+   * The chart sets it; a deployment that does not is rate limiting itself.
+   */
+  readonly trustedProxies: readonly string[];
   readonly port: number;
 }
 
@@ -64,6 +71,10 @@ export function readConfig(env: Env = Bun.env): Config {
         ? null
         : longEnough('KTHX_ME_KEY_PREVIOUS', previous),
     pgKey: longEnough('KTHX_PG_KEY', required(env, 'KTHX_PG_KEY')),
+    trustedProxies: (env.KTHX_TRUSTED_PROXIES ?? '')
+      .split(',')
+      .map((entry) => entry.trim())
+      .filter((entry) => entry !== ''),
     port: Number(env.PORT?.trim() || 8080),
   };
 }

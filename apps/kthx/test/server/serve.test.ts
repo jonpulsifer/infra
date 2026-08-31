@@ -77,7 +77,14 @@ describe('the apex', () => {
     const landing = await get(ZONE, '/');
     expect(landing.status).toBe(200);
     expect(landing.headers.get('cache-control')).toBe('no-cache');
-    expect(await landing.text()).toContain('<!doctype html>');
+    const html = await landing.text();
+    expect(html).toContain('<!doctype html>');
+    // The asset on disk is still v1's, because the apex Spindrift serves reads
+    // the same file; this process moves the two endpoints as it serves.
+    expect(html).toContain('const API = "/api/sites"');
+    expect(html).toContain('"/api/sdk.js"');
+    expect(html).not.toContain('/kthx/sites');
+    expect(html).not.toContain('/_/sdk.js');
 
     const sdk = await get(ZONE, '/sdk.js');
     expect(sdk.status).toBe(200);

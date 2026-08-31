@@ -6,14 +6,17 @@ import { describe, expect, test } from 'bun:test';
 import { readdir, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tarGz } from '../../cli/tar.ts';
+import { secondsToMidnight } from '../../server/limits.ts';
 import {
   MAX_ARCHIVE_BYTES,
   MAX_UNPACKED_BYTES,
   MAX_UNPACKS,
   pruneSite,
+  takeSlot,
 } from '../../server/releases.ts';
 import {
   MAX_CLAIMS_PER_DAY,
+  MAX_UPLOADS_PER_DAY,
   nameProblem,
   RESERVED_NAMES,
 } from '../../server/sites.ts';
@@ -220,8 +223,10 @@ describe('claiming', () => {
       true,
     );
     expect(statuses.at(-1)).toBe(429);
-    // The day is what it waits for, not the minute.
-    expect(Number(last?.headers.get('retry-after'))).toBeGreaterThan(60);
+    // The day is what it waits for, not the minute — which at 23:59 UTC is
+    // fewer than sixty seconds, so the number itself is what is asserted.
+    const wait = Number(last?.headers.get('retry-after'));
+    expect(Math.abs(wait - secondsToMidnight())).toBeLessThanOrEqual(2);
   });
 });
 
@@ -381,22 +386,47 @@ describe('releases', () => {
     ).toMatchObject({ status: 413, body: { code: 'TOO_LARGE' } });
   });
 
-  test('only MAX_UNPACKS unpack at once; the rest are told the process is full', async () => {
+  test('with every unpack slot held, an upload and a rehydrate both wait', async () => {
     const owned = await mine();
-    const from = address();
-    const answers = await Promise.all(
-      Array.from({ length: MAX_UNPACKS + 1 }, (_unused, i) =>
-        upload(owned.name, owned.token, site({ 'index.html': `v${i}` }), {
-          address: from,
-        }),
-      ),
-    );
-    expect(answers.filter((a) => a.status === 201)).toHaveLength(MAX_UNPACKS);
-    const refused = answers.filter((a) => a.status !== 201);
-    expect(refused).toHaveLength(1);
-    expect(refused[0]).toMatchObject({ status: 503, body: { code: 'BUSY' } });
+    await upload(owned.name, owned.token);
+    await rm(join(kthx().sitesDir, owned.name, '1'), {
+      recursive: true,
+      force: true,
+    });
 
-    // The slot is given back, so the site takes uploads again afterwards.
+    const held = Array.from({ length: MAX_UNPACKS }, () => takeSlot());
+    expect(held.every((slot) => slot !== null)).toBe(true);
+    try {
+      expect(await upload(owned.name, owned.token)).toMatchObject({
+        status: 503,
+        body: { code: 'BUSY' },
+      });
+      // The same two slots cover a rehydrate, which is the 503 page rather
+      // than a code: a browser asked for bytes, not for JSON.
+      const page = await kthx().fetch(
+        ask('/', { host: `${owned.name}.${ZONE}` }),
+      );
+      expect(page.status).toBe(503);
+    } finally {
+      for (const slot of held) slot?.();
+    }
+
+    // The slots are given back, so both paths work again.
+    expect((await upload(owned.name, owned.token)).status).toBe(201);
+    expect(
+      (await kthx().fetch(ask('/', { host: `${owned.name}.${ZONE}` }))).status,
+    ).toBe(200);
+  });
+
+  test('an archive this boundary refuses does not spend a day of uploads', async () => {
+    const owned = await mine();
+    const empty = site({ 'about.html': 'no entry page' });
+    for (let i = 0; i < MAX_UPLOADS_PER_DAY + 1; i += 1) {
+      expect(await upload(owned.name, owned.token, empty)).toMatchObject({
+        status: 400,
+        body: { code: 'NO_INDEX' },
+      });
+    }
     expect((await upload(owned.name, owned.token)).status).toBe(201);
   });
 });

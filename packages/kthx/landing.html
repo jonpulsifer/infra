@@ -381,7 +381,7 @@ pre.sh .p{color:var(--hot)}
       </div>
 
       <div class="sdkpane" id="sdk-db">
-<pre class="sh">&lt;script src=<u>"/api/sdk.js"</u>&gt;&lt;/script&gt;
+<pre class="sh">&lt;script src=<u>"/_/sdk.js"</u>&gt;&lt;/script&gt;
 
 <b>await</b> kthx.db.set(<u>'votes'</u>, { optiplex: 3, riptide: 1 })
 <b>await</b> kthx.db.get(<u>'votes'</u>)              <i>// { optiplex: 3, riptide: 1 }</i>
@@ -428,7 +428,7 @@ kthx.me.id               <i>// stable for each browser, anonymous, null before r
 "use strict";
 /* the apex is the zone: this page is only ever served at https://<zone>/ */
 const ZONE = location.hostname;
-const API = "/api/sites";
+const API = "/kthx/sites";
 const $ = (s, r = document) => r.querySelector(s);
 const KB = n => n < 1024 ? `${n} B` : n < 1048576 ? `${(n / 1024).toFixed(1)} KB` : `${(n / 1048576).toFixed(1)} MB`;
 const ago = t => { const s = (Date.now() - t) / 1000;

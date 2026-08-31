@@ -3,12 +3,19 @@
  * keys does to a key that is being held.
  */
 import { describe, expect, test } from 'bun:test';
+import { addressOf } from '../../server/http.ts';
 import {
   CLAIM_BUCKET,
   DailyCap,
   secondsToMidnight,
   TokenBucket,
 } from '../../server/limits.ts';
+
+function from(address: string): Request {
+  return new Request('http://kthx.test/api/sites', {
+    headers: { 'cf-connecting-ip': address },
+  });
+}
 
 describe('the token bucket', () => {
   test('gives a burst, then refuses, then refills with time', () => {
@@ -56,5 +63,27 @@ describe('the daily cap', () => {
     const seconds = secondsToMidnight();
     expect(seconds).toBeGreaterThan(0);
     expect(seconds).toBeLessThanOrEqual(86_400);
+  });
+});
+
+describe('the address a bucket is keyed by', () => {
+  test('two addresses in one /64 are one key', () => {
+    // What a residential customer is handed is a /64, so two addresses out of
+    // it must not be two allowances — compressed, which is the form that
+    // arrives, as much as expanded.
+    expect(addressOf(from('2001:db8::1'), undefined)).toBe(
+      addressOf(from('2001:db8::2'), undefined),
+    );
+    expect(addressOf(from('2001:db8::1'), undefined)).toBe(
+      addressOf(from('2001:0db8:0000:0000:aaaa:bbbb:cccc:dddd'), undefined),
+    );
+    expect(addressOf(from('2001:db8:1::1'), undefined)).not.toBe(
+      addressOf(from('2001:db8::1'), undefined),
+    );
+  });
+
+  test('IPv4 keys by itself, and an empty header is no address at all', () => {
+    expect(addressOf(from('198.51.100.7'), undefined)).toBe('198.51.100.7');
+    expect(addressOf(new Request('http://kthx.test/'), undefined)).toBe(null);
   });
 });
