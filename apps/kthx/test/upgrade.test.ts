@@ -34,6 +34,17 @@ function asTty<T>(run: () => T): T {
   }
 }
 
+/** stdout claiming to be a pipe, whatever the test runner is attached to. */
+function asPipe<T>(run: () => T): T {
+  const was = process.stdout.isTTY;
+  process.stdout.isTTY = false;
+  try {
+    return run();
+  } finally {
+    process.stdout.isTTY = was;
+  }
+}
+
 /** `env` in place for the length of one call, and exactly those keys restored. */
 function withEnv<T>(env: Record<string, string | undefined>, run: () => T): T {
   const was = Object.fromEntries(
@@ -55,10 +66,11 @@ function withEnv<T>(env: Record<string, string | undefined>, run: () => T): T {
 
 describe('paint', () => {
   test('emits nothing at all when stdout is not a terminal', () => {
-    expect(process.stdout.isTTY).not.toBe(true);
-    expect(level()).toBe(0);
-    expect(rainbow('kthx')).toBe('kthx');
-    expect(tint('kthx', 0.5)).toBe('kthx');
+    asPipe(() => {
+      expect(level()).toBe(0);
+      expect(rainbow('kthx')).toBe('kthx');
+      expect(tint('kthx', 0.5)).toBe('kthx');
+    });
   });
 
   test('NO_COLOR and TERM=dumb beat a terminal', () => {
@@ -207,19 +219,20 @@ describe('the update check', () => {
   });
 
   test('says nothing when stdout is a pipe, whatever the apex says', async () => {
-    expect(process.stdout.isTTY).not.toBe(true);
     await expect(
-      updateNudge({
-        origin: talkative.url.origin,
-        mine: MINE,
-        command: 'ls',
-        versionAsked: false,
-      }),
+      asPipe(() =>
+        updateNudge({
+          origin: talkative.url.origin,
+          mine: MINE,
+          command: 'ls',
+          versionAsked: false,
+        }),
+      ),
     ).resolves.toBeNull();
     expect(asked).toBe(0);
   });
 
-  test('an apex that never answers costs the cap and nothing more', async () => {
+  test('an apex that never answers costs the cap once a day, not once a command', async () => {
     // The measurement the check exists to bound: a connection accepted and
     // never answered. It has to end, near the 1.5 s cap, resolving `null`
     // rather than throwing — a rejection here would take the command with it.
@@ -228,7 +241,15 @@ describe('the update check', () => {
     const took = Date.now() - started;
     expect(took).toBeGreaterThan(1000);
     expect(took).toBeLessThan(3000);
-    expect(existsSync(cache())).toBe(false);
+
+    // Silence is an answer and is remembered like one: a machine with no route
+    // to the apex waits once, not on every command it types that day.
+    expect(JSON.parse(readFileSync(cache(), 'utf8'))).toMatchObject({
+      build: null,
+    });
+    const again = Date.now();
+    await expect(ask({ origin: silent.url.origin })).resolves.toBeNull();
+    expect(Date.now() - again).toBeLessThan(500);
   }, 10_000);
 });
 

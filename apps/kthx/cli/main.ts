@@ -29,7 +29,7 @@ import { dirname, join, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
 import bundledSkill from '@repo/kthx/skill.md' with { type: 'text' };
 import { nameProblem } from '../server/names.ts';
-import { KthxError } from './error.ts';
+import { KthxError, refusal } from './error.ts';
 import { banner, faint, link, rainbow, tint } from './paint.ts';
 import { pack } from './tar.ts';
 import {
@@ -162,17 +162,8 @@ async function api<T>(
   }).catch((cause: Error) => {
     throw new KthxError('UNREACHABLE', `${origin()}: ${cause.message}`);
   });
-  const body = (await response.json().catch(() => ({}))) as Record<
-    string,
-    unknown
-  >;
-  if (!response.ok) {
-    throw new KthxError(
-      typeof body.code === 'string' ? body.code : `HTTP_${response.status}`,
-      typeof body.message === 'string' ? body.message : response.statusText,
-    );
-  }
-  return body as T;
+  if (!response.ok) throw await refusal(response);
+  return (await response.json().catch(() => ({}))) as T;
 }
 
 const json = (body: unknown) => ({
@@ -472,7 +463,7 @@ async function listEverySite(): Promise<void> {
   }
   for (const found of page.items) {
     console.log(
-      `  ${found.name.padEnd(24)} ${link(found.url.padEnd(32))} ${serves(found.serving).padEnd(12)} ${found.releases} releases  ${found.at}`,
+      `  ${found.name.padEnd(24)} ${link(found.url)}${' '.repeat(Math.max(0, 32 - found.url.length))} ${serves(found.serving).padEnd(12)} ${found.releases} releases  ${found.at}`,
     );
   }
   if (page.next !== null) {

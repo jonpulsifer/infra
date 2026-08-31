@@ -11,6 +11,7 @@
 import {
   existsSync,
   mkdirSync,
+  mkdtempSync,
   readFileSync,
   rmSync,
   writeFileSync,
@@ -18,7 +19,7 @@ import {
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { version } from '../package.json' with { type: 'json' };
-import { KthxError } from './error.ts';
+import { KthxError, refusal } from './error.ts';
 
 /** What `pack.ts` writes and the server serves as `x-kthx-build`. */
 export interface Build {
@@ -72,7 +73,21 @@ const updateFile = () => join(configDir(), 'update.json');
 
 interface Seen {
   readonly at: number;
-  readonly build: string;
+  /** The apex's build id, or `null` for a day the apex did not answer. */
+  readonly build: string | null;
+}
+
+/** Today's answer on disk, no answer included, and never a reason to fail. */
+function remember(build: string | null): void {
+  try {
+    mkdirSync(configDir(), { recursive: true, mode: 0o700 });
+    writeFileSync(
+      updateFile(),
+      `${JSON.stringify({ at: Date.now(), build } satisfies Seen)}\n`,
+    );
+  } catch {
+    // An unwritable config directory costs one HEAD per command, silently.
+  }
 }
 
 /**
@@ -80,9 +95,11 @@ interface Seen {
  * otherwise from one `HEAD /cli/kthx.tgz` under a 1.5 s cap.
  *
  * Every failure — no network, a slow apex, an unwritable config directory, a
- * corrupt cache — is `null`. This runs beside the command the user actually
- * typed and must not be able to change what it prints, how long it takes past
- * the cap, or what it exits with.
+ * corrupt cache — is `null`, and a `null` is cached like any other answer: a
+ * machine with no route to the apex pays the cap once a day, not on every
+ * command. This runs beside the command the user actually typed and must not be
+ * able to change what it prints, how long it takes past the cap, or what it
+ * exits with.
  */
 async function apexBuild(origin: string): Promise<string | null> {
   try {
@@ -91,7 +108,7 @@ async function apexBuild(origin: string): Promise<string | null> {
       const seen = JSON.parse(readFileSync(path, 'utf8')) as Partial<Seen>;
       if (
         typeof seen.at === 'number' &&
-        typeof seen.build === 'string' &&
+        (typeof seen.build === 'string' || seen.build === null) &&
         Date.now() - seen.at < DAY
       ) {
         return seen.build;
@@ -100,22 +117,16 @@ async function apexBuild(origin: string): Promise<string | null> {
   } catch {
     // A cache that will not parse is asked again, not repaired.
   }
-  try {
-    const response = await fetch(`${origin}/cli/kthx.tgz`, {
-      method: 'HEAD',
-      signal: AbortSignal.timeout(CAP_MS),
-    });
-    const build = response.headers.get('x-kthx-build');
-    if (!response.ok || build === null) return null;
-    mkdirSync(configDir(), { recursive: true, mode: 0o700 });
-    writeFileSync(
-      updateFile(),
-      `${JSON.stringify({ at: Date.now(), build } satisfies Seen)}\n`,
-    );
-    return build;
-  } catch {
-    return null;
-  }
+  const build = await fetch(`${origin}/cli/kthx.tgz`, {
+    method: 'HEAD',
+    signal: AbortSignal.timeout(CAP_MS),
+  })
+    .then((response) =>
+      response.ok ? response.headers.get('x-kthx-build') : null,
+    )
+    .catch(() => null);
+  remember(build);
+  return build;
 }
 
 /**
@@ -167,25 +178,24 @@ export async function upgrade(origin: string): Promise<void> {
   const response = await fetch(url).catch((cause: Error) => {
     throw new KthxError('UNREACHABLE', `${url}: ${cause.message}`);
   });
-  if (!response.ok) {
-    const body = (await response.json().catch(() => ({}))) as {
-      code?: unknown;
-      message?: unknown;
-    };
-    throw new KthxError(
-      typeof body.code === 'string' ? body.code : `HTTP_${response.status}`,
-      typeof body.message === 'string' ? body.message : response.statusText,
-    );
-  }
+  if (!response.ok) throw await refusal(response);
   const to = response.headers.get('x-kthx-build');
-  const file = join(tmpdir(), `kthx-${process.pid}-${Date.now()}.tgz`);
+  // A directory of its own, 0700 and unguessable: the shared temp directory is
+  // world-writable, and this file is handed straight to an installer.
+  const dir = mkdtempSync(join(tmpdir(), 'kthx-'));
+  const file = join(dir, 'kthx.tgz');
   try {
     await Bun.write(file, await response.arrayBuffer());
     await Bun.$`bun add -g ${file}`.quiet().catch((cause: Error) => {
-      throw new KthxError('UPGRADE_FAILED', `bun add -g: ${cause.message}`);
+      // The shell captured why; `cause.message` is only the exit code.
+      const why = (cause as { stderr?: Buffer }).stderr?.toString().trim();
+      throw new KthxError(
+        'UPGRADE_FAILED',
+        `bun add -g: ${why || cause.message}`,
+      );
     });
   } finally {
-    rmSync(file, { force: true });
+    rmSync(dir, { recursive: true, force: true });
     // The nudge was decided against a build that is no longer installed.
     rmSync(updateFile(), { force: true });
   }
