@@ -15,7 +15,7 @@ import {
   GCP_CREDENTIALS_VAR,
   loadDeploymentFederation,
   parseFederationCredential,
-} from '../../src/config/federation-credential.ts';
+} from '@repo/archive/federation-credential';
 import { installationManifestSchema } from '../../src/config/manifest.schema.ts';
 import { parseManifest, resolveManifest } from '../../src/config/manifest.ts';
 

@@ -4,7 +4,7 @@
  */
 import { describe, expect, test } from 'bun:test';
 import { join } from 'node:path';
-import { GCP_CREDENTIALS_VAR } from '../../src/config/federation-credential.ts';
+import { GCP_CREDENTIALS_VAR } from '@repo/archive/federation-credential';
 import {
   KTHX_BUCKET_VAR,
   type KthxDeps,

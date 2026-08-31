@@ -30,7 +30,7 @@ gzipped tar stages as-is, a ZIP is transcoded into one, and anything else is
 refused with a `400` naming what arrived. Every build route opens a staged
 bundle with `tar -xz`, so gzip is the wire format rather than a preference, and
 the one conversion sits in front of the depot instead of in three fetchers —
-`apps/spindrift/src/storage/archive-format.ts` carries the reasoning.
+`packages/archive/archive-format.ts` carries the reasoning.
 
 The digest describes the **converted** bytes, so a ZIP upload's `bundleDigest`
 names the tarball the builders actually fetch, not the file that left this

@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { gunzipSync, gzipSync } from 'node:zlib';
+import { sniffArchiveFormat } from '@repo/archive/archive-format';
 import type { Principal } from '../../src/commands/types.ts';
-import { sniffArchiveFormat } from '../../src/storage/archive-format.ts';
 import { readStagedArchive } from '../../src/storage/archives.ts';
 import type { DispatchDeps } from '../../src/web/dispatch.ts';
 import { handleUpload } from '../../src/web/upload.ts';

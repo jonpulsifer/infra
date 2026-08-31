@@ -10,7 +10,7 @@
  * workload.
  */
 
-import { loadDeploymentFederation } from './federation-credential.ts';
+import { loadDeploymentFederation } from '@repo/archive/federation-credential';
 import {
   type AuthoredManifest,
   type InstallationManifest,

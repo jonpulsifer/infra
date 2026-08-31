@@ -14,8 +14,8 @@
  * ranks silently deciding what a healthy Target looks like.
  */
 import { join } from 'node:path';
+import { GCP_CREDENTIALS_VAR } from '@repo/archive/federation-credential';
 import type { ConnectTargetInput } from '../../src/commands/targets/connect.ts';
-import { GCP_CREDENTIALS_VAR } from '../../src/config/federation-credential.ts';
 import {
   type AuthoredManifest,
   type TargetAdapter,

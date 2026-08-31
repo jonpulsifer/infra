@@ -13,7 +13,7 @@
  */
 import { describe, expect, test } from 'bun:test';
 import { join } from 'node:path';
-import type { FederationOptions } from '../../src/adapters/deploy/cloud/federation.ts';
+import type { FederationOptions } from '@repo/archive/federation';
 import { createAdapterRegistry } from '../../src/adapters/registry.ts';
 import type { InstallationManifest } from '../../src/config/manifest.ts';
 import { parseManifest, resolveManifest } from '../../src/config/manifest.ts';

@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { base64urlEncode } from '../../src/auth/bytes.ts';
+import { base64urlEncode } from '@repo/archive/bytes';
 import {
   CREDENTIAL_KEYRING_VAR,
   CredentialDecryptError,

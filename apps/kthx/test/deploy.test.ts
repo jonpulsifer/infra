@@ -12,7 +12,7 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { readBundle } from '../../spindrift/src/adapters/deploy/static/bundle.ts';
+import { readBundle } from '@repo/archive/bundle';
 import {
   deploy,
   KthxError,

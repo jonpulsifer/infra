@@ -1,10 +1,8 @@
 import { describe, expect, test } from 'bun:test';
+import { uploadToGcsBucket } from '@repo/archive/gcs';
 import { testBucketPermissions } from '../../src/commands/storage/test-bucket.ts';
 import type { CommandContext } from '../../src/commands/types.ts';
-import {
-  testGcsBucketPermissions,
-  uploadToGcsBucket,
-} from '../../src/storage/cloud.ts';
+import { testGcsBucketPermissions } from '../../src/storage/cloud.ts';
 
 describe('cloud storage WIF permissions and publishing', () => {
   const mockFederation = {

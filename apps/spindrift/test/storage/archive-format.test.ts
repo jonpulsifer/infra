@@ -23,7 +23,7 @@ import {
   canonicalGzip,
   normalizeArchive,
   sniffArchiveFormat,
-} from '../../src/storage/archive-format.ts';
+} from '@repo/archive/archive-format';
 import { zipOf } from '../fixtures/zip.ts';
 import { bytes, tar, tarball } from '../harness/tar.ts';
 

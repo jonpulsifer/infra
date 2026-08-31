@@ -29,8 +29,9 @@
  * refusal that read as a code defect. Every removal is recorded at the block it
  * left, so the reason survives the key.
  */
+
+import type { FederationConfig } from '@repo/archive/federation';
 import { z } from 'zod';
-import type { FederationConfig } from '../adapters/deploy/cloud/federation.ts';
 
 /** A non-empty string with no surrounding whitespace. */
 const nonEmptyString = z.string().trim().min(1);

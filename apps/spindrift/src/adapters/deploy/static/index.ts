@@ -35,6 +35,9 @@
  * the project can see. Both halves of that are said out loud: `destroy` below,
  * and `ensureSite`'s reading of a 409 it cannot reconcile.
  */
+
+import { type BundleFile, readBundle } from '@repo/archive/bundle';
+import type { FederationOptions } from '@repo/archive/federation';
 import type {
   StoreAdapter,
   TargetAdapter,
@@ -59,7 +62,6 @@ import {
   parseGcsLocation,
 } from '../../../storage/signed-url.ts';
 import { cloudChecklist, cloudSurfaceProbe } from '../cloud/checklist.ts';
-import type { FederationOptions } from '../cloud/federation.ts';
 import { CloudHttp, type Fetcher, type TokenProvider } from '../cloud/http.ts';
 import {
   cloudWriteFailure,
@@ -82,12 +84,7 @@ import type {
 } from '../contract.ts';
 import { type DeployEvents, deployEvents, internalFailure } from '../events.ts';
 import { parseScopedRef, scopedRef } from '../ref.ts';
-import {
-  ArtifactUnavailable,
-  type BundleFile,
-  bundleFailure,
-  readBundle,
-} from './bundle.ts';
+import { ArtifactUnavailable, bundleFailure } from './bundle.ts';
 import { googleRegistryRef, OciPullError, pullFilesLayer } from './oci.ts';
 
 export interface StaticAdapterOptions {

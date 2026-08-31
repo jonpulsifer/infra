@@ -1427,7 +1427,7 @@ function SourceControls({
             ) : null}
             <input
               type="file"
-              // Exactly what `storage/archive-format.ts` sniffs — gzip magic
+              // Exactly what `@repo/archive/archive-format` sniffs — gzip magic
               // or ZIP magic. A plain `.tar` in this list is an invitation
               // the boundary answers with `UNKNOWN_FORMAT`, which makes the
               // chooser the thing that was wrong.

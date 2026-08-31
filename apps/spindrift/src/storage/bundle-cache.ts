@@ -22,21 +22,12 @@
  * deploy. That is the retention policy working rather than a race against it.
  */
 
+import { gcsObjectExists, parseGcsLocation } from '@repo/archive/gcs';
 import { and, eq, sql } from 'drizzle-orm';
 import type { Database } from '../db/client.ts';
 import { sourceBundles } from '../db/schema.ts';
 import type { StagedSourceBundle } from '../domain/source-bundle.ts';
 import type { SourceDepot } from './archives.ts';
-import { gcsObjectExists } from './cloud.ts';
-
-/** The `(bucket, object)` a `gs://` location names, or `null` if it names none. */
-function gcsObject(
-  location: string,
-): { bucket: string; object: string } | null {
-  const match = /^gs:\/\/([^/]+)\/(.+)$/.exec(location);
-  if (match === null) return null;
-  return { bucket: match[1] as string, object: match[2] as string };
-}
 
 /**
  * The bundle already staged for this commit, if the depot still holds it.
@@ -71,7 +62,7 @@ export async function cachedBundle(
       .limit(1);
     if (row === undefined) return null;
 
-    const object = gcsObject(row.location);
+    const object = parseGcsLocation(row.location);
     if (object === null || object.bucket !== depot.bucket) return null;
 
     const present = await gcsObjectExists({

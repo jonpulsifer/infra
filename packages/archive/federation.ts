@@ -21,7 +21,11 @@
  * operator configuring this has one of those already and copying it should be
  * the whole of the work.
  */
-import type { Fetcher, TokenProvider } from './http.ts';
+/** The transport, in the shape `fetch` already has. */
+export type Fetcher = (request: Request) => Promise<Response>;
+
+/** Mints a bearer token per request. Never a stored credential (§13). */
+export type TokenProvider = () => string | Promise<string>;
 
 /** What every exchange asks for. Cloud APIs are gated on this one scope. */
 const SCOPE = 'https://www.googleapis.com/auth/cloud-platform';

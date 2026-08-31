@@ -13,8 +13,8 @@
  * navigate to is a preflight somebody can be surprised by.
  */
 import { describe, expect, test } from 'bun:test';
+import { sniffArchiveFormat } from '@repo/archive/archive-format';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { sniffArchiveFormat } from '../../src/storage/archive-format.ts';
 import {
   blockersFor,
   type Draft,
@@ -548,7 +548,7 @@ describe('the draft reducer', () => {
 
 /**
  * The chooser's `accept` list is a hand-written claim about
- * `storage/archive-format.ts`, which decides by magic number and has never
+ * `@repo/archive/archive-format`, which decides by magic number and has never
  * heard of a filename. Nothing but this ties the two together, so the screen
  * offered a plain `.tar` the boundary answers with `UNKNOWN_FORMAT` — an
  * operator following the screen earning a `400`.

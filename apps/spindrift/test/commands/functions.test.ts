@@ -15,8 +15,8 @@
  */
 
 import { describe, expect, test } from 'bun:test';
+import { base64urlEncode } from '@repo/archive/bytes';
 import { eq } from 'drizzle-orm';
-import { base64urlEncode } from '../../src/auth/bytes.ts';
 import { dispatch } from '../../src/commands/registry.ts';
 import type { Clock, CommandContext } from '../../src/commands/types.ts';
 import {

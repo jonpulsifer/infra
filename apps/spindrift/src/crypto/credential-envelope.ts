@@ -7,8 +7,9 @@
  * Rotation is additive—install a new active key while retaining the old key,
  * then reads opportunistically rewrite old ciphertext.
  */
+
+import { base64urlDecode, base64urlEncode } from '@repo/archive/bytes';
 import { z } from 'zod';
-import { base64urlDecode, base64urlEncode } from '../auth/bytes.ts';
 
 export const CREDENTIAL_KEYRING_VAR = 'SPINDRIFT_CREDENTIAL_KEYRING';
 

@@ -20,11 +20,11 @@ import { createHash } from 'node:crypto';
 import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { FederationOptions } from '../adapters/deploy/cloud/federation.ts';
+import type { FederationOptions } from '@repo/archive/federation';
+import { uploadToGcsBucket } from '@repo/archive/gcs';
 import { sharedServicesOf } from '../config/manifest.schema.ts';
 import type { InstallationManifest } from '../config/manifest.ts';
 import type { BundleRetention } from '../domain/source-bundle.ts';
-import { uploadToGcsBucket } from './cloud.ts';
 
 export interface StagedArchive {
   readonly digest: string;

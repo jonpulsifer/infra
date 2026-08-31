@@ -1,9 +1,15 @@
 {
-  "name": "kthx",
+  "name": "@repo/archive",
+  "version": "0.0.0",
   "private": true,
   "type": "module",
-  "bin": {
-    "kthx": "cli/main.ts"
+  "exports": {
+    "./archive-format": "./archive-format.ts",
+    "./bundle": "./bundle.ts",
+    "./bytes": "./bytes.ts",
+    "./federation": "./federation.ts",
+    "./federation-credential": "./federation-credential.ts",
+    "./gcs": "./gcs.ts"
   },
   "scripts": {
     "lint": "biome check .",
@@ -12,8 +18,7 @@
     "test": "bun test"
   },
   "dependencies": {
-    "@repo/archive": "workspace:*",
-    "@repo/kthx": "workspace:*"
+    "zod": "4.4.3"
   },
   "devDependencies": {
     "@repo/typescript-config": "workspace:*",

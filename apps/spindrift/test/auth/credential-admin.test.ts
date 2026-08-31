@@ -6,7 +6,7 @@
  * linked Gateway session cannot accidentally become an account root.
  */
 import { describe, expect, test } from 'bun:test';
-import { base64urlDecode, base64urlEncode } from '../../src/auth/bytes.ts';
+import { base64urlDecode, base64urlEncode } from '@repo/archive/bytes';
 import {
   beginAddPasskey,
   beginCredentialChange,

@@ -15,14 +15,14 @@
  * an archive with no `index.html` at its root is refused before it is stored.
  */
 import { createHash, timingSafeEqual } from 'node:crypto';
-import { and, desc, eq, max } from 'drizzle-orm';
-import { BundleError } from '../adapters/deploy/static/bundle.ts';
-import { base64urlEncode } from '../auth/bytes.ts';
-import { kthxKv, kthxReleases, kthxSites } from '../db/schema.ts';
 import {
   ArchiveFormatError,
   normalizeArchive,
-} from '../storage/archive-format.ts';
+} from '@repo/archive/archive-format';
+import { BundleError } from '@repo/archive/bundle';
+import { base64urlEncode } from '@repo/archive/bytes';
+import { and, desc, eq, max } from 'drizzle-orm';
+import { kthxKv, kthxReleases, kthxSites } from '../db/schema.ts';
 import { stageArchiveBytes } from '../storage/archives.ts';
 import {
   type KthxDeps,
@@ -95,7 +95,7 @@ export const MAX_FILES = 2000;
 // ponytail: a counter, so an upload that finds it full is refused rather than
 // queued — what it would wait for is memory, and a queue holds the bytes it is
 // queueing. The slot is held across the depot upload too, which is why that
-// upload carries a deadline (`UPLOAD_TIMEOUT_MS` in `storage/cloud.ts`): the
+// upload carries a deadline (`@repo/archive/gcs` sets one on every call): the
 // counter alone would let two stalled sockets refuse every release until the
 // pod restarted. Streaming the archive to disk instead of holding it is what
 // would let the ceiling above grow.

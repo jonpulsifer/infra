@@ -21,11 +21,12 @@
  * one.
  */
 
-/** The transport, in the shape `fetch` already has. */
-export type Fetcher = (request: Request) => Promise<Response>;
+import type { Fetcher, TokenProvider } from '@repo/archive/federation';
 
-/** Mints a bearer token per request. Never a stored credential (§13). */
-export type TokenProvider = () => string | Promise<string>;
+// Defined where federation is, because the token provider this client calls is
+// the one that package mints, and two structurally identical declarations of a
+// transport is how the seam stops being one seam.
+export type { Fetcher, TokenProvider };
 
 /** Where one cloud API is reached and how a request to it is authorized. */
 export interface CloudEndpoint {
