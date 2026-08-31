@@ -37,6 +37,8 @@ interface Sdk {
     collection(name: string): {
       create(document: unknown): Promise<Doc | Doc[]>;
       get(id: string): Promise<Doc | null>;
+      findById(id: string): Promise<Doc | null>;
+      subscribe(handlers: Record<string, unknown>): () => void;
       update(
         id: string,
         patch: unknown,
@@ -65,38 +67,12 @@ interface Sdk {
   files: { url(path: string): string; upload(): unknown };
 }
 
-/** The SDK, evaluated the way a `<script>` tag would, pointed at one site. */
-async function loaded(label: string): Promise<Sdk> {
-  const name = kthx().name(label);
-  const claim = await kthx().fetch(
-    ask('/api/sites', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ name }),
-      address: address(),
-    }),
-  );
-  expect(claim.status).toBe(201);
-  await claim.json();
-
-  const host = `${name}.${ZONE}`;
-  const cookies: string[] = [];
+/** `sdk.js` run as a classic script over the `fetch` it is given. */
+async function evaluated(
+  location: { origin: string; protocol: string; host: string },
+  call: (path: string, init?: RequestInit) => Promise<Response>,
+): Promise<Sdk> {
   const win: { kthx?: Sdk } = {};
-  const location = {
-    origin: `https://${host}`,
-    protocol: 'https:',
-    host,
-  };
-  // A browser's cookie jar, which is what makes two calls the same visitor.
-  const call = async (path: string, init: RequestInit = {}) => {
-    const headers = new Headers(init.headers);
-    if (cookies.length > 0) headers.set('cookie', cookies.join('; '));
-    const response = await kthx().fetch(ask(path, { ...init, host, headers }));
-    const set = response.headers.get('set-cookie');
-    if (set !== null) cookies.push(set.split(';')[0] ?? '');
-    return response;
-  };
-
   const evaluate = new Function(
     'window',
     'location',
@@ -121,6 +97,41 @@ async function loaded(label: string): Promise<Sdk> {
   );
   const sdk = win.kthx;
   if (sdk === undefined) throw new Error('sdk.js did not define window.kthx');
+  return sdk;
+}
+
+/** The SDK, evaluated the way a `<script>` tag would, pointed at one site. */
+async function loaded(label: string): Promise<Sdk> {
+  const name = kthx().name(label);
+  const claim = await kthx().fetch(
+    ask('/api/sites', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ name }),
+      address: address(),
+    }),
+  );
+  expect(claim.status).toBe(201);
+  await claim.json();
+
+  const host = `${name}.${ZONE}`;
+  const cookies: string[] = [];
+  const location = {
+    origin: `https://${host}`,
+    protocol: 'https:',
+    host,
+  };
+  // A browser's cookie jar, which is what makes two calls the same visitor.
+  const call = async (path: string, init: RequestInit = {}) => {
+    const headers = new Headers(init.headers);
+    if (cookies.length > 0) headers.set('cookie', cookies.join('; '));
+    const response = await kthx().fetch(ask(path, { ...init, host, headers }));
+    const set = response.headers.get('set-cookie');
+    if (set !== null) cookies.push(set.split(';')[0] ?? '');
+    return response;
+  };
+
+  const sdk = await evaluated(location, call);
   await sdk.ready;
   expect(sdk.me.id).toMatch(/^[0-9a-f-]{36}$/);
   expect(sdk.site.name).toBe(name);
@@ -135,7 +146,10 @@ describe('sdk.js', () => {
     const made = (await notes.create({ title: 'one', n: 1 })) as Doc;
     expect(made.id).toMatch(/^[0-9a-f-]{36}$/);
     expect(await notes.get(made.id)).toEqual(made);
+    // Quick's name for the same call, which the SDK's own docblock promises.
+    expect(await notes.findById(made.id)).toEqual(made);
     expect(await notes.get('missing')).toBeNull();
+    expect(await notes.findById('missing')).toBeNull();
 
     const merged = await notes.update(made.id, { n: 2 });
     expect(merged.n).toBe(2);
@@ -178,6 +192,38 @@ describe('sdk.js', () => {
     await expect(
       sdk.db.collection('notes').create('not a document'),
     ).rejects.toMatchObject({ status: 400, code: 'INVALID_DOCUMENT' });
+  });
+
+  test('a site that is still provisioning rejects ready and nothing else', async () => {
+    const host = `busy.${ZONE}`;
+    const loose: unknown[] = [];
+    const seen = (cause: unknown) => loose.push(cause);
+    process.on('unhandledRejection', seen);
+    const errors: unknown[] = [];
+    const complain = console.error;
+    console.error = (...args: unknown[]) => errors.push(args);
+    try {
+      const sdk = await evaluated(
+        { origin: `https://${host}`, protocol: 'https:', host },
+        () =>
+          Promise.resolve(
+            new Response('{"code":"BUSY"}', {
+              status: 503,
+              headers: { 'content-type': 'application/json' },
+            }),
+          ),
+      );
+      // The contract has `ready` reject rather than hang; what must not happen
+      // is every socket-backed call becoming an unhandled rejection of its own.
+      await expect(sdk.ready).rejects.toThrow(/503/);
+      expect(sdk.db.collection('notes').subscribe({})).toBeInstanceOf(Function);
+      await Bun.sleep(20);
+      expect(loose).toEqual([]);
+      expect(errors.length).toBeGreaterThan(0);
+    } finally {
+      console.error = complain;
+      process.off('unhandledRejection', seen);
+    }
   });
 
   test('the backends that are not here yet say so', async () => {

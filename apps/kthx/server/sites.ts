@@ -13,7 +13,7 @@
  * in the depot, then on the volume, and only then does a row say a site serves
  * them.
  */
-import { createHash, timingSafeEqual } from 'node:crypto';
+import { createHash } from 'node:crypto';
 import { rm } from 'node:fs/promises';
 import { base64urlEncode } from '@repo/archive/bytes';
 import type { SQL } from 'bun';
@@ -30,6 +30,7 @@ import {
   refuse,
   sameOrigin,
   siteUrl,
+  timingSafeEquals,
 } from './http.ts';
 import {
   CLAIM_BUCKET,
@@ -139,12 +140,6 @@ function hash(token: string): string {
   return createHash('sha256').update(token).digest('hex');
 }
 
-function sameHash(a: string, b: string): boolean {
-  const left = Buffer.from(a);
-  const right = Buffer.from(b);
-  return left.length === right.length && timingSafeEqual(left, right);
-}
-
 function retryAfter(seconds: number): Record<string, string> {
   return { 'retry-after': String(seconds) };
 }
@@ -160,7 +155,7 @@ export function opensSite(request: Request, tokenHash: string): boolean {
   const bearer = /^Bearer\s+(\S+)$/i.exec(
     request.headers.get('authorization') ?? '',
   )?.[1];
-  return bearer !== undefined && sameHash(hash(bearer), tokenHash);
+  return bearer !== undefined && timingSafeEquals(hash(bearer), tokenHash);
 }
 
 /**

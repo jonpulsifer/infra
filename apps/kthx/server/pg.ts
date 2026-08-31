@@ -312,8 +312,20 @@ export class Pg {
     return sql;
   }
 
-  /** Re-run provisioning, once per name at a time. */
+  /**
+   * Re-run provisioning, once per name at a time.
+   *
+   * The row is read first: `leaving` only covers the window {@link drop} is
+   * inside, so without this a handler that read a live row before a delete and
+   * reached here after it would re-create the database its owner just dropped.
+   */
   async repair(name: string): Promise<void> {
+    const [row] = (await this.control`
+      select deleted_at from sites where name = ${name}
+    `) as { deleted_at: Date | null }[];
+    if (row === undefined || row.deleted_at !== null) {
+      throw new SiteGone(`${name} is gone`);
+    }
     const running = this.repairs.get(name);
     if (running !== undefined) return running;
     const attempt = this.provision(name).finally(() => {
@@ -370,9 +382,12 @@ export class Pg {
         select pg_database_size(${name})::bigint as bytes
       `) as { bytes: string | number }[];
       return Number(row?.bytes ?? 0);
-    } catch {
-      // A site whose database is not there yet has spent nothing.
-      return 0;
+    } catch (cause) {
+      // A site whose database is not there yet has spent nothing. Anything
+      // else is the one quota meter failing, and a meter that fails open is
+      // not a ceiling — let it reach `dbApi`, which logs it and answers 500.
+      if (sqlState(cause) === UNDEFINED_DATABASE) return 0;
+      throw cause;
     }
   }
 
@@ -454,9 +469,15 @@ export class Pg {
       );
       dropped.push(name);
     }
+    // Membership of the group role, not name shape, is what makes a role a
+    // site's: every `provision` creates one `in role kthx_site`, and nothing
+    // else in the cluster is. A `backup` or `readonly` login added later would
+    // pass the name test and must survive the nightly timer.
     const roles = (await this.control`
-      select rolname as name from pg_roles r
-      where not rolsuper
+      select r.rolname as name from pg_roles r
+      join pg_auth_members m on m.member = r.oid
+      join pg_roles g on g.oid = m.roleid and g.rolname = ${this.group}
+      where not r.rolsuper
         and not exists (
           select 1 from sites s where s.name = r.rolname and s.deleted_at is null
         )

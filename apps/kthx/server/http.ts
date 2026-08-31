@@ -9,6 +9,7 @@
  * `x-request-id` the caller was handed. An `x-filename` a caller sent is never
  * echoed anywhere.
  */
+import { timingSafeEqual } from 'node:crypto';
 
 /** The codes this process answers with. Later tickets add their own rows. */
 export type Code =
@@ -82,6 +83,18 @@ const ERRORS: Record<Code, readonly [number, string]> = {
   BUSY: [503, 'the server is full right now; try again in a moment'],
   SITE_FULL: [507, 'this site is full; delete something to add something'],
 };
+
+/**
+ * Two strings compared without leaking how far they match.
+ *
+ * Both a cookie's HMAC and a bearer's hash are checked this way, so the
+ * comparison lives here rather than once per caller.
+ */
+export function timingSafeEquals(a: string, b: string): boolean {
+  const left = Buffer.from(a);
+  const right = Buffer.from(b);
+  return left.length === right.length && timingSafeEqual(left, right);
+}
 
 /** Never absent: a caller with no cause to read still gets one to quote. */
 export function requestId(): string {

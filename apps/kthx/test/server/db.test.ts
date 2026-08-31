@@ -159,6 +159,30 @@ describe('provisioning', () => {
     expect((await at(site, '/api/db')).status).toBe(410);
   });
 
+  test('a handler that arrives after a delete does not rebuild the site', async () => {
+    const site = await claimed('late');
+    await kthx().fetch(
+      ask(`/api/sites/${site.name}`, { method: 'DELETE', token: site.token }),
+    );
+
+    // The state a `drop()` that threw between its two statements leaves: the
+    // database gone, the role still there. A handler that read a live row just
+    // before the delete now connects, gets 3D000, and asks for a repair —
+    // `leaving` is already cleared, so only the row keeps this honest.
+    const password = sitePassword(kthx().config.pgKey, site.name);
+    await kthx().sql.unsafe(
+      `create role "${site.name}" login password '${password}'`,
+    );
+    await expect(
+      kthx().pg.site(site.name, (sql) => sql`select 1`),
+    ).rejects.toMatchObject({ name: 'SiteGone' });
+
+    const [left] = (await kthx().sql`
+      select exists (select 1 from pg_database where datname = ${site.name}) as any
+    `) as { any: boolean }[];
+    expect(left?.any).toBe(false);
+  });
+
   test('the sweep drops the residue and nothing the cluster needs', async () => {
     const site = await claimed('orphan');
     await kthx().sql`delete from sites where name = ${site.name}`;
@@ -177,6 +201,18 @@ describe('provisioning', () => {
     expect(left?.any).toBe(false);
     // The control connection is still the control connection.
     expect((await kthx().sql`select 1 as ok`)[0]).toEqual({ ok: 1 });
+
+    // A login that is not a site's, whose name a site could have had. The
+    // sweep is the one unconditional destructive path in the process, so what
+    // makes a role a site's is membership of the group role, not its shape.
+    const bystander = `${ours}keepme`;
+    await kthx().sql.unsafe(`create role "${bystander}" login`);
+    const second = await kthx().pg.sweep((name) => name.startsWith(ours));
+    expect(second).not.toContain(bystander);
+    const [alive] = (await kthx().sql`
+      select exists (select 1 from pg_roles where rolname = ${bystander}) as any
+    `) as { any: boolean }[];
+    expect(alive?.any).toBe(true);
   });
 
   test('a name that is already a database is taken even with no row', async () => {
@@ -717,6 +753,32 @@ describe('quotas', () => {
       more: 'z'.repeat(60_000),
     });
     expect(grown.status).toBe(413);
+  });
+
+  test('a chunked body past the ceiling is cut, not read', async () => {
+    const site = await claimed('chunked');
+    const chunk = new Uint8Array(256 * 1024);
+    chunk.fill(120);
+    let pulls = 0;
+    const body = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        pulls += 1;
+        // Far past the ceiling: what must not happen is all of it arriving.
+        if (pulls > 200) controller.close();
+        else controller.enqueue(chunk);
+      },
+    });
+    const request = new Request(`http://${site.host}/api/db/notes`, {
+      method: 'POST',
+      headers: { host: site.host, 'content-type': 'application/json' },
+      body,
+      // @ts-expect-error the fetch types have no `duplex` yet; Bun wants it.
+      duplex: 'half',
+    });
+    const response = await kthx().fetch(request);
+    expect(response.status).toBe(413);
+    // 2 MiB is nine of these chunks; the rest of the stream was never taken.
+    expect(pulls).toBeLessThan(16);
   });
 });
 

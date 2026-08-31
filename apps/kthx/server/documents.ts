@@ -401,16 +401,35 @@ function withEtag(
   });
 }
 
+/**
+ * The request's JSON, refusing anything past 2 MiB without holding it.
+ *
+ * `content-length` is the fast path; a chunked body has none, so the stream is
+ * read a chunk at a time and cancelled the moment it goes over. The server-wide
+ * ceiling is 32 MiB, so materialising first would let every anonymous write
+ * pin sixteen times what this route allows.
+ */
 async function bodyOf(
   request: Request,
 ): Promise<{ json: unknown } | { code: Code }> {
   if (Number(request.headers.get('content-length') ?? 0) > MAX_BODY_BYTES) {
     return { code: 'TOO_LARGE' };
   }
-  const text = await request.text();
-  if (Buffer.byteLength(text) > MAX_BODY_BYTES) return { code: 'TOO_LARGE' };
+  const reader = request.body?.getReader();
+  const parts: Uint8Array[] = [];
+  let seen = 0;
+  while (reader !== undefined) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    seen += value.byteLength;
+    if (seen > MAX_BODY_BYTES) {
+      await reader.cancel().catch(() => {});
+      return { code: 'TOO_LARGE' };
+    }
+    parts.push(value);
+  }
   try {
-    return { json: JSON.parse(text) as unknown };
+    return { json: JSON.parse(Buffer.concat(parts).toString()) as unknown };
   } catch {
     return { code: 'MALFORMED_REQUEST' };
   }

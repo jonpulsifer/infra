@@ -13,7 +13,9 @@
  * refuses to store such a cookie with a `Domain`, which is what stops one site
  * host from writing a cookie its siblings would send.
  */
-import { createHmac, timingSafeEqual } from 'node:crypto';
+import { createHmac } from 'node:crypto';
+
+import { timingSafeEquals } from './http.ts';
 
 export const ME_COOKIE = '__Host-kthx_me';
 const ME_LIFETIME_S = 365 * 24 * 60 * 60;
@@ -30,12 +32,6 @@ function sign(key: string, site: string, id: string): string {
   return createHmac('sha256', key)
     .update(`me:${site}:${id}`)
     .digest('base64url');
-}
-
-function same(a: string, b: string): boolean {
-  const left = Buffer.from(a);
-  const right = Buffer.from(b);
-  return left.length === right.length && timingSafeEqual(left, right);
 }
 
 /** Every value sent under this name, so a duplicate is caught rather than picked. */
@@ -64,10 +60,14 @@ export function meOf(
   if (sent.length === 1) {
     const [id = '', signature = ''] = (sent[0] ?? '').split('.');
     if (UUID.test(id)) {
-      if (same(signature, sign(key, site, id))) return { id, setCookie: null };
+      if (timingSafeEquals(signature, sign(key, site, id)))
+        return { id, setCookie: null };
       // Signed by the key this deployment has just rotated away from: the
       // visitor keeps their id and is handed a cookie under the live key.
-      if (previous !== null && same(signature, sign(previous, site, id))) {
+      if (
+        previous !== null &&
+        timingSafeEquals(signature, sign(previous, site, id))
+      ) {
         return { id, setCookie: cookie(id, sign(key, site, id)) };
       }
     }

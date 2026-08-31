@@ -95,6 +95,13 @@
 
   function collection(name) {
     const runner = query(name, {});
+    /** One document by id. `findById` is the same call under Quick's name. */
+    const get = async (id) => {
+      const response = await fetch(path(name, id));
+      if (response.status === 404) return null;
+      if (!response.ok) throw await failed(response);
+      return response.json();
+    };
     return {
       name,
 
@@ -104,12 +111,8 @@
         return Array.isArray(document) ? answer.items : answer;
       },
 
-      async get(id) {
-        const response = await fetch(path(name, id));
-        if (response.status === 404) return null;
-        if (!response.ok) throw await failed(response);
-        return response.json();
-      },
+      get,
+      findById: get,
 
       /**
        * A SHALLOW MERGE of top-level keys.
@@ -227,20 +230,26 @@
 
   /** Queue a frame behind `ready`: the cookie identifying it must exist first. */
   function frame(body) {
-    ready.then(() => {
-      connect();
-      // `onopen` replays subscriptions and joins from their own state; only
-      // what cannot be derived from it waits here.
-      if (socket.readyState === WebSocket.OPEN) {
-        socket.send(JSON.stringify(body));
-      } else if (
-        body.t === 'send' ||
-        body.t === 'leave' ||
-        body.t === 'unsub'
-      ) {
-        pending.push(JSON.stringify(body));
-      }
-    });
+    // `ready` rejects when /api/me does — a site still provisioning answers 503
+    // — and this derived promise is not the one a page can catch, so it says so
+    // here rather than surfacing as an unhandled rejection per frame.
+    ready.then(
+      () => {
+        connect();
+        // `onopen` replays subscriptions and joins from their own state; only
+        // what cannot be derived from it waits here.
+        if (socket.readyState === WebSocket.OPEN) {
+          socket.send(JSON.stringify(body));
+        } else if (
+          body.t === 'send' ||
+          body.t === 'leave' ||
+          body.t === 'unsub'
+        ) {
+          pending.push(JSON.stringify(body));
+        }
+      },
+      (cause) => console.error('kthx: the socket cannot open', cause),
+    );
   }
 
   function dispatch(body) {
