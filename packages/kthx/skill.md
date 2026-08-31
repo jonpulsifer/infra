@@ -6,8 +6,9 @@ documents, realtime, an anonymous visitor id, an OpenAI-compatible model
 endpoint, files, and MCP. There is no build step, no account, and no server to
 run — a static bundle plus `window.kthx` is the whole application.
 
-There is no password reset. A site is opened by one bearer token, shown once at
-claim. A lost token is a lost site.
+A site is owned by a Google account. Every owner-scoped call carries the ID
+token `gcloud auth print-identity-token` mints, and the server verifies it. There
+is nothing shown once and nothing to keep safe.
 
 ## Client
 
@@ -109,7 +110,7 @@ The SDK is a convenience; the routes are the product. `<site>` is
 | PATCH | `/api/db/:collection/:id` | shallow merge; `?overwrite=1`; `If-Match` |
 | PUT | `/api/db/:collection/:id` | upsert; `If-Match` / `If-None-Match: *` |
 | DELETE | `/api/db/:collection/:id` | 204 |
-| DELETE | `/api/db/:collection` | 204 — owner bearer only; drops every document |
+| DELETE | `/api/db/:collection` | 204 — the owner only; drops every document |
 | GET | `/api/ws` | websocket |
 | POST | `/api/ai/v1/chat/completions` | OpenAI-compatible; also `/models`, `/embeddings`. `/v1` is optional; nothing else under `/api/ai` exists |
 | GET | `/api/ai/usage` | `{day, requests, tokens, quotas}` — today, against the daily budget |
@@ -119,11 +120,12 @@ The SDK is a convenience; the routes are the product. `<site>` is
 | GET | `/files/<path>` | the bytes |
 | POST | `/api/mcp` | JSON-RPC 2.0, one message per request |
 
-The apex has one route no token opens: `GET https://kthx.dev/api/sites` is the
-public directory — `{items: [{name, url, serving, releases, at}], next}`, newest
-claim first, `limit` up to 500 and `after=<name>` for the page after that. It
-names sites and nothing else; a site's releases, usage and hold stay behind its
-bearer. The first page is cached; ask for more than sixty other pages a minute
+The apex has one route no credential opens: `GET https://kthx.dev/api/sites` is
+the public directory — `{items: [{name, url, owner, serving, releases, at}],
+next}`, newest claim first, `limit` up to 500 and `after=<name>` for the page
+after that. `owner` is the owner's email address, or `null` for a site claimed
+before accounts; owner addresses are public, because attribution is the point of
+them. A site's releases, usage and hold stay behind its owner. The first page is cached; ask for more than sixty other pages a minute
 from one address and the answer is 429 `RATE_LIMITED`.
 
 Every non-`GET` `/api/*` from a browser must send `Origin` equal to the site's
@@ -201,15 +203,19 @@ bun add -g https://kthx.dev/cli/kthx.tgz
 | `kthx dev [dir]` | serves the directory on `:4321` against the site's live `/api` |
 | `kthx rollback [n]` | serves release `n` and holds it there |
 | `kthx release` | drops the hold; the newest release serves |
-| `kthx ls` | releases, what is serving, usage against the quotas; with no `kthx.json`, every site in `sites.json` |
+| `kthx ls` | releases, what is serving, usage against the quotas; with no `kthx.json`, every site this account owns |
 | `kthx ls --all` | the public directory: every site on the apex |
 | `kthx rm` | deletes the site |
 | `kthx open` | opens `https://<name>.kthx.dev` |
+| `kthx whoami` | the Google account this machine claims sites as |
+| `kthx adopt` | takes a site claimed before accounts, with its old token |
 | `kthx upgrade` | replaces this copy with the one the apex serves |
 
-The token lives in `$XDG_CONFIG_HOME/kthx/sites.json`, never in the project
-directory — which is what gets uploaded. `kthx.json` holds `{name}` and nothing
-secret.
+Run `gcloud auth login` once. Every owner command shells out to `gcloud auth
+print-identity-token` and keeps the token in memory until it expires;
+`KTHX_IDENTITY_TOKEN` is used instead where there is no gcloud. `kthx.json` holds
+`{name}` and nothing secret. `$XDG_CONFIG_HOME/kthx/sites.json` holds the bearers
+of sites claimed before accounts, and `kthx adopt` is what spends one.
 
 `kthx upgrade` re-runs `bun add -g` on the apex tarball. It replaces only a
 `bun add -g` install. `kthx --version` prints the version and the build id; set
@@ -219,14 +225,23 @@ to turn the colour off.
 ## MCP
 
 An editor that speaks Streamable HTTP with headers connects to
-`https://<name>.kthx.dev/api/mcp` with `Authorization: Bearer <token>`; the
-token is the one in `sites.json`. Tools: `site_info`, `db_collections`,
+`https://<name>.kthx.dev/api/mcp` with `Authorization: Bearer <token>`, where the
+token is `$(gcloud auth print-identity-token)`. Tools: `site_info`, `db_collections`,
 `db_query`, `db_get`, `db_create`, `db_update`, `db_delete`.
 
 ## Owning a site
 
-The bearer is required by `/api/sites/*` on the apex, by `DELETE
-/api/db/:collection`, and by `/api/mcp`. Everywhere else a bearer that is not
-this site's is ignored and the caller proceeds as a visitor. Writes default to
-anyone on the site's own origin, bounded by the quotas above — a kthx link is
-meant to be sendable to anyone.
+The ID token is required by `/api/sites/*` and `POST /api/sites` on the apex, by
+`DELETE /api/db/:collection`, and by `/api/mcp`. The server checks the signature
+against Google's JWKS, the issuer, the audience, the expiry, and
+`email_verified`; the site row keeps the account's `sub`, so the address may
+change and the ownership does not. Everywhere else a bearer that is not this
+site's is ignored and the caller proceeds as a visitor. Writes default to anyone
+on the site's own origin, bounded by the quotas above — a kthx link is meant to
+be sendable to anyone.
+
+A site claimed before accounts still answers to its old bearer over the API,
+until `kthx adopt` trades it for an account: `POST /api/sites/:name/adopt` with
+the ID token and `{token: "<the old bearer>"}` writes the owner and spends the
+string. The CLI sends the account and not the bearer, so `kthx deploy` on an
+unadopted site is `FORBIDDEN` until `kthx adopt` has run once.

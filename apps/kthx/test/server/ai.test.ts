@@ -18,7 +18,7 @@ import {
   MAX_AI_TOKENS_DAY,
   utcDay,
 } from '../../server/ai.ts';
-import { ask, withServer, ZONE } from '../harness/server.ts';
+import { ask, idToken, withServer, ZONE } from '../harness/server.ts';
 
 interface Seen {
   readonly method: string;
@@ -84,17 +84,18 @@ interface Site {
 
 async function claimed(label: string, at = kthx): Promise<Site> {
   const name = at().name(label);
+  const token = await idToken(`${name}@example.com`);
   const response = await at().fetch(
     ask('/api/sites', {
       method: 'POST',
+      token,
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ name }),
       address: address(),
     }),
   );
   expect(response.status).toBe(201);
-  const body = (await response.json()) as { token: string };
-  return { name, host: `${name}.${ZONE}`, token: body.token };
+  return { name, host: `${name}.${ZONE}`, token };
 }
 
 function chat(

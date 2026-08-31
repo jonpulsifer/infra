@@ -60,6 +60,32 @@ export interface Config {
   /** The ceiling `max_tokens` is clamped to, named or not. */
   readonly aiMaxTokens: number;
   /**
+   * The `aud` values an ID token may carry.
+   *
+   * The default is gcloud's own OAuth client id, which is what
+   * `gcloud auth print-identity-token` puts in `aud` when it is asked for no
+   * audience — read out of this machine's gcloud credential store, where it is
+   * the `client_id` of the stored user credential.
+   */
+  readonly oidcAudiences: readonly string[];
+  /**
+   * Where the RSA public keys come from: Google, and no environment says
+   * otherwise. A test hands this field its own JWKS directly; an operator
+   * cannot point the verifier at keys nobody chose.
+   */
+  readonly jwksUrl: string;
+  /**
+   * The header a trusted hop uses to say which address the caller is, or
+   * `null`.
+   *
+   * The IAP / pass-through seam, off by default: with nothing named here the
+   * only identity this server believes is one it verified itself. Naming one
+   * asks for IAP's pair — the hop must also send the subject in
+   * `x-goog-authenticated-user-id`, because `owner_sub` is what ownership
+   * compares and an asserted address alone would open nothing.
+   */
+  readonly trustedIdentityHeader: string | null;
+  /**
    * The peers whose `cf-connecting-ip` is believed: the Gateway hop in front of
    * this pod. Empty means no peer is, so every address-keyed bucket falls back
    * to the socket address — which behind a proxy is one key for the whole zone.
@@ -70,6 +96,19 @@ export interface Config {
 }
 
 type Env = Record<string, string | undefined>;
+
+/** gcloud's installed-app client id: the `aud` of the token it prints. */
+const GCLOUD_CLIENT_ID = '32555940559.apps.googleusercontent.com';
+
+/** Google's published RS256 keys. */
+const GOOGLE_JWKS = 'https://www.googleapis.com/oauth2/v3/certs';
+
+function list(raw: string | undefined): string[] {
+  return (raw ?? '')
+    .split(',')
+    .map((entry) => entry.trim())
+    .filter((entry) => entry !== '');
+}
 
 /** ≥ 32 bytes, per the contract — a shorter HMAC key is a weaker one. */
 const KEY_BYTES = 32;
@@ -101,6 +140,7 @@ function longEnough(name: string, value: string): string {
 
 export function readConfig(env: Env = Bun.env): Config {
   const previous = env.KTHX_ME_KEY_PREVIOUS?.trim();
+  const audiences = list(env.KTHX_OIDC_AUDIENCES);
   return {
     zone: env.KTHX_ZONE?.trim().toLowerCase() || 'kthx.dev',
     bucket: env.KTHX_BUCKET?.trim() || null,
@@ -121,15 +161,13 @@ export function readConfig(env: Env = Bun.env): Config {
     ),
     aiKey: env.KTHX_AI_KEY?.trim() || null,
     aiModel: env.KTHX_AI_MODEL?.trim() || 'minimax-m3',
-    aiModels: (env.KTHX_AI_MODELS ?? '')
-      .split(',')
-      .map((entry) => entry.trim())
-      .filter((entry) => entry !== ''),
+    aiModels: list(env.KTHX_AI_MODELS),
     aiMaxTokens: positive(env.KTHX_AI_MAX_TOKENS, 4096),
-    trustedProxies: (env.KTHX_TRUSTED_PROXIES ?? '')
-      .split(',')
-      .map((entry) => entry.trim())
-      .filter((entry) => entry !== ''),
+    oidcAudiences: audiences.length === 0 ? [GCLOUD_CLIENT_ID] : audiences,
+    jwksUrl: GOOGLE_JWKS,
+    trustedIdentityHeader:
+      env.KTHX_TRUSTED_IDENTITY_HEADER?.trim().toLowerCase() || null,
+    trustedProxies: list(env.KTHX_TRUSTED_PROXIES),
     port: Number(env.PORT?.trim() || 8080),
   };
 }

@@ -22,7 +22,12 @@ const MIGRATIONS = join(import.meta.dir, 'migrations');
 /** One site row, as every handler reads it. */
 export interface SiteRow {
   readonly name: string;
-  readonly token_hash: string;
+  /** The Google `sub` that owns it, or null while it is unadopted. */
+  readonly owner_sub: string | null;
+  /** The address that `sub` verified with — public, and what is displayed. */
+  readonly owner_email: string | null;
+  /** The pre-identity bearer's hash; null once the site has an owner. */
+  readonly token_hash: string | null;
   readonly serving: number | null;
   readonly held: boolean;
   readonly deleted_at: Date | null;

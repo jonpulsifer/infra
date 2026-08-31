@@ -20,6 +20,7 @@ import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { version } from '../package.json' with { type: 'json' };
 import { KthxError, refusal } from './error.ts';
+import { reach, unreachable } from './reach.ts';
 
 /** What `pack.ts` writes and the server serves as `x-kthx-build`. */
 export interface Build {
@@ -175,8 +176,10 @@ export async function upgrade(origin: string): Promise<void> {
   // this copy answers `buildId()` from.
   const from = buildId() ?? `${version}+dev`;
   const url = `${origin}/cli/kthx.tgz`;
-  const response = await fetch(url).catch((cause: Error) => {
-    throw new KthxError('UNREACHABLE', `${url}: ${cause.message}`);
+  // The bound covers the download too — the tarball is tens of kilobytes, and
+  // a half-sent one hangs the upgrade as surely as an apex that never answers.
+  const response = await reach(url).catch((cause: Error) => {
+    throw unreachable(url, cause);
   });
   if (!response.ok) throw await refusal(response);
   const to = response.headers.get('x-kthx-build');
@@ -185,7 +188,10 @@ export async function upgrade(origin: string): Promise<void> {
   const dir = mkdtempSync(join(tmpdir(), 'kthx-'));
   const file = join(dir, 'kthx.tgz');
   try {
-    await Bun.write(file, await response.arrayBuffer());
+    const tarball = await response.arrayBuffer().catch((cause: Error) => {
+      throw unreachable(url, cause);
+    });
+    await Bun.write(file, tarball);
     await Bun.$`bun add -g ${file}`.quiet().catch((cause: Error) => {
       // The shell captured why; `cause.message` is only the exit code.
       const why = (cause as { stderr?: Buffer }).stderr?.toString().trim();

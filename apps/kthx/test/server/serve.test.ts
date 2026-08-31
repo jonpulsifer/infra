@@ -9,7 +9,7 @@ import { readBundle } from '@repo/archive/bundle';
 import { tarGz } from '../../cli/tar.ts';
 import { version } from '../../package.json' with { type: 'json' };
 import { siteUrl } from '../../server/http.ts';
-import { ask, withServer, ZONE } from '../harness/server.ts';
+import { ask, idToken, withServer, ZONE } from '../harness/server.ts';
 
 const kthx = withServer();
 
@@ -36,10 +36,12 @@ async function published(
   // Prefixed: a claim makes a Postgres database and role of this name on a
   // server this suite shares.
   const name = kthx().name(label);
-  const claimed = await kthx()
+  const token = await idToken(`${name}@example.com`);
+  await kthx()
     .fetch(
       ask('/api/sites', {
         method: 'POST',
+        token,
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ name }),
         address: address(),
@@ -49,13 +51,13 @@ async function published(
   const uploaded = await kthx().fetch(
     ask(`/api/sites/${name}/releases`, {
       method: 'POST',
-      token: claimed.token,
+      token,
       body: bundle(files),
       address: address(),
     }),
   );
   expect(uploaded.status).toBe(201);
-  return { name, token: claimed.token, host: `${name}.${ZONE}` };
+  return { name, token, host: `${name}.${ZONE}` };
 }
 
 function get(host: string, path: string, init: RequestInit = {}) {
@@ -92,6 +94,11 @@ describe('the apex', () => {
     expect(html).toContain('bun add -g https://kthx.dev/cli/kthx.tgz');
     expect(html).toContain('kthx init');
     expect(html).toContain('kthx rollback');
+    // CLI-first: the page reads the zone and claims nothing, because a browser
+    // cannot mint the token an owner call needs.
+    expect(html).toContain('gcloud auth login');
+    expect(html).not.toContain('localStorage');
+    expect(html).not.toContain('method: "POST"');
     expect(html).not.toContain('/kthx/sites');
     expect(html).not.toContain('/_/sdk.js');
     expect(html).not.toContain('alias kthx=');

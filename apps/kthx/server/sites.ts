@@ -1,10 +1,10 @@
 /**
  * The control API: claim a name, upload a release, choose which one serves.
  *
- * Answered on the apex only. Ownership is one bearer per site, minted at claim
- * and shown once; the row keeps its SHA-256 and nothing else. There is no user
- * and no session — a visitor who lost the token has lost the site, which is the
- * deal the landing page states.
+ * Answered on the apex only. An owner is a Google account: every route here
+ * carries an ID token this server verified, the row keeps the `sub` it compares
+ * and the address it displays, and a site is therefore attributable. Sites
+ * claimed before identities keep their bearer until `adopt` trades it for one.
  *
  * The upload boundary is `@repo/archive`: `normalizeArchive` turns a ZIP into
  * the gzipped tar everything downstream opens, the depot stores it under its
@@ -15,7 +15,6 @@
  */
 import { createHash } from 'node:crypto';
 import { rm } from 'node:fs/promises';
-import { base64urlEncode } from '@repo/archive/bytes';
 import type { SQL } from 'bun';
 import { aiUsage, MAX_AI_REQUESTS_DAY, MAX_AI_TOKENS_DAY } from './ai.ts';
 import type { ReleaseRow, SiteRow } from './db.ts';
@@ -41,6 +40,7 @@ import {
   siteUrl,
   timingSafeEquals,
 } from './http.ts';
+import { bearerOf, identityOf } from './identity.ts';
 import {
   CLAIM_BUCKET,
   DailyCap,
@@ -103,18 +103,46 @@ function retryAfter(seconds: number): Record<string, string> {
   return { 'retry-after': String(seconds) };
 }
 
+/** Whether this request carries the pre-identity bearer of this site. */
+function opensSite(request: Request, tokenHash: string): boolean {
+  const bearer = bearerOf(request);
+  return bearer !== null && timingSafeEquals(hash(bearer), tokenHash);
+}
+
+/** What an owner check reads off a row, wherever the row was selected. */
+export interface Owned {
+  readonly owner_sub: string | null;
+  readonly token_hash: string | null;
+}
+
 /**
- * Whether this request carries the bearer that opens this site.
+ * Whether this request is this site's owner.
  *
- * On a site host a bearer that is not this site's is *ignored* rather than
- * refused — the OpenAI SDK puts one on every call to `/api/ai` — so this
+ * Two credentials open a site, and only ever one at a time: the verified
+ * identity a row names, or — while the row still has a `token_hash`, which is
+ * to say until it is adopted — the bearer minted before identities existed.
+ *
+ * On a site host a credential that is not this site's is *ignored* rather than
+ * refused — the OpenAI SDK puts a bearer on every call to `/api/ai` — so this
  * answers a question, not a challenge.
  */
-export function opensSite(request: Request, tokenHash: string): boolean {
-  const bearer = /^Bearer\s+(\S+)$/i.exec(
-    request.headers.get('authorization') ?? '',
-  )?.[1];
-  return bearer !== undefined && timingSafeEquals(hash(bearer), tokenHash);
+export async function ownsSite(
+  request: Request,
+  ctx: Pick<Ctx, 'config' | 'server' | 'id'>,
+  row: Owned,
+): Promise<boolean> {
+  const identity = await identityOf(request, ctx);
+  if (identity !== null) {
+    return row.owner_sub !== null && row.owner_sub === identity.sub;
+  }
+  return row.token_hash !== null && opensSite(request, row.token_hash);
+}
+
+/** `GET /api/whoami`: the address this server just verified. */
+export async function whoami(request: Request, ctx: Ctx): Promise<Response> {
+  const identity = await identityOf(request, ctx);
+  if (identity === null) return refuse('UNAUTHENTICATED', ctx.id);
+  return ok({ email: identity.email }, ctx.id);
 }
 
 /**
@@ -144,6 +172,13 @@ export async function sitesApi(
 
   const tail = segments[4] ?? '';
   const method = request.method;
+  // Ahead of `siteFor`, which asks whether the caller already owns the site:
+  // adopting is what a caller who does not yet own it does.
+  if (tail === 'adopt') {
+    return method === 'POST'
+      ? adopt(request, ctx, name)
+      : refuse('METHOD_NOT_ALLOWED', ctx.id);
+  }
   const act =
     tail === '' && method === 'GET'
       ? inspect
@@ -158,7 +193,7 @@ export async function sitesApi(
               : null;
   if (act === null) {
     // A path we do not have is 404; one we have with the wrong verb is 405.
-    return ['', 'releases', 'serve', 'hold'].includes(tail)
+    return ['', 'releases', 'serve', 'hold', 'adopt'].includes(tail)
       ? refuse('METHOD_NOT_ALLOWED', ctx.id)
       : refuse('NOT_FOUND', ctx.id);
   }
@@ -169,12 +204,12 @@ export async function sitesApi(
 }
 
 /**
- * The row this name names, once its bearer is the one presented.
+ * The row this name names, once the caller is shown to own it.
  *
- * A deleted name is 410 before the bearer is even read — the site is gone for
- * its owner too. A name with no row is 404 whether or not a token came with it,
- * which is what makes an unauthenticated `GET` the landing page's taken-probe:
- * 401 means claimed, 404 means free.
+ * A deleted name is 410 before a credential is even read — the site is gone for
+ * its owner too. A name with no row is 404 whether or not a credential came
+ * with it, which is what makes an unauthenticated `GET` a taken-probe: 401
+ * means claimed, 404 means free.
  */
 async function siteFor(
   request: Request,
@@ -182,16 +217,22 @@ async function siteFor(
   ctx: Ctx,
 ): Promise<{ row: SiteRow } | { code: Code }> {
   const [row] = (await ctx.sql`
-    select name, token_hash, serving, held, deleted_at
+    select name, owner_sub, owner_email, token_hash, serving, held, deleted_at
     from sites where name = ${name} limit 1
   `) as SiteRow[];
   if (row === undefined) return { code: 'NOT_FOUND' };
   if (row.deleted_at !== null) return { code: 'GONE' };
 
-  if (request.headers.get('authorization') === null) {
-    return { code: 'UNAUTHENTICATED' };
+  const identity = await identityOf(request, ctx);
+  if (identity !== null) {
+    // An identity that is not this owner is refused rather than falling back to
+    // the bearer: a verified caller is a decision, not an attempt.
+    return row.owner_sub === identity.sub ? { row } : { code: 'FORBIDDEN' };
   }
-  if (!opensSite(request, row.token_hash)) return { code: 'FORBIDDEN' };
+  if (bearerOf(request) === null) return { code: 'UNAUTHENTICATED' };
+  if (row.token_hash === null || !opensSite(request, row.token_hash)) {
+    return { code: 'FORBIDDEN' };
+  }
   return { row };
 }
 
@@ -205,9 +246,11 @@ const MAX_DIRECTORY_PAGE = 500;
 /** How long the default page is answered from memory rather than the database. */
 const DIRECTORY_CACHE_MS = 10_000;
 
-/** One site as the directory shows it: no token hash, no usage, no hold. */
+/** One site as the directory shows it: no usage, no hold, no credential. */
 interface Listed {
   readonly name: string;
+  /** The owner's address, or null while the site is unadopted. */
+  readonly owner_email: string | null;
   readonly serving: number | null;
   readonly releases: number;
   readonly at: Date;
@@ -248,8 +291,9 @@ function forgetPages(): void {
  *
  * Public by construction: a name answers on `<name>.<zone>` to anyone who
  * dials it, so listing the names gives away nothing a walk of the zone would
- * not. What stays behind the bearer is everything about *owning* a site: the
- * token hash, the usage, the hold, the release digests.
+ * not. The owner's address is here on purpose — attribution is why identities
+ * exist — while everything about *running* a site stays behind the credential:
+ * the usage, the hold, the release digests.
  *
  * One statement, whatever the page: the cursor names the last site of the
  * previous one and the query finds its place itself, so a caller paging to the
@@ -290,6 +334,7 @@ async function directory(request: Request, ctx: Ctx): Promise<Response> {
       items: page.rows.map((row) => ({
         name: row.name,
         url: siteUrl(ctx.config.zone, row.name, ctx.port),
+        owner: row.owner_email,
         serving: row.serving,
         releases: row.releases,
         at: row.at.toISOString(),
@@ -321,7 +366,7 @@ async function listSites(
     with mark as (
       select created_at, name from sites where name = ${after}
     )
-    select s.name, s.serving, s.created_at as at,
+    select s.name, s.owner_email, s.serving, s.created_at as at,
            (select count(*)::int from releases r where r.site = s.name)
              as releases
     from sites s
@@ -363,6 +408,12 @@ async function claim(request: Request, ctx: Ctx): Promise<Response> {
     return refuse('RATE_LIMITED', ctx.id, retryAfter(secondsToMidnight()));
   }
 
+  // Behind the buckets, so a flood of anonymous claims costs a lookup rather
+  // than a signature check each. A name now belongs to an account, which is
+  // what makes the directory able to say whose it is.
+  const identity = await identityOf(request, ctx);
+  if (identity === null) return refuse('UNAUTHENTICATED', ctx.id);
+
   const body = await jsonBody(request);
   const name =
     typeof body.name === 'string' ? body.name.trim().toLowerCase() : '';
@@ -379,10 +430,10 @@ async function claim(request: Request, ctx: Ctx): Promise<Response> {
   // it out again would hand its documents to someone else.
   if (await ctx.pg.inUse(name)) return refuse('TAKEN', ctx.id);
 
-  const token = base64urlEncode(crypto.getRandomValues(new Uint8Array(32)));
   // A deleted name stays taken: the row is what makes it answer 410.
   const claimed = (await ctx.sql`
-    insert into sites (name, token_hash) values (${name}, ${hash(token)})
+    insert into sites (name, owner_sub, owner_email)
+    values (${name}, ${identity.sub}, ${identity.email})
     on conflict do nothing returning name
   `) as { name: string }[];
   if (claimed.length === 0) return refuse('TAKEN', ctx.id);
@@ -403,11 +454,77 @@ async function claim(request: Request, ctx: Ctx): Promise<Response> {
 
   if (address !== null) claimsPerDay.count(address);
   forgetPages();
+  // No token in the answer: there is nothing shown once any more. What opens
+  // this site is the account that just claimed it.
   return ok(
-    { name, url: siteUrl(ctx.config.zone, name, ctx.port), token },
+    { name, url: siteUrl(ctx.config.zone, name, ctx.port) },
     ctx.id,
     201,
   );
+}
+
+// --- adopt ------------------------------------------------------------------
+
+/**
+ * An identity takes a site that was claimed with a bearer.
+ *
+ * The old string is the proof: whoever holds it held the site under the deal
+ * that was on offer when it was claimed. It is spent here — `token_hash` goes
+ * null in the same statement that writes the owner — so a site has exactly one
+ * kind of credential at any moment, and a leaked bearer stops opening anything
+ * the moment its holder adopts.
+ */
+async function adopt(
+  request: Request,
+  ctx: Ctx,
+  name: string,
+): Promise<Response> {
+  if (!sameOrigin(request, ctx.host, ctx.port)) {
+    return refuse('FORBIDDEN', ctx.id);
+  }
+  if (!isJson(request)) return refuse('MALFORMED_REQUEST', ctx.id);
+  if (Number(request.headers.get('content-length') ?? 0) > MAX_CLAIM_BYTES) {
+    return refuse('TOO_LARGE', ctx.id);
+  }
+  // A bearer is 32 random bytes and cannot be guessed, but this is still the
+  // one route that says whether a string opens a site.
+  if (claims.spend(addressOf(request, ctx.server, ctx.config.trustedProxies))) {
+    return refuse('RATE_LIMITED', ctx.id, retryAfter(60));
+  }
+  const identity = await identityOf(request, ctx);
+  if (identity === null) return refuse('UNAUTHENTICATED', ctx.id);
+
+  const [row] = (await ctx.sql`
+    select owner_sub, token_hash, deleted_at from sites
+    where name = ${name} limit 1
+  `) as Pick<SiteRow, 'owner_sub' | 'token_hash' | 'deleted_at'>[];
+  if (row === undefined) return refuse('NOT_FOUND', ctx.id);
+  if (row.deleted_at !== null) return refuse('GONE', ctx.id);
+  if (row.owner_sub !== null) return refuse('OWNED', ctx.id);
+
+  const body = await jsonBody(request);
+  const token = typeof body.token === 'string' ? body.token : '';
+  if (
+    row.token_hash === null ||
+    !timingSafeEquals(hash(token), row.token_hash)
+  ) {
+    return refuse('FORBIDDEN', ctx.id);
+  }
+
+  // The row read above is a moment old, so the `owner_sub is null` guard is
+  // what actually decides it: two callers holding the same bearer both get
+  // here, and only one changes a row. The other is told what it would have been
+  // told a moment later — 409, not a 204 for a site it does not own.
+  const took = (await ctx.sql`
+    update sites
+    set owner_sub = ${identity.sub}, owner_email = ${identity.email},
+        token_hash = null
+    where name = ${name} and owner_sub is null
+    returning name
+  `) as { name: string }[];
+  if (took.length === 0) return refuse('OWNED', ctx.id);
+  forgetPages();
+  return empty(ctx.id);
 }
 
 async function jsonBody(request: Request): Promise<Record<string, unknown>> {
@@ -437,6 +554,7 @@ const inspect: Act = async (_request, ctx, site) => {
     {
       name: site.name,
       url: siteUrl(ctx.config.zone, site.name, ctx.port),
+      owner: site.owner_email,
       serving: site.serving,
       held: site.held,
       releases: rows.map((row) => ({
