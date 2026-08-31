@@ -659,13 +659,13 @@ start over a credential it does not need.
 
 **A cloud Target needs no variable at all**, and that is §13's one auth mode
 arriving where the spec wanted it: "native OIDC federation, nothing stored".
-`src/adapters/deploy/cloud/federation.ts` reads a projected token, exchanges it
+`@repo/archive/federation` reads a projected token, exchanges it
 at the pool's STS endpoint, and optionally impersonates a service account.
 
 **Nobody configures any of that.** The installer chart already renders an
 `external_account` credential document from the workload-identity audience and
 mount path a release names, and points `GOOGLE_APPLICATION_CREDENTIALS` at it.
-`src/config/federation-credential.ts` reads the four facts back out of that
+`@repo/archive/federation-credential` reads the four facts back out of that
 document, and `resolveManifest` joins them onto the manifest every reader gets —
 so there is no `cloud.federation` key to author, and nothing that could disagree
 with the pod it is running in. An installation whose deployment mounts no
@@ -700,7 +700,7 @@ which is what the product stores and therefore what it deduplicates on, so a
 redeploy of an unchanged site uploads nothing.
 
 **A `files` artifact is a gzipped tar**, and the static adapter reads one with
-`src/adapters/deploy/static/bundle.ts` rather than a dependency: it is the same
+`@repo/archive/bundle` rather than a dependency: it is the same
 format `buildkit.ts` already unpacks, read from the other end, and §20 wants a
 package that prunes to something self-contained. The bundle is untrusted input,
 so a path that escapes the bundle is refused rather than normalized away — that

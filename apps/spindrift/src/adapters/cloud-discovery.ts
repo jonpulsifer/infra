@@ -22,7 +22,7 @@
  * **No credential here, and no second one anywhere.** The token is a provider
  * called per request, exactly as the two cloud deploy adapters and the cloud
  * build route take it, and `registry.ts` hands all four the same one — so the
- * hourly STS-and-impersonation exchange in `deploy/cloud/federation.ts` is made
+ * hourly STS-and-impersonation exchange in `@repo/archive/federation` is made
  * once for the process rather than once per discovery call.
  *
  * **A concrete class, not an interface.** § Seam 2's pattern is "a fake of the

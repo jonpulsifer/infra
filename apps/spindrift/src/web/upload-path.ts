@@ -2,7 +2,7 @@
  * The client-safe edge of the archive upload boundary.
  *
  * The same split, and the same reason, as `command-path.ts`: `upload.ts` is the
- * server-side handler, and behind it sits `storage/archive-format.ts` — which
+ * server-side handler, and behind it sits `@repo/archive/archive-format` — which
  * imports `node:zlib` to transcode a ZIP. None of that belongs in the browser,
  * and importing the route constant from `upload.ts` is enough to drag all of it
  * in, because a value import is a module edge whatever the value is.

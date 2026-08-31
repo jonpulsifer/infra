@@ -7,8 +7,8 @@
  * it the same way: `curl … | tar -xz` in the reusable workflow,
  * `wget -qO- … | tar -xz` in `adapters/build/buildkit.ts`, and `tar -xzf` in
  * the bosun build hull. A gzipped tar is therefore not a preference, it is the
- * wire format of a staged bundle, and `adapters/deploy/static/bundle.ts` reads
- * a `files` artifact back on the same assumption.
+ * wire format of a staged bundle, and `bundle.ts` beside this one reads a
+ * `files` artifact back on the same assumption.
  *
  * Nothing enforced it. A ZIP was accepted, staged, signed for and dispatched,
  * and died in the builder at `tar: This does not look like a tar archive` —

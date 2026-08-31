@@ -250,7 +250,7 @@ export function createAdapterRegistry(
   // That one is minted for this cluster's own API server and a cloud API
   // refuses it; the failure would be a `401` on every cloud deploy, blamed on
   // the Target. What belongs here is a federated token, which is what
-  // `cloudTokenFor` mints — see `cloud/federation.ts`. The cloud build route
+  // `cloudTokenFor` mints — see `@repo/archive/federation`. The cloud build route
   // submits with it too, so it is resolved before the routes are built.
   const cloud = cloudTokenFor(options);
 
@@ -754,7 +754,7 @@ function controlPlaneDnsPublisher(
  * build service the cloud build route submits to.
  *
  * **No credential, in either arm.** §13 settles one auth mode — "native OIDC
- * federation, nothing stored" — and `cloud/federation.ts` is the whole of it:
+ * federation, nothing stored" — and `@repo/archive/federation` is the whole of it:
  * a projected token, exchanged, optionally impersonating. An installation that
  * configured no federation gets a provider that refuses rather than one that is
  * absent, because §13's "connect always succeeds" means a cloud Target still

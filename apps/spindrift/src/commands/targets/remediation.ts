@@ -53,7 +53,7 @@ export interface BoundaryFacts {
  *
  * Read off the credential this deployment mounts, which is the only copy of
  * this fact that cannot disagree with the pod holding it — the same argument
- * `config/federation-credential.ts` makes for reading the whole federation
+ * `@repo/archive/federation-credential` makes for reading the whole federation
  * there rather than asking the manifest for it a second time.
  *
  * Only the impersonation arm answers. Federating directly, the member a policy

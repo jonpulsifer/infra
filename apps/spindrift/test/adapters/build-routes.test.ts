@@ -1413,7 +1413,7 @@ describe('the BuildKit program', () => {
   });
 
   test('opens a staged bundle the one way every route opens one', () => {
-    // The second of the readers `storage/archive-format.ts` converts a ZIP
+    // The second of the readers `@repo/archive/archive-format` converts a ZIP
     // for; the hosted workflow's copy is pinned in
     // `test/storage/archive-format.test.ts`. This program carries no unzip
     // binary in either image that runs it, so the two drifting apart is a

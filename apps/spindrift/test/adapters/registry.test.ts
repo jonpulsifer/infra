@@ -76,7 +76,7 @@ test('source adapter returns explicitly passed source stager when provided', asy
  * *which* token the request carries. `src/storage/cloud.ts` shows the other
  * shape: a second `workloadIdentityToken` constructed per call, which re-runs
  * the STS and impersonation exchange every time and defeats the cache in
- * `deploy/cloud/federation.ts`. A discovery client wired that way would pass
+ * `@repo/archive/federation`. A discovery client wired that way would pass
  * every fold assertion in `test/commands/installation-discover.test.ts` and
  * still be the wrong wiring.
  */

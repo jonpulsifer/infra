@@ -113,7 +113,7 @@ export async function handleUpload(
 
     // The one container every build route can open, before anything durable
     // happens. A ZIP is transcoded and anything else is refused here — see
-    // `storage/archive-format.ts` for why the boundary is the right place and
+    // `@repo/archive/archive-format` for why the boundary is the right place and
     // why the digest is therefore over the converted bytes.
     //
     // Refused as a `400`, because it is: the request carried bytes this

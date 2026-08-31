@@ -1888,7 +1888,7 @@ export const functions = pgTable(
  * The commit → bundle index over the source depot (§15).
  *
  * §15 stages "one immutable bundle" per commit, and `canonicalGzip`
- * (`src/storage/archive-format.ts`) is what makes the digest a function of the
+ * (`@repo/archive/archive-format`) is what makes the digest a function of the
  * commit rather than of the repository host's compressor. Together those two
  * mean the depot already *is* a cache: the same commit always names the same
  * object. What it had no way to answer was "have I staged this one before" —

@@ -396,6 +396,17 @@ async function readSource(dir: string): Promise<SourceFile[]> {
   );
 }
 
+/**
+ * A workspace package's own source, without the tests beside it: a fixture in a
+ * package's suite is not something this image serves, and holding it to the
+ * literal rule only teaches the next author to misspell a fake token.
+ */
+async function packageSource(dir: string): Promise<SourceFile[]> {
+  return (await readSource(dir)).filter(
+    (file) => !/\.test\.tsx?$/.test(file.path),
+  );
+}
+
 async function readFiles(...paths: string[]): Promise<SourceFile[]> {
   return Promise.all(
     paths.map(async (path) => ({
@@ -412,8 +423,8 @@ async function readFiles(...paths: string[]): Promise<SourceFile[]> {
 const src = await readSource('src');
 const shipped = [
   ...src,
-  ...(await readSource('../../packages/archive')),
-  ...(await readSource('../../packages/kthx')),
+  ...(await packageSource('../../packages/archive')),
+  ...(await packageSource('../../packages/kthx')),
 ];
 const everything = [
   ...src,

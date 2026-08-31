@@ -56,6 +56,24 @@ describe('readGcsObject', () => {
     ).toBeNull();
   });
 
+  test("an object over the caller's ceiling is refused unread", async () => {
+    const { fetcher } = farSide(
+      () =>
+        new Response('too many bytes', {
+          headers: { 'content-length': '9000' },
+        }),
+    );
+
+    await expect(
+      readGcsObject({
+        bucketName: 'depot',
+        objectName: 'huge.tgz',
+        federation: { ...federation, fetch: fetcher },
+        maxBytes: 1024,
+      }),
+    ).rejects.toBeInstanceOf(FederationError);
+  });
+
   test('a refusal is not absence', async () => {
     const { fetcher } = farSide(() => new Response('no', { status: 403 }));
 

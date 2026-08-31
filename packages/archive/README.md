@@ -17,3 +17,8 @@ manifest, or a database. `bundleFailure` stays in
 stays in `apps/spindrift/src/storage/archives.ts` for that reason — both read
 this app's contract, and a package that imported it would put Spindrift in
 every host that installs this.
+
+The `§` numbers in these files' prose cite Spindrift's spec, because that is
+where the invariants were first written down. They are provenance, not a
+dependency: nothing here imports, reads or needs that spec, and a host with no
+Apps at all gets the same behaviour.

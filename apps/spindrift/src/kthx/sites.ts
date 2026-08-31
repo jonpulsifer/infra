@@ -95,7 +95,7 @@ export const MAX_FILES = 2000;
 // ponytail: a counter, so an upload that finds it full is refused rather than
 // queued — what it would wait for is memory, and a queue holds the bytes it is
 // queueing. The slot is held across the depot upload too, which is why that
-// upload carries a deadline (`UPLOAD_TIMEOUT_MS` in `storage/cloud.ts`): the
+// upload carries a deadline (`@repo/archive/gcs` sets one on every call): the
 // counter alone would let two stalled sockets refuse every release until the
 // pod restarted. Streaming the archive to disk instead of holding it is what
 // would let the ceiling above grow.

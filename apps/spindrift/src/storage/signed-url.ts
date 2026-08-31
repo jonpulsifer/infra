@@ -37,6 +37,12 @@ import {
   type FederationOptions,
   workloadIdentityToken,
 } from '@repo/archive/federation';
+import { type GcsObject, parseGcsLocation } from '@repo/archive/gcs';
+
+// The splitter moved to `@repo/archive/gcs`, beside the object calls it feeds,
+// so the kthx server can read a stored `gs://` address without a second copy.
+// Re-exported because signing is still where this app's callers look for it.
+export { type GcsObject, parseGcsLocation };
 
 /** Where a signed URL points. GCS serves signed requests on this host. */
 const STORAGE_HOST = 'storage.googleapis.com';
@@ -55,31 +61,6 @@ const SCOPE_SUFFIX = 'auto/storage/goog4_request';
  * that has already expired by the time anyone reads it. Not a tuning knob.
  */
 export const SIGNED_URL_TTL_SECONDS = 900;
-
-/** A `gs://bucket/object` address, split into the two parts signing needs. */
-export interface GcsObject {
-  readonly bucket: string;
-  readonly object: string;
-}
-
-/**
- * Parse a `gs://` address, or `null` for anything else.
- *
- * `null` rather than a throw because the caller's question is "is this an
- * object I should sign?", and every other location scheme — a local
- * `upload://` handle, an already-fetchable `https://` URL — is a legitimate
- * answer of "no" rather than an error.
- */
-export function parseGcsLocation(location: string): GcsObject | null {
-  if (!location.startsWith('gs://')) return null;
-  const rest = location.slice('gs://'.length);
-  const slash = rest.indexOf('/');
-  if (slash <= 0) return null;
-  const bucket = rest.slice(0, slash);
-  const object = rest.slice(slash + 1);
-  if (object === '') return null;
-  return { bucket, object };
-}
 
 export interface SignedUrlInput {
   /** The object to sign a GET for, as `gs://bucket/object`. */
