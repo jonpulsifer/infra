@@ -63,6 +63,19 @@ const stub = Bun.serve({
         ? new Response(null, { status: 503 })
         : new Response(SKILL);
     }
+    if (request.method === 'GET' && pathname === '/api/sites') {
+      calls.push({ method: 'GET', path: pathname, body: null });
+      return Response.json({
+        items: [...tokens.keys()].map((claimed) => ({
+          name: claimed,
+          url: `https://${claimed}.kthx.test`,
+          serving: 3,
+          releases: 3,
+          at: '2026-08-31T00:00:00.000Z',
+        })),
+        next: null,
+      });
+    }
     if (request.method === 'POST' && pathname === '/api/sites') {
       const body = (await request.json()) as { name: string };
       calls.push({ method: 'POST', path: pathname, body });
@@ -165,6 +178,19 @@ function site(files: Record<string, string> = { 'index.html': '<h1>hi</h1>' }) {
     writeFileSync(join(dir, path), text);
   }
   return dir;
+}
+
+/** Everything a command printed, so a listing can be read back. */
+async function capture(run: () => Promise<unknown>): Promise<string> {
+  const lines: string[] = [];
+  const printed = console.log;
+  console.log = (...parts: unknown[]) => lines.push(parts.join(' '));
+  try {
+    await run();
+  } finally {
+    console.log = printed;
+  }
+  return lines.join('\n');
 }
 
 const cwd = process.cwd();
@@ -340,8 +366,8 @@ describe('rollback, release, ls and rm', () => {
     await deploy('.', { name: 'notes' });
 
     const found = await ls('.');
-    expect(found.serving).toBe(3);
-    expect(found.releases).toHaveLength(3);
+    expect(found?.serving).toBe(3);
+    expect(found?.releases).toHaveLength(3);
 
     await rm('.', () => 'nope');
     expect(deleted).toEqual([]);
@@ -359,9 +385,49 @@ describe('rollback, release, ls and rm', () => {
   test('every command but init, deploy and dev needs a name', async () => {
     const dir = site();
     process.chdir(dir);
-    for (const command of [rollback, release, ls]) {
+    for (const command of [rollback, release]) {
       await expect(command('.')).rejects.toMatchObject({ code: 'NO_NAME' });
     }
+  });
+
+  test('ls with no kthx.json lists every site this machine has a token for', async () => {
+    process.chdir(site());
+    await deploy('.', { name: 'notes' });
+    process.chdir(site());
+    await deploy('.', { name: 'other' });
+    // A directory that is not a site: the question is "which did I claim?",
+    // and sites.json is the answer.
+    process.chdir(site());
+
+    const printed = await capture(() => ls('.'));
+    expect(printed).toContain('notes');
+    expect(printed).toContain('other');
+    expect(printed).toContain('https://notes.kthx.test');
+    // One GET for each site, and the public directory is not asked for.
+    expect(
+      calls.filter(
+        (call) => call.method === 'GET' && call.path.startsWith('/api/sites/'),
+      ),
+    ).toHaveLength(2);
+    expect(
+      calls.filter(
+        (call) => call.method === 'GET' && call.path === '/api/sites',
+      ),
+    ).toHaveLength(0);
+  });
+
+  test('ls --all prints the public directory whatever the directory is', async () => {
+    process.chdir(site());
+    await deploy('.', { name: 'notes' });
+
+    const printed = await capture(() => ls('.', { all: true }));
+    expect(printed).toContain('notes');
+    expect(printed).toContain('v3');
+    expect(
+      calls.filter(
+        (call) => call.method === 'GET' && call.path === '/api/sites',
+      ),
+    ).toHaveLength(1);
   });
 
   test('refuses a kthx.json that names something no site can be called', async () => {

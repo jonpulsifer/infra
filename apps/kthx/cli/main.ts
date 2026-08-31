@@ -7,7 +7,7 @@
  *   kthx dev [dir]                 serve it on :4321 against the live backends
  *   kthx rollback [n]              serve release n (default: the one before)
  *   kthx release                   drop the hold; the newest release serves
- *   kthx ls                        what the site is serving, and what it uses
+ *   kthx ls [--all]                this site, or every site of yours, or all
  *   kthx rm                        delete the site
  *   kthx open                      open the site in a browser
  *
@@ -366,8 +366,36 @@ export async function release(dir = '.'): Promise<number | null> {
   return serving;
 }
 
-export async function ls(dir = '.'): Promise<Site> {
-  const found = await site(nameOf(dir));
+/** One site as the public directory lists it. */
+interface Listed {
+  readonly name: string;
+  readonly url: string;
+  readonly serving: number | null;
+  readonly releases: number;
+  readonly at: string;
+}
+
+/**
+ * What this directory serves — or, with no `kthx.json`, what this machine
+ * holds tokens for, or, with `--all`, every site on the apex.
+ *
+ * A directory that is not a site is the moment someone asks "which of these
+ * did I claim?", and `sites.json` has held the answer all along.
+ */
+export async function ls(
+  dir = '.',
+  options: { all?: boolean } = {},
+): Promise<Site | undefined> {
+  if (options.all === true) {
+    await listEverySite();
+    return undefined;
+  }
+  const name = named(dir);
+  if (name === undefined) {
+    await listMySites();
+    return undefined;
+  }
+  const found = await site(name);
   const held = found.held ? ' (held)' : '';
   console.log(`  ${found.name}  ${found.url}`);
   console.log(
@@ -396,6 +424,59 @@ export async function ls(dir = '.'): Promise<Site> {
   }
   return found;
 }
+
+/**
+ * Every site this machine has a token for at this origin.
+ *
+ * One `GET /api/sites/:name` each, because the token is what makes the answer
+ * more than the public directory's. A token that no longer opens its site is
+ * still printed: the name is what its owner recognises, and the code says what
+ * became of it.
+ */
+async function listMySites(): Promise<void> {
+  const names = Object.keys(
+    readJson<Tokens>(sitesFile(), {})[origin()] ?? {},
+  ).sort();
+  if (names.length === 0) {
+    console.log(`  no tokens for ${origin()} in ${sitesFile()}`);
+    console.log('  run kthx init here, or kthx ls --all for every site');
+    return;
+  }
+  const states = await Promise.all(
+    names.map(async (name) => {
+      try {
+        const found = await site(name);
+        return `${found.url}  ${serves(found.serving)}${found.held ? ' (held)' : ''}`;
+      } catch (error) {
+        return error instanceof KthxError ? error.code : String(error);
+      }
+    }),
+  );
+  for (const [index, name] of names.entries()) {
+    console.log(`  ${name.padEnd(24)} ${states[index]}`);
+  }
+}
+
+/** The public directory: every live site on the apex, newest claim first. */
+async function listEverySite(): Promise<void> {
+  const page = await api<{ items: Listed[]; next: string | null }>(
+    '/api/sites',
+  );
+  if (page.items.length === 0) {
+    console.log(`  ${origin()} has no sites yet`);
+    return;
+  }
+  for (const found of page.items) {
+    console.log(
+      `  ${found.name.padEnd(24)} ${found.url.padEnd(32)} ${serves(found.serving).padEnd(12)} ${found.releases} releases  ${found.at}`,
+    );
+  }
+  if (page.next !== null) {
+    console.log(`  … more after ${page.next}`);
+  }
+}
+
+const serves = (n: number | null) => (n === null ? 'nothing yet' : `v${n}`);
 
 /**
  * Delete the site, once its name has been typed back.
@@ -447,22 +528,27 @@ const short = (hex: string) => {
   return `sha256:${bare.slice(0, 4)}…${bare.slice(-4)}`;
 };
 
-const USAGE = `usage: kthx <command> [dir] [--name <name>]
+const USAGE = `usage: kthx <command> [dir] [--name <name>] [--all]
   init      claim a name; write kthx.json, SKILL.md and a starter page
   deploy    upload the directory as a release
   dev       serve the directory on :4321 against the site's live backends
   rollback  serve an earlier release and hold it
   release   drop the hold; the newest release serves
-  ls        what the site serves, and what it uses
+  ls        what the site serves; with no kthx.json, every site of yours
+  ls --all  every site on the apex
   rm        delete the site
   open      open the site in a browser`;
 
 if (import.meta.main) {
-  let values: { name?: string; version?: boolean } = {};
+  let values: { name?: string; version?: boolean; all?: boolean } = {};
   let positionals: string[] = [];
   try {
     ({ values, positionals } = parseArgs({
-      options: { name: { type: 'string' }, version: { type: 'boolean' } },
+      options: {
+        name: { type: 'string' },
+        version: { type: 'boolean' },
+        all: { type: 'boolean' },
+      },
       allowPositionals: true,
     }));
   } catch {
@@ -506,7 +592,7 @@ if (import.meta.main) {
           await release('.');
           break;
         case 'ls':
-          await ls(dir);
+          await ls(dir, values);
           break;
         case 'rm':
           await rm(dir);
