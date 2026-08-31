@@ -13,7 +13,7 @@
  */
 import { afterAll, describe, expect, test } from 'bun:test';
 import { SDK_PATH } from '@repo/kthx/assets';
-import { ask, withServer, ZONE } from '../harness/server.ts';
+import { ask, idToken, withServer, ZONE } from '../harness/server.ts';
 
 /** Enough of an upstream for `ai.chat` to have something to read a string out of. */
 const upstream = Bun.serve({
@@ -154,6 +154,7 @@ async function loaded(label: string): Promise<Sdk> {
   const claim = await kthx().fetch(
     ask('/api/sites', {
       method: 'POST',
+      token: await idToken(`${name}@example.com`),
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ name }),
       address: address(),

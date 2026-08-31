@@ -17,6 +17,7 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { forgetIdentity, identityToken } from '../cli/identity.ts';
 import { level, rainbow, tint } from '../cli/paint.ts';
 import { updateNudge, upgrade } from '../cli/upgrade.ts';
 
@@ -257,7 +258,7 @@ describe('the update check', () => {
 
 describe('the CLI', () => {
   const run = (args: string[], env: Record<string, string> = {}) =>
-    Bun.spawn(['bun', CLI, ...args], {
+    Bun.spawn([process.execPath, CLI, ...args], {
       env: {
         ...process.env,
         XDG_CONFIG_HOME: config,
@@ -292,20 +293,101 @@ describe('the CLI', () => {
     expect(err).toContain('usage: kthx');
   }, 30_000);
 
-  test('an apex that never answers does not change what ls exits with', async () => {
+  test('a command with no google login says how to get one, and fast', async () => {
+    // No `gcloud` on this PATH and no token in the environment: the command
+    // ends on the login, not on the network, so the silent apex costs it
+    // nothing at all — over a pipe the update check is skipped outright.
+    const bare = mkdtempSync(join(tmpdir(), 'kthx-nopath-'));
     const started = Date.now();
-    const child = run(['ls']);
-    const [code, out] = await Promise.all([
+    const child = run(['ls'], { PATH: bare, KTHX_IDENTITY_TOKEN: '' });
+    const [code, err] = await Promise.all([
       child.exited,
-      new Response(child.stdout).text(),
+      new Response(child.stderr).text(),
     ]);
-    expect(code).toBe(0);
-    expect(out).toContain('no tokens for');
-    // Over a pipe the check is skipped outright, so the silent apex costs
-    // nothing at all — the cap is what bounds it when stdout is a terminal.
+    expect(code).toBe(1);
+    expect(err).toContain('NO_IDENTITY');
+    expect(err).toContain('gcloud auth login');
     expect(Date.now() - started).toBeLessThan(10_000);
   }, 30_000);
 });
+
+// --- the google identity ----------------------------------------------------
+
+describe('the identity token', () => {
+  /** A `gcloud` on PATH that prints what this test tells it to. */
+  function stubGcloud(script: string): string {
+    const dir = mkdtempSync(join(tmpdir(), 'kthx-gcloud-'));
+    writeFileSync(join(dir, 'gcloud'), `#!/bin/sh\n${script}\n`, {
+      mode: 0o755,
+    });
+    return dir;
+  }
+
+  const was = process.env.PATH;
+  beforeEach(() => {
+    forgetIdentity();
+    delete process.env.KTHX_IDENTITY_TOKEN;
+  });
+  afterAll(() => {
+    process.env.PATH = was;
+  });
+
+  test('is what gcloud prints, minted once and kept until it expires', async () => {
+    const minted = jwt({ exp: Math.floor(Date.now() / 1000) + 3600 });
+    // Every call after the first appends to `count`, so a second mint shows up
+    // as a second line rather than as a different token.
+    const counted = mkdtempSync(join(tmpdir(), 'kthx-count-'));
+    process.env.PATH = `${stubGcloud(
+      `echo ran >> ${join(counted, 'count')}\nprintf %s ${minted}`,
+    )}:${was}`;
+
+    expect(await identityToken()).toBe(minted);
+    expect(await identityToken()).toBe(minted);
+    expect(readFileSync(join(counted, 'count'), 'utf8').trim()).toBe('ran');
+  });
+
+  test('is minted again once the old one is near its end', async () => {
+    // A token already inside the early-mint window is not worth sending: the
+    // next call must go back to gcloud rather than hand out something the
+    // apex is about to refuse.
+    const stale = jwt({ exp: Math.floor(Date.now() / 1000) + 5 });
+    process.env.PATH = `${stubGcloud(`printf %s ${stale}`)}:${was}`;
+    expect(await identityToken()).toBe(stale);
+    const fresh = jwt({ exp: Math.floor(Date.now() / 1000) + 3600 });
+    process.env.PATH = `${stubGcloud(`printf %s ${fresh}`)}:${was}`;
+    expect(await identityToken()).toBe(fresh);
+  });
+
+  test('a gcloud that refuses is one error naming the login', async () => {
+    process.env.PATH = `${stubGcloud(
+      'echo "ERROR: Reauthentication failed" >&2\nexit 1',
+    )}:${was}`;
+    await expect(identityToken()).rejects.toMatchObject({
+      code: 'NO_IDENTITY',
+    });
+    await expect(identityToken()).rejects.toThrow(/gcloud auth login/);
+  });
+
+  test('a gcloud that prints nothing is the same error', async () => {
+    process.env.PATH = `${stubGcloud('exit 0')}:${was}`;
+    await expect(identityToken()).rejects.toMatchObject({
+      code: 'NO_IDENTITY',
+    });
+  });
+
+  test('KTHX_IDENTITY_TOKEN is used verbatim, and gcloud is never asked', async () => {
+    process.env.PATH = `${stubGcloud('exit 1')}:${was}`;
+    process.env.KTHX_IDENTITY_TOKEN = 'from.the.environment';
+    expect(await identityToken()).toBe('from.the.environment');
+  });
+});
+
+/** A token shaped enough for the CLI to read an `exp` off it. */
+function jwt(payload: Record<string, unknown>): string {
+  const part = (value: unknown) =>
+    Buffer.from(JSON.stringify(value)).toString('base64url');
+  return `${part({ alg: 'RS256' })}.${part(payload)}.signature`;
+}
 
 // --- upgrade ----------------------------------------------------------------
 

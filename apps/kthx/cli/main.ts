@@ -10,12 +10,15 @@
  *   kthx ls [--all]                this site, or every site of yours, or all
  *   kthx rm                        delete the site
  *   kthx open                      open the site in a browser
+ *   kthx whoami                    which google account this machine is
+ *   kthx adopt                     take a site claimed before identities
  *   kthx upgrade                   replace this copy with the apex's
  *
- * The name is `kthx.json`, read from the directory and then from here. The
- * token that opens it is in `$XDG_CONFIG_HOME/kthx/sites.json`, never in the
- * directory — the directory is what gets uploaded. `KTHX_ORIGIN` points the
- * client somewhere else.
+ * The name is `kthx.json`, read from the directory and then from here. What
+ * opens a site is a Google identity: every owner-scoped call carries the ID
+ * token `gcloud auth print-identity-token` mints. `sites.json` still holds the
+ * bearers of sites claimed before that, and `kthx adopt` is what spends one.
+ * `KTHX_ORIGIN` points the client somewhere else.
  */
 import {
   chmodSync,
@@ -25,11 +28,12 @@ import {
   readFileSync,
   writeFileSync,
 } from 'node:fs';
-import { dirname, join, resolve } from 'node:path';
+import { join, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
 import bundledSkill from '@repo/kthx/skill.md' with { type: 'text' };
 import { nameProblem } from '../server/names.ts';
 import { KthxError, refusal } from './error.ts';
+import { identityToken } from './identity.ts';
 import { banner, faint, link, rainbow, tint } from './paint.ts';
 import { REACH_MS, reach, SEND_MS, timedOut, unreachable } from './reach.ts';
 import { pack } from './tar.ts';
@@ -73,16 +77,6 @@ function readJson<T>(path: string, fallback: T): T {
   }
 }
 
-function remember(name: string, token: string): void {
-  const path = sitesFile();
-  const tokens = readJson<Tokens>(path, {});
-  tokens[origin()] = { ...tokens[origin()], [name]: token };
-  mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
-  writeFileSync(path, `${JSON.stringify(tokens, null, 2)}\n`, { mode: 0o600 });
-  // `mode` applies only when the file is created.
-  chmodSync(path, 0o600);
-}
-
 function forget(name: string): void {
   const path = sitesFile();
   const tokens = readJson<Tokens>(path, {});
@@ -93,6 +87,12 @@ function forget(name: string): void {
   chmodSync(path, 0o600);
 }
 
+/**
+ * The pre-identity bearer this machine still holds for a name.
+ *
+ * Nothing writes one any more: a claim mints no token. It is read by `adopt`,
+ * which spends it, and by nothing else.
+ */
 const knownToken = (name: string): string | undefined =>
   readJson<Tokens>(sitesFile(), {})[origin()]?.[name];
 
@@ -101,7 +101,7 @@ function tokenFor(name: string): string {
   if (token === undefined) {
     throw new KthxError(
       'NO_TOKEN',
-      `${sitesFile()} has no token for ${name} at ${origin()}`,
+      `${sitesFile()} has no token for ${name} at ${origin()}; a site claimed with an identity needs no adopting`,
     );
   }
   return token;
@@ -152,11 +152,15 @@ function nameOf(dir: string): string {
 
 async function api<T>(
   path: string,
-  init: RequestInit & { token?: string } = {},
+  init: RequestInit & { identity?: boolean } = {},
 ): Promise<T> {
-  const { token, ...rest } = init;
+  const { identity, ...rest } = init;
   const headers = new Headers(rest.headers);
-  if (token !== undefined) headers.set('authorization', `Bearer ${token}`);
+  // One credential, minted once per process: the account is the owner, so
+  // every owner-scoped call on every site carries the same token.
+  if (identity === true) {
+    headers.set('authorization', `Bearer ${await identityToken()}`);
+  }
   // A release upload is answered once the apex has the whole tarball, so the
   // read bound would refuse a deploy that is going fine.
   const bound = rest.body === undefined ? REACH_MS : SEND_MS;
@@ -216,20 +220,16 @@ async function nameFor(
     }
     return already;
   }
-  // A name whose token is already here is one this machine claimed before:
-  // reuse it rather than spend a claim finding out it is taken.
-  if (chosen !== undefined && knownToken(chosen) !== undefined) {
-    write(writeTo, chosen);
-    return chosen;
-  }
   for (let attempt = 1; ; attempt += 1) {
     const name = chosen ?? mint();
     try {
-      const { token } = await api<{ token: string }>('/api/sites', {
+      // Nothing comes back to store: the account that claimed the name is what
+      // opens it from here on.
+      await api('/api/sites', {
         method: 'POST',
+        identity: true,
         ...json({ name }),
       });
-      remember(name, token);
       write(writeTo, name);
       if (chosen === undefined) console.log(`  no name set — uses ${name}`);
       return name;
@@ -300,14 +300,13 @@ export async function deploy(
 ): Promise<Release> {
   const started = Date.now();
   const name = await nameFor(dir, options.name, '.');
-  const token = tokenFor(name);
   const packed = pack(dir);
   console.log(
     `  ${packed.files} files · ${kb(packed.size)} · ${short(digestOf(packed.bytes))}`,
   );
   const release = await api<Release>(`/api/sites/${name}/releases`, {
     method: 'POST',
-    token,
+    identity: true,
     headers: {
       'content-type': 'application/gzip',
       'x-filename': 'site.tar.gz',
@@ -324,6 +323,7 @@ export async function deploy(
 interface Site {
   readonly name: string;
   readonly url: string;
+  readonly owner: string | null;
   readonly serving: number | null;
   readonly held: boolean;
   readonly releases: readonly {
@@ -337,7 +337,7 @@ interface Site {
 }
 
 const site = (name: string) =>
-  api<Site>(`/api/sites/${name}`, { token: tokenFor(name) });
+  api<Site>(`/api/sites/${name}`, { identity: true });
 
 export async function rollback(dir = '.', n?: number): Promise<number> {
   const name = nameOf(dir);
@@ -351,7 +351,7 @@ export async function rollback(dir = '.', n?: number): Promise<number> {
   }
   const { serving } = await api<{ serving: number }>(
     `/api/sites/${name}/serve`,
-    { method: 'POST', token: tokenFor(name), ...json({ n: target }) },
+    { method: 'POST', identity: true, ...json({ n: target }) },
   );
   console.log(
     `  v${found.serving} → v${serving} · held: new uploads do not replace v${serving} until you run kthx release`,
@@ -363,7 +363,7 @@ export async function release(dir = '.'): Promise<number | null> {
   const name = nameOf(dir);
   const { serving } = await api<{ serving: number | null }>(
     `/api/sites/${name}/hold`,
-    { method: 'DELETE', token: tokenFor(name) },
+    { method: 'DELETE', identity: true },
   );
   console.log(
     `  released: v${serving} serves, and the next upload replaces it`,
@@ -375,6 +375,7 @@ export async function release(dir = '.'): Promise<number | null> {
 interface Listed {
   readonly name: string;
   readonly url: string;
+  readonly owner: string | null;
   readonly serving: number | null;
   readonly releases: number;
   readonly at: string;
@@ -432,49 +433,61 @@ export async function ls(
 }
 
 /**
- * Every site this machine has a token for at this origin.
+ * Every site this Google account owns.
  *
- * One `GET /api/sites/:name` each, because the token is what makes the answer
- * more than the public directory's. A token that no longer opens its site is
- * still printed: the name is what its owner recognises, and the code says what
- * became of it.
+ * The directory carries the owner, so this is one walk of it filtered by the
+ * address the apex just verified — not one request per name, and not a list of
+ * what happens to be written down on this machine. The walk is bounded by the
+ * zone's own live-site cap.
  */
 async function listMySites(): Promise<void> {
-  const names = Object.keys(
-    readJson<Tokens>(sitesFile(), {})[origin()] ?? {},
-  ).sort();
-  if (names.length === 0) {
-    console.log(`  no tokens for ${origin()} in ${sitesFile()}`);
+  const { email } = await api<{ email: string }>('/api/whoami', {
+    identity: true,
+  });
+  const mine: Listed[] = [];
+  let after: string | null = null;
+  for (let page = 0; page < MAX_DIRECTORY_PAGES; page += 1) {
+    const asked: Page = await api<Page>(
+      after === null
+        ? '/api/sites'
+        : `/api/sites?after=${encodeURIComponent(after)}`,
+    );
+    mine.push(...asked.items.filter((found) => found.owner === email));
+    after = asked.next;
+    if (after === null) break;
+  }
+  if (mine.length === 0) {
+    console.log(`  ${email} owns no site at ${origin()}`);
     console.log('  run kthx init here, or kthx ls --all for every site');
     return;
   }
-  const states = await Promise.all(
-    names.map(async (name) => {
-      try {
-        const found = await site(name);
-        return `${link(found.url)}  ${serves(found.serving)}${found.held ? ' (held)' : ''}`;
-      } catch (error) {
-        return error instanceof KthxError ? error.code : String(error);
-      }
-    }),
-  );
-  for (const [index, name] of names.entries()) {
-    console.log(`  ${name.padEnd(24)} ${states[index]}`);
+  console.log(`  ${email}`);
+  for (const found of mine) {
+    console.log(
+      `  ${found.name.padEnd(24)} ${link(found.url)}  ${serves(found.serving)}`,
+    );
   }
 }
 
+/** One page of the public directory. */
+interface Page {
+  readonly items: Listed[];
+  readonly next: string | null;
+}
+
+/** 500 names a page against a 5000-site zone: the whole of it, and no more. */
+const MAX_DIRECTORY_PAGES = 10;
+
 /** The public directory: every live site on the apex, newest claim first. */
 async function listEverySite(): Promise<void> {
-  const page = await api<{ items: Listed[]; next: string | null }>(
-    '/api/sites',
-  );
+  const page = await api<Page>('/api/sites');
   if (page.items.length === 0) {
     console.log(`  ${origin()} has no sites yet`);
     return;
   }
   for (const found of page.items) {
     console.log(
-      `  ${found.name.padEnd(24)} ${link(found.url)}${' '.repeat(Math.max(0, 32 - found.url.length))} ${serves(found.serving).padEnd(12)} ${found.releases} releases  ${found.at}`,
+      `  ${found.name.padEnd(24)} ${link(found.url)}${' '.repeat(Math.max(0, 32 - found.url.length))} ${serves(found.serving).padEnd(12)} ${found.releases} releases  ${faint(found.owner ?? 'unadopted')}`,
     );
   }
   if (page.next !== null) {
@@ -497,9 +510,40 @@ export async function rm(dir = '.', confirm = prompt): Promise<void> {
     console.log('  nothing deleted');
     return;
   }
-  await api(`/api/sites/${name}`, { method: 'DELETE', token: tokenFor(name) });
+  await api(`/api/sites/${name}`, { method: 'DELETE', identity: true });
   forget(name);
   console.log(`  ${name} is gone; the name stays taken`);
+}
+
+/** Which account this machine talks to the apex as. */
+export async function whoami(): Promise<string> {
+  const { email } = await api<{ email: string }>('/api/whoami', {
+    identity: true,
+  });
+  console.log(`  ${email}`);
+  return email;
+}
+
+/**
+ * Hand a site claimed before identities to this Google account.
+ *
+ * The stored bearer is the proof and is spent doing it: the apex nulls the
+ * hash, and this forgets the string, so there is one credential and it is the
+ * account.
+ */
+export async function adopt(
+  dir = '.',
+  options: { name?: string } = {},
+): Promise<string> {
+  const name = options.name ?? nameOf(dir);
+  await api(`/api/sites/${name}/adopt`, {
+    method: 'POST',
+    identity: true,
+    ...json({ token: tokenFor(name) }),
+  });
+  forget(name);
+  console.log(`  ${rainbow(name)} is yours; the old token no longer opens it`);
+  return name;
 }
 
 export function openSite(dir = '.'): string {
@@ -553,6 +597,8 @@ const USAGE = `usage: kthx <command> [dir] [--name <name>] [--all] [--version]
   ls --all  every site on the apex
   rm        delete the site
   open      open the site in a browser
+  whoami    the google account this machine claims sites as
+  adopt     take a site claimed before identities, with its old token
   upgrade   replace this copy with the one the apex serves`;
 
 if (import.meta.main) {
@@ -606,11 +652,9 @@ if (import.meta.main) {
           break;
         case 'dev': {
           const name = await nameFor(dir, values.name, '.');
-          // Not `tokenFor`: `kthx.json` is committed and the token is not, so a
-          // clone of the project must still be able to run the loop.
           (await import('./dev.ts')).dev(dir, {
             name,
-            token: knownToken(name),
+            identity: identityToken,
             site: siteOrigin(name),
           });
           break;
@@ -636,6 +680,12 @@ if (import.meta.main) {
         case 'open':
           openSite(dir);
           break;
+        case 'whoami':
+          await whoami();
+          break;
+        case 'adopt':
+          await adopt(dir, values);
+          break;
         case 'upgrade':
           await upgrade(origin());
           break;
@@ -643,7 +693,7 @@ if (import.meta.main) {
           // The reference this CLI writes names it; the stdio bridge is not in
           // this build. One honest line beats usage and exit 2.
           console.error(
-            `MCP: not in this build — point the editor at ${siteOrigin(nameOf(dir))}/api/mcp with the bearer from ${sitesFile()}`,
+            `MCP: not in this build — point the editor at ${siteOrigin(nameOf(dir))}/api/mcp with $(gcloud auth print-identity-token)`,
           );
           process.exitCode = 1;
           break;

@@ -16,3 +16,9 @@ answers.
 `apps/kthx` serves the assets from its own process, and answers `/_/` with 410
 on every site host. `kthx dev` answers `/_/` over a `Map`, which is all a
 `KthxStore` takes.
+
+`landing.html` reads and does not write: a site is owned by a Google account, a
+browser cannot mint the ID token an owner call needs, and the page says so
+rather than offering a form that cannot work. It is the wordmark, the two
+commands that start a site, the SDK, and the public directory with each site's
+owner beside it.

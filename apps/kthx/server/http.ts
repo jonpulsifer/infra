@@ -35,6 +35,7 @@ export type Code =
   | 'TIMEOUT'
   | 'TAKEN'
   | 'EXISTS'
+  | 'OWNED'
   | 'GONE'
   | 'PRECONDITION_FAILED'
   | 'TOO_LARGE'
@@ -81,7 +82,7 @@ const ERRORS: Record<Code, readonly [number, string]> = {
   ],
   UNAUTHENTICATED: [
     401,
-    'this site is opened with its token: Authorization: Bearer <token>',
+    'this needs a google identity: Authorization: Bearer $(gcloud auth print-identity-token), or run kthx',
   ],
   FORBIDDEN: [403, 'that does not open this site'],
   NOT_FOUND: [404, 'there is nothing here'],
@@ -89,6 +90,7 @@ const ERRORS: Record<Code, readonly [number, string]> = {
   TIMEOUT: [408, 'the body was not sent within the time this path waits'],
   TAKEN: [409, 'that name is taken'],
   EXISTS: [409, 'that id is already in this collection'],
+  OWNED: [409, 'that site already has an owner'],
   GONE: [410, 'that site is gone'],
   PRECONDITION_FAILED: [412, 'it changed since it was read'],
   TOO_LARGE: [413, 'that is larger than this path accepts'],
@@ -310,6 +312,22 @@ export function addressOf(
   }
   if (forwarded !== null) warnIgnored(peer ?? 'an unknown peer');
   return peer === null || peer === '' ? null : prefix(peer);
+}
+
+/**
+ * Whether this request arrived from a peer this deployment believes.
+ *
+ * The same rule {@link addressOf} uses, and for the same reason: a header is
+ * worth what the peer that sent it is worth. No socket peer at all is a handler
+ * called directly, which is a test and not a network.
+ */
+export function fromTrustedProxy(
+  request: Request,
+  server: Bun.Server<unknown> | undefined,
+  trusted: readonly string[],
+): boolean {
+  const peer = server?.requestIP(request)?.address?.trim() ?? null;
+  return peer === null || trustedPeer(peer, trusted);
 }
 
 let warned = false;

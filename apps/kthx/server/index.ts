@@ -42,7 +42,7 @@ import {
   notHere,
   staticResponse,
 } from './serve.ts';
-import { type Ctx, opensSite, sitesApi } from './sites.ts';
+import { type Ctx, ownsSite, sitesApi, whoami } from './sites.ts';
 
 /** The one sentence a v1 site's old calls get. No shim: they fail loudly. */
 const RETIRED = 'the /_/ API is retired; use /api/ — https://kthx.dev/skill.md';
@@ -154,6 +154,13 @@ async function apex(
       (await sitesApi(request, ctx, segments)) ?? refuse('NOT_FOUND', ctx.id)
     );
   }
+  // The one route that answers about the caller rather than about a site: it
+  // is how `kthx whoami` shows which account this machine is signed in as.
+  if (path === '/api/whoami') {
+    return request.method === 'GET'
+      ? whoami(request, ctx)
+      : refuse('METHOD_NOT_ALLOWED', ctx.id);
+  }
   // The v1 API. Gone rather than moved: its key→JSON plane had no real users,
   // and a shim would be a second contract to keep alive.
   if (path === '/kthx' || path.startsWith('/kthx/')) {
@@ -209,7 +216,8 @@ async function apex(
 interface Serving {
   readonly deleted_at: Date | null;
   readonly provisioned_at: Date | null;
-  readonly token_hash: string;
+  readonly owner_sub: string | null;
+  readonly token_hash: string | null;
   readonly serving: number | null;
   readonly digest: string | null;
   readonly location: string | null;
@@ -251,8 +259,8 @@ async function site(
   let row: Serving | undefined;
   try {
     [row] = (await ctx.sql`
-      select s.deleted_at, s.provisioned_at, s.token_hash, s.serving,
-             r.digest, r.location
+      select s.deleted_at, s.provisioned_at, s.owner_sub, s.token_hash,
+             s.serving, r.digest, r.location
       from sites s
       left join releases r on r.site = s.name and r.n = s.serving
       where s.name = ${name} limit 1
@@ -336,7 +344,7 @@ async function siteApi(
     return serveFile(request, ctx, name, path);
   }
 
-  const owner = opensSite(request, row.token_hash);
+  const owner = await ownsSite(request, ctx, row);
   // The upgrade is a `GET` and is guarded all the same: a socket is a write
   // channel, and a foreign page opening one is exactly what this stops.
   const guarded = request.method !== 'GET' || path === '/api/ws';

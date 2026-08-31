@@ -29,9 +29,13 @@ import { SQL } from 'bun';
 import { migrate } from '../../server/db.ts';
 import { diskDepot } from '../../server/depot.ts';
 import type { Config } from '../../server/env.ts';
+import { forgetKeys } from '../../server/identity.ts';
 import { handler, type Kthx } from '../../server/index.ts';
 import { Pg } from '../../server/pg.ts';
 import { websocket } from '../../server/realtime.ts';
+import { AUDIENCE, jwksUrl } from './identity.ts';
+
+export { AUDIENCE, idToken, jwksUrl, rotatedJwks, subOf } from './identity.ts';
 
 export const ZONE = 'kthx.test';
 
@@ -111,6 +115,10 @@ export function withServer(overrides: Partial<Config> = {}): () => Harness {
   const prefix = prefixName();
 
   beforeEach(async () => {
+    // The verifier caches the keys it fetched process-wide, so a file that
+    // points `jwksUrl` somewhere else starts from nothing rather than from the
+    // previous test's answer.
+    forgetKeys();
     const schema = schemaName();
     await adminSession().unsafe(`create schema "${schema}"`);
 
@@ -139,6 +147,9 @@ export function withServer(overrides: Partial<Config> = {}): () => Harness {
       aiModel: 'test-model',
       aiModels: [],
       aiMaxTokens: 4096,
+      oidcAudiences: [AUDIENCE],
+      jwksUrl: jwksUrl(),
+      trustedIdentityHeader: null,
       trustedProxies: [],
       port: 0,
       ...overrides,

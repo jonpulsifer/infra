@@ -100,7 +100,11 @@ for (const [path, text] of Object.entries({
 }
 const server = dev(
   dir,
-  { name: 'notes', token: 'tok-notes', site: upstream.url.origin },
+  {
+    name: 'notes',
+    identity: async () => 'tok-notes',
+    site: upstream.url.origin,
+  },
   0,
 );
 const url = (path: string) => `${server.url.origin}${path}`;
@@ -145,7 +149,7 @@ describe('files', () => {
     writeFileSync(join(wrapped, 'kthx.json'), '{}');
     const inner = dev(
       wrapped,
-      { name: 'notes', token: 't', site: upstream.url.origin },
+      { name: 'notes', identity: async () => 't', site: upstream.url.origin },
       0,
     );
     try {
@@ -236,7 +240,7 @@ describe('the proxy', () => {
     expect(seen[0]!.cookie).toBeNull();
   });
 
-  test('runs without a token, and then signs nothing', async () => {
+  test('runs without an identity, and then signs nothing', async () => {
     seen.length = 0;
     const loose = dev(dir, { name: 'notes', site: upstream.url.origin }, 0);
     try {
@@ -288,7 +292,13 @@ describe('a site that never answers', () => {
     socket: { data: () => {}, open: () => {} },
   });
   const gone = `http://127.0.0.1:${deaf.port}`;
-  const loop = dev(dir, { name: 'notes', token: 't', site: gone }, 0, 300, 900);
+  const loop = dev(
+    dir,
+    { name: 'notes', identity: async () => 't', site: gone },
+    0,
+    300,
+    900,
+  );
   afterAll(() => {
     loop.stop(true);
     deaf.stop();

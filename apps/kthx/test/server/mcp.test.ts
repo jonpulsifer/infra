@@ -10,7 +10,7 @@
  */
 import { describe, expect, test } from 'bun:test';
 import { writes } from '../../server/limits.ts';
-import { ask, withServer, ZONE } from '../harness/server.ts';
+import { ask, idToken, withServer, ZONE } from '../harness/server.ts';
 
 /** The contract's tool table, written out so the server cannot define it. */
 const TOOLS = [
@@ -39,17 +39,18 @@ interface Site {
 
 async function claimed(label: string): Promise<Site> {
   const name = kthx().name(label);
+  const token = await idToken(`${name}@example.com`);
   const response = await kthx().fetch(
     ask('/api/sites', {
       method: 'POST',
+      token,
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ name }),
       address: address(),
     }),
   );
   expect(response.status).toBe(201);
-  const body = (await response.json()) as { token: string };
-  return { name, host: `${name}.${ZONE}`, token: body.token };
+  return { name, host: `${name}.${ZONE}`, token };
 }
 
 /** One JSON-RPC message, as a client sends it. */

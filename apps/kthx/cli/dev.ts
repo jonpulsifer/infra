@@ -37,11 +37,11 @@ export interface Site {
   /** The claimed name. */
   readonly name: string;
   /**
-   * The bearer, attached to owner-scoped calls and to nothing else. Absent on a
-   * machine that never claimed the name — the loop still serves the files and
-   * still proxies everything a visitor may call.
+   * The owner's ID token, minted on demand and attached to owner-scoped calls
+   * and to nothing else. A machine with no Google login still serves the files
+   * and still proxies everything a visitor may call.
    */
-  readonly token?: string | undefined;
+  readonly identity?: (() => Promise<string>) | undefined;
   /** `https://<name>.kthx.dev` — where `/api` and `/files` really are. */
   readonly site: string;
 }
@@ -132,8 +132,10 @@ export function dev(
   console.log(
     `  /api and /files go to ${site.site} — this is ${site.name}'s live database, not a copy`,
   );
-  if (site.token === undefined) {
-    console.log('  no token here — /api/mcp and DELETE /api/db/:c answer 401');
+  if (site.identity === undefined) {
+    console.log(
+      '  no identity here — /api/mcp and DELETE /api/db/:c answer 401',
+    );
   }
   return server;
 }
@@ -156,9 +158,9 @@ const HOP = [
 ];
 
 /**
- * The owner bearer opens exactly two things on a site host. Everywhere else a
- * page is a visitor, and sending the token would give the loop a quieter rate
- * limit than production — the one difference `kthx dev` must not have.
+ * The owner's token opens exactly two things on a site host. Everywhere else a
+ * page is a visitor, and sending it would give the loop a quieter rate limit
+ * than production — the one difference `kthx dev` must not have.
  */
 function ownerScoped(method: string, path: string): boolean {
   return (
@@ -187,8 +189,11 @@ async function proxy(
   const cookie = visitorCookie(headers.get('cookie'));
   if (cookie === null) headers.delete('cookie');
   else headers.set('cookie', cookie);
-  if (site.token !== undefined && ownerScoped(request.method, path)) {
-    headers.set('authorization', `Bearer ${site.token}`);
+  if (site.identity !== undefined && ownerScoped(request.method, path)) {
+    // A login that has gone stale costs the two owner-scoped routes a 401, not
+    // the whole loop: everything else on this hop is a visitor's call.
+    const token = await site.identity().catch(() => null);
+    if (token !== null) headers.set('authorization', `Bearer ${token}`);
   }
 
   // A model call is answered when the model has finished thinking, which is

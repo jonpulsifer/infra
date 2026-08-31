@@ -11,8 +11,9 @@ One Bun process on `:8080`, behind the Cilium Gateway. It dispatches on `Host`:
 
 | Surface | What it is |
 | --- | --- |
-| `POST /api/sites` | claim a name; the bearer is minted once and shown once |
-| `/api/sites/:name…` | inspect, upload a release, `serve` one, drop the `hold`, delete |
+| `POST /api/sites` | claim a name for the Google account on the request |
+| `/api/sites/:name…` | inspect, upload a release, `serve` one, drop the `hold`, `adopt`, delete |
+| `GET /api/whoami` | the address the server read out of the token it verified |
 | apex `/`, `/sdk.js`, `/skill.md`, `/favicon.ico` | the files `@repo/kthx` carries |
 | apex `/cli/kthx.tgz` | the command line, packed into the image by `pack.ts` |
 | `<name>.kthx.dev/*` | the release the site's row says it serves |
@@ -36,13 +37,24 @@ upstream paths by name, the client's `Authorization` dropped, and a per-site
 daily budget in the control database that a restart cannot reset. Without
 `KTHX_AI_KEY` it answers 502 and nothing else changes.
 
+An owner is a Google account. `server/identity.ts` verifies the ID token the
+CLI sends — RS256 over `crypto.subtle` against Google's JWKS, then the issuer,
+the audience, the expiry and `email_verified` — and the site row keeps the
+account's `sub` beside the address it displays. `KTHX_TRUSTED_IDENTITY_HEADER`
+is the seam for an IAP-style proxy front: name a header and a request from a
+peer in `KTHX_TRUSTED_PROXIES` carrying it *is* that identity, no token. It is
+unset, so today nothing but a verified token is believed. A site claimed before
+accounts keeps its bearer until `POST /api/sites/:name/adopt` trades it for one.
+
 Configuration: `KTHX_ZONE`, `KTHX_BUCKET` (unset uses an on-disk depot),
 `KTHX_SITES_DIR`, `DATABASE_URL`, `KTHX_ME_KEY` (+ optional
 `KTHX_ME_KEY_PREVIOUS`) and `KTHX_PG_KEY`, both at least 32 bytes,
 `KTHX_TRUSTED_PROXIES` — the comma-separated peers whose `cf-connecting-ip` the
 rate limits believe — and the AI upstream's `KTHX_AI_URL`, `KTHX_AI_KEY`,
 `KTHX_AI_MODEL`, `KTHX_AI_MODELS` (a comma list; empty is every model the
-upstream sells) and `KTHX_AI_MAX_TOKENS`. With `KTHX_TRUSTED_PROXIES` unset, no
+upstream sells) and `KTHX_AI_MAX_TOKENS`; `KTHX_OIDC_AUDIENCES` (the `aud` an ID
+token may carry, defaulting to gcloud's own client id) and
+`KTHX_TRUSTED_IDENTITY_HEADER`. With `KTHX_TRUSTED_PROXIES` unset, no
 peer is believed and every address-keyed bucket keys on the socket address,
 which behind a proxy is one key for the whole zone. The control database's
 schema is the numbered SQL in `server/migrations/`, applied at boot.
@@ -63,6 +75,8 @@ bun run apps/kthx/server      # or `bun run start` from this directory
 | `kthx ls` | what the site serves, and what it uses against its quotas |
 | `kthx rm` | deletes the site, once its name is typed back |
 | `kthx open` | opens the site |
+| `kthx whoami` | the Google account this machine claims sites as |
+| `kthx adopt` | takes a site claimed before accounts, with its stored bearer |
 | `kthx upgrade` | re-runs `bun add -g` on the apex tarball |
 
 ```
@@ -99,14 +113,17 @@ to the 256-colour cube without `COLORTERM`.
 `kthx dev` does not simulate the backends. It proxies `/api/*` (the websocket
 included) and `/files/*` to `https://<name>.kthx.dev`, rewriting `Origin` to the
 site's and the visitor cookie to a plain `kthx_me` a browser will keep over
-`http://localhost`. The owner bearer is attached to the two owner-scoped routes
+`http://localhost`. The owner's token is attached to the two owner-scoped routes
 and to nothing else, so the loop is rate-limited exactly as a visitor is. The
 data is the site's own, live.
 
-`KTHX_ORIGIN` points the client somewhere other than `https://kthx.dev`. The
-token that opens a site is in `$XDG_CONFIG_HOME/kthx/sites.json` (0600), by
-origin and name — never in the directory, which is what gets uploaded. There is
-no account and no reset: a lost token is a lost site.
+`KTHX_ORIGIN` points the client somewhere other than `https://kthx.dev`. What
+opens a site is the Google account: `cli/identity.ts` shells out to `gcloud auth
+print-identity-token` once and keeps the token until its `exp`, and
+`KTHX_IDENTITY_TOKEN` replaces the shell-out where there is no gcloud.
+`$XDG_CONFIG_HOME/kthx/sites.json` (0600) still holds the bearers of sites
+claimed before accounts; `kthx adopt` is the only command that reads one, and it
+forgets the string once the apex has taken it.
 
 The name is `kthx.json`, read from the directory and then from the current one,
 so `kthx deploy dist` inside a project root deploys the project's site. `init`
