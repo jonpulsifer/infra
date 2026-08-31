@@ -9,6 +9,7 @@
  * row says which release it serves.
  */
 
+import { join } from 'node:path';
 import { LANDING_PATH, SDK_PATH, SKILL_PATH } from '@repo/kthx/assets';
 import { FAVICON_PATH } from '@repo/kthx/favicon';
 import { createClient, migrate } from './db.ts';
@@ -60,28 +61,67 @@ function asset(path: string, type: string, cacheControl: string): Response {
 }
 
 /**
- * The landing page, with its two endpoint literals moved to this API.
+ * The landing page, as v2 tells it.
  *
  * `packages/kthx/landing.html` is one file served by two processes: the v1 apex
  * Spindrift still answers reads the same asset, and every button on it would
  * break the moment a republished image carried v2's paths. So the file on disk
  * stays v1's and this process rewrites it as it serves.
  *
- * ponytail: two string replacements, read once. They are deleted with
- * `apps/spindrift/src/kthx/` in the migration ticket, which is what makes the
- * asset ours to edit.
+ * ponytail: a list of literal swaps, applied once. The whole table is deleted
+ * with `apps/spindrift/src/kthx/` in the migration ticket, which is what makes
+ * the asset ours to edit in place.
  */
+const V2: readonly (readonly [string, string])[] = [
+  ['const API = "/kthx/sites"', 'const API = "/api/sites"'],
+  ['"/_/sdk.js"', '"/api/sdk.js"'],
+  [
+    '<b>alias kthx="bun ~/src/infra/apps/kthx/cli/main.ts"</b>  <i># apps/kthx, from a checkout of this repo</i>',
+    '<b>bun add -g https://kthx.dev/cli/kthx.tgz</b>  <i># the only install; there is no npm package</i>',
+  ],
+  [
+    '<span class="p">$</span> <b>kthx dev</b>\n<i>  serves ./ on http://localhost:4321 — sdk in local mode, data stays on this machine</i>',
+    '<span class="p">$</span> <b>kthx init</b>\n<i>  quiet-lynx-73 — kthx.json, SKILL.md and index.html written; run kthx deploy</i>\n\n<span class="p">$</span> <b>kthx dev</b>\n<i>  serves ./ on http://localhost:4321</i>\n<i>  /api and /files go to</i> <u>https://quiet-lynx-73.kthx.dev</u> <i>— the live database, not a copy</i>',
+  ],
+  [
+    '<span>Releases and rollbacks come from Spindrift.</span>',
+    '<span>Every site keeps its releases; <code>kthx rollback</code> serves an earlier one.</span>',
+  ],
+];
+
 let landing: Promise<string> | null = null;
 
 function landingHtml(): Promise<string> {
   landing ??= Bun.file(LANDING_PATH)
     .text()
-    .then((html) =>
-      html
-        .replace('const API = "/kthx/sites"', 'const API = "/api/sites"')
-        .replace('"/_/sdk.js"', '"/api/sdk.js"'),
-    );
+    .then((html) => {
+      let out = html;
+      for (const [from, to] of V2) out = out.replace(from, to);
+      return out;
+    });
   return landing;
+}
+
+/**
+ * The CLI, as the tarball `bun add -g` installs from.
+ *
+ * Built into the image by `apps/kthx/pack.ts`, so the command line a site's
+ * owner installs is always the one this server answers. A checkout that has
+ * not run `bun run pack` has no tarball and says so rather than serving a file
+ * that is not there.
+ */
+const TARBALL = join(import.meta.dir, '..', 'dist', 'kthx.tgz');
+
+async function tarball(id: string): Promise<Response> {
+  const file = Bun.file(TARBALL);
+  if (!(await file.exists())) return refuse('NOT_FOUND', id);
+  return new Response(file, {
+    headers: {
+      'content-type': 'application/gzip',
+      'cache-control': 'public, max-age=300',
+      'x-content-type-options': 'nosniff',
+    },
+  });
 }
 
 // --- the apex ---------------------------------------------------------------
@@ -143,9 +183,7 @@ async function apex(
     );
   }
   if (path === FAVICON_PATH) return faviconResponse(request);
-  // The tarball is built and served by the CLI ticket; until then the path
-  // exists and is empty rather than pointing somewhere that lies.
-  if (path === '/cli/kthx.tgz') return refuse('NOT_FOUND', ctx.id);
+  if (path === '/cli/kthx.tgz') return tarball(ctx.id);
   return notHere(ctx.host, ctx.config.zone, 404, ctx.id, ctx.port);
 }
 

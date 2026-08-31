@@ -7,6 +7,6 @@
     "types": ["bun"],
     "allowImportingTsExtensions": true
   },
-  "include": ["cli/**/*", "server/**/*", "test/**/*"],
+  "include": ["cli/**/*", "server/**/*", "test/**/*", "pack.ts"],
   "exclude": ["node_modules"]
 }

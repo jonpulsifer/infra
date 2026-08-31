@@ -1,12 +1,14 @@
 {
   "name": "kthx",
   "private": true,
+  "version": "2.0.0",
   "type": "module",
   "bin": {
     "kthx": "cli/main.ts"
   },
   "scripts": {
     "start": "bun run server/index.ts",
+    "pack": "bun run pack.ts",
     "lint": "biome check .",
     "lint:fix": "biome check . --write",
     "typecheck": "tsc --noEmit",

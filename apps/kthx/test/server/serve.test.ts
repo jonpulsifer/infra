@@ -3,9 +3,11 @@
  * the paths that are the server's on every name in the zone.
  */
 import { describe, expect, test } from 'bun:test';
-import { symlink, writeFile } from 'node:fs/promises';
+import { rm, symlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import { readBundle } from '@repo/archive/bundle';
 import { tarGz } from '../../cli/tar.ts';
+import { version } from '../../package.json' with { type: 'json' };
 import { siteUrl } from '../../server/http.ts';
 import { ask, withServer, ZONE } from '../harness/server.ts';
 
@@ -83,11 +85,18 @@ describe('the apex', () => {
     const html = await landing.text();
     expect(html).toContain('<!doctype html>');
     // The asset on disk is still v1's, because the apex Spindrift serves reads
-    // the same file; this process moves the two endpoints as it serves.
+    // the same file; this process rewrites it as it serves. Every swap has to
+    // land: one that stops matching leaves v1's copy on a v2 page in silence.
     expect(html).toContain('const API = "/api/sites"');
     expect(html).toContain('"/api/sdk.js"');
+    expect(html).toContain('bun add -g https://kthx.dev/cli/kthx.tgz');
+    expect(html).toContain('kthx init');
+    expect(html).toContain('kthx rollback');
     expect(html).not.toContain('/kthx/sites');
     expect(html).not.toContain('/_/sdk.js');
+    expect(html).not.toContain('alias kthx=');
+    expect(html).not.toContain('sdk in local mode');
+    expect(html).not.toContain('come from Spindrift');
 
     const sdk = await get(ZONE, '/sdk.js');
     expect(sdk.status).toBe(200);
@@ -115,10 +124,45 @@ describe('the apex', () => {
     const unknown = await get(ZONE, '/api/db');
     expect(unknown.status).toBe(404);
     expect((await unknown.json()).code).toBe('NOT_FOUND');
-
-    // The tarball is the CLI ticket's; the path is not a lie in the meantime.
-    expect((await get(ZONE, '/cli/kthx.tgz')).status).toBe(404);
   });
+
+  test('serves the CLI tarball a checkout has packed, and 404s one it has not', async () => {
+    const dist = join(import.meta.dir, '..', '..', 'dist');
+    await rm(dist, { recursive: true, force: true });
+    expect((await get(ZONE, '/cli/kthx.tgz')).status).toBe(404);
+
+    // The whole install line, end to end. `bun add -g <url>` reads exactly
+    // this tarball, so it has to carry one runnable file and a manifest with no
+    // dependencies at all: `@repo/archive` and `@repo/kthx` are `workspace:*`,
+    // which `bun pm pack` rewrites to a version the public registry has never
+    // heard of, and an install of that resolves nothing.
+    await Bun.$`bun run pack`.cwd(join(import.meta.dir, '..', '..')).quiet();
+    const tarball = await get(ZONE, '/cli/kthx.tgz');
+    expect(tarball.status).toBe(200);
+    expect(tarball.headers.get('content-type')).toBe('application/gzip');
+    expect(tarball.headers.get('cache-control')).toBe('public, max-age=300');
+
+    const packed = readBundle(new Uint8Array(await tarball.arrayBuffer()));
+    const text = (path: string) =>
+      new TextDecoder().decode(
+        packed.find((file) => file.path.endsWith(path))?.bytes ??
+          new Uint8Array(),
+      );
+    const manifest = JSON.parse(text('package.json')) as {
+      version: string;
+      bin: Record<string, string>;
+      dependencies?: unknown;
+    };
+    expect(manifest.version).toBe(version);
+    expect(manifest.bin).toEqual({ kthx: 'kthx.js' });
+    expect(manifest.dependencies).toBeUndefined();
+
+    const bin = join(kthx().sitesDir, 'kthx.js');
+    await writeFile(bin, text('kthx.js'));
+    expect((await Bun.$`bun ${bin} --version`.quiet().text()).trim()).toBe(
+      version,
+    );
+  }, 60_000);
 
   test('a host outside the zone learns nothing', async () => {
     const stranger = await get('example.test', '/');

@@ -2,7 +2,14 @@
  * The client against a `Bun.serve` that speaks the contract: what it sends,
  * what it writes down, and how it fails.
  */
-import { afterAll, beforeEach, describe, expect, test } from 'bun:test';
+import {
+  afterAll,
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  test,
+} from 'bun:test';
 import {
   mkdirSync,
   mkdtempSync,
@@ -15,9 +22,13 @@ import { join } from 'node:path';
 import { readBundle } from '@repo/archive/bundle';
 import {
   deploy,
+  init,
   KthxError,
+  ls,
   release,
+  rm,
   rollback,
+  siteOrigin,
   sitesFile,
 } from '../cli/main.ts';
 
@@ -32,16 +43,26 @@ const NAME = /^[a-z]+-[a-z]+-\d\d$/;
 const calls: { method: string; path: string; body: unknown }[] = [];
 const uploads: Upload[] = [];
 const tokens = new Map<string, string>();
+const deleted: string[] = [];
 let n = 0;
 /** How many claims to answer TAKEN before accepting one. */
 let refuseClaims = 0;
+
+const SKILL = '# kthx\n\nthe apex copy\n';
+/** The apex having no reference to hand, so the packed copy is the answer. */
+let skillDown = false;
 
 const stub = Bun.serve({
   port: 0,
   async fetch(request) {
     const { pathname } = new URL(request.url);
     const [, , , name, act] = pathname.split('/');
-    if (request.method === 'POST' && pathname === '/kthx/sites') {
+    if (pathname === '/skill.md') {
+      return skillDown
+        ? new Response(null, { status: 503 })
+        : new Response(SKILL);
+    }
+    if (request.method === 'POST' && pathname === '/api/sites') {
       const body = (await request.json()) as { name: string };
       calls.push({ method: 'POST', path: pathname, body });
       if (
@@ -88,7 +109,7 @@ const stub = Bun.serve({
       return Response.json(
         {
           n,
-          digest: 'sha256:abc',
+          digest: 'a'.repeat(64),
           url: `https://${name}.kthx.test`,
           serving: n,
         },
@@ -97,12 +118,34 @@ const stub = Bun.serve({
     }
     const body = request.method === 'POST' ? await request.json() : null;
     calls.push({ method: request.method, path: pathname, body });
+    if (request.method === 'DELETE' && act === undefined) {
+      deleted.push(name);
+      return new Response(null, { status: 204 });
+    }
     if (request.method === 'GET' && act === undefined) {
       return Response.json({
         name,
+        url: `https://${name}.kthx.test`,
         serving: 3,
         held: false,
-        releases: [{ n: 3 }, { n: 2 }, { n: 1 }],
+        releases: [3, 2, 1].map((r) => ({
+          n: r,
+          digest: 'b'.repeat(64),
+          size: 2048,
+          at: '2026-08-31T00:00:00.000Z',
+        })),
+        usage: {
+          db_bytes: 1024,
+          files_bytes: 0,
+          ai_requests_today: 2,
+          ai_tokens_today: 40,
+        },
+        quotas: {
+          db_bytes: 268435456,
+          files_bytes: 268435456,
+          ai_requests_day: 200,
+          ai_tokens_day: 500000,
+        },
       });
     }
     if (act === 'serve') {
@@ -123,15 +166,21 @@ function site(files: Record<string, string> = { 'index.html': '<h1>hi</h1>' }) {
   return dir;
 }
 
+const cwd = process.cwd();
 beforeEach(() => {
   process.env.KTHX_ORIGIN = `${stub.url.origin}/`;
   process.env.XDG_CONFIG_HOME = mkdtempSync(join(tmpdir(), 'kthx-config-'));
   calls.length = 0;
   uploads.length = 0;
+  deleted.length = 0;
   tokens.clear();
   n = 0;
   refuseClaims = 0;
+  skillDown = false;
 });
+// Every command writes `kthx.json` relative to where it runs, so no test may
+// leave the process standing somewhere else.
+afterEach(() => process.chdir(cwd));
 
 describe('deploy', () => {
   test('mints a name, keeps the token out of the directory, and uploads the tar', async () => {
@@ -141,7 +190,8 @@ describe('deploy', () => {
       '.env': 'SECRET',
       'node_modules/x.js': 'x',
     });
-    const first = await deploy(dir);
+    process.chdir(dir);
+    const first = await deploy('.');
     const { name } = JSON.parse(readFileSync(join(dir, 'kthx.json'), 'utf8'));
     expect(name).toMatch(NAME);
     expect(first.url).toBe(`https://${name}.kthx.test`);
@@ -155,17 +205,18 @@ describe('deploy', () => {
     expect(uploads[0]!.paths).toEqual(['/app.js', '/index.html']);
 
     // The second deploy reuses the name and claims nothing.
-    const second = await deploy(dir);
+    const second = await deploy('.');
     expect(second.n).toBe(2);
-    expect(calls.filter((call) => call.path === '/kthx/sites')).toHaveLength(1);
+    expect(calls.filter((call) => call.path === '/api/sites')).toHaveLength(1);
     expect(uploads[1]!.bearer).toBe(`tok-${name}`);
   });
 
   test('rolls the dice again when a minted name is taken', async () => {
     refuseClaims = 1;
     const dir = site();
-    await deploy(dir);
-    const claims = calls.filter((call) => call.path === '/kthx/sites');
+    process.chdir(dir);
+    await deploy('.');
+    const claims = calls.filter((call) => call.path === '/api/sites');
     expect(claims).toHaveLength(2);
     expect(claims[0]!.body).not.toEqual(claims[1]!.body);
     expect(JSON.parse(readFileSync(join(dir, 'kthx.json'), 'utf8'))).toEqual(
@@ -173,49 +224,145 @@ describe('deploy', () => {
     );
   });
 
-  test('--name claims that name, and does not retry when it is taken', async () => {
+  test('--name claims that name, reuses a known one, and refuses to rename', async () => {
     const dir = site();
-    await deploy(dir, { name: 'notes' });
+    process.chdir(dir);
+    await deploy('.', { name: 'notes' });
     expect(JSON.parse(readFileSync(join(dir, 'kthx.json'), 'utf8'))).toEqual({
       name: 'notes',
     });
     const other = site();
-    await expect(deploy(other, { name: 'taken' })).rejects.toMatchObject({
+    process.chdir(other);
+    await expect(deploy('.', { name: 'taken' })).rejects.toMatchObject({
       code: 'TAKEN',
     });
-    expect(calls.filter((call) => call.path === '/kthx/sites')).toHaveLength(2);
-    await expect(deploy(dir, { name: 'other' })).rejects.toMatchObject({
+    process.chdir(dir);
+    await expect(deploy('.', { name: 'other' })).rejects.toMatchObject({
       code: 'NAMED',
     });
+
+    // A name this machine already holds a token for is reused, not re-claimed.
+    const again = site();
+    process.chdir(again);
+    await deploy('.', { name: 'notes' });
+    expect(calls.filter((call) => call.path === '/api/sites')).toHaveLength(2);
+  });
+
+  test('deploys a subdirectory under the project root’s name', async () => {
+    const project = site({ 'dist/index.html': '<h1>built</h1>' });
+    process.chdir(project);
+    await deploy('dist');
+    const { name } = JSON.parse(
+      readFileSync(join(project, 'kthx.json'), 'utf8'),
+    );
+    expect(name).toMatch(NAME);
+    // The name lives in the project, never in the directory a build rewrites.
+    expect(() => statSync(join(project, 'dist', 'kthx.json'))).toThrow();
+    expect(uploads[0]!.paths).toEqual(['/index.html']);
+    expect(uploads[0]!.name).toBe(name);
   });
 
   test("fails with the server's code, and without a token", async () => {
     const dir = site({ 'readme.md': 'no index' });
-    const error = await deploy(dir).catch((cause: unknown) => cause);
+    process.chdir(dir);
+    const error = await deploy('.').catch((cause: unknown) => cause);
     expect(error).toBeInstanceOf(KthxError);
     expect((error as KthxError).code).toBe('NO_INDEX');
 
     const orphan = site();
     writeFileSync(join(orphan, 'kthx.json'), '{"name":"lost"}');
-    await expect(deploy(orphan)).rejects.toMatchObject({ code: 'NO_TOKEN' });
+    process.chdir(orphan);
+    await expect(deploy('.')).rejects.toMatchObject({ code: 'NO_TOKEN' });
   });
 });
 
-describe('rollback and release', () => {
+describe('init', () => {
+  test('claims, writes the apex reference, and starts an empty directory off', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'kthx-init-'));
+    const name = await init(dir);
+    expect(name).toMatch(NAME);
+    expect(JSON.parse(readFileSync(join(dir, 'kthx.json'), 'utf8'))).toEqual({
+      name,
+    });
+    expect(readFileSync(join(dir, 'SKILL.md'), 'utf8')).toBe(SKILL);
+    expect(readFileSync(join(dir, 'index.html'), 'utf8')).toContain(
+      '/api/sdk.js',
+    );
+  });
+
+  test('leaves a directory that has files alone, and falls back when the apex is away', async () => {
+    const dir = site({ 'index.html': '<h1>mine</h1>' });
+    process.env.KTHX_ORIGIN = stub.url.origin;
+    await init(dir, { name: 'notes' });
+    expect(readFileSync(join(dir, 'index.html'), 'utf8')).toBe('<h1>mine</h1>');
+
+    // An apex with no reference to hand still leaves one behind: the copy this
+    // build was packed with.
+    const offline = mkdtempSync(join(tmpdir(), 'kthx-init-'));
+    writeFileSync(join(offline, 'kthx.json'), '{"name":"notes"}');
+    skillDown = true;
+    await init(offline);
+    const bundled = readFileSync(join(offline, 'SKILL.md'), 'utf8');
+    expect(bundled).not.toBe(SKILL);
+    expect(bundled).toContain('/api/db');
+  });
+});
+
+describe('rollback, release, ls and rm', () => {
   test('serve the release before the serving one, or the one named, then unhold', async () => {
     const dir = site();
-    await deploy(dir, { name: 'notes' });
-    expect(await rollback(dir)).toBe(2);
-    expect(await rollback(dir, 1)).toBe(1);
-    expect(await release(dir)).toBe(3);
+    process.chdir(dir);
+    await deploy('.', { name: 'notes' });
+    expect(await rollback('.')).toBe(2);
+    expect(await rollback('.', 1)).toBe(1);
+    expect(await release('.')).toBe(3);
     expect(
-      calls.filter((call) => call.path.startsWith('/kthx/sites/notes')),
+      calls.filter((call) => call.path.startsWith('/api/sites/notes')),
     ).toEqual([
-      { method: 'GET', path: '/kthx/sites/notes', body: null },
-      { method: 'POST', path: '/kthx/sites/notes/serve', body: { n: 2 } },
-      { method: 'GET', path: '/kthx/sites/notes', body: null },
-      { method: 'POST', path: '/kthx/sites/notes/serve', body: { n: 1 } },
-      { method: 'DELETE', path: '/kthx/sites/notes/hold', body: null },
+      { method: 'GET', path: '/api/sites/notes', body: null },
+      { method: 'POST', path: '/api/sites/notes/serve', body: { n: 2 } },
+      { method: 'GET', path: '/api/sites/notes', body: null },
+      { method: 'POST', path: '/api/sites/notes/serve', body: { n: 1 } },
+      { method: 'DELETE', path: '/api/sites/notes/hold', body: null },
     ]);
+  });
+
+  test('ls reads the site, and rm needs the name typed back', async () => {
+    const dir = site();
+    process.chdir(dir);
+    await deploy('.', { name: 'notes' });
+
+    const found = await ls('.');
+    expect(found.serving).toBe(3);
+    expect(found.releases).toHaveLength(3);
+
+    await rm('.', () => 'nope');
+    expect(deleted).toEqual([]);
+    expect(
+      JSON.parse(readFileSync(sitesFile(), 'utf8'))[stub.url.origin].notes,
+    ).toBe('tok-notes');
+
+    await rm('.', () => 'notes');
+    expect(deleted).toEqual(['notes']);
+    expect(
+      JSON.parse(readFileSync(sitesFile(), 'utf8'))[stub.url.origin],
+    ).toEqual({});
+  });
+
+  test('every command but init, deploy and dev needs a name', async () => {
+    const dir = site();
+    process.chdir(dir);
+    for (const command of [rollback, release, ls]) {
+      await expect(command('.')).rejects.toMatchObject({ code: 'NO_NAME' });
+    }
+  });
+});
+
+describe('siteOrigin', () => {
+  test('is the apex with the name as a label in front of it', () => {
+    process.env.KTHX_ORIGIN = 'https://kthx.dev';
+    expect(siteOrigin('notes')).toBe('https://notes.kthx.dev');
+    process.env.KTHX_ORIGIN = 'http://127.0.0.1:8080/';
+    expect(siteOrigin('notes')).toBe('http://notes.127.0.0.1:8080');
   });
 });

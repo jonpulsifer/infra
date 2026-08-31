@@ -182,6 +182,7 @@ bun add -g https://kthx.dev/cli/kthx.tgz
 | `kthx release` | drops the hold; the newest release serves |
 | `kthx ls` | releases, what is serving, usage against the quotas |
 | `kthx rm` | deletes the site |
+| `kthx open` | opens `https://<name>.kthx.dev` |
 
 The token lives in `$XDG_CONFIG_HOME/kthx/sites.json`, never in the project
 directory — which is what gets uploaded. `kthx.json` holds `{name}` and nothing
