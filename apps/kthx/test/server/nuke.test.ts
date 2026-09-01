@@ -13,6 +13,7 @@
 import { describe, expect, test } from 'bun:test';
 import { join } from 'node:path';
 import { tarGz } from '../../cli/tar.ts';
+import { readConfig } from '../../server/env.ts';
 import { CLAIM_BUCKET, NUKE_ATTEMPTS } from '../../server/limits.ts';
 import { ask, withServer, ZONE } from '../harness/server.ts';
 
@@ -204,5 +205,23 @@ describe('the nuke', () => {
     );
     expect(refused.status).toBe(403);
     expect(await inPostgres(site.name)).toBe(true);
+  });
+});
+
+describe('the key the environment carries', () => {
+  const env = (admin: string) => ({
+    DATABASE_URL: 'postgres://x/y',
+    KTHX_ME_KEY: 'm'.repeat(32),
+    KTHX_PG_KEY: 'p'.repeat(32),
+    KTHX_ADMIN_KEY: admin,
+  });
+
+  test('a key shorter than the contract is no key at all', () => {
+    // Not a boot failure: this field is created by hand, and a whole zone must
+    // not stop serving over it. Not trusted either — the route has no rate
+    // limit, so a short key would be a guessable one.
+    expect(readConfig(env('short')).adminKey).toBeNull();
+    expect(readConfig(env('  ')).adminKey).toBeNull();
+    expect(readConfig(env(ADMIN)).adminKey).toBe(ADMIN);
   });
 });

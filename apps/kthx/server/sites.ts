@@ -319,24 +319,28 @@ async function listSites(
 /**
  * Whether this request carries the operator's key.
  *
- * Compared timing-safe against the whole configured value, the way a site's
- * bearer is. A public zone with anonymous claims cannot have an
- * unauthenticated nuke, and nothing a visitor ever holds opens this one.
+ * Compared timing-safe over the hashes, the way a site's bearer is: this route
+ * has no rate limit by design, so comparing the raw values would make the
+ * key's *length* free to measure — `timingSafeEquals` answers before the
+ * constant-time compare when the lengths differ. Hashing both sides makes
+ * every comparison 64 characters long. A public zone with anonymous claims
+ * cannot have an unauthenticated nuke, and nothing a visitor holds opens this
+ * one.
  */
 function opensZone(request: Request, key: string): boolean {
   const bearer = /^Bearer\s+(\S+)$/i.exec(
     request.headers.get('authorization') ?? '',
   )?.[1];
-  return bearer !== undefined && timingSafeEquals(bearer, key);
+  return bearer !== undefined && timingSafeEquals(hash(bearer), hash(key));
 }
 
 /**
  * Every site gone — the clean slate a demo starts from.
  *
  * A hard delete, not the soft one `DELETE /api/sites/:name` does: the rows go
- * too, so the names come free again. Release archives stay in the depot; they
- * are content-addressed and the nightly sweep already collects the ones
- * nothing references.
+ * too, so the names come free again. Release archives stay in the depot. They
+ * are keyed by content digest and may be shared between sites, and after a
+ * hard delete no row references them — nothing collects them.
  *
  * With no `KTHX_ADMIN_KEY` this answers 404, the same as a path this server
  * does not have — a deployment without the key does not advertise that a nuke

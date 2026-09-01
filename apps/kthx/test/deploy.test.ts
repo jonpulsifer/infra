@@ -430,6 +430,12 @@ describe('rollback, release, ls and rm', () => {
     expect(said).toContain('claimable again');
     expect(nuked).toBe(1);
     expect(sent()).toHaveLength(1);
+
+    // Every token this machine held opens a name anyone may now claim, so the
+    // store is emptied the way `rm` empties the one entry it invalidated.
+    expect(
+      JSON.parse(readFileSync(sitesFile(), 'utf8'))[stub.url.origin],
+    ).toEqual({});
   });
 
   test('nuke with the wrong key is refused by the apex', async () => {

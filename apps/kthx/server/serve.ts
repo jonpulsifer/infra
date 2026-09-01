@@ -138,6 +138,7 @@ function fileResponse(
   digest: string,
   path: string,
   found: Body,
+  cacheControl = 'no-cache',
 ): Response {
   // Percent-encoded so the header stays ASCII and carries no quote of its own;
   // `/` is left alone because a path with slashes is still one token.
@@ -145,11 +146,11 @@ function fileResponse(
   const headers: Record<string, string> = {
     etag,
     'content-type': found.type,
-    // Revalidate every time, cache the bytes. The etag carries the release
-    // digest, so an unchanged file is a 304 and the moment `serving` moves the
-    // etag moves with it — which is what makes a new release show on the next
-    // refresh instead of up to a minute later.
-    'cache-control': 'no-cache',
+    // Release files revalidate every time and cache the bytes. The etag carries
+    // the release digest, so an unchanged file is a 304 and the moment
+    // `serving` moves the etag moves with it — which is what makes a new
+    // release show on the next refresh instead of up to a minute later.
+    'cache-control': cacheControl,
     'x-content-type-options': 'nosniff',
   };
   // ponytail: exact match only, so a weak or multi-valued `if-none-match`
@@ -170,12 +171,20 @@ function fileResponse(
 }
 
 export function faviconResponse(request: Request): Response {
-  return fileResponse(request, FAVICON_DIGEST, FAVICON_PATH, {
-    body: FAVICON.bytes,
-    size: FAVICON.bytes.byteLength,
-    type: FAVICON.type,
-    status: 200,
-  });
+  // Not a release file: this one is built into the process, so it cannot move
+  // between two requests of the same build. It caches like `/sdk.js`.
+  return fileResponse(
+    request,
+    FAVICON_DIGEST,
+    FAVICON_PATH,
+    {
+      body: FAVICON.bytes,
+      size: FAVICON.bytes.byteLength,
+      type: FAVICON.type,
+      status: 200,
+    },
+    'public, max-age=300',
+  );
 }
 
 // --- the page for a name nothing answers ------------------------------------

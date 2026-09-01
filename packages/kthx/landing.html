@@ -243,20 +243,6 @@ pre.sh u{color:var(--ok);text-decoration:none}
 .more{padding:14px 16px;text-align:center;border-top:1px solid var(--line-soft)}
 
 /* link a site this browser has no token for */
-.link{
-  display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr) auto;gap:8px;
-  margin-top:10px;padding:14px 16px;background:var(--card);
-  border:1px solid var(--line);border-radius:var(--r);box-shadow:var(--shade);
-}
-.link p{grid-column:1 / -1;margin:0;font-size:13px;color:var(--ink-2)}
-.link input{
-  min-width:0;padding:9px 11px;outline:0;
-  background:var(--sunk);border:1px solid var(--line);border-radius:var(--r-sm);
-  font-family:var(--mono);font-size:13px;
-}
-.link input::placeholder{color:var(--ink-3)}
-.link input:focus{border-color:var(--hot-line)}
-@media (max-width:560px){.link{grid-template-columns:minmax(0,1fr)}}
 
 /* terminal */
 .term{border:1px solid var(--line);border-radius:var(--r);overflow:hidden;box-shadow:var(--shade)}
@@ -373,12 +359,6 @@ pre.sh .p{color:var(--hot)}
     <div class="sechead">Your properties <span class="sp"></span><span id="count"></span></div>
     <div class="props" id="props"></div>
     <p class="hint" id="keep">Your sites are kept in this browser. Keep the token safe: there is no account and no password reset.</p>
-    <form class="link" id="link">
-      <p>Enter a name and its token to add a site that you claimed on the command line.</p>
-      <input id="linkname" autocomplete="off" spellcheck="false" placeholder="notes" aria-label="Name of the site to link" maxlength="40">
-      <input id="linktoken" type="password" autocomplete="off" spellcheck="false" placeholder="token" aria-label="Token of the site to link">
-      <button type="submit" class="tiny">Link the site</button>
-    </form>
   </section>
 
   <section class="sec">
@@ -952,29 +932,6 @@ document.addEventListener("click", async e => {
   if (t.id === "again") { resetStage(); nameInput.focus(); }
 });
 
-/* linking: the token is tried against the site before it is written down, so a
-   typed token that opens nothing never becomes a row that says it does */
-$("#link").addEventListener("submit", async e => {
-  e.preventDefault();
-  const name = $("#linkname").value.trim().toLowerCase();
-  const token = $("#linktoken").value.trim();
-  if (!name || !token) { toast("Enter the name and the token."); return; }
-  /* the name must be a name: a typed `/` asks for one site and files the token under another */
-  const v = check(name);
-  if (!v.ok) { toast(v.why); return; }
-  try {
-    await api("GET", `${API}/${encodeURIComponent(name)}`, { name, token });
-  } catch (err) {
-    toast(err.status === 404 ? `${name}.${ZONE} is not claimed.` : err.message);
-    return;
-  }
-  tokens[name] = token; store();
-  await refresh(name);
-  $("#linkname").value = ""; $("#linktoken").value = "";
-  open = name; renderProps(name); renderDir();
-  toast(`${name}.${ZONE} is linked.`);
-});
-
 let toastEl;
 let toastTimer;
 function toast(msg) {
@@ -1006,8 +963,9 @@ $("#nuke").addEventListener("click", async () => {
     /* the tokens are now tokens for nothing */
     for (const name of Object.keys(tokens)) delete tokens[name];
     store(); sites = []; open = null; renderProps();
-    listed = []; more = null; renderDir();
-    toast(`${counts.deleted} site${counts.deleted === 1 ? "" : "s"} deleted.`);
+    /* re-read rather than assert: a site that refused to drop is still live */
+    listed = []; more = null; renderDir(); loadDir().catch(() => {});
+    toast(`${counts.deleted} site${counts.deleted === 1 ? "" : "s"} deleted${counts.failed ? `, ${counts.failed} failed` : ""}.`);
   } catch (err) {
     /* the key this tab holds is not one: forget it rather than keep offering it */
     if (err.status === 403 || err.status === 404) forgetAdmin();
