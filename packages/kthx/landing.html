@@ -48,7 +48,7 @@ a{color:inherit}
 @keyframes roll{to{transform:perspective(420px) rotateX(62deg) translateY(44px)}}
 .sun{position:absolute;left:50%;top:38vh;width:min(38vw,320px);aspect-ratio:1;transform:translateX(-50%);border-radius:50%;opacity:.32;
   background:linear-gradient(var(--hot),var(--cool));mask:repeating-linear-gradient(180deg,#000 0 14px,transparent 14px 19px)}
-/* the roflcopter crosses the sky now and then */
+/* the roflcopter crosses the sky now and then, and flies over on each deploy */
 .copter{position:absolute;left:0;bottom:58vh;margin:0;font-family:var(--mono);font-size:clamp(8px,1.4vw,12px);line-height:1.15;color:var(--ink);opacity:.45;white-space:pre;transform:translateX(-40vw);will-change:transform}
 .copter.fly{animation:flyby 28s linear infinite}
 .copter .body{display:block;animation:bob 2.4s var(--ease-in-out) infinite}
@@ -56,9 +56,15 @@ a{color:inherit}
 @keyframes flyby{0%{transform:translateX(-40vw)}55%{transform:translateX(140vw)}100%{transform:translateX(140vw)}}
 @keyframes bob{50%{transform:translateY(-6px) rotate(-1.5deg)}}
 
-/* press feedback lives on pointer-down, 100ms, and is the only press transform on the page */
-.tiny{transition:transform .1s var(--ease-out),color .13s,border-color .13s,background-color .13s}
-.tiny:active{transform:scale(.97)}
+/* the two-ink moment: a hair out of register, snapping into register */
+@keyframes register{
+  from{text-shadow:-3px 0 0 var(--hot), 3px 0 0 var(--cool)}
+  to{text-shadow:0 0 0 var(--hot), 0 0 0 var(--cool)}
+}
+
+/* press feedback lives on pointer-down, 100ms, and is the only hover/press transform on the page */
+.tiny,.dice,.drop,.chev{transition:transform .1s var(--ease-out),color .13s,border-color .13s,background-color .13s}
+.tiny:active,.dice:active,.drop:active,.chev:active{transform:scale(.97)}
 
 /* hero: the wordmark arrives letter by letter, the dot lands, the inks slip once in a while */
 .hero{position:relative;z-index:1;min-height:min(36vh,300px);display:grid}
@@ -71,18 +77,105 @@ a{color:inherit}
 .big .l{display:inline-block;animation:popin .7s var(--spring) calc(var(--i) * 70ms) both;will-change:transform}
 .big .dev{color:var(--ink-2)}
 .bdot{display:inline-block;width:.22em;height:.22em;border-radius:50%;background:var(--hot);margin:0 .06em;transform-origin:50% 100%;animation:dropin .8s var(--ease-out) .42s both}
-.tagline{margin:0;font-size:15px;color:var(--ink-2);max-width:44ch}
-.tagline code{font-family:var(--mono);font-size:13.5px;color:var(--ink)}
+.hero.launch .big{animation:slip .6s steps(1) infinite}
+.hero.launch .bdot{animation:hop .6s var(--spring)}
 @keyframes popin{from{opacity:0;transform:translateY(.35em) rotate(-6deg)}to{opacity:1;transform:none}}
 @keyframes dropin{0%{opacity:0;transform:translateY(-1.6em)}55%{opacity:1;transform:translateY(0) scale(1.3,.7)}75%{transform:scale(.9,1.1)}100%{transform:none}}
+@keyframes hop{30%{transform:translateY(-.6em) scale(.9,1.1)}60%{transform:translateY(0) scale(1.25,.75)}80%{transform:scale(.95,1.05)}100%{transform:none}}
 @keyframes slip{
   0%,1.5%{filter:drop-shadow(-4px 0 0 var(--cool)) drop-shadow(4px 0 0 var(--hot));transform:translateX(2px)}
   1%{transform:translateX(-2px)}
   2.5%,100%{filter:none;transform:none}
 }
 
-/* sections */
-.props,.term,.sdk{background:var(--card)}
+/* the deploy card */
+.deck,.props,.term,.sdk{background:var(--card)}
+.deck{border:1px solid var(--line);border-radius:var(--r);box-shadow:var(--shade);overflow:hidden;margin-top:-28px}
+.deckhead{
+  display:flex;align-items:center;gap:9px;padding:12px 16px;border-bottom:1px solid var(--line-soft);
+  font-family:var(--mono);font-size:11px;letter-spacing:.13em;text-transform:uppercase;color:var(--ink-3);
+}
+.deckhead .n{
+  width:17px;height:17px;border-radius:calc(var(--r-sm) - 2px);background:var(--hot);color:var(--hot-ink);
+  display:grid;place-items:center;font-family:var(--sans);font-size:10px;font-weight:700;letter-spacing:0;
+}
+.deckhead .sp{flex:1}
+
+/* name field: the zone is part of the input, not a label beside it */
+.namefield{display:grid;grid-template-columns:minmax(0,1fr) auto auto auto;align-items:center;padding:4px 16px;border-bottom:1px solid var(--line-soft)}
+.namefield input{
+  min-width:0;background:none;border:0;outline:0;padding:15px 0;
+  font-family:var(--mono);font-size:20px;letter-spacing:-.02em;text-align:right;font-variant-numeric:tabular-nums;
+}
+.namefield input::placeholder{color:var(--ink-3)}
+.namefield .zone{font-family:var(--mono);font-size:20px;letter-spacing:-.02em;color:var(--ink-3);white-space:nowrap}
+.namefield .verdict{
+  font-family:var(--mono);font-size:11px;letter-spacing:.06em;text-transform:uppercase;
+  padding:3px 8px;border-radius:calc(var(--r-sm) - 2px);margin-left:12px;white-space:nowrap;border:1px solid transparent;
+}
+.namefield .verdict.free{color:var(--ok);background:var(--ok-soft)}
+.namefield .verdict.taken{color:var(--hot);background:var(--hot-soft);border-color:var(--hot-line)}
+.namefield .verdict.idle{color:var(--ink-3)}
+.namefield .dice{margin-left:10px;font-size:13px;color:var(--ink-3);border:1px solid var(--line);border-radius:var(--r-sm);padding:5px 8px}
+.namefield .dice:hover{color:var(--hot);border-color:var(--hot-line)}
+.dice.roll{animation:roll360 .5s var(--spring)}
+@keyframes roll360{from{transform:rotate(-180deg)}to{transform:rotate(0)}}
+@media (max-width:480px){
+  .namefield{grid-template-columns:minmax(0,1fr) auto auto;padding-bottom:10px}
+  .namefield input{font-size:17px;padding:13px 0}
+  .namefield .zone{font-size:17px}
+  .namefield .dice{grid-row:1;grid-column:3}
+  .namefield .verdict{grid-row:2;grid-column:1 / -1;justify-self:end;margin:0}
+}
+
+.drop{
+  padding:30px 20px;text-align:center;display:grid;gap:6px;justify-items:center;cursor:pointer;width:calc(100% - 20px);
+  border:2px dashed transparent;margin:10px;border-radius:calc(var(--r) - 4px);
+  transition:background-color .15s,border-color .15s,transform .18s var(--ease-out);
+  will-change:transform;
+}
+.drop:hover{background:var(--sunk)}
+.drop.hot{border-color:var(--hot);background:var(--hot-soft)}
+.drop h2{font-size:16px;font-weight:700;letter-spacing:-.01em}
+.drop p{margin:0;font-size:13px;color:var(--ink-2)}
+.drop code{font-family:var(--mono);font-size:12.5px;color:var(--ink)}
+.drop .arrow{font-size:20px;color:var(--hot);line-height:1;display:block}
+.drop.hot .arrow{animation:nod .9s var(--ease-in-out) infinite}
+@keyframes nod{50%{transform:translateY(5px)}}
+
+/* live deploy readout: the drop zone becomes a receipt, printed one line at a time */
+.run{padding:20px 18px;display:grid;gap:9px;font-family:var(--mono);font-size:13px}
+.run .ln{
+  display:grid;grid-template-columns:15px 1fr auto;gap:10px;align-items:baseline;color:var(--ink-2);
+  transition:opacity .22s var(--ease-out),transform .22s var(--ease-out);
+}
+.run .ln.wait{opacity:0;transform:translateY(-6px)}
+.run .ln .g{display:inline-block}
+.run .ln.done .g{color:var(--ok);animation:pop .4s var(--spring)}
+.run .ln.now .g{color:var(--hot)}
+@keyframes pop{from{transform:scale(.5)}to{transform:scale(1)}}
+.sdknote b{color:var(--ink);font-weight:500}
+pre.sh b{color:var(--ink);font-weight:500}
+.termbar i{width:8px;height:8px;border-radius:50%;background:var(--line);display:block}
+pre.sh i{color:var(--ink-3);font-style:normal}
+pre.sh u{color:var(--ok);text-decoration:none}
+.run .ln b{font-weight:400;color:var(--ink)}
+.run .ln.bad .g,.run .ln.bad b{color:var(--hot)}
+.run .ln .t{color:var(--ink-3);font-variant-numeric:tabular-nums;font-size:11.5px}
+.run .out{
+  margin-top:4px;border-top:1px solid var(--line-soft);padding-top:14px;
+  display:flex;align-items:center;gap:12px;flex-wrap:wrap;
+  animation:land .55s var(--spring) both;
+}
+.run .out a{
+  font-size:16px;letter-spacing:-.02em;text-decoration:none;border-bottom:1px solid var(--hot-line);padding-bottom:1px;
+  animation:register .6s var(--ease-out) .12s both;
+}
+.run .out a:hover{color:var(--hot)}
+.run .out .sp{flex:1}
+@keyframes land{from{opacity:0;transform:translateY(10px) scale(.97)}to{opacity:1;transform:none}}
+
+/* properties */
 .sec{margin-top:38px;display:grid;gap:2px}
 .sechead{
   display:flex;align-items:center;gap:10px;padding-bottom:9px;
@@ -90,19 +183,47 @@ a{color:inherit}
   font-variant-numeric:tabular-nums;
 }
 .sechead .sp{flex:1;height:1px;background:var(--line)}
+
 .props{border:1px solid var(--line);border-radius:var(--r);overflow:hidden;box-shadow:var(--shade)}
+/* a row is the address (a real link) plus a chevron that opens it; the row itself also toggles */
+.prop{
+  display:grid;grid-template-columns:minmax(0,1fr) auto auto;gap:14px;align-items:center;cursor:pointer;
+  padding:10px 12px 10px 16px;border-bottom:1px solid var(--line-soft);
+  transition:background-color .13s;
+}
+.prop:last-of-type{border-bottom:0}
+.prop:hover{background:var(--sunk)}
+.prop.open{background:var(--sunk)}
+.prop.new{animation:land .5s var(--spring) both,glow 1.4s var(--ease-out) .3s backwards}
+@keyframes glow{from{background-color:var(--hot-soft)}to{background-color:var(--sunk)}}
 /* right-aligned label so every zone suffix stacks into one column */
 .addr{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:baseline;font-family:var(--mono);font-size:15px;letter-spacing:-.015em;min-width:0;text-decoration:none;padding:4px 0}
 .addr .lb{text-align:right;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .addr .zn{color:var(--ink-3)}
 .addr:hover .lb{color:var(--hot)}
 .pmeta{display:flex;align-items:center;gap:14px;font-family:var(--mono);font-size:12px;color:var(--ink-3);white-space:nowrap;font-variant-numeric:tabular-nums}
-.pmeta .who{overflow:hidden;text-overflow:ellipsis;max-width:22ch}
 .pmeta .dot{width:6px;height:6px;border-radius:50%;background:var(--ok);flex:none}
 .pmeta .dot.off{background:var(--line)}
+.chev{width:28px;height:28px;display:grid;place-items:center;border-radius:var(--r-sm);color:var(--ink-3);border:1px solid transparent}
+.chev:hover{color:var(--ink);border-color:var(--line)}
+.chev svg{transition:transform .2s var(--ease-out)}
+.chev[aria-expanded="true"] svg{transform:rotate(180deg)}
 @media (max-width:560px){.pmeta .hide{display:none}.addr{font-size:13.5px}}
+
+.pdetail{
+  padding:2px 16px 18px;border-bottom:1px solid var(--line-soft);background:var(--sunk);
+  display:grid;gap:14px;animation:open .2s var(--ease-out) both;
+}
+.pdetail:last-child{border-bottom:0}
+@keyframes open{from{opacity:0;transform:translateY(-4px)}to{opacity:1;transform:none}}
+.block{display:grid;gap:6px;align-content:start;min-width:0}
+.block h3{font-family:var(--mono);font-size:10.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--ink-3);font-weight:400}
+.acts{display:flex;gap:7px;flex-wrap:wrap;padding-top:2px}
 .tiny{border:1px solid var(--line);border-radius:var(--r-sm);padding:5px 11px;font-size:13px;color:var(--ink-2);background:var(--card);text-decoration:none}
 .tiny:hover{color:var(--ink);border-color:var(--ink-3)}
+.tiny.danger:hover{color:var(--hot);border-color:var(--hot-line)}
+.tiny.go{color:var(--hot);border-color:var(--hot-line)}
+
 .hint{font-size:13px;color:var(--ink-2);text-align:center;padding:26px 16px}
 
 /* the directory: one row for each name in the zone, and the box that filters them */
@@ -121,16 +242,69 @@ a{color:inherit}
 .pub:hover{background:var(--sunk)}
 .more{padding:14px 16px;text-align:center;border-top:1px solid var(--line-soft)}
 
+/* link a site this browser has no token for */
+.link{
+  display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr) auto;gap:8px;
+  margin-top:10px;padding:14px 16px;background:var(--card);
+  border:1px solid var(--line);border-radius:var(--r);box-shadow:var(--shade);
+}
+.link p{grid-column:1 / -1;margin:0;font-size:13px;color:var(--ink-2)}
+.link input{
+  min-width:0;padding:9px 11px;outline:0;
+  background:var(--sunk);border:1px solid var(--line);border-radius:var(--r-sm);
+  font-family:var(--mono);font-size:13px;
+}
+.link input::placeholder{color:var(--ink-3)}
+.link input:focus{border-color:var(--hot-line)}
+@media (max-width:560px){.link{grid-template-columns:minmax(0,1fr)}}
+
 /* terminal */
 .term{border:1px solid var(--line);border-radius:var(--r);overflow:hidden;box-shadow:var(--shade)}
 .termbar{display:flex;gap:5px;align-items:center;padding:9px 13px;background:var(--sunk);border-bottom:1px solid var(--line-soft)}
 .termbar span{margin-left:8px;font-family:var(--mono);font-size:11.5px;color:var(--ink-3)}
-.termbar i{width:8px;height:8px;border-radius:50%;background:var(--line);display:block}
 pre.sh{
   margin:0;padding:16px;font-family:var(--mono);font-size:13px;line-height:1.85;
   overflow-x:auto;color:var(--ink-2);font-variant-numeric:tabular-nums;
 }
 pre.sh .p{color:var(--hot)}
+
+.foot{margin-top:40px;display:flex;gap:14px;flex-wrap:wrap;align-items:center;font-size:13px;color:var(--ink-3);border-top:1px solid var(--line);padding-top:16px}
+.foot .sp{flex:1}
+.foot code{font-family:var(--mono)}
+
+/* toast: rises from the bottom edge, leaves the same way */
+.toast{
+  position:fixed;bottom:20px;left:50%;z-index:90;max-width:calc(100vw - 32px);
+  background:var(--ink);color:var(--paper);border-radius:var(--r-sm);padding:9px 15px;font-size:13px;
+  box-shadow:var(--shade);animation:rise .2s var(--ease-out) both;
+  transition:opacity .16s var(--ease-out),transform .16s var(--ease-out);
+  transform:translate(-50%,0);
+}
+.toast.bye{animation:none;opacity:0;transform:translate(-50%,7px)}
+@keyframes rise{from{opacity:0;transform:translate(-50%,7px)}to{opacity:1;transform:translate(-50%,0)}}
+
+/* releases */
+.rels{position:relative;padding-left:14px}
+/* the pin is the one thing that moves on a rollback: it slides between versions */
+.rels .pin{position:absolute;left:0;top:0;width:6px;height:6px;border-radius:50%;background:var(--hot);will-change:transform}
+.rel{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:11px;align-items:center;
+  font-family:var(--mono);font-size:13px;padding:5px 0;border-bottom:1px solid var(--line-soft);font-variant-numeric:tabular-nums}
+.rel:last-child{border-bottom:0}
+.rel .v{color:var(--ink-3);min-width:26px;transition:color .2s}
+.rel .v.cur{color:var(--hot)}
+.rel .w{color:var(--ink-2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.rel .a{opacity:0;transition:opacity .13s}
+.rel:hover .a,.rel:focus-within .a{opacity:1}
+.rel .now{color:var(--ok);font-size:11.5px}
+.hold{
+  display:inline-flex;align-items:center;gap:7px;font-family:var(--mono);font-size:12px;
+  color:var(--hot);background:var(--hot-soft);border:1px solid var(--hot-line);
+  border-radius:var(--r-sm);padding:5px 9px;animation:latch .45s var(--spring) both;transform-origin:left center;
+}
+.hold .bar{display:inline-block;animation:swing .45s var(--spring) both;transform-origin:center}
+.hold button{font-size:12px;color:var(--hot);text-decoration:underline;text-underline-offset:2px}
+@keyframes latch{from{opacity:0;transform:translateX(-8px)}to{opacity:1;transform:none}}
+@keyframes swing{from{transform:rotate(-90deg)}to{transform:rotate(0)}}
 
 /* sdk tabs */
 .sdk{border:1px solid var(--line);border-radius:var(--r);overflow:hidden;box-shadow:var(--shade)}
@@ -141,22 +315,22 @@ pre.sh .p{color:var(--hot)}
 .sdkpane{animation:fade .16s var(--ease-out) both}
 @keyframes fade{from{opacity:0}to{opacity:1}}
 .sdknote{padding:12px 16px;border-top:1px solid var(--line-soft);font-size:13px;color:var(--ink-2)}
-.sdknote b{color:var(--ink);font-weight:500}
 .sdknote code{font-family:var(--mono);font-size:12.5px;color:var(--hot)}
-pre.sh b{color:var(--ink);font-weight:500}
-pre.sh i{color:var(--ink-3);font-style:normal}
-pre.sh u{color:var(--ok);text-decoration:none}
-
-.foot{margin-top:40px;display:flex;gap:14px;flex-wrap:wrap;align-items:center;font-size:13px;color:var(--ink-3);border-top:1px solid var(--line);padding-top:16px}
-.foot .sp{flex:1}
-.foot code{font-family:var(--mono)}
 
 /* reduced motion: every entrance becomes a short cross-fade, nothing travels, nothing loops */
 @media (prefers-reduced-motion: reduce){
-  .sdkpane,.big .l,.bdot{animation:fade .2s ease both}
-  .big,.jack .dots::after,.gridfloor,.copter.fly,.copter .body{animation:none}
+  .run .out a{animation:none}
+  .run .out,.prop.new,.pdetail,.toast,.hold,.sdkpane,.big .l,.bdot{animation:fade .2s ease both}
+  .prop.new{animation:fade .2s ease both,glow 1.4s ease .3s backwards}
+  .run .ln{transition:opacity .2s ease}
+  .run .ln.wait{transform:none}
+  .run .ln.done .g,.hold .bar,.dice.roll,.drop.hot .arrow,.big,.hero.launch .big,.hero.launch .bdot,.jack .dots::after,
+  .gridfloor,.copter.fly,.copter .body{animation:none}
   .copter{transform:translateX(64vw)}
-  .tiny:active{transform:none}
+  .toast.bye{transform:translate(-50%,0)}
+  .drop{transition:background-color .15s,border-color .15s}
+  .chev svg{transition:none}
+  .tiny:active,.dice:active,.drop:active,.chev:active{transform:none}
 }
 </style>
 </head>
@@ -178,37 +352,66 @@ pre.sh u{color:var(--ok);text-decoration:none}
   <div class="herobox">
     <p class="jack" id="jack">&gt; <span id="jackText">connection in progress</span><span class="dots"></span></p>
     <h1 class="big" aria-label="kthx.dev"><span class="l" style="--i:0">k</span><span class="l" style="--i:1">t</span><span class="l" style="--i:2">h</span><span class="l" style="--i:3">x</span><span class="bdot" aria-hidden="true"></span><span class="l dev" style="--i:5">dev</span></h1>
-    <p class="tagline">A directory becomes a website with a database. Claim a name with the command line; your Google account owns it.</p>
   </div>
 </section>
 
 <div class="col">
+  <div class="deck">
+    <div class="deckhead"><span class="n">1</span> Select a name <span class="sp"></span></div>
+    <div class="namefield">
+      <input id="name" autocomplete="off" spellcheck="false" placeholder="notes" aria-label="Site name" maxlength="40">
+      <span class="zone" id="zone"></span>
+      <span class="verdict idle" id="verdict" aria-live="polite">Enter a name</span>
+      <button type="button" class="dice" id="dice" title="Select a random name" aria-label="Select a random name">&#127922;</button>
+    </div>
+
+    <div class="deckhead" style="border-top:1px solid var(--line-soft)"><span class="n">2</span> Upload the files</div>
+    <div id="stage2"></div>
+  </div>
+
   <section class="sec">
-    <div class="sechead">Start here <span class="sp"></span><span>two commands</span></div>
+    <div class="sechead">Your properties <span class="sp"></span><span id="count"></span></div>
+    <div class="props" id="props"></div>
+    <p class="hint" id="keep">Your sites are kept in this browser. Keep the token safe: there is no account and no password reset.</p>
+    <form class="link" id="link">
+      <p>Enter a name and its token to add a site that you claimed on the command line.</p>
+      <input id="linkname" autocomplete="off" spellcheck="false" placeholder="notes" aria-label="Name of the site to link" maxlength="40">
+      <input id="linktoken" type="password" autocomplete="off" spellcheck="false" placeholder="token" aria-label="Token of the site to link">
+      <button type="submit" class="tiny">Link the site</button>
+    </form>
+  </section>
+
+  <section class="sec">
+    <div class="sechead">Every site <span class="sp"></span><span id="dircount"></span></div>
+    <input class="filter" id="filter" autocomplete="off" spellcheck="false" placeholder="Filter the names" aria-label="Filter the names" hidden>
+    <div class="props" id="dir"></div>
+  </section>
+
+  <section class="sec">
+    <div class="sechead">Or use the command line <span class="sp"></span></div>
     <div class="term">
       <div class="termbar"><i></i><i></i><i></i><span>~/notes</span></div>
       <pre class="sh"><span class="p">$</span> <b>bun add -g https://kthx.dev/cli/kthx.tgz</b>  <i># the only install; there is no npm package</i>
 
-<span class="p">$</span> <b>gcloud auth login</b>  <i># your google account is what owns a site</i>
-
 <span class="p">$</span> <b>kthx init</b>
 <i>  quiet-lynx-73 — kthx.json, SKILL.md and index.html written; run kthx deploy</i>
-
-<span class="p">$</span> <b>kthx deploy</b>
-<i>  6 files &middot; 214 KB &middot; sha256:8c1f…d902</i>
-<i>  →</i> <u id="cli1"></u>  <i>(3.1s) — v1</i>
 
 <span class="p">$</span> <b>kthx dev</b>
 <i>  serves ./ on http://localhost:4321</i>
 <i>  /api and /files go to</i> <u>https://quiet-lynx-73.kthx.dev</u> <i>— the live database, not a copy</i>
 
-<span class="p">$</span> <b>kthx rollback</b>
-<i>  v2 → v1 · held: new uploads do not replace v1 until you run</i> <b>kthx release</b>
+<span class="p">$</span> <b>kthx deploy</b>
+<i>  no name set — uses</i> <u>plum-otter-41</u>
+<i>  6 files &middot; 214 KB &middot; sha256:8c1f…d902</i>
+<i>  →</i> <u id="cli1"></u>  <i>(3.1s) — v1</i>
 
-<span class="p">$</span> <b>kthx whoami</b>
-<i>  you@example.com</i></pre>
+<span class="p">$</span> <b>kthx deploy</b>
+<i>  6 files &middot; 214 KB &middot; sha256:2a77…f0c4</i>
+<i>  →</i> <u id="cli2"></u>  <i>(1.4s) — v2</i>
+
+<span class="p">$</span> <b>kthx rollback</b>
+<i>  v2 → v1 · held: new uploads do not replace v1 until you run</i> <b>kthx release</b></pre>
     </div>
-    <p class="hint">Every owner command sends the ID token <code>gcloud auth print-identity-token</code> prints. There is no password and nothing to keep safe. A site claimed before accounts is taken over with <code>kthx adopt</code>, using its old token.</p>
   </section>
 
   <section class="sec">
@@ -278,12 +481,6 @@ kthx.site.name           <i>// this site's name, right even under kthx dev</i></
     </div>
   </section>
 
-  <section class="sec">
-    <div class="sechead">Every site <span class="sp"></span><span id="dircount"></span></div>
-    <input class="filter" id="filter" autocomplete="off" spellcheck="false" placeholder="Filter the names" aria-label="Filter the names" hidden>
-    <div class="props" id="dir"></div>
-  </section>
-
   <div class="foot">
     <span>Each site is one name in <code id="footzone"></code>.</span>
     <span class="sp"></span>
@@ -297,52 +494,86 @@ kthx.site.name           <i>// this site's name, right even under kthx dev</i></
 const ZONE = location.hostname;
 const API = "/api/sites";
 const $ = (s, r = document) => r.querySelector(s);
+const KB = n => n < 1024 ? `${n} B` : n < 1048576 ? `${(n / 1024).toFixed(1)} KB` : `${(n / 1048576).toFixed(1)} MB`;
 const ago = t => { const s = (Date.now() - t) / 1000;
   return s < 60 ? "just now" : s < 3600 ? `${Math.floor(s / 60)}m ago` : s < 86400 ? `${Math.floor(s / 3600)}h ago` : `${Math.floor(s / 86400)}d ago`; };
+const RESERVED = ["www", "api", "app", "admin", "mail", "ftp", "sdk", "static", "assets", "cdn", "fn", "dev", "test", "staging", "kthx", "lolwtf", "spindrift", "root", "internal", "_"];
+const root = document.documentElement;
 const REDUCE = matchMedia("(prefers-reduced-motion: reduce)");
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
-$("#footzone").textContent = ZONE;
-$("#cli1").textContent = `https://quiet-lynx-73.${ZONE}`;
+const SPRING = getComputedStyle(root).getPropertyValue("--spring").trim();
+for (const el of document.querySelectorAll("#zone, #footzone")) el.textContent = (el.id === "zone" ? "." : "") + ZONE;
+$("#cli1").textContent = $("#cli2").textContent = `https://plum-otter-41.${ZONE}`;
 
-/* This page reads. It claims nothing, uploads nothing and holds no credential:
-   a site is owned by a Google account, and a browser has no way to mint the
-   token that proves one. The command line does that, and the page says so. */
-async function api(path) {
-  const r = await fetch(path);
+/* the tokens are the sites: whoever holds one owns the name */
+const STORE = "kthx.sites";
+/* no prototype: `tokens["constructor"]` must be a site of this browser or nothing */
+const tokens = Object.create(null);
+try { Object.assign(tokens, JSON.parse(localStorage.getItem(STORE) || "{}")); } catch {}
+function store() { try { localStorage.setItem(STORE, JSON.stringify(tokens)); } catch {} }
+function forget(name) { delete tokens[name]; store(); sites = sites.filter(s => s.name !== name); }
+let sites = [];   /* [{ name, url, serving, held, releases: [{ n, digest, size, at }] }] newest first */
+let open = null;
+
+async function api(method, path, { json, body, name, token, filename } = {}) {
+  const headers = {};
+  /* `token` is the one being tried: a site is linked before it is stored */
+  if (name) headers.authorization = `Bearer ${token || tokens[name]}`;
+  if (json !== undefined) { headers["content-type"] = "application/json"; body = JSON.stringify(json); }
+  if (filename) headers["x-filename"] = filename;
+  const r = await fetch(path, { method, headers, body });
+  if (r.status === 204) return null;
   const data = await r.json().catch(() => ({}));
   if (!r.ok) { const e = new Error(data.message || r.statusText); e.code = data.code; e.status = r.status; throw e; }
   return data;
 }
+async function refresh(name) {
+  try {
+    const s = await api("GET", `${API}/${name}`, { name });
+    s.releases.forEach(r => { r.at = Date.parse(r.at); });
+    sites = [s, ...sites.filter(x => x.name !== name)];
+  } catch (e) {
+    if (e.status === 401 || e.status === 403 || e.status === 404) forget(name);
+    else throw e;
+  }
+}
+async function loadAll() {
+  await Promise.all(Object.keys(tokens).map(n => refresh(n).catch(() => {})));
+  sites.sort((a, b) => (b.releases[0]?.at ?? 0) - (a.releases[0]?.at ?? 0));
+  renderProps();
+  $("#jackText").textContent = `connected · ${sites.length} site${sites.length === 1 ? "" : "s"}`;
+  $("#jack").classList.add("on");
+}
 
 /* the directory: every live site in the zone, newest claim first. Names are
-   public — each one answers on its own host to anyone — and so is the owner:
-   attribution is the point of an account. */
+   public — each one answers on its own host to anyone — so the list carries
+   nothing a walk of the zone would not give. Sites of this browser are shown
+   above instead, with their releases. */
 let listed = null;   /* null until the directory answers: nothing is asserted before it does */
 let more = null;
 async function loadDir(after) {
-  const page = await api(after ? `${API}?after=${encodeURIComponent(after)}` : API);
+  const page = await api("GET", after ? `${API}?after=${encodeURIComponent(after)}` : API);
   listed = after && listed ? [...listed, ...page.items] : page.items;
   more = page.next;
   renderDir();
-  $("#jackText").textContent = `${listed.length} site${listed.length === 1 ? "" : "s"} in ${ZONE}`;
-  $("#jack").classList.add("on");
 }
 function renderDir() {
   if (listed === null) return;
   const q = $("#filter").value.trim().toLowerCase();
-  const rows = listed.filter(s => s.name.includes(q) || (s.owner || "").includes(q));
-  $("#filter").hidden = listed.length === 0;
-  $("#dircount").textContent = listed.length === 0 ? ""
-    : q ? `${rows.length} of ${listed.length}` : `${listed.length} site${listed.length === 1 ? "" : "s"}`;
+  /* the sites of this browser are rendered above, with their releases */
+  const others = listed.filter(s => !Object.hasOwn(tokens, s.name));
+  const rows = others.filter(s => s.name.includes(q));
+  $("#filter").hidden = others.length === 0;
+  $("#dircount").textContent = others.length === 0 ? ""
+    : q ? `${rows.length} of ${others.length}` : `${others.length} site${others.length === 1 ? "" : "s"}`;
   $("#dir").innerHTML = (rows.length ? rows.map(s => `<div class="pub">
       <a class="addr" href="${esc(s.url)}" target="_blank" rel="noopener"><span class="lb">${esc(s.name)}</span><span class="zn">.${ZONE}</span></a>
       <span class="pmeta">
-        <span class="hide who">${s.owner === null ? "unadopted" : esc(s.owner)}</span>
         <span class="hide">${s.serving === null ? "claimed, nothing yet" : `v${s.serving} · ${s.releases} release${s.releases === 1 ? "" : "s"}`}</span>
         <span>${ago(Date.parse(s.at))}</span>
         <span class="dot${s.serving === null ? " off" : ""}" title="${s.serving === null ? "nothing served yet" : "live"}"></span>
       </span>
-    </div>`).join("") : `<div class="hint">${q ? "No name matches." : "No site yet."}</div>`)
+    </div>`).join("") : `<div class="hint">${q ? "No name matches." : "No other site yet."}</div>`)
     + (more && !q ? `<div class="more"><button class="tiny" id="dirmore">Show more sites</button></div>` : "");
 }
 $("#filter").addEventListener("input", renderDir);
@@ -362,24 +593,393 @@ setInterval(() => {
   $("#tr1").textContent = t[0]; $("#tr2").textContent = t[1]; $("#tr3").textContent = t[2];
 }, 70);
 $("#copter").classList.add("fly");
+function flyover() { const c = $("#copter"); c.classList.remove("fly"); void c.offsetWidth; c.classList.add("fly"); }
+function deployed() {
+  const h = $("#hero"); h.classList.remove("launch"); void h.offsetWidth; h.classList.add("launch");
+  setTimeout(() => h.classList.remove("launch"), 1200);
+  flyover();
+}
 
-document.addEventListener("click", e => {
+/* name */
+const LABEL = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/;
+const ADJ = ["plum", "brisk", "quiet", "amber", "loose", "tiny", "wired", "damp", "clever", "spare"];
+const ANI = ["otter", "heron", "marten", "raven", "shrew", "lynx", "grebe", "wombat", "tapir", "civet"];
+const ALPHA = "abcdefghijklmnopqrstuvwxyz";
+const pick = a => a[Math.floor(Math.random() * a.length)];
+function mint() { return `${pick(ADJ)}-${pick(ANI)}-${10 + Math.floor(Math.random() * 89)}`; }
+function check(n) {
+  if (!n) return { ok: false, why: "Enter a name", cls: "idle" };
+  if (n.length < 3) return { ok: false, why: "Too short", cls: "taken" };
+  if (n.length > 40) return { ok: false, why: "Too long", cls: "taken" };
+  if (!LABEL.test(n)) return { ok: false, why: "Use a-z, 0-9, -", cls: "taken" };
+  if (RESERVED.includes(n)) return { ok: false, why: "Reserved", cls: "taken" };
+  if (Object.hasOwn(tokens, n)) return { ok: true, why: "Yours · will update", cls: "free" };
+  return { ok: true, why: "Available", cls: "free" };
+}
+const nameInput = $("#name");
+function say(cls, why) { const el = $("#verdict"); el.className = `verdict ${cls}`; el.textContent = why; }
+/* the server knows whether a name is taken; asked a beat after typing stops */
+let probeTimer;
+function probe(n) {
+  clearTimeout(probeTimer);
+  probeTimer = setTimeout(async () => {
+    try {
+      const r = await fetch(`${API}/${n}`);
+      if (nameInput.value.trim().toLowerCase() !== n) return;
+      if (r.status === 401) say("taken", "Taken");
+    } catch {}
+  }, 250);
+}
+function verdict() {
+  const n = nameInput.value.trim().toLowerCase();
+  const v = check(n);
+  say(v.cls, v.why);
+  if (v.ok && !Object.hasOwn(tokens, n)) probe(n);
+  return v;
+}
+nameInput.addEventListener("input", () => { abort(); nameInput.value = nameInput.value.toLowerCase().replace(/[^a-z0-9-]/g, ""); verdict(); });
+
+/* the selected name tumbles in: settled letters on the left, two still rolling on the right */
+let minted = null;
+let tumbleId = 0;
+function abort() { cancelAnimationFrame(tumbleId); minted = null; }
+function settle() {
+  if (!minted) return;
+  const n = minted; abort(); nameInput.value = n; verdict();
+}
+function tumble(n) {
+  settle(); minted = n;
+  if (REDUCE.matches) return settle();
+  say("idle", "Selecting");
+  const t0 = performance.now();
+  const tick = t => {
+    const k = Math.floor((t - t0) / 22);
+    if (k >= n.length) return settle();
+    nameInput.value = n.slice(0, k) + pick(ALPHA) + (k + 1 < n.length ? pick(ALPHA) : "");
+    tumbleId = requestAnimationFrame(tick);
+  };
+  tumbleId = requestAnimationFrame(tick);
+}
+$("#dice").onclick = e => {
+  const d = e.currentTarget;
+  d.classList.remove("roll"); void d.offsetWidth; d.classList.add("roll");
+  tumble(mint()); nameInput.focus();
+};
+$("#dice").addEventListener("animationend", e => e.currentTarget.classList.remove("roll"));
+
+/* zip, read with the platform's own views — enough to count the files and find index.html */
+async function readZip(buf) {
+  const dv = new DataView(buf);
+  const u8 = new Uint8Array(buf);
+  const dec = new TextDecoder();
+  let eocd = -1;
+  for (let i = u8.length - 22; i >= Math.max(0, u8.length - 65558); i--)
+    if (dv.getUint32(i, true) === 0x06054b50) { eocd = i; break; }
+  if (eocd < 0) throw new Error("This file is not a zip file.");
+  const n = dv.getUint16(eocd + 10, true);
+  let p = dv.getUint32(eocd + 16, true);
+  const out = [];
+  for (let i = 0; i < n && dv.getUint32(p, true) === 0x02014b50; i++) {
+    const usize = dv.getUint32(p + 24, true);
+    const nlen = dv.getUint16(p + 28, true);
+    const elen = dv.getUint16(p + 30, true);
+    const clen = dv.getUint16(p + 32, true);
+    const name = dec.decode(u8.subarray(p + 46, p + 46 + nlen));
+    p += 46 + nlen + elen + clen;
+    if (name.endsWith("/") || name.startsWith("__MACOSX/") || name.includes("/.")) continue;
+    out.push([name, usize]);
+  }
+  if (!out.length) throw new Error("This zip file has no files to serve.");
+  return out;
+}
+function unwrap(files) {
+  const tops = new Set(files.map(f => f[0].split("/")[0]));
+  if (tops.size !== 1 || !files.every(f => f[0].includes("/"))) return files;
+  const cut = [...tops][0].length + 1;
+  return files.map(f => [f[0].slice(cut), f[1]]);
+}
+/* a stored zip of one file, so a bare index.html travels the same road as a folder */
+let crcTable;
+function crc32(bytes) {
+  if (!crcTable) { crcTable = new Uint32Array(256); for (let i = 0; i < 256; i++) { let c = i; for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1; crcTable[i] = c >>> 0; } }
+  let crc = 0xffffffff;
+  for (const b of bytes) crc = crcTable[(crc ^ b) & 0xff] ^ (crc >>> 8);
+  return (crc ^ 0xffffffff) >>> 0;
+}
+function zipOne(name, bytes) {
+  const enc = new TextEncoder().encode(name);
+  const crc = crc32(bytes);
+  const local = new Uint8Array(30 + enc.length + bytes.length);
+  const lv = new DataView(local.buffer);
+  lv.setUint32(0, 0x04034b50, true); lv.setUint16(4, 20, true); lv.setUint32(14, crc, true);
+  lv.setUint32(18, bytes.length, true); lv.setUint32(22, bytes.length, true); lv.setUint16(26, enc.length, true);
+  local.set(enc, 30); local.set(bytes, 30 + enc.length);
+  const central = new Uint8Array(46 + enc.length);
+  const cv = new DataView(central.buffer);
+  cv.setUint32(0, 0x02014b50, true); cv.setUint16(4, 20, true); cv.setUint16(6, 20, true); cv.setUint32(16, crc, true);
+  cv.setUint32(20, bytes.length, true); cv.setUint32(24, bytes.length, true); cv.setUint16(28, enc.length, true);
+  central.set(enc, 46);
+  const end = new Uint8Array(22);
+  const ev = new DataView(end.buffer);
+  ev.setUint32(0, 0x06054b50, true); ev.setUint16(8, 1, true); ev.setUint16(10, 1, true);
+  ev.setUint32(12, central.length, true); ev.setUint32(16, local.length, true);
+  return new Blob([local, central, end], { type: "application/zip" });
+}
+
+/* upload */
+/* the zone leans a few px toward the dragged file; transform only, eased between dragover events */
+function lean(e) {
+  const d = $("#drop"); if (!d) return;
+  d.classList.add("hot");
+  if (REDUCE.matches) return;
+  const r = d.getBoundingClientRect();
+  const dx = ((e.clientX - r.left) / r.width - .5) * 8;
+  const dy = ((e.clientY - r.top) / r.height - .5) * 6;
+  d.style.transform = `translate(${dx.toFixed(1)}px,${dy.toFixed(1)}px) scale(1.01)`;
+}
+function unlean() { const d = $("#drop"); if (!d) return; d.classList.remove("hot"); d.style.transform = ""; }
+for (const ev of ["dragenter", "dragover"]) addEventListener(ev, e => { e.preventDefault(); lean(e); });
+addEventListener("dragleave", e => { if (!e.relatedTarget) unlean(); });
+addEventListener("drop", e => {
+  e.preventDefault(); unlean();
+  const f = e.dataTransfer?.files?.[0];
+  if (f) { if (!$("#drop")) resetStage(); take(f); }
+});
+document.addEventListener("change", e => { if (e.target.id === "file" && e.target.files[0]) take(e.target.files[0]); });
+
+let busy = false;
+async function take(file) {
+  settle();
+  if (busy) return;
+  try {
+    let body;
+    let what;
+    let filename = file.name;
+    if (/\.zip$/i.test(file.name)) {
+      const files = unwrap(await readZip(await file.arrayBuffer()));
+      if (!files.some(f => /^index\.html?$/i.test(f[0]))) throw new Error("This zip file has no index.html. kthx needs one.");
+      // The server refuses on the unpacked size, and text compresses hard
+      // enough that a zip well under 25 MB can pass that check and still be
+      // refused after the whole upload. This is the same total the label
+      // below shows, so the refusal costs the upload rather than following it.
+      const unpacked = files.reduce((s, f) => s + f[1], 0);
+      if (unpacked > 32 * 1048576) throw new Error(`Those files are ${KB(unpacked)} unpacked. kthx takes 32 MB at most once unpacked.`);
+      body = file; what = `${files.length} file${files.length === 1 ? "" : "s"} · ${KB(unpacked)}`;
+    } else if (/\.(tar\.gz|tgz)$/i.test(file.name)) {
+      body = file; what = KB(file.size);
+    } else if (/\.html?$/i.test(file.name)) {
+      body = zipOne("index.html", new Uint8Array(await file.arrayBuffer())); filename = "index.zip"; what = `1 file · ${KB(file.size)}`;
+    } else throw new Error("kthx serves static files only. Drop a .zip, a .tar.gz, or an index.html file.");
+    if (file.size > 25 * 1048576) throw new Error("That is more than 25 MB. kthx takes 25 MB at most.");
+
+    let name = nameInput.value.trim().toLowerCase();
+    if (!check(name).ok) {
+      const fromFile = file.name.replace(/\.(zip|tar\.gz|tgz|html?)$/i, "").toLowerCase().replace(/[^a-z0-9-]+/g, "-").replace(/^-|-$/g, "");
+      name = fromFile && check(fromFile).ok ? fromFile : mint();
+      nameInput.value = name; verdict();
+    }
+    await deploy(name, body, filename, what);
+  } catch (err) { toast(err.message || String(err)); }
+  finally { const p = $("#file"); if (p) p.value = ""; }
+}
+
+/* the receipt: one line per step, printed as the step starts, the URL lands last */
+async function deploy(name, body, filename, what) {
+  const box = $("#stage2");
+  const mine = !!tokens[name];
+  let result = null;
+  const steps = [
+    { text: mine ? `<b>${name}.${ZONE}</b> · yours` : `Claim <b>${name}.${ZONE}</b>`,
+      run: async () => { if (mine) return; const r = await api("POST", API, { json: { name } }); tokens[name] = r.token; store(); } },
+    { text: `Upload <b>${what}</b>`, run: async () => { result = await api("POST", `${API}/${name}/releases`, { body, name, filename }); } },
+    { text: "Publish", run: () => refresh(name) },
+  ];
+  box.innerHTML = `<div class="run">${steps.map(s => `
+      <div class="ln wait"><span class="g">&#8226;</span><span>${s.text}</span><span class="t"></span></div>`).join("")}</div>`;
+  const lns = box.querySelectorAll(".ln");
+  void box.offsetHeight;
+  busy = true;
+  try {
+    for (let i = 0; i < steps.length; i++) {
+      lns[i].className = "ln now";
+      const t0 = performance.now();
+      try { await steps[i].run(); }
+      catch (err) {
+        lns[i].className = "ln bad"; $(".g", lns[i]).innerHTML = "&#10007;"; $(".t", lns[i]).textContent = err.code || "failed";
+        if (err.code === "TAKEN") say("taken", "Taken");
+        $(".run", box).insertAdjacentHTML("beforeend", `<div class="out"><b>${esc(err.message)}</b><span class="sp"></span><button class="tiny" id="again">Try again</button></div>`);
+        toast(err.message); return;
+      }
+      lns[i].className = "ln done"; $(".g", lns[i]).innerHTML = "&#10003;"; $(".t", lns[i]).textContent = `${((performance.now() - t0) / 1000).toFixed(1)}s`;
+    }
+  } finally { busy = false; }
+  const site = sites.find(s => s.name === name);
+  $(".run", box).insertAdjacentHTML("beforeend", `<div class="out">
+      <a href="${esc(result.url)}" target="_blank" rel="noopener">${name}.${ZONE}</a>
+      <button class="tiny" data-copy="${esc(result.url)}">Copy the URL</button>
+      <span class="sp"></span><button class="tiny" id="again">Deploy another site</button></div>`);
+  nameInput.value = ""; verdict(); open = name; renderProps(name); renderDir();
+  deployed();
+  if (site?.held && result.serving !== result.n) toast(`v${result.n} is stored. ${name} is held at v${result.serving}.`);
+  else toast(`${result.url} is live.`);
+}
+function resetStage() {
+  $("#stage2").innerHTML = `<button class="drop" id="drop">
+      <span class="arrow" aria-hidden="true">&darr;</span>
+      <h2>Drop a zip file or an index.html file</h2>
+      <p>Static files only. <code>.zip</code>, <code>.tar.gz</code>, or <code>.html</code>. Maximum 25 MB, or 32 MB unpacked.</p>
+      <input type="file" id="file" accept=".html,.htm,.zip,.tgz,.gz" hidden></button>`;
+}
+
+/* properties */
+const CHEV = `<svg viewBox="0 0 12 12" width="12" height="12" aria-hidden="true"><path d="M2.5 4.5 6 8l3.5-3.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+function current(s) { return s.releases.find(r => r.n === s.serving) || null; }
+function renderProps(fresh) {
+  $("#count").textContent = `${sites.length} site${sites.length === 1 ? "" : "s"}`;
+  $("#keep").hidden = sites.length === 0;
+  $("#props").innerHTML = sites.length ? sites.map(s => {
+    const cur = current(s);
+    const isOpen = open === s.name;
+    return `<div class="prop${isOpen ? " open" : ""}${s.name === fresh ? " new" : ""}" data-n="${s.name}">
+      <a class="addr" href="${esc(s.url)}" target="_blank" rel="noopener"><span class="lb">${s.name}</span><span class="zn">.${ZONE}</span></a>
+      <span class="pmeta">
+        <span class="hide">${cur ? `v${cur.n}${s.held ? " · held" : ""}` : "no release"}</span>
+        <span class="hide">${cur ? KB(cur.size) : ""}</span>
+        <span>${cur ? ago(cur.at) : ""}</span>
+        <span class="dot${cur ? "" : " off"}" title="${cur ? "live" : "nothing served yet"}"></span>
+      </span>
+      <button class="chev" aria-expanded="${isOpen}" aria-label="${isOpen ? "Hide" : "Show"} the details for ${s.name}.${ZONE}">${CHEV}</button>
+    </div>${isOpen ? detail(s) : ""}`;
+  }).join("") : `<div class="hint">You have no sites. Select a name and drop a file.</div>`;
+  placePin();
+}
+
+/* the live pin sits beside the current release; on a rollback it slides there from where it was */
+function pinY() { const cur = $(".rels .v.cur"); return cur ? cur.closest(".rel").offsetTop + cur.closest(".rel").offsetHeight / 2 - 3 : null; }
+function placePin(fromY) {
+  const pin = $(".rels .pin");
+  const y = pinY();
+  if (!pin || y === null) return;
+  pin.style.transform = `translateY(${y}px)`;
+  if (fromY != null && fromY !== y && !REDUCE.matches)
+    pin.animate([{ transform: `translateY(${fromY}px)` }, { transform: `translateY(${y}px)` }], { duration: 500, easing: SPRING });
+}
+
+function detail(s) {
+  const rels = s.releases.length ? s.releases.map(r => `<div class="rel">
+      <span class="v ${r.n === s.serving ? "cur" : ""}">v${r.n}</span>
+      <span class="w">${KB(r.size)} · ${ago(r.at)} · ${r.digest.slice(7, 19)}</span>
+      <span class="a">${r.n === s.serving ? `<span class="now">live</span>` : `<button class="tiny" data-roll="${s.name}:${r.n}">${r.n > s.serving ? "Roll forward" : "Roll back"}</button>`}</span>
+    </div>`).join("") : `<div class="rel"><span class="v"></span><span class="w">No release yet. Drop a file with this name selected.</span><span></span></div>`;
+  const hold = s.held ? `<div class="hold"><span class="bar" aria-hidden="true">&#9646;</span> Held at v${s.serving}. New uploads do not go live until you <button data-release="${s.name}">release the hold</button>.</div>` : "";
+  return `<div class="pdetail">
+    ${hold}
+    <div class="block"><h3>Releases</h3><div class="rels"><i class="pin" aria-hidden="true"></i>${rels}</div></div>
+    <div class="acts">
+      <a class="tiny go" href="${esc(s.url)}" target="_blank" rel="noopener">Open the site &#8599;</a>
+      <button class="tiny" data-copy="${esc(s.url)}">Copy the URL</button>
+      <button class="tiny" data-replace="${s.name}">New release</button>
+      <button class="tiny danger" data-del="${s.name}">Delete</button>
+    </div>
+  </div>`;
+}
+
+/* wiring */
+document.addEventListener("click", async e => {
   const t = e.target;
+  if (t.closest(".drop")) { $("#file")?.click(); return; }
+
+  if (t.closest(".prop .addr")) return;
+  const p = t.closest(".prop");
+  if (p) { open = open === p.dataset.n ? null : p.dataset.n; renderProps(); if (open) $(`.prop[data-n="${open}"] .chev`)?.focus(); return; }
+
+  const c = t.closest("[data-copy]");
+  if (c) { navigator.clipboard?.writeText(c.dataset.copy); toast(`Copied ${c.dataset.copy}`); return; }
+
+  try {
+    const roll = t.closest("[data-roll]");
+    if (roll) {
+      const [n, v] = roll.dataset.roll.split(":");
+      const s = sites.find(x => x.name === n);
+      const from = s.serving;
+      const fromY = pinY();
+      await api("POST", `${API}/${n}/serve`, { json: { n: +v }, name: n });
+      await refresh(n); renderProps(); placePin(fromY);
+      toast(`${n}: v${from} → v${v} · held`);
+      return;
+    }
+    const rel = t.closest("[data-release]");
+    if (rel) {
+      const n = rel.dataset.release;
+      const fromY = pinY();
+      const r = await api("DELETE", `${API}/${n}/hold`, { name: n });
+      await refresh(n); renderProps(); placePin(fromY); toast(`Hold released. v${r.serving} is live.`);
+      return;
+    }
+    const d = t.closest("[data-del]");
+    if (d) {
+      const n = d.dataset.del;
+      if (!confirm(`${n}.${ZONE} will stop serving and the name stays taken. Delete it?`)) return;
+      await api("DELETE", `${API}/${n}`, { name: n });
+      forget(n); open = null; renderProps(); renderDir(); toast(`${n}.${ZONE} is deleted.`);
+      loadDir().catch(() => {});
+      return;
+    }
+  } catch (err) { toast(err.message || String(err)); return; }
+
+  const r = t.closest("[data-replace]");
+  if (r) { nameInput.value = r.dataset.replace; verdict(); resetStage(); $("#drop").scrollIntoView({ block: "center", behavior: REDUCE.matches ? "auto" : "smooth" }); toast("Drop the new files."); return; }
+
   const tab = t.closest(".sdktabs button");
   if (tab) {
     for (const b of document.querySelectorAll(".sdktabs button")) b.setAttribute("aria-selected", String(b === tab));
     for (const pane of document.querySelectorAll(".sdkpane")) pane.hidden = pane.id !== `sdk-${tab.dataset.t}`;
     return;
   }
-  if (t.id === "dirmore") { loadDir(more).catch(() => {}); }
+
+  if (t.id === "dirmore") { loadDir(more).catch(err => toast(err.message || String(err))); return; }
+
+  if (t.id === "again") { resetStage(); nameInput.focus(); }
 });
 
-renderDir();
-loadDir().catch(() => {
-  $("#dir").innerHTML = `<div class="hint">The list of sites is not available.</div>`;
-  $("#jackText").textContent = "offline";
-  $("#jack").classList.add("on");
+/* linking: the token is tried against the site before it is written down, so a
+   typed token that opens nothing never becomes a row that says it does */
+$("#link").addEventListener("submit", async e => {
+  e.preventDefault();
+  const name = $("#linkname").value.trim().toLowerCase();
+  const token = $("#linktoken").value.trim();
+  if (!name || !token) { toast("Enter the name and the token."); return; }
+  /* the name must be a name: a typed `/` asks for one site and files the token under another */
+  const v = check(name);
+  if (!v.ok) { toast(v.why); return; }
+  try {
+    await api("GET", `${API}/${encodeURIComponent(name)}`, { name, token });
+  } catch (err) {
+    toast(err.status === 404 ? `${name}.${ZONE} is not claimed.` : err.message);
+    return;
+  }
+  tokens[name] = token; store();
+  await refresh(name);
+  $("#linkname").value = ""; $("#linktoken").value = "";
+  open = name; renderProps(name); renderDir();
+  toast(`${name}.${ZONE} is linked.`);
 });
+
+let toastEl;
+let toastTimer;
+function toast(msg) {
+  clearTimeout(toastTimer); toastEl?.remove();
+  const el = document.createElement("div");
+  toastEl = el;
+  el.className = "toast"; el.textContent = msg; el.setAttribute("role", "status");
+  document.body.append(el);
+  toastTimer = setTimeout(() => { el.classList.add("bye"); setTimeout(() => el.remove(), 180); }, 2800);
+}
+
+resetStage(); renderProps(); renderDir(); verdict();
+loadAll().catch(() => { $("#jackText").textContent = "offline"; $("#jack").classList.add("on"); });
+loadDir().catch(() => { $("#dir").innerHTML = `<div class="hint">The list of sites is not available.</div>`; });
+document.fonts?.ready.then(() => placePin());
 </script>
 </body>
 </html>

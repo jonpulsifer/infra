@@ -11,7 +11,7 @@ import { describe, expect, test } from 'bun:test';
 import { SQL } from 'bun';
 import { MAX_BULK } from '../../server/documents.ts';
 import { sitePassword } from '../../server/pg.ts';
-import { ask, idToken, withServer, ZONE } from '../harness/server.ts';
+import { ask, withServer, ZONE } from '../harness/server.ts';
 
 const kthx = withServer();
 
@@ -29,18 +29,17 @@ interface Site {
 
 async function claimed(label: string): Promise<Site> {
   const name = kthx().name(label);
-  const token = await idToken(`${name}@example.com`);
   const response = await kthx().fetch(
     ask('/api/sites', {
       method: 'POST',
-      token,
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ name }),
       address: address(),
     }),
   );
   expect(response.status).toBe(201);
-  return { name, host: `${name}.${ZONE}`, token };
+  const body = (await response.json()) as { token: string };
+  return { name, host: `${name}.${ZONE}`, token: body.token };
 }
 
 function at(site: Site, path: string, init: Parameters<typeof ask>[1] = {}) {
@@ -225,7 +224,6 @@ describe('provisioning', () => {
     const again = await kthx().fetch(
       ask('/api/sites', {
         method: 'POST',
-        token: site.token,
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ name: site.name }),
         address: address(),

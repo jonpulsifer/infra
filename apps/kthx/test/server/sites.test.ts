@@ -20,7 +20,7 @@ import {
   nameProblem,
   RESERVED_NAMES,
 } from '../../server/sites.ts';
-import { ask, idToken, subOf, withServer, ZONE } from '../harness/server.ts';
+import { ask, withServer, ZONE } from '../harness/server.ts';
 
 const kthx = withServer();
 
@@ -46,7 +46,6 @@ async function claim(name: string, init: Parameters<typeof ask>[1] = {}) {
   const response = await kthx().fetch(
     ask('/api/sites', {
       method: 'POST',
-      token: await idToken(`${name}@example.com`),
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ name }),
       address: address(),
@@ -57,17 +56,16 @@ async function claim(name: string, init: Parameters<typeof ask>[1] = {}) {
 }
 
 /**
- * A site of ours: claimed, with the identity that owns it in hand.
+ * A site of ours: claimed, with its token in hand.
  *
- * The label is prefixed, because a claim creates a Postgres database and a
+ * The label is prefixed, because a claim now creates a Postgres database and a
  * role of that name on the server this suite shares with everything else.
- * `token` is the owner's ID token — one credential for every route of theirs.
  */
 async function mine(label = 'notes') {
   const name = kthx().name(label);
   const claimed = await claim(name);
   expect(claimed.status).toBe(201);
-  return { name, token: await idToken(`${name}@example.com`) };
+  return { name, token: claimed.body.token as string };
 }
 
 async function upload(
@@ -143,59 +141,21 @@ describe('names', () => {
 });
 
 describe('claiming', () => {
-  test('a free name answers 201 with no token, and names its owner', async () => {
+  test('a free name answers 201 with the token, shown once', async () => {
     const name = kthx().name('notes');
     const claimed = await claim(name);
     expect(claimed.status).toBe(201);
     expect(claimed.body.name).toBe(name);
     expect(claimed.body.url).toBe(`https://${name}.kthx.test`);
-    // Nothing is shown once any more: the account is the credential.
-    expect(claimed.body.token).toBeUndefined();
+    expect(claimed.body.token).toMatch(/^[A-Za-z0-9_-]{43}$/);
 
-    const [row] = await kthx().sql`
-      select owner_sub, owner_email, token_hash, provisioned_at
-      from sites where name = ${name}
-    `;
+    // The token is not stored: nothing but its hash is on the row.
+    const [row] = await kthx()
+      .sql`select token_hash, provisioned_at from sites where name = ${name}`;
     // And the name is a database of its own before it is a website.
     expect(row.provisioned_at).not.toBeNull();
-    expect(row.token_hash).toBeNull();
-    expect(row.owner_email).toBe(`${name}@example.com`);
-    expect(row.owner_sub).toBe(subOf(`${name}@example.com`));
-  });
-
-  test('an anonymous claim is 401, and the message names the command line', async () => {
-    const name = kthx().name('anon');
-    const refused = await kthx().fetch(
-      ask('/api/sites', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ name }),
-        address: address(),
-      }),
-    );
-    expect(refused.status).toBe(401);
-    const body = (await refused.json()) as { code: string; message: string };
-    expect(body.code).toBe('UNAUTHENTICATED');
-    expect(body.message).toContain('kthx');
-    // And it claimed nothing.
-    const rows = await kthx().sql`select name from sites where name = ${name}`;
-    expect(rows.length).toBe(0);
-  });
-
-  test('a token that does not verify claims nothing', async () => {
-    const name = kthx().name('forged');
-    for (const token of [
-      await idToken('stranger@example.com', { unpublished: true }),
-      await idToken('stranger@example.com', {
-        claims: { iss: 'https://accounts.example.com' },
-      }),
-      'not-even-a-jwt',
-    ]) {
-      const refused = await claim(name, { token });
-      expect(refused.status).toBe(401);
-    }
-    const rows = await kthx().sql`select name from sites where name = ${name}`;
-    expect(rows.length).toBe(0);
+    expect(row.token_hash).toMatch(/^[0-9a-f]{64}$/);
+    expect(row.token_hash).not.toBe(claimed.body.token);
   });
 
   test('a reserved, invalid, or taken name is refused by code', async () => {
@@ -263,7 +223,6 @@ describe('claiming', () => {
       last = await kthx().fetch(
         ask('/api/sites', {
           method: 'POST',
-          token: await idToken('burst@example.com'),
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify({ name: kthx().name(`burst-${i}`) }),
           address: from,
@@ -295,7 +254,8 @@ describe('ownership', () => {
         body: { code: 'FORBIDDEN' },
       },
     );
-    // A free name is 404 even unauthenticated: that pair is the taken-probe.
+    // A free name is 404 even unauthenticated: that pair is the landing page's
+    // taken-probe.
     expect((await inspect('nobody')).status).toBe(404);
     expect((await inspect('%E0', owned.token)).status).toBe(404);
   });
@@ -607,7 +567,6 @@ describe('the directory', () => {
   interface Item {
     readonly name: string;
     readonly url: string;
-    readonly owner: string | null;
     readonly serving: number | null;
     readonly releases: number;
     readonly at: string;
@@ -659,8 +618,6 @@ describe('the directory', () => {
     expect(served).toEqual({
       name: second.name,
       url: `https://${second.name}.${ZONE}`,
-      // Attribution is the point of the identity: the address is public.
-      owner: `${second.name}@example.com`,
       serving: 1,
       releases: 1,
       at: '2026-08-02T00:00:00.000Z',
@@ -669,12 +626,11 @@ describe('the directory', () => {
     expect(listed.body.items).toContainEqual(
       expect.objectContaining({ name: first.name, serving: null, releases: 0 }),
     );
-    // Running a site is what the credential is for: none of it is here.
+    // Owning a site is what the bearer is for: none of it is here.
     for (const item of listed.body.items) {
       expect(Object.keys(item).sort()).toEqual([
         'at',
         'name',
-        'owner',
         'releases',
         'serving',
         'url',
