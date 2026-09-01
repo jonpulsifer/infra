@@ -45,6 +45,7 @@ import {
   CLAIM_BUCKET,
   DailyCap,
   DIRECTORY_BUCKET,
+  NUKE_ATTEMPTS,
   secondsToMidnight,
   TokenBucket,
 } from './limits.ts';
@@ -78,6 +79,7 @@ export const BODY_TIMEOUT_MS = 120_000;
 const MAX_CLAIM_BYTES = 64 * 1024;
 
 const claims = new TokenBucket(CLAIM_BUCKET);
+const nukeAttempts = new TokenBucket(NUKE_ATTEMPTS);
 const claimsPerDay = new DailyCap(MAX_CLAIMS_PER_DAY);
 const uploadsPerDay = new DailyCap(MAX_UPLOADS_PER_DAY);
 
@@ -338,8 +340,10 @@ function opensZone(request: Request, key: string): boolean {
  *
  * With no `KTHX_ADMIN_KEY` this answers 404, the same as a path this server
  * does not have — a deployment without the key does not advertise that a nuke
- * exists. A wrong key is 403 and spends no claim allowance: an operator who
- * mistypes it must not then be rate limited out of the demo.
+ * exists. A wrong key is 403 and spends no claim allowance — an operator who
+ * mistypes it must not then be rate limited out of the demo — but wrong keys
+ * do fill `NUKE_ATTEMPTS`, process-wide, so a short passphrase cannot be
+ * guessed at wire speed; past it every attempt is 429 until the minute passes.
  */
 async function nuke(request: Request, ctx: Ctx): Promise<Response> {
   const key = ctx.config.adminKey;
@@ -347,7 +351,13 @@ async function nuke(request: Request, ctx: Ctx): Promise<Response> {
   if (!sameOrigin(request, ctx.host, ctx.port)) {
     return refuse('FORBIDDEN', ctx.id);
   }
-  if (!opensZone(request, key)) return refuse('FORBIDDEN', ctx.id);
+  if (!opensZone(request, key)) {
+    // Wrong keys fill a bucket of their own: the key may be a short passphrase
+    // and this is a public route. A right key is checked first and never held.
+    return nukeAttempts.spend('zone')
+      ? refuse('RATE_LIMITED', ctx.id, retryAfter(60))
+      : refuse('FORBIDDEN', ctx.id);
+  }
 
   // Deleted rows as well: taking those is what frees their names.
   const rows = (await ctx.sql`select name from sites order by name`) as {
