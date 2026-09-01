@@ -36,9 +36,11 @@ export interface Config {
    * answers 404 like a path this server does not have, and the landing page's
    * control stays hidden.
    *
-   * Not length-checked at boot, unlike the two HMAC keys: those are minted
-   * here and refused when short, this one is typed into 1Password by hand and
-   * a whole zone must not stop serving over it. ≥ 32 bytes is the contract.
+   * A key shorter than the contract's 32 bytes is refused the same way an
+   * unset one is — `null`, a 404, one line on stderr — rather than trusted or
+   * thrown on. Throwing would take a whole zone down over a hand-typed
+   * 1Password field, and trusting it would leave a destructive, unmetered
+   * route behind something guessable.
    */
   readonly adminKey: string | null;
   /**
@@ -103,8 +105,11 @@ function positive(raw: string | undefined, fallback: number): number {
   return Number.isFinite(asked) && asked > 0 ? asked : fallback;
 }
 
+const byteLength = (value: string): number =>
+  new TextEncoder().encode(value).byteLength;
+
 function longEnough(name: string, value: string): string {
-  if (new TextEncoder().encode(value).byteLength < KEY_BYTES) {
+  if (byteLength(value) < KEY_BYTES) {
     throw new ConfigError(`${name} is shorter than ${KEY_BYTES} bytes`);
   }
   return value;
@@ -112,6 +117,12 @@ function longEnough(name: string, value: string): string {
 
 export function readConfig(env: Env = Bun.env): Config {
   const previous = env.KTHX_ME_KEY_PREVIOUS?.trim();
+  const admin = env.KTHX_ADMIN_KEY?.trim() ?? '';
+  if (admin !== '' && byteLength(admin) < KEY_BYTES) {
+    console.error(
+      `KTHX_ADMIN_KEY is shorter than ${KEY_BYTES} bytes; the nuke stays closed`,
+    );
+  }
   return {
     zone: env.KTHX_ZONE?.trim().toLowerCase() || 'kthx.dev',
     bucket: env.KTHX_BUCKET?.trim() || null,
@@ -123,7 +134,7 @@ export function readConfig(env: Env = Bun.env): Config {
         ? null
         : longEnough('KTHX_ME_KEY_PREVIOUS', previous),
     pgKey: longEnough('KTHX_PG_KEY', required(env, 'KTHX_PG_KEY')),
-    adminKey: env.KTHX_ADMIN_KEY?.trim() || null,
+    adminKey: byteLength(admin) >= KEY_BYTES ? admin : null,
     pgPrefix: 'kthx',
     maxDbBytes: 256 * 1024 * 1024,
     maxCollections: 256,

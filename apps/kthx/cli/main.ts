@@ -84,11 +84,18 @@ function remember(name: string, token: string): void {
 }
 
 function forget(name: string): void {
+  forgetWhere((known) => {
+    delete known[name];
+  });
+}
+
+/** Rewrite this origin's tokens, when there are any to rewrite. */
+function forgetWhere(edit: (known: Record<string, string>) => void): void {
   const path = sitesFile();
   const tokens = readJson<Tokens>(path, {});
   const known = tokens[origin()];
   if (known === undefined) return;
-  delete known[name];
+  edit(known);
   writeFileSync(path, `${JSON.stringify(tokens, null, 2)}\n`, { mode: 0o600 });
   chmodSync(path, 0o600);
 }
@@ -521,6 +528,10 @@ export async function nuke(
   const counts = await api<{ deleted: number; failed: number }>('/api/sites', {
     method: 'DELETE',
     token: key,
+  });
+  // Every token this machine holds is now a token for a name anyone may claim.
+  forgetWhere((known) => {
+    for (const name of Object.keys(known)) delete known[name];
   });
   console.log(
     `  ${counts.deleted} deleted${counts.failed ? `, ${counts.failed} failed` : ''}; every name is claimable again`,

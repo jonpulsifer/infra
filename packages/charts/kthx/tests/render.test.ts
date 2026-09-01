@@ -25,6 +25,7 @@ const VALUES = {
   image: 'ghcr.io/jonpulsifer/kthx@sha256:feed',
   bucket: 'bluenose-kthx',
   envFromSecret: 'kthx-env',
+  adminSecret: 'kthx-admin',
   node: 'oldschool',
   gcp: {
     audience: '//iam.googleapis.com/projects/1/locations/global/x',
@@ -130,6 +131,26 @@ describe('the GCP credential', () => {
     expect(document.credential_source.file).toBe(
       `${mount.mountPath}/${tokenPath}`,
     );
+  });
+});
+
+describe('the operator key', () => {
+  test('is a second, optional envFrom — a missing Secret must not stop the pod', async () => {
+    const envFrom = one(await render(), 'Deployment').spec.template.spec
+      .containers[0].envFrom;
+    expect(envFrom.map((e: any) => e.secretRef.name)).toEqual([
+      'kthx-env',
+      'kthx-admin',
+    ]);
+    expect(envFrom[0].secretRef.optional).toBeUndefined();
+    expect(envFrom[1].secretRef.optional).toBe(true);
+  });
+
+  test('is absent when unset, which is the nuke turned off', async () => {
+    const objects = await render({ ...VALUES, adminSecret: '' });
+    const envFrom = one(objects, 'Deployment').spec.template.spec.containers[0]
+      .envFrom;
+    expect(envFrom).toHaveLength(1);
   });
 });
 
