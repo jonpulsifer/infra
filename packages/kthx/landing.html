@@ -1006,8 +1006,9 @@ $("#nuke").addEventListener("click", async () => {
     /* the tokens are now tokens for nothing */
     for (const name of Object.keys(tokens)) delete tokens[name];
     store(); sites = []; open = null; renderProps();
-    listed = []; more = null; renderDir();
-    toast(`${counts.deleted} site${counts.deleted === 1 ? "" : "s"} deleted.`);
+    /* re-read rather than assert: a site that refused to drop is still live */
+    listed = []; more = null; renderDir(); loadDir().catch(() => {});
+    toast(`${counts.deleted} site${counts.deleted === 1 ? "" : "s"} deleted${counts.failed ? `, ${counts.failed} failed` : ""}.`);
   } catch (err) {
     /* the key this tab holds is not one: forget it rather than keep offering it */
     if (err.status === 403 || err.status === 404) forgetAdmin();

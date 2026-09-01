@@ -112,6 +112,9 @@ describe('the apex', () => {
     const icon = await get(ZONE, '/favicon.ico');
     expect(icon.status).toBe(200);
     expect(icon.headers.get('content-type')).toBe('image/x-icon');
+    // Built into the process, not served out of a release: it caches like the
+    // SDK rather than revalidating on every page load of every site.
+    expect(icon.headers.get('cache-control')).toBe('public, max-age=300');
   });
 
   test('answers /healthz, retires /kthx/, and 404s an unknown API path', async () => {
