@@ -22,7 +22,6 @@ import { readdirSync, statSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { ME_COOKIE } from '../server/me.ts';
 import { decodePath, notHere, staticResponse } from '../server/serve.ts';
-import { REACH_MS, reach, SEND_MS, seconds, timedOut } from './reach.ts';
 import { included } from './tar.ts';
 
 export const PORT = 4321;
@@ -37,11 +36,11 @@ export interface Site {
   /** The claimed name. */
   readonly name: string;
   /**
-   * The owner's ID token, minted on demand and attached to owner-scoped calls
-   * and to nothing else. A machine with no Google login still serves the files
-   * and still proxies everything a visitor may call.
+   * The bearer, attached to owner-scoped calls and to nothing else. Absent on a
+   * machine that never claimed the name — the loop still serves the files and
+   * still proxies everything a visitor may call.
    */
-  readonly identity?: (() => Promise<string>) | undefined;
+  readonly token?: string | undefined;
   /** `https://<name>.kthx.dev` — where `/api` and `/files` really are. */
   readonly site: string;
 }
@@ -60,18 +59,12 @@ interface SocketData {
   readonly inbound: string[];
   tab: Bun.ServerWebSocket<SocketData> | null;
   closed: boolean;
-  /** Why the site's end went, when there is more to say than "it closed". */
-  why: string | null;
 }
 
 export function dev(
   dir: string,
   site: Site,
   port = PORT,
-  /** How long the site gets to answer before the loop stops waiting on it. */
-  deadline = REACH_MS,
-  /** The same, for a model call, which is answered when it is thought out. */
-  send = SEND_MS,
 ): Bun.Server<SocketData> {
   const root = unwrap(resolve(dir));
 
@@ -88,8 +81,8 @@ export function dev(
       if (path === null) return notHere('localhost', 'kthx.dev', 404, 'dev');
       if (reserved(path)) {
         return path === '/api/ws'
-          ? upgrade(request, server, site, deadline)
-          : proxy(request, path, site, deadline, send);
+          ? upgrade(request, server, site)
+          : proxy(request, path, site);
       }
       if (request.method !== 'GET' && request.method !== 'HEAD') {
         return Response.json(
@@ -132,10 +125,8 @@ export function dev(
   console.log(
     `  /api and /files go to ${site.site} — this is ${site.name}'s live database, not a copy`,
   );
-  if (site.identity === undefined) {
-    console.log(
-      '  no identity here — /api/mcp and DELETE /api/db/:c answer 401',
-    );
+  if (site.token === undefined) {
+    console.log('  no token here — /api/mcp and DELETE /api/db/:c answer 401');
   }
   return server;
 }
@@ -158,9 +149,9 @@ const HOP = [
 ];
 
 /**
- * The owner's token opens exactly two things on a site host. Everywhere else a
- * page is a visitor, and sending it would give the loop a quieter rate limit
- * than production — the one difference `kthx dev` must not have.
+ * The owner bearer opens exactly two things on a site host. Everywhere else a
+ * page is a visitor, and sending the token would give the loop a quieter rate
+ * limit than production — the one difference `kthx dev` must not have.
  */
 function ownerScoped(method: string, path: string): boolean {
   return (
@@ -173,8 +164,6 @@ async function proxy(
   request: Request,
   path: string,
   site: Site,
-  deadline: number,
-  send: number,
 ): Promise<Response> {
   const target = new URL(request.url);
   const upstream = new URL(site.site);
@@ -183,53 +172,26 @@ async function proxy(
 
   const headers = new Headers(request.headers);
   for (const header of HOP) headers.delete(header);
-  // A proxy hands the bytes on; it does not negotiate an encoding of its own.
-  headers.set('accept-encoding', 'identity');
   if (headers.has('origin')) headers.set('origin', site.site);
   const cookie = visitorCookie(headers.get('cookie'));
   if (cookie === null) headers.delete('cookie');
   else headers.set('cookie', cookie);
-  if (site.identity !== undefined && ownerScoped(request.method, path)) {
-    // A login that has gone stale costs the two owner-scoped routes a 401, not
-    // the whole loop: everything else on this hop is a visitor's call.
-    const token = await site.identity().catch(() => null);
-    if (token !== null) headers.set('authorization', `Bearer ${token}`);
+  if (site.token !== undefined && ownerScoped(request.method, path)) {
+    headers.set('authorization', `Bearer ${site.token}`);
   }
 
-  // A model call is answered when the model has finished thinking, which is
-  // minutes on a long completion — the read bound would refuse work that is
-  // going fine. Nothing else on the loop earns that patience: a document write
-  // to a route that has gone dark should fail as fast as a read does.
-  const bound = path.startsWith('/api/ai') ? send : deadline;
-  const answer = await reach(
-    target,
-    {
-      method: request.method,
-      headers,
-      body: request.body,
-      redirect: 'manual',
-      // A streamed body needs the half-duplex opt-out; an upload is one.
-      duplex: 'half',
-    } as RequestInit,
-    bound,
-    // The answer is handed to the tab as it arrives; how long the site means it
-    // to be — a completion streamed token by token — is not this hop's call.
-    true,
-  ).catch((cause: Error) =>
-    // A site that never answers is the loop's worst failure: nothing prints,
-    // the tab spins, and the network is the last place anyone looks. Say so.
-    timedOut(cause)
-      ? Response.json(
-          {
-            code: 'UNREACHABLE',
-            message: `${site.site} did not answer in ${seconds(bound)}`,
-          },
-          { status: 504, headers: { 'cache-control': 'no-store' } },
-        )
-      : Response.json(
-          { code: 'UNREACHABLE', message: `${site.site}: ${cause.message}` },
-          { status: 502, headers: { 'cache-control': 'no-store' } },
-        ),
+  const answer = await fetch(target, {
+    method: request.method,
+    headers,
+    body: request.body,
+    redirect: 'manual',
+    // A streamed body needs the half-duplex opt-out; an upload is one.
+    duplex: 'half',
+  } as RequestInit).catch((cause: Error) =>
+    Response.json(
+      { code: 'UNREACHABLE', message: `${site.site}: ${cause.message}` },
+      { status: 502, headers: { 'cache-control': 'no-store' } },
+    ),
   );
 
   const out = new Headers(answer.headers);
@@ -270,7 +232,6 @@ function upgrade(
   request: Request,
   server: Bun.Server<SocketData>,
   site: Site,
-  deadline: number,
 ): Response | undefined {
   const target = new URL(site.site);
   target.protocol = target.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -291,22 +252,8 @@ function upgrade(
     inbound: [],
     tab: null,
     closed: false,
-    why: null,
   };
-  // The same silence the proxy guards against, on the socket: an upgrade to a
-  // site that has gone dark neither opens nor fails, and a tab left holding a
-  // socket that does neither is the loop hanging by another name.
-  const timer = setTimeout(() => {
-    data.closed = true;
-    // Kept on the data as well as sent: the tab's socket may not have been
-    // handed over yet, and `pipe` closes it with this rather than with a bare
-    // 1000, which would tell the page the site answered and then said goodbye.
-    data.why = `${site.site} did not answer in ${seconds(deadline)}`;
-    data.tab?.close(1013, data.why);
-    upstream.close();
-  }, deadline);
   upstream.onopen = () => {
-    clearTimeout(timer);
     for (const frame of data.pending.splice(0)) upstream.send(frame);
   };
   upstream.onmessage = (event: MessageEvent) => {
@@ -315,7 +262,6 @@ function upgrade(
     else data.tab.send(frame);
   };
   const gone = () => {
-    clearTimeout(timer);
     data.closed = true;
     data.tab?.close();
   };
@@ -323,7 +269,6 @@ function upgrade(
   upstream.onerror = gone;
   if (server.upgrade(request, { data })) return undefined;
 
-  clearTimeout(timer);
   upstream.close();
   return Response.json(
     {
@@ -338,9 +283,7 @@ function upgrade(
 function pipe(socket: Bun.ServerWebSocket<SocketData>): void {
   socket.data.tab = socket;
   for (const frame of socket.data.inbound.splice(0)) socket.send(frame);
-  if (!socket.data.closed) return;
-  if (socket.data.why === null) socket.close();
-  else socket.close(1013, socket.data.why);
+  if (socket.data.closed) socket.close();
 }
 
 // --- files ------------------------------------------------------------------

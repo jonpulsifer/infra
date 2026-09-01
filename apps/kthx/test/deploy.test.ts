@@ -20,9 +20,7 @@ import {
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { readBundle } from '@repo/archive/bundle';
-import { forgetIdentity } from '../cli/identity.ts';
 import {
-  adopt,
   deploy,
   init,
   KthxError,
@@ -33,12 +31,7 @@ import {
   rollback,
   siteOrigin,
   sitesFile,
-  whoami,
 } from '../cli/main.ts';
-
-/** The ID token the CLI is told to send, and the address the stub reads off it. */
-const IDENTITY = 'stub.identity.token';
-const OWNER = 'operator@example.com';
 
 interface Upload {
   readonly name: string;
@@ -50,9 +43,6 @@ interface Upload {
 const NAME = /^[a-z]+-[a-z]+-\d\d$/;
 const calls: { method: string; path: string; body: unknown }[] = [];
 const uploads: Upload[] = [];
-/** Names this identity owns. */
-const owned = new Set<string>();
-/** Names still carrying a pre-identity bearer, which is what `adopt` spends. */
 const tokens = new Map<string, string>();
 const deleted: string[] = [];
 let n = 0;
@@ -73,27 +63,12 @@ const stub = Bun.serve({
         ? new Response(null, { status: 503 })
         : new Response(SKILL);
     }
-    const bearer = request.headers.get('authorization')?.slice(7) ?? null;
-    const who = bearer === IDENTITY ? OWNER : null;
-    const unauthenticated = Response.json(
-      { code: 'UNAUTHENTICATED', message: 'this needs a google identity' },
-      { status: 401 },
-    );
-    if (pathname === '/api/whoami') {
-      calls.push({ method: 'GET', path: pathname, body: null });
-      return who === null ? unauthenticated : Response.json({ email: who });
-    }
     if (request.method === 'GET' && pathname === '/api/sites') {
       calls.push({ method: 'GET', path: pathname, body: null });
-      const listed = [
-        ...[...owned].map((claimed) => [claimed, OWNER] as const),
-        ...[...tokens.keys()].map((claimed) => [claimed, null] as const),
-      ];
       return Response.json({
-        items: listed.map(([claimed, owner]) => ({
+        items: [...tokens.keys()].map((claimed) => ({
           name: claimed,
           url: `https://${claimed}.kthx.test`,
-          owner,
           serving: 3,
           releases: 3,
           at: '2026-08-31T00:00:00.000Z',
@@ -104,37 +79,27 @@ const stub = Bun.serve({
     if (request.method === 'POST' && pathname === '/api/sites') {
       const body = (await request.json()) as { name: string };
       calls.push({ method: 'POST', path: pathname, body });
-      if (who === null) return unauthenticated;
-      if (refuseClaims-- > 0 || owned.has(body.name) || body.name === 'taken') {
+      if (
+        refuseClaims-- > 0 ||
+        tokens.has(body.name) ||
+        body.name === 'taken'
+      ) {
         return Response.json(
           { code: 'TAKEN', message: `${body.name} is taken` },
           { status: 409 },
         );
       }
-      owned.add(body.name);
-      // No token: the account that claimed the name is what opens it.
+      const token = `tok-${body.name}`;
+      tokens.set(body.name, token);
       return Response.json(
-        { name: body.name, url: `https://${body.name}.kthx.test` },
+        { name: body.name, url: `https://${body.name}.kthx.test`, token },
         { status: 201 },
       );
     }
-    if (name !== undefined && act === 'adopt' && request.method === 'POST') {
-      const body = (await request.json()) as { token?: string };
-      calls.push({ method: 'POST', path: pathname, body });
-      if (who === null) return unauthenticated;
-      if (tokens.get(name) !== body.token) {
-        return Response.json(
-          { code: 'FORBIDDEN', message: 'that does not open this site' },
-          { status: 403 },
-        );
-      }
-      tokens.delete(name);
-      owned.add(name);
-      return new Response(null, { status: 204 });
-    }
-    if (name === undefined || who === null || !owned.has(name)) {
+    const bearer = request.headers.get('authorization')?.slice(7) ?? null;
+    if (name === undefined || tokens.get(name) !== bearer) {
       return Response.json(
-        { code: 'FORBIDDEN', message: 'that does not open this site' },
+        { code: 'FORBIDDEN', message: 'that token does not open this site' },
         { status: 403 },
       );
     }
@@ -175,7 +140,6 @@ const stub = Bun.serve({
       return Response.json({
         name,
         url: `https://${name}.kthx.test`,
-        owner: OWNER,
         serving: 3,
         held: false,
         releases: [3, 2, 1].map((r) => ({
@@ -233,14 +197,9 @@ const cwd = process.cwd();
 beforeEach(() => {
   process.env.KTHX_ORIGIN = `${stub.url.origin}/`;
   process.env.XDG_CONFIG_HOME = mkdtempSync(join(tmpdir(), 'kthx-config-'));
-  // The one thing standing in for `gcloud auth print-identity-token`; the
-  // shell-out itself has its own tests below.
-  process.env.KTHX_IDENTITY_TOKEN = IDENTITY;
-  forgetIdentity();
   calls.length = 0;
   uploads.length = 0;
   deleted.length = 0;
-  owned.clear();
   tokens.clear();
   n = 0;
   refuseClaims = 0;
@@ -251,7 +210,7 @@ beforeEach(() => {
 afterEach(() => process.chdir(cwd));
 
 describe('deploy', () => {
-  test('mints a name, writes down no token, and uploads the tar', async () => {
+  test('mints a name, keeps the token out of the directory, and uploads the tar', async () => {
     const dir = site({
       'index.html': '<h1>hi</h1>',
       'app.js': 'x',
@@ -264,8 +223,9 @@ describe('deploy', () => {
     expect(name).toMatch(NAME);
     expect(first.url).toBe(`https://${name}.kthx.test`);
 
-    // A claim mints nothing to store: the account is the credential.
-    expect(() => statSync(sitesFile())).toThrow();
+    const stored = JSON.parse(readFileSync(sitesFile(), 'utf8'));
+    expect(stored[stub.url.origin][name]).toBe(`tok-${name}`);
+    expect(statSync(sitesFile()).mode & 0o777).toBe(0o600);
 
     expect(uploads).toHaveLength(1);
     expect(uploads[0]!.filename).toBe('site.tar.gz');
@@ -274,12 +234,8 @@ describe('deploy', () => {
     // The second deploy reuses the name and claims nothing.
     const second = await deploy('.');
     expect(second.n).toBe(2);
-    expect(
-      calls.filter(
-        (call) => call.method === 'POST' && call.path === '/api/sites',
-      ),
-    ).toHaveLength(1);
-    expect(uploads[1]!.bearer).toBe(IDENTITY);
+    expect(calls.filter((call) => call.path === '/api/sites')).toHaveLength(1);
+    expect(uploads[1]!.bearer).toBe(`tok-${name}`);
   });
 
   test('rolls the dice again when a minted name is taken', async () => {
@@ -287,9 +243,7 @@ describe('deploy', () => {
     const dir = site();
     process.chdir(dir);
     await deploy('.');
-    const claims = calls.filter(
-      (call) => call.method === 'POST' && call.path === '/api/sites',
-    );
+    const claims = calls.filter((call) => call.path === '/api/sites');
     expect(claims).toHaveLength(2);
     expect(claims[0]!.body).not.toEqual(claims[1]!.body);
     expect(JSON.parse(readFileSync(join(dir, 'kthx.json'), 'utf8'))).toEqual(
@@ -297,7 +251,7 @@ describe('deploy', () => {
     );
   });
 
-  test('--name claims that name, and refuses to rename or re-take one', async () => {
+  test('--name claims that name, reuses a known one, and refuses to rename', async () => {
     const dir = site();
     process.chdir(dir);
     await deploy('.', { name: 'notes' });
@@ -314,13 +268,11 @@ describe('deploy', () => {
       code: 'NAMED',
     });
 
-    // A name is a claim on the apex, not a note on this machine: asking for
-    // one that is already claimed is refused, ours or not.
+    // A name this machine already holds a token for is reused, not re-claimed.
     const again = site();
     process.chdir(again);
-    await expect(deploy('.', { name: 'notes' })).rejects.toMatchObject({
-      code: 'TAKEN',
-    });
+    await deploy('.', { name: 'notes' });
+    expect(calls.filter((call) => call.path === '/api/sites')).toHaveLength(2);
   });
 
   test('deploys a subdirectory under the project root’s name', async () => {
@@ -337,19 +289,17 @@ describe('deploy', () => {
     expect(uploads[0]!.name).toBe(name);
   });
 
-  test("fails with the server's code, on a site that is not ours", async () => {
+  test("fails with the server's code, and without a token", async () => {
     const dir = site({ 'readme.md': 'no index' });
     process.chdir(dir);
     const error = await deploy('.').catch((cause: unknown) => cause);
     expect(error).toBeInstanceOf(KthxError);
     expect((error as KthxError).code).toBe('NO_INDEX');
 
-    // A `kthx.json` naming somebody else's site is a 403 now, not a missing
-    // note on this machine: the credential is the same one either way.
     const orphan = site();
     writeFileSync(join(orphan, 'kthx.json'), '{"name":"lost"}');
     process.chdir(orphan);
-    await expect(deploy('.')).rejects.toMatchObject({ code: 'FORBIDDEN' });
+    await expect(deploy('.')).rejects.toMatchObject({ code: 'NO_TOKEN' });
   });
 });
 
@@ -421,9 +371,15 @@ describe('rollback, release, ls and rm', () => {
 
     await rm('.', () => 'nope');
     expect(deleted).toEqual([]);
+    expect(
+      JSON.parse(readFileSync(sitesFile(), 'utf8'))[stub.url.origin].notes,
+    ).toBe('tok-notes');
 
     await rm('.', () => 'notes');
     expect(deleted).toEqual(['notes']);
+    expect(
+      JSON.parse(readFileSync(sitesFile(), 'utf8'))[stub.url.origin],
+    ).toEqual({});
   });
 
   test('every command but init, deploy and dev needs a name', async () => {
@@ -434,32 +390,28 @@ describe('rollback, release, ls and rm', () => {
     }
   });
 
-  test('ls with no kthx.json lists what this account owns', async () => {
+  test('ls with no kthx.json lists every site this machine has a token for', async () => {
     process.chdir(site());
     await deploy('.', { name: 'notes' });
     process.chdir(site());
     await deploy('.', { name: 'other' });
-    // A name somebody else still holds with a bearer: in the directory, and
-    // not in this listing.
-    tokens.set('theirs', 'tok-theirs');
     // A directory that is not a site: the question is "which did I claim?",
-    // and the directory carries the answer now.
+    // and sites.json is the answer.
     process.chdir(site());
 
     const printed = await capture(() => ls('.'));
-    expect(printed).toContain(OWNER);
     expect(printed).toContain('notes');
     expect(printed).toContain('other');
-    expect(printed).not.toContain('theirs');
-    // One walk of the directory, and not one request per name.
-    expect(
-      calls.filter(
-        (call) => call.method === 'GET' && call.path === '/api/sites',
-      ),
-    ).toHaveLength(1);
+    expect(printed).toContain('https://notes.kthx.test');
+    // One GET for each site, and the public directory is not asked for.
     expect(
       calls.filter(
         (call) => call.method === 'GET' && call.path.startsWith('/api/sites/'),
+      ),
+    ).toHaveLength(2);
+    expect(
+      calls.filter(
+        (call) => call.method === 'GET' && call.path === '/api/sites',
       ),
     ).toHaveLength(0);
   });
@@ -493,65 +445,6 @@ describe('rollback, release, ls and rm', () => {
       );
       await expect(ls('.')).rejects.toMatchObject({ code });
     }
-  });
-});
-
-/** `sites.json` as a machine that claimed before identities would have it. */
-function storeToken(name: string, token: string): void {
-  mkdirSync(join(sitesFile(), '..'), { recursive: true, mode: 0o700 });
-  writeFileSync(
-    sitesFile(),
-    JSON.stringify({ [stub.url.origin]: { [name]: token } }),
-  );
-}
-
-describe('identity', () => {
-  test('whoami is the address the apex verified', async () => {
-    expect(await capture(() => whoami())).toContain(OWNER);
-  });
-
-  test('adopt spends the old bearer and forgets it', async () => {
-    const dir = site();
-    writeFileSync(join(dir, 'kthx.json'), '{"name":"legacy"}');
-    process.chdir(dir);
-    // A site claimed before identities: a bearer on the apex, and the same
-    // string in this machine's store.
-    tokens.set('legacy', 'tok-legacy');
-    storeToken('legacy', 'tok-legacy');
-
-    // Until it is adopted, the identity opens nothing on it.
-    await expect(ls('.')).rejects.toMatchObject({ code: 'FORBIDDEN' });
-
-    await adopt('.');
-    expect(owned.has('legacy')).toBe(true);
-    // The string is spent on both sides: the apex dropped it, and so did this.
-    expect(tokens.has('legacy')).toBe(false);
-    expect(
-      JSON.parse(readFileSync(sitesFile(), 'utf8'))[stub.url.origin],
-    ).toEqual({});
-
-    const found = await ls('.');
-    expect(found?.owner).toBe(OWNER);
-  });
-
-  test('adopt with no stored bearer says so rather than asking', async () => {
-    const dir = site();
-    writeFileSync(join(dir, 'kthx.json'), '{"name":"notes"}');
-    process.chdir(dir);
-    await expect(adopt('.')).rejects.toMatchObject({ code: 'NO_TOKEN' });
-    expect(calls.filter((call) => call.path.endsWith('/adopt'))).toHaveLength(
-      0,
-    );
-  });
-
-  test('a wrong bearer adopts nothing', async () => {
-    const dir = site();
-    writeFileSync(join(dir, 'kthx.json'), '{"name":"legacy"}');
-    process.chdir(dir);
-    tokens.set('legacy', 'tok-legacy');
-    storeToken('legacy', 'not-the-token');
-    await expect(adopt('.')).rejects.toMatchObject({ code: 'FORBIDDEN' });
-    expect(owned.has('legacy')).toBe(false);
   });
 });
 

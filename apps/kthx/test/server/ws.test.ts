@@ -8,7 +8,7 @@
  */
 import { describe, expect, test } from 'bun:test';
 import { MAX_SOCKETS_PER_VISITOR } from '../../server/realtime.ts';
-import { ask, idToken, withServer, ZONE } from '../harness/server.ts';
+import { ask, withServer, ZONE } from '../harness/server.ts';
 
 const kthx = withServer();
 
@@ -26,11 +26,9 @@ interface Site {
 
 async function claimed(label: string): Promise<Site> {
   const name = kthx().name(label);
-  const token = await idToken(`${name}@example.com`);
   const response = await kthx().fetch(
     ask('/api/sites', {
       method: 'POST',
-      token,
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ name }),
       address: address(),

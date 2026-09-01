@@ -2,24 +2,17 @@
 # Verify kthx against production, end to end, on a throwaway name.
 #
 # Claim -> upload a zip -> serve -> `/api/me` -> `/api/db` -> `/api/ws` -> a
-# second release -> roll back -> hold -> release -> adopt -> a credential that
-# opens nothing -> delete -> 410 -> the site database is gone. Run it after the
-# HTTPRoute is live; it touches nothing that exists already.
-#
-# A site is owned by a Google account, so this runs as whoever `gcloud auth
-# print-identity-token` answers for. The one thing it cannot do over HTTP is
-# make a site that predates accounts, which is what `adopt` exists for: it
-# writes a bearer hash onto the smoke site's own row over `kubectl cnpg psql`,
-# adopts it back, and asserts both halves. That is the throwaway site's row and
-# nothing else.
+# second release -> roll back -> hold -> release -> a wrong bearer -> delete ->
+# 410 -> the site database is gone. Run it after the HTTPRoute is live and after
+# `scripts/kthx-carry-over.sh`; it touches nothing that exists already.
 #
 # The smoke site is deleted on the way out even when a check fails -- a kthx
 # name is never freed, so an abandoned run would take one forever.
 #
-# Needs: curl, jq, bun, gcloud (signed in), sha256sum, `kthx` on PATH
-# (`bun add -g https://kthx.dev/cli/kthx.tgz`), kubectl with the cnpg plugin,
-# and either zip or python3 for the one zip. `$XDG_CONFIG_HOME` is pointed at a
-# temp directory, so the operator's own `~/.config/kthx` is not touched.
+# Needs: curl, jq, bun, `kthx` on PATH (`bun add -g https://kthx.dev/cli/kthx.tgz`),
+# kubectl with the cnpg plugin, and either zip or python3 for the one zip.
+# `$XDG_CONFIG_HOME` is pointed at a temp directory, so the operator's own
+# `~/.config/kthx/sites.json` is not touched.
 set -euo pipefail
 
 ZONE=${KTHX_ZONE:-kthx.dev}
@@ -37,31 +30,18 @@ die() {
   exit 1
 }
 
-for tool in curl jq bun gcloud sha256sum kthx kubectl; do
+for tool in curl jq bun kthx kubectl; do
   command -v "$tool" >/dev/null || die "$tool is not on PATH"
 done
 
-# The credential every owner call carries. Minted once: it is good for an hour
-# and this run is a minute.
-IDT=$(gcloud auth print-identity-token 2>/dev/null) \
-  || die "gcloud auth print-identity-token failed -- run gcloud auth login"
-[[ -n $IDT ]] || die "gcloud auth print-identity-token printed nothing"
-auth=(-H "authorization: Bearer $IDT")
-
 tmp=$(mktemp -d)
-CLAIMED=""
-BEARER=""
+TOKEN=""
 cleanup() {
   local code=$?
-  # Best effort, and harmless twice: a deleted name answers 410 here. Both
-  # credentials are tried, because a run that stops mid-adopt leaves the site
-  # answering to the bearer rather than to the account.
-  if [[ -n $CLAIMED ]]; then
-    curl -sS -o /dev/null -X DELETE "$APEX/api/sites/$NAME" "${auth[@]}" || true
-    [[ -z $BEARER ]] \
-      || curl -sS -o /dev/null -X DELETE "$APEX/api/sites/$NAME" \
-        -H "authorization: Bearer $BEARER" || true
-  fi
+  # Best effort, and harmless twice: a deleted name answers 410 here.
+  [[ -z $TOKEN ]] \
+    || curl -sS -o /dev/null -X DELETE "$APEX/api/sites/$NAME" \
+      -H "authorization: Bearer $TOKEN" || true
   rm -rf "$tmp"
   exit "$code"
 }
@@ -136,34 +116,19 @@ echo "kthx: $SITE"
 # --- claim ------------------------------------------------------------------
 
 echo
-echo "identity"
-check 'GET /api/whoami' 200 "$(req GET "$APEX/api/whoami" "${auth[@]}")"
-WHO=$(jq -r '.email // empty' <"$body")
-[[ -n $WHO ]] || die "whoami returned no address: $(cat "$body")"
-check '  unauthenticated' 401 "$(req GET "$APEX/api/whoami")"
-
-echo
 echo "claim"
-# A name belongs to an account now, so an anonymous claim is refused and the
-# refusal points at the command line rather than at a form.
-check 'POST /api/sites anonymous' 401 "$(req POST "$APEX/api/sites" \
+check 'POST /api/sites' 201 "$(req POST "$APEX/api/sites" \
   -H 'content-type: application/json' -d "{\"name\":\"$NAME\"}")"
-check '  says UNAUTHENTICATED' UNAUTHENTICATED "$(jq -r '.code // empty' <"$body")"
+TOKEN=$(jq -r '.token // empty' <"$body")
+[[ -n $TOKEN ]] || die "the claim returned no token: $(cat "$body")"
 
-check 'POST /api/sites' 201 "$(req POST "$APEX/api/sites" "${auth[@]}" \
-  -H 'content-type: application/json' -d "{\"name\":\"$NAME\"}")"
-CLAIMED=$NAME
-# Nothing is shown once any more: the account is the credential.
-check '  answers no token' null "$(jq -r '.token // "null"' <"$body")"
-
-check 'GET /api/sites/:name' 200 "$(req GET "$APEX/api/sites/$NAME" "${auth[@]}")"
-check '  names its owner' "$WHO" "$(jq -r '.owner // empty' <"$body")"
-
-# The CLI reads its config and its apex from the environment, so pointing both
-# at the temp directory keeps this run out of the operator's own.
+# The CLI reads its token store and its apex from the environment, so pointing
+# both at the temp directory keeps this run out of the operator's own config.
 export XDG_CONFIG_HOME="$tmp/config"
 export KTHX_ORIGIN="$APEX"
 mkdir -p "$XDG_CONFIG_HOME/kthx"
+jq -n --arg o "$APEX" --arg n "$NAME" --arg t "$TOKEN" '{($o): {($n): $t}}' \
+  >"$XDG_CONFIG_HOME/kthx/sites.json"
 printf '{"name":"%s"}\n' "$NAME" >"$tmp/v2/kthx.json"
 
 # --- release 1, served ------------------------------------------------------
@@ -171,7 +136,7 @@ printf '{"name":"%s"}\n' "$NAME" >"$tmp/v2/kthx.json"
 echo
 echo "release 1 (zip, curl)"
 check 'POST /api/sites/:name/releases' 201 "$(req POST "$APEX/api/sites/$NAME/releases" \
-  "${auth[@]}" -H 'x-filename: site.zip' \
+  -H "authorization: Bearer $TOKEN" -H 'x-filename: site.zip' \
   --data-binary "@$tmp/v1.zip")"
 check '  serving' 1 "$(jq -r '.serving // empty' <"$body")"
 
@@ -277,7 +242,7 @@ if kthx deploy "$tmp/v2" >"$tmp/deploy.log" 2>&1; then
 else
   check 'kthx deploy' ok "failed: $(tail -1 "$tmp/deploy.log")"
 fi
-req GET "$APEX/api/sites/$NAME" "${auth[@]}" >/dev/null
+req GET "$APEX/api/sites/$NAME" -H "authorization: Bearer $TOKEN" >/dev/null
 check '  serving' 2 "$(jq -r '.serving // empty' <"$body")"
 check '  /nope is now the SPA fallback' 200 "$(req GET "$(fresh "$SITE/nope")")"
 
@@ -285,68 +250,26 @@ check '  /nope is now the SPA fallback' 200 "$(req GET "$(fresh "$SITE/nope")")"
 # directory, not from an argument.
 (cd "$tmp/v2" && kthx rollback 1) >"$tmp/rollback.log" 2>&1 \
   || cat "$tmp/rollback.log"
-req GET "$APEX/api/sites/$NAME" "${auth[@]}" >/dev/null
+req GET "$APEX/api/sites/$NAME" -H "authorization: Bearer $TOKEN" >/dev/null
 check 'kthx rollback 1 serves' 1 "$(jq -r '.serving // empty' <"$body")"
 check '  and holds' true "$(jq -r '.held' <"$body")"
 check '  release 1 answers 404 again' 404 "$(req GET "$(fresh "$SITE/nope")")"
 
 (cd "$tmp/v2" && kthx release) >"$tmp/release.log" 2>&1 || cat "$tmp/release.log"
-req GET "$APEX/api/sites/$NAME" "${auth[@]}" >/dev/null
+req GET "$APEX/api/sites/$NAME" -H "authorization: Bearer $TOKEN" >/dev/null
 check 'kthx release drops the hold' false "$(jq -r '.held' <"$body")"
 check '  the newest release serves' 2 "$(jq -r '.serving // empty' <"$body")"
 
 # --- the bearer, and the end ------------------------------------------------
 
-# --- adopt ------------------------------------------------------------------
-
-echo
-echo "adopt"
-# A site that predates accounts, made the only way one can be made now: the
-# row's own owner columns cleared and a bearer hash written onto it.
-BEARER="verify-$(head -c 24 /dev/urandom | base64 | tr -d '=+/')"
-BEARER_HASH=$(printf %s "$BEARER" | sha256sum | cut -d' ' -f1)
-site_psql "update sites set owner_sub = null, owner_email = null,
-  token_hash = '$BEARER_HASH' where name = '$NAME'" >/dev/null
-
-check 'the identity does not own it yet' 403 "$(req GET "$APEX/api/sites/$NAME" \
-  "${auth[@]}")"
-check 'the old bearer still opens it' 200 "$(req GET "$APEX/api/sites/$NAME" \
-  -H "authorization: Bearer $BEARER")"
-# Not the default page: that one is kept in process for ten seconds, and the
-# row above was changed behind the server's back.
-req GET "$APEX/api/sites?limit=500" >/dev/null
-check '  and the directory says unadopted' null \
-  "$(jq -r --arg n "$NAME" \
-    '.items[] | select(.name == $n) | .owner // "null"' <"$body")"
-
-adopt='content-type: application/json'
-check 'POST …/adopt anonymous' 401 "$(req POST "$APEX/api/sites/$NAME/adopt" \
-  -H "$adopt" -d '{"token":"'"$BEARER"'"}')"
-check 'POST …/adopt with the wrong token' 403 \
-  "$(req POST "$APEX/api/sites/$NAME/adopt" "${auth[@]}" -H "$adopt" \
-    -d '{"token":"not-the-token"}')"
-check 'POST …/adopt' 204 "$(req POST "$APEX/api/sites/$NAME/adopt" \
-  "${auth[@]}" -H "$adopt" -d '{"token":"'"$BEARER"'"}')"
-
-check '  the identity owns it now' 200 "$(req GET "$APEX/api/sites/$NAME" \
-  "${auth[@]}")"
-check '  and it says so' "$WHO" "$(jq -r '.owner // empty' <"$body")"
-check '  the old bearer is spent' 403 "$(req GET "$APEX/api/sites/$NAME" \
-  -H "authorization: Bearer $BEARER")"
-check '  adopting again is 409' 409 "$(req POST "$APEX/api/sites/$NAME/adopt" \
-  "${auth[@]}" -H "$adopt" -d '{"token":"'"$BEARER"'"}')"
-BEARER=""
-
-# --- the end ----------------------------------------------------------------
-
 echo
 echo "delete"
-check 'a credential that opens nothing' 403 "$(req GET "$APEX/api/sites/$NAME" \
+check 'a bearer that is not this site' 403 "$(req GET "$APEX/api/sites/$NAME" \
   -H 'authorization: Bearer not-this-sites-token')"
 check 'DELETE /api/sites/:name' 204 "$(req DELETE "$APEX/api/sites/$NAME" \
-  "${auth[@]}")"
+  -H "authorization: Bearer $TOKEN")"
 check '  the apex answers 410' 410 "$(req GET "$APEX/api/sites/$NAME" \
-  "${auth[@]}")"
+  -H "authorization: Bearer $TOKEN")"
 check '  the site host answers 410' 410 "$(req GET "$(fresh "$SITE/")")"
 check '  the site database is dropped' 0 \
   "$(site_psql "select count(*) from pg_database where datname = '$NAME'")"

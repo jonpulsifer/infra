@@ -19,7 +19,7 @@ import {
 } from '../../server/files.ts';
 import { bodyWithin } from '../../server/http.ts';
 import { ME_COOKIE } from '../../server/me.ts';
-import { ask, idToken, withServer, ZONE } from '../harness/server.ts';
+import { ask, withServer, ZONE } from '../harness/server.ts';
 
 const kthx = withServer();
 
@@ -37,18 +37,17 @@ interface Site {
 
 async function claimed(label: string): Promise<Site> {
   const name = kthx().name(label);
-  const token = await idToken(`${name}@example.com`);
   const response = await kthx().fetch(
     ask('/api/sites', {
       method: 'POST',
-      token,
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ name }),
       address: address(),
     }),
   );
   expect(response.status).toBe(201);
-  return { name, host: `${name}.${ZONE}`, token };
+  const body = await response.json();
+  return { name, host: `${name}.${ZONE}`, token: body.token };
 }
 
 /** A visitor, remembered by the cookie the server hands them. */
