@@ -486,6 +486,14 @@ kthx.site.name           <i>// this site's name, right even under kthx dev</i></
     <span class="sp"></span>
     <span>Every site keeps its releases; <code>kthx rollback</code> serves an earlier one.</span>
   </div>
+
+  <!-- the operator's own, and the last thing on the page: hidden unless this
+       tab has been given the key -->
+  <div class="foot" id="nukebar" hidden>
+    <span>Deletes every site on the zone and frees every name.</span>
+    <span class="sp"></span>
+    <button type="button" class="tiny danger" id="nuke">Nuke all sites</button>
+  </div>
 </div>
 
 <script>
@@ -515,10 +523,12 @@ function forget(name) { delete tokens[name]; store(); sites = sites.filter(s => 
 let sites = [];   /* [{ name, url, serving, held, releases: [{ n, digest, size, at }] }] newest first */
 let open = null;
 
-async function api(method, path, { json, body, name, token, filename } = {}) {
+async function api(method, path, { json, body, name, token, filename, auth } = {}) {
   const headers = {};
   /* `token` is the one being tried: a site is linked before it is stored */
   if (name) headers.authorization = `Bearer ${token || tokens[name]}`;
+  /* the operator key, which opens the zone rather than one site */
+  if (auth) headers.authorization = `Bearer ${auth}`;
   if (json !== undefined) { headers["content-type"] = "application/json"; body = JSON.stringify(json); }
   if (filename) headers["x-filename"] = filename;
   const r = await fetch(path, { method, headers, body });
@@ -975,6 +985,35 @@ function toast(msg) {
   document.body.append(el);
   toastTimer = setTimeout(() => { el.classList.add("bye"); setTimeout(() => el.remove(), 180); }, 2800);
 }
+
+/* the nuke: the operator's key opens the whole zone, so it is asked for once
+   per tab — `#nuke` in the URL — and kept in sessionStorage, which closing the
+   tab forgets. Never localStorage: that is where the site tokens live and it
+   outlives the demo. The button does not exist until the key does. */
+const ADMIN = "kthx.admin";
+const adminKey = () => { try { return sessionStorage.getItem(ADMIN); } catch { return null; } };
+function forgetAdmin() { try { sessionStorage.removeItem(ADMIN); } catch {} showNuke(); }
+function showNuke() { $("#nukebar").hidden = adminKey() === null; }
+if (location.hash === "#nuke" && adminKey() === null) {
+  const typed = prompt("Operator key:");
+  if (typed?.trim()) { try { sessionStorage.setItem(ADMIN, typed.trim()); } catch {} }
+}
+showNuke();
+$("#nuke").addEventListener("click", async () => {
+  if (prompt("Every site on the zone is deleted and every name comes free. Type NUKE:")?.trim() !== "NUKE") { toast("Nothing deleted."); return; }
+  try {
+    const counts = await api("DELETE", API, { auth: adminKey() });
+    /* the tokens are now tokens for nothing */
+    for (const name of Object.keys(tokens)) delete tokens[name];
+    store(); sites = []; open = null; renderProps();
+    listed = []; more = null; renderDir();
+    toast(`${counts.deleted} site${counts.deleted === 1 ? "" : "s"} deleted.`);
+  } catch (err) {
+    /* the key this tab holds is not one: forget it rather than keep offering it */
+    if (err.status === 403 || err.status === 404) forgetAdmin();
+    toast(err.message || String(err));
+  }
+});
 
 resetStage(); renderProps(); renderDir(); verdict();
 loadAll().catch(() => { $("#jackText").textContent = "offline"; $("#jack").classList.add("on"); });

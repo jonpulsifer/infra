@@ -154,9 +154,12 @@ spec:
           # `required` rather than `with`: an omitted name would drop `envFrom`
           # entirely and render a Deployment that boots and dies on ConfigError,
           # which is a template error deferred to a crash loop.
+          #
+          # `KTHX_ADMIN_KEY` rides in the same Secret and is the one key here
+          # that is optional: without it `DELETE /api/sites` answers 404.
           envFrom:
             - secretRef:
-                name: {{ required "envFromSecret is required: it carries KTHX_ME_KEY, KTHX_PG_KEY and KTHX_AI_KEY" .Values.envFromSecret }}
+                name: {{ required "envFromSecret is required: it carries KTHX_ME_KEY, KTHX_PG_KEY, KTHX_AI_KEY and KTHX_ADMIN_KEY" .Values.envFromSecret }}
           {{/*
           Readiness only. The slow path here is Postgres, and a liveness probe
           would restart the process exactly when it is least able to recover.

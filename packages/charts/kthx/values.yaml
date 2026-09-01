@@ -41,7 +41,9 @@ ai:
   models: minimax-m3,kimi-k2.5,glm-5,deepseek-v4-flash,nemotron-3.5-lightning-free
   maxTokens: 4096
 
-# `KTHX_ME_KEY`, `KTHX_PG_KEY` and `KTHX_AI_KEY`. The process refuses to boot
+# `KTHX_ME_KEY`, `KTHX_PG_KEY`, `KTHX_AI_KEY` and `KTHX_ADMIN_KEY` (the
+# operator key `DELETE /api/sites` is gated on; without it the route is 404).
+# The process refuses to boot
 # without the first two and answers 502 on `/api/ai` without the third, and a
 # chart that generated them would rotate every visitor cookie and every site's
 # database password on each upgrade, so they arrive from 1Password through an

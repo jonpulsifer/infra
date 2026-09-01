@@ -25,6 +25,7 @@ import {
   init,
   KthxError,
   ls,
+  nuke,
   openSite,
   release,
   rm,
@@ -48,6 +49,11 @@ const deleted: string[] = [];
 let n = 0;
 /** How many claims to answer TAKEN before accepting one. */
 let refuseClaims = 0;
+
+/** The operator key this stub answers `DELETE /api/sites` for. */
+const ADMIN = 'admin-key-for-the-stub';
+/** Every site the stub had when it was last nuked. */
+let nuked: number | null = null;
 
 const SKILL = '# kthx\n\nthe apex copy\n';
 /** The apex having no reference to hand, so the packed copy is the answer. */
@@ -95,6 +101,18 @@ const stub = Bun.serve({
         { name: body.name, url: `https://${body.name}.kthx.test`, token },
         { status: 201 },
       );
+    }
+    if (request.method === 'DELETE' && pathname === '/api/sites') {
+      calls.push({ method: 'DELETE', path: pathname, body: null });
+      if (request.headers.get('authorization') !== `Bearer ${ADMIN}`) {
+        return Response.json(
+          { code: 'FORBIDDEN', message: 'that does not open this site' },
+          { status: 403 },
+        );
+      }
+      nuked = tokens.size;
+      tokens.clear();
+      return Response.json({ deleted: nuked, failed: 0 });
     }
     const bearer = request.headers.get('authorization')?.slice(7) ?? null;
     if (name === undefined || tokens.get(name) !== bearer) {
@@ -202,8 +220,11 @@ beforeEach(() => {
   deleted.length = 0;
   tokens.clear();
   n = 0;
+  nuked = null;
   refuseClaims = 0;
   skillDown = false;
+  // The nuke reads it from the environment, so no test may inherit one.
+  delete process.env.KTHX_ADMIN_KEY;
 });
 // Every command writes `kthx.json` relative to where it runs, so no test may
 // leave the process standing somewhere else.
@@ -380,6 +401,46 @@ describe('rollback, release, ls and rm', () => {
     expect(
       JSON.parse(readFileSync(sitesFile(), 'utf8'))[stub.url.origin],
     ).toEqual({});
+  });
+
+  test('nuke asks for the operator key, then for NUKE', async () => {
+    const dir = site();
+    process.chdir(dir);
+    await deploy('.', { name: 'notes' });
+    const sent = () =>
+      calls.filter(
+        (call) => call.method === 'DELETE' && call.path === '/api/sites',
+      );
+
+    // No key is not a request the apex refuses: it is one that is never sent.
+    await expect(nuke({}, () => 'NUKE')).rejects.toMatchObject({
+      code: 'NO_ADMIN_KEY',
+    });
+    expect(sent()).toHaveLength(0);
+
+    // Anything but NUKE, and a `prompt` with no terminal to ask on, delete
+    // nothing — `--yes` is the only way past it without typing.
+    process.env.KTHX_ADMIN_KEY = ADMIN;
+    await nuke({}, () => 'nope');
+    await nuke({}, () => null);
+    expect(sent()).toHaveLength(0);
+
+    const said = await capture(() => nuke({}, () => 'NUKE'));
+    expect(said).toContain('1 deleted');
+    expect(said).toContain('claimable again');
+    expect(nuked).toBe(1);
+    expect(sent()).toHaveLength(1);
+  });
+
+  test('nuke with the wrong key is refused by the apex', async () => {
+    const dir = site();
+    process.chdir(dir);
+    await deploy('.', { name: 'notes' });
+    process.env.KTHX_ADMIN_KEY = 'not-the-key';
+    await expect(nuke({ yes: true })).rejects.toMatchObject({
+      code: 'FORBIDDEN',
+    });
+    expect(nuked).toBeNull();
   });
 
   test('every command but init, deploy and dev needs a name', async () => {

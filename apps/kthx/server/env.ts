@@ -31,6 +31,17 @@ export interface Config {
   /** Derives per-site Postgres passwords. */
   readonly pgKey: string;
   /**
+   * What opens `DELETE /api/sites`, the nuke — the operator's key, never a
+   * site's and never a visitor's. Unset is not a disabled feature: the route
+   * answers 404 like a path this server does not have, and the landing page's
+   * control stays hidden.
+   *
+   * Not length-checked at boot, unlike the two HMAC keys: those are minted
+   * here and refused when short, this one is typed into 1Password by hand and
+   * a whole zone must not stop serving over it. ≥ 32 bytes is the contract.
+   */
+  readonly adminKey: string | null;
+  /**
    * What the template database and the group role are called: `template_kthx`
    * and `kthx_site`.
    *
@@ -112,6 +123,7 @@ export function readConfig(env: Env = Bun.env): Config {
         ? null
         : longEnough('KTHX_ME_KEY_PREVIOUS', previous),
     pgKey: longEnough('KTHX_PG_KEY', required(env, 'KTHX_PG_KEY')),
+    adminKey: env.KTHX_ADMIN_KEY?.trim() || null,
     pgPrefix: 'kthx',
     maxDbBytes: 256 * 1024 * 1024,
     maxCollections: 256,
