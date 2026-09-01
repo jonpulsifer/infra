@@ -42,6 +42,13 @@ export const WRITE_VISITOR: BucketSpec = { capacity: 60, perSecond: 0.5 };
 export const WRITE_ADDRESS: BucketSpec = { capacity: 240, perSecond: 2 };
 export const WRITE_SITE: BucketSpec = { capacity: 600, perSecond: 5 };
 
+/**
+ * Wrong operator keys, counted for the whole process. The key may be a short
+ * passphrase and the route is public, so guesses cannot run at wire speed; a
+ * right key is never held by this.
+ */
+export const NUKE_ATTEMPTS: BucketSpec = { capacity: 10, perSecond: 10 / 60 };
+
 /** Beyond this many keys the map is a memory leak rather than a limiter. */
 const MAX_KEYS = 10_000;
 

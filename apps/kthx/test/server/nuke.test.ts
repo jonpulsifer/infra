@@ -14,7 +14,7 @@ import { describe, expect, test } from 'bun:test';
 import { join } from 'node:path';
 import { tarGz } from '../../cli/tar.ts';
 import { readConfig } from '../../server/env.ts';
-import { CLAIM_BUCKET } from '../../server/limits.ts';
+import { CLAIM_BUCKET, NUKE_ATTEMPTS } from '../../server/limits.ts';
 import { ask, withServer, ZONE } from '../harness/server.ts';
 
 const ADMIN = 'n'.repeat(40);
@@ -164,12 +164,16 @@ describe('the nuke', () => {
     expect(await inPostgres(site.name)).toBe(true);
   });
 
-  test('a wrong key spends no claim allowance', async () => {
+  test('a wrong key spends no claim allowance, and guesses are held', async () => {
     const from = address();
-    // More attempts than the claim bucket holds. If the nuke charged them, the
-    // claim after it would be a 429 rather than a site.
+    // More attempts than the claim bucket holds. If the nuke charged the claim
+    // bucket, the claim after it would be a 429 rather than a site. The guesses
+    // fill their own bucket instead: 403 while it has tokens, 429 once it does
+    // not — and it is process-wide, so how many 403s come first depends on the
+    // tests before this one.
+    const seen: number[] = [];
     for (let tried = 0; tried <= CLAIM_BUCKET.capacity; tried += 1) {
-      expect(
+      seen.push(
         (
           await kthx().fetch(
             ask('/api/sites', {
@@ -179,9 +183,14 @@ describe('the nuke', () => {
             }),
           )
         ).status,
-      ).toBe(403);
+      );
     }
+    expect(new Set(seen)).toEqual(new Set([403, 429]));
+    expect(seen.at(-1)).toBe(429);
+    expect(seen.indexOf(429)).toBeLessThanOrEqual(NUKE_ATTEMPTS.capacity);
     expect((await claim(kthx().name('after'), from)).status).toBe(201);
+    // The right key is never held, however many guesses came before it.
+    expect((await nuke()).status).toBe(200);
   });
 
   test('refuses a browser that is not on the apex', async () => {
