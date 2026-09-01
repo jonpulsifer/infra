@@ -7,6 +7,11 @@
  * `lstat`ed and everything is checked to still be under the release root — the
  * archive reader has already refused a `..`, and this refuses one that arrives
  * in a URL.
+ *
+ * Freshness is `no-cache` plus the digest etag: the bytes are still cached
+ * everywhere, and every read revalidates. A release that has not moved costs a
+ * 304 and no body; the moment it moves the etag does too, so the next refresh
+ * is the new release rather than whatever a `max-age` was still holding.
  */
 import { lstat } from 'node:fs/promises';
 import { join, normalize } from 'node:path';
@@ -140,7 +145,11 @@ function fileResponse(
   const headers: Record<string, string> = {
     etag,
     'content-type': found.type,
-    'cache-control': 'public, max-age=60',
+    // Revalidate every time, cache the bytes. The etag carries the release
+    // digest, so an unchanged file is a 304 and the moment `serving` moves the
+    // etag moves with it — which is what makes a new release show on the next
+    // refresh instead of up to a minute later.
+    'cache-control': 'no-cache',
     'x-content-type-options': 'nosniff',
   };
   // ponytail: exact match only, so a weak or multi-valued `if-none-match`

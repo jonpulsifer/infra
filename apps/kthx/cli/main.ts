@@ -11,6 +11,7 @@
  *   kthx rm                        delete the site
  *   kthx open                      open the site in a browser
  *   kthx upgrade                   replace this copy with the apex's
+ *   kthx nuke [--yes]              delete every site (KTHX_ADMIN_KEY)
  *
  * The name is `kthx.json`, read from the directory and then from here. The
  * token that opens it is in `$XDG_CONFIG_HOME/kthx/sites.json`, never in the
@@ -491,6 +492,41 @@ export async function rm(dir = '.', confirm = prompt): Promise<void> {
   console.log(`  ${name} is gone; the name stays taken`);
 }
 
+/**
+ * Every site on the zone gone, once `NUKE` has been typed back.
+ *
+ * The operator's key, never a site's bearer: `KTHX_ADMIN_KEY` is what the
+ * server compares, and a deployment with none answers 404 here. `--yes` is for
+ * a script; without it and without a terminal to ask on, `prompt` answers null
+ * and nothing is deleted, which is the right way round.
+ */
+export async function nuke(
+  { yes = false } = {},
+  confirm = prompt,
+): Promise<void> {
+  const key = process.env.KTHX_ADMIN_KEY?.trim();
+  if (!key) {
+    throw new KthxError(
+      'NO_ADMIN_KEY',
+      'KTHX_ADMIN_KEY is not set; the nuke is the operator key, not a site token',
+    );
+  }
+  if (!yes) {
+    const typed = confirm(`  type NUKE to delete every site on ${origin()}: `);
+    if (typed?.trim() !== 'NUKE') {
+      console.log('  nothing deleted');
+      return;
+    }
+  }
+  const counts = await api<{ deleted: number; failed: number }>('/api/sites', {
+    method: 'DELETE',
+    token: key,
+  });
+  console.log(
+    `  ${counts.deleted} deleted${counts.failed ? `, ${counts.failed} failed` : ''}; every name is claimable again`,
+  );
+}
+
 export function openSite(dir = '.'): string {
   const url = siteOrigin(nameOf(dir));
   console.log(`  ${link(url)}`);
@@ -542,7 +578,8 @@ const USAGE = `usage: kthx <command> [dir] [--name <name>] [--all] [--version]
   ls --all  every site on the apex
   rm        delete the site
   open      open the site in a browser
-  upgrade   replace this copy with the one the apex serves`;
+  upgrade   replace this copy with the one the apex serves
+  nuke      delete every site on the apex (operator key; --yes skips the prompt)`;
 
 if (import.meta.main) {
   let values: {
@@ -550,6 +587,7 @@ if (import.meta.main) {
     version?: boolean;
     all?: boolean;
     help?: boolean;
+    yes?: boolean;
   } = {};
   let positionals: string[] = [];
   try {
@@ -559,6 +597,7 @@ if (import.meta.main) {
         version: { type: 'boolean' },
         all: { type: 'boolean' },
         help: { type: 'boolean', short: 'h' },
+        yes: { type: 'boolean' },
       },
       allowPositionals: true,
     }));
@@ -627,6 +666,9 @@ if (import.meta.main) {
           break;
         case 'upgrade':
           await upgrade(origin());
+          break;
+        case 'nuke':
+          await nuke(values);
           break;
         case 'mcp':
           // The reference this CLI writes names it; the stdio bridge is not in

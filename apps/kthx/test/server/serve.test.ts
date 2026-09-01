@@ -215,7 +215,7 @@ describe('a site', () => {
     expect(root.status).toBe(200);
     expect(await root.text()).toBe('<h1>hi</h1>');
     expect(root.headers.get('content-type')).toBe('text/html; charset=utf-8');
-    expect(root.headers.get('cache-control')).toBe('public, max-age=60');
+    expect(root.headers.get('cache-control')).toBe('no-cache');
     expect(root.headers.get('x-content-type-options')).toBe('nosniff');
 
     const script = await get(site.host, '/app.js');
@@ -238,6 +238,35 @@ describe('a site', () => {
     expect(head.status).toBe(200);
     expect(await head.text()).toBe('');
     expect(head.headers.get('etag')).toBe(etag);
+  });
+
+  test('a second release changes the etag, so the next refresh is the new one', async () => {
+    const site = await published({ 'index.html': 'v1' }, 'fresh');
+    const first = await get(site.host, '/');
+    expect(await first.text()).toBe('v1');
+    const before = first.headers.get('etag') ?? '';
+    // Nothing may hold the old bytes: the etag is the whole freshness story.
+    expect(first.headers.get('cache-control')).toBe('no-cache');
+
+    const uploaded = await kthx().fetch(
+      ask(`/api/sites/${site.name}/releases`, {
+        method: 'POST',
+        token: site.token,
+        body: bundle({ 'index.html': 'v2' }),
+        address: address(),
+      }),
+    );
+    expect(uploaded.status).toBe(201);
+
+    // The conditional request a browser makes with what it has cached: the
+    // release moved, so it is answered with the new bytes rather than a 304.
+    const after = await get(site.host, '/', {
+      headers: { 'if-none-match': before },
+    });
+    expect(after.status).toBe(200);
+    expect(await after.text()).toBe('v2');
+    expect(after.headers.get('etag')).not.toBe(before);
+    expect(after.headers.get('cache-control')).toBe('no-cache');
   });
 
   test('200.html is the SPA fallback and 404.html is the miss', async () => {

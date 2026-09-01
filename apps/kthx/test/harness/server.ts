@@ -128,6 +128,8 @@ export function withServer(overrides: Partial<Config> = {}): () => Harness {
       meKey: 'k'.repeat(32),
       mePreviousKey: null,
       pgKey: 'p'.repeat(32),
+      // No nuke unless a test asks for one, which is production's shape too.
+      adminKey: null,
       pgPrefix: prefix,
       maxDbBytes: 256 * 1024 * 1024,
       maxCollections: 256,

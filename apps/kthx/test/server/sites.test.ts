@@ -607,7 +607,7 @@ describe('the directory', () => {
 
     const listed = await directory();
     expect(listed.status).toBe(200);
-    expect(listed.cache).toBe('public, max-age=30');
+    expect(listed.cache).toBe('no-store');
     // Newest claim first, and a deleted name is not in the list at all.
     expect(
       names(listed.body.items, [first.name, second.name, gone.name]),
@@ -688,52 +688,52 @@ describe('the directory', () => {
     });
   });
 
-  test('bounds how fast one address asks for a page the cache cannot hold', async () => {
+  test('bounds how fast one address asks for a page', async () => {
     const from = address();
-    // The page everyone lands on, warmed by somebody else before the burst.
-    const warm = await kthx().fetch(ask('/api/sites', { address: address() }));
-    expect(warm.status).toBe(200);
-    await warm.json();
-
-    // A cursor or a page size the cache does not keep costs a query each.
+    // Every page costs a query now, so every page spends a token.
     for (let asked = 0; asked < DIRECTORY_BUCKET.capacity; asked += 1) {
-      const paged = await kthx().fetch(
-        ask('/api/sites?limit=1', { address: from }),
-      );
+      const paged = await kthx().fetch(ask('/api/sites', { address: from }));
       expect(paged.status).toBe(200);
       await paged.json();
     }
-    const refused = await kthx().fetch(
-      ask('/api/sites?limit=1', { address: from }),
-    );
+    const refused = await kthx().fetch(ask('/api/sites', { address: from }));
     expect(refused.status).toBe(429);
     expect((await refused.json()).code).toBe('RATE_LIMITED');
     expect(Number(refused.headers.get('retry-after'))).toBeGreaterThan(0);
 
-    // And the hot page is still free: it spends nothing to answer.
-    const landing = await kthx().fetch(ask('/api/sites', { address: from }));
-    expect(landing.status).toBe(200);
-    await landing.json();
+    // The bucket is per address: nobody else is refused by this one's burst.
+    const other = await kthx().fetch(ask('/api/sites', { address: address() }));
+    expect(other.status).toBe(200);
+    await other.json();
   });
 
-  test('answers a hot page from memory, and forgets it when a name is claimed', async () => {
-    const owned = await mine('cached');
-    const before = await directory();
-    expect(names(before.body.items, [owned.name])).toEqual([owned.name]);
+  test('has no nuke when the deployment has no admin key', async () => {
+    const owned = await mine('kept');
+    // Not 401, not 403: a deployment without the key does not have this route.
+    // The rest of the nuke is in `nuke.test.ts`, whose harness has one.
+    const refused = await kthx().fetch(
+      ask('/api/sites', { method: 'DELETE', token: 'anything' }),
+    );
+    expect(refused.status).toBe(404);
+    expect((await refused.json()).code).toBe('NOT_FOUND');
+    expect(names((await directory()).body.items, [owned.name])).toEqual([
+      owned.name,
+    ]);
+  });
 
-    // Straight into the table, so nothing tells the cache to let go.
+  test('keeps nothing: a row written behind the API is on the next page', async () => {
+    const owned = await mine('uncached');
+    expect(names((await directory()).body.items, [owned.name])).toEqual([
+      owned.name,
+    ]);
+
+    // Straight into the table, so nothing but a fresh query can find it.
     const smuggled = kthx().name('smuggled');
     await kthx().sql`
       insert into sites (name, token_hash) values (${smuggled}, ${'0'.repeat(64)})
     `;
-    expect((await directory()).body.items.map((item) => item.name)).toEqual(
-      before.body.items.map((item) => item.name),
-    );
-
-    // A claim is the one thing that must never be missing from the list.
-    const fresh = await mine('fresh');
-    expect(
-      names((await directory()).body.items, [fresh.name, smuggled]),
-    ).toEqual([fresh.name, smuggled]);
+    expect(names((await directory()).body.items, [smuggled])).toEqual([
+      smuggled,
+    ]);
   });
 });

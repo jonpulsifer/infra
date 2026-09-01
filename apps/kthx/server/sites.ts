@@ -130,6 +130,7 @@ export async function sitesApi(
 ): Promise<Response | null> {
   if (segments.length === 3) {
     if (request.method === 'GET') return directory(request, ctx);
+    if (request.method === 'DELETE') return nuke(request, ctx);
     if (request.method !== 'POST') return refuse('METHOD_NOT_ALLOWED', ctx.id);
     return claim(request, ctx);
   }
@@ -202,8 +203,6 @@ type Act = (request: Request, ctx: Ctx, site: SiteRow) => Promise<Response>;
 /** How many sites a page of the directory holds, and what it may be asked for. */
 const DIRECTORY_PAGE = 200;
 const MAX_DIRECTORY_PAGE = 500;
-/** How long the default page is answered from memory rather than the database. */
-const DIRECTORY_CACHE_MS = 10_000;
 
 /** One site as the directory shows it: no token hash, no usage, no hold. */
 interface Listed {
@@ -216,32 +215,10 @@ interface Listed {
 interface Page {
   readonly rows: readonly Listed[];
   readonly next: string | null;
-  readonly at: number;
 }
 
-/**
- * The default page, as this process last answered it.
- *
- * One entry rather than a map keyed by the query, because the caller writes
- * both halves of such a key: invented cursors would fill it, evict what every
- * other visitor is reading, and still cost a query each. Every other shape
- * goes to the database, behind {@link directoryReads}.
- *
- * ponytail: process-wide and in memory, like every other counter here — there
- * is one replica by construction. Dropped whenever the set of names changes,
- * so "I claimed a site and it is not on the list" is never the cache's doing;
- * a release or a rollback is left to age out, because what those move is a
- * number beside a name rather than the list of names.
- */
-let cachedPage: Page | null = null;
-
-/** How fast one address may ask for a page the cache does not hold. */
+/** How fast one address may ask for a page. */
 const directoryReads = new TokenBucket(DIRECTORY_BUCKET);
-
-/** The kept page is stale: a name was claimed or deleted. */
-function forgetPages(): void {
-  cachedPage = null;
-}
 
 /**
  * Every live site, newest claim first — the public directory.
@@ -254,6 +231,12 @@ function forgetPages(): void {
  * One statement, whatever the page: the cursor names the last site of the
  * previous one and the query finds its place itself, so a caller paging to the
  * end costs one indexed lookup a page rather than a growing `offset`.
+ *
+ * Nothing is kept and nothing is cached — `no-store`, one query per request.
+ * A directory that is a few seconds behind is a demo where the site somebody
+ * just claimed is not on the page, and a live zone is at most a few thousand
+ * indexed rows. What bounds it is {@link directoryReads}, now on every request
+ * rather than only the ones a cache could not answer.
  */
 async function directory(request: Request, ctx: Ctx): Promise<Response> {
   const query = new URL(request.url).searchParams;
@@ -270,20 +253,11 @@ async function directory(request: Request, ctx: Ctx): Promise<Response> {
     ? Math.min(Math.max(Math.trunc(asked), 1), MAX_DIRECTORY_PAGE)
     : DIRECTORY_PAGE;
 
-  const now = Date.now();
-  const canonical = after === null && limit === DIRECTORY_PAGE;
-  let page = canonical ? cachedPage : null;
-  if (page === null || now - page.at > DIRECTORY_CACHE_MS) {
-    // Spent on the query, not on the request: the page everyone lands on stays
-    // free while it is hot, and what is bounded is work on the control
-    // database — the same connection every site host serves its files through.
-    const address = addressOf(request, ctx.server, ctx.config.trustedProxies);
-    if (directoryReads.spend(address)) {
-      return refuse('RATE_LIMITED', ctx.id, retryAfter(60));
-    }
-    page = await listSites(ctx, limit, after, now);
-    if (canonical) cachedPage = page;
+  const address = addressOf(request, ctx.server, ctx.config.trustedProxies);
+  if (directoryReads.spend(address)) {
+    return refuse('RATE_LIMITED', ctx.id, retryAfter(60));
   }
+  const page = await listSites(ctx, limit, after);
 
   return ok(
     {
@@ -297,8 +271,6 @@ async function directory(request: Request, ctx: Ctx): Promise<Response> {
       next: page.next,
     },
     ctx.id,
-    200,
-    'public, max-age=30',
   );
 }
 
@@ -315,7 +287,6 @@ async function listSites(
   ctx: Ctx,
   limit: number,
   after: string | null,
-  at: number,
 ): Promise<Page> {
   const rows = (await ctx.sql`
     with mark as (
@@ -338,8 +309,87 @@ async function listSites(
   return {
     rows: kept,
     next: rows.length > limit ? (kept.at(-1)?.name ?? null) : null,
-    at,
   };
+}
+
+// --- the nuke ---------------------------------------------------------------
+
+/**
+ * Whether this request carries the operator's key.
+ *
+ * Compared timing-safe against the whole configured value, the way a site's
+ * bearer is. A public zone with anonymous claims cannot have an
+ * unauthenticated nuke, and nothing a visitor ever holds opens this one.
+ */
+function opensZone(request: Request, key: string): boolean {
+  const bearer = /^Bearer\s+(\S+)$/i.exec(
+    request.headers.get('authorization') ?? '',
+  )?.[1];
+  return bearer !== undefined && timingSafeEquals(bearer, key);
+}
+
+/**
+ * Every site gone — the clean slate a demo starts from.
+ *
+ * A hard delete, not the soft one `DELETE /api/sites/:name` does: the rows go
+ * too, so the names come free again. Release archives stay in the depot; they
+ * are content-addressed and the nightly sweep already collects the ones
+ * nothing references.
+ *
+ * With no `KTHX_ADMIN_KEY` this answers 404, the same as a path this server
+ * does not have — a deployment without the key does not advertise that a nuke
+ * exists. A wrong key is 403 and spends no claim allowance: an operator who
+ * mistypes it must not then be rate limited out of the demo.
+ */
+async function nuke(request: Request, ctx: Ctx): Promise<Response> {
+  const key = ctx.config.adminKey;
+  if (key === null) return refuse('NOT_FOUND', ctx.id);
+  if (!sameOrigin(request, ctx.host, ctx.port)) {
+    return refuse('FORBIDDEN', ctx.id);
+  }
+  if (!opensZone(request, key)) return refuse('FORBIDDEN', ctx.id);
+
+  // Deleted rows as well: taking those is what frees their names.
+  const rows = (await ctx.sql`select name from sites order by name`) as {
+    name: string;
+  }[];
+  let deleted = 0;
+  let failed = 0;
+  // ponytail: serial, one `DROP DATABASE` at a time. Tens of sites is a couple
+  // of seconds and the zone has never held more; batch it the day a nuke has to
+  // clear thousands, because the edge gives a request 100 s.
+  for (const { name } of rows) {
+    try {
+      await erase(ctx, name);
+      deleted += 1;
+    } catch (cause) {
+      // One database refusing to drop is not the other forty sites' problem.
+      logCause(ctx.id, `nuking ${name}`, cause);
+      failed += 1;
+    }
+  }
+  return ok({ deleted, failed }, ctx.id);
+}
+
+/**
+ * One site, hard: its files, its rows, its database, its role, its bytes.
+ *
+ * The row delete is one statement, so `releases`, `files` and `ai_usage` go
+ * with it through their foreign keys — a site is never left half-listed. It
+ * also runs *before* the database is dropped, which is what makes everything
+ * after it recoverable: `Pg.sweep` drops any database or role whose site row
+ * is gone, so a failure past that line costs disk until the nightly run rather
+ * than leaving a name nobody can claim.
+ */
+async function erase(ctx: Ctx, name: string): Promise<void> {
+  // First, while the rows that name its objects are still there to read.
+  await dropFiles(ctx, name);
+  await ctx.sql`delete from sites where name = ${name}`;
+  await ctx.pg.drop(name);
+  await rm(siteDir(ctx.config.sitesDir, name), {
+    recursive: true,
+    force: true,
+  });
 }
 
 // --- claim ------------------------------------------------------------------
@@ -402,7 +452,6 @@ async function claim(request: Request, ctx: Ctx): Promise<Response> {
   }
 
   if (address !== null) claimsPerDay.count(address);
-  forgetPages();
   return ok(
     { name, url: siteUrl(ctx.config.zone, name, ctx.port), token },
     ctx.id,
@@ -683,6 +732,5 @@ const remove: Act = async (_request, ctx, site) => {
     recursive: true,
     force: true,
   });
-  forgetPages();
   return empty(ctx.id);
 };
