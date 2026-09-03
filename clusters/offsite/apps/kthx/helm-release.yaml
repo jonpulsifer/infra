@@ -24,7 +24,7 @@ spec:
   values:
     # The containers workflow rewrites this digest on every kthx build that
     # lands on main (`.github/containers.json`, `deploy.kthx`).
-    image: ghcr.io/jonpulsifer/kthx:latest@sha256:25dd259349faad0e739a4961f486b89e6e589b3f8df8571db9ca808a63097b83
+    image: ghcr.io/jonpulsifer/kthx:latest@sha256:f02fa3010ffd8d154f8a3c9ba3e69cad6c09a51b15130d8265c3a11580dd14ca
     zone: kthx.dev
     # Terraform output `kthx_bucket` from `terraform/gcp/projects/bluenose`.
     # `objectAdmin` on this bucket is the whole of what kthx can do in GCP —
