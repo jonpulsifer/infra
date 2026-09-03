@@ -12,7 +12,7 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.30.0",
-    "@x402/core": "2.23.0",
+    "@x402/core": "2.24.0",
     "@x402/evm": "2.23.0",
     "@x402/hono": "2.23.0",
     "@x402/mcp": "2.23.0",
