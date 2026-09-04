@@ -1,6 +1,8 @@
 [tools]
 hugo = "0.165.0"
 "aqua:tailwindlabs/tailwindcss" = "4.3.3"
+pandoc = "3.11"
+"github:tectonic-typesetting/tectonic" = { version = "0.17.0", asset_pattern = "*x86_64-unknown-linux-musl*" }
 
 [tasks.css]
 description = "Compile Tailwind CSS into the Hugo assets dir"
@@ -19,3 +21,29 @@ run = "hugo --minify"
 description = "Run the Hugo dev server (pair with css-watch when editing styles)"
 depends = ["css"]
 run = "hugo serve"
+
+[tasks.cv]
+description = "Render content/cv.md to dist/cv.tex and dist/cv.pdf"
+run = '''
+set -eu
+mkdir -p dist
+# Strip Hugo front matter/shortcodes and emoji, and turn the single-column tables into lists
+sed -E \
+  -e '1,/^---$/d' \
+  -e '/\{\{< detail/,/\{\{< \/detail/s/^#/##/' \
+  -e '/\{\{< \/?detail/d' \
+  -e 's#\{\{< relref "([^"]+)" >\}\}#https://pulsifer.ca\1/#g' \
+  -e 's/:cloud:/cloud/g; s/:1st_place_medal:/(1st place)/g; s/:2nd_place_medal:/(2nd place)/g' \
+  -e '/^- /!s/ :[a-z0-9_+-]+:$/./; s/ ?:[a-z0-9_+-]+://g' \
+  -e '/^\|[ -]*\|$/d' \
+  -e 's/^\| *(.*[^ ]) *\|$/- \1/' \
+  content/cv.md > dist/cv.md
+pandoc dist/cv.md -s --shift-heading-level-by=-1 \
+  -M title="Curriculum Vitae" -M author="Jonathan Pulsifer" -M date="$(date +%F)" \
+  -V geometry:margin=0.75in -V colorlinks=true \
+  -V mainfont=lmroman10-regular.otf \
+  -V mainfontoptions='BoldFont=lmroman10-bold.otf,ItalicFont=lmroman10-italic.otf,BoldItalicFont=lmroman10-bolditalic.otf,Ligatures={TeX,NoCommon}' \
+  -V header-includes='\makeatletter\renewcommand\paragraph{\@startsection{paragraph}{4}{\z@}{2.5ex plus 1ex minus .2ex}{1ex}{\normalfont\normalsize\bfseries}}\makeatother' \
+  -o dist/cv.tex
+tectonic --outdir dist dist/cv.tex
+'''
