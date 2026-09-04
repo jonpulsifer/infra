@@ -26,6 +26,17 @@ spec:
     # lands on main (`.github/containers.json`, `deploy.kthx`).
     image: ghcr.io/jonpulsifer/kthx:latest@sha256:632ba5c21bfb0136893368e8d89ad38625f6536ff02475033e7edc58ebd58518
     zone: kthx.dev
+    # Claiming and site control answer on this name alone; the public apex
+    # keeps the page, the directory, the SDK and the CLI, and every
+    # `<name>.kthx.dev` stays public. The name sits on the gateway's own
+    # address — reachable from the lab, the offsite LAN and the tailnet, and
+    # from nowhere the tunnel serves — on the listener that carries the
+    # wildcard certificate for that zone, which is where external-dns
+    # publishes it. `KTHX_ORIGIN=https://kthx.${SECRET_DOMAIN}` is what a
+    # `kthx` command line or an agent sets to publish.
+    control:
+      host: kthx.${SECRET_DOMAIN}
+      listener: spindrift-apps-tls-secret-domain
     # Terraform output `kthx_bucket` from `terraform/gcp/projects/bluenose`.
     # `objectAdmin` on this bucket is the whole of what kthx can do in GCP —
     # notably not `storage.buckets.get`, so nothing here may preflight it.

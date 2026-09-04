@@ -19,6 +19,12 @@ export class ConfigError extends Error {
 export interface Config {
   /** The zone sites live under. `Host === zone` is the apex. */
   readonly zone: string;
+  /**
+   * The private host claiming and site control answer on, or `null` when the
+   * apex answers them itself. Outside the zone by construction: a label
+   * inside it would shadow the site of that name.
+   */
+  readonly controlHost: string | null;
   /** The depot bucket, or `null` for the local-disk fallback. */
   readonly bucket: string | null;
   /** Where release directories are unpacked. */
@@ -123,8 +129,17 @@ export function readConfig(env: Env = Bun.env): Config {
       `KTHX_ADMIN_KEY is shorter than ${KEY_BYTES} bytes; the nuke stays closed`,
     );
   }
+  const zone = env.KTHX_ZONE?.trim().toLowerCase() || 'kthx.dev';
+  const controlHost = env.KTHX_CONTROL_HOST?.trim().toLowerCase() || null;
+  if (
+    controlHost !== null &&
+    (controlHost === zone || controlHost.endsWith(`.${zone}`))
+  ) {
+    throw new ConfigError(`KTHX_CONTROL_HOST must be outside ${zone}`);
+  }
   return {
-    zone: env.KTHX_ZONE?.trim().toLowerCase() || 'kthx.dev',
+    zone,
+    controlHost,
     bucket: env.KTHX_BUCKET?.trim() || null,
     sitesDir: env.KTHX_SITES_DIR?.trim() || '/sites',
     databaseUrl: required(env, 'DATABASE_URL'),

@@ -1,7 +1,8 @@
 /**
  * The control API: claim a name, upload a release, choose which one serves.
  *
- * Answered on the apex only. Ownership is one bearer per site, minted at claim
+ * Answered on the apex — or, where `KTHX_CONTROL_HOST` names a private host,
+ * there alone. Ownership is one bearer per site, minted at claim
  * and shown once; the row keeps its SHA-256 and nothing else. There is no user
  * and no session — a visitor who lost the token has lost the site, which is the
  * deal the landing page states.
@@ -95,6 +96,12 @@ export interface Ctx {
   readonly host: string;
   /** The port the request named, so a local run answers with a reachable URL. */
   readonly port: string;
+  /**
+   * Whether this request may claim and control sites: true on the private
+   * host, and on the apex only while no private host is configured. The public
+   * apex of a deployment that has one reads the directory and nothing else.
+   */
+  readonly control: boolean;
 }
 
 function hash(token: string): string {

@@ -209,8 +209,13 @@ bun add -g https://kthx.dev/cli/kthx.tgz
 | `kthx upgrade` | replaces this copy with the one the apex serves |
 
 The token lives in `$XDG_CONFIG_HOME/kthx/sites.json`, never in the project
-directory — which is what gets uploaded. `kthx.json` holds `{name}` and nothing
-secret.
+directory — which is what gets uploaded. `kthx.json` holds `{name, url}` and
+nothing secret.
+
+A deployment may answer claiming and site control on a private host only; the
+public apex says so with `403 PRIVATE`. Set `KTHX_ORIGIN` to that host for every
+command. The site itself stays at `https://<name>.kthx.dev`, which is the `url`
+`kthx.json` records.
 
 `kthx upgrade` re-runs `bun add -g` on the apex tarball. It replaces only a
 `bun add -g` install. `kthx --version` prints the version and the build id; set

@@ -318,6 +318,8 @@ pre.sh .p{color:var(--hot)}
   .chev svg{transition:none}
   .tiny:active,.dice:active,.drop:active,.chev:active{transform:none}
 }
+/* the public apex of a deployment whose claiming lives on a private host: the directory reads, nothing claims */
+html[data-readonly] .deck,html[data-readonly] #mine,html[data-readonly] #nukebar{display:none}
 </style>
 </head>
 <body>
@@ -355,7 +357,7 @@ pre.sh .p{color:var(--hot)}
     <div id="stage2"></div>
   </div>
 
-  <section class="sec">
+  <section class="sec" id="mine">
     <div class="sechead">Your properties <span class="sp"></span><span id="count"></span></div>
     <div class="props" id="props"></div>
     <p class="hint" id="keep">Your sites are kept in this browser. Keep the token safe: there is no account and no password reset.</p>
@@ -479,7 +481,7 @@ kthx.site.name           <i>// this site's name, right even under kthx dev</i></
 <script>
 "use strict";
 /* the apex is the zone: this page is only ever served at https://<zone>/ */
-const ZONE = location.hostname;
+const ZONE = document.documentElement.dataset.zone || location.hostname;
 const API = "/api/sites";
 const $ = (s, r = document) => r.querySelector(s);
 const KB = n => n < 1024 ? `${n} B` : n < 1048576 ? `${(n / 1024).toFixed(1)} KB` : `${(n / 1048576).toFixed(1)} MB`;

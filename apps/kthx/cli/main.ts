@@ -56,6 +56,22 @@ export function siteOrigin(name: string): string {
   return `${protocol}//${name}.${host}`;
 }
 
+/**
+ * The site's address as the server stated it at claim, kept in `kthx.json`
+ * beside the name: the origin is not always the zone, since a deployment may
+ * answer claims on a private host while its sites stay public. A `kthx.json`
+ * from before the address was kept falls back to the origin's zone.
+ */
+export function siteUrlOf(dir: string): string {
+  for (const at of [join(dir, 'kthx.json'), 'kthx.json']) {
+    const { name, url } = readJson<{ name?: unknown; url?: unknown }>(at, {});
+    if (name === undefined) continue;
+    if (typeof url === 'string' && /^https?:\/\/[^/]+$/.test(url)) return url;
+    break;
+  }
+  return siteOrigin(nameOf(dir));
+}
+
 // --- what is remembered -----------------------------------------------------
 
 export const sitesFile = () => join(configDir(), 'sites.json');
@@ -222,12 +238,12 @@ async function nameFor(
   for (let attempt = 1; ; attempt += 1) {
     const name = chosen ?? mint();
     try {
-      const { token } = await api<{ token: string }>('/api/sites', {
-        method: 'POST',
-        ...json({ name }),
-      });
+      const { token, url } = await api<{ token: string; url: string }>(
+        '/api/sites',
+        { method: 'POST', ...json({ name }) },
+      );
       remember(name, token);
-      write(writeTo, name);
+      write(writeTo, name, url);
       if (chosen === undefined) console.log(`  no name set — uses ${name}`);
       return name;
     } catch (error) {
@@ -237,10 +253,10 @@ async function nameFor(
   }
 }
 
-function write(dir: string, name: string): void {
+function write(dir: string, name: string, url?: string): void {
   writeFileSync(
     join(dir, 'kthx.json'),
-    `${JSON.stringify({ name }, null, 2)}\n`,
+    `${JSON.stringify(url === undefined ? { name } : { name, url }, null, 2)}\n`,
   );
 }
 
@@ -539,7 +555,7 @@ export async function nuke(
 }
 
 export function openSite(dir = '.'): string {
-  const url = siteOrigin(nameOf(dir));
+  const url = siteUrlOf(dir);
   console.log(`  ${link(url)}`);
   const opener = process.platform === 'darwin' ? 'open' : 'xdg-open';
   try {
@@ -650,7 +666,7 @@ if (import.meta.main) {
           (await import('./dev.ts')).dev(dir, {
             name,
             token: knownToken(name),
-            site: siteOrigin(name),
+            site: siteUrlOf(dir),
           });
           break;
         }
@@ -685,7 +701,7 @@ if (import.meta.main) {
           // The reference this CLI writes names it; the stdio bridge is not in
           // this build. One honest line beats usage and exit 2.
           console.error(
-            `MCP: not in this build — point the editor at ${siteOrigin(nameOf(dir))}/api/mcp with the bearer from ${sitesFile()}`,
+            `MCP: not in this build — point the editor at ${siteUrlOf(dir)}/api/mcp with the bearer from ${sitesFile()}`,
           );
           process.exitCode = 1;
           break;

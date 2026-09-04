@@ -123,6 +123,23 @@ gateway:
   name: spindrift-apps
   namespace: spindrift-apps
 
+# Where claiming and site control answer once they are not public. Empty is
+# the apex answering everything — a checkout, or a demo zone. Set, the host is
+# served on the named gateway listener alone, and the public apex answers
+# `403 PRIVATE` to everything under `/api/sites` but the directory; the sites
+# themselves stay public.
+#
+# The listener is named rather than inherited on purpose. The tunnel reaches
+# this gateway on its plain HTTP listener, so a private host that existed
+# there would be a name Cloudflare could carry. On a TLS listener whose
+# certificate is the lab's own wildcard, the name is reachable from the lab,
+# the offsite LAN and the tailnet, and from nowhere the tunnel serves.
+# external-dns publishes it at the gateway's private address, which is why
+# that route carries no hold-out annotation.
+control:
+  host: ""
+  listener: ""
+
 # Keyless GCP, exactly as the spindrift chart does it: the pod projects a
 # ServiceAccount token for this cluster's own OIDC issuer and mounts an ordinary
 # ADC `external_account` document beside it. The pool principal is

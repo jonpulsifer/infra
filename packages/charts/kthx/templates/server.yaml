@@ -121,6 +121,10 @@ spec:
               value: {{ .Values.port | quote }}
             - name: KTHX_ZONE
               value: {{ .Values.zone | quote }}
+            {{- with .Values.control.host }}
+            - name: KTHX_CONTROL_HOST
+              value: {{ . | quote }}
+            {{- end }}
             - name: KTHX_BUCKET
               # `required`, because an empty bucket is not a degraded mode: the
               # process reads it as "no depot" and silently keeps every release

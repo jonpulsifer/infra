@@ -32,6 +32,7 @@ import {
   rollback,
   siteOrigin,
   sitesFile,
+  siteUrlOf,
 } from '../cli/main.ts';
 
 interface Upload {
@@ -267,9 +268,11 @@ describe('deploy', () => {
     const claims = calls.filter((call) => call.path === '/api/sites');
     expect(claims).toHaveLength(2);
     expect(claims[0]!.body).not.toEqual(claims[1]!.body);
-    expect(JSON.parse(readFileSync(join(dir, 'kthx.json'), 'utf8'))).toEqual(
-      claims[1]!.body,
-    );
+    const written = JSON.parse(readFileSync(join(dir, 'kthx.json'), 'utf8'));
+    expect(written).toEqual({
+      ...(claims[1]!.body as { name: string }),
+      url: `https://${written.name}.kthx.test`,
+    });
   });
 
   test('--name claims that name, reuses a known one, and refuses to rename', async () => {
@@ -278,6 +281,7 @@ describe('deploy', () => {
     await deploy('.', { name: 'notes' });
     expect(JSON.parse(readFileSync(join(dir, 'kthx.json'), 'utf8'))).toEqual({
       name: 'notes',
+      url: 'https://notes.kthx.test',
     });
     const other = site();
     process.chdir(other);
@@ -331,6 +335,7 @@ describe('init', () => {
     expect(name).toMatch(NAME);
     expect(JSON.parse(readFileSync(join(dir, 'kthx.json'), 'utf8'))).toEqual({
       name,
+      url: `https://${name}.kthx.test`,
     });
     expect(readFileSync(join(dir, 'SKILL.md'), 'utf8')).toBe(SKILL);
     expect(readFileSync(join(dir, 'index.html'), 'utf8')).toContain(
@@ -521,5 +526,25 @@ describe('siteOrigin', () => {
     expect(siteOrigin('notes')).toBe('https://notes.kthx.dev');
     process.env.KTHX_ORIGIN = 'http://127.0.0.1:8080/';
     expect(siteOrigin('notes')).toBe('http://notes.127.0.0.1:8080');
+  });
+});
+
+describe('siteUrlOf', () => {
+  test('is the url kthx.json kept, and the origin zone for one that kept none', () => {
+    process.env.KTHX_ORIGIN = 'https://ops.lab.test';
+    const kept = site({
+      'kthx.json': JSON.stringify({
+        name: 'notes',
+        url: 'https://notes.kthx.test',
+      }),
+    });
+    expect(siteUrlOf(kept)).toBe('https://notes.kthx.test');
+    // A url that is not one is not trusted: the name still resolves somewhere.
+    const odd = site({
+      'kthx.json': JSON.stringify({ name: 'notes', url: 'notes' }),
+    });
+    expect(siteUrlOf(odd)).toBe('https://notes.ops.lab.test');
+    const bare = site({ 'kthx.json': JSON.stringify({ name: 'notes' }) });
+    expect(siteUrlOf(bare)).toBe('https://notes.ops.lab.test');
   });
 });
