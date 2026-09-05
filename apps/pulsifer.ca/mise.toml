@@ -14,16 +14,16 @@ run = "tailwindcss --input css/main.css --output assets/css/built.css --watch"
 
 [tasks.build]
 description = "Build the production site"
-depends = ["css"]
+depends = ["css", "cv"]
 run = "hugo --minify"
 
 [tasks.serve]
 description = "Run the Hugo dev server (pair with css-watch when editing styles)"
-depends = ["css"]
+depends = ["css", "cv"]
 run = "hugo serve"
 
 [tasks.cv]
-description = "Render content/cv.md to dist/cv.pdf (pandoc + typst)"
+description = "Render content/cv.md to static/cv.pdf (pandoc + typst), served at /cv.pdf"
 run = '''
 set -eu
 mkdir -p dist
@@ -40,5 +40,5 @@ sed -E \
   content/cv.md > dist/cv.md
 pandoc dist/cv.md -t typst --lua-filter cv/cv.lua -o dist/body.typ
 fonts=$(nix build --inputs-from ../.. nixpkgs#source-serif-pro nixpkgs#source-sans-pro nixpkgs#jetbrains-mono --no-link --print-out-paths)
-typst compile --root . --ignore-system-fonts $(printf -- '--font-path %s ' $fonts) cv/cv.typ dist/cv.pdf
+typst compile --root . --ignore-system-fonts $(printf -- '--font-path %s ' $fonts) cv/cv.typ static/cv.pdf
 '''
