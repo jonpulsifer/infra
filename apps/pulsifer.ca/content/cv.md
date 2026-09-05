@@ -54,7 +54,7 @@ I retired from the Canadian Armed Forces a [Master Sailor][ms] working as what's
 
 #### Senior Surveillance Analyst, 2012-2015
 
-Technical lead for a group of surveillance analysts — providing focus and direction on computer security incident response, and incident handling on one of the largest computer networks in Canada.
+Technical lead for a group of surveillance analysts -- providing focus and direction on computer security incident response, and incident handling on one of the largest computer networks in Canada.
 
 Responsible for anomaly detection, network intrusion detection systems, alert triage, escalation of malware, botnet, and rookit behaviour. Engineered custom tools to increase the unit’s capability and assist in the generation of metadata. Produced end product reports, briefings, and incident reports.
 
@@ -102,7 +102,7 @@ Whenever I have enough spoons :spoon: left I like to give back to the community.
 - [Kubernetes Product Security Committee][k8s] emeritus member
 - [GIAC Advisory Board][giac-advisory-board] member
 
-Previously, as a [Google Developer Expert][gde-profile] and [Kubernetes][k8s] community person, I hosted and partipated in [Google Developer Group][gdg] chapters and Cloud Native Computing Foundation meetups:
+Previously, as a [Google Developer Expert][gde-profile] and [Kubernetes][k8s] community person, I hosted and participated in [Google Developer Group][gdg] chapters and Cloud Native Computing Foundation meetups:
 
 - [CNCF Ottawa][cncf-ottawa]
 - [GDG Cloud Ottawa][gdg-cloud-ottawa]

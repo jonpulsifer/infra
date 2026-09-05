@@ -1,6 +1,8 @@
 [tools]
 hugo = "0.165.0"
 "aqua:tailwindlabs/tailwindcss" = "4.3.3"
+pandoc = "3.11"
+"aqua:typst/typst" = "0.15.1"
 
 [tasks.css]
 description = "Compile Tailwind CSS into the Hugo assets dir"
@@ -19,3 +21,24 @@ run = "hugo --minify"
 description = "Run the Hugo dev server (pair with css-watch when editing styles)"
 depends = ["css"]
 run = "hugo serve"
+
+[tasks.cv]
+description = "Render content/cv.md to dist/cv.pdf (pandoc + typst)"
+run = '''
+set -eu
+mkdir -p dist
+# Strip Hugo front matter/shortcodes and emoji, and turn the single-column tables into lists
+sed -E \
+  -e '1,/^---$/d' \
+  -e '/\{\{< detail/,/\{\{< \/detail/s/^#/##/' \
+  -e '/\{\{< \/?detail/d' \
+  -e 's#\{\{< relref "([^"]+)" >\}\}#https://pulsifer.ca\1/#g' \
+  -e 's/:cloud:/cloud/g; s/:1st_place_medal:/(1st place)/g; s/:2nd_place_medal:/(2nd place)/g' \
+  -e '/^- /!s/ :[a-z0-9_+-]+:$/./; s/ ?:[a-z0-9_+-]+://g' \
+  -e '/^\|[ -]*\|$/d' \
+  -e 's/^\| *(.*[^ ]) *\|$/- \1/' \
+  content/cv.md > dist/cv.md
+pandoc dist/cv.md -t typst --lua-filter cv/cv.lua -o dist/body.typ
+fonts=$(nix build --inputs-from ../.. nixpkgs#source-serif-pro nixpkgs#source-sans-pro nixpkgs#jetbrains-mono --no-link --print-out-paths)
+typst compile --root . --ignore-system-fonts $(printf -- '--font-path %s ' $fonts) cv/cv.typ dist/cv.pdf
+'''
