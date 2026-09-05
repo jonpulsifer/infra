@@ -2,7 +2,7 @@
 hugo = "0.165.0"
 "aqua:tailwindlabs/tailwindcss" = "4.3.3"
 pandoc = "3.11"
-"github:tectonic-typesetting/tectonic" = { version = "0.17.0", asset_pattern = "*x86_64-unknown-linux-musl*" }
+"aqua:typst/typst" = "0.15.1"
 
 [tasks.css]
 description = "Compile Tailwind CSS into the Hugo assets dir"
@@ -23,7 +23,7 @@ depends = ["css"]
 run = "hugo serve"
 
 [tasks.cv]
-description = "Render content/cv.md to dist/cv.tex and dist/cv.pdf"
+description = "Render content/cv.md to dist/cv.pdf (pandoc + typst)"
 run = '''
 set -eu
 mkdir -p dist
@@ -38,12 +38,7 @@ sed -E \
   -e '/^\|[ -]*\|$/d' \
   -e 's/^\| *(.*[^ ]) *\|$/- \1/' \
   content/cv.md > dist/cv.md
-pandoc dist/cv.md -s --shift-heading-level-by=-1 \
-  -M title="Curriculum Vitae" -M author="Jonathan Pulsifer" -M date="$(date +%F)" \
-  -V geometry:margin=0.75in -V colorlinks=true \
-  -V mainfont=lmroman10-regular.otf \
-  -V mainfontoptions='BoldFont=lmroman10-bold.otf,ItalicFont=lmroman10-italic.otf,BoldItalicFont=lmroman10-bolditalic.otf,Ligatures={TeX,NoCommon}' \
-  -V header-includes='\makeatletter\renewcommand\paragraph{\@startsection{paragraph}{4}{\z@}{2.5ex plus 1ex minus .2ex}{1ex}{\normalfont\normalsize\bfseries}}\makeatother' \
-  -o dist/cv.tex
-tectonic --outdir dist dist/cv.tex
+pandoc dist/cv.md -t typst --lua-filter cv/cv.lua -o dist/body.typ
+fonts=$(nix build --inputs-from ../.. nixpkgs#source-serif-pro nixpkgs#source-sans-pro nixpkgs#jetbrains-mono --no-link --print-out-paths)
+typst compile --root . --ignore-system-fonts $(printf -- '--font-path %s ' $fonts) cv/cv.typ dist/cv.pdf
 '''
