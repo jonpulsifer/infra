@@ -22,6 +22,9 @@ CLUSTER=${KTHX_CLUSTER:-kthx-db}
 DATABASE=${KTHX_DATABASE:-kthx}
 
 APEX="https://$ZONE"
+# Where claiming and site control answer: the private host, when the
+# deployment has one, else the apex. `KTHX_ORIGIN` is the CLI's own name for it.
+CONTROL="${KTHX_ORIGIN:-$APEX}"
 NAME=${1:-smoke-$(date -u +%s)}
 SITE="https://$NAME.$ZONE"
 
@@ -40,7 +43,7 @@ cleanup() {
   local code=$?
   # Best effort, and harmless twice: a deleted name answers 410 here.
   [[ -z $TOKEN ]] \
-    || curl -sS -o /dev/null -X DELETE "$APEX/api/sites/$NAME" \
+    || curl -sS -o /dev/null -X DELETE "$CONTROL/api/sites/$NAME" \
       -H "authorization: Bearer $TOKEN" || true
   rm -rf "$tmp"
   exit "$code"
@@ -117,7 +120,7 @@ echo "kthx: $SITE"
 
 echo
 echo "claim"
-check 'POST /api/sites' 201 "$(req POST "$APEX/api/sites" \
+check 'POST /api/sites' 201 "$(req POST "$CONTROL/api/sites" \
   -H 'content-type: application/json' -d "{\"name\":\"$NAME\"}")"
 TOKEN=$(jq -r '.token // empty' <"$body")
 [[ -n $TOKEN ]] || die "the claim returned no token: $(cat "$body")"
@@ -125,9 +128,9 @@ TOKEN=$(jq -r '.token // empty' <"$body")
 # The CLI reads its token store and its apex from the environment, so pointing
 # both at the temp directory keeps this run out of the operator's own config.
 export XDG_CONFIG_HOME="$tmp/config"
-export KTHX_ORIGIN="$APEX"
+export KTHX_ORIGIN="$CONTROL"
 mkdir -p "$XDG_CONFIG_HOME/kthx"
-jq -n --arg o "$APEX" --arg n "$NAME" --arg t "$TOKEN" '{($o): {($n): $t}}' \
+jq -n --arg o "$CONTROL" --arg n "$NAME" --arg t "$TOKEN" '{($o): {($n): $t}}' \
   >"$XDG_CONFIG_HOME/kthx/sites.json"
 printf '{"name":"%s"}\n' "$NAME" >"$tmp/v2/kthx.json"
 
@@ -135,7 +138,7 @@ printf '{"name":"%s"}\n' "$NAME" >"$tmp/v2/kthx.json"
 
 echo
 echo "release 1 (zip, curl)"
-check 'POST /api/sites/:name/releases' 201 "$(req POST "$APEX/api/sites/$NAME/releases" \
+check 'POST /api/sites/:name/releases' 201 "$(req POST "$CONTROL/api/sites/$NAME/releases" \
   -H "authorization: Bearer $TOKEN" -H 'x-filename: site.zip' \
   --data-binary "@$tmp/v1.zip")"
 check '  serving' 1 "$(jq -r '.serving // empty' <"$body")"
@@ -242,7 +245,7 @@ if kthx deploy "$tmp/v2" >"$tmp/deploy.log" 2>&1; then
 else
   check 'kthx deploy' ok "failed: $(tail -1 "$tmp/deploy.log")"
 fi
-req GET "$APEX/api/sites/$NAME" -H "authorization: Bearer $TOKEN" >/dev/null
+req GET "$CONTROL/api/sites/$NAME" -H "authorization: Bearer $TOKEN" >/dev/null
 check '  serving' 2 "$(jq -r '.serving // empty' <"$body")"
 check '  /nope is now the SPA fallback' 200 "$(req GET "$(fresh "$SITE/nope")")"
 
@@ -250,13 +253,13 @@ check '  /nope is now the SPA fallback' 200 "$(req GET "$(fresh "$SITE/nope")")"
 # directory, not from an argument.
 (cd "$tmp/v2" && kthx rollback 1) >"$tmp/rollback.log" 2>&1 \
   || cat "$tmp/rollback.log"
-req GET "$APEX/api/sites/$NAME" -H "authorization: Bearer $TOKEN" >/dev/null
+req GET "$CONTROL/api/sites/$NAME" -H "authorization: Bearer $TOKEN" >/dev/null
 check 'kthx rollback 1 serves' 1 "$(jq -r '.serving // empty' <"$body")"
 check '  and holds' true "$(jq -r '.held' <"$body")"
 check '  release 1 answers 404 again' 404 "$(req GET "$(fresh "$SITE/nope")")"
 
 (cd "$tmp/v2" && kthx release) >"$tmp/release.log" 2>&1 || cat "$tmp/release.log"
-req GET "$APEX/api/sites/$NAME" -H "authorization: Bearer $TOKEN" >/dev/null
+req GET "$CONTROL/api/sites/$NAME" -H "authorization: Bearer $TOKEN" >/dev/null
 check 'kthx release drops the hold' false "$(jq -r '.held' <"$body")"
 check '  the newest release serves' 2 "$(jq -r '.serving // empty' <"$body")"
 
@@ -264,11 +267,11 @@ check '  the newest release serves' 2 "$(jq -r '.serving // empty' <"$body")"
 
 echo
 echo "delete"
-check 'a bearer that is not this site' 403 "$(req GET "$APEX/api/sites/$NAME" \
+check 'a bearer that is not this site' 403 "$(req GET "$CONTROL/api/sites/$NAME" \
   -H 'authorization: Bearer not-this-sites-token')"
-check 'DELETE /api/sites/:name' 204 "$(req DELETE "$APEX/api/sites/$NAME" \
+check 'DELETE /api/sites/:name' 204 "$(req DELETE "$CONTROL/api/sites/$NAME" \
   -H "authorization: Bearer $TOKEN")"
-check '  the apex answers 410' 410 "$(req GET "$APEX/api/sites/$NAME" \
+check '  the apex answers 410' 410 "$(req GET "$CONTROL/api/sites/$NAME" \
   -H "authorization: Bearer $TOKEN")"
 check '  the site host answers 410' 410 "$(req GET "$(fresh "$SITE/")")"
 check '  the site database is dropped' 0 \

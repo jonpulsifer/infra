@@ -109,6 +109,20 @@ describe('the private host', () => {
   });
 });
 
+describe('GET /api on the apex', () => {
+  test('states the zone on both hosts, which is how the CLI finds a site', async () => {
+    for (const host of [ZONE, PRIVATE]) {
+      const response = await kthx().fetch(ask('/api', { host }));
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual({
+        zone: ZONE,
+        url: `https://${ZONE}`,
+        docs: `https://${ZONE}/skill.md`,
+      });
+    }
+  });
+});
+
 describe('the config', () => {
   const env = {
     DATABASE_URL: 'postgres://x',

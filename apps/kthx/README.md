@@ -16,6 +16,7 @@ came through Cloudflare — is 404.
 
 | Surface | What it is |
 | --- | --- |
+| apex `GET /api` | `{zone, url, docs}` — what a site host's `/api` says, said about the zone |
 | `POST /api/sites` | claim a name; the bearer is minted once and shown once |
 | `/api/sites/:name…` | inspect, upload a release, `serve` one, drop the `hold`, delete |
 | apex `/`, `/sdk.js`, `/skill.md`, `/favicon.ico` | the files `@repo/kthx` carries |
@@ -116,9 +117,10 @@ name — never in the directory, which is what gets uploaded. There is no
 account and no reset: a lost token is a lost site.
 
 The name is `kthx.json`, read from the directory and then from the current one,
-so `kthx deploy dist` inside a project root deploys the project's site. Beside
-the name it keeps the site's `url` as the server stated it at claim, which is
-how `dev` and `open` find a site whose origin is not its zone. `init`
+so `kthx deploy dist` inside a project root deploys the project's site. It
+holds the name and nothing else: `dev`, `open` and `mcp` ask the origin's
+`GET /api` for the zone, because a committed file must not be what chooses
+where the owner bearer is sent. `init`
 writes it into the directory it is given; `deploy` and `dev` write it where they
 run, so a build output directory that is rebuilt from scratch does not take the
 name with it.

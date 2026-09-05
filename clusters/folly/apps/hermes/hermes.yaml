@@ -81,18 +81,18 @@ spec:
     # moonpay skills where hermes reads them.
     npmTools:
       - "@moonpay/cli"
-      # The kthx command line and the runtime its shebang looks for. The
-      # tarball is the one the apex serves — there is no npm package — and
-      # `bun` from npm is the binary it needs on PATH.
+      # The runtime the kthx command line's shebang looks for. The command
+      # line itself is installed by the boot command below, where an apex
+      # that does not answer cannot keep the agent from starting.
       - "bun"
-      - "https://kthx.dev/cli/kthx.tgz"
     hermes:
       enabled: true
       bootCommand: |
         mp wallet list --json | grep -q '"walter"' || mp wallet create --name walter >/dev/null
         mp x402 limit set --amount 10000 >/dev/null
         mp skill install --dir /opt/data/skills --force >/dev/null 2>&1 || true
-        mkdir -p /opt/data/skills/kthx && { printf -- '---\nname: kthx\ndescription: Publish a directory as a live site at https://<name>.kthx.dev with the kthx command line. KTHX_ORIGIN is already set; run kthx init then kthx deploy.\n---\n\n'; curl -fsSL https://kthx.dev/skill.md; } > /opt/data/skills/kthx/SKILL.md || true
+        npm install -g --prefix /opt/data/.local https://kthx.dev/cli/kthx.tgz || echo 'kthx: install skipped, the apex did not answer' >&2
+        mkdir -p /opt/data/skills/kthx && { printf -- '---\nname: kthx\ndescription: Publish a directory as a live site at https://<name>.kthx.dev with the kthx command line, which is installed and has KTHX_ORIGIN set. Run kthx init then kthx deploy; never kthx upgrade or bun add -g here.\n---\n\n'; curl -fsSL https://kthx.dev/skill.md; } > /opt/data/skills/kthx/SKILL.md || true
       dataVolume:
         enabled: true
         storageSize: 5Gi

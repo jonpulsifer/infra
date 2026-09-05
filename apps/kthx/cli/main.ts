@@ -47,29 +47,19 @@ export const origin = () =>
   (process.env.KTHX_ORIGIN?.trim() || 'https://kthx.dev').replace(/\/+$/, '');
 
 /**
- * Where the site's own backends answer: the apex origin with the name as a
- * label in front of it. Every site is a host, so this is the only address
- * `kthx dev` needs to proxy to.
+ * Where the site's own backends answer: the zone the origin says it serves,
+ * with the name as a label in front of it. Asked of the origin rather than
+ * derived from it, because a deployment may answer claims on a private host
+ * while its sites stay on the public zone — and never read from a file in the
+ * project, which is committed and cloned and must not be what chooses where
+ * `kthx dev` sends the owner bearer.
  */
-export function siteOrigin(name: string): string {
-  const { protocol, host } = new URL(origin());
-  return `${protocol}//${name}.${host}`;
-}
+let apex: Promise<{ url: string }> | null = null;
 
-/**
- * The site's address as the server stated it at claim, kept in `kthx.json`
- * beside the name: the origin is not always the zone, since a deployment may
- * answer claims on a private host while its sites stay public. A `kthx.json`
- * from before the address was kept falls back to the origin's zone.
- */
-export function siteUrlOf(dir: string): string {
-  for (const at of [join(dir, 'kthx.json'), 'kthx.json']) {
-    const { name, url } = readJson<{ name?: unknown; url?: unknown }>(at, {});
-    if (name === undefined) continue;
-    if (typeof url === 'string' && /^https?:\/\/[^/]+$/.test(url)) return url;
-    break;
-  }
-  return siteOrigin(nameOf(dir));
+export async function siteUrl(name: string): Promise<string> {
+  apex ??= api<{ url: string }>('/api');
+  const { protocol, host } = new URL((await apex).url);
+  return `${protocol}//${name}.${host}`;
 }
 
 // --- what is remembered -----------------------------------------------------
@@ -238,12 +228,12 @@ async function nameFor(
   for (let attempt = 1; ; attempt += 1) {
     const name = chosen ?? mint();
     try {
-      const { token, url } = await api<{ token: string; url: string }>(
-        '/api/sites',
-        { method: 'POST', ...json({ name }) },
-      );
+      const { token } = await api<{ token: string }>('/api/sites', {
+        method: 'POST',
+        ...json({ name }),
+      });
       remember(name, token);
-      write(writeTo, name, url);
+      write(writeTo, name);
       if (chosen === undefined) console.log(`  no name set — uses ${name}`);
       return name;
     } catch (error) {
@@ -253,10 +243,10 @@ async function nameFor(
   }
 }
 
-function write(dir: string, name: string, url?: string): void {
+function write(dir: string, name: string): void {
   writeFileSync(
     join(dir, 'kthx.json'),
-    `${JSON.stringify(url === undefined ? { name } : { name, url }, null, 2)}\n`,
+    `${JSON.stringify({ name }, null, 2)}\n`,
   );
 }
 
@@ -554,8 +544,8 @@ export async function nuke(
   );
 }
 
-export function openSite(dir = '.'): string {
-  const url = siteUrlOf(dir);
+export async function openSite(dir = '.'): Promise<string> {
+  const url = await siteUrl(nameOf(dir));
   console.log(`  ${link(url)}`);
   const opener = process.platform === 'darwin' ? 'open' : 'xdg-open';
   try {
@@ -666,7 +656,7 @@ if (import.meta.main) {
           (await import('./dev.ts')).dev(dir, {
             name,
             token: knownToken(name),
-            site: siteUrlOf(dir),
+            site: await siteUrl(name),
           });
           break;
         }
@@ -689,7 +679,7 @@ if (import.meta.main) {
           await rm(dir);
           break;
         case 'open':
-          openSite(dir);
+          await openSite(dir);
           break;
         case 'upgrade':
           await upgrade(origin());
@@ -701,7 +691,7 @@ if (import.meta.main) {
           // The reference this CLI writes names it; the stdio bridge is not in
           // this build. One honest line beats usage and exit 2.
           console.error(
-            `MCP: not in this build — point the editor at ${siteUrlOf(dir)}/api/mcp with the bearer from ${sitesFile()}`,
+            `MCP: not in this build — point the editor at ${await siteUrl(nameOf(dir))}/api/mcp with the bearer from ${sitesFile()}`,
           );
           process.exitCode = 1;
           break;

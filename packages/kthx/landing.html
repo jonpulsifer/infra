@@ -525,15 +525,19 @@ async function refresh(name) {
     s.releases.forEach(r => { r.at = Date.parse(r.at); });
     sites = [s, ...sites.filter(x => x.name !== name)];
   } catch (e) {
+    /* the public apex of a deployment that claims elsewhere: the token is not dead, it is just not askable here */
+    if (e.code === "PRIVATE") return;
     if (e.status === 401 || e.status === 403 || e.status === 404) forget(name);
     else throw e;
   }
 }
 async function loadAll() {
-  await Promise.all(Object.keys(tokens).map(n => refresh(n).catch(() => {})));
+  /* read only here: the owner routes answer elsewhere, and asking would only be told so */
+  const readonly = document.documentElement.hasAttribute("data-readonly");
+  if (!readonly) await Promise.all(Object.keys(tokens).map(n => refresh(n).catch(() => {})));
   sites.sort((a, b) => (b.releases[0]?.at ?? 0) - (a.releases[0]?.at ?? 0));
   renderProps();
-  $("#jackText").textContent = `connected · ${sites.length} site${sites.length === 1 ? "" : "s"}`;
+  $("#jackText").textContent = readonly ? "connected · read only here" : `connected · ${sites.length} site${sites.length === 1 ? "" : "s"}`;
   $("#jack").classList.add("on");
 }
 

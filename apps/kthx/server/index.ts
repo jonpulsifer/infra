@@ -182,6 +182,14 @@ async function apex(
       },
     });
   }
+  if (path === '/api' && READ_METHODS.has(request.method)) {
+    // What a site host's `/api` says about itself, said about the zone. The
+    // command line asks this to build a site's address, because the origin it
+    // was pointed at is not always the zone — and a file in the project must
+    // not be what decides where a bearer is sent.
+    const url = siteUrl(ctx.config.zone, undefined, ctx.port);
+    return ok({ zone: ctx.config.zone, url, docs: `${url}/skill.md` }, ctx.id);
+  }
   if (path === '/api' || path.startsWith('/api/')) {
     return refuse('NOT_FOUND', ctx.id);
   }
