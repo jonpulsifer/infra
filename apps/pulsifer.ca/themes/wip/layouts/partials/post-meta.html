@@ -8,6 +8,10 @@
       <span>{{ . }}</span>
     {{ end }}
   {{ end }}
+  {{ with .Params.pdf }}
+    <span class="text-zinc-700 select-none" aria-hidden="true">|</span>
+    <a href="{{ . }}" download class="text-accent transition-colors hover:text-accent-bright">download pdf</a>
+  {{ end }}
   {{ if .Params.ShowModified }}
     {{ with .Page.Lastmod }}
       <span class="text-zinc-700 select-none" aria-hidden="true">|</span>

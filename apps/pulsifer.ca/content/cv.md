@@ -5,6 +5,7 @@ author: jonpulsifer
 date: 2022-03-29
 draft: false
 toc: true
+pdf: /cv.pdf
 ---
 
 ## Summary
