@@ -17,7 +17,7 @@
         "@x402/core": "2.24.0",
         "@x402/evm": "2.24.0",
         "@x402/hono": "2.23.0",
-        "@x402/mcp": "2.23.0",
+        "@x402/mcp": "2.24.0",
         "@x402/svm": "2.24.0",
         "hono": "4.13.5",
         "uqr": "0.1.3",
@@ -1230,7 +1230,7 @@
 
     "@x402/hono": ["@x402/hono@2.23.0", "", { "dependencies": { "@x402/core": "~2.23.0", "@x402/extensions": "~2.23.0" }, "peerDependencies": { "@x402/paywall": "^2.23.0", "hono": "^4.0.0" }, "optionalPeers": ["@x402/paywall"] }, "sha512-X0fnLcdEpwqf4toNT55OdfsffiSNvmQeCYLvHMpbSxmlKlFe5r33wrrAu+Vr1oTTg4ooulywsXNNg9tmx/PlzQ=="],
 
-    "@x402/mcp": ["@x402/mcp@2.23.0", "", { "dependencies": { "@modelcontextprotocol/sdk": "^1.12.1", "@x402/core": "~2.23.0", "zod": "^3.24.2" } }, "sha512-lzyZNc+JRyOQ3sCEa0RaSDTQBgiDRYqKJx8RBq0sZypuWFgcVvyTi0hI8jhGSAbfHvYYsb2B/AwgbYRjoLaYaA=="],
+    "@x402/mcp": ["@x402/mcp@2.24.0", "", { "dependencies": { "@modelcontextprotocol/sdk": "^1.12.1", "@x402/core": "~2.24.0", "zod": "^3.24.2" } }, "sha512-fUxrVZpScShsvrl/lTi3+guTSUDkB95MDWJEqoHywtTVx9e9N5w6v5rj6+ABdNEofSUyMAn+iFFx0MrI3pKndQ=="],
 
     "@x402/svm": ["@x402/svm@2.24.0", "", { "dependencies": { "@solana-program/compute-budget": "^0.11.0", "@solana-program/token": "^0.9.0", "@solana-program/token-2022": "^0.6.1", "@x402/core": "~2.24.0" }, "peerDependencies": { "@solana/kit": ">=5.1.0" } }, "sha512-j/2ARlUaDipqGyMuQOCbxSr+Pr7sANsksL1HXMCqYmTnNhX8BqZGIYTXNxbkNON47QKaojSdRckXwHwX0oIVrg=="],
 
@@ -2369,8 +2369,6 @@
     "@x402/extensions/zod": ["zod@3.25.76", "", {}, "sha512-gzUt/qt81nXsFGKIFcC3YnfEAx5NkunCfnDlvuBSSFS02bcXu4Lmea0AFIUwbLWxWPx3d9p8S5QoaujKcNQxcQ=="],
 
     "@x402/hono/@x402/core": ["@x402/core@2.23.0", "", { "dependencies": { "zod": "^3.24.2" } }, "sha512-EFeV0nXbTPPe5FXaD6y9vMgqc+k/ujLXCrUPrQXkmHjHyjC3Ir5tTL1e2FPSkx2+GUGzfpt1wVZb36639ygkWw=="],
-
-    "@x402/mcp/@x402/core": ["@x402/core@2.23.0", "", { "dependencies": { "zod": "^3.24.2" } }, "sha512-EFeV0nXbTPPe5FXaD6y9vMgqc+k/ujLXCrUPrQXkmHjHyjC3Ir5tTL1e2FPSkx2+GUGzfpt1wVZb36639ygkWw=="],
 
     "@x402/mcp/zod": ["zod@3.25.76", "", {}, "sha512-gzUt/qt81nXsFGKIFcC3YnfEAx5NkunCfnDlvuBSSFS02bcXu4Lmea0AFIUwbLWxWPx3d9p8S5QoaujKcNQxcQ=="],
 
