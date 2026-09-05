@@ -69,7 +69,7 @@
     "tailwind-merge": "3.6.0",
     "typescript": "5.9.3",
     "vaul": "1.1.2",
-    "zod": "4.4.3"
+    "zod": "4.5.2"
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.11",
