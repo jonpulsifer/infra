@@ -30,8 +30,8 @@ import {
   release,
   rm,
   rollback,
-  siteOrigin,
   sitesFile,
+  siteUrl,
 } from '../cli/main.ts';
 
 interface Upload {
@@ -68,6 +68,9 @@ const stub = Bun.serve({
       return skillDown
         ? new Response(null, { status: 503 })
         : new Response(SKILL);
+    }
+    if (request.method === 'GET' && pathname === '/api') {
+      return Response.json({ zone: 'kthx.test', url: 'https://kthx.test' });
     }
     if (request.method === 'GET' && pathname === '/api/sites') {
       calls.push({ method: 'GET', path: pathname, body: null });
@@ -507,19 +510,15 @@ describe('rollback, release, ls and rm', () => {
     ] as const) {
       const dir = site({ 'kthx.json': JSON.stringify({ name }) });
       process.chdir(dir);
-      expect(() => openSite('.')).toThrowError(
-        expect.objectContaining({ code }),
-      );
+      await expect(openSite('.')).rejects.toMatchObject({ code });
       await expect(ls('.')).rejects.toMatchObject({ code });
     }
   });
 });
 
-describe('siteOrigin', () => {
-  test('is the apex with the name as a label in front of it', () => {
-    process.env.KTHX_ORIGIN = 'https://kthx.dev';
-    expect(siteOrigin('notes')).toBe('https://notes.kthx.dev');
-    process.env.KTHX_ORIGIN = 'http://127.0.0.1:8080/';
-    expect(siteOrigin('notes')).toBe('http://notes.127.0.0.1:8080');
+describe('siteUrl', () => {
+  test('is the zone the origin states with the name in front, whatever the origin is', async () => {
+    process.env.KTHX_ORIGIN = `${stub.url.origin}/`;
+    expect(await siteUrl('notes')).toBe('https://notes.kthx.test');
   });
 });

@@ -175,3 +175,40 @@ describe('the load-bearing values', () => {
     },
   );
 });
+
+describe('the private host', () => {
+  const CONTROL = { host: 'kthx.lab.test', listener: 'lab-tls' };
+
+  test('is a second route on the named TLS listener, published to DNS', async () => {
+    const objects = await render({ ...VALUES, control: CONTROL });
+    const routes = objects.filter((o) => o.kind === 'HTTPRoute');
+    expect(routes).toHaveLength(2);
+    const control = routes.find(
+      (r) => r.metadata.name === 'kthx-control',
+    ) as Rendered;
+    expect(control.spec.hostnames).toEqual([CONTROL.host]);
+    expect(control.spec.parentRefs[0].sectionName).toBe(CONTROL.listener);
+    // No hold-out: this name's record is meant to be the gateway's address.
+    expect((control.metadata as any).annotations).toBeUndefined();
+    // ...and the public route keeps its own, or external-dns claims the zone.
+    const zone = routes.find((r) => r.metadata.name === 'kthx') as Rendered;
+    expect(Object.keys((zone.metadata as any).annotations)).not.toHaveLength(0);
+
+    const env = one(objects, 'Deployment').spec.template.spec.containers[0].env;
+    expect(env.find((e: any) => e.name === 'KTHX_CONTROL_HOST').value).toBe(
+      CONTROL.host,
+    );
+  });
+
+  test('is absent when unset, and refuses a host with no listener', async () => {
+    const objects = await render();
+    expect(objects.filter((o) => o.kind === 'HTTPRoute')).toHaveLength(1);
+    const env = one(objects, 'Deployment').spec.template.spec.containers[0].env;
+    expect(
+      env.find((e: any) => e.name === 'KTHX_CONTROL_HOST'),
+    ).toBeUndefined();
+    expect(
+      render({ ...VALUES, control: { host: CONTROL.host, listener: '' } }),
+    ).rejects.toThrow('control.listener');
+  });
+});

@@ -65,9 +65,18 @@ function asset(path: string, type: string, cacheControl: string): Response {
 /** The apex page, read once. This process is the only one that serves it. */
 let landing: Promise<string> | null = null;
 
-function landingHtml(): Promise<string> {
+/**
+ * The page is told two things a browser cannot see: the zone, because on the
+ * private host `location.hostname` is not it, and whether this host may claim
+ * — on the public apex of a deployment with a private host the claim deck is
+ * hidden rather than left to fail.
+ */
+async function landingHtml(zone: string, control: boolean): Promise<string> {
   landing ??= Bun.file(LANDING_PATH).text();
-  return landing;
+  return (await landing).replace(
+    '<html lang="en">',
+    `<html lang="en" data-zone="${zone}"${control ? '' : ' data-readonly'}>`,
+  );
 }
 
 /**
@@ -150,6 +159,10 @@ async function apex(
 ): Promise<Response> {
   const segments = path.split('/');
   if (segments[1] === 'api' && segments[2] === 'sites') {
+    // With a private host configured, the public apex reads the directory and
+    // nothing else: claiming and everything behind a bearer answer there.
+    const directory = request.method === 'GET' && segments.length === 3;
+    if (!ctx.control && !directory) return refuse('PRIVATE', ctx.id);
     return (
       (await sitesApi(request, ctx, segments)) ?? refuse('NOT_FOUND', ctx.id)
     );
@@ -169,6 +182,14 @@ async function apex(
       },
     });
   }
+  if (path === '/api' && READ_METHODS.has(request.method)) {
+    // What a site host's `/api` says about itself, said about the zone. The
+    // command line asks this to build a site's address, because the origin it
+    // was pointed at is not always the zone — and a file in the project must
+    // not be what decides where a bearer is sent.
+    const url = siteUrl(ctx.config.zone, undefined, ctx.port);
+    return ok({ zone: ctx.config.zone, url, docs: `${url}/skill.md` }, ctx.id);
+  }
   if (path === '/api' || path.startsWith('/api/')) {
     return refuse('NOT_FOUND', ctx.id);
   }
@@ -177,7 +198,7 @@ async function apex(
     return refuse('METHOD_NOT_ALLOWED', ctx.id);
   }
   if (path === '/') {
-    return new Response(await landingHtml(), {
+    return new Response(await landingHtml(ctx.config.zone, ctx.control), {
       headers: {
         'content-type': 'text/html; charset=utf-8',
         'cache-control': 'no-cache',
@@ -532,10 +553,17 @@ export function handler(
   ): Promise<Response | undefined> => {
     const id = requestId();
     const host = hostOf(request);
-    const name = siteOf(host, config.zone);
+    const control = config.controlHost !== null && host === config.controlHost;
+    const name = control ? '' : siteOf(host, config.zone);
     // A host outside the zone reached this process by mistake or on purpose;
     // either way it learns nothing about what is behind it.
     if (name === null) return refuse('NOT_FOUND', id);
+    // Nor does a request for the private host that came through Cloudflare:
+    // the tunnel never carries that name, so this is an edge misrouted, and it
+    // gets the answer a host outside the zone gets.
+    if (control && request.headers.has('cf-connecting-ip')) {
+      return refuse('NOT_FOUND', id);
+    }
 
     const ctx: Ctx = {
       config,
@@ -546,6 +574,7 @@ export function handler(
       id,
       host,
       port: portOf(request),
+      control: control || config.controlHost === null,
     };
     const path = decodePath(request.url);
     if (path === null) {

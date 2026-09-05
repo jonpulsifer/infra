@@ -30,6 +30,7 @@ export type Code =
   | 'MALFORMED_REQUEST'
   | 'UNAUTHENTICATED'
   | 'FORBIDDEN'
+  | 'PRIVATE'
   | 'NOT_FOUND'
   | 'METHOD_NOT_ALLOWED'
   | 'TIMEOUT'
@@ -84,6 +85,10 @@ const ERRORS: Record<Code, readonly [number, string]> = {
     'this site is opened with its token: Authorization: Bearer <token>',
   ],
   FORBIDDEN: [403, 'that does not open this site'],
+  PRIVATE: [
+    403,
+    'claiming and site control answer on the private host only; point KTHX_ORIGIN at it',
+  ],
   NOT_FOUND: [404, 'there is nothing here'],
   METHOD_NOT_ALLOWED: [405, 'that is not something this path does'],
   TIMEOUT: [408, 'the body was not sent within the time this path waits'],

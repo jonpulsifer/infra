@@ -81,12 +81,18 @@ spec:
     # moonpay skills where hermes reads them.
     npmTools:
       - "@moonpay/cli"
+      # The runtime the kthx command line's shebang looks for. The command
+      # line itself is installed by the boot command below, where an apex
+      # that does not answer cannot keep the agent from starting.
+      - "bun"
     hermes:
       enabled: true
       bootCommand: |
         mp wallet list --json | grep -q '"walter"' || mp wallet create --name walter >/dev/null
         mp x402 limit set --amount 10000 >/dev/null
         mp skill install --dir /opt/data/skills --force >/dev/null 2>&1 || true
+        npm install -g --prefix /opt/data/.local https://kthx.dev/cli/kthx.tgz || echo 'kthx: install skipped, the apex did not answer' >&2
+        mkdir -p /opt/data/skills/kthx && { printf -- '---\nname: kthx\ndescription: Publish a directory as a live site at https://<name>.kthx.dev with the kthx command line, which is installed and has KTHX_ORIGIN set. Run kthx init then kthx deploy; never kthx upgrade or bun add -g here.\n---\n\n'; curl -fsSL https://kthx.dev/skill.md; } > /opt/data/skills/kthx/SKILL.md || true
       dataVolume:
         enabled: true
         storageSize: 5Gi
@@ -136,6 +142,14 @@ spec:
           value: "#general"
         - name: DISCORD_FREE_RESPONSE_CHANNELS
           value: "1509024937422356532,1509024937422356533"
+        # kthx answers claims and site control on its private host, which this
+        # cluster reaches over the lab link; the sites it publishes are public.
+        - name: KTHX_ORIGIN
+          value: "https://kthx.${SECRET_DOMAIN}"
+        # The install above is npm's, not `bun add -g`, so the daily nudge to
+        # run `kthx upgrade` would point at the wrong replacement.
+        - name: KTHX_NO_UPDATE_CHECK
+          value: "1"
         - name: DISCORD_ALLOWED_USERS
           value: "308072071949320204"
     resources:

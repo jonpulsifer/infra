@@ -7,10 +7,16 @@ This package is both halves — `server/` is the process that answers the zone,
 ## The server
 
 One Bun process on `:8080`, behind the Cilium Gateway. It dispatches on `Host`:
-`kthx.dev` is the apex, `<name>.kthx.dev` is a site, anything else is 404.
+`kthx.dev` is the apex, `<name>.kthx.dev` is a site, `KTHX_CONTROL_HOST` is the
+apex with the control API, anything else is 404. With a control host set, the
+public apex keeps the page, the directory, the SDK, the reference and the CLI
+tarball and answers `403 PRIVATE` to everything else under `/api/sites`; a
+request for the control host that arrived with `cf-connecting-ip` — one that
+came through Cloudflare — is 404.
 
 | Surface | What it is |
 | --- | --- |
+| apex `GET /api` | `{zone, url, docs}` — what a site host's `/api` says, said about the zone |
 | `POST /api/sites` | claim a name; the bearer is minted once and shown once |
 | `/api/sites/:name…` | inspect, upload a release, `serve` one, drop the `hold`, delete |
 | apex `/`, `/sdk.js`, `/skill.md`, `/favicon.ico` | the files `@repo/kthx` carries |
@@ -36,7 +42,8 @@ upstream paths by name, the client's `Authorization` dropped, and a per-site
 daily budget in the control database that a restart cannot reset. Without
 `KTHX_AI_KEY` it answers 502 and nothing else changes.
 
-Configuration: `KTHX_ZONE`, `KTHX_BUCKET` (unset uses an on-disk depot),
+Configuration: `KTHX_ZONE`, `KTHX_CONTROL_HOST` (a host outside the zone;
+unset, the apex answers claims itself), `KTHX_BUCKET` (unset uses an on-disk depot),
 `KTHX_SITES_DIR`, `DATABASE_URL`, `KTHX_ME_KEY` (+ optional
 `KTHX_ME_KEY_PREVIOUS`) and `KTHX_PG_KEY`, both at least 32 bytes,
 `KTHX_TRUSTED_PROXIES` — the comma-separated peers whose `cf-connecting-ip` the
@@ -103,13 +110,17 @@ site's and the visitor cookie to a plain `kthx_me` a browser will keep over
 and to nothing else, so the loop is rate-limited exactly as a visitor is. The
 data is the site's own, live.
 
-`KTHX_ORIGIN` points the client somewhere other than `https://kthx.dev`. The
-token that opens a site is in `$XDG_CONFIG_HOME/kthx/sites.json` (0600), by
-origin and name — never in the directory, which is what gets uploaded. There is
-no account and no reset: a lost token is a lost site.
+`KTHX_ORIGIN` points the client somewhere other than `https://kthx.dev` — at
+the control host, where a deployment answers claims there alone. The token that
+opens a site is in `$XDG_CONFIG_HOME/kthx/sites.json` (0600), by origin and
+name — never in the directory, which is what gets uploaded. There is no
+account and no reset: a lost token is a lost site.
 
 The name is `kthx.json`, read from the directory and then from the current one,
-so `kthx deploy dist` inside a project root deploys the project's site. `init`
+so `kthx deploy dist` inside a project root deploys the project's site. It
+holds the name and nothing else: `dev`, `open` and `mcp` ask the origin's
+`GET /api` for the zone, because a committed file must not be what chooses
+where the owner bearer is sent. `init`
 writes it into the directory it is given; `deploy` and `dev` write it where they
 run, so a build output directory that is rebuilt from scratch does not take the
 name with it.

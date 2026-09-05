@@ -47,12 +47,18 @@ export const origin = () =>
   (process.env.KTHX_ORIGIN?.trim() || 'https://kthx.dev').replace(/\/+$/, '');
 
 /**
- * Where the site's own backends answer: the apex origin with the name as a
- * label in front of it. Every site is a host, so this is the only address
- * `kthx dev` needs to proxy to.
+ * Where the site's own backends answer: the zone the origin says it serves,
+ * with the name as a label in front of it. Asked of the origin rather than
+ * derived from it, because a deployment may answer claims on a private host
+ * while its sites stay on the public zone — and never read from a file in the
+ * project, which is committed and cloned and must not be what chooses where
+ * `kthx dev` sends the owner bearer.
  */
-export function siteOrigin(name: string): string {
-  const { protocol, host } = new URL(origin());
+let apex: Promise<{ url: string }> | null = null;
+
+export async function siteUrl(name: string): Promise<string> {
+  apex ??= api<{ url: string }>('/api');
+  const { protocol, host } = new URL((await apex).url);
   return `${protocol}//${name}.${host}`;
 }
 
@@ -538,8 +544,8 @@ export async function nuke(
   );
 }
 
-export function openSite(dir = '.'): string {
-  const url = siteOrigin(nameOf(dir));
+export async function openSite(dir = '.'): Promise<string> {
+  const url = await siteUrl(nameOf(dir));
   console.log(`  ${link(url)}`);
   const opener = process.platform === 'darwin' ? 'open' : 'xdg-open';
   try {
@@ -650,7 +656,7 @@ if (import.meta.main) {
           (await import('./dev.ts')).dev(dir, {
             name,
             token: knownToken(name),
-            site: siteOrigin(name),
+            site: await siteUrl(name),
           });
           break;
         }
@@ -673,7 +679,7 @@ if (import.meta.main) {
           await rm(dir);
           break;
         case 'open':
-          openSite(dir);
+          await openSite(dir);
           break;
         case 'upgrade':
           await upgrade(origin());
@@ -685,7 +691,7 @@ if (import.meta.main) {
           // The reference this CLI writes names it; the stdio bridge is not in
           // this build. One honest line beats usage and exit 2.
           console.error(
-            `MCP: not in this build — point the editor at ${siteOrigin(nameOf(dir))}/api/mcp with the bearer from ${sitesFile()}`,
+            `MCP: not in this build — point the editor at ${await siteUrl(nameOf(dir))}/api/mcp with the bearer from ${sitesFile()}`,
           );
           process.exitCode = 1;
           break;

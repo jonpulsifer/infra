@@ -122,6 +122,8 @@ export function withServer(overrides: Partial<Config> = {}): () => Harness {
     const sitesDir = await mkdtemp(join(tmpdir(), 'kthx-sites-'));
     const config: Config = {
       zone: ZONE,
+      // The apex answers claims itself unless a test says otherwise.
+      controlHost: null,
       bucket: null,
       sitesDir,
       databaseUrl: url.toString(),

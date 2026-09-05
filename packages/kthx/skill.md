@@ -212,6 +212,11 @@ The token lives in `$XDG_CONFIG_HOME/kthx/sites.json`, never in the project
 directory — which is what gets uploaded. `kthx.json` holds `{name}` and nothing
 secret.
 
+A deployment may answer claiming and site control on a private host only; the
+public apex says so with `403 PRIVATE`. Set `KTHX_ORIGIN` to that host for every
+command. The site itself stays at `https://<name>.kthx.dev`: `GET /api` on
+either apex answers `{zone, url, docs}`, and that is how the CLI finds it.
+
 `kthx upgrade` re-runs `bun add -g` on the apex tarball. It replaces only a
 `bun add -g` install. `kthx --version` prints the version and the build id; set
 `KTHX_NO_UPDATE_CHECK=1` to stop the daily check for a newer one, and `NO_COLOR`

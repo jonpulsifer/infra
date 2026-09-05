@@ -45,3 +45,29 @@ spec:
     - backendRefs:
         - name: {{ include "kthx.fullname" . }}
           port: {{ .Values.port }}
+{{- with .Values.control.host }}
+---
+{{/*
+The private host, on the named TLS listener alone. No hold-out annotation: this
+is the one kthx name whose record is meant to be the gateway's private address,
+and external-dns writing it there is the whole of how the name resolves.
+*/}}
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: {{ include "kthx.fullname" $ }}-control
+  namespace: {{ $.Release.Namespace }}
+  labels:
+    {{- include "kthx.labels" $ | nindent 4 }}
+spec:
+  parentRefs:
+    - name: {{ $.Values.gateway.name }}
+      namespace: {{ $.Values.gateway.namespace }}
+      sectionName: {{ required "control.listener names the TLS listener the private host is served on" $.Values.control.listener | quote }}
+  hostnames:
+    - {{ . | quote }}
+  rules:
+    - backendRefs:
+        - name: {{ include "kthx.fullname" $ }}
+          port: {{ $.Values.port }}
+{{- end }}
