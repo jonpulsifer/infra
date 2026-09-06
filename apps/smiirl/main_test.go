@@ -394,3 +394,34 @@ func TestDailyValidation(t *testing.T) {
 		t.Fatalf("state daily = %v", d)
 	}
 }
+
+func TestDeviceHostFacade(t *testing.T) {
+	_, ts := newTest(t)
+	dev := http.Header{"Host": {"api.smiirl.com"}}
+	if _, out := do(t, ts, "GET", "/", "", dev); out["smiirl"] != "api" {
+		t.Fatalf("GET / on the device host = %v", out)
+	}
+	if _, out := do(t, ts, "GET", "/number", "", dev); out["number"] != float64(1) {
+		t.Fatalf("GET /number = %v", out)
+	}
+	for _, p := range []string{"/status", "/update/firmware.bin", "/api/state", "/api/number"} {
+		resp, out := do(t, ts, "GET", p, "", dev)
+		if resp.StatusCode != 200 || out["api"] != "front" {
+			t.Fatalf("GET %s on the device host = %d %v", p, resp.StatusCode, out)
+		}
+	}
+	if resp, out := do(t, ts, "PUT", "/api/number", `{"number":5}`, dev); out["api"] != "front" {
+		t.Fatalf("PUT /api/number on the device host = %d %v, must not be offered", resp.StatusCode, out)
+	}
+	if _, out := do(t, ts, "GET", "/api/state", "", nil); out["number"] != float64(0) {
+		t.Fatalf("the page host still serves the API: %v", out)
+	}
+	resp, _ := do(t, ts, "GET", "/nope", "", nil)
+	if resp.StatusCode != 404 {
+		t.Fatalf("unknown path on the page host = %d, want 404", resp.StatusCode)
+	}
+	resp, _ = do(t, ts, "GET", "/", "", nil)
+	if ct := resp.Header.Get("Content-Type"); !strings.HasPrefix(ct, "text/html") {
+		t.Fatalf("GET / on the page host is %q, want the page", ct)
+	}
+}

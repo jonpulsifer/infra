@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -78,12 +79,13 @@ type server struct {
 	lastPoll   time.Time
 	lastSent   string // cells last answered to the device; single device, so one is enough
 	lastSentAt time.Time
+	devHost    string
 	lastStatus json.RawMessage
 	changed    chan struct{} // closed and replaced whenever cells change
 }
 
 func newServer(dataDir string, loc *time.Location) (*server, error) {
-	s := &server{path: filepath.Join(dataDir, "number.json"), loc: loc, now: time.Now, changed: make(chan struct{})}
+	s := &server{devHost: envOr("SMIIRL_DEVICE_HOST", "api.smiirl.com"), path: filepath.Join(dataDir, "number.json"), loc: loc, now: time.Now, changed: make(chan struct{})}
 	var file struct {
 		persisted
 		Number *int `json:"number"` // files written before cells existed
@@ -221,11 +223,39 @@ func (s *server) handler() http.Handler {
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
 		fmt.Fprintln(w, "ok")
 	})
-	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, _ *http.Request) {
+	mux.HandleFunc("GET /number", func(w http.ResponseWriter, _ *http.Request) {
+		// The firmware's internet check after joining Wi-Fi; the cloud answers 1.
+		writeJSON(w, http.StatusOK, map[string]int{"number": 1})
+	})
+	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
+		if s.deviceHost(r) {
+			writeJSON(w, http.StatusOK, map[string]string{"smiirl": "api"})
+			return
+		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.Write(indexHTML)
 	})
-	return mux
+	// On the device's hostname, behave like the cloud: every other path is a
+	// 200 {"api":"front"}, and the page's writable API is not offered at all.
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if s.deviceHost(r) {
+			if _, pattern := mux.Handler(r); pattern == "" || strings.HasPrefix(r.URL.Path, "/api/") {
+				writeJSON(w, http.StatusOK, map[string]string{"api": "front"})
+				return
+			}
+		}
+		mux.ServeHTTP(w, r)
+	})
+}
+
+// deviceHost reports whether the request arrived on the name the firmware
+// polls (SMIIRL_DEVICE_HOST, api.smiirl.com by default).
+func (s *server) deviceHost(r *http.Request) bool {
+	host := r.Host
+	if h, _, err := net.SplitHostPort(host); err == nil {
+		host = h
+	}
+	return host == s.devHost
 }
 
 func device(r *http.Request) (string, bool) {

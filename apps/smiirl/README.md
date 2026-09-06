@@ -25,6 +25,11 @@ the counter polls it over plain HTTP and shows whatever the web page last set.
   handed to the device less than 10 seconds apart: a drum needs a few seconds
   per flip and a full turn to reach a lower digit, and a value arriving
   mid-turn leaves drums out of step until the counter is power-cycled.
+- On the device's hostname (`SMIIRL_DEVICE_HOST`, `api.smiirl.com` by default)
+  the app answers like the cloud: `GET /` is `{"smiirl":"api"}`, `GET /number`
+  is `{"number":1}` (the firmware's internet check after it joins Wi-Fi; it
+  gives up and falls back to setup mode without it), and any other path is a
+  200 `{"api":"front"}`. The page and its `/api` are not offered on that name.
 - An optional daily step adds `step` to the number once a day at `at`
   (24-hour local time in `TZ`, `Canada/Atlantic` by default), clamped to
   `0..99999`. The check runs at startup and every 30 seconds; days missed while
