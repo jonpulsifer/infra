@@ -14,6 +14,7 @@ resources:
   - open-webui
   - postgres
   - redis
+  - smiirl
   - spindrift-target
   - ../../base/apps/reloader
   # - satisfactory

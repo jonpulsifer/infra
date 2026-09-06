@@ -1,0 +1,639 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
+<title>Smiirl</title>
+<style>
+  :root {
+    --bg: #f3eadb;
+    --bg2: #e6d9c3;
+    --text: #2a2521;
+    --muted: #605648;
+    --card: #fbf6ec;
+    --btn: #fffaf1;
+    --btn-border: #cbbfab;
+    --btn-shadow: #b9ac97;
+    --accent: #d98a34;
+    --accent-hi: #ec9c45;
+    --accent-lo: #9c5d1b;
+    --accent-text: #1c1006;
+    --bad: #a83a30;
+    --led-ok: #4ad46e;
+    --led-warn: #f0b429;
+    --led-bad: #e0473b;
+    --focus: #2b6fd6;
+    --w: clamp(48px, 14.5vw, 74px);
+    --h: calc(var(--w) * 1.5);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #1b1917;
+      --bg2: #100f0d;
+      --text: #efe7d8;
+      --muted: #b3a892;
+      --card: #24211d;
+      --btn: #2e2a25;
+      --btn-border: #4c443a;
+      --btn-shadow: #0d0b09;
+      --bad: #f28b80;
+      --focus: #8ab4f8;
+    }
+  }
+
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    color: var(--text);
+    background: radial-gradient(120% 80% at 50% 0%, var(--bg) 0%, var(--bg2) 100%) fixed;
+    -webkit-text-size-adjust: 100%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: max(16px, env(safe-area-inset-top)) 16px max(24px, env(safe-area-inset-bottom));
+  }
+  main { width: 100%; max-width: 440px; }
+  h1 {
+    font-size: 15px;
+    font-weight: 600;
+    letter-spacing: .18em;
+    text-transform: uppercase;
+    color: var(--muted);
+    text-align: center;
+    margin: 8px 0 18px;
+  }
+
+  /* ---------- the device ---------- */
+  .housing {
+    position: relative;
+    background: linear-gradient(180deg, #2c2c2f 0%, #1b1b1d 60%, #141416 100%);
+    border-radius: 26px;
+    padding: 30px 18px 26px;
+    box-shadow:
+      0 30px 50px -24px rgba(0,0,0,.65),
+      0 2px 0 rgba(255,255,255,.06) inset,
+      0 -3px 0 rgba(0,0,0,.7) inset,
+      0 0 0 1px rgba(0,0,0,.6);
+  }
+  .housing::before {
+    /* brushed sheen */
+    content: "";
+    position: absolute; inset: 0;
+    border-radius: inherit;
+    background: repeating-linear-gradient(90deg, rgba(255,255,255,.015) 0 2px, transparent 2px 4px);
+    pointer-events: none;
+  }
+  .screw {
+    position: absolute; width: 8px; height: 8px; border-radius: 50%;
+    background: radial-gradient(circle at 35% 35%, #4a4a4e, #101012);
+    box-shadow: 0 1px 0 rgba(255,255,255,.08);
+  }
+  .screw.tl { top: 11px; left: 11px; } .screw.tr { top: 11px; right: 11px; }
+  .screw.bl { bottom: 11px; left: 11px; } .screw.br { bottom: 11px; right: 11px; }
+
+  .display {
+    display: flex;
+    justify-content: center;
+    gap: calc(var(--w) * .1);
+    padding: 12px 8px;
+    border-radius: 14px;
+    background: #0a0a0b;
+    box-shadow: 0 2px 10px rgba(0,0,0,.9) inset, 0 1px 0 rgba(255,255,255,.05);
+  }
+
+  .digit {
+    position: relative;
+    width: var(--w);
+    height: var(--h);
+    perspective: calc(var(--w) * 5);
+    font-size: calc(var(--w) * 1.32);
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    color: #f4eee3;
+    border-radius: 6px;
+  }
+  .half, .flap {
+    position: absolute; left: 0; right: 0;
+    height: 50%;
+    overflow: hidden;
+    background: linear-gradient(180deg, #2d2d31, #212124);
+    box-shadow: 0 0 0 1px rgba(0,0,0,.8) inset;
+  }
+  .half span, .flap span {
+    position: absolute; left: 0; right: 0;
+    height: var(--h);
+    line-height: var(--h);
+    text-align: center;
+    letter-spacing: -.02em;
+  }
+  .top, .flap-top { top: 0; border-radius: 6px 6px 0 0; }
+  .bottom, .flap-bottom { bottom: 0; border-radius: 0 0 6px 6px;
+    background: linear-gradient(180deg, #26262a, #1c1c1f); }
+  .top span, .flap-top span { top: 0; }
+  .bottom span, .flap-bottom span { bottom: 0; }
+  .flap {
+    visibility: hidden;
+    backface-visibility: hidden;
+    -webkit-backface-visibility: hidden;
+    will-change: transform;
+  }
+  .display.pending .digit { opacity: .6; }
+  .flap-top { transform-origin: 50% 100%; }
+  .flap-bottom { transform-origin: 50% 0%; }
+  .digit::after {
+    /* hinge */
+    content: "";
+    position: absolute; left: -2px; right: -2px; top: 50%;
+    height: 3px; margin-top: -1.5px;
+    background: linear-gradient(180deg, rgba(0,0,0,.95), rgba(0,0,0,.55));
+    z-index: 5;
+    pointer-events: none;
+  }
+  .digit::before {
+    /* hinge pins */
+    content: "";
+    position: absolute; top: 50%; left: -3px; right: -3px;
+    height: 10px; margin-top: -5px;
+    background:
+      linear-gradient(#0a0a0b, #0a0a0b) left / 4px 100% no-repeat,
+      linear-gradient(#0a0a0b, #0a0a0b) right / 4px 100% no-repeat;
+    z-index: 6;
+    pointer-events: none;
+  }
+
+  .deck {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-top: 16px; padding: 0 4px;
+  }
+  .led-wrap { display: flex; align-items: center; gap: 9px; color: #cfc7b8; font-size: 13px; }
+  .led {
+    width: 10px; height: 10px; border-radius: 50%;
+    background: #3a3a3e;
+    box-shadow: 0 0 0 2px #0e0e0f, 0 1px 0 rgba(255,255,255,.05);
+    transition: background .3s, box-shadow .3s;
+  }
+  .led.ok { background: var(--led-ok); box-shadow: 0 0 0 2px #0e0e0f, 0 0 10px var(--led-ok); }
+  .led.warn { background: var(--led-warn); box-shadow: 0 0 0 2px #0e0e0f, 0 0 10px var(--led-warn); }
+  .led.bad { background: var(--led-bad); box-shadow: 0 0 0 2px #0e0e0f, 0 0 10px var(--led-bad); }
+  .led.busy { animation: blink 1s ease-in-out infinite; }
+  @keyframes blink { 50% { opacity: .25; } }
+  .brand {
+    font-size: 11px; letter-spacing: .3em; text-transform: lowercase;
+    color: #6f6a62; user-select: none;
+  }
+
+  /* ---------- controls ---------- */
+  .panel {
+    margin-top: 22px;
+    background: var(--card);
+    border-radius: 20px;
+    padding: 16px;
+    box-shadow: 0 1px 0 rgba(255,255,255,.4) inset, 0 12px 30px -20px rgba(0,0,0,.4);
+  }
+  .row { display: flex; gap: 8px; align-items: stretch; }
+  .btn {
+    appearance: none;
+    font: inherit;
+    font-weight: 700;
+    color: var(--text);
+    background: var(--btn);
+    border: 1px solid var(--btn-border);
+    border-radius: 14px;
+    min-width: 52px;
+    min-height: 56px;
+    padding: 0 6px;
+    cursor: pointer;
+    box-shadow: 0 3px 0 var(--btn-shadow);
+    transition: transform .08s, box-shadow .08s;
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+    user-select: none;
+  }
+  .btn:active { transform: translateY(3px); box-shadow: 0 0 0 var(--btn-shadow); }
+  .btn.step { font-size: 17px; flex: 0 0 auto; }
+  .field {
+    flex: 1 1 auto;
+    min-width: 0;
+    font: inherit;
+    font-size: 26px;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    text-align: center;
+    color: var(--text);
+    background: var(--bg);
+    border: 1px solid var(--btn-border);
+    border-radius: 14px;
+    min-height: 56px;
+    padding: 0 6px;
+    box-shadow: 0 2px 6px rgba(0,0,0,.12) inset;
+  }
+  .field.dirty { border-color: var(--accent); }
+  .go {
+    width: 100%;
+    margin-top: 12px;
+    min-height: 60px;
+    font-size: 20px;
+    letter-spacing: .02em;
+    color: var(--accent-text);
+    background: linear-gradient(180deg, var(--accent-hi), var(--accent));
+    border: 1px solid var(--accent-lo);
+    box-shadow: 0 4px 0 var(--accent-lo), 0 1px 0 rgba(255,255,255,.35) inset;
+  }
+  .go:active { transform: translateY(4px); box-shadow: 0 0 0 var(--accent-lo), 0 1px 0 rgba(255,255,255,.35) inset; }
+  .go:disabled {
+    cursor: default;
+    opacity: .55;
+    transform: none;
+    box-shadow: 0 4px 0 var(--accent-lo);
+  }
+  .btn:focus-visible, .field:focus-visible {
+    outline: 3px solid var(--focus);
+    outline-offset: 2px;
+  }
+  .field:focus { outline: 3px solid var(--focus); outline-offset: 2px; }
+
+  .status { margin: 18px 4px 0; font-size: 15px; line-height: 1.4; min-height: 1.4em; }
+  .msg {
+    margin: 8px 4px 0;
+    font-size: 15px;
+    font-weight: 600;
+    line-height: 1.4;
+    min-height: 1.4em;
+  }
+  .msg.bad { color: var(--bad); }
+  .msg.yay { color: var(--text); }
+  .hint { margin: 18px 4px 0; font-size: 13px; color: var(--muted); text-align: center; }
+
+  .confetti {
+    position: fixed; inset: 0; pointer-events: none; overflow: hidden; z-index: 50;
+  }
+  .confetti i {
+    position: absolute; width: 9px; height: 13px; border-radius: 2px; display: block;
+  }
+  .sr-only {
+    position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0);
+    white-space: nowrap;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .btn, .led { transition: none; }
+    .led.busy { animation: none; opacity: .7; }
+  }
+</style>
+</head>
+<body>
+<main>
+  <h1>Smiirl</h1>
+
+  <section class="housing" aria-labelledby="display-label">
+    <span class="screw tl"></span><span class="screw tr"></span>
+    <span class="screw bl"></span><span class="screw br"></span>
+    <div class="display" id="display" role="img" aria-label="Counter shows 00000"></div>
+    <span id="display-label" class="sr-only">The counter</span>
+    <div class="deck">
+      <div class="led-wrap"><span class="led" id="led" aria-hidden="true"></span><span id="led-text" role="status">connecting…</span></div>
+      <span class="brand" aria-hidden="true">smiirl</span>
+    </div>
+  </section>
+
+  <form class="panel" id="form" autocomplete="off">
+    <div class="row">
+      <button type="button" class="btn step" data-step="-10" aria-label="Minus ten">−10</button>
+      <button type="button" class="btn step" data-step="-1" aria-label="Minus one">−1</button>
+      <label for="field" class="sr-only">New number, 0 to 99999</label>
+      <input class="field" id="field" inputmode="numeric" pattern="[0-9]*" maxlength="5"
+             value="0" aria-describedby="hint">
+      <button type="button" class="btn step" data-step="1" aria-label="Plus one">+1</button>
+      <button type="button" class="btn step" data-step="10" aria-label="Plus ten">+10</button>
+    </div>
+    <button type="submit" class="btn go" id="go" disabled>Flip it</button>
+  </form>
+
+  <p class="status" id="status"></p>
+  <p class="msg" id="msg" role="status" aria-live="polite"></p>
+  <p class="hint" id="hint">Pick a number and hit Flip it. The counter checks in every 20 seconds or so.</p>
+</main>
+<div class="confetti" id="confetti" aria-hidden="true"></div>
+
+<script>
+(() => {
+  "use strict";
+
+  const MAX = 99999;
+  const FLIP_MS = 130;
+  const reduceMotion = () => matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const $ = (id) => document.getElementById(id);
+
+  // ---------- split-flap digit ----------
+  class Digit {
+    constructor(parent) {
+      this.el = el("div", "digit");
+      const mk = (cls) => { const d = el("div", cls); d.appendChild(el("span")); this.el.appendChild(d); return d; };
+      this.topEl = mk("half top");
+      this.bottomEl = mk("half bottom");
+      this.flapTopEl = mk("flap flap-top");
+      this.flapBottomEl = mk("flap flap-bottom");
+      this.value = 0;
+      this.target = 0;
+      this.running = false;
+      this.paint(0);
+      parent.appendChild(this.el);
+    }
+    paint(d) {
+      for (const h of [this.topEl, this.bottomEl, this.flapTopEl, this.flapBottomEl]) h.firstChild.textContent = d;
+      this.value = d;
+    }
+    set(d) {
+      this.target = d;
+      if (!this.running) this.run();
+    }
+    async run() {
+      this.running = true;
+      // Like the real machine, flaps only advance (mod 10).
+      while (this.value !== this.target) {
+        const next = (this.value + 1) % 10;
+        if (reduceMotion()) this.paint(next);
+        else await this.flip(next);
+      }
+      this.running = false;
+    }
+    async flip(next) {
+      const cur = this.value;
+      this.topEl.firstChild.textContent = next;
+      this.bottomEl.firstChild.textContent = cur;
+      this.flapTopEl.firstChild.textContent = cur;
+      this.flapBottomEl.firstChild.textContent = next;
+      this.flapTopEl.style.visibility = this.flapBottomEl.style.visibility = "visible";
+      const a = this.flapTopEl.animate(
+        [{ transform: "rotateX(0deg)", filter: "brightness(1)" },
+         { transform: "rotateX(-90deg)", filter: "brightness(.55)" }],
+        { duration: FLIP_MS / 2, easing: "ease-in", fill: "forwards" });
+      const b = this.flapBottomEl.animate(
+        [{ transform: "rotateX(90deg)", filter: "brightness(.55)" },
+         { transform: "rotateX(0deg)", filter: "brightness(1)" }],
+        { duration: FLIP_MS / 2, delay: FLIP_MS / 2, easing: "ease-out", fill: "both" });
+      await Promise.allSettled([a.finished, b.finished]);
+      a.cancel(); b.cancel();
+      this.flapTopEl.style.visibility = this.flapBottomEl.style.visibility = "hidden";
+      this.bottomEl.firstChild.textContent = next;
+      this.value = next;
+    }
+  }
+
+  function el(tag, cls) {
+    const e = document.createElement(tag);
+    if (cls) e.className = cls;
+    return e;
+  }
+
+  const display = $("display");
+  const digits = Array.from({ length: 5 }, () => new Digit(display));
+
+  function showNumber(n) {
+    const s = String(n).padStart(5, "0");
+    digits.forEach((d, i) => {
+      const t = +s[i];
+      if (reduceMotion()) d.set(t);
+      else setTimeout(() => d.set(t), i * 45);
+    });
+  }
+
+  // ---------- state ----------
+  const S = {
+    number: null,
+    lastPoll: null,
+    online: false,
+    reachable: true,
+    lastSetAt: 0,
+    lastStateAt: 0,
+    sending: false,
+    pending: null, // { number, sentAt, lastPollAtSend, nagged }
+  };
+  const PENDING_MAX_MS = 180000;
+
+  const field = $("field"), go = $("go"), statusEl = $("status"), msgEl = $("msg"),
+        led = $("led"), ledText = $("led-text");
+
+  const clamp = (n) => Math.min(MAX, Math.max(0, n));
+  function parseField() {
+    const digitsOnly = field.value.replace(/\D/g, "");
+    return digitsOnly === "" ? null : clamp(parseInt(digitsOnly, 10));
+  }
+  function setField(n) {
+    field.value = String(n);
+    syncGo();
+  }
+  function syncGo() {
+    const v = parseField();
+    const dirty = v !== null && v !== S.number;
+    field.classList.toggle("dirty", dirty);
+    go.disabled = S.sending || !dirty || S.number === null;
+  }
+
+  let msgTimer = 0;
+  function say(text, kind) {
+    clearTimeout(msgTimer);
+    msgEl.textContent = text;
+    msgEl.className = "msg " + (kind || "");
+    if (text) msgTimer = setTimeout(() => { msgEl.textContent = ""; msgEl.className = "msg"; }, 8000);
+  }
+
+  function ago(iso) {
+    const s = Math.max(0, Math.round((Date.now() - Date.parse(iso)) / 1000));
+    if (s < 60) return s + " s";
+    if (s < 3600) return Math.round(s / 60) + " min";
+    if (s < 86400) return Math.round(s / 3600) + " h";
+    return Math.round(s / 86400) + " d";
+  }
+
+  function renderStatus() {
+    let ledClass = "led", text = "", short = "";
+    const sent = S.pending ? `Sent ${S.pending.number.toLocaleString()} — ` : "";
+    if (!S.reachable) {
+      ledClass += " bad"; short = "no connection";
+      text = "Can't reach the counter's server right now. Is the phone on the home Wi-Fi?";
+    } else if (S.lastPoll && !S.online) {
+      ledClass += " warn"; short = "asleep?";
+      text = `${sent}the counter hasn't checked in for ${ago(S.lastPoll)}. Is it plugged in?`;
+    } else if (S.pending) {
+      ledClass += " warn busy"; short = "sending…";
+      text = `${sent}waiting for the counter to check in (it does every ~20 s).`;
+    } else if (S.online) {
+      ledClass += " ok"; short = "listening";
+      text = "The counter is listening.";
+    } else if (S.number !== null) {
+      ledClass += " warn"; short = "never seen";
+      text = "The counter hasn't checked in yet.";
+    } else {
+      short = "connecting…";
+    }
+    led.className = ledClass;
+    // only touch the live region when the words change, or it re-announces every tick
+    if (ledText.textContent !== short) ledText.textContent = short;
+    statusEl.textContent = text;
+    display.classList.toggle("pending", !!S.pending);
+    if (S.number !== null) {
+      display.setAttribute("aria-label", S.pending
+        ? `Set to ${S.pending.number.toLocaleString()}, waiting for the counter`
+        : "Counter shows " + String(S.number).padStart(5, "0"));
+    }
+  }
+
+  // ---------- server ----------
+  let pollTimer = 0;
+  async function refresh() {
+    clearTimeout(pollTimer);
+    if (!document.hidden) {
+      const startedAt = Date.now();
+      try {
+        const r = await fetch("/api/state", { cache: "no-store", signal: AbortSignal.timeout(4000) });
+        if (!r.ok) throw new Error("HTTP " + r.status);
+        applyState(await r.json(), startedAt);
+        S.reachable = true;
+      } catch {
+        S.reachable = false;
+      }
+      if (S.pending && Date.now() - S.pending.sentAt > PENDING_MAX_MS) S.pending = null;
+      renderStatus();
+    }
+    clearTimeout(pollTimer);
+    pollTimer = setTimeout(refresh, 2000);
+  }
+
+  function applyState(st, startedAt) {
+    // responses can land out of order; never apply one older than the last applied
+    if (startedAt < S.lastStateAt) return;
+    S.lastStateAt = startedAt;
+    const dev = st.device || {};
+    S.online = !!dev.online;
+    S.lastPoll = typeof dev.lastPoll === "string" && !isNaN(Date.parse(dev.lastPoll)) ? dev.lastPoll : null;
+
+    // A poll in flight alongside a PUT may carry the number from before it.
+    if (S.sending || startedAt < S.lastSetAt) return;
+
+    const n = Number.isInteger(st.number) ? clamp(st.number) : 0;
+    const first = S.number === null;
+    if (n !== S.number) {
+      const wasDirty = parseField() !== S.number;
+      S.number = n;
+      showNumber(n);
+      if (first || !wasDirty) setField(n);
+      if (!first && S.pending && n !== S.pending.number) {
+        S.pending = null;
+        say(`Someone else just set it to ${n.toLocaleString()}.`);
+      }
+    }
+    syncGo();
+
+    if (S.pending) {
+      const p = S.pending;
+      if (n === p.number && S.lastPoll && S.lastPoll !== p.lastPollAtSend) {
+        S.pending = null;
+        celebrate(n);
+      } else if (!p.nagged && Date.now() - p.sentAt > 90000) {
+        p.nagged = true;
+        say("The counter hasn't picked it up yet. It'll show the number the moment it wakes up.", "bad");
+      }
+    }
+  }
+
+  async function send(n) {
+    if (S.sending) return;
+    S.sending = true;
+    const prev = S.number;
+    const pollAtSend = S.lastPoll;
+    S.lastSetAt = Date.now();
+    S.number = n;
+    showNumber(n);
+    setField(n);
+    syncGo();
+    say("");
+    try {
+      const r = await fetch("/api/number", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ number: n }),
+        signal: AbortSignal.timeout(6000),
+      });
+      const body = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(body.error || ("HTTP " + r.status));
+      S.lastSetAt = Date.now();
+      S.number = Number.isInteger(body.number) ? body.number : n;
+      showNumber(S.number);
+      setField(S.number);
+      S.pending = { number: S.number, sentAt: Date.now(), lastPollAtSend: pollAtSend, nagged: false };
+    } catch (e) {
+      S.number = prev;
+      if (prev !== null) showNumber(prev);
+      setField(n);
+      const offline = e instanceof TypeError || (e && e.name === "TimeoutError");
+      say(offline ? "Couldn't reach the counter's server. Check the Wi-Fi and try again."
+                  : `That didn't work: ${e.message}`, "bad");
+    }
+    S.sending = false;
+    renderStatus();
+    syncGo();
+  }
+
+  // ---------- delight ----------
+  function celebrate(n) {
+    say(`The counter got it! It's showing ${n.toLocaleString()} now.`, "yay");
+    if (reduceMotion()) return;
+    document.querySelector(".housing").animate(
+      [{ transform: "translateY(0)" }, { transform: "translateY(-7px) scale(1.01)" }, { transform: "translateY(0)" }],
+      { duration: 420, easing: "ease-out" });
+    const box = $("confetti");
+    const rect = display.getBoundingClientRect();
+    const cx = rect.left + rect.width / 2, cy = rect.top + rect.height / 2;
+    const colors = ["#ec9c45", "#f4eee3", "#e0473b", "#4ad46e", "#8ab4f8", "#f0b429"];
+    for (let i = 0; i < 36; i++) {
+      const p = el("i");
+      p.style.left = cx + "px";
+      p.style.top = cy + "px";
+      p.style.background = colors[i % colors.length];
+      box.appendChild(p);
+      const ang = Math.random() * Math.PI * 2, dist = 120 + Math.random() * 220;
+      const dx = Math.cos(ang) * dist, dy = Math.sin(ang) * dist * .6 - 80;
+      const spin = (Math.random() - .5) * 1080;
+      p.animate([
+        { transform: "translate(0,0) rotate(0deg)", opacity: 1 },
+        { transform: `translate(${dx * .7}px, ${dy}px) rotate(${spin * .5}deg)`, opacity: 1, offset: .5 },
+        { transform: `translate(${dx}px, ${dy + 260}px) rotate(${spin}deg)`, opacity: 0 },
+      ], { duration: 1100 + Math.random() * 500, easing: "cubic-bezier(.2,.7,.3,1)", fill: "forwards" })
+        .finished.then(() => p.remove(), () => p.remove());
+    }
+  }
+
+  // ---------- wiring ----------
+  for (const b of document.querySelectorAll("[data-step]")) {
+    b.addEventListener("click", () => {
+      const base = parseField() ?? S.number ?? 0;
+      setField(clamp(base + Number(b.dataset.step)));
+    });
+  }
+  field.addEventListener("input", () => {
+    const cleaned = field.value.replace(/\D/g, "").slice(0, 5);
+    if (cleaned !== field.value) field.value = cleaned;
+    syncGo();
+  });
+  field.addEventListener("blur", () => { const v = parseField(); if (v !== null) setField(v); else if (S.number !== null) setField(S.number); });
+  field.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && S.number !== null) { setField(S.number); field.blur(); }
+  });
+  $("form").addEventListener("submit", (e) => {
+    e.preventDefault();
+    const v = parseField();
+    if (v === null) { say("Type a number from 0 to 99,999.", "bad"); return; }
+    if (v === S.number) { say("It's already showing that."); return; }
+    field.blur();
+    send(v);
+  });
+  document.addEventListener("visibilitychange", () => { if (!document.hidden) refresh(); });
+
+  renderStatus();
+  refresh();
+})();
+</script>
+</body>
+</html>

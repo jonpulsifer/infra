@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: smiirl
+  namespace: smiirl
+  labels:
+    app.kubernetes.io/name: smiirl
+    app.kubernetes.io/part-of: smiirl
+spec:
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+  selector:
+    app.kubernetes.io/name: smiirl

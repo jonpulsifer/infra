@@ -35,6 +35,9 @@ in
       . {
         errors
         hosts {
+          # The Smiirl counter on the iot VLAN polls this name over plain HTTP;
+          # the folly Gateway at clusters/folly/apps/smiirl answers it.
+          10.3.0.84 api.smiirl.com
           # The hosts plugin caps TTL at 65535 seconds. /etc/hosts is an
           # immutable Nix-store file, so polling it for changes only burns I/O.
           ttl 65535
