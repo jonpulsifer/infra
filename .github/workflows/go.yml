@@ -21,6 +21,7 @@ on:
       - 'apps/fml-attest/**'
       - 'apps/fml-ceremony/**'
       - 'apps/fml-pki/**'
+      - 'apps/smiirl/**'
       - 'apps/spindrift-verifier/**'
       - 'terraform/pki/certs/**'
       - 'terraform/pki/oidc/**'
@@ -32,6 +33,7 @@ on:
       - 'apps/fml-attest/**'
       - 'apps/fml-ceremony/**'
       - 'apps/fml-pki/**'
+      - 'apps/smiirl/**'
       - 'apps/spindrift-verifier/**'
       - 'terraform/pki/certs/**'
       - 'terraform/pki/oidc/**'
@@ -56,6 +58,7 @@ jobs:
           - apps/fml-attest
           - apps/fml-ceremony
           - apps/fml-pki
+          - apps/smiirl
           - apps/spindrift-verifier
     defaults:
       run:

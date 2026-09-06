@@ -1,0 +1,82 @@
+apiVersion: gateway.networking.k8s.io/v1beta1
+kind: Gateway
+metadata:
+  name: smiirl
+  namespace: smiirl
+  annotations:
+    cert-manager.io/cluster-issuer: ${CERT_CLUSTER_ISSUER}
+spec:
+  gatewayClassName: cilium
+  # Pinned, because the lab CoreDNS (nix/services/coredns-sinkhole.nix) hands
+  # the counter this literal address for api.smiirl.com; an address the pool
+  # reassigns on a rebuild would strand the device. Free in this cluster's
+  # `LB_RANGE` (`cluster-topology.json`).
+  addresses:
+    - type: IPAddress
+      value: 10.3.0.84
+  listeners:
+    # The counter's plain-HTTP poll. Its firmware only speaks http://api.smiirl.com.
+    - name: api
+      protocol: HTTP
+      port: 80
+      hostname: api.smiirl.com
+    - name: http
+      protocol: HTTP
+      port: 80
+      hostname: &hostname "smiirl.${SECRET_DOMAIN}"
+    - name: https
+      protocol: HTTPS
+      port: 443
+      hostname: *hostname
+      tls:
+        certificateRefs:
+          - kind: Secret
+            name: *hostname
+---
+# The device hostname carries only the firmware's three paths; the writable
+# /api and the page stay off api.smiirl.com, which every iot-VLAN client
+# resolves.
+apiVersion: gateway.networking.k8s.io/v1beta1
+kind: HTTPRoute
+metadata:
+  name: smiirl-api
+  namespace: smiirl
+spec:
+  parentRefs:
+    - name: smiirl
+  hostnames:
+    - api.smiirl.com
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /v1.0/
+        - path:
+            type: RegularExpression
+            value: ^/[0-9a-f]{12}/number$
+      # The number poll is held up to 12 s in the app; Envoy's default route
+      # timeout is 15 s, too close for comfort on a slow round trip.
+      timeouts:
+        request: 30s
+        backendRequest: 30s
+      backendRefs:
+        - name: smiirl
+          port: 8080
+---
+apiVersion: gateway.networking.k8s.io/v1beta1
+kind: HTTPRoute
+metadata:
+  name: smiirl
+  namespace: smiirl
+spec:
+  parentRefs:
+    - name: smiirl
+  hostnames:
+    - "smiirl.${SECRET_DOMAIN}"
+  rules:
+    - timeouts:
+        request: 30s
+        backendRequest: 30s
+      backendRefs:
+        - name: smiirl
+          port: 8080
