@@ -31,7 +31,7 @@ opentofu = "1.12.6"
 terraform = "latest"
 terraform-docs = "latest"
 vim = "latest"
-d2 = "0.7.1"
+d2 = "0.8.2"
 
 [tasks.devshell]
 description = "Enter the Nix dev shell"
