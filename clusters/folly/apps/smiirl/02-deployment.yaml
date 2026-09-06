@@ -32,12 +32,8 @@ spec:
           type: RuntimeDefault
       containers:
         - name: smiirl
-          # No digest pin yet: the containers workflow refuses to add a deploy
-          # target for a manifest that pins none, and there is no published
-          # image to pin until this merges. The pin and the "deploy" entry in
-          # .github/containers.json follow once the first image lands on main.
-          image: ghcr.io/jonpulsifer/smiirl:latest
-          imagePullPolicy: Always
+          image: ghcr.io/jonpulsifer/smiirl:latest@sha256:5829d885627f2b8c431cc7d1e7a3d955d89cee4bd4b344012e321c13d75cc06a
+          imagePullPolicy: IfNotPresent
           ports:
             - name: http
               containerPort: 8080
@@ -45,6 +41,9 @@ spec:
           env:
             - name: SMIIRL_DATA_DIR
               value: /data
+            # The daily step fires on this clock.
+            - name: TZ
+              value: Canada/Atlantic
           volumeMounts:
             - name: data
               mountPath: /data

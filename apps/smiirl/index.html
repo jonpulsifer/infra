@@ -108,12 +108,22 @@
     width: var(--w);
     height: var(--h);
     perspective: calc(var(--w) * 5);
+    font-family: inherit;
     font-size: calc(var(--w) * 1.32);
     font-weight: 600;
     font-variant-numeric: tabular-nums;
     color: #f4eee3;
     border-radius: 6px;
+    appearance: none;
+    border: 0;
+    padding: 0;
+    margin: 0;
+    background: none;
+    cursor: pointer;
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
   }
+  .digit:focus-visible { outline: 3px solid var(--focus); outline-offset: 3px; }
   .half, .flap {
     position: absolute; left: 0; right: 0;
     height: 50%;
@@ -127,6 +137,9 @@
     line-height: var(--h);
     text-align: center;
     letter-spacing: -.02em;
+  }
+  .striped span {
+    background: repeating-linear-gradient(-45deg, currentColor 0 calc(var(--w) * .07), transparent 0 calc(var(--w) * .2));
   }
   .top, .flap-top { top: 0; border-radius: 6px 6px 0 0; }
   .bottom, .flap-bottom { bottom: 0; border-radius: 0 0 6px 6px;
@@ -212,6 +225,7 @@
     user-select: none;
   }
   .btn:active { transform: translateY(3px); box-shadow: 0 0 0 var(--btn-shadow); }
+  .btn:disabled { cursor: default; opacity: .55; transform: none; box-shadow: 0 3px 0 var(--btn-shadow); }
   .btn.step { font-size: 17px; flex: 0 0 auto; }
   .field {
     flex: 1 1 auto;
@@ -229,6 +243,7 @@
     padding: 0 6px;
     box-shadow: 0 2px 6px rgba(0,0,0,.12) inset;
   }
+  .field::placeholder { color: var(--muted); font-weight: 600; opacity: 1; }
   .field.dirty { border-color: var(--accent); }
   .go {
     width: 100%;
@@ -242,17 +257,21 @@
     box-shadow: 0 4px 0 var(--accent-lo), 0 1px 0 rgba(255,255,255,.35) inset;
   }
   .go:active { transform: translateY(4px); box-shadow: 0 0 0 var(--accent-lo), 0 1px 0 rgba(255,255,255,.35) inset; }
-  .go:disabled {
-    cursor: default;
-    opacity: .55;
-    transform: none;
-    box-shadow: 0 4px 0 var(--accent-lo);
-  }
+  .go:disabled { box-shadow: 0 4px 0 var(--accent-lo); }
   .btn:focus-visible, .field:focus-visible {
     outline: 3px solid var(--focus);
     outline-offset: 2px;
   }
   .field:focus { outline: 3px solid var(--focus); outline-offset: 2px; }
+
+  /* ---------- daily ---------- */
+  .daily-row {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 8px;
+    margin-bottom: 10px; font-size: 15px; font-weight: 600;
+  }
+  .field.time { flex: 0 1 auto; width: auto; font-size: 18px; min-height: 44px; padding: 0 10px; }
+  .btn.save { width: 100%; margin-top: 12px; min-height: 48px; font-size: 16px; }
+  .next { margin: 12px 4px 0; font-size: 14px; line-height: 1.4; min-height: 1.4em; color: var(--muted); }
 
   .status { margin: 18px 4px 0; font-size: 15px; line-height: 1.4; min-height: 1.4em; }
   .msg {
@@ -289,7 +308,7 @@
   <section class="housing" aria-labelledby="display-label">
     <span class="screw tl"></span><span class="screw tr"></span>
     <span class="screw bl"></span><span class="screw br"></span>
-    <div class="display" id="display" role="img" aria-label="Counter shows 00000"></div>
+    <div class="display" id="display" role="group" aria-label="Counter, connecting"></div>
     <span id="display-label" class="sr-only">The counter</span>
     <div class="deck">
       <div class="led-wrap"><span class="led" id="led" aria-hidden="true"></span><span id="led-text" role="status">connecting…</span></div>
@@ -310,9 +329,24 @@
     <button type="submit" class="btn go" id="go" disabled>Flip it</button>
   </form>
 
+  <form class="panel" id="daily" autocomplete="off" aria-label="Daily increment">
+    <div class="daily-row">
+      <label for="at">Every day at</label>
+      <input type="time" class="field time" id="at" value="08:00" required>
+      <label for="step">add</label>
+    </div>
+    <div class="row">
+      <button type="button" class="btn step" data-dstep="-1" aria-label="Step minus one">−</button>
+      <input class="field" id="step" maxlength="6" value="" placeholder="Off" aria-describedby="next">
+      <button type="button" class="btn step" data-dstep="1" aria-label="Step plus one">+</button>
+    </div>
+    <button type="submit" class="btn save" id="save" disabled>Save</button>
+    <p class="next" id="next"></p>
+  </form>
+
   <p class="status" id="status"></p>
   <p class="msg" id="msg" role="status" aria-live="polite"></p>
-  <p class="hint" id="hint">Pick a number and hit Flip it. The counter checks in every 20 seconds or so.</p>
+  <p class="hint" id="hint">Pick a number or tap a flap, then hit Flip it. The counter checks in every 20 seconds or so.</p>
 </main>
 <div class="confetti" id="confetti" aria-hidden="true"></div>
 
@@ -322,13 +356,25 @@
 
   const MAX = 99999;
   const FLIP_MS = 130;
+  const FACES = "0123456789ab"; // drum order: digits, blank, striped
   const reduceMotion = () => matchMedia("(prefers-reduced-motion: reduce)").matches;
   const $ = (id) => document.getElementById(id);
+
+  // ---------- cells ----------
+  const clamp = (n) => Math.min(MAX, Math.max(0, n));
+  const isCells = (c) => typeof c === "string" && /^[0-9ab]{5}$/.test(c);
+  const numberToCells = (n) => String(n).padStart(5, "a");
+  // A canonical number is leading blanks then digits with no leading zero.
+  const cellsToNumber = (c) => /^a*(0|[1-9][0-9]*)$/.test(c) ? parseInt(c.replace(/a/g, ""), 10) : null;
+  const faceName = (c) => c === "a" ? "blank" : c === "b" ? "stripes" : c;
+  const pretty = (c) => { const n = cellsToNumber(c); return n === null ? c.replace(/a/g, "·").replace(/b/g, "/") : n.toLocaleString(); };
+  const spoken = (c) => { const n = cellsToNumber(c); return n === null ? c.split("").map(faceName).join(" ") : n.toLocaleString(); };
 
   // ---------- split-flap digit ----------
   class Digit {
     constructor(parent) {
-      this.el = el("div", "digit");
+      this.el = el("button", "digit");
+      this.el.type = "button";
       const mk = (cls) => { const d = el("div", cls); d.appendChild(el("span")); this.el.appendChild(d); return d; };
       this.topEl = mk("half top");
       this.bottomEl = mk("half bottom");
@@ -340,19 +386,19 @@
       this.paint(0);
       parent.appendChild(this.el);
     }
-    paint(d) {
-      for (const h of [this.topEl, this.bottomEl, this.flapTopEl, this.flapBottomEl]) h.firstChild.textContent = d;
-      this.value = d;
+    paint(f) {
+      for (const h of [this.topEl, this.bottomEl, this.flapTopEl, this.flapBottomEl]) face(h, f);
+      this.value = f;
     }
-    set(d) {
-      this.target = d;
+    set(f) {
+      this.target = f;
       if (!this.running) this.run();
     }
     async run() {
       this.running = true;
-      // Like the real machine, flaps only advance (mod 10).
+      // Like the real machine, flaps only advance (mod 12).
       while (this.value !== this.target) {
-        const next = (this.value + 1) % 10;
+        const next = (this.value + 1) % FACES.length;
         if (reduceMotion()) this.paint(next);
         else await this.flip(next);
       }
@@ -360,10 +406,10 @@
     }
     async flip(next) {
       const cur = this.value;
-      this.topEl.firstChild.textContent = next;
-      this.bottomEl.firstChild.textContent = cur;
-      this.flapTopEl.firstChild.textContent = cur;
-      this.flapBottomEl.firstChild.textContent = next;
+      face(this.topEl, next);
+      face(this.bottomEl, cur);
+      face(this.flapTopEl, cur);
+      face(this.flapBottomEl, next);
       this.flapTopEl.style.visibility = this.flapBottomEl.style.visibility = "visible";
       const a = this.flapTopEl.animate(
         [{ transform: "rotateX(0deg)", filter: "brightness(1)" },
@@ -376,9 +422,14 @@
       await Promise.allSettled([a.finished, b.finished]);
       a.cancel(); b.cancel();
       this.flapTopEl.style.visibility = this.flapBottomEl.style.visibility = "hidden";
-      this.bottomEl.firstChild.textContent = next;
+      face(this.bottomEl, next);
       this.value = next;
     }
+  }
+
+  function face(h, f) {
+    h.firstChild.textContent = f < 10 ? f : "";
+    h.classList.toggle("striped", f === 11);
   }
 
   function el(tag, cls) {
@@ -390,45 +441,59 @@
   const display = $("display");
   const digits = Array.from({ length: 5 }, () => new Digit(display));
 
-  function showNumber(n) {
-    const s = String(n).padStart(5, "0");
+  function showCells(cells) {
     digits.forEach((d, i) => {
-      const t = +s[i];
-      if (reduceMotion()) d.set(t);
-      else setTimeout(() => d.set(t), i * 45);
+      const f = FACES.indexOf(cells[i]);
+      d.el.setAttribute("aria-label", `Flap ${i + 1}, showing ${faceName(cells[i])}`);
+      if (reduceMotion()) d.set(f);
+      else setTimeout(() => d.set(f), i * 45);
     });
   }
 
   // ---------- state ----------
   const S = {
-    number: null,
+    cells: null,  // what the server holds
+    draft: null,  // what the display shows; differs from cells while editing
+    daily: null,  // { step, at, next }
     lastPoll: null,
     online: false,
     reachable: true,
     lastSetAt: 0,
     lastStateAt: 0,
     sending: false,
-    pending: null, // { number, sentAt, lastPollAtSend, nagged }
+    pending: null, // { cells, sentAt, lastPollAtSend, nagged }
+    savingDaily: false,
+    lastDailyAt: 0,
   };
   const PENDING_MAX_MS = 180000;
 
   const field = $("field"), go = $("go"), statusEl = $("status"), msgEl = $("msg"),
-        led = $("led"), ledText = $("led-text");
+        led = $("led"), ledText = $("led-text"),
+        atEl = $("at"), stepEl = $("step"), saveBtn = $("save"), nextEl = $("next");
 
-  const clamp = (n) => Math.min(MAX, Math.max(0, n));
-  function parseField() {
-    const digitsOnly = field.value.replace(/\D/g, "");
-    return digitsOnly === "" ? null : clamp(parseInt(digitsOnly, 10));
-  }
-  function setField(n) {
-    field.value = String(n);
+  const number = () => S.cells === null ? null : cellsToNumber(S.cells);
+  const dirty = () => S.draft !== null && S.draft !== S.cells;
+
+  function setDraft(cells, keepField) {
+    S.draft = cells;
+    showCells(cells);
+    if (!keepField) {
+      const n = cellsToNumber(cells);
+      field.value = n === null ? "" : String(n);
+      field.placeholder = n === null ? "flaps" : "";
+    }
     syncGo();
   }
   function syncGo() {
-    const v = parseField();
-    const dirty = v !== null && v !== S.number;
-    field.classList.toggle("dirty", dirty);
-    go.disabled = S.sending || !dirty || S.number === null;
+    const d = dirty();
+    field.classList.toggle("dirty", d);
+    go.disabled = S.sending || !d || S.cells === null;
+    display.classList.toggle("pending", !!S.pending || d);
+    if (S.draft !== null) {
+      display.setAttribute("aria-label", S.pending
+        ? `Set to ${spoken(S.pending.cells)}, waiting for the counter`
+        : d ? `Draft shows ${spoken(S.draft)}, not sent yet` : "Counter shows " + spoken(S.cells));
+    }
   }
 
   let msgTimer = 0;
@@ -437,6 +502,11 @@
     msgEl.textContent = text;
     msgEl.className = "msg " + (kind || "");
     if (text) msgTimer = setTimeout(() => { msgEl.textContent = ""; msgEl.className = "msg"; }, 8000);
+  }
+  function failMsg(e) {
+    const offline = e instanceof TypeError || (e && e.name === "TimeoutError");
+    say(offline ? "Couldn't reach the counter's server. Check the Wi-Fi and try again."
+                : `That didn't work: ${e.message}`, "bad");
   }
 
   function ago(iso) {
@@ -449,7 +519,7 @@
 
   function renderStatus() {
     let ledClass = "led", text = "", short = "";
-    const sent = S.pending ? `Sent ${S.pending.number.toLocaleString()} — ` : "";
+    const sent = S.pending ? `Sent ${pretty(S.pending.cells)} — ` : "";
     if (!S.reachable) {
       ledClass += " bad"; short = "no connection";
       text = "Can't reach the counter's server right now. Is the phone on the home Wi-Fi?";
@@ -462,7 +532,7 @@
     } else if (S.online) {
       ledClass += " ok"; short = "listening";
       text = "The counter is listening.";
-    } else if (S.number !== null) {
+    } else if (S.cells !== null) {
       ledClass += " warn"; short = "never seen";
       text = "The counter hasn't checked in yet.";
     } else {
@@ -472,12 +542,7 @@
     // only touch the live region when the words change, or it re-announces every tick
     if (ledText.textContent !== short) ledText.textContent = short;
     statusEl.textContent = text;
-    display.classList.toggle("pending", !!S.pending);
-    if (S.number !== null) {
-      display.setAttribute("aria-label", S.pending
-        ? `Set to ${S.pending.number.toLocaleString()}, waiting for the counter`
-        : "Counter shows " + String(S.number).padStart(5, "0"));
-    }
+    syncGo();
   }
 
   // ---------- server ----------
@@ -508,29 +573,32 @@
     const dev = st.device || {};
     S.online = !!dev.online;
     S.lastPoll = typeof dev.lastPoll === "string" && !isNaN(Date.parse(dev.lastPoll)) ? dev.lastPoll : null;
+    if (st.daily && typeof st.daily === "object" && !S.savingDaily && startedAt >= S.lastDailyAt) applyDaily(st.daily);
 
-    // A poll in flight alongside a PUT may carry the number from before it.
+    // A poll in flight alongside a PUT may carry the value from before it.
     if (S.sending || startedAt < S.lastSetAt) return;
 
-    const n = Number.isInteger(st.number) ? clamp(st.number) : 0;
-    const first = S.number === null;
-    if (n !== S.number) {
-      const wasDirty = parseField() !== S.number;
-      S.number = n;
-      showNumber(n);
-      if (first || !wasDirty) setField(n);
-      if (!first && S.pending && n !== S.pending.number) {
+    const cells = isCells(st.cells) ? st.cells : numberToCells(Number.isInteger(st.number) ? clamp(st.number) : 0);
+    const first = S.cells === null;
+    if (cells !== S.cells) {
+      const wasDirty = dirty();
+      S.cells = cells;
+      if (first || !wasDirty) setDraft(cells);
+      if (!first && S.pending && cells !== S.pending.cells) {
         S.pending = null;
-        say(`Someone else just set it to ${n.toLocaleString()}.`);
+        say(`Someone else just set it to ${pretty(cells)}.`);
+      } else if (!first && wasDirty) {
+        say(`The counter now shows ${pretty(cells)}.`);
       }
+      renderDaily();
     }
     syncGo();
 
     if (S.pending) {
       const p = S.pending;
-      if (n === p.number && S.lastPoll && S.lastPoll !== p.lastPollAtSend) {
+      if (cells === p.cells && S.lastPoll && S.lastPoll !== p.lastPollAtSend) {
         S.pending = null;
-        celebrate(n);
+        celebrate(cells);
       } else if (!p.nagged && Date.now() - p.sentAt > 90000) {
         p.nagged = true;
         say("The counter hasn't picked it up yet. It'll show the number the moment it wakes up.", "bad");
@@ -538,47 +606,112 @@
     }
   }
 
-  async function send(n) {
+  async function send(cells) {
     if (S.sending) return;
     S.sending = true;
-    const prev = S.number;
+    const prev = S.cells;
     const pollAtSend = S.lastPoll;
+    const n = cellsToNumber(cells);
     S.lastSetAt = Date.now();
-    S.number = n;
-    showNumber(n);
-    setField(n);
-    syncGo();
+    S.cells = cells;
+    setDraft(cells);
     say("");
     try {
       const r = await fetch("/api/number", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ number: n }),
+        body: JSON.stringify(n === null ? { cells } : { number: n }),
         signal: AbortSignal.timeout(6000),
       });
       const body = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(body.error || ("HTTP " + r.status));
       S.lastSetAt = Date.now();
-      S.number = Number.isInteger(body.number) ? body.number : n;
-      showNumber(S.number);
-      setField(S.number);
-      S.pending = { number: S.number, sentAt: Date.now(), lastPollAtSend: pollAtSend, nagged: false };
+      S.cells = isCells(body.cells) ? body.cells : cells;
+      setDraft(S.cells);
+      S.pending = { cells: S.cells, sentAt: Date.now(), lastPollAtSend: pollAtSend, nagged: false };
     } catch (e) {
-      S.number = prev;
-      if (prev !== null) showNumber(prev);
-      setField(n);
-      const offline = e instanceof TypeError || (e && e.name === "TimeoutError");
-      say(offline ? "Couldn't reach the counter's server. Check the Wi-Fi and try again."
-                  : `That didn't work: ${e.message}`, "bad");
+      S.cells = prev;
+      setDraft(cells);
+      failMsg(e);
     }
     S.sending = false;
     renderStatus();
-    syncGo();
+    renderDaily();
+  }
+
+  // ---------- daily ----------
+  const clampStep = (n) => Math.min(MAX, Math.max(-MAX, n));
+  function parseStep() {
+    const v = stepEl.value.trim();
+    if (v === "" || v.toLowerCase() === "off") return 0;
+    return /^-?\d+$/.test(v) ? clampStep(parseInt(v, 10)) : null;
+  }
+  const setStepField = (n) => { stepEl.value = n === 0 ? "" : String(n); };
+  const dailyDirty = () => !!S.daily && (atEl.value !== S.daily.at || parseStep() !== S.daily.step);
+  const editingDaily = () => document.activeElement === atEl || document.activeElement === stepEl;
+  function syncSave() { saveBtn.disabled = S.savingDaily || !dailyDirty(); }
+  function resetDaily() {
+    if (S.daily) { atEl.value = S.daily.at; setStepField(S.daily.step); }
+    syncSave();
+  }
+  function applyDaily(d) {
+    const wasDirty = dailyDirty();
+    S.daily = { step: Number.isInteger(d.step) ? clampStep(d.step) : 0, at: typeof d.at === "string" ? d.at : "", next: d.next };
+    if (!wasDirty && !editingDaily()) resetDaily();
+    renderDaily();
+  }
+  function dayWord(when) {
+    const today = new Date(), tomorrow = new Date();
+    tomorrow.setDate(today.getDate() + 1);
+    const day = (x) => x.toDateString();
+    if (day(when) === day(today)) return "today";
+    if (day(when) === day(tomorrow)) return "tomorrow";
+    return when.toLocaleDateString([], { weekday: "long" });
+  }
+  function renderDaily() {
+    syncSave();
+    const d = S.daily, n = number();
+    let text = "";
+    if (d && !d.step) text = "Off. The number only changes when someone flips it.";
+    else if (d && typeof d.next === "string" && !isNaN(Date.parse(d.next))) {
+      const when = new Date(d.next);
+      const shows = n === null ? "skipped while the flaps aren't a number" : `shows ${clamp(n + d.step).toLocaleString()}`;
+      text = `Next: ${dayWord(when)} at ${when.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })} → ${shows}`;
+    }
+    nextEl.textContent = text;
+  }
+  async function saveDaily() {
+    if (S.savingDaily) return;
+    const step = parseStep(), at = atEl.value;
+    if (step === null) { say("The step has to be a whole number.", "bad"); return; }
+    if (!/^\d\d:\d\d$/.test(at)) { say("Pick a time of day.", "bad"); return; }
+    atEl.blur(); stepEl.blur();
+    S.savingDaily = true;
+    S.lastDailyAt = Date.now();
+    syncSave();
+    try {
+      const r = await fetch("/api/daily", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ step, at }),
+        signal: AbortSignal.timeout(6000),
+      });
+      const body = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(body.error || ("HTTP " + r.status));
+      S.lastDailyAt = Date.now();
+      S.savingDaily = false;
+      applyDaily(Number.isInteger(body.step) ? body : { step, at, next: null });
+      say(step ? "Saved. The counter will count on its own." : "Saved. The counter stays put unless someone flips it.");
+    } catch (e) {
+      S.savingDaily = false;
+      failMsg(e);
+    }
+    renderDaily();
   }
 
   // ---------- delight ----------
-  function celebrate(n) {
-    say(`The counter got it! It's showing ${n.toLocaleString()} now.`, "yay");
+  function celebrate(cells) {
+    say(`The counter got it! It's showing ${pretty(cells)} now.`, "yay");
     if (reduceMotion()) return;
     document.querySelector(".housing").animate(
       [{ transform: "translateY(0)" }, { transform: "translateY(-7px) scale(1.01)" }, { transform: "translateY(0)" }],
@@ -606,29 +739,60 @@
   }
 
   // ---------- wiring ----------
+  digits.forEach((d, i) => {
+    const nudge = (delta) => {
+      if (S.draft === null) return;
+      const f = (FACES.indexOf(S.draft[i]) + delta + FACES.length) % FACES.length;
+      setDraft(S.draft.slice(0, i) + FACES[f] + S.draft.slice(i + 1));
+    };
+    d.el.addEventListener("click", () => nudge(1));
+    d.el.addEventListener("keydown", (e) => {
+      if (e.key === "ArrowUp") nudge(1);
+      else if (e.key === "ArrowDown") nudge(-1);
+      else if (e.key === "Escape" && S.cells !== null) setDraft(S.cells);
+      else return;
+      e.preventDefault();
+    });
+  });
   for (const b of document.querySelectorAll("[data-step]")) {
     b.addEventListener("click", () => {
-      const base = parseField() ?? S.number ?? 0;
-      setField(clamp(base + Number(b.dataset.step)));
+      const base = cellsToNumber(S.draft ?? "") ?? number() ?? 0;
+      setDraft(numberToCells(clamp(base + Number(b.dataset.step))));
     });
   }
   field.addEventListener("input", () => {
     const cleaned = field.value.replace(/\D/g, "").slice(0, 5);
     if (cleaned !== field.value) field.value = cleaned;
-    syncGo();
+    if (S.cells === null) return;
+    setDraft(cleaned === "" ? S.cells : numberToCells(clamp(parseInt(cleaned, 10))), true);
   });
-  field.addEventListener("blur", () => { const v = parseField(); if (v !== null) setField(v); else if (S.number !== null) setField(S.number); });
+  field.addEventListener("blur", () => { if (S.draft !== null) setDraft(S.draft); });
   field.addEventListener("keydown", (e) => {
-    if (e.key === "Escape" && S.number !== null) { setField(S.number); field.blur(); }
+    if (e.key === "Escape" && S.cells !== null) { setDraft(S.cells); field.blur(); }
   });
   $("form").addEventListener("submit", (e) => {
     e.preventDefault();
-    const v = parseField();
-    if (v === null) { say("Type a number from 0 to 99,999.", "bad"); return; }
-    if (v === S.number) { say("It's already showing that."); return; }
+    if (S.cells === null) { say("Still connecting to the counter's server."); return; }
+    if (!dirty()) { say("It's already showing that."); return; }
     field.blur();
-    send(v);
+    send(S.draft);
   });
+
+  for (const b of document.querySelectorAll("[data-dstep]")) {
+    b.addEventListener("click", () => {
+      setStepField(clampStep((parseStep() ?? 0) + Number(b.dataset.dstep)));
+      syncSave();
+    });
+  }
+  stepEl.addEventListener("input", syncSave);
+  stepEl.addEventListener("blur", () => { setStepField(parseStep() ?? (S.daily ? S.daily.step : 0)); syncSave(); });
+  atEl.addEventListener("input", syncSave);
+  atEl.addEventListener("change", syncSave);
+  for (const i of [stepEl, atEl]) {
+    i.addEventListener("keydown", (e) => { if (e.key === "Escape") { resetDaily(); i.blur(); } });
+  }
+  $("daily").addEventListener("submit", (e) => { e.preventDefault(); saveDaily(); });
+
   document.addEventListener("visibilitychange", () => { if (!document.hidden) refresh(); });
 
   renderStatus();
