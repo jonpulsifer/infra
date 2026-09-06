@@ -54,7 +54,7 @@ export const MAX_FILES = 2000;
  */
 export const MAX_UNPACKS = 2;
 
-/** Release rows kept per site; older ones and their directories go. */
+/** Release rows kept per site past the serving one; older ones go. */
 export const KEEP_RELEASES = 50;
 
 /** Past this much of the volume, a directory nothing guarantees is evicted. */

@@ -510,10 +510,9 @@ describe('rolling back and holding', () => {
     );
     expect(served.status).toBe(200);
     expect(await served.text()).toBe('pinned');
-    expect((await inspect(owned.name, owned.token)).body).toMatchObject({
-      serving: 1,
-      held: true,
-    });
+    const seen = (await inspect(owned.name, owned.token)).body;
+    expect(seen).toMatchObject({ serving: 1, held: true });
+    expect(seen.releases).toHaveLength(KEEP_RELEASES + 1);
   });
 });
 
