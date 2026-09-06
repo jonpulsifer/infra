@@ -524,10 +524,20 @@ func (s *server) save() error {
 	return os.Rename(tmp.Name(), s.path)
 }
 
+// writeJSON sends the body byte for byte as the cloud does: no trailing
+// newline, an explicit length, the same content type. The firmware's
+// internet check compares the reply literally; a 13-byte {"number":1}
+// fails it.
 func writeJSON(w http.ResponseWriter, status int, v any) {
-	w.Header().Set("Content-Type", "application/json")
+	b, err := json.Marshal(v)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.Header().Set("Content-Length", strconv.Itoa(len(b)))
 	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(v)
+	w.Write(b)
 }
 
 func envOr(key, def string) string {
