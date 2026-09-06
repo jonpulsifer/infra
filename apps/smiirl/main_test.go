@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -66,7 +67,7 @@ func do(t *testing.T, ts *httptest.Server, method, path, body string, hdr http.H
 func TestBootstrapUsesHostHeader(t *testing.T) {
 	_, ts := newTest(t)
 	resp, out := do(t, ts, "GET", "/v1.0/aabbccddeeff/0123abcd", "", http.Header{"Host": {"api.smiirl.com"}})
-	if resp.StatusCode != 200 || resp.Header.Get("Content-Type") != "application/json" {
+	if resp.StatusCode != 200 || resp.Header.Get("Content-Type") != "application/json; charset=utf-8" {
 		t.Fatalf("status %d content-type %q", resp.StatusCode, resp.Header.Get("Content-Type"))
 	}
 	if out["url"] != "http://api.smiirl.com/aabbccddeeff/number" || out["v"] != "smiirl_2.0.7-1" || out["interval"] != float64(20) {
@@ -404,6 +405,18 @@ func TestDeviceHostFacade(t *testing.T) {
 	if _, out := do(t, ts, "GET", "/number", "", dev); out["number"] != float64(1) {
 		t.Fatalf("GET /number = %v", out)
 	}
+	// The check compares the reply literally with the cloud's 12 bytes.
+	req, _ := http.NewRequest("GET", ts.URL+"/number", nil)
+	req.Host = "api.smiirl.com"
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if string(raw) != `{"number":1}` || resp.Header.Get("Content-Length") != "12" || resp.Header.Get("Content-Type") != "application/json; charset=utf-8" {
+		t.Fatalf("GET /number = %q, Content-Length %q, Content-Type %q", raw, resp.Header.Get("Content-Length"), resp.Header.Get("Content-Type"))
+	}
 	for _, p := range []string{"/status", "/update/firmware.bin", "/api/state", "/api/number"} {
 		resp, out := do(t, ts, "GET", p, "", dev)
 		if resp.StatusCode != 200 || out["api"] != "front" {
@@ -416,7 +429,7 @@ func TestDeviceHostFacade(t *testing.T) {
 	if _, out := do(t, ts, "GET", "/api/state", "", nil); out["number"] != float64(0) {
 		t.Fatalf("the page host still serves the API: %v", out)
 	}
-	resp, _ := do(t, ts, "GET", "/nope", "", nil)
+	resp, _ = do(t, ts, "GET", "/nope", "", nil)
 	if resp.StatusCode != 404 {
 		t.Fatalf("unknown path on the page host = %d, want 404", resp.StatusCode)
 	}
