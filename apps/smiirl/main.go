@@ -31,6 +31,12 @@ var indexHTML []byte
 // is not honoured.
 var pollTimeout = 12 * time.Second
 
+// flapSettle is the least time between two different values handed to the
+// device. A drum needs a few seconds per flip and a full turn to reach a
+// lower digit; a new value arriving mid-turn has left drums out of step with
+// what the firmware believes they show.
+var flapSettle = 10 * time.Second
+
 const (
 	maxNumber  = 99999 // the counter has five drums
 	blankCells = "aaaa0"
@@ -71,6 +77,7 @@ type server struct {
 	persisted  persisted
 	lastPoll   time.Time
 	lastSent   string // cells last answered to the device; single device, so one is enough
+	lastSentAt time.Time
 	lastStatus json.RawMessage
 	changed    chan struct{} // closed and replaced whenever cells change
 }
@@ -302,7 +309,23 @@ func (s *server) handleNumber(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	s.mu.Lock()
+	settle := time.Duration(0)
+	if s.persisted.Cells != s.lastSent {
+		settle = flapSettle - time.Since(s.lastSentAt)
+	}
+	s.mu.Unlock()
+	if settle > 0 {
+		select {
+		case <-time.After(settle):
+		case <-r.Context().Done():
+			return
+		}
+	}
+	s.mu.Lock()
 	cells := s.persisted.Cells
+	if cells != s.lastSent {
+		s.lastSentAt = time.Now()
+	}
 	s.lastSent = cells
 	s.lastPoll = s.now() // the page treats a later lastPoll as "the counter got it"
 	s.mu.Unlock()
@@ -504,7 +527,7 @@ func main() {
 		Addr:              addr,
 		Handler:           s.handler(),
 		ReadHeaderTimeout: 10 * time.Second,
-		WriteTimeout:      pollTimeout + 10*time.Second,
+		WriteTimeout:      pollTimeout + flapSettle + 10*time.Second,
 	}
 	log.Printf("smiirl listening on %s, cells %s, daily %+v in %s", addr, s.persisted.Cells, s.persisted.Daily, loc)
 	log.Fatal(srv.ListenAndServe())

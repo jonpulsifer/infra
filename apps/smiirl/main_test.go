@@ -34,6 +34,8 @@ func newTest(t *testing.T) (*server, *httptest.Server) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	flapSettle = 0
+	t.Cleanup(func() { flapSettle = 10 * time.Second })
 	ts := httptest.NewServer(s.handler())
 	t.Cleanup(ts.Close)
 	return s, ts
@@ -199,6 +201,16 @@ func TestLongPoll(t *testing.T) {
 	if _, out := do(t, ts, "GET", "/aabbccddeeff/number", "", nil); out["number"] != float64(3) || time.Since(start) > time.Second {
 		t.Fatalf("poll after a set between polls = %v after %v", out, time.Since(start))
 	}
+
+	// Two different values are never handed over closer than flapSettle,
+	// measured from the previous handover.
+	handed := time.Now()
+	flapSettle = 300 * time.Millisecond
+	do(t, ts, "PUT", "/api/number", `{"number":4}`, nil)
+	if _, out := do(t, ts, "GET", "/aabbccddeeff/number", "", nil); out["number"] != float64(4) || time.Since(handed) < flapSettle {
+		t.Fatalf("second value handed over as %v %v after the first, before the flaps settled", out, time.Since(handed))
+	}
+	flapSettle = 0
 
 	got := make(chan map[string]any, 1)
 	go func() {
