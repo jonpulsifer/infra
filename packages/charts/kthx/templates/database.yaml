@@ -121,7 +121,10 @@ spec:
           # dump leaves no log to read. `backoffLimit` above keeps the attempt
           # count the same; each attempt is now its own pod, kept by
           # `failedJobsHistoryLimit` — which is what `KthxBackupFailing` tells
-          # the operator to go and read.
+          # the operator to go and read. The accounting moves with it:
+          # `status.failed` counts failed pods, so a night that fails once and
+          # succeeds on retry ends at 1 and fires the alert. A page now means an
+          # attempt failed, not that the Job gave up.
           restartPolicy: Never
           serviceAccountName: {{ include "kthx.fullname" . }}
           automountServiceAccountToken: false

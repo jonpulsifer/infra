@@ -2,7 +2,7 @@
  * `helm template` over the kthx chart, parsed.
  *
  * `render-cluster-apps.sh` in CI proves this chart renders. It cannot prove
- * what it renders, and the three facts below are exactly the ones a reader
+ * what it renders, and the facts below are exactly the ones a reader
  * checks by eye and gets wrong: a Service selector that also matches the
  * nightly dump pod renders perfectly and takes half the zone down while the Job
  * lives.
@@ -234,7 +234,7 @@ describe('the nightly dump', () => {
     // `-l` picks the database global objects are read from, it does not narrow
     // what is dumped — paired with exclusions it renders a green Job whose
     // archive holds no site at all.
-    expect(command).not.toMatch(/(^|\s)(-l|--database)(\s|=)/);
+    expect(command).not.toMatch(/(^|\s)(-l|--database)/);
     expect(command).not.toContain('--exclude-database');
   });
 
