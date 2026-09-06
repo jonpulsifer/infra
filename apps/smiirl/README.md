@@ -21,7 +21,10 @@ the counter polls it over plain HTTP and shows whatever the web page last set.
   `POST /v1.0/<mac>/<key>/status`, then polls `GET /<mac>/number` roughly every
   20 seconds. The poll is held for up to 12 seconds and answered early when the
   cells change (or at once when they changed between polls), so a new value
-  reaches the flaps within a couple of seconds.
+  reaches the flaps within a couple of seconds. Two different values are never
+  handed to the device less than 10 seconds apart: a drum needs a few seconds
+  per flip and a full turn to reach a lower digit, and a value arriving
+  mid-turn leaves drums out of step until the counter is power-cycled.
 - An optional daily step adds `step` to the number once a day at `at`
   (24-hour local time in `TZ`, `Canada/Atlantic` by default), clamped to
   `0..99999`. The check runs at startup and every 30 seconds; days missed while
