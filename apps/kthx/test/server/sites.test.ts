@@ -8,6 +8,7 @@ import { join } from 'node:path';
 import { tarGz } from '../../cli/tar.ts';
 import { DIRECTORY_BUCKET, secondsToMidnight } from '../../server/limits.ts';
 import {
+  KEEP_RELEASES,
   MAX_ARCHIVE_BYTES,
   MAX_UNPACKED_BYTES,
   MAX_UNPACKS,
@@ -479,6 +480,40 @@ describe('rolling back and holding', () => {
     expect((await serveRelease(owned.name, owned.token, 'one')).status).toBe(
       404,
     );
+  });
+
+  test('a hold survives more than KEEP_RELEASES further uploads', async () => {
+    const owned = await mine('pinned');
+    expect(
+      (await upload(owned.name, owned.token, site({ 'index.html': 'pinned' })))
+        .status,
+    ).toBe(201);
+    expect(await serveRelease(owned.name, owned.token, 1)).toMatchObject({
+      status: 200,
+      body: { serving: 1, held: true },
+    });
+
+    for (let i = 0; i < KEEP_RELEASES + 1; i += 1) {
+      expect(
+        (
+          await upload(
+            owned.name,
+            owned.token,
+            site({ 'index.html': `v${i + 2}` }),
+          )
+        ).status,
+      ).toBe(201);
+    }
+
+    const served = await kthx().fetch(
+      ask('/', { host: `${owned.name}.${ZONE}` }),
+    );
+    expect(served.status).toBe(200);
+    expect(await served.text()).toBe('pinned');
+    expect((await inspect(owned.name, owned.token)).body).toMatchObject({
+      serving: 1,
+      held: true,
+    });
   });
 });
 
