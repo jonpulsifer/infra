@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"maps"
 	"net"
 	"net/http"
 	"os"
@@ -63,10 +64,14 @@ type daily struct {
 	Last string `json:"last"` // date of the last boundary applied
 }
 
+// persisted is number.json. Cells is the stored number whatever the mode; the
+// daily step keeps moving it while the clock or a countdown is showing.
 type persisted struct {
 	Cells     string    `json:"cells"`
 	UpdatedAt time.Time `json:"updatedAt"`
 	Daily     daily     `json:"daily"`
+	Mode      string    `json:"mode"`               // number, clock or days
+	DaysDate  string    `json:"daysDate,omitempty"` // the date days mode counts to
 }
 
 type server struct {
@@ -113,9 +118,73 @@ func newServer(dataDir string, loc *time.Location) (*server, error) {
 	if file.UpdatedAt.IsZero() {
 		file.UpdatedAt = s.now()
 	}
+	if _, err := time.ParseInLocation(dayFormat, file.DaysDate, loc); err != nil {
+		file.DaysDate = ""
+	}
+	if file.Mode != "clock" && !(file.Mode == "days" && file.DaysDate != "") {
+		file.Mode = "number"
+	}
 	s.persisted = file.persisted
-	s.lastSent = s.persisted.Cells
+	s.lastSent = s.display(s.now())
 	return s, nil
+}
+
+// clockCells is the local time as HHbMM: the striped flap separates hours
+// and minutes.
+func clockCells(now time.Time, loc *time.Location) string {
+	return now.In(loc).Format("15b04")
+}
+
+// daysCells counts the whole calendar days between today (in loc) and date,
+// clamped to the drums, with the label "until", "since" or "today". Both
+// ends are taken as UTC midnights so a DST change never yields a 23-hour
+// day.
+func daysCells(now time.Time, loc *time.Location, date string) (int, string, error) {
+	target, err := time.Parse(dayFormat, date)
+	if err != nil {
+		return 0, "", err
+	}
+	y, m, d := now.In(loc).Date()
+	today := time.Date(y, m, d, 0, 0, 0, 0, time.UTC)
+	days := int(target.Sub(today) / (24 * time.Hour))
+	switch {
+	case days > 0:
+		return clamp(days), "until", nil
+	case days < 0:
+		return clamp(-days), "since", nil
+	}
+	return 0, "today", nil
+}
+
+// display is what the drums should show at now under the current mode.
+// Caller holds s.mu.
+func (s *server) display(now time.Time) string {
+	p := s.persisted
+	switch p.Mode {
+	case "clock":
+		return clockCells(now, s.loc)
+	case "days":
+		if n, _, err := daysCells(now, s.loc, p.DaysDate); err == nil {
+			return numberToCells(n)
+		}
+	}
+	return p.Cells
+}
+
+// modeView is the mode part of /api/state and the /api/mode reply. Caller
+// holds s.mu.
+func (s *server) modeView(now time.Time) map[string]any {
+	p := s.persisted
+	var days, label any
+	if n, l, err := daysCells(now, s.loc, p.DaysDate); err == nil {
+		days, label = n, l
+	}
+	return map[string]any{
+		"mode":    p.Mode,
+		"display": s.display(now),
+		"clock":   map[string]any{"cells": clockCells(now, s.loc)},
+		"days":    map[string]any{"date": p.DaysDate, "days": days, "label": label},
+	}
 }
 
 func clamp(n int) int {
@@ -220,6 +289,8 @@ func (s *server) handler() http.Handler {
 	mux.HandleFunc("POST /api/number", s.handleSet)
 	mux.HandleFunc("PUT /api/daily", s.handleDaily)
 	mux.HandleFunc("POST /api/daily", s.handleDaily)
+	mux.HandleFunc("PUT /api/mode", s.handleMode)
+	mux.HandleFunc("POST /api/mode", s.handleMode)
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
 		fmt.Fprintln(w, "ok")
 	})
@@ -326,21 +397,37 @@ func (s *server) handleNumber(w http.ResponseWriter, r *http.Request) {
 	s.mu.Lock()
 	s.lastPoll = s.now()
 	changed := s.changed
-	stale := s.persisted.Cells != s.lastSent
+	stale := s.display(s.now()) != s.lastSent
 	s.mu.Unlock()
 
 	// A value set between polls is answered at once instead of after the hold.
+	// The hold also ends when the clock or countdown moves on its own.
 	if !stale {
-		select {
-		case <-changed:
-		case <-time.After(pollTimeout):
-		case <-r.Context().Done():
-			return
+		deadline := time.After(pollTimeout)
+		tick := time.NewTicker(time.Second)
+		defer tick.Stop()
+	hold:
+		for {
+			select {
+			case <-changed:
+				break hold
+			case <-deadline:
+				break hold
+			case <-r.Context().Done():
+				return
+			case <-tick.C:
+				s.mu.Lock()
+				moved := s.display(s.now()) != s.lastSent
+				s.mu.Unlock()
+				if moved {
+					break hold
+				}
+			}
 		}
 	}
 	s.mu.Lock()
 	settle := time.Duration(0)
-	if s.persisted.Cells != s.lastSent {
+	if s.display(s.now()) != s.lastSent {
 		settle = flapSettle - time.Since(s.lastSentAt)
 	}
 	s.mu.Unlock()
@@ -352,7 +439,7 @@ func (s *server) handleNumber(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	s.mu.Lock()
-	cells := s.persisted.Cells
+	cells := s.display(s.now())
 	if cells != s.lastSent {
 		s.lastSentAt = time.Now()
 	}
@@ -374,6 +461,7 @@ func (s *server) handleState(w http.ResponseWriter, _ *http.Request) {
 		lastStatus = s.lastStatus
 	}
 	v := cellsView(s.persisted.Cells)
+	maps.Copy(v, s.modeView(s.now()))
 	v["updatedAt"] = s.persisted.UpdatedAt
 	v["daily"] = s.dailyView()
 	v["device"] = map[string]any{
@@ -466,6 +554,43 @@ func (s *server) handleDaily(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, view)
 }
 
+func (s *server) handleMode(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Mode string `json:"mode"`
+		Date string `json:"date"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1024)).Decode(&body); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": `body must be {"mode":"number"|"clock"} or {"mode":"days","date":"YYYY-MM-DD"}`})
+		return
+	}
+	s.mu.Lock()
+	p := s.persisted
+	switch body.Mode {
+	case "number", "clock":
+	case "days":
+		if _, err := time.Parse(dayFormat, body.Date); err != nil {
+			s.mu.Unlock()
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "date must be YYYY-MM-DD"})
+			return
+		}
+		p.DaysDate = body.Date
+	default:
+		s.mu.Unlock()
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "mode must be number, clock or days"})
+		return
+	}
+	p.Mode = body.Mode
+	err := s.commit(p)
+	view := s.modeView(s.now())
+	s.mu.Unlock()
+	if err != nil {
+		log.Printf("persist mode: %v", err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not persist mode"})
+		return
+	}
+	writeJSON(w, http.StatusOK, view)
+}
+
 func (s *server) set(cells string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -477,8 +602,8 @@ func (s *server) set(cells string) error {
 	return s.commit(p)
 }
 
-// commit persists p and wakes the device poll when the cells changed. Caller
-// holds s.mu.
+// commit persists p and wakes the device poll when the cells or the mode
+// changed. Caller holds s.mu.
 func (s *server) commit(p persisted) error {
 	prev := s.persisted
 	moved := p.Cells != prev.Cells
@@ -490,10 +615,10 @@ func (s *server) commit(p persisted) error {
 		s.persisted = prev
 		return err
 	}
-	if moved {
+	if moved || p.Mode != prev.Mode || p.DaysDate != prev.DaysDate {
 		close(s.changed)
 		s.changed = make(chan struct{})
-		log.Printf("cells %s -> %s", prev.Cells, p.Cells)
+		log.Printf("cells %s -> %s, mode %s", prev.Cells, p.Cells, strings.TrimSpace(p.Mode+" "+p.DaysDate))
 	}
 	return nil
 }
@@ -569,6 +694,6 @@ func main() {
 		ReadHeaderTimeout: 10 * time.Second,
 		WriteTimeout:      pollTimeout + flapSettle + 10*time.Second,
 	}
-	log.Printf("smiirl listening on %s, cells %s, daily %+v in %s", addr, s.persisted.Cells, s.persisted.Daily, loc)
+	log.Printf("smiirl listening on %s, cells %s, mode %s, daily %+v in %s", addr, s.persisted.Cells, strings.TrimSpace(s.persisted.Mode+" "+s.persisted.DaysDate), s.persisted.Daily, loc)
 	log.Fatal(srv.ListenAndServe())
 }
