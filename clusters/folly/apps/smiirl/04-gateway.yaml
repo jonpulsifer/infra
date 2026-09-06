@@ -45,9 +45,10 @@ spec:
           - kind: Secret
             name: *counter
 ---
-# The device hostname carries only the firmware's three paths; the writable
-# /api and the page stay off api.smiirl.com, which every iot-VLAN client
-# resolves.
+# The device hostname goes straight to the app, which answers it the way the
+# cloud does (a boot-time GET /number and GET / included) and never offers the
+# page or its writable /api on it, since every iot-VLAN client resolves this
+# name.
 apiVersion: gateway.networking.k8s.io/v1beta1
 kind: HTTPRoute
 metadata:
@@ -59,14 +60,7 @@ spec:
   hostnames:
     - api.smiirl.com
   rules:
-    - matches:
-        - path:
-            type: PathPrefix
-            value: /v1.0/
-        - path:
-            type: RegularExpression
-            value: ^/[0-9a-f]{12}/number$
-      # The number poll is held up to 12 s in the app; Envoy's default route
+    - # The number poll is held up to 12 s in the app; Envoy's default route
       # timeout is 15 s, too close for comfort on a slow round trip.
       timeouts:
         request: 30s
