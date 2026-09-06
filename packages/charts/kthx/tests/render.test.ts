@@ -212,3 +212,33 @@ describe('the private host', () => {
     ).rejects.toThrow('control.listener');
   });
 });
+
+describe('the nightly dump', () => {
+  const dumpPodSpec = async () =>
+    one(await render(), 'CronJob').spec.jobTemplate.spec.template.spec;
+
+  test('hands the child pg_dump processes a password', async () => {
+    const env = (await dumpPodSpec()).initContainers[0].env;
+    // `pg_dumpall` omits the password from the connection string it hands each
+    // child `pg_dump`; without this every child prompts and the Job dies.
+    const password = env.find((e: any) => e.name === 'PGPASSWORD');
+    expect(password.valueFrom.secretKeyRef).toEqual({
+      name: 'kthx-db-app',
+      key: 'password',
+    });
+  });
+
+  test('dumps every database, naming no subset', async () => {
+    const command = (await dumpPodSpec()).initContainers[0].command.at(-1);
+    expect(command).toContain('pg_dumpall');
+    // `-l` picks the database global objects are read from, it does not narrow
+    // what is dumped — paired with exclusions it renders a green Job whose
+    // archive holds no site at all.
+    expect(command).not.toMatch(/(^|\s)(-l|--database)(\s|=)/);
+    expect(command).not.toContain('--exclude-database');
+  });
+
+  test('leaves a readable pod behind when it fails', async () => {
+    expect((await dumpPodSpec()).restartPolicy).toBe('Never');
+  });
+});

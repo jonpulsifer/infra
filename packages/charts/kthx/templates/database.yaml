@@ -76,7 +76,10 @@ them.
 
 `--no-role-passwords` is what lets a non-superuser run this at all: it reads
 `pg_roles` instead of `pg_authid`. Nothing is lost — every site role's password
-is derived from `KTHX_PG_KEY`, never stored.
+is derived from `KTHX_PG_KEY`, never stored. `PGPASSWORD` is required alongside
+the URI, not redundant with it: `pg_dumpall` keeps the password out of the
+command line it hands each child `pg_dump`, so libpq's environment is the only
+way those children get one.
 
 Retention is the bucket's, not this job's: a lifecycle rule expires `backups/`
 at 30 days (`terraform/gcp/projects/bluenose`).
@@ -113,7 +116,13 @@ spec:
             app.kubernetes.io/instance: {{ .Release.Name }}
             app.kubernetes.io/managed-by: {{ .Release.Service }}
         spec:
-          restartPolicy: OnFailure
+          # Never, not OnFailure: OnFailure retries inside one pod and the Job
+          # controller deletes that pod once the retries are spent, so a failing
+          # dump leaves no log to read. `backoffLimit` above keeps the attempt
+          # count the same; each attempt is now its own pod, kept by
+          # `failedJobsHistoryLimit` — which is what `KthxBackupFailing` tells
+          # the operator to go and read.
+          restartPolicy: Never
           serviceAccountName: {{ include "kthx.fullname" . }}
           automountServiceAccountToken: false
           securityContext:
@@ -131,6 +140,14 @@ spec:
                     secretKeyRef:
                       name: {{ include "kthx.databaseName" . }}-app
                       key: uri
+                # `pg_dumpall` re-invokes `pg_dump` once per database and does
+                # not pass the password from `-d` to those children — they
+                # prompt, and a Job has no tty. libpq reads this instead.
+                - name: PGPASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ include "kthx.databaseName" . }}-app
+                      key: password
                 - name: HOME
                   value: /tmp
               volumeMounts:
