@@ -32,6 +32,18 @@ spec:
         certificateRefs:
           - kind: Secret
             name: *hostname
+    - name: http-counter
+      protocol: HTTP
+      port: 80
+      hostname: &counter "counter.${SECRET_DOMAIN}"
+    - name: https-counter
+      protocol: HTTPS
+      port: 443
+      hostname: *counter
+      tls:
+        certificateRefs:
+          - kind: Secret
+            name: *counter
 ---
 # The device hostname carries only the firmware's three paths; the writable
 # /api and the page stay off api.smiirl.com, which every iot-VLAN client
@@ -73,6 +85,7 @@ spec:
     - name: smiirl
   hostnames:
     - "smiirl.${SECRET_DOMAIN}"
+    - "counter.${SECRET_DOMAIN}"
   rules:
     - timeouts:
         request: 30s

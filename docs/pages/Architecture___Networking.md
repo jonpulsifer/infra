@@ -15,7 +15,7 @@ tags:: architecture
 		  | Lab Net | 2 | `10.2.0.0/24` | WLAN `lab` (open, hidden SSID); SSOT below |
 		  | Kubernetes | 8 | `10.3.0.0/26` | node network; DHCP hands out iPXE boot info pointing at spore |
 		  | future | 1337 | `10.13.37.0/28` | IPv6 PD enabled |
-		  | iot | 666 | `10.66.6.0/26` | domain `iot.fml.pulsifer.ca`; the Smiirl counter's `api.smiirl.com` resolves to the folly Gateway at `clusters/folly/apps/smiirl` |
+		  | iot | 666 | `10.66.6.0/26` | domain `iot.fml.pulsifer.ca`; the Smiirl counter's `api.smiirl.com` (and the page's `counter.lolwtf.ca` / `smiirl.lolwtf.ca`) resolve on the lab sinkhole to the folly Gateway at `clusters/folly/apps/smiirl` |
 	- offsite (`terraform/network/unifi/offsite/`):
 		- | network | VLAN | CIDR |
 		  | ---- | ---- | ---- |

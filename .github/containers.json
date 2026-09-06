@@ -38,6 +38,9 @@
     "rackstat": [
       "clusters/folly/apps/tronbyt/07-rackstat-deployment.yaml"
     ],
+    "smiirl": [
+      "clusters/folly/apps/smiirl/02-deployment.yaml"
+    ],
     "spindrift": [
       "clusters/offsite/apps/spindrift/helm-release.yaml"
     ]
