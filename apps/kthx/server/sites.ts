@@ -676,6 +676,11 @@ async function unpack(
 /**
  * Drop the rows past {@link KEEP_RELEASES} and the directories nothing needs.
  *
+ * The row a site serves is never one of them: a held site would otherwise lose
+ * what names the release it answers with, so it keeps {@link KEEP_RELEASES}
+ * plus that one while the hold is on an older release. The site row says which
+ * one, so a hold taken while the upload commits still counts.
+ *
  * The serving release and the one before it are what stays on disk; everything
  * else is a rehydrate away, and only goes when the volume is under pressure.
  */
@@ -686,7 +691,9 @@ async function prune(
 ): Promise<void> {
   try {
     await ctx.sql`
-      delete from releases where site = ${name} and n not in (
+      delete from releases where site = ${name}
+      and n is distinct from (select serving from sites where name = ${name})
+      and n not in (
         select n from releases where site = ${name}
         order by n desc limit ${KEEP_RELEASES}
       )
