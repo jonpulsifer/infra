@@ -19,6 +19,7 @@ icon:: 🚒
 	- [[Runbooks/Connect an Agent to the Wiki]] — point Claude Desktop or any MCP client at `wiki.lolwtf.ca/mcp` so an agent can read the homelab docs
 	- [[Runbooks/Connect an Agent to Spindrift]] — mint an agent token and point an MCP client at `spindrift-control.lolwtf.dev/mcp` to drive the platform
 	- [[Runbooks/Developer Connect GitHub OAuth]] — one-time browser authorization that moves the trusted-builds GitHub connection from PENDING_USER_OAUTH to COMPLETE
+	- [[Runbooks/Smiirl Counter]] — the split-flap counter that thinks the lab is Smiirl's cloud: checks, the byte-exact internet check, out-of-sync flaps and the firmware's calibration wizard
 - ## Conventions
 	- Tag runbook pages `#runbook`, lead with quick checks, then symptom-shaped sections ("If X…"), each with copy-pasteable commands and expected output.
 	- Prefer `mise run <task>` where a task exists; it encodes the correct binary and flags. Give a raw invocation only where mise has no task — deploying to a live host, `sops`, `flux reconcile`.

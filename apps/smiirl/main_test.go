@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -436,5 +437,224 @@ func TestDeviceHostFacade(t *testing.T) {
 	resp, _ = do(t, ts, "GET", "/", "", nil)
 	if ct := resp.Header.Get("Content-Type"); !strings.HasPrefix(ct, "text/html") {
 		t.Fatalf("GET / on the page host is %q, want the page", ct)
+	}
+}
+
+func TestClockCells(t *testing.T) {
+	for _, tc := range []struct{ now, want string }{
+		{"2026-09-06T12:05:00Z", "09b05"}, // 09:05 ADT
+		{"2026-09-06T03:00:00Z", "00b00"},
+		{"2026-09-07T02:59:59Z", "23b59"},
+		{"2026-09-06T17:30:00Z", "14b30"},
+		{"2026-01-15T14:05:00Z", "10b05"}, // AST
+	} {
+		if got := clockCells(utc(tc.now), atlantic); got != tc.want {
+			t.Errorf("%s: %s, want %s", tc.now, got, tc.want)
+		}
+	}
+}
+
+func TestDaysCells(t *testing.T) {
+	for _, tc := range []struct {
+		now, date string
+		days      int
+		label     string
+	}{
+		{"2026-09-06T12:00:00Z", "2026-12-25", 110, "until"},
+		{"2026-09-06T12:00:00Z", "2026-09-07", 1, "until"},
+		{"2026-09-07T02:59:59Z", "2026-09-07", 1, "until"}, // still the 6th in Halifax
+		{"2026-09-07T03:00:00Z", "2026-09-07", 0, "today"},
+		{"2026-09-06T12:00:00Z", "2026-09-05", 1, "since"},
+		{"2026-09-06T12:00:00Z", "2026-01-01", 248, "since"},
+		// Clocks spring forward on 2026-03-08 and fall back on 2026-11-01:
+		// whole days either way, never 23 or 25 hours rounded off.
+		{"2026-03-07T15:00:00Z", "2026-03-08", 1, "until"},
+		{"2026-03-07T15:00:00Z", "2026-03-09", 2, "until"},
+		{"2026-03-09T15:00:00Z", "2026-03-07", 2, "since"},
+		{"2026-03-08T03:30:00Z", "2026-03-08", 1, "until"}, // 23:30 AST on the 7th
+		{"2026-10-31T15:00:00Z", "2026-11-02", 2, "until"},
+		{"2026-11-02T15:00:00Z", "2026-10-31", 2, "since"},
+		{"2026-09-06T12:00:00Z", "2999-01-01", 99999, "until"},
+		{"2026-09-06T12:00:00Z", "1500-01-01", 99999, "since"},
+	} {
+		days, label, err := daysCells(utc(tc.now), atlantic, tc.date)
+		if err != nil || days != tc.days || label != tc.label {
+			t.Errorf("now %s date %s: %d %s %v, want %d %s", tc.now, tc.date, days, label, err, tc.days, tc.label)
+		}
+	}
+	for _, bad := range []string{"", "2026-1-5", "2026-02-30", "25 Dec 2026", "2026-12-25T00:00:00Z"} {
+		if _, _, err := daysCells(utc("2026-09-06T12:00:00Z"), atlantic, bad); err == nil {
+			t.Errorf("%q: no error", bad)
+		}
+	}
+}
+
+func TestModeValidation(t *testing.T) {
+	_, ts := newTest(t)
+	for _, tc := range []struct {
+		body string
+		want int
+	}{
+		{`{"mode":"clock"}`, 200},
+		{`{"mode":"days","date":"2026-12-25"}`, 200},
+		{`{"mode":"number"}`, 200},
+		{`{"mode":"days"}`, 400},
+		{`{"mode":"days","date":""}`, 400},
+		{`{"mode":"days","date":"2026-1-5"}`, 400},
+		{`{"mode":"days","date":"2026-02-30"}`, 400},
+		{`{"mode":"weather"}`, 400},
+		{`{"mode":""}`, 400},
+		{`{}`, 400},
+		{`{"mode":1}`, 400},
+		{`nope`, 400},
+	} {
+		resp, out := do(t, ts, "PUT", "/api/mode", tc.body, nil)
+		if resp.StatusCode != tc.want {
+			t.Errorf("%s: status %d, want %d (%v)", tc.body, resp.StatusCode, tc.want, out)
+		}
+		if tc.want == 400 && out["error"] == nil {
+			t.Errorf("%s: no error field", tc.body)
+		}
+	}
+	// A rejected request leaves the mode alone.
+	if _, state := do(t, ts, "GET", "/api/state", "", nil); state["mode"] != "number" {
+		t.Fatalf("state = %v", state)
+	}
+}
+
+func TestModes(t *testing.T) {
+	s, ts := newTest(t)
+	now := utc("2026-09-06T12:05:00Z") // 09:05 ADT
+	s.now = func() time.Time { return now }
+	do(t, ts, "PUT", "/api/number", `{"number":302}`, nil)
+
+	_, state := do(t, ts, "GET", "/api/state", "", nil)
+	if state["mode"] != "number" || state["display"] != "aa302" || state["cells"] != "aa302" || state["clock"].(map[string]any)["cells"] != "09b05" {
+		t.Fatalf("number state = %v", state)
+	}
+	if d := state["days"].(map[string]any); d["date"] != "" || d["days"] != nil || d["label"] != nil {
+		t.Fatalf("days with no date = %v", d)
+	}
+
+	resp, out := do(t, ts, "POST", "/api/mode", `{"mode":"clock"}`, nil)
+	if resp.StatusCode != 200 || out["mode"] != "clock" || out["display"] != "09b05" {
+		t.Fatalf("clock: status %d body %v", resp.StatusCode, out)
+	}
+	if _, poll := do(t, ts, "GET", "/aabbccddeeff/number", "", nil); poll["number"] != "09b05" {
+		t.Fatalf("device in clock mode got %v", poll["number"])
+	}
+	// The stored number is untouched and still editable without leaving the mode.
+	if resp, out := do(t, ts, "PUT", "/api/number", `{"number":303}`, nil); resp.StatusCode != 200 || out["cells"] != "aa303" {
+		t.Fatalf("set in clock mode: status %d body %v", resp.StatusCode, out)
+	}
+	_, state = do(t, ts, "GET", "/api/state", "", nil)
+	if state["mode"] != "clock" || state["display"] != "09b05" || state["number"] != float64(303) {
+		t.Fatalf("clock state = %v", state)
+	}
+
+	resp, out = do(t, ts, "PUT", "/api/mode", `{"mode":"days","date":"2026-12-25"}`, nil)
+	days, _ := out["days"].(map[string]any)
+	if resp.StatusCode != 200 || out["mode"] != "days" || out["display"] != "aa110" || days["date"] != "2026-12-25" || days["days"] != float64(110) || days["label"] != "until" {
+		t.Fatalf("days: status %d body %v", resp.StatusCode, out)
+	}
+	if _, poll := do(t, ts, "GET", "/aabbccddeeff/number", "", nil); poll["number"] != float64(110) {
+		t.Fatalf("device in days mode got %v", poll["number"])
+	}
+	now = utc("2026-12-25T12:00:00Z")
+	if _, state = do(t, ts, "GET", "/api/state", "", nil); state["display"] != "aaaa0" || state["days"].(map[string]any)["label"] != "today" {
+		t.Fatalf("christmas state = %v", state)
+	}
+	now = utc("2026-12-30T12:00:00Z")
+	if _, state = do(t, ts, "GET", "/api/state", "", nil); state["display"] != "aaaa5" || state["days"].(map[string]any)["label"] != "since" {
+		t.Fatalf("after christmas state = %v", state)
+	}
+
+	// Back to number mode: the date is remembered for the page.
+	if _, out = do(t, ts, "PUT", "/api/mode", `{"mode":"number"}`, nil); out["display"] != "aa303" || out["days"].(map[string]any)["date"] != "2026-12-25" {
+		t.Fatalf("back to number = %v", out)
+	}
+	if _, poll := do(t, ts, "GET", "/aabbccddeeff/number", "", nil); poll["number"] != float64(303) {
+		t.Fatalf("device back in number mode got %v", poll["number"])
+	}
+
+	again, err := newServer(s.path[:len(s.path)-len("/number.json")], atlantic)
+	if err != nil || again.persisted.Mode != "number" || again.persisted.DaysDate != "2026-12-25" {
+		t.Fatalf("reloaded: %v, %+v", err, again.persisted)
+	}
+}
+
+func TestClockWakesPoll(t *testing.T) {
+	pollTimeout = 10 * time.Second
+	t.Cleanup(func() { pollTimeout = 12 * time.Second })
+	s, ts := newTest(t)
+	var mu sync.Mutex
+	now := utc("2026-09-06T12:04:59.5Z") // 09:04:59.5 ADT
+	s.now = func() time.Time {
+		mu.Lock()
+		defer mu.Unlock()
+		return now
+	}
+	do(t, ts, "PUT", "/api/mode", `{"mode":"clock"}`, nil)
+	if _, poll := do(t, ts, "GET", "/aabbccddeeff/number", "", nil); poll["number"] != "09b04" {
+		t.Fatalf("first poll = %v", poll["number"])
+	}
+
+	got := make(chan map[string]any, 1)
+	go func() {
+		_, out := do(t, ts, "GET", "/aabbccddeeff/number", "", nil)
+		got <- out
+	}()
+	time.Sleep(50 * time.Millisecond)
+	mu.Lock()
+	now = utc("2026-09-06T12:05:00Z")
+	mu.Unlock()
+	select {
+	case out := <-got:
+		if out["number"] != "09b05" {
+			t.Fatalf("poll = %v", out)
+		}
+	case <-time.After(1500 * time.Millisecond):
+		t.Fatal("poll did not wake when the minute changed")
+	}
+}
+
+func TestDailyStepsInClockMode(t *testing.T) {
+	s, ts := newTest(t)
+	now := utc("2026-09-06T10:00:00Z") // 07:00 ADT
+	s.now = func() time.Time { return now }
+	do(t, ts, "PUT", "/api/daily", `{"step":1,"at":"08:00"}`, nil)
+	do(t, ts, "PUT", "/api/number", `{"number":302}`, nil)
+	do(t, ts, "PUT", "/api/mode", `{"mode":"clock"}`, nil)
+	now = utc("2026-09-06T11:00:00Z")
+	s.tick()
+	_, state := do(t, ts, "GET", "/api/state", "", nil)
+	if state["mode"] != "clock" || state["number"] != float64(303) || state["cells"] != "aa303" || state["display"] != "08b00" {
+		t.Fatalf("state = %v", state)
+	}
+}
+
+func TestModeMigration(t *testing.T) {
+	dir := t.TempDir()
+	path := dir + "/number.json"
+	for _, tc := range []struct {
+		file string
+		mode string
+		date string
+	}{
+		{`{"cells":"aa302","updatedAt":"2026-09-01T12:00:00Z","daily":{"step":0,"at":"08:00","last":""}}`, "number", ""},
+		{`{"number":302,"updatedAt":"2026-09-01T12:00:00Z"}`, "number", ""},
+		{`{"cells":"aa302","updatedAt":"2026-09-01T12:00:00Z","mode":"clock"}`, "clock", ""},
+		{`{"cells":"aa302","updatedAt":"2026-09-01T12:00:00Z","mode":"days","daysDate":"2026-12-25"}`, "days", "2026-12-25"},
+		{`{"cells":"aa302","updatedAt":"2026-09-01T12:00:00Z","mode":"days"}`, "number", ""},
+		{`{"cells":"aa302","updatedAt":"2026-09-01T12:00:00Z","mode":"days","daysDate":"soon"}`, "number", ""},
+		{`{"cells":"aa302","updatedAt":"2026-09-01T12:00:00Z","mode":"weather"}`, "number", ""},
+	} {
+		if err := os.WriteFile(path, []byte(tc.file), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		s, err := newServer(dir, atlantic)
+		if err != nil || s.persisted.Cells != "aa302" || s.persisted.Mode != tc.mode || s.persisted.DaysDate != tc.date {
+			t.Errorf("%s: %v, %+v", tc.file, err, s.persisted)
+		}
 	}
 }
