@@ -27,7 +27,7 @@ tags:: runbook, smiirl
 	- The display is five cells over `0-9`, `a` (blank flap) and `b` (striped flap). A plain number goes to the counter as an integer and shows with leading blanks; anything else (stripes, explicit leading zeros) goes as a five-character string.
 	- The counter shows one of three modes, chosen on the page or with `PUT /api/mode`: the number (with the daily step), the time as `HH` stripes `MM` in `Canada/Atlantic` (24-hour, or 12-hour with a blank flap for the leading zero when `hour12` is set), or the days until or since a date. The app recomputes the display every second while a poll is held, so the clock ticks over within a poll.
 	- The app never hands the counter a different value less than ten seconds after the previous one. Each drum needs seconds per flip, and values arriving mid-turn leave drums out of step.
-	- Only the counter opens connections. Nothing needs to reach it from the cluster, and no firewall rule is involved beyond iot's access to the Lab zone.
+	- Only the counter opens connections. Nothing needs to reach it from the cluster. No firewall rule gates the path either: the Gateway address is a Cilium LB VIP, which is in no UniFi zone, so iot traffic to it takes the gateway's `→ WAN` fall-through rather than an iot→Lab policy — see [[Architecture/Networking]].
 - # Set the number
 	- The page is the normal way. From a shell on the LAN:
 	- ```bash

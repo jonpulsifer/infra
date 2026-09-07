@@ -35,14 +35,25 @@ resource "unifi_firewall_group" "teleport_cidr" {
 
 # Cross-site (Site Magic) k8s reachability CIDRs.
 #
-# The Site Magic firewall must allow the *full* Kubernetes address space across
-# the tunnel, not just the node subnets. The cross-site allow policies below
-# originally matched on the k8s/nest NETWORKs (node subnets 10.3.0.0/26 and
-# 10.89.0.0/28 only), so node<->node traffic worked but pod-sourced packets
-# (10.100.0.0/20) were dropped at the gateway on the Lab->Vpn forward — pods
-# could not reach the offsite nodes/VIPs and vice-versa. Match these CIDR lists
-# inline (matching_target = "IP") so the pod CIDRs and Cilium LB VIP pools are
-# permitted too.
+# Read the SOURCE and DESTINATION halves of the cross-site policies differently,
+# because the gateway picks a forward chain from each half differently.
+#
+# SOURCE is load-bearing for every CIDR listed. Zone entry is by ingress
+# interface, so a pod-sourced or VIP-sourced packet leaving br8 is in the Lab
+# zone regardless of its address, and the Lab->Vpn chain closes with a DROP.
+# Omit 10.100.0.0/20 here and pod-sourced traffic to an offsite node is dropped.
+#
+# DESTINATION only dispatches for the node CIDR. A UniFi zone holds the subnets
+# of *declared* networks and nothing else, and the Cilium LB pool and pod CIDR
+# are BGP-learned, so they are in no zone: a packet addressed to one misses the
+# zone match and takes the source zone's -> WAN fall-through, which accepts. The
+# other destination entries are therefore declared intent the zone dispatch
+# never consults. Keep them — they document the boundary, they cost nothing in a
+# hash:net ipset, and they become live the day the prefixes are ever zoned.
+#
+# The one cross-site policy whose destination genuinely dispatches is
+# folly_lb_to_nest_lan below: the offsite subnets are declared networks on the
+# far console, so Site Magic carries them into the Vpn zone.
 locals {
   # Cross-site k8s CIDRs derived from the network SSOT (topology.tf).
   # folly_k8s_cidrs covers the folly cluster's node subnet, Cilium LB VIP pool,

@@ -19,21 +19,30 @@ resolve *through that same tunnel*, so they are not separate paths:
   `update-source`) is the **only** way the Cilium LoadBalancer `/32` VIPs (from
   the `*.64/26` pools) and the pod CIDRs (`10.100.0.0/20` / `10.101.0.0/20`)
   cross the sites — OSPF/Site Magic does not carry them.
-- **OSPF (Site Magic)** auto-shares the LAN/node subnets
-  (`10.3.0.0/26` ⇄ `10.89.0.0/28`) and wins the RIB for them; the iBGP copy of
-  the node subnet is an inactive (recursive-next-hop) backup.
+- **OSPF (Site Magic)** carries the subnets each gateway's Site Magic config
+  lists and wins the RIB for them — folly advertises `10.3.0.0/26` and
+  `10.13.37.0/28`, and installs `10.89.0.0/28` and `192.168.1.0/24` from
+  offsite; the iBGP copy of the node subnet is an inactive
+  (recursive-next-hop) backup.
 
 Because there is only one tunnel, cross-site **reachability does not depend on
-which protocol wins the RIB** — it depends on the **gateway firewall** allowing
-the full k8s address space across the tunnel. The folly gateway isolates its
-k8s network in a custom **`Lab`** zone (`firewall.tf`), so the cross-site allow
-policies must list the **pod CIDRs and LB VIP pools**, not just the node
-subnets — otherwise pod-sourced packets are dropped on the `Lab → Vpn` forward.
-(That gap was the cause of the "folly pods can't reach offsite nodes" outage;
-node↔node kept working because the node subnets *were* allowed.) The offsite
-console has **no custom firewall policies** — its k8s network sits in the
-default `Internal` zone, whose predefined `Internal ⇄ Vpn` rules already permit
-the traffic.
+which protocol wins the RIB** — it depends on the **gateway firewall**. The
+folly gateway isolates its k8s network in a custom **`Lab`** zone
+(`firewall.tf`), and it picks a forward chain from the **destination's** zone
+while deciding the source zone by ingress interface.
+
+A zone holds only the subnets of *declared* networks, so the BGP-learned LB VIP
+pool and pod CIDR are in no zone. That makes the two halves of each cross-site
+policy behave differently: the **pod CIDRs and LB VIP pools are load-bearing as
+sources** — omit them and pod-sourced packets hit the `Lab → Vpn` chain's
+closing `DROP` — while as **destinations** only the node CIDR dispatches, and
+traffic to a VIP or pod takes the `→ WAN` fall-through instead. See the comment
+above `locals` in `firewall.tf`; `docs/pages/Architecture___Networking.md`
+carries the full reasoning and why closing the inbound gap is not worth it.
+
+The offsite console has **no custom firewall policies** — its k8s network sits
+in the default `Internal` zone, whose predefined `Internal ⇄ Vpn` rules already
+permit the traffic.
 
 ```mermaid
 flowchart LR
@@ -51,7 +60,7 @@ flowchart LR
         onodes -->|eBGP| ucg
     end
 
-    udm <-->|"Site Magic WireGuard tunnel (wgsts1000) — one data plane<br/>iBGP: LB VIP /32s + pod CIDRs (BGP-only) + node subnets<br/>OSPF: node subnets /26 ⇄ /28 (wins RIB)<br/>cross-site reachability gated by the gateway firewall, not protocol choice"| ucg
+    udm <-->|"Site Magic WireGuard tunnel (wgsts1000) — one data plane<br/>iBGP: LB VIP /32s + pod CIDRs (BGP-only) + node subnets<br/>OSPF: each gateway's listed subnets (wins RIB)<br/>cross-site reachability gated by the gateway firewall, not protocol choice"| ucg
 ```
 
 <!-- BEGIN_TF_DOCS -->
@@ -61,19 +70,23 @@ flowchart LR
 | ---- | ------- |
 | <a name="requirement_cloudflare"></a> [cloudflare](#requirement\_cloudflare) | ~> 5.1 |
 | <a name="requirement_onepassword"></a> [onepassword](#requirement\_onepassword) | ~> 3.0 |
-| <a name="requirement_unifi"></a> [unifi](#requirement\_unifi) | ~> 0.53 |
+| <a name="requirement_unifi"></a> [unifi](#requirement\_unifi) | ~> 0.55 |
 
 ## Providers
 
 | Name | Version |
 | ---- | ------- |
-| <a name="provider_cloudflare"></a> [cloudflare](#provider\_cloudflare) | 5.21.1 |
+| <a name="provider_cloudflare"></a> [cloudflare](#provider\_cloudflare) | 5.24.0 |
 | <a name="provider_onepassword"></a> [onepassword](#provider\_onepassword) | 3.3.1 |
-| <a name="provider_unifi"></a> [unifi](#provider\_unifi) | 0.53.0 |
+| <a name="provider_unifi"></a> [unifi](#provider\_unifi) | 0.55.0 |
 
 ## Modules
 
-No modules.
+| Name | Source | Version |
+| ---- | ------ | ------- |
+| <a name="module_lab_topology"></a> [lab\_topology](#module\_lab\_topology) | ../../../modules/cluster-topology | n/a |
+| <a name="module_offsite_topology"></a> [offsite\_topology](#module\_offsite\_topology) | ../../../modules/cluster-topology | n/a |
+| <a name="module_topology"></a> [topology](#module\_topology) | ../../../modules/cluster-topology | n/a |
 
 ## Resources
 
@@ -81,6 +94,7 @@ No modules.
 | ---- | ---- |
 | [cloudflare_dns_record.k8s_remote_dns](https://registry.terraform.io/providers/cloudflare/cloudflare/latest/docs/resources/dns_record) | resource |
 | [cloudflare_dns_record.lab_remote_dns](https://registry.terraform.io/providers/cloudflare/cloudflare/latest/docs/resources/dns_record) | resource |
+| [cloudflare_dns_record.lab_service_dns](https://registry.terraform.io/providers/cloudflare/cloudflare/latest/docs/resources/dns_record) | resource |
 | [unifi_bgp.folly](https://registry.terraform.io/providers/ubiquiti-community/unifi/latest/docs/resources/bgp) | resource |
 | [unifi_client_qos_rate.iot](https://registry.terraform.io/providers/ubiquiti-community/unifi/latest/docs/resources/client_qos_rate) | resource |
 | [unifi_client_qos_rate.streaming](https://registry.terraform.io/providers/ubiquiti-community/unifi/latest/docs/resources/client_qos_rate) | resource |
@@ -97,6 +111,7 @@ No modules.
 | [unifi_firewall_policy.folly_k8s_to_nest_k8s](https://registry.terraform.io/providers/ubiquiti-community/unifi/latest/docs/resources/firewall_policy) | resource |
 | [unifi_firewall_policy.internal_to_lab](https://registry.terraform.io/providers/ubiquiti-community/unifi/latest/docs/resources/firewall_policy) | resource |
 | [unifi_firewall_policy.internal_to_nest_k8s](https://registry.terraform.io/providers/ubiquiti-community/unifi/latest/docs/resources/firewall_policy) | resource |
+| [unifi_firewall_policy.lab_clients_to_nest_k8s](https://registry.terraform.io/providers/ubiquiti-community/unifi/latest/docs/resources/firewall_policy) | resource |
 | [unifi_firewall_policy.lab_to_lab](https://registry.terraform.io/providers/ubiquiti-community/unifi/latest/docs/resources/firewall_policy) | resource |
 | [unifi_firewall_policy.nest_k8s_to_folly_k8s](https://registry.terraform.io/providers/ubiquiti-community/unifi/latest/docs/resources/firewall_policy) | resource |
 | [unifi_firewall_policy.prometheus_windows_exporters](https://registry.terraform.io/providers/ubiquiti-community/unifi/latest/docs/resources/firewall_policy) | resource |
