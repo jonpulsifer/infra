@@ -25,7 +25,7 @@ tags:: runbook, smiirl
 	- After joining Wi-Fi it fetches `GET /number` and compares the reply literally with the cloud's `{"number":1}`; any other byte (a trailing newline, a different length) makes the setup wizard report "Counter does not have access to internet" and fall back to its own access point.
 	- It then bootstraps with `GET /v1.0/<mac>/<key>`, which tells it what URL to poll and how often, posts a status report, and polls `GET /<mac>/number` about every 20 seconds. The app holds that poll and answers the moment the display should change.
 	- The display is five cells over `0-9`, `a` (blank flap) and `b` (striped flap). A plain number goes to the counter as an integer and shows with leading blanks; anything else (stripes, explicit leading zeros) goes as a five-character string.
-	- The counter shows one of three modes, chosen on the page or with `PUT /api/mode`: the number (with the daily step), the time as `HH` stripes `MM` in `Canada/Atlantic`, or the days until or since a date. The app recomputes the display every second while a poll is held, so the clock ticks over within a poll.
+	- The counter shows one of three modes, chosen on the page or with `PUT /api/mode`: the number (with the daily step), the time as `HH` stripes `MM` in `Canada/Atlantic` (24-hour, or 12-hour with a blank flap for the leading zero when `hour12` is set), or the days until or since a date. The app recomputes the display every second while a poll is held, so the clock ticks over within a poll.
 	- The app never hands the counter a different value less than ten seconds after the previous one. Each drum needs seconds per flip, and values arriving mid-turn leave drums out of step.
 	- Only the counter opens connections. Nothing needs to reach it from the cluster, and no firewall rule is involved beyond iot's access to the Lab zone.
 - # Set the number
@@ -35,6 +35,7 @@ tags:: runbook, smiirl
 	  curl -s -X PUT -H 'Content-Type: application/json' -d '{"cells":"aa3b2"}' https://smiirl.lolwtf.ca/api/number
 	  curl -s -X PUT -H 'Content-Type: application/json' -d '{"step":1,"at":"08:00"}' https://smiirl.lolwtf.ca/api/daily
 	  curl -s -X PUT -H 'Content-Type: application/json' -d '{"mode":"clock"}' https://smiirl.lolwtf.ca/api/mode
+	  curl -s -X PUT -H 'Content-Type: application/json' -d '{"mode":"clock","hour12":true}' https://smiirl.lolwtf.ca/api/mode
 	  curl -s -X PUT -H 'Content-Type: application/json' -d '{"mode":"days","date":"2026-12-25"}' https://smiirl.lolwtf.ca/api/mode
 	  ```
 	- The daily step runs in `Canada/Atlantic` and catches up missed days after a restart. The number itself is on the `smiirl-data` volume in the `smiirl` namespace.
