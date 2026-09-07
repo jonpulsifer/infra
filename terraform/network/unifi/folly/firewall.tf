@@ -419,3 +419,35 @@ resource "unifi_firewall_policy" "teleport_cidr_to_lab" {
     zone_id            = unifi_firewall_zone.lab.id
   }
 }
+
+# The offsite client LAN reaches folly's Cilium LB VIPs.
+#
+# Clients on the offsite Default network (nest.pulsifer.ca) resolve folly-hosted
+# hostnames to addresses in folly's LB pool and route to them over Site Magic.
+# The reply is sourced from the VIP, which sits in the Lab zone, so without this
+# the SYN is accepted but the SYN-ACK is dropped on the Lab->Vpn forward and the
+# connection blackholes. Scoped to the LB range rather than local.folly_k8s_cidrs
+# so folly pods and nodes still cannot initiate into the offsite LAN.
+resource "unifi_firewall_policy" "folly_lb_to_nest_lan" {
+  name                 = "Allow Folly LB VIPs to Nest LAN"
+  action               = "ALLOW"
+  protocol             = "all"
+  ip_version           = "BOTH"
+  create_allow_respond = true
+  enabled              = true
+  logging              = false
+
+  source = {
+    matching_target    = "IP"
+    ips                = [local.lb_range]
+    port_matching_type = "ANY"
+    zone_id            = unifi_firewall_zone.lab.id
+  }
+
+  destination = {
+    matching_target    = "NETWORK"
+    network_ids        = [data.unifi_network.nest.id]
+    port_matching_type = "ANY"
+    zone_id            = data.unifi_firewall_zone.vpn.id
+  }
+}
