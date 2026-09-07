@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="A split-flap card">
+  <rect width="512" height="512" rx="72" fill="#1b1917"/>
+  <rect x="97" y="67" width="318" height="379" rx="36" fill="#f3eadb"/>
+  <rect x="97" y="241" width="318" height="15" fill="#2a2521"/>
+  <rect x="97" y="256" width="318" height="15" fill="#d98a34"/>
+</svg>

@@ -16,6 +16,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -25,6 +26,15 @@ import (
 
 //go:embed index.html
 var indexHTML []byte
+
+//go:embed manifest.webmanifest
+var manifestJSON []byte
+
+//go:embed icon.svg
+var iconSVG []byte
+
+//go:embed sw.js
+var serviceWorkerJS []byte
 
 // pollTimeout bounds how long a firmware poll is held waiting for a change.
 // The cloud holds ~17 s and the device re-polls ~20 s after the previous
@@ -45,7 +55,19 @@ const (
 	defaultAt  = "08:00"
 	maxCatchUp = 366 // daily steps applied at once after downtime
 	dayFormat  = "2006-01-02"
+	// minFormat is a countdown target, in the shape the page's
+	// datetime-local input hands over.
+	minFormat    = "2006-01-02T15:04"
+	maxCountdown = 99*60 + 59 // minutes the drums hold as HHbMM
+	defaultEvery = 5          // minutes a cycle holds each mode
+	maxEvery     = 1440
 )
+
+// modes is everything the drums can show. A cycle rotates through the others,
+// never through itself.
+var modes = []string{"number", "clock", "days", "date", "countdown", "github", "cycle"}
+
+var cyclable = modes[:len(modes)-1]
 
 var (
 	macRe = regexp.MustCompile(`^[0-9a-f]{12}$`)
@@ -56,6 +78,8 @@ var (
 	// A canonical number: leading blanks, then digits without a leading zero.
 	numberRe = regexp.MustCompile(`^a*(0|[1-9][0-9]*)$`)
 	atRe     = regexp.MustCompile(`^([01][0-9]|2[0-3]):[0-5][0-9]$`)
+	// A GitHub login: alphanumerics and inner hyphens, up to 39 characters.
+	userRe = regexp.MustCompile(`^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?$`)
 )
 
 type daily struct {
@@ -64,15 +88,74 @@ type daily struct {
 	Last string `json:"last"` // date of the last boundary applied
 }
 
+// cycle is the rotation: each mode in Modes holds the drums for Every
+// minutes, in turn.
+type cycle struct {
+	Modes []string `json:"modes"`
+	Every int      `json:"every"`
+}
+
+// github counts a person's public commits or pull requests. Count and At are
+// kept so a restart shows the last number instead of blanking the drums while
+// the first fetch is out.
+type github struct {
+	User  string    `json:"user"`
+	What  string    `json:"what"` // commits or prs
+	Count int       `json:"count"`
+	At    time.Time `json:"at"`
+	Err   string    `json:"-"` // the last fetch failure, for the page; not persisted
+}
+
 // persisted is number.json. Cells is the stored number whatever the mode; the
-// daily step keeps moving it while the clock or a countdown is showing.
+// daily step keeps moving it while another mode has the drums.
 type persisted struct {
-	Cells     string    `json:"cells"`
-	UpdatedAt time.Time `json:"updatedAt"`
-	Daily     daily     `json:"daily"`
-	Mode      string    `json:"mode"`               // number, clock or days
-	DaysDate  string    `json:"daysDate,omitempty"` // the date days mode counts to
-	Clock12   bool      `json:"clock12,omitempty"`  // clock mode shows a 12-hour time
+	Cells       string    `json:"cells"`
+	UpdatedAt   time.Time `json:"updatedAt"`
+	Daily       daily     `json:"daily"`
+	Mode        string    `json:"mode"`                  // one of modes
+	DaysDate    string    `json:"daysDate,omitempty"`    // the date days mode counts to
+	Clock12     bool      `json:"clock12,omitempty"`     // clock mode shows a 12-hour time
+	CountdownAt string    `json:"countdownAt,omitempty"` // the moment countdown mode runs to
+	Cycle       cycle     `json:"cycle"`
+	GitHub      github    `json:"github"`
+}
+
+// shows reports whether p has what mode m needs. A mode that wants a setting
+// is not offered, kept or rotated to until the setting is there.
+func (p persisted) shows(m string) bool {
+	switch m {
+	case "number", "clock", "date":
+		return true
+	case "days":
+		return p.DaysDate != ""
+	case "countdown":
+		return p.CountdownAt != ""
+	case "github":
+		return p.GitHub.User != ""
+	case "cycle":
+		return len(p.Cycle.Modes) >= 2
+	}
+	return false
+}
+
+// cycleMode is the member holding the drums at now. The turns are keyed to
+// the wall clock rather than to a timer, so nothing has to be scheduled and a
+// restart lands back in the rotation where it left off.
+func (p persisted) cycleMode(now time.Time) string {
+	turn := now.Unix() / int64(p.Cycle.Every*60)
+	return p.Cycle.Modes[int(turn%int64(len(p.Cycle.Modes)))]
+}
+
+// keepCyclable is ms with anything a cycle cannot rotate to dropped: another
+// cycle, a repeat, and any mode whose setting is missing.
+func keepCyclable(p persisted, ms []string) []string {
+	keep := []string{}
+	for _, m := range ms {
+		if slices.Contains(cyclable, m) && !slices.Contains(keep, m) && p.shows(m) {
+			keep = append(keep, m)
+		}
+	}
+	return keep
 }
 
 type server struct {
@@ -122,7 +205,20 @@ func newServer(dataDir string, loc *time.Location) (*server, error) {
 	if _, err := time.ParseInLocation(dayFormat, file.DaysDate, loc); err != nil {
 		file.DaysDate = ""
 	}
-	if file.Mode != "clock" && !(file.Mode == "days" && file.DaysDate != "") {
+	if _, err := time.ParseInLocation(minFormat, file.CountdownAt, loc); err != nil {
+		file.CountdownAt = ""
+	}
+	if !userRe.MatchString(file.GitHub.User) {
+		file.GitHub = github{}
+	}
+	if file.GitHub.What != "prs" {
+		file.GitHub.What = "commits"
+	}
+	if file.Cycle.Every < 1 || file.Cycle.Every > maxEvery {
+		file.Cycle.Every = defaultEvery
+	}
+	file.Cycle.Modes = keepCyclable(file.persisted, file.Cycle.Modes)
+	if !file.persisted.shows(file.Mode) {
 		file.Mode = "number"
 	}
 	s.persisted = file.persisted
@@ -162,16 +258,52 @@ func daysCells(now time.Time, loc *time.Location, date string) (int, string, err
 	return 0, "today", nil
 }
 
-// display is what the drums should show at now under the current mode.
-// Caller holds s.mu.
+// countdownCells is the time left until at, as HHbMM with the striped flap
+// between: 06b30 is six and a half hours out. It rests at 00b00 once the
+// moment is past and stops at 99b59, the most the drums hold.
+func countdownCells(now time.Time, loc *time.Location, at string) (string, int, error) {
+	t, err := time.ParseInLocation(minFormat, at, loc)
+	if err != nil {
+		return "", 0, err
+	}
+	mins := max(0, min(int(t.Sub(now)/time.Minute), maxCountdown))
+	return fmt.Sprintf("%02db%02d", mins/60, mins%60), mins, nil
+}
+
+// showing is the mode with the drums at now: the mode itself, or the member a
+// cycle has reached. Caller holds s.mu.
+func (s *server) showing(now time.Time) string {
+	if s.persisted.Mode == "cycle" {
+		return s.persisted.cycleMode(now)
+	}
+	return s.persisted.Mode
+}
+
+// display is what the drums should show at now. Caller holds s.mu.
 func (s *server) display(now time.Time) string {
+	return s.cells(s.showing(now), now)
+}
+
+// cells is what mode m shows at now. A mode whose setting has gone falls back
+// to the stored number rather than to nothing. Caller holds s.mu.
+func (s *server) cells(m string, now time.Time) string {
 	p := s.persisted
-	switch p.Mode {
+	switch m {
 	case "clock":
 		return clockCells(now, s.loc, p.Clock12)
+	case "date":
+		return now.In(s.loc).Format("01b02")
 	case "days":
 		if n, _, err := daysCells(now, s.loc, p.DaysDate); err == nil {
 			return numberToCells(n)
+		}
+	case "countdown":
+		if c, _, err := countdownCells(now, s.loc, p.CountdownAt); err == nil {
+			return c
+		}
+	case "github":
+		if p.GitHub.User != "" && !p.GitHub.At.IsZero() {
+			return numberToCells(clamp(p.GitHub.Count))
 		}
 	}
 	return p.Cells
@@ -185,12 +317,32 @@ func (s *server) modeView(now time.Time) map[string]any {
 	if n, l, err := daysCells(now, s.loc, p.DaysDate); err == nil {
 		days, label = n, l
 	}
-	return map[string]any{
-		"mode":    p.Mode,
-		"display": s.display(now),
-		"clock":   map[string]any{"cells": clockCells(now, s.loc, p.Clock12), "hour12": p.Clock12},
-		"days":    map[string]any{"date": p.DaysDate, "days": days, "label": label},
+	var left any
+	if _, m, err := countdownCells(now, s.loc, p.CountdownAt); err == nil {
+		left = m
 	}
+	var fetched any
+	if !p.GitHub.At.IsZero() {
+		fetched = p.GitHub.At
+	}
+	return map[string]any{
+		"mode":      p.Mode,
+		"showing":   s.showing(now),
+		"display":   s.display(now),
+		"clock":     map[string]any{"cells": clockCells(now, s.loc, p.Clock12), "hour12": p.Clock12},
+		"date":      map[string]any{"cells": s.cells("date", now)},
+		"days":      map[string]any{"date": p.DaysDate, "days": days, "label": label},
+		"countdown": map[string]any{"at": p.CountdownAt, "left": left},
+		"github":    map[string]any{"user": p.GitHub.User, "what": p.GitHub.What, "count": p.GitHub.Count, "at": fetched, "error": errOrNil(p.GitHub.Err)},
+		"cycle":     map[string]any{"modes": p.Cycle.Modes, "every": p.Cycle.Every},
+	}
+}
+
+func errOrNil(s string) any {
+	if s == "" {
+		return nil
+	}
+	return s
 }
 
 func clamp(n int) int {
@@ -297,6 +449,10 @@ func (s *server) handler() http.Handler {
 	mux.HandleFunc("POST /api/daily", s.handleDaily)
 	mux.HandleFunc("PUT /api/mode", s.handleMode)
 	mux.HandleFunc("POST /api/mode", s.handleMode)
+	mux.HandleFunc("GET /manifest.webmanifest", asset("application/manifest+json", manifestJSON))
+	mux.HandleFunc("GET /sw.js", asset("text/javascript; charset=utf-8", serviceWorkerJS))
+	mux.HandleFunc("GET /icon.svg", asset("image/svg+xml", iconSVG))
+	mux.HandleFunc("GET /icon.png", asset("image/png", iconPNG))
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
 		fmt.Fprintln(w, "ok")
 	})
@@ -562,34 +718,81 @@ func (s *server) handleDaily(w http.ResponseWriter, r *http.Request) {
 
 func (s *server) handleMode(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		Mode   string `json:"mode"`
-		Date   string `json:"date"`
-		Hour12 *bool  `json:"hour12"`
+		Mode   string   `json:"mode"`
+		Date   string   `json:"date"`   // days
+		At     string   `json:"at"`     // countdown
+		Hour12 *bool    `json:"hour12"` // clock
+		User   string   `json:"user"`   // github
+		What   string   `json:"what"`   // github
+		Modes  []string `json:"modes"`  // cycle
+		Every  *int     `json:"every"`  // cycle
 	}
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1024)).Decode(&body); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": `body must be {"mode":"number"|"clock"} or {"mode":"days","date":"YYYY-MM-DD"}`})
+		badMode(w, `body must be {"mode":"..."} with that mode's settings`)
 		return
 	}
 	s.mu.Lock()
 	p := s.persisted
+	if body.Hour12 != nil {
+		p.Clock12 = *body.Hour12
+	}
 	switch body.Mode {
-	case "number", "clock":
-		if body.Hour12 != nil {
-			p.Clock12 = *body.Hour12
-		}
+	case "number", "clock", "date":
 	case "days":
 		if _, err := time.Parse(dayFormat, body.Date); err != nil {
 			s.mu.Unlock()
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "date must be YYYY-MM-DD"})
+			badMode(w, "date must be YYYY-MM-DD")
 			return
 		}
 		p.DaysDate = body.Date
+	case "countdown":
+		if _, err := time.ParseInLocation(minFormat, body.At, s.loc); err != nil {
+			s.mu.Unlock()
+			badMode(w, "at must be YYYY-MM-DDTHH:MM")
+			return
+		}
+		p.CountdownAt = body.At
+	case "github":
+		if !userRe.MatchString(body.User) {
+			s.mu.Unlock()
+			badMode(w, "user must be a GitHub login")
+			return
+		}
+		if body.What != "commits" && body.What != "prs" {
+			s.mu.Unlock()
+			badMode(w, `what must be "commits" or "prs"`)
+			return
+		}
+		// A different person or count starts over rather than showing the
+		// number that belonged to the last one.
+		if body.User != p.GitHub.User || body.What != p.GitHub.What {
+			p.GitHub = github{User: body.User, What: body.What}
+		}
+	case "cycle":
+		if body.Every != nil {
+			if *body.Every < 1 || *body.Every > maxEvery {
+				s.mu.Unlock()
+				badMode(w, fmt.Sprintf("every must be 1..%d minutes", maxEvery))
+				return
+			}
+			p.Cycle.Every = *body.Every
+		}
+		if body.Modes != nil {
+			p.Cycle.Modes = keepCyclable(p, body.Modes)
+		}
+		if len(p.Cycle.Modes) < 2 {
+			s.mu.Unlock()
+			badMode(w, "modes must name at least two the counter can show")
+			return
+		}
 	default:
 		s.mu.Unlock()
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "mode must be number, clock or days"})
+		badMode(w, "mode must be one of "+strings.Join(modes, ", "))
 		return
 	}
 	p.Mode = body.Mode
+	// Dropping a setting a cycle was rotating to takes it out of the rotation.
+	p.Cycle.Modes = keepCyclable(p, p.Cycle.Modes)
 	err := s.commit(p)
 	view := s.modeView(s.now())
 	s.mu.Unlock()
@@ -598,7 +801,45 @@ func (s *server) handleMode(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not persist mode"})
 		return
 	}
+	if body.Mode == "github" {
+		go s.refreshGitHub() // the drums should not wait for the next tick
+	}
 	writeJSON(w, http.StatusOK, view)
+}
+
+func badMode(w http.ResponseWriter, msg string) {
+	writeJSON(w, http.StatusBadRequest, map[string]string{"error": msg})
+}
+
+// refreshGitHub fetches the count when a mode wants it and the last one has
+// gone stale. The fetch runs without the lock; a failure leaves the number on
+// the drums alone and is reported on the page.
+func (s *server) refreshGitHub() {
+	s.mu.Lock()
+	p := s.persisted
+	wanted := p.Mode == "github" || (p.Mode == "cycle" && slices.Contains(p.Cycle.Modes, "github"))
+	stale := s.now().Sub(p.GitHub.At) >= githubEvery
+	s.mu.Unlock()
+	if p.GitHub.User == "" || !wanted || !stale {
+		return
+	}
+	n, err := githubCount(p.GitHub.User, p.GitHub.What)
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	q := s.persisted
+	if q.GitHub.User != p.GitHub.User || q.GitHub.What != p.GitHub.What {
+		return // the page moved on while the fetch was out
+	}
+	if err != nil {
+		log.Printf("github: %v", err)
+		s.persisted.GitHub.Err = err.Error() // not persisted, so nothing to save
+		return
+	}
+	q.GitHub.Count, q.GitHub.At, q.GitHub.Err = n, s.now(), ""
+	if err := s.commit(q); err != nil {
+		log.Printf("github: %v", err)
+	}
 }
 
 func (s *server) set(cells string) error {
@@ -612,23 +853,25 @@ func (s *server) set(cells string) error {
 	return s.commit(p)
 }
 
-// commit persists p and wakes the device poll when the cells or the mode
-// changed. Caller holds s.mu.
+// commit persists p and wakes a held device poll when what the drums show
+// changed. Comparing the display rather than each setting means a new setting
+// needs nothing added here. Caller holds s.mu.
 func (s *server) commit(p persisted) error {
 	prev := s.persisted
 	moved := p.Cells != prev.Cells
 	if moved {
 		p.UpdatedAt = s.now()
 	}
+	was := s.display(s.now())
 	s.persisted = p
 	if err := s.save(); err != nil {
 		s.persisted = prev
 		return err
 	}
-	if moved || p.Mode != prev.Mode || p.DaysDate != prev.DaysDate || p.Clock12 != prev.Clock12 {
+	if now := s.display(s.now()); moved || now != was {
 		close(s.changed)
 		s.changed = make(chan struct{})
-		log.Printf("cells %s -> %s, mode %s", prev.Cells, p.Cells, strings.TrimSpace(p.Mode+" "+p.DaysDate))
+		log.Printf("cells %s -> %s, showing %s %s", prev.Cells, p.Cells, p.Mode, now)
 	}
 	return nil
 }
@@ -675,6 +918,17 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 	w.Write(b)
 }
 
+// asset serves an embedded file. The page and its parts are rebuilt into the
+// image, so they carry no cache lifetime of their own; the service worker is
+// what keeps them around.
+func asset(contentType string, body []byte) http.HandlerFunc {
+	return func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", contentType)
+		w.Header().Set("Content-Length", strconv.Itoa(len(body)))
+		w.Write(body)
+	}
+}
+
 func envOr(key, def string) string {
 	if v := os.Getenv(key); v != "" {
 		return v
@@ -692,9 +946,11 @@ func main() {
 		log.Fatal(err)
 	}
 	s.tick()
+	go s.refreshGitHub()
 	go func() {
 		for range time.Tick(30 * time.Second) {
 			s.tick()
+			s.refreshGitHub()
 		}
 	}()
 	addr := ":" + envOr("PORT", "8080")
@@ -704,6 +960,6 @@ func main() {
 		ReadHeaderTimeout: 10 * time.Second,
 		WriteTimeout:      pollTimeout + flapSettle + 10*time.Second,
 	}
-	log.Printf("smiirl listening on %s, cells %s, mode %s, daily %+v in %s", addr, s.persisted.Cells, strings.TrimSpace(s.persisted.Mode+" "+s.persisted.DaysDate), s.persisted.Daily, loc)
+	log.Printf("smiirl listening on %s, cells %s, mode %s, daily %+v in %s", addr, s.persisted.Cells, s.persisted.Mode, s.persisted.Daily, loc)
 	log.Fatal(srv.ListenAndServe())
 }
