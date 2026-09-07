@@ -372,6 +372,7 @@
 
   <section class="panel" id="clock-panel" hidden aria-label="Clock">
     <p class="line" id="clock-line"></p>
+    <button type="button" class="btn save" id="hour12" aria-pressed="false">12-hour time</button>
   </section>
 
   <form class="panel" id="days-panel" hidden autocomplete="off" aria-label="Days">
@@ -422,7 +423,7 @@
   const faceName = (c) => c === "a" ? "blank" : c === "b" ? "stripes" : c;
   const pretty = (c) => { const n = cellsToNumber(c); return n === null ? c.replace(/a/g, "·").replace(/b/g, "/") : n.toLocaleString(); };
   const spoken = (c) => { const n = cellsToNumber(c); return n === null ? c.split("").map(faceName).join(" ") : n.toLocaleString(); };
-  const hhmm = (c) => isCells(c) && c[2] === "b" ? c.slice(0, 2) + ":" + c.slice(3) : pretty(c);
+  const hhmm = (c) => isCells(c) && c[2] === "b" ? c.slice(0, 2).replace(/a/g, "") + ":" + c.slice(3) : pretty(c);
   // How the shown cells read in the current mode: a clock is "14:30", not "14/30".
   const shown = (c) => S.mode === "clock" ? hhmm(c) : pretty(c);
   const shownSpoken = (c) => S.mode === "clock" ? "the time, " + hhmm(c) : spoken(c);
@@ -528,6 +529,7 @@
     mode: null,    // number | clock | days, once the server has said
     display: null, // the cells the counter is being handed right now
     clockCells: null,
+    clock12: false,
     days: null,    // { date, days, label }
     switching: false,
     lastModeAt: 0,
@@ -538,7 +540,7 @@
         led = $("led"), ledText = $("led-text"), hint = $("hint"),
         atEl = $("at"), stepEl = $("step"), saveBtn = $("save"), nextEl = $("next"),
         modeBtns = Array.from(document.querySelectorAll("[data-mode]")),
-        dateEl = $("date"), daysLine = $("days-line"), clockLine = $("clock-line");
+        dateEl = $("date"), daysLine = $("days-line"), clockLine = $("clock-line"), hour12Btn = $("hour12");
 
   const number = () => S.cells === null ? null : cellsToNumber(S.cells);
   const dirty = () => S.draft !== null && S.draft !== S.cells;
@@ -651,11 +653,16 @@
     // A poll in flight alongside a mode PUT may carry the mode from before it.
     if (!S.switching && startedAt >= S.lastModeAt) {
       const m = MODES.includes(st.mode) ? st.mode : "number";
-      if (st.clock && typeof st.clock === "object" && isCells(st.clock.cells)) S.clockCells = st.clock.cells;
+      let clockFlipped = false;
+      if (st.clock && typeof st.clock === "object") {
+        if (isCells(st.clock.cells)) S.clockCells = st.clock.cells;
+        clockFlipped = !!st.clock.hour12 !== S.clock12;
+        S.clock12 = !!st.clock.hour12;
+      }
       if (st.days && typeof st.days === "object") applyDays(st.days);
       const shownCells = isCells(st.display) ? st.display : cells;
       const moved = S.mode !== null && m !== S.mode;
-      const changed = moved || shownCells !== S.display;
+      const changed = moved || clockFlipped || shownCells !== S.display;
       S.mode = m;
       S.display = shownCells;
       if (moved && S.pending) {
@@ -761,26 +768,29 @@
       : m === "clock" ? "The flaps follow the clock. The counter checks in every 20 seconds or so."
       : "Pick a date and the counter counts the days to it, one flip a day.";
     clockLine.textContent = `Showing the time, ${hhmm(S.clockCells ?? S.display ?? "aaaaa")} in Atlantic.`;
+    hour12Btn.textContent = S.clock12 ? "24-hour time" : "12-hour time";
+    hour12Btn.setAttribute("aria-pressed", String(S.clock12));
     daysLine.textContent = daysText();
     if (S.display !== null) showCells(m === "number" ? (S.draft ?? S.display) : S.display);
     syncGo();
   }
-  async function setMode(m, date) {
+  async function setMode(m, date, hour12) {
     if (S.sending || S.switching) { say("Still sending the last change, try again in a moment."); return; }
     if (S.cells === null) { say("Still connecting to the counter's server."); return; }
     S.switching = true;
-    const prev = { mode: S.mode, display: S.display, days: S.days };
+    const prev = { mode: S.mode, display: S.display, days: S.days, clock12: S.clock12 };
     const pollAtSend = S.lastPoll;
     S.lastModeAt = Date.now();
     S.mode = m;
     if (m === "days") S.days = { date, days: null, label: null };
+    if (hour12 !== undefined) S.clock12 = hour12;
     renderMode();
     say("");
     try {
       const r = await fetch("/api/mode", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(m === "days" ? { mode: m, date } : { mode: m }),
+        body: JSON.stringify(m === "days" ? { mode: m, date } : hour12 === undefined ? { mode: m } : { mode: m, hour12 }),
         signal: AbortSignal.timeout(6000),
       });
       const body = await r.json().catch(() => ({}));
@@ -789,6 +799,10 @@
       S.mode = MODES.includes(body.mode) ? body.mode : m;
       if (isCells(body.display)) S.display = body.display;
       if (body.days && typeof body.days === "object") applyDays(body.days);
+      if (body.clock && typeof body.clock === "object") {
+        if (isCells(body.clock.cells)) S.clockCells = body.clock.cells;
+        S.clock12 = !!body.clock.hour12;
+      }
       S.pending = { cells: S.display, sentAt: Date.now(), lastPollAtSend: pollAtSend, nagged: false };
     } catch (e) {
       Object.assign(S, prev);
@@ -966,6 +980,7 @@
       setMode("days", date);
     });
   }
+  hour12Btn.addEventListener("click", () => setMode("clock", undefined, !S.clock12));
   $("modes").addEventListener("keydown", (e) => {
     const i = modeBtns.indexOf(document.activeElement);
     if (i < 0) return;

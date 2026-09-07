@@ -32,7 +32,10 @@ the counter polls it over plain HTTP and shows whatever the web page last set.
   200 `{"api":"front"}`. The page and its `/api` are not offered on that name.
 - The counter shows one of three **modes**. `number` shows the stored cells.
   `clock` shows the local time in `TZ` as `HHbMM`: hours, the striped flap as
-  the separator, minutes, 24-hour and zero-padded (`09b05`, `14b30`). `days`
+  the separator, minutes, 24-hour and zero-padded (`09b05`, `14b30`), or
+  12-hour with the leading zero as a blank flap (`a9b05`, `a2b30`) when
+  `hour12` is on — midnight and noon are `12b00`, and no drum shows am/pm.
+  `days`
   shows the whole calendar days between today and a date, right-aligned like
   a number and clamped to 99999, labelled `until` when the date is ahead,
   `since` when it is past and `today` when it is today (0). Days are counted
@@ -75,20 +78,22 @@ the counter polls it over plain HTTP and shows whatever the web page last set.
 ### UI API
 
 - `GET /api/state` —
-  `{"cells","number","updatedAt","mode","display","clock":{"cells"},"days":{"date","days","label"},"daily":{"step","at","next"},"device":{"lastPoll","lastStatus","online"}}`;
+  `{"cells","number","updatedAt","mode","display","clock":{"cells","hour12"},"days":{"date","days","label"},"daily":{"step","at","next"},"device":{"lastPoll","lastStatus","online"}}`;
   `cells`/`number` are the stored number (`number` is `null` when the cells
   are not a plain number), `display` is what the drums show right now,
-  `clock.cells` is the time now as `HHbMM`, `days.days`/`days.label` are
+  `clock.cells` is the time now as `HHbMM` and `clock.hour12` says whether
+  the clock is 12-hour, `days.days`/`days.label` are
   `null` until a date is set, `next` is `null` when the daily step is off
 - `PUT /api/number` (or `POST`) — body `{"number":N}` with `N` in `0..99999`,
   or `{"cells":"xxxxx"}`; answers `{"cells","number"}`
 - `PUT /api/daily` (or `POST`) — body `{"step":N,"at":"HH:MM"}` with `N` in
   `-99999..99999`; the first step lands at the next `at` after the call
 - `PUT /api/mode` (or `POST`) — body `{"mode":"number"}`, `{"mode":"clock"}`
-  or `{"mode":"days","date":"YYYY-MM-DD"}`; answers
-  `{"mode","display","clock","days"}`; a days request without a valid date or
-  an unknown mode is a 400 `{"error"}`. The date stays remembered when
-  switching to another mode.
+  or `{"mode":"days","date":"YYYY-MM-DD"}`, with an optional `"hour12":true`
+  alongside `number` or `clock`; answers `{"mode","display","clock","days"}`;
+  a days request without a valid date or an unknown mode is a 400
+  `{"error"}`. The date and the 12-hour choice stay remembered when switching
+  to another mode.
 - `GET /` — the embedded page
 - `GET /healthz`
 
@@ -101,6 +106,7 @@ curl -X PUT localhost:8080/api/number -d '{"number":302}'
 curl -X PUT localhost:8080/api/number -d '{"cells":"14b30"}'
 curl -X PUT localhost:8080/api/daily -d '{"step":1,"at":"08:00"}'
 curl -X PUT localhost:8080/api/mode -d '{"mode":"clock"}'
+curl -X PUT localhost:8080/api/mode -d '{"mode":"clock","hour12":true}'
 curl -X PUT localhost:8080/api/mode -d '{"mode":"days","date":"2026-12-25"}'
 curl -H 'Host: api.smiirl.com' localhost:8080/v1.0/aabbccddeeff/00
 ```

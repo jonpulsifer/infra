@@ -72,6 +72,7 @@ type persisted struct {
 	Daily     daily     `json:"daily"`
 	Mode      string    `json:"mode"`               // number, clock or days
 	DaysDate  string    `json:"daysDate,omitempty"` // the date days mode counts to
+	Clock12   bool      `json:"clock12,omitempty"`  // clock mode shows a 12-hour time
 }
 
 type server struct {
@@ -130,9 +131,14 @@ func newServer(dataDir string, loc *time.Location) (*server, error) {
 }
 
 // clockCells is the local time as HHbMM: the striped flap separates hours
-// and minutes.
-func clockCells(now time.Time, loc *time.Location) string {
-	return now.In(loc).Format("15b04")
+// and minutes. A 12-hour clock drops the leading zero to a blank flap, the
+// way a wall clock leaves the tens digit off; there is no flap for am/pm.
+func clockCells(now time.Time, loc *time.Location, twelve bool) string {
+	if !twelve {
+		return now.In(loc).Format("15b04")
+	}
+	c := now.In(loc).Format("3b04")
+	return strings.Repeat("a", 5-len(c)) + c
 }
 
 // daysCells counts the whole calendar days between today (in loc) and date,
@@ -162,7 +168,7 @@ func (s *server) display(now time.Time) string {
 	p := s.persisted
 	switch p.Mode {
 	case "clock":
-		return clockCells(now, s.loc)
+		return clockCells(now, s.loc, p.Clock12)
 	case "days":
 		if n, _, err := daysCells(now, s.loc, p.DaysDate); err == nil {
 			return numberToCells(n)
@@ -182,7 +188,7 @@ func (s *server) modeView(now time.Time) map[string]any {
 	return map[string]any{
 		"mode":    p.Mode,
 		"display": s.display(now),
-		"clock":   map[string]any{"cells": clockCells(now, s.loc)},
+		"clock":   map[string]any{"cells": clockCells(now, s.loc, p.Clock12), "hour12": p.Clock12},
 		"days":    map[string]any{"date": p.DaysDate, "days": days, "label": label},
 	}
 }
@@ -556,8 +562,9 @@ func (s *server) handleDaily(w http.ResponseWriter, r *http.Request) {
 
 func (s *server) handleMode(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		Mode string `json:"mode"`
-		Date string `json:"date"`
+		Mode   string `json:"mode"`
+		Date   string `json:"date"`
+		Hour12 *bool  `json:"hour12"`
 	}
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1024)).Decode(&body); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": `body must be {"mode":"number"|"clock"} or {"mode":"days","date":"YYYY-MM-DD"}`})
@@ -567,6 +574,9 @@ func (s *server) handleMode(w http.ResponseWriter, r *http.Request) {
 	p := s.persisted
 	switch body.Mode {
 	case "number", "clock":
+		if body.Hour12 != nil {
+			p.Clock12 = *body.Hour12
+		}
 	case "days":
 		if _, err := time.Parse(dayFormat, body.Date); err != nil {
 			s.mu.Unlock()
@@ -615,7 +625,7 @@ func (s *server) commit(p persisted) error {
 		s.persisted = prev
 		return err
 	}
-	if moved || p.Mode != prev.Mode || p.DaysDate != prev.DaysDate {
+	if moved || p.Mode != prev.Mode || p.DaysDate != prev.DaysDate || p.Clock12 != prev.Clock12 {
 		close(s.changed)
 		s.changed = make(chan struct{})
 		log.Printf("cells %s -> %s, mode %s", prev.Cells, p.Cells, strings.TrimSpace(p.Mode+" "+p.DaysDate))

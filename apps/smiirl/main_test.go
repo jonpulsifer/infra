@@ -441,15 +441,21 @@ func TestDeviceHostFacade(t *testing.T) {
 }
 
 func TestClockCells(t *testing.T) {
-	for _, tc := range []struct{ now, want string }{
-		{"2026-09-06T12:05:00Z", "09b05"}, // 09:05 ADT
-		{"2026-09-06T03:00:00Z", "00b00"},
-		{"2026-09-07T02:59:59Z", "23b59"},
-		{"2026-09-06T17:30:00Z", "14b30"},
-		{"2026-01-15T14:05:00Z", "10b05"}, // AST
+	for _, tc := range []struct {
+		now, want, want12 string
+	}{
+		{"2026-09-06T12:05:00Z", "09b05", "a9b05"}, // 09:05 ADT
+		{"2026-09-06T03:00:00Z", "00b00", "12b00"}, // midnight is 12 on a 12-hour clock
+		{"2026-09-07T02:59:59Z", "23b59", "11b59"},
+		{"2026-09-06T17:30:00Z", "14b30", "a2b30"},
+		{"2026-09-06T15:00:00Z", "12b00", "12b00"}, // and so is noon
+		{"2026-01-15T14:05:00Z", "10b05", "10b05"}, // AST
 	} {
-		if got := clockCells(utc(tc.now), atlantic); got != tc.want {
+		if got := clockCells(utc(tc.now), atlantic, false); got != tc.want {
 			t.Errorf("%s: %s, want %s", tc.now, got, tc.want)
+		}
+		if got := clockCells(utc(tc.now), atlantic, true); got != tc.want12 {
+			t.Errorf("%s 12h: %s, want %s", tc.now, got, tc.want12)
 		}
 	}
 }
@@ -496,6 +502,8 @@ func TestModeValidation(t *testing.T) {
 		want int
 	}{
 		{`{"mode":"clock"}`, 200},
+		{`{"mode":"clock","hour12":true}`, 200},
+		{`{"mode":"clock","hour12":"yes"}`, 400},
 		{`{"mode":"days","date":"2026-12-25"}`, 200},
 		{`{"mode":"number"}`, 200},
 		{`{"mode":"days"}`, 400},
@@ -550,6 +558,25 @@ func TestModes(t *testing.T) {
 	_, state = do(t, ts, "GET", "/api/state", "", nil)
 	if state["mode"] != "clock" || state["display"] != "09b05" || state["number"] != float64(303) {
 		t.Fatalf("clock state = %v", state)
+	}
+
+	// The 12-hour switch stands on its own: same mode, a different display.
+	resp, out = do(t, ts, "PUT", "/api/mode", `{"mode":"clock","hour12":true}`, nil)
+	if resp.StatusCode != 200 || out["display"] != "a9b05" || out["clock"].(map[string]any)["hour12"] != true {
+		t.Fatalf("12-hour clock: status %d body %v", resp.StatusCode, out)
+	}
+	if _, poll := do(t, ts, "GET", "/aabbccddeeff/number", "", nil); poll["number"] != "a9b05" {
+		t.Fatalf("device on a 12-hour clock got %v", poll["number"])
+	}
+	// It survives a mode round trip and clears when asked.
+	do(t, ts, "PUT", "/api/mode", `{"mode":"number"}`, nil)
+	_, state = do(t, ts, "GET", "/api/state", "", nil)
+	if c := state["clock"].(map[string]any); c["hour12"] != true || c["cells"] != "a9b05" {
+		t.Fatalf("clock view in number mode = %v", c)
+	}
+	resp, out = do(t, ts, "PUT", "/api/mode", `{"mode":"clock","hour12":false}`, nil)
+	if resp.StatusCode != 200 || out["display"] != "09b05" {
+		t.Fatalf("back to 24-hour: status %d body %v", resp.StatusCode, out)
 	}
 
 	resp, out = do(t, ts, "PUT", "/api/mode", `{"mode":"days","date":"2026-12-25"}`, nil)
@@ -644,6 +671,7 @@ func TestModeMigration(t *testing.T) {
 		{`{"cells":"aa302","updatedAt":"2026-09-01T12:00:00Z","daily":{"step":0,"at":"08:00","last":""}}`, "number", ""},
 		{`{"number":302,"updatedAt":"2026-09-01T12:00:00Z"}`, "number", ""},
 		{`{"cells":"aa302","updatedAt":"2026-09-01T12:00:00Z","mode":"clock"}`, "clock", ""},
+		{`{"cells":"aa302","updatedAt":"2026-09-01T12:00:00Z","mode":"clock","clock12":true}`, "clock", ""},
 		{`{"cells":"aa302","updatedAt":"2026-09-01T12:00:00Z","mode":"days","daysDate":"2026-12-25"}`, "days", "2026-12-25"},
 		{`{"cells":"aa302","updatedAt":"2026-09-01T12:00:00Z","mode":"days"}`, "number", ""},
 		{`{"cells":"aa302","updatedAt":"2026-09-01T12:00:00Z","mode":"days","daysDate":"soon"}`, "number", ""},
