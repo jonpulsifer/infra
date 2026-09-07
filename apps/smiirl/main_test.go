@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"reflect"
+	"regexp"
 	"strings"
 	"sync"
 	"testing"
@@ -994,5 +995,46 @@ func TestStateReportsWhatTheCounterWasHanded(t *testing.T) {
 	dev := state["device"].(map[string]any)
 	if dev["lastSent"] != "11111" || dev["lastSentAt"] == nil {
 		t.Fatalf("after a poll, device = %v", dev)
+	}
+}
+
+// setMode takes an options object. It once took positional arguments, and two
+// call sites kept passing a bare date string through the change; spreading a
+// string into the request body yields {"0":"2","1":"0",...} and no "date", so
+// the server rejected every date the picker produced. Nothing in the page
+// catches that, so this does.
+func TestPageCallsSetModeWithAnObject(t *testing.T) {
+	page := string(indexHTML)
+	calls := regexp.MustCompile(`setMode\(([^;]*?)\)[;,\s]`).FindAllStringSubmatch(page, -1)
+	if len(calls) < 8 {
+		t.Fatalf("found %d setMode calls, expected the page to still make several", len(calls))
+	}
+	for _, c := range calls {
+		args := strings.SplitN(c[1], ",", 2)
+		if len(args) < 2 {
+			continue // no options at all is fine; setMode fills them in
+		}
+		if opt := strings.TrimSpace(args[1]); !strings.HasPrefix(opt, "{") && opt != "opts" {
+			t.Errorf("setMode(%s): options must be an object literal, got %q", c[1], opt)
+		}
+	}
+}
+
+// The shape the broken call sites produced, kept as the regression it is.
+func TestModeRejectsASpreadString(t *testing.T) {
+	_, ts := newTest(t)
+	spread := `{"mode":"days","0":"2","1":"0","2":"2","3":"6","4":"-","5":"1","6":"2","7":"-","8":"2","9":"5"}`
+	if resp, out := do(t, ts, "PUT", "/api/mode", spread, nil); resp.StatusCode != 400 || out["error"] == nil {
+		t.Fatalf("a body with no date should be a 400 with a reason: %d %v", resp.StatusCode, out)
+	}
+	// And the shape the picker actually sends now is accepted.
+	if resp, out := do(t, ts, "PUT", "/api/mode", `{"mode":"days","date":"2026-12-25"}`, nil); resp.StatusCode != 200 {
+		t.Fatalf("days with a date: %d %v", resp.StatusCode, out)
+	}
+	// The date sticks across a trip through another mode.
+	do(t, ts, "PUT", "/api/mode", `{"mode":"number"}`, nil)
+	_, state := do(t, ts, "GET", "/api/state", "", nil)
+	if state["days"].(map[string]any)["date"] != "2026-12-25" {
+		t.Fatalf("the counter forgot the date: %v", state["days"])
 	}
 }
