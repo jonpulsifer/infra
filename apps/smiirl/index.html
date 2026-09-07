@@ -425,7 +425,7 @@
         <option value="prs">pull requests</option>
       </select>
       <label for="user">by</label>
-      <input class="field time" id="user" value="jonpulsifer" maxlength="39" required
+      <input class="field time" id="user" placeholder="github login" maxlength="39" required
              spellcheck="false" autocapitalize="none" autocorrect="off" aria-describedby="github-line">
     </div>
     <p class="line" id="github-line"></p>
@@ -847,6 +847,9 @@
   const modeSig = () => JSON.stringify([S.mode, S.showing, S.display, S.clock12, S.clockCells,
     S.date, S.days, S.countdown, S.github, S.cycle]);
   const editing = (el) => document.activeElement === el;
+  // A mode that needs a setting the counter does not have yet shows its panel
+  // without taking the drums, so there is somewhere to type it.
+  let arming = null;
 
   // The mode half of /api/state and the whole of the /api/mode reply are the
   // same shape, so both land here.
@@ -928,11 +931,12 @@
       b.setAttribute("aria-checked", String(on));
       b.tabIndex = on ? 0 : -1;
     }
-    $("form").hidden = m !== "number";
-    $("daily").hidden = m !== "number";
-    for (const n of ["clock", "date", "days", "countdown", "github", "cycle"]) $(n + "-panel").hidden = m !== n;
+    $("form").hidden = m !== "number" || arming !== null;
+    $("daily").hidden = m !== "number" || arming !== null;
+    const panel = arming ?? m;
+    for (const n of ["clock", "date", "days", "countdown", "github", "cycle"]) $(n + "-panel").hidden = n !== panel;
     for (const d of digits) d.el.disabled = m !== "number";
-    hint.textContent = HINTS[m];
+    hint.textContent = HINTS[panel];
     clockLine.textContent = `Showing the time, ${hhmm(S.clockCells ?? "aaaaa")} in Atlantic.`;
     hour12Btn.textContent = S.clock12 ? "24-hour time" : "12-hour time";
     hour12Btn.setAttribute("aria-pressed", String(S.clock12));
@@ -977,6 +981,7 @@
       if (!r.ok) throw new Error(body.error || ("HTTP " + r.status));
       S.lastModeAt = Date.now();
       applyMode(body, m);
+      arming = null;
       S.pending = { cells: S.display, sentAt: Date.now(), lastPollAtSend: pollAtSend, nagged: false };
     } catch (e) {
       Object.assign(S, prev);
@@ -1191,7 +1196,13 @@
       const m = b.dataset.mode;
       if (m === S.mode) return;
       const opts = optsFor(m);
-      if (m === "github" && !opts) { userEl.focus(); say("Type a GitHub login first."); return; }
+      if (m === "github" && !opts) {
+        arming = "github";
+        renderMode();
+        userEl.focus();
+        say("Type a GitHub login, and the counter will start counting.");
+        return;
+      }
       setMode(m, opts);
     });
   }

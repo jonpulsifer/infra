@@ -41,7 +41,8 @@ the counter polls it over plain HTTP and shows whatever the web page last set.
   when it is today (0). Days are counted on local dates, so a DST change never
   yields a 23-hour day. `countdown` shows the time left until a moment as
   `HHbMM`, resting at `00b00` once it is past and stopping at `99b59`.
-  `github` shows how many public commits or pull requests a GitHub login has.
+  `github` shows how many public commits or pull requests a GitHub login has;
+  the page holds the mode until a login is typed rather than guessing one.
   `cycle` hands the drums to each of a list of modes in turn. The stored
   number is kept in every mode: `/api/number` still edits it and the daily
   step still moves it while the clock or a countdown is showing. Switching
