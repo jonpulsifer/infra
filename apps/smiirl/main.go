@@ -61,6 +61,7 @@ const (
 	maxCountdown = 99*60 + 59 // minutes the drums hold as HHbMM
 	defaultEvery = 5          // minutes a cycle holds each mode
 	maxEvery     = 1440
+	maxTick      = 60 // minutes between changes of a time-shaped mode
 )
 
 // modes is everything the drums can show. A cycle rotates through the others,
@@ -117,6 +118,7 @@ type persisted struct {
 	Clock12     bool      `json:"clock12,omitempty"`     // clock mode shows a 12-hour time
 	CountdownAt string    `json:"countdownAt,omitempty"` // the moment countdown mode runs to
 	CountupAt   string    `json:"countupAt,omitempty"`   // the moment countup mode runs from
+	Tick        int       `json:"tick"`                  // minutes between changes of a time-shaped mode
 	Cycle       cycle     `json:"cycle"`
 	GitHub      github    `json:"github"`
 }
@@ -220,6 +222,9 @@ func newServer(dataDir string, loc *time.Location) (*server, error) {
 	if file.GitHub.What != "prs" {
 		file.GitHub.What = "commits"
 	}
+	if file.Tick < 1 || file.Tick > maxTick {
+		file.Tick = 1
+	}
 	if file.Cycle.Every < 1 || file.Cycle.Every > maxEvery {
 		file.Cycle.Every = defaultEvery
 	}
@@ -268,12 +273,8 @@ func daysCells(now time.Time, loc *time.Location, date string) (int, string, err
 // flap between: 06b30 is six and a half hours. Counting down measures how
 // much is left, counting up how much has passed; either way it rests at
 // 00b00 on the wrong side of the moment and stops at 99b59, the most the
-// drums hold.
-//
-// Counting up is the kinder of the two on the hardware. A drum only turns
-// forwards, so every digit that decreases costs most of a revolution, and a
-// countdown decreases every minute.
-func spanCells(now time.Time, loc *time.Location, at string, up bool) (string, int, error) {
+// drums hold. tick coarsens it the same way it coarsens the clock.
+func spanCells(now time.Time, loc *time.Location, at string, up bool, tick int) (string, int, error) {
 	t, err := time.ParseInLocation(minFormat, at, loc)
 	if err != nil {
 		return "", 0, err
@@ -283,7 +284,17 @@ func spanCells(now time.Time, loc *time.Location, at string, up bool) (string, i
 		d = -d
 	}
 	mins := max(0, min(int(d/time.Minute), maxCountdown))
+	mins -= mins % tick
 	return fmt.Sprintf("%02db%02d", mins/60, mins%60), mins, nil
+}
+
+// ticked is now rounded down to a multiple of tick minutes. The counter turns
+// a drum a full revolution for any change at all, however small, so a clock
+// that changes every minute costs a turn a minute; showing 11b40 for ten
+// minutes costs one turn where 11b41..11b49 would cost ten. Truncating the
+// instant aligns with local minutes in a whole-hour offset like Atlantic.
+func ticked(now time.Time, tick int) time.Time {
+	return now.Truncate(time.Duration(tick) * time.Minute)
 }
 
 // showing is the mode with the drums at now: the mode itself, or the member a
@@ -306,7 +317,7 @@ func (s *server) cells(m string, now time.Time) string {
 	p := s.persisted
 	switch m {
 	case "clock":
-		return clockCells(now, s.loc, p.Clock12)
+		return clockCells(ticked(now, p.Tick), s.loc, p.Clock12)
 	case "date":
 		return now.In(s.loc).Format("01b02")
 	case "days":
@@ -314,11 +325,11 @@ func (s *server) cells(m string, now time.Time) string {
 			return numberToCells(n)
 		}
 	case "countdown":
-		if c, _, err := spanCells(now, s.loc, p.CountdownAt, false); err == nil {
+		if c, _, err := spanCells(now, s.loc, p.CountdownAt, false, p.Tick); err == nil {
 			return c
 		}
 	case "countup":
-		if c, _, err := spanCells(now, s.loc, p.CountupAt, true); err == nil {
+		if c, _, err := spanCells(now, s.loc, p.CountupAt, true, p.Tick); err == nil {
 			return c
 		}
 	case "github":
@@ -338,10 +349,10 @@ func (s *server) modeView(now time.Time) map[string]any {
 		days, label = n, l
 	}
 	var left, elapsed any
-	if _, m, err := spanCells(now, s.loc, p.CountdownAt, false); err == nil {
+	if _, m, err := spanCells(now, s.loc, p.CountdownAt, false, p.Tick); err == nil {
 		left = m
 	}
-	if _, m, err := spanCells(now, s.loc, p.CountupAt, true); err == nil {
+	if _, m, err := spanCells(now, s.loc, p.CountupAt, true, p.Tick); err == nil {
 		elapsed = m
 	}
 	var fetched any
@@ -351,8 +362,9 @@ func (s *server) modeView(now time.Time) map[string]any {
 	return map[string]any{
 		"mode":      p.Mode,
 		"showing":   s.showing(now),
+		"tick":      p.Tick,
 		"display":   s.display(now),
-		"clock":     map[string]any{"cells": clockCells(now, s.loc, p.Clock12), "hour12": p.Clock12},
+		"clock":     map[string]any{"cells": clockCells(ticked(now, p.Tick), s.loc, p.Clock12), "hour12": p.Clock12},
 		"date":      map[string]any{"cells": s.cells("date", now)},
 		"days":      map[string]any{"date": p.DaysDate, "days": days, "label": label},
 		"countdown": map[string]any{"at": p.CountdownAt, "left": left},
@@ -650,10 +662,19 @@ func (s *server) handleState(w http.ResponseWriter, _ *http.Request) {
 	maps.Copy(v, s.modeView(s.now()))
 	v["updatedAt"] = s.persisted.UpdatedAt
 	v["daily"] = s.dailyView()
+	var lastSentAt any
+	if !s.lastSentAt.IsZero() {
+		lastSentAt = s.lastSentAt
+	}
 	v["device"] = map[string]any{
 		"lastPoll":   lastPoll,
 		"lastStatus": lastStatus,
 		"online":     s.now().Sub(s.lastPoll) < time.Minute,
+		// What the counter was actually handed, as opposed to what the app
+		// would hand it now. The two differ while a change waits for the
+		// flaps to settle, and only this one moved the drums.
+		"lastSent":   s.lastSent,
+		"lastSentAt": lastSentAt,
 	}
 	writeJSON(w, http.StatusOK, v)
 }
@@ -746,6 +767,7 @@ func (s *server) handleMode(w http.ResponseWriter, r *http.Request) {
 		Date   string   `json:"date"`   // days
 		At     string   `json:"at"`     // countdown, countup
 		Hour12 *bool    `json:"hour12"` // clock
+		Tick   *int     `json:"tick"`   // clock, countdown, countup
 		User   string   `json:"user"`   // github
 		What   string   `json:"what"`   // github
 		Modes  []string `json:"modes"`  // cycle
@@ -759,6 +781,14 @@ func (s *server) handleMode(w http.ResponseWriter, r *http.Request) {
 	p := s.persisted
 	if body.Hour12 != nil {
 		p.Clock12 = *body.Hour12
+	}
+	if body.Tick != nil {
+		if *body.Tick < 1 || *body.Tick > maxTick {
+			s.mu.Unlock()
+			badMode(w, fmt.Sprintf("tick must be 1..%d minutes", maxTick))
+			return
+		}
+		p.Tick = *body.Tick
 	}
 	switch body.Mode {
 	case "number", "clock", "date":

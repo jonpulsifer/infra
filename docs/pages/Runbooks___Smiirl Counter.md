@@ -29,7 +29,9 @@ tags:: runbook, smiirl
 	- Every mode's setting is kept whether or not that mode has the drums, so switching back never asks for it again. A cycle silently drops any member whose setting has gone and refuses to be left with fewer than two it can show.
 	- The GitHub count comes from the public search API with no token, asked at most once every five minutes. A failed fetch leaves the last number on the drums and reports itself on the page; the pod reaches `api.github.com` directly, so this is the one mode that needs egress.
 	- The page is a PWA: `manifest.webmanifest`, `sw.js` and the icons come out of the same binary, so it installs to a home screen and opens offline. The service worker caches the shell and never `/api`, and a deploy wins on the first load with a network.
-	- A drum only turns forwards, so a digit that decreases costs most of a revolution while one that increases costs a single flap. Counting down decreases every minute; counting up is the same span read the other way and flips once.
+	- The counter turns a drum a full revolution for any change at all, however small: measured on the device on 2026-09-07, `11112` to `11113` turned the drums exactly as far as a wholesale change did, through both the integer form and the cells string. Between changes the drums sit still, even though the counter keeps polling every twenty seconds. The cost is therefore per change, not per flap, and no value the app can choose makes a change cheaper.
+	- What that leaves is changing less often. `tick` coarsens the clock, the countdown and the countup to a multiple of N minutes: at `tick` 5 the clock turns the drums twelve times an hour instead of sixty. It is 1 by default. A mode that changes once a day (`date`, `days`) or on demand (`number`) costs a turn only then.
+	- `device.lastSent` in `/api/state` is what the counter was actually handed, as opposed to what the app would hand it now; the two differ while a change waits out the ten-second settle, and only the former moved the drums.
 	- The app never hands the counter a different value less than ten seconds after the previous one. Each drum needs seconds per flip, and values arriving mid-turn leave drums out of step.
 	- Only the counter opens connections. Nothing needs to reach it from the cluster, and no firewall rule is involved beyond iot's access to the Lab zone.
 - # Set the number
@@ -43,6 +45,7 @@ tags:: runbook, smiirl
 	  curl -s -X PUT -H 'Content-Type: application/json' -d '{"mode":"days","date":"2026-12-25"}' https://smiirl.lolwtf.ca/api/mode
 	  curl -s -X PUT -H 'Content-Type: application/json' -d '{"mode":"countdown","at":"2026-12-25T08:00"}' https://smiirl.lolwtf.ca/api/mode
 	  curl -s -X PUT -H 'Content-Type: application/json' -d '{"mode":"countup","at":"2026-01-01T00:00"}' https://smiirl.lolwtf.ca/api/mode
+	  curl -s -X PUT -H 'Content-Type: application/json' -d '{"mode":"clock","tick":5}' https://smiirl.lolwtf.ca/api/mode
 	  curl -s -X PUT -H 'Content-Type: application/json' -d '{"mode":"github","user":"jonpulsifer","what":"commits"}' https://smiirl.lolwtf.ca/api/mode
 	  curl -s -X PUT -H 'Content-Type: application/json' -d '{"mode":"cycle","modes":["clock","date","github"],"every":5}' https://smiirl.lolwtf.ca/api/mode
 	  ```

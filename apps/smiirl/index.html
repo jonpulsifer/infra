@@ -406,6 +406,15 @@
     <button type="button" class="btn save" id="hour12" aria-pressed="false">12-hour time</button>
   </section>
 
+  <form class="panel" id="tick-panel" hidden autocomplete="off" aria-label="How often the drums move">
+    <div class="daily-row">
+      <label for="tick">Move the drums every</label>
+      <input class="field time" id="tick" inputmode="numeric" maxlength="2" value="1">
+      <span>minutes</span>
+    </div>
+    <p class="line" id="tick-line"></p>
+  </form>
+
   <section class="panel" id="date-panel" hidden aria-label="Date">
     <p class="line" id="date-line"></p>
   </section>
@@ -649,6 +658,7 @@
     clockCells: null,
     clock12: false,
     showing: "number", // the mode with the drums; differs from mode under a cycle
+    tick: 1,           // minutes between changes of a time-shaped mode
     date: null,        // { cells }
     days: null,        // { date, days, label }
     countdown: null,   // { at, left }
@@ -669,6 +679,7 @@
         fromEl = $("from"), countupLine = $("countup-line"),
         userEl = $("user"), whatEl = $("what"), githubLine = $("github-line"),
         everyEl = $("every"), cycleLine = $("cycle-line"),
+        tickEl = $("tick"), tickLine = $("tick-line"),
         pickBoxes = Array.from(document.querySelectorAll("#picks input"));
 
   const number = () => S.cells === null ? null : cellsToNumber(S.cells);
@@ -862,7 +873,7 @@
   // Everything renderMode draws. Comparing it is how a poll decides to
   // re-render, so a new mode needs nothing added to applyState.
   const modeSig = () => JSON.stringify([S.mode, S.showing, S.display, S.clock12, S.clockCells,
-    S.date, S.days, S.countdown, S.countup, S.github, S.cycle]);
+    S.date, S.days, S.countdown, S.countup, S.github, S.cycle, S.tick]);
   const editing = (el) => document.activeElement === el;
   // A mode that needs a setting the counter does not have yet shows its panel
   // without taking the drums, so there is somewhere to type it.
@@ -873,6 +884,10 @@
   function applyMode(st, fallback) {
     S.mode = MODES.includes(st.mode) ? st.mode : fallback;
     S.showing = MODES.includes(st.showing) ? st.showing : S.mode;
+    if (Number.isInteger(st.tick) && st.tick >= 1) {
+      S.tick = st.tick;
+      if (!editing(tickEl)) tickEl.value = String(S.tick);
+    }
     if (st.clock && typeof st.clock === "object") {
       if (isCells(st.clock.cells)) S.clockCells = st.clock.cells;
       S.clock12 = !!st.clock.hour12;
@@ -964,6 +979,12 @@
     $("form").hidden = m !== "number" || arming !== null;
     $("daily").hidden = m !== "number" || arming !== null;
     const panel = arming ?? m;
+    // The drums turn a full revolution for any change at all, so how often a
+    // timed mode changes is the only thing that spares them.
+    $("tick-panel").hidden = !SPANS.includes(panel);
+    tickLine.textContent = S.tick === 1
+      ? "The drums turn once a minute. Every change costs a full revolution, however small."
+      : `The drums turn every ${S.tick} minutes — ${Math.round(60 / S.tick)} revolutions an hour instead of 60.`;
     for (const n of ["clock", "date", "days", "countdown", "countup", "github", "cycle"]) $(n + "-panel").hidden = n !== panel;
     for (const d of digits) d.el.disabled = m !== "number";
     hint.textContent = HINTS[panel];
@@ -1061,6 +1082,10 @@
     }
     return null;
   }
+  const tickNum = () => {
+    const n = parseInt(tickEl.value, 10);
+    return Number.isInteger(n) && n >= 1 && n <= 60 ? n : 1;
+  };
   const everyNum = () => {
     const n = parseInt(everyEl.value, 10);
     return Number.isInteger(n) && n >= 1 && n <= 1440 ? n : 5;
@@ -1250,6 +1275,13 @@
     if (isMinute(v) && v !== (S.countdown || {}).at) setMode("countdown", { at: v });
   }, 400);
   for (const e of ["input", "change"]) untilEl.addEventListener(e, untilChanged);
+
+  const tickChanged = settles(() => {
+    const t = tickNum();
+    if (t !== S.tick) setMode(mode(), { ...(optsFor(mode()) || {}), tick: t });
+  }, 500);
+  for (const e of ["input", "change"]) tickEl.addEventListener(e, tickChanged);
+  $("tick-panel").addEventListener("submit", (e) => { e.preventDefault(); tickEl.blur(); tickChanged(); });
 
   const fromChanged = settles(() => {
     const v = fromEl.value.slice(0, 16);

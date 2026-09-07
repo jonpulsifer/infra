@@ -212,7 +212,9 @@ func TestLongPoll(t *testing.T) {
 	handed := time.Now()
 	flapSettle = 300 * time.Millisecond
 	do(t, ts, "PUT", "/api/number", `{"number":4}`, nil)
-	if _, out := do(t, ts, "GET", "/aabbccddeeff/number", "", nil); out["number"] != float64(4) || time.Since(handed) < flapSettle {
+	// The wait is measured from the handover inside the app, which happened a
+	// touch before handed was read here, so allow that much slack.
+	if _, out := do(t, ts, "GET", "/aabbccddeeff/number", "", nil); out["number"] != float64(4) || time.Since(handed) < flapSettle-10*time.Millisecond {
 		t.Fatalf("second value handed over as %v %v after the first, before the flaps settled", out, time.Since(handed))
 	}
 	flapSettle = 0
@@ -703,12 +705,12 @@ func TestSpanCells(t *testing.T) {
 		{"2026-09-06T08:00", "00b00", 0},    // past, and it rests there
 		{"2030-01-01T00:00", "99b59", 5999}, // clamped to the drums
 	} {
-		got, left, err := spanCells(now, atlantic, tc.at, false)
+		got, left, err := spanCells(now, atlantic, tc.at, false, 1)
 		if err != nil || got != tc.want || left != tc.left {
 			t.Errorf("%s: %s %d %v, want %s %d", tc.at, got, left, err, tc.want, tc.left)
 		}
 	}
-	if _, _, err := spanCells(now, atlantic, "2026-09-06", false); err == nil {
+	if _, _, err := spanCells(now, atlantic, "2026-09-06", false, 1); err == nil {
 		t.Error("a date with no time should not parse")
 	}
 	// Counting up is the same span the other way round, and it is the one
@@ -722,7 +724,7 @@ func TestSpanCells(t *testing.T) {
 		{"2026-09-06T15:35", "00b00"}, // still ahead, so nothing has passed
 		{"2020-01-01T00:00", "99b59"},
 	} {
-		if got, _, err := spanCells(now, atlantic, tc.at, true); err != nil || got != tc.want {
+		if got, _, err := spanCells(now, atlantic, tc.at, true, 1); err != nil || got != tc.want {
 			t.Errorf("up %s: %s %v, want %s", tc.at, got, err, tc.want)
 		}
 	}
@@ -928,5 +930,69 @@ func TestPWAAssets(t *testing.T) {
 	resp.Body.Close()
 	if err != nil || img.Bounds().Dx() != 180 || img.Bounds().Dy() != 180 {
 		t.Fatalf("icon.png: %v %v", err, img.Bounds())
+	}
+}
+
+// The counter turns a drum a full revolution for any change at all, so the
+// only lever on wear is how seldom a timed mode changes.
+func TestTickCoarsensTheTimedModes(t *testing.T) {
+	s, ts := newTest(t)
+	now := utc("2026-09-06T12:08:00Z") // 09:08 ADT
+	s.now = func() time.Time { return now }
+
+	if resp, out := do(t, ts, "PUT", "/api/mode", `{"mode":"clock"}`, nil); resp.StatusCode != 200 || out["display"] != "09b08" {
+		t.Fatalf("clock at tick 1: status %d body %v", resp.StatusCode, out)
+	}
+	resp, out := do(t, ts, "PUT", "/api/mode", `{"mode":"clock","tick":5}`, nil)
+	if resp.StatusCode != 200 || out["display"] != "09b05" || out["tick"] != float64(5) {
+		t.Fatalf("clock at tick 5: status %d body %v", resp.StatusCode, out)
+	}
+	// The same stretch of clock now holds a handful of values instead of one
+	// a minute, and each value it does not take is a revolution not turned.
+	values := func() int {
+		seen := map[string]bool{}
+		for i := range 30 {
+			s.mu.Lock()
+			seen[s.display(now.Add(time.Duration(i)*time.Minute))] = true
+			s.mu.Unlock()
+		}
+		return len(seen)
+	}
+	// Seven, not six: the half hour starts at 09:08 and so clips a bucket at
+	// each end.
+	if n := values(); n != 7 {
+		t.Fatalf("half an hour at tick 5 showed %d values, want 7", n)
+	}
+	do(t, ts, "PUT", "/api/mode", `{"mode":"clock","tick":1}`, nil)
+	if n := values(); n != 30 {
+		t.Fatalf("half an hour at tick 1 showed %d values, want 30", n)
+	}
+	do(t, ts, "PUT", "/api/mode", `{"mode":"clock","tick":5}`, nil)
+	// It coarsens a countdown the same way, and is remembered across modes.
+	resp, out = do(t, ts, "PUT", "/api/mode", `{"mode":"countdown","at":"2026-09-06T15:36"}`, nil)
+	if resp.StatusCode != 200 || out["display"] != "06b25" {
+		t.Fatalf("countdown at tick 5: status %d body %v", resp.StatusCode, out) // 6h28 floors to 6h25
+	}
+	for _, body := range []string{`{"mode":"clock","tick":0}`, `{"mode":"clock","tick":61}`} {
+		if resp, _ := do(t, ts, "PUT", "/api/mode", body, nil); resp.StatusCode != 400 {
+			t.Errorf("%s: status %d, want 400", body, resp.StatusCode)
+		}
+	}
+}
+
+// The page reports what the counter was handed, not just what the app would
+// hand it now; the drums only ever moved for the former.
+func TestStateReportsWhatTheCounterWasHanded(t *testing.T) {
+	_, ts := newTest(t)
+	do(t, ts, "PUT", "/api/number", `{"number":11111}`, nil)
+	_, state := do(t, ts, "GET", "/api/state", "", nil)
+	if dev := state["device"].(map[string]any); dev["lastSent"] != "aaaa0" || dev["lastSentAt"] != nil {
+		t.Fatalf("nothing handed over yet, but device = %v", dev)
+	}
+	do(t, ts, "GET", "/aabbccddeeff/number", "", nil)
+	_, state = do(t, ts, "GET", "/api/state", "", nil)
+	dev := state["device"].(map[string]any)
+	if dev["lastSent"] != "11111" || dev["lastSentAt"] == nil {
+		t.Fatalf("after a poll, device = %v", dev)
 	}
 }

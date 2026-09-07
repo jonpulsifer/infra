@@ -41,9 +41,7 @@ the counter polls it over plain HTTP and shows whatever the web page last set.
   when it is today (0). Days are counted on local dates, so a DST change never
   yields a 23-hour day. `countdown` shows the time left until a moment as
   `HHbMM`, resting at `00b00` once it is past and stopping at `99b59`, and
-  `countup` the time since one, on its own moment. Counting up is the kinder
-  of the two on the hardware: a drum only turns forwards, so a digit that
-  decreases costs most of a revolution and a countdown decreases every minute.
+  `countup` the time since one, on its own moment.
   `github` shows how many public commits or pull requests a GitHub login has;
   the page holds the mode until a login is typed rather than guessing one.
   `cycle` hands the drums to each of a list of modes in turn. The stored
@@ -51,6 +49,14 @@ the counter polls it over plain HTTP and shows whatever the web page last set.
   step still moves it while the clock or a countdown is showing. Switching
   mode wakes the device poll like a new value does, and the poll also checks
   once a second whether the clock or countdown has moved on its own.
+- The counter turns a drum a **full revolution for any change at all**,
+  however small: `11112` to `11113` costs the same turn as `11112` to `40000`.
+  It sits still between changes. Measured on the device on 2026-09-07, both
+  through the integer form and the cells string. So the cost is per change,
+  not per flap, and the only lever on wear is how seldom a value changes:
+  `tick` coarsens `clock`, `countdown` and `countup` to a multiple of N
+  minutes, so a clock at `tick` 5 turns the drums twelve times an hour rather
+  than sixty. It is 1 by default, which is a turn a minute.
 - An optional daily step adds `step` to the number once a day at `at`
   (24-hour local time in `TZ`, `Canada/Atlantic` by default), clamped to
   `0..99999`. The check runs at startup and every 30 seconds; days missed while
@@ -85,7 +91,7 @@ the counter polls it over plain HTTP and shows whatever the web page last set.
 ### UI API
 
 - `GET /api/state` —
-  `{"cells","number","updatedAt","mode","display","showing","clock":{"cells","hour12"},"date":{"cells"},"days":{"date","days","label"},"countdown":{"at","left"},"countup":{"at","elapsed"},"github":{"user","what","count","at","error"},"cycle":{"modes","every"},"daily":{"step","at","next"},"device":{"lastPoll","lastStatus","online"}}`;
+  `{"cells","number","updatedAt","mode","display","showing","tick","clock":{"cells","hour12"},"date":{"cells"},"days":{"date","days","label"},"countdown":{"at","left"},"countup":{"at","elapsed"},"github":{"user","what","count","at","error"},"cycle":{"modes","every"},"daily":{"step","at","next"},"device":{"lastPoll","lastStatus","online","lastSent","lastSentAt"}}`;
   `cells`/`number` are the stored number (`number` is `null` when the cells
   are not a plain number), `display` is what the drums show right now,
   `showing` is the mode with the drums (it differs from `mode` under a cycle),
@@ -93,7 +99,9 @@ the counter polls it over plain HTTP and shows whatever the web page last set.
   clock is 12-hour, `days.days`/`days.label` are `null` until a date is set,
   `countdown.left` and `countup.elapsed` are minutes, `github.at` is `null` until the first
   fetch lands and `github.error` carries the last failure, `next` is `null`
-  when the daily step is off
+  when the daily step is off, and `device.lastSent` is what the counter was
+  actually handed, which differs from `display` while a change waits for the
+  flaps to settle and is the only value that moved the drums
 - `PUT /api/number` (or `POST`) — body `{"number":N}` with `N` in `0..99999`,
   or `{"cells":"xxxxx"}`; answers `{"cells","number"}`
 - `PUT /api/daily` (or `POST`) — body `{"step":N,"at":"HH:MM"}` with `N` in
@@ -102,8 +110,8 @@ the counter polls it over plain HTTP and shows whatever the web page last set.
   settings: `days` wants `"date":"YYYY-MM-DD"`, `countdown` and `countup` each want their own
   `"at":"YYYY-MM-DDTHH:MM"` read in `TZ`, `github` wants `"user"` and
   `"what":"commits"|"prs"`, `cycle` wants `"modes":[...]` and optionally
-  `"every":N` minutes (1..1440, 5 by default). `"hour12":true|false` may ride
-  along with any mode. Answers the same shape as the `/api/state` mode fields.
+  `"every":N` minutes (1..1440, 5 by default). `"hour12":true|false` and `"tick":N`
+  (1..60 minutes) may ride along with any mode. Answers the same shape as the `/api/state` mode fields.
   An unknown mode, a bad setting, or a cycle left with fewer than two modes it
   can show is a 400 `{"error"}`. Every setting stays remembered when switching
   to another mode, so coming back needs no re-entry.
@@ -128,6 +136,7 @@ curl -X PUT localhost:8080/api/mode -d '{"mode":"days","date":"2026-12-25"}'
 curl -X PUT localhost:8080/api/mode -d '{"mode":"date"}'
 curl -X PUT localhost:8080/api/mode -d '{"mode":"countdown","at":"2026-12-25T08:00"}'
 curl -X PUT localhost:8080/api/mode -d '{"mode":"countup","at":"2026-01-01T00:00"}'
+curl -X PUT localhost:8080/api/mode -d '{"mode":"clock","tick":5}'
 curl -X PUT localhost:8080/api/mode -d '{"mode":"github","user":"jonpulsifer","what":"commits"}'
 curl -X PUT localhost:8080/api/mode -d '{"mode":"cycle","modes":["clock","date","github"],"every":5}'
 curl -H 'Host: api.smiirl.com' localhost:8080/v1.0/aabbccddeeff/00
