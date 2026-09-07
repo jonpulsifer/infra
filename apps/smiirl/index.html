@@ -1000,11 +1000,12 @@
     if (S.display !== null) showCells(m === "number" ? (S.draft ?? S.display) : S.display);
     syncGo();
   }
-  // opts carries whatever the mode needs: date, at, hour12, user/what, modes/every.
+  // opts overrides what the mode needs; anything left out is filled in from
+  // the panel by optsFor, so no caller has to remember a mode's settings.
   async function setMode(m, opts) {
     if (S.sending || S.switching) { say("Still sending the last change, try again in a moment."); return; }
     if (S.cells === null) { say("Still connecting to the counter's server."); return; }
-    const o = opts || {};
+    const o = { ...(optsFor(m) || {}), ...(opts && typeof opts === "object" ? opts : {}) };
     S.switching = true;
     const prev = {
       mode: S.mode, showing: S.showing, display: S.display, clock12: S.clock12,
@@ -1278,7 +1279,7 @@
 
   const tickChanged = settles(() => {
     const t = tickNum();
-    if (t !== S.tick) setMode(mode(), { ...(optsFor(mode()) || {}), tick: t });
+    if (t !== S.tick) setMode(mode(), { tick: t });
   }, 500);
   for (const e of ["input", "change"]) tickEl.addEventListener(e, tickChanged);
   $("tick-panel").addEventListener("submit", (e) => { e.preventDefault(); tickEl.blur(); tickChanged(); });
@@ -1322,7 +1323,7 @@
       dateTimer = 0;
       if (S.switching) return; // setMode re-sends the date once the in-flight request settles
       const v = dateEl.value;
-      if (isDate(v) && v !== (S.days && S.days.date)) setMode("days", v);
+      if (isDate(v) && v !== (S.days && S.days.date)) setMode("days", { date: v });
     }, 400);
   }
   dateEl.addEventListener("input", dateChanged);
@@ -1330,7 +1331,7 @@
   dateEl.addEventListener("keydown", (e) => {
     if (e.key === "Escape") { clearTimeout(dateTimer); dateTimer = 0; if (S.days) dateEl.value = S.days.date; dateEl.blur(); }
   });
-  $("days-panel").addEventListener("submit", (e) => { e.preventDefault(); clearTimeout(dateTimer); dateTimer = 0; dateEl.blur(); if (isDate(dateEl.value) && dateEl.value !== (S.days && S.days.date)) setMode("days", dateEl.value); });
+  $("days-panel").addEventListener("submit", (e) => { e.preventDefault(); clearTimeout(dateTimer); dateTimer = 0; dateEl.blur(); if (isDate(dateEl.value) && dateEl.value !== (S.days && S.days.date)) setMode("days", { date: dateEl.value }); });
 
   document.addEventListener("visibilitychange", () => { if (!document.hidden) refresh(); });
 
