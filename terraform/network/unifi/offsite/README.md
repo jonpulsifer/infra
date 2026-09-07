@@ -13,7 +13,8 @@ The offsite UCG peers **iBGP** (ASN 64512) with the folly UDM (`10.3.0.1`) over
 the Site Magic WireGuard tunnel — see `bgp.conf` and the folly side's
 `network/unifi/folly/README.md` for the full topology. That iBGP session is the
 only thing that carries the LB VIP `/32`s and pod CIDRs between the sites;
-OSPF/Site Magic only auto-shares the LAN/node subnets.
+OSPF/Site Magic carries only the subnets each gateway's Site Magic config lists
+(from this side, `10.89.0.0/28` and `192.168.1.0/24`).
 
 Unlike folly, the offsite console has **no Terraform-managed firewall** and **no
 custom firewall policies** — the Kubernetes network (VLAN 2, `10.89.0.1/28`)
@@ -23,7 +24,10 @@ offsite-pod → folly works without extra rules. (Folly needs explicit policies
 only because it isolates its k8s network in a custom `Lab` zone; see
 `network/unifi/folly/firewall.tf`.) If the offsite k8s network is ever moved into
 a custom/isolated zone, mirror folly's cross-site allow policies here — matching
-the **pod CIDRs + VIP pools**, not just the node subnets.
+the **pod CIDRs + VIP pools**, not just the node subnets. Note that a UniFi zone
+holds only the subnets of declared networks, so those two prefixes bite as
+policy *sources* and not as destinations; `network/unifi/folly/firewall.tf`
+explains the split.
 
 <!-- BEGIN_TF_DOCS -->
 ## Requirements
@@ -31,17 +35,19 @@ the **pod CIDRs + VIP pools**, not just the node subnets.
 | Name | Version |
 | ---- | ------- |
 | <a name="requirement_onepassword"></a> [onepassword](#requirement\_onepassword) | ~> 3.0 |
-| <a name="requirement_unifi"></a> [unifi](#requirement\_unifi) | ~> 0.53 |
+| <a name="requirement_unifi"></a> [unifi](#requirement\_unifi) | ~> 0.55 |
 
 ## Providers
 
 | Name | Version |
 | ---- | ------- |
-| <a name="provider_unifi"></a> [unifi](#provider\_unifi) | 0.53.0 |
+| <a name="provider_unifi"></a> [unifi](#provider\_unifi) | 0.55.0 |
 
 ## Modules
 
-No modules.
+| Name | Source | Version |
+| ---- | ------ | ------- |
+| <a name="module_topology"></a> [topology](#module\_topology) | ../../../modules/cluster-topology | n/a |
 
 ## Resources
 
