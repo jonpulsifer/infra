@@ -2,10 +2,13 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
+	"image/png"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -209,7 +212,9 @@ func TestLongPoll(t *testing.T) {
 	handed := time.Now()
 	flapSettle = 300 * time.Millisecond
 	do(t, ts, "PUT", "/api/number", `{"number":4}`, nil)
-	if _, out := do(t, ts, "GET", "/aabbccddeeff/number", "", nil); out["number"] != float64(4) || time.Since(handed) < flapSettle {
+	// The wait is measured from the handover inside the app, which happened a
+	// touch before handed was read here, so allow that much slack.
+	if _, out := do(t, ts, "GET", "/aabbccddeeff/number", "", nil); out["number"] != float64(4) || time.Since(handed) < flapSettle-10*time.Millisecond {
 		t.Fatalf("second value handed over as %v %v after the first, before the flaps settled", out, time.Since(handed))
 	}
 	flapSettle = 0
@@ -684,5 +689,310 @@ func TestModeMigration(t *testing.T) {
 		if err != nil || s.persisted.Cells != "aa302" || s.persisted.Mode != tc.mode || s.persisted.DaysDate != tc.date {
 			t.Errorf("%s: %v, %+v", tc.file, err, s.persisted)
 		}
+	}
+}
+
+func TestSpanCells(t *testing.T) {
+	now := utc("2026-09-06T12:05:00Z") // 09:05 ADT
+	for _, tc := range []struct {
+		at   string
+		want string
+		left int
+	}{
+		{"2026-09-06T15:35", "06b30", 390},
+		{"2026-09-06T09:06", "00b01", 1},
+		{"2026-09-06T09:05", "00b00", 0},
+		{"2026-09-06T08:00", "00b00", 0},    // past, and it rests there
+		{"2030-01-01T00:00", "99b59", 5999}, // clamped to the drums
+	} {
+		got, left, err := spanCells(now, atlantic, tc.at, false, 1)
+		if err != nil || got != tc.want || left != tc.left {
+			t.Errorf("%s: %s %d %v, want %s %d", tc.at, got, left, err, tc.want, tc.left)
+		}
+	}
+	if _, _, err := spanCells(now, atlantic, "2026-09-06", false, 1); err == nil {
+		t.Error("a date with no time should not parse")
+	}
+	// Counting up is the same span the other way round, and it is the one
+	// that only ever increments.
+	for _, tc := range []struct {
+		at   string
+		want string
+	}{
+		{"2026-09-06T08:35", "00b30"},
+		{"2026-09-06T09:05", "00b00"},
+		{"2026-09-06T15:35", "00b00"}, // still ahead, so nothing has passed
+		{"2020-01-01T00:00", "99b59"},
+	} {
+		if got, _, err := spanCells(now, atlantic, tc.at, true, 1); err != nil || got != tc.want {
+			t.Errorf("up %s: %s %v, want %s", tc.at, got, err, tc.want)
+		}
+	}
+}
+
+func TestDateAndCountdownModes(t *testing.T) {
+	s, ts := newTest(t)
+	now := utc("2026-09-06T12:05:00Z") // 09:05 ADT on 6 September
+	s.now = func() time.Time { return now }
+
+	if resp, out := do(t, ts, "PUT", "/api/mode", `{"mode":"date"}`, nil); resp.StatusCode != 200 || out["display"] != "09b06" {
+		t.Fatalf("date: status %d body %v", resp.StatusCode, out)
+	}
+	resp, out := do(t, ts, "PUT", "/api/mode", `{"mode":"countdown","at":"2026-09-06T15:35"}`, nil)
+	if resp.StatusCode != 200 || out["display"] != "06b30" {
+		t.Fatalf("countdown: status %d body %v", resp.StatusCode, out)
+	}
+	if c := out["countdown"].(map[string]any); c["at"] != "2026-09-06T15:35" || c["left"] != float64(390) {
+		t.Fatalf("countdown view = %v", c)
+	}
+	if _, poll := do(t, ts, "GET", "/aabbccddeeff/number", "", nil); poll["number"] != "06b30" {
+		t.Fatalf("device counting down got %v", poll["number"])
+	}
+	// Counting up keeps its own moment, so the two do not tread on each other.
+	resp, out = do(t, ts, "PUT", "/api/mode", `{"mode":"countup","at":"2026-09-06T08:35"}`, nil)
+	if resp.StatusCode != 200 || out["display"] != "00b30" {
+		t.Fatalf("countup: status %d body %v", resp.StatusCode, out)
+	}
+	if c := out["countdown"].(map[string]any); c["at"] != "2026-09-06T15:35" {
+		t.Fatalf("countup trod on the countdown target: %v", c)
+	}
+	if c := out["countup"].(map[string]any); c["elapsed"] != float64(30) {
+		t.Fatalf("countup view = %v", c)
+	}
+
+	// The target is remembered, so coming back needs no date again.
+	do(t, ts, "PUT", "/api/mode", `{"mode":"number"}`, nil)
+	_, state := do(t, ts, "GET", "/api/state", "", nil)
+	if state["countdown"].(map[string]any)["at"] != "2026-09-06T15:35" {
+		t.Fatalf("countdown forgotten: %v", state)
+	}
+}
+
+func TestCycleTakesTurns(t *testing.T) {
+	s, ts := newTest(t)
+	now := utc("2026-09-06T12:05:00Z")
+	s.now = func() time.Time { return now }
+
+	resp, out := do(t, ts, "PUT", "/api/mode", `{"mode":"cycle","modes":["clock","date","clock"],"every":5}`, nil)
+	if resp.StatusCode != 200 || out["mode"] != "cycle" {
+		t.Fatalf("cycle: status %d body %v", resp.StatusCode, out)
+	}
+	// The repeat is dropped, and only what the counter can show is kept.
+	if got := out["cycle"].(map[string]any)["modes"]; !reflect.DeepEqual(got, []any{"clock", "date"}) {
+		t.Fatalf("cycle modes = %v", got)
+	}
+	// Turns are keyed to the wall clock, so stepping five minutes swaps member.
+	seen := map[string]string{}
+	for i := range 4 {
+		at := now.Add(time.Duration(i) * 5 * time.Minute)
+		s.mu.Lock()
+		seen[s.showing(at)] = s.display(at)
+		s.mu.Unlock()
+	}
+	if len(seen) != 2 || seen["date"] != "09b06" || !strings.Contains(seen["clock"], "b") {
+		t.Fatalf("a lap showed %v", seen)
+	}
+	// A cycle needs two members it can actually show.
+	if resp, _ := do(t, ts, "PUT", "/api/mode", `{"mode":"cycle","modes":["clock","days"]}`, nil); resp.StatusCode != 400 {
+		t.Fatalf("days with no date should not be cyclable, got %d", resp.StatusCode)
+	}
+	// Losing a setting takes that member out of the rotation.
+	do(t, ts, "PUT", "/api/mode", `{"mode":"cycle","modes":["clock","date","countdown"],"every":5}`, nil)
+	_, state := do(t, ts, "GET", "/api/state", "", nil)
+	if got := state["cycle"].(map[string]any)["modes"]; !reflect.DeepEqual(got, []any{"clock", "date"}) {
+		t.Fatalf("countdown with no target should have been dropped: %v", got)
+	}
+}
+
+// stubGitHub answers every search with total, recording what was asked.
+func stubGitHub(t *testing.T, total int, status int) func() []string {
+	t.Helper()
+	var mu sync.Mutex
+	var asked []string
+	stub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		asked = append(asked, r.URL.Path+"?"+r.URL.RawQuery)
+		mu.Unlock()
+		if r.Header.Get("User-Agent") == "" {
+			t.Error("no User-Agent; GitHub would reject this")
+		}
+		if status != http.StatusOK {
+			http.Error(w, "rate limited", status)
+			return
+		}
+		fmt.Fprintf(w, `{"total_count":%d}`, total)
+	}))
+	t.Cleanup(stub.Close)
+	githubAPI = stub.URL
+	t.Cleanup(func() { githubAPI = "https://api.github.com" })
+	return func() []string {
+		mu.Lock()
+		defer mu.Unlock()
+		return append([]string(nil), asked...)
+	}
+}
+
+// waitFor polls until cond holds, so nothing depends on how fast the fetch
+// kicked off by the mode change lands.
+func waitFor(t *testing.T, what string, cond func() bool) {
+	t.Helper()
+	for deadline := time.Now().Add(3 * time.Second); time.Now().Before(deadline); {
+		if cond() {
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatalf("timed out waiting for %s", what)
+}
+
+func TestGitHubMode(t *testing.T) {
+	asked := stubGitHub(t, 4569, http.StatusOK)
+	s, ts := newTest(t)
+	resp, out := do(t, ts, "PUT", "/api/mode", `{"mode":"github","user":"jonpulsifer","what":"commits"}`, nil)
+	if resp.StatusCode != 200 {
+		t.Fatalf("github: status %d body %v", resp.StatusCode, out)
+	}
+	// Switching to the mode asks GitHub at once rather than at the next tick.
+	var state map[string]any
+	waitFor(t, "the first count", func() bool {
+		_, state = do(t, ts, "GET", "/api/state", "", nil)
+		return state["github"].(map[string]any)["at"] != nil
+	})
+	g := state["github"].(map[string]any)
+	if n := len(asked()); n != 1 {
+		t.Fatalf("asked %d times for one count: %v", n, asked())
+	}
+	if state["display"] != "a4569" {
+		t.Fatalf("display = %v", state["display"])
+	}
+	if g["user"] != "jonpulsifer" || g["count"] != float64(4569) || g["error"] != nil {
+		t.Fatalf("github view = %v", g)
+	}
+	if a := asked()[0]; !strings.Contains(a, "/search/commits") || !strings.Contains(a, "author%3Ajonpulsifer") {
+		t.Fatalf("asked %v", a)
+	}
+	// A fresh count stands; only a stale one is fetched again.
+	s.refreshGitHub()
+	if n := len(asked()); n != 1 {
+		t.Fatalf("refetched a fresh count: %v", asked())
+	}
+	// Switching what is counted starts over on the other search.
+	do(t, ts, "PUT", "/api/mode", `{"mode":"github","user":"jonpulsifer","what":"prs"}`, nil)
+	waitFor(t, "the pull request count", func() bool { return len(asked()) == 2 })
+	if a := asked()[1]; !strings.Contains(a, "/search/issues") || !strings.Contains(a, "is%3Apr") {
+		t.Fatalf("asked %v", a)
+	}
+	for _, body := range []string{`{"mode":"github","user":"","what":"commits"}`, `{"mode":"github","user":"-nope","what":"commits"}`, `{"mode":"github","user":"ok","what":"stars"}`} {
+		if resp, _ := do(t, ts, "PUT", "/api/mode", body, nil); resp.StatusCode != 400 {
+			t.Errorf("%s: status %d, want 400", body, resp.StatusCode)
+		}
+	}
+}
+
+func TestGitHubFailureKeepsTheNumber(t *testing.T) {
+	asked := stubGitHub(t, 0, http.StatusForbidden)
+	_, ts := newTest(t)
+	do(t, ts, "PUT", "/api/number", `{"number":302}`, nil)
+	do(t, ts, "PUT", "/api/mode", `{"mode":"github","user":"jonpulsifer","what":"commits"}`, nil)
+	waitFor(t, "the failed fetch", func() bool { return len(asked()) > 0 })
+
+	var state map[string]any
+	waitFor(t, "the failure to be reported", func() bool {
+		_, state = do(t, ts, "GET", "/api/state", "", nil)
+		return state["github"].(map[string]any)["error"] != nil
+	})
+	if state["display"] != "aa302" {
+		t.Fatalf("a failed fetch should keep the stored number on the drums: %v", state)
+	}
+}
+
+func TestPWAAssets(t *testing.T) {
+	_, ts := newTest(t)
+	for _, tc := range []struct{ path, ctype string }{
+		{"/manifest.webmanifest", "application/manifest+json"},
+		{"/sw.js", "text/javascript; charset=utf-8"},
+		{"/icon.svg", "image/svg+xml"},
+		{"/icon.png", "image/png"},
+	} {
+		resp, err := http.Get(ts.URL + tc.path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		b, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if resp.StatusCode != 200 || resp.Header.Get("Content-Type") != tc.ctype || len(b) == 0 {
+			t.Errorf("%s: status %d type %q %d bytes", tc.path, resp.StatusCode, resp.Header.Get("Content-Type"), len(b))
+		}
+	}
+	// The icon has to be a real PNG of the size the page asks iOS for.
+	resp, _ := http.Get(ts.URL + "/icon.png")
+	img, err := png.Decode(resp.Body)
+	resp.Body.Close()
+	if err != nil || img.Bounds().Dx() != 180 || img.Bounds().Dy() != 180 {
+		t.Fatalf("icon.png: %v %v", err, img.Bounds())
+	}
+}
+
+// The counter turns a drum a full revolution for any change at all, so the
+// only lever on wear is how seldom a timed mode changes.
+func TestTickCoarsensTheTimedModes(t *testing.T) {
+	s, ts := newTest(t)
+	now := utc("2026-09-06T12:08:00Z") // 09:08 ADT
+	s.now = func() time.Time { return now }
+
+	if resp, out := do(t, ts, "PUT", "/api/mode", `{"mode":"clock"}`, nil); resp.StatusCode != 200 || out["display"] != "09b08" {
+		t.Fatalf("clock at tick 1: status %d body %v", resp.StatusCode, out)
+	}
+	resp, out := do(t, ts, "PUT", "/api/mode", `{"mode":"clock","tick":5}`, nil)
+	if resp.StatusCode != 200 || out["display"] != "09b05" || out["tick"] != float64(5) {
+		t.Fatalf("clock at tick 5: status %d body %v", resp.StatusCode, out)
+	}
+	// The same stretch of clock now holds a handful of values instead of one
+	// a minute, and each value it does not take is a revolution not turned.
+	values := func() int {
+		seen := map[string]bool{}
+		for i := range 30 {
+			s.mu.Lock()
+			seen[s.display(now.Add(time.Duration(i)*time.Minute))] = true
+			s.mu.Unlock()
+		}
+		return len(seen)
+	}
+	// Seven, not six: the half hour starts at 09:08 and so clips a bucket at
+	// each end.
+	if n := values(); n != 7 {
+		t.Fatalf("half an hour at tick 5 showed %d values, want 7", n)
+	}
+	do(t, ts, "PUT", "/api/mode", `{"mode":"clock","tick":1}`, nil)
+	if n := values(); n != 30 {
+		t.Fatalf("half an hour at tick 1 showed %d values, want 30", n)
+	}
+	do(t, ts, "PUT", "/api/mode", `{"mode":"clock","tick":5}`, nil)
+	// It coarsens a countdown the same way, and is remembered across modes.
+	resp, out = do(t, ts, "PUT", "/api/mode", `{"mode":"countdown","at":"2026-09-06T15:36"}`, nil)
+	if resp.StatusCode != 200 || out["display"] != "06b25" {
+		t.Fatalf("countdown at tick 5: status %d body %v", resp.StatusCode, out) // 6h28 floors to 6h25
+	}
+	for _, body := range []string{`{"mode":"clock","tick":0}`, `{"mode":"clock","tick":61}`} {
+		if resp, _ := do(t, ts, "PUT", "/api/mode", body, nil); resp.StatusCode != 400 {
+			t.Errorf("%s: status %d, want 400", body, resp.StatusCode)
+		}
+	}
+}
+
+// The page reports what the counter was handed, not just what the app would
+// hand it now; the drums only ever moved for the former.
+func TestStateReportsWhatTheCounterWasHanded(t *testing.T) {
+	_, ts := newTest(t)
+	do(t, ts, "PUT", "/api/number", `{"number":11111}`, nil)
+	_, state := do(t, ts, "GET", "/api/state", "", nil)
+	if dev := state["device"].(map[string]any); dev["lastSent"] != "aaaa0" || dev["lastSentAt"] != nil {
+		t.Fatalf("nothing handed over yet, but device = %v", dev)
+	}
+	do(t, ts, "GET", "/aabbccddeeff/number", "", nil)
+	_, state = do(t, ts, "GET", "/api/state", "", nil)
+	dev := state["device"].(map[string]any)
+	if dev["lastSent"] != "11111" || dev["lastSentAt"] == nil {
+		t.Fatalf("after a poll, device = %v", dev)
 	}
 }
