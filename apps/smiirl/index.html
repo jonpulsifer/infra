@@ -383,6 +383,7 @@
     <button type="button" class="mode" role="radio" aria-checked="false" tabindex="-1" data-mode="days">Days</button>
     <button type="button" class="mode" role="radio" aria-checked="false" tabindex="-1" data-mode="date">Date</button>
     <button type="button" class="mode" role="radio" aria-checked="false" tabindex="-1" data-mode="countdown">Timer</button>
+    <button type="button" class="mode" role="radio" aria-checked="false" tabindex="-1" data-mode="countup">Since</button>
     <button type="button" class="mode" role="radio" aria-checked="false" tabindex="-1" data-mode="github">GitHub</button>
     <button type="button" class="mode" role="radio" aria-checked="false" tabindex="-1" data-mode="cycle">Cycle</button>
   </div>
@@ -417,6 +418,14 @@
     <p class="line" id="countdown-line"></p>
   </form>
 
+  <form class="panel" id="countup-panel" hidden autocomplete="off" aria-label="Since">
+    <div class="daily-row">
+      <label for="from">Counting up from</label>
+      <input type="datetime-local" class="field time" id="from" required aria-describedby="countup-line">
+    </div>
+    <p class="line" id="countup-line"></p>
+  </form>
+
   <form class="panel" id="github-panel" hidden autocomplete="off" aria-label="GitHub">
     <div class="daily-row">
       <label for="what">Counting</label>
@@ -440,6 +449,7 @@
         <label class="pick"><input type="checkbox" value="days">Days</label>
         <label class="pick"><input type="checkbox" value="date">Date</label>
         <label class="pick"><input type="checkbox" value="countdown">Timer</label>
+        <label class="pick"><input type="checkbox" value="countup">Since</label>
         <label class="pick"><input type="checkbox" value="github">GitHub</label>
       </div>
     </fieldset>
@@ -503,17 +513,19 @@
   const mmdd = (c) => isCells(c) && c[2] === "b" ? c.slice(0, 2) + "/" + c.slice(3) : pretty(c);
   // How the shown cells read: whatever has the drums decides, so a clock is
   // "14:30" and not "14/30", even when a cycle is what put it there.
-  const shown = (c) => S.showing === "clock" || S.showing === "countdown" ? hhmm(c)
+  const SPANS = ["clock", "countdown", "countup"];
+  const shown = (c) => SPANS.includes(S.showing) ? hhmm(c)
     : S.showing === "date" ? mmdd(c) : pretty(c);
   const shownSpoken = (c) => S.showing === "clock" ? "the time, " + hhmm(c)
     : S.showing === "countdown" ? hhmm(c) + " to go"
+    : S.showing === "countup" ? hhmm(c) + " since"
     : S.showing === "date" ? "the date, " + mmdd(c)
     : spoken(c);
-  const MODES = ["number", "clock", "days", "date", "countdown", "github", "cycle"];
+  const MODES = ["number", "clock", "days", "date", "countdown", "countup", "github", "cycle"];
   const CYCLABLE = MODES.slice(0, -1);
   const NAMES = {
     number: "a number", clock: "the clock", days: "counting days", date: "the date",
-    countdown: "a countdown", github: "GitHub", cycle: "a rotation",
+    countdown: "a countdown", countup: "time since", github: "GitHub", cycle: "a rotation",
   };
   const HINTS = {
     number: "Pick a number or tap a flap, then hit Flip it. The counter checks in every 20 seconds or so.",
@@ -521,6 +533,7 @@
     days: "Pick a date and the counter counts the days to it, one flip a day.",
     date: "Today's date, month and day. One flip a day.",
     countdown: "Hours and minutes left. The drums stop at 99:59 and rest at 00:00.",
+    countup: "Hours and minutes since. This one only ever counts up, which is one flap a minute instead of most of a revolution.",
     github: "A public count from GitHub's search, checked every five minutes.",
     cycle: "The counter takes each of these in turn.",
   };
@@ -533,7 +546,9 @@
   const today = () => stamp(new Date());
   // The server reads a countdown target in Atlantic, so a phone on another
   // clock will be off by the difference; nothing here is set up to travel.
-  const inAnHour = () => { const t = new Date(Date.now() + 3600000); return `${stamp(t)}T${p2(t.getHours())}:${p2(t.getMinutes())}`; };
+  const minuteStamp = (ms) => { const t = new Date(ms); return `${stamp(t)}T${p2(t.getHours())}:${p2(t.getMinutes())}`; };
+  const inAnHour = () => minuteStamp(Date.now() + 3600000);
+  const anHourAgo = () => minuteStamp(Date.now() - 3600000);
 
   // ---------- split-flap digit ----------
   class Digit {
@@ -637,6 +652,7 @@
     date: null,        // { cells }
     days: null,        // { date, days, label }
     countdown: null,   // { at, left }
+    countup: null,     // { at, elapsed }
     github: null,      // { user, what, count, at, error }
     cycle: null,       // { modes, every }
     switching: false,
@@ -650,6 +666,7 @@
         modeBtns = Array.from(document.querySelectorAll("[data-mode]")),
         dateEl = $("date"), daysLine = $("days-line"), clockLine = $("clock-line"), hour12Btn = $("hour12"),
         dateLine = $("date-line"), untilEl = $("until"), countdownLine = $("countdown-line"),
+        fromEl = $("from"), countupLine = $("countup-line"),
         userEl = $("user"), whatEl = $("what"), githubLine = $("github-line"),
         everyEl = $("every"), cycleLine = $("cycle-line"),
         pickBoxes = Array.from(document.querySelectorAll("#picks input"));
@@ -845,7 +862,7 @@
   // Everything renderMode draws. Comparing it is how a poll decides to
   // re-render, so a new mode needs nothing added to applyState.
   const modeSig = () => JSON.stringify([S.mode, S.showing, S.display, S.clock12, S.clockCells,
-    S.date, S.days, S.countdown, S.github, S.cycle]);
+    S.date, S.days, S.countdown, S.countup, S.github, S.cycle]);
   const editing = (el) => document.activeElement === el;
   // A mode that needs a setting the counter does not have yet shows its panel
   // without taking the drums, so there is somewhere to type it.
@@ -863,6 +880,7 @@
     if (st.date && typeof st.date === "object" && isCells(st.date.cells)) S.date = { cells: st.date.cells };
     if (st.days && typeof st.days === "object") applyDays(st.days);
     if (st.countdown && typeof st.countdown === "object") applyCountdown(st.countdown);
+    if (st.countup && typeof st.countup === "object") applyCountup(st.countup);
     if (st.github && typeof st.github === "object") applyGitHub(st.github);
     if (st.cycle && typeof st.cycle === "object") applyCycle(st.cycle);
     if (isCells(st.display)) S.display = st.display;
@@ -874,6 +892,10 @@
   function applyCountdown(c) {
     S.countdown = { at: isMinute(c.at) ? c.at : "", left: Number.isInteger(c.left) ? c.left : null };
     if (!editing(untilEl)) untilEl.value = S.countdown.at;
+  }
+  function applyCountup(c) {
+    S.countup = { at: isMinute(c.at) ? c.at : "", elapsed: Number.isInteger(c.elapsed) ? c.elapsed : null };
+    if (!editing(fromEl)) fromEl.value = S.countup.at;
   }
   function applyGitHub(g) {
     S.github = {
@@ -901,6 +923,14 @@
     if (c.left === 0) return "Time's up.";
     const h = Math.floor(c.left / 60), m = c.left % 60;
     return `${h ? `${h} ${h === 1 ? "hour" : "hours"} ` : ""}${m} min to go.`;
+  }
+  function countupText() {
+    const c = S.countup;
+    if (!c || !c.at) return "Pick a moment.";
+    if (c.elapsed === null) return "…";
+    if (c.elapsed === 0) return "Not yet.";
+    const h = Math.floor(c.elapsed / 60), m = c.elapsed % 60;
+    return `${h ? `${h} ${h === 1 ? "hour" : "hours"} ` : ""}${m} min since.`;
   }
   function githubText() {
     const g = S.github;
@@ -934,7 +964,7 @@
     $("form").hidden = m !== "number" || arming !== null;
     $("daily").hidden = m !== "number" || arming !== null;
     const panel = arming ?? m;
-    for (const n of ["clock", "date", "days", "countdown", "github", "cycle"]) $(n + "-panel").hidden = n !== panel;
+    for (const n of ["clock", "date", "days", "countdown", "countup", "github", "cycle"]) $(n + "-panel").hidden = n !== panel;
     for (const d of digits) d.el.disabled = m !== "number";
     hint.textContent = HINTS[panel];
     clockLine.textContent = `Showing the time, ${hhmm(S.clockCells ?? "aaaaa")} in Atlantic.`;
@@ -942,6 +972,7 @@
     hour12Btn.setAttribute("aria-pressed", String(S.clock12));
     dateLine.textContent = `Showing today, ${mmdd((S.date && S.date.cells) ?? "aaaaa")}, as month and day.`;
     countdownLine.textContent = countdownText();
+    countupLine.textContent = countupText();
     githubLine.textContent = githubText();
     cycleLine.textContent = cycleText();
     daysLine.textContent = daysText();
@@ -964,6 +995,7 @@
     if (m !== "cycle") S.showing = m;
     if (m === "days") S.days = { date: o.date, days: null, label: null };
     if (m === "countdown") S.countdown = { at: o.at, left: null };
+    if (m === "countup") S.countup = { at: o.at, elapsed: null };
     if (m === "github" && (o.user !== (S.github || {}).user || o.what !== (S.github || {}).what)) {
       S.github = { user: o.user, what: o.what, count: 0, at: null, error: null };
     }
@@ -1007,6 +1039,11 @@
       case "countdown": {
         const at = isMinute(untilEl.value) ? untilEl.value : (S.countdown && S.countdown.at) || inAnHour();
         untilEl.value = at;
+        return { at };
+      }
+      case "countup": {
+        const at = isMinute(fromEl.value) ? fromEl.value : (S.countup && S.countup.at) || anHourAgo();
+        fromEl.value = at;
         return { at };
       }
       case "github": {
@@ -1213,6 +1250,12 @@
     if (isMinute(v) && v !== (S.countdown || {}).at) setMode("countdown", { at: v });
   }, 400);
   for (const e of ["input", "change"]) untilEl.addEventListener(e, untilChanged);
+
+  const fromChanged = settles(() => {
+    const v = fromEl.value.slice(0, 16);
+    if (isMinute(v) && v !== (S.countup || {}).at) setMode("countup", { at: v });
+  }, 400);
+  for (const e of ["input", "change"]) fromEl.addEventListener(e, fromChanged);
 
   const githubChanged = settles(() => {
     const user = userEl.value.trim(), what = whatEl.value, g = S.github || {};

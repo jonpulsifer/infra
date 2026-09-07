@@ -65,7 +65,7 @@ const (
 
 // modes is everything the drums can show. A cycle rotates through the others,
 // never through itself.
-var modes = []string{"number", "clock", "days", "date", "countdown", "github", "cycle"}
+var modes = []string{"number", "clock", "days", "date", "countdown", "countup", "github", "cycle"}
 
 var cyclable = modes[:len(modes)-1]
 
@@ -116,6 +116,7 @@ type persisted struct {
 	DaysDate    string    `json:"daysDate,omitempty"`    // the date days mode counts to
 	Clock12     bool      `json:"clock12,omitempty"`     // clock mode shows a 12-hour time
 	CountdownAt string    `json:"countdownAt,omitempty"` // the moment countdown mode runs to
+	CountupAt   string    `json:"countupAt,omitempty"`   // the moment countup mode runs from
 	Cycle       cycle     `json:"cycle"`
 	GitHub      github    `json:"github"`
 }
@@ -130,6 +131,8 @@ func (p persisted) shows(m string) bool {
 		return p.DaysDate != ""
 	case "countdown":
 		return p.CountdownAt != ""
+	case "countup":
+		return p.CountupAt != ""
 	case "github":
 		return p.GitHub.User != ""
 	case "cycle":
@@ -208,6 +211,9 @@ func newServer(dataDir string, loc *time.Location) (*server, error) {
 	if _, err := time.ParseInLocation(minFormat, file.CountdownAt, loc); err != nil {
 		file.CountdownAt = ""
 	}
+	if _, err := time.ParseInLocation(minFormat, file.CountupAt, loc); err != nil {
+		file.CountupAt = ""
+	}
 	if !userRe.MatchString(file.GitHub.User) {
 		file.GitHub = github{}
 	}
@@ -258,15 +264,25 @@ func daysCells(now time.Time, loc *time.Location, date string) (int, string, err
 	return 0, "today", nil
 }
 
-// countdownCells is the time left until at, as HHbMM with the striped flap
-// between: 06b30 is six and a half hours out. It rests at 00b00 once the
-// moment is past and stops at 99b59, the most the drums hold.
-func countdownCells(now time.Time, loc *time.Location, at string) (string, int, error) {
+// spanCells is the distance between at and now, as HHbMM with the striped
+// flap between: 06b30 is six and a half hours. Counting down measures how
+// much is left, counting up how much has passed; either way it rests at
+// 00b00 on the wrong side of the moment and stops at 99b59, the most the
+// drums hold.
+//
+// Counting up is the kinder of the two on the hardware. A drum only turns
+// forwards, so every digit that decreases costs most of a revolution, and a
+// countdown decreases every minute.
+func spanCells(now time.Time, loc *time.Location, at string, up bool) (string, int, error) {
 	t, err := time.ParseInLocation(minFormat, at, loc)
 	if err != nil {
 		return "", 0, err
 	}
-	mins := max(0, min(int(t.Sub(now)/time.Minute), maxCountdown))
+	d := t.Sub(now)
+	if up {
+		d = -d
+	}
+	mins := max(0, min(int(d/time.Minute), maxCountdown))
 	return fmt.Sprintf("%02db%02d", mins/60, mins%60), mins, nil
 }
 
@@ -298,7 +314,11 @@ func (s *server) cells(m string, now time.Time) string {
 			return numberToCells(n)
 		}
 	case "countdown":
-		if c, _, err := countdownCells(now, s.loc, p.CountdownAt); err == nil {
+		if c, _, err := spanCells(now, s.loc, p.CountdownAt, false); err == nil {
+			return c
+		}
+	case "countup":
+		if c, _, err := spanCells(now, s.loc, p.CountupAt, true); err == nil {
 			return c
 		}
 	case "github":
@@ -317,9 +337,12 @@ func (s *server) modeView(now time.Time) map[string]any {
 	if n, l, err := daysCells(now, s.loc, p.DaysDate); err == nil {
 		days, label = n, l
 	}
-	var left any
-	if _, m, err := countdownCells(now, s.loc, p.CountdownAt); err == nil {
+	var left, elapsed any
+	if _, m, err := spanCells(now, s.loc, p.CountdownAt, false); err == nil {
 		left = m
+	}
+	if _, m, err := spanCells(now, s.loc, p.CountupAt, true); err == nil {
+		elapsed = m
 	}
 	var fetched any
 	if !p.GitHub.At.IsZero() {
@@ -333,6 +356,7 @@ func (s *server) modeView(now time.Time) map[string]any {
 		"date":      map[string]any{"cells": s.cells("date", now)},
 		"days":      map[string]any{"date": p.DaysDate, "days": days, "label": label},
 		"countdown": map[string]any{"at": p.CountdownAt, "left": left},
+		"countup":   map[string]any{"at": p.CountupAt, "elapsed": elapsed},
 		"github":    map[string]any{"user": p.GitHub.User, "what": p.GitHub.What, "count": p.GitHub.Count, "at": fetched, "error": errOrNil(p.GitHub.Err)},
 		"cycle":     map[string]any{"modes": p.Cycle.Modes, "every": p.Cycle.Every},
 	}
@@ -720,7 +744,7 @@ func (s *server) handleMode(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Mode   string   `json:"mode"`
 		Date   string   `json:"date"`   // days
-		At     string   `json:"at"`     // countdown
+		At     string   `json:"at"`     // countdown, countup
 		Hour12 *bool    `json:"hour12"` // clock
 		User   string   `json:"user"`   // github
 		What   string   `json:"what"`   // github
@@ -745,13 +769,17 @@ func (s *server) handleMode(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		p.DaysDate = body.Date
-	case "countdown":
+	case "countdown", "countup":
 		if _, err := time.ParseInLocation(minFormat, body.At, s.loc); err != nil {
 			s.mu.Unlock()
 			badMode(w, "at must be YYYY-MM-DDTHH:MM")
 			return
 		}
-		p.CountdownAt = body.At
+		if body.Mode == "countup" {
+			p.CountupAt = body.At
+		} else {
+			p.CountdownAt = body.At
+		}
 	case "github":
 		if !userRe.MatchString(body.User) {
 			s.mu.Unlock()

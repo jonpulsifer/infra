@@ -40,7 +40,10 @@ the counter polls it over plain HTTP and shows whatever the web page last set.
   labelled `until` when the date is ahead, `since` when it is past and `today`
   when it is today (0). Days are counted on local dates, so a DST change never
   yields a 23-hour day. `countdown` shows the time left until a moment as
-  `HHbMM`, resting at `00b00` once it is past and stopping at `99b59`.
+  `HHbMM`, resting at `00b00` once it is past and stopping at `99b59`, and
+  `countup` the time since one, on its own moment. Counting up is the kinder
+  of the two on the hardware: a drum only turns forwards, so a digit that
+  decreases costs most of a revolution and a countdown decreases every minute.
   `github` shows how many public commits or pull requests a GitHub login has;
   the page holds the mode until a login is typed rather than guessing one.
   `cycle` hands the drums to each of a list of modes in turn. The stored
@@ -82,13 +85,13 @@ the counter polls it over plain HTTP and shows whatever the web page last set.
 ### UI API
 
 - `GET /api/state` —
-  `{"cells","number","updatedAt","mode","display","showing","clock":{"cells","hour12"},"date":{"cells"},"days":{"date","days","label"},"countdown":{"at","left"},"github":{"user","what","count","at","error"},"cycle":{"modes","every"},"daily":{"step","at","next"},"device":{"lastPoll","lastStatus","online"}}`;
+  `{"cells","number","updatedAt","mode","display","showing","clock":{"cells","hour12"},"date":{"cells"},"days":{"date","days","label"},"countdown":{"at","left"},"countup":{"at","elapsed"},"github":{"user","what","count","at","error"},"cycle":{"modes","every"},"daily":{"step","at","next"},"device":{"lastPoll","lastStatus","online"}}`;
   `cells`/`number` are the stored number (`number` is `null` when the cells
   are not a plain number), `display` is what the drums show right now,
   `showing` is the mode with the drums (it differs from `mode` under a cycle),
   `clock.cells` is the time now as `HHbMM` and `clock.hour12` says whether the
   clock is 12-hour, `days.days`/`days.label` are `null` until a date is set,
-  `countdown.left` is minutes remaining, `github.at` is `null` until the first
+  `countdown.left` and `countup.elapsed` are minutes, `github.at` is `null` until the first
   fetch lands and `github.error` carries the last failure, `next` is `null`
   when the daily step is off
 - `PUT /api/number` (or `POST`) — body `{"number":N}` with `N` in `0..99999`,
@@ -96,7 +99,7 @@ the counter polls it over plain HTTP and shows whatever the web page last set.
 - `PUT /api/daily` (or `POST`) — body `{"step":N,"at":"HH:MM"}` with `N` in
   `-99999..99999`; the first step lands at the next `at` after the call
 - `PUT /api/mode` (or `POST`) — body `{"mode":"..."}` carrying that mode's
-  settings: `days` wants `"date":"YYYY-MM-DD"`, `countdown` wants
+  settings: `days` wants `"date":"YYYY-MM-DD"`, `countdown` and `countup` each want their own
   `"at":"YYYY-MM-DDTHH:MM"` read in `TZ`, `github` wants `"user"` and
   `"what":"commits"|"prs"`, `cycle` wants `"modes":[...]` and optionally
   `"every":N` minutes (1..1440, 5 by default). `"hour12":true|false` may ride
@@ -124,6 +127,7 @@ curl -X PUT localhost:8080/api/mode -d '{"mode":"clock","hour12":true}'
 curl -X PUT localhost:8080/api/mode -d '{"mode":"days","date":"2026-12-25"}'
 curl -X PUT localhost:8080/api/mode -d '{"mode":"date"}'
 curl -X PUT localhost:8080/api/mode -d '{"mode":"countdown","at":"2026-12-25T08:00"}'
+curl -X PUT localhost:8080/api/mode -d '{"mode":"countup","at":"2026-01-01T00:00"}'
 curl -X PUT localhost:8080/api/mode -d '{"mode":"github","user":"jonpulsifer","what":"commits"}'
 curl -X PUT localhost:8080/api/mode -d '{"mode":"cycle","modes":["clock","date","github"],"every":5}'
 curl -H 'Host: api.smiirl.com' localhost:8080/v1.0/aabbccddeeff/00

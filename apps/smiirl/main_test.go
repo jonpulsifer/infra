@@ -690,7 +690,7 @@ func TestModeMigration(t *testing.T) {
 	}
 }
 
-func TestCountdownCells(t *testing.T) {
+func TestSpanCells(t *testing.T) {
 	now := utc("2026-09-06T12:05:00Z") // 09:05 ADT
 	for _, tc := range []struct {
 		at   string
@@ -703,13 +703,28 @@ func TestCountdownCells(t *testing.T) {
 		{"2026-09-06T08:00", "00b00", 0},    // past, and it rests there
 		{"2030-01-01T00:00", "99b59", 5999}, // clamped to the drums
 	} {
-		got, left, err := countdownCells(now, atlantic, tc.at)
+		got, left, err := spanCells(now, atlantic, tc.at, false)
 		if err != nil || got != tc.want || left != tc.left {
 			t.Errorf("%s: %s %d %v, want %s %d", tc.at, got, left, err, tc.want, tc.left)
 		}
 	}
-	if _, _, err := countdownCells(now, atlantic, "2026-09-06"); err == nil {
+	if _, _, err := spanCells(now, atlantic, "2026-09-06", false); err == nil {
 		t.Error("a date with no time should not parse")
+	}
+	// Counting up is the same span the other way round, and it is the one
+	// that only ever increments.
+	for _, tc := range []struct {
+		at   string
+		want string
+	}{
+		{"2026-09-06T08:35", "00b30"},
+		{"2026-09-06T09:05", "00b00"},
+		{"2026-09-06T15:35", "00b00"}, // still ahead, so nothing has passed
+		{"2020-01-01T00:00", "99b59"},
+	} {
+		if got, _, err := spanCells(now, atlantic, tc.at, true); err != nil || got != tc.want {
+			t.Errorf("up %s: %s %v, want %s", tc.at, got, err, tc.want)
+		}
 	}
 }
 
@@ -731,6 +746,18 @@ func TestDateAndCountdownModes(t *testing.T) {
 	if _, poll := do(t, ts, "GET", "/aabbccddeeff/number", "", nil); poll["number"] != "06b30" {
 		t.Fatalf("device counting down got %v", poll["number"])
 	}
+	// Counting up keeps its own moment, so the two do not tread on each other.
+	resp, out = do(t, ts, "PUT", "/api/mode", `{"mode":"countup","at":"2026-09-06T08:35"}`, nil)
+	if resp.StatusCode != 200 || out["display"] != "00b30" {
+		t.Fatalf("countup: status %d body %v", resp.StatusCode, out)
+	}
+	if c := out["countdown"].(map[string]any); c["at"] != "2026-09-06T15:35" {
+		t.Fatalf("countup trod on the countdown target: %v", c)
+	}
+	if c := out["countup"].(map[string]any); c["elapsed"] != float64(30) {
+		t.Fatalf("countup view = %v", c)
+	}
+
 	// The target is remembered, so coming back needs no date again.
 	do(t, ts, "PUT", "/api/mode", `{"mode":"number"}`, nil)
 	_, state := do(t, ts, "GET", "/api/state", "", nil)
