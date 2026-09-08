@@ -26,16 +26,7 @@
     "command": "~/.claude/statusline.sh"
   },
   "enabledPlugins": {
-    "mattpocock-skills@claude-plugins-official": true,
-    "ponytail@ponytail": true
-  },
-  "extraKnownMarketplaces": {
-    "ponytail": {
-      "source": {
-        "source": "github",
-        "repo": "DietrichGebert/ponytail"
-      }
-    }
+    "mattpocock-skills@claude-plugins-official": true
   },
   "effortLevel": "high",
   "tui": "fullscreen",
