@@ -14,7 +14,7 @@
 # `src/web/dev.ts` is the other entry and does the opposite — Bun's HTML import,
 # compiled on demand, so `bun run dev` needs no build step. That convenience is
 # the thing production is not paying for.
-FROM cgr.dev/chainguard/node:latest-dev@sha256:ca22c7a9f32410b215d4b17bd0507083f5361f7a21b49d3ea003c7dd28378a35 AS base
+FROM cgr.dev/chainguard/node:latest-dev@sha256:9df8062d1bc926d1eafd0be518d308bf92adde1b13093905cdf8dd45e4beaf9e AS base
 ARG BUN_VERSION=1.4.0
 ENV BUN_INSTALL=/usr/local \
   TURBO_TELEMETRY_DISABLED=1
