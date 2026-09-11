@@ -4,7 +4,7 @@ go 1.27.0
 
 require (
 	codeberg.org/miekg/dns v0.6.106
-	github.com/cloudflare/cloudflare-go/v7 v7.9.0
+	github.com/cloudflare/cloudflare-go/v7 v7.10.0
 )
 
 require (
