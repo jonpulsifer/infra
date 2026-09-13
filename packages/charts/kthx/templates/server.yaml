@@ -138,6 +138,26 @@ spec:
             # The AI passthrough. `KTHX_AI_KEY` is not here — it comes with the
             # HMAC keys through `envFrom` below. Without it `/api/ai` answers
             # 502 and nothing else in the process changes.
+            {{- with .Values.identity.host }}
+            # The tailnet door. The header is believed on this host alone, and
+            # only from a peer in KTHX_TAILNET_PROXIES — unset means nobody,
+            # which is a deployment that renders an Ingress and then tells
+            # every caller through it that nobody is signed in.
+            - name: KTHX_IDENTITY_HOST
+              value: {{ . | quote }}
+            {{- end }}
+            {{- with .Values.identity.header }}
+            - name: KTHX_IDENTITY_HEADER
+              value: {{ . | quote }}
+            {{- end }}
+            {{- with .Values.identity.host }}
+            # Required beside the host, not optional under it: the server
+            # refuses to boot with an identity host and nobody to believe, and
+            # failing at render is a chart that does not install rather than a
+            # Deployment that crash-loops with the reason four layers down.
+            - name: KTHX_TAILNET_PROXIES
+              value: {{ required "identity.proxies names the hop whose identity header is believed" $.Values.identity.proxies | quote }}
+            {{- end }}
             - name: KTHX_AI_URL
               value: {{ .Values.ai.url | quote }}
             - name: KTHX_AI_MODEL

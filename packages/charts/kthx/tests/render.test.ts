@@ -15,7 +15,11 @@ const CHART = dirname(import.meta.dir);
 
 interface Rendered {
   kind: string;
-  metadata: { name: string; labels?: Record<string, string> };
+  metadata: {
+    name: string;
+    labels?: Record<string, string>;
+    annotations?: Record<string, string>;
+  };
   data?: Record<string, string>;
   spec?: any;
 }
@@ -274,5 +278,94 @@ describe('the AI passthrough values', () => {
     // one is a 4xx on the other. Nothing renderable can ask the upstream, so
     // this asserts only the pairing the values were measured against.
     expect(url).toBe('https://opencode.ai/zen/go/v1');
+  });
+});
+
+describe('the tailnet identity host', () => {
+  test('renders nothing at all when no host is named', async () => {
+    const objects = await render();
+    expect(objects.some((o) => o.kind === 'Ingress')).toBe(false);
+
+    const env: { name: string }[] = one(objects, 'Deployment').spec.template
+      .spec.containers[0].env;
+    const names = env.map((entry) => entry.name);
+    expect(names).not.toContain('KTHX_IDENTITY_HOST');
+    expect(names).not.toContain('KTHX_TAILNET_PROXIES');
+
+    // And the policy is back to same-namespace only: a clause naming a proxy
+    // that was never created is a rule admitting a pod label anyone may wear.
+    const from = one(objects, 'NetworkPolicy').spec.ingress[0].from;
+    expect(from).toHaveLength(1);
+  });
+
+  test('serves the label the server is told to expect, not the fqdn', async () => {
+    const host = 'kthx.example-tailnet.ts.net';
+    const objects = await render({
+      ...VALUES,
+      identity: { host, tag: 'tag:kthx-ingress', proxies: '10.101.0.0/20' },
+    });
+    const ingress = one(objects, 'Ingress');
+
+    // The operator appends the tailnet domain to what it finds here. Passing
+    // the fqdn produces `kthx.example-tailnet.ts.net.example-tailnet.ts.net`,
+    // which resolves for nobody and reports itself as healthy.
+    expect(ingress.spec.tls[0].hosts).toEqual(['kthx']);
+    expect(ingress.spec.ingressClassName).toBe('tailscale');
+    const annotations = ingress.metadata.annotations ?? {};
+    expect(annotations['tailscale.com/tags']).toBe('tag:kthx-ingress');
+    // Funnel would publish this to the internet, and a funnel request carries
+    // no identity headers at all — an anonymous publishing surface.
+    expect(Object.keys(annotations)).not.toContain('tailscale.com/funnel');
+
+    const backend = ingress.spec.defaultBackend.service;
+    const service = one(objects, 'Service');
+    expect(backend.name).toBe(service.metadata.name);
+    expect(backend.port.number).toBe(service.spec.ports[0].port);
+
+    const env: { name: string; value?: string }[] = one(objects, 'Deployment')
+      .spec.template.spec.containers[0].env;
+    expect(env.find((e) => e.name === 'KTHX_IDENTITY_HOST')?.value).toBe(host);
+  });
+
+  test('refuses to render a host with no hop to believe', async () => {
+    // The server refuses to boot in this state, so rendering it produces a
+    // Deployment that crash-loops with the reason four layers down. Failing
+    // here is a chart that does not install.
+    await expect(
+      render({
+        ...VALUES,
+        identity: {
+          host: 'kthx.example-tailnet.ts.net',
+          tag: 'tag:kthx-ingress',
+          proxies: '',
+        },
+      }),
+    ).rejects.toThrow('identity.proxies');
+  });
+
+  test('admits the proxy created for this ingress and no other', async () => {
+    const objects = await render({
+      ...VALUES,
+      identity: {
+        host: 'kthx.example-tailnet.ts.net',
+        tag: 'tag:kthx-ingress',
+        proxies: '10.101.0.0/20',
+      },
+    });
+    const from = one(objects, 'NetworkPolicy').spec.ingress[0].from;
+    const proxy = from.find((entry: any) => entry.namespaceSelector);
+
+    // Namespace and pod in ONE entry. Two entries are an OR, and the namespace
+    // alone admits every proxy the operator runs in this cluster — egress
+    // proxies for unrelated Services included.
+    expect(
+      proxy.namespaceSelector.matchLabels['kubernetes.io/metadata.name'],
+    ).toBe('tailscale');
+    expect(proxy.podSelector.matchLabels['tailscale.com/parent-resource']).toBe(
+      one(objects, 'Ingress').metadata.name,
+    );
+    expect(
+      proxy.podSelector.matchLabels['tailscale.com/parent-resource-type'],
+    ).toBe('ingress');
   });
 });

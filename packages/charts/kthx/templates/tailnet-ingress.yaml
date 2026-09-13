@@ -1,0 +1,51 @@
+{{- with .Values.identity.host }}
+{{/*
+The identity host: the one name whose callers this process believes a login for.
+
+An L7 tailscale Ingress is `serve`, and serve is what puts the caller's tailnet
+login on the request — a plain L4 Service or a Funnel gets none, and neither
+does a tagged node. So this object is not a second way in, it is the only way a
+person's identity ever reaches the server.
+
+It is an Ingress and not a second HTTPRoute because the gateway cannot mint a
+tailnet identity: everything it carries arrives through Cloudflare or the LAN,
+where these headers would be a client's to write. The two data paths are
+separate on purpose and the server reads the header on this host alone.
+
+`tls.hosts` takes the MagicDNS label, not the fqdn — the operator appends the
+tailnet domain itself — so it is derived from the first label of the host the
+server is told to expect. Deriving rather than declaring both is what stops a
+rename from leaving a reachable name the server does not believe, which is a
+page that loads and then says nobody is signed in.
+
+No funnel annotation, deliberately: funnel would publish this to the internet
+and `serve.go` sets no identity headers on a funnel request, so it would be a
+public, anonymous publishing surface. external-dns ignores it — `ts.net` is in
+none of its `--domain-filter` entries — and the hold-out annotation says so
+rather than relying on that list never growing.
+*/}}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "kthx.fullname" $ }}-tailnet
+  namespace: {{ $.Release.Namespace }}
+  labels:
+    {{- include "kthx.labels" $ | nindent 4 }}
+  annotations:
+    # The tag the operator mints the proxy device's auth key with. The tailnet
+    # policy must already allow `tag:k8s-operator` to own it, or the key is
+    # refused and the proxy never joins: the Ingress then reports no hostname
+    # and the backend is unreachable with nothing in this namespace to say why.
+    tailscale.com/tags: {{ required "identity.tag names the tailnet tag the grant points at" $.Values.identity.tag | quote }}
+    external-dns.alpha.kubernetes.io/exclude: "true"
+spec:
+  ingressClassName: tailscale
+  defaultBackend:
+    service:
+      name: {{ include "kthx.fullname" $ }}
+      port:
+        number: {{ $.Values.port }}
+  tls:
+    - hosts:
+        - {{ splitList "." . | first | quote }}
+{{- end }}
