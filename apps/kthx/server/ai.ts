@@ -122,13 +122,20 @@ function bill(ctx: Ctx, name: string, day: string, tokens: number): void {
 }
 
 /**
- * The request this call spent, given back.
+ * The request this call spent, given back — only when the fault was ours.
  *
  * A request counts at dispatch, which is the only way two calls in flight
- * cannot both read the last one as free — so an upstream that refuses spends
- * one of a site's 200 for an answer it never got. `greatest` because the day's
- * row is not locked here: a refund that raced a reset would otherwise leave a
- * negative count, and a negative count is a budget that never runs out.
+ * cannot both read the last one as free. That leaves a site charged for an
+ * answer it never got whenever this deployment is the reason: a credential, a
+ * base URL, a header this server owes the upstream, an upstream that is down.
+ *
+ * It is never called for a refusal the caller's own body earned. The 200 a day
+ * is the only ceiling on outbound calls there is, and a body the upstream
+ * reliably refuses would otherwise be free to send forever.
+ *
+ * `greatest` because the day's row is not locked here: a refund that raced a
+ * reset would otherwise leave a negative count, and a negative count is a
+ * budget that never runs out.
  */
 function refundRequest(ctx: Ctx, name: string, day: string): void {
   void ctx.sql`
@@ -442,8 +449,9 @@ async function forward(
   const key = ctx.config.aiKey;
   if (key === null) {
     slot();
-    // Billed, not refunded: the request was counted at dispatch and this is a
-    // deployment fault, not a caller's. It is one line in the log either way.
+    // Refunded, like every other deployment fault: the request was counted at
+    // dispatch and a deployment with no key never made one.
+    refundRequest(ctx, name, day);
     logCause(ctx.id, 'the ai upstream', new Error('KTHX_AI_KEY is not set'));
     return refuse('AI_UPSTREAM', ctx.id);
   }
@@ -487,38 +495,52 @@ async function forward(
       signal: upstream.signal,
     });
   } catch (cause) {
-    settle(sent.fallbackTokens);
+    // An upstream that could not be reached at all is the same fault as one
+    // that answered 503, and is accounted the same way: no tokens, and the
+    // request back. Billing the clamped ceiling here — which is what a silent
+    // answer is billed, and the only number in scope — charged a site 4096
+    // tokens a try for an outage it did not cause and locked it out of AI for
+    // the rest of the day after about a hundred and twenty of them.
+    settle(0);
+    refundRequest(ctx, name, day);
     logCause(ctx.id, `the ai upstream at ${path}`, cause);
     return refuse('AI_UPSTREAM', ctx.id);
   }
   clearTimeout(deadline);
 
-  // Every refusal is one line under the caller's `x-request-id`. An upstream
-  // that turns down a request this server composed — a header it wants and did
-  // not get, a base URL that moved, an account that may not have that model —
-  // is otherwise invisible until somebody reads a page's console.
+  // Whose fault it was decides two things, and they are the same question.
+  //
+  // 401, 403 and every 5xx are the deployment's — a credential, a base URL, a
+  // header this server owes the upstream. A page can act on none of them (a
+  // relayed 401 in particular sends it looking for a token it does not have),
+  // so the caller is told `AI_UPSTREAM`, and the day gets its request back:
+  // this site asked for 200 answers and that was not one of them.
+  //
+  // Every other 4xx is about the body the caller composed — a field this model
+  // will not take, a role it does not know — and it keeps the request it spent.
+  // Refunding those would leave nothing bounding outbound calls at all: a body
+  // the upstream reliably refuses is free to send, so one anonymous visitor on
+  // one public site could loop it forever on the operator's account. The 200 a
+  // day is the only ceiling there is, and a request that reached the upstream
+  // spent one whatever came back.
+  const ours =
+    answer.status === 401 || answer.status === 403 || answer.status >= 500;
+
+  // Either way it is one line under the caller's `x-request-id`. An upstream
+  // that turns down a request this server composed is otherwise invisible
+  // until somebody reads a page's console.
   if (!answer.ok) {
     logCause(
       ctx.id,
       `the ai upstream at ${path} refused`,
       new Error(`upstream ${answer.status}`),
     );
-    // And the day gets its request back: it was counted at dispatch, and an
-    // answer the upstream refused is not one of the 200 this site asked for.
-    refundRequest(ctx, name, day);
   }
 
-  // Whose fault it was decides what the caller is told. 401, 403 and every 5xx
-  // are the deployment's — a credential, a base URL, a header this server owes
-  // the upstream — and a page can act on none of them; a relayed 401 in
-  // particular sends it looking for a token it does not have. Every other 4xx
-  // is about the body the caller composed, a field this model will not take or
-  // a role it does not know, and is relayed with the upstream's own status and
-  // message: one fixed sentence of this server's own would tell whoever wrote
-  // that body strictly less than the upstream already has.
-  if (answer.status === 401 || answer.status === 403 || answer.status >= 500) {
+  if (ours) {
     void answer.body?.cancel();
     settle(0);
+    refundRequest(ctx, name, day);
     return refuse('AI_UPSTREAM', ctx.id);
   }
 

@@ -329,7 +329,7 @@ describe('the passthrough', () => {
     expect((await response.json()).code).toBe('AI_UPSTREAM');
   });
 
-  test('relays a refusal the caller caused, and gives the request back', async () => {
+  test('relays a refusal the caller caused, and keeps the request spent', async () => {
     const site = await claimed('ai-400');
     reply = () =>
       Response.json({ error: { message: 'no such model' } }, { status: 400 });
@@ -338,9 +338,25 @@ describe('the passthrough', () => {
     // caller composed than one fixed sentence of this server's could.
     expect(response.status).toBe(400);
     expect((await response.json()).error.message).toBe('no such model');
-    // The request was counted at dispatch; an answer nobody got is not one of
-    // the 200 this site has today.
-    expect(await counted(site, 0)).toEqual({ requests: 0, tokens: 0 });
+    // And it costs a request. This is the whole ceiling on outbound calls: a
+    // body the upstream reliably refuses would otherwise be free to send, so
+    // one anonymous visitor on one public site could loop it forever on the
+    // operator's account.
+    // A relayed refusal bills no tokens — there was no completion — but the
+    // request it spent at dispatch stays spent.
+    expect(await counted(site, 1)).toEqual({ requests: 1, tokens: 0 });
+    await Bun.sleep(50);
+    expect(await counted(site, 1)).toEqual({ requests: 1, tokens: 0 });
+  });
+
+  test('a body the upstream refuses cannot be looped for free', async () => {
+    const site = await claimed('ai-loop');
+    reply = () =>
+      Response.json({ error: { message: 'bad role' } }, { status: 400 });
+    for (let i = 0; i < 5; i += 1) {
+      expect((await chat(site, { messages: [] })).status).toBe(400);
+    }
+    expect(await counted(site, 5)).toEqual({ requests: 5, tokens: 0 });
   });
 
   test('an upstream 500 is 502 AI_UPSTREAM, logged, and refunded', async () => {
@@ -352,6 +368,7 @@ describe('the passthrough', () => {
       // and there is nothing in it for a page to act on.
       expect(response.status).toBe(502);
       expect((await response.json()).code).toBe('AI_UPSTREAM');
+      // Refunded: this one is the deployment's fault, not the body's.
       expect(await counted(site, 0)).toEqual({ requests: 0, tokens: 0 });
     });
     // The failure this is here for — a header the upstream wants and did not
