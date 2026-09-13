@@ -10,6 +10,7 @@ import { PRICES } from '../src/prices.ts';
 const HOSTILE_PAYER = '"><img src=x onerror=alert(1)>';
 const HOSTILE_TX = '"><b>tx</b>';
 let facilitatorCalls = 0;
+let settleSucceeds = true;
 const facilitator = Bun.serve({
   port: 0,
   fetch: (req) => {
@@ -19,8 +20,10 @@ const facilitator = Bun.serve({
       return Response.json({ isValid: true, payer: HOSTILE_PAYER });
     if (path === '/settle')
       return Response.json({
-        success: true,
-        transaction: HOSTILE_TX,
+        success: settleSucceeds,
+        ...(settleSucceeds
+          ? { transaction: HOSTILE_TX }
+          : { errorReason: 'insufficient_funds' }),
         network: 'eip155:8453',
         payer: HOSTILE_PAYER,
       });
@@ -525,6 +528,28 @@ describe('clankerbanker', () => {
       .map((r) => r.status)
       .sort();
     expect(statuses.filter((s) => s === 200)).toHaveLength(1);
+    expect(await ledgerEntries()).toHaveLength(rows + 1);
+  });
+
+  test('a settlement that fails without throwing releases the lock', async () => {
+    // The facilitator answers 200 with success:false. That skips afterSettle,
+    // where the in-flight gate is normally released, so only onSettleFailure
+    // can free the key. If it does not, this payment is wedged forever.
+    const header = btoa(JSON.stringify(payload(await challenge('/oracle'))));
+    const rows = (await ledgerEntries()).length;
+    settleSucceeds = false;
+    try {
+      await app.request('/oracle', {
+        headers: { 'payment-signature': header },
+      });
+    } finally {
+      settleSucceeds = true;
+    }
+    expect(await ledgerEntries()).toHaveLength(rows);
+    const again = await app.request('/oracle', {
+      headers: { 'payment-signature': header },
+    });
+    expect(again.status).toBe(200);
     expect(await ledgerEntries()).toHaveLength(rows + 1);
   });
 
