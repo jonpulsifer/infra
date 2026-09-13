@@ -90,11 +90,26 @@ spec:
         # upload needs `storage.buckets.get`, which `roles/storage.objectAdmin`
         # does not grant, and the dump client major is pinned in the chart while
         # the server major comes from the operator defaulting webhook.
+        #
+        # Measured on the CronJob's last success, not on a failed Job object.
+        # A failed Job is an artifact that outlives the problem — it is kept by
+        # count, so once the dumps recover the last failures stay and an alert
+        # keyed on them never clears. Worse, the loudest failure of all leaves
+        # no failed Job to key on: a CronJob that stops firing writes nothing.
+        # Staleness sees both, and clears itself the night a dump succeeds.
+        #
+        # The `absent` arm is the one that matters most: no series at all means
+        # the CronJob has never succeeded, was deleted, or kube-state-metrics
+        # is not reporting — each of which is a backup this cluster does not
+        # have, and none of which the first arm can see.
         - alert: KthxBackupFailing
-          expr: kube_job_status_failed{namespace="kthx",job_name=~"kthx-db-backup-.*"} > 0
+          expr: |
+            (time() - kube_cronjob_status_last_successful_time{namespace="kthx",cronjob="kthx-db-backup"} > 36 * 3600)
+            or
+            absent(kube_cronjob_status_last_successful_time{namespace="kthx",cronjob="kthx-db-backup"})
           for: 15m
           labels:
             severity: warning
           annotations:
-            message: "The nightly kthx database dump failed"
-            description: "A kthx-db-backup Job exhausted its retries, so the depot has no dump under backups/pg for today and the only undo path for a site database is stale. Read both containers of the Job — dump is pg_dumpall, upload is gcloud — before the next window rotates the history away (3 failures are kept)."
+            message: "The nightly kthx database dump has not succeeded"
+            description: "The last successful kthx-db-backup is over 36 hours old — one whole window missed with the schedule at 04:23 UTC — so the depot has no current dump under backups/pg and the only undo path for a site database is stale. Read both containers of the most recent Job — dump is pg_dumpall, upload is gcloud — within three days, after which the Job is collected. If there is no Job at all, the CronJob itself stopped firing or is suspended."

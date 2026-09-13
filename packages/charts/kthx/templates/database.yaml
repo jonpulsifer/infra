@@ -102,6 +102,12 @@ spec:
   startingDeadlineSeconds: 3600
   jobTemplate:
     spec:
+      # A failed Job is kept to be read, not kept forever. `failedJobsHistoryLimit`
+      # alone evicts by count, so the last failures before a fix sit here
+      # indefinitely once the dumps start succeeding again — and every alert
+      # keyed on a failed Job object stays firing on a problem that is over.
+      # Three days is long enough to read both containers after a bad night.
+      ttlSecondsAfterFinished: 259200
       backoffLimit: 2
       template:
         metadata:
