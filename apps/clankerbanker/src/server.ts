@@ -204,7 +204,14 @@ if (treasury.length === 0) {
           console.error('ledger write failed; dropped settlement', entry, err);
         }
       },
-    );
+    )
+    // A settlement that fails without throwing — the facilitator answering
+    // 200 with `success: false` — skips afterSettle entirely, so the release
+    // above never runs. Without this the signed payment stays wedged in the
+    // gate and every retry of it aborts as already in flight, forever.
+    .onSettleFailure(async ({ transportContext, paymentPayload }) => {
+      payers.delete(stashKey(transportContext, paymentPayload));
+    });
   // Cloudflare terminates TLS and the tunnel hands us plain http, so the URL
   // the middleware would derive advertises `http://` and x402 clients refuse
   // the quote. Pin the resource to the public origin instead.
