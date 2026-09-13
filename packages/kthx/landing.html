@@ -469,8 +469,8 @@ kthx.site.name           <i>// this site's name, right even under kthx dev</i></
     <span>Every site keeps its releases; <code>kthx rollback</code> serves an earlier one.</span>
   </div>
 
-  <!-- the operator's own, and the last thing on the page: hidden unless this
-       tab has been given the key -->
+  <!-- the operator's own, and the last thing on the page: hidden unless the
+       server said this caller is one -->
   <div class="foot" id="nukebar" hidden>
     <span>Deletes every site on the zone and frees every name.</span>
     <span class="sp"></span>
@@ -505,12 +505,10 @@ function forget(name) { delete tokens[name]; store(); sites = sites.filter(s => 
 let sites = [];   /* [{ name, url, serving, held, releases: [{ n, digest, size, at }] }] newest first */
 let open = null;
 
-async function api(method, path, { json, body, name, token, filename, auth } = {}) {
+async function api(method, path, { json, body, name, token, filename } = {}) {
   const headers = {};
   /* `token` is the one being tried: a site is linked before it is stored */
   if (name) headers.authorization = `Bearer ${token || tokens[name]}`;
-  /* the operator key, which opens the zone rather than one site */
-  if (auth) headers.authorization = `Bearer ${auth}`;
   if (json !== undefined) { headers["content-type"] = "application/json"; body = JSON.stringify(json); }
   if (filename) headers["x-filename"] = filename;
   const r = await fetch(path, { method, headers, body });
@@ -949,23 +947,16 @@ function toast(msg) {
   toastTimer = setTimeout(() => { el.classList.add("bye"); setTimeout(() => el.remove(), 180); }, 2800);
 }
 
-/* the nuke: the operator's key opens the whole zone, so it is asked for once
-   per tab — `#nuke` in the URL — and kept in sessionStorage, which closing the
-   tab forgets. Never localStorage: that is where the site tokens live and it
-   outlives the demo. The button does not exist until the key does. */
-const ADMIN = "kthx.admin";
-const adminKey = () => { try { return sessionStorage.getItem(ADMIN); } catch { return null; } };
-function forgetAdmin() { try { sessionStorage.removeItem(ADMIN); } catch {} showNuke(); }
-function showNuke() { $("#nukebar").hidden = adminKey() === null; }
-if (location.hash === "#nuke" && adminKey() === null) {
-  const typed = prompt("Operator key:");
-  if (typed?.trim()) { try { sessionStorage.setItem(ADMIN, typed.trim()); } catch {} }
-}
-showNuke();
+/* the nuke: the zone opens for a person, not for a key. The server stamps
+   `data-admin` on <html> when this caller is one of them, which is the same
+   decision the route makes again from the same request — so there is nothing
+   to type, nothing to remember, and nothing left in a tab afterwards. The
+   button does not exist for anybody else. */
+$("#nukebar").hidden = !document.documentElement.hasAttribute("data-admin");
 $("#nuke").addEventListener("click", async () => {
   if (prompt("Every site on the zone is deleted and every name comes free. Type NUKE:")?.trim() !== "NUKE") { toast("Nothing deleted."); return; }
   try {
-    const counts = await api("DELETE", API, { auth: adminKey() });
+    const counts = await api("DELETE", API);
     /* the tokens are now tokens for nothing */
     for (const name of Object.keys(tokens)) delete tokens[name];
     store(); sites = []; open = null; renderProps();
@@ -973,8 +964,6 @@ $("#nuke").addEventListener("click", async () => {
     listed = []; more = null; renderDir(); loadDir().catch(() => {});
     toast(`${counts.deleted} site${counts.deleted === 1 ? "" : "s"} deleted${counts.failed ? `, ${counts.failed} failed` : ""}.`);
   } catch (err) {
-    /* the key this tab holds is not one: forget it rather than keep offering it */
-    if (err.status === 403 || err.status === 404) forgetAdmin();
     toast(err.message || String(err));
   }
 });

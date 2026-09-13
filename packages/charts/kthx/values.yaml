@@ -49,6 +49,11 @@ identity:
   # The header the proxy sets. Named rather than assumed so a different
   # identity-asserting hop is a values change; the default is tailscale's.
   header: ""
+  # Comma-separated logins that open `DELETE /api/sites`, the nuke. Empty is the
+  # default and means the route answers 404 — a deployment with no operator does
+  # not advertise that a nuke exists. These are people, not a credential: a
+  # login is only ever set for a caller the identity proxy vouched for.
+  admins: ""
 
 # The AI passthrough. The key is not here: it arrives with the HMAC keys through
 # `envFromSecret`, because a chart value is rendered into a HelmRelease in a
@@ -100,16 +105,6 @@ ai:
 # ExternalSecret the installation owns. `required` at the point of use, because
 # an omitted name renders a valid Deployment that dies on ConfigError.
 envFromSecret: ""
-
-# A second Secret, referenced `optional`, carrying `KTHX_ADMIN_KEY` alone — the
-# operator key `DELETE /api/sites` is gated on. Empty, or a Secret that is not
-# there, is the nuke answering 404 and nothing else changing.
-#
-# Its own Secret rather than a fourth key in `envFromSecret`: an ExternalSecret
-# fails as a whole when one field is missing from the vault, and a stalled one
-# keeps serving its old data while never refreshing again. The keys the process
-# cannot boot without must not be able to stall behind a hand-created field.
-adminSecret: ""
 
 # Both volumes are `local-path`, which is a directory on one node's disk, so the
 # pod and the Postgres instance have to be pinned to that node or they bind to a

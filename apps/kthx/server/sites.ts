@@ -48,7 +48,6 @@ import {
   CLAIM_BUCKET,
   DailyCap,
   DIRECTORY_BUCKET,
-  NUKE_ATTEMPTS,
   secondsToMidnight,
   TokenBucket,
 } from './limits.ts';
@@ -82,7 +81,6 @@ export const BODY_TIMEOUT_MS = 120_000;
 const MAX_CLAIM_BYTES = 64 * 1024;
 
 const claims = new TokenBucket(CLAIM_BUCKET);
-const nukeAttempts = new TokenBucket(NUKE_ATTEMPTS);
 const claimsPerDay = new DailyCap(MAX_CLAIMS_PER_DAY);
 const uploadsPerDay = new DailyCap(MAX_UPLOADS_PER_DAY);
 
@@ -416,19 +414,18 @@ export async function nameStatus(ctx: Ctx, segment: string): Promise<Response> {
 // --- the nuke ---------------------------------------------------------------
 
 /**
- * Whether this request carries the operator's key.
+ * Whether this caller opens the whole zone.
  *
- * Compared timing-safe over the hashes, the way a site's bearer is: this route
- * has no rate limit by design, so comparing the raw values would make the
- * key's *length* free to measure — `timingSafeEquals` answers before the
- * constant-time compare when the lengths differ. Hashing both sides makes
- * every comparison 64 characters long. A public zone with anonymous claims
- * cannot have an unauthenticated nuke, and nothing a visitor holds opens this
- * one.
+ * One predicate for two readers — the route, and the page that decides whether
+ * to show a control at all — because a page that offers a button the route
+ * refuses is worse than no button. A login is only ever set on the identity
+ * host, so naming a door here would be saying the same thing twice.
  */
-function opensZone(caller: Caller, key: string): boolean {
+export function opensZone(caller: Caller, config: Config): boolean {
   return (
-    caller.bearer !== null && timingSafeEquals(hash(caller.bearer), hash(key))
+    config.adminLogins.length > 0 &&
+    caller.login !== null &&
+    config.adminLogins.includes(caller.login)
   );
 }
 
@@ -440,25 +437,32 @@ function opensZone(caller: Caller, key: string): boolean {
  * are keyed by content digest and may be shared between sites, and after a
  * hard delete no row references them — nothing collects them.
  *
- * With no `KTHX_ADMIN_KEY` this answers 404, the same as a path this server
- * does not have — a deployment without the key does not advertise that a nuke
- * exists. A wrong key is 403 and spends no claim allowance — an operator who
- * mistypes it must not then be rate limited out of the demo — but wrong keys
- * do fill `NUKE_ATTEMPTS`, process-wide, so a short passphrase cannot be
- * guessed at wire speed; past it every attempt is 429 until the minute passes.
+ * Opened by a name in `KTHX_ADMIN_LOGINS` and nothing else, which means the
+ * identity host and nothing else: a login is only ever vouched for there, by a
+ * proxy this server trusts. With the list empty — the default — this answers
+ * 404, the same as a path this server does not have, so a deployment without
+ * an operator does not advertise that a nuke exists.
+ *
+ * There is no rate limit and it needs none. A key could be mistyped in front
+ * of an audience, guessed at wire speed, or left in a tab's `sessionStorage`;
+ * an address that a tailnet vouched for is none of those, and the caller who
+ * fails this check is a real person the log can name.
  */
 async function nuke(request: Request, ctx: Ctx): Promise<Response> {
-  const key = ctx.config.adminKey;
-  if (key === null) return refuse('NOT_FOUND', ctx.id);
+  if (ctx.config.adminLogins.length === 0) return refuse('NOT_FOUND', ctx.id);
   if (!sameOrigin(request, ctx.host, ctx.port)) {
     return refuse('FORBIDDEN', ctx.id);
   }
-  if (!opensZone(ctx.caller, key)) {
-    // Wrong keys fill a bucket of their own: the key may be a short passphrase
-    // and this is a public route. A right key is checked first and never held.
-    return nukeAttempts.spend('zone')
-      ? refuse('RATE_LIMITED', ctx.id, retryAfter(60))
-      : refuse('FORBIDDEN', ctx.id);
+  const login = ctx.caller.login;
+  if (!opensZone(ctx.caller, ctx.config)) {
+    // Named in the log, because unlike a mistyped key this identifies a person
+    // and the only interesting case is the one nobody expected.
+    logCause(
+      ctx.id,
+      'the nuke',
+      new Error(`${login ?? 'nobody'} does not open the zone`),
+    );
+    return refuse(login === null ? 'UNAUTHENTICATED' : 'FORBIDDEN', ctx.id);
   }
 
   // Deleted rows as well: taking those is what frees their names.

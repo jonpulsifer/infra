@@ -146,6 +146,13 @@ spec:
             - name: KTHX_IDENTITY_HOST
               value: {{ . | quote }}
             {{- end }}
+            {{- with .Values.identity.admins }}
+            # Who opens `DELETE /api/sites`. Not a secret: it is a list of
+            # people, and it is only ever consulted for a login the tailnet
+            # already vouched for on the identity host.
+            - name: KTHX_ADMIN_LOGINS
+              value: {{ . | quote }}
+            {{- end }}
             {{- with .Values.identity.header }}
             - name: KTHX_IDENTITY_HEADER
               value: {{ . | quote }}
@@ -178,21 +185,9 @@ spec:
           # `required` rather than `with`: an omitted name would drop `envFrom`
           # entirely and render a Deployment that boots and dies on ConfigError,
           # which is a template error deferred to a crash loop.
-          #
-          # `KTHX_ADMIN_KEY` is in a Secret of its own, referenced `optional`,
-          # because it is the one key here the process does not need: without it
-          # `DELETE /api/sites` answers 404 and everything else serves. Its own
-          # Secret so that a missing field in the vault cannot fail the sync of
-          # the keys the process *does* need — an ExternalSecret is all-or-
-          # nothing, and a stalled one stops refreshing the rest.
           envFrom:
             - secretRef:
                 name: {{ required "envFromSecret is required: it carries KTHX_ME_KEY, KTHX_PG_KEY and KTHX_AI_KEY" .Values.envFromSecret }}
-            {{- with .Values.adminSecret }}
-            - secretRef:
-                name: {{ . | quote }}
-                optional: true
-            {{- end }}
           {{/*
           Readiness only. The slow path here is Postgres, and a liveness probe
           would restart the process exactly when it is least able to recover.

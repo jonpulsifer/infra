@@ -5,5 +5,4 @@ namespace: kthx
 resources:
   - namespace.yaml
   - external-secret.yaml
-  - admin-secret.yaml
   - helm-release.yaml

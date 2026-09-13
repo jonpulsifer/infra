@@ -29,7 +29,6 @@ const VALUES = {
   image: 'ghcr.io/jonpulsifer/kthx@sha256:feed',
   bucket: 'bluenose-kthx',
   envFromSecret: 'kthx-env',
-  adminSecret: 'kthx-admin',
   node: 'oldschool',
   gcp: {
     audience: '//iam.googleapis.com/projects/1/locations/global/x',
@@ -138,23 +137,42 @@ describe('the GCP credential', () => {
   });
 });
 
-describe('the operator key', () => {
-  test('is a second, optional envFrom — a missing Secret must not stop the pod', async () => {
-    const envFrom = one(await render(), 'Deployment').spec.template.spec
-      .containers[0].envFrom;
-    expect(envFrom.map((e: any) => e.secretRef.name)).toEqual([
-      'kthx-env',
-      'kthx-admin',
-    ]);
-    expect(envFrom[0].secretRef.optional).toBeUndefined();
-    expect(envFrom[1].secretRef.optional).toBe(true);
+describe('who opens the zone', () => {
+  const env = async (values?: Record<string, unknown>) =>
+    (
+      one(await render(values), 'Deployment').spec.template.spec
+        .containers[0] as { env: { name: string; value?: string }[] }
+    ).env;
+
+  test('is nobody unless the installation names somebody', async () => {
+    // No env entry rather than an empty one: the route answers 404 either way,
+    // and a rendered `KTHX_ADMIN_LOGINS: ""` reads like a setting somebody
+    // cleared rather than one nobody made.
+    expect((await env()).map((e) => e.name)).not.toContain('KTHX_ADMIN_LOGINS');
   });
 
-  test('is absent when unset, which is the nuke turned off', async () => {
-    const objects = await render({ ...VALUES, adminSecret: '' });
-    const envFrom = one(objects, 'Deployment').spec.template.spec.containers[0]
-      .envFrom;
+  test('is a list of people, not a credential', async () => {
+    const rendered = await env({
+      ...VALUES,
+      identity: {
+        host: 'kthx.example-tailnet.ts.net',
+        tag: 'tag:kthx-ingress',
+        proxies: '10.101.0.0/20',
+        admins: 'someone@example.test',
+      },
+    });
+    expect(rendered.find((e) => e.name === 'KTHX_ADMIN_LOGINS')?.value).toBe(
+      'someone@example.test',
+    );
+  });
+
+  test('leaves one envFrom, because there is no second Secret any more', async () => {
+    const envFrom = one(await render(), 'Deployment').spec.template.spec
+      .containers[0].envFrom;
     expect(envFrom).toHaveLength(1);
+    expect(envFrom[0].secretRef.name).toBe('kthx-env');
+    // The keys the process cannot boot without are not optional.
+    expect(envFrom[0].secretRef.optional).toBeUndefined();
   });
 });
 

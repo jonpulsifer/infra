@@ -51,18 +51,19 @@ export interface Config {
   /** Derives per-site Postgres passwords. */
   readonly pgKey: string;
   /**
-   * What opens `DELETE /api/sites`, the nuke — the operator's key, never a
-   * site's and never a visitor's. Unset is not a disabled feature: the route
-   * answers 404 like a path this server does not have, and the landing page's
-   * control stays hidden.
+   * Who opens `DELETE /api/sites`, the nuke: tailnet logins, by name.
    *
-   * A key shorter than the contract's 32 bytes is refused the same way an
-   * unset one is — `null`, a 404, one line on stderr — rather than trusted or
-   * thrown on. Throwing would take a whole zone down over a hand-typed
-   * 1Password field, and trusting it would leave a destructive, unmetered
-   * route behind something guessable.
+   * A login and not a key, because there is no longer anything a key buys.
+   * The identity host already knows who is calling and a proxy this server
+   * trusts is what says so, and an address cannot be mistyped into a demo, be
+   * guessed at wire speed, be left in a `sessionStorage` on a shared laptop,
+   * or need a rate limiter of its own to stay unguessable.
+   *
+   * Empty is not a disabled feature: the route answers 404 like a path this
+   * server does not have, and the page's control stays hidden. It is also the
+   * default, so a deployment that says nothing has no nuke.
    */
-  readonly adminKey: string | null;
+  readonly adminLogins: readonly string[];
   /**
    * What the template database and the group role are called: `template_kthx`
    * and `kthx_site`.
@@ -164,12 +165,6 @@ function longEnough(name: string, value: string): string {
 
 export function readConfig(env: Env = Bun.env): Config {
   const previous = env.KTHX_ME_KEY_PREVIOUS?.trim();
-  const admin = env.KTHX_ADMIN_KEY?.trim() ?? '';
-  if (admin !== '' && byteLength(admin) < KEY_BYTES) {
-    console.error(
-      `KTHX_ADMIN_KEY is shorter than ${KEY_BYTES} bytes; the nuke stays closed`,
-    );
-  }
   const zone = env.KTHX_ZONE?.trim().toLowerCase() || 'kthx.dev';
   const controlHost = env.KTHX_CONTROL_HOST?.trim().toLowerCase() || null;
   if (
@@ -232,7 +227,10 @@ export function readConfig(env: Env = Bun.env): Config {
         ? null
         : longEnough('KTHX_ME_KEY_PREVIOUS', previous),
     pgKey: longEnough('KTHX_PG_KEY', required(env, 'KTHX_PG_KEY')),
-    adminKey: byteLength(admin) >= KEY_BYTES ? admin : null,
+    adminLogins: (env.KTHX_ADMIN_LOGINS ?? '')
+      .split(',')
+      .map((entry) => entry.trim().toLowerCase())
+      .filter((entry) => entry !== ''),
     pgPrefix: 'kthx',
     maxDbBytes: 256 * 1024 * 1024,
     maxCollections: 256,
