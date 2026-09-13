@@ -19,10 +19,18 @@ import { SQL } from 'bun';
 
 const MIGRATIONS = join(import.meta.dir, 'migrations');
 
-/** One site row, as every handler reads it. */
+/**
+ * One site row, as every handler reads it.
+ *
+ * Both credentials are nullable and both are first class: a site claimed by an
+ * agent has only a `token_hash`, one handed to a person on the tailnet has a
+ * login as well, and either opens it. Typing `token_hash` as `string` is what
+ * left a null flowing into a timing-safe compare.
+ */
 export interface SiteRow {
   readonly name: string;
-  readonly token_hash: string;
+  readonly token_hash: string | null;
+  readonly owner_login: string | null;
   readonly serving: number | null;
   readonly held: boolean;
   readonly deleted_at: Date | null;

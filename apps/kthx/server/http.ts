@@ -360,7 +360,7 @@ export function prefix(raw: string): string {
  * IPv4 in this cluster, so a prefix is only ever needed for v4; an IPv6 entry
  * has to be written out in full. Widen the day the pod network is dual-stack.
  */
-function trustedPeer(peer: string, trusted: readonly string[]): boolean {
+export function trustedPeer(peer: string, trusted: readonly string[]): boolean {
   const address = peer.startsWith('::ffff:') ? peer.slice(7) : peer;
   return trusted.some((entry) => {
     const [network = '', bits] = entry.split('/');

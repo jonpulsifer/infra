@@ -446,15 +446,21 @@ describe('releases', () => {
 });
 
 describe('rolling back and holding', () => {
-  test('serving an older release sets the hold; a held site keeps serving it', async () => {
+  test('a rollback holds, and choosing the newest again does not', async () => {
     const owned = await mine();
     await upload(owned.name, owned.token);
     await upload(owned.name, owned.token, site({ 'index.html': 'v2' }));
 
+    // Back to v1: the latch is on, which is what stops a deploy firing while
+    // somebody is looking at what broke from putting it back.
     expect(await serveRelease(owned.name, owned.token, 1)).toMatchObject({
       status: 200,
       body: { serving: 1, held: true },
     });
+    const rolled = await kthx().fetch(
+      ask('/', { host: `${owned.name}.${ZONE}` }),
+    );
+    expect(await rolled.text()).toContain('v1');
 
     const third = await upload(
       owned.name,
@@ -462,19 +468,53 @@ describe('rolling back and holding', () => {
       site({ 'index.html': 'v3' }),
     );
     expect(third.body).toMatchObject({ n: 3, serving: 1 });
-    expect((await inspect(owned.name, owned.token)).body).toMatchObject({
-      serving: 1,
-      held: true,
-    });
+    const still = await kthx().fetch(
+      ask('/', { host: `${owned.name}.${ZONE}` }),
+    );
+    expect(await still.text()).toContain('v1');
 
-    // Forward is the same act, and also holds.
-    expect((await serveRelease(owned.name, owned.token, 3)).body).toEqual({
+    // Choosing the newest is the ordinary state and holds nothing. Setting the
+    // latch here too made the first rollback of a site's life permanent: every
+    // later release stored, none of them ever serving.
+    expect(await serveRelease(owned.name, owned.token, 3)).toMatchObject({
+      status: 200,
+      body: { serving: 3, held: false },
+    });
+    expect((await inspect(owned.name, owned.token)).body).toMatchObject({
       serving: 3,
-      held: true,
+      held: false,
+    });
+    const published = await kthx().fetch(
+      ask('/', { host: `${owned.name}.${ZONE}` }),
+    );
+    expect(await published.text()).toBe('v3');
+
+    // And an upload onto an unheld site serves, as it always has.
+    const fourth = await upload(
+      owned.name,
+      owned.token,
+      site({ 'index.html': 'v4' }),
+    );
+    expect(fourth.body).toMatchObject({ n: 4, serving: 4 });
+  });
+
+  test('choosing the newest release holds nothing', async () => {
+    const owned = await mine('forward');
+    await upload(owned.name, owned.token);
+    await upload(owned.name, owned.token, site({ 'index.html': 'v2' }));
+
+    expect(await serveRelease(owned.name, owned.token, 1)).toMatchObject({
+      body: { serving: 1, held: true },
+    });
+    // Forward is the same act and is not a hold: the site is on its newest
+    // release, which is where an untouched site already is.
+    expect((await serveRelease(owned.name, owned.token, 2)).body).toEqual({
+      serving: 2,
+      held: false,
     });
     expect(await unhold(owned.name, owned.token)).toMatchObject({
       status: 200,
-      body: { held: false, serving: 3 },
+      body: { held: false, serving: 2 },
     });
     expect((await serveRelease(owned.name, owned.token, 9)).status).toBe(404);
     expect((await serveRelease(owned.name, owned.token, 'one')).status).toBe(
@@ -482,18 +522,13 @@ describe('rolling back and holding', () => {
     );
   });
 
-  test('a hold survives more than KEEP_RELEASES further uploads', async () => {
+  test('a rollback reaches a release the volume no longer carries', async () => {
     const owned = await mine('pinned');
     expect(
       (await upload(owned.name, owned.token, site({ 'index.html': 'pinned' })))
         .status,
     ).toBe(201);
-    expect(await serveRelease(owned.name, owned.token, 1)).toMatchObject({
-      status: 200,
-      body: { serving: 1, held: true },
-    });
-
-    for (let i = 0; i < KEEP_RELEASES + 1; i += 1) {
+    for (let i = 0; i < KEEP_RELEASES - 1; i += 1) {
       expect(
         (
           await upload(
@@ -504,7 +539,15 @@ describe('rolling back and holding', () => {
         ).status,
       ).toBe(201);
     }
+    // Only the serving release and the one before it stay on disk; v1 is a
+    // rehydrate from the depot away.
+    await pruneSite(kthx().sitesDir, owned.name, new Set(), new Set());
+    expect(await releaseDirs(owned.name)).toEqual([]);
 
+    expect(await serveRelease(owned.name, owned.token, 1)).toMatchObject({
+      status: 200,
+      body: { serving: 1, held: true },
+    });
     const served = await kthx().fetch(
       ask('/', { host: `${owned.name}.${ZONE}` }),
     );
@@ -512,7 +555,7 @@ describe('rolling back and holding', () => {
     expect(await served.text()).toBe('pinned');
     const seen = (await inspect(owned.name, owned.token)).body;
     expect(seen).toMatchObject({ serving: 1, held: true });
-    expect(seen.releases).toHaveLength(KEEP_RELEASES + 1);
+    expect(seen.releases).toHaveLength(KEEP_RELEASES);
   });
 });
 
@@ -601,6 +644,7 @@ describe('the directory', () => {
   interface Item {
     readonly name: string;
     readonly url: string;
+    readonly owner: string | null;
     readonly serving: number | null;
     readonly releases: number;
     readonly at: string;
@@ -652,6 +696,9 @@ describe('the directory', () => {
     expect(served).toEqual({
       name: second.name,
       url: `https://${second.name}.${ZONE}`,
+      // Claimed with no login, and read by a caller with none: nobody's
+      // address is in a list anyone may read.
+      owner: null,
       serving: 1,
       releases: 1,
       at: '2026-08-02T00:00:00.000Z',
@@ -665,6 +712,7 @@ describe('the directory', () => {
       expect(Object.keys(item).sort()).toEqual([
         'at',
         'name',
+        'owner',
         'releases',
         'serving',
         'url',

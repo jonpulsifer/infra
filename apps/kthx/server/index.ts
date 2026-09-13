@@ -13,13 +13,13 @@ import { join } from 'node:path';
 import { LANDING_PATH, SDK_PATH, SKILL_PATH } from '@repo/kthx/assets';
 import { FAVICON_PATH } from '@repo/kthx/favicon';
 import { AI_IDLE_SECONDS, aiApi } from './ai.ts';
+import { callerOf } from './caller.ts';
 import { createClient, migrate } from './db.ts';
 import { bucketDepot, type Depot, diskDepot } from './depot.ts';
 import { dbApi } from './documents.ts';
 import { type Config, readConfig } from './env.ts';
 import { filesApi, serveFile } from './files.ts';
 import {
-  addressOf,
   hostOf,
   logCause,
   ok,
@@ -42,7 +42,7 @@ import {
   notHere,
   staticResponse,
 } from './serve.ts';
-import { type Ctx, opensSite, sitesApi } from './sites.ts';
+import { type Ctx, nameStatus, opensSite, sitesApi } from './sites.ts';
 
 /** The one sentence a v1 site's old calls get. No shim: they fail loudly. */
 const RETIRED = 'the /_/ API is retired; use /api/ — https://kthx.dev/skill.md';
@@ -162,10 +162,31 @@ async function apex(
     // With a private host configured, the public apex reads the directory and
     // nothing else: claiming and everything behind a bearer answer there.
     const directory = request.method === 'GET' && segments.length === 3;
-    if (!ctx.control && !directory) return refuse('PRIVATE', ctx.id);
+    if (!ctx.caller.control && !directory) return refuse('PRIVATE', ctx.id);
     return (
       (await sitesApi(request, ctx, segments)) ?? refuse('NOT_FOUND', ctx.id)
     );
+  }
+  // Ahead of the `/api/*` catch-all below, which is where every path this
+  // server does not have goes to die.
+  if (segments[1] === 'api' && segments[2] === 'names') {
+    if (!READ_METHODS.has(request.method)) {
+      return refuse('METHOD_NOT_ALLOWED', ctx.id);
+    }
+    const asked = segments.length === 4 ? (segments[3] ?? '') : '';
+    if (asked === '') return refuse('NOT_FOUND', ctx.id);
+    return nameStatus(ctx, asked);
+  }
+  if (path === '/api/whoami') {
+    if (!READ_METHODS.has(request.method)) {
+      return refuse('METHOD_NOT_ALLOWED', ctx.id);
+    }
+    // Nowhere but the identity host has anything to answer with, so this is
+    // 401 on the public apex and on the control host by construction rather
+    // than by a rule of its own.
+    return ctx.caller.login === null
+      ? refuse('UNAUTHENTICATED', ctx.id)
+      : ok({ login: ctx.caller.login }, ctx.id);
   }
   // The v1 API. Gone rather than moved: its key→JSON plane had no real users,
   // and a shim would be a second contract to keep alive.
@@ -198,13 +219,16 @@ async function apex(
     return refuse('METHOD_NOT_ALLOWED', ctx.id);
   }
   if (path === '/') {
-    return new Response(await landingHtml(ctx.config.zone, ctx.control), {
-      headers: {
-        'content-type': 'text/html; charset=utf-8',
-        'cache-control': 'no-cache',
-        'x-content-type-options': 'nosniff',
+    return new Response(
+      await landingHtml(ctx.config.zone, ctx.caller.control),
+      {
+        headers: {
+          'content-type': 'text/html; charset=utf-8',
+          'cache-control': 'no-cache',
+          'x-content-type-options': 'nosniff',
+        },
       },
-    });
+    );
   }
   if (path === '/sdk.js') {
     return asset(
@@ -230,7 +254,8 @@ async function apex(
 interface Serving {
   readonly deleted_at: Date | null;
   readonly provisioned_at: Date | null;
-  readonly token_hash: string;
+  readonly token_hash: string | null;
+  readonly owner_login: string | null;
   readonly serving: number | null;
   readonly digest: string | null;
   readonly location: string | null;
@@ -272,8 +297,8 @@ async function site(
   let row: Serving | undefined;
   try {
     [row] = (await ctx.sql`
-      select s.deleted_at, s.provisioned_at, s.token_hash, s.serving,
-             r.digest, r.location
+      select s.deleted_at, s.provisioned_at, s.token_hash, s.owner_login,
+             s.serving, r.digest, r.location
       from sites s
       left join releases r on r.site = s.name and r.n = s.serving
       where s.name = ${name} limit 1
@@ -357,7 +382,7 @@ async function siteApi(
     return serveFile(request, ctx, name, path);
   }
 
-  const owner = opensSite(request, row.token_hash);
+  const owner = opensSite(ctx.caller, row);
   // The upgrade is a `GET` and is guarded all the same: a socket is a write
   // channel, and a foreign page opening one is exactly what this stops.
   const guarded = request.method !== 'GET' || path === '/api/ws';
@@ -366,7 +391,7 @@ async function siteApi(
   }
 
   const me = meOf(request, name, ctx.config.meKey, ctx.config.mePreviousKey);
-  const address = addressOf(request, ctx.server, ctx.config.trustedProxies);
+  const address = ctx.caller.bucket;
 
   if (path === '/api/files' || path.startsWith('/api/files/')) {
     const refusal = charge(
@@ -510,7 +535,7 @@ function upgrade(
   name: string,
   me: Me,
 ): Response | undefined {
-  const address = addressOf(request, ctx.server, ctx.config.trustedProxies);
+  const address = ctx.caller.bucket;
   if (socketsFull(name, me.id, address)) {
     return refuse('RATE_LIMITED', ctx.id, { 'retry-after': '60' });
   }
@@ -553,15 +578,17 @@ export function handler(
   ): Promise<Response | undefined> => {
     const id = requestId();
     const host = hostOf(request);
-    const control = config.controlHost !== null && host === config.controlHost;
-    const name = control ? '' : siteOf(host, config.zone);
+    const caller = callerOf(request, server, config, host);
+    // Both private hosts answer the apex, because neither is in the zone and
+    // the control API is what both are for.
+    const name = caller.door === 'public' ? siteOf(host, config.zone) : '';
     // A host outside the zone reached this process by mistake or on purpose;
     // either way it learns nothing about what is behind it.
     if (name === null) return refuse('NOT_FOUND', id);
-    // Nor does a request for the private host that came through Cloudflare:
-    // the tunnel never carries that name, so this is an edge misrouted, and it
-    // gets the answer a host outside the zone gets.
-    if (control && request.headers.has('cf-connecting-ip')) {
+    // Nor does a request for a private host that came through Cloudflare:
+    // the tunnel never carries those names, so this is an edge misrouted, and
+    // it gets the answer a host outside the zone gets.
+    if (caller.door !== 'public' && request.headers.has('cf-connecting-ip')) {
       return refuse('NOT_FOUND', id);
     }
 
@@ -574,7 +601,7 @@ export function handler(
       id,
       host,
       port: portOf(request),
-      control: control || config.controlHost === null,
+      caller,
     };
     const path = decodePath(request.url);
     if (path === null) {

@@ -124,6 +124,10 @@ export function withServer(overrides: Partial<Config> = {}): () => Harness {
       zone: ZONE,
       // The apex answers claims itself unless a test says otherwise.
       controlHost: null,
+      // No identity host is the kill switch, and the shape production had
+      // before there was one: the header is read nowhere.
+      identityHost: null,
+      identityHeader: 'tailscale-user-login',
       bucket: null,
       sitesDir,
       databaseUrl: url.toString(),
@@ -145,6 +149,7 @@ export function withServer(overrides: Partial<Config> = {}): () => Harness {
       aiMaxTokens: 4096,
       aiBuildMaxTokens: 4096,
       trustedProxies: [],
+      tailnetProxies: [],
       port: 0,
       ...overrides,
     };

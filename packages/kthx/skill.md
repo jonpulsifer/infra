@@ -120,12 +120,28 @@ The SDK is a convenience; the routes are the product. `<site>` is
 | POST | `/api/mcp` | JSON-RPC 2.0, one message per request |
 
 The apex has one route no token opens: `GET https://kthx.dev/api/sites` is the
-public directory — `{items: [{name, url, serving, releases, at}], next}`, newest
-claim first, `limit` up to 500 and `after=<name>` for the page after that. It
-names sites and nothing else; a site's releases, usage and hold stay behind its
-bearer. It is never cached, so a name claimed a second ago is on it; ask for
-more than sixty pages a minute from one address and the answer is 429
+public directory — `{items: [{name, url, owner, serving, releases, at}],
+next}`, newest claim first, `limit` up to 500 and `after=<name>` for the page
+after that. It names sites and nothing else; a site's releases, usage and hold
+stay behind its bearer, and `owner` is an address only when the caller is that
+site's owner and `null` to everyone else — attribution is for the owner, not
+for the zone. It is never cached, so a name claimed a second ago is on it; ask
+for more than sixty pages a minute from one address and the answer is 429
 `RATE_LIMITED`.
+
+Three more apex routes exist for a caller whose identity the deployment can
+verify — a person on the tailnet host, where a proxy vouches for a login. An
+agent has a bearer instead and needs none of them.
+
+| Method | Path | Answers |
+| --- | --- | --- |
+| GET | `/api/whoami` | `{login}`, or 401 `UNAUTHENTICATED` when nobody is vouched for |
+| GET | `/api/names/:name` | whether a name can be claimed — the answer a 409 at publish would otherwise be |
+| GET | `/api/sites?owner=me` | the directory, narrowed to the caller's own sites |
+
+A site answers to a bearer **or** to its owner's login, permanently and both:
+the login is only ever presented from a browser on one host, and a command
+line, an agent or a phone off the tailnet still needs something to carry.
 
 Every non-`GET` `/api/*` from a browser must send `Origin` equal to the site's
 own; a non-browser client sends none. JSON routes require `content-type:

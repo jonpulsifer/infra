@@ -25,6 +25,20 @@ export interface Config {
    * inside it would shadow the site of that name.
    */
   readonly controlHost: string | null;
+  /**
+   * The tailnet host an identity header is believed on, or `null`.
+   *
+   * Outside the zone and never the control host, for the reason above and
+   * because the two doors believe different things: the control host is
+   * reach-is-identity and an agent's bearer, this one is a person the tailnet
+   * vouched for. `null` reads the header nowhere, which is the kill switch.
+   */
+  readonly identityHost: string | null;
+  /**
+   * The header {@link identityHost} is read from — the tailnet proxy's, which
+   * strips whatever the client sent before setting its own.
+   */
+  readonly identityHeader: string;
   /** The depot bucket, or `null` for the local-disk fallback. */
   readonly bucket: string | null;
   /** Where release directories are unpacked. */
@@ -95,6 +109,15 @@ export interface Config {
    * The chart sets it; a deployment that does not is rate limiting itself.
    */
   readonly trustedProxies: readonly string[];
+  /**
+   * The peers whose identity header and `x-forwarded-for` are believed: the
+   * tailnet proxy, and nothing else.
+   *
+   * Separate from {@link trustedProxies} and empty by default because that one
+   * is the whole pod CIDR in the chart — reusing it would let any pod in the
+   * cluster assert it is anybody.
+   */
+  readonly tailnetProxies: readonly string[];
   readonly port: number;
 }
 
@@ -119,6 +142,14 @@ function required(env: Env, name: string): string {
 function positive(raw: string | undefined, fallback: number): number {
   const asked = Number(raw?.trim() ?? '');
   return Number.isFinite(asked) && asked > 0 ? asked : fallback;
+}
+
+/** A comma-separated list of peers, blanks dropped. */
+function peers(raw: string | undefined): readonly string[] {
+  return (raw ?? '')
+    .split(',')
+    .map((entry) => entry.trim())
+    .filter((entry) => entry !== '');
 }
 
 const byteLength = (value: string): number =>
@@ -147,6 +178,29 @@ export function readConfig(env: Env = Bun.env): Config {
   ) {
     throw new ConfigError(`KTHX_CONTROL_HOST must be outside ${zone}`);
   }
+  const identityHost = env.KTHX_IDENTITY_HOST?.trim().toLowerCase() || null;
+  const tailnetProxies = peers(env.KTHX_TAILNET_PROXIES);
+  if (identityHost !== null) {
+    if (identityHost === zone || identityHost.endsWith(`.${zone}`)) {
+      throw new ConfigError(`KTHX_IDENTITY_HOST must be outside ${zone}`);
+    }
+    // One host cannot be two doors: the control host believes reach and the
+    // identity host believes a header, and a host that was both would hand
+    // every agent on the lab network whatever login it cared to assert.
+    if (identityHost === controlHost) {
+      throw new ConfigError('KTHX_IDENTITY_HOST must not be KTHX_CONTROL_HOST');
+    }
+    // An identity host with nobody to believe is the worst of both: it renders
+    // a reachable name, answers every caller on it as anonymous, and lets them
+    // claim sites that are tied to no account at all. Refusing here is the same
+    // class of failure as the two guards above — a deployment that is wrong
+    // rather than a request that is.
+    if (tailnetProxies.length === 0) {
+      throw new ConfigError(
+        'KTHX_IDENTITY_HOST needs KTHX_TAILNET_PROXIES: the hop whose identity header is believed',
+      );
+    }
+  }
   const aiModel = env.KTHX_AI_MODEL?.trim() || 'minimax-m3';
   const aiModels = (env.KTHX_AI_MODELS ?? '')
     .split(',')
@@ -166,6 +220,9 @@ export function readConfig(env: Env = Bun.env): Config {
   return {
     zone,
     controlHost,
+    identityHost,
+    identityHeader:
+      env.KTHX_IDENTITY_HEADER?.trim().toLowerCase() || 'tailscale-user-login',
     bucket: env.KTHX_BUCKET?.trim() || null,
     sitesDir: env.KTHX_SITES_DIR?.trim() || '/sites',
     databaseUrl: required(env, 'DATABASE_URL'),
@@ -188,10 +245,8 @@ export function readConfig(env: Env = Bun.env): Config {
     aiModels,
     aiMaxTokens,
     aiBuildMaxTokens: positive(env.KTHX_AI_BUILD_MAX_TOKENS, aiMaxTokens),
-    trustedProxies: (env.KTHX_TRUSTED_PROXIES ?? '')
-      .split(',')
-      .map((entry) => entry.trim())
-      .filter((entry) => entry !== ''),
+    trustedProxies: peers(env.KTHX_TRUSTED_PROXIES),
+    tailnetProxies,
     port: Number(env.PORT?.trim() || 8080),
   };
 }
