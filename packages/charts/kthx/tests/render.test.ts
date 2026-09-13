@@ -242,3 +242,37 @@ describe('the nightly dump', () => {
     expect((await dumpPodSpec()).restartPolicy).toBe('Never');
   });
 });
+
+describe('the AI passthrough values', () => {
+  test('name a default model the allow-list also names', async () => {
+    const objects = await render();
+    const env: { name: string; value?: string }[] = one(objects, 'Deployment')
+      .spec.template.spec.containers[0].env;
+    const value = (name: string): string =>
+      env.find((entry) => entry.name === name)?.value ?? '';
+
+    const models = value('KTHX_AI_MODELS')
+      .split(',')
+      .map((entry) => entry.trim())
+      .filter((entry) => entry !== '');
+
+    // The server writes the default into a body that names no model and only
+    // then checks it against this list, so a default missing from it answers
+    // every keyless call 400 — and the process refuses to boot rather than
+    // serve that. A chart that renders it is a pod that crash-loops.
+    expect(models.length).toBeGreaterThan(0);
+    expect(models).toContain(value('KTHX_AI_MODEL'));
+  });
+
+  test('point at a base that takes the models named beside it', async () => {
+    const objects = await render();
+    const env: { name: string; value?: string }[] = one(objects, 'Deployment')
+      .spec.template.spec.containers[0].env;
+    const url = env.find((entry) => entry.name === 'KTHX_AI_URL')?.value ?? '';
+
+    // The two bases of this vendor are different catalogues, and a model from
+    // one is a 4xx on the other. Nothing renderable can ask the upstream, so
+    // this asserts only the pairing the values were measured against.
+    expect(url).toBe('https://opencode.ai/zen/go/v1');
+  });
+});
