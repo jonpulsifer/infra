@@ -58,8 +58,12 @@ in
         RemainAfterExit = true;
       };
       path = [ pkgs.coreutils ];
+      # Numeric ids, not names: the nobody *group* is not in /etc/group, it is
+      # synthesized by nss-systemd, and that userdb does not answer while a
+      # switch restarts systemd. A name lookup here failed the unit mid-upgrade
+      # and took nfs-server down with it.
       script = ''
-        install -d -m 0777 -o nobody -g nobody \
+        install -d -m 0777 -o 65534 -g 65534 \
           /nfs/data/k8s \
           /nfs/data/k8s-provisioned
       '';

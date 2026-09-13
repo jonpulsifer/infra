@@ -60,6 +60,12 @@ tags:: runbook, smiirl
 	- The counter is idle: opening its setup wizard pages (anything under `http://<counter-ip>/`) stops its cloud loop until it is power-cycled.
 	- The counter is off the Wi-Fi: no client with its MAC on the controller. Re-run its setup wizard (`SmiirlSetup` network, then `192.168.1.1`).
 	- The Gateway is not programmed, or the pod is not running: `kubectl -n smiirl get gateway,pods`. Route and pod checks are on [[Runbooks/Kubernetes GitOps Change]].
+	- The app is wedged on its NFS volume: `/api/state` hangs and the pod's log stops mid-stream, while the pod reads `1/1 Running` and `/healthz` and `/number` still answer instantly. Those two routes take no lock; a write to the `smiirl-data` volume that never returns leaves the state lock held, so `/api/state` and the counter's poll are the only things that hang. The volume is NFS from spore:
+	- ```bash
+	  curl -s --max-time 5 -o /dev/null -w '%{http_code}\n' https://smiirl.lolwtf.ca/api/state
+	  rpcinfo -T tcp $(jq -r .data.SPORE_IP clusters/folly/config/lab-topology.json) nfs
+	  ```
+	- A dead server answers `Program not registered`. Fix it on spore, not here: `systemctl status nfs-server nfs-data-directories` and start `nfs-server.service`. Clients recover on their own once nfsd answers, with no pod restarts.
 - # If the setup wizard says "Counter does not have access to internet"
 	- Its check is the byte-exact `GET /number` above. Verify it through the Gateway first.
 	- To see exactly what the counter asks, capture on the UDM by MAC on the iot bridge. The `-i any` pseudo-interface cannot filter by MAC and silently captures nothing:
