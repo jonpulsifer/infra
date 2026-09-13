@@ -42,7 +42,13 @@ import {
   notHere,
   staticResponse,
 } from './serve.ts';
-import { type Ctx, nameStatus, opensSite, sitesApi } from './sites.ts';
+import {
+  type Ctx,
+  nameStatus,
+  opensSite,
+  opensZone,
+  sitesApi,
+} from './sites.ts';
 
 /** The one sentence a v1 site's old calls get. No shim: they fail loudly. */
 const RETIRED = 'the /_/ API is retired; use /api/ — https://kthx.dev/skill.md';
@@ -66,16 +72,25 @@ function asset(path: string, type: string, cacheControl: string): Response {
 let landing: Promise<string> | null = null;
 
 /**
- * The page is told two things a browser cannot see: the zone, because on the
- * private host `location.hostname` is not it, and whether this host may claim
- * — on the public apex of a deployment with a private host the claim deck is
- * hidden rather than left to fail.
+ * The page is told three things a browser cannot see: the zone, because on a
+ * private host `location.hostname` is not it; whether this host may claim — on
+ * the public apex of a deployment with a private host the claim deck is hidden
+ * rather than left to fail; and whether this caller opens the zone, which is
+ * what decides whether the nuke exists as far as the page is concerned.
+ *
+ * The last one is a hint and not the check. The route makes the same decision
+ * again from the same request, so a hand-typed `DELETE` from a browser that
+ * never got the attribute is refused exactly the same way.
  */
-async function landingHtml(zone: string, control: boolean): Promise<string> {
+async function landingHtml(
+  zone: string,
+  control: boolean,
+  admin: boolean,
+): Promise<string> {
   landing ??= Bun.file(LANDING_PATH).text();
   return (await landing).replace(
     '<html lang="en">',
-    `<html lang="en" data-zone="${zone}"${control ? '' : ' data-readonly'}>`,
+    `<html lang="en" data-zone="${zone}"${control ? '' : ' data-readonly'}${admin ? ' data-admin' : ''}>`,
   );
 }
 
@@ -220,7 +235,11 @@ async function apex(
   }
   if (path === '/') {
     return new Response(
-      await landingHtml(ctx.config.zone, ctx.caller.control),
+      await landingHtml(
+        ctx.config.zone,
+        ctx.caller.control,
+        opensZone(ctx.caller, ctx.config),
+      ),
       {
         headers: {
           'content-type': 'text/html; charset=utf-8',

@@ -11,7 +11,7 @@
  *   kthx rm                        delete the site
  *   kthx open                      open the site in a browser
  *   kthx upgrade                   replace this copy with the apex's
- *   kthx nuke [--yes]              delete every site (KTHX_ADMIN_KEY)
+ *   kthx nuke [--yes]              delete every site (a tailnet operator)
  *
  * The name is `kthx.json`, read from the directory and then from here. The
  * token that opens it is in `$XDG_CONFIG_HOME/kthx/sites.json`, never in the
@@ -507,22 +507,19 @@ export async function rm(dir = '.', confirm = prompt): Promise<void> {
 /**
  * Every site on the zone gone, once `NUKE` has been typed back.
  *
- * The operator's key, never a site's bearer: `KTHX_ADMIN_KEY` is what the
- * server compares, and a deployment with none answers 404 here. `--yes` is for
- * a script; without it and without a terminal to ask on, `prompt` answers null
- * and nothing is deleted, which is the right way round.
+ * There is no key to hold. The zone is opened by a person the tailnet vouched
+ * for, so what this command carries is where it is pointed: run it against the
+ * tailnet host from a device signed in to the tailnet, and the proxy in front
+ * of the server says who is asking. Anywhere else the route is a 404, and the
+ * error below is the only useful thing to say about that.
+ *
+ * `--yes` is for a script; without it and without a terminal to ask on,
+ * `prompt` answers null and nothing is deleted, which is the right way round.
  */
 export async function nuke(
   { yes = false } = {},
   confirm = prompt,
 ): Promise<void> {
-  const key = process.env.KTHX_ADMIN_KEY?.trim();
-  if (!key) {
-    throw new KthxError(
-      'NO_ADMIN_KEY',
-      'KTHX_ADMIN_KEY is not set; the nuke is the operator key, not a site token',
-    );
-  }
   if (!yes) {
     const typed = confirm(`  type NUKE to delete every site on ${origin()}: `);
     if (typed?.trim() !== 'NUKE') {
@@ -530,10 +527,23 @@ export async function nuke(
       return;
     }
   }
-  const counts = await api<{ deleted: number; failed: number }>('/api/sites', {
-    method: 'DELETE',
-    token: key,
-  });
+  let counts: { deleted: number; failed: number };
+  try {
+    counts = await api<{ deleted: number; failed: number }>('/api/sites', {
+      method: 'DELETE',
+    });
+  } catch (cause) {
+    // 404 is the honest answer for both "this deployment has no operator" and
+    // "you are not on the host that knows who you are", and the second is the
+    // one that happens to a person.
+    if (cause instanceof KthxError && cause.code === 'NOT_FOUND') {
+      throw new KthxError(
+        'NO_NUKE',
+        `${origin()} has no nuke. It opens for a named tailnet login on the identity host — point KTHX_ORIGIN at that host from a device on the tailnet.`,
+      );
+    }
+    throw cause;
+  }
   // Every token this machine holds is now a token for a name anyone may claim.
   forgetWhere((known) => {
     for (const name of Object.keys(known)) delete known[name];

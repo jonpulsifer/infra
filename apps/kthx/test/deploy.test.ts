@@ -51,9 +51,11 @@ let n = 0;
 let refuseClaims = 0;
 
 /** The operator key this stub answers `DELETE /api/sites` for. */
-const ADMIN = 'admin-key-for-the-stub';
 /** Every site the stub had when it was last nuked. */
 let nuked: number | null = null;
+/** What the stub answers the nuke with: a deployment that has no operator, or
+ *  a host that cannot know who is calling, both answer 404. */
+let nukeOpens = true;
 
 const SKILL = '# kthx\n\nthe apex copy\n';
 /** The apex having no reference to hand, so the packed copy is the answer. */
@@ -107,10 +109,10 @@ const stub = Bun.serve({
     }
     if (request.method === 'DELETE' && pathname === '/api/sites') {
       calls.push({ method: 'DELETE', path: pathname, body: null });
-      if (request.headers.get('authorization') !== `Bearer ${ADMIN}`) {
+      if (!nukeOpens) {
         return Response.json(
-          { code: 'FORBIDDEN', message: 'that does not open this site' },
-          { status: 403 },
+          { code: 'NOT_FOUND', message: 'there is nothing here' },
+          { status: 404 },
         );
       }
       nuked = tokens.size;
@@ -224,10 +226,9 @@ beforeEach(() => {
   tokens.clear();
   n = 0;
   nuked = null;
+  nukeOpens = true;
   refuseClaims = 0;
   skillDown = false;
-  // The nuke reads it from the environment, so no test may inherit one.
-  delete process.env.KTHX_ADMIN_KEY;
 });
 // Every command writes `kthx.json` relative to where it runs, so no test may
 // leave the process standing somewhere else.
@@ -406,7 +407,7 @@ describe('rollback, release, ls and rm', () => {
     ).toEqual({});
   });
 
-  test('nuke asks for the operator key, then for NUKE', async () => {
+  test('nuke asks for NUKE, and carries no key of its own', async () => {
     const dir = site();
     process.chdir(dir);
     await deploy('.', { name: 'notes' });
@@ -415,15 +416,8 @@ describe('rollback, release, ls and rm', () => {
         (call) => call.method === 'DELETE' && call.path === '/api/sites',
       );
 
-    // No key is not a request the apex refuses: it is one that is never sent.
-    await expect(nuke({}, () => 'NUKE')).rejects.toMatchObject({
-      code: 'NO_ADMIN_KEY',
-    });
-    expect(sent()).toHaveLength(0);
-
     // Anything but NUKE, and a `prompt` with no terminal to ask on, delete
     // nothing — `--yes` is the only way past it without typing.
-    process.env.KTHX_ADMIN_KEY = ADMIN;
     await nuke({}, () => 'nope');
     await nuke({}, () => null);
     expect(sent()).toHaveLength(0);
@@ -441,13 +435,17 @@ describe('rollback, release, ls and rm', () => {
     ).toEqual({});
   });
 
-  test('nuke with the wrong key is refused by the apex', async () => {
+  test('nuke against a host with no nuke says where one is', async () => {
     const dir = site();
     process.chdir(dir);
     await deploy('.', { name: 'notes' });
-    process.env.KTHX_ADMIN_KEY = 'not-the-key';
+    // 404 is the honest answer both for a deployment that names no operator
+    // and for the far likelier case: pointed at a host that cannot know who is
+    // calling. Relaying it as `there is nothing here` would send a person
+    // looking for a typo in the URL.
+    nukeOpens = false;
     await expect(nuke({ yes: true })).rejects.toMatchObject({
-      code: 'FORBIDDEN',
+      code: 'NO_NUKE',
     });
     expect(nuked).toBeNull();
   });

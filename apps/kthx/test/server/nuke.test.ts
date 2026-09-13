@@ -4,21 +4,41 @@
  * The claims worth the most here are the two a demo depends on — a nuked name
  * can be claimed again, which a per-site delete deliberately does not allow —
  * and the one that keeps it from being a way to empty the zone by accident:
- * nothing but the operator's key opens it, and getting it wrong costs the
- * caller nothing it needs later.
+ * it opens for a named person the identity proxy vouched for and for nobody
+ * else, which is why there is no guessing to rate limit.
  *
- * The 404 a deployment with no key answers is in `sites.test.ts`, whose
- * harness is the one without an admin key.
+ * The 404 a deployment that names no operator answers is in `sites.test.ts`,
+ * whose harness names none.
  */
 import { describe, expect, test } from 'bun:test';
 import { join } from 'node:path';
 import { tarGz } from '../../cli/tar.ts';
 import { readConfig } from '../../server/env.ts';
-import { CLAIM_BUCKET, NUKE_ATTEMPTS } from '../../server/limits.ts';
 import { ask, withServer, ZONE } from '../harness/server.ts';
 
-const ADMIN = 'n'.repeat(40);
-const kthx = withServer({ adminKey: ADMIN });
+const IDENTITY = 'ops.kthx-tailnet.test';
+/** The proxy pod, which is the only peer allowed to speak for a person. */
+const PROXY = '10.42.0.7';
+const OPERATOR = 'operator@example.test';
+const SOMEBODY = 'somebody@example.test';
+
+const kthx = withServer({
+  identityHost: IDENTITY,
+  tailnetProxies: ['10.42.0.0/16'],
+  adminLogins: [OPERATOR],
+});
+
+/**
+ * A socket peer, the way Bun hands one to the handler. A request with no peer
+ * is a handler called directly, which the resolver reads as a test harness
+ * rather than a network and would therefore believe any header it was given.
+ */
+function peer(address: string): Bun.Server<unknown> {
+  return {
+    requestIP: () => ({ address, port: 1, family: 'IPv4' }),
+    timeout: () => undefined,
+  } as unknown as Bun.Server<unknown>;
+}
 
 let nextAddress = 0;
 function address(): string {
@@ -69,14 +89,22 @@ async function publish(site: Site): Promise<void> {
   expect(uploaded.status).toBe(201);
 }
 
-/** `null` sends no `Authorization` at all. */
-function nuke(bearer: string | null = ADMIN) {
+/**
+ * The nuke, as a person on the tailnet. `null` is a caller the proxy vouched
+ * for nobody as; `from` is the peer, so a test can send the header from
+ * somewhere this deployment does not believe.
+ */
+function nuke(login: string | null = OPERATOR, from = PROXY) {
+  // No `address`: that sets `cf-connecting-ip`, and a private host answers 404
+  // to anything carrying one — the tunnel never carries these names, so such a
+  // request is an edge that misrouted.
   return kthx().fetch(
     ask('/api/sites', {
       method: 'DELETE',
-      token: bearer ?? undefined,
-      address: address(),
+      host: IDENTITY,
+      headers: login === null ? {} : { 'tailscale-user-login': login },
     }),
+    peer(from),
   );
 }
 
@@ -153,75 +181,85 @@ describe('the nuke', () => {
     expect((await claim(site.name)).status).toBe(201);
   });
 
-  test('is not opened by a site token, a wrong key, or nothing at all', async () => {
+  test('is not opened by another person, or by nobody at all', async () => {
     const site = await claimed('kept');
-    for (const bearer of [null, 'nope', site.token, ADMIN.slice(0, -1)]) {
-      const refused = await nuke(bearer);
-      expect(refused.status).toBe(403);
-      expect((await refused.json()).code).toBe('FORBIDDEN');
-    }
-    // Refused means refused: the site is still there.
+
+    // Vouched for, and not the operator.
+    const other = await nuke(SOMEBODY);
+    expect(other.status).toBe(403);
+    expect((await other.json()).code).toBe('FORBIDDEN');
+
+    // Nobody was vouched for: 401 rather than 403, because nothing was
+    // offered — the same distinction every other route makes.
+    const anonymous = await nuke(null);
+    expect(anonymous.status).toBe(401);
+    expect((await anonymous.json()).code).toBe('UNAUTHENTICATED');
+
     expect(await inPostgres(site.name)).toBe(true);
   });
 
-  test('a wrong key spends no claim allowance, and guesses are held', async () => {
-    const from = address();
-    // More attempts than the claim bucket holds. If the nuke charged the claim
-    // bucket, the claim after it would be a 429 rather than a site. The guesses
-    // fill their own bucket instead: 403 while it has tokens, 429 once it does
-    // not — and it is process-wide, so how many 403s come first depends on the
-    // tests before this one.
-    const seen: number[] = [];
-    for (let tried = 0; tried <= CLAIM_BUCKET.capacity; tried += 1) {
-      seen.push(
-        (
-          await kthx().fetch(
-            ask('/api/sites', {
-              method: 'DELETE',
-              token: 'nope',
-              address: from,
-            }),
-          )
-        ).status,
-      );
-    }
-    expect(new Set(seen)).toEqual(new Set([403, 429]));
-    expect(seen.at(-1)).toBe(429);
-    expect(seen.indexOf(429)).toBeLessThanOrEqual(NUKE_ATTEMPTS.capacity);
-    expect((await claim(kthx().name('after'), from)).status).toBe(201);
-    // The right key is never held, however many guesses came before it.
-    expect((await nuke()).status).toBe(200);
+  test('is not opened by a site bearer, on any door', async () => {
+    const site = await claimed('bearer');
+    // A bearer opens one site. There is no bearer that opens the zone any
+    // more, which is the point: there is nothing to hold, lose or guess.
+    const refused = await kthx().fetch(
+      ask('/api/sites', {
+        method: 'DELETE',
+        token: site.token,
+        address: address(),
+      }),
+    );
+    expect(refused.status).toBe(401);
+    expect(await inPostgres(site.name)).toBe(true);
   });
 
-  test('refuses a browser that is not on the apex', async () => {
+  test('is not opened by a peer this deployment does not believe', async () => {
+    const site = await claimed('forged');
+    // The header is the proxy's to set. From anywhere else it is a client's,
+    // and the caller is nobody.
+    const refused = await nuke(OPERATOR, '198.51.100.9');
+    expect(refused.status).toBe(401);
+    expect(await inPostgres(site.name)).toBe(true);
+  });
+
+  test('refuses a browser that is not on this host', async () => {
     const site = await claimed('origin');
     const refused = await kthx().fetch(
       ask('/api/sites', {
         method: 'DELETE',
-        token: ADMIN,
-        headers: { origin: `https://${site.host}` },
-        address: address(),
+        host: IDENTITY,
+        headers: {
+          'tailscale-user-login': OPERATOR,
+          origin: `https://${site.host}`,
+        },
       }),
+      peer(PROXY),
     );
     expect(refused.status).toBe(403);
     expect(await inPostgres(site.name)).toBe(true);
   });
 });
 
-describe('the key the environment carries', () => {
-  const env = (admin: string) => ({
+describe('who the environment names', () => {
+  const env = (admins: string) => ({
     DATABASE_URL: 'postgres://x/y',
     KTHX_ME_KEY: 'm'.repeat(32),
     KTHX_PG_KEY: 'p'.repeat(32),
-    KTHX_ADMIN_KEY: admin,
+    KTHX_ADMIN_LOGINS: admins,
   });
 
-  test('a key shorter than the contract is no key at all', () => {
-    // Not a boot failure: this field is created by hand, and a whole zone must
-    // not stop serving over it. Not trusted either — the route has no rate
-    // limit, so a short key would be a guessable one.
-    expect(readConfig(env('short')).adminKey).toBeNull();
-    expect(readConfig(env('  ')).adminKey).toBeNull();
-    expect(readConfig(env(ADMIN)).adminKey).toBe(ADMIN);
+  test('is a list of addresses, folded and trimmed, and empty means nobody', () => {
+    // Folded because the header is compared against it and a login's case is
+    // not the caller's to decide; empty entries dropped so a trailing comma is
+    // not an operator called "".
+    expect(readConfig(env(' Operator@Example.test , ')).adminLogins).toEqual([
+      'operator@example.test',
+    ]);
+    expect(readConfig(env('a@b.test,c@d.test')).adminLogins).toEqual([
+      'a@b.test',
+      'c@d.test',
+    ]);
+    expect(readConfig(env('')).adminLogins).toEqual([]);
+    expect(readConfig(env(' , ')).adminLogins).toEqual([]);
   });
 });

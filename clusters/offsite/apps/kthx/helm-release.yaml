@@ -44,10 +44,6 @@ spec:
     # Both HMAC keys and the AI upstream key, from 1Password through
     # external-secret.yaml beside this.
     envFromSecret: kthx-env
-    # The operator key the nuke is gated on, from admin-secret.yaml beside
-    # this, referenced `optional`: until the `admin-key` field exists on the
-    # 1Password item there is no Secret and `DELETE /api/sites` answers 404.
-    adminSecret: kthx-admin
     # Substituted from the cluster topology ConfigMap rather than restated: the
     # `cf-connecting-ip` a rate-limit bucket is keyed by is only believed from
     # the gateway hop, which is a host-networked Envoy on a node address. The
@@ -75,6 +71,9 @@ spec:
       host: kthx.pirate-musical.ts.net
       tag: tag:kthx-ingress
       proxies: ${CILIUM_POD_CIDR}
+      # Who opens the nuke. A person, on the tailnet host, and nobody else —
+      # `DELETE /api/sites` is 404 to every other caller and every other door.
+      admins: jonathan@pulsifer.ca
     # The release volume and the database volume are both `local-path`, which is
     # a directory on one node's disk. oldschool: it has the free space and
     # carries nothing else stateful, while retrofit already holds the control
