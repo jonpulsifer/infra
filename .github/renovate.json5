@@ -338,6 +338,17 @@
       groupName: 'agent-sandbox',
       groupSlug: 'agent-sandbox',
     },
+    {
+      // The crds chart and the stack chart each carry their own copy of the
+      // same prometheus-operator CRDs. Offsite takes its CRDs from the crds
+      // release and its operator from the stack, so splitting them into two
+      // PRs puts an operator against a schema it was not built against. They
+      // are one bump.
+      description: 'prometheus-operator: CRDs chart + kube-prometheus-stack move together',
+      matchPackageNames: ['prometheus-operator-crds', 'kube-prometheus-stack'],
+      groupName: 'prometheus-operator',
+      groupSlug: 'prometheus-operator',
+    },
     // ============================================================
     // Flux helm charts
     // ============================================================
