@@ -1,0 +1,22 @@
+---
+# `tls.hosts[0]`'s first label is the tailnet hostname the operator claims, so
+# this answers at https://identity-spike.pirate-musical.ts.net. No Funnel
+# annotation: identity headers are tailnet-only and a funnelled request carries
+# none.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: identity-spike
+  namespace: identity-spike
+  labels:
+    app.kubernetes.io/name: identity-spike
+spec:
+  ingressClassName: tailscale
+  defaultBackend:
+    service:
+      name: echo
+      port:
+        number: 80
+  tls:
+    - hosts:
+        - identity-spike

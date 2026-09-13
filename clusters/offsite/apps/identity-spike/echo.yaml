@@ -1,0 +1,75 @@
+---
+# Bun is already on the kthx image and the cluster already pulls it, so the echo
+# is an inline script rather than a new image to build and trust.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: echo
+  namespace: identity-spike
+  labels:
+    app.kubernetes.io/name: identity-spike
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: identity-spike
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: identity-spike
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: echo
+          image: ghcr.io/jonpulsifer/kthx:latest@sha256:2209687886f57f5775d37d761f5c6b24664220b4df440bb780c01ce05cb45eb5
+          imagePullPolicy: IfNotPresent
+          command: ["/usr/local/bin/bun", "-e"]
+          args:
+            - |
+              const server = Bun.serve({
+                port: 8080,
+                fetch(req) {
+                  const headers = {};
+                  for (const [key, value] of req.headers) headers[key] = value;
+                  return Response.json(
+                    { method: req.method, url: req.url, headers },
+                    { headers: { 'cache-control': 'no-store' } },
+                  );
+                },
+              });
+              console.log(`echo on :${server.port}`);
+          ports:
+            - name: http
+              containerPort: 8080
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests:
+              cpu: 10m
+              memory: 64Mi
+            limits:
+              memory: 128Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: echo
+  namespace: identity-spike
+  labels:
+    app.kubernetes.io/name: identity-spike
+spec:
+  selector:
+    app.kubernetes.io/name: identity-spike
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
