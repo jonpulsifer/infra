@@ -345,14 +345,23 @@ describe('the config', () => {
     ).toThrow('must not be KTHX_CONTROL_HOST');
   });
 
-  test('defaults to the tailscale header and to trusting no peer', () => {
+  test('refuses an identity host with no hop to believe', () => {
+    // Booting would render a reachable name that answers every caller on it as
+    // anonymous and lets them claim sites tied to no account — worse than not
+    // having the host at all, and silent.
+    expect(() => readConfig({ ...env, KTHX_IDENTITY_HOST: IDENTITY })).toThrow(
+      'KTHX_TAILNET_PROXIES',
+    );
+  });
+
+  test('defaults to the tailscale header, and keeps the two peer lists apart', () => {
     const read = readConfig({
       ...env,
       KTHX_IDENTITY_HOST: ' KTHX.Tailnet.Test ',
+      KTHX_TAILNET_PROXIES: '10.42.0.7',
     });
     expect(read.identityHost).toBe(IDENTITY);
     expect(read.identityHeader).toBe('tailscale-user-login');
-    expect(read.tailnetProxies).toEqual([]);
     // Separate lists: the pod CIDR one is not the one an identity is read from.
     const both = readConfig({
       ...env,
@@ -361,5 +370,7 @@ describe('the config', () => {
     });
     expect(both.trustedProxies).toEqual(['10.42.0.0/16']);
     expect(both.tailnetProxies).toEqual(['10.42.0.7']);
+    // And with no identity host at all, trusting nobody is the default.
+    expect(readConfig(env).tailnetProxies).toEqual([]);
   });
 });

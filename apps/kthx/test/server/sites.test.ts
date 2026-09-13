@@ -446,11 +446,13 @@ describe('releases', () => {
 });
 
 describe('rolling back and holding', () => {
-  test('a rollback pins the site, and the next publish supersedes it', async () => {
+  test('a rollback holds, and choosing the newest again does not', async () => {
     const owned = await mine();
     await upload(owned.name, owned.token);
     await upload(owned.name, owned.token, site({ 'index.html': 'v2' }));
 
+    // Back to v1: the latch is on, which is what stops a deploy firing while
+    // somebody is looking at what broke from putting it back.
     expect(await serveRelease(owned.name, owned.token, 1)).toMatchObject({
       status: 200,
       body: { serving: 1, held: true },
@@ -460,14 +462,24 @@ describe('rolling back and holding', () => {
     );
     expect(await rolled.text()).toContain('v1');
 
-    // The defect this replaced: the latch stayed on, so the first rollback of
-    // a site's life stored every later release without ever serving one.
     const third = await upload(
       owned.name,
       owned.token,
       site({ 'index.html': 'v3' }),
     );
-    expect(third.body).toMatchObject({ n: 3, serving: 3 });
+    expect(third.body).toMatchObject({ n: 3, serving: 1 });
+    const still = await kthx().fetch(
+      ask('/', { host: `${owned.name}.${ZONE}` }),
+    );
+    expect(await still.text()).toContain('v1');
+
+    // Choosing the newest is the ordinary state and holds nothing. Setting the
+    // latch here too made the first rollback of a site's life permanent: every
+    // later release stored, none of them ever serving.
+    expect(await serveRelease(owned.name, owned.token, 3)).toMatchObject({
+      status: 200,
+      body: { serving: 3, held: false },
+    });
     expect((await inspect(owned.name, owned.token)).body).toMatchObject({
       serving: 3,
       held: false,
@@ -476,6 +488,14 @@ describe('rolling back and holding', () => {
       ask('/', { host: `${owned.name}.${ZONE}` }),
     );
     expect(await published.text()).toBe('v3');
+
+    // And an upload onto an unheld site serves, as it always has.
+    const fourth = await upload(
+      owned.name,
+      owned.token,
+      site({ 'index.html': 'v4' }),
+    );
+    expect(fourth.body).toMatchObject({ n: 4, serving: 4 });
   });
 
   test('choosing the newest release holds nothing', async () => {

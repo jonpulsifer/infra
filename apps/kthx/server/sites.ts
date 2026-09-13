@@ -649,6 +649,12 @@ const release: Act = async (request, ctx, site) => {
   return answer;
 };
 
+/** The number a release took, and what the site serves once it has it. */
+interface Numbered {
+  readonly n: number;
+  readonly serving: number | null;
+}
+
 async function stage(
   request: Request,
   ctx: Ctx,
@@ -713,42 +719,40 @@ async function unpack(
   }
 
   const size = read.archive.bytes.byteLength;
-  let n: number;
+  let numbered: Numbered;
   try {
-    n = await writeTree(
+    numbered = await writeTree(
       ctx.config.sitesDir,
       site.name,
       read.files,
-      async (temp): Promise<number> => {
+      async (temp): Promise<Numbered> => {
         // One site's uploads are numbered under its own lock, so two arriving
         // at once take two numbers rather than one losing the primary key.
         return await ctx.sql.begin(async (tx: SQL) => {
-          await tx`select name from sites where name = ${site.name} for update`;
+          const [locked] = (await tx`
+            select held, serving from sites where name = ${site.name} for update
+          `) as { held: boolean; serving: number | null }[];
           const [top] = (await tx`
             select max(n) as n from releases where site = ${site.name}
           `) as { n: number | null }[];
-          const numbered = Number(top?.n ?? 0) + 1;
+          const n = Number(top?.n ?? 0) + 1;
           await tx`
             insert into releases (site, n, digest, size, location)
-            values (${site.name}, ${numbered}, ${read.digest}, ${size},
-                    ${location})
+            values (${site.name}, ${n}, ${read.digest}, ${size}, ${location})
           `;
-          // New bytes are the owner saying which release they want, so they
-          // serve and the hold goes with them. A hold that outlived the next
-          // publish is what made the site after a rollback stop answering to
-          // anything anyone uploaded.
-          await tx`
-            update sites set serving = ${numbered}, held = false
-            where name = ${site.name}
-          `;
+          // A hold is the owner saying "not yet": an upload onto a held site is
+          // stored and numbered and does not serve until the hold is released.
+          // That is the whole point of rolling back — a deploy that fires while
+          // you are looking at what broke must not put it back.
+          const serving = locked?.held ? locked.serving : n;
+          if (!locked?.held) {
+            await tx`update sites set serving = ${n} where name = ${site.name}`;
+          }
           // Inside the transaction, so a rename that cannot happen rolls the
           // row back: a site must never say it serves a release whose directory
           // never landed. `writeTree` sweeps the temp tree either way.
-          await placeTree(
-            temp,
-            releaseDir(ctx.config.sitesDir, site.name, numbered),
-          );
-          return numbered;
+          await placeTree(temp, releaseDir(ctx.config.sitesDir, site.name, n));
+          return { n, serving };
         });
       },
     );
@@ -757,11 +761,11 @@ async function unpack(
     return refuse('STORAGE_FAILURE', ctx.id);
   }
 
-  await prune(ctx, site.name, n);
+  await prune(ctx, site.name, numbered.serving);
   return ok(
     {
-      n,
-      serving: n,
+      n: numbered.n,
+      serving: numbered.serving,
       digest: read.digest,
       url: siteUrl(ctx.config.zone, site.name, ctx.port),
     },
@@ -818,11 +822,13 @@ async function prune(
 /**
  * Roll back — or forward — to a numbered release.
  *
- * `held` says where `serving` sits, not that this route was called. Setting it
- * unconditionally made the first rollback of a site's life permanent: the
- * latch stayed on, every later release was stored without serving, and
- * "rolling back is free" was true exactly once. Choosing the newest release is
- * the ordinary state and holds nothing.
+ * The latch says where `serving` sits, not that this route was called. Holding
+ * is what an older release means: uploads keep arriving and keep being stored,
+ * and none of them serves until the hold is released, so a deploy that fires
+ * while somebody is looking at what broke cannot put it back. Choosing the
+ * newest release is the ordinary state and holds nothing — setting the latch
+ * there too would make the first rollback of a site's life permanent, with
+ * every later release stored and invisible.
  */
 const chooseRelease: Act = async (request, ctx, site) => {
   if (!isJson(request)) return refuse('MALFORMED_REQUEST', ctx.id);

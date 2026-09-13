@@ -179,6 +179,7 @@ export function readConfig(env: Env = Bun.env): Config {
     throw new ConfigError(`KTHX_CONTROL_HOST must be outside ${zone}`);
   }
   const identityHost = env.KTHX_IDENTITY_HOST?.trim().toLowerCase() || null;
+  const tailnetProxies = peers(env.KTHX_TAILNET_PROXIES);
   if (identityHost !== null) {
     if (identityHost === zone || identityHost.endsWith(`.${zone}`)) {
       throw new ConfigError(`KTHX_IDENTITY_HOST must be outside ${zone}`);
@@ -188,6 +189,16 @@ export function readConfig(env: Env = Bun.env): Config {
     // every agent on the lab network whatever login it cared to assert.
     if (identityHost === controlHost) {
       throw new ConfigError('KTHX_IDENTITY_HOST must not be KTHX_CONTROL_HOST');
+    }
+    // An identity host with nobody to believe is the worst of both: it renders
+    // a reachable name, answers every caller on it as anonymous, and lets them
+    // claim sites that are tied to no account at all. Refusing here is the same
+    // class of failure as the two guards above — a deployment that is wrong
+    // rather than a request that is.
+    if (tailnetProxies.length === 0) {
+      throw new ConfigError(
+        'KTHX_IDENTITY_HOST needs KTHX_TAILNET_PROXIES: the hop whose identity header is believed',
+      );
     }
   }
   const aiModel = env.KTHX_AI_MODEL?.trim() || 'minimax-m3';
@@ -235,7 +246,7 @@ export function readConfig(env: Env = Bun.env): Config {
     aiMaxTokens,
     aiBuildMaxTokens: positive(env.KTHX_AI_BUILD_MAX_TOKENS, aiMaxTokens),
     trustedProxies: peers(env.KTHX_TRUSTED_PROXIES),
-    tailnetProxies: peers(env.KTHX_TAILNET_PROXIES),
+    tailnetProxies,
     port: Number(env.PORT?.trim() || 8080),
   };
 }
