@@ -6,6 +6,7 @@ resources:
   - atlantis
   - descheduler
   - hub
+  - identity-spike
   - kthx
   - prowler
   - spindrift

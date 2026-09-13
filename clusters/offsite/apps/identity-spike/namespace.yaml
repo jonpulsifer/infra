@@ -1,0 +1,13 @@
+---
+# A throwaway namespace: it exists to measure whether the Tailscale operator's
+# L7 Ingress injects identity headers on this tailnet, so that kthx ownership
+# can be a tailnet login rather than a bearer token. Delete it once the answer
+# is written down.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: identity-spike
+  labels:
+    app.kubernetes.io/name: identity-spike
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/enforce-version: latest
