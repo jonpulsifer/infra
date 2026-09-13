@@ -1,5 +1,5 @@
 [tools]
-hugo = "0.165.0"
+hugo = "0.166.0"
 "aqua:tailwindlabs/tailwindcss" = "4.3.3"
 pandoc = "3.11"
 "aqua:typst/typst" = "0.15.1"
