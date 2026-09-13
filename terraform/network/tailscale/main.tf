@@ -2,9 +2,10 @@
 # Tailscale tailnet-wide resources
 # ---------------------------------------------------------------------------
 
-# Touch to trigger Atlantis plan on policy.hujson changes.
-# Re-applies the offsite k8s subnet-router autoApprovers that merged in #911
-# without an apply, leaving offsite-k8s-lan-router routes stuck pending.
+# The whole tailnet policy is one file and one resource. Atlantis autoplans it
+# because ATLANTIS_AUTOPLAN_FILE_LIST names "terraform/**/*.hujson"; a policy
+# change with no .tf beside it plans nothing otherwise, and a green PR that
+# planned 0/0 projects looks exactly like a green PR that applied.
 resource "tailscale_acl" "this" {
   acl = file("${path.module}/policy.hujson")
 }
