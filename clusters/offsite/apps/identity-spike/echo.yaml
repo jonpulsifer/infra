@@ -1,6 +1,11 @@
 ---
 # Bun is already on the kthx image and the cluster already pulls it, so the echo
 # is an inline script rather than a new image to build and trust.
+#
+# No JS template literals here. Flux runs envsubst over every manifest in this
+# Kustomization, so a dollar-brace expression is read as a variable reference;
+# one it cannot resolve fails the whole `apps` Kustomization, not just this
+# Deployment.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -43,7 +48,7 @@ spec:
                   );
                 },
               });
-              console.log(`echo on :${server.port}`);
+              console.log('echo on :' + server.port);
           ports:
             - name: http
               containerPort: 8080
