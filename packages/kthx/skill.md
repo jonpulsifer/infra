@@ -120,10 +120,10 @@ The SDK is a convenience; the routes are the product. `<site>` is
 | POST | `/api/mcp` | JSON-RPC 2.0, one message per request |
 
 The apex has one route no token opens: `GET https://kthx.dev/api/sites` is the
-public directory — `{items: [{name, url, serving, releases, at}], next}`, newest
+public directory — `{items: [{name, url, owner, serving, releases, at}], next}`, newest
 claim first, `limit` up to 500 and `after=<name>` for the page after that. It
 names sites and nothing else; a site's releases, usage and hold stay behind its
-bearer. It is never cached, so a name claimed a second ago is on it; ask for
+bearer, and `owner` is null unless the caller is the site's owner. It is never cached, so a name claimed a second ago is on it; ask for
 more than sixty pages a minute from one address and the answer is 429
 `RATE_LIMITED`.
 
