@@ -103,18 +103,23 @@ function trustedHop(
 }
 
 /**
- * The caller's own tailnet address, which the proxy puts at the head of
- * `x-forwarded-for`.
+ * The caller's own tailnet address, as the proxy observed it.
  *
- * `addressOf` discards it, and rightly so everywhere else: on the Cloudflare
- * path it is a header anyone may write, and honouring it would turn every
- * address-keyed bucket into one line of a request. Here it is the only thing
- * that tells two people on the tailnet apart, and without it they would share
- * one bucket — twenty claims a day between a household.
+ * `addressOf` discards this header, and rightly so everywhere else: on the
+ * Cloudflare path it is a header anyone may write, and honouring it would turn
+ * every address-keyed bucket into one line of a request. Here it is the only
+ * thing that tells two people on the tailnet apart, and without it they would
+ * share one bucket — twenty claims a day between a household.
+ *
+ * The **last** entry, not the first. A Go reverse proxy appends rather than
+ * replaces, so a client that writes its own `x-forwarded-for` puts a value of
+ * its choosing at the head of the list; the tail is the one hop that is
+ * trusted here, and it is the only entry that hop wrote itself.
  */
 function forwardedFor(request: Request): string | null {
-  const first = request.headers.get('x-forwarded-for')?.split(',')[0]?.trim();
-  return first ? prefix(first) : null;
+  const hops = request.headers.get('x-forwarded-for')?.split(',') ?? [];
+  const nearest = hops.at(-1)?.trim();
+  return nearest ? prefix(nearest) : null;
 }
 
 let warned = false;

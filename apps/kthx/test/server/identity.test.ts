@@ -297,6 +297,15 @@ describe('the caller', () => {
     // Off the identity door `x-forwarded-for` is a header the client wrote.
     expect(resolve(ZONE, forwarded, PROXY).bucket).toBe(PROXY);
     expect(resolve(IDENTITY, forwarded, '10.99.0.3').bucket).toBe('10.99.0.3');
+    // A proxy appends, so a client that wrote its own entry is at the head of
+    // the list and the hop this server trusts is at the tail.
+    expect(
+      resolve(
+        IDENTITY,
+        { 'x-forwarded-for': '198.51.100.9, 100.104.133.114' },
+        PROXY,
+      ).bucket,
+    ).toBe('100.104.133.114');
   });
 
   test('reads nothing at all when no identity host is configured', () => {
