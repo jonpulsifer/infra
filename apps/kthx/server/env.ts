@@ -76,8 +76,18 @@ export interface Config {
   readonly aiModel: string;
   /** The models a site may name. Empty is every model the upstream has. */
   readonly aiModels: readonly string[];
-  /** The ceiling `max_tokens` is clamped to, named or not. */
+  /** The ceiling `max_tokens` is clamped to, named or not, on `/api/ai`. */
   readonly aiMaxTokens: number;
+  /**
+   * The same ceiling for the authenticated build route.
+   *
+   * Two numbers because `/api/ai` is anonymous on every site in the zone and
+   * the clamp is also the floor a silent answer is billed, while a route that
+   * generates a whole document needs thousands of completion tokens. One
+   * global is what makes raising the second raise the first. Unset is the
+   * public ceiling, so a deployment that says nothing raises nothing.
+   */
+  readonly aiBuildMaxTokens: number;
   /**
    * The peers whose `cf-connecting-ip` is believed: the Gateway hop in front of
    * this pod. Empty means no peer is, so every address-keyed bucket falls back
@@ -137,6 +147,22 @@ export function readConfig(env: Env = Bun.env): Config {
   ) {
     throw new ConfigError(`KTHX_CONTROL_HOST must be outside ${zone}`);
   }
+  const aiModel = env.KTHX_AI_MODEL?.trim() || 'minimax-m3';
+  const aiModels = (env.KTHX_AI_MODELS ?? '')
+    .split(',')
+    .map((entry) => entry.trim())
+    .filter((entry) => entry !== '');
+  // A default outside its own allow-list is refused here rather than per
+  // request: `/api/ai` writes the default into a body that names no model and
+  // only then checks it, so one typo in a chart value answers every keyless
+  // call 400 INVALID_MODEL, as though the page had asked for something it may
+  // not have.
+  if (aiModels.length > 0 && !aiModels.includes(aiModel)) {
+    throw new ConfigError(
+      `KTHX_AI_MODEL ${aiModel} is not one of KTHX_AI_MODELS`,
+    );
+  }
+  const aiMaxTokens = positive(env.KTHX_AI_MAX_TOKENS, 4096);
   return {
     zone,
     controlHost,
@@ -158,12 +184,10 @@ export function readConfig(env: Env = Bun.env): Config {
       '',
     ),
     aiKey: env.KTHX_AI_KEY?.trim() || null,
-    aiModel: env.KTHX_AI_MODEL?.trim() || 'minimax-m3',
-    aiModels: (env.KTHX_AI_MODELS ?? '')
-      .split(',')
-      .map((entry) => entry.trim())
-      .filter((entry) => entry !== ''),
-    aiMaxTokens: positive(env.KTHX_AI_MAX_TOKENS, 4096),
+    aiModel,
+    aiModels,
+    aiMaxTokens,
+    aiBuildMaxTokens: positive(env.KTHX_AI_BUILD_MAX_TOKENS, aiMaxTokens),
     trustedProxies: (env.KTHX_TRUSTED_PROXIES ?? '')
       .split(',')
       .map((entry) => entry.trim())

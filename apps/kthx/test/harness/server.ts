@@ -143,6 +143,7 @@ export function withServer(overrides: Partial<Config> = {}): () => Harness {
       aiModel: 'test-model',
       aiModels: [],
       aiMaxTokens: 4096,
+      aiBuildMaxTokens: 4096,
       trustedProxies: [],
       port: 0,
       ...overrides,
