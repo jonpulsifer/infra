@@ -18,6 +18,7 @@ import {
   MAX_AI_TOKENS_DAY,
   utcDay,
 } from '../../server/ai.ts';
+import { readConfig } from '../../server/env.ts';
 import { ask, withServer, ZONE } from '../harness/server.ts';
 
 interface Seen {
@@ -118,6 +119,11 @@ function sent(): Record<string, unknown> {
   return JSON.parse(seen?.body ?? '{}') as Record<string, unknown>;
 }
 
+/** The session id the upstream was handed, read fresh after each call. */
+function session(): string | undefined {
+  return seen?.headers['x-opencode-session'];
+}
+
 /** The row as it settles: tokens are billed after the answer is on the wire. */
 async function spent(
   site: Site,
@@ -135,6 +141,44 @@ async function spent(
     await Bun.sleep(10);
   }
   throw new Error('no tokens were ever billed');
+}
+
+/**
+ * The row once the day's request count settles on `want`.
+ *
+ * The refund, like the bill, is fired after the answer is on the wire: reading
+ * the row straight back would be reading it before the statement ran.
+ */
+async function counted(
+  site: Site,
+  want: number,
+): Promise<{ requests: number; tokens: number }> {
+  for (let attempt = 0; attempt < 200; attempt += 1) {
+    const [row] = (await kthx().sql`
+      select requests, tokens from ai_usage
+      where site = ${site.name} and day = ${utcDay()}
+    `) as { requests: number; tokens: string }[];
+    const counted = {
+      requests: Number(row?.requests ?? 0),
+      tokens: Number(row?.tokens ?? 0),
+    };
+    if (counted.requests === want) return counted;
+    await Bun.sleep(10);
+  }
+  throw new Error(`the day never settled at ${want} requests`);
+}
+
+/** `console.error` while `run` runs, one entry per line. */
+async function complaints(run: () => Promise<void>): Promise<string[]> {
+  const lines: string[] = [];
+  const complain = console.error;
+  console.error = (...args: unknown[]) => lines.push(args.join(' '));
+  try {
+    await run();
+  } finally {
+    console.error = complain;
+  }
+  return lines;
 }
 
 function stream(
@@ -191,6 +235,27 @@ describe('the passthrough', () => {
     expect(seen?.headers.cookie).toBeUndefined();
     expect(seen?.headers['x-forwarded-for']).toBeUndefined();
     expect(seen?.headers['openai-organization']).toBeUndefined();
+  });
+
+  test("sends a session header of its own, never the caller's", async () => {
+    const site = await claimed('ai-session');
+    await chat(
+      site,
+      { messages: [] },
+      { headers: { 'x-opencode-session': 'someone-elses-session' } },
+    );
+    const mine = session();
+    // Opaque and derived: the Go base 400s MissingSessionID without one, and a
+    // page that could choose it would file its calls under another site's.
+    expect(mine).toMatch(/^kthx-[0-9a-f]{32}$/);
+
+    // Stable for a site, because routing metadata that changes every call
+    // groups nothing; different for the next site, for the same reason.
+    await chat(site, { messages: [] });
+    expect(session()).toBe(mine as string);
+    const other = await claimed('ai-session-other');
+    await chat(other, { messages: [] });
+    expect(session()).not.toBe(mine as string);
   });
 
   test('drops the query string a caller appended', async () => {
@@ -264,17 +329,44 @@ describe('the passthrough', () => {
     expect((await response.json()).code).toBe('AI_UPSTREAM');
   });
 
-  test('relays a refusal the upstream composed, and bills nothing for it', async () => {
+  test('relays a refusal the caller caused, and gives the request back', async () => {
     const site = await claimed('ai-400');
     reply = () =>
       Response.json({ error: { message: 'no such model' } }, { status: 400 });
     const response = await chat(site, { messages: [] });
+    // The upstream's own message, because it says more about the body the
+    // caller composed than one fixed sentence of this server's could.
     expect(response.status).toBe(400);
-    const [row] = (await kthx().sql`
-      select requests, tokens from ai_usage where site = ${site.name}
-    `) as { requests: number; tokens: string }[];
-    expect(Number(row?.requests)).toBe(1);
-    expect(Number(row?.tokens)).toBe(0);
+    expect((await response.json()).error.message).toBe('no such model');
+    // The request was counted at dispatch; an answer nobody got is not one of
+    // the 200 this site has today.
+    expect(await counted(site, 0)).toEqual({ requests: 0, tokens: 0 });
+  });
+
+  test('an upstream 500 is 502 AI_UPSTREAM, logged, and refunded', async () => {
+    const site = await claimed('ai-500');
+    reply = () => Response.json({ error: 'boom' }, { status: 500 });
+    const lines = await complaints(async () => {
+      const response = await chat(site, { messages: [] });
+      // Not relayed: a 5xx is the upstream or this deployment falling over,
+      // and there is nothing in it for a page to act on.
+      expect(response.status).toBe(502);
+      expect((await response.json()).code).toBe('AI_UPSTREAM');
+      expect(await counted(site, 0)).toEqual({ requests: 0, tokens: 0 });
+    });
+    // The failure this is here for — a header the upstream wants and did not
+    // get — is the one that would otherwise leave no signal at all.
+    expect(lines.some((line) => line.includes('upstream 500'))).toBe(true);
+  });
+
+  test('a request the upstream answered stays spent', async () => {
+    const site = await claimed('ai-no-refund');
+    await (await chat(site, { messages: [] })).json();
+    expect(await spent(site)).toEqual({ requests: 1, tokens: 42 });
+    // The refund is fired after the answer is on the wire, so a success has to
+    // be watched for one that arrives late as well as for one that arrives.
+    await Bun.sleep(50);
+    expect(await counted(site, 1)).toEqual({ requests: 1, tokens: 42 });
   });
 });
 
@@ -299,37 +391,28 @@ describe('the allow-list of paths', () => {
     expect(rows).toHaveLength(0);
   });
 
-  test('embeddings are relayed with the model defaulted', async () => {
-    const site = await claimed('ai-paths');
-    reply = () => Response.json({ data: [{ embedding: [0.1] }], usage: {} });
-    const embeddings = await kthx().fetch(
-      ask('/api/ai/embeddings', {
-        host: site.host,
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ input: 'hi' }),
-      }),
-    );
-    expect(embeddings.status).toBe(200);
-    expect(seen?.url).toBe(`http://127.0.0.1:${upstream.port}/v1/embeddings`);
-    expect(sent().model).toBe('test-model');
-  });
-
-  test('an embeddings reply with no usage is billed its input, not zero', async () => {
-    const site = await claimed('ai-embed-bill');
-    // There is no `max_tokens` on this path, so a silent upstream used to make
-    // the whole call free — the one door without a billing floor.
-    reply = () => Response.json({ data: [] });
-    const response = await kthx().fetch(
-      ask('/api/ai/embeddings', {
-        host: site.host,
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ input: 'x'.repeat(4000) }),
-      }),
-    );
-    await response.json();
-    expect((await spent(site)).tokens).toBeGreaterThan(900);
+  test("embeddings are this server's own 404, and cost nothing", async () => {
+    const site = await claimed('ai-embed');
+    // Neither upstream base has the endpoint — both answer `404 text/html` —
+    // so a forwarded call bought a site's never-zero billing floor a
+    // marketing page.
+    for (const path of ['/api/ai/embeddings', '/api/ai/v1/embeddings']) {
+      const response = await kthx().fetch(
+        ask(path, {
+          host: site.host,
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ input: 'hi' }),
+        }),
+      );
+      expect(response.status).toBe(404);
+      expect((await response.json()).code).toBe('NOT_FOUND');
+    }
+    expect(seen).toBeNull();
+    const rows = (await kthx().sql`
+      select requests from ai_usage where site = ${site.name}
+    `) as { requests: number }[];
+    expect(rows).toHaveLength(0);
   });
 
   test('anything else is 404 and reaches no upstream', async () => {
@@ -493,6 +576,54 @@ describe('concurrency', () => {
     const after = await chat(site, { messages: [] });
     expect(after.status).toBe(200);
     await after.text();
+  });
+});
+
+describe('the model configuration', () => {
+  const env = {
+    DATABASE_URL: 'postgres://x',
+    KTHX_ME_KEY: 'k'.repeat(32),
+    KTHX_PG_KEY: 'p'.repeat(32),
+  };
+
+  test('a default model outside its own allow-list refuses to boot', () => {
+    // A body that names no model is given this one and only then checked
+    // against the list, so a typo here answers every keyless call 400
+    // INVALID_MODEL — as though the page had asked for something forbidden.
+    expect(() =>
+      readConfig({
+        ...env,
+        KTHX_AI_MODEL: 'mimo-v2.5-pr',
+        KTHX_AI_MODELS: 'mimo-v2.5-pro,kimi-k2.7-code',
+      }),
+    ).toThrow('is not one of KTHX_AI_MODELS');
+    expect(
+      readConfig({
+        ...env,
+        KTHX_AI_MODEL: 'mimo-v2.5-pro',
+        KTHX_AI_MODELS: 'mimo-v2.5-pro,kimi-k2.7-code',
+      }).aiModel,
+    ).toBe('mimo-v2.5-pro');
+    // An empty list is every model the upstream has: nothing to be outside of.
+    expect(readConfig({ ...env, KTHX_AI_MODEL: 'anything' }).aiModels).toEqual(
+      [],
+    );
+  });
+
+  test('the build ceiling is its own number, and defaults to the public one', () => {
+    expect(
+      readConfig({ ...env, KTHX_AI_MAX_TOKENS: '4096' }).aiBuildMaxTokens,
+    ).toBe(4096);
+    // The point of the second number: a route that writes a whole document
+    // gets a bigger ceiling without moving what a visitor on a public site may
+    // spend, which is also the floor a silent answer is billed.
+    expect(
+      readConfig({
+        ...env,
+        KTHX_AI_MAX_TOKENS: '4096',
+        KTHX_AI_BUILD_MAX_TOKENS: '16000',
+      }),
+    ).toMatchObject({ aiMaxTokens: 4096, aiBuildMaxTokens: 16000 });
   });
 });
 
