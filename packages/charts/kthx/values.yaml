@@ -24,6 +24,32 @@ bucket: ""
 # is not. Both come from the cluster topology ConfigMap.
 trustedProxies: ""
 
+# The identity host: the tailnet name a person opens, and the only host whose
+# `tailscale-user-login` header this process believes.
+#
+# Empty is the kill switch and the default. With no host the Ingress is not
+# rendered, the NetworkPolicy gains no clause, the server is told no identity
+# host, and every door behaves exactly as it did before any of this existed.
+#
+# `proxies` is deliberately its own list and not `trustedProxies` above. That
+# one is the node and pod CIDRs, because a rate-limit bucket keyed off a header
+# is worth little either way; this one decides whether a header is allowed to
+# say who somebody *is*, and handing that to every pod in the cluster is a
+# different kind of mistake. It still has to be a CIDR — the operator's proxy
+# takes an ordinary pod address — so what actually narrows it is the
+# NetworkPolicy beside it, which admits that one StatefulSet and this
+# namespace's own pods and nothing else.
+identity:
+  host: ""
+  # The tailnet tag the operator mints the proxy's auth key with, and the tag
+  # the policy grant points at. It is not `tag:k8s`: that is every proxy the
+  # operator runs, and a grant to it would hand a member the lot.
+  tag: tag:kthx-ingress
+  proxies: ""
+  # The header the proxy sets. Named rather than assumed so a different
+  # identity-asserting hop is a values change; the default is tailscale's.
+  header: ""
+
 # The AI passthrough. The key is not here: it arrives with the HMAC keys through
 # `envFromSecret`, because a chart value is rendered into a HelmRelease in a
 # public repository.

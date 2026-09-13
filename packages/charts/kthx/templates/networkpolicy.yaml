@@ -31,6 +31,30 @@ spec:
   ingress:
     - from:
         - podSelector: {}
+      {{- with .Values.identity.host }}
+      {{/*
+      The tailscale operator runs the identity proxy as its own StatefulSet in
+      its own namespace, so the same-namespace exception above does not reach
+      it and the Ingress would be a name that resolves to a connection this
+      policy drops.
+
+      The namespace and the pod are one `from` entry and not two: two entries
+      are an OR, and the namespace alone admits every proxy the operator runs
+      in this cluster — including egress proxies for unrelated Services, which
+      are reachable by whatever those Services are for. The three
+      `parent-resource` labels are what narrow it to the proxy created for this
+      Ingress and no other.
+      */}}
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: tailscale
+          podSelector:
+            matchLabels:
+              tailscale.com/managed: "true"
+              tailscale.com/parent-resource-type: ingress
+              tailscale.com/parent-resource: {{ include "kthx.fullname" $ }}-tailnet
+              tailscale.com/parent-resource-ns: {{ $.Release.Namespace }}
+      {{- end }}
       ports:
         - port: {{ .Values.port }}
           protocol: TCP

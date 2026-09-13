@@ -61,6 +61,20 @@ spec:
     # requiring cloudflared's own address in `x-forwarded-for` before believing
     # the header, which is a change in the server, not here.
     trustedProxies: ${K8S_NODE_CIDR},${CILIUM_POD_CIDR}
+    # The tailnet door, where a person is a login rather than a bearer. The
+    # operator creates the proxy device and the name it answers on is the first
+    # label of this host plus the tailnet domain; `tag:kthx-ingress` is what the
+    # tailnet policy grants a member reach to, and nothing else carries it.
+    #
+    # `proxies` is the pod CIDR because the operator's proxy takes an ordinary
+    # pod address, so what actually stands between a pod and a forged login is
+    # the NetworkPolicy — which admits that one StatefulSet and this namespace's
+    # own pods — plus the fact that this host is not on the gateway at all, so
+    # nothing arriving through Cloudflare or the LAN can carry the name.
+    identity:
+      host: kthx.pirate-musical.ts.net
+      tag: tag:kthx-ingress
+      proxies: ${CILIUM_POD_CIDR}
     # The release volume and the database volume are both `local-path`, which is
     # a directory on one node's disk. oldschool: it has the free space and
     # carries nothing else stateful, while retrofit already holds the control
