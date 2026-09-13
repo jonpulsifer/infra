@@ -284,6 +284,26 @@ describe('the AI passthrough values', () => {
     // serve that. A chart that renders it is a pod that crash-loops.
     expect(models.length).toBeGreaterThan(0);
     expect(models).toContain(value('KTHX_AI_MODEL'));
+    // The two build models are refused at boot on the same rule, and they are
+    // the ones a reader is most likely to set from a bake-off table without
+    // adding them here.
+    expect(models).toContain(value('KTHX_AI_BUILD_MODEL'));
+    expect(models).toContain(value('KTHX_AI_BUILD_FALLBACK_MODEL'));
+  });
+
+  test('give the builder a ceiling of its own', async () => {
+    const objects = await render();
+    const env: { name: string; value?: string }[] = one(objects, 'Deployment')
+      .spec.template.spec.containers[0].env;
+    const value = (name: string): number =>
+      Number(env.find((entry) => entry.name === name)?.value ?? '');
+
+    // One global would make raising what a whole-page generation may spend also
+    // raise what every anonymous visitor on every public site may spend. A
+    // document is 3 000 to 14 000 completion tokens; the public ceiling is 4096.
+    expect(value('KTHX_AI_BUILD_MAX_TOKENS')).toBeGreaterThan(
+      value('KTHX_AI_MAX_TOKENS'),
+    );
   });
 
   test('point at a base that takes the models named beside it', async () => {

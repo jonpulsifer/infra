@@ -148,6 +148,11 @@ export function withServer(overrides: Partial<Config> = {}): () => Harness {
       aiModels: [],
       aiMaxTokens: 4096,
       aiBuildMaxTokens: 4096,
+      aiBuildModel: 'test-model',
+      // No fallback by default: a test that means to exercise the second model
+      // says so, and one that does not must not quietly make two upstream calls
+      // for every refusal it asserts on.
+      aiBuildFallbackModel: null,
       trustedProxies: [],
       tailnetProxies: [],
       port: 0,

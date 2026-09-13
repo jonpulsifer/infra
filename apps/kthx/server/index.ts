@@ -10,9 +10,15 @@
  */
 
 import { join } from 'node:path';
-import { LANDING_PATH, SDK_PATH, SKILL_PATH } from '@repo/kthx/assets';
+import {
+  BUILD_PATH,
+  LANDING_PATH,
+  SDK_PATH,
+  SKILL_PATH,
+} from '@repo/kthx/assets';
 import { FAVICON_PATH } from '@repo/kthx/favicon';
 import { AI_IDLE_SECONDS, aiApi } from './ai.ts';
+import { buildApi } from './build.ts';
 import { callerOf } from './caller.ts';
 import { createClient, migrate } from './db.ts';
 import { bucketDepot, type Depot, diskDepot } from './depot.ts';
@@ -68,8 +74,9 @@ function asset(path: string, type: string, cacheControl: string): Response {
   });
 }
 
-/** The apex page, read once. This process is the only one that serves it. */
+/** The two apex pages, read once. This process is the only one serving them. */
 let landing: Promise<string> | null = null;
+let builder: Promise<string> | null = null;
 
 /**
  * The page is told three things a browser cannot see: the zone, because on a
@@ -92,6 +99,38 @@ async function landingHtml(
     '<html lang="en">',
     `<html lang="en" data-zone="${zone}"${control ? '' : ' data-readonly'}${admin ? ' data-admin' : ''}>`,
   );
+}
+
+/**
+ * The builder, which the identity host serves instead of the landing page.
+ *
+ * A separate file rather than a seventh section on the landing page: that one
+ * is 55 KB of hand-written arcade for people who deploy things, and this one is
+ * a text box for somebody who has never heard of a release. It is also the page
+ * whose breakage reverted a ticket once, and it has four assertions to its name.
+ *
+ * The login is written into the tag so the first paint already knows whether
+ * there is anybody to greet — a page that asks `/api/whoami` first shows its
+ * "sign in" sentence to everybody for a round trip. It is escaped because it is
+ * a header value: the proxy sets it, but the proxy is not what this file is
+ * defending against.
+ */
+async function buildHtml(zone: string, login: string | null): Promise<string> {
+  builder ??= Bun.file(BUILD_PATH).text();
+  const who = login === null ? '' : ` data-login="${attribute(login)}"`;
+  return (await builder).replace(
+    '<html lang="en">',
+    `<html lang="en" data-zone="${zone}"${who}>`,
+  );
+}
+
+/** Safe inside a double-quoted attribute, which is the only place this goes. */
+function attribute(value: string): string {
+  return value
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;');
 }
 
 /**
@@ -192,6 +231,13 @@ async function apex(
     if (asked === '') return refuse('NOT_FOUND', ctx.id);
     return nameStatus(ctx, asked);
   }
+  // The builder answers on the identity host and nowhere else — not 403, not
+  // 401: on every other door it is a path this server does not have, because
+  // there is no credential that would open it there.
+  if (segments[1] === 'api' && segments[2] === 'build') {
+    if (ctx.caller.door !== 'identity') return refuse('NOT_FOUND', ctx.id);
+    return buildApi(request, ctx, segments);
+  }
   if (path === '/api/whoami') {
     if (!READ_METHODS.has(request.method)) {
       return refuse('METHOD_NOT_ALLOWED', ctx.id);
@@ -234,20 +280,21 @@ async function apex(
     return refuse('METHOD_NOT_ALLOWED', ctx.id);
   }
   if (path === '/') {
-    return new Response(
-      await landingHtml(
-        ctx.config.zone,
-        ctx.caller.control,
-        opensZone(ctx.caller, ctx.config),
-      ),
-      {
-        headers: {
-          'content-type': 'text/html; charset=utf-8',
-          'cache-control': 'no-cache',
-          'x-content-type-options': 'nosniff',
-        },
+    const page =
+      ctx.caller.door === 'identity'
+        ? await buildHtml(ctx.config.zone, ctx.caller.login)
+        : await landingHtml(
+            ctx.config.zone,
+            ctx.caller.control,
+            opensZone(ctx.caller, ctx.config),
+          );
+    return new Response(page, {
+      headers: {
+        'content-type': 'text/html; charset=utf-8',
+        'cache-control': 'no-cache',
+        'x-content-type-options': 'nosniff',
       },
-    );
+    });
   }
   if (path === '/sdk.js') {
     return asset(
