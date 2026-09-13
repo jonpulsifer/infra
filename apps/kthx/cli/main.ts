@@ -317,9 +317,8 @@ export async function deploy(
     },
     body: packed.bytes,
   });
-  const held = release.serving !== release.n ? ' — held' : '';
   console.log(
-    `  ${tint('→', 0.9)} ${link(release.url)}  ${faint(`(${((Date.now() - started) / 1000).toFixed(1)}s)`)} — v${release.n}${held}`,
+    `  ${tint('→', 0.9)} ${link(release.url)}  ${faint(`(${((Date.now() - started) / 1000).toFixed(1)}s)`)} — v${release.n}`,
   );
   return release;
 }
@@ -352,12 +351,12 @@ export async function rollback(dir = '.', n?: number): Promise<number> {
       `${name} has no release before v${found.serving}`,
     );
   }
-  const { serving } = await api<{ serving: number }>(
+  const { serving, held } = await api<{ serving: number; held: boolean }>(
     `/api/sites/${name}/serve`,
     { method: 'POST', token: tokenFor(name), ...json({ n: target }) },
   );
   console.log(
-    `  v${found.serving} → v${serving} · held: new uploads do not replace v${serving} until you run kthx release`,
+    `  v${found.serving} → v${serving}${held ? ' · held: the next deploy takes it over, or kthx release jumps to the newest' : ''}`,
   );
   return serving;
 }

@@ -1,11 +1,13 @@
 /**
  * The control API: claim a name, upload a release, choose which one serves.
  *
- * Answered on the apex — or, where `KTHX_CONTROL_HOST` names a private host,
- * there alone. Ownership is one bearer per site, minted at claim
- * and shown once; the row keeps its SHA-256 and nothing else. There is no user
- * and no session — a visitor who lost the token has lost the site, which is the
- * deal the landing page states.
+ * Answered on the apex — or, where `KTHX_CONTROL_HOST` or `KTHX_IDENTITY_HOST`
+ * name a private host, there alone. Ownership is two credentials and a row may
+ * carry either: the bearer minted at claim and shown once, of which the row
+ * keeps only a SHA-256, and the tailnet login the identity door vouched for.
+ * There is still no session and no reset — a visitor who lost the token has
+ * lost the site unless its row also names a login, which is the deal the
+ * landing page states.
  *
  * The upload boundary is `@repo/archive`: `normalizeArchive` turns a ZIP into
  * the gzipped tar everything downstream opens, the depot stores it under its
@@ -19,6 +21,7 @@ import { rm } from 'node:fs/promises';
 import { base64urlEncode } from '@repo/archive/bytes';
 import type { SQL } from 'bun';
 import { aiUsage, MAX_AI_REQUESTS_DAY, MAX_AI_TOKENS_DAY } from './ai.ts';
+import type { Caller } from './caller.ts';
 import type { ReleaseRow, SiteRow } from './db.ts';
 import type { Depot } from './depot.ts';
 import { isPlainObject } from './documents.ts';
@@ -30,7 +33,6 @@ import {
   MAX_FILES_BYTES,
 } from './files.ts';
 import {
-  addressOf,
   bodyWithin,
   type Code,
   empty,
@@ -96,12 +98,8 @@ export interface Ctx {
   readonly host: string;
   /** The port the request named, so a local run answers with a reachable URL. */
   readonly port: string;
-  /**
-   * Whether this request may claim and control sites: true on the private
-   * host, and on the apex only while no private host is configured. The public
-   * apex of a deployment that has one reads the directory and nothing else.
-   */
-  readonly control: boolean;
+  /** Which door this arrived through, who it is, and what keys its buckets. */
+  readonly caller: Caller;
 }
 
 function hash(token: string): string {
@@ -112,18 +110,41 @@ function retryAfter(seconds: number): Record<string, string> {
   return { 'retry-after': String(seconds) };
 }
 
+/** The two columns that decide who opens a site. */
+export interface Owned {
+  readonly token_hash: string | null;
+  readonly owner_login: string | null;
+}
+
 /**
- * Whether this request carries the bearer that opens this site.
+ * Whether this caller opens this site.
+ *
+ * Two credentials, both permanent: the bearer minted at claim, and the tailnet
+ * login the identity door vouched for. Neither supersedes the other — a tagged
+ * node gets no identity header at all, so identity-only ownership would lock
+ * every agent out of its own sites on the day it shipped.
+ *
+ * Reach is not one of them. Everyone on the tailnet can dial the identity host,
+ * so arriving there says which door was used and nothing about who came
+ * through it.
+ *
+ * A null `token_hash` opens nothing, and is checked before the compare rather
+ * than inside it: the live column is nullable, and `timingSafeEquals` against
+ * a null is a throw in the middle of a request that should have been a 403.
  *
  * On a site host a bearer that is not this site's is *ignored* rather than
  * refused — the OpenAI SDK puts one on every call to `/api/ai` — so this
  * answers a question, not a challenge.
  */
-export function opensSite(request: Request, tokenHash: string): boolean {
-  const bearer = /^Bearer\s+(\S+)$/i.exec(
-    request.headers.get('authorization') ?? '',
-  )?.[1];
-  return bearer !== undefined && timingSafeEquals(hash(bearer), tokenHash);
+export function opensSite(caller: Caller, site: Owned): boolean {
+  if (
+    site.token_hash !== null &&
+    caller.bearer !== null &&
+    timingSafeEquals(hash(caller.bearer), site.token_hash)
+  ) {
+    return true;
+  }
+  return site.owner_login !== null && site.owner_login === caller.login;
 }
 
 /**
@@ -173,7 +194,17 @@ export async function sitesApi(
       : refuse('NOT_FOUND', ctx.id);
   }
 
-  const site = await siteFor(request, name, ctx);
+  // Every owner-scoped write under `:name`, in one place. An identity header is
+  // set by the proxy on whatever reaches it, so the credential is ambient the
+  // moment a browser is on that host: without this a foreign page publishes a
+  // release to somebody else's site with nothing but their address bar. `GET`
+  // is left alone — this server sends no CORS header, so a cross-origin read
+  // cannot be read.
+  if (method !== 'GET' && !sameOrigin(request, ctx.host, ctx.port)) {
+    return refuse('FORBIDDEN', ctx.id);
+  }
+
+  const site = await siteFor(name, ctx);
   if ('code' in site) return refuse(site.code, ctx.id);
   return act(request, ctx, site.row);
 }
@@ -187,22 +218,23 @@ export async function sitesApi(
  * 401 means claimed, 404 means free.
  */
 async function siteFor(
-  request: Request,
   name: string,
   ctx: Ctx,
 ): Promise<{ row: SiteRow } | { code: Code }> {
   const [row] = (await ctx.sql`
-    select name, token_hash, serving, held, deleted_at
+    select name, token_hash, owner_login, serving, held, deleted_at
     from sites where name = ${name} limit 1
   `) as SiteRow[];
   if (row === undefined) return { code: 'NOT_FOUND' };
   if (row.deleted_at !== null) return { code: 'GONE' };
 
-  if (request.headers.get('authorization') === null) {
-    return { code: 'UNAUTHENTICATED' };
-  }
-  if (!opensSite(request, row.token_hash)) return { code: 'FORBIDDEN' };
-  return { row };
+  if (opensSite(ctx.caller, row)) return { row };
+  // An unauthenticated read is still 401, which is what makes it the landing
+  // page's taken-probe. A verified login is not a credential *offered* for this
+  // site, so it does not turn that 401 into a 403 and break the probe on the
+  // identity host.
+  if (ctx.caller.authorization === null) return { code: 'UNAUTHENTICATED' };
+  return { code: 'FORBIDDEN' };
 }
 
 type Act = (request: Request, ctx: Ctx, site: SiteRow) => Promise<Response>;
@@ -216,6 +248,7 @@ const MAX_DIRECTORY_PAGE = 500;
 /** One site as the directory shows it: no token hash, no usage, no hold. */
 interface Listed {
   readonly name: string;
+  readonly owner_login: string | null;
   readonly serving: number | null;
   readonly releases: number;
   readonly at: Date;
@@ -235,7 +268,14 @@ const directoryReads = new TokenBucket(DIRECTORY_BUCKET);
  * Public by construction: a name answers on `<name>.<zone>` to anyone who
  * dials it, so listing the names gives away nothing a walk of the zone would
  * not. What stays behind the bearer is everything about *owning* a site: the
- * token hash, the usage, the hold, the release digests.
+ * token hash, the usage, the hold, the release digests — and who owns it. A
+ * row's `owner` is its login only when it is the caller's own, because an
+ * owner is an email address and the directory is read by anyone.
+ *
+ * `?owner=me` is the same page filtered to the caller's own sites — "your
+ * websites", which is the only list a person landing on the identity host
+ * wants. Any other `?owner=` is refused rather than answered: listing by
+ * somebody else's address is the leak this route must not have.
  *
  * One statement, whatever the page: the cursor names the last site of the
  * previous one and the query finds its place itself, so a caller paging to the
@@ -249,6 +289,11 @@ const directoryReads = new TokenBucket(DIRECTORY_BUCKET);
  */
 async function directory(request: Request, ctx: Ctx): Promise<Response> {
   const query = new URL(request.url).searchParams;
+  const owner = query.get('owner');
+  if (owner !== null && owner !== 'me') return refuse('INVALID_QUERY', ctx.id);
+  if (owner === 'me' && ctx.caller.login === null) {
+    return refuse('UNAUTHENTICATED', ctx.id);
+  }
   const after = query.get('after');
   // A reserved name is a name: it matches no row, so it ends the walk rather
   // than being refused. Only a string that is not a name at all is a bad query.
@@ -262,17 +307,23 @@ async function directory(request: Request, ctx: Ctx): Promise<Response> {
     ? Math.min(Math.max(Math.trunc(asked), 1), MAX_DIRECTORY_PAGE)
     : DIRECTORY_PAGE;
 
-  const address = addressOf(request, ctx.server, ctx.config.trustedProxies);
-  if (directoryReads.spend(address)) {
+  if (directoryReads.spend(ctx.caller.bucket)) {
     return refuse('RATE_LIMITED', ctx.id, retryAfter(60));
   }
-  const page = await listSites(ctx, limit, after);
+  const login = ctx.caller.login;
+  const page = await listSites(
+    ctx,
+    limit,
+    after,
+    owner === 'me' ? login : null,
+  );
 
   return ok(
     {
       items: page.rows.map((row) => ({
         name: row.name,
         url: siteUrl(ctx.config.zone, row.name, ctx.port),
+        owner: row.owner_login === login ? login : null,
         serving: row.serving,
         releases: row.releases,
         at: row.at.toISOString(),
@@ -296,16 +347,18 @@ async function listSites(
   ctx: Ctx,
   limit: number,
   after: string | null,
+  mine: string | null,
 ): Promise<Page> {
   const rows = (await ctx.sql`
     with mark as (
       select created_at, name from sites where name = ${after}
     )
-    select s.name, s.serving, s.created_at as at,
+    select s.name, s.owner_login, s.serving, s.created_at as at,
            (select count(*)::int from releases r where r.site = s.name)
              as releases
     from sites s
     where s.deleted_at is null
+      and (${mine}::text is null or s.owner_login = ${mine})
       and (${after}::text is null or exists (
         select 1 from mark m
         where s.created_at < m.created_at
@@ -321,6 +374,45 @@ async function listSites(
   };
 }
 
+// --- the name probe ---------------------------------------------------------
+
+/**
+ * Whether a name can be claimed.
+ *
+ * This is the question the landing page used to ask by reading a 401 off
+ * `GET /api/sites/:name` — a probe that only worked because an owner route
+ * answers differently to a name that exists, and that says "taken" to anyone
+ * who is simply not its owner. Asked plainly it is one indexed row.
+ *
+ * **No `deleted_at` filter.** A deleted name is taken forever: its row is what
+ * makes the site host answer 410 rather than handing the name to the next
+ * claimer, and a probe that called it free would offer a name the claim then
+ * refuses.
+ *
+ * A fast no, never a promise of a yes: a claim also refuses a name already in
+ * `pg_database` or `pg_roles`, and two callers racing for the last free name
+ * still both see `available`. Those two catalogue lookups stay off a public
+ * unauthenticated route; the claim is the authority.
+ */
+export async function nameStatus(ctx: Ctx, segment: string): Promise<Response> {
+  if (directoryReads.spend(ctx.caller.bucket)) {
+    return refuse('RATE_LIMITED', ctx.id, retryAfter(60));
+  }
+  let name: string;
+  try {
+    name = decodeURIComponent(segment).trim().toLowerCase();
+  } catch {
+    return refuse('NOT_FOUND', ctx.id);
+  }
+  const why = nameProblem(name);
+  if (why !== null) return ok({ name, available: false, why }, ctx.id);
+  const [row] = (await ctx.sql`
+    select name from sites where name = ${name} limit 1
+  `) as { name: string }[];
+  const taken = row !== undefined;
+  return ok({ name, available: !taken, why: taken ? 'TAKEN' : null }, ctx.id);
+}
+
 // --- the nuke ---------------------------------------------------------------
 
 /**
@@ -334,11 +426,10 @@ async function listSites(
  * cannot have an unauthenticated nuke, and nothing a visitor holds opens this
  * one.
  */
-function opensZone(request: Request, key: string): boolean {
-  const bearer = /^Bearer\s+(\S+)$/i.exec(
-    request.headers.get('authorization') ?? '',
-  )?.[1];
-  return bearer !== undefined && timingSafeEquals(hash(bearer), hash(key));
+function opensZone(caller: Caller, key: string): boolean {
+  return (
+    caller.bearer !== null && timingSafeEquals(hash(caller.bearer), hash(key))
+  );
 }
 
 /**
@@ -362,7 +453,7 @@ async function nuke(request: Request, ctx: Ctx): Promise<Response> {
   if (!sameOrigin(request, ctx.host, ctx.port)) {
     return refuse('FORBIDDEN', ctx.id);
   }
-  if (!opensZone(request, key)) {
+  if (!opensZone(ctx.caller, key)) {
     // Wrong keys fill a bucket of their own: the key may be a short passphrase
     // and this is a public route. A right key is checked first and never held.
     return nukeAttempts.spend('zone')
@@ -426,7 +517,7 @@ async function claim(request: Request, ctx: Ctx): Promise<Response> {
     return refuse('TOO_LARGE', ctx.id);
   }
 
-  const address = addressOf(request, ctx.server, ctx.config.trustedProxies);
+  const address = ctx.caller.bucket;
   if (claims.spend(address)) {
     return refuse('RATE_LIMITED', ctx.id, retryAfter(60));
   }
@@ -451,9 +542,14 @@ async function claim(request: Request, ctx: Ctx): Promise<Response> {
   if (await ctx.pg.inUse(name)) return refuse('TAKEN', ctx.id);
 
   const token = base64urlEncode(crypto.getRandomValues(new Uint8Array(32)));
-  // A deleted name stays taken: the row is what makes it answer 410.
+  // A deleted name stays taken: the row is what makes it answer 410. A bearer
+  // is minted whatever the door, so a site claimed by a person on the tailnet
+  // carries both credentials — the login is only ever presented from a browser
+  // on one host, and the CLI, an agent and a phone off the tailnet all still
+  // need something to carry.
   const claimed = (await ctx.sql`
-    insert into sites (name, token_hash) values (${name}, ${hash(token)})
+    insert into sites (name, token_hash, owner_login)
+    values (${name}, ${hash(token)}, ${ctx.caller.login})
     on conflict do nothing returning name
   `) as { name: string }[];
   if (claimed.length === 0) return refuse('TAKEN', ctx.id);
@@ -507,6 +603,7 @@ const inspect: Act = async (_request, ctx, site) => {
     {
       name: site.name,
       url: siteUrl(ctx.config.zone, site.name, ctx.port),
+      owner: site.owner_login,
       serving: site.serving,
       held: site.held,
       releases: rows.map((row) => ({
@@ -538,7 +635,7 @@ const release: Act = async (request, ctx, site) => {
   // itself either — the process is full, which clears on its own. A probe and
   // not a slot: the slot is taken in `stage`, once the body is in hand.
   if (slotsFull()) return refuse('BUSY', ctx.id);
-  if (claims.spend(addressOf(request, ctx.server, ctx.config.trustedProxies))) {
+  if (claims.spend(ctx.caller.bucket)) {
     return refuse('RATE_LIMITED', ctx.id, retryAfter(60));
   }
   if (uploadsPerDay.full(site.name)) {
@@ -551,12 +648,6 @@ const release: Act = async (request, ctx, site) => {
   if (answer.status === 201) uploadsPerDay.count(site.name);
   return answer;
 };
-
-/** The number a release took, and what the site serves once it has it. */
-interface Numbered {
-  readonly n: number;
-  readonly serving: number | null;
-}
 
 async function stage(
   request: Request,
@@ -622,36 +713,42 @@ async function unpack(
   }
 
   const size = read.archive.bytes.byteLength;
-  let numbered: Numbered;
+  let n: number;
   try {
-    numbered = await writeTree(
+    n = await writeTree(
       ctx.config.sitesDir,
       site.name,
       read.files,
-      async (temp): Promise<Numbered> => {
+      async (temp): Promise<number> => {
         // One site's uploads are numbered under its own lock, so two arriving
         // at once take two numbers rather than one losing the primary key.
         return await ctx.sql.begin(async (tx: SQL) => {
-          const [locked] = (await tx`
-            select held, serving from sites where name = ${site.name} for update
-          `) as { held: boolean; serving: number | null }[];
+          await tx`select name from sites where name = ${site.name} for update`;
           const [top] = (await tx`
             select max(n) as n from releases where site = ${site.name}
           `) as { n: number | null }[];
-          const n = Number(top?.n ?? 0) + 1;
+          const numbered = Number(top?.n ?? 0) + 1;
           await tx`
             insert into releases (site, n, digest, size, location)
-            values (${site.name}, ${n}, ${read.digest}, ${size}, ${location})
+            values (${site.name}, ${numbered}, ${read.digest}, ${size},
+                    ${location})
           `;
-          const serving = locked?.held ? locked.serving : n;
-          if (!locked?.held) {
-            await tx`update sites set serving = ${n} where name = ${site.name}`;
-          }
+          // New bytes are the owner saying which release they want, so they
+          // serve and the hold goes with them. A hold that outlived the next
+          // publish is what made the site after a rollback stop answering to
+          // anything anyone uploaded.
+          await tx`
+            update sites set serving = ${numbered}, held = false
+            where name = ${site.name}
+          `;
           // Inside the transaction, so a rename that cannot happen rolls the
           // row back: a site must never say it serves a release whose directory
           // never landed. `writeTree` sweeps the temp tree either way.
-          await placeTree(temp, releaseDir(ctx.config.sitesDir, site.name, n));
-          return { n, serving };
+          await placeTree(
+            temp,
+            releaseDir(ctx.config.sitesDir, site.name, numbered),
+          );
+          return numbered;
         });
       },
     );
@@ -660,11 +757,11 @@ async function unpack(
     return refuse('STORAGE_FAILURE', ctx.id);
   }
 
-  await prune(ctx, site.name, numbered.serving);
+  await prune(ctx, site.name, n);
   return ok(
     {
-      n: numbered.n,
-      serving: numbered.serving,
+      n,
+      serving: n,
       digest: read.digest,
       url: siteUrl(ctx.config.zone, site.name, ctx.port),
     },
@@ -676,10 +773,10 @@ async function unpack(
 /**
  * Drop the rows past {@link KEEP_RELEASES} and the directories nothing needs.
  *
- * The row a site serves is never one of them: a held site would otherwise lose
- * what names the release it answers with, so it keeps {@link KEEP_RELEASES}
- * plus that one while the hold is on an older release. The site row says which
- * one, so a hold taken while the upload commits still counts.
+ * The row a site serves is never one of them: a rollback that lands while this
+ * upload commits would otherwise lose what names the release the site answers
+ * with, so it keeps {@link KEEP_RELEASES} plus whatever the site row says it is
+ * serving by the time the delete runs.
  *
  * The serving release and the one before it are what stays on disk; everything
  * else is a rehydrate away, and only goes when the volume is under pressure.
@@ -718,19 +815,30 @@ async function prune(
 
 // --- serve, hold, delete ----------------------------------------------------
 
+/**
+ * Roll back — or forward — to a numbered release.
+ *
+ * `held` says where `serving` sits, not that this route was called. Setting it
+ * unconditionally made the first rollback of a site's life permanent: the
+ * latch stayed on, every later release was stored without serving, and
+ * "rolling back is free" was true exactly once. Choosing the newest release is
+ * the ordinary state and holds nothing.
+ */
 const chooseRelease: Act = async (request, ctx, site) => {
   if (!isJson(request)) return refuse('MALFORMED_REQUEST', ctx.id);
   const body = await jsonBody(request);
   const n = Number(body.n);
   if (!Number.isInteger(n) || n <= 0) return refuse('NOT_FOUND', ctx.id);
-  const found = (await ctx.sql`
-    select n from releases where site = ${site.name} and n = ${n} limit 1
-  `) as { n: number }[];
-  if (found.length === 0) return refuse('NOT_FOUND', ctx.id);
+  const [found] = (await ctx.sql`
+    select max(n) as top, bool_or(n = ${n}) as chosen
+    from releases where site = ${site.name}
+  `) as { top: number | null; chosen: boolean | null }[];
+  if (found?.chosen !== true) return refuse('NOT_FOUND', ctx.id);
+  const held = n !== found.top;
   await ctx.sql`
-    update sites set serving = ${n}, held = true where name = ${site.name}
+    update sites set serving = ${n}, held = ${held} where name = ${site.name}
   `;
-  return ok({ serving: n, held: true }, ctx.id);
+  return ok({ serving: n, held }, ctx.id);
 };
 
 const unhold: Act = async (_request, ctx, site) => {
