@@ -102,7 +102,7 @@
 			// this one port and nothing else on the tailnet: the Ingress
 			// carries `tag:kthx-ingress` and no other device does.
 			//
-			// The source is `autogroup:member` rather than a named group
+			// The source is `autogroup:members` rather than a named group
 			// because this file is public and the people it is for are
 			// family. The cost, stated rather than discovered later: every
 			// future member of this tailnet inherits the same reach.
@@ -111,7 +111,7 @@
 			// backend the caller's login — which is what kthx uses to decide
 			// who owns a site. A tagged node gets no login at all, so this
 			// grant is only ever useful to a person.
-			"src": ["autogroup:member"],
+			"src": ["autogroup:members"],
 			"dst": ["tag:kthx-ingress"],
 			"ip":  ["tcp:443"],
 		},
@@ -175,7 +175,7 @@
 		{
 			// The builder Ingress is reachable, and the tag is spelled the
 			// same here as in the annotation the operator reads. A test
-			// cannot take `autogroup:member` as a source, so this proves the
+			// cannot take `autogroup:members` as a source, so this proves the
 			// tag and the port, not the membership grant itself.
 			"src":    "jonathan@pulsifer.ca",
 			"accept": ["tag:kthx-ingress:443"],
