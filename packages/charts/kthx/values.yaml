@@ -28,17 +28,43 @@ trustedProxies: ""
 # `envFromSecret`, because a chart value is rendered into a HelmRelease in a
 # public repository.
 #
-# `models` is an allow-list, and an empty one is every model the upstream sells
-# — including the ones priced ten times the rest. The operator pays for every
-# call any anonymous visitor makes, so this is a spend decision, not tuning.
+# `models` is an allow-list, and an empty one is every model the upstream has.
+# The plan behind the key is flat-rate, so the per-site daily numbers the server
+# enforces are a rate limiter rather than a spend control: what an anonymous
+# visitor can exhaust is the operator's subscription and its rate limits, not a
+# bill. That makes the list a decision about what works, and the daily caps the
+# thing standing between one site and everyone else's.
 ai:
-  url: https://opencode.ai/zen/v1
-  # What a request that names no model gets.
-  model: minimax-m3
-  # Comma-separated, and deliberately short: OpenAI-compatible, cheap, and
-  # enough to build something with. `GET /api/ai/v1/models` lists what the
-  # upstream has; adding one here is what makes it askable.
-  models: minimax-m3,kimi-k2.5,glm-5,deepseek-v4-flash,nemotron-3.5-lightning-free
+  # The subscription base. It is a different catalogue from the metered one and
+  # it refuses any call without an `x-opencode-session` header, which the server
+  # sends — so the image carrying that header must be live before this value
+  # moves, or every call answers 400.
+  url: https://opencode.ai/zen/go/v1
+  # What a request that names no model gets. Measured at this deployment's own
+  # 4096 ceiling: it answers a one-sentence question in 70 completion tokens and
+  # spends *zero* of them reasoning, which no other model on this base does. The
+  # rest reason first — 693 of 734 tokens on qwen3.7-plus — so a tight clamp
+  # buys their thinking and truncates their answer.
+  model: mimo-v2.5-pro
+  # Comma-separated, and an allow-list rather than a shortlist: a model absent
+  # here is 400 INVALID_MODEL before the call leaves the pod. Every entry was
+  # asked a real question on this base at this ceiling and answered it.
+  #
+  # What is deliberately absent, and why:
+  #   kimi-k2.5, glm-5, deepseek-v4-flash  upstream error or an empty answer
+  #   glm-5.1/5.2/5.3, glm-5.3-flash       spend the whole budget reasoning and
+  #                                        return no content at all
+  #   grok-4.6                             401, anthropic-shaped only
+  #   gpt-5.6-luna                         500
+  #   kimi-k3, qwen3.6-plus                first byte at 161 s and 99 s
+  #   nemotron-3.5-lightning-free          not in this catalogue
+  #
+  # minimax-m3 is here only because it was the default and a site may name it.
+  # It is the one model that writes its reasoning into `content` as a <think>
+  # block, so a page that renders the answer renders that too.
+  models: mimo-v2.5-pro,kimi-k2.7-code,qwen3.7-plus,minimax-m2.5,deepseek-v4.1-flash,minimax-m3
+  # The public ceiling, and also the floor a silent answer is billed. It stays
+  # where it is: this route is anonymous on every site in the zone.
   maxTokens: 4096
 
 # `KTHX_ME_KEY`, `KTHX_PG_KEY` and `KTHX_AI_KEY`. The process refuses to boot
