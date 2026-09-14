@@ -320,6 +320,90 @@ pre.sh .p{color:var(--hot)}
 }
 /* the public apex of a deployment whose claiming lives on a private host: the directory reads, nothing claims */
 html[data-readonly] .deck,html[data-readonly] #mine,html[data-readonly] #nukebar{display:none}
+
+/* the builder: "build me a website for …", for somebody who has never heard of
+   a release, on a phone, held at arm's length — one thing to press per screen,
+   every road ending in a sentence rather than a code. It is a section of this
+   page and not a page of its own: one address, one UI layer, this page's ink
+   and chrome, and only what a wizard needs added on top.
+
+   Which door it is on decides whether it exists. The server stamps
+   `data-identity` on the tailnet host, so on the apex and the control host
+   none of this is rendered at all — the same way `data-readonly` already takes
+   the claim deck off a public apex that cannot claim. */
+/* builder:start */
+#builder{display:none;margin-top:-28px}
+html[data-identity] #builder{display:block}
+/* And the other way round: what the tailnet door does not have. Ownership
+   there is a login, so the properties kept in this browser would be a second
+   list that can only contradict "your websites" inside the builder; the rest —
+   a name field, a dice, a file drop, a terminal, SDK tabs, a directory of
+   everybody's sites — is for people who deploy things, which is the one
+   audience this door does not have. */
+html[data-identity] .deck,
+html[data-identity] #mine,
+html[data-identity] #every,
+html[data-identity] #cli,
+html[data-identity] #sdkbox,
+html[data-identity] .foot{display:none}
+/* builder:end */
+/* One screen at a time, so `hidden` has to mean gone rather than laid out.
+   Scoped to this section on purpose: `.foot` and `.sdkpane` out there carry a
+   display of their own, and a bare `[hidden]` rule would quietly change what
+   the apex shows. */
+#builder [hidden]{display:none}
+
+.build{background:var(--card);border:1px solid var(--line);border-radius:var(--r);box-shadow:var(--shade);padding:22px 18px;overflow-wrap:break-word}
+.build h2{font-size:23px;line-height:1.2;font-weight:700;letter-spacing:-.02em;margin:0 0 6px}
+.build h3{font-family:var(--mono);font-size:11px;letter-spacing:.13em;text-transform:uppercase;color:var(--ink-3);font-weight:400;margin:0 0 8px}
+.build p{margin:0 0 12px}
+.build .lede{color:var(--ink-2);font-size:16px}
+.build .tip{display:block;color:var(--ink-3);font-size:13px;margin:0 0 6px}
+
+.bask,.bname{width:100%;background:var(--sunk);border:1px solid var(--line);border-radius:var(--r-sm);color:var(--ink);outline:0;font-family:var(--sans);font-size:16px}
+.bask{min-height:132px;padding:13px;line-height:1.5;resize:vertical}
+.bname{padding:13px;font-family:var(--mono)}
+.bask:focus,.bname:focus{border-color:var(--hot-line)}
+
+/* the one live thing on each screen, and a thumb cannot miss it */
+.bgo{display:block;width:100%;margin-top:14px;padding:15px;border-radius:var(--r-sm);background:var(--hot);color:var(--hot-ink);font-size:17px;font-weight:700;transition:transform .1s var(--ease-out),opacity .13s}
+.bgo:active{transform:scale(.99)}
+.bgo:disabled{opacity:.4;cursor:default;transform:none}
+.brow{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
+.brow .tiny{flex:1 1 auto;text-align:center;padding:11px 14px;font-size:14px}
+
+/* the wait: a real line about a real thing, never a bare spinner */
+.bwait{background:var(--sunk);border:1px solid var(--line-soft);border-radius:var(--r-sm);padding:16px}
+.bbar{height:6px;border-radius:4px;background:var(--paper);overflow:hidden;margin:14px 0 10px}
+#builder .bbar i{display:block;height:100%;width:32%;border-radius:4px;background:var(--hot);animation:slide 2.1s var(--ease-in-out) infinite}
+@keyframes slide{0%{transform:translateX(-105%)}100%{transform:translateX(320%)}}
+.bcount{font-family:var(--mono);font-size:13px;color:var(--ink-2);font-variant-numeric:tabular-nums}
+
+.bpreview{width:100%;height:min(58vh,440px);border:1px solid var(--line);border-radius:var(--r-sm);background:#fff;display:block}
+.burl{font-family:var(--mono);font-size:16px;font-weight:500;word-break:break-all;background:var(--hot-soft);border:1px solid var(--hot-line);border-radius:var(--r-sm);padding:11px 13px;margin:0 0 12px}
+.boops{background:var(--hot-soft);border:1px solid var(--hot-line);border-radius:var(--r-sm);color:var(--hot);padding:12px 13px;margin:0 0 12px;font-size:15px}
+#builder .boops b{display:block;color:var(--ink);font-weight:500;margin-bottom:2px}
+/* The same box in the other ink, and the reason it has two. Half of what this
+   component has to say in it is good news — the address is already yours, what
+   you typed is still here — and saying that in the colour kept for things going
+   wrong teaches a person not to trust the colour. */
+.boops.note{background:var(--ok-soft);border-color:var(--ok);color:var(--ink)}
+.bverdict{min-height:22px;margin-top:8px;font-size:14px;color:var(--ink-2)}
+.bverdict.no{color:var(--hot)}
+.bverdict.yes{color:var(--ok)}
+
+.bsites{margin-bottom:24px}
+.bsite{display:flex;flex-wrap:wrap;align-items:baseline;gap:6px 12px;padding:11px 0;border-bottom:1px solid var(--line-soft)}
+.bsite:last-child{border-bottom:0}
+.bhost{font-family:var(--mono);font-size:15px;font-weight:500;word-break:break-all}
+.bwhen{color:var(--ink-3);font-size:13px}
+.bacts{margin-left:auto;display:flex;gap:8px}
+.bacts .tiny{padding:10px 12px;font-size:14px}
+
+@media (prefers-reduced-motion: reduce){
+  #builder .bbar i{animation:none;width:100%;opacity:.5}
+  .bgo:active{transform:none}
+}
 </style>
 </head>
 <body>
@@ -344,6 +428,108 @@ html[data-readonly] .deck,html[data-readonly] #mine,html[data-readonly] #nukebar
 </section>
 
 <div class="col">
+  <!-- The tailnet door's one component: "build me a website for …". It is a
+       section of this page rather than a page of its own — one address, one UI
+       layer — and `html[data-identity]` above is what renders it, so on the
+       apex and the control host none of this is on the screen at all. Every id
+       in here is prefixed, because merging two pages is exactly where an id
+       collides. -->
+  <!-- builder:start -->
+  <section id="builder" aria-label="Make a website">
+    <div class="build">
+
+      <!-- no login: the whole component, because there is nothing here to do
+           without one -->
+      <section id="b-signedout" hidden>
+        <h2>Make a website</h2>
+        <p class="lede">This page needs your Tailscale login. Open it from a device signed in to the tailnet.</p>
+      </section>
+
+      <!-- the first screen -->
+      <section id="b-start" hidden>
+        <div class="bsites" id="b-mine" hidden>
+          <h3>Your websites</h3>
+          <div id="b-minelist"></div>
+        </div>
+        <h2 id="b-hello">Hello.</h2>
+        <p class="lede" id="b-prompt">What would you like a website for?</p>
+        <div id="b-startoops"></div>
+        <label class="tip" for="b-ask" id="b-asklabel">Tell it anything — what you do, where you are, how people reach you.</label>
+        <textarea class="bask" id="b-ask" autocapitalize="sentences" spellcheck="true"
+          placeholder="A page for my woodworking. I make cutting boards and small furniture in Dartmouth. People can call me at 902-555-0134."></textarea>
+        <button type="button" class="bgo" id="b-make">Make it</button>
+        <p class="tip" style="margin-top:12px">You can change it afterwards.</p>
+      </section>
+
+      <!-- the wait, which the server talks through -->
+      <section id="b-working" hidden>
+        <h2 id="b-workingtitle">Writing your page</h2>
+        <div class="bwait">
+          <p id="b-say" style="margin:0">This takes about a minute. It is writing the whole page, from nothing.</p>
+          <div class="bbar"><i></i></div>
+          <div class="bcount" id="b-count">0 seconds so far</div>
+        </div>
+      </section>
+
+      <!-- what it wrote, before anything is claimed -->
+      <section id="b-proposal" hidden>
+        <h2>Here it is</h2>
+        <p class="lede">Have a look. If it is right, put it online.</p>
+        <iframe class="bpreview" id="b-preview" title="What your website looks like" sandbox="allow-scripts"></iframe>
+        <p class="lede" style="margin-top:14px">It will live at</p>
+        <p class="burl" id="b-proposedurl"></p>
+        <div id="b-proposaloops"></div>
+        <button type="button" class="bgo" id="b-put">Put it online</button>
+        <!-- what the green button becomes when the name is spoken for: one live
+             action per screen, and the page he waited a minute for stays on it -->
+        <button type="button" class="bgo" id="b-pickname" hidden>Pick a different name</button>
+        <div class="brow">
+          <button type="button" class="tiny" id="b-rename">Change the name</button>
+          <button type="button" class="tiny" id="b-scrap">Start again</button>
+        </div>
+      </section>
+
+      <!-- the name, when the person wants a different one -->
+      <section id="b-naming" hidden>
+        <h2>Pick a name</h2>
+        <p class="lede" id="b-namingsay">Letters, numbers and hyphens. This becomes the address.</p>
+        <input type="text" class="bname" id="b-name" autocapitalize="none" autocorrect="off" spellcheck="false" inputmode="url" maxlength="40" aria-label="The name this website lives at">
+        <p class="burl" id="b-namingurl" style="margin-top:12px"></p>
+        <div class="bverdict" id="b-verdict" aria-live="polite"></div>
+        <button type="button" class="bgo" id="b-usename">Use this name</button>
+        <div class="brow"><button type="button" class="tiny" id="b-keepname">Keep the old one</button></div>
+      </section>
+
+      <!-- online -->
+      <section id="b-live" hidden>
+        <h2 id="b-livetitle">It is online</h2>
+        <p class="lede" id="b-livesay">Anyone can open this address.</p>
+        <p class="burl" id="b-liveurl"></p>
+        <iframe class="bpreview" id="b-livepreview" title="Your website" sandbox="allow-scripts"></iframe>
+        <div id="b-liveoops" style="margin-top:14px"></div>
+        <div id="b-openrow"></div>
+        <div class="brow">
+          <button type="button" class="tiny" id="b-change">Change it</button>
+          <button type="button" class="tiny" id="b-another">Make another</button>
+        </div>
+      </section>
+
+      <!-- a change to a site that is already online -->
+      <section id="b-changing" hidden>
+        <h2>Change it</h2>
+        <p class="lede" id="b-changingwhat"></p>
+        <div id="b-changingoops"></div>
+        <label class="tip" for="b-edit">Say what should be different. One thing or several.</label>
+        <textarea class="bask" id="b-edit" autocapitalize="sentences" spellcheck="true"
+          placeholder="Make the heading dark green, and add my phone number 902-555-0134 at the bottom."></textarea>
+        <button type="button" class="bgo" id="b-applychange">Change it</button>
+        <div class="brow"><button type="button" class="tiny" id="b-nevermind">Never mind</button></div>
+      </section>
+
+    </div>
+  </section>
+  <!-- builder:end -->
+
   <div class="deck">
     <div class="deckhead"><span class="n">1</span> Select a name <span class="sp"></span></div>
     <div class="namefield">
@@ -363,13 +549,13 @@ html[data-readonly] .deck,html[data-readonly] #mine,html[data-readonly] #nukebar
     <p class="hint" id="keep">Your sites are kept in this browser. Keep the token safe: there is no account and no password reset.</p>
   </section>
 
-  <section class="sec">
+  <section class="sec" id="every">
     <div class="sechead">Every site <span class="sp"></span><span id="dircount"></span></div>
     <input class="filter" id="filter" autocomplete="off" spellcheck="false" placeholder="Filter the names" aria-label="Filter the names" hidden>
     <div class="props" id="dir"></div>
   </section>
 
-  <section class="sec">
+  <section class="sec" id="cli">
     <div class="sechead">Or use the command line <span class="sp"></span></div>
     <div class="term">
       <div class="termbar"><i></i><i></i><i></i><span>~/notes</span></div>
@@ -396,7 +582,7 @@ html[data-readonly] .deck,html[data-readonly] #mine,html[data-readonly] #nukebar
     </div>
   </section>
 
-  <section class="sec">
+  <section class="sec" id="sdkbox">
     <div class="sechead">The SDK <span class="sp"></span><span>one script tag on each site</span></div>
     <div class="sdk">
       <div class="sdktabs" role="tablist">
@@ -489,6 +675,9 @@ const ago = t => { const s = (Date.now() - t) / 1000;
   return s < 60 ? "just now" : s < 3600 ? `${Math.floor(s / 60)}m ago` : s < 86400 ? `${Math.floor(s / 3600)}h ago` : `${Math.floor(s / 86400)}d ago`; };
 const RESERVED = ["www", "api", "app", "admin", "mail", "ftp", "sdk", "static", "assets", "cdn", "fn", "dev", "test", "staging", "kthx", "lolwtf", "spindrift", "root", "internal", "_"];
 const root = document.documentElement;
+/* The tailnet door. It adds the builder below and takes away everything this
+   page has that answers to a token rather than to a login. */
+const IDENTITY = root.hasAttribute("data-identity");
 const REDUCE = matchMedia("(prefers-reduced-motion: reduce)");
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 const SPRING = getComputedStyle(root).getPropertyValue("--spring").trim();
@@ -535,7 +724,7 @@ async function loadAll() {
   if (!readonly) await Promise.all(Object.keys(tokens).map(n => refresh(n).catch(() => {})));
   sites.sort((a, b) => (b.releases[0]?.at ?? 0) - (a.releases[0]?.at ?? 0));
   renderProps();
-  $("#jackText").textContent = readonly ? "connected · read only here" : `connected · ${sites.length} site${sites.length === 1 ? "" : "s"}`;
+  $("#jackText").textContent = IDENTITY ? "connected" : readonly ? "connected · read only here" : `connected · ${sites.length} site${sites.length === 1 ? "" : "s"}`;
   $("#jack").classList.add("on");
 }
 
@@ -732,13 +921,19 @@ function lean(e) {
   d.style.transform = `translate(${dx.toFixed(1)}px,${dy.toFixed(1)}px) scale(1.01)`;
 }
 function unlean() { const d = $("#drop"); if (!d) return; d.classList.remove("hot"); d.style.transform = ""; }
-for (const ev of ["dragenter", "dragover"]) addEventListener(ev, e => { e.preventDefault(); lean(e); });
-addEventListener("dragleave", e => { if (!e.relatedTarget) unlean(); });
-addEventListener("drop", e => {
-  e.preventDefault(); unlean();
-  const f = e.dataTransfer?.files?.[0];
-  if (f) { if (!$("#drop")) resetStage(); take(f); }
-});
+/* The whole window takes a drop, because a person aiming at a zone that small
+   misses it. Not on the tailnet door: the deck is not on the screen there, and
+   a file dropped on a page with no drop zone on it would claim a name and
+   deploy into a receipt nobody can see. */
+if (!IDENTITY) {
+  for (const ev of ["dragenter", "dragover"]) addEventListener(ev, e => { e.preventDefault(); lean(e); });
+  addEventListener("dragleave", e => { if (!e.relatedTarget) unlean(); });
+  addEventListener("drop", e => {
+    e.preventDefault(); unlean();
+    const f = e.dataTransfer?.files?.[0];
+    if (f) { if (!$("#drop")) resetStage(); take(f); }
+  });
+}
 document.addEventListener("change", e => { if (e.target.id === "file" && e.target.files[0]) take(e.target.files[0]); });
 
 let busy = false;
@@ -970,8 +1165,805 @@ $("#nuke").addEventListener("click", async () => {
 
 resetStage(); renderProps(); renderDir(); verdict();
 loadAll().catch(() => { $("#jackText").textContent = "offline"; $("#jack").classList.add("on"); });
-loadDir().catch(() => { $("#dir").innerHTML = `<div class="hint">The list of sites is not available.</div>`; });
+if (!IDENTITY) loadDir().catch(() => { $("#dir").innerHTML = `<div class="hint">The list of sites is not available.</div>`; });
 document.fonts?.ready.then(() => placePin());
+
+/* ==== the builder ==========================================================
+ * "Build me a website for …", the tailnet door's one component.
+ *
+ * All of it is inside this block, and the block runs on that door alone. Every
+ * name in here is private to it — `api`, `ago` and `busy` deliberately shadow
+ * the page's own, because this surface answers to a login rather than to a
+ * token in this browser and translates a dropped connection into a sentence
+ * rather than a toast. `$`, `ZONE`, `REDUCE` and `zipOne` are the page's own,
+ * shared because they are the same thing and this is one file.
+ */
+/* builder:start */
+if (IDENTITY) (() => {
+const LOGIN = root.dataset.login || null;
+/* The build a tab was in the middle of. iOS discards a backgrounded tab without
+   warning, and this surface has a minute of somebody's patience in it. */
+const DRAFT = "kthx.build";
+/* And the sentence he typed, which the draft above cannot hold: the row on the
+   server is written when a document exists, and a tab discarded *while* the
+   model is writing never gets one — the writing stops when the socket does. So
+   between pressing the green button and seeing a page, this is the only copy
+   of what he said. */
+const TYPED = "kthx.typed";
+/* And the address he settled on, which the row on the server does not know: it
+   was written with the name the model proposed, at generation time, and
+   "Change the name" happens in this tab alone. A tab discarded after the claim
+   that follows comes back through `recover()`, and a name read back off the row
+   would be a different address — free, so the claim there would take a SECOND
+   name and leave the first one paid for and stranded. */
+const CHOSEN = "kthx.name";
+
+/* ---- state: exactly one page in hand at a time ---------------------------- */
+/* {build, name, site, changing, taken, yours, document}: the draft id, the
+   address it would live at, the site it already belongs to (null until
+   something is claimed), whether it is a change to a site that is already
+   online, whether that name turned out to be spoken for, and — when it is
+   spoken for by *him* — whether it is an empty claim or a website. */
+let held = null;
+/* An address of his with nothing on it, chosen from the list: the next page
+   made goes on that one rather than on the name the model proposes. */
+let pinned = null;
+
+let painted = false;
+function show(id) {
+  for (const el of document.querySelectorAll("#builder .build > section")) el.hidden = el.id !== id;
+  /* The clock belongs to the one screen that shows it; left running it counts
+     seconds into a hidden element for the rest of the session. */
+  if (id !== "b-working") { clearInterval(ticker); ticker = null; }
+  /* The first paint leaves the page where it loaded, wordmark and all. Every
+     screen after it is a new thing to read, and this is a section of a page
+     now rather than the whole of one — so what has to come into view is the
+     top of this component, not the top of the document. */
+  if (painted) $("#builder").scrollIntoView({ block: "start", behavior: REDUCE.matches ? "auto" : "smooth" });
+  painted = true;
+}
+/** The draft in hand and the address it is going to, kept and cleared together. */
+function draft(id, name) {
+  try {
+    if (!id) { localStorage.removeItem(DRAFT); localStorage.removeItem(CHOSEN); return; }
+    localStorage.setItem(DRAFT, id);
+    if (name) localStorage.setItem(CHOSEN, name);
+  } catch {}
+}
+function draftId() { try { return localStorage.getItem(DRAFT); } catch { return null; } }
+function draftName() { try { return localStorage.getItem(CHOSEN); } catch { return null; } }
+function typed(what) { try { what ? localStorage.setItem(TYPED, JSON.stringify(what)) : localStorage.removeItem(TYPED); } catch {} }
+function typedBack() { try { return JSON.parse(localStorage.getItem(TYPED) || "null"); } catch { return null; } }
+function hostOf(name) { return `${name}.${ZONE}`; }
+function urlOf(name) { return `https://${hostOf(name)}`; }
+
+/* Every refusal is a sentence, never a code, and the server's own message never
+   reaches the screen: it is written for whoever is holding a terminal, and
+   nobody here is. Neither does the browser's, which is worse — a dropped
+   tailnet makes `fetch` reject with "Load failed" on iOS and "Failed to fetch"
+   on Chrome, and neither is a sentence about a website. So every road ends in
+   this table, including the ones this page invents for itself, and a code
+   nobody thought of ends at UNKNOWN rather than in somebody else's English. */
+const SAYS = {
+  UNKNOWN: "Something went wrong. Nothing you typed was lost — try again in a moment.",
+  /* the connection, which is the half this page owns */
+  OFFLINE: "The connection dropped. Nothing you typed was lost — try again once your phone is back on the tailnet.",
+  CUT_OFF: "The writing stopped part way through. Nothing was lost — try again.",
+  TIMEOUT: "That took too long to send. Nothing was lost — try again.",
+  /* the writer */
+  AI_UPSTREAM: "The writer is not answering right now. Nothing you typed was lost — try again in a minute.",
+  NO_DOCUMENT: "It answered, but not with a website. Try saying a little more about what you do.",
+  TOO_LARGE: "That came back too big to put online. Try asking for something simpler.",
+  AI_BUDGET: "You have made a lot of websites today. This resets overnight.",
+  RATE_LIMITED: "One at a time — a page is still being written. Give it a moment.",
+  MALFORMED_REQUEST: "That is more than this page can send at once. Try saying it in fewer words.",
+  /* the name */
+  TAKEN: "That name is taken. Pick another one.",
+  YOURS: "You already have a website at that address. Give this page a name of its own — the one you have stays exactly as it is.",
+  INVALID_NAME: "That name will not work. Three letters or more, using letters, numbers and hyphens, and not starting or ending with a hyphen.",
+  RESERVED: "That name is kept for the system. Pick another one.",
+  /* the door */
+  UNAUTHENTICATED: "This page needs your Tailscale login. Open it from a device signed in to the tailnet.",
+  FORBIDDEN: "That website is not yours to change.",
+  NOT_FOUND: "That website was not written here, so it cannot be changed by asking.",
+  GONE: "That website was deleted, and its address cannot be used again.",
+  /* the server */
+  BUSY: "The server is busy. Try again in a moment.",
+  STORAGE_FAILURE: "Something went wrong saving it. Nothing was lost — try again.",
+  /* what this page says about itself, in the same voice as the rest */
+  UNCHANGED: "It came back exactly the same, so nothing was put online. Try saying it a different way.",
+  PICKED_UP: "This is the page you were making when the tab closed. It is still here.",
+  CLAIMED: "The address is yours already. The page is not on it yet — press Put it online.",
+  TYPED_BACK: "This is what you were asking for when the tab closed. Nothing was lost — it is ready to go again.",
+  PINNED: "Say what it should be about, and the page you make goes on that address.",
+};
+/* Not everything this box has to say is a refusal. These four are plainly good
+   news, and they are why it has a second colour. */
+const GOOD = new Set(["PICKED_UP", "CLAIMED", "TYPED_BACK", "PINNED"]);
+/* The same refusal, read on a screen that asked a different question. Told to
+   "say more about what you do" while asking for a green heading, he writes his
+   business into the change box and the next turn is worse for it. */
+const WHILE_CHANGING = {
+  NO_DOCUMENT: "It did not come back with a page this time. Try saying the change a different way.",
+  TOO_LARGE: "The changed page came back too big to put online. Try asking for a smaller change.",
+};
+/* The same code from the other side of the model. A refusal carrying a status
+   came back before anything was written, so what was too big is the page that
+   is already there — and no change is small enough, because the size is the
+   same either way. Told to ask for a smaller one he asks forever. */
+const BEFORE_CHANGING = {
+  TOO_LARGE: "This website is too big to change by asking. It was put here another way, and that is the way to change it.",
+};
+const WHILE_PUBLISHING = {
+  RATE_LIMITED: "That is a lot of putting online at once. Give it a minute and try again.",
+  TOO_LARGE: "The page is too big to put online. Try asking for something simpler.",
+};
+function sentence(err, also) {
+  return (also && also[err?.code]) || SAYS[err?.code] || SAYS.UNKNOWN;
+}
+/** A refusal of this page's own making, carried the way the server's are. */
+function fault(code) { const e = new Error(code); e.code = code; return e; }
+function oops(where, err, lead, also) {
+  const el = $(where);
+  if (!err) { el.replaceChildren(); return; }
+  const box = document.createElement("div");
+  box.className = GOOD.has(err.code) ? "boops note" : "boops";
+  const b = document.createElement("b");
+  b.textContent = lead || "That did not work";
+  const p = document.createElement("span");
+  p.textContent = sentence(err, also);
+  box.append(b, p);
+  el.replaceChildren(box);
+}
+
+/** `fetch`, with a dropped connection turned into a sentence like any other. */
+async function reach(path, init) {
+  try { return await fetch(path, init); } catch { throw fault("OFFLINE"); }
+}
+async function api(method, path, { json, body, filename } = {}) {
+  const headers = {};
+  if (json !== undefined) { headers["content-type"] = "application/json"; body = JSON.stringify(json); }
+  if (filename) headers["x-filename"] = filename;
+  const r = await reach(path, { method, headers, body });
+  if (r.status === 204) return null;
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) { const e = new Error(data.message || r.statusText); e.code = data.code; e.status = r.status; throw e; }
+  return data;
+}
+
+/* ---- your websites -------------------------------------------------------- */
+function ago(iso) {
+  if (!iso) return "no pages yet";
+  const days = Math.floor((Date.now() - Date.parse(iso)) / 86400000);
+  if (days <= 0) return "changed today";
+  if (days === 1) return "changed yesterday";
+  if (days < 31) return `changed ${days} days ago`;
+  const months = Math.round(days / 30);
+  return months < 12 ? `changed ${months} months ago` : "changed over a year ago";
+}
+/**
+ * Every address of his, including the ones with no page on them.
+ *
+ * An address with nothing published is not nothing: it is a name taken for
+ * good, a Postgres database and a role, and it is what a failed upload leaves
+ * behind when the person presses "Start again" instead of trying once more.
+ * Filtered out of this list, it was unreachable from every screen on this page
+ * and nothing on the server reclaims it. So it is listed, and the one thing to
+ * do with it — put a page on it — is the button.
+ */
+async function listMine() {
+  let items = [];
+  try { items = (await api("GET", "/api/sites?owner=me")).items || []; } catch { return; }
+  $("#b-mine").hidden = items.length === 0;
+  const list = $("#b-minelist");
+  list.replaceChildren();
+  for (const s of items) {
+    const empty = s.serving === null && (s.releases || 0) === 0;
+    const card = document.createElement("div");
+    card.className = "bsite";
+    const host = document.createElement("span");
+    host.className = "bhost";
+    host.textContent = hostOf(s.name);
+    const when = document.createElement("span");
+    when.className = "bwhen";
+    when.textContent = empty ? "nothing on it yet" : ago(s.changed);
+    const acts = document.createElement("span");
+    acts.className = "bacts";
+    if (empty) {
+      const use = document.createElement("button");
+      use.className = "tiny";
+      use.textContent = "Put a page on it";
+      use.onclick = () => usePinned(s.name);
+      acts.append(use);
+    } else {
+      const open = document.createElement("a");
+      open.className = "tiny";
+      open.href = s.url; open.target = "_blank"; open.rel = "noopener";
+      open.textContent = "Open";
+      const edit = document.createElement("button");
+      edit.className = "tiny";
+      edit.textContent = "Change it";
+      edit.onclick = () => askChange(s.name);
+      acts.append(open, edit);
+    }
+    card.append(host, when, acts);
+    list.append(card);
+  }
+}
+
+/**
+ * An address he already owns, waiting for the next page he makes.
+ *
+ * It says where the next page goes and nothing else. It does not touch the
+ * sentence in the box, its backup, or a draft this phone recovered — the
+ * button sits at the top of the start screen, above the greeting, so the tap
+ * that reaches it is most often the one *after* he has typed, and a button
+ * that answers "where" by throwing away "what" is a button nobody can afford
+ * to press.
+ */
+function usePinned(name) {
+  pinned = name;
+  held = null;
+  const box = $("#b-ask");
+  // The sentence outlives the tap; a box that lost it to a reload gets it back.
+  if (box.value.trim() === "") box.value = typedBack()?.ask ?? "";
+  oops("#b-startoops", { code: "PINNED" }, `${hostOf(name)} is waiting for a page`);
+  show("b-start");
+  box.focus();
+}
+
+/* ---- the wait ------------------------------------------------------------- */
+/* The server talks the whole way through it. `accepted` lands in milliseconds,
+   then a `thinking` frame every second naming the model and how long it has
+   been quiet, then `writing` with the characters as they arrive. So the number
+   on this screen is the server's own clock rather than this phone's guess at
+   it: a tab throttled in a pocket catches up on the next frame, and a count
+   that has stopped moving means the frames stopped, which is a different thing
+   from a model taking its time and should not look the same.
+
+   The local tick only fills the second between frames, and it is what keeps
+   the screen honest before the first one lands. */
+let ticker = null;
+let started = 0;
+/** How far through the reassurance lines this wait has got. */
+let said = 0;
+function countSeconds() {
+  const seconds = Math.max(0, Math.round((Date.now() - started) / 1000));
+  $("#b-count").textContent = `${seconds} seconds so far`;
+  /* Said once each as the usual minute goes by, and then again when it is
+     plainly a long one: measured generations run 30 to 150 seconds and a busy
+     upstream is the slow half. On `>=` rather than an exact second, because a
+     tick delayed past a second and a half — a screen dimming, a backgrounded
+     tab being throttled — would skip it, and then the only sentence on the
+     screen never changes for three minutes. */
+  if (seconds >= 45 && said < 1) { said = 1; $("#b-say").textContent = "Still going. It gets slower when a lot of people are asking at once."; }
+  if (seconds >= 120 && said < 2) { said = 2; $("#b-say").textContent = "Still writing. It has not given up."; }
+}
+function waiting(title, say) {
+  $("#b-workingtitle").textContent = title;
+  $("#b-say").textContent = say;
+  started = Date.now();
+  said = 0;
+  countSeconds();
+  show("b-working");
+  clearInterval(ticker);
+  ticker = setInterval(countSeconds, 1000);
+  return () => { clearInterval(ticker); ticker = null; };
+}
+/** The server's clock, which is the one that is right, in ms since it accepted. */
+function heard(ms) {
+  if (typeof ms === "number" && ms >= 0) started = Date.now() - ms;
+  countSeconds();
+}
+const WRITING = "This takes about a minute. It is writing the whole page, from nothing.";
+const PUTTING = "Sending it to the web. This part is quick.";
+
+/* ---- the build ------------------------------------------------------------ */
+/* NDJSON: one JSON object a line. The response opens the moment the server
+   accepts the request rather than when the model writes, and it speaks every
+   second it is quiet — which is what this screen reads out. Held to the first
+   content byte it was a minute and a half of empty socket, and a browser gives
+   up on that long before the page does and rejects `fetch` with English of its
+   own that means nothing to anybody. */
+async function build(ask, site) {
+  const stop = waiting(site ? "Making the change" : "Writing your page", WRITING);
+  try {
+    const r = await reach("/api/build", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(site ? { ask, site } : { ask }),
+    });
+    if (!r.ok || !r.body) {
+      const data = await r.json().catch(() => ({}));
+      const e = new Error(data.message || r.statusText);
+      e.code = data.code;
+      /* Which half of the road it failed on, for the screens where the same
+         code means two different things: a status is a refusal made before a
+         model was asked anything. */
+      e.status = r.status;
+      throw e;
+    }
+    const reader = r.body.getReader();
+    const decoder = new TextDecoder();
+    let rest = "";
+    let last = null;
+    /* The model being waited on. A change of it between two `thinking` frames
+       IS the fallback — there is no other frame that says so — and a minute of
+       silence with no reason given is a minute somebody spends wondering. */
+    let model = null;
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      rest += decoder.decode(value, { stream: true });
+      const lines = rest.split("\n");
+      rest = lines.pop();
+      for (const line of lines) {
+        if (!line.trim()) continue;
+        let frame;
+        try { frame = JSON.parse(line); } catch { continue; }
+        if (frame.t === "thinking") {
+          heard(frame.ms);
+          if (model !== null && frame.model !== model) {
+            said = 2;
+            $("#b-say").textContent = "That writer did not answer. Trying another one.";
+          } else if (said === 0) {
+            $("#b-say").textContent = "It is thinking about what to write.";
+          }
+          model = frame.model;
+        } else if (frame.t === "start") {
+          $("#b-say").textContent = "It has started writing.";
+        } else if (frame.t === "writing") {
+          /* The seconds stop here and the characters take over: from the first
+             word on, the honest number is how much of the page exists. */
+          clearInterval(ticker); ticker = null;
+          $("#b-count").textContent = `${frame.chars.toLocaleString()} characters so far`;
+        } else if (frame.t === "error") {
+          const e = new Error(frame.message);
+          e.code = frame.code;
+          throw e;
+        } else if (frame.t === "done") {
+          last = frame;
+        }
+      }
+    }
+    if (last === null) throw fault("CUT_OFF");
+    return last;
+  } catch (err) {
+    /* A read that rejects part way through the stream is the same lost tailnet
+       as a fetch that never opened, and arrives the same way: a TypeError with
+       the browser's own English in it and nothing this page can say. */
+    throw err?.code ? err : fault("OFFLINE");
+  } finally {
+    stop();
+  }
+}
+
+/* ---- publishing ----------------------------------------------------------- */
+/* The document goes up as a stored zip of one file, through `zipOne` above —
+   the deck's own — so it travels the ordinary release road and meets the same
+   25 MiB refusal, unpack slot, daily cap and same-site guard every CLI upload
+   does. */
+async function put(name, document_) {
+  const zip = zipOne("index.html", new TextEncoder().encode(document_));
+  const out = await api("POST", `/api/sites/${encodeURIComponent(name)}/releases`, { body: zip, filename: "index.zip" });
+  /* A site somebody rolled back is held: the release above is stored, numbered
+     and NOT serving, and every later one would be too. Publishing a change is
+     saying "this is the one", so the hold comes off with it. */
+  if (out.serving !== out.n) await api("DELETE", `/api/sites/${encodeURIComponent(name)}/hold`);
+  return out;
+}
+
+/**
+ * The name, claimed once and only once.
+ *
+ * This is the one step on the road that cannot be repeated: a claim makes a
+ * real Postgres database and a role, and a kthx name is taken for good — even
+ * deleting a site keeps the row. So when the claim answers "taken" the question
+ * is whose, and an address of his own with nothing on it is not somebody
+ * else's: it is this same claim, already made, by a press or a whole tab that
+ * did not live to see its answer. Told "that name is taken" about his own
+ * website he would rename, and the first address would be spent for nothing.
+ */
+async function claim(name) {
+  try {
+    await api("POST", "/api/sites", { json: { name } });
+  } catch (err) {
+    if (err.code !== "TAKEN" || !(await claimedEmpty(name))) throw err;
+  }
+}
+
+/**
+ * Whether that address is his, with nothing published on it yet.
+ *
+ * Asked of the server rather than of this tab, because the tab that claimed may
+ * be gone. A site of his that *has* releases is not a claim to resume — it is a
+ * page he made before, and putting a new one over it is not what pressing the
+ * button twice means. A refusal with a status settles it (somebody else's, or
+ * nothing at all); a request that never arrived settles nothing and must not
+ * read as "not yours", or one dropped packet sends him to rename an address he
+ * already owns.
+ */
+async function claimedEmpty(name) {
+  let site;
+  try {
+    site = await api("GET", `/api/sites/${encodeURIComponent(name)}`);
+  } catch (err) {
+    if (err.status) return false;
+    throw err;
+  }
+  return site.serving === null && (site.releases || []).length === 0;
+}
+
+/* ---- screens -------------------------------------------------------------- */
+function greet() {
+  const who = (LOGIN || "").split("@")[0].split(/[._+-]/)[0];
+  $("#b-hello").textContent = who ? `Hello, ${who[0].toUpperCase()}${who.slice(1)}.` : "Hello.";
+}
+
+/**
+ * A page, in hand, with whatever its address turned out to be.
+ *
+ * Three answers about the name arrive here and only one of them is a refusal.
+ * A name nobody has is the ordinary road. A name of *his* with nothing on it is
+ * the claim a failed upload stranded — the green button finishes it, and
+ * calling it taken is what sent him off to spend a second address. A name of
+ * his with a website already on it is the only one that needs another name, and
+ * it is not somebody else's either.
+ */
+function propose(done) {
+  /* A page asked for from the list goes to the address that was waiting for it;
+     the name the model proposed is not the one it lives at. */
+  const name = pinned ?? done.name;
+  const yours = pinned === null ? (done.yours ?? null) : "empty";
+  held = {
+    build: done.build,
+    name,
+    site: done.site,
+    changing: done.site !== null,
+    taken: yours !== "empty" && done.available === false,
+    yours,
+    document: done.document,
+  };
+  draft(done.build, name);
+  /* The row on the server holds the ask from here on. */
+  typed(null);
+  proposal(
+    held.taken
+      ? { code: yours === "live" ? "YOURS" : "TAKEN" }
+      : yours === "empty"
+        ? { code: "CLAIMED" }
+        : null,
+    yours === "live"
+      ? `${hostOf(name)} is already your website`
+      : yours === "empty"
+        ? `${hostOf(name)} is already yours`
+        : `${hostOf(name)} is taken`,
+  );
+}
+
+/**
+ * The proposal screen, painted from whatever page is in hand.
+ *
+ * Four roads arrive here — a page just written, a draft a closed tab left
+ * behind, a change that was written but not published, and a publish that
+ * failed — and each of them used to paint a bit of it. So the three things that
+ * follow from what is held are decided once, here, instead of four times: which
+ * green button this screen has, whether the name can still be changed, and what
+ * went wrong.
+ */
+function proposal(err, lead, also) {
+  /* Assigning srcdoc reloads the frame, and on a failed publish that would tear
+     the page he is looking at down and redraw it for nothing. */
+  if ($("#b-preview").srcdoc !== held.document) $("#b-preview").srcdoc = held.document;
+  $("#b-proposedurl").textContent = urlOf(held.name);
+  /* A name somebody else has is not a disabled button and a red box — that is a
+     screen that looks broken. The one thing left to do becomes the green one. */
+  $("#b-put").hidden = held.taken === true;
+  $("#b-pickname").hidden = held.taken !== true;
+  /* An address that already exists cannot be renamed by typing a different one
+     here: the release would go to a site nobody has claimed, and the change
+     would have nowhere to land. */
+  $("#b-rename").hidden = held.taken === true || held.site !== null;
+  oops("#b-proposaloops", err, lead, also);
+  show("b-proposal");
+}
+
+function online(name, changed) {
+  $("#b-livetitle").textContent = changed ? "Changed" : "It is online";
+  $("#b-livesay").textContent = changed
+    ? "The new version is live. Anyone can open this address."
+    : "Anyone can open this address. Nothing else to do.";
+  $("#b-liveurl").textContent = urlOf(name);
+  const open = document.createElement("a");
+  open.className = "bgo";
+  open.style.textAlign = "center";
+  open.style.textDecoration = "none";
+  open.href = urlOf(name);
+  open.target = "_blank";
+  open.rel = "noopener";
+  open.textContent = "Open it";
+  $("#b-openrow").replaceChildren(open);
+  $("#b-livepreview").srcdoc = held ? held.document : "";
+  oops("#b-liveoops", null);
+  held = held ? { ...held, site: name } : { site: name, name, document: "" };
+  pinned = null;
+  draft(null);
+  typed(null);
+  show("b-live");
+  void listMine();
+}
+
+function askChange(name) {
+  held = { site: name, name, changing: true, taken: false, yours: "live", document: "" };
+  $("#b-changingwhat").textContent = `${hostOf(name)} — say what should be different and it will be rewritten.`;
+  $("#b-edit").value = "";
+  oops("#b-changingoops", null);
+  show("b-changing");
+  $("#b-edit").focus();
+}
+
+/* ---- the name screen ------------------------------------------------------ */
+let checking = null;
+/** `pushed` is the name that sent him here, when it was not his idea to come. */
+function startNaming(pushed) {
+  /* Pushed here by a name that is not free, there is no old name to keep and no
+     reason on the screen for the move. Both are said out loud, or he lands on
+     "Pick a name" having asked for nothing of the sort and with the page he
+     waited a minute for nowhere in sight. */
+  $("#b-namingsay").textContent = !pushed
+    ? "Letters, numbers and hyphens. This becomes the address."
+    : held.yours === "live"
+      ? `${hostOf(pushed)} already has your website on it. Give this page a name of its own and you keep both.`
+      : `${hostOf(pushed)} is already taken. Your page is safe — give it another name and it goes online.`;
+  /* Never hidden, whichever road arrived. This screen has exactly two buttons,
+     and it opens holding a name that has just been refused — so the green one
+     starts disabled, and hiding the other leaves a screen with nothing live on
+     it at all and the page he waited a minute for off it. The way back is a
+     button, not a reload. */
+  $("#b-keepname").textContent = pushed ? "Back to the page" : "Keep the old one";
+  $("#b-name").value = held.name;
+  paintName();
+  show("b-naming");
+  $("#b-name").focus();
+}
+/* Named for what it is rather than `verdict`, which the deck above already has:
+   one file, two name checks, and the wrong one is a silent shadow. */
+function nameVerdict(say, kind) {
+  $("#b-verdict").textContent = say;
+  $("#b-verdict").className = kind ? `bverdict ${kind}` : "bverdict";
+}
+function paintName() {
+  const asked = $("#b-name").value.trim().toLowerCase();
+  $("#b-namingurl").textContent = asked ? urlOf(asked) : "—";
+  /* Said while the round trip is out, because the alternative is an empty line
+     and a greyed-out button, which is what a broken page looks like. */
+  nameVerdict(asked ? "Checking that one…" : "");
+  $("#b-usename").disabled = true;
+  clearTimeout(checking);
+  if (!asked) return;
+  checking = setTimeout(async () => {
+    let answer;
+    try {
+      answer = await api("GET", `/api/names/${encodeURIComponent(asked)}`);
+    } catch {
+      if ($("#b-name").value.trim().toLowerCase() !== asked) return;
+      /* A check that could not be made is not a no, and leaving the only button
+         on the screen dead is not an answer. The claim is the authority anyway
+         — it asks the catalogue this probe cannot — so the button goes live and
+         a name that really is taken is refused there, in a sentence. */
+      nameVerdict("It could not be checked just now. You can still try it.");
+      $("#b-usename").disabled = false;
+      return;
+    }
+    if ($("#b-name").value.trim().toLowerCase() !== asked) return;
+    const why = {
+      INVALID_NAME: "Letters, numbers and hyphens only — three characters at least, and not starting or ending with a hyphen.",
+      RESERVED: "That name is kept for the system. Pick another.",
+      TAKEN: "That one is already taken. Pick another.",
+    };
+    /* An address of his own is not "somebody already has that one". An empty
+       one is the claim a failed upload left behind, and typing it back in here
+       is the only road to it, so the button has to go live for it. A live one
+       is a website of his, which this page changes by asking rather than by
+       writing a new one over the top. */
+    const empty = answer.yours === "empty";
+    const usable = answer.available || empty;
+    nameVerdict(
+      answer.available
+        ? "That one is free."
+        : empty
+          ? "That one is already yours, with nothing on it yet."
+          : answer.yours === "live"
+            ? "That is your website already. Change it from the first screen."
+            : (why[answer.why] || "That name cannot be used."),
+      usable ? "yes" : "no",
+    );
+    $("#b-usename").disabled = !usable;
+  }, 250);
+}
+
+/* ---- what the buttons do -------------------------------------------------- */
+let busy = false;
+async function guard(fn) {
+  if (busy) return;
+  busy = true;
+  try { await fn(); } finally { busy = false; }
+}
+
+$("#b-make").onclick = () => guard(async () => {
+  const ask = $("#b-ask").value.trim();
+  oops("#b-startoops", null);
+  if (!ask) { $("#b-ask").focus(); return; }
+  /* Kept before the request goes out, not after it lands: the minute it takes
+     is a minute of a phone in a pocket, and the tab may not survive it. */
+  typed({ ask, site: null });
+  try {
+    propose(await build(ask, null));
+  } catch (err) {
+    oops("#b-startoops", err, "It could not be written");
+    show("b-start");
+  }
+});
+
+$("#b-put").onclick = () => guard(async () => {
+  const page = held;
+  oops("#b-proposaloops", null);
+  waiting("Putting it online", PUTTING);
+  try {
+    if (page.site === null) {
+      await claim(page.name);
+      /* Written down the moment it succeeds, and before the upload — which is
+         the half that fails, on a tailnet blip or a pod rolling under a merge.
+         A second press has to be a second upload and never a second claim: the
+         claim would answer "taken", about his own website. */
+      held = { ...page, site: page.name };
+    }
+    await put(page.name, page.document);
+    online(page.name, page.changing === true);
+  } catch (err) {
+    const owned = held.site !== null;
+    /* Refused by the catalogue after all — a race, or a page left open while
+       the address went live somewhere else — so whatever this tab believed
+       about whose it is, it no longer knows. */
+    if (err.code === "TAKEN") held = { ...held, taken: true, yours: null };
+    proposal(
+      err,
+      err.code === "TAKEN"
+        ? `${hostOf(page.name)} is taken`
+        : owned
+          ? `${hostOf(page.name)} is yours — it is just not on the web yet`
+          : "It could not be put online",
+      WHILE_PUBLISHING,
+    );
+  }
+});
+
+$("#b-rename").onclick = () => startNaming();
+$("#b-pickname").onclick = () => startNaming(held.name);
+$("#b-keepname").onclick = () => proposal(null);
+$("#b-usename").onclick = () => {
+  const name = $("#b-name").value.trim().toLowerCase();
+  held = { ...held, name, taken: false, yours: null };
+  /* Written down beside the draft, because the row on the server still says
+     whatever the model proposed and nothing here tells it otherwise: a tab
+     discarded after the claim that follows has to come back to THIS address,
+     or the resumed-claim check asks about a name he never took, finds it free,
+     and claims a second one. */
+  draft(held.build, name);
+  proposal(null);
+};
+function afresh() { held = null; pinned = null; draft(null); typed(null); $("#b-ask").value = ""; oops("#b-startoops", null); show("b-start"); void listMine(); }
+$("#b-scrap").onclick = afresh;
+$("#b-another").onclick = afresh;
+$("#b-change").onclick = () => askChange(held.site);
+$("#b-nevermind").onclick = () => { held = null; pinned = null; typed(null); oops("#b-startoops", null); show("b-start"); void listMine(); };
+$("#b-name").oninput = paintName;
+
+$("#b-applychange").onclick = () => guard(async () => {
+  const site = held.site;
+  const ask = $("#b-edit").value.trim();
+  oops("#b-changingoops", null);
+  if (!ask) { $("#b-edit").focus(); return; }
+  typed({ ask, site });
+  let done;
+  try {
+    done = await build(ask, site);
+  } catch (err) {
+    oops(
+      "#b-changingoops",
+      err,
+      "It could not be changed",
+      err.status ? BEFORE_CHANGING : WHILE_CHANGING,
+    );
+    show("b-changing");
+    return;
+  }
+  if (done.unchanged) {
+    held = { site, name: site, changing: true, taken: false, yours: "live", document: "" };
+    oops("#b-changingoops", { code: "UNCHANGED" }, "Nothing changed");
+    show("b-changing");
+    return;
+  }
+  held = { build: done.build, name: site, site, changing: true, taken: false, yours: "live", document: done.document };
+  draft(done.build, site);
+  typed(null);
+  waiting("Putting it online", PUTTING);
+  try {
+    await put(site, done.document);
+    online(site, true);
+  } catch (err) {
+    /* The page is written and the row is safe on the server; only the publish
+       failed, so the person is put back where a second press finishes it. The
+       name is not his to change here — it is a site that already exists — and
+       the screen he lands on knows that. */
+    proposal(err, "It was written but not put online", WHILE_PUBLISHING);
+  }
+});
+
+/* ---- boot ----------------------------------------------------------------- */
+async function recover() {
+  const id = draftId();
+  if (!id) return false;
+  let row;
+  try {
+    row = await api("GET", `/api/build/${encodeURIComponent(id)}`);
+  } catch (err) {
+    /* A draft the server says is gone is forgotten. A draft this phone could
+       not reach is not: the tailnet comes back and the page is still there. */
+    if (err.status) draft(null);
+    return false;
+  }
+  /* The row carries the name the model proposed at generation time; "Change the
+     name" happened here and never reached it. So this tab's own note of the
+     address wins — asking the server about the row's name instead would find a
+     name he never claimed, call it free, and claim a SECOND one on the next
+     press, stranding the first. */
+  const name = draftName() || row.name;
+  held = {
+    build: row.id,
+    name,
+    site: row.site,
+    changing: row.site !== null,
+    taken: false,
+    yours: null,
+    document: row.document,
+  };
+  /* The draft says nothing about a claim, so a tab discarded between claiming
+     the name and publishing to it would come back offering to change the name —
+     and publishing under a new one would spend the first address for nothing.
+     A server that cannot be asked leaves the name changeable, which the claim
+     itself then sorts out in a sentence. */
+  if (held.site === null && await claimedEmpty(name).catch(() => false)) {
+    held = { ...held, site: name };
+  }
+  proposal({ code: held.site === null ? "PICKED_UP" : "CLAIMED" }, "Picked up where you left off");
+  return true;
+}
+
+/** What he typed, when the tab died before there was a page to show for it. */
+function resume() {
+  const again = typedBack();
+  if (again === null || !again.ask) return;
+  if (again.site) {
+    askChange(again.site);
+    $("#b-edit").value = again.ask;
+    oops("#b-changingoops", { code: "TYPED_BACK" }, "Picked up where you left off");
+    return;
+  }
+  $("#b-ask").value = again.ask;
+  oops("#b-startoops", { code: "TYPED_BACK" }, "Picked up where you left off");
+}
+
+(async () => {
+  if (LOGIN === null) { show("b-signedout"); return; }
+  greet();
+  show("b-start");
+  await listMine();
+  if (!(await recover())) resume();
+})();
+
+})();
+/* builder:end */
 </script>
 </body>
 </html>

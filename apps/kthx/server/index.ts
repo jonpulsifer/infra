@@ -10,16 +10,11 @@
  */
 
 import { join } from 'node:path';
-import {
-  BUILD_PATH,
-  LANDING_PATH,
-  SDK_PATH,
-  SKILL_PATH,
-} from '@repo/kthx/assets';
+import { LANDING_PATH, SDK_PATH, SKILL_PATH } from '@repo/kthx/assets';
 import { FAVICON_PATH } from '@repo/kthx/favicon';
 import { AI_IDLE_SECONDS, aiApi } from './ai.ts';
 import { buildApi } from './build.ts';
-import { callerOf } from './caller.ts';
+import { type Caller, callerOf } from './caller.ts';
 import { createClient, migrate } from './db.ts';
 import { bucketDepot, type Depot, diskDepot } from './depot.ts';
 import { dbApi } from './documents.ts';
@@ -74,54 +69,84 @@ function asset(path: string, type: string, cacheControl: string): Response {
   });
 }
 
-/** The two apex pages, read once. This process is the only one serving them. */
+/** The one apex page, read once. This process is the only one serving it. */
 let landing: Promise<string> | null = null;
-let builder: Promise<string> | null = null;
 
 /**
- * The page is told three things a browser cannot see: the zone, because on a
+ * The page is told four things a browser cannot see: the zone, because on a
  * private host `location.hostname` is not it; whether this host may claim — on
  * the public apex of a deployment with a private host the claim deck is hidden
- * rather than left to fail; and whether this caller opens the zone, which is
- * what decides whether the nuke exists as far as the page is concerned.
+ * rather than left to fail; whether this caller opens the zone, which is what
+ * decides whether the nuke exists as far as the page is concerned; and whether
+ * this is the tailnet door, which is where the builder — "build me a website
+ * for …" — is a section of this page and nowhere else is.
  *
- * The last one is a hint and not the check. The route makes the same decision
- * again from the same request, so a hand-typed `DELETE` from a browser that
- * never got the attribute is refused exactly the same way.
+ * The login goes in the tag with it so the first paint already knows whether
+ * there is anybody to greet: a page that asked `/api/whoami` first would show
+ * its "sign in" sentence to everybody for a round trip. It is escaped because
+ * it is a header value — the proxy sets it, but the proxy is not what this
+ * file is defending against.
+ *
+ * `data-admin` and `data-identity` are hints and not the check. Each route
+ * makes the same decision again from the same request, so a hand-typed
+ * `DELETE`, or a `POST /api/build` from a browser that never got the
+ * attribute, is refused exactly the same way.
  */
 async function landingHtml(
   zone: string,
-  control: boolean,
+  caller: Caller,
   admin: boolean,
 ): Promise<string> {
   landing ??= Bun.file(LANDING_PATH).text();
-  return (await landing).replace(
+  const who =
+    caller.login === null ? '' : ` data-login="${attribute(caller.login)}"`;
+  const onTailnet = caller.door === 'identity';
+  const identity = onTailnet ? ` data-identity${who}` : '';
+  const body = onTailnet ? await whole(landing) : await slim(landing);
+  return body.replace(
     '<html lang="en">',
-    `<html lang="en" data-zone="${zone}"${control ? '' : ' data-readonly'}${admin ? ' data-admin' : ''}>`,
+    `<html lang="en" data-zone="${zone}"${caller.control ? '' : ' data-readonly'}${admin ? ' data-admin' : ''}${identity}>`,
   );
 }
 
 /**
- * The builder, which the identity host serves instead of the landing page.
+ * The page without the builder, for the doors that do not have one.
  *
- * A separate file rather than a seventh section on the landing page: that one
- * is 55 KB of hand-written arcade for people who deploy things, and this one is
- * a text box for somebody who has never heard of a release. It is also the page
- * whose breakage reverted a ticket once, and it has four assertions to its name.
+ * `html[data-identity]` is what shows the component, so hiding it costs a
+ * selector — but the markup, its rules and thirty-five kilobytes of its script
+ * still went to every anonymous visitor on the public apex, who cannot reach
+ * `POST /api/build` and has nobody to be. Roughly doubling a page nobody asked
+ * for is a strange thing to send over a tunnel.
  *
- * The login is written into the tag so the first paint already knows whether
- * there is anybody to greet — a page that asks `/api/whoami` first shows its
- * "sign in" sentence to everybody for a round trip. It is escaped because it is
- * a header value: the proxy sets it, but the proxy is not what this file is
- * defending against.
+ * The regions are fenced in `landing.html` rather than split into a second
+ * file: one page is what the owner asked for, and two files drift. The fence
+ * is spelled the same in all three comment syntaxes the file uses, so one
+ * expression clears markup, rules and script alike.
+ *
+ * Cut once and kept, like the page it is cut from: both are read at boot and
+ * never change under a running process.
  */
-async function buildHtml(zone: string, login: string | null): Promise<string> {
-  builder ??= Bun.file(BUILD_PATH).text();
-  const who = login === null ? '' : ` data-login="${attribute(login)}"`;
-  return (await builder).replace(
-    '<html lang="en">',
-    `<html lang="en" data-zone="${zone}"${who}>`,
-  );
+/** One fence post, in any of the three comment syntaxes this file uses. */
+const POST = String.raw`[/<]\*?!?-{0,2}\s*builder:%s\s*-{0,2}\*?/?>?`;
+const FENCE = new RegExp(`${POST.replace('%s', '(?:start|end)')}\n?`, 'g');
+const BUILDER = new RegExp(
+  `${POST.replace('%s', 'start')}[\\s\\S]*?${POST.replace('%s', 'end')}`,
+  'g',
+);
+
+let cut: Promise<string> | undefined;
+let kept: Promise<string> | undefined;
+
+/** Without the builder, for a door that has none. */
+function slim(full: Promise<string>): Promise<string> {
+  cut ??= full.then((text) => text.replace(BUILDER, '').replace(FENCE, ''));
+  return cut;
+}
+
+/** With it, and without the fence — scaffolding is nobody's to download. */
+function whole(full: Promise<string>): Promise<string> {
+  kept ??= full.then((text) => text.replace(FENCE, ''));
+  return kept;
 }
 
 /** Safe inside a double-quoted attribute, which is the only place this goes. */
@@ -280,14 +305,11 @@ async function apex(
     return refuse('METHOD_NOT_ALLOWED', ctx.id);
   }
   if (path === '/') {
-    const page =
-      ctx.caller.door === 'identity'
-        ? await buildHtml(ctx.config.zone, ctx.caller.login)
-        : await landingHtml(
-            ctx.config.zone,
-            ctx.caller.control,
-            opensZone(ctx.caller, ctx.config),
-          );
+    const page = await landingHtml(
+      ctx.config.zone,
+      ctx.caller,
+      opensZone(ctx.caller, ctx.config),
+    );
     return new Response(page, {
       headers: {
         'content-type': 'text/html; charset=utf-8',

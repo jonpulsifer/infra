@@ -4,16 +4,24 @@
  *
  * A real stub upstream that really streams, because every interesting claim
  * here is about time and framing rather than about a return value: the response
- * is held until the model's first content byte, the page is fed progress after
- * it, and a model that thinks for forty seconds must not be cut off by a
+ * opens when the request is accepted, it says something every second the model
+ * is quiet, and a model that thinks for forty seconds must not be cut off by a
  * connection timeout nobody sees fire.
+ *
+ * **A stub that answers instantly cannot fail on any of that**, which is how a
+ * route that held its response for 71-95 s of empty socket passed this file all
+ * the way into somebody's hands. So the stubs here are slow on purpose and the
+ * assertions are timed: {@link thinksFor} and {@link writesSlowly} are the two
+ * that can still fail, and {@link arriving} is what reads a body while it is
+ * still arriving rather than after it has stopped.
  */
 import { afterAll, beforeEach, describe, expect, test } from 'bun:test';
-import { BUILD_PATH } from '@repo/kthx/assets';
+import { LANDING_PATH } from '@repo/kthx/assets';
 import { tarGz } from '../../cli/tar.ts';
 import { utcDay } from '../../server/ai.ts';
 import {
   documentIn,
+  HEADERS_MS,
   MAX_BUILD_REQUESTS_DAY,
   nameIn,
   slugOf,
@@ -115,10 +123,11 @@ function writes(pieces: readonly string[], tokens = 900): Response {
 /**
  * A model that thinks, writes a word, thinks again, then finishes.
  *
- * Both halves of a real generation, because the socket is idle in two different
- * ways: before the first content byte this server is holding the response, and
- * after it this server is a slow response body. Bun's idle timer treats those
- * differently, and the route has to survive both.
+ * Both halves of a real generation, because the socket goes quiet in two
+ * different ways: before the first content byte, where the route has nothing to
+ * report but that it is waiting, and after it, where the route is a slow
+ * response body. Bun's idle timer treats those differently, and the route has
+ * to survive both.
  */
 function writesSlowly(
   before: number,
@@ -129,6 +138,12 @@ function writesSlowly(
   const encoder = new TextEncoder();
   const body = new ReadableStream<Uint8Array>({
     async start(controller) {
+      // Reasoning first, like the real base — see `thinksFor`.
+      controller.enqueue(
+        encoder.encode(
+          `data: ${JSON.stringify({ choices: [{ delta: { reasoning_content: 'mm' } }] })}\n\n`,
+        ),
+      );
       await Bun.sleep(before);
       controller.enqueue(
         encoder.encode(
@@ -160,6 +175,17 @@ function thinksFor(
   const encoder = new TextEncoder();
   const body = new ReadableStream<Uint8Array>({
     async start(controller) {
+      // What the real base does while a model thinks, measured against it: the
+      // headers land in about a second and `reasoning_content` streams the
+      // whole way — 183 KB of it before the first content delta at 18.7 s. The
+      // silence is in the answer, not on the socket, and a stub that withheld
+      // its headers instead was modelling a different upstream and would have
+      // been cut by the clock that exists to catch a base nobody is listening on.
+      controller.enqueue(
+        encoder.encode(
+          `data: ${JSON.stringify({ choices: [{ delta: { reasoning_content: 'mm' } }] })}\n\n`,
+        ),
+      );
       await Bun.sleep(ms);
       try {
         controller.enqueue(
@@ -223,6 +249,37 @@ function post(body: unknown, login: string | null = DAD) {
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(body),
   });
+}
+
+/**
+ * Every frame as it lands, with the millisecond it landed on.
+ *
+ * The whole defect was invisible to a test that reads a response to the end and
+ * then looks at it: a body that arrives all at once at ninety seconds and one
+ * that arrives a line at a time from the first millisecond are the same array
+ * afterwards, and only the second one is a page somebody sees.
+ */
+async function* arriving(
+  response: Response,
+): AsyncGenerator<{ frame: Record<string, unknown>; at: number }> {
+  const reader = response.body?.getReader();
+  if (reader === undefined) return;
+  const decoder = new TextDecoder();
+  let held = '';
+  for (;;) {
+    const chunk = await reader.read();
+    if (chunk.done || chunk.value === undefined) return;
+    held += decoder.decode(chunk.value, { stream: true });
+    const lines = held.split('\n');
+    held = lines.pop() ?? '';
+    for (const line of lines) {
+      if (line.trim() === '') continue;
+      yield {
+        frame: JSON.parse(line) as Record<string, unknown>,
+        at: Date.now(),
+      };
+    }
+  }
 }
 
 /** Every frame of an ndjson answer, in order. */
@@ -343,7 +400,14 @@ describe('a page', () => {
     ];
     const all = await read(await post({ ask: 'A page for my woodworking.' }));
 
-    expect(all[0]).toEqual({ t: 'start', model: 'writer' });
+    // The response is open before a model has been asked anything, and it names
+    // the one it is waiting on until that model's first word arrives.
+    expect(all[0]).toEqual({ t: 'accepted' });
+    expect(all[1]).toMatchObject({ t: 'thinking', model: 'writer' });
+    expect(all.find((frame) => frame.t === 'start')).toEqual({
+      t: 'start',
+      model: 'writer',
+    });
     // Progress, not a spinner: the page says how much has been written.
     expect(all.some((frame) => frame.t === 'writing')).toBe(true);
     const last = done(all);
@@ -446,7 +510,17 @@ describe('the upstream', () => {
     ];
     const all = await read(await post({ ask: 'a lawn care page' }));
 
-    expect(all[0]).toEqual({ t: 'start', model: 'second-writer' });
+    expect(all[0]).toEqual({ t: 'accepted' });
+    // The fallback used to run behind a held response, so the page had only its
+    // own clock to fill that silence with. It runs on an open one now, and the
+    // model named in `thinking` changing is the whole of the signal.
+    expect(
+      all.filter((frame) => frame.t === 'thinking').map((frame) => frame.model),
+    ).toEqual(['writer', 'second-writer']);
+    expect(all.find((frame) => frame.t === 'start')).toEqual({
+      t: 'start',
+      model: 'second-writer',
+    });
     expect(asked.map((seen) => seen.model)).toEqual([
       'writer',
       'second-writer',
@@ -461,9 +535,11 @@ describe('the upstream', () => {
     // emit no content at all. Nothing was written, so nothing may be published
     // — but it answered, and what it spent reasoning is charged.
     answers = [() => thinksOnly(), () => thinksOnly()];
-    const refused = await post({ ask: 'a page' });
-    expect(refused.status).toBe(502);
-    expect((await refused.json()).code).toBe('AI_UPSTREAM');
+    const answer = await post({ ask: 'a page' });
+    expect(answer.status).toBe(200);
+    const all = await read(answer);
+    expect(failed(all)).toMatchObject({ code: 'AI_UPSTREAM' });
+    expect(done(all)).toBeNull();
     expect(asked).toHaveLength(2);
     expect(await spent()).toEqual({ requests: 2, tokens: 32000 });
   });
@@ -478,8 +554,8 @@ describe('the upstream', () => {
       () => new Response('no credit', { status: 401 }),
       () => new Response('down', { status: 503 }),
     ];
-    const refused = await post({ ask: 'a page for my woodworking' });
-    expect(refused.status).toBe(502);
+    const all = await read(await post({ ask: 'a page for my woodworking' }));
+    expect(failed(all)).toMatchObject({ code: 'AI_UPSTREAM' });
     expect(asked).toHaveLength(2);
     expect(await spent()).toEqual({ requests: 0, tokens: 0 });
   });
@@ -497,8 +573,8 @@ describe('the upstream', () => {
         () => new Response('not here', { status }),
         () => new Response('not here', { status }),
       ];
-      const refused = await post({ ask: 'a page for my woodworking' });
-      expect(refused.status).toBe(502);
+      const all = await read(await post({ ask: 'a page for my woodworking' }));
+      expect(failed(all)).toMatchObject({ code: 'AI_UPSTREAM' });
       expect(asked).toHaveLength(2);
       expect(await spent()).toEqual({ requests: 0, tokens: 0 });
       asked = [];
@@ -515,8 +591,8 @@ describe('the upstream', () => {
       () => new Response(null, { status: 200 }),
       () => new Response(null, { status: 200 }),
     ];
-    const refused = await post({ ask: 'a page' });
-    expect(refused.status).toBe(502);
+    const all = await read(await post({ ask: 'a page' }));
+    expect(failed(all)).toMatchObject({ code: 'AI_UPSTREAM' });
     expect(asked).toHaveLength(2);
     expect(await spent()).toEqual({ requests: 0, tokens: 0 });
   });
@@ -530,18 +606,18 @@ describe('the upstream', () => {
       () => new Response('context length', { status: 400 }),
       () => new Response('context length', { status: 400 }),
     ];
-    const refused = await post({ ask: 'a page' });
-    expect(refused.status).toBe(502);
+    const all = await read(await post({ ask: 'a page' }));
+    expect(failed(all)).toMatchObject({ code: 'AI_UPSTREAM' });
     expect(await spent()).toEqual({ requests: 2, tokens: 0 });
   });
 
   test('gives the slot back when the control database does not answer', async () => {
-    // The attempt is counted against the day before the upstream is dialled,
-    // and an ordinary CNPG blip rejects that await. The in-flight slot is taken
-    // before it: released on the paths that return and not on the one that
-    // throws, a single Postgres error left this login reading "one at a time"
-    // for the life of the pod, and four of them closed the builder for
-    // everybody on the tailnet.
+    // The day is read before the response opens — it is the last thing here
+    // that can still be a status — and an ordinary CNPG blip rejects that
+    // await. The in-flight slot is taken before it: released on the paths that
+    // return and not on the one that throws, a single Postgres error left this
+    // login reading "one at a time" for the life of the pod, and four of them
+    // closed the builder for everybody on the tailnet.
     await kthx().sql`alter table build_usage rename to build_usage_gone`;
     const broken = await post({ ask: 'a page' });
     expect(broken.status).toBe(500);
@@ -563,6 +639,102 @@ describe('the upstream', () => {
     expect((await refused.json()).code).toBe('AI_BUDGET');
     expect(refused.headers.get('retry-after')).not.toBeNull();
     expect(asked).toHaveLength(0);
+  });
+});
+
+describe('the silence before a model writes', () => {
+  test('is answered at once, and spoken through', async () => {
+    // The defect this file could not see, and the reason it could not. Every
+    // other stub here answers in microseconds, so the response always arrived
+    // before anything could give up on it, and the 71-95 s of empty socket
+    // production measured — twice, against the real model — was invisible from
+    // in here. A browser abandons a `fetch` long before ninety seconds and
+    // rejects it with a sentence of its own making: "Load failed", which is
+    // what was on the screen.
+    //
+    // This stub is quiet for twenty seconds, twice Bun's default idle timeout,
+    // and the claim is that bytes reach the client all the way through it.
+    answers = [
+      () => thinksFor(20_000, '<!-- kthx-name: patient -->\n', [PAGE]),
+    ];
+    const server = kthx().listen();
+    const began = Date.now();
+    const response = await fetch(`${server.url.origin}/api/build`, {
+      method: 'POST',
+      headers: {
+        host: IDENTITY,
+        'content-type': 'application/json',
+        'tailscale-user-login': DAD,
+      },
+      body: JSON.stringify({ ask: 'a page for my woodworking' }),
+    });
+    expect(response.status).toBe(200);
+    expect(response.headers.get('content-type')).toBe('application/x-ndjson');
+
+    // The status on its own proves nothing — `fetch` resolves on headers — so
+    // the frames are read as they land and timed against the model's silence.
+    const all: Record<string, unknown>[] = [];
+    const at: number[] = [];
+    for await (const landed of arriving(response)) {
+      all.push(landed.frame);
+      at.push(landed.at - began);
+      if (landed.frame.t === 'done' || landed.frame.t === 'error') break;
+    }
+
+    // The assertion that would have caught it: a first byte while the model is
+    // twenty seconds from writing one. Asserted before the frame's shape so a
+    // failure here reads as the wait it is rather than as a renamed field.
+    expect(at[0]).toBeLessThan(5_000);
+    expect(all[0]).toEqual({ t: 'accepted' });
+    const thinking = all.filter((frame) => frame.t === 'thinking');
+    // One a second through a twenty-second silence, every one of them naming
+    // the model that is busy — a reasoning model is working, not idle, and the
+    // page is now able to say so instead of spinning.
+    expect(thinking.length).toBeGreaterThanOrEqual(10);
+    expect(thinking.every((frame) => frame.model === 'writer')).toBe(true);
+    expect(thinking.at(-1)?.ms).toBeGreaterThan(9_000);
+    // And they were not one burst at the end: the last of them landed while the
+    // model was still silent, which is the only reason the wait is countable.
+    const last = all.reduce(
+      (found, frame, index) => (frame.t === 'thinking' ? index : found),
+      -1,
+    );
+    expect(at[last]).toBeGreaterThan(15_000);
+    // Not strictly less than the last frame of all: the model's first byte and
+    // a heartbeat tick can land in the same millisecond, and a test that fails
+    // one run in two hundred on a coincidence teaches people to re-run it.
+    expect(at[last]).toBeLessThanOrEqual(at.at(-1) ?? 0);
+    // The page still arrives, which is the other half of the bargain.
+    expect(done(all)).toMatchObject({ name: 'patient', document: PAGE });
+  }, 60_000);
+
+  test('ends in a frame, never in a status, however it ends', async () => {
+    // Moving where a request is accepted moves every upstream fault with it:
+    // once the body is a stream there is no status left to refuse with, so a
+    // page that reads a code has to find one in the frames. Both models refuse
+    // outright, and the answer is still 200.
+    answers = [
+      () => new Response('down', { status: 503 }),
+      () => new Response('down', { status: 503 }),
+    ];
+    const answer = await post({ ask: 'a page for my woodworking' });
+    expect(answer.status).toBe(200);
+    expect(answer.headers.get('content-type')).toBe('application/x-ndjson');
+
+    const all = await read(answer);
+    expect(all[0]).toEqual({ t: 'accepted' });
+    expect(
+      all.filter((frame) => frame.t === 'thinking').map((frame) => frame.model),
+    ).toEqual(['writer', 'second-writer']);
+    // No model wrote a word, so there is no `start` and nothing to publish —
+    // and the last frame carries the same code and the same fixed sentence the
+    // 502 used to carry in a body nobody was left to read.
+    expect(all.some((frame) => frame.t === 'start')).toBe(false);
+    expect(done(all)).toBeNull();
+    expect(all.at(-1)).toMatchObject({ t: 'error', code: 'AI_UPSTREAM' });
+    expect(all.at(-1)?.message).toBeString();
+    // It is still this deployment's fault, so it still costs him nothing.
+    expect(await spent()).toEqual({ requests: 0, tokens: 0 });
   });
 });
 
@@ -641,12 +813,12 @@ describe('the connection', () => {
   test('outlives a model that thinks for forty seconds', async () => {
     // Bun closes a connection that has sent nothing for its idle timeout —
     // 30 s in production, Bun's own 10 s here, both of them far under the
-    // 30-150 s a measured generation takes — and this route sends nothing
-    // until the model writes its first word. Without the per-request
-    // `server.timeout` the socket closes with no status, no body and no log
-    // line, on the least technical caller this server has. Timed rather than
-    // mocked: `server.timeout` is a fact about a socket, and a fake that
-    // records the call would pass with the argument in seconds or in
+    // 30-150 s a measured generation takes. The heartbeat is what keeps this
+    // socket busy now and `server.timeout` is the belt behind it, so this walks
+    // the whole road with a twenty-second think *and* a twenty-second gap
+    // mid-document, which is the half no frame-counting test reaches. Timed
+    // rather than mocked: `server.timeout` is a fact about a socket, and a fake
+    // that records the call would pass with the argument in seconds or in
     // milliseconds.
     answers = [
       () =>
@@ -708,31 +880,119 @@ describe('a caller who has gone away', () => {
   }, 20_000);
 });
 
-describe('the page the identity host serves', () => {
-  test('is the builder, told who is reading it', async () => {
+describe('a base that is not there', () => {
+  // Reserved by RFC 5737 and routed nowhere, so a connect hangs rather than
+  // refusing — the shape a wrong hostname actually has.
+  const dead = withServer({
+    identityHost: IDENTITY,
+    tailnetProxies: [PROXY],
+    aiUrl: 'http://192.0.2.1:9',
+    aiKey: 'k',
+    aiModel: 'writer',
+    aiModels: ['writer', 'second-writer'],
+    aiBuildModel: 'writer',
+    aiBuildFallbackModel: 'second-writer',
+  });
+
+  test('says so in seconds, not in minutes', async () => {
+    // One clock for "can you be reached" and "have you thought of a word yet"
+    // made a mis-set KTHX_AI_URL take 268 s to admit it — 133 s on the primary
+    // and 135 s again on the fallback, narrated the whole way as writing.
+    const began = Date.now();
+    const response = await dead().fetch(
+      ask('/api/build', {
+        host: IDENTITY,
+        method: 'POST',
+        headers: {
+          'tailscale-user-login': DAD,
+          origin: `https://${IDENTITY}`,
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({ ask: 'a page for my woodworking' }),
+      }),
+      peer(PROXY),
+    );
+    // Still a frame on a 200 — the socket is never the thing that fails.
+    expect(response.status).toBe(200);
+    const frames = await read(response);
+    expect(frames.at(-1)).toMatchObject({ t: 'error', code: 'AI_UPSTREAM' });
+
+    // Two models, each on the short clock, and the whole thing inside what a
+    // person will sit through. The long clock is for a model that has answered.
+    const took = Date.now() - began;
+    expect(took).toBeLessThan(2 * HEADERS_MS + 20_000);
+  }, 120_000);
+});
+
+describe('the page every door serves', () => {
+  test('carries the builder on the tailnet door, told who is reading it', async () => {
     const served = await ontailnet('/', DAD);
     expect(served.status).toBe(200);
     const html = await served.text();
-    expect(html).toContain(`data-login="${DAD}"`);
+    expect(html).toContain(` data-identity data-login="${DAD}"`);
     expect(html).toContain(`data-zone="${ZONE}"`);
     expect(html).toContain('What would you like a website for?');
   });
 
   test('says one sentence to a caller the tailnet did not name', async () => {
     const html = await (await ontailnet('/', null)).text();
-    expect(html).not.toContain('data-login');
+    expect(html).toContain(' data-identity>');
+    expect(html).not.toContain('data-login="');
     expect(html).toContain('needs your Tailscale login');
   });
 
-  test('is not the landing page, which still answers everywhere else', async () => {
-    // The landing page's breakage is what reverted a ticket once. It has no
-    // seventh section, and it did not move.
+  test('is one page, and the builder is on no door but that one', async () => {
+    // The landing page's breakage is what reverted a ticket once, and folding
+    // the builder into it is exactly the kind of change that does it again. So
+    // the assertion is on both halves: the attribute is absent on the other
+    // two doors, the gate that reads it is still in the sheet — nothing is
+    // rendered rather than something being hidden after the fact — and the
+    // furniture those doors had yesterday is still where it was.
+    const page = await Bun.file(LANDING_PATH).text();
+    expect(page).toContain('#builder{display:none;');
+    expect(page).toContain('html[data-identity] #builder{display:block}');
     for (const host of [ZONE, CONTROL]) {
       const html = await (
         await kthx().fetch(ask('/', { host }), peer(PROXY))
       ).text();
+      // The tag, not the file: the sheet inside it names the attribute in the
+      // gate itself, and a bare search of the body would find that and read as
+      // a door this caller is not on.
+      const tag = /<html[^>]*>/.exec(html)?.[0] ?? '';
       expect(html).toContain('kthx.dev</title>');
-      expect(html).not.toContain('What would you like a website for?');
+      expect(tag).toContain(`data-zone="${ZONE}"`);
+      expect(tag).not.toContain('data-identity');
+      expect(html).toContain('<div class="deck">');
+      expect(html).toContain('Select a name');
+      expect(html).toContain('Drop a zip file or an index.html file');
+    }
+  });
+
+  test('does not send the builder to a door that cannot use it', async () => {
+    // Hiding it with a selector still shipped the markup, its rules and
+    // thirty-five kilobytes of its script to every anonymous visitor on the
+    // public apex — who has no `POST /api/build` to reach and nobody to be.
+    const onDoor = async (host: string) =>
+      await (await kthx().fetch(ask('/', { host }), peer(PROXY))).text();
+
+    const tailnet = await (await ontailnet('/', DAD)).text();
+    for (const host of [ZONE, CONTROL]) {
+      const html = await onDoor(host);
+      for (const gone of [
+        'id="builder"',
+        'if (IDENTITY) (() => {',
+        'html[data-identity] #builder{display:block}',
+      ]) {
+        expect(tailnet).toContain(gone);
+        expect(html).not.toContain(gone);
+      }
+      // The fence itself never reaches a browser either.
+      expect(html).not.toContain('builder:start');
+      expect(tailnet).not.toContain('builder:start');
+      // And it is a cut, not a rewrite: the page is meaningfully smaller and
+      // still ends where a page ends.
+      expect(html.length).toBeLessThan(tailnet.length - 30_000);
+      expect(html.trimEnd().endsWith('</html>')).toBe(true);
     }
   });
 });
@@ -743,12 +1003,14 @@ describe('the whole road, as the page walks it', () => {
    *
    * It is twenty lines of hand-written ZIP that nothing else in this repo
    * parses until an upload arrives, so the assertion worth having is that the
-   * release route reads what that page writes.
+   * release route reads what that page writes. One writer for both the deck
+   * and the builder, now that they are one file: a second copy is a second
+   * thing to get wrong.
    */
   async function pageZip(): Promise<(name: string, bytes: Uint8Array) => Blob> {
-    const html = await Bun.file(BUILD_PATH).text();
+    const html = await Bun.file(LANDING_PATH).text();
     const from = html.indexOf('let crcTable;');
-    const to = html.indexOf('async function put(');
+    const to = html.indexOf('/* upload */');
     expect(from).toBeGreaterThan(0);
     expect(to).toBeGreaterThan(from);
     return new Function(`${html.slice(from, to)}; return zipOne;`)() as (
@@ -878,7 +1140,7 @@ describe('the page, when the upload half of publishing fails', () => {
     claim: (name: string) => Promise<void>;
     claimedEmpty: (name: string) => Promise<boolean>;
   }> {
-    const html = await Bun.file(BUILD_PATH).text();
+    const html = await Bun.file(LANDING_PATH).text();
     const from = html.indexOf('async function claim(');
     const to = html.indexOf('/* ---- screens');
     expect(from).toBeGreaterThan(0);
@@ -1007,7 +1269,7 @@ describe('every refusal this page can meet has a sentence', () => {
 
   /** The copy table, the lookup over it, and the box it lands in. */
   async function pageSays(): Promise<Says> {
-    const html = await Bun.file(BUILD_PATH).text();
+    const html = await Bun.file(LANDING_PATH).text();
     const from = html.indexOf('const SAYS = {');
     const to = html.indexOf('/** `fetch`, with a dropped connection');
     expect(from).toBeGreaterThan(0);
@@ -1103,25 +1365,26 @@ describe('every refusal this page can meet has a sentence', () => {
   });
 });
 
+/**
+ * A span of the page's own script, by the comments that bound it.
+ *
+ * Lifted rather than rendered, the way the ZIP writer and the claim step are:
+ * this file has no DOM, and the claims worth making about a screen are which
+ * control on it is live and what it says — which is the whole of the defect,
+ * since a screen with nothing live on it is where the person stops. The
+ * builder shares the page with the deck now, so every marker here has to be
+ * one only the builder has; `nameVerdict` is named as it is for that reason.
+ */
+async function slice(from: string, to: string): Promise<string> {
+  const html = await Bun.file(LANDING_PATH).text();
+  const start = html.indexOf(from);
+  const end = html.indexOf(to);
+  expect(start).toBeGreaterThan(0);
+  expect(end).toBeGreaterThan(start);
+  return html.slice(start, end);
+}
+
 describe('an address of his own, on the screens that offer it', () => {
-  /**
-   * Just enough of a document for the three properties these screens touch.
-   *
-   * Lifted rather than rendered, the way the ZIP writer and the claim step
-   * above are: this file has no DOM, and the claims worth making here are about
-   * which control on a screen is live — which is the whole of the defect, since
-   * a screen with nothing live on it is where the person stops.
-   */
-
-  async function slice(from: string, to: string): Promise<string> {
-    const html = await Bun.file(BUILD_PATH).text();
-    const start = html.indexOf(from);
-    const end = html.indexOf(to);
-    expect(start).toBeGreaterThan(0);
-    expect(end).toBeGreaterThan(start);
-    return html.slice(start, end);
-  }
-
   test('is offered as his own, and not as somebody else’s', async () => {
     const src = await slice('function propose(done)', '/**\n * The proposal');
     const said: { code: string | null; lead: string }[] = [];
@@ -1227,7 +1490,7 @@ describe('an address of his own, on the screens that offer it', () => {
     };
 
     await list.listMine();
-    const rows = page.el('minelist').children;
+    const rows = page.el('b-minelist').children;
     expect(rows).toHaveLength(2);
     const stranded = rows[0]?.children ?? [];
     expect(stranded[0]?.textContent).toBe(`stranded.${ZONE}`);
@@ -1248,7 +1511,7 @@ describe('an address of his own, on the screens that offer it', () => {
     // recovery on the page a button nobody can afford to press.
     const src = await slice('/**\n * Every address of his', '/* ---- the wait');
     const page = screen();
-    const ask = page.el('ask');
+    const ask = page.el('b-ask');
     const lifted = new Function(
       '$',
       'document',
@@ -1298,7 +1561,7 @@ describe('an address of his own, on the screens that offer it', () => {
     // opens holding that name, so the green one starts disabled — and hiding
     // the other left a screen with nothing live on it at all, the page he
     // waited a minute for off it, and a reload the only way out.
-    const src = await slice('function startNaming(', 'function verdict(');
+    const src = await slice('function startNaming(', 'function nameVerdict(');
     const page = screen();
     const startNaming = new Function(
       '$',
@@ -1316,24 +1579,24 @@ describe('an address of his own, on the screens that offer it', () => {
     ) as (pushed?: string) => void;
 
     startNaming('taken-one');
-    expect(page.el('keepname').hidden).toBe(false);
-    expect(page.el('keepname').textContent).toBeTruthy();
-    expect(page.el('namingsay').textContent).not.toContain('somebody else');
-    expect(page.el('name').value).toBe('taken-one');
+    expect(page.el('b-keepname').hidden).toBe(false);
+    expect(page.el('b-keepname').textContent).toBeTruthy();
+    expect(page.el('b-namingsay').textContent).not.toContain('somebody else');
+    expect(page.el('b-name').value).toBe('taken-one');
 
     startNaming();
-    expect(page.el('keepname').hidden).toBe(false);
+    expect(page.el('b-keepname').hidden).toBe(false);
   });
 
   test('is usable on the name screen when it is his and empty', async () => {
     const src = await slice('function paintName()', '/* ---- what the buttons');
     const answers: Record<string, unknown>[] = [];
-    const page = screen({ name: 'his-own' });
+    const page = screen({ 'b-name': 'his-own' });
     const verdicts: { say: string; kind?: string }[] = [];
     const paintName = new Function(
       '$',
       'urlOf',
-      'verdict',
+      'nameVerdict',
       'api',
       `let checking = null; ${src} return paintName;`,
     )(
@@ -1348,7 +1611,7 @@ describe('an address of his own, on the screens that offer it', () => {
     answers.push({ available: false, why: 'TAKEN', yours: 'empty' });
     paintName();
     await Bun.sleep(400);
-    expect(page.el('usename').disabled).toBe(false);
+    expect(page.el('b-usename').disabled).toBe(false);
     expect(verdicts.at(-1)?.kind).toBe('yes');
     expect(verdicts.at(-1)?.say).not.toContain('Somebody');
 
@@ -1357,14 +1620,141 @@ describe('an address of his own, on the screens that offer it', () => {
     answers.push({ available: false, why: 'TAKEN', yours: 'live' });
     paintName();
     await Bun.sleep(400);
-    expect(page.el('usename').disabled).toBe(true);
+    expect(page.el('b-usename').disabled).toBe(true);
     expect(verdicts.at(-1)?.say).toContain('your website');
 
     answers.push({ available: false, why: 'TAKEN', yours: null });
     paintName();
     await Bun.sleep(400);
-    expect(page.el('usename').disabled).toBe(true);
+    expect(page.el('b-usename').disabled).toBe(true);
     expect(verdicts.at(-1)?.say).not.toContain('Somebody');
+  });
+});
+
+describe('the wait, now that the server talks through it', () => {
+  /**
+   * The wait screen and the frame reader, lifted together.
+   *
+   * They are adjacent in the file because they are one mechanism: the screen
+   * says what the stream says. The defect they replaced was a screen with
+   * nothing to say — held to the model's first content byte the socket was
+   * empty for 71-95 s, this counted its own seconds at it, and a browser gave
+   * up long before either of them did.
+   */
+  async function walk(frames: string[]): Promise<{
+    done: Record<string, unknown> | null;
+    refused: string | null;
+    screens: { say: string; count: string }[];
+  }> {
+    const src = await slice('/* ---- the wait', '/* ---- publishing');
+    const said: Record<string, string> = {};
+    const screens: { say: string; count: string }[] = [];
+    const el = (id: string) => ({
+      set textContent(value: string) {
+        said[id] = value;
+      },
+      get textContent() {
+        return said[id] ?? '';
+      },
+    });
+    let at = 0;
+    const reader = {
+      async read(): Promise<{ done: boolean; value?: Uint8Array }> {
+        // Recorded one read late on purpose: this is the screen as it stood
+        // once the frame before it had been read, which is the only thing
+        // somebody holding the phone ever sees.
+        if (at > 0) {
+          screens.push({
+            say: said['#b-say'] ?? '',
+            count: said['#b-count'] ?? '',
+          });
+        }
+        if (at >= frames.length) return { done: true };
+        return {
+          done: false,
+          value: new TextEncoder().encode(`${frames[at++]}\n`),
+        };
+      },
+    };
+    const build = new Function(
+      '$',
+      'show',
+      'reach',
+      'fault',
+      `${src}; return build;`,
+    )(
+      el,
+      () => undefined,
+      async () => ({ ok: true, body: { getReader: () => reader } }),
+      (code: string) => Object.assign(new Error(code), { code }),
+    ) as (ask: string, site: string | null) => Promise<Record<string, unknown>>;
+    let refused: string | null = null;
+    const done = await build('a page for my boats', null).catch(
+      (err: { code?: string }) => {
+        refused = err.code ?? null;
+        return null;
+      },
+    );
+    return { done, refused, screens };
+  }
+
+  test('counts the server’s clock rather than this phone’s', async () => {
+    // A tab throttled in a pocket cannot count, and the thing worth counting
+    // is how long the model has been at it rather than how long this screen
+    // has been open. `ms` is the server's, so the two cannot drift apart.
+    const { screens } = await walk([
+      '{"t":"accepted"}',
+      '{"t":"thinking","model":"writer","ms":0}',
+      '{"t":"thinking","model":"writer","ms":40000}',
+    ]);
+    expect(screens[1]?.count).toBe('0 seconds so far');
+    expect(screens[1]?.say).toContain('thinking');
+    expect(screens[2]?.count).toBe('40 seconds so far');
+  });
+
+  test('says the fallback happened, which nothing else says', async () => {
+    // A change of model between two `thinking` frames IS the fallback signal —
+    // there is no frame that announces it — and a minute and a half of silence
+    // with no reason given is a minute and a half somebody spends wondering
+    // whether to press it again.
+    const { screens } = await walk([
+      '{"t":"accepted"}',
+      '{"t":"thinking","model":"writer","ms":0}',
+      '{"t":"thinking","model":"second-writer","ms":95000}',
+    ]);
+    expect(screens[2]?.say).toContain('did not answer');
+    expect(screens[2]?.count).toBe('95 seconds so far');
+  });
+
+  test('turns from seconds into characters when the first word lands', async () => {
+    const { done, screens } = await walk([
+      '{"t":"accepted"}',
+      '{"t":"thinking","model":"writer","ms":0}',
+      '{"t":"start","model":"writer"}',
+      '{"t":"writing","chars":2140}',
+      `{"t":"done","build":"b1","name":"boats","document":${JSON.stringify(PAGE)}}`,
+    ]);
+    expect(screens[2]?.say).toContain('started writing');
+    expect(screens[3]?.count).toBe('2,140 characters so far');
+    expect(done).toMatchObject({ name: 'boats', document: PAGE });
+  });
+
+  test('reads a refusal that arrives as a frame as a refusal', async () => {
+    // Nothing about the upstream is a status any more, so the only place a
+    // refusal can arrive is here, in a 200 that has been open and talking
+    // since the first millisecond.
+    const { done, refused } = await walk([
+      '{"t":"accepted"}',
+      '{"t":"thinking","model":"writer","ms":0}',
+      '{"t":"error","code":"AI_UPSTREAM","message":"the ai upstream did not answer"}',
+    ]);
+    expect(done).toBeNull();
+    expect(refused).toBe('AI_UPSTREAM');
+  });
+
+  test('reads a body that ends without either as a connection that went', async () => {
+    const { refused } = await walk(['{"t":"accepted"}']);
+    expect(refused).toBe('CUT_OFF');
   });
 });
 
