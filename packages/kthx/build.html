@@ -417,16 +417,25 @@ async function listMine() {
   }
 }
 
-/** An address he already owns, waiting for the next page he makes. */
+/**
+ * An address he already owns, waiting for the next page he makes.
+ *
+ * It says where the next page goes and nothing else. It does not touch the
+ * sentence in the box, its backup, or a draft this phone recovered — the
+ * button sits at the top of the start screen, above the greeting, so the tap
+ * that reaches it is most often the one *after* he has typed, and a button
+ * that answers "where" by throwing away "what" is a button nobody can afford
+ * to press.
+ */
 function usePinned(name) {
   pinned = name;
   held = null;
-  draft(null);
-  typed(null);
-  $("#ask").value = "";
+  const box = $("#ask");
+  // The sentence outlives the tap; a box that lost it to a reload gets it back.
+  if (box.value.trim() === "") box.value = typedBack()?.ask ?? "";
   oops("#startoops", { code: "PINNED" }, `${hostOf(name)} is waiting for a page`);
   show("start");
-  $("#ask").focus();
+  box.focus();
 }
 
 /* ---- the wait ------------------------------------------------------------- */

@@ -1191,11 +1191,12 @@ describe('an address of his own, on the screens that offer it', () => {
       'askChange',
       'draft',
       'typed',
+      'typedBack',
       'oops',
       'show',
       `let held = null; let pinned = null;
        ${src}
-       return { listMine, pinnedNow: () => pinned };`,
+       return { listMine, usePinned, pinnedNow: () => pinned };`,
     )(
       page.$,
       { createElement: node },
@@ -1216,9 +1217,14 @@ describe('an address of his own, on the screens that offer it', () => {
       () => undefined,
       () => undefined,
       () => undefined,
+      () => ({ ask: 'the sentence he typed' }),
       () => undefined,
       () => undefined,
-    ) as { listMine: () => Promise<void>; pinnedNow: () => string | null };
+    ) as {
+      listMine: () => Promise<void>;
+      usePinned: (name: string) => void;
+      pinnedNow: () => string | null;
+    };
 
     await list.listMine();
     const rows = page.el('minelist').children;
@@ -1233,6 +1239,58 @@ describe('an address of his own, on the screens that offer it', () => {
     // address rather than on whatever the model proposes for it.
     acts[0]?.onclick?.();
     expect(list.pinnedNow()).toBe('stranded');
+  });
+
+  test('the address he picks does not cost him the sentence he typed', async () => {
+    // The button sits above the greeting, so the tap that reaches it is most
+    // often the one *after* he has typed a paragraph into the box below it.
+    // Answering "where does it go" by throwing away "what is it" makes the one
+    // recovery on the page a button nobody can afford to press.
+    const src = await slice('/**\n * Every address of his', '/* ---- the wait');
+    const page = screen();
+    const ask = page.el('ask');
+    const lifted = new Function(
+      '$',
+      'document',
+      'api',
+      'hostOf',
+      'ago',
+      'askChange',
+      'draft',
+      'typed',
+      'typedBack',
+      'oops',
+      'show',
+      `let held = null; let pinned = null;
+       ${src}
+       return { usePinned };`,
+    )(
+      page.$,
+      { createElement: node },
+      async () => ({ items: [] }),
+      (name: string) => `${name}.${ZONE}`,
+      () => 'changed today',
+      () => undefined,
+      () => {
+        throw new Error('the draft is not this button to discard');
+      },
+      () => {
+        throw new Error('the backup is not this button to discard');
+      },
+      () => ({ ask: 'a page for my woodworking' }),
+      () => undefined,
+      () => undefined,
+    ) as { usePinned: (name: string) => void };
+
+    ask.value = 'cutting boards and birdhouses in Dartmouth';
+    lifted.usePinned('stranded');
+    expect(ask.value).toBe('cutting boards and birdhouses in Dartmouth');
+
+    // And a box a reload emptied is filled from the backup rather than left
+    // blank beside an address that is now waiting for a page.
+    ask.value = '';
+    lifted.usePinned('stranded');
+    expect(ask.value).toBe('a page for my woodworking');
   });
 
   test('leaves the name screen with something he can press', async () => {
