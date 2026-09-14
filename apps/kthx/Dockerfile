@@ -9,7 +9,7 @@
 #
 # The chart runs this with a read-only root filesystem, `/tmp` and the sites
 # volume being the only writable paths, as uid 65532.
-FROM cgr.dev/chainguard/node:latest-dev@sha256:f09827f0f82991e657bbc4017674a104604a5bb42690e1977315c57713b84ef2 AS base
+FROM cgr.dev/chainguard/node:latest-dev@sha256:37ea42c0860729767b090a7c700c836eac660eb4bcfee3b5fe63eb85acd63df4 AS base
 ARG BUN_VERSION=1.4.0
 ENV BUN_INSTALL=/usr/local \
   TURBO_TELEMETRY_DISABLED=1
