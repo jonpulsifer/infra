@@ -96,6 +96,11 @@ button{font:inherit;cursor:pointer;border-radius:var(--r);border:2px solid trans
 }
 .oops{background:var(--bad-soft);border:1px solid var(--bad);color:var(--bad);border-radius:var(--r);padding:14px 15px;margin:0 0 14px}
 .oops b{display:block;color:var(--ink);margin-bottom:2px}
+/* The same box in the other colour, and the reason it has two. Half of what
+   this page has to say in it is good news — the address is already yours, what
+   you typed is still here — and saying that in the red kept for things going
+   wrong teaches a person not to trust the red. */
+.note{background:var(--go-soft);border-color:var(--go);color:var(--ink)}
 .verdict{min-height:24px;font-size:16px;margin-top:8px}
 .verdict.no{color:var(--bad)}
 .verdict.yes{color:var(--go)}
@@ -215,13 +220,24 @@ const DRAFT = "kthx.build";
    between pressing the green button and seeing a page, this is the only copy
    of what he said. */
 const TYPED = "kthx.typed";
+/* And the address he settled on, which the row on the server does not know: it
+   was written with the name the model proposed, at generation time, and
+   "Change the name" happens in this tab alone. A tab discarded after the claim
+   that follows comes back through `recover()`, and a name read back off the row
+   would be a different address — free, so the claim there would take a SECOND
+   name and leave the first one paid for and stranded. */
+const CHOSEN = "kthx.name";
 
 /* ---- state: exactly one page in hand at a time ---------------------------- */
-/* {build, name, site, changing, taken, document}: the draft id, the address it
-   would live at, the site it already belongs to (null until something is
-   claimed), whether it is a change to a site that is already online, and
-   whether that name turned out to be spoken for. */
+/* {build, name, site, changing, taken, yours, document}: the draft id, the
+   address it would live at, the site it already belongs to (null until
+   something is claimed), whether it is a change to a site that is already
+   online, whether that name turned out to be spoken for, and — when it is
+   spoken for by *him* — whether it is an empty claim or a website. */
 let held = null;
+/* An address of his with nothing on it, chosen from the list: the next page
+   made goes on that one rather than on the name the model proposes. */
+let pinned = null;
 let ticker = null;
 
 function show(id) {
@@ -231,8 +247,16 @@ function show(id) {
   if (id !== "working") { clearInterval(ticker); ticker = null; }
   window.scrollTo(0, 0);
 }
-function draft(id) { try { id ? localStorage.setItem(DRAFT, id) : localStorage.removeItem(DRAFT); } catch {} }
+/** The draft in hand and the address it is going to, kept and cleared together. */
+function draft(id, name) {
+  try {
+    if (!id) { localStorage.removeItem(DRAFT); localStorage.removeItem(CHOSEN); return; }
+    localStorage.setItem(DRAFT, id);
+    if (name) localStorage.setItem(CHOSEN, name);
+  } catch {}
+}
 function draftId() { try { return localStorage.getItem(DRAFT); } catch { return null; } }
+function draftName() { try { return localStorage.getItem(CHOSEN); } catch { return null; } }
 function typed(what) { try { what ? localStorage.setItem(TYPED, JSON.stringify(what)) : localStorage.removeItem(TYPED); } catch {} }
 function typedBack() { try { return JSON.parse(localStorage.getItem(TYPED) || "null"); } catch { return null; } }
 function hostOf(name) { return `${name}.${ZONE}`; }
@@ -260,6 +284,7 @@ const SAYS = {
   MALFORMED_REQUEST: "That is more than this page can send at once. Try saying it in fewer words.",
   /* the name */
   TAKEN: "That name is taken. Pick another one.",
+  YOURS: "You already have a website at that address. Give this page a name of its own — the one you have stays exactly as it is.",
   INVALID_NAME: "That name will not work. Three letters or more, using letters, numbers and hyphens, and not starting or ending with a hyphen.",
   RESERVED: "That name is kept for the system. Pick another one.",
   /* the door */
@@ -275,13 +300,24 @@ const SAYS = {
   PICKED_UP: "This is the page you were making when the tab closed. It is still here.",
   CLAIMED: "The address is yours already. The page is not on it yet — press Put it online.",
   TYPED_BACK: "This is what you were asking for when the tab closed. Nothing was lost — it is ready to go again.",
+  PINNED: "Say what it should be about, and the page you make goes on that address.",
 };
+/* Not everything this box has to say is a refusal. These four are plainly good
+   news, and they are why it has a second colour. */
+const GOOD = new Set(["PICKED_UP", "CLAIMED", "TYPED_BACK", "PINNED"]);
 /* The same refusal, read on a screen that asked a different question. Told to
    "say more about what you do" while asking for a green heading, he writes his
    business into the change box and the next turn is worse for it. */
 const WHILE_CHANGING = {
   NO_DOCUMENT: "It did not come back with a page this time. Try saying the change a different way.",
   TOO_LARGE: "The changed page came back too big to put online. Try asking for a smaller change.",
+};
+/* The same code from the other side of the model. A refusal carrying a status
+   came back before anything was written, so what was too big is the page that
+   is already there — and no change is small enough, because the size is the
+   same either way. Told to ask for a smaller one he asks forever. */
+const BEFORE_CHANGING = {
+  TOO_LARGE: "This website is too big to change by asking. It was put here another way, and that is the way to change it.",
 };
 const WHILE_PUBLISHING = {
   RATE_LIMITED: "That is a lot of putting online at once. Give it a minute and try again.",
@@ -296,7 +332,7 @@ function oops(where, err, lead, also) {
   const el = $(where);
   if (!err) { el.replaceChildren(); return; }
   const box = document.createElement("div");
-  box.className = "oops";
+  box.className = GOOD.has(err.code) ? "oops note" : "oops";
   const b = document.createElement("b");
   b.textContent = lead || "That did not work";
   const p = document.createElement("span");
@@ -330,14 +366,24 @@ function ago(iso) {
   const months = Math.round(days / 30);
   return months < 12 ? `changed ${months} months ago` : "changed over a year ago";
 }
+/**
+ * Every address of his, including the ones with no page on them.
+ *
+ * An address with nothing published is not nothing: it is a name taken for
+ * good, a Postgres database and a role, and it is what a failed upload leaves
+ * behind when the person presses "Start again" instead of trying once more.
+ * Filtered out of this list, it was unreachable from every screen on this page
+ * and nothing on the server reclaims it. So it is listed, and the one thing to
+ * do with it — put a page on it — is the button.
+ */
 async function listMine() {
   let items = [];
   try { items = (await api("GET", "/api/sites?owner=me")).items || []; } catch { return; }
-  const live = items.filter((s) => s.serving !== null);
-  $("#mine").hidden = live.length === 0;
+  $("#mine").hidden = items.length === 0;
   const list = $("#minelist");
   list.replaceChildren();
-  for (const s of live) {
+  for (const s of items) {
+    const empty = s.serving === null && (s.releases || 0) === 0;
     const card = document.createElement("div");
     card.className = "card site";
     const host = document.createElement("span");
@@ -345,22 +391,42 @@ async function listMine() {
     host.textContent = hostOf(s.name);
     const when = document.createElement("span");
     when.className = "when";
-    when.textContent = ago(s.changed);
+    when.textContent = empty ? "nothing on it yet" : ago(s.changed);
     const acts = document.createElement("span");
     acts.className = "acts";
-    const open = document.createElement("a");
-    open.className = "plain";
-    open.href = s.url; open.target = "_blank"; open.rel = "noopener";
-    open.style.textDecoration = "none";
-    open.textContent = "Open";
-    const edit = document.createElement("button");
-    edit.className = "plain";
-    edit.textContent = "Change it";
-    edit.onclick = () => askChange(s.name);
-    acts.append(open, edit);
+    if (empty) {
+      const use = document.createElement("button");
+      use.className = "plain";
+      use.textContent = "Put a page on it";
+      use.onclick = () => usePinned(s.name);
+      acts.append(use);
+    } else {
+      const open = document.createElement("a");
+      open.className = "plain";
+      open.href = s.url; open.target = "_blank"; open.rel = "noopener";
+      open.style.textDecoration = "none";
+      open.textContent = "Open";
+      const edit = document.createElement("button");
+      edit.className = "plain";
+      edit.textContent = "Change it";
+      edit.onclick = () => askChange(s.name);
+      acts.append(open, edit);
+    }
     card.append(host, when, acts);
     list.append(card);
   }
+}
+
+/** An address he already owns, waiting for the next page he makes. */
+function usePinned(name) {
+  pinned = name;
+  held = null;
+  draft(null);
+  typed(null);
+  $("#ask").value = "";
+  oops("#startoops", { code: "PINNED" }, `${hostOf(name)} is waiting for a page`);
+  show("start");
+  $("#ask").focus();
 }
 
 /* ---- the wait ------------------------------------------------------------- */
@@ -404,6 +470,10 @@ async function build(ask, site) {
       const data = await r.json().catch(() => ({}));
       const e = new Error(data.message || r.statusText);
       e.code = data.code;
+      /* Which half of the road it failed on, for the screens where the same
+         code means two different things: a status is a refusal made before a
+         model was asked anything. */
+      e.status = r.status;
       throw e;
     }
     const reader = r.body.getReader();
@@ -535,19 +605,45 @@ function greet() {
   $("#hello").textContent = who ? `Hello, ${who[0].toUpperCase()}${who.slice(1)}.` : "Hello.";
 }
 
+/**
+ * A page, in hand, with whatever its address turned out to be.
+ *
+ * Three answers about the name arrive here and only one of them is a refusal.
+ * A name nobody has is the ordinary road. A name of *his* with nothing on it is
+ * the claim a failed upload stranded — the green button finishes it, and
+ * calling it taken is what sent him off to spend a second address. A name of
+ * his with a website already on it is the only one that needs another name, and
+ * it is not somebody else's either.
+ */
 function propose(done) {
+  /* A page asked for from the list goes to the address that was waiting for it;
+     the name the model proposed is not the one it lives at. */
+  const name = pinned ?? done.name;
+  const yours = pinned === null ? (done.yours ?? null) : "empty";
   held = {
     build: done.build,
-    name: done.name,
+    name,
     site: done.site,
     changing: done.site !== null,
-    taken: done.available === false,
+    taken: yours !== "empty" && done.available === false,
+    yours,
     document: done.document,
   };
-  draft(done.build);
+  draft(done.build, name);
   /* The row on the server holds the ask from here on. */
   typed(null);
-  proposal(done.available === false ? { code: "TAKEN" } : null, `${hostOf(done.name)} is taken`);
+  proposal(
+    held.taken
+      ? { code: yours === "live" ? "YOURS" : "TAKEN" }
+      : yours === "empty"
+        ? { code: "CLAIMED" }
+        : null,
+    yours === "live"
+      ? `${hostOf(name)} is already your website`
+      : yours === "empty"
+        ? `${hostOf(name)} is already yours`
+        : `${hostOf(name)} is taken`,
+  );
 }
 
 /**
@@ -595,6 +691,7 @@ function online(name, changed) {
   $("#livepreview").srcdoc = held ? held.document : "";
   oops("#liveoops", null);
   held = held ? { ...held, site: name } : { site: name, name, document: "" };
+  pinned = null;
   draft(null);
   typed(null);
   show("live");
@@ -602,7 +699,7 @@ function online(name, changed) {
 }
 
 function askChange(name) {
-  held = { site: name, name, changing: true, taken: false, document: "" };
+  held = { site: name, name, changing: true, taken: false, yours: "live", document: "" };
   $("#changingwhat").textContent = `${hostOf(name)} — say what should be different and it will be rewritten.`;
   $("#edit").value = "";
   oops("#changingoops", null);
@@ -612,16 +709,23 @@ function askChange(name) {
 
 /* ---- the name screen ------------------------------------------------------ */
 let checking = null;
-/** `taken` is the name that sent him here, when it was not his idea to come. */
-function startNaming(taken) {
-  /* Pushed here by a name somebody else has, there is no old name to keep and
-     no reason on the screen for the move. Both are said out loud, or he lands
-     on "Pick a name" having asked for nothing of the sort and with the page he
+/** `pushed` is the name that sent him here, when it was not his idea to come. */
+function startNaming(pushed) {
+  /* Pushed here by a name that is not free, there is no old name to keep and no
+     reason on the screen for the move. Both are said out loud, or he lands on
+     "Pick a name" having asked for nothing of the sort and with the page he
      waited a minute for nowhere in sight. */
-  $("#namingsay").textContent = taken
-    ? `${hostOf(taken)} belongs to somebody else. Your page is safe — give it another name and it goes online.`
-    : "Letters, numbers and hyphens. This becomes the address.";
-  $("#keepname").hidden = Boolean(taken);
+  $("#namingsay").textContent = !pushed
+    ? "Letters, numbers and hyphens. This becomes the address."
+    : held.yours === "live"
+      ? `${hostOf(pushed)} already has your website on it. Give this page a name of its own and you keep both.`
+      : `${hostOf(pushed)} is already taken. Your page is safe — give it another name and it goes online.`;
+  /* Never hidden, whichever road arrived. This screen has exactly two buttons,
+     and it opens holding a name that has just been refused — so the green one
+     starts disabled, and hiding the other leaves a screen with nothing live on
+     it at all and the page he waited a minute for off it. The way back is a
+     button, not a reload. */
+  $("#keepname").textContent = pushed ? "Back to the page" : "Keep the old one";
   $("#name").value = held.name;
   paintName();
   show("naming");
@@ -658,13 +762,26 @@ function paintName() {
     const why = {
       INVALID_NAME: "Letters, numbers and hyphens only — three characters at least, and not starting or ending with a hyphen.",
       RESERVED: "That name is kept for the system. Pick another.",
-      TAKEN: "Somebody already has that one. Pick another.",
+      TAKEN: "That one is already taken. Pick another.",
     };
+    /* An address of his own is not "somebody already has that one". An empty
+       one is the claim a failed upload left behind, and typing it back in here
+       is the only road to it, so the button has to go live for it. A live one
+       is a website of his, which this page changes by asking rather than by
+       writing a new one over the top. */
+    const empty = answer.yours === "empty";
+    const usable = answer.available || empty;
     verdict(
-      answer.available ? "That one is free." : (why[answer.why] || "That name cannot be used."),
-      answer.available ? "yes" : "no",
+      answer.available
+        ? "That one is free."
+        : empty
+          ? "That one is already yours, with nothing on it yet."
+          : answer.yours === "live"
+            ? "That is your website already. Change it from the first screen."
+            : (why[answer.why] || "That name cannot be used."),
+      usable ? "yes" : "no",
     );
-    $("#usename").disabled = !answer.available;
+    $("#usename").disabled = !usable;
   }, 250);
 }
 
@@ -708,7 +825,10 @@ $("#put").onclick = () => guard(async () => {
     online(page.name, page.changing === true);
   } catch (err) {
     const owned = held.site !== null;
-    if (err.code === "TAKEN") held = { ...held, taken: true };
+    /* Refused by the catalogue after all — a race, or a page left open while
+       the address went live somewhere else — so whatever this tab believed
+       about whose it is, it no longer knows. */
+    if (err.code === "TAKEN") held = { ...held, taken: true, yours: null };
     proposal(
       err,
       err.code === "TAKEN"
@@ -725,13 +845,20 @@ $("#rename").onclick = () => startNaming();
 $("#pickname").onclick = () => startNaming(held.name);
 $("#keepname").onclick = () => proposal(null);
 $("#usename").onclick = () => {
-  held = { ...held, name: $("#name").value.trim().toLowerCase(), taken: false };
+  const name = $("#name").value.trim().toLowerCase();
+  held = { ...held, name, taken: false, yours: null };
+  /* Written down beside the draft, because the row on the server still says
+     whatever the model proposed and nothing here tells it otherwise: a tab
+     discarded after the claim that follows has to come back to THIS address,
+     or the resumed-claim check asks about a name he never took, finds it free,
+     and claims a second one. */
+  draft(held.build, name);
   proposal(null);
 };
-$("#scrap").onclick = () => { held = null; draft(null); typed(null); $("#ask").value = ""; show("start"); void listMine(); };
-$("#another").onclick = () => { held = null; draft(null); typed(null); $("#ask").value = ""; oops("#startoops", null); show("start"); void listMine(); };
+$("#scrap").onclick = () => { held = null; pinned = null; draft(null); typed(null); $("#ask").value = ""; oops("#startoops", null); show("start"); void listMine(); };
+$("#another").onclick = () => { held = null; pinned = null; draft(null); typed(null); $("#ask").value = ""; oops("#startoops", null); show("start"); void listMine(); };
 $("#change").onclick = () => askChange(held.site);
-$("#nevermind").onclick = () => { held = null; typed(null); show("start"); void listMine(); };
+$("#nevermind").onclick = () => { held = null; pinned = null; typed(null); oops("#startoops", null); show("start"); void listMine(); };
 $("#name").oninput = paintName;
 
 $("#applychange").onclick = () => guard(async () => {
@@ -744,18 +871,23 @@ $("#applychange").onclick = () => guard(async () => {
   try {
     done = await build(ask, site);
   } catch (err) {
-    oops("#changingoops", err, "It could not be changed", WHILE_CHANGING);
+    oops(
+      "#changingoops",
+      err,
+      "It could not be changed",
+      err.status ? BEFORE_CHANGING : WHILE_CHANGING,
+    );
     show("changing");
     return;
   }
   if (done.unchanged) {
-    held = { site, name: site, changing: true, taken: false, document: "" };
+    held = { site, name: site, changing: true, taken: false, yours: "live", document: "" };
     oops("#changingoops", { code: "UNCHANGED" }, "Nothing changed");
     show("changing");
     return;
   }
-  held = { build: done.build, name: site, site, changing: true, taken: false, document: done.document };
-  draft(done.build);
+  held = { build: done.build, name: site, site, changing: true, taken: false, yours: "live", document: done.document };
+  draft(done.build, site);
   typed(null);
   waiting("Putting it online", PUTTING);
   try {
@@ -783,12 +915,19 @@ async function recover() {
     if (err.status) draft(null);
     return false;
   }
+  /* The row carries the name the model proposed at generation time; "Change the
+     name" happened here and never reached it. So this tab's own note of the
+     address wins — asking the server about the row's name instead would find a
+     name he never claimed, call it free, and claim a SECOND one on the next
+     press, stranding the first. */
+  const name = draftName() || row.name;
   held = {
     build: row.id,
-    name: row.name,
+    name,
     site: row.site,
     changing: row.site !== null,
     taken: false,
+    yours: null,
     document: row.document,
   };
   /* The draft says nothing about a claim, so a tab discarded between claiming
@@ -796,8 +935,8 @@ async function recover() {
      and publishing under a new one would spend the first address for nothing.
      A server that cannot be asked leaves the name changeable, which the claim
      itself then sorts out in a sentence. */
-  if (held.site === null && await claimedEmpty(row.name).catch(() => false)) {
-    held = { ...held, site: row.name };
+  if (held.site === null && await claimedEmpty(name).catch(() => false)) {
+    held = { ...held, site: name };
   }
   proposal({ code: held.site === null ? "PICKED_UP" : "CLAIMED" }, "Picked up where you left off");
   return true;

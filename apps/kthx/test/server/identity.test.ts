@@ -234,6 +234,7 @@ describe('GET /api/names/:name', () => {
       name: free,
       available: true,
       why: null,
+      yours: null,
     });
 
     const taken = await claimAs(DAD, 'probed');
@@ -241,6 +242,7 @@ describe('GET /api/names/:name', () => {
       name: taken.name,
       available: false,
       why: 'TAKEN',
+      yours: null,
     });
 
     // A deleted name is taken forever: its row is what answers 410 on the site
@@ -252,6 +254,59 @@ describe('GET /api/names/:name', () => {
     expect((await probe(taken.name)).body).toMatchObject({
       available: false,
       why: 'TAKEN',
+    });
+  });
+
+  test('tells a person their own address apart from somebody else’s', async () => {
+    // Owner-blind, this said TAKEN about the caller's own name, and both
+    // readers printed it as somebody else's — which sent him off to rename an
+    // address he had already paid a database and a role for, and made the
+    // stranded one unreachable, since typing it back in met the same sentence.
+    const mine = await claimAs(DAD, 'mine-empty');
+    const asDad = async (name: string) =>
+      json(await ontailnet(`/api/names/${name}`, DAD));
+    expect((await asDad(mine.name)).body).toEqual({
+      name: mine.name,
+      available: false,
+      why: 'TAKEN',
+      yours: 'empty',
+    });
+
+    // With a page on it the answer changes again: it is his, and it is a
+    // website rather than a claim waiting to be finished.
+    await ontailnet(`/api/sites/${mine.name}/releases`, DAD, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/gzip',
+        origin: `https://${IDENTITY}`,
+      },
+      body: SITE,
+    });
+    expect((await asDad(mine.name)).body).toMatchObject({ yours: 'live' });
+
+    // Somebody else's is somebody else's, and so is the same name asked for by
+    // nobody at all on the public apex.
+    const hers = await claimAs(MOM, 'hers-empty');
+    expect((await asDad(hers.name)).body).toMatchObject({
+      available: false,
+      why: 'TAKEN',
+      yours: null,
+    });
+    expect(
+      (await json(await kthx().fetch(ask(`/api/names/${mine.name}`)))).body,
+    ).toMatchObject({ why: 'TAKEN', yours: null });
+
+    // A deleted name is nobody's, its old owner least of all: the row is what
+    // answers 410 forever, so offering it back to him is the same dead end.
+    const gone = await claimAs(DAD, 'mine-deleted');
+    expect(
+      (await ontailnet(`/api/sites/${gone.name}`, DAD, { method: 'DELETE' }))
+        .status,
+    ).toBe(204);
+    expect((await asDad(gone.name)).body).toMatchObject({
+      available: false,
+      why: 'TAKEN',
+      yours: null,
     });
   });
 
