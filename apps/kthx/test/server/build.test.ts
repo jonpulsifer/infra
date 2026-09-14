@@ -905,6 +905,34 @@ describe('the page every door serves', () => {
       expect(html).toContain('Drop a zip file or an index.html file');
     }
   });
+
+  test('does not send the builder to a door that cannot use it', async () => {
+    // Hiding it with a selector still shipped the markup, its rules and
+    // thirty-five kilobytes of its script to every anonymous visitor on the
+    // public apex — who has no `POST /api/build` to reach and nobody to be.
+    const onDoor = async (host: string) =>
+      await (await kthx().fetch(ask('/', { host }), peer(PROXY))).text();
+
+    const tailnet = await (await ontailnet('/', DAD)).text();
+    for (const host of [ZONE, CONTROL]) {
+      const html = await onDoor(host);
+      for (const gone of [
+        'id="builder"',
+        'if (IDENTITY) (() => {',
+        'html[data-identity] #builder{display:block}',
+      ]) {
+        expect(tailnet).toContain(gone);
+        expect(html).not.toContain(gone);
+      }
+      // The fence itself never reaches a browser either.
+      expect(html).not.toContain('builder:start');
+      expect(tailnet).not.toContain('builder:start');
+      // And it is a cut, not a rewrite: the page is meaningfully smaller and
+      // still ends where a page ends.
+      expect(html.length).toBeLessThan(tailnet.length - 30_000);
+      expect(html.trimEnd().endsWith('</html>')).toBe(true);
+    }
+  });
 });
 
 describe('the whole road, as the page walks it', () => {

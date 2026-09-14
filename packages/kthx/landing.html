@@ -331,6 +331,7 @@ html[data-readonly] .deck,html[data-readonly] #mine,html[data-readonly] #nukebar
    `data-identity` on the tailnet host, so on the apex and the control host
    none of this is rendered at all — the same way `data-readonly` already takes
    the claim deck off a public apex that cannot claim. */
+/* builder:start */
 #builder{display:none;margin-top:-28px}
 html[data-identity] #builder{display:block}
 /* And the other way round: what the tailnet door does not have. Ownership
@@ -345,6 +346,7 @@ html[data-identity] #every,
 html[data-identity] #cli,
 html[data-identity] #sdkbox,
 html[data-identity] .foot{display:none}
+/* builder:end */
 /* One screen at a time, so `hidden` has to mean gone rather than laid out.
    Scoped to this section on purpose: `.foot` and `.sdkpane` out there carry a
    display of their own, and a bare `[hidden]` rule would quietly change what
@@ -432,6 +434,7 @@ html[data-identity] .foot{display:none}
        apex and the control host none of this is on the screen at all. Every id
        in here is prefixed, because merging two pages is exactly where an id
        collides. -->
+  <!-- builder:start -->
   <section id="builder" aria-label="Make a website">
     <div class="build">
 
@@ -525,6 +528,7 @@ html[data-identity] .foot{display:none}
 
     </div>
   </section>
+  <!-- builder:end -->
 
   <div class="deck">
     <div class="deckhead"><span class="n">1</span> Select a name <span class="sp"></span></div>
@@ -1174,6 +1178,7 @@ document.fonts?.ready.then(() => placePin());
  * rather than a toast. `$`, `ZONE`, `REDUCE` and `zipOne` are the page's own,
  * shared because they are the same thing and this is one file.
  */
+/* builder:start */
 if (IDENTITY) (() => {
 const LOGIN = root.dataset.login || null;
 /* The build a tab was in the middle of. iOS discards a backgrounded tab without
@@ -1958,6 +1963,7 @@ function resume() {
 })();
 
 })();
+/* builder:end */
 </script>
 </body>
 </html>

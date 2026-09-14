@@ -100,11 +100,53 @@ async function landingHtml(
   landing ??= Bun.file(LANDING_PATH).text();
   const who =
     caller.login === null ? '' : ` data-login="${attribute(caller.login)}"`;
-  const identity = caller.door === 'identity' ? ` data-identity${who}` : '';
-  return (await landing).replace(
+  const onTailnet = caller.door === 'identity';
+  const identity = onTailnet ? ` data-identity${who}` : '';
+  const body = onTailnet ? await whole(landing) : await slim(landing);
+  return body.replace(
     '<html lang="en">',
     `<html lang="en" data-zone="${zone}"${caller.control ? '' : ' data-readonly'}${admin ? ' data-admin' : ''}${identity}>`,
   );
+}
+
+/**
+ * The page without the builder, for the doors that do not have one.
+ *
+ * `html[data-identity]` is what shows the component, so hiding it costs a
+ * selector — but the markup, its rules and thirty-five kilobytes of its script
+ * still went to every anonymous visitor on the public apex, who cannot reach
+ * `POST /api/build` and has nobody to be. Roughly doubling a page nobody asked
+ * for is a strange thing to send over a tunnel.
+ *
+ * The regions are fenced in `landing.html` rather than split into a second
+ * file: one page is what the owner asked for, and two files drift. The fence
+ * is spelled the same in all three comment syntaxes the file uses, so one
+ * expression clears markup, rules and script alike.
+ *
+ * Cut once and kept, like the page it is cut from: both are read at boot and
+ * never change under a running process.
+ */
+/** One fence post, in any of the three comment syntaxes this file uses. */
+const POST = String.raw`[/<]\*?!?-{0,2}\s*builder:%s\s*-{0,2}\*?/?>?`;
+const FENCE = new RegExp(`${POST.replace('%s', '(?:start|end)')}\n?`, 'g');
+const BUILDER = new RegExp(
+  `${POST.replace('%s', 'start')}[\\s\\S]*?${POST.replace('%s', 'end')}`,
+  'g',
+);
+
+let cut: Promise<string> | undefined;
+let kept: Promise<string> | undefined;
+
+/** Without the builder, for a door that has none. */
+function slim(full: Promise<string>): Promise<string> {
+  cut ??= full.then((text) => text.replace(BUILDER, '').replace(FENCE, ''));
+  return cut;
+}
+
+/** With it, and without the fence — scaffolding is nobody's to download. */
+function whole(full: Promise<string>): Promise<string> {
+  kept ??= full.then((text) => text.replace(FENCE, ''));
+  return kept;
 }
 
 /** Safe inside a double-quoted attribute, which is the only place this goes. */
