@@ -145,6 +145,40 @@ function writesSlowly(
   });
 }
 
+/**
+ * A model that thinks for a while before its first word.
+ *
+ * Written to survive being hung up on: the enqueue after the sleep lands on a
+ * stream the server under test has already cancelled, and an unguarded one
+ * would fail the run from inside this stub rather than inside a test.
+ */
+function thinksFor(
+  ms: number,
+  first: string,
+  rest: readonly string[],
+): Response {
+  const encoder = new TextEncoder();
+  const body = new ReadableStream<Uint8Array>({
+    async start(controller) {
+      await Bun.sleep(ms);
+      try {
+        controller.enqueue(
+          encoder.encode(
+            `data: ${JSON.stringify({ choices: [{ delta: { content: first } }] })}\n\n`,
+          ),
+        );
+        controller.enqueue(encoder.encode(frames(rest)));
+        controller.close();
+      } catch {
+        // Nobody is reading this any more, which is the point of the test.
+      }
+    },
+  });
+  return new Response(body, {
+    headers: { 'content-type': 'text/event-stream' },
+  });
+}
+
 /** A model that reasons for its whole ceiling and writes nothing at all. */
 function thinksOnly(): Response {
   return new Response(
@@ -204,6 +238,28 @@ const done = (all: Record<string, unknown>[]) =>
   all.find((frame) => frame.t === 'done') ?? null;
 const failed = (all: Record<string, unknown>[]) =>
   all.find((frame) => frame.t === 'error') ?? null;
+
+/**
+ * What this login has spent today.
+ *
+ * Slept on first: `bill` and `refundRequest` are `void ctx.sql…` — the answer
+ * is not held for them, because a ledger write that failed costs the operator
+ * money and the caller nothing — so a test that reads the row the moment the
+ * response lands reads it before they arrive.
+ */
+async function spent(
+  login = DAD,
+): Promise<{ requests: number; tokens: number }> {
+  await Bun.sleep(150);
+  const [row] = (await kthx().sql`
+    select requests, tokens from build_usage
+    where login = ${login} and day = ${utcDay()}
+  `) as { requests: number; tokens: string | number }[];
+  return {
+    requests: Number(row?.requests ?? 0),
+    tokens: Number(row?.tokens ?? 0),
+  };
+}
 
 async function claimAs(login: string, label: string): Promise<string> {
   const name = kthx().name(label);
@@ -374,21 +430,69 @@ describe('the upstream', () => {
       'writer',
       'second-writer',
     ]);
-    // Two attempts, one of them this deployment's fault and given back.
-    const [spent] = (await kthx().sql`
-      select requests from build_usage where login = ${DAD} and day = ${utcDay()}
-    `) as { requests: number }[];
-    expect(spent?.requests).toBe(1);
+    // Two attempts, one of them this deployment's fault and given back — and
+    // only the one that wrote a page is billed any tokens.
+    expect(await spent()).toEqual({ requests: 1, tokens: 900 });
   });
 
   test('treats a model that only reasons as one that never answered', async () => {
     // Measured: four models on this base spend the whole ceiling reasoning and
-    // emit no content at all. Nothing was written, so nothing may be published.
+    // emit no content at all. Nothing was written, so nothing may be published
+    // — but it answered, and what it spent reasoning is charged.
     answers = [() => thinksOnly(), () => thinksOnly()];
     const refused = await post({ ask: 'a page' });
     expect(refused.status).toBe(502);
     expect((await refused.json()).code).toBe('AI_UPSTREAM');
     expect(asked).toHaveLength(2);
+    expect(await spent()).toEqual({ requests: 2, tokens: 32000 });
+  });
+
+  test('bills nothing for a deployment fault, and hands the attempts back', async () => {
+    // The state production was in for weeks: a key with no credit answers 401
+    // to everything. Billing the token ceiling on a path where usage never
+    // arrived charged sixteen thousand tokens an attempt for an outage nobody
+    // asked for, and thirty-one presses of a button that wrote no page at all
+    // closed the day until UTC midnight.
+    answers = [
+      () => new Response('no credit', { status: 401 }),
+      () => new Response('down', { status: 503 }),
+    ];
+    const refused = await post({ ask: 'a page for my woodworking' });
+    expect(refused.status).toBe(502);
+    expect(asked).toHaveLength(2);
+    expect(await spent()).toEqual({ requests: 0, tokens: 0 });
+  });
+
+  test('keeps the attempt when the refusal is about the body', async () => {
+    // The other half of the same rule, and the half `/api/ai` was hardened to
+    // after it was found live: a refusal the caller's own material earned is
+    // free to ask for again, and the day is the only ceiling on outbound calls
+    // there is.
+    answers = [
+      () => new Response('context length', { status: 400 }),
+      () => new Response('context length', { status: 400 }),
+    ];
+    const refused = await post({ ask: 'a page' });
+    expect(refused.status).toBe(502);
+    expect(await spent()).toEqual({ requests: 2, tokens: 0 });
+  });
+
+  test('gives the slot back when the control database does not answer', async () => {
+    // The attempt is counted against the day before the upstream is dialled,
+    // and an ordinary CNPG blip rejects that await. The in-flight slot is taken
+    // before it: released on the paths that return and not on the one that
+    // throws, a single Postgres error left this login reading "one at a time"
+    // for the life of the pod, and four of them closed the builder for
+    // everybody on the tailnet.
+    await kthx().sql`alter table build_usage rename to build_usage_gone`;
+    const broken = await post({ ask: 'a page' });
+    expect(broken.status).toBe(500);
+    expect((await broken.json()).code).toBe('STORAGE_FAILURE');
+    await kthx().sql`alter table build_usage_gone rename to build_usage`;
+
+    answers = [() => writes([`<!-- kthx-name: after-the-blip -->\n${PAGE}`])];
+    const after = done(await read(await post({ ask: 'a page' })));
+    expect(after).toMatchObject({ name: 'after-the-blip' });
   });
 
   test('is not called at all once the day is spent', async () => {
@@ -447,6 +551,20 @@ describe('a change', () => {
     expect(asked).toHaveLength(0);
   });
 
+  test('is refused when the page it would send back is too big to answer', async () => {
+    // The answer is capped at 512 KiB on the way out; the release route takes
+    // 32 MiB unpacked, so without the same cap on the way in one press of
+    // "Change it" reads thirty megabytes into this pod and posts it to the
+    // upstream once per model.
+    const name = await claimAs(DAD, 'toobig');
+    const huge = `<!doctype html><html><body>${'x'.repeat(600 * 1024)}</body></html>`;
+    await publish(DAD, name, [{ path: 'index.html', bytes: bytes(huge) }]);
+    const refused = await post({ ask: 'make it simpler', site: name });
+    expect(refused.status).toBe(413);
+    expect((await refused.json()).code).toBe('TOO_LARGE');
+    expect(asked).toHaveLength(0);
+  });
+
   test('is refused on a site that was not written here', async () => {
     // Two files means assets, and publishing one document over them would leave
     // every image of that site in a release nobody is looking at.
@@ -492,6 +610,44 @@ describe('the connection', () => {
       document: PAGE,
     });
   }, 90_000);
+});
+
+describe('a caller who has gone away', () => {
+  test('does not pay for the fallback model', async () => {
+    // Measured before this existed: abort 300 ms into the primary's think time
+    // and the fallback ran a whole paid generation, streaming a document into a
+    // response nothing was reading — on the surface where a 30-150 s wait is
+    // exactly when a phone gets backgrounded. Over a real socket, because the
+    // claim is about what a closed connection does to `request.signal`.
+    answers = [
+      () => thinksFor(3000, '<!-- kthx-name: nobody -->\n', [PAGE]),
+      () => writes([PAGE]),
+    ];
+    const server = kthx().listen();
+    const hangUp = new AbortController();
+    const call = fetch(`${server.url.origin}/api/build`, {
+      method: 'POST',
+      headers: {
+        host: IDENTITY,
+        'content-type': 'application/json',
+        'tailscale-user-login': DAD,
+      },
+      body: JSON.stringify({ ask: 'a page for my boats' }),
+      signal: hangUp.signal,
+    }).catch(() => null);
+    await Bun.sleep(300);
+    hangUp.abort();
+    await call;
+    await Bun.sleep(500);
+
+    expect(asked.map((seen) => seen.model)).toEqual(['writer']);
+    // Nothing was written, so there is no draft: a partial document is not a
+    // page, and the generation stops when the socket does.
+    const [row] = (await kthx().sql`
+      select count(*)::int as drafts from builds
+    `) as { drafts: number }[];
+    expect(row?.drafts).toBe(0);
+  }, 20_000);
 });
 
 describe('the page the identity host serves', () => {

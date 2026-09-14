@@ -60,7 +60,25 @@ export const MAX_ASK_CHARS = 4000;
 const MAX_BUILD_BODY_BYTES = 64 * 1024;
 /** A one-page site. Past this the answer is not a page, it is a transcript. */
 export const MAX_DOCUMENT_BYTES = 512 * 1024;
-/** Per login per UTC day, whichever runs out first. */
+/**
+ * What one login may spend on the builder in a UTC day, whichever runs out
+ * first.
+ *
+ * Rate limits, not a spend control. The upstream plan is flat rate and reports
+ * `cost: "0"` on every call, so neither number is money: what they bound is a
+ * page left reloading in somebody's pocket and a key somebody else is holding.
+ * Sixty pages is one every ten minutes of a waking day, which nobody reaches
+ * by describing a business; the token half is the backstop for the failure
+ * this base actually has, a model that spends its whole ceiling reasoning and
+ * writes nothing, which costs what a page costs and produces none.
+ *
+ * **Nothing bounds the total across logins.** `build_usage` is keyed by login,
+ * and the in-flight counters below bound how many run at once rather than how
+ * many run in a day, so the ceiling for the whole tailnet is sixty pages times
+ * the number of people the `policy.hujson` grant lets through — a household.
+ * Growing that grant grows the day, and there is no second number here that
+ * would stop it.
+ */
 export const MAX_BUILD_REQUESTS_DAY = 60;
 export const MAX_BUILD_TOKENS_DAY = 1_000_000;
 /**
@@ -320,7 +338,7 @@ interface Writing {
   text: string;
   readonly deltas: Deltas;
   readonly body: ReadableStreamDefaultReader<Uint8Array>;
-  /** Stop the upstream and the deadline, and charge the day once. */
+  /** Stop the upstream and the deadline, and charge the day once, never zero. */
   settle(): void;
   /** Extend the deadline, called on every chunk. */
   tick(): void;
@@ -359,22 +377,43 @@ async function dispatch(
   );
   let done = false;
   const deltas = new Deltas();
-  const settle = (): void => {
+  /**
+   * The day, charged exactly once, with what the upstream actually did.
+   *
+   * The argument is the whole of it, and `/api/ai` is where the lesson was
+   * learned: everything that fails before a body is open — an unreachable
+   * base, a 401 on a key with no credit, a 503 — cost the operator nothing and
+   * is billed nothing. Billing the ceiling there charged sixteen thousand
+   * tokens for an outage the person did not cause, and thirty-one of those
+   * close a day that never wrote a page.
+   */
+  const settle = (tokens: number): void => {
     if (done) return;
     done = true;
     clearTimeout(deadline);
     upstream.abort();
-    // A silent answer is billed its ceiling, never zero: a model that reasoned
-    // for sixteen thousand tokens and said nothing still cost them.
-    bill(ctx, login, day, deltas.tokens ?? ceiling);
+    bill(ctx, login, day, tokens);
   };
+  /**
+   * What an upstream that opened a body is billed: never zero.
+   *
+   * Usage arrives in the frame before `[DONE]` and a stream that ends any
+   * other way carries none, so without the floor a model that reasoned for its
+   * whole ceiling and wrote nothing — measured, four on this base do — would
+   * be free, and so would every stream a reader walked away from.
+   */
+  const spent = (): number => deltas.tokens ?? ceiling;
   const tick = (): void => {
     clearTimeout(deadline);
     deadline = setTimeout(() => upstream.abort(), GAP_MS);
   };
   // A page that was closed while a model was thinking holds this person's one
   // in-flight slot until the 90 s deadline otherwise, so the next thing they
-  // do after reopening the tab is read "one at a time".
+  // do after reopening the tab is read "one at a time". Checked as well as
+  // listened for: a listener added to a signal that has already fired never
+  // runs, which is how a closed tab paid for a whole second generation on the
+  // fallback model.
+  if (gone.aborted) upstream.abort();
   gone.addEventListener('abort', () => upstream.abort(), { once: true });
 
   let answer: Response;
@@ -398,24 +437,48 @@ async function dispatch(
       signal: upstream.signal,
     });
   } catch (cause) {
-    settle();
-    // Unreachable is the same fault as a 503, and is accounted the same way:
-    // no tokens, and the attempt back.
-    refundRequest(ctx, login, day);
+    // Nothing was opened, so nothing is billed. Unreachable is the same fault
+    // as a 503 and the attempt goes back with it — unless the caller is what
+    // went away, which is nobody's deployment fault and must not be free: an
+    // abort loop that got its attempt back would dial the upstream all day
+    // under a budget that never moved.
+    settle(0);
+    if (!gone.aborted) refundRequest(ctx, login, day);
     logCause(ctx.id, `the build upstream on ${model}`, cause);
     return { code: 'AI_UPSTREAM' };
   }
 
-  if (!answer.ok || answer.body === null) {
+  if (!answer.ok) {
     void answer.body?.cancel();
-    settle();
-    // Every non-ok answer here is this deployment's: the caller composed one
-    // sentence and this server composed the rest of the body.
-    refundRequest(ctx, login, day);
+    // It refused before writing anything, so there are no tokens to charge.
+    settle(0);
+    // Whose fault it was decides whether the attempt comes back, and it is the
+    // rule `/api/ai` was hardened to after the first version turned out to be
+    // exploitable in production. 401, 403 and every 5xx are a credential or a
+    // base URL this deployment owes the upstream. Every other 4xx is about the
+    // body — here, one built around a document this route sent — and it keeps
+    // the attempt it spent, because a refusal that is free to earn is one that
+    // can be asked for forever, and the sixty a day is the only ceiling on
+    // outbound calls there is.
+    const ours =
+      answer.status === 401 || answer.status === 403 || answer.status >= 500;
+    if (ours) refundRequest(ctx, login, day);
     logCause(
       ctx.id,
       `the build upstream on ${model} refused`,
       new Error(`upstream ${answer.status}`),
+    );
+    return { code: 'AI_UPSTREAM' };
+  }
+
+  if (answer.body === null) {
+    // A 200 with nothing behind it is an upstream that answered, so the floor
+    // applies and the attempt stays spent.
+    settle(spent());
+    logCause(
+      ctx.id,
+      `the build upstream on ${model}`,
+      new Error('a 200 with no body'),
     );
     return { code: 'AI_UPSTREAM' };
   }
@@ -426,20 +489,27 @@ async function dispatch(
     try {
       chunk = await body.read();
     } catch (cause) {
-      settle();
+      settle(spent());
       logCause(ctx.id, `reading from ${model}`, cause);
       return { code: 'AI_UPSTREAM' };
     }
     if (chunk.done || chunk.value === undefined) {
       // It answered, and wrote nothing. The attempt is not refunded: it reached
       // the upstream and spent the operator's quota to say nothing.
-      settle();
+      settle(spent());
       return { code: 'AI_UPSTREAM' };
     }
     tick();
     const written = deltas.read(chunk.value);
     if (written !== '') {
-      return { model, text: written, deltas, body, settle, tick };
+      return {
+        model,
+        text: written,
+        deltas,
+        body,
+        settle: () => settle(spent()),
+        tick,
+      };
     }
   }
 }
@@ -549,29 +619,48 @@ async function build(
     ctx.config.aiBuildFallbackModel,
   ].filter((model): model is string => model !== null);
 
-  let last: Code = 'AI_UPSTREAM';
-  for (const model of models) {
-    const attempt = await dispatch(
-      ctx,
-      login,
-      day,
-      model,
-      messages,
-      request.signal,
-    );
-    if (!('code' in attempt)) {
-      return streamed(request, ctx, login, named, ask, base, attempt, slot);
+  // The slot has exactly one owner at a time. Until a model starts writing it
+  // belongs to this scope, and `finally` gives it back however the scope ends
+  // — including through an exception, which is not hypothetical: `dispatch`
+  // awaits the control database, a CNPG failover rejects that await, and the
+  // release used to be skipped. One of those left that login reading "one at a
+  // time" for the life of the pod and four of them closed the builder for
+  // everybody. After the hand-off the stream owns it and returns it when the
+  // stream ends, so this must not release it twice.
+  let writing: Writing | null = null;
+  try {
+    let last: Code = 'AI_UPSTREAM';
+    for (const model of models) {
+      // A caller who has gone away must not start new work on the operator's
+      // account. The abort listener inside `dispatch` cannot cover this: for
+      // the fallback the signal has already fired, and a listener added after
+      // that never runs — which is how a closed tab paid for a second whole
+      // generation, streamed into a response nothing was reading.
+      if (request.signal.aborted) break;
+      const attempt = await dispatch(
+        ctx,
+        login,
+        day,
+        model,
+        messages,
+        request.signal,
+      );
+      if (!('code' in attempt)) {
+        writing = attempt;
+        return streamed(request, ctx, login, named, ask, base, attempt, slot);
+      }
+      last = attempt.code;
+      // A day that is spent is spent for the fallback too.
+      if (last === 'AI_BUDGET') break;
     }
-    last = attempt.code;
-    // A day that is spent is spent for the fallback too.
-    if (last === 'AI_BUDGET') break;
+    return last === 'AI_BUDGET'
+      ? refuse('AI_BUDGET', ctx.id, {
+          'retry-after': String(secondsToMidnight()),
+        })
+      : refuse(last, ctx.id);
+  } finally {
+    if (writing === null) slot();
   }
-  slot();
-  return last === 'AI_BUDGET'
-    ? refuse('AI_BUDGET', ctx.id, {
-        'retry-after': String(secondsToMidnight()),
-      })
-    : refuse(last, ctx.id);
 }
 
 /** What the model is asked, new or changed. */
@@ -638,9 +727,14 @@ async function changeable(
   if (entries === null || entries.length !== 1 || entries[0] !== 'index.html') {
     return { code: 'NOT_FOUND' };
   }
-  const document = await Bun.file(join(dir, 'index.html'))
-    .text()
-    .catch(() => null);
+  const page = Bun.file(join(dir, 'index.html'));
+  // The same cap the answer is held to, applied to the question. The release
+  // route takes 32 MiB unpacked, which is sixty-four of these, and a document
+  // that size is one press of "Change it" reading thirty megabytes into this
+  // pod and posting it to the upstream once per model — for a refusal the
+  // caller now keeps, because a 4xx the body earned is no longer refunded.
+  if (page.size > MAX_DOCUMENT_BYTES) return { code: 'TOO_LARGE' };
+  const document = await page.text().catch(() => null);
   return document === null ? { code: 'BUSY' } : { document };
 }
 
@@ -748,9 +842,17 @@ async function ending(
   const name = site ?? nameIn(text, ask);
   const id = crypto.randomUUID();
   try {
-    // Before anything is claimed, because a claim is a real Postgres database
-    // and a person confirms the name first — and because a phone that discards
-    // a backgrounded tab would otherwise lose the minute this took.
+    // Written the moment there is a document and before anything is claimed,
+    // because a claim is a real Postgres database and a person confirms the
+    // name first: the minutes between "here is your page" and "put it online"
+    // are the ones a phone locks in, and they survive here.
+    //
+    // A tab discarded *while* a model is writing is not one of them, and no
+    // row can make it one. The generation stops when the socket does, by
+    // design — the alternative is finishing a page for nobody on the
+    // operator's subscription — so there is nothing complete to keep and a
+    // partial document is not a site. What was typed is the browser's to hold
+    // on to; this table holds pages.
     await ctx.sql`
       insert into builds (id, owner_login, site, name, ask, document)
       values (${id}, ${login}, ${site}, ${name}, ${ask}, ${document})

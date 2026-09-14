@@ -2,11 +2,14 @@
 --
 -- A build row is a draft, not a site. It is written the moment a document
 -- exists and before anything is claimed, because a claim is a real Postgres
--- database and a person confirms the name first — and because a phone discards
--- a backgrounded tab, which on this surface is a minute of a model's time and a
--- page nobody can get back. `site` is null until a turn is a change to a named
--- one, and there is no foreign key: a build outlives every name it was never
--- given, and a nuke that took these rows would take the drafts with it.
+-- database and a person confirms the name first — so the minutes between "here
+-- is your page" and "put it online", which is where a phone locks and discards
+-- the tab, cost nothing. A tab discarded while the model is still writing is a
+-- different thing and no row here helps: the generation stops when the socket
+-- does, so there is no document to keep. `site` is null until a turn is a
+-- change to a named one, and there is no foreign key: a build outlives every
+-- name it was never given, and a nuke that took these rows would take the
+-- drafts with it.
 --
 -- ponytail: nothing prunes `builds`. A row is a few kilobytes of HTML; a year
 -- of one household is megabytes, so the sweep can wait for a second household.
