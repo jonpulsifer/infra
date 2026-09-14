@@ -1,0 +1,612 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Make a website</title>
+<link rel="icon" href="/favicon.ico">
+<style>
+/* The builder is not the landing page and does not look like one. That page is
+   for people who deploy things; this one is one text box for somebody who has
+   never heard of a release, on a phone, holding it at arm's length. So: system
+   fonts (no webfont round trip, and no external request at all), 19px base,
+   one action per screen, and buttons a thumb cannot miss. */
+:root{
+  --paper:#fbfaf8; --card:#fff; --sunk:#f2f0ec; --line:#ddd8d0;
+  --ink:#1b1a18; --ink-2:#55524c; --ink-3:#807b73;
+  --go:#12603a; --go-ink:#fff; --go-soft:#e6f2ec;
+  --bad:#8c2416; --bad-soft:#fbeceb;
+  --r:14px;
+  --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+  --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  color-scheme:light dark;
+}
+@media (prefers-color-scheme: dark){
+  :root{
+    --paper:#14161a; --card:#1c1f24; --sunk:#22262c; --line:#343a42;
+    --ink:#f4f3f1; --ink-2:#bcb8b1; --ink-3:#8d8880;
+    --go:#4ec98d; --go-ink:#0d1512; --go-soft:#16291f;
+    --bad:#ff8f7d; --bad-soft:#2b1714;
+  }
+}
+*{box-sizing:border-box}
+body{
+  margin:0;background:var(--paper);color:var(--ink);font-family:var(--sans);
+  font-size:19px;line-height:1.5;-webkit-text-size-adjust:100%;
+}
+.col{max-width:640px;margin:0 auto;padding:28px 20px 80px}
+h1{font-size:30px;line-height:1.2;margin:0 0 4px;font-weight:700;letter-spacing:-.02em}
+h2{font-size:21px;line-height:1.3;margin:0 0 10px;font-weight:600}
+p{margin:0 0 14px}
+.quiet{color:var(--ink-2);font-size:17px}
+.small{color:var(--ink-3);font-size:15px}
+code,.mono{font-family:var(--mono);font-size:.92em}
+a{color:inherit}
+:focus-visible{outline:3px solid var(--go);outline-offset:2px;border-radius:6px}
+
+textarea{
+  width:100%;min-height:150px;padding:14px;border:2px solid var(--line);border-radius:var(--r);
+  background:var(--card);color:var(--ink);font:inherit;line-height:1.45;resize:vertical;
+}
+textarea:focus{border-color:var(--go);outline:none}
+input[type=text]{
+  width:100%;padding:13px 14px;border:2px solid var(--line);border-radius:var(--r);
+  background:var(--card);color:var(--ink);font-family:var(--mono);font-size:19px;
+}
+input[type=text]:focus{border-color:var(--go);outline:none}
+
+button{font:inherit;cursor:pointer;border-radius:var(--r);border:2px solid transparent}
+.go{
+  display:block;width:100%;padding:16px;background:var(--go);color:var(--go-ink);
+  font-size:21px;font-weight:700;margin-top:14px;
+}
+.go:disabled{opacity:.45;cursor:default}
+.plain{
+  display:inline-block;padding:12px 16px;background:var(--card);color:var(--ink);
+  border-color:var(--line);font-size:17px;font-weight:600;
+}
+.row{display:flex;flex-wrap:wrap;gap:10px;margin-top:12px}
+.row .plain{flex:1 1 auto;text-align:center}
+
+.card{background:var(--card);border:1px solid var(--line);border-radius:var(--r);padding:16px;margin:0 0 12px}
+.site{display:flex;flex-wrap:wrap;align-items:baseline;gap:6px 12px}
+.site .host{font-family:var(--mono);font-size:17px;font-weight:600;word-break:break-all}
+.site .when{color:var(--ink-3);font-size:15px}
+.site .acts{margin-left:auto;display:flex;gap:8px}
+.site .acts .plain{padding:9px 13px;font-size:15px}
+
+/* the wait: a real line about a real thing, never a bare spinner */
+.wait{background:var(--card);border:1px solid var(--line);border-radius:var(--r);padding:18px}
+.bar{height:8px;border-radius:5px;background:var(--sunk);overflow:hidden;margin:14px 0 10px}
+.bar i{display:block;height:100%;width:32%;border-radius:5px;background:var(--go);animation:slide 2.1s ease-in-out infinite}
+@keyframes slide{0%{transform:translateX(-105%)}100%{transform:translateX(320%)}}
+.count{font-family:var(--mono);font-size:16px;color:var(--ink-2);font-variant-numeric:tabular-nums}
+
+.preview{
+  width:100%;height:min(58vh,460px);border:1px solid var(--line);border-radius:var(--r);
+  background:#fff;display:block;
+}
+.url{
+  font-family:var(--mono);font-size:19px;font-weight:600;word-break:break-all;
+  background:var(--go-soft);border:1px solid var(--go);border-radius:var(--r);padding:13px 15px;margin:0 0 14px;
+}
+.oops{background:var(--bad-soft);border:1px solid var(--bad);color:var(--bad);border-radius:var(--r);padding:14px 15px;margin:0 0 14px}
+.oops b{display:block;color:var(--ink);margin-bottom:2px}
+.verdict{min-height:24px;font-size:16px;margin-top:8px}
+.verdict.no{color:var(--bad)}
+.verdict.yes{color:var(--go)}
+
+@media (prefers-reduced-motion: reduce){
+  .bar i{animation:none;width:100%;opacity:.5}
+}
+
+/* last, so it beats every display rule above it: one screen is visible at a
+   time and the rest are `hidden`, which has to mean gone rather than laid out */
+[hidden]{display:none}
+</style>
+</head>
+<body>
+<main class="col">
+
+<!-- no login: the whole page, because there is nothing here to do without one -->
+<section id="signedout" hidden>
+  <h1>Make a website</h1>
+  <p class="quiet">This page needs your Tailscale login. Open it from a device signed in to the tailnet.</p>
+</section>
+
+<!-- the first screen -->
+<section id="start" hidden>
+  <div id="mine" hidden>
+    <h2>Your websites</h2>
+    <div id="minelist"></div>
+  </div>
+  <h1 id="hello">Hello.</h1>
+  <p class="quiet" id="prompt">What would you like a website for?</p>
+  <div id="startoops"></div>
+  <label class="small" for="ask" id="asklabel">Tell it anything — what you do, where you are, how people reach you.</label>
+  <textarea id="ask" autocapitalize="sentences" spellcheck="true"
+    placeholder="A page for my woodworking. I make cutting boards and small furniture in Dartmouth. People can call me at 902-555-0134."></textarea>
+  <button type="button" class="go" id="make">Make it</button>
+  <p class="small" style="margin-top:12px">You can change it afterwards.</p>
+</section>
+
+<!-- the wait -->
+<section id="working" hidden>
+  <h1 id="workingtitle">Writing your page</h1>
+  <div class="wait">
+    <p id="workingsay" style="margin:0">This takes about a minute. It is writing the whole page, from nothing.</p>
+    <div class="bar"><i></i></div>
+    <div class="count" id="workingcount">0 seconds so far</div>
+  </div>
+</section>
+
+<!-- what it wrote, before anything is claimed -->
+<section id="proposal" hidden>
+  <h1>Here it is</h1>
+  <p class="quiet">Have a look. If it is right, put it online.</p>
+  <iframe class="preview" id="preview" title="What your website looks like" sandbox="allow-scripts"></iframe>
+  <p class="quiet" style="margin-top:14px">It will live at</p>
+  <p class="url" id="proposedurl"></p>
+  <div id="proposaloops"></div>
+  <button type="button" class="go" id="put">Put it online</button>
+  <div class="row">
+    <button type="button" class="plain" id="rename">Change the name</button>
+    <button type="button" class="plain" id="scrap">Start again</button>
+  </div>
+</section>
+
+<!-- the name, when the person wants a different one -->
+<section id="naming" hidden>
+  <h1>Pick a name</h1>
+  <p class="quiet">Letters, numbers and hyphens. This becomes the address.</p>
+  <input type="text" id="name" autocapitalize="none" autocorrect="off" spellcheck="false" inputmode="url">
+  <p class="url" id="namingurl"></p>
+  <div class="verdict" id="verdict"></div>
+  <button type="button" class="go" id="usename">Use this name</button>
+  <div class="row"><button type="button" class="plain" id="keepname">Keep the old one</button></div>
+</section>
+
+<!-- online -->
+<section id="live" hidden>
+  <h1 id="livetitle">It is online</h1>
+  <p class="quiet" id="livesay">Anyone can open this address.</p>
+  <p class="url" id="liveurl"></p>
+  <iframe class="preview" id="livepreview" title="Your website" sandbox="allow-scripts"></iframe>
+  <div id="liveoops"></div>
+  <div id="openrow"></div>
+  <div class="row">
+    <button type="button" class="plain" id="change">Change it</button>
+    <button type="button" class="plain" id="another">Make another</button>
+  </div>
+</section>
+
+<!-- a change to a site that is already online -->
+<section id="changing" hidden>
+  <h1>Change it</h1>
+  <p class="quiet" id="changingwhat"></p>
+  <div id="changingoops"></div>
+  <label class="small" for="edit">Say what should be different. One thing or several.</label>
+  <textarea id="edit" autocapitalize="sentences" spellcheck="true"
+    placeholder="Make the heading dark green, and add my phone number 902-555-0134 at the bottom."></textarea>
+  <button type="button" class="go" id="applychange">Change it</button>
+  <div class="row"><button type="button" class="plain" id="nevermind">Never mind</button></div>
+</section>
+
+</main>
+<script>
+"use strict";
+const $ = (s) => document.querySelector(s);
+const ROOT = document.documentElement;
+const ZONE = ROOT.dataset.zone || "kthx.dev";
+const LOGIN = ROOT.dataset.login || null;
+/* The build a tab was in the middle of. iOS discards a backgrounded tab without
+   warning, and this surface has a minute of somebody's patience in it. */
+const DRAFT = "kthx.build";
+
+/* ---- state: exactly one page in hand at a time ---------------------------- */
+let held = null;   /* {build, name, site, document, url} — what may be published */
+let ticker = null;
+
+function show(id) {
+  for (const el of document.querySelectorAll("main > section")) el.hidden = el.id !== id;
+  /* The clock belongs to the one screen that shows it; left running it counts
+     seconds into a hidden element for the rest of the session. */
+  if (id !== "working") { clearInterval(ticker); ticker = null; }
+  window.scrollTo(0, 0);
+}
+function draft(id) { try { id ? localStorage.setItem(DRAFT, id) : localStorage.removeItem(DRAFT); } catch {} }
+function draftId() { try { return localStorage.getItem(DRAFT); } catch { return null; } }
+function hostOf(name) { return `${name}.${ZONE}`; }
+function urlOf(name) { return `https://${hostOf(name)}`; }
+
+/* Every refusal is a sentence, never a code. The server's own message is the
+   fallback rather than the first choice: it is written for whoever is holding a
+   terminal, and nobody here is. */
+const SAYS = {
+  AI_UPSTREAM: "The writer is not answering right now. Nothing you typed was lost — try again in a minute.",
+  NO_DOCUMENT: "It answered, but not with a website. Try saying a little more about what you do.",
+  TOO_LARGE: "That came back too big to put online. Try asking for something simpler.",
+  AI_BUDGET: "You have made a lot of websites today. This resets overnight.",
+  RATE_LIMITED: "One at a time — a page is still being written. Give it a moment.",
+  UNAUTHENTICATED: "This page needs your Tailscale login. Open it from a device signed in to the tailnet.",
+  FORBIDDEN: "That website is not yours to change.",
+  NOT_FOUND: "That website was not written here, so it cannot be changed by asking.",
+  BUSY: "The server is busy. Try again in a moment.",
+  TAKEN: "That name is taken. Pick another one.",
+  STORAGE_FAILURE: "Something went wrong saving it. Nothing was lost — try again.",
+};
+function sentence(err) {
+  return SAYS[err?.code] || err?.message || "Something went wrong. Try again.";
+}
+function oops(where, err, lead) {
+  const el = $(where);
+  if (!err) { el.replaceChildren(); return; }
+  const box = document.createElement("div");
+  box.className = "oops";
+  const b = document.createElement("b");
+  b.textContent = lead || "That did not work";
+  const p = document.createElement("span");
+  p.textContent = sentence(err);
+  box.append(b, p);
+  el.replaceChildren(box);
+}
+
+async function api(method, path, { json, body, filename } = {}) {
+  const headers = {};
+  if (json !== undefined) { headers["content-type"] = "application/json"; body = JSON.stringify(json); }
+  if (filename) headers["x-filename"] = filename;
+  const r = await fetch(path, { method, headers, body });
+  if (r.status === 204) return null;
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) { const e = new Error(data.message || r.statusText); e.code = data.code; e.status = r.status; throw e; }
+  return data;
+}
+
+/* ---- your websites -------------------------------------------------------- */
+function ago(iso) {
+  if (!iso) return "no pages yet";
+  const days = Math.floor((Date.now() - Date.parse(iso)) / 86400000);
+  if (days <= 0) return "changed today";
+  if (days === 1) return "changed yesterday";
+  if (days < 31) return `changed ${days} days ago`;
+  const months = Math.round(days / 30);
+  return months < 12 ? `changed ${months} months ago` : "changed over a year ago";
+}
+async function listMine() {
+  let items = [];
+  try { items = (await api("GET", "/api/sites?owner=me")).items || []; } catch { return; }
+  const live = items.filter((s) => s.serving !== null);
+  $("#mine").hidden = live.length === 0;
+  const list = $("#minelist");
+  list.replaceChildren();
+  for (const s of live) {
+    const card = document.createElement("div");
+    card.className = "card site";
+    const host = document.createElement("span");
+    host.className = "host";
+    host.textContent = hostOf(s.name);
+    const when = document.createElement("span");
+    when.className = "when";
+    when.textContent = ago(s.changed);
+    const acts = document.createElement("span");
+    acts.className = "acts";
+    const open = document.createElement("a");
+    open.className = "plain";
+    open.href = s.url; open.target = "_blank"; open.rel = "noopener";
+    open.style.textDecoration = "none";
+    open.textContent = "Open";
+    const edit = document.createElement("button");
+    edit.className = "plain";
+    edit.textContent = "Change it";
+    edit.onclick = () => askChange(s.name);
+    acts.append(open, edit);
+    card.append(host, when, acts);
+    list.append(card);
+  }
+}
+
+/* ---- the wait ------------------------------------------------------------- */
+function waiting(title, say) {
+  $("#workingtitle").textContent = title;
+  $("#workingsay").textContent = say;
+  $("#workingcount").textContent = "0 seconds so far";
+  show("working");
+  const started = Date.now();
+  clearInterval(ticker);
+  ticker = setInterval(() => {
+    const seconds = Math.round((Date.now() - started) / 1000);
+    $("#workingcount").textContent = `${seconds} seconds so far`;
+    /* Said once, when the usual minute has clearly gone by: measured
+       generations run 30 to 150 seconds and a busy upstream is the slow half. */
+    if (seconds === 45) $("#workingsay").textContent = "Still going. It gets slower when a lot of people are asking at once.";
+  }, 1000);
+  return () => { clearInterval(ticker); ticker = null; };
+}
+const WRITING = "This takes about a minute. It is writing the whole page, from nothing.";
+const PUTTING = "Sending it to the web. This part is quick.";
+
+/* ---- the build ------------------------------------------------------------ */
+/* NDJSON: one JSON object a line. The response is held by the server until the
+   model's first word, so everything before the first frame is the clock above. */
+async function build(ask, site) {
+  const stop = waiting(site ? "Making the change" : "Writing your page", WRITING);
+  try {
+    const r = await fetch("/api/build", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(site ? { ask, site } : { ask }),
+    });
+    if (!r.ok || !r.body) {
+      const data = await r.json().catch(() => ({}));
+      const e = new Error(data.message || r.statusText);
+      e.code = data.code;
+      throw e;
+    }
+    const reader = r.body.getReader();
+    const decoder = new TextDecoder();
+    let rest = "";
+    let last = null;
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      rest += decoder.decode(value, { stream: true });
+      const lines = rest.split("\n");
+      rest = lines.pop();
+      for (const line of lines) {
+        if (!line.trim()) continue;
+        let frame;
+        try { frame = JSON.parse(line); } catch { continue; }
+        if (frame.t === "writing") {
+          $("#workingsay").textContent = "It has started writing.";
+          $("#workingcount").textContent = `${frame.chars.toLocaleString()} characters so far`;
+          clearInterval(ticker);
+        } else if (frame.t === "error") {
+          const e = new Error(frame.message);
+          e.code = frame.code;
+          throw e;
+        } else if (frame.t === "done") {
+          last = frame;
+        }
+      }
+    }
+    if (last === null) throw new Error("The writing stopped part way through. Nothing was lost — try again.");
+    return last;
+  } finally {
+    stop();
+  }
+}
+
+/* ---- publishing ----------------------------------------------------------- */
+/* A stored zip of one file, so the document travels the ordinary release road:
+   the same 25 MiB refusal, unpack slot, daily cap and same-site guard every CLI
+   upload meets. The same routine as the landing page's — copied rather than
+   shared because both pages are hand-written HTML with no build step between
+   them and a file neither one imports. */
+let crcTable;
+function crc32(bytes) {
+  if (!crcTable) { crcTable = new Uint32Array(256); for (let i = 0; i < 256; i++) { let c = i; for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1; crcTable[i] = c >>> 0; } }
+  let crc = 0xffffffff;
+  for (const b of bytes) crc = crcTable[(crc ^ b) & 0xff] ^ (crc >>> 8);
+  return (crc ^ 0xffffffff) >>> 0;
+}
+function zipOne(name, bytes) {
+  const enc = new TextEncoder().encode(name);
+  const crc = crc32(bytes);
+  const local = new Uint8Array(30 + enc.length + bytes.length);
+  const lv = new DataView(local.buffer);
+  lv.setUint32(0, 0x04034b50, true); lv.setUint16(4, 20, true); lv.setUint32(14, crc, true);
+  lv.setUint32(18, bytes.length, true); lv.setUint32(22, bytes.length, true); lv.setUint16(26, enc.length, true);
+  local.set(enc, 30); local.set(bytes, 30 + enc.length);
+  const central = new Uint8Array(46 + enc.length);
+  const cv = new DataView(central.buffer);
+  cv.setUint32(0, 0x02014b50, true); cv.setUint16(4, 20, true); cv.setUint16(6, 20, true); cv.setUint32(16, crc, true);
+  cv.setUint32(20, bytes.length, true); cv.setUint32(24, bytes.length, true); cv.setUint16(28, enc.length, true);
+  central.set(enc, 46);
+  const end = new Uint8Array(22);
+  const ev = new DataView(end.buffer);
+  ev.setUint32(0, 0x06054b50, true); ev.setUint16(8, 1, true); ev.setUint16(10, 1, true);
+  ev.setUint32(12, central.length, true); ev.setUint32(16, local.length, true);
+  return new Blob([local, central, end], { type: "application/zip" });
+}
+
+async function put(name, document_) {
+  const zip = zipOne("index.html", new TextEncoder().encode(document_));
+  const out = await api("POST", `/api/sites/${encodeURIComponent(name)}/releases`, { body: zip, filename: "index.zip" });
+  /* A site somebody rolled back is held: the release above is stored, numbered
+     and NOT serving, and every later one would be too. Publishing a change is
+     saying "this is the one", so the hold comes off with it. */
+  if (out.serving !== out.n) await api("DELETE", `/api/sites/${encodeURIComponent(name)}/hold`);
+  return out;
+}
+
+/* ---- screens -------------------------------------------------------------- */
+function greet() {
+  const who = (LOGIN || "").split("@")[0].split(/[._+-]/)[0];
+  $("#hello").textContent = who ? `Hello, ${who[0].toUpperCase()}${who.slice(1)}.` : "Hello.";
+}
+
+function propose(done) {
+  held = { build: done.build, name: done.name, site: done.site, document: done.document };
+  draft(done.build);
+  $("#preview").srcdoc = done.document;
+  $("#proposedurl").textContent = urlOf(done.name);
+  oops("#proposaloops", done.available === false ? { code: "TAKEN" } : null, `${hostOf(done.name)} is taken`);
+  $("#put").disabled = done.available === false;
+  show("proposal");
+  if (done.available === false) startNaming();
+}
+
+function online(name, changed) {
+  $("#livetitle").textContent = changed ? "Changed" : "It is online";
+  $("#livesay").textContent = changed
+    ? "The new version is live. Anyone can open this address."
+    : "Anyone can open this address. Nothing else to do.";
+  $("#liveurl").textContent = urlOf(name);
+  const open = document.createElement("a");
+  open.className = "go";
+  open.style.textAlign = "center";
+  open.style.textDecoration = "none";
+  open.href = urlOf(name);
+  open.target = "_blank";
+  open.rel = "noopener";
+  open.textContent = "Open it";
+  $("#openrow").replaceChildren(open);
+  $("#livepreview").srcdoc = held ? held.document : "";
+  oops("#liveoops", null);
+  held = held ? { ...held, site: name } : { site: name, name, document: "" };
+  draft(null);
+  show("live");
+  void listMine();
+}
+
+function askChange(name) {
+  held = { site: name, name, document: "" };
+  $("#changingwhat").textContent = `${hostOf(name)} — say what should be different and it will be rewritten.`;
+  $("#edit").value = "";
+  oops("#changingoops", null);
+  show("changing");
+  $("#edit").focus();
+}
+
+/* ---- the name screen ------------------------------------------------------ */
+let checking = null;
+function startNaming() {
+  $("#name").value = held.name;
+  paintName();
+  show("naming");
+  $("#name").focus();
+}
+function paintName() {
+  const asked = $("#name").value.trim().toLowerCase();
+  $("#namingurl").textContent = asked ? urlOf(asked) : "—";
+  $("#verdict").textContent = "";
+  $("#verdict").className = "verdict";
+  $("#usename").disabled = true;
+  clearTimeout(checking);
+  if (!asked) return;
+  checking = setTimeout(async () => {
+    let answer;
+    try { answer = await api("GET", `/api/names/${encodeURIComponent(asked)}`); } catch { return; }
+    if ($("#name").value.trim().toLowerCase() !== asked) return;
+    const why = {
+      INVALID_NAME: "Letters, numbers and hyphens only — three characters at least, and not starting or ending with a hyphen.",
+      RESERVED: "That name is kept for the system. Pick another.",
+      TAKEN: "Somebody already has that one. Pick another.",
+    };
+    $("#verdict").textContent = answer.available ? "That one is free." : (why[answer.why] || "That name cannot be used.");
+    $("#verdict").className = `verdict ${answer.available ? "yes" : "no"}`;
+    $("#usename").disabled = !answer.available;
+  }, 250);
+}
+
+/* ---- what the buttons do -------------------------------------------------- */
+let busy = false;
+async function guard(fn) {
+  if (busy) return;
+  busy = true;
+  try { await fn(); } finally { busy = false; }
+}
+
+$("#make").onclick = () => guard(async () => {
+  const ask = $("#ask").value.trim();
+  oops("#startoops", null);
+  if (!ask) { $("#ask").focus(); return; }
+  try {
+    propose(await build(ask, null));
+  } catch (err) {
+    oops("#startoops", err, "It could not be written");
+    show("start");
+  }
+});
+
+$("#put").onclick = () => guard(async () => {
+  const page = held;
+  oops("#proposaloops", null);
+  waiting("Putting it online", PUTTING);
+  try {
+    if (!page.site) await api("POST", "/api/sites", { json: { name: page.name } });
+    await put(page.name, page.document);
+    online(page.name, Boolean(page.site));
+  } catch (err) {
+    oops("#proposaloops", err, err.code === "TAKEN" ? `${hostOf(page.name)} is taken` : "It could not be put online");
+    show("proposal");
+    if (err.code === "TAKEN") startNaming();
+  }
+});
+
+$("#rename").onclick = startNaming;
+$("#keepname").onclick = () => show("proposal");
+$("#usename").onclick = () => {
+  held.name = $("#name").value.trim().toLowerCase();
+  $("#proposedurl").textContent = urlOf(held.name);
+  $("#put").disabled = false;
+  oops("#proposaloops", null);
+  show("proposal");
+};
+$("#scrap").onclick = () => { held = null; draft(null); $("#ask").value = ""; show("start"); void listMine(); };
+$("#another").onclick = () => { held = null; draft(null); $("#ask").value = ""; oops("#startoops", null); show("start"); void listMine(); };
+$("#change").onclick = () => askChange(held.site);
+$("#nevermind").onclick = () => { held = null; show("start"); void listMine(); };
+$("#name").oninput = paintName;
+
+$("#applychange").onclick = () => guard(async () => {
+  const site = held.site;
+  const ask = $("#edit").value.trim();
+  oops("#changingoops", null);
+  if (!ask) { $("#edit").focus(); return; }
+  let done;
+  try {
+    done = await build(ask, site);
+  } catch (err) {
+    oops("#changingoops", err, "It could not be changed");
+    show("changing");
+    return;
+  }
+  if (done.unchanged) {
+    held = { site, name: site, document: "" };
+    oops("#changingoops", { message: "It came back exactly the same, so nothing was put online. Try saying it a different way." }, "Nothing changed");
+    show("changing");
+    return;
+  }
+  held = { build: done.build, name: site, site, document: done.document };
+  draft(done.build);
+  waiting("Putting it online", PUTTING);
+  try {
+    await put(site, done.document);
+    online(site, true);
+  } catch (err) {
+    /* The page is written and the row is safe on the server; only the publish
+       failed, so the person is put back where a second press finishes it. */
+    $("#preview").srcdoc = done.document;
+    $("#proposedurl").textContent = urlOf(site);
+    $("#put").disabled = false;
+    oops("#proposaloops", err, "It was written but not put online");
+    show("proposal");
+  }
+});
+
+/* ---- boot ----------------------------------------------------------------- */
+async function recover() {
+  const id = draftId();
+  if (!id) return false;
+  let row;
+  try { row = await api("GET", `/api/build/${encodeURIComponent(id)}`); } catch { draft(null); return false; }
+  held = { build: row.id, name: row.name, site: row.site, document: row.document };
+  $("#preview").srcdoc = row.document;
+  $("#proposedurl").textContent = urlOf(row.name);
+  $("#put").disabled = false;
+  oops("#proposaloops", { message: "This is the page you were making when the tab closed. It is still here." }, "Picked up where you left off");
+  show("proposal");
+  return true;
+}
+
+(async () => {
+  if (LOGIN === null) { show("signedout"); return; }
+  greet();
+  show("start");
+  await listMine();
+  await recover();
+})();
+</script>
+</body>
+</html>

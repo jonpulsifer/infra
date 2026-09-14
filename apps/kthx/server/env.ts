@@ -104,6 +104,19 @@ export interface Config {
    */
   readonly aiBuildMaxTokens: number;
   /**
+   * What writes a whole page on the build route, and what is tried when it
+   * never answers a first byte.
+   *
+   * Not {@link aiModel}: that one is picked for short answers under a 4096
+   * ceiling, and the two questions have different right answers — the model
+   * measured best at writing a complete document took 26 s to do it and 12 s
+   * to start, which is a terrible way to answer one sentence. The fallback is
+   * `null` where a deployment names none, and a build then fails rather than
+   * silently spending a second call on the same model that just went quiet.
+   */
+  readonly aiBuildModel: string;
+  readonly aiBuildFallbackModel: string | null;
+  /**
    * The peers whose `cf-connecting-ip` is believed: the Gateway hop in front of
    * this pod. Empty means no peer is, so every address-keyed bucket falls back
    * to the socket address — which behind a proxy is one key for the whole zone.
@@ -211,6 +224,19 @@ export function readConfig(env: Env = Bun.env): Config {
       `KTHX_AI_MODEL ${aiModel} is not one of KTHX_AI_MODELS`,
     );
   }
+  const aiBuildModel = env.KTHX_AI_BUILD_MODEL?.trim() || aiModel;
+  const aiBuildFallbackModel = env.KTHX_AI_BUILD_FALLBACK_MODEL?.trim() || null;
+  // The same refusal, for the same reason: a build model outside the allow-list
+  // is not a request that fails, it is the whole builder failing for everyone on
+  // the tailnet — and the value that did it is a chart line nobody reads until
+  // then. `prepare` would answer INVALID_MODEL as though the page had asked for
+  // something it may not have.
+  for (const named of [aiBuildModel, aiBuildFallbackModel]) {
+    if (named === null || aiModels.length === 0 || aiModels.includes(named)) {
+      continue;
+    }
+    throw new ConfigError(`build model ${named} is not one of KTHX_AI_MODELS`);
+  }
   const aiMaxTokens = positive(env.KTHX_AI_MAX_TOKENS, 4096);
   return {
     zone,
@@ -243,6 +269,8 @@ export function readConfig(env: Env = Bun.env): Config {
     aiModels,
     aiMaxTokens,
     aiBuildMaxTokens: positive(env.KTHX_AI_BUILD_MAX_TOKENS, aiMaxTokens),
+    aiBuildModel,
+    aiBuildFallbackModel,
     trustedProxies: peers(env.KTHX_TRUSTED_PROXIES),
     tailnetProxies,
     port: Number(env.PORT?.trim() || 8080),

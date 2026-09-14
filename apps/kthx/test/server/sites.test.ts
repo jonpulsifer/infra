@@ -648,6 +648,7 @@ describe('the directory', () => {
     readonly serving: number | null;
     readonly releases: number;
     readonly at: string;
+    readonly changed: string | null;
   }
 
   async function directory(query = '') {
@@ -702,15 +703,25 @@ describe('the directory', () => {
       serving: 1,
       releases: 1,
       at: '2026-08-02T00:00:00.000Z',
+      // When it last changed, which is not when it was claimed: a list of
+      // somebody's own sites says the first and the claim time stops being it
+      // on the second publish.
+      changed: expect.any(String),
     });
     // A claimed name with no upload is in the list, serving nothing.
     expect(listed.body.items).toContainEqual(
-      expect.objectContaining({ name: first.name, serving: null, releases: 0 }),
+      expect.objectContaining({
+        name: first.name,
+        serving: null,
+        releases: 0,
+        changed: null,
+      }),
     );
     // Owning a site is what the bearer is for: none of it is here.
     for (const item of listed.body.items) {
       expect(Object.keys(item).sort()).toEqual([
         'at',
+        'changed',
         'name',
         'owner',
         'releases',

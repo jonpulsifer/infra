@@ -173,6 +173,18 @@ spec:
               value: {{ .Values.ai.models | quote }}
             - name: KTHX_AI_MAX_TOKENS
               value: {{ .Values.ai.maxTokens | quote }}
+            # The builder's own model, fallback and ceiling. Both models are
+            # checked against `models` at boot for the reason the default is:
+            # one that is not on the allow-list is the whole builder answering
+            # 400 for every person on the tailnet.
+            - name: KTHX_AI_BUILD_MODEL
+              value: {{ .Values.ai.buildModel | quote }}
+            {{- with .Values.ai.buildFallbackModel }}
+            - name: KTHX_AI_BUILD_FALLBACK_MODEL
+              value: {{ . | quote }}
+            {{- end }}
+            - name: KTHX_AI_BUILD_MAX_TOKENS
+              value: {{ .Values.ai.buildMaxTokens | quote }}
             - name: GOOGLE_APPLICATION_CREDENTIALS
               value: {{ printf "%s/gcp-credentials.json" .Values.gcp.tokenMountPath | quote }}
             # The control database. The role is `initdb`'s owner, given

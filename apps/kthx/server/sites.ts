@@ -250,6 +250,8 @@ interface Listed {
   readonly serving: number | null;
   readonly releases: number;
   readonly at: Date;
+  /** The newest release's time, or null for a name with none. */
+  readonly changed: Date | null;
 }
 
 interface Page {
@@ -272,7 +274,9 @@ const directoryReads = new TokenBucket(DIRECTORY_BUCKET);
  *
  * `?owner=me` is the same page filtered to the caller's own sites — "your
  * websites", which is the only list a person landing on the identity host
- * wants. Any other `?owner=` is refused rather than answered: listing by
+ * wants. `changed` is beside `at` for the same reader: a list of somebody's own
+ * sites wants to say when each last changed, and the claim time stops being
+ * that on the second publish. Any other `?owner=` is refused rather than answered: listing by
  * somebody else's address is the leak this route must not have.
  *
  * One statement, whatever the page: the cursor names the last site of the
@@ -325,6 +329,7 @@ async function directory(request: Request, ctx: Ctx): Promise<Response> {
         serving: row.serving,
         releases: row.releases,
         at: row.at.toISOString(),
+        changed: row.changed?.toISOString() ?? null,
       })),
       next: page.next,
     },
@@ -353,7 +358,9 @@ async function listSites(
     )
     select s.name, s.owner_login, s.serving, s.created_at as at,
            (select count(*)::int from releases r where r.site = s.name)
-             as releases
+             as releases,
+           (select max(r.at) from releases r where r.site = s.name)
+             as changed
     from sites s
     where s.deleted_at is null
       and (${mine}::text is null or s.owner_login = ${mine})

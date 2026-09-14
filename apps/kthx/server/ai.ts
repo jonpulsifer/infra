@@ -158,7 +158,7 @@ function refundRequest(ctx: Ctx, name: string, day: string): void {
 const inFlight = new Map<string, number>();
 
 /** Take a slot in each of the named counters, or `null`. Call it to give back. */
-function enter(
+export function enter(
   keys: readonly (readonly [string, number])[],
 ): (() => void) | null {
   if (keys.some(([key, limit]) => (inFlight.get(key) ?? 0) >= limit)) {

@@ -97,6 +97,24 @@ ai:
   # The public ceiling, and also the floor a silent answer is billed. It stays
   # where it is: this route is anonymous on every site in the zone.
   maxTokens: 4096
+  # What writes a whole page on `POST /api/build`, which is a different question
+  # from the one `model` above answers and has a different right answer. Measured
+  # against six prompts a non-technical person would type, 12 requests at a time:
+  # kimi-k2.7-code proposed 6/6 valid names and returned 6/6 clean single
+  # documents; qwen3.7-plus dropped the name comment on one of the six, which is
+  # why it is the fallback and why the server never trusts that comment to be
+  # there. Both must also appear in `models` — the process refuses to boot
+  # otherwise, the same way it does for `model`.
+  buildModel: kimi-k2.7-code
+  # Tried only when the first model never answers a first byte. Empty is no
+  # second attempt, which is a build that fails rather than one that spends a
+  # second call on a model that just went quiet.
+  buildFallbackModel: qwen3.7-plus
+  # A whole HTML document is 3 000 to 14 000 completion tokens, and the models
+  # here reason before they write. Separate from `maxTokens` because that one is
+  # what an anonymous visitor on any public site may spend; this one is behind a
+  # tailnet login and a per-person daily budget.
+  buildMaxTokens: 16000
 
 # `KTHX_ME_KEY`, `KTHX_PG_KEY` and `KTHX_AI_KEY`. The process refuses to boot
 # without the first two and answers 502 on `/api/ai` without the third, and a

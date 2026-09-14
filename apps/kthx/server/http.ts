@@ -43,6 +43,7 @@ export type Code =
   | 'AI_BUDGET'
   | 'STORAGE_FAILURE'
   | 'AI_UPSTREAM'
+  | 'NO_DOCUMENT'
   | 'BUSY'
   | 'SITE_FULL';
 
@@ -101,6 +102,7 @@ const ERRORS: Record<Code, readonly [number, string]> = {
   AI_BUDGET: [429, "this site has spent today's ai budget"],
   STORAGE_FAILURE: [500, 'storing the release failed'],
   AI_UPSTREAM: [502, 'the ai upstream did not answer'],
+  NO_DOCUMENT: [502, 'the answer came back without a web page in it'],
   BUSY: [503, 'the server is full right now; try again in a moment'],
   SITE_FULL: [507, 'this site is full; delete something to add something'],
 };
@@ -123,6 +125,18 @@ export function requestId(): string {
 }
 
 const BASE_HEADERS = { 'x-content-type-options': 'nosniff' } as const;
+
+/**
+ * The body {@link refuse} would have sent, for a route whose status is already
+ * 200 by the time it fails.
+ *
+ * A streamed answer cannot go back and change its status, so its refusals
+ * travel as a frame — and they say the same sentence per code as every other
+ * refusal here rather than a second wording of the same fault.
+ */
+export function problem(code: Code): { code: Code; message: string } {
+  return { code, message: ERRORS[code][1] };
+}
 
 export function refuse(
   code: Code,
