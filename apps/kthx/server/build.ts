@@ -517,19 +517,28 @@ async function dispatch(
   }
 
   const body = answer.body.getReader();
-  // Whether one byte ever came over the wire. A 200 whose body closes without
-  // any is the bodiless answer above arriving the way `fetch` actually hands
-  // one over — an empty stream rather than a null — and it generated nothing,
-  // so it is billed nothing and the attempt goes back with it. Past that first
-  // byte the floor applies: a model that spends its whole ceiling reasoning
-  // still sends `reasoning_content` frames, and that is compute somebody's
-  // subscription paid for whether or not a page came out of it.
+  // Whether one byte ever came over the wire. A body that *closes* without any
+  // is the bodiless answer above arriving the way `fetch` actually hands one
+  // over — an empty stream rather than a null — and a clean close with nothing
+  // in it is an upstream that generated nothing, so it is billed nothing and
+  // the attempt goes back with it. Once a byte has arrived the floor applies: a
+  // model that spends its whole ceiling reasoning still sends
+  // `reasoning_content` frames, and that is compute somebody's subscription
+  // paid for whether or not a page came out of it.
   let arrived = false;
   for (;;) {
     let chunk: Awaited<ReturnType<typeof body.read>>;
     try {
       chunk = await body.read();
     } catch (cause) {
+      // A read that rejects is not a clean close, and it bills the floor even
+      // with nothing yet on the wire. Two things reach here: the caller hung up
+      // (which pays, or an abort loop is free to dial the upstream all day),
+      // and the first-byte deadline cut a model that has flushed nothing —
+      // which on this base is what a model *working* looks like, measured up to
+      // 161 s to a first byte with the whole ceiling being spent on reasoning
+      // behind it. Silence is not proof that nothing was generated; a body that
+      // closed empty is.
       settle(spent());
       logCause(ctx.id, `reading from ${model}`, cause);
       return { code: 'AI_UPSTREAM' };
