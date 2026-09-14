@@ -16,7 +16,7 @@
  * still arriving rather than after it has stopped.
  */
 import { afterAll, beforeEach, describe, expect, test } from 'bun:test';
-import { BUILD_PATH } from '@repo/kthx/assets';
+import { LANDING_PATH } from '@repo/kthx/assets';
 import { tarGz } from '../../cli/tar.ts';
 import { utcDay } from '../../server/ai.ts';
 import {
@@ -862,31 +862,47 @@ describe('a caller who has gone away', () => {
   }, 20_000);
 });
 
-describe('the page the identity host serves', () => {
-  test('is the builder, told who is reading it', async () => {
+describe('the page every door serves', () => {
+  test('carries the builder on the tailnet door, told who is reading it', async () => {
     const served = await ontailnet('/', DAD);
     expect(served.status).toBe(200);
     const html = await served.text();
-    expect(html).toContain(`data-login="${DAD}"`);
+    expect(html).toContain(` data-identity data-login="${DAD}"`);
     expect(html).toContain(`data-zone="${ZONE}"`);
     expect(html).toContain('What would you like a website for?');
   });
 
   test('says one sentence to a caller the tailnet did not name', async () => {
     const html = await (await ontailnet('/', null)).text();
-    expect(html).not.toContain('data-login');
+    expect(html).toContain(' data-identity>');
+    expect(html).not.toContain('data-login="');
     expect(html).toContain('needs your Tailscale login');
   });
 
-  test('is not the landing page, which still answers everywhere else', async () => {
-    // The landing page's breakage is what reverted a ticket once. It has no
-    // seventh section, and it did not move.
+  test('is one page, and the builder is on no door but that one', async () => {
+    // The landing page's breakage is what reverted a ticket once, and folding
+    // the builder into it is exactly the kind of change that does it again. So
+    // the assertion is on both halves: the attribute is absent on the other
+    // two doors, the gate that reads it is still in the sheet — nothing is
+    // rendered rather than something being hidden after the fact — and the
+    // furniture those doors had yesterday is still where it was.
+    const page = await Bun.file(LANDING_PATH).text();
+    expect(page).toContain('#builder{display:none;');
+    expect(page).toContain('html[data-identity] #builder{display:block}');
     for (const host of [ZONE, CONTROL]) {
       const html = await (
         await kthx().fetch(ask('/', { host }), peer(PROXY))
       ).text();
+      // The tag, not the file: the sheet inside it names the attribute in the
+      // gate itself, and a bare search of the body would find that and read as
+      // a door this caller is not on.
+      const tag = /<html[^>]*>/.exec(html)?.[0] ?? '';
       expect(html).toContain('kthx.dev</title>');
-      expect(html).not.toContain('What would you like a website for?');
+      expect(tag).toContain(`data-zone="${ZONE}"`);
+      expect(tag).not.toContain('data-identity');
+      expect(html).toContain('<div class="deck">');
+      expect(html).toContain('Select a name');
+      expect(html).toContain('Drop a zip file or an index.html file');
     }
   });
 });
@@ -897,12 +913,14 @@ describe('the whole road, as the page walks it', () => {
    *
    * It is twenty lines of hand-written ZIP that nothing else in this repo
    * parses until an upload arrives, so the assertion worth having is that the
-   * release route reads what that page writes.
+   * release route reads what that page writes. One writer for both the deck
+   * and the builder, now that they are one file: a second copy is a second
+   * thing to get wrong.
    */
   async function pageZip(): Promise<(name: string, bytes: Uint8Array) => Blob> {
-    const html = await Bun.file(BUILD_PATH).text();
+    const html = await Bun.file(LANDING_PATH).text();
     const from = html.indexOf('let crcTable;');
-    const to = html.indexOf('async function put(');
+    const to = html.indexOf('/* upload */');
     expect(from).toBeGreaterThan(0);
     expect(to).toBeGreaterThan(from);
     return new Function(`${html.slice(from, to)}; return zipOne;`)() as (
@@ -1032,7 +1050,7 @@ describe('the page, when the upload half of publishing fails', () => {
     claim: (name: string) => Promise<void>;
     claimedEmpty: (name: string) => Promise<boolean>;
   }> {
-    const html = await Bun.file(BUILD_PATH).text();
+    const html = await Bun.file(LANDING_PATH).text();
     const from = html.indexOf('async function claim(');
     const to = html.indexOf('/* ---- screens');
     expect(from).toBeGreaterThan(0);
@@ -1161,7 +1179,7 @@ describe('every refusal this page can meet has a sentence', () => {
 
   /** The copy table, the lookup over it, and the box it lands in. */
   async function pageSays(): Promise<Says> {
-    const html = await Bun.file(BUILD_PATH).text();
+    const html = await Bun.file(LANDING_PATH).text();
     const from = html.indexOf('const SAYS = {');
     const to = html.indexOf('/** `fetch`, with a dropped connection');
     expect(from).toBeGreaterThan(0);
@@ -1257,25 +1275,26 @@ describe('every refusal this page can meet has a sentence', () => {
   });
 });
 
+/**
+ * A span of the page's own script, by the comments that bound it.
+ *
+ * Lifted rather than rendered, the way the ZIP writer and the claim step are:
+ * this file has no DOM, and the claims worth making about a screen are which
+ * control on it is live and what it says — which is the whole of the defect,
+ * since a screen with nothing live on it is where the person stops. The
+ * builder shares the page with the deck now, so every marker here has to be
+ * one only the builder has; `nameVerdict` is named as it is for that reason.
+ */
+async function slice(from: string, to: string): Promise<string> {
+  const html = await Bun.file(LANDING_PATH).text();
+  const start = html.indexOf(from);
+  const end = html.indexOf(to);
+  expect(start).toBeGreaterThan(0);
+  expect(end).toBeGreaterThan(start);
+  return html.slice(start, end);
+}
+
 describe('an address of his own, on the screens that offer it', () => {
-  /**
-   * Just enough of a document for the three properties these screens touch.
-   *
-   * Lifted rather than rendered, the way the ZIP writer and the claim step
-   * above are: this file has no DOM, and the claims worth making here are about
-   * which control on a screen is live — which is the whole of the defect, since
-   * a screen with nothing live on it is where the person stops.
-   */
-
-  async function slice(from: string, to: string): Promise<string> {
-    const html = await Bun.file(BUILD_PATH).text();
-    const start = html.indexOf(from);
-    const end = html.indexOf(to);
-    expect(start).toBeGreaterThan(0);
-    expect(end).toBeGreaterThan(start);
-    return html.slice(start, end);
-  }
-
   test('is offered as his own, and not as somebody else’s', async () => {
     const src = await slice('function propose(done)', '/**\n * The proposal');
     const said: { code: string | null; lead: string }[] = [];
@@ -1381,7 +1400,7 @@ describe('an address of his own, on the screens that offer it', () => {
     };
 
     await list.listMine();
-    const rows = page.el('minelist').children;
+    const rows = page.el('b-minelist').children;
     expect(rows).toHaveLength(2);
     const stranded = rows[0]?.children ?? [];
     expect(stranded[0]?.textContent).toBe(`stranded.${ZONE}`);
@@ -1402,7 +1421,7 @@ describe('an address of his own, on the screens that offer it', () => {
     // recovery on the page a button nobody can afford to press.
     const src = await slice('/**\n * Every address of his', '/* ---- the wait');
     const page = screen();
-    const ask = page.el('ask');
+    const ask = page.el('b-ask');
     const lifted = new Function(
       '$',
       'document',
@@ -1452,7 +1471,7 @@ describe('an address of his own, on the screens that offer it', () => {
     // opens holding that name, so the green one starts disabled — and hiding
     // the other left a screen with nothing live on it at all, the page he
     // waited a minute for off it, and a reload the only way out.
-    const src = await slice('function startNaming(', 'function verdict(');
+    const src = await slice('function startNaming(', 'function nameVerdict(');
     const page = screen();
     const startNaming = new Function(
       '$',
@@ -1470,24 +1489,24 @@ describe('an address of his own, on the screens that offer it', () => {
     ) as (pushed?: string) => void;
 
     startNaming('taken-one');
-    expect(page.el('keepname').hidden).toBe(false);
-    expect(page.el('keepname').textContent).toBeTruthy();
-    expect(page.el('namingsay').textContent).not.toContain('somebody else');
-    expect(page.el('name').value).toBe('taken-one');
+    expect(page.el('b-keepname').hidden).toBe(false);
+    expect(page.el('b-keepname').textContent).toBeTruthy();
+    expect(page.el('b-namingsay').textContent).not.toContain('somebody else');
+    expect(page.el('b-name').value).toBe('taken-one');
 
     startNaming();
-    expect(page.el('keepname').hidden).toBe(false);
+    expect(page.el('b-keepname').hidden).toBe(false);
   });
 
   test('is usable on the name screen when it is his and empty', async () => {
     const src = await slice('function paintName()', '/* ---- what the buttons');
     const answers: Record<string, unknown>[] = [];
-    const page = screen({ name: 'his-own' });
+    const page = screen({ 'b-name': 'his-own' });
     const verdicts: { say: string; kind?: string }[] = [];
     const paintName = new Function(
       '$',
       'urlOf',
-      'verdict',
+      'nameVerdict',
       'api',
       `let checking = null; ${src} return paintName;`,
     )(
@@ -1502,7 +1521,7 @@ describe('an address of his own, on the screens that offer it', () => {
     answers.push({ available: false, why: 'TAKEN', yours: 'empty' });
     paintName();
     await Bun.sleep(400);
-    expect(page.el('usename').disabled).toBe(false);
+    expect(page.el('b-usename').disabled).toBe(false);
     expect(verdicts.at(-1)?.kind).toBe('yes');
     expect(verdicts.at(-1)?.say).not.toContain('Somebody');
 
@@ -1511,14 +1530,141 @@ describe('an address of his own, on the screens that offer it', () => {
     answers.push({ available: false, why: 'TAKEN', yours: 'live' });
     paintName();
     await Bun.sleep(400);
-    expect(page.el('usename').disabled).toBe(true);
+    expect(page.el('b-usename').disabled).toBe(true);
     expect(verdicts.at(-1)?.say).toContain('your website');
 
     answers.push({ available: false, why: 'TAKEN', yours: null });
     paintName();
     await Bun.sleep(400);
-    expect(page.el('usename').disabled).toBe(true);
+    expect(page.el('b-usename').disabled).toBe(true);
     expect(verdicts.at(-1)?.say).not.toContain('Somebody');
+  });
+});
+
+describe('the wait, now that the server talks through it', () => {
+  /**
+   * The wait screen and the frame reader, lifted together.
+   *
+   * They are adjacent in the file because they are one mechanism: the screen
+   * says what the stream says. The defect they replaced was a screen with
+   * nothing to say — held to the model's first content byte the socket was
+   * empty for 71-95 s, this counted its own seconds at it, and a browser gave
+   * up long before either of them did.
+   */
+  async function walk(frames: string[]): Promise<{
+    done: Record<string, unknown> | null;
+    refused: string | null;
+    screens: { say: string; count: string }[];
+  }> {
+    const src = await slice('/* ---- the wait', '/* ---- publishing');
+    const said: Record<string, string> = {};
+    const screens: { say: string; count: string }[] = [];
+    const el = (id: string) => ({
+      set textContent(value: string) {
+        said[id] = value;
+      },
+      get textContent() {
+        return said[id] ?? '';
+      },
+    });
+    let at = 0;
+    const reader = {
+      async read(): Promise<{ done: boolean; value?: Uint8Array }> {
+        // Recorded one read late on purpose: this is the screen as it stood
+        // once the frame before it had been read, which is the only thing
+        // somebody holding the phone ever sees.
+        if (at > 0) {
+          screens.push({
+            say: said['#b-say'] ?? '',
+            count: said['#b-count'] ?? '',
+          });
+        }
+        if (at >= frames.length) return { done: true };
+        return {
+          done: false,
+          value: new TextEncoder().encode(`${frames[at++]}\n`),
+        };
+      },
+    };
+    const build = new Function(
+      '$',
+      'show',
+      'reach',
+      'fault',
+      `${src}; return build;`,
+    )(
+      el,
+      () => undefined,
+      async () => ({ ok: true, body: { getReader: () => reader } }),
+      (code: string) => Object.assign(new Error(code), { code }),
+    ) as (ask: string, site: string | null) => Promise<Record<string, unknown>>;
+    let refused: string | null = null;
+    const done = await build('a page for my boats', null).catch(
+      (err: { code?: string }) => {
+        refused = err.code ?? null;
+        return null;
+      },
+    );
+    return { done, refused, screens };
+  }
+
+  test('counts the server’s clock rather than this phone’s', async () => {
+    // A tab throttled in a pocket cannot count, and the thing worth counting
+    // is how long the model has been at it rather than how long this screen
+    // has been open. `ms` is the server's, so the two cannot drift apart.
+    const { screens } = await walk([
+      '{"t":"accepted"}',
+      '{"t":"thinking","model":"writer","ms":0}',
+      '{"t":"thinking","model":"writer","ms":40000}',
+    ]);
+    expect(screens[1]?.count).toBe('0 seconds so far');
+    expect(screens[1]?.say).toContain('thinking');
+    expect(screens[2]?.count).toBe('40 seconds so far');
+  });
+
+  test('says the fallback happened, which nothing else says', async () => {
+    // A change of model between two `thinking` frames IS the fallback signal —
+    // there is no frame that announces it — and a minute and a half of silence
+    // with no reason given is a minute and a half somebody spends wondering
+    // whether to press it again.
+    const { screens } = await walk([
+      '{"t":"accepted"}',
+      '{"t":"thinking","model":"writer","ms":0}',
+      '{"t":"thinking","model":"second-writer","ms":95000}',
+    ]);
+    expect(screens[2]?.say).toContain('did not answer');
+    expect(screens[2]?.count).toBe('95 seconds so far');
+  });
+
+  test('turns from seconds into characters when the first word lands', async () => {
+    const { done, screens } = await walk([
+      '{"t":"accepted"}',
+      '{"t":"thinking","model":"writer","ms":0}',
+      '{"t":"start","model":"writer"}',
+      '{"t":"writing","chars":2140}',
+      `{"t":"done","build":"b1","name":"boats","document":${JSON.stringify(PAGE)}}`,
+    ]);
+    expect(screens[2]?.say).toContain('started writing');
+    expect(screens[3]?.count).toBe('2,140 characters so far');
+    expect(done).toMatchObject({ name: 'boats', document: PAGE });
+  });
+
+  test('reads a refusal that arrives as a frame as a refusal', async () => {
+    // Nothing about the upstream is a status any more, so the only place a
+    // refusal can arrive is here, in a 200 that has been open and talking
+    // since the first millisecond.
+    const { done, refused } = await walk([
+      '{"t":"accepted"}',
+      '{"t":"thinking","model":"writer","ms":0}',
+      '{"t":"error","code":"AI_UPSTREAM","message":"the ai upstream did not answer"}',
+    ]);
+    expect(done).toBeNull();
+    expect(refused).toBe('AI_UPSTREAM');
+  });
+
+  test('reads a body that ends without either as a connection that went', async () => {
+    const { refused } = await walk(['{"t":"accepted"}']);
+    expect(refused).toBe('CUT_OFF');
   });
 });
 
