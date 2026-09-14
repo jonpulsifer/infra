@@ -33,6 +33,10 @@
 body{
   margin:0;background:var(--paper);color:var(--ink);font-family:var(--sans);
   font-size:19px;line-height:1.5;-webkit-text-size-adjust:100%;
+  /* Addresses are said in prose here — "…is taken", "…belongs to somebody
+     else" — and a name may be forty characters. On a 375px screen one of those
+     would push the whole page sideways if it could not break. */
+  overflow-wrap:break-word;
 }
 .col{max-width:640px;margin:0 auto;padding:28px 20px 80px}
 h1{font-size:30px;line-height:1.2;margin:0 0 4px;font-weight:700;letter-spacing:-.02em}
@@ -149,6 +153,9 @@ button{font:inherit;cursor:pointer;border-radius:var(--r);border:2px solid trans
   <p class="url" id="proposedurl"></p>
   <div id="proposaloops"></div>
   <button type="button" class="go" id="put">Put it online</button>
+  <!-- what the green button becomes when the name is spoken for: one live
+       action per screen, and the page he waited a minute for stays on it -->
+  <button type="button" class="go" id="pickname" hidden>Pick a different name</button>
   <div class="row">
     <button type="button" class="plain" id="rename">Change the name</button>
     <button type="button" class="plain" id="scrap">Start again</button>
@@ -158,7 +165,7 @@ button{font:inherit;cursor:pointer;border-radius:var(--r);border:2px solid trans
 <!-- the name, when the person wants a different one -->
 <section id="naming" hidden>
   <h1>Pick a name</h1>
-  <p class="quiet">Letters, numbers and hyphens. This becomes the address.</p>
+  <p class="quiet" id="namingsay">Letters, numbers and hyphens. This becomes the address.</p>
   <input type="text" id="name" autocapitalize="none" autocorrect="off" spellcheck="false" inputmode="url">
   <p class="url" id="namingurl"></p>
   <div class="verdict" id="verdict"></div>
@@ -202,9 +209,19 @@ const LOGIN = ROOT.dataset.login || null;
 /* The build a tab was in the middle of. iOS discards a backgrounded tab without
    warning, and this surface has a minute of somebody's patience in it. */
 const DRAFT = "kthx.build";
+/* And the sentence he typed, which the draft above cannot hold: the row on the
+   server is written when a document exists, and a tab discarded *while* the
+   model is writing never gets one — the writing stops when the socket does. So
+   between pressing the green button and seeing a page, this is the only copy
+   of what he said. */
+const TYPED = "kthx.typed";
 
 /* ---- state: exactly one page in hand at a time ---------------------------- */
-let held = null;   /* {build, name, site, document, url} — what may be published */
+/* {build, name, site, changing, taken, document}: the draft id, the address it
+   would live at, the site it already belongs to (null until something is
+   claimed), whether it is a change to a site that is already online, and
+   whether that name turned out to be spoken for. */
+let held = null;
 let ticker = null;
 
 function show(id) {
@@ -216,29 +233,66 @@ function show(id) {
 }
 function draft(id) { try { id ? localStorage.setItem(DRAFT, id) : localStorage.removeItem(DRAFT); } catch {} }
 function draftId() { try { return localStorage.getItem(DRAFT); } catch { return null; } }
+function typed(what) { try { what ? localStorage.setItem(TYPED, JSON.stringify(what)) : localStorage.removeItem(TYPED); } catch {} }
+function typedBack() { try { return JSON.parse(localStorage.getItem(TYPED) || "null"); } catch { return null; } }
 function hostOf(name) { return `${name}.${ZONE}`; }
 function urlOf(name) { return `https://${hostOf(name)}`; }
 
-/* Every refusal is a sentence, never a code. The server's own message is the
-   fallback rather than the first choice: it is written for whoever is holding a
-   terminal, and nobody here is. */
+/* Every refusal is a sentence, never a code, and the server's own message never
+   reaches the screen: it is written for whoever is holding a terminal, and
+   nobody here is. Neither does the browser's, which is worse — a dropped
+   tailnet makes `fetch` reject with "Load failed" on iOS and "Failed to fetch"
+   on Chrome, and neither is a sentence about a website. So every road ends in
+   this table, including the ones this page invents for itself, and a code
+   nobody thought of ends at UNKNOWN rather than in somebody else's English. */
 const SAYS = {
+  UNKNOWN: "Something went wrong. Nothing you typed was lost — try again in a moment.",
+  /* the connection, which is the half this page owns */
+  OFFLINE: "The connection dropped. Nothing you typed was lost — try again once your phone is back on the tailnet.",
+  CUT_OFF: "The writing stopped part way through. Nothing was lost — try again.",
+  TIMEOUT: "That took too long to send. Nothing was lost — try again.",
+  /* the writer */
   AI_UPSTREAM: "The writer is not answering right now. Nothing you typed was lost — try again in a minute.",
   NO_DOCUMENT: "It answered, but not with a website. Try saying a little more about what you do.",
   TOO_LARGE: "That came back too big to put online. Try asking for something simpler.",
   AI_BUDGET: "You have made a lot of websites today. This resets overnight.",
   RATE_LIMITED: "One at a time — a page is still being written. Give it a moment.",
+  MALFORMED_REQUEST: "That is more than this page can send at once. Try saying it in fewer words.",
+  /* the name */
+  TAKEN: "That name is taken. Pick another one.",
+  INVALID_NAME: "That name will not work. Three letters or more, using letters, numbers and hyphens, and not starting or ending with a hyphen.",
+  RESERVED: "That name is kept for the system. Pick another one.",
+  /* the door */
   UNAUTHENTICATED: "This page needs your Tailscale login. Open it from a device signed in to the tailnet.",
   FORBIDDEN: "That website is not yours to change.",
   NOT_FOUND: "That website was not written here, so it cannot be changed by asking.",
+  GONE: "That website was deleted, and its address cannot be used again.",
+  /* the server */
   BUSY: "The server is busy. Try again in a moment.",
-  TAKEN: "That name is taken. Pick another one.",
   STORAGE_FAILURE: "Something went wrong saving it. Nothing was lost — try again.",
+  /* what this page says about itself, in the same voice as the rest */
+  UNCHANGED: "It came back exactly the same, so nothing was put online. Try saying it a different way.",
+  PICKED_UP: "This is the page you were making when the tab closed. It is still here.",
+  CLAIMED: "The address is yours already. The page is not on it yet — press Put it online.",
+  TYPED_BACK: "This is what you were asking for when the tab closed. Nothing was lost — it is ready to go again.",
 };
-function sentence(err) {
-  return SAYS[err?.code] || err?.message || "Something went wrong. Try again.";
+/* The same refusal, read on a screen that asked a different question. Told to
+   "say more about what you do" while asking for a green heading, he writes his
+   business into the change box and the next turn is worse for it. */
+const WHILE_CHANGING = {
+  NO_DOCUMENT: "It did not come back with a page this time. Try saying the change a different way.",
+  TOO_LARGE: "The changed page came back too big to put online. Try asking for a smaller change.",
+};
+const WHILE_PUBLISHING = {
+  RATE_LIMITED: "That is a lot of putting online at once. Give it a minute and try again.",
+  TOO_LARGE: "The page is too big to put online. Try asking for something simpler.",
+};
+function sentence(err, also) {
+  return (also && also[err?.code]) || SAYS[err?.code] || SAYS.UNKNOWN;
 }
-function oops(where, err, lead) {
+/** A refusal of this page's own making, carried the way the server's are. */
+function fault(code) { const e = new Error(code); e.code = code; return e; }
+function oops(where, err, lead, also) {
   const el = $(where);
   if (!err) { el.replaceChildren(); return; }
   const box = document.createElement("div");
@@ -246,16 +300,20 @@ function oops(where, err, lead) {
   const b = document.createElement("b");
   b.textContent = lead || "That did not work";
   const p = document.createElement("span");
-  p.textContent = sentence(err);
+  p.textContent = sentence(err, also);
   box.append(b, p);
   el.replaceChildren(box);
 }
 
+/** `fetch`, with a dropped connection turned into a sentence like any other. */
+async function reach(path, init) {
+  try { return await fetch(path, init); } catch { throw fault("OFFLINE"); }
+}
 async function api(method, path, { json, body, filename } = {}) {
   const headers = {};
   if (json !== undefined) { headers["content-type"] = "application/json"; body = JSON.stringify(json); }
   if (filename) headers["x-filename"] = filename;
-  const r = await fetch(path, { method, headers, body });
+  const r = await reach(path, { method, headers, body });
   if (r.status === 204) return null;
   const data = await r.json().catch(() => ({}));
   if (!r.ok) { const e = new Error(data.message || r.statusText); e.code = data.code; e.status = r.status; throw e; }
@@ -312,13 +370,19 @@ function waiting(title, say) {
   $("#workingcount").textContent = "0 seconds so far";
   show("working");
   const started = Date.now();
+  let said = 0;
   clearInterval(ticker);
   ticker = setInterval(() => {
     const seconds = Math.round((Date.now() - started) / 1000);
     $("#workingcount").textContent = `${seconds} seconds so far`;
-    /* Said once, when the usual minute has clearly gone by: measured
-       generations run 30 to 150 seconds and a busy upstream is the slow half. */
-    if (seconds === 45) $("#workingsay").textContent = "Still going. It gets slower when a lot of people are asking at once.";
+    /* Said once each as the usual minute goes by, and then again when it is
+       plainly a long one: measured generations run 30 to 150 seconds and a busy
+       upstream is the slow half. On `>=` rather than an exact second, because a
+       tick delayed past a second and a half — a screen dimming, a backgrounded
+       tab being throttled — would skip it, and then the only sentence on the
+       screen never changes for three minutes. */
+    if (seconds >= 45 && said < 1) { said = 1; $("#workingsay").textContent = "Still going. It gets slower when a lot of people are asking at once."; }
+    if (seconds >= 120 && said < 2) { said = 2; $("#workingsay").textContent = "Still writing. It has not given up."; }
   }, 1000);
   return () => { clearInterval(ticker); ticker = null; };
 }
@@ -331,7 +395,7 @@ const PUTTING = "Sending it to the web. This part is quick.";
 async function build(ask, site) {
   const stop = waiting(site ? "Making the change" : "Writing your page", WRITING);
   try {
-    const r = await fetch("/api/build", {
+    const r = await reach("/api/build", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(site ? { ask, site } : { ask }),
@@ -369,8 +433,13 @@ async function build(ask, site) {
         }
       }
     }
-    if (last === null) throw new Error("The writing stopped part way through. Nothing was lost — try again.");
+    if (last === null) throw fault("CUT_OFF");
     return last;
+  } catch (err) {
+    /* A read that rejects part way through the stream is the same lost tailnet
+       as a fetch that never opened, and arrives the same way: a TypeError with
+       the browser's own English in it and nothing this page can say. */
+    throw err?.code ? err : fault("OFFLINE");
   } finally {
     stop();
   }
@@ -419,6 +488,47 @@ async function put(name, document_) {
   return out;
 }
 
+/**
+ * The name, claimed once and only once.
+ *
+ * This is the one step on the road that cannot be repeated: a claim makes a
+ * real Postgres database and a role, and a kthx name is taken for good — even
+ * deleting a site keeps the row. So when the claim answers "taken" the question
+ * is whose, and an address of his own with nothing on it is not somebody
+ * else's: it is this same claim, already made, by a press or a whole tab that
+ * did not live to see its answer. Told "that name is taken" about his own
+ * website he would rename, and the first address would be spent for nothing.
+ */
+async function claim(name) {
+  try {
+    await api("POST", "/api/sites", { json: { name } });
+  } catch (err) {
+    if (err.code !== "TAKEN" || !(await claimedEmpty(name))) throw err;
+  }
+}
+
+/**
+ * Whether that address is his, with nothing published on it yet.
+ *
+ * Asked of the server rather than of this tab, because the tab that claimed may
+ * be gone. A site of his that *has* releases is not a claim to resume — it is a
+ * page he made before, and putting a new one over it is not what pressing the
+ * button twice means. A refusal with a status settles it (somebody else's, or
+ * nothing at all); a request that never arrived settles nothing and must not
+ * read as "not yours", or one dropped packet sends him to rename an address he
+ * already owns.
+ */
+async function claimedEmpty(name) {
+  let site;
+  try {
+    site = await api("GET", `/api/sites/${encodeURIComponent(name)}`);
+  } catch (err) {
+    if (err.status) return false;
+    throw err;
+  }
+  return site.serving === null && (site.releases || []).length === 0;
+}
+
 /* ---- screens -------------------------------------------------------------- */
 function greet() {
   const who = (LOGIN || "").split("@")[0].split(/[._+-]/)[0];
@@ -426,14 +536,45 @@ function greet() {
 }
 
 function propose(done) {
-  held = { build: done.build, name: done.name, site: done.site, document: done.document };
+  held = {
+    build: done.build,
+    name: done.name,
+    site: done.site,
+    changing: done.site !== null,
+    taken: done.available === false,
+    document: done.document,
+  };
   draft(done.build);
-  $("#preview").srcdoc = done.document;
-  $("#proposedurl").textContent = urlOf(done.name);
-  oops("#proposaloops", done.available === false ? { code: "TAKEN" } : null, `${hostOf(done.name)} is taken`);
-  $("#put").disabled = done.available === false;
+  /* The row on the server holds the ask from here on. */
+  typed(null);
+  proposal(done.available === false ? { code: "TAKEN" } : null, `${hostOf(done.name)} is taken`);
+}
+
+/**
+ * The proposal screen, painted from whatever page is in hand.
+ *
+ * Four roads arrive here — a page just written, a draft a closed tab left
+ * behind, a change that was written but not published, and a publish that
+ * failed — and each of them used to paint a bit of it. So the three things that
+ * follow from what is held are decided once, here, instead of four times: which
+ * green button this screen has, whether the name can still be changed, and what
+ * went wrong.
+ */
+function proposal(err, lead, also) {
+  /* Assigning srcdoc reloads the frame, and on a failed publish that would tear
+     the page he is looking at down and redraw it for nothing. */
+  if ($("#preview").srcdoc !== held.document) $("#preview").srcdoc = held.document;
+  $("#proposedurl").textContent = urlOf(held.name);
+  /* A name somebody else has is not a disabled button and a red box — that is a
+     screen that looks broken. The one thing left to do becomes the green one. */
+  $("#put").hidden = held.taken === true;
+  $("#pickname").hidden = held.taken !== true;
+  /* An address that already exists cannot be renamed by typing a different one
+     here: the release would go to a site nobody has claimed, and the change
+     would have nowhere to land. */
+  $("#rename").hidden = held.taken === true || held.site !== null;
+  oops("#proposaloops", err, lead, also);
   show("proposal");
-  if (done.available === false) startNaming();
 }
 
 function online(name, changed) {
@@ -455,12 +596,13 @@ function online(name, changed) {
   oops("#liveoops", null);
   held = held ? { ...held, site: name } : { site: name, name, document: "" };
   draft(null);
+  typed(null);
   show("live");
   void listMine();
 }
 
 function askChange(name) {
-  held = { site: name, name, document: "" };
+  held = { site: name, name, changing: true, taken: false, document: "" };
   $("#changingwhat").textContent = `${hostOf(name)} — say what should be different and it will be rewritten.`;
   $("#edit").value = "";
   oops("#changingoops", null);
@@ -470,31 +612,58 @@ function askChange(name) {
 
 /* ---- the name screen ------------------------------------------------------ */
 let checking = null;
-function startNaming() {
+/** `taken` is the name that sent him here, when it was not his idea to come. */
+function startNaming(taken) {
+  /* Pushed here by a name somebody else has, there is no old name to keep and
+     no reason on the screen for the move. Both are said out loud, or he lands
+     on "Pick a name" having asked for nothing of the sort and with the page he
+     waited a minute for nowhere in sight. */
+  $("#namingsay").textContent = taken
+    ? `${hostOf(taken)} belongs to somebody else. Your page is safe — give it another name and it goes online.`
+    : "Letters, numbers and hyphens. This becomes the address.";
+  $("#keepname").hidden = Boolean(taken);
   $("#name").value = held.name;
   paintName();
   show("naming");
   $("#name").focus();
 }
+function verdict(say, kind) {
+  $("#verdict").textContent = say;
+  $("#verdict").className = kind ? `verdict ${kind}` : "verdict";
+}
 function paintName() {
   const asked = $("#name").value.trim().toLowerCase();
   $("#namingurl").textContent = asked ? urlOf(asked) : "—";
-  $("#verdict").textContent = "";
-  $("#verdict").className = "verdict";
+  /* Said while the round trip is out, because the alternative is an empty line
+     and a greyed-out button, which is what a broken page looks like. */
+  verdict(asked ? "Checking that one…" : "");
   $("#usename").disabled = true;
   clearTimeout(checking);
   if (!asked) return;
   checking = setTimeout(async () => {
     let answer;
-    try { answer = await api("GET", `/api/names/${encodeURIComponent(asked)}`); } catch { return; }
+    try {
+      answer = await api("GET", `/api/names/${encodeURIComponent(asked)}`);
+    } catch {
+      if ($("#name").value.trim().toLowerCase() !== asked) return;
+      /* A check that could not be made is not a no, and leaving the only button
+         on the screen dead is not an answer. The claim is the authority anyway
+         — it asks the catalogue this probe cannot — so the button goes live and
+         a name that really is taken is refused there, in a sentence. */
+      verdict("It could not be checked just now. You can still try it.");
+      $("#usename").disabled = false;
+      return;
+    }
     if ($("#name").value.trim().toLowerCase() !== asked) return;
     const why = {
       INVALID_NAME: "Letters, numbers and hyphens only — three characters at least, and not starting or ending with a hyphen.",
       RESERVED: "That name is kept for the system. Pick another.",
       TAKEN: "Somebody already has that one. Pick another.",
     };
-    $("#verdict").textContent = answer.available ? "That one is free." : (why[answer.why] || "That name cannot be used.");
-    $("#verdict").className = `verdict ${answer.available ? "yes" : "no"}`;
+    verdict(
+      answer.available ? "That one is free." : (why[answer.why] || "That name cannot be used."),
+      answer.available ? "yes" : "no",
+    );
     $("#usename").disabled = !answer.available;
   }, 250);
 }
@@ -511,6 +680,9 @@ $("#make").onclick = () => guard(async () => {
   const ask = $("#ask").value.trim();
   oops("#startoops", null);
   if (!ask) { $("#ask").focus(); return; }
+  /* Kept before the request goes out, not after it lands: the minute it takes
+     is a minute of a phone in a pocket, and the tab may not survive it. */
+  typed({ ask, site: null });
   try {
     propose(await build(ask, null));
   } catch (err) {
@@ -524,29 +696,42 @@ $("#put").onclick = () => guard(async () => {
   oops("#proposaloops", null);
   waiting("Putting it online", PUTTING);
   try {
-    if (!page.site) await api("POST", "/api/sites", { json: { name: page.name } });
+    if (page.site === null) {
+      await claim(page.name);
+      /* Written down the moment it succeeds, and before the upload — which is
+         the half that fails, on a tailnet blip or a pod rolling under a merge.
+         A second press has to be a second upload and never a second claim: the
+         claim would answer "taken", about his own website. */
+      held = { ...page, site: page.name };
+    }
     await put(page.name, page.document);
-    online(page.name, Boolean(page.site));
+    online(page.name, page.changing === true);
   } catch (err) {
-    oops("#proposaloops", err, err.code === "TAKEN" ? `${hostOf(page.name)} is taken` : "It could not be put online");
-    show("proposal");
-    if (err.code === "TAKEN") startNaming();
+    const owned = held.site !== null;
+    if (err.code === "TAKEN") held = { ...held, taken: true };
+    proposal(
+      err,
+      err.code === "TAKEN"
+        ? `${hostOf(page.name)} is taken`
+        : owned
+          ? `${hostOf(page.name)} is yours — it is just not on the web yet`
+          : "It could not be put online",
+      WHILE_PUBLISHING,
+    );
   }
 });
 
-$("#rename").onclick = startNaming;
-$("#keepname").onclick = () => show("proposal");
+$("#rename").onclick = () => startNaming();
+$("#pickname").onclick = () => startNaming(held.name);
+$("#keepname").onclick = () => proposal(null);
 $("#usename").onclick = () => {
-  held.name = $("#name").value.trim().toLowerCase();
-  $("#proposedurl").textContent = urlOf(held.name);
-  $("#put").disabled = false;
-  oops("#proposaloops", null);
-  show("proposal");
+  held = { ...held, name: $("#name").value.trim().toLowerCase(), taken: false };
+  proposal(null);
 };
-$("#scrap").onclick = () => { held = null; draft(null); $("#ask").value = ""; show("start"); void listMine(); };
-$("#another").onclick = () => { held = null; draft(null); $("#ask").value = ""; oops("#startoops", null); show("start"); void listMine(); };
+$("#scrap").onclick = () => { held = null; draft(null); typed(null); $("#ask").value = ""; show("start"); void listMine(); };
+$("#another").onclick = () => { held = null; draft(null); typed(null); $("#ask").value = ""; oops("#startoops", null); show("start"); void listMine(); };
 $("#change").onclick = () => askChange(held.site);
-$("#nevermind").onclick = () => { held = null; show("start"); void listMine(); };
+$("#nevermind").onclick = () => { held = null; typed(null); show("start"); void listMine(); };
 $("#name").oninput = paintName;
 
 $("#applychange").onclick = () => guard(async () => {
@@ -554,34 +739,34 @@ $("#applychange").onclick = () => guard(async () => {
   const ask = $("#edit").value.trim();
   oops("#changingoops", null);
   if (!ask) { $("#edit").focus(); return; }
+  typed({ ask, site });
   let done;
   try {
     done = await build(ask, site);
   } catch (err) {
-    oops("#changingoops", err, "It could not be changed");
+    oops("#changingoops", err, "It could not be changed", WHILE_CHANGING);
     show("changing");
     return;
   }
   if (done.unchanged) {
-    held = { site, name: site, document: "" };
-    oops("#changingoops", { message: "It came back exactly the same, so nothing was put online. Try saying it a different way." }, "Nothing changed");
+    held = { site, name: site, changing: true, taken: false, document: "" };
+    oops("#changingoops", { code: "UNCHANGED" }, "Nothing changed");
     show("changing");
     return;
   }
-  held = { build: done.build, name: site, site, document: done.document };
+  held = { build: done.build, name: site, site, changing: true, taken: false, document: done.document };
   draft(done.build);
+  typed(null);
   waiting("Putting it online", PUTTING);
   try {
     await put(site, done.document);
     online(site, true);
   } catch (err) {
     /* The page is written and the row is safe on the server; only the publish
-       failed, so the person is put back where a second press finishes it. */
-    $("#preview").srcdoc = done.document;
-    $("#proposedurl").textContent = urlOf(site);
-    $("#put").disabled = false;
-    oops("#proposaloops", err, "It was written but not put online");
-    show("proposal");
+       failed, so the person is put back where a second press finishes it. The
+       name is not his to change here — it is a site that already exists — and
+       the screen he lands on knows that. */
+    proposal(err, "It was written but not put online", WHILE_PUBLISHING);
   }
 });
 
@@ -590,14 +775,46 @@ async function recover() {
   const id = draftId();
   if (!id) return false;
   let row;
-  try { row = await api("GET", `/api/build/${encodeURIComponent(id)}`); } catch { draft(null); return false; }
-  held = { build: row.id, name: row.name, site: row.site, document: row.document };
-  $("#preview").srcdoc = row.document;
-  $("#proposedurl").textContent = urlOf(row.name);
-  $("#put").disabled = false;
-  oops("#proposaloops", { message: "This is the page you were making when the tab closed. It is still here." }, "Picked up where you left off");
-  show("proposal");
+  try {
+    row = await api("GET", `/api/build/${encodeURIComponent(id)}`);
+  } catch (err) {
+    /* A draft the server says is gone is forgotten. A draft this phone could
+       not reach is not: the tailnet comes back and the page is still there. */
+    if (err.status) draft(null);
+    return false;
+  }
+  held = {
+    build: row.id,
+    name: row.name,
+    site: row.site,
+    changing: row.site !== null,
+    taken: false,
+    document: row.document,
+  };
+  /* The draft says nothing about a claim, so a tab discarded between claiming
+     the name and publishing to it would come back offering to change the name —
+     and publishing under a new one would spend the first address for nothing.
+     A server that cannot be asked leaves the name changeable, which the claim
+     itself then sorts out in a sentence. */
+  if (held.site === null && await claimedEmpty(row.name).catch(() => false)) {
+    held = { ...held, site: row.name };
+  }
+  proposal({ code: held.site === null ? "PICKED_UP" : "CLAIMED" }, "Picked up where you left off");
   return true;
+}
+
+/** What he typed, when the tab died before there was a page to show for it. */
+function resume() {
+  const again = typedBack();
+  if (again === null || !again.ask) return;
+  if (again.site) {
+    askChange(again.site);
+    $("#edit").value = again.ask;
+    oops("#changingoops", { code: "TYPED_BACK" }, "Picked up where you left off");
+    return;
+  }
+  $("#ask").value = again.ask;
+  oops("#startoops", { code: "TYPED_BACK" }, "Picked up where you left off");
 }
 
 (async () => {
@@ -605,7 +822,7 @@ async function recover() {
   greet();
   show("start");
   await listMine();
-  await recover();
+  if (!(await recover())) resume();
 })();
 </script>
 </body>

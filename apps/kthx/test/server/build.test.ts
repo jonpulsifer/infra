@@ -771,6 +771,179 @@ describe('the whole road, as the page walks it', () => {
   });
 });
 
+describe('the page, when the upload half of publishing fails', () => {
+  /** The page's `api`, as the browser's one behaves, against this server. */
+  function apiAs(login: string) {
+    return async (
+      method: string,
+      path: string,
+      init: { json?: unknown } = {},
+    ): Promise<unknown> => {
+      const response = await ontailnet(path, login, {
+        method,
+        headers:
+          init.json === undefined
+            ? {}
+            : {
+                'content-type': 'application/json',
+                origin: `https://${IDENTITY}`,
+              },
+        body: init.json === undefined ? undefined : JSON.stringify(init.json),
+      });
+      if (response.status === 204) return null;
+      const data = (await response.json().catch(() => ({}))) as {
+        code?: string;
+        message?: string;
+      };
+      if (!response.ok) {
+        const refusal = new Error(data.message) as Error & {
+          code?: string;
+          status?: number;
+        };
+        refusal.code = data.code;
+        refusal.status = response.status;
+        throw refusal;
+      }
+      return data;
+    };
+  }
+
+  /**
+   * The page's own claim step, lifted out of the file it lives in.
+   *
+   * Claiming is the one step on that road which cannot be repeated — it makes a
+   * real database and a kthx name is taken for good — so what the page does
+   * when it is asked to claim twice is a claim about this server's answers, and
+   * belongs against this server rather than against a mock of it.
+   */
+  async function pageClaim(api: ReturnType<typeof apiAs>): Promise<{
+    claim: (name: string) => Promise<void>;
+    claimedEmpty: (name: string) => Promise<boolean>;
+  }> {
+    const html = await Bun.file(BUILD_PATH).text();
+    const from = html.indexOf('async function claim(');
+    const to = html.indexOf('/* ---- screens');
+    expect(from).toBeGreaterThan(0);
+    expect(to).toBeGreaterThan(from);
+    return new Function(
+      'api',
+      `${html.slice(from, to)}; return { claim, claimedEmpty };`,
+    )(api) as {
+      claim: (name: string) => Promise<void>;
+      claimedEmpty: (name: string) => Promise<boolean>;
+    };
+  }
+
+  test('finishes the claim it already made instead of taking a second name', async () => {
+    const { claim } = await pageClaim(apiAs(DAD));
+    const name = kthx().name('resume');
+
+    await claim(name);
+    // The upload is what failed — a tailnet blip, a pod rolling under a merge —
+    // and the second press comes back through here. Before, the claim ran
+    // again, his own row conflicted, and the page told him the address he had
+    // just taken belonged to somebody else.
+    await claim(name);
+
+    await publish(DAD, name, [{ path: 'index.html', bytes: bytes(PAGE) }]);
+    expect(
+      await (await kthx().fetch(ask('/', { host: `${name}.${ZONE}` }))).text(),
+    ).toBe(PAGE);
+  });
+
+  test('does not put a new page over one that is already online', async () => {
+    const { claim } = await pageClaim(apiAs(DAD));
+    const mine = await claimAs(DAD, 'standing');
+    await publish(DAD, mine, [{ path: 'index.html', bytes: bytes(PAGE) }]);
+    // His, but with a page on it: pressing the button twice means "finish
+    // this", never "write over the one I made last week".
+    await expect(claim(mine)).rejects.toMatchObject({ code: 'TAKEN' });
+
+    const hers = await claimAs(MOM, 'hers');
+    await expect(claim(hers)).rejects.toMatchObject({ code: 'TAKEN' });
+  });
+
+  test('reads an unreachable server as neither taken nor free', async () => {
+    const name = await claimAs(DAD, 'unreachable');
+    expect(await (await pageClaim(apiAs(DAD))).claimedEmpty(name)).toBe(true);
+
+    // A check that never arrived must not answer "not yours": one dropped
+    // packet would otherwise send him off to rename an address he owns. The
+    // page tells those apart by the status a refusal carries, so a rejection
+    // with none has to come back out of here rather than reading as a no.
+    const offline = await pageClaim(() => {
+      throw Object.assign(new Error('offline'), { code: 'OFFLINE' });
+    });
+    await expect(offline.claimedEmpty(name)).rejects.toMatchObject({
+      code: 'OFFLINE',
+    });
+    await expect(offline.claim(name)).rejects.toMatchObject({
+      code: 'OFFLINE',
+    });
+  });
+});
+
+describe('every refusal this page can meet has a sentence', () => {
+  /** The copy table and the lookup over it, lifted out of the page. */
+  async function pageSays(): Promise<{
+    SAYS: { UNKNOWN: string } & Record<string, string | undefined>;
+    sentence: (err: unknown, also?: Record<string, string>) => string;
+  }> {
+    const html = await Bun.file(BUILD_PATH).text();
+    const from = html.indexOf('const SAYS = {');
+    const to = html.indexOf('/** A refusal of this page');
+    expect(from).toBeGreaterThan(0);
+    expect(to).toBeGreaterThan(from);
+    return new Function(
+      `${html.slice(from, to)}; return { SAYS, sentence };`,
+    )() as {
+      SAYS: { UNKNOWN: string } & Record<string, string | undefined>;
+      sentence: (err: unknown, also?: Record<string, string>) => string;
+    };
+  }
+
+  test('covers every code the routes it calls can refuse with', async () => {
+    const { SAYS } = await pageSays();
+    // `POST /api/build`, `GET /api/build/:id`, `POST /api/sites`,
+    // `GET /api/names/:name`, `POST /api/sites/:name/releases` and
+    // `DELETE /api/sites/:name/hold`, as this page calls them.
+    for (const code of [
+      'AI_BUDGET',
+      'AI_UPSTREAM',
+      'BUSY',
+      'FORBIDDEN',
+      'GONE',
+      'INVALID_NAME',
+      'MALFORMED_REQUEST',
+      'NOT_FOUND',
+      'NO_DOCUMENT',
+      'RATE_LIMITED',
+      'RESERVED',
+      'STORAGE_FAILURE',
+      'TAKEN',
+      'TIMEOUT',
+      'TOO_LARGE',
+      'UNAUTHENTICATED',
+    ]) {
+      expect(SAYS[code]).toBeString();
+    }
+  });
+
+  test('never shows the browser its own English, or the server its own', async () => {
+    const { SAYS, sentence } = await pageSays();
+    // What a dropped tailnet actually rejects with on a phone. It has no code,
+    // and its message is the one thing this screen must never read out.
+    expect(sentence(new TypeError('Load failed'))).toBe(SAYS.UNKNOWN);
+    expect(sentence({ code: 'SITE_FULL', message: 'this site is full' })).toBe(
+      SAYS.UNKNOWN,
+    );
+    expect(sentence(undefined)).toBe(SAYS.UNKNOWN);
+    for (const say of Object.values(SAYS)) {
+      expect(say).not.toMatch(/[0-9]{3}|release|token|bearer|endpoint/i);
+    }
+  });
+});
+
 describe('what an answer is read as', () => {
   test('takes the document out of whatever surrounds it', () => {
     expect(documentIn(`chatter\n${PAGE}\n\`\`\``)).toBe(PAGE);

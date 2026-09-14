@@ -288,7 +288,31 @@ describe('the AI passthrough values', () => {
     // the ones a reader is most likely to set from a bake-off table without
     // adding them here.
     expect(models).toContain(value('KTHX_AI_BUILD_MODEL'));
-    expect(models).toContain(value('KTHX_AI_BUILD_FALLBACK_MODEL'));
+    // The second of them is optional — values.yaml offers an empty one as "no
+    // second attempt" — and an absent entry is nothing to check against the
+    // list. Read off the entry itself rather than through `value`, which cannot
+    // tell an empty setting from a missing one.
+    const fallback = env.find(
+      (entry) => entry.name === 'KTHX_AI_BUILD_FALLBACK_MODEL',
+    )?.value;
+    if (fallback !== undefined) expect(models).toContain(fallback);
+  });
+
+  test('leave the second attempt out when there is to be none', async () => {
+    const objects = await render({ ...VALUES, ai: { buildFallbackModel: '' } });
+    const env: { name: string; value?: string }[] = one(objects, 'Deployment')
+      .spec.template.spec.containers[0].env;
+    // An empty entry is not the same as none: the server reads that variable as
+    // a model name and refuses to boot on one the allow-list does not carry, so
+    // the setting values.yaml invites has to render as an absence.
+    expect(
+      env.find((entry) => entry.name === 'KTHX_AI_BUILD_FALLBACK_MODEL'),
+    ).toBeUndefined();
+    // And the first attempt is still configured, so the absence above is the
+    // template obeying the value and not an env list that failed to render.
+    expect(
+      env.find((entry) => entry.name === 'KTHX_AI_BUILD_MODEL')?.value,
+    ).toBeString();
   });
 
   test('give the builder a ceiling of its own', async () => {
