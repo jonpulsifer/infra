@@ -21,6 +21,7 @@ import { tarGz } from '../../cli/tar.ts';
 import { utcDay } from '../../server/ai.ts';
 import {
   documentIn,
+  HEADERS_MS,
   MAX_BUILD_REQUESTS_DAY,
   nameIn,
   slugOf,
@@ -137,6 +138,12 @@ function writesSlowly(
   const encoder = new TextEncoder();
   const body = new ReadableStream<Uint8Array>({
     async start(controller) {
+      // Reasoning first, like the real base — see `thinksFor`.
+      controller.enqueue(
+        encoder.encode(
+          `data: ${JSON.stringify({ choices: [{ delta: { reasoning_content: 'mm' } }] })}\n\n`,
+        ),
+      );
       await Bun.sleep(before);
       controller.enqueue(
         encoder.encode(
@@ -168,6 +175,17 @@ function thinksFor(
   const encoder = new TextEncoder();
   const body = new ReadableStream<Uint8Array>({
     async start(controller) {
+      // What the real base does while a model thinks, measured against it: the
+      // headers land in about a second and `reasoning_content` streams the
+      // whole way — 183 KB of it before the first content delta at 18.7 s. The
+      // silence is in the answer, not on the socket, and a stub that withheld
+      // its headers instead was modelling a different upstream and would have
+      // been cut by the clock that exists to catch a base nobody is listening on.
+      controller.enqueue(
+        encoder.encode(
+          `data: ${JSON.stringify({ choices: [{ delta: { reasoning_content: 'mm' } }] })}\n\n`,
+        ),
+      );
       await Bun.sleep(ms);
       try {
         controller.enqueue(
@@ -860,6 +878,50 @@ describe('a caller who has gone away', () => {
     `) as { drafts: number }[];
     expect(row?.drafts).toBe(0);
   }, 20_000);
+});
+
+describe('a base that is not there', () => {
+  // Reserved by RFC 5737 and routed nowhere, so a connect hangs rather than
+  // refusing — the shape a wrong hostname actually has.
+  const dead = withServer({
+    identityHost: IDENTITY,
+    tailnetProxies: [PROXY],
+    aiUrl: 'http://192.0.2.1:9',
+    aiKey: 'k',
+    aiModel: 'writer',
+    aiModels: ['writer', 'second-writer'],
+    aiBuildModel: 'writer',
+    aiBuildFallbackModel: 'second-writer',
+  });
+
+  test('says so in seconds, not in minutes', async () => {
+    // One clock for "can you be reached" and "have you thought of a word yet"
+    // made a mis-set KTHX_AI_URL take 268 s to admit it — 133 s on the primary
+    // and 135 s again on the fallback, narrated the whole way as writing.
+    const began = Date.now();
+    const response = await dead().fetch(
+      ask('/api/build', {
+        host: IDENTITY,
+        method: 'POST',
+        headers: {
+          'tailscale-user-login': DAD,
+          origin: `https://${IDENTITY}`,
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({ ask: 'a page for my woodworking' }),
+      }),
+      peer(PROXY),
+    );
+    // Still a frame on a 200 — the socket is never the thing that fails.
+    expect(response.status).toBe(200);
+    const frames = await read(response);
+    expect(frames.at(-1)).toMatchObject({ t: 'error', code: 'AI_UPSTREAM' });
+
+    // Two models, each on the short clock, and the whole thing inside what a
+    // person will sit through. The long clock is for a model that has answered.
+    const took = Date.now() - began;
+    expect(took).toBeLessThan(2 * HEADERS_MS + 20_000);
+  }, 120_000);
 });
 
 describe('the page every door serves', () => {

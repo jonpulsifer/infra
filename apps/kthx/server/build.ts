@@ -150,6 +150,22 @@ export const MAX_BUILD_TOKENS_DAY = 1_000_000;
  * end, which is the number this is set against.
  */
 const FIRST_BYTE_MS = 150_000;
+/**
+ * How long the upstream has to answer with headers at all.
+ *
+ * A separate, much shorter clock than {@link FIRST_BYTE_MS}, because the two
+ * silences mean opposite things. A model that has sent headers and is quiet is
+ * thinking, and the measured wait for its first word is 71-95 s. A base that
+ * has not sent headers is not thinking — it is a name that does not resolve or
+ * a host that is not listening, and no amount of waiting improves it.
+ *
+ * One clock for both made a mis-set `KTHX_AI_URL` take 268 s to say so: 133 s
+ * on the primary and 135 s again on the fallback, every second of it narrated
+ * to somebody watching a page claim it was writing. Measured on this base,
+ * headers arrive in well under a second even when the first word is a minute
+ * and a half behind them.
+ */
+export const HEADERS_MS = 20_000;
 const GAP_MS = 60_000;
 /**
  * Bun's connection idle timeout for this route, in seconds.
@@ -480,9 +496,11 @@ async function dispatch(
 
   const ceiling = ctx.config.aiBuildMaxTokens;
   const upstream = new AbortController();
+  // Headers first, on the short clock. It is replaced by the long one the
+  // moment they arrive, so a model may then think for as long as a model does.
   let deadline: ReturnType<typeof setTimeout> | undefined = setTimeout(
     () => upstream.abort(),
-    FIRST_BYTE_MS,
+    HEADERS_MS,
   );
   let done = false;
   const deltas = new Deltas();
@@ -531,7 +549,7 @@ async function dispatch(
     deadline = setTimeout(() => upstream.abort(), GAP_MS);
   };
   // A page that was closed while a model was thinking holds this person's one
-  // in-flight slot until the 90 s deadline otherwise, so the next thing they
+  // in-flight slot until the first-byte deadline otherwise, so the next thing they
   // do after reopening the tab is read "one at a time". Checked as well as
   // listened for: a listener added to a signal that has already fired never
   // runs, which is how a closed tab paid for a whole second generation on the
@@ -570,6 +588,11 @@ async function dispatch(
     logCause(ctx.id, `the build upstream on ${model}`, cause);
     return { code: 'AI_UPSTREAM' };
   }
+
+  // Headers are in: the base is real and listening, and what is left to wait
+  // for is a model, on the clock a model needs.
+  clearTimeout(deadline);
+  deadline = setTimeout(() => upstream.abort(), FIRST_BYTE_MS);
 
   if (!answer.ok) {
     void answer.body?.cancel();
