@@ -52,7 +52,7 @@ import {
 import { secondsToMidnight } from './limits.ts';
 import { nameProblem, RESERVED_NAMES } from './names.ts';
 import { ensureRelease, releaseDir } from './releases.ts';
-import { type Ctx, opensSite } from './sites.ts';
+import { type Ctx, nameStanding, opensSite } from './sites.ts';
 
 /** A sentence about a business, not a document paste. */
 export const MAX_ASK_CHARS = 4000;
@@ -401,6 +401,20 @@ async function dispatch(
    * other way carries none, so without the floor a model that reasoned for its
    * whole ceiling and wrote nothing — measured, four on this base do — would
    * be free, and so would every stream a reader walked away from.
+   *
+   * **A phone that backgrounds itself mid-generation is billed the ceiling,
+   * deliberately.** It is the common way this ends — the wait is 30-150 s and
+   * this page is used one-handed — and it is tempting to make it free. Two
+   * things settle it against that. There is no honest smaller number: the
+   * upstream generated, the usage frame never arrives, and anything else here
+   * would be a guess dressed as a measurement. And the harm the refund would
+   * avoid is already bounded elsewhere: an abandoned build breaks the model
+   * loop, so it spends one attempt and one ceiling, and
+   * {@link MAX_BUILD_REQUESTS_DAY} × ceiling — 60 × 16 000 — is under
+   * {@link MAX_BUILD_TOKENS_DAY}. Sixty abandoned builds cannot close the
+   * token day before the request day it already closed. Raising
+   * `KTHX_AI_BUILD_MAX_TOKENS` past ~16 600 is what would change that, and it
+   * is the ceiling to re-read this paragraph against.
    */
   const spent = (): number => deltas.tokens ?? ceiling;
   const tick = (): void => {
@@ -460,8 +474,22 @@ async function dispatch(
     // the attempt it spent, because a refusal that is free to earn is one that
     // can be asked for forever, and the sixty a day is the only ceiling on
     // outbound calls there is.
+    //
+    // Two of those 4xx are this deployment's here and are not on `/api/ai`,
+    // because that route forwards a path the caller picked and this one builds
+    // the whole URL out of `KTHX_AI_URL`. A **404** is therefore only ever a
+    // mis-set base — measured, a wrong path on this upstream answers 404 with
+    // a marketing page rather than a 5xx — and thirty presses against one
+    // would close a day in which nobody wrote a page, which is the exact end
+    // state this rule exists to prevent, moved from the token column to the
+    // request column. A **429** is the plan's concurrency, not the sentence
+    // somebody typed: nothing in this body is the caller's to change.
     const ours =
-      answer.status === 401 || answer.status === 403 || answer.status >= 500;
+      answer.status === 401 ||
+      answer.status === 403 ||
+      answer.status === 404 ||
+      answer.status === 429 ||
+      answer.status >= 500;
     if (ours) refundRequest(ctx, login, day);
     logCause(
       ctx.id,
@@ -472,9 +500,14 @@ async function dispatch(
   }
 
   if (answer.body === null) {
-    // A 200 with nothing behind it is an upstream that answered, so the floor
-    // applies and the attempt stays spent.
-    settle(spent());
+    // Nothing was opened, so nothing is billed — the same rule as an
+    // unreachable base. The floor above it is for an upstream that *opened a
+    // body* and said nothing through it; a 2xx with no stream behind it is
+    // this deployment's upstream misbehaving on a URL and a model that are
+    // both its own, and charging both the ceiling and the attempt for a
+    // generation that never started is that rule applied backwards.
+    settle(0);
+    refundRequest(ctx, login, day);
     logCause(
       ctx.id,
       `the build upstream on ${model}`,
@@ -484,21 +517,49 @@ async function dispatch(
   }
 
   const body = answer.body.getReader();
+  // Whether one byte ever came over the wire. A body that *closes* without any
+  // is the bodiless answer above arriving the way `fetch` actually hands one
+  // over — an empty stream rather than a null — and a clean close with nothing
+  // in it is an upstream that generated nothing, so it is billed nothing and
+  // the attempt goes back with it. Once a byte has arrived the floor applies: a
+  // model that spends its whole ceiling reasoning still sends
+  // `reasoning_content` frames, and that is compute somebody's subscription
+  // paid for whether or not a page came out of it.
+  let arrived = false;
   for (;;) {
     let chunk: Awaited<ReturnType<typeof body.read>>;
     try {
       chunk = await body.read();
     } catch (cause) {
+      // A read that rejects is not a clean close, and it bills the floor even
+      // with nothing yet on the wire. Two things reach here: the caller hung up
+      // (which pays, or an abort loop is free to dial the upstream all day),
+      // and the first-byte deadline cut a model that has flushed nothing —
+      // which on this base is what a model *working* looks like, measured up to
+      // 161 s to a first byte with the whole ceiling being spent on reasoning
+      // behind it. Silence is not proof that nothing was generated; a body that
+      // closed empty is.
       settle(spent());
       logCause(ctx.id, `reading from ${model}`, cause);
       return { code: 'AI_UPSTREAM' };
     }
     if (chunk.done || chunk.value === undefined) {
+      if (!arrived) {
+        settle(0);
+        refundRequest(ctx, login, day);
+        logCause(
+          ctx.id,
+          `the build upstream on ${model}`,
+          new Error('a 200 with an empty body'),
+        );
+        return { code: 'AI_UPSTREAM' };
+      }
       // It answered, and wrote nothing. The attempt is not refunded: it reached
       // the upstream and spent the operator's quota to say nothing.
       settle(spent());
       return { code: 'AI_UPSTREAM' };
     }
+    arrived = true;
     tick();
     const written = deltas.read(chunk.value);
     if (written !== '') {
@@ -840,6 +901,11 @@ async function ending(
   }
 
   const name = site ?? nameIn(text, ask);
+  // Asked of the same routine `GET /api/names/:name` answers with, so the page
+  // is told the same thing whichever way it asks — and told it about *this*
+  // person: a name he already holds is not a name that belongs to somebody
+  // else, and offering it to him as one is what spent the first address.
+  const standing = site === null ? await nameStanding(ctx, name) : null;
   const id = crypto.randomUUID();
   try {
     // Written the moment there is a document and before anything is claimed,
@@ -868,25 +934,14 @@ async function ending(
     site,
     // Meaningless for a refine, and null rather than false so a page cannot
     // read "this name is taken" off a site it already owns.
-    available: site === null ? await free(ctx, name) : null,
+    available: standing?.available ?? null,
+    // `empty` is an address of his with nothing on it — the claim a failed
+    // upload stranded, which the page finishes rather than renaming — and
+    // `live` is a website of his, which is a different sentence again and
+    // never "somebody else has it".
+    yours: standing?.yours ?? null,
     url: siteUrl(ctx.config.zone, name, ctx.port),
     unchanged: false,
     document,
   };
-}
-
-/**
- * Whether the proposed name can still be claimed.
- *
- * The same question `GET /api/names/:name` answers and the same fast no: the
- * claim itself still checks `pg_database` and `pg_roles` and can still lose a
- * race. Asked here so the page offers the name with the URL it becomes rather
- * than finding out at the claim, after the person has agreed to it.
- */
-async function free(ctx: Ctx, name: string): Promise<boolean> {
-  if (nameProblem(name) !== null) return false;
-  const [row] = (await ctx.sql`
-    select name from sites where name = ${name} limit 1
-  `) as { name: string }[];
-  return row === undefined;
 }

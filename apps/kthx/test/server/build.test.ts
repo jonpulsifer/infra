@@ -406,7 +406,28 @@ describe('a page', () => {
     const name = await claimAs(MOM, 'held-name');
     answers = [() => writes([`<!-- kthx-name: ${name} -->\n${PAGE}`])];
     const last = done(await read(await post({ ask: 'another page' })));
-    expect(last).toMatchObject({ name, available: false });
+    expect(last).toMatchObject({ name, available: false, yours: null });
+  });
+
+  test('never offers this person their own address as somebody else’s', async () => {
+    // The model proposes from the description, so asking twice about the same
+    // business proposes the same name — measured, every time. Told that address
+    // was taken, he renamed, and the first name, its database and its role were
+    // spent for nothing.
+    const empty = await claimAs(DAD, 'his-own');
+    answers = [() => writes([`<!-- kthx-name: ${empty} -->\n${PAGE}`])];
+    expect(
+      done(await read(await post({ ask: 'my woodworking' }))),
+    ).toMatchObject({ name: empty, available: false, yours: 'empty' });
+
+    // And a website of his is not the same answer as a claim of his: one is
+    // finished by pressing the green button, the other needs its own name.
+    const live = await claimAs(DAD, 'his-site');
+    await publish(DAD, live, [{ path: 'index.html', bytes: bytes(PAGE) }]);
+    answers = [() => writes([`<!-- kthx-name: ${live} -->\n${PAGE}`])];
+    expect(
+      done(await read(await post({ ask: 'my woodworking' }))),
+    ).toMatchObject({ name: live, available: false, yours: 'live' });
   });
 
   test('is refused when the answer is not a page', async () => {
@@ -458,6 +479,43 @@ describe('the upstream', () => {
       () => new Response('down', { status: 503 }),
     ];
     const refused = await post({ ask: 'a page for my woodworking' });
+    expect(refused.status).toBe(502);
+    expect(asked).toHaveLength(2);
+    expect(await spent()).toEqual({ requests: 0, tokens: 0 });
+  });
+
+  test('hands the attempts back for a base URL this deployment got wrong', async () => {
+    // Unlike `/api/ai`, this route composes the whole URL out of `KTHX_AI_URL`
+    // — the caller cannot pick a path — so a 404 is only ever the operator's,
+    // and measured, a wrong path on this upstream answers 404 with a marketing
+    // page rather than a 5xx. Thirty presses against one would otherwise close
+    // a day in which nobody wrote a page, and then go on refusing after the URL
+    // was fixed. A 429 is the plan's concurrency, which is nobody's sentence.
+    for (const status of [404, 429]) {
+      await kthx().sql`delete from build_usage where login = ${DAD}`;
+      answers = [
+        () => new Response('not here', { status }),
+        () => new Response('not here', { status }),
+      ];
+      const refused = await post({ ask: 'a page for my woodworking' });
+      expect(refused.status).toBe(502);
+      expect(asked).toHaveLength(2);
+      expect(await spent()).toEqual({ requests: 0, tokens: 0 });
+      asked = [];
+    }
+  });
+
+  test('bills nothing for an upstream that answers with no stream at all', async () => {
+    // The floor is for an upstream that opened a body and said nothing through
+    // it. Nothing was opened here, on a URL and a model that are both this
+    // deployment's, so charging the ceiling *and* keeping the attempt is that
+    // rule applied backwards: two presses would cost a day's worth of tokens
+    // for two generations that never started.
+    answers = [
+      () => new Response(null, { status: 200 }),
+      () => new Response(null, { status: 200 }),
+    ];
+    const refused = await post({ ask: 'a page' });
     expect(refused.status).toBe(502);
     expect(asked).toHaveLength(2);
     expect(await spent()).toEqual({ requests: 0, tokens: 0 });
@@ -768,6 +826,545 @@ describe('the whole road, as the page walks it', () => {
     expect(
       await (await kthx().fetch(ask('/', { host: `${name}.${ZONE}` }))).text(),
     ).toBe(greener);
+  });
+});
+
+describe('the page, when the upload half of publishing fails', () => {
+  /** The page's `api`, as the browser's one behaves, against this server. */
+  function apiAs(login: string) {
+    return async (
+      method: string,
+      path: string,
+      init: { json?: unknown } = {},
+    ): Promise<unknown> => {
+      const response = await ontailnet(path, login, {
+        method,
+        headers:
+          init.json === undefined
+            ? {}
+            : {
+                'content-type': 'application/json',
+                origin: `https://${IDENTITY}`,
+              },
+        body: init.json === undefined ? undefined : JSON.stringify(init.json),
+      });
+      if (response.status === 204) return null;
+      const data = (await response.json().catch(() => ({}))) as {
+        code?: string;
+        message?: string;
+      };
+      if (!response.ok) {
+        const refusal = new Error(data.message) as Error & {
+          code?: string;
+          status?: number;
+        };
+        refusal.code = data.code;
+        refusal.status = response.status;
+        throw refusal;
+      }
+      return data;
+    };
+  }
+
+  /**
+   * The page's own claim step, lifted out of the file it lives in.
+   *
+   * Claiming is the one step on that road which cannot be repeated — it makes a
+   * real database and a kthx name is taken for good — so what the page does
+   * when it is asked to claim twice is a claim about this server's answers, and
+   * belongs against this server rather than against a mock of it.
+   */
+  async function pageClaim(api: ReturnType<typeof apiAs>): Promise<{
+    claim: (name: string) => Promise<void>;
+    claimedEmpty: (name: string) => Promise<boolean>;
+  }> {
+    const html = await Bun.file(BUILD_PATH).text();
+    const from = html.indexOf('async function claim(');
+    const to = html.indexOf('/* ---- screens');
+    expect(from).toBeGreaterThan(0);
+    expect(to).toBeGreaterThan(from);
+    return new Function(
+      'api',
+      `${html.slice(from, to)}; return { claim, claimedEmpty };`,
+    )(api) as {
+      claim: (name: string) => Promise<void>;
+      claimedEmpty: (name: string) => Promise<boolean>;
+    };
+  }
+
+  test('finishes the claim it already made instead of taking a second name', async () => {
+    const { claim } = await pageClaim(apiAs(DAD));
+    const name = kthx().name('resume');
+
+    await claim(name);
+    // The upload is what failed — a tailnet blip, a pod rolling under a merge —
+    // and the second press comes back through here. Before, the claim ran
+    // again, his own row conflicted, and the page told him the address he had
+    // just taken belonged to somebody else.
+    await claim(name);
+
+    await publish(DAD, name, [{ path: 'index.html', bytes: bytes(PAGE) }]);
+    expect(
+      await (await kthx().fetch(ask('/', { host: `${name}.${ZONE}` }))).text(),
+    ).toBe(PAGE);
+  });
+
+  test('does not put a new page over one that is already online', async () => {
+    const { claim } = await pageClaim(apiAs(DAD));
+    const mine = await claimAs(DAD, 'standing');
+    await publish(DAD, mine, [{ path: 'index.html', bytes: bytes(PAGE) }]);
+    // His, but with a page on it: pressing the button twice means "finish
+    // this", never "write over the one I made last week".
+    await expect(claim(mine)).rejects.toMatchObject({ code: 'TAKEN' });
+
+    const hers = await claimAs(MOM, 'hers');
+    await expect(claim(hers)).rejects.toMatchObject({ code: 'TAKEN' });
+  });
+
+  test('reads an unreachable server as neither taken nor free', async () => {
+    const name = await claimAs(DAD, 'unreachable');
+    expect(await (await pageClaim(apiAs(DAD))).claimedEmpty(name)).toBe(true);
+
+    // A check that never arrived must not answer "not yours": one dropped
+    // packet would otherwise send him off to rename an address he owns. The
+    // page tells those apart by the status a refusal carries, so a rejection
+    // with none has to come back out of here rather than reading as a no.
+    const offline = await pageClaim(() => {
+      throw Object.assign(new Error('offline'), { code: 'OFFLINE' });
+    });
+    await expect(offline.claimedEmpty(name)).rejects.toMatchObject({
+      code: 'OFFLINE',
+    });
+    await expect(offline.claim(name)).rejects.toMatchObject({
+      code: 'OFFLINE',
+    });
+  });
+});
+
+/**
+ * Just enough of a document for the handful of properties these screens touch.
+ *
+ * The page is lifted rather than rendered, the way its ZIP writer and its claim
+ * step are: this file has no DOM, and what is worth asserting about a screen
+ * here is which control on it is live — which is the whole of the defect, since
+ * a screen with nothing live on it is where the person stops.
+ */
+interface Node {
+  textContent: string;
+  value: string;
+  hidden: boolean;
+  disabled: boolean;
+  className: string;
+  onclick?: () => void;
+  children: Node[];
+  append: (...kids: Node[]) => void;
+  replaceChildren: (...kids: Node[]) => void;
+  [key: string]: unknown;
+}
+function node(): Node {
+  const made: Node = {
+    textContent: '',
+    value: '',
+    hidden: false,
+    disabled: false,
+    className: '',
+    style: {},
+    children: [],
+    focus: () => undefined,
+    append: (...kids: Node[]) => {
+      made.children.push(...kids);
+    },
+    replaceChildren: (...kids: Node[]) => {
+      made.children = kids;
+    },
+  };
+  return made;
+}
+function screen(values: Record<string, string> = {}) {
+  const made = new Map<string, Node>();
+  const $ = (selector: string): Node => {
+    const id = selector.replace('#', '');
+    let el = made.get(id);
+    if (el === undefined) {
+      el = node();
+      el.value = values[id] ?? '';
+      made.set(id, el);
+    }
+    return el;
+  };
+  return { $, el: (id: string) => $(`#${id}`) };
+}
+
+describe('every refusal this page can meet has a sentence', () => {
+  interface Says {
+    SAYS: { UNKNOWN: string } & Record<string, string | undefined>;
+    GOOD: Set<string>;
+    BEFORE_CHANGING: Record<string, string>;
+    sentence: (err: unknown, also?: Record<string, string>) => string;
+    /** Renders into the stub box below and answers what it was dressed as. */
+    render: (err: unknown) => { className: string; text: string };
+  }
+
+  /** The copy table, the lookup over it, and the box it lands in. */
+  async function pageSays(): Promise<Says> {
+    const html = await Bun.file(BUILD_PATH).text();
+    const from = html.indexOf('const SAYS = {');
+    const to = html.indexOf('/** `fetch`, with a dropped connection');
+    expect(from).toBeGreaterThan(0);
+    expect(to).toBeGreaterThan(from);
+    const box = node();
+    const lifted = new Function(
+      '$',
+      'document',
+      `${html.slice(from, to)}; return { SAYS, GOOD, BEFORE_CHANGING, sentence, oops };`,
+    )(() => box, { createElement: node }) as Omit<Says, 'render'> & {
+      oops: (where: string, err: unknown, lead?: string) => void;
+    };
+    return {
+      ...lifted,
+      render: (err: unknown) => {
+        lifted.oops('#anywhere', err, 'lead');
+        const made = box.children[0] as Node;
+        return {
+          className: made.className,
+          text: made.children.map((kid) => kid.textContent).join(' '),
+        };
+      },
+    };
+  }
+
+  test('covers every code the routes it calls can refuse with', async () => {
+    const { SAYS } = await pageSays();
+    // `POST /api/build`, `GET /api/build/:id`, `POST /api/sites`,
+    // `GET /api/names/:name`, `POST /api/sites/:name/releases` and
+    // `DELETE /api/sites/:name/hold`, as this page calls them.
+    for (const code of [
+      'AI_BUDGET',
+      'AI_UPSTREAM',
+      'BUSY',
+      'FORBIDDEN',
+      'GONE',
+      'INVALID_NAME',
+      'MALFORMED_REQUEST',
+      'NOT_FOUND',
+      'NO_DOCUMENT',
+      'RATE_LIMITED',
+      'RESERVED',
+      'STORAGE_FAILURE',
+      'TAKEN',
+      'TIMEOUT',
+      'TOO_LARGE',
+      'UNAUTHENTICATED',
+    ]) {
+      expect(SAYS[code]).toBeString();
+    }
+  });
+
+  test('never shows the browser its own English, or the server its own', async () => {
+    const { SAYS, sentence } = await pageSays();
+    // What a dropped tailnet actually rejects with on a phone. It has no code,
+    // and its message is the one thing this screen must never read out.
+    expect(sentence(new TypeError('Load failed'))).toBe(SAYS.UNKNOWN);
+    expect(sentence({ code: 'SITE_FULL', message: 'this site is full' })).toBe(
+      SAYS.UNKNOWN,
+    );
+    expect(sentence(undefined)).toBe(SAYS.UNKNOWN);
+    for (const say of Object.values(SAYS)) {
+      expect(say).not.toMatch(/[0-9]{3}|release|token|bearer|endpoint/i);
+    }
+  });
+
+  test('does not say good news in the colour kept for bad', async () => {
+    const { SAYS, render } = await pageSays();
+    // Every one of these is a reassurance — the address is already yours, what
+    // you typed is still here — and they were landing in the red box kept for
+    // things going wrong. Told his site is fine in the colour of an alarm, a
+    // person learns not to trust the colour.
+    for (const code of ['PICKED_UP', 'CLAIMED', 'TYPED_BACK', 'PINNED']) {
+      expect(SAYS[code]).toBeString();
+      const shown = render({ code });
+      expect(shown.className).toContain('note');
+      expect(shown.text).toContain(String(SAYS[code]));
+    }
+    for (const code of ['TAKEN', 'AI_UPSTREAM', 'OFFLINE', 'UNCHANGED']) {
+      expect(render({ code }).className).not.toContain('note');
+    }
+  });
+
+  test('does not send him round a circle no smaller change gets out of', async () => {
+    const { BEFORE_CHANGING, sentence } = await pageSays();
+    // A site whose serving page is over the cap is refused 413 before a model
+    // is asked anything, so what was too big is the page that is already there
+    // — and asking for a smaller change cannot help, because the size is the
+    // same whatever he asks for.
+    const said = sentence({ code: 'TOO_LARGE', status: 413 }, BEFORE_CHANGING);
+    expect(said).not.toMatch(/came back|smaller change/i);
+    expect(said).toBeString();
+  });
+});
+
+describe('an address of his own, on the screens that offer it', () => {
+  /**
+   * Just enough of a document for the three properties these screens touch.
+   *
+   * Lifted rather than rendered, the way the ZIP writer and the claim step
+   * above are: this file has no DOM, and the claims worth making here are about
+   * which control on a screen is live — which is the whole of the defect, since
+   * a screen with nothing live on it is where the person stops.
+   */
+
+  async function slice(from: string, to: string): Promise<string> {
+    const html = await Bun.file(BUILD_PATH).text();
+    const start = html.indexOf(from);
+    const end = html.indexOf(to);
+    expect(start).toBeGreaterThan(0);
+    expect(end).toBeGreaterThan(start);
+    return html.slice(start, end);
+  }
+
+  test('is offered as his own, and not as somebody else’s', async () => {
+    const src = await slice('function propose(done)', '/**\n * The proposal');
+    const said: { code: string | null; lead: string }[] = [];
+    const propose = new Function(
+      'pinned',
+      'draft',
+      'typed',
+      'proposal',
+      'hostOf',
+      `let held = null; ${src} return (done) => { propose(done); return held; };`,
+    )(
+      null,
+      () => undefined,
+      () => undefined,
+      (err: { code: string } | null, lead: string) =>
+        said.push({ code: err?.code ?? null, lead }),
+      (name: string) => `${name}.${ZONE}`,
+    ) as (done: Record<string, unknown>) => Record<string, unknown>;
+
+    const frame = {
+      build: 'b1',
+      name: 'dartmouth-boards',
+      site: null,
+      document: PAGE,
+    };
+    // Nobody's: the ordinary road, and the green button is "Put it online".
+    expect(propose({ ...frame, available: true, yours: null })).toMatchObject({
+      taken: false,
+    });
+    expect(said.at(-1)).toEqual({ code: null, lead: expect.any(String) });
+
+    // His, with nothing on it — the claim a failed upload stranded. The green
+    // button finishes it, and the box says so in the colour for good news.
+    expect(
+      propose({ ...frame, available: false, yours: 'empty' }),
+    ).toMatchObject({ taken: false, yours: 'empty' });
+    expect(said.at(-1)?.code).toBe('CLAIMED');
+
+    // His, with a website on it: the one answer that does need another name,
+    // and still not "belongs to somebody else".
+    expect(
+      propose({ ...frame, available: false, yours: 'live' }),
+    ).toMatchObject({ taken: true, yours: 'live' });
+    expect(said.at(-1)?.code).toBe('YOURS');
+    expect(said.at(-1)?.lead).toContain('already your website');
+
+    // Somebody else's, which is the only time the word taken is the truth.
+    expect(propose({ ...frame, available: false, yours: null })).toMatchObject({
+      taken: true,
+    });
+    expect(said.at(-1)?.code).toBe('TAKEN');
+  });
+
+  test('is on the list, with the one thing left to do with it', async () => {
+    // A claim with no release is a name taken for good, a Postgres database
+    // and a role. Filtered out of "your websites" it was reachable from no
+    // screen on this page, and nothing on the server reclaims it — so a failed
+    // upload followed by "Start again" spent one silently and forever.
+    const src = await slice('/**\n * Every address of his', '/* ---- the wait');
+    const page = screen();
+    const list = new Function(
+      '$',
+      'document',
+      'api',
+      'hostOf',
+      'ago',
+      'askChange',
+      'draft',
+      'typed',
+      'typedBack',
+      'oops',
+      'show',
+      `let held = null; let pinned = null;
+       ${src}
+       return { listMine, usePinned, pinnedNow: () => pinned };`,
+    )(
+      page.$,
+      { createElement: node },
+      async () => ({
+        items: [
+          { name: 'stranded', url: 'x', serving: null, releases: 0 },
+          {
+            name: 'published',
+            url: 'y',
+            serving: 1,
+            releases: 1,
+            changed: null,
+          },
+        ],
+      }),
+      (name: string) => `${name}.${ZONE}`,
+      () => 'changed today',
+      () => undefined,
+      () => undefined,
+      () => undefined,
+      () => ({ ask: 'the sentence he typed' }),
+      () => undefined,
+      () => undefined,
+    ) as {
+      listMine: () => Promise<void>;
+      usePinned: (name: string) => void;
+      pinnedNow: () => string | null;
+    };
+
+    await list.listMine();
+    const rows = page.el('minelist').children;
+    expect(rows).toHaveLength(2);
+    const stranded = rows[0]?.children ?? [];
+    expect(stranded[0]?.textContent).toBe(`stranded.${ZONE}`);
+    const acts = stranded[2]?.children ?? [];
+    expect(acts).toHaveLength(1);
+    expect(acts[0]?.textContent).toBe('Put a page on it');
+
+    // And pressing it is the way back: the next page he makes goes on that
+    // address rather than on whatever the model proposes for it.
+    acts[0]?.onclick?.();
+    expect(list.pinnedNow()).toBe('stranded');
+  });
+
+  test('the address he picks does not cost him the sentence he typed', async () => {
+    // The button sits above the greeting, so the tap that reaches it is most
+    // often the one *after* he has typed a paragraph into the box below it.
+    // Answering "where does it go" by throwing away "what is it" makes the one
+    // recovery on the page a button nobody can afford to press.
+    const src = await slice('/**\n * Every address of his', '/* ---- the wait');
+    const page = screen();
+    const ask = page.el('ask');
+    const lifted = new Function(
+      '$',
+      'document',
+      'api',
+      'hostOf',
+      'ago',
+      'askChange',
+      'draft',
+      'typed',
+      'typedBack',
+      'oops',
+      'show',
+      `let held = null; let pinned = null;
+       ${src}
+       return { usePinned };`,
+    )(
+      page.$,
+      { createElement: node },
+      async () => ({ items: [] }),
+      (name: string) => `${name}.${ZONE}`,
+      () => 'changed today',
+      () => undefined,
+      () => {
+        throw new Error('the draft is not this button to discard');
+      },
+      () => {
+        throw new Error('the backup is not this button to discard');
+      },
+      () => ({ ask: 'a page for my woodworking' }),
+      () => undefined,
+      () => undefined,
+    ) as { usePinned: (name: string) => void };
+
+    ask.value = 'cutting boards and birdhouses in Dartmouth';
+    lifted.usePinned('stranded');
+    expect(ask.value).toBe('cutting boards and birdhouses in Dartmouth');
+
+    // And a box a reload emptied is filled from the backup rather than left
+    // blank beside an address that is now waiting for a page.
+    ask.value = '';
+    lifted.usePinned('stranded');
+    expect(ask.value).toBe('a page for my woodworking');
+  });
+
+  test('leaves the name screen with something he can press', async () => {
+    // The screen has two buttons. Pushed here by a name that is not free it
+    // opens holding that name, so the green one starts disabled — and hiding
+    // the other left a screen with nothing live on it at all, the page he
+    // waited a minute for off it, and a reload the only way out.
+    const src = await slice('function startNaming(', 'function verdict(');
+    const page = screen();
+    const startNaming = new Function(
+      '$',
+      'held',
+      'hostOf',
+      'paintName',
+      'show',
+      `${src} return startNaming;`,
+    )(
+      page.$,
+      { name: 'taken-one', yours: null },
+      (name: string) => `${name}.${ZONE}`,
+      () => undefined,
+      () => undefined,
+    ) as (pushed?: string) => void;
+
+    startNaming('taken-one');
+    expect(page.el('keepname').hidden).toBe(false);
+    expect(page.el('keepname').textContent).toBeTruthy();
+    expect(page.el('namingsay').textContent).not.toContain('somebody else');
+    expect(page.el('name').value).toBe('taken-one');
+
+    startNaming();
+    expect(page.el('keepname').hidden).toBe(false);
+  });
+
+  test('is usable on the name screen when it is his and empty', async () => {
+    const src = await slice('function paintName()', '/* ---- what the buttons');
+    const answers: Record<string, unknown>[] = [];
+    const page = screen({ name: 'his-own' });
+    const verdicts: { say: string; kind?: string }[] = [];
+    const paintName = new Function(
+      '$',
+      'urlOf',
+      'verdict',
+      'api',
+      `let checking = null; ${src} return paintName;`,
+    )(
+      page.$,
+      (name: string) => `https://${name}.${ZONE}`,
+      (say: string, kind?: string) => verdicts.push({ say, kind }),
+      async () => answers.shift() ?? {},
+    ) as () => void;
+
+    // Typing the stranded address back in is the only way back to it once the
+    // draft is gone, and it was refused with "somebody already has that one".
+    answers.push({ available: false, why: 'TAKEN', yours: 'empty' });
+    paintName();
+    await Bun.sleep(400);
+    expect(page.el('usename').disabled).toBe(false);
+    expect(verdicts.at(-1)?.kind).toBe('yes');
+    expect(verdicts.at(-1)?.say).not.toContain('Somebody');
+
+    // A website of his is not usable here — writing a new page over it is not
+    // what this screen does — but the sentence says which it is.
+    answers.push({ available: false, why: 'TAKEN', yours: 'live' });
+    paintName();
+    await Bun.sleep(400);
+    expect(page.el('usename').disabled).toBe(true);
+    expect(verdicts.at(-1)?.say).toContain('your website');
+
+    answers.push({ available: false, why: 'TAKEN', yours: null });
+    paintName();
+    await Bun.sleep(400);
+    expect(page.el('usename').disabled).toBe(true);
+    expect(verdicts.at(-1)?.say).not.toContain('Somebody');
   });
 });
 

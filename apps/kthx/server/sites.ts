@@ -381,24 +381,71 @@ async function listSites(
 
 // --- the name probe ---------------------------------------------------------
 
+/** What a name is to the caller asking about it. */
+export interface Standing {
+  /** Whether `POST /api/sites` would take it — never true for a name with a row. */
+  readonly available: boolean;
+  readonly why: 'INVALID_NAME' | 'RESERVED' | 'TAKEN' | null;
+  /**
+   * The caller's own address, and whether anything is published on it.
+   *
+   * `empty` is the claim itself: a name, a database and a role with no release,
+   * which is what a failed upload leaves behind and what a second press
+   * finishes.
+   */
+  readonly yours: 'empty' | 'live' | null;
+}
+
 /**
- * Whether a name can be claimed.
+ * What a name is, to whoever is asking.
  *
  * This is the question the landing page used to ask by reading a 401 off
  * `GET /api/sites/:name` — a probe that only worked because an owner route
  * answers differently to a name that exists, and that says "taken" to anyone
  * who is simply not its owner. Asked plainly it is one indexed row.
  *
+ * **A name its own owner holds is not taken to him.** Answered owner-blind,
+ * this route and the builder's proposal both called the caller's own address
+ * somebody else's — which sent a person off to rename a name he had already
+ * paid a database and a role for, and made the stranded one unreachable, since
+ * typing it back in was refused by the same sentence. So who is asking is part
+ * of the answer: `yours` is the one field that changes with the caller, and it
+ * is null for everybody who does not open the site, including anonymous callers
+ * on the public apex.
+ *
  * **No `deleted_at` filter.** A deleted name is taken forever: its row is what
  * makes the site host answer 410 rather than handing the name to the next
  * claimer, and a probe that called it free would offer a name the claim then
- * refuses.
+ * refuses. It is not `yours` either — nobody can have it again, its old owner
+ * least of all, and offering it to him would be the same dead end.
  *
  * A fast no, never a promise of a yes: a claim also refuses a name already in
  * `pg_database` or `pg_roles`, and two callers racing for the last free name
  * still both see `available`. Those two catalogue lookups stay off a public
  * unauthenticated route; the claim is the authority.
  */
+export async function nameStanding(ctx: Ctx, name: string): Promise<Standing> {
+  const why = nameProblem(name);
+  if (why !== null) return { available: false, why, yours: null };
+  const [row] = (await ctx.sql`
+    select token_hash, owner_login, serving, deleted_at from sites
+    where name = ${name} limit 1
+  `) as {
+    token_hash: string | null;
+    owner_login: string | null;
+    serving: number | null;
+    deleted_at: Date | null;
+  }[];
+  if (row === undefined) return { available: true, why: null, yours: null };
+  const mine = row.deleted_at === null && opensSite(ctx.caller, row);
+  return {
+    available: false,
+    why: 'TAKEN',
+    yours: mine ? (row.serving === null ? 'empty' : 'live') : null,
+  };
+}
+
+/** {@link nameStanding} as a route: one indexed row, on the directory bucket. */
 export async function nameStatus(ctx: Ctx, segment: string): Promise<Response> {
   if (directoryReads.spend(ctx.caller.bucket)) {
     return refuse('RATE_LIMITED', ctx.id, retryAfter(60));
@@ -409,13 +456,7 @@ export async function nameStatus(ctx: Ctx, segment: string): Promise<Response> {
   } catch {
     return refuse('NOT_FOUND', ctx.id);
   }
-  const why = nameProblem(name);
-  if (why !== null) return ok({ name, available: false, why }, ctx.id);
-  const [row] = (await ctx.sql`
-    select name from sites where name = ${name} limit 1
-  `) as { name: string }[];
-  const taken = row !== undefined;
-  return ok({ name, available: !taken, why: taken ? 'TAKEN' : null }, ctx.id);
+  return ok({ name, ...(await nameStanding(ctx, name)) }, ctx.id);
 }
 
 // --- the nuke ---------------------------------------------------------------
