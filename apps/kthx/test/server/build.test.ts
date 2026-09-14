@@ -4,9 +4,16 @@
  *
  * A real stub upstream that really streams, because every interesting claim
  * here is about time and framing rather than about a return value: the response
- * is held until the model's first content byte, the page is fed progress after
- * it, and a model that thinks for forty seconds must not be cut off by a
+ * opens when the request is accepted, it says something every second the model
+ * is quiet, and a model that thinks for forty seconds must not be cut off by a
  * connection timeout nobody sees fire.
+ *
+ * **A stub that answers instantly cannot fail on any of that**, which is how a
+ * route that held its response for 71-95 s of empty socket passed this file all
+ * the way into somebody's hands. So the stubs here are slow on purpose and the
+ * assertions are timed: {@link thinksFor} and {@link writesSlowly} are the two
+ * that can still fail, and {@link arriving} is what reads a body while it is
+ * still arriving rather than after it has stopped.
  */
 import { afterAll, beforeEach, describe, expect, test } from 'bun:test';
 import { BUILD_PATH } from '@repo/kthx/assets';
@@ -115,10 +122,11 @@ function writes(pieces: readonly string[], tokens = 900): Response {
 /**
  * A model that thinks, writes a word, thinks again, then finishes.
  *
- * Both halves of a real generation, because the socket is idle in two different
- * ways: before the first content byte this server is holding the response, and
- * after it this server is a slow response body. Bun's idle timer treats those
- * differently, and the route has to survive both.
+ * Both halves of a real generation, because the socket goes quiet in two
+ * different ways: before the first content byte, where the route has nothing to
+ * report but that it is waiting, and after it, where the route is a slow
+ * response body. Bun's idle timer treats those differently, and the route has
+ * to survive both.
  */
 function writesSlowly(
   before: number,
@@ -223,6 +231,37 @@ function post(body: unknown, login: string | null = DAD) {
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(body),
   });
+}
+
+/**
+ * Every frame as it lands, with the millisecond it landed on.
+ *
+ * The whole defect was invisible to a test that reads a response to the end and
+ * then looks at it: a body that arrives all at once at ninety seconds and one
+ * that arrives a line at a time from the first millisecond are the same array
+ * afterwards, and only the second one is a page somebody sees.
+ */
+async function* arriving(
+  response: Response,
+): AsyncGenerator<{ frame: Record<string, unknown>; at: number }> {
+  const reader = response.body?.getReader();
+  if (reader === undefined) return;
+  const decoder = new TextDecoder();
+  let held = '';
+  for (;;) {
+    const chunk = await reader.read();
+    if (chunk.done || chunk.value === undefined) return;
+    held += decoder.decode(chunk.value, { stream: true });
+    const lines = held.split('\n');
+    held = lines.pop() ?? '';
+    for (const line of lines) {
+      if (line.trim() === '') continue;
+      yield {
+        frame: JSON.parse(line) as Record<string, unknown>,
+        at: Date.now(),
+      };
+    }
+  }
 }
 
 /** Every frame of an ndjson answer, in order. */
@@ -343,7 +382,14 @@ describe('a page', () => {
     ];
     const all = await read(await post({ ask: 'A page for my woodworking.' }));
 
-    expect(all[0]).toEqual({ t: 'start', model: 'writer' });
+    // The response is open before a model has been asked anything, and it names
+    // the one it is waiting on until that model's first word arrives.
+    expect(all[0]).toEqual({ t: 'accepted' });
+    expect(all[1]).toMatchObject({ t: 'thinking', model: 'writer' });
+    expect(all.find((frame) => frame.t === 'start')).toEqual({
+      t: 'start',
+      model: 'writer',
+    });
     // Progress, not a spinner: the page says how much has been written.
     expect(all.some((frame) => frame.t === 'writing')).toBe(true);
     const last = done(all);
@@ -446,7 +492,17 @@ describe('the upstream', () => {
     ];
     const all = await read(await post({ ask: 'a lawn care page' }));
 
-    expect(all[0]).toEqual({ t: 'start', model: 'second-writer' });
+    expect(all[0]).toEqual({ t: 'accepted' });
+    // The fallback used to run behind a held response, so the page had only its
+    // own clock to fill that silence with. It runs on an open one now, and the
+    // model named in `thinking` changing is the whole of the signal.
+    expect(
+      all.filter((frame) => frame.t === 'thinking').map((frame) => frame.model),
+    ).toEqual(['writer', 'second-writer']);
+    expect(all.find((frame) => frame.t === 'start')).toEqual({
+      t: 'start',
+      model: 'second-writer',
+    });
     expect(asked.map((seen) => seen.model)).toEqual([
       'writer',
       'second-writer',
@@ -461,9 +517,11 @@ describe('the upstream', () => {
     // emit no content at all. Nothing was written, so nothing may be published
     // — but it answered, and what it spent reasoning is charged.
     answers = [() => thinksOnly(), () => thinksOnly()];
-    const refused = await post({ ask: 'a page' });
-    expect(refused.status).toBe(502);
-    expect((await refused.json()).code).toBe('AI_UPSTREAM');
+    const answer = await post({ ask: 'a page' });
+    expect(answer.status).toBe(200);
+    const all = await read(answer);
+    expect(failed(all)).toMatchObject({ code: 'AI_UPSTREAM' });
+    expect(done(all)).toBeNull();
     expect(asked).toHaveLength(2);
     expect(await spent()).toEqual({ requests: 2, tokens: 32000 });
   });
@@ -478,8 +536,8 @@ describe('the upstream', () => {
       () => new Response('no credit', { status: 401 }),
       () => new Response('down', { status: 503 }),
     ];
-    const refused = await post({ ask: 'a page for my woodworking' });
-    expect(refused.status).toBe(502);
+    const all = await read(await post({ ask: 'a page for my woodworking' }));
+    expect(failed(all)).toMatchObject({ code: 'AI_UPSTREAM' });
     expect(asked).toHaveLength(2);
     expect(await spent()).toEqual({ requests: 0, tokens: 0 });
   });
@@ -497,8 +555,8 @@ describe('the upstream', () => {
         () => new Response('not here', { status }),
         () => new Response('not here', { status }),
       ];
-      const refused = await post({ ask: 'a page for my woodworking' });
-      expect(refused.status).toBe(502);
+      const all = await read(await post({ ask: 'a page for my woodworking' }));
+      expect(failed(all)).toMatchObject({ code: 'AI_UPSTREAM' });
       expect(asked).toHaveLength(2);
       expect(await spent()).toEqual({ requests: 0, tokens: 0 });
       asked = [];
@@ -515,8 +573,8 @@ describe('the upstream', () => {
       () => new Response(null, { status: 200 }),
       () => new Response(null, { status: 200 }),
     ];
-    const refused = await post({ ask: 'a page' });
-    expect(refused.status).toBe(502);
+    const all = await read(await post({ ask: 'a page' }));
+    expect(failed(all)).toMatchObject({ code: 'AI_UPSTREAM' });
     expect(asked).toHaveLength(2);
     expect(await spent()).toEqual({ requests: 0, tokens: 0 });
   });
@@ -530,18 +588,18 @@ describe('the upstream', () => {
       () => new Response('context length', { status: 400 }),
       () => new Response('context length', { status: 400 }),
     ];
-    const refused = await post({ ask: 'a page' });
-    expect(refused.status).toBe(502);
+    const all = await read(await post({ ask: 'a page' }));
+    expect(failed(all)).toMatchObject({ code: 'AI_UPSTREAM' });
     expect(await spent()).toEqual({ requests: 2, tokens: 0 });
   });
 
   test('gives the slot back when the control database does not answer', async () => {
-    // The attempt is counted against the day before the upstream is dialled,
-    // and an ordinary CNPG blip rejects that await. The in-flight slot is taken
-    // before it: released on the paths that return and not on the one that
-    // throws, a single Postgres error left this login reading "one at a time"
-    // for the life of the pod, and four of them closed the builder for
-    // everybody on the tailnet.
+    // The day is read before the response opens — it is the last thing here
+    // that can still be a status — and an ordinary CNPG blip rejects that
+    // await. The in-flight slot is taken before it: released on the paths that
+    // return and not on the one that throws, a single Postgres error left this
+    // login reading "one at a time" for the life of the pod, and four of them
+    // closed the builder for everybody on the tailnet.
     await kthx().sql`alter table build_usage rename to build_usage_gone`;
     const broken = await post({ ask: 'a page' });
     expect(broken.status).toBe(500);
@@ -563,6 +621,102 @@ describe('the upstream', () => {
     expect((await refused.json()).code).toBe('AI_BUDGET');
     expect(refused.headers.get('retry-after')).not.toBeNull();
     expect(asked).toHaveLength(0);
+  });
+});
+
+describe('the silence before a model writes', () => {
+  test('is answered at once, and spoken through', async () => {
+    // The defect this file could not see, and the reason it could not. Every
+    // other stub here answers in microseconds, so the response always arrived
+    // before anything could give up on it, and the 71-95 s of empty socket
+    // production measured — twice, against the real model — was invisible from
+    // in here. A browser abandons a `fetch` long before ninety seconds and
+    // rejects it with a sentence of its own making: "Load failed", which is
+    // what was on the screen.
+    //
+    // This stub is quiet for twenty seconds, twice Bun's default idle timeout,
+    // and the claim is that bytes reach the client all the way through it.
+    answers = [
+      () => thinksFor(20_000, '<!-- kthx-name: patient -->\n', [PAGE]),
+    ];
+    const server = kthx().listen();
+    const began = Date.now();
+    const response = await fetch(`${server.url.origin}/api/build`, {
+      method: 'POST',
+      headers: {
+        host: IDENTITY,
+        'content-type': 'application/json',
+        'tailscale-user-login': DAD,
+      },
+      body: JSON.stringify({ ask: 'a page for my woodworking' }),
+    });
+    expect(response.status).toBe(200);
+    expect(response.headers.get('content-type')).toBe('application/x-ndjson');
+
+    // The status on its own proves nothing — `fetch` resolves on headers — so
+    // the frames are read as they land and timed against the model's silence.
+    const all: Record<string, unknown>[] = [];
+    const at: number[] = [];
+    for await (const landed of arriving(response)) {
+      all.push(landed.frame);
+      at.push(landed.at - began);
+      if (landed.frame.t === 'done' || landed.frame.t === 'error') break;
+    }
+
+    // The assertion that would have caught it: a first byte while the model is
+    // twenty seconds from writing one. Asserted before the frame's shape so a
+    // failure here reads as the wait it is rather than as a renamed field.
+    expect(at[0]).toBeLessThan(5_000);
+    expect(all[0]).toEqual({ t: 'accepted' });
+    const thinking = all.filter((frame) => frame.t === 'thinking');
+    // One a second through a twenty-second silence, every one of them naming
+    // the model that is busy — a reasoning model is working, not idle, and the
+    // page is now able to say so instead of spinning.
+    expect(thinking.length).toBeGreaterThanOrEqual(10);
+    expect(thinking.every((frame) => frame.model === 'writer')).toBe(true);
+    expect(thinking.at(-1)?.ms).toBeGreaterThan(9_000);
+    // And they were not one burst at the end: the last of them landed while the
+    // model was still silent, which is the only reason the wait is countable.
+    const last = all.reduce(
+      (found, frame, index) => (frame.t === 'thinking' ? index : found),
+      -1,
+    );
+    expect(at[last]).toBeGreaterThan(15_000);
+    // Not strictly less than the last frame of all: the model's first byte and
+    // a heartbeat tick can land in the same millisecond, and a test that fails
+    // one run in two hundred on a coincidence teaches people to re-run it.
+    expect(at[last]).toBeLessThanOrEqual(at.at(-1) ?? 0);
+    // The page still arrives, which is the other half of the bargain.
+    expect(done(all)).toMatchObject({ name: 'patient', document: PAGE });
+  }, 60_000);
+
+  test('ends in a frame, never in a status, however it ends', async () => {
+    // Moving where a request is accepted moves every upstream fault with it:
+    // once the body is a stream there is no status left to refuse with, so a
+    // page that reads a code has to find one in the frames. Both models refuse
+    // outright, and the answer is still 200.
+    answers = [
+      () => new Response('down', { status: 503 }),
+      () => new Response('down', { status: 503 }),
+    ];
+    const answer = await post({ ask: 'a page for my woodworking' });
+    expect(answer.status).toBe(200);
+    expect(answer.headers.get('content-type')).toBe('application/x-ndjson');
+
+    const all = await read(answer);
+    expect(all[0]).toEqual({ t: 'accepted' });
+    expect(
+      all.filter((frame) => frame.t === 'thinking').map((frame) => frame.model),
+    ).toEqual(['writer', 'second-writer']);
+    // No model wrote a word, so there is no `start` and nothing to publish —
+    // and the last frame carries the same code and the same fixed sentence the
+    // 502 used to carry in a body nobody was left to read.
+    expect(all.some((frame) => frame.t === 'start')).toBe(false);
+    expect(done(all)).toBeNull();
+    expect(all.at(-1)).toMatchObject({ t: 'error', code: 'AI_UPSTREAM' });
+    expect(all.at(-1)?.message).toBeString();
+    // It is still this deployment's fault, so it still costs him nothing.
+    expect(await spent()).toEqual({ requests: 0, tokens: 0 });
   });
 });
 
@@ -641,12 +795,12 @@ describe('the connection', () => {
   test('outlives a model that thinks for forty seconds', async () => {
     // Bun closes a connection that has sent nothing for its idle timeout —
     // 30 s in production, Bun's own 10 s here, both of them far under the
-    // 30-150 s a measured generation takes — and this route sends nothing
-    // until the model writes its first word. Without the per-request
-    // `server.timeout` the socket closes with no status, no body and no log
-    // line, on the least technical caller this server has. Timed rather than
-    // mocked: `server.timeout` is a fact about a socket, and a fake that
-    // records the call would pass with the argument in seconds or in
+    // 30-150 s a measured generation takes. The heartbeat is what keeps this
+    // socket busy now and `server.timeout` is the belt behind it, so this walks
+    // the whole road with a twenty-second think *and* a twenty-second gap
+    // mid-document, which is the half no frame-counting test reaches. Timed
+    // rather than mocked: `server.timeout` is a fact about a socket, and a fake
+    // that records the call would pass with the argument in seconds or in
     // milliseconds.
     answers = [
       () =>
