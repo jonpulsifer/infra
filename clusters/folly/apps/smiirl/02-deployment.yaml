@@ -32,7 +32,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: smiirl
-          image: ghcr.io/jonpulsifer/smiirl:latest@sha256:3e0ee9c8c2586f464ad00fc1fe098580fd45c867cfc2cc3a58e118caf24b5de7
+          image: ghcr.io/jonpulsifer/smiirl:latest@sha256:68d46194c617eeec0671f508c18ff73dab84b1e540e8f3976f49c2de878ea36d
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
