@@ -159,7 +159,7 @@
         "@opentelemetry/semantic-conventions": "^1.30.0",
         "@repo/archive": "workspace:*",
         "drizzle-orm": "0.45.2",
-        "vercel": "59.12.0",
+        "vercel": "59.13.1",
         "zod": "4.5.4",
       },
       "devDependencies": {
@@ -1212,13 +1212,13 @@
 
     "@vercel/static-config": ["@vercel/static-config@3.4.3", "", { "dependencies": { "ajv": "8.6.3", "json-schema-to-ts": "1.6.4", "oxc-parser": "0.121.0", "ts-morph": "12.0.0" } }, "sha512-BY1sL8rNJvIm3TK/8TQ+Q6jIx7NpO5xckQzv7s6c1ypHvRnTl+vf6rmgY5WFXmoYDeGm3tMy4jiy/5M/5jGr/g=="],
 
-    "@vercel/vc-native-darwin-arm64": ["@vercel/vc-native-darwin-arm64@59.12.0", "", { "os": "darwin", "cpu": "arm64" }, "sha512-1oFctumPTJxMKYPS+FTiBuDdykfxvFnmP0lYuYuLaFAyZdxcbF7cgcekqSNbNa83qtCQZmwm1wZpV18EobzT+w=="],
+    "@vercel/vc-native-darwin-arm64": ["@vercel/vc-native-darwin-arm64@59.13.1", "", { "os": "darwin", "cpu": "arm64" }, "sha512-PGNDXWhQQ0oTcISSr9JzrPY0zSW7yp30X1byCtZhm6DCdo3pWK+vuoHrJ1NHvkesTeSRNk14ejDPWfDYWNgHDg=="],
 
-    "@vercel/vc-native-darwin-x64": ["@vercel/vc-native-darwin-x64@59.12.0", "", { "os": "darwin", "cpu": "x64" }, "sha512-wWMZg5gwxuriIATRylDjms8KGJNGEKlbtOdPq7Yatovh1Twwm2jf/yVeYFfpET+01wjKcWRy7WudWBGmlNyPWg=="],
+    "@vercel/vc-native-darwin-x64": ["@vercel/vc-native-darwin-x64@59.13.1", "", { "os": "darwin", "cpu": "x64" }, "sha512-syRdmkuvIoUWRqWUobfLd4QJN72PfB7KgPS29ah3h0Bivj9N8WL8ofJNv2UYO/59jugmWroCcTHAtuBvXTPdqg=="],
 
-    "@vercel/vc-native-linux-arm64": ["@vercel/vc-native-linux-arm64@59.12.0", "", { "os": "linux", "cpu": "arm64" }, "sha512-MpbWGH5eH8J+ZgGBDwveinjGZWrjeO37R93IcT1rYivhPdEDB4ruumsOk64D8OveXcOLExxFSdhcLzMpCv6OhA=="],
+    "@vercel/vc-native-linux-arm64": ["@vercel/vc-native-linux-arm64@59.13.1", "", { "os": "linux", "cpu": "arm64" }, "sha512-vWLGdCrQSGUuS4csFCAZ2rpQ2MJkxfFoLFcOkPA5xT0Nwgoc7CQLBLxZm3ri0DUXTFU4phrdav00e3rlgV6C+Q=="],
 
-    "@vercel/vc-native-linux-x64": ["@vercel/vc-native-linux-x64@59.12.0", "", { "os": "linux", "cpu": "x64" }, "sha512-xaMQFZ5aKcNiMbtN3+/0WRifV3e3urg6n874IzLZqgrRPrrG2YC9RDLPJA8RRuySQHMNPXZQeDCcJTnm5ueeGA=="],
+    "@vercel/vc-native-linux-x64": ["@vercel/vc-native-linux-x64@59.13.1", "", { "os": "linux", "cpu": "x64" }, "sha512-sZlkpA+1NqeLEilNSeo/A0QnxtnvY8hT5C2YAzRupfAmXQFcPvppfu2bz7eQOua1msJJFQDi9V9Au+KJCbSfdg=="],
 
     "@workflow/serde": ["@workflow/serde@4.1.0-beta.2", "", {}, "sha512-8kkeoQKLDaKXefjV5dbhBj2aErfKp1Mc4pb6tj8144cF+Em5SPbyMbyLCHp+BVrFfFVCBluCtMx+jjvaFVZGww=="],
 
@@ -2172,7 +2172,7 @@
 
     "vaul": ["vaul@1.1.2", "", { "dependencies": { "@radix-ui/react-dialog": "^1.1.1" }, "peerDependencies": { "react": "^16.8 || ^17.0 || ^18.0 || ^19.0.0 || ^19.0.0-rc", "react-dom": "^16.8 || ^17.0 || ^18.0 || ^19.0.0 || ^19.0.0-rc" } }, "sha512-ZFkClGpWyI2WUQjdLJ/BaGuV6AVQiJ3uELGk3OYtP+B6yCO7Cmn9vPFXVJkRaGkOJu3m8bQMgtyzNHixULceQA=="],
 
-    "vercel": ["vercel@59.12.0", "", { "dependencies": { "@vercel/backends": "7.0.3", "@vercel/blob": "2.8.0", "@vercel/build-utils": "14.9.2", "@vercel/cli-auth": "0.3.6", "@vercel/cli-config": "0.2.5", "@vercel/container": "7.0.2", "@vercel/detect-agent": "1.2.5", "@vercel/elysia": "7.0.2", "@vercel/express": "7.0.3", "@vercel/fastify": "7.0.2", "@vercel/fun": "1.3.0", "@vercel/go": "10.1.0", "@vercel/h3": "7.0.2", "@vercel/hono": "7.0.2", "@vercel/hydrogen": "8.0.2", "@vercel/koa": "7.0.2", "@vercel/nestjs": "7.0.2", "@vercel/next": "11.0.3", "@vercel/node": "12.0.2", "@vercel/prepare-flags-definitions": "0.3.0", "@vercel/python": "13.0.2", "@vercel/python-analysis": "0.14.0", "@vercel/redwood": "9.0.2", "@vercel/remix-builder": "12.0.2", "@vercel/ruby": "9.0.2", "@vercel/rust": "8.0.2", "@vercel/static-build": "9.0.2", "chokidar": "4.0.0", "esbuild": "0.27.0", "jose": "5.9.6", "jsonc-parser": "3.3.1", "luxon": "^3.4.0", "sandbox": "4.1.0", "smol-toml": "1.5.2", "undici": "5.29.0", "uuid": "14.0.1", "zod": "4.1.11" }, "optionalDependencies": { "@vercel/vc-native-darwin-arm64": "59.12.0", "@vercel/vc-native-darwin-x64": "59.12.0", "@vercel/vc-native-linux-arm64": "59.12.0", "@vercel/vc-native-linux-x64": "59.12.0" }, "bin": { "vc": "dist/vc.js", "vercel": "dist/vc.js" } }, "sha512-W0j7p5iFhsFrDMS6S43hJMOBGkStlWIt1MKpP/nhNYzpwncWqqIfxh0POIudMs0BLX4zxTby1QXR2JL5zPQbbg=="],
+    "vercel": ["vercel@59.13.1", "", { "dependencies": { "@vercel/backends": "7.0.3", "@vercel/blob": "2.8.0", "@vercel/build-utils": "14.9.2", "@vercel/cli-auth": "0.3.6", "@vercel/cli-config": "0.2.5", "@vercel/container": "7.0.2", "@vercel/detect-agent": "1.2.5", "@vercel/elysia": "7.0.2", "@vercel/express": "7.0.3", "@vercel/fastify": "7.0.2", "@vercel/fun": "1.3.0", "@vercel/go": "10.1.0", "@vercel/h3": "7.0.2", "@vercel/hono": "7.0.2", "@vercel/hydrogen": "8.0.2", "@vercel/koa": "7.0.2", "@vercel/nestjs": "7.0.2", "@vercel/next": "11.0.3", "@vercel/node": "12.0.2", "@vercel/prepare-flags-definitions": "0.3.0", "@vercel/python": "13.0.2", "@vercel/python-analysis": "0.14.0", "@vercel/redwood": "9.0.2", "@vercel/remix-builder": "12.0.2", "@vercel/ruby": "9.0.2", "@vercel/rust": "8.0.2", "@vercel/static-build": "9.0.2", "chokidar": "4.0.0", "esbuild": "0.27.0", "jose": "5.9.6", "jsonc-parser": "3.3.1", "luxon": "^3.4.0", "sandbox": "4.1.0", "smol-toml": "1.5.2", "undici": "5.29.0", "uuid": "14.0.1", "zod": "4.1.11" }, "optionalDependencies": { "@vercel/vc-native-darwin-arm64": "59.13.1", "@vercel/vc-native-darwin-x64": "59.13.1", "@vercel/vc-native-linux-arm64": "59.13.1", "@vercel/vc-native-linux-x64": "59.13.1" }, "bin": { "vc": "dist/vc.js", "vercel": "dist/vc.js" } }, "sha512-sBxGOvWru8BFdCaqlRhtARTAWDL4FV+Q8APcN63lnOEryTXRce1z3DBWzaakpsts+uF1Sy9MdrTft0zPOWpGuA=="],
 
     "vfile": ["vfile@6.0.3", "", { "dependencies": { "@types/unist": "^3.0.0", "vfile-message": "^4.0.0" } }, "sha512-KzIbH/9tXat2u30jf+smMwFCsno4wHVdNmzFyL+T/L3UGqqk6JKfVqOFOZEpZSHADH1k40ab6NUIXZq422ov3Q=="],
 
