@@ -29,7 +29,7 @@
     "@repo/archive": "workspace:*",
     "drizzle-orm": "0.45.2",
     "vercel": "59.14.0",
-    "zod": "4.5.4"
+    "zod": "4.6.0"
   },
   "devDependencies": {
     "@radix-ui/react-collapsible": "1.1.20",
