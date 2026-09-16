@@ -44,6 +44,7 @@ in
 
   imports = [
     ./gvisor.nix
+    ./kata.nix
     ./longhorn.nix
   ];
 

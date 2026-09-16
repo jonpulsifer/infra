@@ -20,6 +20,11 @@ tags:: architecture
 	- This root applies through Atlantis like any other Terraform module — see [[Architecture/GitOps]].
 - ## Nodes
 	- `clusters/folly/nodes/` adds the Intel device-plugin operator, the GPU device plugin, and node-feature-discovery (`intel-uhd-630.yaml`) for the folly nodes' integrated GPUs. offsite has no `nodes/` directory — no device-plugin layer runs there.
+- ## Sandbox runtimes
+	- Both clusters carry the `RuntimeClass` objects declared in `clusters/base/cluster-runtimeclass.yaml`: `gvisor` on handler `runsc`, and `kata` on handler `kata`. A workload opts in with `runtimeClassName`; a pod that names neither runs on `runc`.
+	- The node half lives in `nix/services/k8s/gvisor.nix` and `nix/services/k8s/kata.nix`, both imported by `nix/services/k8s/default.nix`. Each puts its runtime package on containerd's PATH and registers a handler under `plugins."io.containerd.grpc.v1.cri".containerd.runtimes`. That containerd handler name is exactly what a `RuntimeClass` selects, so the two halves have to agree.
+	- `kata` runs each pod as a QEMU microVM, which needs KVM plus the `vhost_vsock` and `vhost_net` drivers. All five nodes are bare-metal Intel machines and `nix/profiles/k8s-node.nix` already loads `kvm-intel`, so the runtime is available on every node and the `RuntimeClass` carries no scheduling constraint. Its `overhead.podFixed` is what charges a kata pod for the guest kernel and qemu process it costs the node.
+	- The kubelet rejects a pod whose `RuntimeClass` handler its containerd does not define, so the Nix side has to reach every node before a workload names the class. A node deployed from a branch reverts on its next auto-upgrade — see [[Architecture/NixOS]].
 - ## Storage
 	- `clusters/base/storage/` provides `local-path-provisioner`, shared by both clusters.
 	- `clusters/folly/storage/` layers an NFS provisioner (`nfs-provisioner/`, backed by spore) and a static PV (`spore-pv.yaml`) on top. offsite uses `base/storage` unmodified.
