@@ -1,0 +1,61 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: kata-demo
+  namespace: kata-demo
+  labels:
+    app.kubernetes.io/name: kata-demo
+    app.kubernetes.io/part-of: kata-demo
+data:
+  default.conf: |-
+    server {
+      listen 8080 default_server;
+      listen [::]:8080 default_server;
+      root /srv;
+      index index.html;
+      location / {
+        try_files $uri $uri/ =404;
+      }
+    }
+  # Everything this page reports is read from inside the sandbox at startup.
+  # The interesting lines are the ones that differ from the node: a kernel the
+  # pod does not share with its host, a vCPU count and memory size set by the
+  # VMM rather than by the node's capacity, and an empty DMI tree — Cloud
+  # Hypervisor boots the guest kernel directly, so the guest has no firmware to
+  # describe itself with.
+  #
+  # Shell variables are written bare on purpose. Flux postBuild substitutes
+  # $-brace references before this ConfigMap is applied, so a $-brace here
+  # would reach the container already emptied.
+  render.sh: |-
+    set -eu
+    kernel=$(uname -r)
+    cpus=$(nproc)
+    mem=$(awk '/MemTotal/ {printf "%d MiB", $2/1024}' /proc/meminfo)
+    if grep -qw hypervisor /proc/cpuinfo; then virt=yes; else virt=no; fi
+    dmi=$(cat /sys/class/dmi/id/product_name 2>/dev/null || echo "none (direct kernel boot)")
+    cat > /srv/index.html <<HTML
+    <!doctype html>
+    <meta charset="utf-8">
+    <title>kata-clh demo</title>
+    <style>
+      body { font: 16px/1.6 system-ui, sans-serif; margin: 3rem auto; max-width: 42rem; padding: 0 1rem; }
+      table { border-collapse: collapse; width: 100%; }
+      th, td { text-align: left; padding: .35rem .6rem; border-bottom: 1px solid #ddd; }
+      th { width: 13rem; font-weight: 600; }
+      code { font-family: ui-monospace, monospace; }
+    </style>
+    <h1>Hello from inside a microVM</h1>
+    <p>This pod runs under the <code>kata-clh</code> RuntimeClass: a Kata
+    Containers sandbox with Cloud Hypervisor as the VMM. It does not share the
+    node's kernel.</p>
+    <table>
+      <tr><th>Pod</th><td><code>$POD_NAME</code></td></tr>
+      <tr><th>Node</th><td><code>$NODE_NAME</code></td></tr>
+      <tr><th>Guest kernel</th><td><code>$kernel</code></td></tr>
+      <tr><th>Guest vCPUs</th><td><code>$cpus</code></td></tr>
+      <tr><th>Guest memory</th><td><code>$mem</code></td></tr>
+      <tr><th>CPU hypervisor flag</th><td><code>$virt</code></td></tr>
+      <tr><th>DMI product</th><td><code>$dmi</code></td></tr>
+    </table>
+    HTML

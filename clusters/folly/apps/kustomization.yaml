@@ -10,6 +10,7 @@ resources:
   - falco
   - jellyfin.yaml
   - k6
+  - kata-demo
   - netbench
   - open-webui
   - postgres
