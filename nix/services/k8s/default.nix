@@ -44,12 +44,14 @@ in
 
   imports = [
     ./gvisor.nix
+    ./kata.nix
     ./longhorn.nix
   ];
 
   config = lib.mkIf cfg.enable {
     nixpkgs.overlays = [
       (import ../../overlays/certmgr.nix)
+      (import ../../overlays/kata-runtime.nix)
       (import ../../overlays/runc.nix)
     ];
 
