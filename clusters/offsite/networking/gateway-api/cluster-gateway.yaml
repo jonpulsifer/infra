@@ -22,22 +22,6 @@ spec:
                   - agents-sandbox
         kinds:
           - kind: HTTPRoute
-    - name: dave-tls
-      protocol: HTTPS
-      port: 443
-      hostname: &hostname "dave.${SECRET_DOMAIN}"
-      tls:
-        certificateRefs:
-          - kind: Secret
-            name: *hostname
-      allowedRoutes:
-        namespaces:
-          from: Selector
-          selector:
-            matchLabels:
-              kubernetes.io/metadata.name: agents-sandbox
-        kinds:
-          - kind: HTTPRoute
     # The authenticated edge. oauth2-proxy answers on a name in the App zone
     # (`SPINDRIFT_DOMAIN`, see `clusters/base/cluster-settings.yaml`), and its
     # HTTPRoute lives in its own namespace, so this listener names both: the

@@ -19,9 +19,6 @@
     "actions-runner": [
       "clusters/base/apps/arc/infra.yaml"
     ],
-    "ai-agents": [
-      "clusters/offsite/apps/dave.yaml"
-    ],
     "atlantis": [
       "clusters/offsite/apps/atlantis/helm-release.yaml"
     ],

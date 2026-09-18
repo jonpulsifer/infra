@@ -11,7 +11,6 @@ resources:
   - prowler
   - spindrift
   - ../../base/platform/spindrift-target
-  - dave.yaml
   - ../../base/apps/reloader
 patches:
   - target:
