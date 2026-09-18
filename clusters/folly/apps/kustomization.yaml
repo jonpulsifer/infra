@@ -19,7 +19,6 @@ resources:
   - spindrift-target
   - ../../base/apps/reloader
   # - satisfactory
-  - hermes
   - tronbyt
   - vault
 patches:

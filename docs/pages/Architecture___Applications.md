@@ -26,7 +26,7 @@ tags:: architecture
 	- `apps/ddnsd` is Go source vendored in-repo; `nix/overlays/ddnsd.nix` builds it as a Nix package (`callPackage ../../apps/ddnsd/package.nix`) and `nix/system/ddnsd.nix` imports `apps/ddnsd/module.nix` to run it as a `systemd` service, configured per-host (zone, token file) with `services.ddnsd.enable`. This is how homelab hosts actually run `ddnsd` — through the NixOS closure, not a container.
 	- `apps/ddnsd` also has a `Dockerfile` and IS in `containers.json`'s `build` list, so `ghcr.io/jonpulsifer/ddnsd` exists — the README documents it as a general-purpose Cloudflare DDNS client for anyone, container included. The two facts coexist: the image is published for external/portable use; this repo's own deployment path for it is Nix, not that image.
 - ## Helm charts: how Flux consumes `packages/charts/`
-	- `packages/charts/` holds first-party charts (`app`, `ai-agent`) with no Dockerfile of their own. A `HelmRelease` references one by relative path against the `infra` `GitRepository`, e.g. `clusters/offsite/apps/hub/helm-release.yaml`:
+	- `packages/charts/` holds first-party charts with no Dockerfile of their own. A `HelmRelease` references one by relative path against the `infra` `GitRepository`, e.g. `clusters/offsite/apps/hub/helm-release.yaml`:
 		- ```yaml
 		  chart:
 		    spec:

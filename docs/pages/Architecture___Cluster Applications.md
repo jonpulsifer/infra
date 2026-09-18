@@ -22,7 +22,6 @@ tags:: architecture
 	  | `descheduler` | Cluster-local descheduler release. |
 	  | `dump.yaml` | Scratch nginx pod for poking at cluster networking. |
 	  | `falco` | Runtime security monitoring. |
-	  | `hermes` | Nous Research Hermes agent, deployed through the first-party `packages/charts/ai-agent` chart. |
 	  | `jellyfin.yaml` | Media server. |
 	  | `k6` | The k6 operator, plus the TestRun scaffolding for lab load tests. |
 	  | `netbench` | First-party network benchmark image. |
@@ -39,7 +38,6 @@ tags:: architecture
 	- | Directory | What it is |
 	  | --- | --- |
 	  | `atlantis` | The Terraform apply path for every PR — see [[Architecture/GitOps]]. |
-	  | `dave.yaml` | An `ai-agent` chart release in the `agents-sandbox` namespace. |
 	  | `descheduler` | Cluster-local descheduler release. |
 	  | `hub` | `apps/hub`, deployed through the first-party `packages/charts/app` chart. |
 	  | `prowler` | Cloud security posture scanning, via `packages/charts/prowler`. |
