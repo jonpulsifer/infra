@@ -21,15 +21,7 @@ import { getInstruments, lazyInstruments } from './metrics.ts';
 import { type Sandboxes, StubSandboxes } from './sandbox.ts';
 import { KubeSandboxes } from './sandboxes.ts';
 import { fileSessionStore, memorySessionStore } from './session.ts';
-import {
-  type BlockActions,
-  openSocket,
-  slackInbound,
-  slackSessionStopped,
-  slackStop,
-  slackSurface,
-  slackWeb,
-} from './slack.ts';
+import { openSocket, slackEvent, slackSurface, slackWeb } from './slack.ts';
 import { SocketMode } from './socket.ts';
 import {
   EXPORT_TIMEOUT_MS,
@@ -148,6 +140,7 @@ async function openSlack(slack: SlackConfig) {
       allowedUserIds: slack.allowedUserIds,
       allowedChannelIds: slack.allowedChannelIds,
       log,
+      clock: systemClock,
     }),
     listen(threads: Threads): SocketMode {
       const socket = new SocketMode({
@@ -156,24 +149,15 @@ async function openSlack(slack: SlackConfig) {
         clock: systemClock,
         log,
         since: Date.now(),
-        onEvent: (payload) => {
-          const event = payload.event ?? {};
-          // Slack's own stop control, for an app subscribed to it: the same
-          // cancel the button asks for, under the same thread key.
-          const stopped = slackSessionStopped(event);
-          if (stopped) {
-            void threads.onStop(stopped.key, stopped.userId, async () => {});
-            return;
-          }
-          const inbound = slackInbound(event, identity.userId);
-          if (inbound) void threads.onMessage(inbound);
-        },
-        onInteractive: (payload) => {
-          const stop = slackStop(payload as BlockActions);
-          // Already acknowledged on the socket, which is the only ack Slack
-          // is waiting for.
-          if (stop) void threads.onStop(stop.key, stop.userId, async () => {});
-        },
+        onEvent: (payload) =>
+          slackEvent(payload.event ?? {}, identity.userId, {
+            // Slack's own stop control: the same cancel the Discord button
+            // asks for, on the same thread key, and already acknowledged on
+            // the socket — which is the only ack Slack is waiting for.
+            stopped: (stop) =>
+              void threads.onStop(stop.key, stop.userId, async () => {}),
+            message: (inbound) => void threads.onMessage(inbound),
+          }),
       });
       void socket.run();
       return socket;
