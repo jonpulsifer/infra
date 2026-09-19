@@ -158,15 +158,7 @@ export class FakeSurface implements Surface {
 }
 
 export type SlackCall =
-  | {
-      call: 'post';
-      channel: string;
-      threadTs: string;
-      text: string;
-      blocks: unknown[] | null;
-      stop: boolean;
-    }
-  | { call: 'remove'; ts: string }
+  | { call: 'post'; channel: string; threadTs: string; text: string }
   | { call: 'start'; args: StreamStart }
   | { call: 'append'; ts: string; chunks: StreamChunk[] }
   | { call: 'stop'; ts: string }
@@ -176,36 +168,20 @@ export class FakeSlack implements SlackApi {
   readonly calls: SlackCall[] = [];
   readonly thread: SlackMessage[] = [];
   readonly names = new Map<string, string>();
-  failRemove: Error | null = null;
   failStopStream: Error | null = null;
   failSession: Error | null = null;
   failAppend: Error | null = null;
+  failStart: Error | null = null;
   private serial = 0;
 
-  async post(
-    channel: string,
-    threadTs: string,
-    text: string,
-    blocks?: unknown[],
-  ): Promise<string> {
+  async post(channel: string, threadTs: string, text: string): Promise<string> {
     const ts = `p-${++this.serial}`;
-    this.calls.push({
-      call: 'post',
-      channel,
-      threadTs,
-      text,
-      blocks: blocks ?? null,
-      stop: Boolean(blocks?.length),
-    });
+    this.calls.push({ call: 'post', channel, threadTs, text });
     return ts;
   }
 
-  async remove(_channel: string, ts: string): Promise<void> {
-    if (this.failRemove) throw this.failRemove;
-    this.calls.push({ call: 'remove', ts });
-  }
-
   async startStream(args: StreamStart): Promise<string> {
+    if (this.failStart) throw this.failStart;
     const ts = `s-${++this.serial}`;
     this.calls.push({ call: 'start', args });
     return ts;

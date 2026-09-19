@@ -87,7 +87,7 @@ export interface ToolCall {
 export interface Canvas {
   /** The answer so far, and the line naming what the harness is doing. */
   live(text: string, status: string | null): Promise<void>;
-  /** The last frame; the Stop affordance goes away with it. */
+  /** The last frame; whatever the surface drew for a live turn goes with it. */
   final(text: string, outcome: Outcome): Promise<void>;
   /** The surface's "working" sign, shown until the first live frame. */
   working?(): Promise<void>;

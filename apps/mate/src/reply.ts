@@ -1,8 +1,9 @@
 /**
  * One streamed reply: what the answer says and when it is repainted, with an
- * italic status line naming the current tool call and a Stop affordance until
- * the turn ends. How any of that reaches a human is the `Canvas`'s — this
- * holds only the parts that are the same wherever mate answers.
+ * italic status line naming the current tool call until the turn ends. How
+ * any of that reaches a human — and whatever else the surface draws around a
+ * turn in flight — is the `Canvas`'s; this holds only the parts that are the
+ * same wherever mate answers.
  */
 import type { Clock, Handle } from './clock.ts';
 import { type Log, plain } from './log.ts';

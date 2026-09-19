@@ -1,7 +1,8 @@
 /**
  * Slack Socket Mode: the one inbound connection, on Bun's own WebSocket.
- * Events and button clicks both arrive here, so mate needs no HTTP surface,
- * no public name and no request-signature check.
+ * Everything inbound arrives here — the mentions mate answers and the stop
+ * Slack draws on its own — so mate needs no HTTP surface, no public name and
+ * no request-signature check.
  *
  * Two things this has to get right that an HTTP app never faces. Slack gives
  * an app up to ten connections and **splits** payloads across them — "each
@@ -43,8 +44,6 @@ export interface SocketModeDeps {
   log: Log;
   /** One events_api payload, already acknowledged. */
   onEvent(payload: EventPayload): void;
-  /** One interactive payload — a button click — already acknowledged. */
-  onInteractive(payload: Record<string, unknown>): void;
   /**
    * Events older than this are Slack replaying what it buffered while mate
    * was away; a turn that lost its process is not run again on the next one.
@@ -126,12 +125,11 @@ export class SocketMode {
       return;
     }
     // Before anything else is done with it: the deadline is three seconds and
-    // a missed ack is a redelivery.
+    // a missed ack is a redelivery. Every envelope is acknowledged, the ones
+    // mate has nothing to do with included — an interactive payload from an
+    // app feature mate does not use is still an envelope Slack would retry.
     if (typeof frame.envelope_id === 'string') this.ack(frame.envelope_id);
     if (frame.type === 'events_api') this.event(frame.payload as EventPayload);
-    else if (frame.type === 'interactive') {
-      this.deps.onInteractive(frame.payload as Record<string, unknown>);
-    }
   }
 
   private hello(frame: Record<string, unknown>): void {
