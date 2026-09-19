@@ -1,7 +1,7 @@
 /**
- * The sandbox side, behind one interface: a stub today, an agent-sandbox
- * client dialing a real ACP server later. The thread engine only ever sees
- * this.
+ * The sandbox side, behind one interface: the in-process stub below or the
+ * agent-sandbox client in `sandboxes.ts`, chosen by `MATE_SANDBOXES`. The
+ * thread engine only ever sees this.
  */
 import { type Clock, systemClock } from './clock.ts';
 
