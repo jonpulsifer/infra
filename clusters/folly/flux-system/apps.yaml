@@ -20,6 +20,11 @@ spec:
     # unknown kind refuses the whole overlay rather than just itself.
     - name: cloudnative-pg
     - name: monitoring
+    # Same shape for the Sandbox-family kinds (`agents.x-k8s.io`,
+    # `extensions.agents.x-k8s.io`). The CRDs are what the dry-run needs; the
+    # controller being down does not refuse an apply, so this stops at the
+    # CRD Kustomization rather than freezing every app behind the controller.
+    - name: agent-sandbox-crds
   decryption:
     provider: sops
     secretRef:
