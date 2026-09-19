@@ -69,6 +69,7 @@ client.once(GatewayDispatchEvents.Ready, async ({ data }) => {
     applicationId: data.application.id,
     guilds: data.guilds.length,
   });
+  await threads.rehydrate();
   try {
     await clearGlobalCommands(
       client.api.applicationCommands,
@@ -78,7 +79,6 @@ client.once(GatewayDispatchEvents.Ready, async ({ data }) => {
   } catch (error) {
     log.warn('global command cleanup failed', { error: plain(error) });
   }
-  await threads.rehydrate();
 });
 
 client.on(GatewayDispatchEvents.GuildCreate, ({ data }) => {
@@ -154,7 +154,11 @@ client.on(GatewayDispatchEvents.InteractionCreate, ({ data }) => {
 
 async function shutdown(signal: string): Promise<void> {
   log.info('shutting down', { signal });
-  await manager.destroy();
+  try {
+    await manager.destroy();
+  } catch (error) {
+    log.warn('gateway destroy failed', { error: plain(error) });
+  }
   server.stop(true);
   process.exit(0);
 }

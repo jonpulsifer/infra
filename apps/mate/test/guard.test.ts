@@ -1,13 +1,15 @@
 import { describe, expect, test } from 'bun:test';
 import {
+  FETCH_RETRY_MS,
   IdentifyBudget,
   MAX_IDENTIFIES_PER_HOUR,
   MIN_IDENTIFY_SPACING_MS,
+  MIN_RESET_SLEEP_MS,
   reserveOf,
   type SessionStartLimit,
 } from '../src/guard.ts';
 import { silentLog } from '../src/log.ts';
-import { FakeClock, settle } from './support.ts';
+import { FakeClock, RecordingLog, settle } from './support.ts';
 
 function limit(remaining: number, reset_after = 3_600_000): SessionStartLimit {
   return { total: 1000, remaining, reset_after, max_concurrency: 1 };
@@ -111,5 +113,78 @@ describe('the identify budget', () => {
     controller.abort(new Error('closed'));
     await expect(wait).rejects.toThrow('closed');
     expect(clock.pendingTimers).toBe(0);
+  });
+
+  test('a failed budget read is retried with backoff and never escapes to the shard', async () => {
+    const clock = new FakeClock();
+    const log = new RecordingLog();
+    let calls = 0;
+    const budget = new IdentifyBudget({
+      clock,
+      log,
+      fetchLimit: async () => {
+        calls += 1;
+        if (calls < 3) throw new Error('fetch failed: ETIMEDOUT');
+        return limit(900);
+      },
+      onBreach: () => {},
+    });
+    let done = false;
+    const wait = budget.waitForIdentify(0, signal).then(() => {
+      done = true;
+    });
+    await settle();
+    expect(calls).toBe(1);
+    await clock.advance(FETCH_RETRY_MS - 1);
+    expect(calls).toBe(1);
+    await clock.advance(1);
+    expect(calls).toBe(2);
+    await clock.advance(FETCH_RETRY_MS * 2 - 1);
+    expect(calls).toBe(2);
+    await clock.advance(1);
+    await wait;
+    expect(done).toBe(true);
+    expect(calls).toBe(3);
+    expect(log.of('gateway budget read failed; retrying')).toHaveLength(2);
+  });
+
+  test('an abort during a read retry backoff leaves waitForIdentify', async () => {
+    const clock = new FakeClock();
+    const budget = new IdentifyBudget({
+      clock,
+      log: silentLog,
+      fetchLimit: async () => {
+        throw new Error('fetch failed');
+      },
+      onBreach: () => {},
+    });
+    const controller = new AbortController();
+    const wait = budget.waitForIdentify(0, controller.signal);
+    await settle();
+    controller.abort(new Error('closed'));
+    await expect(wait).rejects.toThrow('closed');
+    expect(clock.pendingTimers).toBe(0);
+  });
+
+  test('a zero reset_after sleeps the floor instead of hammering the gateway route', async () => {
+    const { clock, budget, reads } = build([
+      limit(0, 0),
+      limit(0, 0),
+      limit(900),
+    ]);
+    let done = false;
+    const wait = budget.waitForIdentify(0, signal).then(() => {
+      done = true;
+    });
+    await settle();
+    expect(reads()).toBe(1);
+    await clock.advance(MIN_RESET_SLEEP_MS - 1);
+    expect(reads()).toBe(1);
+    await clock.advance(1);
+    expect(reads()).toBe(2);
+    await clock.advance(MIN_RESET_SLEEP_MS);
+    await wait;
+    expect(reads()).toBe(3);
+    expect(done).toBe(true);
   });
 });
