@@ -125,6 +125,72 @@ describe('a thread on a surface that is not Discord', () => {
     expect(surface.askers).toEqual([OWNER]);
   });
 
+  test('a turn hands the surface every tool call, beside the same answer', async () => {
+    const { threads } = build({
+      script: () => [
+        { tool: { id: 'c1', title: 'read files', state: 'in_progress' } },
+        { status: 'read files…' },
+        { text: 'found it' },
+        { tool: { id: 'c1', title: 'read files', state: 'complete' } },
+        { status: null },
+      ],
+    });
+    const start = mention('go');
+    await threads.onMessage(start);
+    await clock.advance(5_000);
+    // The state machine names no surface: the calls reach whichever canvas
+    // has somewhere to put them, and the answer is the same either way.
+    expect(surface.canvases.get(start.id)?.cards).toEqual([
+      { id: 'c1', title: 'read files', state: 'in_progress' },
+      { id: 'c1', title: 'read files', state: 'complete' },
+    ]);
+    expect(surface.answerIn(start.id)).toBe('found it');
+    expect(surface.canvases.get(start.id)?.outcome).toBe('done');
+  });
+
+  test('a restart under a running turn tells the surface the thread is idle', async () => {
+    const { threads, sandboxes } = build({
+      script: () => [{ status: 'thinking…' }, { wait: 10_000_000 }],
+    });
+    const start = mention('a long job');
+    await threads.onMessage(start);
+    await clock.advance(5_000);
+    expect(threads.stateOf(key(start.id))).toBe('turn');
+
+    const after = new Threads({
+      surfaces: [surface],
+      sandboxes,
+      clock,
+      log,
+      config,
+      editCadenceMs: 1_000,
+      metrics,
+    });
+    await after.rehydrate();
+    // A working sign that belongs to the thread outlives the process that
+    // raised it, so the thread is told the turn it was raised for is over.
+    expect(surface.settled).toEqual([start.id]);
+  });
+
+  test('a restart over an idle thread tells it nothing', async () => {
+    const { threads, sandboxes } = build({ script: streaming('alpha') });
+    const start = mention('go');
+    await threads.onMessage(start);
+    await clock.advance(5_000);
+
+    const after = new Threads({
+      surfaces: [surface],
+      sandboxes,
+      clock,
+      log,
+      config,
+      editCadenceMs: 1_000,
+      metrics,
+    });
+    await after.rehydrate();
+    expect(surface.settled).toEqual([]);
+  });
+
   test('a mention from anyone else, or outside an allowed channel, is silence', async () => {
     const { threads } = build();
     await threads.onMessage(mention('hi', { authorId: STRANGER }));

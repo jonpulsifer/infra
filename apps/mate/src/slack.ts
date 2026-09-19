@@ -1,6 +1,6 @@
 /**
  * Slack as a surface. Socket Mode carries everything inbound (`socket.ts`);
- * outbound is six Web API calls on Bun's own `fetch`, which is the whole of
+ * outbound is a handful of Web API calls on Bun's own `fetch`, the whole of
  * what mate needs and is why no `@slack/*` package is here — they declare a
  * Node engine, and the Kubernetes client in this same process already took
  * the raw path for the same reason.
@@ -8,21 +8,37 @@
  * What Slack does differently from Discord, and why the canvas below looks
  * nothing like the Discord one:
  *
- * - Slack streams. `chat.startStream` / `appendStream` / `stopStream` take
- *   deltas, so an answer is appended rather than a message rewritten, and
- *   nothing has to be chunked at a message cap the way Discord's 2000
- *   characters force.
- * - Because the answer is append-only, the status line cannot sit above it.
- *   It goes on a control message of its own, which also carries Stop and is
- *   deleted when the turn ends — `chat.update` against a message that is
- *   streaming is refused, so the button could not live on the answer anyway.
+ * - Slack streams, in chunks. `chat.startStream` / `appendStream` /
+ *   `stopStream` take an array of chunks, so an answer is appended rather
+ *   than a message rewritten. A `markdown_text` chunk is answer text; a
+ *   `task_update` chunk merges by its id into a `task_card` block that
+ *   mutates in place, which is exactly one ACP tool call. The mode is fixed
+ *   at `startStream`: a stream opened with `markdown_text` refuses chunks
+ *   with `streaming_mode_mismatch`, so every stream here opens in chunks.
+ * - Those same `task_update` chunks render two ways and `task_display_mode`
+ *   picks which, at `startStream` and nowhere else: `timeline` is a
+ *   `task_card` per call that mutates in place, `plan` is the one `plan`
+ *   block summarising them, and anything else is `invalid_arguments`. mate
+ *   sends `timeline`, because a turn's tool calls are discovered one at a
+ *   time rather than announced up front, and because a plan stopped under a
+ *   running step retitles itself "Something went wrong" — which Slack folds
+ *   into the message's `text`, where the transcript replay reads it back as
+ *   something mate said.
+ * - A channel thread has no free-text status. `agents.sessions.setStatus`
+ *   takes a lifecycle enum and no words, and `assistant.threads.setStatus`
+ *   answers `ok` and does nothing at all here. So the italic line Discord
+ *   paints has no home: the tool cards say what mate is doing, and the
+ *   session says that it is doing something.
+ * - The Stop button still needs a message of its own, deleted when the turn
+ *   ends — `chat.update` against a streaming message is refused with
+ *   `streaming_state_conflict`, so it cannot live on the answer.
  * - In a channel the stream is addressed: `thread_ts`, `recipient_user_id`
  *   and `recipient_team_id` are all required. The mention that opened the
  *   thread is its parent, so mate has all three without asking for them.
  */
 import type { Clock } from './clock.ts';
 import { type Log, plain } from './log.ts';
-import { NO_REPLY, PLACEHOLDER, splitAt, statusLine } from './reply.ts';
+import { NO_REPLY, PLACEHOLDER, splitAt } from './reply.ts';
 import {
   type Canvas,
   type HistoryMessage,
@@ -30,6 +46,8 @@ import {
   type Outcome,
   type Surface,
   type ThreadRef,
+  type ToolCall,
+  type ToolState,
   threadKey,
 } from './surface.ts';
 
@@ -91,15 +109,42 @@ export interface SlackMessage {
   thread_ts?: string;
 }
 
+/**
+ * One piece of a streamed message. Answer text is `markdown_text`; a tool
+ * call is `task_update`, which Slack merges by `id` into the `task_card`
+ * block it renders as `task-<id>` and mutates in place on every later chunk
+ * carrying the same id.
+ */
+export type StreamChunk =
+  | { type: 'markdown_text'; text: string }
+  | {
+      type: 'task_update';
+      id: string;
+      title: string;
+      status: ToolState;
+    };
+
 export interface StreamStart {
   channel: string;
   threadTs: string;
   userId: string;
   teamId: string;
-  markdown: string;
+  chunks: StreamChunk[];
 }
 
-/** The six calls and the lookup mate makes; the fake in tests records them. */
+/**
+ * The lifecycle of the agent session on a thread's parent. `processing` is
+ * Slack's own loading UX, `active` is ready for the next prompt and `closed`
+ * is the thread sealed; `suspended` is for an agent waiting on a human and
+ * mate has nothing to wait for. Slack also has a stop control it renders
+ * itself on a `processing` session — but only for an app subscribed to
+ * `agent_session_stopped`, which is app configuration rather than code, so
+ * every session mate creates today reports `is_stoppable: false` and the
+ * Stop button below is the only cancel a human has.
+ */
+export type SessionStatus = 'processing' | 'active' | 'closed';
+
+/** The calls and lookups mate makes; the fake in tests records them. */
 export interface SlackApi {
   post(
     channel: string,
@@ -107,16 +152,20 @@ export interface SlackApi {
     text: string,
     blocks?: unknown[],
   ): Promise<string>;
-  update(
-    channel: string,
-    ts: string,
-    text: string,
-    blocks?: unknown[],
-  ): Promise<void>;
   remove(channel: string, ts: string): Promise<void>;
   startStream(args: StreamStart): Promise<string>;
-  appendStream(channel: string, ts: string, markdown: string): Promise<void>;
+  appendStream(
+    channel: string,
+    ts: string,
+    chunks: StreamChunk[],
+  ): Promise<void>;
   stopStream(channel: string, ts: string): Promise<void>;
+  /** Where the thread's agent session is in its lifecycle. */
+  session(
+    channel: string,
+    threadTs: string,
+    status: SessionStatus,
+  ): Promise<void>;
   /** A thread's messages, oldest first. */
   replies(channel: string, threadTs: string): Promise<SlackMessage[]>;
   userName(userId: string): Promise<string>;
@@ -128,19 +177,22 @@ export function slackWeb(
   deps: { clock: Clock; log: Log },
 ): SlackApi {
   const names = new Map<string, string>();
+  /** Every session warning already said, so a new one is still heard once. */
+  const warned = new Set<string>();
 
-  async function call(
+  async function send(
     method: string,
-    body: Record<string, unknown>,
+    body: string,
+    contentType: string,
   ): Promise<Record<string, unknown>> {
     for (let attempt = 0; ; attempt += 1) {
       const response = await fetch(`${SLACK_API}${method}`, {
         method: 'POST',
         headers: {
           authorization: `Bearer ${token}`,
-          'content-type': 'application/json; charset=utf-8',
+          'content-type': contentType,
         },
-        body: JSON.stringify(body),
+        body,
         // Bun's fetch has no happy-eyeballs fallback, so an unreachable
         // address hangs rather than failing: every call is bounded.
         signal: AbortSignal.timeout(CALL_TIMEOUT_MS),
@@ -169,6 +221,41 @@ export function slackWeb(
     }
   }
 
+  /** A write, as JSON: the only encoding that carries blocks and chunks. */
+  async function call(
+    method: string,
+    body: Record<string, unknown>,
+  ): Promise<Record<string, unknown>> {
+    return send(
+      method,
+      JSON.stringify(body),
+      'application/json; charset=utf-8',
+    );
+  }
+
+  /**
+   * A read, form-encoded. Slack's read methods refuse a JSON body, and say so
+   * as anything but an encoding problem: `conversations.replies` answers
+   * `invalid_arguments` with `missing required field: channel` for a channel
+   * that is right there in the body, and `users.info` answers
+   * `user_not_found` for a user who exists. Form encoding is what every
+   * method accepts; JSON is the exception, not the rule.
+   */
+  async function read(
+    method: string,
+    args: Record<string, string | number>,
+  ): Promise<Record<string, unknown>> {
+    const form = new URLSearchParams();
+    for (const [key, value] of Object.entries(args)) {
+      form.set(key, String(value));
+    }
+    return send(
+      method,
+      form.toString(),
+      'application/x-www-form-urlencoded; charset=utf-8',
+    );
+  }
+
   return {
     async post(channel, threadTs, text, blocks) {
       const sent = await call('chat.postMessage', {
@@ -179,14 +266,6 @@ export function slackWeb(
       });
       return String(sent.ts);
     },
-    async update(channel, ts, text, blocks) {
-      await call('chat.update', {
-        channel,
-        ts,
-        text,
-        ...(blocks ? { blocks } : {}),
-      });
-    },
     async remove(channel, ts) {
       await call('chat.delete', { channel, ts });
     },
@@ -196,28 +275,49 @@ export function slackWeb(
         thread_ts: args.threadTs,
         recipient_user_id: args.userId,
         recipient_team_id: args.teamId,
-        markdown_text: args.markdown,
+        // The default, sent anyway: it is the choice between a card per call
+        // and one plan block, and leaving it to the default would leave no
+        // trace that the choice was made.
+        task_display_mode: 'timeline',
+        chunks: args.chunks,
       });
       return String(started.ts);
     },
-    async appendStream(channel, ts, markdown) {
-      await call('chat.appendStream', { channel, ts, markdown_text: markdown });
+    async appendStream(channel, ts, chunks) {
+      await call('chat.appendStream', { channel, ts, chunks });
     },
     async stopStream(channel, ts) {
       await call('chat.stopStream', { channel, ts });
+    },
+    async session(channel, threadTs, status) {
+      const set = await call('agents.sessions.setStatus', {
+        status,
+        channel_id: channel,
+        thread_ts: threadTs,
+      });
+      // Each distinct warning once a process, because the one Slack sends
+      // today is a dashboard tick and not a per-turn fault: without the
+      // `agent_session_stopped` subscription it renders a spinner where its
+      // own stop control would be. Keyed on the warning so that one saying
+      // so for an hour does not swallow a different one behind it.
+      const warning = set.warning ? String(set.warning) : '';
+      if (warning && !warned.has(warning)) {
+        warned.add(warning);
+        deps.log.warn('slack agent session', { warning });
+      }
     },
     async replies(channel, threadTs) {
       const all: SlackMessage[] = [];
       let cursor: string | undefined;
       for (let page = 0; page < REPLIES_PAGES; page += 1) {
-        const read = await call('conversations.replies', {
+        const got = await read('conversations.replies', {
           channel,
           ts: threadTs,
           limit: REPLIES_PAGE,
           ...(cursor ? { cursor } : {}),
         });
-        all.push(...((read.messages ?? []) as SlackMessage[]));
-        const meta = read.response_metadata as
+        all.push(...((got.messages ?? []) as SlackMessage[]));
+        const meta = got.response_metadata as
           | { next_cursor?: string }
           | undefined;
         cursor = meta?.next_cursor || undefined;
@@ -229,8 +329,8 @@ export function slackWeb(
       const known = names.get(userId);
       if (known) return known;
       try {
-        const read = await call('users.info', { user: userId });
-        const user = read.user as
+        const got = await read('users.info', { user: userId });
+        const user = got.user as
           | { profile?: { display_name?: string }; real_name?: string }
           | undefined;
         const name = user?.profile?.display_name || user?.real_name || userId;
@@ -245,7 +345,7 @@ export function slackWeb(
       }
     },
     async identity() {
-      const auth = await call('auth.test', {});
+      const auth = await read('auth.test', {});
       return {
         userId: String(auth.user_id),
         teamId: String(auth.team_id),
@@ -276,48 +376,48 @@ export async function openSocket(appToken: string): Promise<string> {
   return payload.url;
 }
 
-function stopBlock(key: string): Record<string, unknown> {
-  return {
-    type: 'actions',
-    block_id: STOP_ACTION,
-    elements: [
-      {
-        type: 'button',
-        style: 'danger',
-        action_id: STOP_ACTION,
-        value: key,
-        text: { type: 'plain_text', text: 'Stop' },
-      },
-    ],
-  };
-}
-
 /**
- * The control message's body: the status line, then Stop. `text` on a message
- * that carries `blocks` is only the fallback a notification shows — the
- * rendered body is the blocks alone — so the line the human reads has to be a
- * block of its own, and `text` stays what the notification says.
+ * The control message's body: Stop, and nothing else. `text` on a message
+ * that carries `blocks` is only what a notification shows, and it is the
+ * ellipsis every other placeholder uses so the transcript replay reads it
+ * back as one of mate's own lines rather than as something it said.
  */
-export function controlBlocks(
-  text: string,
-  key: string,
-): Record<string, unknown>[] {
-  return [{ type: 'section', text: { type: 'mrkdwn', text } }, stopBlock(key)];
+export function controlBlocks(key: string): Record<string, unknown>[] {
+  return [
+    {
+      type: 'actions',
+      block_id: STOP_ACTION,
+      elements: [
+        {
+          type: 'button',
+          style: 'danger',
+          action_id: STOP_ACTION,
+          value: key,
+          text: { type: 'plain_text', text: 'Stop' },
+        },
+      ],
+    },
+  ];
 }
 
 /**
- * One turn in a Slack thread: the answer streamed into a message of its own,
- * and a control message beside it holding the status line and Stop until the
+ * One turn in a Slack thread: the answer and its tool cards streamed into a
+ * message of its own, the agent session on the thread's parent saying the
+ * turn is running, and a control message beside it holding Stop until the
  * turn ends.
+ *
+ * Nothing here can fail a turn on its own. The session calls are swallowed,
+ * and the canvas answers whether or not Slack rendered a single card.
  */
 export class SlackCanvas implements Canvas {
   private streamTs: string | null = null;
-  /** Characters streamed this turn, across every message it has taken. */
+  /** Answer characters streamed this turn, across every message it has taken. */
   private sent = 0;
-  /** Characters in the streamed message that is live now. */
+  /** Answer characters in the streamed message that is live now. */
   private painted = 0;
   private controlTs: string | null = null;
-  private controlText = '';
+  /** Cards still running, so a turn that ends under them can close them. */
+  private readonly running = new Map<string, string>();
 
   constructor(
     private readonly api: SlackApi,
@@ -328,31 +428,144 @@ export class SlackCanvas implements Canvas {
     private readonly cap = STREAM_CAP,
   ) {}
 
-  async live(text: string, status: string | null): Promise<void> {
+  /**
+   * Slack's own loading UX, from before the first token. A turn is capped
+   * well inside the hour a `processing` session lasts, so it needs no
+   * keepalive; the renderer calls this every few seconds until the first
+   * frame lands anyway.
+   */
+  async working(): Promise<void> {
+    await this.api.session(this.thread.channelId, this.thread.id, 'processing');
+  }
+
+  /**
+   * The answer so far. `status` is the line Discord paints and Slack has
+   * nowhere to put: what the harness is doing is the tool cards' to say.
+   */
+  async live(text: string, _status: string | null): Promise<void> {
     await this.stream(text);
-    await this.control(status ? escapeSlack(statusLine(status)) : PLACEHOLDER);
+    await this.control();
+  }
+
+  /** One tool call, as the card Slack merges by its id and mutates in place. */
+  async tool(call: ToolCall): Promise<void> {
+    if (call.state === 'in_progress') this.running.set(call.id, call.title);
+    else this.running.delete(call.id);
+    await this.card(call.id, call.title, call.state);
+    await this.control();
+  }
+
+  /**
+   * One card. The title is the only string a model writes that Slack takes
+   * as a field of its own, and it folds it into the streamed message's
+   * `text` byte for byte: a title of `<@U…>` reads back indistinguishable
+   * from a real mention, so it goes through the same escape as the answer.
+   */
+  private card(id: string, title: string, status: ToolState): Promise<void> {
+    return this.chunk({
+      type: 'task_update',
+      id,
+      title: escapeMentions(title),
+      status,
+    });
   }
 
   async final(text: string, outcome: Outcome): Promise<void> {
     try {
       await this.stream(text, true);
-      if (this.streamTs) {
-        await this.api.stopStream(this.thread.channelId, this.streamTs);
-        this.streamTs = null;
-      } else if (this.sent === 0 && outcome !== 'failed') {
-        // A turn with nothing to show still says so, exactly as it does on
-        // Discord — except a failed one, whose reason is its own line.
-        await this.api.post(
-          this.thread.channelId,
-          this.thread.id,
-          escapeSlack(NO_REPLY),
-        );
-      }
+      await this.closeCards(outcome === 'done' ? 'complete' : 'error');
+      // A turn with nothing to say still says so, exactly as it does on
+      // Discord — except a failed one, whose reason is its own line. Cards
+      // are not an answer, so a turn that only ran tools still lands here.
+      if (this.sent === 0 && outcome !== 'failed') await this.nothing();
     } finally {
-      // Whatever the last call did: a live Stop button on a finished turn is
-      // worse than a turn that ended with one failed call.
+      // Whatever the last call did. A message left streaming refuses every
+      // later edit, a live Stop button outlives its turn, and a thread that
+      // still reads as working is a lie: each is worse than a failed call.
+      await this.endStream();
       await this.clearControl();
+      await this.settle();
     }
+  }
+
+  /**
+   * Every card still running when the turn ends, settled. `chat.stopStream`
+   * stamps one left `in_progress` as `error` on its own — a stream stopped
+   * under a running card reads back `status: "error"` — so leaving them is
+   * not leaving the harness's last word, it is rendering a failed call on a
+   * turn that succeeded. `complete` is what a `done` turn's unfinished card
+   * actually is; on a stopped or failed one `error` is Slack's own stamp
+   * said deliberately, there being no cancelled state to say better.
+   */
+  private async closeCards(state: ToolState): Promise<void> {
+    const open = [...this.running];
+    this.running.clear();
+    for (const [id, title] of open) {
+      await this.card(id, title, state).catch((error) =>
+        this.log.warn('a tool card could not be closed', {
+          threadId: this.thread.id,
+          error: plain(error),
+        }),
+      );
+    }
+  }
+
+  /** A message left streaming refuses every later edit, so the stop always goes. */
+  private async endStream(): Promise<void> {
+    const ts = this.streamTs;
+    this.streamTs = null;
+    if (!ts) return;
+    await this.api.stopStream(this.thread.channelId, ts).catch((error) =>
+      this.log.warn('the stream could not be stopped', {
+        threadId: this.thread.id,
+        error: plain(error),
+      }),
+    );
+  }
+
+  private async nothing(): Promise<void> {
+    if (this.streamTs) {
+      await this.chunk({ type: 'markdown_text', text: NO_REPLY });
+      return;
+    }
+    await this.api.post(
+      this.thread.channelId,
+      this.thread.id,
+      escapeSlack(NO_REPLY),
+    );
+  }
+
+  /**
+   * `chat.stopStream` already leaves the session `active`, so this is for the
+   * turn that streamed nothing and for the one whose stop failed: either way
+   * the thread must not be left spinning.
+   */
+  private async settle(): Promise<void> {
+    await this.api
+      .session(this.thread.channelId, this.thread.id, 'active')
+      .catch((error) =>
+        this.log.warn('the agent session could not be settled', {
+          threadId: this.thread.id,
+          error: plain(error),
+        }),
+      );
+  }
+
+  /** One chunk into the turn's stream, opening one when there is none yet. */
+  private async chunk(chunk: StreamChunk): Promise<void> {
+    if (this.streamTs) {
+      await this.api.appendStream(this.thread.channelId, this.streamTs, [
+        chunk,
+      ]);
+      return;
+    }
+    this.streamTs = await this.api.startStream({
+      channel: this.thread.channelId,
+      threadTs: this.thread.id,
+      userId: this.recipient.userId,
+      teamId: this.recipient.teamId,
+      chunks: [chunk],
+    });
   }
 
   private async stream(text: string, last = false): Promise<void> {
@@ -370,40 +583,22 @@ export class SlackCanvas implements Canvas {
         this.painted = 0;
       }
       const [head, rest] = splitAt(tail, this.cap - this.painted);
-      if (this.streamTs) {
-        await this.api.appendStream(this.thread.channelId, this.streamTs, head);
-      } else {
-        this.streamTs = await this.api.startStream({
-          channel: this.thread.channelId,
-          threadTs: this.thread.id,
-          userId: this.recipient.userId,
-          teamId: this.recipient.teamId,
-          markdown: head,
-        });
-      }
+      await this.chunk({ type: 'markdown_text', text: head });
       this.sent += head.length;
       this.painted += head.length;
       tail = rest;
     }
   }
 
-  private async control(text: string): Promise<void> {
-    const blocks = controlBlocks(text, this.key);
-    if (!this.controlTs) {
-      this.controlTs = await this.api.post(
-        this.thread.channelId,
-        this.thread.id,
-        text,
-        blocks,
-      );
-      this.controlText = text;
-      return;
-    }
-    // Only when it actually changed: an edit per second would spend the
-    // method's whole per-minute allowance on a line that rarely moves.
-    if (text === this.controlText) return;
-    this.controlText = text;
-    await this.api.update(this.thread.channelId, this.controlTs, text, blocks);
+  /** Posted once and never edited: the button says the same thing all turn. */
+  private async control(): Promise<void> {
+    if (this.controlTs) return;
+    this.controlTs = await this.api.post(
+      this.thread.channelId,
+      this.thread.id,
+      PLACEHOLDER,
+      controlBlocks(this.key),
+    );
   }
 
   /** A button that outlives its turn is worse than one that fails to go away quietly. */
@@ -499,6 +694,18 @@ export function slackSurface(deps: SlackSurfaceDeps): Surface {
         deps.streamCap,
       );
     },
+    // A Slack thread is never archived, but its agent session has an end:
+    // closing it is what stops the thread reading as one mate is working in.
+    async archive(thread) {
+      await deps.api.session(thread.channelId, thread.id, 'closed');
+    },
+    // The session outlives the process that set it, so a turn killed by a
+    // restart would leave the thread spinning until the quiet timer tore it
+    // down. `active` is the thread ready for the next prompt, which is what
+    // it is the moment the restart notice lands.
+    async settle(thread) {
+      await deps.api.session(thread.channelId, thread.id, 'active');
+    },
   };
 }
 
@@ -548,6 +755,28 @@ export function slackInbound(event: SlackEvent, me: string): Inbound | null {
     // Read before decoding, so a human typing the escape's own entities
     // cannot conjure a mention out of them.
     mentionsMe: raw.includes(`<@${me}>`),
+  };
+}
+
+/**
+ * Slack's own stop, or null when the event is something else. An app
+ * subscribed to `agent_session_stopped` gets the stop control Slack renders
+ * on a `processing` session, and the click arrives here rather than as a
+ * block action. It names the channel and the thread, which is exactly a
+ * thread's key, so it drops into the same cancel path as the button.
+ */
+export function slackSessionStopped(
+  event: SlackEvent,
+): { key: string; userId: string } | null {
+  if (event.type !== 'agent_session_stopped') return null;
+  if (!event.channel || !event.thread_ts) return null;
+  return {
+    key: threadKey({
+      surface: 'slack',
+      channelId: event.channel,
+      id: event.thread_ts,
+    }),
+    userId: event.user ?? '',
   };
 }
 

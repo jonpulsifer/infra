@@ -8,7 +8,8 @@ import {
   splitAt,
   statusLine,
 } from '../src/reply.ts';
-import { FakeClock, FakeDiscord, RecordingLog } from './support.ts';
+import { FakeCanvas } from './fakesurface.ts';
+import { FakeClock, FakeDiscord, RecordingLog, settle } from './support.ts';
 
 describe('the chunk rule', () => {
   test('splits at the last line break inside the budget', () => {
@@ -56,6 +57,23 @@ describe('a streamed reply', () => {
     await reply.finish('done');
     expect(message!.content).toBe('ab');
     expect(message!.hasStop).toBe(false);
+  });
+
+  test('a turn whose updates all land in one tick still ends with the last frame', async () => {
+    const clock = new FakeClock();
+    const canvas = new FakeCanvas();
+    const reply = new Reply(canvas, clock, silentLog, 't', 1_000);
+    // Each update queues a repaint while the first is still in flight, so
+    // without care one of them repaints after the turn has already ended.
+    reply.update({ kind: 'status', line: 'thinking' });
+    reply.update({ kind: 'text', delta: 'an answer' });
+    reply.update({ kind: 'status', line: null });
+    await reply.finish('done');
+    expect(canvas.frames.at(-1)).toEqual({
+      text: 'an answer',
+      status: null,
+      outcome: 'done',
+    });
   });
 
   test('a stopped reply with no text still says so', async () => {
@@ -122,6 +140,71 @@ describe('a streamed reply', () => {
     );
     await reply.finish('failed');
     expect(discord.contentsIn('t')).toEqual([]);
+  });
+});
+
+describe('tool calls', () => {
+  test('reach a canvas that has cards at once, in order with the text', async () => {
+    const clock = new FakeClock();
+    const canvas = new FakeCanvas();
+    const reply = new Reply(canvas, clock, silentLog, 't', 1_000);
+    reply.update({ kind: 'text', delta: 'a' });
+    reply.update({
+      kind: 'tool',
+      call: { id: 'c1', title: 'read files', state: 'in_progress' },
+    });
+    await settle();
+    // Not held for the repaint cadence the way text is: a card arrives at
+    // tool-call rate, and it is one small call.
+    expect(canvas.cards).toEqual([
+      { id: 'c1', title: 'read files', state: 'in_progress' },
+    ]);
+    reply.update({
+      kind: 'tool',
+      call: { id: 'c1', title: 'read files', state: 'complete' },
+    });
+    await reply.finish('done');
+    expect(canvas.cards.at(-1)?.state).toBe('complete');
+    expect(canvas.answer).toBe('a');
+  });
+
+  test('are nothing to a canvas with no cards, and the turn is unchanged', async () => {
+    const clock = new FakeClock();
+    const discord = new FakeDiscord();
+    const reply = new Reply(discord.canvas('t'), clock, silentLog, 't', 1_000);
+    reply.update({ kind: 'status', line: 'read files' });
+    reply.update({
+      kind: 'tool',
+      call: { id: 'c1', title: 'read files', state: 'in_progress' },
+    });
+    await clock.advance(0);
+    reply.update({ kind: 'text', delta: 'an answer' });
+    await clock.advance(1_000);
+    expect(discord.contentsIn('t')).toEqual(['*read files*\n\nan answer']);
+    await reply.finish('done');
+    expect(discord.contentsIn('t')).toEqual(['an answer']);
+  });
+
+  test('a card that cannot be painted is one warning and still an answer', async () => {
+    const clock = new FakeClock();
+    const canvas = new FakeCanvas();
+    const log = new RecordingLog();
+    const reply = new Reply(canvas, clock, log, 't', 1_000);
+    canvas.failTool = new Error('invalid_blocks');
+    reply.update({
+      kind: 'tool',
+      call: { id: 'c1', title: 'read files', state: 'in_progress' },
+    });
+    reply.update({
+      kind: 'tool',
+      call: { id: 'c1', title: 'read files', state: 'complete' },
+    });
+    reply.update({ kind: 'text', delta: 'the answer' });
+    await clock.advance(0);
+    await reply.finish('done');
+    expect(log.of('a tool card could not be painted')).toHaveLength(1);
+    expect(canvas.answer).toBe('the answer');
+    expect(canvas.outcome).toBe('done');
   });
 });
 

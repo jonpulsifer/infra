@@ -11,6 +11,7 @@ import {
   SlackCanvas,
   STOP_ACTION,
   slackInbound,
+  slackSessionStopped,
   slackStop,
   slackSurface,
   slackWeb,
@@ -39,10 +40,6 @@ beforeEach(() => {
 
 const canvas = (cap?: number) =>
   new SlackCanvas(api, log, THREAD, { userId: OWNER, teamId: TEAM }, KEY, cap);
-
-/** The line a human actually reads on the control message. */
-const shown = (blocks: unknown[] | null): string | undefined =>
-  (blocks?.[0] as { text?: { text?: string } } | undefined)?.text?.text;
 
 /** The thread key the Stop button carries, or undefined when there is none. */
 const button = (blocks: unknown[] | null): string | undefined =>
@@ -224,6 +221,26 @@ describe('the Stop button', () => {
       slackStop({ actions: [{ action_id: 'something-else', value: 'x' }] }),
     ).toBeNull();
   });
+
+  test("Slack's own stop names the same thread key the button carries", () => {
+    expect(
+      slackSessionStopped({
+        type: 'agent_session_stopped',
+        channel: CHANNEL,
+        thread_ts: TS,
+        user: OWNER,
+      }),
+    ).toEqual({ key: KEY, userId: OWNER });
+  });
+
+  test('a stop naming no thread, and any other event, is not a stop', () => {
+    expect(
+      slackSessionStopped({ type: 'agent_session_stopped', channel: CHANNEL }),
+    ).toBeNull();
+    expect(
+      slackSessionStopped({ type: 'message', channel: CHANNEL, ts: TS }),
+    ).toBeNull();
+  });
 });
 
 describe('streaming a turn', () => {
@@ -238,21 +255,19 @@ describe('streaming a turn', () => {
         threadTs: TS,
         userId: OWNER,
         teamId: TEAM,
-        markdown: 'hello ',
+        chunks: [{ type: 'markdown_text', text: 'hello ' }],
       },
     });
+    // The control message carries Stop and nothing else: a channel thread
+    // has no free-text status, so the line Discord paints is not sent here.
     expect(control).toMatchObject({
       call: 'post',
       threadTs: TS,
-      text: '*reading files*',
+      text: PLACEHOLDER,
       stop: true,
     });
-    // A message carrying blocks renders the blocks alone — `text` is only
-    // what a notification shows — so the status line has to be one of them.
-    expect(control?.call === 'post' ? shown(control.blocks) : null).toBe(
-      '*reading files*',
-    );
     expect(control?.call === 'post' ? button(control.blocks) : null).toBe(KEY);
+    expect(JSON.stringify(api.calls)).not.toContain('reading files');
   });
 
   test('later frames append only what is new', async () => {
@@ -261,24 +276,19 @@ describe('streaming a turn', () => {
     await painter.live('one two ', 'thinking');
     await painter.live('one two three ', 'thinking');
     expect(api.only('start')).toHaveLength(1);
-    expect(api.only('append').map((c) => c.markdown)).toEqual([
-      'two ',
-      'three ',
+    expect(api.only('append').map((c) => c.chunks)).toEqual([
+      [{ type: 'markdown_text', text: 'two ' }],
+      [{ type: 'markdown_text', text: 'three ' }],
     ]);
     expect(api.streamed()).toBe('one two three ');
   });
 
-  test('the control message is only edited when the status actually changes', async () => {
+  test('the control message is posted once and never edited', async () => {
     const painter = canvas();
     await painter.live('a', 'thinking');
-    await painter.live('ab', 'thinking');
-    expect(api.only('update')).toHaveLength(0);
-    await painter.live('abc', 'running `mise run docs:check`');
-    expect(api.only('update')).toHaveLength(1);
-    const edit = api.only('update')[0];
-    expect(edit).toMatchObject({ text: '*running `mise run docs:check`*' });
-    expect(shown(edit?.blocks ?? null)).toBe('*running `mise run docs:check`*');
-    expect(button(edit?.blocks ?? null)).toBe(KEY);
+    await painter.live('ab', 'running `mise run docs:check`');
+    await painter.tool({ id: 't1', title: 'read files', state: 'complete' });
+    expect(api.only('post')).toHaveLength(1);
   });
 
   test('a turn with no status yet still shows the button', async () => {
@@ -286,7 +296,7 @@ describe('streaming a turn', () => {
     await painter.live('', null);
     const control = api.only('post')[0];
     expect(control).toMatchObject({ text: PLACEHOLDER, stop: true });
-    expect(shown(control?.blocks ?? null)).toBe(PLACEHOLDER);
+    expect(button(control?.blocks ?? null)).toBe(KEY);
   });
 
   test('the last frame stops the stream and takes the button away', async () => {
@@ -306,7 +316,19 @@ describe('streaming a turn', () => {
     api.calls.length = 0;
     const failed = canvas();
     await failed.final('', 'failed');
-    expect(api.calls).toEqual([]);
+    expect(api.only('post')).toEqual([]);
+    expect(api.only('start')).toEqual([]);
+  });
+
+  test('a turn that only ran tools still says it answered nothing', async () => {
+    const painter = canvas();
+    await painter.tool({ id: 't1', title: 'read files', state: 'complete' });
+    await painter.final('', 'done');
+    // The card is not an answer: the line goes into the same message, which
+    // is the one Slack will not let a second message be edited into.
+    expect(api.streamed()).toBe(NO_REPLY);
+    expect(api.only('post').map((c) => c.text)).toEqual([PLACEHOLDER]);
+    expect(api.only('stop')).toHaveLength(1);
   });
 
   test('an answer past the cap rolls into a new stream, and no call exceeds it', async () => {
@@ -314,13 +336,9 @@ describe('streaming a turn', () => {
     const text = `${'lorem ipsum '.repeat(10).trim()}\n`.repeat(3);
     await painter.live(text, null);
     await painter.final(text, 'done');
-    const written = api.calls.flatMap((call) =>
-      call.call === 'start'
-        ? [call.args.markdown]
-        : call.call === 'append'
-          ? [call.markdown]
-          : [],
-    );
+    const written = api
+      .chunks()
+      .flatMap((chunk) => (chunk.type === 'markdown_text' ? [chunk.text] : []));
     expect(written.length).toBeGreaterThan(1);
     for (const body of written) {
       expect(body.length).toBeLessThanOrEqual(40);
@@ -337,14 +355,27 @@ describe('streaming a turn', () => {
     expect(log.of('the stop button could not be removed')).toHaveLength(1);
   });
 
-  test('a last call that fails still takes the button away', async () => {
+  test('a last call that fails still ends the stream and takes the button away', async () => {
     const painter = canvas();
     await painter.live('a', 'thinking');
-    api.failStopStream = new Error('streaming_state_conflict');
+    api.failAppend = new Error('streaming_state_conflict');
     await expect(painter.final('ab', 'done')).rejects.toThrow(
       'streaming_state_conflict',
     );
+    // A message left streaming refuses every later edit, so the stop goes
+    // out whatever the frame before it did.
+    expect(api.only('stop')).toHaveLength(1);
     expect(api.only('remove')).toHaveLength(1);
+    expect(api.only('session').at(-1)?.status).toBe('active');
+  });
+
+  test('a stream that cannot be stopped is one warning, not a failed turn', async () => {
+    const painter = canvas();
+    await painter.live('a', null);
+    api.failStopStream = new Error('streaming_state_conflict');
+    await painter.final('a', 'done');
+    expect(log.of('the stream could not be stopped')).toHaveLength(1);
+    expect(api.only('session').at(-1)?.status).toBe('active');
   });
 
   test('what the model says cannot mention anyone, across frames', async () => {
@@ -365,6 +396,128 @@ describe('streaming a turn', () => {
     await painter.live('a <', null);
     await painter.final('a <', 'done');
     expect(api.streamed()).toBe('a <');
+  });
+});
+
+describe('tool cards', () => {
+  test('a tool call before any text opens the stream with a card of its own', async () => {
+    const painter = canvas();
+    await painter.tool({
+      id: 'call-1',
+      title: 'read files',
+      state: 'in_progress',
+    });
+    expect(api.only('start')[0]?.args.chunks).toEqual([
+      {
+        type: 'task_update',
+        id: 'call-1',
+        title: 'read files',
+        status: 'in_progress',
+      },
+    ]);
+    expect(api.streamed()).toBe('');
+  });
+
+  test('one card per call, mutated by its id, interleaved with the answer', async () => {
+    const painter = canvas();
+    await painter.tool({ id: 'c1', title: 'read files', state: 'in_progress' });
+    await painter.live('looking. ', 'read files');
+    await painter.tool({ id: 'c1', title: 'read files', state: 'complete' });
+    await painter.tool({
+      id: 'c2',
+      title: 'run `bun test`',
+      state: 'in_progress',
+    });
+    await painter.tool({ id: 'c2', title: 'run `bun test`', state: 'error' });
+    await painter.final('looking. done', 'done');
+    // Slack merges a task_update into the card its id names, so the same id
+    // twice is one card that moved rather than two cards.
+    expect(api.cards()).toEqual([
+      { id: 'c1', title: 'read files', status: 'in_progress' },
+      { id: 'c1', title: 'read files', status: 'complete' },
+      { id: 'c2', title: 'run `bun test`', status: 'in_progress' },
+      { id: 'c2', title: 'run `bun test`', status: 'error' },
+    ]);
+    expect(api.chunks().map((chunk) => chunk.type)).toEqual([
+      'task_update',
+      'markdown_text',
+      'task_update',
+      'task_update',
+      'task_update',
+      'markdown_text',
+    ]);
+    expect(api.streamed()).toBe('looking. done');
+    expect(api.only('stop')).toHaveLength(1);
+  });
+
+  test('a turn stopped under a running tool closes its card', async () => {
+    const painter = canvas();
+    await painter.tool({ id: 'c1', title: 'read files', state: 'complete' });
+    await painter.tool({
+      id: 'c2',
+      title: 'run `bun test`',
+      state: 'in_progress',
+    });
+    await painter.final('partial\n\n*stopped*', 'stopped');
+    // Slack has no cancelled card, and one left running would spin for ever
+    // on a turn that has ended; the call that did finish is untouched.
+    expect(api.cards().at(-1)).toEqual({
+      id: 'c2',
+      title: 'run `bun test`',
+      status: 'error',
+    });
+    expect(api.cards().filter((card) => card.id === 'c1')).toHaveLength(1);
+  });
+
+  test('a turn that ends normally completes the card it was still running', async () => {
+    const painter = canvas();
+    await painter.tool({ id: 'c1', title: 'read files', state: 'in_progress' });
+    await painter.final('done', 'done');
+    // Leaving it is not leaving the harness's last word: `chat.stopStream`
+    // stamps a card still `in_progress` as `error` itself, so a successful
+    // turn would render a failed call.
+    expect(api.cards()).toEqual([
+      { id: 'c1', title: 'read files', status: 'in_progress' },
+      { id: 'c1', title: 'read files', status: 'complete' },
+    ]);
+  });
+
+  test('a card title cannot ping a human, however the model writes it', async () => {
+    const painter = canvas();
+    // Slack folds the title into the streamed message's `text` byte for
+    // byte, where a raw `<@U…>` is indistinguishable from a real mention.
+    await painter.tool({
+      id: 'c1',
+      title: `ping <@${OWNER}> and <!channel>`,
+      state: 'in_progress',
+    });
+    await painter.final('', 'stopped');
+    for (const card of api.cards()) {
+      expect(card.title).toBe(`ping &lt;@${OWNER}> and &lt;!channel>`);
+    }
+    expect(api.cards()).toHaveLength(2);
+  });
+});
+
+describe('the agent session', () => {
+  test('the working sign is the session, and the end of the turn settles it', async () => {
+    const painter = canvas();
+    await painter.working();
+    await painter.live('a', null);
+    await painter.final('a', 'done');
+    expect(api.only('session')).toEqual([
+      { call: 'session', threadTs: TS, status: 'processing' },
+      { call: 'session', threadTs: TS, status: 'active' },
+    ]);
+  });
+
+  test('a session that cannot be settled is one warning, not a failed turn', async () => {
+    const painter = canvas();
+    await painter.live('a', null);
+    api.failSession = new Error('invalid_arguments');
+    await painter.final('a', 'done');
+    expect(log.of('the agent session could not be settled')).toHaveLength(1);
+    expect(api.only('stop')).toHaveLength(1);
   });
 });
 
@@ -472,6 +625,20 @@ describe('the surface', () => {
     expect(older.map((m) => m.content)).toEqual(['first & oldest']);
   });
 
+  test('teardown closes the thread’s agent session', async () => {
+    await surface().archive?.(THREAD);
+    expect(api.only('session')).toEqual([
+      { call: 'session', threadTs: TS, status: 'closed' },
+    ]);
+  });
+
+  test('an idle thread puts its agent session back to ready', async () => {
+    await surface().settle?.(THREAD);
+    expect(api.only('session')).toEqual([
+      { call: 'session', threadTs: TS, status: 'active' },
+    ]);
+  });
+
   test("mate's own answer is mate's, whether or not Slack put a user on it", async () => {
     api.thread.push(
       { ts: '1.000001', bot_id: BOT, username: 'rowbutt', text: 'an answer' },
@@ -511,6 +678,65 @@ describe('a Web API call', () => {
     await expect(web().post(CHANNEL, TS, 'hi')).rejects.toThrow(
       'chat.postMessage: not_in_channel',
     );
+  });
+
+  /**
+   * The encoding is not a style choice. A read sent as JSON comes back
+   * `invalid_arguments` naming a field that is right there in the body, or
+   * `user_not_found` for a user who exists — a lie that reads like a
+   * permission problem and leaves the transcript replay silently empty.
+   */
+  test('a read is form-encoded and a write that carries chunks is JSON', async () => {
+    const sent: { url: string; type: string; body: string }[] = [];
+    globalThis.fetch = (async (url: string, init: RequestInit) => {
+      sent.push({
+        url: String(url),
+        type: String((init.headers as Record<string, string>)['content-type']),
+        body: String(init.body),
+      });
+      return Response.json({ ok: true, ts: '1.1', messages: [], user: {} });
+    }) as unknown as typeof fetch;
+
+    const client = web();
+    await client.replies(CHANNEL, TS);
+    await client.userName(OWNER);
+    await client.startStream({
+      channel: CHANNEL,
+      threadTs: TS,
+      userId: OWNER,
+      teamId: TEAM,
+      chunks: [{ type: 'markdown_text', text: 'hi' }],
+    });
+
+    const [replies, users, stream] = sent;
+    expect(replies?.type).toBe(
+      'application/x-www-form-urlencoded; charset=utf-8',
+    );
+    expect(replies?.body).toContain(`channel=${CHANNEL}`);
+    expect(users?.body).toBe(`user=${OWNER}`);
+    expect(stream?.type).toBe('application/json; charset=utf-8');
+    expect(JSON.parse(stream?.body ?? '{}')).toMatchObject({
+      chunks: [{ type: 'markdown_text', text: 'hi' }],
+      recipient_user_id: OWNER,
+      recipient_team_id: TEAM,
+      // A card per call rather than one plan block summarising them: the
+      // same chunks render either way and only this says which.
+      task_display_mode: 'timeline',
+    });
+  });
+
+  test('a session warning is said once each, not once a turn', async () => {
+    let warning = 'missing_agent_session_stopped_event_subscription';
+    globalThis.fetch = (async () =>
+      Response.json({ ok: true, warning })) as unknown as typeof fetch;
+    const client = web();
+    await client.session(CHANNEL, TS, 'processing');
+    await client.session(CHANNEL, TS, 'active');
+    expect(log.of('slack agent session')).toHaveLength(1);
+    // The one Slack sends today would otherwise silence every later one.
+    warning = 'something_else_entirely';
+    await client.session(CHANNEL, TS, 'processing');
+    expect(log.of('slack agent session')).toHaveLength(2);
   });
 });
 
