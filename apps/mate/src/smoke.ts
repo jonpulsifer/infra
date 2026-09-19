@@ -14,6 +14,7 @@ import { discoverKube, Kube } from './kube.ts';
 import { jsonLog, plain } from './log.ts';
 import type { PromptSink, SandboxRef, Update } from './sandbox.ts';
 import { KubeSandboxes, waitForPodGone } from './sandboxes.ts';
+import type { ThreadRef } from './surface.ts';
 
 const PROMPT =
   'Read AGENTS.md and reply with the file:line of the rule about `tofu apply`';
@@ -23,7 +24,8 @@ const kill = process.argv.includes('--kill');
 const config = readSandboxConfig(process.env);
 const kube = new Kube(await discoverKube());
 const guildId = process.env.MATE_GUILD_ID?.trim() || '0';
-const thread = {
+const thread: ThreadRef = {
+  surface: 'discord',
   id: `${Date.now()}${Math.floor(Math.random() * 10_000)
     .toString()
     .padStart(4, '0')}`,

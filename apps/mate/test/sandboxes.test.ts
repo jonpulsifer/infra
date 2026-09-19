@@ -14,12 +14,17 @@ import {
   TURN_ANNOTATION,
   WORKSPACE,
 } from '../src/sandboxes.ts';
+import type { ThreadRef } from '../src/surface.ts';
 import { FakeKube } from './fakeapi.ts';
 import { RecordingLog } from './support.ts';
 
-const THREAD = { id: '1509024937422356777', channelId: '1509024937422356532' };
+const THREAD: ThreadRef = {
+  surface: 'discord',
+  id: '1509024937422356777',
+  channelId: '1509024937422356532',
+};
 const GUILD = '1509024936717455381';
-const NAME = sandboxName(THREAD.id);
+const NAME = sandboxName(THREAD);
 
 const config: SandboxConfig = {
   image: 'ghcr.io/jonpulsifer/mate-sandbox:latest',
@@ -83,6 +88,7 @@ describe('mint', () => {
     expect(sandbox.kind).toBe('Sandbox');
     expect(sandbox.metadata.labels).toMatchObject({
       'lolwtf.ca/minted-by': 'mate',
+      'lolwtf.ca/surface': 'discord',
       'lolwtf.ca/thread': THREAD.id,
       'lolwtf.ca/channel': THREAD.channelId,
       'lolwtf.ca/guild': GUILD,
@@ -159,7 +165,9 @@ describe('mint', () => {
   });
 
   test('refuses a thread id that is not a snowflake', () => {
-    expect(() => sandboxName('../escape')).toThrow(/not a snowflake/);
+    expect(() => sandboxName({ ...THREAD, id: '../escape' })).toThrow(
+      /not a snowflake/,
+    );
   });
 });
 
@@ -406,7 +414,11 @@ describe('teardown and list', () => {
       guildId: '1509024936717455999',
       log,
     });
-    await other.mint({ id: '1509024937422356888', channelId: 'c2' });
+    await other.mint({
+      surface: 'discord',
+      id: '1509024937422356888',
+      channelId: 'c2',
+    });
 
     const mine = await sandboxes.list();
     expect(mine).toEqual([{ name: NAME, thread: THREAD, turnInFlight: false }]);

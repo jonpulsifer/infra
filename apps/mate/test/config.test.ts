@@ -51,6 +51,31 @@ describe('config from the environment', () => {
     ).toThrow('MATE_SANDBOXES must be stub or kube');
   });
 
+  test('the slack surface is off unless both of its tokens are set', () => {
+    expect(readConfig(minimal).slack).toBeNull();
+    expect(() =>
+      readConfig({ ...minimal, MATE_SLACK_BOT_TOKEN: 'xoxb' }),
+    ).toThrow('MATE_SLACK_APP_TOKEN is required');
+    const slack = {
+      ...minimal,
+      MATE_SLACK_BOT_TOKEN: 'xoxb',
+      MATE_SLACK_APP_TOKEN: 'xapp',
+      MATE_SLACK_TEAM_ID: 'TAR78LS82',
+      MATE_SLACK_ALLOWED_USER_IDS: 'UAR78LSKC',
+      MATE_SLACK_ALLOWED_CHANNEL_IDS: 'CARBAMA05, C062BS4GADR',
+    };
+    expect(readConfig(slack).slack).toEqual({
+      botToken: 'xoxb',
+      appToken: 'xapp',
+      teamId: 'TAR78LS82',
+      allowedUserIds: new Set(['UAR78LSKC']),
+      allowedChannelIds: new Set(['CARBAMA05', 'C062BS4GADR']),
+    });
+    expect(() =>
+      readConfig({ ...slack, MATE_SLACK_ALLOWED_CHANNEL_IDS: 'general' }),
+    ).toThrow('non-Slack id');
+  });
+
   test('kube mode needs a harness image and takes the sandbox defaults', () => {
     expect(() => readConfig({ ...minimal, MATE_SANDBOXES: 'kube' })).toThrow(
       'MATE_SANDBOX_IMAGE is required',

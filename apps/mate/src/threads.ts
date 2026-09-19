@@ -1,11 +1,12 @@
 /**
- * The thread state machine: one Discord thread owns at most one sandbox, and
- * every transition in the state table lives here. Discord and the sandbox
- * side are both ports, so the whole contract runs against fakes.
+ * The thread state machine: one thread owns at most one sandbox, and every
+ * transition in the state table lives here. The surface a thread is on and
+ * the sandbox side are both ports, so the whole contract runs against fakes,
+ * and the caps below are mate's rather than any one surface's — one process,
+ * one queue, one daily budget, however many places it answers in.
  */
 import type { Clock, Handle } from './clock.ts';
 import type { Config } from './config.ts';
-import type { Discord } from './discord.ts';
 import { type Log, plain } from './log.ts';
 import {
   type Instruments,
@@ -25,14 +26,24 @@ import {
   UNDELIVERED,
   WAITING,
 } from './notices.ts';
-import { EDIT_CADENCE_MS, type Outcome, Reply } from './reply.ts';
+import { EDIT_CADENCE_MS, Reply } from './reply.ts';
 import type {
   PromptResult,
   Sandboxes,
   SandboxRef,
   Session,
 } from './sandbox.ts';
+import {
+  type Inbound,
+  type Outcome,
+  type Surface,
+  type SurfaceName,
+  type ThreadRef,
+  threadKey,
+} from './surface.ts';
 import { replayPreamble } from './transcript.ts';
+
+export type { Inbound };
 
 export type ThreadState =
   | 'new'
@@ -44,16 +55,6 @@ export type ThreadState =
   | 'closed'
   | 'rehydrating';
 
-export interface Inbound {
-  id: string;
-  guildId: string | null;
-  channelId: string;
-  authorId: string;
-  authorIsBot: boolean;
-  content: string;
-  mentionsMe: boolean;
-}
-
 interface Prompt {
   text: string;
   raw: string;
@@ -61,8 +62,10 @@ interface Prompt {
 }
 
 interface Thread {
-  id: string;
-  channelId: string;
+  /** The name this thread is known by, unique across every surface. */
+  key: string;
+  ref: ThreadRef;
+  surface: Surface;
   state: ThreadState;
   sandbox: SandboxRef | null;
   session: Session | null;
@@ -87,23 +90,16 @@ const HOLDING_A_SLOT: ReadonlySet<ThreadState> = new Set([
 
 export type ThreadsConfig = Pick<
   Config,
-  | 'guildId'
-  | 'allowedUserIds'
-  | 'allowedChannelIds'
-  | 'quietMs'
-  | 'maxTurnsPerThread'
-  | 'maxTurnsPerDay'
-  | 'maxConcurrent'
+  'quietMs' | 'maxTurnsPerThread' | 'maxTurnsPerDay' | 'maxConcurrent'
 >;
 
 export interface ThreadsDeps {
-  discord: Discord;
+  /** Every place mate answers; each carries its own identity and allowlists. */
+  surfaces: readonly Surface[];
   sandboxes: Sandboxes;
   clock: Clock;
   log: Log;
   config: ThreadsConfig;
-  /** The bot user's id. */
-  me: string;
   editCadenceMs?: number;
   metrics?: Instruments;
 }
@@ -125,6 +121,7 @@ export function threadName(content: string, me: string): string {
 
 export class Threads {
   private readonly threads = new Map<string, Thread>();
+  private readonly surfaces = new Map<SurfaceName, Surface>();
   private readonly waiting: string[] = [];
   private readonly dayTurns: number[] = [];
   private readonly backlog: Inbound[] = [];
@@ -133,34 +130,65 @@ export class Threads {
 
   constructor(private readonly deps: ThreadsDeps) {
     this.metrics = deps.metrics ?? lazyInstruments();
+    for (const surface of deps.surfaces) {
+      this.surfaces.set(surface.name, surface);
+    }
   }
 
-  stateOf(threadId: string): ThreadState | undefined {
-    return this.threads.get(threadId)?.state;
+  stateOf(key: string): ThreadState | undefined {
+    return this.threads.get(key)?.state;
   }
 
   get waitingIds(): readonly string[] {
     return this.waiting;
   }
 
+  /** Every place mate is answering right now. */
+  get surfaceNames(): SurfaceName[] {
+    return [...this.surfaces.keys()];
+  }
+
   /** A thread mate owns from an earlier life: known, and closed until spoken to. */
-  adopt(threadId: string, channelId: string): void {
-    this.ensure(threadId, channelId);
+  adopt(ref: ThreadRef): void {
+    const surface = this.surfaces.get(ref.surface);
+    if (surface) this.ensure(surface, ref);
+  }
+
+  /**
+   * Registers a surface and picks up what was left on it. Surfaces arrive
+   * independently — Slack's socket opens before the Discord gateway, and
+   * either one can be down while the other answers — so each rehydrates as it
+   * arrives rather than all of them at once.
+   */
+  async add(surface: Surface): Promise<void> {
+    this.surfaces.set(surface.name, surface);
+    await this.rehydrate(surface.name);
   }
 
   /**
    * Re-attaches to the sandboxes found at start. Messages that land meanwhile
-   * are held and handled afterwards, so a thread is never minted twice.
+   * are held and handled afterwards, so a thread is never minted twice. With
+   * a surface named, only that surface's sandboxes are claimed and the rest
+   * are left for whichever surface comes up to claim them.
    */
-  async rehydrate(): Promise<void> {
+  async rehydrate(only?: SurfaceName): Promise<void> {
     const { sandboxes, log } = this.deps;
     this.hydrating = true;
     try {
       for (const sandbox of await sandboxes.list()) {
-        const thread = this.ensure(sandbox.thread.id, sandbox.thread.channelId);
+        if (only && sandbox.thread.surface !== only) continue;
+        const surface = this.surfaces.get(sandbox.thread.surface);
+        if (!surface) {
+          log.warn('rehydrate found a sandbox on a surface mate is not on', {
+            sandbox: sandbox.name,
+            surface: sandbox.thread.surface,
+          });
+          continue;
+        }
+        const thread = this.ensure(surface, sandbox.thread);
         if (thread.state !== 'new') {
           log.warn('rehydrate skipped a thread already in motion', {
-            threadId: thread.id,
+            threadId: thread.ref.id,
             state: thread.state,
           });
           continue;
@@ -178,7 +206,7 @@ export class Threads {
           await this.pump(thread);
         } catch (error) {
           log.warn('rehydrate failed; tearing down', {
-            threadId: thread.id,
+            threadId: thread.ref.id,
             error: plain(error),
           });
           await this.close(thread, {
@@ -197,59 +225,73 @@ export class Threads {
   }
 
   async onMessage(message: Inbound): Promise<void> {
-    const { config, discord, log, me } = this.deps;
-    if (message.authorIsBot || message.guildId !== config.guildId) return;
+    const { log } = this.deps;
+    const surface = this.surfaces.get(message.surface);
+    if (!surface || message.authorIsBot) return;
+    // Belt and braces on the worst failure this has: a message in a thread
+    // mate owns is accepted without an allowlist or a mention, so one post of
+    // its own read back as a human's would answer itself until the turn
+    // budget ran out. Discord marks its own messages as a bot's; Slack's
+    // shapes are not all observed, and this holds whatever one of them omits.
+    if (message.authorId === surface.me) return;
     if (this.hydrating) {
       this.backlog.push(message);
       return;
     }
     const prompt = {
-      text: stripMention(message.content, me),
+      text: stripMention(message.content, surface.me),
       raw: message.content,
       authorId: message.authorId,
     };
-    const known = this.threads.get(message.channelId);
+    const known = message.threadId
+      ? this.threads.get(
+          threadKey({
+            surface: surface.name,
+            channelId: message.channelId,
+            id: message.threadId,
+          }),
+        )
+      : undefined;
     if (known) {
       this.accept(known, prompt);
       return;
     }
     if (
-      !config.allowedChannelIds.has(message.channelId) ||
+      !surface.allowedChannelIds.has(message.channelId) ||
       !message.mentionsMe ||
-      !config.allowedUserIds.has(message.authorId)
+      !surface.allowedUserIds.has(message.authorId)
     ) {
       return;
     }
-    let threadId: string;
+    let ref: ThreadRef;
     try {
-      threadId = await discord.createThread(
-        message.channelId,
-        message.id,
-        threadName(message.content, me),
+      ref = await surface.openThread(
+        message,
+        threadName(message.content, surface.me),
       );
     } catch (error) {
       log.warn('thread create failed', {
+        surface: surface.name,
         channelId: message.channelId,
         messageId: message.id,
         error: plain(error),
       });
       return;
     }
-    const thread = this.ensure(threadId, message.channelId);
-    this.accept(thread, prompt);
+    this.accept(this.ensure(surface, ref), prompt);
   }
 
   async onStop(
-    threadId: string,
+    key: string,
     userId: string,
     ack: () => Promise<void>,
   ): Promise<void> {
-    const { config, sandboxes, log } = this.deps;
+    const { sandboxes, log } = this.deps;
     await ack().catch((error) =>
-      log.warn('stop ack failed', { threadId, error: plain(error) }),
+      log.warn('stop ack failed', { threadId: key, error: plain(error) }),
     );
-    const thread = this.threads.get(threadId);
-    if (!thread || !config.allowedUserIds.has(userId)) return;
+    const thread = this.threads.get(key);
+    if (!thread?.surface.allowedUserIds.has(userId)) return;
     if (thread.state !== 'turn') return;
     // A turn still reading the thread's transcript has nothing to cancel yet,
     // so the flag is what stops it; the harness only hears about one it holds.
@@ -257,8 +299,8 @@ export class Threads {
     if (thread.session) await sandboxes.cancel(thread.session);
   }
 
-  async onThreadArchived(threadId: string): Promise<void> {
-    const thread = this.threads.get(threadId);
+  async onThreadArchived(ref: ThreadRef): Promise<void> {
+    const thread = this.threads.get(threadKey(ref));
     if (!thread) return;
     if (thread.state === 'attached') {
       await this.close(thread, {
@@ -271,19 +313,21 @@ export class Threads {
     }
   }
 
-  async onThreadDeleted(threadId: string): Promise<void> {
-    const thread = this.threads.get(threadId);
+  async onThreadDeleted(ref: ThreadRef): Promise<void> {
+    const key = threadKey(ref);
+    const thread = this.threads.get(key);
     if (!thread) return;
-    this.threads.delete(threadId);
+    this.threads.delete(key);
     this.disarmQuiet(thread);
-    const at = this.waiting.indexOf(threadId);
+    const at = this.waiting.indexOf(key);
     if (at >= 0) this.waiting.splice(at, 1);
     if (thread.sandbox) {
       await this.deps.sandboxes.teardown(thread.sandbox).catch(() => {});
       this.metrics.teardown('thread-deleted');
     }
     this.deps.log.info('thread deleted', {
-      threadId,
+      surface: ref.surface,
+      threadId: ref.id,
       sandbox: thread.sandbox?.name ?? null,
       turns: thread.turns,
     });
@@ -291,12 +335,14 @@ export class Threads {
     this.pumpWaiting();
   }
 
-  private ensure(threadId: string, channelId: string): Thread {
-    let thread = this.threads.get(threadId);
+  private ensure(surface: Surface, ref: ThreadRef): Thread {
+    const key = threadKey(ref);
+    let thread = this.threads.get(key);
     if (!thread) {
       thread = {
-        id: threadId,
-        channelId,
+        key,
+        ref,
+        surface,
         state: 'new',
         sandbox: null,
         session: null,
@@ -306,7 +352,7 @@ export class Threads {
         replay: false,
         stopRequested: false,
       };
-      this.threads.set(threadId, thread);
+      this.threads.set(key, thread);
     }
     return thread;
   }
@@ -315,7 +361,8 @@ export class Threads {
   private to(thread: Thread, state: ThreadState): void {
     thread.state = state;
     this.deps.log.info('thread state', {
-      threadId: thread.id,
+      surface: thread.ref.surface,
+      threadId: thread.ref.id,
       state,
       sandbox: thread.sandbox?.name ?? null,
       turns: thread.turns,
@@ -359,7 +406,7 @@ export class Threads {
       }
     } catch (error) {
       this.deps.log.error('thread pump failed', {
-        threadId: thread.id,
+        threadId: thread.ref.id,
         state: thread.state,
         error: plain(error),
       });
@@ -379,10 +426,7 @@ export class Threads {
     this.to(thread, 'minting');
     this.disarmQuiet(thread);
     try {
-      thread.sandbox = await sandboxes.mint({
-        id: thread.id,
-        channelId: thread.channelId,
-      });
+      thread.sandbox = await sandboxes.mint(thread.ref);
     } catch (error) {
       // Counted here because nothing else sees it: no sandbox exists, so the
       // teardown that follows records none.
@@ -412,7 +456,7 @@ export class Threads {
   }
 
   private async enqueue(thread: Thread): Promise<void> {
-    this.waiting.push(thread.id);
+    this.waiting.push(thread.key);
     this.to(thread, 'waiting');
     await this.tell(thread, `${WAITING} (${this.waiting.length - 1} ahead)`);
     this.armQuiet(thread);
@@ -426,7 +470,7 @@ export class Threads {
   }
 
   private leaveQueue(thread: Thread): void {
-    const at = this.waiting.indexOf(thread.id);
+    const at = this.waiting.indexOf(thread.key);
     if (at >= 0) this.waiting.splice(at, 1);
     this.disarmQuiet(thread);
     thread.pending = [];
@@ -434,7 +478,7 @@ export class Threads {
   }
 
   private async runTurn(thread: Thread): Promise<void> {
-    const { clock, discord, sandboxes, log } = this.deps;
+    const { clock, sandboxes, log } = this.deps;
     const prompt = thread.pending.shift();
     if (!prompt || !thread.session) return;
     const refusal = this.budgetRefusal(thread);
@@ -452,13 +496,13 @@ export class Threads {
     this.disarmQuiet(thread);
 
     const reply = new Reply(
-      discord,
+      thread.surface.canvas(thread.ref, prompt.authorId),
       clock,
       log,
-      thread.id,
+      thread.ref.id,
       this.deps.editCadenceMs ?? EDIT_CADENCE_MS,
     );
-    reply.startTyping();
+    reply.startWorking();
     try {
       const text = await this.withHistory(thread, prompt);
       if (thread.stopRequested) {
@@ -474,7 +518,7 @@ export class Threads {
         this.metrics.turnEnded('sandbox-died', {});
         await this.deliver(thread, reply, 'failed');
         log.warn('sandbox died mid-turn', {
-          threadId: thread.id,
+          threadId: thread.ref.id,
           error: plain(error),
         });
         await this.tell(thread, `${SANDBOX_DIED}: ${plain(error)}`);
@@ -506,7 +550,7 @@ export class Threads {
 
   /**
    * The first prompt of a session the harness could not reload carries the
-   * thread's own history: Discord is the durable log, and a harness that
+   * thread's own history: the thread is the durable log, and a harness that
    * starts empty would otherwise answer as if nothing had been said.
    */
   private async withHistory(thread: Thread, prompt: Prompt): Promise<string> {
@@ -516,19 +560,19 @@ export class Threads {
     for (const queued of thread.pending)
       skip.push(queued.text, queued.raw.trim());
     try {
-      const preamble = await replayPreamble(this.deps.discord, thread.id, {
-        me: this.deps.me,
+      const preamble = await replayPreamble(thread.surface, thread.ref, {
+        me: thread.surface.me,
         skip,
       });
       if (!preamble) return prompt.text;
       this.deps.log.info('replaying the thread transcript', {
-        threadId: thread.id,
+        threadId: thread.ref.id,
         characters: preamble.length,
       });
       return `${preamble}${prompt.text}`;
     } catch (error) {
       this.deps.log.warn('transcript replay failed; the session starts empty', {
-        threadId: thread.id,
+        threadId: thread.ref.id,
         error: plain(error),
       });
       return prompt.text;
@@ -545,7 +589,7 @@ export class Threads {
       await reply.finish(outcome);
     } catch (error) {
       this.deps.log.warn('reply delivery failed', {
-        threadId: thread.id,
+        threadId: thread.ref.id,
         error: plain(error),
       });
       await this.tell(thread, `${UNDELIVERED}: ${plain(error)}`);
@@ -597,13 +641,13 @@ export class Threads {
     thread: Thread,
     opts: { line: string | null; archive: boolean; reason: TeardownReason },
   ): Promise<void> {
-    const { discord, sandboxes, log } = this.deps;
+    const { sandboxes, log } = this.deps;
     this.to(thread, 'tearing-down');
     this.disarmQuiet(thread);
     if (thread.sandbox) {
       await sandboxes.teardown(thread.sandbox).catch((error) =>
         log.warn('teardown failed', {
-          threadId: thread.id,
+          threadId: thread.ref.id,
           error: plain(error),
         }),
       );
@@ -614,10 +658,12 @@ export class Threads {
     thread.replay = false;
     this.to(thread, 'closed');
     if (opts.line) await this.tell(thread, opts.line);
+    // A surface with no such thing — a Slack thread is never closed —
+    // declares no `archive`, so there is simply nothing here to call.
     if (opts.archive && thread.pending.length === 0) {
-      await discord.archiveThread(thread.id).catch((error) =>
+      await thread.surface.archive?.(thread.ref).catch((error) =>
         log.warn('archive failed', {
-          threadId: thread.id,
+          threadId: thread.ref.id,
           error: plain(error),
         }),
       );
@@ -627,13 +673,11 @@ export class Threads {
   }
 
   private async tell(thread: Thread, content: string): Promise<void> {
-    await this.deps.discord
-      .createMessage(thread.id, { content })
-      .catch((error) =>
-        this.deps.log.warn('message failed', {
-          threadId: thread.id,
-          error: plain(error),
-        }),
-      );
+    await thread.surface.post(thread.ref, content).catch((error) =>
+      this.deps.log.warn('message failed', {
+        threadId: thread.ref.id,
+        error: plain(error),
+      }),
+    );
   }
 }

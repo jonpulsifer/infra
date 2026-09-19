@@ -1,21 +1,18 @@
 /**
- * One streamed reply: a message edited in place as text arrives, sealed into
- * a new message at the cap, with an italic status line above the live text
- * and a Stop button below it until the turn ends.
+ * One streamed reply: what the answer says and when it is repainted, with an
+ * italic status line naming the current tool call and a Stop affordance until
+ * the turn ends. How any of that reaches a human is the `Canvas`'s — this
+ * holds only the parts that are the same wherever mate answers.
  */
 import type { Clock, Handle } from './clock.ts';
-import { type Discord, type OutMessage, stopRow } from './discord.ts';
 import { type Log, plain } from './log.ts';
 import type { PromptSink, Update } from './sandbox.ts';
+import type { Canvas, Outcome } from './surface.ts';
 
-export const MESSAGE_CAP = 2000;
 export const STATUS_MAX = 120;
-/** Room kept on the live message for the status line and its separator. */
-export const STATUS_RESERVE = STATUS_MAX + 6;
-export const CHUNK_BUDGET = MESSAGE_CAP - STATUS_RESERVE;
 export const EDIT_CADENCE_MS = 1_000;
 export const NO_REPLY = 'the harness sent no reply';
-const TYPING_INTERVAL_MS = 8_000;
+const WORKING_INTERVAL_MS = 8_000;
 export const PLACEHOLDER = '…';
 /** Marks a turn the human stopped; a turn stopped before any text is only this. */
 export const STOPPED = '*stopped*';
@@ -36,35 +33,35 @@ export function splitAt(text: string, budget: number): [string, string] {
   return [text.slice(0, at), text.slice(at)];
 }
 
-export type Outcome = 'done' | 'stopped' | 'failed';
+export type { Outcome };
 
 export class Reply implements PromptSink {
   private text = '';
   private status: string | null = null;
-  private sealedLength = 0;
-  private liveId: string | null = null;
   private dirty = false;
+  private painted = false;
   private timer: Handle | null = null;
-  private typingTimer: Handle | null = null;
+  private workingTimer: Handle | null = null;
   private lastFlushAt = Number.NEGATIVE_INFINITY;
   private chain: Promise<void> = Promise.resolve();
   private outcome: Outcome | null = null;
   private failures = 0;
 
   constructor(
-    private readonly discord: Discord,
+    private readonly canvas: Canvas,
     private readonly clock: Clock,
     private readonly log: Log,
     private readonly threadId: string,
     private readonly cadenceMs = EDIT_CADENCE_MS,
   ) {}
 
-  /** Shows "typing" until the first visible edit lands. */
-  startTyping(): void {
+  /** Shows the surface's "working" sign until the first visible frame lands. */
+  startWorking(): void {
+    if (!this.canvas.working) return;
     const tick = () => {
-      if (this.liveId || this.outcome) return;
-      void this.discord.showTyping(this.threadId).catch(() => {});
-      this.typingTimer = this.clock.after(TYPING_INTERVAL_MS, tick);
+      if (this.painted || this.outcome) return;
+      void this.canvas.working?.().catch(() => {});
+      this.workingTimer = this.clock.after(WORKING_INTERVAL_MS, tick);
     };
     tick();
   }
@@ -79,7 +76,7 @@ export class Reply implements PromptSink {
 
   /**
    * Sends the final state. Rejects only when that last send fails; a failed
-   * edit mid-stream is logged once and re-sent by the next flush.
+   * repaint mid-stream is logged once and re-sent by the next flush.
    */
   async finish(outcome: Outcome): Promise<void> {
     if (this.outcome) return;
@@ -89,7 +86,7 @@ export class Reply implements PromptSink {
     this.dirty = true;
     if (outcome === 'stopped')
       this.text += `${this.text ? '\n\n' : ''}${STOPPED}`;
-    this.chain = this.chain.then(() => this.flush(true));
+    this.chain = this.chain.then(() => this.flush(outcome));
     await this.chain;
   }
 
@@ -108,7 +105,7 @@ export class Reply implements PromptSink {
 
   private enqueue(): void {
     this.chain = this.chain
-      .then(() => this.flush(false))
+      .then(() => this.flush(null))
       .catch((error) => this.failed(error));
   }
 
@@ -123,47 +120,24 @@ export class Reply implements PromptSink {
     }
   }
 
-  private async flush(final: boolean): Promise<void> {
+  private async flush(final: Outcome | null): Promise<void> {
     if (!this.dirty) return;
     this.dirty = false;
+    this.painted = true;
     this.lastFlushAt = this.clock.now();
-    this.stopTyping();
-
-    let live = this.text.slice(this.sealedLength);
-    while (live.length > CHUNK_BUDGET) {
-      const [head, rest] = splitAt(live, CHUNK_BUDGET);
-      await this.send({ content: head }, true);
-      this.liveId = null;
-      this.sealedLength += head.length;
-      live = rest;
-    }
-
-    if (final) {
-      if (!live && !this.liveId && this.outcome === 'failed') return;
-      await this.send({ content: live || NO_REPLY }, false);
-      return;
-    }
-    const header = this.status ? statusLine(this.status) : '';
-    const content = [header, live].filter(Boolean).join('\n\n') || PLACEHOLDER;
-    await this.send({ content, components: [stopRow(this.threadId)] }, false);
-  }
-
-  private async send(body: OutMessage, seal: boolean): Promise<void> {
-    if (this.liveId) {
-      await this.discord.editMessage(this.threadId, this.liveId, body);
-    } else if (!seal || body.content) {
-      this.liveId = await this.discord.createMessage(this.threadId, body);
-    }
+    this.stopWorking();
+    if (final) await this.canvas.final(this.text, final);
+    else await this.canvas.live(this.text, this.status);
   }
 
   private stopTimers(): void {
     if (this.timer) this.clock.cancel(this.timer);
     this.timer = null;
-    this.stopTyping();
+    this.stopWorking();
   }
 
-  private stopTyping(): void {
-    if (this.typingTimer) this.clock.cancel(this.typingTimer);
-    this.typingTimer = null;
+  private stopWorking(): void {
+    if (this.workingTimer) this.clock.cancel(this.workingTimer);
+    this.workingTimer = null;
   }
 }

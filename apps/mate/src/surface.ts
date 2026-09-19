@@ -1,0 +1,106 @@
+/**
+ * The place mate is present, behind one interface. Discord and Slack are both
+ * adapters over it, so the thread state machine and the renderer never name
+ * either one and the whole contract runs against a fake.
+ *
+ * A surface is one workspace: its own bot identity, its own allowlists, its
+ * own ids. Two surfaces in one process share the concurrency cap, the turn
+ * budgets and the quiet timer, because those belong to mate rather than to a
+ * place it answers in.
+ */
+
+export type SurfaceName = 'discord' | 'slack';
+
+/** One thread, named the way its own surface names it. */
+export interface ThreadRef {
+  readonly surface: SurfaceName;
+  /** The channel the thread hangs under. */
+  readonly channelId: string;
+  /** The thread itself, inside that channel. */
+  readonly id: string;
+}
+
+/**
+ * The name a thread is known by across both surfaces, and the only key the
+ * state machine uses. A Discord thread is itself a channel, so its id is a
+ * snowflake that stands alone and a message in a thread names nothing else; a
+ * Slack thread is the timestamp of its parent message, which is only unique
+ * inside its channel, so the channel is part of its name.
+ */
+export function threadKey(thread: ThreadRef): string {
+  return thread.surface === 'discord'
+    ? `discord:${thread.id}`
+    : `${thread.surface}:${thread.channelId}:${thread.id}`;
+}
+
+/** A message the surface delivered, already stripped of its own wire shape. */
+export interface Inbound {
+  readonly surface: SurfaceName;
+  readonly id: string;
+  readonly channelId: string;
+  /** The thread it landed in, or null when it is not in one. */
+  readonly threadId: string | null;
+  readonly authorId: string;
+  readonly authorIsBot: boolean;
+  readonly content: string;
+  readonly mentionsMe: boolean;
+}
+
+/** One message already in a thread, as the transcript replay reads it. */
+export interface HistoryMessage {
+  id: string;
+  authorId: string;
+  authorName: string;
+  authorIsBot: boolean;
+  content: string;
+}
+
+export interface HistoryQuery {
+  limit: number;
+  /** Only messages older than this id, which is how a replay pages backwards. */
+  before?: string;
+}
+
+export type Outcome = 'done' | 'stopped' | 'failed';
+
+/**
+ * Where one turn's answer is painted. The renderer decides what the answer
+ * says and when to repaint it; the canvas decides how that reaches the
+ * surface — edited in place and chunked on Discord, streamed on Slack — and
+ * is the only thing that remembers what has already been shown.
+ */
+export interface Canvas {
+  /** The answer so far, and the line naming what the harness is doing. */
+  live(text: string, status: string | null): Promise<void>;
+  /** The last frame; the Stop affordance goes away with it. */
+  final(text: string, outcome: Outcome): Promise<void>;
+  /** The surface's "working" sign, shown until the first live frame. */
+  working?(): Promise<void>;
+}
+
+export interface Surface {
+  readonly name: SurfaceName;
+  /** The bot's own user id here: what a mention looks like, and who "you" is. */
+  readonly me: string;
+  /** Who may drive mate here. Anyone else is silence. */
+  readonly allowedUserIds: ReadonlySet<string>;
+  /** Where a mention may open a thread. */
+  readonly allowedChannelIds: ReadonlySet<string>;
+  /** The thread a mention opens. */
+  openThread(message: Inbound, title: string): Promise<ThreadRef>;
+  /** One plain line in the thread: everything mate says that is not an answer. */
+  post(thread: ThreadRef, text: string): Promise<void>;
+  /** The thread's own messages, newest first. */
+  history(thread: ThreadRef, query: HistoryQuery): Promise<HistoryMessage[]>;
+  /**
+   * A fresh canvas for one turn. `asker` is the human it answers: Slack
+   * requires a streamed message to name who it is for, Discord does not care.
+   */
+  canvas(thread: ThreadRef, asker: string): Canvas;
+  /**
+   * Seals the thread at teardown, where the surface has such a thing. Discord
+   * archives; Slack threads have no closed state, so it is absent there and
+   * the state machine simply has nothing to call.
+   */
+  archive?(thread: ThreadRef): Promise<void>;
+}

@@ -7,6 +7,7 @@ import { beforeEach, describe, expect, test } from 'bun:test';
 import { silentLog } from '../src/log.ts';
 import { RESTARTED, SANDBOX_CLOSED } from '../src/notices.ts';
 import { type Script, StubSandboxes } from '../src/sandbox.ts';
+import { type Surface, threadKey } from '../src/surface.ts';
 import {
   type Inbound,
   Threads,
@@ -14,6 +15,7 @@ import {
   threadName,
 } from '../src/threads.ts';
 import {
+  discordRef,
   FakeClock,
   FakeDiscord,
   RecordingInstruments,
@@ -24,15 +26,11 @@ import {
 const ME = '900000000000000001';
 const OWNER = '308072071949320204';
 const STRANGER = '111111111111111111';
-const GUILD = '1509024936717455381';
 const CHANNEL = '1509024937422356532';
 const OTHER_CHANNEL = '1509024937422356599';
 const QUIET_MS = 15 * 60_000;
 
 const config: ThreadsConfig = {
-  guildId: GUILD,
-  allowedUserIds: new Set([OWNER]),
-  allowedChannelIds: new Set([CHANNEL]),
   quietMs: QUIET_MS,
   maxTurnsPerThread: 30,
   maxTurnsPerDay: 120,
@@ -41,15 +39,21 @@ const config: ThreadsConfig = {
 
 let clock: FakeClock;
 let discord: FakeDiscord;
+let surface: Surface;
 let log: RecordingLog;
 let metrics: RecordingInstruments;
 let serial = 0;
 
+/** A Discord thread as the state machine names it. */
+const ref = (threadId: string) => discordRef(threadId, CHANNEL);
+const key = (threadId: string) => threadKey(ref(threadId));
+
 function mention(content: string, overrides: Partial<Inbound> = {}): Inbound {
   return {
+    surface: 'discord',
     id: `m-${++serial}`,
-    guildId: GUILD,
     channelId: CHANNEL,
+    threadId: CHANNEL,
     authorId: OWNER,
     authorIsBot: false,
     content: `<@${ME}> ${content}`,
@@ -67,9 +71,10 @@ function inThread(
   // transcript replay reads it back from.
   discord.post(threadId, content, authorId);
   return {
+    surface: 'discord',
     id: `m-${++serial}`,
-    guildId: GUILD,
     channelId: threadId,
+    threadId,
     authorId,
     authorIsBot: false,
     content,
@@ -96,12 +101,11 @@ function build(
     resumes: opts.resumes,
   });
   const threads = new Threads({
-    discord,
+    surfaces: [surface],
     sandboxes,
     clock,
     log,
     config: { ...config, ...opts.config },
-    me: ME,
     editCadenceMs: 1_000,
     metrics,
   });
@@ -122,6 +126,11 @@ const streaming =
 beforeEach(() => {
   clock = new FakeClock();
   discord = new FakeDiscord(ME);
+  surface = discord.surface({
+    me: ME,
+    allowedUserIds: new Set([OWNER]),
+    allowedChannelIds: new Set([CHANNEL]),
+  });
   log = new RecordingLog();
   metrics = new RecordingInstruments();
 });
@@ -137,9 +146,9 @@ describe('starting a thread', () => {
       name: 'say hi',
     });
     const threadId = discord.threads[0]!.id;
-    expect(threads.stateOf(threadId)).toBe('turn');
+    expect(threads.stateOf(key(threadId))).toBe('turn');
     await clock.advance(5_000);
-    expect(threads.stateOf(threadId)).toBe('attached');
+    expect(threads.stateOf(key(threadId))).toBe('attached');
     expect(discord.contentsIn(threadId).at(-1)).toBe('hello there ');
   });
 
@@ -159,12 +168,13 @@ describe('starting a thread', () => {
     expect(discord.messages).toHaveLength(0);
   });
 
-  test('a mention outside an allowed channel, without a mention, from a bot, or in another guild is silence', async () => {
+  test('a mention outside an allowed channel, without a mention, or from a bot is silence', async () => {
     const { threads } = build();
-    await threads.onMessage(mention('hi', { channelId: OTHER_CHANNEL }));
+    await threads.onMessage(
+      mention('hi', { channelId: OTHER_CHANNEL, threadId: OTHER_CHANNEL }),
+    );
     await threads.onMessage(mention('hi', { mentionsMe: false }));
     await threads.onMessage(mention('hi', { authorIsBot: true }));
-    await threads.onMessage(mention('hi', { guildId: '2' }));
     await settle();
     expect(discord.threads).toHaveLength(0);
     expect(discord.messages).toHaveLength(0);
@@ -260,10 +270,10 @@ describe('stopping a turn', () => {
     await threads.onMessage(mention('go'));
     await clock.advance(250);
     const threadId = discord.threads[0]!.id;
-    await threads.onStop(threadId, OWNER, () => discord.ackUpdate('i-1'));
+    await threads.onStop(key(threadId), OWNER, () => discord.ackUpdate('i-1'));
     await clock.advance(2_000);
     expect(discord.acks).toEqual(['i-1']);
-    expect(threads.stateOf(threadId)).toBe('attached');
+    expect(threads.stateOf(key(threadId))).toBe('attached');
     const reply = discord.inThread(threadId)[0]!;
     expect(reply.content).toEndWith('*stopped*');
     expect(reply.content).not.toContain('five');
@@ -275,7 +285,9 @@ describe('stopping a turn', () => {
     await threads.onMessage(mention('go'));
     await clock.advance(250);
     const threadId = discord.threads[0]!.id;
-    await threads.onStop(threadId, STRANGER, () => discord.ackUpdate('i-2'));
+    await threads.onStop(key(threadId), STRANGER, () =>
+      discord.ackUpdate('i-2'),
+    );
     await clock.advance(2_000);
     expect(discord.acks).toEqual(['i-2']);
     expect(discord.inThread(threadId)[0]!.content).toBe('one two ');
@@ -291,7 +303,7 @@ describe('errors', () => {
     expect(discord.contentsIn(threadId)).toEqual([
       'the sandbox did not start: ImagePullBackOff',
     ]);
-    expect(threads.stateOf(threadId)).toBe('closed');
+    expect(threads.stateOf(key(threadId))).toBe('closed');
   });
 
   test('a harness failure mid-turn is one plain sentence and the thread stays attached', async () => {
@@ -308,7 +320,7 @@ describe('errors', () => {
       'partial ',
       'the harness failed: provider returned 402',
     ]);
-    expect(threads.stateOf(threadId)).toBe('attached');
+    expect(threads.stateOf(key(threadId))).toBe('attached');
   });
 
   test('a sandbox that dies mid-turn is one plain sentence and the thread closes', async () => {
@@ -327,7 +339,7 @@ describe('errors', () => {
     expect(discord.contentsIn(threadId).at(-1)).toStartWith(
       'the sandbox died mid-turn: ',
     );
-    expect(threads.stateOf(threadId)).toBe('closed');
+    expect(threads.stateOf(key(threadId))).toBe('closed');
   });
 });
 
@@ -339,9 +351,9 @@ describe('quiet', () => {
     const threadId = discord.threads[0]!.id;
     // the turn completed 200 ms in; the timer runs from then
     await clock.advance(QUIET_MS - 5_000 + 199);
-    expect(threads.stateOf(threadId)).toBe('attached');
+    expect(threads.stateOf(key(threadId))).toBe('attached');
     await clock.advance(1);
-    expect(threads.stateOf(threadId)).toBe('closed');
+    expect(threads.stateOf(key(threadId))).toBe('closed');
     expect(sandboxes.liveCount).toBe(0);
     expect(discord.contentsIn(threadId).at(-1)).toBe(SANDBOX_CLOSED);
     expect(discord.archived).toEqual([threadId]);
@@ -356,7 +368,7 @@ describe('quiet', () => {
     await threads.onMessage(inThread(threadId, 'still here'));
     await clock.advance(5_000);
     await clock.advance(QUIET_MS - 60_000);
-    expect(threads.stateOf(threadId)).toBe('attached');
+    expect(threads.stateOf(key(threadId))).toBe('attached');
   });
 
   test('a message after teardown mints a fresh sandbox', async () => {
@@ -365,10 +377,10 @@ describe('quiet', () => {
     await clock.advance(5_000);
     const threadId = discord.threads[0]!.id;
     await clock.advance(QUIET_MS);
-    expect(threads.stateOf(threadId)).toBe('closed');
+    expect(threads.stateOf(key(threadId))).toBe('closed');
     await threads.onMessage(inThread(threadId, 'again'));
     await clock.advance(5_000);
-    expect(threads.stateOf(threadId)).toBe('attached');
+    expect(threads.stateOf(key(threadId))).toBe('attached');
     expect(sandboxes.liveCount).toBe(1);
     expect(discord.contentsIn(threadId).at(-1)).toBe('ok ');
   });
@@ -378,7 +390,7 @@ describe('quiet', () => {
     await threads.onMessage(mention('go'));
     await clock.advance(5_000);
     const threadId = discord.threads[0]!.id;
-    await threads.onThreadArchived(threadId);
+    await threads.onThreadArchived(ref(threadId));
     expect(sandboxes.liveCount).toBe(0);
     expect(discord.contentsIn(threadId).at(-1)).toBe(SANDBOX_CLOSED);
     // the closing line auto-unarchives the thread, so mate archives it again
@@ -401,9 +413,9 @@ describe('capacity', () => {
       string,
       string,
     ];
-    expect(threads.stateOf(first)).toBe('turn');
-    expect(threads.stateOf(second)).toBe('waiting');
-    expect(threads.stateOf(third)).toBe('waiting');
+    expect(threads.stateOf(key(first))).toBe('turn');
+    expect(threads.stateOf(key(second))).toBe('waiting');
+    expect(threads.stateOf(key(third))).toBe('waiting');
     expect(discord.contentsIn(second)).toEqual([
       'waiting for a sandbox (0 ahead)',
     ]);
@@ -411,17 +423,17 @@ describe('capacity', () => {
       'waiting for a sandbox (1 ahead)',
     ]);
     await clock.advance(5_000);
-    expect(threads.stateOf(second)).toBe('waiting');
-    await threads.onThreadArchived(first);
+    expect(threads.stateOf(key(second))).toBe('waiting');
+    await threads.onThreadArchived(ref(first));
     await settle();
-    expect(threads.stateOf(first)).toBe('closed');
-    expect(threads.stateOf(second)).toBe('turn');
-    expect(threads.stateOf(third)).toBe('waiting');
+    expect(threads.stateOf(key(first))).toBe('closed');
+    expect(threads.stateOf(key(second))).toBe('turn');
+    expect(threads.stateOf(key(third))).toBe('waiting');
     await clock.advance(5_000);
     expect(discord.contentsIn(second).at(-1)).toBe('ok ');
-    await threads.onThreadArchived(second);
+    await threads.onThreadArchived(ref(second));
     await settle();
-    expect(threads.stateOf(third)).toBe('turn');
+    expect(threads.stateOf(key(third))).toBe('turn');
   });
 
   test('a thread that waits 15 minutes in the queue is told and closed', async () => {
@@ -435,9 +447,9 @@ describe('capacity', () => {
     const second = discord.threads[1]!.id;
     await threads.onMessage(inThread(discord.threads[0]!.id, 'keep busy'));
     await clock.advance(QUIET_MS - 1);
-    expect(threads.stateOf(second)).toBe('waiting');
+    expect(threads.stateOf(key(second))).toBe('waiting');
     await clock.advance(1);
-    expect(threads.stateOf(second)).toBe('closed');
+    expect(threads.stateOf(key(second))).toBe('closed');
     expect(threads.waitingIds).toHaveLength(0);
     expect(discord.contentsIn(second).at(-1)).toBe(
       'stopped waiting for a sandbox; message again to start fresh',
@@ -455,7 +467,7 @@ describe('capacity', () => {
     const second = discord.threads[1]!.id;
     await threads.onMessage(inThread(second, 'still waiting'));
     await clock.advance(QUIET_MS + 1);
-    expect(threads.stateOf(second)).toBe('closed');
+    expect(threads.stateOf(key(second))).toBe('closed');
     expect(threads.waitingIds).toHaveLength(0);
     expect(discord.contentsIn(second).at(-1)).toBe(
       'stopped waiting for a sandbox; message again to start fresh',
@@ -485,7 +497,7 @@ describe('delivery failures', () => {
     );
     discord.failEdits = null;
     await clock.advance(5_000);
-    expect(threads.stateOf(threadId)).toBe('attached');
+    expect(threads.stateOf(key(threadId))).toBe('attached');
     expect(discord.contentsIn(threadId)).toEqual(['one two ']);
     expect(log.of('reply delivery failed')).toHaveLength(0);
   });
@@ -499,7 +511,7 @@ describe('delivery failures', () => {
     await clock.advance(50);
     discord.failEdits = new Error('thread archived');
     await clock.advance(5_000);
-    expect(threads.stateOf(threadId)).toBe('attached');
+    expect(threads.stateOf(key(threadId))).toBe('attached');
     expect(log.of('reply delivery failed')).toHaveLength(2);
     expect(
       discord
@@ -509,7 +521,7 @@ describe('delivery failures', () => {
         ),
     ).toHaveLength(2);
     await clock.advance(QUIET_MS);
-    expect(threads.stateOf(threadId)).toBe('closed');
+    expect(threads.stateOf(key(threadId))).toBe('closed');
   });
 });
 
@@ -532,7 +544,7 @@ describe('turn budgets', () => {
     expect(
       discord.contentsIn(threadId).filter((c) => c === 'ok '),
     ).toHaveLength(2);
-    expect(threads.stateOf(threadId)).toBe('attached');
+    expect(threads.stateOf(key(threadId))).toBe('attached');
   });
 
   test('the daily cap trips across threads and frees after 24 hours', async () => {
@@ -560,12 +572,11 @@ describe('rehydrating', () => {
   test('a restarted mate re-attaches to the sandboxes it finds and continues the thread', async () => {
     const shared = new StubSandboxes({ clock, script: streaming('back') });
     const before = new Threads({
-      discord,
+      surfaces: [surface],
       sandboxes: shared,
       clock,
       log: silentLog,
       config,
-      me: ME,
       editCadenceMs: 1_000,
     });
     await before.onMessage(mention('go'));
@@ -573,16 +584,15 @@ describe('rehydrating', () => {
     const threadId = discord.threads[0]!.id;
 
     const after = new Threads({
-      discord,
+      surfaces: [surface],
       sandboxes: shared,
       clock,
       log: silentLog,
       config,
-      me: ME,
       editCadenceMs: 1_000,
     });
     await after.rehydrate();
-    expect(after.stateOf(threadId)).toBe('attached');
+    expect(after.stateOf(key(threadId))).toBe('attached');
     await after.onMessage(inThread(threadId, 'still there?'));
     await clock.advance(5_000);
     expect(shared.liveCount).toBe(1);
@@ -591,8 +601,8 @@ describe('rehydrating', () => {
 
   test('an adopted thread with no sandbox mints on the next message', async () => {
     const { threads, sandboxes } = build({ script: streaming('fresh') });
-    threads.adopt('thread-old', CHANNEL);
-    expect(threads.stateOf('thread-old')).toBe('new');
+    threads.adopt(ref('thread-old'));
+    expect(threads.stateOf(key('thread-old'))).toBe('new');
     await threads.onMessage(inThread('thread-old', 'hello again'));
     await clock.advance(5_000);
     expect(sandboxes.liveCount).toBe(1);
@@ -602,12 +612,11 @@ describe('rehydrating', () => {
   test('a message that lands during rehydration is handled afterwards, against the rehydrated sandbox', async () => {
     const shared = new StubSandboxes({ clock, script: streaming('back') });
     const before = new Threads({
-      discord,
+      surfaces: [surface],
       sandboxes: shared,
       clock,
       log: silentLog,
       config,
-      me: ME,
       editCadenceMs: 1_000,
     });
     await before.onMessage(mention('go'));
@@ -616,23 +625,22 @@ describe('rehydrating', () => {
     expect(shared.mintCount).toBe(1);
 
     const after = new Threads({
-      discord,
+      surfaces: [surface],
       sandboxes: shared,
       clock,
       log,
       config,
-      me: ME,
       editCadenceMs: 1_000,
     });
-    after.adopt(threadId, CHANNEL);
+    after.adopt(ref(threadId));
     const hydrating = after.rehydrate();
     await after.onMessage(inThread(threadId, 'racing'));
-    expect(after.stateOf(threadId)).not.toBe('minting');
+    expect(after.stateOf(key(threadId))).not.toBe('minting');
     await hydrating;
     await clock.advance(5_000);
     expect(shared.mintCount).toBe(1);
     expect(shared.liveCount).toBe(1);
-    expect(after.stateOf(threadId)).toBe('attached');
+    expect(after.stateOf(key(threadId))).toBe('attached');
     expect(discord.contentsIn(threadId).at(-1)).toBe('back ');
   });
 
@@ -643,12 +651,11 @@ describe('rehydrating', () => {
       mintDelayMs: 500,
     });
     const before = new Threads({
-      discord,
+      surfaces: [surface],
       sandboxes: shared,
       clock,
       log: silentLog,
       config,
-      me: ME,
       editCadenceMs: 1_000,
     });
     await before.onMessage(mention('go'));
@@ -656,25 +663,24 @@ describe('rehydrating', () => {
     const threadId = discord.threads[0]!.id;
 
     const after = new Threads({
-      discord,
+      surfaces: [surface],
       sandboxes: shared,
       clock,
       log,
       config,
-      me: ME,
       editCadenceMs: 1_000,
     });
-    after.adopt(threadId, CHANNEL);
+    after.adopt(ref(threadId));
     await after.onMessage(inThread(threadId, 'first'));
     await settle();
-    expect(after.stateOf(threadId)).toBe('minting');
+    expect(after.stateOf(key(threadId))).toBe('minting');
     await after.rehydrate();
-    expect(after.stateOf(threadId)).toBe('minting');
+    expect(after.stateOf(key(threadId))).toBe('minting');
     expect(log.of('rehydrate skipped a thread already in motion')).toHaveLength(
       1,
     );
     await clock.advance(5_000);
-    expect(after.stateOf(threadId)).toBe('attached');
+    expect(after.stateOf(key(threadId))).toBe('attached');
     expect(discord.contentsIn(threadId).at(-1)).toBe('x ');
   });
 });
@@ -682,12 +688,11 @@ describe('rehydrating', () => {
 /** A second mate over the same sandboxes: what a Deployment roll leaves behind. */
 function rebuild(sandboxes: StubSandboxes): Threads {
   return new Threads({
-    discord,
+    surfaces: [surface],
     sandboxes,
     clock,
     log,
     config,
-    me: ME,
     editCadenceMs: 1_000,
     metrics,
   });
@@ -774,8 +779,8 @@ describe('replaying the transcript', () => {
 
     const turn = threads.onMessage(inThread(threadId, 'third question'));
     await clock.advance(1_000);
-    expect(threads.stateOf(threadId)).toBe('turn');
-    await threads.onStop(threadId, OWNER, async () => {});
+    expect(threads.stateOf(key(threadId))).toBe('turn');
+    await threads.onStop(key(threadId), OWNER, async () => {});
     release();
     await turn;
     await clock.advance(5_000);
@@ -783,7 +788,7 @@ describe('replaying the transcript', () => {
     expect(sandboxes.prompts).not.toContain('third question');
     expect(discord.contentsIn(threadId).at(-1)).toBe('*stopped*');
     expect(metrics.turns.at(-1)).toBe('cancelled');
-    expect(threads.stateOf(threadId)).toBe('attached');
+    expect(threads.stateOf(key(threadId))).toBe('attached');
   });
 
   test('a history read that fails leaves the turn alone', async () => {
@@ -809,18 +814,18 @@ describe('a mate restart', () => {
     await threads.onMessage(mention('a long job'));
     await clock.advance(5_000);
     const threadId = discord.threads[0]?.id ?? '';
-    expect(threads.stateOf(threadId)).toBe('turn');
+    expect(threads.stateOf(key(threadId))).toBe('turn');
 
     const after = rebuild(sandboxes);
     await after.rehydrate();
-    expect(after.stateOf(threadId)).toBe('attached');
+    expect(after.stateOf(key(threadId))).toBe('attached');
     expect(discord.contentsIn(threadId).filter((c) => c === RESTARTED)).toEqual(
       [RESTARTED],
     );
 
     await after.onMessage(inThread(threadId, 'again'));
     await settle();
-    expect(after.stateOf(threadId)).toBe('turn');
+    expect(after.stateOf(key(threadId))).toBe('turn');
     expect(discord.contentsIn(threadId).filter((c) => c === RESTARTED)).toEqual(
       [RESTARTED],
     );
@@ -835,7 +840,7 @@ describe('a mate restart', () => {
     const after = rebuild(sandboxes);
     await after.rehydrate();
     expect(discord.contentsIn(threadId)).not.toContain(RESTARTED);
-    expect(after.stateOf(threadId)).toBe('attached');
+    expect(after.stateOf(key(threadId))).toBe('attached');
   });
 
   test('a sandbox it cannot re-attach to is torn down and the thread told', async () => {
@@ -848,7 +853,7 @@ describe('a mate restart', () => {
     sandboxes.attachFails = 'the harness never answered';
     await after.rehydrate();
 
-    expect(after.stateOf(threadId)).toBe('closed');
+    expect(after.stateOf(key(threadId))).toBe('closed');
     expect(discord.contentsIn(threadId).at(-1)).toBe(SANDBOX_CLOSED);
     expect(sandboxes.liveCount).toBe(0);
     expect(metrics.teardowns).toEqual(['restart']);
@@ -878,7 +883,7 @@ describe('metrics', () => {
     await threads.onMessage(mention('go'));
     await settle();
     const threadId = discord.threads[0]?.id ?? '';
-    await threads.onStop(threadId, OWNER, async () => {});
+    await threads.onStop(key(threadId), OWNER, async () => {});
     await clock.advance(5_000);
     expect(metrics.turns).toEqual(['cancelled']);
 
@@ -888,7 +893,7 @@ describe('metrics', () => {
     const second = discord.threads[1]?.id ?? '';
     await dying.sandboxes.teardown({
       name: `mate-${second}`,
-      thread: { id: second, channelId: CHANNEL },
+      thread: ref(second),
     });
     await clock.advance(5_000);
     expect(metrics.turns.at(-1)).toBe('sandbox-died');
@@ -904,13 +909,13 @@ describe('metrics', () => {
     const archived = build({ script: streaming('alpha') });
     await archived.threads.onMessage(mention('go'));
     await clock.advance(5_000);
-    await archived.threads.onThreadArchived(discord.threads[1]?.id ?? '');
+    await archived.threads.onThreadArchived(ref(discord.threads[1]?.id ?? ''));
     expect(metrics.teardowns.at(-1)).toBe('archived');
 
     const deleted = build({ script: streaming('alpha') });
     await deleted.threads.onMessage(mention('go'));
     await clock.advance(5_000);
-    await deleted.threads.onThreadDeleted(discord.threads[2]?.id ?? '');
+    await deleted.threads.onThreadDeleted(ref(discord.threads[2]?.id ?? ''));
     expect(metrics.teardowns.at(-1)).toBe('thread-deleted');
   });
 
@@ -946,7 +951,7 @@ describe('metrics', () => {
     expect(metrics.queued).toBe(1);
 
     // The head of the queue takes the slot the moment it frees.
-    await threads.onThreadArchived(discord.threads[0]?.id ?? '');
+    await threads.onThreadArchived(ref(discord.threads[0]?.id ?? ''));
     await clock.advance(5_000);
     expect(metrics.queued).toBe(0);
     expect(metrics.live).toBe(1);
@@ -961,6 +966,9 @@ describe('the log', () => {
     const threadId = discord.threads[0]?.id ?? '';
     const states = () => log.of('thread state').map((e) => e.fields?.state);
     expect(states()).toEqual(['minting', 'attached', 'turn', 'attached']);
+    expect(
+      log.of('thread state').every((e) => e.fields?.surface === 'discord'),
+    ).toBe(true);
     expect(
       log.of('thread state').find((e) => e.fields?.state === 'turn')?.fields,
     ).toMatchObject({

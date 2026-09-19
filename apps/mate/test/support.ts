@@ -1,9 +1,9 @@
 import type { Clock, Handle } from '../src/clock.ts';
-import type {
-  Discord,
-  HistoryMessage,
-  HistoryQuery,
-  OutMessage,
+import {
+  type Discord,
+  DiscordCanvas,
+  discordSurface,
+  type OutMessage,
 } from '../src/discord.ts';
 import type { SessionStartLimit } from '../src/guard.ts';
 import type { Fields, Log } from '../src/log.ts';
@@ -14,6 +14,13 @@ import type {
   TurnEnd,
   TurnSample,
 } from '../src/metrics.ts';
+import type {
+  Canvas,
+  HistoryMessage,
+  HistoryQuery,
+  Surface,
+  ThreadRef,
+} from '../src/surface.ts';
 
 export interface Entry {
   level: 'info' | 'warn' | 'error';
@@ -273,4 +280,22 @@ export class FakeDiscord implements Discord {
   contentsIn(threadId: string): string[] {
     return this.inThread(threadId).map((m) => m.content);
   }
+
+  /** The canvas a turn in this thread paints on, as the real surface builds it. */
+  canvas(threadId: string): Canvas {
+    return new DiscordCanvas(this, threadId, `discord:${threadId}`);
+  }
+
+  surface(options: {
+    me: string;
+    allowedUserIds: ReadonlySet<string>;
+    allowedChannelIds: ReadonlySet<string>;
+  }): Surface {
+    return discordSurface(this, options);
+  }
+}
+
+/** A Discord thread as the state machine names it. */
+export function discordRef(id: string, channelId: string): ThreadRef {
+  return { surface: 'discord', channelId, id };
 }

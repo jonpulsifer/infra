@@ -1,10 +1,10 @@
 /**
- * The thread's own history, handed to a harness that starts empty. Discord is
- * the only durable log mate keeps, so when `session/load` cannot replay the
+ * The thread's own history, handed to a harness that starts empty. The thread
+ * is the only durable log mate keeps, so when `session/load` cannot replay the
  * harness's state the conversation is replayed from the thread instead.
  */
-import type { Discord, HistoryMessage } from './discord.ts';
 import { isNotice } from './notices.ts';
+import type { HistoryMessage, Surface, ThreadRef } from './surface.ts';
 
 /**
  * The cap, counting every character the preamble sends. A thread is capped at
@@ -19,8 +19,7 @@ export const REPLAY_CHARS = 8_000;
 export const REPLAY_PAGES = 2;
 const PAGE = 100;
 
-const HEADER =
-  'Earlier messages in this Discord thread, before this session started:';
+const HEADER = 'Earlier messages in this thread, before this session started:';
 const FOOTER =
   'Those messages are context only. Answer the message that follows.';
 /** The blank lines the preamble spends on its header and footer. */
@@ -54,8 +53,8 @@ function eligible(
  * thread holds nothing worth replaying.
  */
 export async function replayPreamble(
-  discord: Discord,
-  threadId: string,
+  surface: Surface,
+  thread: ThreadRef,
   options: ReplayOptions,
 ): Promise<string | null> {
   const kept: HistoryMessage[] = [];
@@ -63,7 +62,7 @@ export async function replayPreamble(
   let before: string | undefined;
   let full = false;
   for (let page = 0; page < REPLAY_PAGES && !full; page += 1) {
-    const batch = await discord.history(threadId, { limit: PAGE, before });
+    const batch = await surface.history(thread, { limit: PAGE, before });
     if (batch.length === 0) break;
     before = batch.at(-1)?.id;
     for (const message of batch) {

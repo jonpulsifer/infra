@@ -13,9 +13,13 @@ metadata:
     app.kubernetes.io/part-of: mate
 spec:
   replicas: 1
-  # Recreate is load-bearing, not tidy: Discord delivers every event to every
-  # gateway session on a token, so a RollingUpdate's overlap would have two
-  # mate pods receiving and replying to the same message.
+  # Recreate is load-bearing, not tidy, and both surfaces need it for opposite
+  # reasons. Discord delivers every event to every gateway session on a token,
+  # so a RollingUpdate's overlap would have two mate pods replying to the same
+  # message. Slack does the inverse: it splits payloads across an app's
+  # connections, so an overlap would have each pod receive a random half and
+  # mate would look like it was ignoring people. The `hello` frame's
+  # connection count is what says so in the log if it ever happens.
   strategy:
     type: Recreate
   selector:
@@ -27,11 +31,11 @@ spec:
         app.kubernetes.io/name: mate
         app.kubernetes.io/part-of: mate
       annotations:
-        # The token is an env var, which a running container never re-reads.
-        # Reloader rolls the pod when the ExternalSecret writes a rotated
-        # token, so rotation is one Recreate roll instead of waiting for
-        # Discord to close the stale session with 4004.
-        secret.reloader.stakater.com/reload: mate-discord
+        # Every token here is an env var, which a running container never
+        # re-reads. Reloader rolls the pod when either ExternalSecret writes a
+        # rotated token, so rotation is one Recreate roll instead of waiting
+        # for Discord to close the stale session with 4004.
+        secret.reloader.stakater.com/reload: mate-discord,mate-slack
     spec:
       # The token is what mints Sandboxes and opens `pods/exec`; `rbac.yaml`
       # scopes it to this namespace, and `network-policy.yaml` is what makes
@@ -71,6 +75,39 @@ spec:
               value: "308072071949320204"
             - name: MATE_ALLOWED_CHANNEL_IDS
               value: "1509024937422356532,1509024937422356533"
+            # The Slack half. It is opt-in: with neither token set mate
+            # answers on Discord alone, and with only one of them set it
+            # refuses to start rather than run half a surface. The thread
+            # contract is the same one — a mention opens a thread, the thread
+            # is the session, one allowlisted human — and the caps above are
+            # shared across both, because this is one process.
+            #
+            # `optional: true` is what keeps that promise on a cluster: a
+            # required secretKeyRef holds the pod in CreateContainerConfigError
+            # until the Secret exists, and with `strategy: Recreate` the pod
+            # answering on Discord is already gone by then. Unset instead of
+            # missing is what mate reads as "Slack is off"; reloader rolls the
+            # pod once the ExternalSecret writes the Secret.
+            - name: MATE_SLACK_BOT_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: mate-slack
+                  key: MATE_SLACK_BOT_TOKEN
+                  optional: true
+            - name: MATE_SLACK_APP_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: mate-slack
+                  key: MATE_SLACK_APP_TOKEN
+                  optional: true
+            # The workspace, the one allowlisted human, and the channels a
+            # mention may start a thread in (#general and #chatops).
+            - name: MATE_SLACK_TEAM_ID
+              value: TAR78LS82
+            - name: MATE_SLACK_ALLOWED_USER_IDS
+              value: UAR78LSKC
+            - name: MATE_SLACK_ALLOWED_CHANNEL_IDS
+              value: CARBAMA05,C062BS4GADR
             # The thread contract's numbers: quiet after 15 minutes, 30 turns
             # per thread, 120 per day, 3 sandboxes at once.
             - name: MATE_QUIET_MINUTES

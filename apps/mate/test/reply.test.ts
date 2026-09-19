@@ -1,8 +1,7 @@
 import { describe, expect, test } from 'bun:test';
+import { CHUNK_BUDGET, MESSAGE_CAP } from '../src/discord.ts';
 import { silentLog } from '../src/log.ts';
 import {
-  CHUNK_BUDGET,
-  MESSAGE_CAP,
   NO_REPLY,
   Reply,
   STATUS_MAX,
@@ -41,7 +40,7 @@ describe('a streamed reply', () => {
   test('flushes the first change at once, coalesces the rest, and drops the status and button on finish', async () => {
     const clock = new FakeClock();
     const discord = new FakeDiscord();
-    const reply = new Reply(discord, clock, silentLog, 't', 1_000);
+    const reply = new Reply(discord.canvas('t'), clock, silentLog, 't', 1_000);
     reply.update({ kind: 'status', line: 'reading files' });
     await clock.advance(0);
     const [message] = discord.inThread('t');
@@ -62,7 +61,7 @@ describe('a streamed reply', () => {
   test('a stopped reply with no text still says so', async () => {
     const clock = new FakeClock();
     const discord = new FakeDiscord();
-    const reply = new Reply(discord, clock, silentLog, 't', 1_000);
+    const reply = new Reply(discord.canvas('t'), clock, silentLog, 't', 1_000);
     reply.update({ kind: 'status', line: 'thinking' });
     await clock.advance(0);
     await reply.finish('stopped');
@@ -72,7 +71,7 @@ describe('a streamed reply', () => {
   test('seals full chunks in order and keeps the button only on the live message', async () => {
     const clock = new FakeClock();
     const discord = new FakeDiscord();
-    const reply = new Reply(discord, clock, silentLog, 't', 1_000);
+    const reply = new Reply(discord.canvas('t'), clock, silentLog, 't', 1_000);
     const text = 'word '.repeat(1_000);
     reply.update({ kind: 'text', delta: text });
     await clock.advance(0);
@@ -90,7 +89,13 @@ describe('a streamed reply', () => {
 
   test('a turn with neither text nor status ends with a plain line, not an ellipsis', async () => {
     const discord = new FakeDiscord();
-    const reply = new Reply(discord, new FakeClock(), silentLog, 't', 1_000);
+    const reply = new Reply(
+      discord.canvas('t'),
+      new FakeClock(),
+      silentLog,
+      't',
+      1_000,
+    );
     await reply.finish('done');
     expect(discord.contentsIn('t')).toEqual([NO_REPLY]);
   });
@@ -98,7 +103,7 @@ describe('a streamed reply', () => {
   test('a status that clears with no text behind it ends with the same plain line', async () => {
     const clock = new FakeClock();
     const discord = new FakeDiscord();
-    const reply = new Reply(discord, clock, silentLog, 't', 1_000);
+    const reply = new Reply(discord.canvas('t'), clock, silentLog, 't', 1_000);
     reply.update({ kind: 'status', line: 'thinking' });
     await clock.advance(0);
     reply.update({ kind: 'status', line: null });
@@ -108,7 +113,13 @@ describe('a streamed reply', () => {
 
   test('a failed turn with nothing to show posts nothing of its own', async () => {
     const discord = new FakeDiscord();
-    const reply = new Reply(discord, new FakeClock(), silentLog, 't', 1_000);
+    const reply = new Reply(
+      discord.canvas('t'),
+      new FakeClock(),
+      silentLog,
+      't',
+      1_000,
+    );
     await reply.finish('failed');
     expect(discord.contentsIn('t')).toEqual([]);
   });
@@ -119,7 +130,7 @@ describe('delivery failures', () => {
     const clock = new FakeClock();
     const discord = new FakeDiscord();
     const log = new RecordingLog();
-    const reply = new Reply(discord, clock, log, 't', 1_000);
+    const reply = new Reply(discord.canvas('t'), clock, log, 't', 1_000);
     reply.update({ kind: 'text', delta: 'a' });
     await clock.advance(0);
     discord.failEdits = new Error('429 past retries');
@@ -139,7 +150,7 @@ describe('delivery failures', () => {
   test('a failed final send rejects finish once; a second finish is a no-op', async () => {
     const clock = new FakeClock();
     const discord = new FakeDiscord();
-    const reply = new Reply(discord, clock, silentLog, 't', 1_000);
+    const reply = new Reply(discord.canvas('t'), clock, silentLog, 't', 1_000);
     reply.update({ kind: 'text', delta: 'a' });
     await clock.advance(0);
     discord.failEdits = new Error('thread archived');
