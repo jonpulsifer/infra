@@ -53,6 +53,22 @@ spec:
         - ports:
             - port: "443"
               protocol: TCP
+    # slack.com carries the whole Web API, including the call that opens a
+    # Socket Mode connection. That call answers with a `wss://` url on a host
+    # mate is told at connect time rather than one it can name ahead: the
+    # answer observed is wss-primary.slack.com, Slack documents a backup
+    # beside it, and a wildcard inside the leftmost label is the narrowest
+    # rule that reaches both — it matches one subdomain level whose name
+    # starts with `wss-` and nothing else under slack.com, which is why the
+    # API host is still named exactly. A connection that cannot be opened is
+    # a surface that never delivers a message, silently.
+    - toFQDNs:
+        - matchName: slack.com
+        - matchPattern: "wss-*.slack.com"
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
     # Sandboxes are minted, watched and exec'd into through the API server,
     # which mate reaches by the address in KUBERNETES_SERVICE_HOST — an IP,
     # never a name, so this cannot be an FQDN rule.

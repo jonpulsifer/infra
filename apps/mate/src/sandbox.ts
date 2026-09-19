@@ -4,11 +4,9 @@
  * thread engine only ever sees this.
  */
 import { type Clock, systemClock } from './clock.ts';
+import type { ThreadRef } from './surface.ts';
 
-export interface ThreadRef {
-  readonly id: string;
-  readonly channelId: string;
-}
+export type { ThreadRef };
 
 export interface SandboxRef {
   readonly name: string;

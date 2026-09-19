@@ -1,6 +1,6 @@
 /**
  * Sandboxes on the cluster: one bare `agents.x-k8s.io/v1beta1` Sandbox per
- * Discord thread, the harness reached by exec-ing `opencode acp` in its pod,
+ * thread, the harness reached by exec-ing `opencode acp` in its pod,
  * and `spec.shutdownTime` slid forward after every turn so a mate that dies
  * mid-thread cannot leak one.
  */
@@ -22,6 +22,7 @@ import type {
   Session,
   ThreadRef,
 } from './sandbox.ts';
+import type { SurfaceName } from './surface.ts';
 
 export const SANDBOX_API = 'agents.x-k8s.io/v1beta1';
 const SANDBOXES = '/apis/agents.x-k8s.io/v1beta1';
@@ -31,6 +32,13 @@ export const MINTED_BY = 'mate';
 export const MINTED_BY_LABEL = 'lolwtf.ca/minted-by';
 export const THREAD_LABEL = 'lolwtf.ca/thread';
 export const CHANNEL_LABEL = 'lolwtf.ca/channel';
+/** Which surface the thread is on, so `list()` can hand it back to the right one. */
+export const SURFACE_LABEL = 'lolwtf.ca/surface';
+/**
+ * This mate's own identity, so two mates sharing a namespace never list each
+ * other's sandboxes. mate answers in exactly one Discord guild, so that id is
+ * what says which mate a sandbox belongs to whichever surface minted it.
+ */
 export const GUILD_LABEL = 'lolwtf.ca/guild';
 /**
  * The harness's own session id, kept on the object rather than in a label:
@@ -69,7 +77,6 @@ const SECRET_SHAPED =
   /(?:sk-[A-Za-z0-9._-]{8,}|[Bb]earer\s+[A-Za-z0-9._-]{8,}|[A-Za-z0-9_-]{32,})/g;
 /** CRDs carry no strategic-merge metadata, so a merge patch is the one that leaves sibling fields alone. */
 const MERGE_PATCH = 'application/merge-patch+json';
-const THREAD_ID = /^\d{15,22}$/;
 
 interface Condition {
   type: string;
@@ -105,11 +112,31 @@ interface Attachment {
   sessionId: string;
 }
 
-export function sandboxName(threadId: string): string {
-  if (!THREAD_ID.test(threadId)) {
-    throw new Error(`thread id ${threadId} is not a snowflake`);
+const SNOWFLAKE = /^\d{15,22}$/;
+const SLACK_CHANNEL = /^[A-Z][A-Z0-9]{1,20}$/;
+const SLACK_TS = /^\d{10}\.\d{6}$/;
+
+/**
+ * The Sandbox a thread gets, named after the thread. The name is a Kubernetes
+ * object name and every part of it is also a label value, so each surface's
+ * ids are checked rather than trusted: a Discord snowflake is already both, a
+ * Slack channel is uppercase and a Slack thread is a timestamp whose dot is
+ * legal in a label value but is spelled as a dash here so one name reads as
+ * one name.
+ */
+export function sandboxName(thread: ThreadRef): string {
+  if (thread.surface === 'discord') {
+    if (!SNOWFLAKE.test(thread.id)) {
+      throw new Error(`thread id ${thread.id} is not a snowflake`);
+    }
+    return `mate-${thread.id}`;
   }
-  return `mate-${threadId}`;
+  if (!SLACK_CHANNEL.test(thread.channelId) || !SLACK_TS.test(thread.id)) {
+    throw new Error(
+      `thread ${thread.channelId}/${thread.id} is not a Slack thread`,
+    );
+  }
+  return `mate-slack-${thread.channelId.toLowerCase()}-${thread.id.replace('.', '-')}`;
 }
 
 function condition(sandbox: Sandbox, type: string): Condition | undefined {
@@ -163,6 +190,7 @@ export function sandboxLabels(
     'app.kubernetes.io/name': 'mate-sandbox',
     'app.kubernetes.io/part-of': 'mate',
     [MINTED_BY_LABEL]: MINTED_BY,
+    [SURFACE_LABEL]: thread.surface,
     [THREAD_LABEL]: thread.id,
     [CHANNEL_LABEL]: thread.channelId,
     [GUILD_LABEL]: guildId,
@@ -361,6 +389,9 @@ export class KubeSandboxes implements Sandboxes {
       const labels = sandbox.metadata.labels ?? {};
       const id = labels[THREAD_LABEL];
       const channelId = labels[CHANNEL_LABEL];
+      // Discord is the default because its threads are the ones whose labels
+      // can predate the surface label; anything else names itself.
+      const surface = (labels[SURFACE_LABEL] ?? 'discord') as SurfaceName;
       if (!id || !channelId) {
         this.deps.log.warn('sandbox has no thread labels; ignoring it', {
           sandbox: sandbox.metadata.name,
@@ -369,7 +400,7 @@ export class KubeSandboxes implements Sandboxes {
       }
       refs.push({
         name: sandbox.metadata.name,
-        thread: { id, channelId },
+        thread: { surface, channelId, id },
         turnInFlight: Boolean(sandbox.metadata.annotations?.[TURN_ANNOTATION]),
       });
     }
@@ -378,7 +409,7 @@ export class KubeSandboxes implements Sandboxes {
 
   async mint(thread: ThreadRef): Promise<SandboxRef> {
     const { kube, log } = this.deps;
-    const name = sandboxName(thread.id);
+    const name = sandboxName(thread);
     const response = await kube.request(this.path(), {
       method: 'POST',
       body: sandboxManifest({

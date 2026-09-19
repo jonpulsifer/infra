@@ -15,6 +15,16 @@ export interface Config {
   /** Where gateway session info is persisted for a resume, or `null` for memory only. */
   readonly sessionFile: string | null;
   readonly sandboxes: SandboxesChoice;
+  /** The second surface, or `null` when mate answers on Discord alone. */
+  readonly slack: SlackConfig | null;
+}
+
+export interface SlackConfig {
+  readonly botToken: string;
+  readonly appToken: string;
+  readonly teamId: string;
+  readonly allowedUserIds: ReadonlySet<string>;
+  readonly allowedChannelIds: ReadonlySet<string>;
 }
 
 /** What answers a thread: the in-process stub, or real Sandboxes on the cluster. */
@@ -59,6 +69,25 @@ function ids(env: Env, key: string): ReadonlySet<string> {
   return set;
 }
 
+/** Slack ids are uppercase: `U…` a user, `C…` a channel, `T…` a workspace. */
+const SLACK_ID = /^[A-Z][A-Z0-9]{1,20}$/;
+
+function slackIds(env: Env, key: string): ReadonlySet<string> {
+  const set = new Set(
+    required(env, key)
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean),
+  );
+  for (const id of set) {
+    if (!SLACK_ID.test(id)) {
+      throw new ConfigError(`${key} holds a non-Slack id: ${id}`);
+    }
+  }
+  if (set.size === 0) throw new ConfigError(`${key} is empty`);
+  return set;
+}
+
 function integer(env: Env, key: string, fallback: number): number {
   const raw = env[key]?.trim();
   if (!raw) return fallback;
@@ -96,6 +125,23 @@ function sandboxes(env: Env): SandboxesChoice {
   throw new ConfigError(`MATE_SANDBOXES must be stub or kube, got ${mode}`);
 }
 
+/**
+ * Off unless both tokens are set, so the surface is opt-in: half a Slack
+ * configuration is a mistake worth refusing rather than half a bot.
+ */
+function slack(env: Env): SlackConfig | null {
+  const bot = env.MATE_SLACK_BOT_TOKEN?.trim();
+  const app = env.MATE_SLACK_APP_TOKEN?.trim();
+  if (!bot && !app) return null;
+  return {
+    botToken: required(env, 'MATE_SLACK_BOT_TOKEN'),
+    appToken: required(env, 'MATE_SLACK_APP_TOKEN'),
+    teamId: required(env, 'MATE_SLACK_TEAM_ID'),
+    allowedUserIds: slackIds(env, 'MATE_SLACK_ALLOWED_USER_IDS'),
+    allowedChannelIds: slackIds(env, 'MATE_SLACK_ALLOWED_CHANNEL_IDS'),
+  };
+}
+
 export function readConfig(env: Env): Config {
   return {
     token: required(env, 'DISCORD_TOKEN'),
@@ -109,5 +155,6 @@ export function readConfig(env: Env): Config {
     port: integer(env, 'MATE_PORT', 8080),
     sessionFile: env.MATE_SESSION_FILE?.trim() || null,
     sandboxes: sandboxes(env),
+    slack: slack(env),
   };
 }

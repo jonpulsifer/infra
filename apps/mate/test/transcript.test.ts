@@ -5,22 +5,30 @@
 import { beforeEach, describe, expect, test } from 'bun:test';
 import { SANDBOX_CLOSED, WAITING } from '../src/notices.ts';
 import { PLACEHOLDER, STOPPED } from '../src/reply.ts';
+import type { Surface } from '../src/surface.ts';
 import {
   REPLAY_CHARS,
   REPLAY_MESSAGES,
   REPLAY_PAGES,
   replayPreamble,
 } from '../src/transcript.ts';
-import { FakeDiscord } from './support.ts';
+import { discordRef, FakeDiscord } from './support.ts';
 
 const ME = '900000000000000001';
 const OWNER = '308072071949320204';
 const THREAD = 'thread-1';
+const CHANNEL = '1509024937422356532';
 
 let discord: FakeDiscord;
+let surface: Surface;
 
 beforeEach(() => {
   discord = new FakeDiscord(ME);
+  surface = discord.surface({
+    me: ME,
+    allowedUserIds: new Set([OWNER]),
+    allowedChannelIds: new Set([CHANNEL]),
+  });
 });
 
 function mate(content: string): void {
@@ -31,7 +39,8 @@ function human(content: string, name = 'jawn'): void {
   discord.post(THREAD, content, OWNER, name);
 }
 
-const replay = () => replayPreamble(discord, THREAD, { me: ME, skip: [] });
+const thread = () => discordRef(THREAD, CHANNEL);
+const replay = () => replayPreamble(surface, thread(), { me: ME, skip: [] });
 
 describe('replaying a thread', () => {
   test('carries the conversation oldest first, attributed', async () => {
@@ -73,7 +82,7 @@ describe('replaying a thread', () => {
     human('old news');
     human('the question being asked now');
 
-    const preamble = await replayPreamble(discord, THREAD, {
+    const preamble = await replayPreamble(surface, thread(), {
       me: ME,
       skip: ['the question being asked now'],
     });

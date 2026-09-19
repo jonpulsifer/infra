@@ -5,8 +5,14 @@ import {
 } from 'discord-api-types/v10';
 import { systemClock } from './clock.ts';
 import { clearGlobalCommands } from './commands.ts';
-import { ConfigError, readConfig } from './config.ts';
-import { discordOver, STOP_PREFIX } from './discord.ts';
+import { ConfigError, readConfig, type SlackConfig } from './config.ts';
+import {
+  discordInbound,
+  discordOver,
+  discordSurface,
+  discordThread,
+  STOP_PREFIX,
+} from './discord.ts';
 import { createGateway } from './gateway.ts';
 import { Health } from './health.ts';
 import { discoverKube, Kube } from './kube.ts';
@@ -15,6 +21,15 @@ import { getInstruments, lazyInstruments } from './metrics.ts';
 import { type Sandboxes, StubSandboxes } from './sandbox.ts';
 import { KubeSandboxes } from './sandboxes.ts';
 import { fileSessionStore, memorySessionStore } from './session.ts';
+import {
+  type BlockActions,
+  openSocket,
+  slackInbound,
+  slackStop,
+  slackSurface,
+  slackWeb,
+} from './slack.ts';
+import { SocketMode } from './socket.ts';
 import {
   EXPORT_TIMEOUT_MS,
   startTelemetry,
@@ -101,27 +116,107 @@ const sandboxes: Sandboxes =
       })
     : new StubSandboxes();
 const discord = discordOver(client.api);
-let threads: Threads | null = null;
+
+/**
+ * The Slack half, opened before the gateway: its own socket, its own
+ * identity, and no dependence on Discord being up. A Slack-side failure is
+ * one loud line and a mate that answers on Discord alone, because the
+ * alternative is a crash loop that takes the surface that was working down
+ * with the one that was not.
+ */
+async function openSlack(slack: SlackConfig) {
+  const api = slackWeb(slack.botToken, { clock: systemClock, log });
+  const identity = await api.identity();
+  if (identity.teamId !== slack.teamId) {
+    throw new Error(
+      `MATE_SLACK_TEAM_ID is ${slack.teamId} but the token belongs to ${identity.teamId}`,
+    );
+  }
+  log.info('slack ready', {
+    teamId: identity.teamId,
+    userId: identity.userId,
+    allowedUsers: slack.allowedUserIds.size,
+    allowedChannels: [...slack.allowedChannelIds],
+  });
+  return {
+    surface: slackSurface({
+      api,
+      me: identity.userId,
+      appBotId: identity.appBotId,
+      teamId: slack.teamId,
+      allowedUserIds: slack.allowedUserIds,
+      allowedChannelIds: slack.allowedChannelIds,
+      log,
+    }),
+    listen(threads: Threads): SocketMode {
+      const socket = new SocketMode({
+        open: () => openSocket(slack.appToken),
+        connect: (url) => new WebSocket(url),
+        clock: systemClock,
+        log,
+        since: Date.now(),
+        onEvent: (payload) => {
+          const inbound = slackInbound(payload.event ?? {}, identity.userId);
+          if (inbound) void threads.onMessage(inbound);
+        },
+        onInteractive: (payload) => {
+          const stop = slackStop(payload as BlockActions);
+          // Already acknowledged on the socket, which is the only ack Slack
+          // is waiting for.
+          if (stop) void threads.onStop(stop.key, stop.userId, async () => {});
+        },
+      });
+      void socket.run();
+      return socket;
+    },
+  };
+}
+
+const slack = config.slack
+  ? await openSlack(config.slack).catch((error) => {
+      log.error('slack could not be opened; answering on Discord alone', {
+        error: plain(error),
+      });
+      return null;
+    })
+  : null;
+
+const threads = new Threads({
+  surfaces: [],
+  sandboxes,
+  clock: systemClock,
+  log,
+  config,
+  metrics: lazyInstruments(),
+});
 let me = '';
+
+// Slack comes up on its own, before the gateway is dialled: the surfaces are
+// independent everywhere else, and a Discord token that is revoked, rate
+// limited or merely waiting out the identify budget must not leave the other
+// one silent with nothing in the log naming the reason.
+let socket: SocketMode | null = null;
+if (slack) {
+  await threads.add(slack.surface);
+  socket = slack.listen(threads);
+}
 
 client.once(GatewayDispatchEvents.Ready, async ({ data }) => {
   me = data.user.id;
-  threads = new Threads({
-    discord,
-    sandboxes,
-    clock: systemClock,
-    log,
-    config,
-    me,
-    metrics: lazyInstruments(),
-  });
+  await threads.add(
+    discordSurface(discord, {
+      me,
+      allowedUserIds: config.allowedUserIds,
+      allowedChannelIds: config.allowedChannelIds,
+    }),
+  );
   log.info('ready', {
     user: data.user.username,
     userId: me,
     applicationId: data.application.id,
     guilds: data.guilds.length,
+    surfaces: threads.surfaceNames,
   });
-  await threads.rehydrate();
   try {
     await clearGlobalCommands(
       client.api.applicationCommands,
@@ -148,7 +243,7 @@ client.on(GatewayDispatchEvents.GuildCreate, ({ data }) => {
   }
   for (const thread of data.threads) {
     if (thread.owner_id === me && thread.parent_id) {
-      threads?.adopt(thread.id, thread.parent_id);
+      threads.adopt(discordThread(thread.id, thread.parent_id));
     }
   }
   log.info('guild ready', {
@@ -164,7 +259,7 @@ client.on(GatewayDispatchEvents.ThreadCreate, async ({ data }) => {
     !data.parent_id
   )
     return;
-  threads?.adopt(data.id, data.parent_id);
+  threads.adopt(discordThread(data.id, data.parent_id));
   await discord.joinThread(data.id).catch((error) =>
     log.warn('thread join failed', {
       threadId: data.id,
@@ -174,23 +269,29 @@ client.on(GatewayDispatchEvents.ThreadCreate, async ({ data }) => {
 });
 
 client.on(GatewayDispatchEvents.ThreadUpdate, ({ data }) => {
-  if (data.thread_metadata?.archived) void threads?.onThreadArchived(data.id);
+  if (data.thread_metadata?.archived) {
+    void threads.onThreadArchived(discordThread(data.id, data.parent_id ?? ''));
+  }
 });
 
 client.on(GatewayDispatchEvents.ThreadDelete, ({ data }) => {
-  void threads?.onThreadDeleted(data.id);
+  void threads.onThreadDeleted(discordThread(data.id, data.parent_id ?? ''));
 });
 
 client.on(GatewayDispatchEvents.MessageCreate, ({ data }) => {
-  void threads?.onMessage({
-    id: data.id,
-    guildId: data.guild_id ?? null,
-    channelId: data.channel_id,
-    authorId: data.author.id,
-    authorIsBot: data.author.bot ?? false,
-    content: data.content,
-    mentionsMe: data.mentions.some((user) => user.id === me),
-  });
+  const inbound = discordInbound(
+    {
+      id: data.id,
+      guildId: data.guild_id ?? null,
+      channelId: data.channel_id,
+      authorId: data.author.id,
+      authorIsBot: data.author.bot ?? false,
+      content: data.content,
+      mentionsMe: data.mentions.some((user) => user.id === me),
+    },
+    config.guildId,
+  );
+  if (inbound) void threads.onMessage(inbound);
 });
 
 client.on(GatewayDispatchEvents.InteractionCreate, ({ data }) => {
@@ -199,13 +300,17 @@ client.on(GatewayDispatchEvents.InteractionCreate, ({ data }) => {
   const customId = data.data.custom_id;
   if (!customId.startsWith(STOP_PREFIX)) return;
   const userId = data.member?.user.id ?? data.user?.id ?? '';
-  void threads?.onStop(customId.slice(STOP_PREFIX.length), userId, () =>
+  void threads.onStop(customId.slice(STOP_PREFIX.length), userId, () =>
     discord.ackUpdate(data.id, data.token),
   );
 });
 
 async function shutdown(signal: string): Promise<void> {
   log.info('shutting down', { signal });
+  // First: an envelope is acknowledged on receipt, so one that arrived during
+  // the drain is one Slack will not send again, and closing the socket is
+  // what stops another from being taken and dropped.
+  socket?.stop();
   try {
     await manager.destroy();
   } catch (error) {
@@ -225,6 +330,7 @@ log.info('mate starting', {
   guildId: config.guildId,
   allowedUsers: config.allowedUserIds.size,
   allowedChannels: [...config.allowedChannelIds],
+  slack: Boolean(config.slack),
   maxConcurrent: config.maxConcurrent,
   quietMinutes: config.quietMs / 60_000,
   port: config.port,
