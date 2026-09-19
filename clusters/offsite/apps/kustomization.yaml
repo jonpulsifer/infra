@@ -8,6 +8,7 @@ resources:
   - hub
   - identity-spike
   - kthx
+  - mate
   - prowler
   - spindrift
   - ../../base/platform/spindrift-target

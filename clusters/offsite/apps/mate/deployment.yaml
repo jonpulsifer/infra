@@ -1,0 +1,124 @@
+---
+# mate: the Discord gateway Rowbutt connects through, one Bun process from
+# `apps/mate`. It answers threads with an in-process stub today; the sandbox
+# side (a ServiceAccount and RBAC for `agents.x-k8s.io`, a template, a
+# NetworkPolicy) lands beside this file when it exists.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mate
+  namespace: mate
+  labels:
+    app.kubernetes.io/name: mate
+    app.kubernetes.io/part-of: mate
+spec:
+  replicas: 1
+  # Recreate is load-bearing, not tidy: Discord delivers every event to every
+  # gateway session on a token, so a RollingUpdate's overlap would have two
+  # mate pods receiving and replying to the same message.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: mate
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: mate
+        app.kubernetes.io/part-of: mate
+      annotations:
+        # The token is an env var, which a running container never re-reads.
+        # Reloader rolls the pod when the ExternalSecret writes a rotated
+        # token, so rotation is one Recreate roll instead of waiting for
+        # Discord to close the stale session with 4004.
+        secret.reloader.stakater.com/reload: mate-discord
+    spec:
+      # Nothing here talks to the API server yet. This flips to a
+      # ServiceAccount with sandbox RBAC when mate mints its first Sandbox.
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: mate
+          # The containers workflow rewrites this digest on every mate build
+          # that lands on main (`.github/containers.json`, `deploy.mate`). The
+          # rewrite anchors on the full `ghcr.io/…/mate…@sha256:` string, so
+          # this stays one literal and never a split repository/tag pair.
+          image: ghcr.io/jonpulsifer/mate:latest@sha256:c3ca8301b2b4c23bd39fcabe8f5018683a187d382e7c43974f02c72e48ca0bf2
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          env:
+            - name: DISCORD_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: mate-discord
+                  key: DISCORD_TOKEN
+            # The homelab guild, the one allowlisted user, and the channels a
+            # mention may start a thread in (#general and the General voice
+            # channel — harmless in the allowlist).
+            - name: MATE_GUILD_ID
+              value: "1509024936717455381"
+            - name: MATE_ALLOWED_USER_IDS
+              value: "308072071949320204"
+            - name: MATE_ALLOWED_CHANNEL_IDS
+              value: "1509024937422356532,1509024937422356533"
+            # The thread contract's numbers: quiet after 15 minutes, 30 turns
+            # per thread, 120 per day, 3 sandboxes at once.
+            - name: MATE_QUIET_MINUTES
+              value: "15"
+            - name: MATE_MAX_TURNS_PER_THREAD
+              value: "30"
+            - name: MATE_MAX_TURNS_PER_DAY
+              value: "120"
+            - name: MATE_MAX_CONCURRENT
+              value: "3"
+            - name: MATE_PORT
+              value: "8080"
+            # Gateway session info (session id, resume URL, sequence) lands
+            # here so a container restart inside the same pod resumes instead
+            # of spending an identify from the daily budget. An emptyDir is
+            # exactly that scope: it outlives the container, not the pod.
+            - name: MATE_SESSION_FILE
+              value: /tmp/session.json
+            # readOnlyRootFilesystem: /tmp (below) is the only writable path.
+            - name: TMPDIR
+              value: /tmp
+            - name: HOME
+              value: /tmp
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+          # Readiness only. /healthz is 503 whenever the gateway is not
+          # connected, and that is deliberate during the identify-budget
+          # guard's sleeps — a liveness probe on it would kill the process for
+          # doing exactly what it should and burn the budget it is protecting.
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 2
+            periodSeconds: 10
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            capabilities:
+              drop: ["ALL"]
+            seccompProfile:
+              type: RuntimeDefault
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              memory: 512Mi
+      volumes:
+        - name: tmp
+          emptyDir: {}
