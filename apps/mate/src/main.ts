@@ -11,7 +11,7 @@ import { createGateway } from './gateway.ts';
 import { Health } from './health.ts';
 import { discoverKube, Kube } from './kube.ts';
 import { jsonLog as log, plain } from './log.ts';
-import { getInstruments } from './metrics.ts';
+import { getInstruments, lazyInstruments } from './metrics.ts';
 import { type Sandboxes, StubSandboxes } from './sandbox.ts';
 import { KubeSandboxes } from './sandboxes.ts';
 import { fileSessionStore, memorySessionStore } from './session.ts';
@@ -71,7 +71,7 @@ client.once(GatewayDispatchEvents.Ready, async ({ data }) => {
     log,
     config,
     me,
-    onTurn: () => getInstruments().turnStarted(),
+    metrics: lazyInstruments(),
   });
   log.info('ready', {
     user: data.user.username,

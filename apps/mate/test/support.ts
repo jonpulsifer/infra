@@ -1,6 +1,18 @@
 import type { Clock, Handle } from '../src/clock.ts';
-import type { Discord, OutMessage } from '../src/discord.ts';
+import type {
+  Discord,
+  HistoryMessage,
+  HistoryQuery,
+  OutMessage,
+} from '../src/discord.ts';
+import type { SessionStartLimit } from '../src/guard.ts';
 import type { Fields, Log } from '../src/log.ts';
+import type {
+  Instruments,
+  TeardownReason,
+  TurnEnd,
+  TurnSample,
+} from '../src/metrics.ts';
 
 export interface Entry {
   level: 'info' | 'warn' | 'error';
@@ -97,8 +109,45 @@ export interface Sent {
   edits: number;
 }
 
+interface Posted extends HistoryMessage {
+  channelId: string;
+}
+
+export class RecordingInstruments implements Instruments {
+  readonly turns: TurnEnd[] = [];
+  readonly teardowns: TeardownReason[] = [];
+  readonly samples: TurnSample[] = [];
+  started = 0;
+  live = 0;
+  queued = 0;
+
+  identifyLimit(_limit: SessionStartLimit): void {}
+  sandboxesLive(count: number): void {
+    this.live = count;
+  }
+  queueDepth(depth: number): void {
+    this.queued = depth;
+  }
+  turnStarted(): void {
+    this.started += 1;
+  }
+  turnEnded(reason: TurnEnd, sample: TurnSample): void {
+    this.turns.push(reason);
+    this.samples.push(sample);
+  }
+  teardown(reason: TeardownReason): void {
+    this.teardowns.push(reason);
+  }
+}
+
 export class FakeDiscord implements Discord {
   readonly messages: Sent[] = [];
+  /** Every message in a channel, mate's own included, oldest first. */
+  readonly posted: Posted[] = [];
+  historyCalls = 0;
+  failHistory: Error | null = null;
+  /** Holds a history read open, for what lands while the transcript is being read. */
+  gateHistory: Promise<void> | null = null;
   readonly threads: {
     channelId: string;
     messageId: string;
@@ -112,6 +161,20 @@ export class FakeDiscord implements Discord {
   failCreateThread: Error | null = null;
   failEdits: Error | null = null;
   private serial = 0;
+
+  constructor(private readonly me = 'bot') {}
+
+  /** A human message landing in a thread, which is what Discord's log holds. */
+  post(channelId: string, content: string, authorId: string, name = 'jawn') {
+    this.posted.push({
+      channelId,
+      id: `h-${++this.serial}`,
+      authorId,
+      authorName: name,
+      authorIsBot: false,
+      content,
+    });
+  }
 
   async createThread(
     channelId: string,
@@ -133,7 +196,32 @@ export class FakeDiscord implements Discord {
       hasStop: (body.components?.length ?? 0) > 0,
       edits: 0,
     });
+    this.posted.push({
+      channelId,
+      id,
+      authorId: this.me,
+      authorName: 'mate',
+      authorIsBot: true,
+      content: body.content,
+    });
     return id;
+  }
+
+  async history(
+    channelId: string,
+    query: HistoryQuery,
+  ): Promise<HistoryMessage[]> {
+    this.historyCalls += 1;
+    if (this.gateHistory) await this.gateHistory;
+    if (this.failHistory) throw this.failHistory;
+    const all = this.posted.filter((m) => m.channelId === channelId);
+    const end = query.before
+      ? all.findIndex((m) => m.id === query.before)
+      : all.length;
+    return all
+      .slice(0, end < 0 ? all.length : end)
+      .reverse()
+      .slice(0, query.limit);
   }
 
   async editMessage(
@@ -149,6 +237,8 @@ export class FakeDiscord implements Discord {
     message.content = body.content;
     message.hasStop = (body.components?.length ?? 0) > 0;
     message.edits += 1;
+    const entry = this.posted.find((m) => m.id === messageId);
+    if (entry) entry.content = body.content;
   }
 
   async archiveThread(threadId: string): Promise<void> {

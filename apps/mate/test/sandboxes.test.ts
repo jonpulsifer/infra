@@ -11,6 +11,7 @@ import {
   KubeSandboxes,
   SESSION_ANNOTATION,
   sandboxName,
+  TURN_ANNOTATION,
   WORKSPACE,
 } from '../src/sandboxes.ts';
 import { FakeKube } from './fakeapi.ts';
@@ -232,7 +233,7 @@ describe('attach', () => {
     expect(fake.lastExec?.clientClosed).toBe(true);
     expect(
       sandboxes.prompt(
-        { id: 'ses-whatever', sandbox: ref },
+        { id: 'ses-whatever', sandbox: ref, resumed: false },
         'hi',
         new Collect(),
       ),
@@ -297,7 +298,6 @@ describe('prompt', () => {
 
     const slide = fake.patches.at(-1);
     expect(slide?.contentType).toBe('application/merge-patch+json');
-    expect(Object.keys(slide?.body ?? {})).toEqual(['spec']);
     expect(Object.keys((slide?.body.spec ?? {}) as object)).toEqual([
       'shutdownTime',
     ]);
@@ -375,7 +375,11 @@ describe('prompt', () => {
   test('refuses a session that is not attached', async () => {
     const ref = await sandboxes.mint(THREAD);
     expect(
-      sandboxes.prompt({ id: 'stale', sandbox: ref }, 'hi', new Collect()),
+      sandboxes.prompt(
+        { id: 'stale', sandbox: ref, resumed: false },
+        'hi',
+        new Collect(),
+      ),
     ).rejects.toThrow(/not attached/);
   });
 });
@@ -405,7 +409,7 @@ describe('teardown and list', () => {
     await other.mint({ id: '1509024937422356888', channelId: 'c2' });
 
     const mine = await sandboxes.list();
-    expect(mine).toEqual([{ name: NAME, thread: THREAD }]);
+    expect(mine).toEqual([{ name: NAME, thread: THREAD, turnInFlight: false }]);
   });
 
   test('skips a sandbox with no thread labels', async () => {
@@ -421,7 +425,70 @@ describe('teardown and list', () => {
         },
       },
     });
-    expect(await sandboxes.list()).toEqual([{ name: NAME, thread: THREAD }]);
+    expect(await sandboxes.list()).toEqual([
+      { name: NAME, thread: THREAD, turnInFlight: false },
+    ]);
     expect(log.of('sandbox has no thread labels; ignoring it')).toHaveLength(1);
+  });
+});
+
+describe('the turn mark', () => {
+  test('is on the object while a turn runs and gone when it ends', async () => {
+    fake.script = { chunks: ['one', 'two'], chunkDelayMs: 60 };
+    const ref = await sandboxes.mint(THREAD);
+    const session = await sandboxes.attach(ref);
+
+    const turn = sandboxes.prompt(session, 'go', new Collect());
+    await Bun.sleep(30);
+    expect((await sandboxes.list())[0]?.turnInFlight).toBe(true);
+
+    await turn;
+    expect((await sandboxes.list())[0]?.turnInFlight).toBe(false);
+    const object = fake.sandboxes.get(NAME) as Record<string, any>;
+    expect(object.metadata.annotations[TURN_ANNOTATION]).toBeUndefined();
+  });
+
+  test('a turn nothing ever finished stays marked for the next mate', async () => {
+    fake.script = { chunks: ['starting'], closeAfterChunk: 1 };
+    const ref = await sandboxes.mint(THREAD);
+    const session = await sandboxes.attach(ref);
+
+    await sandboxes.prompt(session, 'go', new Collect()).catch(() => {});
+    expect((await sandboxes.list())[0]?.turnInFlight).toBe(true);
+  });
+
+  test('attach says whether the harness reloaded the session', async () => {
+    const ref = await sandboxes.mint(THREAD);
+    expect((await sandboxes.attach(ref)).resumed).toBe(false);
+    expect((await sandboxes.attach(ref)).resumed).toBe(true);
+
+    fake.script = { loadFails: true };
+    expect((await sandboxes.attach(ref)).resumed).toBe(false);
+  });
+});
+
+describe('what a turn cost', () => {
+  test('is the step in the session total, not the total', async () => {
+    fake.script = { costs: [0.0024, 0.006] };
+    const ref = await sandboxes.mint(THREAD);
+    const session = await sandboxes.attach(ref);
+
+    const first = await sandboxes.prompt(session, 'one', new Collect());
+    const second = await sandboxes.prompt(session, 'two', new Collect());
+    expect(first.costUsd).toBeCloseTo(0.0024, 6);
+    expect(second.costUsd).toBeCloseTo(0.0036, 6);
+  });
+
+  test('is nothing for the first turn of a session the harness reloaded', async () => {
+    fake.script = { costs: [0.0024, 0.006] };
+    const ref = await sandboxes.mint(THREAD);
+    await sandboxes.attach(ref);
+    const resumed = await sandboxes.attach(ref);
+    expect(resumed.resumed).toBe(true);
+
+    const first = await sandboxes.prompt(resumed, 'one', new Collect());
+    const second = await sandboxes.prompt(resumed, 'two', new Collect());
+    expect(first.costUsd).toBeNull();
+    expect(second.costUsd).toBeCloseTo(0.0036, 6);
   });
 });

@@ -13,11 +13,15 @@ export interface ThreadRef {
 export interface SandboxRef {
   readonly name: string;
   readonly thread: ThreadRef;
+  /** Set by `list()` when the object says a turn was running: mate died under it. */
+  readonly turnInFlight?: boolean;
 }
 
 export interface Session {
   readonly id: string;
   readonly sandbox: SandboxRef;
+  /** True when the harness replayed its own state; false when the session is empty. */
+  readonly resumed: boolean;
 }
 
 export type Update =
@@ -33,6 +37,10 @@ export type StopReason = 'end_turn' | 'cancelled' | 'error';
 export interface PromptResult {
   stopReason: StopReason;
   error?: string;
+  /** Milliseconds from the prompt to the first streamed text, when any arrived. */
+  firstTokenMs?: number | null;
+  /** This turn's share of the session's ACP-reported cost, in USD. */
+  costUsd?: number | null;
 }
 
 export interface Sandboxes {
@@ -74,6 +82,10 @@ export interface StubOptions {
   script?: Script;
   mintDelayMs?: number;
   mintFails?: string;
+  attachFails?: string;
+  costUsd?: number;
+  /** Models a harness that reloads its own session, as `session/load` does. */
+  resumes?: boolean;
 }
 
 export class StubSandboxes implements Sandboxes {
@@ -81,12 +93,19 @@ export class StubSandboxes implements Sandboxes {
   private readonly script: Script;
   private readonly live = new Map<string, SandboxRef>();
   private readonly cancelled = new Set<string>();
+  private readonly running = new Set<string>();
+  private readonly sessions = new Map<string, string>();
+  /** Mutable so a test can fail an attach on a sandbox that already exists. */
+  attachFails: string | null;
+  /** Every prompt text the harness was handed, replay preamble included. */
+  readonly prompts: string[] = [];
   private serial = 0;
   private mints = 0;
 
   constructor(private readonly opts: StubOptions = {}) {
     this.clock = opts.clock ?? systemClock;
     this.script = opts.script ?? echoScript;
+    this.attachFails = opts.attachFails ?? null;
   }
 
   get liveCount(): number {
@@ -98,7 +117,10 @@ export class StubSandboxes implements Sandboxes {
   }
 
   async list(): Promise<SandboxRef[]> {
-    return [...this.live.values()];
+    return [...this.live.values()].map((ref) => ({
+      ...ref,
+      turnInFlight: this.running.has(ref.name),
+    }));
   }
 
   async mint(thread: ThreadRef): Promise<SandboxRef> {
@@ -111,11 +133,19 @@ export class StubSandboxes implements Sandboxes {
   }
 
   async attach(sandbox: SandboxRef): Promise<Session> {
+    if (this.attachFails) throw new Error(this.attachFails);
     if (!this.live.has(sandbox.name)) {
       throw new Error(`sandbox ${sandbox.name} is gone`);
     }
+    this.running.delete(sandbox.name);
+    const stored = this.sessions.get(sandbox.name);
+    if (stored && this.opts.resumes) {
+      return { id: stored, sandbox, resumed: true };
+    }
     this.serial += 1;
-    return { id: `stub-session-${this.serial}`, sandbox };
+    const id = `stub-session-${this.serial}`;
+    this.sessions.set(sandbox.name, id);
+    return { id, sandbox, resumed: false };
   }
 
   async prompt(
@@ -123,20 +153,39 @@ export class StubSandboxes implements Sandboxes {
     text: string,
     sink: PromptSink,
   ): Promise<PromptResult> {
+    const name = session.sandbox.name;
     this.cancelled.delete(session.id);
+    this.running.add(name);
+    this.prompts.push(text);
+    const startedAt = this.clock.now();
+    let firstTokenMs: number | null = null;
     for (const step of this.script(text)) {
-      if (this.cancelled.has(session.id)) return { stopReason: 'cancelled' };
-      if (!this.live.has(session.sandbox.name)) {
-        throw new Error(`sandbox ${session.sandbox.name} died mid-turn`);
+      if (this.cancelled.has(session.id)) return this.ended(name, 'cancelled');
+      if (!this.live.has(name)) {
+        throw new Error(`sandbox ${name} died mid-turn`);
       }
       if ('wait' in step) await this.clock.sleep(step.wait);
-      else if ('text' in step) sink.update({ kind: 'text', delta: step.text });
-      else if ('status' in step)
+      else if ('text' in step) {
+        firstTokenMs ??= this.clock.now() - startedAt;
+        sink.update({ kind: 'text', delta: step.text });
+      } else if ('status' in step)
         sink.update({ kind: 'status', line: step.status });
-      else return { stopReason: 'error', error: step.fail };
+      else return this.ended(name, 'error', { error: step.fail });
     }
-    if (this.cancelled.has(session.id)) return { stopReason: 'cancelled' };
-    return { stopReason: 'end_turn' };
+    if (this.cancelled.has(session.id)) return this.ended(name, 'cancelled');
+    return this.ended(name, 'end_turn', {
+      firstTokenMs,
+      costUsd: this.opts.costUsd ?? null,
+    });
+  }
+
+  private ended(
+    name: string,
+    stopReason: StopReason,
+    rest: Omit<PromptResult, 'stopReason'> = {},
+  ): PromptResult {
+    this.running.delete(name);
+    return { stopReason, ...rest };
   }
 
   async cancel(session: Session): Promise<void> {
@@ -145,5 +194,7 @@ export class StubSandboxes implements Sandboxes {
 
   async teardown(sandbox: SandboxRef): Promise<void> {
     this.live.delete(sandbox.name);
+    this.running.delete(sandbox.name);
+    this.sessions.delete(sandbox.name);
   }
 }

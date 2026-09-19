@@ -18,6 +18,8 @@ const CANCEL_GRACE_MS = 10_000;
 export interface TurnSummary {
   stopReason: acp.StopReason;
   cost: acp.Cost | null;
+  /** This turn's share of the session total above, when the baseline is known. */
+  costUsd: number | null;
   tools: number;
   firstTextMs: number | null;
 }
@@ -110,6 +112,12 @@ export class AcpClient {
   private readonly conn: acp.ClientSideConnection;
   private turn: Turn | null = null;
   private closedNow: ExecClose | null = null;
+  /**
+   * ACP reports cost as the session's running total, so a turn's own cost is
+   * the step. A loaded session starts with an unknown total — its first turn
+   * reports no cost rather than the whole of someone else's session.
+   */
+  private sessionUsd: number | null = null;
   readonly closed: Promise<ExecClose>;
 
   constructor(
@@ -152,6 +160,7 @@ export class AcpClient {
       SESSION_TIMEOUT_MS,
       'session/new',
     );
+    this.sessionUsd = 0;
     return response.sessionId;
   }
 
@@ -205,11 +214,17 @@ export class AcpClient {
       const summary: TurnSummary = {
         stopReason: response.stopReason,
         cost: turn.cost,
+        costUsd: this.spent(turn.cost),
         tools: turn.toolCount,
         firstTextMs: turn.firstTextMs,
       };
       this.log.info('turn ended', { ...this.fields, ...summary });
-      return { ...outcome(response.stopReason), summary };
+      return {
+        ...outcome(response.stopReason),
+        firstTokenMs: turn.firstTextMs,
+        costUsd: summary.costUsd,
+        summary,
+      };
     } catch (error) {
       if (error instanceof StreamClosed) throw error;
       if (this.closedNow) throw new StreamClosed(this.closedNow);
@@ -217,6 +232,8 @@ export class AcpClient {
       return {
         stopReason: 'error',
         error: error instanceof Error ? error.message : String(error),
+        firstTokenMs: turn.firstTextMs,
+        costUsd: this.spent(turn.cost),
       };
     } finally {
       for (const timer of timers) clearTimeout(timer);
@@ -237,6 +254,13 @@ export class AcpClient {
 
   close(): void {
     this.exec.close();
+  }
+
+  private spent(cost: acp.Cost | null): number | null {
+    if (cost?.currency !== 'USD') return null;
+    const before = this.sessionUsd;
+    this.sessionUsd = cost.amount;
+    return before === null ? null : cost.amount - before;
   }
 
   private async bounded<T>(
