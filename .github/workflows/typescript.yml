@@ -48,6 +48,7 @@ jobs:
             apps/clankerbanker/**
             apps/hub/**
             apps/kthx/**
+            apps/mate/**
             apps/slingshot/**
             apps/spindrift/**
             packages/charts/**

@@ -1,0 +1,27 @@
+export type Handle = object;
+
+export interface Clock {
+  now(): number;
+  after(ms: number, fn: () => void): Handle;
+  cancel(handle: Handle): void;
+  sleep(ms: number, signal?: AbortSignal): Promise<void>;
+}
+
+export const systemClock: Clock = {
+  now: () => Date.now(),
+  after: (ms, fn) => setTimeout(fn, ms),
+  cancel: (handle) => clearTimeout(handle as ReturnType<typeof setTimeout>),
+  sleep: (ms, signal) =>
+    new Promise((resolve, reject) => {
+      if (signal?.aborted) return reject(signal.reason);
+      const timer = setTimeout(() => {
+        signal?.removeEventListener('abort', onAbort);
+        resolve();
+      }, ms);
+      function onAbort() {
+        clearTimeout(timer);
+        reject(signal?.reason);
+      }
+      signal?.addEventListener('abort', onAbort, { once: true });
+    }),
+};
