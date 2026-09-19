@@ -1,0 +1,60 @@
+---
+# The bot pod's egress allow-list. It selects mate itself by its app label, so
+# it cannot reach the sandboxes that share this namespace: those carry
+# `app.kubernetes.io/name: mate-sandbox`, and no policy selects them. A
+# sandbox therefore has whatever egress the cluster allows — kata-clh isolates
+# the kernel, not the network. Writing that policy (DNS, github.com for the
+# clone, the OpenCode API host, nothing else) is the gate on `MATE_SANDBOXES`
+# becoming `kube`; today it is `stub` and no sandbox runs.
+#
+# Cilium enforces policy per direction, so a rule set with no `ingress:`
+# leaves ingress unenforced: the kubelet's readiness probe on /healthz keeps
+# working, and nothing else reaches a pod that listens only for that probe.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: mate
+  namespace: mate
+  labels:
+    app.kubernetes.io/name: mate
+    app.kubernetes.io/part-of: mate
+spec:
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/name: mate
+  egress:
+    # `toFQDNs` is enforced by Cilium's DNS proxy, which only sees a lookup
+    # that this rule's `rules.dns` sends through it. Without the matchPattern
+    # the names below never resolve to an allowed identity and every Discord
+    # connection fails closed.
+    - toEndpoints:
+        - matchLabels:
+            io.kubernetes.pod.namespace: kube-system
+            k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+            - port: "53"
+              protocol: TCP
+          rules:
+            dns:
+              - matchPattern: "*"
+    # discord.com carries the REST API and the gateway lookup;
+    # gateway.discord.gg is what that lookup returns. The wildcard is for
+    # resuming: Discord hands back a region-specific `resume_gateway_url`
+    # (gateway-us-east1-b.discord.gg and friends), and a resume that cannot
+    # connect spends an identify from the daily budget instead.
+    - toFQDNs:
+        - matchName: discord.com
+        - matchName: gateway.discord.gg
+        - matchPattern: "*.discord.gg"
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+    # Sandboxes are minted, watched and exec'd into through the API server,
+    # which mate reaches by the address in KUBERNETES_SERVICE_HOST — an IP,
+    # never a name, so this cannot be an FQDN rule.
+    - toEntities:
+        - kube-apiserver
