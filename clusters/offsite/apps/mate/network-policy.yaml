@@ -1,11 +1,11 @@
 ---
 # The bot pod's egress allow-list. It selects mate itself by its app label, so
-# it cannot reach the sandboxes that share this namespace: those carry
-# `app.kubernetes.io/name: mate-sandbox`, and no policy selects them. A
-# sandbox therefore has whatever egress the cluster allows — kata-clh isolates
-# the kernel, not the network. Writing that policy (DNS, github.com for the
-# clone, the OpenCode API host, nothing else) is the gate on `MATE_SANDBOXES`
-# becoming `kube`; today it is `stub` and no sandbox runs.
+# it says nothing about the sandboxes that share this namespace: those carry
+# `app.kubernetes.io/name: mate-sandbox` and are selected by
+# `sandbox-network-policy.yaml`. The two selectors never overlap, so neither
+# policy widens the other — and mate's own pod is reachable from a sandbox
+# exactly like any other pod in the cluster, which costs nothing: it listens
+# only for the readiness probe.
 #
 # Cilium enforces policy per direction, so a rule set with no `ingress:`
 # leaves ingress unenforced: the kubelet's readiness probe on /healthz keeps

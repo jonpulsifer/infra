@@ -1,0 +1,94 @@
+---
+# What a sandbox may reach. A sandbox runs agent-authored commands with every
+# permission auto-allowed and the OpenCode key in its environment, so egress is
+# the only boundary around what those commands can talk to — kata-clh isolates
+# the kernel, not the network — and there was no policy on these pods at all
+# until this one.
+#
+# Three rules allow, in widening order:
+#   - `opencode.ai`, the Go base the harness prompts, and `models.opencode.ai`,
+#     the catalogue it fetches at start — a sandbox that cannot reach the second
+#     never finishes `session/new` — plus `github.com`, for the init container's
+#     shallow clone of the public repo. npm is deliberately absent: the
+#     checkout's own `.opencode/package.json` fires hundreds of npm requests per
+#     start, `OPENCODE_DISABLE_PROJECT_CONFIG` is what stops it, and this is the
+#     second lock on that door.
+#   - cluster DNS, which `toFQDNs` cannot work without. The lookup itself is not
+#     restricted: `matchPattern: "*"` lets CoreDNS resolve and forward any name,
+#     so DNS is a name-shaped channel out of here that the three entries above
+#     do not close. It is the same trade the bot policy makes, and narrowing it
+#     is a `matchName` list rather than a rewrite.
+#   - every pod in every namespace, on every port. This is the widest line in
+#     the file and it is wider than the three destinations that motivate it
+#     (kthx, Spindrift's MCP, a CNPG Postgres): unauthenticated in-cluster
+#     surfaces such as VictoriaLogs and Prometheus are in reach too. Trading
+#     that away is one field — an `In` set of namespaces in place of `Exists`.
+#
+# The denied half is unconditional. The LAN, the UniFi console, spore, the node
+# addresses, the API server and the cloud metadata address are all `world` or a
+# reserved identity to Cilium, and no rule here names any of them. Nothing on
+# host network is reachable either, whatever Service fronts it: those endpoints
+# carry the `host` or `remote-node` identity, which a label selector cannot
+# select. No CIDR appears in this file at all. The sandbox holds no
+# service-account token, so the API server is refused twice over.
+#
+# No `ingress:` rule, deliberately. Cilium enforces policy per direction, so a
+# rule set with egress only leaves ingress unenforced — and nothing needs an
+# ingress rule: mate drives the harness through `pods/exec` on the API server,
+# which never touches the pod network, and `kubectl port-forward` is dead under
+# kata-clh regardless.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: mate-sandbox
+  namespace: mate
+  labels:
+    app.kubernetes.io/name: mate-sandbox
+    app.kubernetes.io/part-of: mate
+spec:
+  # The label `apps/mate/src/sandboxes.ts` stamps on every Sandbox and on its
+  # pod template. One label, not the four beside it: the sandbox controller adds
+  # labels of its own and mate's thread labels vary per thread, so naming more
+  # of them only adds ways for this selector to match nothing — and a policy
+  # that selects nothing fails open, back to a sandbox with the whole LAN in
+  # reach.
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/name: mate-sandbox
+  egress:
+    # `toFQDNs` is enforced against names Cilium's DNS proxy has seen resolved,
+    # and the proxy only sees a lookup that a rule like this one sends through
+    # it. Drop this rule or narrow its `matchPattern` past the three names below
+    # and they never map to an allowed identity: the sandbox comes up, the clone
+    # and the model call both fail closed, and the thread gets a plain error.
+    - toEndpoints:
+        - matchLabels:
+            io.kubernetes.pod.namespace: kube-system
+            k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+            - port: "53"
+              protocol: TCP
+          rules:
+            dns:
+              - matchPattern: "*"
+    - toFQDNs:
+        - matchName: opencode.ai
+        - matchName: models.opencode.ai
+        - matchName: github.com
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+    # In-cluster destinations by identity rather than by address, because there
+    # is no address to write: Cilium translates a ClusterIP to its backend in
+    # the pod's own egress path before taking the policy verdict, and CIDR
+    # selectors do not match in-cluster endpoints in the first place, so a rule
+    # naming the Service range would be a no-op. The namespace label has to be
+    # named: an empty selector would mean the `mate` namespace and nothing else.
+    - toEndpoints:
+        - matchExpressions:
+            - key: k8s:io.kubernetes.pod.namespace
+              operator: Exists
