@@ -15,9 +15,26 @@ import { getInstruments, lazyInstruments } from './metrics.ts';
 import { type Sandboxes, StubSandboxes } from './sandbox.ts';
 import { KubeSandboxes } from './sandboxes.ts';
 import { fileSessionStore, memorySessionStore } from './session.ts';
+import {
+  EXPORT_TIMEOUT_MS,
+  startTelemetry,
+  stopTelemetry,
+} from './telemetry.ts';
 import { Threads } from './threads.ts';
 
 const EXIT_CONFIG = 64;
+/**
+ * How long an exiting process waits for the last metrics export. The order
+ * between these two numbers is load-bearing and that is why it is written as
+ * arithmetic rather than a literal: the flush is one export, which the
+ * exporter itself allows `EXPORT_TIMEOUT_MS` to finish, so a budget shorter
+ * than that would call `process.exit` on a collector that is merely slow and
+ * throw the export away. That export is the only reason
+ * MateGatewayFatalClose can fire at all, since the process dies immediately
+ * after counting the close. The spare second covers the shutdown around it,
+ * and the whole budget sits well inside the pod's 30s termination grace.
+ */
+const FLUSH_BUDGET_MS = EXPORT_TIMEOUT_MS + 1_000;
 
 function loadConfig() {
   try {
@@ -32,6 +49,30 @@ function loadConfig() {
 }
 
 const config = loadConfig();
+// Before anything can reach a meter: an instrument minted ahead of the SDK is
+// a no-op for the life of the process.
+startTelemetry(process.env, log);
+
+/**
+ * Exit once the last export is away, or once the budget runs out. The two
+ * exits below both mean a configuration error that will not fix itself, and
+ * the counter that says which one is only useful if it leaves the process.
+ */
+function exitAfterFlush(code: number): void {
+  const done = () => process.exit(code);
+  const timer = setTimeout(done, FLUSH_BUDGET_MS);
+  void stopTelemetry().then(
+    () => {
+      clearTimeout(timer);
+      done();
+    },
+    () => {
+      clearTimeout(timer);
+      done();
+    },
+  );
+}
+
 const health = new Health();
 const server = Bun.serve({
   port: config.port,
@@ -47,7 +88,8 @@ const { client, manager, budget } = createGateway({
   health,
   clock: systemClock,
   onLimit: (limit) => getInstruments().identifyLimit(limit),
-  exit: (code) => process.exit(code),
+  onClose: (code, fatal) => getInstruments().gatewayClosed(code, fatal),
+  exit: exitAfterFlush,
 });
 const sandboxes: Sandboxes =
   config.sandboxes.mode === 'kube'
@@ -169,6 +211,9 @@ async function shutdown(signal: string): Promise<void> {
   } catch (error) {
     log.warn('gateway destroy failed', { error: plain(error) });
   }
+  await stopTelemetry().catch((error) =>
+    log.warn('metrics shutdown failed', { error: plain(error) }),
+  );
   server.stop(true);
   process.exit(0);
 }

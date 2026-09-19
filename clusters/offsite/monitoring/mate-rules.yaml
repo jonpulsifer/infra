@@ -1,0 +1,284 @@
+---
+# mate answers one human in one Discord guild and has no other surface, so
+# nothing about it is noticed by being used. These are the alerts that say
+# "mate is alive and this is what it is doing" without opening Discord.
+#
+# Two families of series feed them. `kube_*` comes from kube-state-metrics and
+# exists whether or not mate's own telemetry works, which is why the death of
+# the process is read there. `mate_*` comes from mate's OpenTelemetry SDK
+# (apps/mate/src/telemetry.ts) through the opentelemetry-collector's
+# `prom-metrics` exporter (../../base/monitoring/opentelemetry-collector.yaml,
+# scraped by the ServiceMonitor beside it), so those series carry the
+# collector's `namespace="monitoring"` and mate's own name as `exported_job`.
+# Nothing here matches on either: the `mate_` prefix is already unique, and a
+# label matcher that a future collector config could drop would make these
+# alerts silently blind rather than loudly wrong.
+#
+# Two consequences of reading mate through the collector, both load-bearing:
+#
+#   - `pod` and `instance` on a `mate_*` series are the *collector's*, and they
+#     change every time that pod is replaced. Any expression that compares a
+#     series to its own past (`unless … offset`, `and … offset`) must therefore
+#     match with `ignoring(pod, instance)`, or a collector roll makes the two
+#     sides of the comparison different series: the `unless` arms would stop
+#     subtracting and report a lifetime counter as if it were this window's,
+#     and the `and` arms would simply go blind. Every such comparison below
+#     carries that modifier. The rest of the label set (`job`, `namespace`,
+#     `exported_job`, `otel_scope_name`, `container`, `endpoint`, `service`)
+#     is stable across a roll and is left to match.
+#   - Those same labels ride into the notification, so the three alerts that do
+#     not aggregate (MateGatewayFatalClose, MateSandboxesAtCap,
+#     MateIdentifyBudgetLow) arrive tagged with the collector's identity and
+#     group under `namespace="monitoring"`, while MateDown groups under
+#     `namespace="mate"`. Alertmanager groups by `cluster, namespace,
+#     alertname` and no inhibit rule crosses alertnames, so this costs a
+#     reader a moment rather than an alert. It is not papered over with a
+#     `namespace: mate` label, which would claim a collector pod lives in
+#     mate's namespace.
+#
+# Two rules the repo has paid for, applied throughout:
+#
+#   - Key on recency, never on a retained failed object. The counters below
+#     are read through `increase()` over a window, so a burst that stops
+#     clears itself; nothing reads the existence of a failed thing.
+#   - A Prometheus restart resets every `for:` timer, so "0 active" can be a
+#     lie for as long as the longest `for:` here. Where the condition is
+#     "this has held for a while", it is written as a range aggregation
+#     (`min_over_time`) rather than a long `for:`, which survives the restart
+#     because it reads the stored samples instead of the evaluator's memory.
+#
+# The counters carry a second arm wherever a single occurrence matters. The
+# collector expires a series five minutes after the last OTLP point, so a mate
+# that is down for longer loses its series and a label set that has never
+# fired before is *born* at 1 rather than rising from 0. `increase()` is
+# last-minus-first over what it can see, so that first failure after a restart
+# reads as 0. The `unless … offset` arm is that birth, and it clears one
+# window later.
+#
+# Alertmanager sends everything but Watchdog/InfoInhibitor to the Discord
+# receiver in ../../base/monitoring/alertmanager-discord.yaml, so these land in
+# the same guild mate serves, in the channel that webhook belongs to.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: mate
+  namespace: monitoring
+  labels:
+    lolwtf.ca/service: mate
+    release: prom-stack
+spec:
+  groups:
+    - name: mate
+      rules:
+        # One replica, `Recreate`, and a readiness probe that is 503 for as
+        # long as the gateway is not connected — so this single expression
+        # covers the pod being gone, the image failing, a crash loop and the
+        # /healthz flip on a dropped WebSocket. The deliberate case is the
+        # identify-budget guard sleeping to the daily reset: mate is healthy,
+        # refusing to spend an IDENTIFY, and correctly not ready. That is
+        # still an outage from the thread's side, so it alerts.
+        #
+        # The second arm is the case the first cannot see: a deleted
+        # Deployment exports no series at all.
+        - alert: MateDown
+          expr: |
+            kube_deployment_status_replicas_available{namespace="mate",deployment="mate"} == 0
+            or absent(kube_deployment_status_replicas_available{namespace="mate",deployment="mate"})
+          for: 10m
+          labels:
+            severity: critical
+          annotations:
+            message: "Rowbutt is not connected to Discord"
+            description: "mate has had no ready pod for ten minutes, so a mention in the homelab guild gets no thread and a live thread gets no answer. A `Recreate` roll takes the only pod down first, so a couple of minutes of this is a normal deploy. Read the pod: `kubectl --context offsite logs -n mate deploy/mate`. If the last line is the budget guard sleeping to the reset, mate is protecting the IDENTIFY budget and will come back on its own; if it is a close code, MateGatewayFatalClose says which."
+
+        # The deadman for everything below: mate is running and ready, and its
+        # metrics are not arriving. `mate_sandboxes_live` is the right probe
+        # because it is an observable gauge with an unconditional callback — it
+        # reports on every collection whether or not a thread is open, so its
+        # absence is the pipeline, never the workload being idle.
+        #
+        # Guarded on the Deployment so a dead mate pages once as MateDown
+        # rather than twice. What is left is the path itself: the SDK failing
+        # to start, the egress rule in
+        # ../../apps/mate/network-policy.yaml not reaching the collector, the
+        # collector down, or its ServiceMonitor unselected.
+        - alert: MateNotReporting
+          expr: |
+            absent(mate_sandboxes_live)
+            and on()
+            kube_deployment_status_replicas_available{namespace="mate",deployment="mate"} > 0
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            message: "mate is up but its metrics have stopped arriving"
+            description: "mate has a ready pod and no `mate_*` series for fifteen minutes, so every other alert in this group is blind. Check mate's own log line for the endpoint (`metrics exporting`), then the collector: `kubectl --context offsite logs -n monitoring deploy/opentelemetry-collector`. A silent drop with the process healthy is usually the CiliumNetworkPolicy — mate is allowed exactly one destination in the monitoring namespace."
+
+        # 4004, 4010-4014: authentication failed, invalid shard, sharding
+        # required, invalid API version, invalid intents, disallowed intents.
+        # Every one is a configuration error that no reconnect can fix, so
+        # mate counts the close and exits rather than burning the identify
+        # budget retrying. A recurrence means something changed underneath
+        # mate — a rotated token, a revoked intent, a gateway version sunset.
+        #
+        # `fatal` is the label rather than a list of codes, so this expression
+        # cannot drift from FATAL_CLOSE_CODES in apps/mate/src/gateway.ts; the
+        # firing alert still carries `code`. The process flushes the counter
+        # before it exits, which is the only reason this can fire at all.
+        - alert: MateGatewayFatalClose
+          expr: |
+            increase(mate_gateway_closes_total{fatal="true"}[1h]) > 0
+            or (
+              mate_gateway_closes_total{fatal="true"}
+              unless ignoring(pod, instance)
+              mate_gateway_closes_total{fatal="true"} offset 1h
+            )
+          for: 0m
+          labels:
+            severity: critical
+          annotations:
+            message: "Discord closed mate's gateway with code {{ $labels.code }}"
+            description: "A close code mate treats as a configuration error, so it exited instead of reconnecting and will crash-loop until the cause is fixed. 4004 is the token — check whether `rowbutt discord bot token` was rotated in 1Password and whether the mate-discord ExternalSecret carried it through. 4013/4014 are the intents, which live in apps/mate/src/gateway.ts and in the developer portal; Message Content is privileged and can be revoked there without anything in git changing."
+
+        # Three is MATE_MAX_CONCURRENT on the Deployment, and the queue is
+        # FIFO behind it, so at the cap the next thread is told to wait. A
+        # thread goes quiet fifteen minutes after its last turn, so half an
+        # hour without the count ever dipping is either three genuinely busy
+        # threads or sandboxes that are not being reaped.
+        #
+        # `min_over_time` rather than `for: 30m` on purpose: this reads the
+        # stored samples, so a Prometheus restart inside the window does not
+        # put the clock back to zero. The other two arms are what make the
+        # window mean something. The instant one keeps a stale series from
+        # firing it — without it a mate that went down at the cap would alert
+        # off the samples it left behind. The `offset 30m` one requires the
+        # window to be *full*: a range selector only sees the samples that
+        # exist, so five minutes after a fresh scrape target appears
+        # `min_over_time` is already satisfied by five minutes of data.
+        #
+        # The `offset` arm matches `ignoring(pod, instance)` for the reason in
+        # the header. The trade that buys: for the half hour after a collector
+        # roll, `min_over_time` still only sees the new series' samples, so
+        # the "held continuously" claim rests on the instant arm and on the
+        # `offset` arm's single sample either side of the gap. That is the
+        # right way round — the alternative is being certain of nothing at all
+        # for thirty minutes after every collector restart.
+        - alert: MateSandboxesAtCap
+          expr: |
+            mate_sandboxes_live >= 3
+            and ignoring(pod, instance)
+            mate_sandboxes_live offset 30m >= 3
+            and min_over_time(mate_sandboxes_live[30m]) >= 3
+          for: 0m
+          labels:
+            severity: warning
+          annotations:
+            message: "mate has been at its sandbox cap for half an hour"
+            description: "All three sandbox slots have been held continuously for thirty minutes, so any further thread is queued behind them. Compare `mate_queue_depth`: with nobody waiting this is three busy threads, and with a queue it is starvation. `kubectl --context offsite get sandboxes -n mate` names them — a Sandbox with no live thread behind it is a leak, and its `lolwtf.ca/thread` label says which thread it thinks it belongs to."
+
+        # A turn that ends `error` is the harness or the provider failing; one
+        # that ends `sandbox-died` is the pod going away underneath a running
+        # turn. Both put a plain sentence in the thread, so one is a bad
+        # minute rather than an incident — three inside half an hour is the
+        # provider, the model id or the image, and mate will keep spending
+        # turns from the daily budget on it.
+        - alert: MateTurnsFailing
+          expr: |
+            sum(increase(mate_turns_ended_total{reason=~"error|sandbox-died"}[30m])) > 2
+            or sum(
+              mate_turns_ended_total{reason=~"error|sandbox-died"}
+              unless ignoring(pod, instance)
+              mate_turns_ended_total{reason=~"error|sandbox-died"} offset 30m
+            ) > 2
+          for: 0m
+          labels:
+            severity: warning
+          annotations:
+            message: "mate turns are failing"
+            description: "More than two turns ended in an error or a dead sandbox in the last thirty minutes. `error` is what the harness reported over ACP — the OpenCode Go key, the model id in MATE_SANDBOX_MODEL, or a region gate on the model. `sandbox-died` is the pod: read `kubectl --context offsite describe sandbox -n mate` and the node's pressure before blaming the harness."
+
+        # The failure nothing else can see. A mint that fails leaves no
+        # sandbox, so the teardown that follows records none, and the turn
+        # never starts so no turn is counted either: without this counter a
+        # thread that can never get a sandbox is invisible outside Discord.
+        # `attach-failed` is the other half — the Sandbox exists and went
+        # Ready, and the ACP session could not be opened in it.
+        - alert: MateSandboxMintFailing
+          expr: |
+            sum(increase(mate_mints_total{result=~"mint-failed|attach-failed"}[30m])) > 2
+            or sum(
+              mate_mints_total{result=~"mint-failed|attach-failed"}
+              unless ignoring(pod, instance)
+              mate_mints_total{result=~"mint-failed|attach-failed"} offset 30m
+            ) > 2
+          for: 0m
+          labels:
+            severity: warning
+          annotations:
+            message: "mate cannot give a thread a sandbox"
+            description: "More than two mints or attaches failed in the last thirty minutes, so a human asking mate a question is getting a plain refusal instead of an answer. A mint failure is the Sandbox never going Ready — the harness image digest, the kata-clh runtime class, or the namespace's restricted PSA. An attach failure is `pods/exec` into a Ready pod, which is the Role in ../../apps/mate/rbac.yaml or the harness not starting inside the sandbox."
+
+        # mate refuses a turn past 120 in a rolling day and says so in the
+        # thread (MATE_MAX_TURNS_PER_DAY). 96 is 80% of that, so this fires
+        # while there is still a day's quarter left to spend rather than after
+        # the first human is turned away.
+        #
+        # This is a rolling 24h over the stored samples, which is deliberately
+        # *not* the window mate itself enforces: `dayTurns` in
+        # apps/mate/src/threads.ts is an in-memory array, so every restart —
+        # including each image-digest CD roll — empties mate's own budget back
+        # to zero. `increase()` reads a restart as a counter reset and keeps
+        # counting, so this can fire at 96 on a day mate believes it has
+        # served far fewer. That divergence is the signal, not a fault: it is
+        # the only place the real spend of a rolling day is visible.
+        - alert: MateTurnBudgetNearlySpent
+          expr: increase(mate_turns_total[24h]) > 96
+          for: 0m
+          labels:
+            severity: warning
+          annotations:
+            message: "mate has spent most of its daily turn budget"
+            description: "More than 96 of the 120 turns allowed in a rolling day have been taken. Past 120 every thread is told the day is spent until the window rolls off. If this is real use rather than a loop, MATE_MAX_TURNS_PER_DAY on the mate Deployment is the number to move — and the spend that goes with it is what MateSpendAboveBudget watches."
+
+        # The only spend mate can see: the per-turn USD step the harness
+        # reports over ACP, summed over a rolling day. The first measured turn
+        # cost $0.002178, so a full 120-turn day is about $0.26 and this
+        # threshold is roughly twice that — $0.50/day is $15/month, the top of
+        # what this lab spends on a service. It cannot trip on volume alone,
+        # because the turn budget caps volume first; it trips when the price
+        # per turn moves, which is what a changed model id looks like.
+        #
+        # Honest about what this is: OpenCode Go bills a flat rate, and the
+        # figure over ACP is a list-price shadow of it. It is an early warning
+        # that something changed, not an invoice.
+        - alert: MateSpendAboveBudget
+          expr: sum(increase(mate_turn_cost_usd_sum[24h])) > 0.5
+          for: 0m
+          labels:
+            severity: warning
+          annotations:
+            message: "mate's reported spend is above its daily budget"
+            description: "The turns of the last rolling day report more than $0.50 of model spend, against a measured $0.002178 for a real turn. Volume is capped at 120 turns/day, so this is the price per turn moving: check MATE_SANDBOX_MODEL on the mate Deployment and what the harness is actually being handed. The number is OpenCode Go's list-price shadow on a flat-rate plan, not a bill."
+
+        # Discord allows 1000 IDENTIFYs per app per day and resets the token
+        # on exhaustion. mate keeps a fifth of that as a reserve and sleeps to
+        # the reset rather than spend into it, which is an outage with no
+        # other warning; this fires at twice the reserve, while there is still
+        # room to find out why it is reconnecting.
+        #
+        # The gauge is only written when mate reads /gateway/bot, which is at
+        # startup and before each IDENTIFY, and it stops reporting once
+        # Discord's own `reset_after` has elapsed — past that the budget has
+        # reset and the last reading is no longer a fact. So this cannot get
+        # stuck firing at a number that has since healed, and `absent` is the
+        # normal state of a bot that has been connected all day.
+        - alert: MateIdentifyBudgetLow
+          expr: |
+            mate_discord_session_start_remaining
+            < mate_discord_session_start_limit * 0.4
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            message: "mate's Discord identify budget is approaching its reserve"
+            description: "Fewer than 40% of the day's IDENTIFYs are left, against a reserve of 20% that mate will not spend into — below that it stops connecting until Discord's reset, and exhausting the budget outright makes Discord rotate the bot token. Something is reconnecting: read the pod for `gateway closed` lines and their codes, and check whether the Deployment is rolling (the digest-bump CD opens a PR per build)."

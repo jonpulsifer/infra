@@ -1,0 +1,323 @@
+---
+# Unit test for the alerts in mate-rules.yaml, run by
+# `mise run k8s:check-rules` against the rendered PrometheusRule. Not a
+# manifest: kustomization.yaml does not list it, so nothing applies it. It
+# lives beside the rule rather than in base/monitoring because only offsite
+# renders `mate.yaml`.
+#
+# Every `mate_*` series carries the labels the opentelemetry-collector's
+# prometheus exporter actually puts on them — mate's own name arrives as
+# `exported_job` because the scrape's own `job` wins, and `namespace` is the
+# collector's, not mate's. Those are what the alert carries into Alertmanager,
+# so stripping them here would assert a label set the deployed alert never has.
+#
+# What each case is here to prove, beyond the expression parsing:
+#   - the two-arm counters fire on a *born* series and then go quiet again,
+#     which is the whole point of keying on recency;
+#   - MateNotReporting stays silent while mate is down, so an outage pages
+#     once rather than twice;
+#   - MateSandboxesAtCap needs the condition to have held for a real half
+#     hour, not merely for as long as Prometheus has been running.
+rule_files:
+  - mate.yaml
+
+evaluation_interval: 1m
+
+tests:
+  # The pod goes away: readiness fails, no replica is available, and the
+  # metrics series stop with it. MateDown says so; MateNotReporting does not,
+  # because its whole job is "up but silent".
+  - interval: 1m
+    input_series:
+      - series: 'kube_deployment_status_replicas_available{namespace="mate",deployment="mate",job="kube-state-metrics",instance="10.101.1.123:8080"}'
+        values: 1x10 0x30
+      - series: 'mate_sandboxes_live{exported_job="mate",otel_scope_name="mate",job="opentelemetry-collector",namespace="monitoring",instance="10.101.1.173:8889"}'
+        values: 0x10
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: MateDown
+        exp_alerts: []
+      - eval_time: 22m
+        alertname: MateDown
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              namespace: mate
+              deployment: mate
+              job: kube-state-metrics
+              instance: 10.101.1.123:8080
+            exp_annotations:
+              message: "Rowbutt is not connected to Discord"
+              description: "mate has had no ready pod for ten minutes, so a mention in the homelab guild gets no thread and a live thread gets no answer. A `Recreate` roll takes the only pod down first, so a couple of minutes of this is a normal deploy. Read the pod: `kubectl --context offsite logs -n mate deploy/mate`. If the last line is the budget guard sleeping to the reset, mate is protecting the IDENTIFY budget and will come back on its own; if it is a close code, MateGatewayFatalClose says which."
+      - eval_time: 35m
+        alertname: MateNotReporting
+        exp_alerts: []
+
+  # The Deployment itself is gone, so there is no series to compare to zero.
+  - interval: 1m
+    input_series:
+      - series: 'up{job="kube-state-metrics"}'
+        values: 1x30
+    alert_rule_test:
+      - eval_time: 9m
+        alertname: MateDown
+        exp_alerts: []
+      - eval_time: 12m
+        alertname: MateDown
+        exp_alerts:
+          # `absent()` carries its own equality matchers, so the alert still
+          # names the workload it could not find.
+          - exp_labels:
+              severity: critical
+              namespace: mate
+              deployment: mate
+            exp_annotations:
+              message: "Rowbutt is not connected to Discord"
+              description: "mate has had no ready pod for ten minutes, so a mention in the homelab guild gets no thread and a live thread gets no answer. A `Recreate` roll takes the only pod down first, so a couple of minutes of this is a normal deploy. Read the pod: `kubectl --context offsite logs -n mate deploy/mate`. If the last line is the budget guard sleeping to the reset, mate is protecting the IDENTIFY budget and will come back on its own; if it is a close code, MateGatewayFatalClose says which."
+
+  # mate is ready and answering Discord, and nothing is arriving from its SDK:
+  # the egress rule, the collector, or the scrape.
+  - interval: 1m
+    input_series:
+      - series: 'kube_deployment_status_replicas_available{namespace="mate",deployment="mate",job="kube-state-metrics",instance="10.101.1.123:8080"}'
+        values: 1x30
+    alert_rule_test:
+      - eval_time: 14m
+        alertname: MateNotReporting
+        exp_alerts: []
+      - eval_time: 17m
+        alertname: MateNotReporting
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+            exp_annotations:
+              message: "mate is up but its metrics have stopped arriving"
+              description: "mate has a ready pod and no `mate_*` series for fifteen minutes, so every other alert in this group is blind. Check mate's own log line for the endpoint (`metrics exporting`), then the collector: `kubectl --context offsite logs -n monitoring deploy/opentelemetry-collector`. A silent drop with the process healthy is usually the CiliumNetworkPolicy — mate is allowed exactly one destination in the monitoring namespace."
+
+  # A 4004 on a process that has just started: the counter is born at 1, which
+  # `increase()` cannot see. The second arm is what fires, and it stops on its
+  # own once the series is an hour old. A recoverable close never fires.
+  - interval: 1m
+    input_series:
+      - series: 'mate_gateway_closes_total{code="4004",fatal="true",exported_job="mate",otel_scope_name="mate",job="opentelemetry-collector",namespace="monitoring",instance="10.101.1.173:8889"}'
+        values: 1x130
+      - series: 'mate_gateway_closes_total{code="1006",fatal="false",exported_job="mate",otel_scope_name="mate",job="opentelemetry-collector",namespace="monitoring",instance="10.101.1.173:8889"}'
+        values: 1+1x130
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: MateGatewayFatalClose
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              code: "4004"
+              fatal: "true"
+              exported_job: mate
+              otel_scope_name: mate
+              job: opentelemetry-collector
+              namespace: monitoring
+              instance: 10.101.1.173:8889
+            exp_annotations:
+              message: "Discord closed mate's gateway with code 4004"
+              description: "A close code mate treats as a configuration error, so it exited instead of reconnecting and will crash-loop until the cause is fixed. 4004 is the token — check whether `rowbutt discord bot token` was rotated in 1Password and whether the mate-discord ExternalSecret carried it through. 4013/4014 are the intents, which live in apps/mate/src/gateway.ts and in the developer portal; Message Content is privileged and can be revoked there without anything in git changing."
+      # An hour later the series is no longer new and has not moved, so the
+      # alert clears itself rather than holding on a fact that stays true.
+      - eval_time: 125m
+        alertname: MateGatewayFatalClose
+        exp_alerts: []
+
+  # Three slots held without a dip. The window has to be full: half an hour of
+  # data, not half an hour of Prometheus.
+  - interval: 1m
+    input_series:
+      - series: 'mate_sandboxes_live{exported_job="mate",otel_scope_name="mate",job="opentelemetry-collector",namespace="monitoring",instance="10.101.1.173:8889"}'
+        values: 3x60
+    alert_rule_test:
+      - eval_time: 29m
+        alertname: MateSandboxesAtCap
+        exp_alerts: []
+      - eval_time: 33m
+        alertname: MateSandboxesAtCap
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              exported_job: mate
+              otel_scope_name: mate
+              job: opentelemetry-collector
+              namespace: monitoring
+              instance: 10.101.1.173:8889
+            exp_annotations:
+              message: "mate has been at its sandbox cap for half an hour"
+              description: "All three sandbox slots have been held continuously for thirty minutes, so any further thread is queued behind them. Compare `mate_queue_depth`: with nobody waiting this is three busy threads, and with a queue it is starvation. `kubectl --context offsite get sandboxes -n mate` names them — a Sandbox with no live thread behind it is a leak, and its `lolwtf.ca/thread` label says which thread it thinks it belongs to."
+
+  # One slot frees for a minute at t=20. Busy is not stuck.
+  - interval: 1m
+    input_series:
+      - series: 'mate_sandboxes_live{exported_job="mate",otel_scope_name="mate",job="opentelemetry-collector",namespace="monitoring",instance="10.101.1.173:8889"}'
+        values: 3x19 2x1 3x60
+    alert_rule_test:
+      - eval_time: 45m
+        alertname: MateSandboxesAtCap
+        exp_alerts: []
+
+  # Turns failing, then stopping. Two reasons and two mint results, each
+  # summed across its label so the threshold counts events rather than series.
+  - interval: 1m
+    input_series:
+      - series: 'mate_turns_ended_total{reason="error",exported_job="mate",otel_scope_name="mate",job="opentelemetry-collector",namespace="monitoring",instance="10.101.1.173:8889"}'
+        values: 1+1x3 4x60
+      - series: 'mate_turns_ended_total{reason="sandbox-died",exported_job="mate",otel_scope_name="mate",job="opentelemetry-collector",namespace="monitoring",instance="10.101.1.173:8889"}'
+        values: 1x64
+      - series: 'mate_mints_total{result="mint-failed",exported_job="mate",otel_scope_name="mate",job="opentelemetry-collector",namespace="monitoring",instance="10.101.1.173:8889"}'
+        values: 1+1x1 2x62
+      - series: 'mate_mints_total{result="attach-failed",exported_job="mate",otel_scope_name="mate",job="opentelemetry-collector",namespace="monitoring",instance="10.101.1.173:8889"}'
+        values: 1x64
+      - series: 'mate_mints_total{result="ok",exported_job="mate",otel_scope_name="mate",job="opentelemetry-collector",namespace="monitoring",instance="10.101.1.173:8889"}'
+        values: 1+10x63
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: MateTurnsFailing
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+            exp_annotations:
+              message: "mate turns are failing"
+              description: "More than two turns ended in an error or a dead sandbox in the last thirty minutes. `error` is what the harness reported over ACP — the OpenCode Go key, the model id in MATE_SANDBOX_MODEL, or a region gate on the model. `sandbox-died` is the pod: read `kubectl --context offsite describe sandbox -n mate` and the node's pressure before blaming the harness."
+      - eval_time: 10m
+        alertname: MateSandboxMintFailing
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+            exp_annotations:
+              message: "mate cannot give a thread a sandbox"
+              description: "More than two mints or attaches failed in the last thirty minutes, so a human asking mate a question is getting a plain refusal instead of an answer. A mint failure is the Sandbox never going Ready — the harness image digest, the kata-clh runtime class, or the namespace's restricted PSA. An attach failure is `pods/exec` into a Ready pod, which is the Role in ../../apps/mate/rbac.yaml or the harness not starting inside the sandbox."
+      # Nothing has failed in the last half hour, so both clear on their own.
+      # The successful mints climbing throughout are what proves the result
+      # matcher is doing the work.
+      - eval_time: 60m
+        alertname: MateTurnsFailing
+        exp_alerts: []
+      - eval_time: 60m
+        alertname: MateSandboxMintFailing
+        exp_alerts: []
+
+  # A collector roll, which is the failure mode these expressions are most
+  # exposed to: `pod` and `instance` on a `mate_*` series belong to the
+  # opentelemetry-collector, not to mate, so replacing that pod retires every
+  # series and starts an identical one under a new identity — carrying mate's
+  # cumulative counters, because mate never restarted. Three distinct
+  # collector pods are visible in offsite's series index at any time, so this
+  # is routine rather than exotic.
+  #
+  # The old series runs to t=29 and the new one takes over at t=30, both flat:
+  # nothing has actually happened to mate. Evaluated at t=50m, `offset 30m`
+  # lands at t=20m, inside the *old* series, so every comparison below spans
+  # the roll.
+  #
+  # Without `ignoring(pod, instance)` the `unless` arms find no match on the
+  # right, keep the whole left side, and report a lifetime counter as this
+  # window's — two spurious warnings for half an hour after every collector
+  # restart. MateSandboxesAtCap fails the other way: its `and` finds no match
+  # and goes silent for the same half hour.
+  - interval: 1m
+    input_series:
+      - series: 'mate_turns_ended_total{reason="error",exported_job="mate",otel_scope_name="mate",job="opentelemetry-collector",namespace="monitoring",pod="opentelemetry-collector-68db544b7d-bwnt6",instance="10.101.0.154:8889"}'
+        values: 7x29 _x40
+      - series: 'mate_turns_ended_total{reason="error",exported_job="mate",otel_scope_name="mate",job="opentelemetry-collector",namespace="monitoring",pod="opentelemetry-collector-6f8df4944d-jwcb7",instance="10.101.1.173:8889"}'
+        values: _x29 7x40
+      - series: 'mate_mints_total{result="mint-failed",exported_job="mate",otel_scope_name="mate",job="opentelemetry-collector",namespace="monitoring",pod="opentelemetry-collector-68db544b7d-bwnt6",instance="10.101.0.154:8889"}'
+        values: 5x29 _x40
+      - series: 'mate_mints_total{result="mint-failed",exported_job="mate",otel_scope_name="mate",job="opentelemetry-collector",namespace="monitoring",pod="opentelemetry-collector-6f8df4944d-jwcb7",instance="10.101.1.173:8889"}'
+        values: _x29 5x40
+      - series: 'mate_sandboxes_live{exported_job="mate",otel_scope_name="mate",job="opentelemetry-collector",namespace="monitoring",pod="opentelemetry-collector-68db544b7d-bwnt6",instance="10.101.0.154:8889"}'
+        values: 3x29 _x40
+      - series: 'mate_sandboxes_live{exported_job="mate",otel_scope_name="mate",job="opentelemetry-collector",namespace="monitoring",pod="opentelemetry-collector-6f8df4944d-jwcb7",instance="10.101.1.173:8889"}'
+        values: _x29 3x40
+    alert_rule_test:
+      # Nothing failed across the roll, so neither counter alert may fire.
+      - eval_time: 50m
+        alertname: MateTurnsFailing
+        exp_alerts: []
+      - eval_time: 50m
+        alertname: MateSandboxMintFailing
+        exp_alerts: []
+      # The cap genuinely has been held for the full half hour, across the
+      # roll, so this one must still fire.
+      - eval_time: 50m
+        alertname: MateSandboxesAtCap
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              exported_job: mate
+              otel_scope_name: mate
+              job: opentelemetry-collector
+              namespace: monitoring
+              pod: opentelemetry-collector-6f8df4944d-jwcb7
+              instance: 10.101.1.173:8889
+            exp_annotations:
+              message: "mate has been at its sandbox cap for half an hour"
+              description: "All three sandbox slots have been held continuously for thirty minutes, so any further thread is queued behind them. Compare `mate_queue_depth`: with nobody waiting this is three busy threads, and with a queue it is starvation. `kubectl --context offsite get sandboxes -n mate` names them — a Sandbox with no live thread behind it is a leak, and its `lolwtf.ca/thread` label says which thread it thinks it belongs to."
+
+  # The daily turn budget. The window is Prometheus's rolling 24h, not the
+  # in-memory one mate enforces — mate's own count empties on every restart,
+  # so this is the only place a real day's spend is visible.
+  - interval: 30m
+    input_series:
+      - series: 'mate_turns_total{exported_job="mate",otel_scope_name="mate",job="opentelemetry-collector",namespace="monitoring",instance="10.101.1.173:8889"}'
+        values: 1+5x30
+      - series: 'mate_turn_cost_usd_sum{exported_job="mate",otel_scope_name="mate",job="opentelemetry-collector",namespace="monitoring",instance="10.101.1.173:8889"}'
+        values: 0.01+0.05x30
+    alert_rule_test:
+      - eval_time: 150m
+        alertname: MateTurnBudgetNearlySpent
+        exp_alerts: []
+      - eval_time: 150m
+        alertname: MateSpendAboveBudget
+        exp_alerts: []
+      - eval_time: 900m
+        alertname: MateTurnBudgetNearlySpent
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              exported_job: mate
+              otel_scope_name: mate
+              job: opentelemetry-collector
+              namespace: monitoring
+              instance: 10.101.1.173:8889
+            exp_annotations:
+              message: "mate has spent most of its daily turn budget"
+              description: "More than 96 of the 120 turns allowed in a rolling day have been taken. Past 120 every thread is told the day is spent until the window rolls off. If this is real use rather than a loop, MATE_MAX_TURNS_PER_DAY on the mate Deployment is the number to move — and the spend that goes with it is what MateSpendAboveBudget watches."
+      - eval_time: 900m
+        alertname: MateSpendAboveBudget
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+            exp_annotations:
+              message: "mate's reported spend is above its daily budget"
+              description: "The turns of the last rolling day report more than $0.50 of model spend, against a measured $0.002178 for a real turn. Volume is capped at 120 turns/day, so this is the price per turn moving: check MATE_SANDBOX_MODEL on the mate Deployment and what the harness is actually being handed. The number is OpenCode Go's list-price shadow on a flat-rate plan, not a bill."
+
+  # The identify budget, and the reading that is allowed to be absent: a bot
+  # that has been connected all day stops reporting one rather than holding a
+  # stale number that no longer describes Discord's counter.
+  - interval: 1m
+    input_series:
+      - series: 'mate_discord_session_start_limit{exported_job="mate",otel_scope_name="mate",job="opentelemetry-collector",namespace="monitoring",instance="10.101.1.173:8889"}'
+        values: 1000x40
+      - series: 'mate_discord_session_start_remaining{exported_job="mate",otel_scope_name="mate",job="opentelemetry-collector",namespace="monitoring",instance="10.101.1.173:8889"}'
+        values: 700x10 300x30
+    alert_rule_test:
+      - eval_time: 9m
+        alertname: MateIdentifyBudgetLow
+        exp_alerts: []
+      - eval_time: 30m
+        alertname: MateIdentifyBudgetLow
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              exported_job: mate
+              otel_scope_name: mate
+              job: opentelemetry-collector
+              namespace: monitoring
+              instance: 10.101.1.173:8889
+            exp_annotations:
+              message: "mate's Discord identify budget is approaching its reserve"
+              description: "Fewer than 40% of the day's IDENTIFYs are left, against a reserve of 20% that mate will not spend into — below that it stops connecting until Discord's reset, and exhausting the budget outright makes Discord rotate the bot token. Something is reconnecting: read the pod for `gateway closed` lines and their codes, and check whether the Deployment is rolling (the digest-bump CD opens a PR per build)."

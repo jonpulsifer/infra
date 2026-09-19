@@ -1,9 +1,16 @@
-import { metrics, type ObservableGauge } from '@opentelemetry/api';
+import {
+  type MeterProvider,
+  metrics,
+  type ObservableGauge,
+} from '@opentelemetry/api';
 import type { SessionStartLimit } from './guard.ts';
 import type { StopReason } from './sandbox.ts';
 
 /** How a turn ended, `sandbox-died` being the one the harness never reports. */
 export type TurnEnd = StopReason | 'sandbox-died';
+
+/** How far getting a thread a usable sandbox got. */
+export type MintResult = 'ok' | 'mint-failed' | 'attach-failed';
 
 /**
  * Why a sandbox went away. The hard `shutdownTime` TTL is not here: the
@@ -23,72 +30,113 @@ export interface TurnSample {
 
 export interface Instruments {
   identifyLimit(limit: SessionStartLimit): void;
+  gatewayClosed(code: number, fatal: boolean): void;
   sandboxesLive(count: number): void;
   queueDepth(depth: number): void;
+  minted(result: MintResult): void;
   turnStarted(): void;
   turnEnded(reason: TurnEnd, sample: TurnSample): void;
   teardown(reason: TeardownReason): void;
 }
 
-let instruments: Instruments | null = null;
+let cached: { provider: MeterProvider; instruments: Instruments } | null = null;
+
+/**
+ * The levels the observable gauges report, kept out here so re-minting an
+ * instrument does not lose what it was last told.
+ */
+let latest: { limit: SessionStartLimit; readAt: number } | null = null;
+let live = 0;
+let queued = 0;
 
 /**
  * Built on first use rather than at import so nothing is minted before a
- * metrics SDK is registered: an instrument created earlier is a no-op forever.
- * With no SDK, the API's global meter is itself a no-op, which is the stub.
+ * metrics SDK is registered: an instrument created earlier is a no-op forever,
+ * and never says so. With no SDK, the API's global meter is itself a no-op,
+ * which is the stub.
+ *
+ * The instruments are re-minted when the global MeterProvider changes, so a
+ * call that lands before `startTelemetry` costs nothing but that one record —
+ * the metrics API keeps no proxy provider that re-binds on registration, the
+ * way the trace and log APIs do, so without this a single early caller would
+ * silently disable every instrument for the life of the process.
+ *
+ * Names are spelled the way Prometheus will hold them rather than in
+ * OpenTelemetry's dotted style. The collector's prometheus exporter rewrites a
+ * dotted name and appends the unit and `_total` on the way out, and an alert
+ * can only be written against the name that survives that. Spelling them here
+ * removes the guess — a name that already ends in its unit or in `total` is
+ * not given a second one, so `mate_turns_total` reads the same whether the
+ * exporter normalises or passes the name through. The one instrument whose
+ * unit has no Prometheus spelling, USD, therefore declares no unit at all.
  */
 export function getInstruments(): Instruments {
-  if (instruments) return instruments;
-  const meter = metrics.getMeter('mate');
-  let latest: SessionStartLimit | null = null;
+  const provider = metrics.getMeterProvider();
+  if (cached?.provider === provider) return cached.instruments;
+  const meter = provider.getMeter('mate');
   const observe = (
     gauge: ObservableGauge,
     pick: (l: SessionStartLimit) => number,
   ) =>
     gauge.addCallback((result) => {
-      if (latest) result.observe(pick(latest));
+      // Discord's `reset_after` is exactly how long the reading stays a fact:
+      // past it the daily budget has reset and mate, still connected, has had
+      // no reason to look again. Reporting the old number past that point
+      // would leave an alert on the reserve firing against a budget that is
+      // no longer low, with nothing able to clear it. Stopping is the honest
+      // reading, and downstream it looks like `absent()`.
+      if (!latest) return;
+      if (Date.now() - latest.readAt >= latest.limit.reset_after) return;
+      result.observe(pick(latest.limit));
     });
   observe(
-    meter.createObservableGauge('discord.session_start.total'),
+    meter.createObservableGauge('mate_discord_session_start_limit'),
     (l) => l.total,
   );
   observe(
-    meter.createObservableGauge('discord.session_start.remaining'),
+    meter.createObservableGauge('mate_discord_session_start_remaining'),
     (l) => l.remaining,
   );
   observe(
-    meter.createObservableGauge('discord.session_start.reset_after_ms'),
+    meter.createObservableGauge(
+      'mate_discord_session_start_reset_after_milliseconds',
+      { unit: 'ms' },
+    ),
     (l) => l.reset_after,
   );
   observe(
-    meter.createObservableGauge('discord.session_start.max_concurrency'),
+    meter.createObservableGauge('mate_discord_session_start_max_concurrency'),
     (l) => l.max_concurrency,
   );
-  let live = 0;
   meter
-    .createObservableGauge('mate.sandboxes.live')
+    .createObservableGauge('mate_sandboxes_live')
     .addCallback((result) => result.observe(live));
-  let queued = 0;
   meter
-    .createObservableGauge('mate.queue.depth')
+    .createObservableGauge('mate_queue_depth')
     .addCallback((result) => result.observe(queued));
-  const turns = meter.createCounter('mate.turns');
-  const ended = meter.createCounter('mate.turns.ended');
-  const teardowns = meter.createCounter('mate.teardowns');
-  const firstToken = meter.createHistogram('mate.turn.first_token', {
-    unit: 'ms',
-  });
-  const cost = meter.createHistogram('mate.turn.cost_usd', { unit: 'USD' });
-  instruments = {
+  const closes = meter.createCounter('mate_gateway_closes_total');
+  const mints = meter.createCounter('mate_mints_total');
+  const turns = meter.createCounter('mate_turns_total');
+  const ended = meter.createCounter('mate_turns_ended_total');
+  const teardowns = meter.createCounter('mate_teardowns_total');
+  const firstToken = meter.createHistogram(
+    'mate_turn_first_token_milliseconds',
+    { unit: 'ms' },
+  );
+  const cost = meter.createHistogram('mate_turn_cost_usd');
+  const instruments: Instruments = {
     identifyLimit: (limit) => {
-      latest = limit;
+      latest = { limit, readAt: Date.now() };
     },
+    gatewayClosed: (code, fatal) =>
+      closes.add(1, { code: String(code), fatal: String(fatal) }),
     sandboxesLive: (count) => {
       live = count;
     },
     queueDepth: (depth) => {
       queued = depth;
     },
+    minted: (result) => mints.add(1, { result }),
     turnStarted: () => turns.add(1),
     turnEnded: (reason, sample) => {
       ended.add(1, { reason });
@@ -99,6 +147,7 @@ export function getInstruments(): Instruments {
     },
     teardown: (reason) => teardowns.add(1, { reason }),
   };
+  cached = { provider, instruments };
   return instruments;
 }
 
@@ -106,8 +155,10 @@ export function getInstruments(): Instruments {
 export function lazyInstruments(): Instruments {
   return {
     identifyLimit: (limit) => getInstruments().identifyLimit(limit),
+    gatewayClosed: (code, fatal) => getInstruments().gatewayClosed(code, fatal),
     sandboxesLive: (count) => getInstruments().sandboxesLive(count),
     queueDepth: (depth) => getInstruments().queueDepth(depth),
+    minted: (result) => getInstruments().minted(result),
     turnStarted: () => getInstruments().turnStarted(),
     turnEnded: (reason, sample) => getInstruments().turnEnded(reason, sample),
     teardown: (reason) => getInstruments().teardown(reason),

@@ -37,6 +37,8 @@ export interface GatewayDeps {
   health: Health;
   clock: Clock;
   onLimit?(limit: SessionStartLimit): void;
+  /** Every close, fatal or not, before anything is done about it. */
+  onClose?(code: number, fatal: boolean): void;
   exit(code: number): void;
 }
 
@@ -81,7 +83,11 @@ export function createGateway(deps: GatewayDeps): Gateway {
   });
   manager.on(WebSocketShardEvents.Closed, (code) => {
     health.connected = false;
-    if (FATAL_CLOSE_CODES.has(code)) {
+    const fatal = FATAL_CLOSE_CODES.has(code);
+    // Counted before the exit, because `exit` is what flushes it: a close
+    // code that never leaves the process cannot be alerted on.
+    deps.onClose?.(code, fatal);
+    if (fatal) {
       log.error('gateway closed with a non-recoverable code; exiting', {
         code,
       });

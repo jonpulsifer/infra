@@ -58,3 +58,22 @@ spec:
     # never a name, so this cannot be an FQDN rule.
     - toEntities:
         - kube-apiserver
+    # The OTLP collector, and nothing else in `monitoring`. mate's metrics —
+    # the identify budget, sandboxes live, turns, teardowns, spend — are the
+    # only way to answer "is mate alive and what is it doing" without opening
+    # Discord, and this one destination is what carries them out of the pod;
+    # the alerts in ../../monitoring/mate-rules.yaml read what arrives. It is
+    # named by the collector's own pod labels rather than by its namespace,
+    # because the namespace also holds Prometheus, Alertmanager, VictoriaLogs
+    # and Grafana, and mate has no business reaching any of them. Cilium
+    # translates the ClusterIP to its backend before the egress verdict, so
+    # the pod selector is what matches and no address appears here.
+    - toEndpoints:
+        - matchLabels:
+            io.kubernetes.pod.namespace: monitoring
+            app.kubernetes.io/name: opentelemetry-collector
+            app.kubernetes.io/instance: opentelemetry-collector
+      toPorts:
+        - ports:
+            - port: "4318"
+              protocol: TCP

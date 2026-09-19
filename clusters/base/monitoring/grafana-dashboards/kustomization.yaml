@@ -1,9 +1,11 @@
 ---
-# Dashboards for services that run on both clusters. Each cluster's Grafana
-# sidecar picks up any ConfigMap labelled grafana_dashboard, so this ships to
-# folly and offsite alike; folly's own dashboards ConfigMap keeps its
-# folly-only ones. The name differs from folly's "dashboards" so the two
-# generators cannot collide in the monitoring namespace.
+# Dashboards both clusters' Grafana carries. Each cluster's sidecar picks up
+# any ConfigMap labelled grafana_dashboard, so this ships to folly and offsite
+# alike; folly's own dashboards ConfigMap keeps its folly-only ones. The name
+# differs from folly's "dashboards" so the two generators cannot collide in
+# the monitoring namespace. A dashboard here reads whatever its cluster's
+# Prometheus holds, so one for a service that only runs on one of them is
+# empty on the other rather than wrong.
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 namespace: monitoring
@@ -12,6 +14,7 @@ configMapGenerator:
     files:
       - bosun.json
       - flux.json
+      - mate.json
       - spindrift.json
 generatorOptions:
   disableNameSuffixHash: true

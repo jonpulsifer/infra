@@ -40,9 +40,15 @@ fi
 promtool check rules "$WORK"/*/*.yaml
 
 # `rule_files` in a test is resolved relative to the test file, so the tests
-# are copied next to the rules they name — once per cluster, which is what
-# runs them against both renders.
+# are copied next to the rules they name. A test beside a shared rule runs
+# once per cluster, which is what checks it against both renders; a test
+# beside a rule only one cluster deploys runs only in that cluster's
+# directory, because the file it names does not exist in the other.
 for dir in "$WORK"/*/; do
+  site="$(basename "$dir")"
   cp clusters/base/monitoring/*_test.yaml "$dir"
+  for test_file in clusters/"$site"/monitoring/*_test.yaml; do
+    if [ -e "$test_file" ]; then cp "$test_file" "$dir"; fi
+  done
   (cd "$dir" && promtool test rules ./*_test.yaml)
 done

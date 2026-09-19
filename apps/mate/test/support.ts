@@ -9,6 +9,7 @@ import type { SessionStartLimit } from '../src/guard.ts';
 import type { Fields, Log } from '../src/log.ts';
 import type {
   Instruments,
+  MintResult,
   TeardownReason,
   TurnEnd,
   TurnSample,
@@ -117,11 +118,19 @@ export class RecordingInstruments implements Instruments {
   readonly turns: TurnEnd[] = [];
   readonly teardowns: TeardownReason[] = [];
   readonly samples: TurnSample[] = [];
+  readonly mints: MintResult[] = [];
+  readonly closes: { code: number; fatal: boolean }[] = [];
   started = 0;
   live = 0;
   queued = 0;
 
   identifyLimit(_limit: SessionStartLimit): void {}
+  gatewayClosed(code: number, fatal: boolean): void {
+    this.closes.push({ code, fatal });
+  }
+  minted(result: MintResult): void {
+    this.mints.push(result);
+  }
   sandboxesLive(count: number): void {
     this.live = count;
   }
