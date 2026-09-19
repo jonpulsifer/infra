@@ -5,6 +5,7 @@
  */
 import type { Clock, Handle } from './clock.ts';
 import { type Discord, type OutMessage, stopRow } from './discord.ts';
+import { type Log, plain } from './log.ts';
 import type { PromptSink, Update } from './sandbox.ts';
 
 export const MESSAGE_CAP = 2000;
@@ -13,6 +14,7 @@ export const STATUS_MAX = 120;
 export const STATUS_RESERVE = STATUS_MAX + 6;
 export const CHUNK_BUDGET = MESSAGE_CAP - STATUS_RESERVE;
 export const EDIT_CADENCE_MS = 1_000;
+export const NO_REPLY = 'the harness sent no reply';
 const TYPING_INTERVAL_MS = 8_000;
 const EMPTY = '…';
 
@@ -44,11 +46,13 @@ export class Reply implements PromptSink {
   private typingTimer: Handle | null = null;
   private lastFlushAt = Number.NEGATIVE_INFINITY;
   private chain: Promise<void> = Promise.resolve();
-  private finished = false;
+  private outcome: Outcome | null = null;
+  private failures = 0;
 
   constructor(
     private readonly discord: Discord,
     private readonly clock: Clock,
+    private readonly log: Log,
     private readonly threadId: string,
     private readonly cadenceMs = EDIT_CADENCE_MS,
   ) {}
@@ -56,7 +60,7 @@ export class Reply implements PromptSink {
   /** Shows "typing" until the first visible edit lands. */
   startTyping(): void {
     const tick = () => {
-      if (this.liveId || this.finished) return;
+      if (this.liveId || this.outcome) return;
       void this.discord.showTyping(this.threadId).catch(() => {});
       this.typingTimer = this.clock.after(TYPING_INTERVAL_MS, tick);
     };
@@ -64,16 +68,20 @@ export class Reply implements PromptSink {
   }
 
   update(update: Update): void {
-    if (this.finished) return;
+    if (this.outcome) return;
     if (update.kind === 'text') this.text += update.delta;
     else this.status = update.line;
     this.dirty = true;
     this.schedule();
   }
 
+  /**
+   * Sends the final state. Rejects only when that last send fails; a failed
+   * edit mid-stream is logged once and re-sent by the next flush.
+   */
   async finish(outcome: Outcome): Promise<void> {
-    if (this.finished) return;
-    this.finished = true;
+    if (this.outcome) return;
+    this.outcome = outcome;
     this.stopTimers();
     this.status = null;
     this.dirty = true;
@@ -87,13 +95,30 @@ export class Reply implements PromptSink {
     if (this.timer) return;
     const wait = this.cadenceMs - (this.clock.now() - this.lastFlushAt);
     if (wait <= 0) {
-      this.chain = this.chain.then(() => this.flush(false));
+      this.enqueue();
       return;
     }
     this.timer = this.clock.after(wait, () => {
       this.timer = null;
-      this.chain = this.chain.then(() => this.flush(false));
+      this.enqueue();
     });
+  }
+
+  private enqueue(): void {
+    this.chain = this.chain
+      .then(() => this.flush(false))
+      .catch((error) => this.failed(error));
+  }
+
+  private failed(error: unknown): void {
+    this.dirty = true;
+    this.failures += 1;
+    if (this.failures === 1) {
+      this.log.warn('reply edit failed; the next flush re-sends', {
+        threadId: this.threadId,
+        error: plain(error),
+      });
+    }
   }
 
   private async flush(final: boolean): Promise<void> {
@@ -111,12 +136,14 @@ export class Reply implements PromptSink {
       live = rest;
     }
 
+    if (final) {
+      if (!live && !this.liveId && this.outcome === 'failed') return;
+      await this.send({ content: live || NO_REPLY }, false);
+      return;
+    }
     const header = this.status ? statusLine(this.status) : '';
     const content = [header, live].filter(Boolean).join('\n\n') || EMPTY;
-    const body: OutMessage = final
-      ? { content: live || EMPTY }
-      : { content, components: [stopRow(this.threadId)] };
-    await this.send(body, false);
+    await this.send({ content, components: [stopRow(this.threadId)] }, false);
   }
 
   private async send(body: OutMessage, seal: boolean): Promise<void> {

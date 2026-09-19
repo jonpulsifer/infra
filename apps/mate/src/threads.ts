@@ -7,7 +7,7 @@ import type { Clock, Handle } from './clock.ts';
 import type { Config } from './config.ts';
 import type { Discord } from './discord.ts';
 import { type Log, plain } from './log.ts';
-import { EDIT_CADENCE_MS, Reply } from './reply.ts';
+import { EDIT_CADENCE_MS, type Outcome, Reply } from './reply.ts';
 import type {
   PromptResult,
   Sandboxes,
@@ -104,6 +104,8 @@ export class Threads {
   private readonly threads = new Map<string, Thread>();
   private readonly waiting: string[] = [];
   private readonly dayTurns: number[] = [];
+  private readonly backlog: Inbound[] = [];
+  private hydrating = false;
 
   constructor(private readonly deps: ThreadsDeps) {}
 
@@ -120,26 +122,45 @@ export class Threads {
     this.ensure(threadId, channelId);
   }
 
+  /**
+   * Re-attaches to the sandboxes found at start. Messages that land meanwhile
+   * are held and handled afterwards, so a thread is never minted twice.
+   */
   async rehydrate(): Promise<void> {
     const { sandboxes, log } = this.deps;
-    for (const sandbox of await sandboxes.list()) {
-      const thread = this.ensure(sandbox.thread.id, sandbox.thread.channelId);
-      thread.state = 'rehydrating';
-      thread.sandbox = sandbox;
-      try {
-        thread.session = await sandboxes.attach(sandbox);
-        thread.state = 'attached';
-        this.armQuiet(thread);
-        log.info('thread rehydrated', {
-          threadId: thread.id,
-          sandbox: sandbox.name,
-        });
-      } catch (error) {
-        log.warn('rehydrate failed; tearing down', {
-          threadId: thread.id,
-          error: plain(error),
-        });
-        await this.close(thread, { line: null, archive: false });
+    this.hydrating = true;
+    try {
+      for (const sandbox of await sandboxes.list()) {
+        const thread = this.ensure(sandbox.thread.id, sandbox.thread.channelId);
+        if (thread.state !== 'new') {
+          log.warn('rehydrate skipped a thread already in motion', {
+            threadId: thread.id,
+            state: thread.state,
+          });
+          continue;
+        }
+        thread.state = 'rehydrating';
+        thread.sandbox = sandbox;
+        try {
+          thread.session = await sandboxes.attach(sandbox);
+          thread.state = 'attached';
+          log.info('thread rehydrated', {
+            threadId: thread.id,
+            sandbox: sandbox.name,
+          });
+          await this.pump(thread);
+        } catch (error) {
+          log.warn('rehydrate failed; tearing down', {
+            threadId: thread.id,
+            error: plain(error),
+          });
+          await this.close(thread, { line: null, archive: false });
+        }
+      }
+    } finally {
+      this.hydrating = false;
+      for (const message of this.backlog.splice(0)) {
+        await this.onMessage(message);
       }
     }
   }
@@ -147,6 +168,10 @@ export class Threads {
   async onMessage(message: Inbound): Promise<void> {
     const { config, discord, log, me } = this.deps;
     if (message.authorIsBot || message.guildId !== config.guildId) return;
+    if (this.hydrating) {
+      this.backlog.push(message);
+      return;
+    }
     const text = stripMention(message.content, me);
     const known = this.threads.get(message.channelId);
     if (known) {
@@ -199,7 +224,7 @@ export class Threads {
     const thread = this.threads.get(threadId);
     if (!thread) return;
     if (thread.state === 'attached') {
-      await this.close(thread, { line: SANDBOX_CLOSED, archive: false });
+      await this.close(thread, { line: SANDBOX_CLOSED, archive: true });
     } else if (thread.state === 'waiting') {
       this.leaveQueue(thread);
     }
@@ -254,6 +279,9 @@ export class Threads {
         case 'attached':
           if (thread.pending.length > 0) await this.runTurn(thread);
           else this.armQuiet(thread);
+          return;
+        case 'waiting':
+          this.armQuiet(thread);
           return;
         default:
           return;
@@ -340,33 +368,61 @@ export class Threads {
     const reply = new Reply(
       discord,
       clock,
+      log,
       thread.id,
       this.deps.editCadenceMs ?? EDIT_CADENCE_MS,
     );
     reply.startTyping();
-    let result: PromptResult;
     try {
-      result = await sandboxes.prompt(thread.session, prompt.text, reply);
+      let result: PromptResult;
+      try {
+        result = await sandboxes.prompt(thread.session, prompt.text, reply);
+      } catch (error) {
+        await this.deliver(thread, reply, 'failed');
+        log.warn('sandbox died mid-turn', {
+          threadId: thread.id,
+          error: plain(error),
+        });
+        await this.tell(thread, `the sandbox died mid-turn: ${plain(error)}`);
+        await this.close(thread, { line: null, archive: false });
+        return;
+      }
+      if (result.stopReason === 'error') {
+        await this.deliver(thread, reply, 'failed');
+        await this.tell(thread, `the harness failed: ${plain(result.error)}`);
+      } else {
+        await this.deliver(
+          thread,
+          reply,
+          result.stopReason === 'cancelled' ? 'stopped' : 'done',
+        );
+      }
+    } finally {
+      if (thread.state === 'turn') {
+        thread.state = 'attached';
+        await this.pump(thread);
+      }
+    }
+  }
+
+  /** Lands the reply's final state; a failure is one line in the thread, never a stuck turn. */
+  private async deliver(
+    thread: Thread,
+    reply: Reply,
+    outcome: Outcome,
+  ): Promise<void> {
+    try {
+      await reply.finish(outcome);
     } catch (error) {
-      await reply.finish('failed');
-      log.warn('sandbox died mid-turn', {
+      this.deps.log.warn('reply delivery failed', {
         threadId: thread.id,
         error: plain(error),
       });
-      await this.tell(thread, `the sandbox died mid-turn: ${plain(error)}`);
-      await this.close(thread, { line: null, archive: false });
-      return;
-    }
-    if (result.stopReason === 'error') {
-      await reply.finish('failed');
-      await this.tell(thread, `the harness failed: ${plain(result.error)}`);
-    } else {
-      await reply.finish(
-        result.stopReason === 'cancelled' ? 'stopped' : 'done',
+      await this.tell(
+        thread,
+        `the reply could not be delivered: ${plain(error)}`,
       );
     }
-    thread.state = 'attached';
-    await this.pump(thread);
   }
 
   private budgetRefusal(thread: Thread): string | null {

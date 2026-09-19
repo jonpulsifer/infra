@@ -13,7 +13,7 @@ import {
   type ThreadsConfig,
   threadName,
 } from '../src/threads.ts';
-import { FakeClock, FakeDiscord, settle } from './support.ts';
+import { FakeClock, FakeDiscord, RecordingLog, settle } from './support.ts';
 
 const ME = '900000000000000001';
 const OWNER = '308072071949320204';
@@ -35,6 +35,7 @@ const config: ThreadsConfig = {
 
 let clock: FakeClock;
 let discord: FakeDiscord;
+let log: RecordingLog;
 let serial = 0;
 
 function mention(content: string, overrides: Partial<Inbound> = {}): Inbound {
@@ -82,7 +83,7 @@ function build(
     discord,
     sandboxes,
     clock,
-    log: silentLog,
+    log,
     config: { ...config, ...opts.config },
     me: ME,
     editCadenceMs: 1_000,
@@ -104,6 +105,7 @@ const streaming =
 beforeEach(() => {
   clock = new FakeClock();
   discord = new FakeDiscord();
+  log = new RecordingLog();
 });
 
 describe('starting a thread', () => {
@@ -361,6 +363,8 @@ describe('quiet', () => {
     await threads.onThreadArchived(threadId);
     expect(sandboxes.liveCount).toBe(0);
     expect(discord.contentsIn(threadId).at(-1)).toBe(SANDBOX_CLOSED);
+    // the closing line auto-unarchives the thread, so mate archives it again
+    expect(discord.archived).toEqual([threadId]);
   });
 });
 
@@ -420,6 +424,74 @@ describe('capacity', () => {
     expect(discord.contentsIn(second).at(-1)).toBe(
       'stopped waiting for a sandbox; message again to start fresh',
     );
+  });
+
+  test('a second message to a waiting thread keeps its quiet timer running', async () => {
+    const { threads } = build({
+      script: streaming('ok'),
+      config: { maxConcurrent: 1 },
+    });
+    await threads.onMessage(mention('first'));
+    await threads.onMessage(mention('second'));
+    await settle();
+    const second = discord.threads[1]!.id;
+    await threads.onMessage(inThread(second, 'still waiting'));
+    await clock.advance(QUIET_MS + 1);
+    expect(threads.stateOf(second)).toBe('closed');
+    expect(threads.waitingIds).toHaveLength(0);
+    expect(discord.contentsIn(second).at(-1)).toBe(
+      'stopped waiting for a sandbox; message again to start fresh',
+    );
+  });
+});
+
+describe('delivery failures', () => {
+  test('edits that fail mid-stream are logged once, re-sent by the next flush, and the turn ends normally', async () => {
+    const script: Script = () => [
+      { status: 'thinking' },
+      { wait: 100 },
+      { text: 'one ' },
+      { wait: 1_000 },
+      { text: 'two ' },
+      { wait: 1_000 },
+      { status: null },
+    ];
+    const { threads } = build({ script });
+    await threads.onMessage(mention('go'));
+    await clock.advance(50);
+    const threadId = discord.threads[0]!.id;
+    discord.failEdits = new Error('429 past retries');
+    await clock.advance(1_500);
+    expect(log.of('reply edit failed; the next flush re-sends')).toHaveLength(
+      1,
+    );
+    discord.failEdits = null;
+    await clock.advance(5_000);
+    expect(threads.stateOf(threadId)).toBe('attached');
+    expect(discord.contentsIn(threadId)).toEqual(['one two ']);
+    expect(log.of('reply delivery failed')).toHaveLength(0);
+  });
+
+  test('a reply whose final send fails is one plain line, the turn ends, the next turn runs, and quiet still closes the thread', async () => {
+    const { threads } = build({ script: streaming('one two') });
+    await threads.onMessage(mention('go'));
+    await settle();
+    const threadId = discord.threads[0]!.id;
+    await threads.onMessage(inThread(threadId, 'and again'));
+    await clock.advance(50);
+    discord.failEdits = new Error('thread archived');
+    await clock.advance(5_000);
+    expect(threads.stateOf(threadId)).toBe('attached');
+    expect(log.of('reply delivery failed')).toHaveLength(2);
+    expect(
+      discord
+        .contentsIn(threadId)
+        .filter(
+          (c) => c === 'the reply could not be delivered: thread archived',
+        ),
+    ).toHaveLength(2);
+    await clock.advance(QUIET_MS);
+    expect(threads.stateOf(threadId)).toBe('closed');
   });
 });
 
@@ -507,5 +579,84 @@ describe('rehydrating', () => {
     await clock.advance(5_000);
     expect(sandboxes.liveCount).toBe(1);
     expect(discord.contentsIn('thread-old').at(-1)).toBe('fresh ');
+  });
+
+  test('a message that lands during rehydration is handled afterwards, against the rehydrated sandbox', async () => {
+    const shared = new StubSandboxes({ clock, script: streaming('back') });
+    const before = new Threads({
+      discord,
+      sandboxes: shared,
+      clock,
+      log: silentLog,
+      config,
+      me: ME,
+      editCadenceMs: 1_000,
+    });
+    await before.onMessage(mention('go'));
+    await clock.advance(5_000);
+    const threadId = discord.threads[0]!.id;
+    expect(shared.mintCount).toBe(1);
+
+    const after = new Threads({
+      discord,
+      sandboxes: shared,
+      clock,
+      log,
+      config,
+      me: ME,
+      editCadenceMs: 1_000,
+    });
+    after.adopt(threadId, CHANNEL);
+    const hydrating = after.rehydrate();
+    await after.onMessage(inThread(threadId, 'racing'));
+    expect(after.stateOf(threadId)).not.toBe('minting');
+    await hydrating;
+    await clock.advance(5_000);
+    expect(shared.mintCount).toBe(1);
+    expect(shared.liveCount).toBe(1);
+    expect(after.stateOf(threadId)).toBe('attached');
+    expect(discord.contentsIn(threadId).at(-1)).toBe('back ');
+  });
+
+  test('rehydration leaves a thread that is already minting alone', async () => {
+    const shared = new StubSandboxes({
+      clock,
+      script: streaming('x'),
+      mintDelayMs: 500,
+    });
+    const before = new Threads({
+      discord,
+      sandboxes: shared,
+      clock,
+      log: silentLog,
+      config,
+      me: ME,
+      editCadenceMs: 1_000,
+    });
+    await before.onMessage(mention('go'));
+    await clock.advance(5_000);
+    const threadId = discord.threads[0]!.id;
+
+    const after = new Threads({
+      discord,
+      sandboxes: shared,
+      clock,
+      log,
+      config,
+      me: ME,
+      editCadenceMs: 1_000,
+    });
+    after.adopt(threadId, CHANNEL);
+    await after.onMessage(inThread(threadId, 'first'));
+    await settle();
+    expect(after.stateOf(threadId)).toBe('minting');
+    await after.rehydrate();
+    expect(after.stateOf(threadId)).toBe('minting');
+    expect(log.of('rehydrate skipped a thread already in motion')).toHaveLength(
+      1,
+    );
+    await clock.advance(5_000);
+    expect(after.stateOf(threadId)).toBe('attached');
+    expect(discord.contentsIn(threadId).at(-1)).toBe('x ');
   });
 });

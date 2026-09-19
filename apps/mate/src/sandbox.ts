@@ -82,6 +82,7 @@ export class StubSandboxes implements Sandboxes {
   private readonly live = new Map<string, SandboxRef>();
   private readonly cancelled = new Set<string>();
   private serial = 0;
+  private mints = 0;
 
   constructor(private readonly opts: StubOptions = {}) {
     this.clock = opts.clock ?? systemClock;
@@ -92,11 +93,16 @@ export class StubSandboxes implements Sandboxes {
     return this.live.size;
   }
 
+  get mintCount(): number {
+    return this.mints;
+  }
+
   async list(): Promise<SandboxRef[]> {
     return [...this.live.values()];
   }
 
   async mint(thread: ThreadRef): Promise<SandboxRef> {
+    this.mints += 1;
     if (this.opts.mintDelayMs) await this.clock.sleep(this.opts.mintDelayMs);
     if (this.opts.mintFails) throw new Error(this.opts.mintFails);
     const ref = { name: `mate-${thread.id}`, thread };

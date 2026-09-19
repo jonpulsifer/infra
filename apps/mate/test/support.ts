@@ -1,5 +1,28 @@
 import type { Clock, Handle } from '../src/clock.ts';
 import type { Discord, OutMessage } from '../src/discord.ts';
+import type { Fields, Log } from '../src/log.ts';
+
+export interface Entry {
+  level: 'info' | 'warn' | 'error';
+  msg: string;
+  fields: Fields | undefined;
+}
+
+export class RecordingLog implements Log {
+  readonly entries: Entry[] = [];
+  info(msg: string, fields?: Fields): void {
+    this.entries.push({ level: 'info', msg, fields });
+  }
+  warn(msg: string, fields?: Fields): void {
+    this.entries.push({ level: 'warn', msg, fields });
+  }
+  error(msg: string, fields?: Fields): void {
+    this.entries.push({ level: 'error', msg, fields });
+  }
+  of(msg: string): Entry[] {
+    return this.entries.filter((e) => e.msg === msg);
+  }
+}
 
 interface Timer {
   at: number;
@@ -87,6 +110,7 @@ export class FakeDiscord implements Discord {
   readonly acks: string[] = [];
   typing = 0;
   failCreateThread: Error | null = null;
+  failEdits: Error | null = null;
   private serial = 0;
 
   async createThread(
@@ -117,6 +141,7 @@ export class FakeDiscord implements Discord {
     messageId: string,
     body: OutMessage,
   ): Promise<void> {
+    if (this.failEdits) throw this.failEdits;
     const message = this.messages.find(
       (m) => m.id === messageId && m.channelId === channelId,
     );

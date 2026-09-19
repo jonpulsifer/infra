@@ -7,20 +7,24 @@
  * it keeps no reserve, and it throws instead of waiting for the window to
  * reset. This throttler is the one seam the shard calls before every IDENTIFY
  * and never before a RESUME, so the three gaps close here.
+ *
+ * Nothing but an abort or a breach may leave `waitForIdentify` by throwing:
+ * the shard treats any other rejection as a reason to reconnect and identify
+ * inside its catch, then identifies again on the way out.
  */
+import type { APIGatewaySessionStartLimit } from 'discord-api-types/v10';
 import type { Clock } from './clock.ts';
-import type { Log } from './log.ts';
+import { type Log, plain } from './log.ts';
 
-export interface SessionStartLimit {
-  total: number;
-  remaining: number;
-  reset_after: number;
-  max_concurrency: number;
-}
+export type SessionStartLimit = APIGatewaySessionStartLimit;
 
 export const RESERVE_DIVISOR = 5;
 export const MAX_IDENTIFIES_PER_HOUR = 10;
 export const MIN_IDENTIFY_SPACING_MS = 5_000;
+/** The shortest sleep before re-reading the budget, so a zero never spins. */
+export const MIN_RESET_SLEEP_MS = 5_000;
+export const FETCH_RETRY_MS = 5_000;
+export const FETCH_RETRY_MAX_MS = 60_000;
 const HOUR_MS = 3_600_000;
 
 export interface IdentifyBudgetOptions {
@@ -71,8 +75,21 @@ export class IdentifyBudget {
   /** Resolves once the daily budget is above the reserve, sleeping to the reset if not. */
   async waitForBudget(signal: AbortSignal): Promise<void> {
     const { clock, log } = this.opts;
+    let retry = FETCH_RETRY_MS;
     for (;;) {
-      const limit = await this.opts.fetchLimit();
+      let limit: SessionStartLimit;
+      try {
+        limit = await this.opts.fetchLimit();
+      } catch (error) {
+        log.warn('gateway budget read failed; retrying', {
+          error: plain(error),
+          retryMs: retry,
+        });
+        await clock.sleep(retry, signal);
+        retry = Math.min(retry * 2, FETCH_RETRY_MAX_MS);
+        continue;
+      }
+      retry = FETCH_RETRY_MS;
       this.opts.onLimit?.(limit);
       const reserve = reserveOf(limit);
       if (limit.remaining >= reserve) {
@@ -85,13 +102,15 @@ export class IdentifyBudget {
         });
         break;
       }
+      const sleepMs = Math.max(limit.reset_after, MIN_RESET_SLEEP_MS);
       log.warn('identify refused below reserve; sleeping to reset', {
         total: limit.total,
         remaining: limit.remaining,
         reserve,
         resetAfterMs: limit.reset_after,
+        sleepMs,
       });
-      await clock.sleep(limit.reset_after, signal);
+      await clock.sleep(sleepMs, signal);
     }
   }
 
