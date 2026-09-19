@@ -51,7 +51,8 @@ WORKDIR /home/agent
 # The environment the harness ran under in the bake-off. HOME and the XDG
 # roots all sit under the mount the pod backs with an emptyDir; opencode
 # creates its subdirectories itself. Autoupdate is off because the binary is
-# root-owned and the sandbox's egress allows no release host anyway.
+# root-owned, and because a harness that swaps itself out from under a live
+# thread is not a version anyone can reason about afterwards.
 ENV HOME=/home/agent \
     USER=agent \
     XDG_DATA_HOME=/home/agent/.local/share \

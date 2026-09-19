@@ -43,4 +43,34 @@ describe('config from the environment', () => {
       readConfig({ ...minimal, MATE_MAX_CONCURRENT: 'three' }),
     ).toThrow('MATE_MAX_CONCURRENT');
   });
+
+  test('answers threads with the stub unless told otherwise', () => {
+    expect(readConfig(minimal).sandboxes).toEqual({ mode: 'stub' });
+    expect(() =>
+      readConfig({ ...minimal, MATE_SANDBOXES: 'kubernetes' }),
+    ).toThrow('MATE_SANDBOXES must be stub or kube');
+  });
+
+  test('kube mode needs a harness image and takes the sandbox defaults', () => {
+    expect(() => readConfig({ ...minimal, MATE_SANDBOXES: 'kube' })).toThrow(
+      'MATE_SANDBOX_IMAGE is required',
+    );
+    const config = readConfig({
+      ...minimal,
+      MATE_SANDBOXES: 'kube',
+      MATE_SANDBOX_IMAGE: 'ghcr.io/jonpulsifer/mate-sandbox:latest',
+    });
+    expect(config.sandboxes).toEqual({
+      mode: 'kube',
+      sandbox: {
+        image: 'ghcr.io/jonpulsifer/mate-sandbox:latest',
+        runtimeClass: 'kata-clh',
+        namespace: null,
+        secret: 'mate-opencode',
+        checkoutRepo: 'https://github.com/jonpulsifer/infra',
+        checkoutRef: 'main',
+        model: 'opencode-go/qwen3.8-flash',
+      },
+    });
+  });
 });

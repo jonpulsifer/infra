@@ -14,6 +14,25 @@ export interface Config {
   readonly port: number;
   /** Where gateway session info is persisted for a resume, or `null` for memory only. */
   readonly sessionFile: string | null;
+  readonly sandboxes: SandboxesChoice;
+}
+
+/** What answers a thread: the in-process stub, or real Sandboxes on the cluster. */
+export type SandboxesChoice =
+  | { readonly mode: 'stub' }
+  | { readonly mode: 'kube'; readonly sandbox: SandboxConfig };
+
+export interface SandboxConfig {
+  /** The harness image every sandbox runs; CD rewrites its digest on mate's Deployment. */
+  readonly image: string;
+  readonly runtimeClass: string;
+  /** Where sandboxes are minted, or `null` for the namespace mate runs in. */
+  readonly namespace: string | null;
+  /** The Secret holding the provider key as `OPENCODE_API_KEY`. */
+  readonly secret: string;
+  readonly checkoutRepo: string;
+  readonly checkoutRef: string;
+  readonly model: string;
 }
 
 type Env = Record<string, string | undefined>;
@@ -50,6 +69,33 @@ function integer(env: Env, key: string, fallback: number): number {
   return value;
 }
 
+function text(env: Env, key: string, fallback: string): string {
+  return env[key]?.trim() || fallback;
+}
+
+export function readSandboxConfig(env: Env): SandboxConfig {
+  return {
+    image: required(env, 'MATE_SANDBOX_IMAGE'),
+    runtimeClass: text(env, 'MATE_SANDBOX_RUNTIME_CLASS', 'kata-clh'),
+    namespace: env.MATE_SANDBOX_NAMESPACE?.trim() || null,
+    secret: text(env, 'MATE_OPENCODE_SECRET', 'mate-opencode'),
+    checkoutRepo: text(
+      env,
+      'MATE_CHECKOUT_REPO',
+      'https://github.com/jonpulsifer/infra',
+    ),
+    checkoutRef: text(env, 'MATE_CHECKOUT_REF', 'main'),
+    model: text(env, 'MATE_SANDBOX_MODEL', 'opencode-go/qwen3.8-flash'),
+  };
+}
+
+function sandboxes(env: Env): SandboxesChoice {
+  const mode = text(env, 'MATE_SANDBOXES', 'stub');
+  if (mode === 'stub') return { mode };
+  if (mode === 'kube') return { mode, sandbox: readSandboxConfig(env) };
+  throw new ConfigError(`MATE_SANDBOXES must be stub or kube, got ${mode}`);
+}
+
 export function readConfig(env: Env): Config {
   return {
     token: required(env, 'DISCORD_TOKEN'),
@@ -62,5 +108,6 @@ export function readConfig(env: Env): Config {
     maxConcurrent: integer(env, 'MATE_MAX_CONCURRENT', 3),
     port: integer(env, 'MATE_PORT', 8080),
     sessionFile: env.MATE_SESSION_FILE?.trim() || null,
+    sandboxes: sandboxes(env),
   };
 }

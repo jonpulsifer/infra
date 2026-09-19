@@ -9,9 +9,11 @@ import { ConfigError, readConfig } from './config.ts';
 import { discordOver, STOP_PREFIX } from './discord.ts';
 import { createGateway } from './gateway.ts';
 import { Health } from './health.ts';
+import { discoverKube, Kube } from './kube.ts';
 import { jsonLog as log, plain } from './log.ts';
 import { getInstruments } from './metrics.ts';
-import { StubSandboxes } from './sandbox.ts';
+import { type Sandboxes, StubSandboxes } from './sandbox.ts';
+import { KubeSandboxes } from './sandboxes.ts';
 import { fileSessionStore, memorySessionStore } from './session.ts';
 import { Threads } from './threads.ts';
 
@@ -47,7 +49,15 @@ const { client, manager, budget } = createGateway({
   onLimit: (limit) => getInstruments().identifyLimit(limit),
   exit: (code) => process.exit(code),
 });
-const sandboxes = new StubSandboxes();
+const sandboxes: Sandboxes =
+  config.sandboxes.mode === 'kube'
+    ? new KubeSandboxes({
+        kube: new Kube(await discoverKube()),
+        config: config.sandboxes.sandbox,
+        guildId: config.guildId,
+        log,
+      })
+    : new StubSandboxes();
 const discord = discordOver(client.api);
 let threads: Threads | null = null;
 let me = '';
@@ -166,6 +176,7 @@ process.on('SIGINT', () => void shutdown('SIGINT'));
 process.on('SIGTERM', () => void shutdown('SIGTERM'));
 
 log.info('mate starting', {
+  sandboxes: config.sandboxes.mode,
   guildId: config.guildId,
   allowedUsers: config.allowedUserIds.size,
   allowedChannels: [...config.allowedChannelIds],

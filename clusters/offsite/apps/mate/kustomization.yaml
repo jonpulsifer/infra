@@ -4,5 +4,7 @@ kind: Kustomization
 namespace: mate
 resources:
   - namespace.yaml
+  - rbac.yaml
   - external-secret.yaml
+  - network-policy.yaml
   - deployment.yaml
