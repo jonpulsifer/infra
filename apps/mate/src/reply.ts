@@ -16,7 +16,7 @@ export const CHUNK_BUDGET = MESSAGE_CAP - STATUS_RESERVE;
 export const EDIT_CADENCE_MS = 1_000;
 export const NO_REPLY = 'the harness sent no reply';
 const TYPING_INTERVAL_MS = 8_000;
-const EMPTY = '…';
+export const PLACEHOLDER = '…';
 
 export function statusLine(line: string): string {
   const flat = line.replace(/\s+/g, ' ').trim().replaceAll('*', '');
@@ -142,7 +142,7 @@ export class Reply implements PromptSink {
       return;
     }
     const header = this.status ? statusLine(this.status) : '';
-    const content = [header, live].filter(Boolean).join('\n\n') || EMPTY;
+    const content = [header, live].filter(Boolean).join('\n\n') || PLACEHOLDER;
     await this.send({ content, components: [stopRow(this.threadId)] }, false);
   }
 

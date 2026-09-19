@@ -38,6 +38,12 @@ export const GUILD_LABEL = 'lolwtf.ca/guild';
  * 63 characters of `[A-Za-z0-9._-]`.
  */
 export const SESSION_ANNOTATION = 'lolwtf.ca/acp-session';
+/**
+ * Stamped when a turn starts and cleared when it ends, so a mate that died
+ * under a running turn can say so in the thread instead of going quiet: this
+ * annotation surviving on the object is the only evidence left.
+ */
+export const TURN_ANNOTATION = 'lolwtf.ca/turn-started';
 
 export const HARNESS_CONTAINER = 'harness';
 export const CHECKOUT_CONTAINER = 'checkout';
@@ -361,7 +367,11 @@ export class KubeSandboxes implements Sandboxes {
         });
         continue;
       }
-      refs.push({ name: sandbox.metadata.name, thread: { id, channelId } });
+      refs.push({
+        name: sandbox.metadata.name,
+        thread: { id, channelId },
+        turnInFlight: Boolean(sandbox.metadata.annotations?.[TURN_ANNOTATION]),
+      });
     }
     return refs;
   }
@@ -416,20 +426,20 @@ export class KubeSandboxes implements Sandboxes {
       },
     });
     const client = new AcpClient(exec, log, { sandbox: ref.name, pod });
-    let sessionId: string;
+    let session: { id: string; resumed: boolean };
     // Nothing is registered until the object carries the session and the
     // slid TTL: a rejected attach must not leave a live harness behind a
     // caller that believes it failed.
     try {
       await client.initialize();
-      sessionId = await this.openSession(client, ref.name, stored);
-      if (sessionId !== stored) await this.remember(ref.name, sessionId);
+      session = await this.openSession(client, ref.name, stored);
+      if (session.id !== stored) await this.remember(ref.name, session.id);
       await this.slide(ref.name);
     } catch (error) {
       client.close();
       throw error;
     }
-    const attachment: Attachment = { client, sessionId };
+    const attachment: Attachment = { client, sessionId: session.id };
     this.attached.set(ref.name, attachment);
     void client.closed.then((close) => {
       if (this.attached.get(ref.name) === attachment) {
@@ -441,7 +451,7 @@ export class KubeSandboxes implements Sandboxes {
         reason: close.reason,
       });
     });
-    return { id: sessionId, sandbox: ref };
+    return { id: session.id, sandbox: ref, resumed: session.resumed };
   }
 
   async prompt(
@@ -454,21 +464,32 @@ export class KubeSandboxes implements Sandboxes {
     if (!attachment || attachment.sessionId !== session.id) {
       throw new Error(`sandbox ${name} is not attached`);
     }
+    await this.mark(name).catch((error) =>
+      this.deps.log.warn('turn mark failed', {
+        sandbox: name,
+        error: plain(error),
+      }),
+    );
     const result = await attachment.client.prompt(
       session.id,
       text,
       sink,
       this.deps.turnTimeoutMs ?? TURN_TIMEOUT_MS,
     );
-    // The turn already happened; a failed slide is a shorter TTL, not a
-    // failed answer.
+    // The turn already happened; a failed slide is a shorter TTL and a stale
+    // turn mark, not a failed answer.
     await this.slide(name).catch((error) =>
       this.deps.log.warn('shutdownTime slide failed', {
         sandbox: name,
         error: plain(error),
       }),
     );
-    return { stopReason: result.stopReason, error: result.error };
+    return {
+      stopReason: result.stopReason,
+      error: result.error,
+      firstTokenMs: result.firstTokenMs,
+      costUsd: result.costUsd,
+    };
   }
 
   async cancel(session: Session): Promise<void> {
@@ -554,13 +575,13 @@ export class KubeSandboxes implements Sandboxes {
     client: AcpClient,
     name: string,
     stored: string | undefined,
-  ): Promise<string> {
+  ): Promise<{ id: string; resumed: boolean }> {
     const { log } = this.deps;
     if (stored) {
       try {
         await client.loadSession(stored, WORKSPACE);
         log.info('acp session loaded', { sandbox: name, session: stored });
-        return stored;
+        return { id: stored, resumed: true };
       } catch (error) {
         log.warn('acp session/load failed; opening a new session', {
           sandbox: name,
@@ -571,7 +592,7 @@ export class KubeSandboxes implements Sandboxes {
     }
     const fresh = await client.newSession(WORKSPACE);
     log.info('acp session opened', { sandbox: name, session: fresh });
-    return fresh;
+    return { id: fresh, resumed: false };
   }
 
   /**
@@ -614,8 +635,20 @@ export class KubeSandboxes implements Sandboxes {
     attachment.client.close();
   }
 
+  /** Slides the TTL and ends the turn mark in one write: both happen together. */
   private async slide(name: string): Promise<void> {
-    await this.patch(name, { spec: { shutdownTime: this.shutdownTime() } });
+    await this.patch(name, {
+      spec: { shutdownTime: this.shutdownTime() },
+      metadata: { annotations: { [TURN_ANNOTATION]: null } },
+    });
+  }
+
+  private async mark(name: string): Promise<void> {
+    await this.patch(name, {
+      metadata: {
+        annotations: { [TURN_ANNOTATION]: new Date().toISOString() },
+      },
+    });
   }
 
   private async remember(name: string, sessionId: string): Promise<void> {

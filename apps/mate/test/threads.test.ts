@@ -5,15 +5,21 @@
  */
 import { beforeEach, describe, expect, test } from 'bun:test';
 import { silentLog } from '../src/log.ts';
+import { RESTARTED, SANDBOX_CLOSED } from '../src/notices.ts';
 import { type Script, StubSandboxes } from '../src/sandbox.ts';
 import {
   type Inbound,
-  SANDBOX_CLOSED,
   Threads,
   type ThreadsConfig,
   threadName,
 } from '../src/threads.ts';
-import { FakeClock, FakeDiscord, RecordingLog, settle } from './support.ts';
+import {
+  FakeClock,
+  FakeDiscord,
+  RecordingInstruments,
+  RecordingLog,
+  settle,
+} from './support.ts';
 
 const ME = '900000000000000001';
 const OWNER = '308072071949320204';
@@ -36,6 +42,7 @@ const config: ThreadsConfig = {
 let clock: FakeClock;
 let discord: FakeDiscord;
 let log: RecordingLog;
+let metrics: RecordingInstruments;
 let serial = 0;
 
 function mention(content: string, overrides: Partial<Inbound> = {}): Inbound {
@@ -56,6 +63,9 @@ function inThread(
   content: string,
   authorId = OWNER,
 ): Inbound {
+  // The message is in Discord's log the moment it is sent, which is where the
+  // transcript replay reads it back from.
+  discord.post(threadId, content, authorId);
   return {
     id: `m-${++serial}`,
     guildId: GUILD,
@@ -72,12 +82,18 @@ function build(
     script?: Script;
     config?: Partial<ThreadsConfig>;
     mintFails?: string;
+    attachFails?: string;
+    costUsd?: number;
+    resumes?: boolean;
   } = {},
 ) {
   const sandboxes = new StubSandboxes({
     clock,
     script: opts.script,
     mintFails: opts.mintFails,
+    attachFails: opts.attachFails,
+    costUsd: opts.costUsd,
+    resumes: opts.resumes,
   });
   const threads = new Threads({
     discord,
@@ -87,6 +103,7 @@ function build(
     config: { ...config, ...opts.config },
     me: ME,
     editCadenceMs: 1_000,
+    metrics,
   });
   return { threads, sandboxes };
 }
@@ -104,8 +121,9 @@ const streaming =
 
 beforeEach(() => {
   clock = new FakeClock();
-  discord = new FakeDiscord();
+  discord = new FakeDiscord(ME);
   log = new RecordingLog();
+  metrics = new RecordingInstruments();
 });
 
 describe('starting a thread', () => {
@@ -658,5 +676,259 @@ describe('rehydrating', () => {
     await clock.advance(5_000);
     expect(after.stateOf(threadId)).toBe('attached');
     expect(discord.contentsIn(threadId).at(-1)).toBe('x ');
+  });
+});
+
+/** A second mate over the same sandboxes: what a Deployment roll leaves behind. */
+function rebuild(sandboxes: StubSandboxes): Threads {
+  return new Threads({
+    discord,
+    sandboxes,
+    clock,
+    log,
+    config,
+    me: ME,
+    editCadenceMs: 1_000,
+    metrics,
+  });
+}
+
+/** Runs a thread to the point where quiet has torn its first sandbox down. */
+async function reopened(
+  opts: Parameters<typeof build>[0] = {},
+): Promise<ReturnType<typeof build> & { threadId: string }> {
+  const built = build({ script: streaming('alpha'), ...opts });
+  await built.threads.onMessage(mention('first question'));
+  await clock.advance(5_000);
+  const threadId = discord.threads[0]?.id ?? '';
+  await built.threads.onMessage(inThread(threadId, 'second question'));
+  await clock.advance(5_000);
+  await clock.advance(QUIET_MS);
+  return { ...built, threadId };
+}
+
+describe('replaying the transcript', () => {
+  test('a fresh sandbox is handed what the thread already said, in order', async () => {
+    const { threads, sandboxes, threadId } = await reopened();
+    expect(sandboxes.liveCount).toBe(0);
+
+    await threads.onMessage(inThread(threadId, 'third question'));
+    await clock.advance(5_000);
+
+    const prompt = sandboxes.prompts.at(-1) ?? '';
+    expect(prompt).toContain('jawn: second question');
+    expect(prompt).toContain('you: alpha');
+    expect(prompt.indexOf('second question')).toBeLessThan(
+      prompt.lastIndexOf('you: alpha'),
+    );
+    expect(prompt.endsWith('third question')).toBe(true);
+    // The teardown line and the message being answered are not conversation.
+    expect(prompt).not.toContain(SANDBOX_CLOSED);
+    expect(prompt.match(/third question/g)).toHaveLength(1);
+  });
+
+  test('a brand new thread replays nothing', async () => {
+    const { threads, sandboxes } = build({ script: streaming('alpha') });
+    await threads.onMessage(mention('say hi'));
+    await clock.advance(5_000);
+    expect(sandboxes.prompts).toEqual(['say hi']);
+  });
+
+  test('a session the harness reloads is not replayed', async () => {
+    const { threads, sandboxes } = build({
+      script: streaming('alpha'),
+      resumes: true,
+    });
+    await threads.onMessage(mention('go'));
+    await clock.advance(5_000);
+    const threadId = discord.threads[0]?.id ?? '';
+
+    const after = rebuild(sandboxes);
+    await after.rehydrate();
+    discord.historyCalls = 0;
+    await after.onMessage(inThread(threadId, 'still there?'));
+    await clock.advance(5_000);
+
+    expect(discord.historyCalls).toBe(0);
+    expect(sandboxes.prompts.at(-1)).toBe('still there?');
+  });
+
+  test('only the first turn of a session replays', async () => {
+    const { threads, sandboxes, threadId } = await reopened();
+    await threads.onMessage(inThread(threadId, 'third question'));
+    await clock.advance(5_000);
+    discord.historyCalls = 0;
+
+    await threads.onMessage(inThread(threadId, 'fourth question'));
+    await clock.advance(5_000);
+    expect(discord.historyCalls).toBe(0);
+    expect(sandboxes.prompts.at(-1)).toBe('fourth question');
+  });
+
+  test('a history read that fails leaves the turn alone', async () => {
+    const { threads, sandboxes, threadId } = await reopened();
+    discord.failHistory = new Error('403 Missing Access');
+
+    await threads.onMessage(inThread(threadId, 'third question'));
+    await clock.advance(5_000);
+
+    expect(sandboxes.prompts.at(-1)).toBe('third question');
+    expect(
+      log.of('transcript replay failed; the session starts empty'),
+    ).toHaveLength(1);
+    expect(discord.contentsIn(threadId).at(-1)).toBe('alpha ');
+  });
+});
+
+describe('a mate restart', () => {
+  const stuck: Script = () => [{ status: 'thinking…' }, { wait: 10_000_000 }];
+
+  test('a thread with a turn in flight is told once, then continues', async () => {
+    const { threads, sandboxes } = build({ script: stuck });
+    await threads.onMessage(mention('a long job'));
+    await clock.advance(5_000);
+    const threadId = discord.threads[0]?.id ?? '';
+    expect(threads.stateOf(threadId)).toBe('turn');
+
+    const after = rebuild(sandboxes);
+    await after.rehydrate();
+    expect(after.stateOf(threadId)).toBe('attached');
+    expect(discord.contentsIn(threadId).filter((c) => c === RESTARTED)).toEqual(
+      [RESTARTED],
+    );
+
+    await after.onMessage(inThread(threadId, 'again'));
+    await settle();
+    expect(after.stateOf(threadId)).toBe('turn');
+    expect(discord.contentsIn(threadId).filter((c) => c === RESTARTED)).toEqual(
+      [RESTARTED],
+    );
+  });
+
+  test('a thread that was idle is told nothing', async () => {
+    const { threads, sandboxes } = build({ script: streaming('alpha') });
+    await threads.onMessage(mention('go'));
+    await clock.advance(5_000);
+    const threadId = discord.threads[0]?.id ?? '';
+
+    const after = rebuild(sandboxes);
+    await after.rehydrate();
+    expect(discord.contentsIn(threadId)).not.toContain(RESTARTED);
+    expect(after.stateOf(threadId)).toBe('attached');
+  });
+
+  test('a sandbox it cannot re-attach to is torn down and the thread told', async () => {
+    const { threads, sandboxes } = build({ script: streaming('alpha') });
+    await threads.onMessage(mention('go'));
+    await clock.advance(5_000);
+    const threadId = discord.threads[0]?.id ?? '';
+
+    const after = rebuild(sandboxes);
+    sandboxes.attachFails = 'the harness never answered';
+    await after.rehydrate();
+
+    expect(after.stateOf(threadId)).toBe('closed');
+    expect(discord.contentsIn(threadId).at(-1)).toBe(SANDBOX_CLOSED);
+    expect(sandboxes.liveCount).toBe(0);
+    expect(metrics.teardowns).toEqual(['restart']);
+  });
+});
+
+describe('metrics', () => {
+  test('a turn is counted with what the harness reported', async () => {
+    const { threads } = build({
+      script: streaming('alpha'),
+      costUsd: 0.002178,
+    });
+    await threads.onMessage(mention('go'));
+    await clock.advance(5_000);
+
+    expect(metrics.started).toBe(1);
+    expect(metrics.turns).toEqual(['end_turn']);
+    expect(metrics.samples[0]).toMatchObject({
+      costUsd: 0.002178,
+      firstTokenMs: 100,
+    });
+    expect(metrics.live).toBe(1);
+  });
+
+  test('a stop and a dead sandbox are counted by how the turn ended', async () => {
+    const { threads } = build({ script: streaming('alpha') });
+    await threads.onMessage(mention('go'));
+    await settle();
+    const threadId = discord.threads[0]?.id ?? '';
+    await threads.onStop(threadId, OWNER, async () => {});
+    await clock.advance(5_000);
+    expect(metrics.turns).toEqual(['cancelled']);
+
+    const dying = build({ script: streaming('beta') });
+    await dying.threads.onMessage(mention('go'));
+    await settle();
+    const second = discord.threads[1]?.id ?? '';
+    await dying.sandboxes.teardown({
+      name: `mate-${second}`,
+      thread: { id: second, channelId: CHANNEL },
+    });
+    await clock.advance(5_000);
+    expect(metrics.turns.at(-1)).toBe('sandbox-died');
+  });
+
+  test('a teardown carries why it happened', async () => {
+    const quiet = build({ script: streaming('alpha') });
+    await quiet.threads.onMessage(mention('go'));
+    await clock.advance(5_000);
+    await clock.advance(QUIET_MS);
+    expect(metrics.teardowns).toEqual(['quiet']);
+
+    const archived = build({ script: streaming('alpha') });
+    await archived.threads.onMessage(mention('go'));
+    await clock.advance(5_000);
+    await archived.threads.onThreadArchived(discord.threads[1]?.id ?? '');
+    expect(metrics.teardowns.at(-1)).toBe('archived');
+
+    const deleted = build({ script: streaming('alpha') });
+    await deleted.threads.onMessage(mention('go'));
+    await clock.advance(5_000);
+    await deleted.threads.onThreadDeleted(discord.threads[2]?.id ?? '');
+    expect(metrics.teardowns.at(-1)).toBe('thread-deleted');
+  });
+
+  test('the live and queued gauges follow the table', async () => {
+    const { threads } = build({
+      script: streaming('alpha'),
+      config: { maxConcurrent: 1 },
+    });
+    await threads.onMessage(mention('one'));
+    await threads.onMessage(mention('two'));
+    await clock.advance(5_000);
+    expect(metrics.live).toBe(1);
+    expect(metrics.queued).toBe(1);
+
+    // The head of the queue takes the slot the moment it frees.
+    await threads.onThreadArchived(discord.threads[0]?.id ?? '');
+    await clock.advance(5_000);
+    expect(metrics.queued).toBe(0);
+    expect(metrics.live).toBe(1);
+  });
+});
+
+describe('the log', () => {
+  test('every transition names the thread, its state, its sandbox and its turns', async () => {
+    const { threads } = build({ script: streaming('alpha') });
+    await threads.onMessage(mention('go'));
+    await clock.advance(5_000);
+    const threadId = discord.threads[0]?.id ?? '';
+    const states = () => log.of('thread state').map((e) => e.fields?.state);
+    expect(states()).toEqual(['minting', 'attached', 'turn', 'attached']);
+    expect(
+      log.of('thread state').find((e) => e.fields?.state === 'turn')?.fields,
+    ).toMatchObject({
+      threadId,
+      sandbox: `mate-${threadId}`,
+      turns: 1,
+    });
+
+    await clock.advance(QUIET_MS);
+    expect(states().slice(-2)).toEqual(['tearing-down', 'closed']);
   });
 });

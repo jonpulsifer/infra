@@ -13,6 +13,21 @@ export interface OutMessage {
   components?: StopRow[];
 }
 
+/** One message already in a thread, as the transcript replay reads it. */
+export interface HistoryMessage {
+  id: string;
+  authorId: string;
+  authorName: string;
+  authorIsBot: boolean;
+  content: string;
+}
+
+export interface HistoryQuery {
+  limit: number;
+  /** Only messages older than this id, which is how Discord pages backwards. */
+  before?: string;
+}
+
 /** What the thread engine asks of Discord; the fake in tests records it. */
 export interface Discord {
   createThread(
@@ -21,6 +36,8 @@ export interface Discord {
     name: string,
   ): Promise<string>;
   createMessage(channelId: string, body: OutMessage): Promise<string>;
+  /** A thread's messages, newest first, as Discord returns them. */
+  history(channelId: string, query: HistoryQuery): Promise<HistoryMessage[]>;
   editMessage(
     channelId: string,
     messageId: string,
@@ -49,6 +66,8 @@ export function stopRow(threadId: string): StopRow {
 }
 
 const NO_MENTIONS = { parse: [] as never[] };
+/** Discord's own retries stay inside this; the replay must not stall a turn. */
+const HISTORY_TIMEOUT_MS = 10_000;
 
 export function discordOver(api: API): Discord {
   return {
@@ -67,6 +86,20 @@ export function discordOver(api: API): Discord {
         allowed_mentions: NO_MENTIONS,
       });
       return message.id;
+    },
+    async history(channelId, query) {
+      const messages = await api.channels.getMessages(
+        channelId,
+        { limit: query.limit, before: query.before },
+        { signal: AbortSignal.timeout(HISTORY_TIMEOUT_MS) },
+      );
+      return messages.map((message) => ({
+        id: message.id,
+        authorId: message.author.id,
+        authorName: message.author.global_name ?? message.author.username,
+        authorIsBot: message.author.bot ?? false,
+        content: message.content,
+      }));
     },
     async editMessage(channelId, messageId, body) {
       await api.channels.editMessage(channelId, messageId, {

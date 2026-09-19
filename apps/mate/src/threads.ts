@@ -7,6 +7,24 @@ import type { Clock, Handle } from './clock.ts';
 import type { Config } from './config.ts';
 import type { Discord } from './discord.ts';
 import { type Log, plain } from './log.ts';
+import {
+  type Instruments,
+  lazyInstruments,
+  type TeardownReason,
+} from './metrics.ts';
+import {
+  ATTACH_FAILED,
+  DAY_SPENT,
+  HARNESS_FAILED,
+  MINT_FAILED,
+  RESTARTED,
+  SANDBOX_CLOSED,
+  SANDBOX_DIED,
+  STOPPED_WAITING,
+  THREAD_SPENT,
+  UNDELIVERED,
+  WAITING,
+} from './notices.ts';
 import { EDIT_CADENCE_MS, type Outcome, Reply } from './reply.ts';
 import type {
   PromptResult,
@@ -14,6 +32,7 @@ import type {
   SandboxRef,
   Session,
 } from './sandbox.ts';
+import { replayPreamble } from './transcript.ts';
 
 export type ThreadState =
   | 'new'
@@ -37,6 +56,7 @@ export interface Inbound {
 
 interface Prompt {
   text: string;
+  raw: string;
   authorId: string;
 }
 
@@ -49,9 +69,10 @@ interface Thread {
   pending: Prompt[];
   turns: number;
   quiet: Handle | null;
+  /** Set while the thread's harness has never been told what came before. */
+  replay: boolean;
 }
 
-export const SANDBOX_CLOSED = 'sandbox closed; message again to start fresh';
 export const THREAD_NAME_MAX = 100;
 const DAY_MS = 86_400_000;
 const HOLDING_A_SLOT: ReadonlySet<ThreadState> = new Set([
@@ -82,7 +103,7 @@ export interface ThreadsDeps {
   /** The bot user's id. */
   me: string;
   editCadenceMs?: number;
-  onTurn?(): void;
+  metrics?: Instruments;
 }
 
 export function stripMention(content: string, me: string): string {
@@ -105,9 +126,12 @@ export class Threads {
   private readonly waiting: string[] = [];
   private readonly dayTurns: number[] = [];
   private readonly backlog: Inbound[] = [];
+  private readonly metrics: Instruments;
   private hydrating = false;
 
-  constructor(private readonly deps: ThreadsDeps) {}
+  constructor(private readonly deps: ThreadsDeps) {
+    this.metrics = deps.metrics ?? lazyInstruments();
+  }
 
   stateOf(threadId: string): ThreadState | undefined {
     return this.threads.get(threadId)?.state;
@@ -139,22 +163,27 @@ export class Threads {
           });
           continue;
         }
-        thread.state = 'rehydrating';
         thread.sandbox = sandbox;
+        this.to(thread, 'rehydrating');
+        // The object says a turn was running when the process died, and the
+        // human is owed the reason their answer never arrived.
+        if (sandbox.turnInFlight) await this.tell(thread, RESTARTED);
         try {
-          thread.session = await sandboxes.attach(sandbox);
-          thread.state = 'attached';
-          log.info('thread rehydrated', {
-            threadId: thread.id,
-            sandbox: sandbox.name,
-          });
+          const session = await sandboxes.attach(sandbox);
+          thread.session = session;
+          thread.replay = !session.resumed;
+          this.to(thread, 'attached');
           await this.pump(thread);
         } catch (error) {
           log.warn('rehydrate failed; tearing down', {
             threadId: thread.id,
             error: plain(error),
           });
-          await this.close(thread, { line: null, archive: false });
+          await this.close(thread, {
+            line: SANDBOX_CLOSED,
+            archive: false,
+            reason: 'restart',
+          });
         }
       }
     } finally {
@@ -172,10 +201,14 @@ export class Threads {
       this.backlog.push(message);
       return;
     }
-    const text = stripMention(message.content, me);
+    const prompt = {
+      text: stripMention(message.content, me),
+      raw: message.content,
+      authorId: message.authorId,
+    };
     const known = this.threads.get(message.channelId);
     if (known) {
-      this.accept(known, { text, authorId: message.authorId });
+      this.accept(known, prompt);
       return;
     }
     if (
@@ -201,7 +234,7 @@ export class Threads {
       return;
     }
     const thread = this.ensure(threadId, message.channelId);
-    this.accept(thread, { text, authorId: message.authorId });
+    this.accept(thread, prompt);
   }
 
   async onStop(
@@ -224,7 +257,11 @@ export class Threads {
     const thread = this.threads.get(threadId);
     if (!thread) return;
     if (thread.state === 'attached') {
-      await this.close(thread, { line: SANDBOX_CLOSED, archive: true });
+      await this.close(thread, {
+        line: SANDBOX_CLOSED,
+        archive: true,
+        reason: 'archived',
+      });
     } else if (thread.state === 'waiting') {
       this.leaveQueue(thread);
     }
@@ -239,7 +276,14 @@ export class Threads {
     if (at >= 0) this.waiting.splice(at, 1);
     if (thread.sandbox) {
       await this.deps.sandboxes.teardown(thread.sandbox).catch(() => {});
+      this.metrics.teardown('thread-deleted');
     }
+    this.deps.log.info('thread deleted', {
+      threadId,
+      sandbox: thread.sandbox?.name ?? null,
+      turns: thread.turns,
+    });
+    this.report();
     this.pumpWaiting();
   }
 
@@ -255,10 +299,32 @@ export class Threads {
         pending: [],
         turns: 0,
         quiet: null,
+        replay: false,
       };
       this.threads.set(threadId, thread);
     }
     return thread;
+  }
+
+  /** The one place a thread changes state, so every move leaves a line. */
+  private to(thread: Thread, state: ThreadState): void {
+    thread.state = state;
+    this.deps.log.info('thread state', {
+      threadId: thread.id,
+      state,
+      sandbox: thread.sandbox?.name ?? null,
+      turns: thread.turns,
+    });
+    this.report();
+  }
+
+  private report(): void {
+    let live = 0;
+    for (const thread of this.threads.values()) {
+      if (thread.sandbox) live += 1;
+    }
+    this.metrics.sandboxesLive(live);
+    this.metrics.queueDepth(this.waiting.length);
   }
 
   private accept(thread: Thread, prompt: Prompt): void {
@@ -305,31 +371,40 @@ export class Threads {
 
   private async mint(thread: Thread): Promise<void> {
     const { sandboxes } = this.deps;
-    thread.state = 'minting';
+    this.to(thread, 'minting');
     this.disarmQuiet(thread);
     try {
       thread.sandbox = await sandboxes.mint({
         id: thread.id,
         channelId: thread.channelId,
       });
-      thread.session = await sandboxes.attach(thread.sandbox);
     } catch (error) {
-      await this.tell(thread, `the sandbox did not start: ${plain(error)}`);
-      thread.pending = [];
-      await this.close(thread, { line: null, archive: false });
+      await this.failed(thread, `${MINT_FAILED}: ${plain(error)}`);
       return;
     }
-    thread.state = 'attached';
+    try {
+      const session = await sandboxes.attach(thread.sandbox);
+      thread.session = session;
+      thread.replay = !session.resumed;
+    } catch (error) {
+      await this.failed(thread, `${ATTACH_FAILED}: ${plain(error)}`);
+      return;
+    }
+    this.to(thread, 'attached');
     await this.pump(thread);
   }
 
+  /** One plain sentence, the queued prompts dropped, and whatever exists torn down. */
+  private async failed(thread: Thread, line: string): Promise<void> {
+    await this.tell(thread, line);
+    thread.pending = [];
+    await this.close(thread, { line: null, archive: false, reason: 'error' });
+  }
+
   private async enqueue(thread: Thread): Promise<void> {
-    thread.state = 'waiting';
     this.waiting.push(thread.id);
-    await this.tell(
-      thread,
-      `waiting for a sandbox (${this.waiting.length - 1} ahead)`,
-    );
+    this.to(thread, 'waiting');
+    await this.tell(thread, `${WAITING} (${this.waiting.length - 1} ahead)`);
     this.armQuiet(thread);
   }
 
@@ -345,7 +420,7 @@ export class Threads {
     if (at >= 0) this.waiting.splice(at, 1);
     this.disarmQuiet(thread);
     thread.pending = [];
-    thread.state = 'closed';
+    this.to(thread, 'closed');
   }
 
   private async runTurn(thread: Thread): Promise<void> {
@@ -361,8 +436,8 @@ export class Threads {
     }
     thread.turns += 1;
     this.dayTurns.push(clock.now());
-    this.deps.onTurn?.();
-    thread.state = 'turn';
+    this.metrics.turnStarted();
+    this.to(thread, 'turn');
     this.disarmQuiet(thread);
 
     const reply = new Reply(
@@ -374,22 +449,29 @@ export class Threads {
     );
     reply.startTyping();
     try {
+      const text = await this.withHistory(thread, prompt);
       let result: PromptResult;
       try {
-        result = await sandboxes.prompt(thread.session, prompt.text, reply);
+        result = await sandboxes.prompt(thread.session, text, reply);
       } catch (error) {
+        this.metrics.turnEnded('sandbox-died', {});
         await this.deliver(thread, reply, 'failed');
         log.warn('sandbox died mid-turn', {
           threadId: thread.id,
           error: plain(error),
         });
-        await this.tell(thread, `the sandbox died mid-turn: ${plain(error)}`);
-        await this.close(thread, { line: null, archive: false });
+        await this.tell(thread, `${SANDBOX_DIED}: ${plain(error)}`);
+        await this.close(thread, {
+          line: null,
+          archive: false,
+          reason: 'error',
+        });
         return;
       }
+      this.metrics.turnEnded(result.stopReason, result);
       if (result.stopReason === 'error') {
         await this.deliver(thread, reply, 'failed');
-        await this.tell(thread, `the harness failed: ${plain(result.error)}`);
+        await this.tell(thread, `${HARNESS_FAILED}: ${plain(result.error)}`);
       } else {
         await this.deliver(
           thread,
@@ -399,9 +481,39 @@ export class Threads {
       }
     } finally {
       if (thread.state === 'turn') {
-        thread.state = 'attached';
+        this.to(thread, 'attached');
         await this.pump(thread);
       }
+    }
+  }
+
+  /**
+   * The first prompt of a session the harness could not reload carries the
+   * thread's own history: Discord is the durable log, and a harness that
+   * starts empty would otherwise answer as if nothing had been said.
+   */
+  private async withHistory(thread: Thread, prompt: Prompt): Promise<string> {
+    if (!thread.replay) return prompt.text;
+    thread.replay = false;
+    const skip = [prompt.text, prompt.raw.trim()];
+    for (const queued of thread.pending) skip.push(queued.text, queued.raw);
+    try {
+      const preamble = await replayPreamble(this.deps.discord, thread.id, {
+        me: this.deps.me,
+        skip,
+      });
+      if (!preamble) return prompt.text;
+      this.deps.log.info('replaying the thread transcript', {
+        threadId: thread.id,
+        characters: preamble.length,
+      });
+      return `${preamble}${prompt.text}`;
+    } catch (error) {
+      this.deps.log.warn('transcript replay failed; the session starts empty', {
+        threadId: thread.id,
+        error: plain(error),
+      });
+      return prompt.text;
     }
   }
 
@@ -418,24 +530,21 @@ export class Threads {
         threadId: thread.id,
         error: plain(error),
       });
-      await this.tell(
-        thread,
-        `the reply could not be delivered: ${plain(error)}`,
-      );
+      await this.tell(thread, `${UNDELIVERED}: ${plain(error)}`);
     }
   }
 
   private budgetRefusal(thread: Thread): string | null {
     const { config, clock } = this.deps;
     if (thread.turns >= config.maxTurnsPerThread) {
-      return `this thread has used its ${config.maxTurnsPerThread} turns; start a new thread`;
+      return `${THREAD_SPENT} ${config.maxTurnsPerThread} turns; start a new thread`;
     }
     const floor = clock.now() - DAY_MS;
     while (this.dayTurns.length > 0 && (this.dayTurns[0] ?? 0) < floor) {
       this.dayTurns.shift();
     }
     if (this.dayTurns.length >= config.maxTurnsPerDay) {
-      return `the daily budget of ${config.maxTurnsPerDay} turns is spent; try again later`;
+      return `${DAY_SPENT} ${config.maxTurnsPerDay} turns is spent; try again later`;
     }
     return null;
   }
@@ -455,22 +564,23 @@ export class Threads {
 
   private async onQuiet(thread: Thread): Promise<void> {
     if (thread.state === 'attached') {
-      await this.close(thread, { line: SANDBOX_CLOSED, archive: true });
+      await this.close(thread, {
+        line: SANDBOX_CLOSED,
+        archive: true,
+        reason: 'quiet',
+      });
     } else if (thread.state === 'waiting') {
       this.leaveQueue(thread);
-      await this.tell(
-        thread,
-        'stopped waiting for a sandbox; message again to start fresh',
-      );
+      await this.tell(thread, STOPPED_WAITING);
     }
   }
 
   private async close(
     thread: Thread,
-    opts: { line: string | null; archive: boolean },
+    opts: { line: string | null; archive: boolean; reason: TeardownReason },
   ): Promise<void> {
     const { discord, sandboxes, log } = this.deps;
-    thread.state = 'tearing-down';
+    this.to(thread, 'tearing-down');
     this.disarmQuiet(thread);
     if (thread.sandbox) {
       await sandboxes.teardown(thread.sandbox).catch((error) =>
@@ -479,10 +589,12 @@ export class Threads {
           error: plain(error),
         }),
       );
+      this.metrics.teardown(opts.reason);
     }
     thread.sandbox = null;
     thread.session = null;
-    thread.state = 'closed';
+    thread.replay = false;
+    this.to(thread, 'closed');
     if (opts.line) await this.tell(thread, opts.line);
     if (opts.archive && thread.pending.length === 0) {
       await discord.archiveThread(thread.id).catch((error) =>
