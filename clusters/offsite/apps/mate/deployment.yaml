@@ -1,8 +1,8 @@
 ---
 # mate: the Discord gateway Rowbutt connects through, one Bun process from
 # `apps/mate`. It carries the ServiceAccount that mints Sandboxes and the
-# egress policy that goes with holding a token, and answers threads with the
-# in-process stub until `MATE_SANDBOXES` says otherwise.
+# egress policy that goes with holding a token, and answers each thread from a
+# Sandbox of its own.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -83,11 +83,16 @@ spec:
               value: "3"
             - name: MATE_PORT
               value: "8080"
-            # stub keeps the reply path exactly as it is on merge. Flipping
-            # this to `kube` is what puts a real Sandbox behind a thread, and
-            # it is a one-word change once the harness image is published.
+            # `kube` puts a real Sandbox behind every thread: mate mints one
+            # per thread, execs `opencode acp` in its pod and streams the turn
+            # back. The other value is `stub`, an in-process reply with no
+            # cluster behind it, and reverting this one word is the rollback —
+            # the bot keeps answering and sandboxes stop being minted.
+            # `sandbox-network-policy.yaml` is what makes the flip safe: a
+            # sandbox runs agent-authored commands with every permission
+            # auto-allowed, and that policy is its only network boundary.
             - name: MATE_SANDBOXES
-              value: stub
+              value: kube
             # The harness image every sandbox runs, built by CD from
             # `images/mate-sandbox/`. It carries a digest for the same reason
             # the image above does, and more urgently: this is the image that

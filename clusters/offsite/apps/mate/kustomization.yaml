@@ -7,4 +7,5 @@ resources:
   - rbac.yaml
   - external-secret.yaml
   - network-policy.yaml
+  - sandbox-network-policy.yaml
   - deployment.yaml
