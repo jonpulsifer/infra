@@ -8,16 +8,6 @@ spec:
   interval: 1h0m0s
   path: ./k8s/crds
   prune: false
-  # One-shot for the v0.5.6 -> v1.0.x move. The four CRDs on both clusters
-  # still list v1alpha1 in status.storedVersions and carry a conversion
-  # caBundle owned by the v0.5.x controller's field manager; server-side apply
-  # of the v1beta1-only CRDs is rejected as Invalid on both counts, and neither
-  # can be fixed from a manifest. Flux treats an Invalid apply as an immutable
-  # change under `force` and recreates the object, which is what produces a
-  # clean CRD here. Safe only while no Sandbox-family object exists (a CRD
-  # delete cascades to its objects), so remove this once both clusters report
-  # v1.0.x Ready.
-  force: true
   sourceRef:
     kind: GitRepository
     name: agent-sandbox
