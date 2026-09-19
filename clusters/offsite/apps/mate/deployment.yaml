@@ -1,8 +1,8 @@
 ---
 # mate: the Discord gateway Rowbutt connects through, one Bun process from
-# `apps/mate`. It answers threads with an in-process stub today; the sandbox
-# side (a ServiceAccount and RBAC for `agents.x-k8s.io`, a template, a
-# NetworkPolicy) lands beside this file when it exists.
+# `apps/mate`. It carries the ServiceAccount that mints Sandboxes and the
+# egress policy that goes with holding a token, and answers threads with the
+# in-process stub until `MATE_SANDBOXES` says otherwise.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -33,9 +33,11 @@ spec:
         # Discord to close the stale session with 4004.
         secret.reloader.stakater.com/reload: mate-discord
     spec:
-      # Nothing here talks to the API server yet. This flips to a
-      # ServiceAccount with sandbox RBAC when mate mints its first Sandbox.
-      automountServiceAccountToken: false
+      # The token is what mints Sandboxes and opens `pods/exec`; `rbac.yaml`
+      # scopes it to this namespace, and `network-policy.yaml` is what makes
+      # holding it safe.
+      serviceAccountName: mate
+      automountServiceAccountToken: true
       securityContext:
         runAsNonRoot: true
         runAsUser: 65532
@@ -81,6 +83,22 @@ spec:
               value: "3"
             - name: MATE_PORT
               value: "8080"
+            # stub keeps the reply path exactly as it is on merge. Flipping
+            # this to `kube` is what puts a real Sandbox behind a thread, and
+            # it is a one-word change once the harness image is published.
+            - name: MATE_SANDBOXES
+              value: stub
+            # The harness image every sandbox runs, built by CD from
+            # `images/mate-sandbox/`. It carries a digest for the same reason
+            # the image above does, and more urgently: this is the image that
+            # runs agent code with every permission auto-allowed, so a mutable
+            # tag is not good enough. The digest is also what makes the
+            # `deploy.mate-sandbox` entry safe — the rewrite anchors on
+            # `ghcr.io/…/mate-sandbox…@sha256:` and falls back to an
+            # unanchored sed when the image is named without a digest beside
+            # it, which would stamp this digest over mate's own.
+            - name: MATE_SANDBOX_IMAGE
+              value: ghcr.io/jonpulsifer/mate-sandbox:latest@sha256:e5ffde82e456b7d974b34ce1235696bdda315f6025a578bc3f838a5640156f8f
             # Gateway session info (session id, resume URL, sequence) lands
             # here so a container restart inside the same pod resumes instead
             # of spending an identify from the daily budget. An emptyDir is

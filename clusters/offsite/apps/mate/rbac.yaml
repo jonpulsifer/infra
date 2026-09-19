@@ -1,0 +1,75 @@
+---
+# The identity mate mints sandboxes with. Namespaced, and scoped to exactly
+# what `apps/mate/src/sandboxes.ts` calls — nothing here reaches outside the
+# `mate` namespace, and nothing here can read a Secret.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: mate
+  namespace: mate
+  labels:
+    app.kubernetes.io/name: mate
+    app.kubernetes.io/part-of: mate
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: mate
+  namespace: mate
+  labels:
+    app.kubernetes.io/name: mate
+    app.kubernetes.io/part-of: mate
+rules:
+  # One bare Sandbox per thread: create at mint, get/list/watch to wait for
+  # Ready and to rebuild the thread table after a restart, delete at teardown.
+  # `patch` is what slides `spec.shutdownTime` forward after every turn and
+  # records the ACP session id as an annotation; without it the sliding TTL
+  # cannot work and a sandbox expires under a live thread.
+  - apiGroups:
+      - agents.x-k8s.io
+    resources:
+      - sandboxes
+    verbs:
+      - create
+      - get
+      - list
+      - watch
+      - patch
+      - delete
+  # The backing pod is resolved through the Sandbox's `status.selector`, so
+  # mate lists pods by label (`resolvePod`); `watch` is how teardown waits for
+  # the pod to go away (`waitUntilGone`) rather than polling. Nothing ever
+  # fetches a pod by name, so there is no `get` here.
+  - apiGroups:
+      - ""
+    resources:
+      - pods
+    verbs:
+      - list
+      - watch
+  # Both verbs, not just `create`: `create` alone is the SPDY-era grant and a
+  # WebSocket exec client sends a GET, which a `create`-only Role answers 403.
+  - apiGroups:
+      - ""
+    resources:
+      - pods/exec
+    verbs:
+      - get
+      - create
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: mate
+  namespace: mate
+  labels:
+    app.kubernetes.io/name: mate
+    app.kubernetes.io/part-of: mate
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: mate
+subjects:
+  - kind: ServiceAccount
+    name: mate
+    namespace: mate
