@@ -33,7 +33,7 @@ spec:
           type: RuntimeDefault
       initContainers:
         - name: render
-          image: busybox:1.37
+          image: busybox:1.38
           command: ["sh", "/etc/kata-demo/render.sh"]
           env:
             - name: POD_NAME
