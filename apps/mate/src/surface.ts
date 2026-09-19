@@ -64,6 +64,21 @@ export interface HistoryQuery {
 export type Outcome = 'done' | 'stopped' | 'failed';
 
 /**
+ * How far one tool call has got. The three values are Slack's `task_card`
+ * statuses, which is the only surface that renders them; ACP's `pending` is
+ * `in_progress` here because a card cannot be pending.
+ */
+export type ToolState = 'in_progress' | 'complete' | 'error';
+
+/** One tool call of a turn, as a surface that shows them one by one reads it. */
+export interface ToolCall {
+  /** The harness's own id for it, stable across its updates. */
+  readonly id: string;
+  readonly title: string;
+  readonly state: ToolState;
+}
+
+/**
  * Where one turn's answer is painted. The renderer decides what the answer
  * says and when to repaint it; the canvas decides how that reaches the
  * surface — edited in place and chunked on Discord, streamed on Slack — and
@@ -76,6 +91,12 @@ export interface Canvas {
   final(text: string, outcome: Outcome): Promise<void>;
   /** The surface's "working" sign, shown until the first live frame. */
   working?(): Promise<void>;
+  /**
+   * One tool call, where the surface renders them itself. Slack has a card
+   * per call that mutates in place; Discord has nothing of the kind and
+   * declares no `tool`, so its turns are painted by the status line alone.
+   */
+  tool?(call: ToolCall): Promise<void>;
 }
 
 export interface Surface {
@@ -99,8 +120,17 @@ export interface Surface {
   canvas(thread: ThreadRef, asker: string): Canvas;
   /**
    * Seals the thread at teardown, where the surface has such a thing. Discord
-   * archives; Slack threads have no closed state, so it is absent there and
-   * the state machine simply has nothing to call.
+   * archives the thread; Slack closes the agent session on its parent, which
+   * is what stops the thread reading as live. A surface with neither declares
+   * no `archive` and the state machine has nothing to call.
    */
   archive?(thread: ThreadRef): Promise<void>;
+  /**
+   * The thread is not working on anything — for a surface whose working sign
+   * belongs to the thread rather than to one message, and so outlives the
+   * process that raised it. Slack's agent session sits on the thread's
+   * parent; Discord's only such sign is a message mid-edit, which ends with
+   * the process, so it declares no `settle`.
+   */
+  settle?(thread: ThreadRef): Promise<void>;
 }

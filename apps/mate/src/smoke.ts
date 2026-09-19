@@ -43,6 +43,11 @@ class Streaming implements PromptSink {
       if (update.line) process.stderr.write(`\n[${update.line}]\n`);
       return;
     }
+    if (update.kind === 'tool') {
+      const { title, state } = update.call;
+      process.stderr.write(`\n[${title}: ${state}]\n`);
+      return;
+    }
     this.firstTextAt ??= Date.now() - this.startedAt;
     this.text += update.delta;
     process.stdout.write(update.delta);

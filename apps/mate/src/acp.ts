@@ -8,6 +8,7 @@ import * as acp from '@agentclientprotocol/sdk';
 import type { ExecClose, ExecStream } from './kube.ts';
 import type { Log } from './log.ts';
 import type { PromptResult, PromptSink } from './sandbox.ts';
+import type { ToolCall, ToolState } from './surface.ts';
 
 export const CLIENT_INFO = { name: 'mate', version: '0.1.0' };
 export const THINKING = 'thinking…';
@@ -24,9 +25,25 @@ export interface TurnSummary {
   firstTextMs: number | null;
 }
 
-/** Folds a turn's `session/update` stream into the sink's text and status line. */
+/**
+ * ACP's own tool statuses as a surface reads them. `pending` is a call the
+ * harness has announced and not started, which is indistinguishable from
+ * running to anything mate paints — and Slack's card has no pending.
+ */
+function toolState(status: acp.ToolCallStatus | undefined): ToolState {
+  if (status === 'completed') return 'complete';
+  if (status === 'failed') return 'error';
+  return 'in_progress';
+}
+
+/**
+ * Folds a turn's `session/update` stream into the sink: the answer text, the
+ * status line, and each tool call in its own right for a surface that renders
+ * them. The two renderings of the same news go out together — which of them a
+ * human sees is the canvas's to decide, not this.
+ */
 class Turn {
-  private readonly tools = new Map<string, { title: string; open: boolean }>();
+  private readonly tools = new Map<string, ToolCall>();
   private status: string | null = null;
   private thinking = false;
   private sawText = false;
@@ -54,21 +71,23 @@ class Turn {
         this.thinking = true;
         break;
       case 'tool_call':
-        this.tools.set(update.toolCallId, {
+        this.tool({
+          id: update.toolCallId,
           title: update.title,
-          open: update.status !== 'completed' && update.status !== 'failed',
+          state: toolState(update.status),
         });
         break;
       case 'tool_call_update': {
-        const tool = this.tools.get(update.toolCallId) ?? {
-          title: update.title ?? 'tool',
-          open: true,
-        };
-        if (update.title) tool.title = update.title;
-        if (update.status === 'completed' || update.status === 'failed') {
-          tool.open = false;
-        }
-        this.tools.set(update.toolCallId, tool);
+        const known = this.tools.get(update.toolCallId);
+        this.tool({
+          id: update.toolCallId,
+          title: update.title ?? known?.title ?? 'tool',
+          // An update that names no status changes none: a completed call
+          // does not start running again because its output arrived late.
+          state: update.status
+            ? toolState(update.status)
+            : (known?.state ?? 'in_progress'),
+        });
         break;
       }
       case 'usage_update':
@@ -80,8 +99,18 @@ class Turn {
     this.refreshStatus();
   }
 
+  /** One tool call, remembered and sent on only when it actually moved. */
+  private tool(call: ToolCall): void {
+    const known = this.tools.get(call.id);
+    this.tools.set(call.id, call);
+    if (known?.title === call.title && known.state === call.state) return;
+    this.sink.update({ kind: 'tool', call });
+  }
+
   private refreshStatus(): void {
-    const running = [...this.tools.values()].filter((t) => t.open).at(-1);
+    const running = [...this.tools.values()]
+      .filter((t) => t.state === 'in_progress')
+      .at(-1);
     const line = running
       ? `${running.title}…`
       : this.thinking && !this.sawText

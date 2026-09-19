@@ -14,7 +14,7 @@ import {
   TURN_ANNOTATION,
   WORKSPACE,
 } from '../src/sandboxes.ts';
-import type { ThreadRef } from '../src/surface.ts';
+import type { ThreadRef, ToolCall } from '../src/surface.ts';
 import { FakeKube } from './fakeapi.ts';
 import { RecordingLog } from './support.ts';
 
@@ -39,8 +39,10 @@ const config: SandboxConfig = {
 class Collect implements PromptSink {
   text = '';
   readonly status: (string | null)[] = [];
+  readonly cards: ToolCall[] = [];
   update(update: Update): void {
     if (update.kind === 'text') this.text += update.delta;
+    else if (update.kind === 'tool') this.cards.push(update.call);
     else this.status.push(update.line);
   }
 }
@@ -297,6 +299,13 @@ describe('prompt', () => {
     expect(sink.text).toBe('AGENTS.md:24');
     expect(sink.status).toContain('read AGENTS.md…');
     expect(sink.status.at(-1)).toBeNull();
+    // The same news the status line carries, said again as the call itself:
+    // a surface with cards of its own keeps the harness's id and follows it
+    // to its end, and an update naming only a status keeps the title.
+    expect(sink.cards).toEqual([
+      { id: 'call-1', title: 'read AGENTS.md', state: 'in_progress' },
+      { id: 'call-1', title: 'read AGENTS.md', state: 'complete' },
+    ]);
 
     // opencode is the harness that reports USD, and the turn summary carries it.
     expect(log.of('turn ended')[0]?.fields?.cost).toEqual({

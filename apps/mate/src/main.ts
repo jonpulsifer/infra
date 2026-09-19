@@ -25,6 +25,7 @@ import {
   type BlockActions,
   openSocket,
   slackInbound,
+  slackSessionStopped,
   slackStop,
   slackSurface,
   slackWeb,
@@ -156,7 +157,15 @@ async function openSlack(slack: SlackConfig) {
         log,
         since: Date.now(),
         onEvent: (payload) => {
-          const inbound = slackInbound(payload.event ?? {}, identity.userId);
+          const event = payload.event ?? {};
+          // Slack's own stop control, for an app subscribed to it: the same
+          // cancel the button asks for, under the same thread key.
+          const stopped = slackSessionStopped(event);
+          if (stopped) {
+            void threads.onStop(stopped.key, stopped.userId, async () => {});
+            return;
+          }
+          const inbound = slackInbound(event, identity.userId);
           if (inbound) void threads.onMessage(inbound);
         },
         onInteractive: (payload) => {

@@ -4,7 +4,7 @@
  * thread engine only ever sees this.
  */
 import { type Clock, systemClock } from './clock.ts';
-import type { ThreadRef } from './surface.ts';
+import type { ThreadRef, ToolCall } from './surface.ts';
 
 export type { ThreadRef };
 
@@ -22,9 +22,16 @@ export interface Session {
   readonly resumed: boolean;
 }
 
+/**
+ * What a turn tells the renderer as it runs. `status` and `tool` are the same
+ * news said two ways — the line a surface paints itself, and the call a
+ * surface that has cards of its own renders one by one — so a harness emits
+ * both and each surface takes the one it can show.
+ */
 export type Update =
   | { kind: 'text'; delta: string }
-  | { kind: 'status'; line: string | null };
+  | { kind: 'status'; line: string | null }
+  | { kind: 'tool'; call: ToolCall };
 
 export interface PromptSink {
   update(update: Update): void;
@@ -61,6 +68,7 @@ export interface Sandboxes {
 export type Step =
   | { text: string }
   | { status: string | null }
+  | { tool: ToolCall }
   | { wait: number }
   | { fail: string };
 
@@ -168,6 +176,7 @@ export class StubSandboxes implements Sandboxes {
         sink.update({ kind: 'text', delta: step.text });
       } else if ('status' in step)
         sink.update({ kind: 'status', line: step.status });
+      else if ('tool' in step) sink.update({ kind: 'tool', call: step.tool });
       else return this.ended(name, 'error', { error: step.fail });
     }
     if (this.cancelled.has(session.id)) return this.ended(name, 'cancelled');

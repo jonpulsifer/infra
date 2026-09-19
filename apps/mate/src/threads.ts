@@ -196,8 +196,18 @@ export class Threads {
         thread.sandbox = sandbox;
         this.to(thread, 'rehydrating');
         // The object says a turn was running when the process died, and the
-        // human is owed the reason their answer never arrived.
-        if (sandbox.turnInFlight) await this.tell(thread, RESTARTED);
+        // human is owed the reason their answer never arrived — and the
+        // surface owed the news too, where its working sign belongs to the
+        // thread and so outlived the turn it was raised for.
+        if (sandbox.turnInFlight) {
+          await this.tell(thread, RESTARTED);
+          await thread.surface.settle?.(thread.ref).catch((error) =>
+            log.warn('settle failed', {
+              threadId: thread.ref.id,
+              error: plain(error),
+            }),
+          );
+        }
         try {
           const session = await sandboxes.attach(sandbox);
           thread.session = session;
@@ -658,8 +668,9 @@ export class Threads {
     thread.replay = false;
     this.to(thread, 'closed');
     if (opts.line) await this.tell(thread, opts.line);
-    // A surface with no such thing — a Slack thread is never closed —
-    // declares no `archive`, so there is simply nothing here to call.
+    // Discord archives the thread; Slack closes the agent session on its
+    // parent. A surface with neither declares no `archive`, so there is
+    // simply nothing here to call.
     if (opts.archive && thread.pending.length === 0) {
       await thread.surface.archive?.(thread.ref).catch((error) =>
         log.warn('archive failed', {

@@ -1,10 +1,17 @@
 /**
  * A surface the state machine has never heard of: no Discord types, no Slack
- * types, channel-scoped thread keys and no archive. Driving the contract
- * through this is what proves the seam holds. The Slack Web API fake below
- * records the six calls the real adapter makes.
+ * types, channel-scoped thread keys, no archive and a `settle` — one optional
+ * capability declared and one not, so both halves of optional are driven.
+ * Driving the contract through this is what proves the seam holds. The Slack
+ * Web API fake below records the six calls the real adapter makes.
  */
-import type { SlackApi, SlackMessage, StreamStart } from '../src/slack.ts';
+import type {
+  SessionStatus,
+  SlackApi,
+  SlackMessage,
+  StreamChunk,
+  StreamStart,
+} from '../src/slack.ts';
 import type { SocketLike } from '../src/socket.ts';
 import type {
   Canvas,
@@ -15,6 +22,7 @@ import type {
   Surface,
   SurfaceName,
   ThreadRef,
+  ToolCall,
 } from '../src/surface.ts';
 
 export interface Frame {
@@ -25,7 +33,10 @@ export interface Frame {
 
 export class FakeCanvas implements Canvas {
   readonly frames: Frame[] = [];
+  /** Every tool card painted, in order, as the surface was told of it. */
+  readonly cards: ToolCall[] = [];
   working_ = 0;
+  failTool: Error | null = null;
 
   async live(text: string, status: string | null): Promise<void> {
     this.frames.push({ text, status, outcome: null });
@@ -37,6 +48,11 @@ export class FakeCanvas implements Canvas {
 
   async working(): Promise<void> {
     this.working_ += 1;
+  }
+
+  async tool(call: ToolCall): Promise<void> {
+    if (this.failTool) throw this.failTool;
+    this.cards.push(call);
   }
 
   /** What the last frame says, which is what a human would be looking at. */
@@ -60,6 +76,8 @@ export class FakeSurface implements Surface {
   readonly opened: { channelId: string; messageId: string; title: string }[] =
     [];
   readonly askers: string[] = [];
+  /** Every thread told it is not working on anything, in order. */
+  readonly settled: string[] = [];
   private serial = 0;
 
   constructor(
@@ -97,6 +115,10 @@ export class FakeSurface implements Surface {
       .slice(0, end < 0 ? all.length : end)
       .reverse()
       .slice(0, query.limit);
+  }
+
+  async settle(thread: ThreadRef): Promise<void> {
+    this.settled.push(thread.id);
   }
 
   canvas(thread: ThreadRef, asker: string): Canvas {
@@ -144,11 +166,11 @@ export type SlackCall =
       blocks: unknown[] | null;
       stop: boolean;
     }
-  | { call: 'update'; ts: string; text: string; blocks: unknown[] | null }
   | { call: 'remove'; ts: string }
   | { call: 'start'; args: StreamStart }
-  | { call: 'append'; ts: string; markdown: string }
-  | { call: 'stop'; ts: string };
+  | { call: 'append'; ts: string; chunks: StreamChunk[] }
+  | { call: 'stop'; ts: string }
+  | { call: 'session'; threadTs: string; status: SessionStatus };
 
 export class FakeSlack implements SlackApi {
   readonly calls: SlackCall[] = [];
@@ -156,6 +178,8 @@ export class FakeSlack implements SlackApi {
   readonly names = new Map<string, string>();
   failRemove: Error | null = null;
   failStopStream: Error | null = null;
+  failSession: Error | null = null;
+  failAppend: Error | null = null;
   private serial = 0;
 
   async post(
@@ -176,15 +200,6 @@ export class FakeSlack implements SlackApi {
     return ts;
   }
 
-  async update(
-    _channel: string,
-    ts: string,
-    text: string,
-    blocks?: unknown[],
-  ): Promise<void> {
-    this.calls.push({ call: 'update', ts, text, blocks: blocks ?? null });
-  }
-
   async remove(_channel: string, ts: string): Promise<void> {
     if (this.failRemove) throw this.failRemove;
     this.calls.push({ call: 'remove', ts });
@@ -199,14 +214,24 @@ export class FakeSlack implements SlackApi {
   async appendStream(
     _channel: string,
     ts: string,
-    markdown: string,
+    chunks: StreamChunk[],
   ): Promise<void> {
-    this.calls.push({ call: 'append', ts, markdown });
+    if (this.failAppend) throw this.failAppend;
+    this.calls.push({ call: 'append', ts, chunks });
   }
 
   async stopStream(_channel: string, ts: string): Promise<void> {
     if (this.failStopStream) throw this.failStopStream;
     this.calls.push({ call: 'stop', ts });
+  }
+
+  async session(
+    _channel: string,
+    threadTs: string,
+    status: SessionStatus,
+  ): Promise<void> {
+    if (this.failSession) throw this.failSession;
+    this.calls.push({ call: 'session', threadTs, status });
   }
 
   async replies(): Promise<SlackMessage[]> {
@@ -221,17 +246,25 @@ export class FakeSlack implements SlackApi {
     return { userId: 'U0BOT', teamId: 'TAR78LS82', appBotId: 'B0BOT' };
   }
 
-  /** Everything the stream was given, in order. */
+  /** Every chunk the stream was given, in order. */
+  chunks(): StreamChunk[] {
+    return this.calls.flatMap((c) =>
+      c.call === 'start' ? c.args.chunks : c.call === 'append' ? c.chunks : [],
+    );
+  }
+
+  /** The answer text alone, as a human would read it back. */
   streamed(): string {
-    return this.calls
-      .map((c) =>
-        c.call === 'start'
-          ? c.args.markdown
-          : c.call === 'append'
-            ? c.markdown
-            : '',
-      )
+    return this.chunks()
+      .map((chunk) => (chunk.type === 'markdown_text' ? chunk.text : ''))
       .join('');
+  }
+
+  /** Every tool card, in the order Slack was told of it. */
+  cards(): { id: string; title: string; status: string }[] {
+    return this.chunks()
+      .filter((chunk) => chunk.type === 'task_update')
+      .map(({ id, title, status }) => ({ id, title, status }));
   }
 
   only<K extends SlackCall['call']>(

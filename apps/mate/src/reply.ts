@@ -7,7 +7,7 @@
 import type { Clock, Handle } from './clock.ts';
 import { type Log, plain } from './log.ts';
 import type { PromptSink, Update } from './sandbox.ts';
-import type { Canvas, Outcome } from './surface.ts';
+import type { Canvas, Outcome, ToolCall } from './surface.ts';
 
 export const STATUS_MAX = 120;
 export const EDIT_CADENCE_MS = 1_000;
@@ -46,6 +46,7 @@ export class Reply implements PromptSink {
   private chain: Promise<void> = Promise.resolve();
   private outcome: Outcome | null = null;
   private failures = 0;
+  private cardFailures = 0;
 
   constructor(
     private readonly canvas: Canvas,
@@ -68,10 +69,39 @@ export class Reply implements PromptSink {
 
   update(update: Update): void {
     if (this.outcome) return;
+    if (update.kind === 'tool') {
+      this.paintTool(update.call);
+      return;
+    }
     if (update.kind === 'text') this.text += update.delta;
     else this.status = update.line;
     this.dirty = true;
     this.schedule();
+  }
+
+  /**
+   * A tool call goes straight to the canvas rather than waiting for the
+   * repaint cadence: it is one small call arriving at tool-call rate, not at
+   * token rate, and it is queued behind the frames already in flight so a
+   * surface that interleaves the two shows them in the order they happened.
+   * A canvas with no cards has nothing to do here.
+   */
+  private paintTool(call: ToolCall): void {
+    const paint = this.canvas.tool;
+    if (!paint) return;
+    this.chain = this.chain
+      .then(() => paint.call(this.canvas, call))
+      .catch((error) => this.cardFailed(error));
+  }
+
+  /** A card that cannot be painted is one warning; the answer is the turn. */
+  private cardFailed(error: unknown): void {
+    this.cardFailures += 1;
+    if (this.cardFailures > 1) return;
+    this.log.warn('a tool card could not be painted', {
+      threadId: this.threadId,
+      error: plain(error),
+    });
   }
 
   /**
@@ -121,7 +151,12 @@ export class Reply implements PromptSink {
   }
 
   private async flush(final: Outcome | null): Promise<void> {
-    if (!this.dirty) return;
+    // The last frame always goes out, and nothing goes out after it. A turn
+    // whose updates all land in one tick queues a repaint per update, and
+    // one of those would otherwise run after `finish` and paint the finished
+    // answer as a live frame — leaving the stream open and the Stop button
+    // up, with the frame that takes them away skipped as a no-op.
+    if (!final && (this.outcome || !this.dirty)) return;
     this.dirty = false;
     this.painted = true;
     this.lastFlushAt = this.clock.now();
