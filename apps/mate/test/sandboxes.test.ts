@@ -466,3 +466,29 @@ describe('the turn mark', () => {
     expect((await sandboxes.attach(ref)).resumed).toBe(false);
   });
 });
+
+describe('what a turn cost', () => {
+  test('is the step in the session total, not the total', async () => {
+    fake.script = { costs: [0.0024, 0.006] };
+    const ref = await sandboxes.mint(THREAD);
+    const session = await sandboxes.attach(ref);
+
+    const first = await sandboxes.prompt(session, 'one', new Collect());
+    const second = await sandboxes.prompt(session, 'two', new Collect());
+    expect(first.costUsd).toBeCloseTo(0.0024, 6);
+    expect(second.costUsd).toBeCloseTo(0.0036, 6);
+  });
+
+  test('is nothing for the first turn of a session the harness reloaded', async () => {
+    fake.script = { costs: [0.0024, 0.006] };
+    const ref = await sandboxes.mint(THREAD);
+    await sandboxes.attach(ref);
+    const resumed = await sandboxes.attach(ref);
+    expect(resumed.resumed).toBe(true);
+
+    const first = await sandboxes.prompt(resumed, 'one', new Collect());
+    const second = await sandboxes.prompt(resumed, 'two', new Collect());
+    expect(first.costUsd).toBeNull();
+    expect(second.costUsd).toBeCloseTo(0.0036, 6);
+  });
+});

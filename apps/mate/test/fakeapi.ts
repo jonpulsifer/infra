@@ -29,6 +29,8 @@ export interface AgentScript {
   thinking?: boolean;
   tool?: string;
   cost?: number;
+  /** One running session total per turn, as ACP reports cost. */
+  costs?: number[];
   stopReason?: string;
   stderr?: string;
   /** Every outbound line is sent as two frames, so the reader must reassemble. */
@@ -56,6 +58,7 @@ interface SocketData {
   script: AgentScript;
   buffer: string;
   cancelled: boolean;
+  turns: number;
 }
 
 type Json = Record<string, unknown>;
@@ -370,7 +373,13 @@ export class FakeKube {
     };
     this.execs.push(exec);
     const upgraded = server.upgrade(request, {
-      data: { exec, script: this.script, buffer: '', cancelled: false },
+      data: {
+        exec,
+        script: this.script,
+        buffer: '',
+        cancelled: false,
+        turns: 0,
+      },
       headers: protocol ? { 'Sec-WebSocket-Protocol': protocol } : undefined,
     });
     return upgraded
@@ -479,6 +488,7 @@ export class FakeKube {
     sessionId: string,
   ): Promise<void> {
     const script = ws.data.script;
+    const turn = ws.data.turns++;
     if (script.thinking) {
       this.notify(ws, sessionId, {
         sessionUpdate: 'agent_thought_chunk',
@@ -518,12 +528,13 @@ export class FakeKube {
         status: 'completed',
       });
     }
-    if (script.cost !== undefined) {
+    const total = script.costs ? script.costs[turn] : script.cost;
+    if (total !== undefined) {
       this.notify(ws, sessionId, {
         sessionUpdate: 'usage_update',
         used: 4096,
         size: 200_000,
-        cost: { amount: script.cost, currency: 'USD' },
+        cost: { amount: total, currency: 'USD' },
       });
     }
     this.reply(ws, message.id, {

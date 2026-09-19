@@ -4,10 +4,11 @@
  */
 import { beforeEach, describe, expect, test } from 'bun:test';
 import { SANDBOX_CLOSED, WAITING } from '../src/notices.ts';
-import { PLACEHOLDER } from '../src/reply.ts';
+import { PLACEHOLDER, STOPPED } from '../src/reply.ts';
 import {
   REPLAY_CHARS,
   REPLAY_MESSAGES,
+  REPLAY_PAGES,
   replayPreamble,
 } from '../src/transcript.ts';
 import { FakeDiscord } from './support.ts';
@@ -50,6 +51,7 @@ describe('replaying a thread', () => {
     mate(SANDBOX_CLOSED);
     mate(`${WAITING} (1 ahead)`);
     mate(PLACEHOLDER);
+    mate(STOPPED);
     discord.posted.push({
       channelId: THREAD,
       id: 'other-bot',
@@ -63,6 +65,7 @@ describe('replaying a thread', () => {
     expect(preamble).toContain('jawn: hello');
     expect(preamble).not.toContain(SANDBOX_CLOSED);
     expect(preamble).not.toContain(WAITING);
+    expect(preamble).not.toContain(STOPPED);
     expect(preamble).not.toContain('KubePodCrashLooping');
   });
 
@@ -92,7 +95,7 @@ describe('replaying a thread', () => {
     for (let i = 0; i < 20; i += 1) human('x'.repeat(1_000));
 
     const preamble = await replay();
-    expect(preamble?.length).toBeLessThan(REPLAY_CHARS + 500);
+    expect(preamble?.length).toBeLessThanOrEqual(REPLAY_CHARS);
     expect(discord.historyCalls).toBe(1);
   });
 
@@ -103,6 +106,14 @@ describe('replaying a thread', () => {
     const preamble = await replay();
     expect(discord.historyCalls).toBe(2);
     expect(preamble).toContain('jawn: m59');
+  });
+
+  test('gives up rather than paging past the cap', async () => {
+    human('the message no reader ever reaches');
+    for (let i = 0; i < 250; i += 1) mate(SANDBOX_CLOSED);
+
+    expect(await replay()).toBeNull();
+    expect(discord.historyCalls).toBe(REPLAY_PAGES);
   });
 
   test('an empty thread replays nothing', async () => {

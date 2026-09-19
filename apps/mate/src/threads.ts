@@ -71,6 +71,8 @@ interface Thread {
   quiet: Handle | null;
   /** Set while the thread's harness has never been told what came before. */
   replay: boolean;
+  /** Set by a Stop that lands before the turn reaches the harness. */
+  stopRequested: boolean;
 }
 
 export const THREAD_NAME_MAX = 100;
@@ -248,9 +250,11 @@ export class Threads {
     );
     const thread = this.threads.get(threadId);
     if (!thread || !config.allowedUserIds.has(userId)) return;
-    if (thread.state === 'turn' && thread.session) {
-      await sandboxes.cancel(thread.session);
-    }
+    if (thread.state !== 'turn') return;
+    // A turn still reading the thread's transcript has nothing to cancel yet,
+    // so the flag is what stops it; the harness only hears about one it holds.
+    thread.stopRequested = true;
+    if (thread.session) await sandboxes.cancel(thread.session);
   }
 
   async onThreadArchived(threadId: string): Promise<void> {
@@ -300,6 +304,7 @@ export class Threads {
         turns: 0,
         quiet: null,
         replay: false,
+        stopRequested: false,
       };
       this.threads.set(threadId, thread);
     }
@@ -435,6 +440,7 @@ export class Threads {
       return;
     }
     thread.turns += 1;
+    thread.stopRequested = false;
     this.dayTurns.push(clock.now());
     this.metrics.turnStarted();
     this.to(thread, 'turn');
@@ -450,6 +456,12 @@ export class Threads {
     reply.startTyping();
     try {
       const text = await this.withHistory(thread, prompt);
+      if (thread.stopRequested) {
+        thread.stopRequested = false;
+        this.metrics.turnEnded('cancelled', {});
+        await this.deliver(thread, reply, 'stopped');
+        return;
+      }
       let result: PromptResult;
       try {
         result = await sandboxes.prompt(thread.session, text, reply);
@@ -496,7 +508,8 @@ export class Threads {
     if (!thread.replay) return prompt.text;
     thread.replay = false;
     const skip = [prompt.text, prompt.raw.trim()];
-    for (const queued of thread.pending) skip.push(queued.text, queued.raw);
+    for (const queued of thread.pending)
+      skip.push(queued.text, queued.raw.trim());
     try {
       const preamble = await replayPreamble(this.deps.discord, thread.id, {
         me: this.deps.me,

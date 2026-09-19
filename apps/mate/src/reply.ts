@@ -17,6 +17,8 @@ export const EDIT_CADENCE_MS = 1_000;
 export const NO_REPLY = 'the harness sent no reply';
 const TYPING_INTERVAL_MS = 8_000;
 export const PLACEHOLDER = '…';
+/** Marks a turn the human stopped; a turn stopped before any text is only this. */
+export const STOPPED = '*stopped*';
 
 export function statusLine(line: string): string {
   const flat = line.replace(/\s+/g, ' ').trim().replaceAll('*', '');
@@ -86,7 +88,7 @@ export class Reply implements PromptSink {
     this.status = null;
     this.dirty = true;
     if (outcome === 'stopped')
-      this.text += `${this.text ? '\n\n' : ''}*stopped*`;
+      this.text += `${this.text ? '\n\n' : ''}${STOPPED}`;
     this.chain = this.chain.then(() => this.flush(true));
     await this.chain;
   }

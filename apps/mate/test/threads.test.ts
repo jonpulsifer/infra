@@ -765,6 +765,27 @@ describe('replaying the transcript', () => {
     expect(sandboxes.prompts.at(-1)).toBe('fourth question');
   });
 
+  test('a stop while the transcript is being read never reaches the harness', async () => {
+    const { threads, sandboxes, threadId } = await reopened();
+    let release = () => {};
+    discord.gateHistory = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+
+    const turn = threads.onMessage(inThread(threadId, 'third question'));
+    await clock.advance(1_000);
+    expect(threads.stateOf(threadId)).toBe('turn');
+    await threads.onStop(threadId, OWNER, async () => {});
+    release();
+    await turn;
+    await clock.advance(5_000);
+
+    expect(sandboxes.prompts).not.toContain('third question');
+    expect(discord.contentsIn(threadId).at(-1)).toBe('*stopped*');
+    expect(metrics.turns.at(-1)).toBe('cancelled');
+    expect(threads.stateOf(threadId)).toBe('attached');
+  });
+
   test('a history read that fails leaves the turn alone', async () => {
     const { threads, sandboxes, threadId } = await reopened();
     discord.failHistory = new Error('403 Missing Access');

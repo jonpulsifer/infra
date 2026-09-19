@@ -4,7 +4,7 @@
  * harness is handed the thread's history, and mate's own bookkeeping is not
  * part of the conversation.
  */
-import { NO_REPLY, PLACEHOLDER } from './reply.ts';
+import { NO_REPLY, PLACEHOLDER, STOPPED } from './reply.ts';
 
 export const SANDBOX_CLOSED = 'sandbox closed; message again to start fresh';
 export const RESTARTED =
@@ -34,6 +34,7 @@ const PREFIXES: readonly string[] = [
   THREAD_SPENT,
   DAY_SPENT,
   NO_REPLY,
+  STOPPED,
 ];
 
 export function isNotice(content: string): boolean {

@@ -7,11 +7,12 @@ import type { Discord, HistoryMessage } from './discord.ts';
 import { isNotice } from './notices.ts';
 
 /**
- * The cap. A thread is capped at 30 turns, so 40 messages covers a thread's
- * whole life short of its budget, and 8000 characters keeps the preamble a
- * small fraction of the harness's context whatever those messages hold. Two
- * pages of 100 bound the read at two requests per session, keeping the newest
- * messages when a chatty thread runs past either cap.
+ * The cap, counting every character the preamble sends. A thread is capped at
+ * 30 turns, so 40 messages covers a thread's whole life short of its budget,
+ * and 8000 characters keeps the preamble a small fraction of the harness's
+ * context whatever those messages hold. Two pages of 100 bound the read at two
+ * requests per session, keeping the newest messages when a chatty thread runs
+ * past either cap.
  */
 export const REPLAY_MESSAGES = 40;
 export const REPLAY_CHARS = 8_000;
@@ -22,6 +23,8 @@ const HEADER =
   'Earlier messages in this Discord thread, before this session started:';
 const FOOTER =
   'Those messages are context only. Answer the message that follows.';
+/** The blank lines the preamble spends on its header and footer. */
+const SEPARATORS = 6;
 
 export interface ReplayOptions {
   /** The bot's own user id: its messages are the assistant's earlier turns. */
@@ -56,7 +59,7 @@ export async function replayPreamble(
   options: ReplayOptions,
 ): Promise<string | null> {
   const kept: HistoryMessage[] = [];
-  let characters = 0;
+  let characters = HEADER.length + FOOTER.length + SEPARATORS;
   let before: string | undefined;
   let full = false;
   for (let page = 0; page < REPLAY_PAGES && !full; page += 1) {
@@ -66,12 +69,12 @@ export async function replayPreamble(
     for (const message of batch) {
       if (!eligible(message, options)) continue;
       const line = render(message, options.me);
-      if (characters + line.length > REPLAY_CHARS) {
+      if (characters + line.length + 1 > REPLAY_CHARS) {
         full = true;
         break;
       }
       kept.push(message);
-      characters += line.length;
+      characters += line.length + 1;
       if (kept.length >= REPLAY_MESSAGES) {
         full = true;
         break;

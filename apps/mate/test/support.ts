@@ -146,6 +146,8 @@ export class FakeDiscord implements Discord {
   readonly posted: Posted[] = [];
   historyCalls = 0;
   failHistory: Error | null = null;
+  /** Holds a history read open, for what lands while the transcript is being read. */
+  gateHistory: Promise<void> | null = null;
   readonly threads: {
     channelId: string;
     messageId: string;
@@ -210,6 +212,7 @@ export class FakeDiscord implements Discord {
     query: HistoryQuery,
   ): Promise<HistoryMessage[]> {
     this.historyCalls += 1;
+    if (this.gateHistory) await this.gateHistory;
     if (this.failHistory) throw this.failHistory;
     const all = this.posted.filter((m) => m.channelId === channelId);
     const end = query.before
