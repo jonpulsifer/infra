@@ -384,6 +384,9 @@ export class Threads {
         channelId: thread.channelId,
       });
     } catch (error) {
+      // Counted here because nothing else sees it: no sandbox exists, so the
+      // teardown that follows records none.
+      this.metrics.minted('mint-failed');
       await this.failed(thread, `${MINT_FAILED}: ${plain(error)}`);
       return;
     }
@@ -392,9 +395,11 @@ export class Threads {
       thread.session = session;
       thread.replay = !session.resumed;
     } catch (error) {
+      this.metrics.minted('attach-failed');
       await this.failed(thread, `${ATTACH_FAILED}: ${plain(error)}`);
       return;
     }
+    this.metrics.minted('ok');
     this.to(thread, 'attached');
     await this.pump(thread);
   }

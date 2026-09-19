@@ -914,6 +914,26 @@ describe('metrics', () => {
     expect(metrics.teardowns.at(-1)).toBe('thread-deleted');
   });
 
+  test('a sandbox a thread never got is counted by how far it got', async () => {
+    const minting = build({ mintFails: 'ImagePullBackOff' });
+    await minting.threads.onMessage(mention('go'));
+    await settle();
+    // The teardown that follows a failed mint has no sandbox to tear down and
+    // records nothing, so this counter is the only thing that sees it.
+    expect(metrics.mints).toEqual(['mint-failed']);
+    expect(metrics.teardowns).toEqual([]);
+
+    const attaching = build({ attachFails: 'the harness never answered' });
+    await attaching.threads.onMessage(mention('go'));
+    await settle();
+    expect(metrics.mints.at(-1)).toBe('attach-failed');
+
+    const working = build({ script: streaming('alpha') });
+    await working.threads.onMessage(mention('go'));
+    await clock.advance(5_000);
+    expect(metrics.mints.at(-1)).toBe('ok');
+  });
+
   test('the live and queued gauges follow the table', async () => {
     const { threads } = build({
       script: streaming('alpha'),

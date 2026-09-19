@@ -83,6 +83,13 @@ spec:
               value: "3"
             - name: MATE_PORT
               value: "8080"
+            # The cluster's OTLP collector, whose prometheus exporter this
+            # cluster's Prometheus scrapes. Unset — a workstation run, or
+            # `bun test` — registers no SDK at all and every instrument stays
+            # the no-op it is born as. `network-policy.yaml` is what lets this
+            # one destination be reached.
+            - name: MATE_OTEL_ENDPOINT
+              value: http://opentelemetry-collector.monitoring.svc.cluster.local:4318
             # `kube` puts a real Sandbox behind every thread: mate mints one
             # per thread, execs `opencode acp` in its pod and streams the turn
             # back. The other value is `stub`, an in-process reply with no
