@@ -175,10 +175,22 @@ function pullPolicy(image: string): string {
   return image.includes('@sha256:') ? 'IfNotPresent' : 'Always';
 }
 
-/** What the harness reads instead of the checkout's own `.opencode/`. */
+/**
+ * What the harness reads instead of the checkout's own `.opencode/`.
+ *
+ * AGENTS.md has to be named here. opencode finds the repo's skills by walking
+ * up from the cwd whatever the project config is doing, so the agent already
+ * arrives holding every `SKILL.md` under `.agents/skills/` — and none of the
+ * hard rules those skills are written on top of, because instruction files
+ * come with the project config this harness turns off. The path is absolute
+ * because a relative one resolves against opencode's own config directory, and
+ * neither that nor a file that is not there is reported: a wrong path here
+ * fails open.
+ */
 export function opencodeConfig(model: string): string {
   return JSON.stringify({
     model,
+    instructions: [`${WORKSPACE}/AGENTS.md`],
     permission: 'allow',
     autoupdate: false,
     share: 'disabled',
@@ -335,9 +347,12 @@ export function sandboxManifest(declaration: SandboxDeclaration): Sandbox {
                   name: 'OPENCODE_CONFIG_CONTENT',
                   value: opencodeConfig(config.model),
                 },
-                // The checkout's own `.opencode/package.json` fires hundreds of
-                // npm requests at every start, and npm is not in the sandbox's
-                // egress allow-list.
+                // opencode npm-installs `@opencode-ai/plugin` into any
+                // `.opencode/` it honours, whether or not a plugin is declared
+                // there, and npm is not in the sandbox's egress allow-list.
+                // Nothing in the checkout's own config buys that back: it
+                // declares one MCP server, and its command is `nix`, which
+                // this image does not carry.
                 { name: 'OPENCODE_DISABLE_PROJECT_CONFIG', value: '1' },
                 ...gitEnv(),
               ],

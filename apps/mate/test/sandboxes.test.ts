@@ -161,10 +161,18 @@ describe('mint', () => {
     expect(env.OPENCODE_DISABLE_PROJECT_CONFIG.value).toBe('1');
     expect(JSON.parse(env.OPENCODE_CONFIG_CONTENT.value)).toEqual({
       model: 'opencode-go/qwen3.8-flash',
+      instructions: [`${WORKSPACE}/AGENTS.md`],
       permission: 'allow',
       autoupdate: false,
       share: 'disabled',
     });
+  });
+
+  // Nothing else in the repo names AGENTS.md, so a rename would strand every
+  // sandbox on a path that no longer exists.
+  test('names an instruction file the checkout really has', async () => {
+    const root = new URL('../../../AGENTS.md', import.meta.url);
+    expect(await Bun.file(root).exists()).toBe(true);
   });
 
   test('hands both containers the git config the checkout needs', async () => {
