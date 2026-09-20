@@ -23,3 +23,20 @@ claude-code = "latest"
 opencode = "latest"
 gh = "latest"
 node = "latest"
+
+# Windows has no Homebrew and no home-manager, so the shell tooling those two
+# provide on macOS and NixOS has to come from mise instead. The os filter keeps
+# them from being installed twice everywhere else.
+#
+# btop is absent on purpose: it ships no Windows build. The zshrc's htop nag
+# alias is dropped there too.
+bat = { version = "latest", os = ["windows"] }
+delta = { version = "latest", os = ["windows"] }
+eza = { version = "latest", os = ["windows"] }
+fd = { version = "latest", os = ["windows"] }
+fzf = { version = "latest", os = ["windows"] }
+jq = { version = "latest", os = ["windows"] }
+neovim = { version = "latest", os = ["windows"] }
+ripgrep = { version = "latest", os = ["windows"] }
+sd = { version = "latest", os = ["windows"] }
+zoxide = { version = "latest", os = ["windows"] }

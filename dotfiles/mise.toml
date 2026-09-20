@@ -13,7 +13,7 @@ moonpay_ssh_prefix = ""
 moonpay_instead_of = ""
 
 [tasks.bootstrap]
-description = "Auto-detect OS and delegate to bootstrap:macos or bootstrap:linux"
+description = "Auto-detect OS and delegate to bootstrap:macos, :linux or :windows"
 run = '''
 if [ "$(uname -s)" = "Darwin" ]; then
   mise run bootstrap:macos
@@ -21,6 +21,9 @@ else
   mise run bootstrap:linux
 fi
 '''
+# mise picks run_windows on Windows and ignores it everywhere else, so the
+# uname split above stays untouched.
+run_windows = "mise run bootstrap:windows"
 
 [tasks."bootstrap:macos"]
 description = "macOS bootstrap: Homebrew bundle + symlink dotfiles"
@@ -35,6 +38,23 @@ run = [
   "mise run dotfiles:deploy",
 ]
 
+[tasks."bootstrap:windows"]
+description = "Windows bootstrap: install tools, symlink dotfiles, install PowerShell modules"
+# The default inline shell on Windows is cmd /c.
+shell = "pwsh -c"
+run = [
+  # Homebrew and home-manager install the shell tooling on the other two
+  # platforms. Here mise is the only thing that will, so it has to be asked.
+  "mise install",
+  "& '{{config_root}}/windows/deploy-dotfiles.ps1'",
+]
+
 [tasks."dotfiles:deploy"]
 description = "Symlink dotfiles into $HOME"
 run = "bash {{config_root}}/scripts/deploy-dotfiles.sh"
+run_windows = "pwsh -NoProfile -File '{{config_root}}/windows/deploy-dotfiles.ps1'"
+
+[tasks."dotfiles:check"]
+description = "Resolve every dotfiles link without touching the filesystem"
+run = "bash {{config_root}}/scripts/deploy-dotfiles.sh --dry-run"
+run_windows = "pwsh -NoProfile -File '{{config_root}}/windows/deploy-dotfiles.ps1' -DryRun"
