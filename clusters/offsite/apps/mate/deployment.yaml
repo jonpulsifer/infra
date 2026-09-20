@@ -54,7 +54,7 @@ spec:
           # that lands on main (`.github/containers.json`, `deploy.mate`). The
           # rewrite anchors on the full `ghcr.io/…/mate…@sha256:` string, so
           # this stays one literal and never a split repository/tag pair.
-          image: ghcr.io/jonpulsifer/mate:latest@sha256:91ff9dfe6c4cd09ee5f9eb866d861752c330895d7176295a45bc04f7e78a9f38
+          image: ghcr.io/jonpulsifer/mate:latest@sha256:1a5c878b354030d080c3eb967a716c23abad95b063b8a06b2bb9d561f455b092
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
