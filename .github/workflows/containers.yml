@@ -38,6 +38,17 @@ jobs:
           CHANGED_FILES: ${{ steps.changed.outputs.all_changed_files }}
         run: bash .github/scripts/detect-containers.sh
 
+  # The digest rewrite and the ancestry guard it defers to live in
+  # .github/scripts/, which means they can be tested — and a guard nobody can
+  # test is a guard nobody will dare change later. This workflow carries no
+  # `paths:` filter, so the test gates every pull request, including one that
+  # only edits the step that calls it.
+  cd-guard:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - run: bash .github/scripts/cd-digest-update_test.sh
+
   build:
     needs: detect
     if: needs.detect.outputs.has_changes == 'true'
@@ -158,6 +169,8 @@ jobs:
           MANIFESTS: ${{ toJson(matrix.manifests) }}
           GH_TOKEN: ${{ steps.cd-app-token.outputs.token || secrets.GITHUB_TOKEN }}
           CD_ACTOR: ${{ steps.cd-app-token.outputs.app-slug }}
+          BUILT_COMMIT: ${{ github.sha }}
+          REGISTRY_REPOSITORY: ${{ github.repository_owner }}/${{ matrix.image }}
         run: |
           set -euo pipefail
           mapfile -t targets < <(jq -r '.[]' <<<"$MANIFESTS")
@@ -166,75 +179,78 @@ jobs:
             exit 0
           fi
 
-          for manifest in "${targets[@]}"; do
-            # A declared target that is missing, or that pins no digest, means
-            # the deploy map is wrong. Fail loudly: a silent no-op here is
-            # indistinguishable from a successful deploy.
-            if [ ! -f "$manifest" ]; then
-              echo "::error::$manifest is a deploy target for $IMAGE_NAME but does not exist"
-              exit 1
-            fi
-            # Anchored on this image's own reference, so a manifest may pin
-            # other images beside it. That is not hypothetical: the in-cluster
-            # build route pins the BuildKit engine in the same document
-            # Spindrift's own image is pinned in, and the blanket rewrite this
-            # replaces refused the whole file rather than stamp Spindrift's
-            # digest onto BuildKit — correctly, but the effect was that every
-            # push stopped rolling out and said so only in a workflow log.
-            #
-            # The name must be followed by `:` or `@` so that a repository whose
-            # path merely starts with this one — `spindrift` and
-            # `spindrift-demo` are both published here — is not rewritten by it.
-            #
-            # The registry is anchored to ghcr.io because that is the only place
-            # this job pushes (see the `images:` input above). A digest is
-            # content-addressed per registry, so stamping this one onto a ref
-            # that resolves anywhere else yields a pin that cannot be pulled —
-            # and the failure lands on the cluster, long after CI goes green.
-            ref="ghcr\.io/[^[:space:]\"']*/${IMAGE_NAME}(:[^@[:space:]]+)?"
+          # Copied out of the tree before the checkout below replaces the
+          # working tree with main's content. A step that swaps the program it
+          # is running halfway through is a step nobody can reason about.
+          cd_digest="$RUNNER_TEMP/cd-digest-update.sh"
+          cp .github/scripts/cd-digest-update.sh "$cd_digest"
 
-            # Refuse rather than rewrite when the manifest pins this image from
-            # somewhere other than ghcr.io, so the mismatch is a red build
-            # instead of an ImagePullBackOff nobody is watching for.
-            if grep -qE "[^[:space:]\"']*/${IMAGE_NAME}(:[^@[:space:]]+)?@sha256:[0-9a-f]{64}" "$manifest" \
-              && ! grep -qE "${ref}@sha256:[0-9a-f]{64}" "$manifest"; then
-              echo "::error::$manifest pins $IMAGE_NAME from a registry this job does not publish to; only ghcr.io digests are valid here"
-              exit 1
-            fi
-            if grep -qE "${ref}@sha256:[0-9a-f]{64}" "$manifest"; then
-              echo "Updating digest for $IMAGE_NAME in $manifest..."
-              # DIGEST already carries the sha256: prefix, so the capture group
-              # must not be replayed into the replacement.
-              sed -i -E "s|(${ref})@sha256:[0-9a-f]{64}|\1@${DIGEST}|g" "$manifest"
-              continue
-            fi
+          # **Everything below happens on current main, not on the commit this
+          # run built.** A branch cut from the build's own checkout is a diff
+          # against a main that has since moved on: the moment anything else
+          # touches the same manifest — and a deployment manifest is touched
+          # for a dozen reasons that have nothing to do with its digest — the
+          # digest commit conflicts. `--auto` never fires on a conflicting pull
+          # request, so the digest sits there forever while every step of this
+          # job reports green; four `cd/*` pull requests were stuck
+          # CONFLICTING at once when this was written. Re-deriving the rewrite
+          # from main's copy of the file makes the pull request a one-line
+          # change against the branch it targets, which cannot conflict.
+          #
+          # The full history comes with it because the guard below has an
+          # ancestry question to answer, and `actions/checkout` leaves a
+          # depth-1 clone that can only answer it wrong.
+          if [ "$(git rev-parse --is-shallow-repository)" = "true" ]; then
+            git fetch --no-tags --unshallow origin main
+          else
+            git fetch --no-tags origin main
+          fi
 
-            # A chart that splits `repository:` from `tag:` puts the digest on a
-            # line that never names the image, so there is nothing to anchor on
-            # and the blanket rewrite is the only thing that reaches it. It is
-            # safe exactly while the file pins one digest, which is what the
-            # count below is for — the same guard this step has always had,
-            # now scoped to the manifests that still need it.
-            pins=$(grep -cE '@sha256:[0-9a-f]{64}' "$manifest" || true)
-            if [ "$pins" -eq 0 ]; then
-              echo "::error::$manifest pins no image digest, so $IMAGE_NAME can never roll from it"
-              exit 1
+          # One branch per image, not per commit. The branch is a queue with a
+          # single slot: the newest build for an image force-pushes over the
+          # one waiting, and there is never more than one open pull request
+          # asking to roll it. A per-commit branch would instead leave every
+          # superseded build open as its own mergeable pull request, each one
+          # carrying an older digest — the regression the guard below exists to
+          # prevent, reintroduced as a matter of routine.
+          BRANCH_NAME="cd/update-${IMAGE_NAME}-digest"
+          git checkout -B "$BRANCH_NAME" FETCH_HEAD
+
+          # Never roll backwards. Re-running an old workflow run is a real
+          # recovery — a run cancelled before its jobs start builds nothing,
+          # and because the matrix is per-commit changed-files no later commit
+          # ever builds that image, so the only way to get it built is to run
+          # that run again. But an old run checks out an old commit and would
+          # happily stamp its older digest over a newer one.
+          #
+          # What the manifests pin right now is the record of which build got
+          # there first, and `org.opencontainers.image.revision` on the pinned
+          # image says which commit that build came from. If this run's commit
+          # is an ancestor of that one, this run is the older of the two and
+          # has nothing to contribute — which is not a failure, so say it
+          # plainly and leave.
+          mapfile -t pinned_digests < <("$cd_digest" pins "$IMAGE_NAME" "${targets[@]}")
+          pinned_commits=()
+          for pinned_digest in "${pinned_digests[@]}"; do
+            pinned_commit=$("$cd_digest" revision "$REGISTRY_REPOSITORY" "$pinned_digest")
+            if [ -n "$pinned_commit" ]; then
+              echo "$IMAGE_NAME is pinned at $pinned_digest, built from $pinned_commit"
+              pinned_commits+=("$pinned_commit")
+            else
+              echo "::warning::Cannot tell which commit $IMAGE_NAME@$pinned_digest was built from; this run cannot be checked against it."
             fi
-            if [ "$pins" -gt 1 ]; then
-              echo "::error::$manifest pins $pins digests and names $IMAGE_NAME in none of them, so there is no way to tell which one to roll"
-              exit 1
-            fi
-            echo "Updating digest for $IMAGE_NAME in $manifest (unanchored)..."
-            sed -i -E "s|@sha256:[0-9a-f]{64}|@${DIGEST}|g" "$manifest"
           done
+          if [ "$("$cd_digest" decide "$BUILT_COMMIT" "${pinned_commits[@]}")" = "skip" ]; then
+            echo "::notice::$IMAGE_NAME already rolls a build newer than $BUILT_COMMIT, so this run leaves the manifests alone."
+            exit 0
+          fi
+
+          "$cd_digest" rewrite "$IMAGE_NAME" "$DIGEST" "${targets[@]}"
 
           if git diff --quiet -- "${targets[@]}"; then
             echo "$IMAGE_NAME manifests already pin $DIGEST"
             exit 0
           fi
-
-          BRANCH_NAME="cd/update-${IMAGE_NAME}-digest"
-          git checkout -b "$BRANCH_NAME"
 
           # Commit as whoever is actually pushing, so the author matches the
           # token and the pull request is attributed to the App when there is
@@ -260,13 +276,12 @@ jobs:
           git commit -m "fix(cd): update ${IMAGE_NAME} image digest to ${DIGEST}"
 
           if ! git push origin "$BRANCH_NAME" --force; then
-            # A prior run that failed after pushing leaves this branch cut from
-            # an older main, so the next push introduces every commit in
-            # between — and GITHUB_TOKEN may never write one that touched
-            # .github/workflows/, whatever this job's `permissions:` say.
-            # Recreating the ref reduces the push to the single manifest-only
-            # commit above. Only on failure, so an open PR keeps its identity
-            # and its running checks in the ordinary case.
+            # The branch now always carries exactly one manifest-only commit on
+            # top of current main, so a refused push means the ref itself is in
+            # a state this token cannot overwrite. Recreating it is the only
+            # recovery that does not need a human. Only on failure, so an open
+            # pull request keeps its identity and its running checks in the
+            # ordinary case.
             echo "Push refused; recreating $BRANCH_NAME so it carries only this commit."
             git push origin --delete "$BRANCH_NAME" || true
             git push origin "$BRANCH_NAME" || {
@@ -281,14 +296,21 @@ jobs:
           # create, and no-opped the auto-merge — leaving the branch force-pushed
           # with a correct digest and no pull request to carry it. Continuous
           # delivery stopped silently, with every step green.
-          if [ -z "$(gh pr list --repo "$GITHUB_REPOSITORY" \
-                       --head "$BRANCH_NAME" --state open --json number --jq '.[0].number')" ]; then
+          pr_number=$(gh pr list --repo "$GITHUB_REPOSITORY" \
+                        --head "$BRANCH_NAME" --state open --json number --jq '.[0].number')
+          if [ -z "$pr_number" ]; then
             gh pr create \
               --repo "$GITHUB_REPOSITORY" \
               --title "fix(cd): update ${IMAGE_NAME} image digest to ${DIGEST}" \
               --body "Automated image digest update for continuous delivery of ${IMAGE_NAME}." \
               --head "$BRANCH_NAME" \
               --base main
+          else
+            # The single slot was already taken. The force push above replaced
+            # what the branch carries, so retitle too, or the open pull request
+            # goes on advertising a digest it no longer holds.
+            gh pr edit "$pr_number" --repo "$GITHUB_REPOSITORY" \
+              --title "fix(cd): update ${IMAGE_NAME} image digest to ${DIGEST}"
           fi
 
           gh pr merge "$BRANCH_NAME" --repo "$GITHUB_REPOSITORY" --auto --squash || gh pr merge "$BRANCH_NAME" --repo "$GITHUB_REPOSITORY" --auto --merge
