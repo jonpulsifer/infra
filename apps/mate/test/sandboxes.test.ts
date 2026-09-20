@@ -108,6 +108,7 @@ describe('mint', () => {
 
     const pod = podTemplate();
     expect(pod.runtimeClassName).toBe('kata-clh');
+    expect(pod.nodeSelector).toEqual({ 'node-role.kubernetes.io/worker': '' });
     expect(pod.automountServiceAccountToken).toBe(false);
     expect(pod.securityContext).toMatchObject({
       runAsNonRoot: true,
@@ -128,10 +129,12 @@ describe('mint', () => {
     // The clone runs as the harness uid so every file it writes is the
     // agent's; the mount root above them is settled by the git env instead.
     expect(pod.initContainers[0].securityContext.runAsUser).toBe(1337);
+    expect(pod.initContainers[0].imagePullPolicy).toBe('IfNotPresent');
 
     const harness = pod.containers[0];
     expect(harness.name).toBe(HARNESS_CONTAINER);
     expect(harness.image).toBe(config.image);
+    expect(harness.imagePullPolicy).toBe('IfNotPresent');
     expect(harness.securityContext.capabilities.drop).toEqual(['ALL']);
     expect(harness.resources).toEqual({
       requests: { cpu: '250m', memory: '512Mi' },

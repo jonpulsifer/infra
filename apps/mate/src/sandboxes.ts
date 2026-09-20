@@ -170,6 +170,15 @@ const CONTAINER_SECURITY = {
   seccompProfile: { type: 'RuntimeDefault' },
 };
 
+/**
+ * `MATE_SANDBOX_IMAGE` carries a digest, so whatever the kubelet already has
+ * under that digest is the image and re-pulling it buys nothing. The tag
+ * beside the digest is what decides the default, and it is `latest`, which
+ * Kubernetes reads as Always: a registry round-trip between a mention and the
+ * first reply, on every mint.
+ */
+const IMAGE_PULL_POLICY = 'IfNotPresent';
+
 /** What the harness reads instead of the checkout's own `.opencode/`. */
 export function opencodeConfig(model: string): string {
   return JSON.stringify({
@@ -250,6 +259,14 @@ export function sandboxManifest(declaration: SandboxDeclaration): Sandbox {
         metadata: { labels },
         spec: {
           runtimeClassName: config.runtimeClass,
+          // Neither offsite node is tainted, so nothing else keeps a microVM
+          // full of agent-authored commands off `retrofit`, the cluster's only
+          // control-plane node — which is where the first live sandbox was
+          // scheduled. Terraform holds this label
+          // (clusters/offsite/bootstrap/node-labels.tf) and puts it on
+          // `oldschool` alone, so cordoning that node stops mate minting
+          // rather than spilling sandboxes back onto the apiserver's node.
+          nodeSelector: { 'node-role.kubernetes.io/worker': '' },
           restartPolicy: 'Always',
           automountServiceAccountToken: false,
           // The agent runs arbitrary commands; it does not need the address of
@@ -268,6 +285,7 @@ export function sandboxManifest(declaration: SandboxDeclaration): Sandbox {
             {
               name: CHECKOUT_CONTAINER,
               image: config.image,
+              imagePullPolicy: IMAGE_PULL_POLICY,
               // Cloned by the uid the harness runs as, so every file in the
               // checkout is the agent's to write. That settles the files and
               // nothing else: the mount root itself stays uid 0, which is
@@ -295,6 +313,7 @@ export function sandboxManifest(declaration: SandboxDeclaration): Sandbox {
             {
               name: HARNESS_CONTAINER,
               image: config.image,
+              imagePullPolicy: IMAGE_PULL_POLICY,
               env: [
                 {
                   name: 'OPENCODE_API_KEY',
