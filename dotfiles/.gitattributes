@@ -1,0 +1,13 @@
+# These dotfiles are checked out natively on Windows as well as on macOS and
+# NixOS. Git for Windows installs with core.autocrlf=true by default, which
+# would rewrite every file on checkout; pinning eol here means the setting no
+# longer matters and LF is what lands on disk everywhere.
+* text=auto eol=lf
+
+# Firmware image: its bytes are what the sibling .md5 hashes, so it must never
+# be renormalized.
+*.hex -text
+
+*.jpeg binary
+*.jpg binary
+*.png binary
