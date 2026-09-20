@@ -8,13 +8,35 @@ import type { ThreadRef, ToolCall } from './surface.ts';
 
 export type { ThreadRef };
 
+/**
+ * Which of three waits a thread paid for its sandbox, and the `source` label
+ * on `mate_mint_duration_milliseconds` and `mate_attach_duration_milliseconds`.
+ * They are three series rather than two because they are three different
+ * costs: a `fresh` mint pays a kata VM boot and a clone, which is the cold
+ * start being chased; `reused` is this thread's own sandbox from an earlier
+ * turn and pays neither; and `spare` is one the warm pool was already
+ * holding, which pays a relabel and a shallow fetch instead. Folding the last
+ * two together would hide exactly the difference the pool exists to make.
+ */
+export type SandboxSource = 'fresh' | 'reused' | 'spare';
+
 export interface SandboxRef {
+  /** Opaque: a sandbox taken from the spare pool is named after no thread. */
   readonly name: string;
   readonly thread: ThreadRef;
   /** Set by `list()` when the object says a turn was running: mate died under it. */
   readonly turnInFlight?: boolean;
-  /** Set by `mint()` when the object was already there and this thread only claimed it. */
-  readonly adopted?: boolean;
+  /**
+   * Absent on a ref `list()` rebuilt from an object that outlived a restart,
+   * because no thread waited for that one. Every mint sets it, which is what
+   * `MintedRef` says.
+   */
+  readonly source?: SandboxSource;
+}
+
+/** What a mint hands back: the ref, and which wait the thread just paid. */
+export interface MintedRef extends SandboxRef {
+  readonly source: SandboxSource;
 }
 
 export interface Session {
@@ -53,8 +75,17 @@ export interface PromptResult {
 export interface Sandboxes {
   /** Every sandbox this mate owns, for rehydration after a restart. */
   list(): Promise<SandboxRef[]>;
-  /** Creates the thread's sandbox, or claims one already under its name; resolves once it is Ready. */
-  mint(thread: ThreadRef): Promise<SandboxRef>;
+  /**
+   * Creates the thread's sandbox, claims the one it already has, or takes one
+   * the warm pool was holding; resolves once it is Ready.
+   */
+  mint(thread: ThreadRef): Promise<MintedRef>;
+  /**
+   * Tops the warm spare pool up to what is configured and renews what is
+   * already in it. Called on a cadence and after a thread takes a spare, and
+   * with no pool configured it does nothing at all.
+   */
+  ensureSpares(): Promise<void>;
   /** Opens the ACP session (`session/load`, else `session/new`). */
   attach(sandbox: SandboxRef): Promise<Session>;
   /** One turn: streams updates into the sink, resolves when the turn ends. */
@@ -95,6 +126,8 @@ export interface StubOptions {
   costUsd?: number;
   /** Models a harness that reloads its own session, as `session/load` does. */
   resumes?: boolean;
+  /** The stub's side of `MATE_SPARES`: how many sandboxes `ensureSpares()` keeps warm. */
+  spares?: number;
 }
 
 export class StubSandboxes implements Sandboxes {
@@ -104,12 +137,15 @@ export class StubSandboxes implements Sandboxes {
   private readonly cancelled = new Set<string>();
   private readonly running = new Set<string>();
   private readonly sessions = new Map<string, string>();
+  /** Warm and unclaimed: named, but belonging to no thread until a mint takes one. */
+  private readonly warm: string[] = [];
   /** Mutable so a test can fail an attach on a sandbox that already exists. */
   attachFails: string | null;
   /** Every prompt text the harness was handed, replay preamble included. */
   readonly prompts: string[] = [];
   private serial = 0;
   private mints = 0;
+  private spares = 0;
 
   constructor(private readonly opts: StubOptions = {}) {
     this.clock = opts.clock ?? systemClock;
@@ -125,6 +161,11 @@ export class StubSandboxes implements Sandboxes {
     return this.mints;
   }
 
+  get spareCount(): number {
+    return this.warm.length;
+  }
+
+  /** Threads only: a spare is not one, and rehydration must not take it for one. */
   async list(): Promise<SandboxRef[]> {
     return [...this.live.values()].map((ref) => ({
       ...ref,
@@ -132,13 +173,31 @@ export class StubSandboxes implements Sandboxes {
     }));
   }
 
-  async mint(thread: ThreadRef): Promise<SandboxRef> {
+  async ensureSpares(): Promise<void> {
+    while (this.warm.length < (this.opts.spares ?? 0)) {
+      if (this.opts.mintDelayMs) await this.clock.sleep(this.opts.mintDelayMs);
+      this.warm.push(`mate-spare-${++this.spares}`);
+    }
+  }
+
+  async mint(thread: ThreadRef): Promise<MintedRef> {
     this.mints += 1;
+    // Ahead of `mintFails`, and faithfully so: a thread that takes a spare
+    // never reaches the path that a broken mint breaks.
+    const spare = this.warm.shift();
+    if (spare) {
+      // The whole of what a spare buys: the wait a fresh one pays is one
+      // somebody already paid, and the name it was born with stays its name.
+      const taken = { name: spare, thread };
+      this.live.set(spare, taken);
+      void this.ensureSpares();
+      return { ...taken, source: 'spare' };
+    }
     if (this.opts.mintDelayMs) await this.clock.sleep(this.opts.mintDelayMs);
     if (this.opts.mintFails) throw new Error(this.opts.mintFails);
     const ref = { name: `mate-${thread.id}`, thread };
     this.live.set(ref.name, ref);
-    return ref;
+    return { ...ref, source: 'fresh' };
   }
 
   async attach(sandbox: SandboxRef): Promise<Session> {

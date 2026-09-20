@@ -11,7 +11,6 @@ import { type Log, plain } from './log.ts';
 import {
   type Instruments,
   lazyInstruments,
-  type SandboxSource,
   type TeardownReason,
 } from './metrics.ts';
 import {
@@ -29,6 +28,7 @@ import {
 } from './notices.ts';
 import { EDIT_CADENCE_MS, Reply } from './reply.ts';
 import type {
+  MintedRef,
   PromptResult,
   Sandboxes,
   SandboxRef,
@@ -439,8 +439,10 @@ export class Threads {
     // Timed from here rather than inside the sandbox client, because this is
     // where the wait starts for the human who just asked a question.
     const asked = clock.now();
+    let minted: MintedRef;
     try {
-      thread.sandbox = await sandboxes.mint(thread.ref);
+      minted = await sandboxes.mint(thread.ref);
+      thread.sandbox = minted;
     } catch (error) {
       // Counted here because nothing else sees it: no sandbox exists, so the
       // teardown that follows records none.
@@ -449,7 +451,10 @@ export class Threads {
       return;
     }
     const ready = clock.now();
-    const source: SandboxSource = thread.sandbox.adopted ? 'adopted' : 'fresh';
+    // Read off the mint rather than decided here: a fresh mint, this thread's
+    // own sandbox and a warm spare are three different waits, and only the
+    // path that produced one knows which it was.
+    const { source } = minted;
     const mintMs = ready - asked;
     try {
       const session = await sandboxes.attach(thread.sandbox);

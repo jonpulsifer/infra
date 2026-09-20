@@ -19,7 +19,7 @@ import { discoverKube, Kube } from './kube.ts';
 import { jsonLog as log, plain } from './log.ts';
 import { getInstruments, lazyInstruments } from './metrics.ts';
 import { type Sandboxes, StubSandboxes } from './sandbox.ts';
-import { KubeSandboxes } from './sandboxes.ts';
+import { KubeSandboxes, SPARE_SWEEP_MS } from './sandboxes.ts';
 import { fileSessionStore, memorySessionStore } from './session.ts';
 import { openSocket, slackEvent, slackSurface, slackWeb } from './slack.ts';
 import { SocketMode } from './socket.ts';
@@ -317,6 +317,18 @@ async function shutdown(signal: string): Promise<void> {
 }
 process.on('SIGINT', () => void shutdown('SIGINT'));
 process.on('SIGTERM', () => void shutdown('SIGTERM'));
+
+/**
+ * The warm pool's cadence, which is also the renewal `SPARE_TTL_MS` is sized
+ * against. With `MATE_SPARES` unset the pass returns without asking the
+ * apiserver anything, so this timer costs a bot with no pool nothing.
+ */
+const sweep = () =>
+  void sandboxes
+    .ensureSpares()
+    .catch((error) => log.warn('spare sweep failed', { error: plain(error) }));
+setInterval(sweep, SPARE_SWEEP_MS);
+sweep();
 
 log.info('mate starting', {
   sandboxes: config.sandboxes.mode,

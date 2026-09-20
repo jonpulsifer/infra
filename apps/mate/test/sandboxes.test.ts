@@ -29,6 +29,15 @@ const THREAD: ThreadRef = {
 };
 const GUILD = '1509024936717455381';
 const NAME = sandboxName(THREAD);
+const threadQuery = encodeURIComponent(
+  `lolwtf.ca/minted-by=mate,lolwtf.ca/guild=${GUILD},lolwtf.ca/thread=${THREAD.id}`,
+);
+
+const OTHER_THREAD: ThreadRef = {
+  surface: 'discord',
+  id: '1509024937422356999',
+  channelId: '1509024937422356532',
+};
 
 const config: SandboxConfig = {
   image:
@@ -40,6 +49,7 @@ const config: SandboxConfig = {
   checkoutRef: 'main',
   model: 'opencode-go/qwen3.8-flash',
   turnTimeoutMs: 4000,
+  spares: 0,
   credentials: {
     connectHost:
       'http://onepassword-connect.external-secrets.svc.cluster.local:8080',
@@ -156,10 +166,38 @@ async function attach(): Promise<SandboxRef> {
   return ref;
 }
 
+/** The same mate, with a pool of one behind it. */
+function withSpares(spares: number): KubeSandboxes {
+  return new KubeSandboxes({
+    kube: new Kube(fake.config()),
+    config: { ...config, spares },
+    guildId: GUILD,
+    log,
+    readyTimeoutMs: 4000,
+    goneTimeoutMs: 4000,
+  });
+}
+
+/** Unclaimed: the marker, not the name, is what still makes one a spare. */
+function spareNames(): string[] {
+  return [...fake.sandboxes.entries()]
+    .filter(([, object]) => (object.metadata as any).labels['lolwtf.ca/spare'])
+    .map(([name]) => name);
+}
+
+/** What a fire-and-forget replacement needs: a wait with a reason to stop. */
+async function until(what: () => boolean, ms = 2000): Promise<void> {
+  const deadline = Date.now() + ms;
+  while (!what()) {
+    if (Date.now() > deadline) throw new Error('it never happened');
+    await Bun.sleep(10);
+  }
+}
+
 describe('mint', () => {
   test('stamps the sandbox a thread gets', async () => {
     const ref = await sandboxes.mint(THREAD);
-    expect(ref).toEqual({ name: NAME, thread: THREAD, adopted: false });
+    expect(ref).toEqual({ name: NAME, thread: THREAD, source: 'fresh' });
 
     const sandbox = fake.sandboxes.get(NAME) as Record<string, any>;
     expect(sandbox.apiVersion).toBe('agents.x-k8s.io/v1beta1');
@@ -410,7 +448,7 @@ describe('mint', () => {
   test('says so when it only claimed a sandbox that was already standing', async () => {
     await sandboxes.mint(THREAD);
     const again = await sandboxes.mint(THREAD);
-    expect(again.adopted).toBe(true);
+    expect(again.source).toBe('reused');
   });
 
   test('gives up when Ready never arrives, saying why and taking the sandbox with it', async () => {
@@ -727,6 +765,253 @@ describe('teardown and list', () => {
       { name: NAME, thread: THREAD, turnInFlight: false },
     ]);
     expect(log.of('sandbox has no thread labels; ignoring it')).toHaveLength(1);
+  });
+});
+
+describe('the warm pool', () => {
+  test('warms a sandbox that belongs to no thread', async () => {
+    const pool = withSpares(1);
+    await pool.ensureSpares();
+
+    const [name] = spareNames();
+    expect(name).toMatch(/^mate-spare-/);
+    const spare = fake.sandboxes.get(name ?? '') as Record<string, any>;
+    expect(spare.metadata.labels).toEqual({
+      'app.kubernetes.io/name': 'mate-sandbox',
+      'app.kubernetes.io/part-of': 'mate',
+      'lolwtf.ca/minted-by': 'mate',
+      'lolwtf.ca/guild': GUILD,
+      'lolwtf.ca/spare': 'true',
+    });
+    // The label the network policy selects on is the first one above; without
+    // it a spare would run the same image with the LAN in reach.
+    expect(spare.spec.podTemplate.metadata.labels).toEqual(
+      spare.metadata.labels,
+    );
+    // Its own short TTL, because nothing but the sweep renews a spare.
+    const ttl = Date.parse(spare.spec.shutdownTime) - Date.now();
+    expect(ttl).toBeGreaterThan(25 * 60_000);
+    expect(ttl).toBeLessThanOrEqual(30 * 60_000);
+
+    // Nobody's thread, so rehydration must not take it for one — and it is
+    // not the stray the warning is about either.
+    expect(await pool.list()).toEqual([]);
+    expect(log.of('sandbox has no thread labels; ignoring it')).toHaveLength(0);
+
+    await pool.ensureSpares();
+    expect(spareNames()).toHaveLength(1);
+  });
+
+  test('a thread takes the spare, and the spare takes its labels', async () => {
+    const pool = withSpares(1);
+    await pool.ensureSpares();
+    const [name] = spareNames();
+
+    const ref = await pool.mint(THREAD);
+    expect(ref).toEqual({ name: name ?? '', thread: THREAD, source: 'spare' });
+
+    const adopted = fake.sandboxes.get(ref.name) as Record<string, any>;
+    expect(adopted.metadata.labels['lolwtf.ca/thread']).toBe(THREAD.id);
+    expect(adopted.metadata.labels['lolwtf.ca/channel']).toBe(THREAD.channelId);
+    expect(adopted.metadata.labels['lolwtf.ca/surface']).toBe('discord');
+    expect(adopted.metadata.labels['lolwtf.ca/spare']).toBeUndefined();
+    // A thread's TTL from the same patch that claimed it, rather than the
+    // half hour it was warming on.
+    expect(Date.parse(adopted.spec.shutdownTime) - Date.now()).toBeGreaterThan(
+      110 * 60_000,
+    );
+    // The clone it came up with is as old as the spare, so the workspace is
+    // brought forward before anything attaches to it.
+    expect(fake.lastExec?.container).toBe(HARNESS_CONTAINER);
+    // The ref is an argument to the shell rather than part of the script, so
+    // a branch name is a branch name and not something `sh` gets a vote on.
+    expect(fake.lastExec?.command).toEqual([
+      '/bin/sh',
+      '-c',
+      `set -e; cd ${WORKSPACE}; git fetch --depth 1 origin "$1"; git reset --hard FETCH_HEAD`,
+      'mate',
+      'main',
+    ]);
+    // The pod template takes the same labels in the same patch: v1.0.3
+    // propagates those onto a running pod, so a thread can still be found
+    // from its pod and the object does not disagree with itself.
+    expect(adopted.spec.podTemplate.metadata.labels).toEqual(
+      adopted.metadata.labels,
+    );
+    // From here it is an ordinary thread, whatever it is called.
+    expect(await pool.list()).toEqual([
+      { name: ref.name, thread: THREAD, turnInFlight: false },
+    ]);
+    await until(() => spareNames().length === 1);
+  });
+
+  test('a second thread cannot take the spare the first one took', async () => {
+    const pool = withSpares(1);
+    await pool.ensureSpares();
+    const [spare] = spareNames();
+
+    const [first, second] = await Promise.all([
+      pool.mint(THREAD),
+      pool.mint(OTHER_THREAD),
+    ]);
+    expect(first.name).not.toBe(second.name);
+    expect([first, second].filter((ref) => ref.name === spare)).toHaveLength(1);
+    // Whichever lost built its own, named after its thread as ever.
+    const loser = first.name === spare ? second : first;
+    expect(loser.name).toBe(sandboxName(loser.thread));
+    expect(loser.source).toBe('fresh');
+  });
+
+  test('the thread is found again by its label, not by a name it no longer has', async () => {
+    const pool = withSpares(1);
+    await pool.ensureSpares();
+    const first = await pool.mint(THREAD);
+
+    const again = await pool.mint(THREAD);
+    expect(again.name).toBe(first.name);
+    // And it says which of the two standing sandboxes it got: the pool is
+    // still holding one, and this is not that.
+    expect(again.source).toBe('reused');
+    expect(log.of('sandbox already existed')).toHaveLength(1);
+    expect(fake.sandboxes.has(sandboxName(THREAD))).toBe(false);
+  });
+
+  test('with no pool configured a mint is exactly what it was', async () => {
+    await sandboxes.ensureSpares();
+    // Not one request: a mate nobody configured a pool for should not be
+    // asking the apiserver about one, on a timer or on a mint.
+    expect(fake.requests).toEqual([]);
+
+    const ref = await sandboxes.mint(THREAD);
+    expect(ref).toEqual({ name: NAME, thread: THREAD, source: 'fresh' });
+    expect([...fake.sandboxes.keys()]).toEqual([NAME]);
+    // Objects are the easy half. The request shape is the claim: a mint that
+    // asks one question more than it did is a mint with one more way to fail.
+    expect(
+      fake.requests.map((r) => `${r.method} ${r.query || r.path}`),
+    ).toEqual([
+      `GET labelSelector=${threadQuery}`,
+      'POST /apis/agents.x-k8s.io/v1beta1/namespaces/mate/sandboxes',
+      `GET fieldSelector=metadata.name%3D${NAME}`,
+    ]);
+  });
+
+  test('renews what it holds, and only what still is one', async () => {
+    const pool = withSpares(1);
+    await pool.ensureSpares();
+    const [name] = spareNames();
+    const spare = fake.sandboxes.get(name ?? '') as Record<string, any>;
+    const first = Date.parse(spare.spec.shutdownTime);
+
+    await Bun.sleep(10);
+    await pool.ensureSpares();
+    // Nothing else slides a spare, so a pass that stopped renewing would hand
+    // every spare back to the controller half an hour later in silence.
+    expect(Date.parse(spare.spec.shutdownTime)).toBeGreaterThan(first);
+    // Carried for the same reason adoption carries one: a sweep that listed a
+    // spare microseconds before a thread took it must not write a spare's
+    // half hour back over the thread's two hours.
+    const slide = fake.patches.filter((p) => p.name === name).at(-1);
+    const meta = (slide?.body.metadata ?? {}) as Record<string, unknown>;
+    expect(meta.resourceVersion).toBeDefined();
+  });
+
+  test('a call that lands mid-pass gets a pass of its own', async () => {
+    const pool = withSpares(1);
+    fake.readyOnCreate = false;
+    const first = pool.ensureSpares();
+    await until(() => spareNames().length === 1);
+
+    // Joining the pass in flight would answer about the pool as it was
+    // counted before this call — which is exactly the state a thread that
+    // just took the last spare is asking about.
+    const second = pool.ensureSpares();
+    fake.markReady(spareNames()[0] ?? '');
+    await Promise.all([first, second]);
+
+    // The pass that followed had a spare to renew where the first found none.
+    expect(
+      fake.patches.filter((p) => p.name.startsWith('mate-spare-')),
+    ).toHaveLength(1);
+  });
+
+  test('keeps none of the spares an earlier mate left behind', async () => {
+    const before = withSpares(1);
+    await before.ensureSpares();
+    const [inherited] = spareNames();
+
+    // A roll is how the sandbox image, the model and the ref change, and
+    // nothing on a spare records which of them it was built from.
+    const after = withSpares(1);
+    await after.ensureSpares();
+    await until(() => !fake.sandboxes.has(inherited ?? ''));
+    expect(spareNames()).toHaveLength(1);
+    expect(spareNames()[0]).not.toBe(inherited);
+  });
+
+  test('will not hand out a spare whose pod has gone', async () => {
+    const pool = withSpares(1);
+    await pool.ensureSpares();
+    const [name] = spareNames();
+    fake.markNotReady(name ?? '');
+
+    // There is a spare, and it is no use: the thread builds its own.
+    const ref = await pool.mint(THREAD);
+    expect(ref.name).toBe(NAME);
+    expect(ref.source).toBe('fresh');
+  });
+
+  test('a refresh that fails takes the spare out rather than the thread', async () => {
+    const pool = withSpares(1);
+    await pool.ensureSpares();
+    const [spare] = spareNames();
+    fake.commandFails = 'fatal: could not read from remote repository';
+
+    const ref = await pool.mint(THREAD);
+    // The slow path, because a current checkout is the thing a spare is only
+    // worth having if it can be given.
+    expect(ref).toEqual({ name: NAME, thread: THREAD, source: 'fresh' });
+    expect(
+      log.of('could not bring an adopted spare up to date; minting one'),
+    ).toHaveLength(1);
+    await until(() => !fake.sandboxes.has(spare ?? ''));
+  });
+
+  test('a spare that cannot be deleted still stops being the thread', async () => {
+    const pool = withSpares(1);
+    await pool.ensureSpares();
+    const [spare] = spareNames();
+    fake.commandFails = 'fatal: could not read from remote repository';
+    fake.deleteFails = true;
+
+    await pool.mint(THREAD);
+    // The delete is what is wanted and the labels are what is load-bearing:
+    // a teardown that does not land must not leave a second object the next
+    // message could be handed instead of the one that was just built for it.
+    const wearing = [...fake.sandboxes.entries()]
+      .filter(([, o]: any) => o.metadata.labels['lolwtf.ca/thread'])
+      .map(([name]) => name);
+    expect(wearing).toEqual([NAME]);
+    const condemned = fake.sandboxes.get(spare ?? '') as Record<string, any>;
+    expect(condemned.metadata.labels['lolwtf.ca/spare']).toBe('condemned');
+    expect(await pool.list()).toEqual([
+      { name: NAME, thread: THREAD, turnInFlight: false },
+    ]);
+  });
+
+  test('a thread whose sandbox is terminating gets a new one, not a refusal', async () => {
+    const pool = withSpares(1);
+    await pool.ensureSpares();
+    const adopted = await pool.mint(THREAD);
+    await until(() => spareNames().length === 1);
+    fake.terminating(adopted.name);
+
+    // The object still carries the thread's labels, and it is on its way out:
+    // what the thread wants is a sandbox, not the one it is waiting to lose,
+    // which is the hard failure `reuse` would raise on being handed it.
+    const again = await pool.mint(THREAD);
+    expect(again.name).not.toBe(adopted.name);
+    expect(again.source).toBe('spare');
   });
 });
 

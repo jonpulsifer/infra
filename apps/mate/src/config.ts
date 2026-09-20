@@ -47,6 +47,14 @@ export interface SandboxConfig {
   readonly model: string;
   /** How long one turn may run before the harness call is abandoned. */
   readonly turnTimeoutMs: number;
+  /**
+   * How many sandboxes are kept warm ahead of the threads that will ask for
+   * one. Zero is the pool switched off, and that is what mate runs with
+   * unless its Deployment says otherwise: a spare holds a whole sandbox's
+   * memory while it waits, out of the same room on the node that
+   * `MATE_MAX_CONCURRENT` is already spending.
+   */
+  readonly spares: number;
   /** How a sandbox reads a credential, or `null` when it holds none. */
   readonly credentials: CredentialsConfig | null;
 }
@@ -109,12 +117,15 @@ function slackIds(env: Env, key: string): ReadonlySet<string> {
   return set;
 }
 
-function integer(env: Env, key: string, fallback: number): number {
+/** `min` is 1 for every cap, and 0 for the one setting whose off position is a number. */
+function integer(env: Env, key: string, fallback: number, min = 1): number {
   const raw = env[key]?.trim();
   if (!raw) return fallback;
   const value = Number(raw);
-  if (!Number.isInteger(value) || value < 1) {
-    throw new ConfigError(`${key} must be a positive integer, got ${raw}`);
+  if (!Number.isInteger(value) || value < min) {
+    throw new ConfigError(
+      `${key} must be an integer of at least ${min}, got ${raw}`,
+    );
   }
   return value;
 }
@@ -173,6 +184,7 @@ export function readSandboxConfig(env: Env): SandboxConfig {
     checkoutRef: text(env, 'MATE_CHECKOUT_REF', 'main'),
     model: text(env, 'MATE_SANDBOX_MODEL', 'opencode-go/qwen3.8-flash'),
     turnTimeoutMs,
+    spares: integer(env, 'MATE_SPARES', 0, 0),
     credentials: credentials(env),
   };
 }

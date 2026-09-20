@@ -4,21 +4,13 @@ import {
   type ObservableGauge,
 } from '@opentelemetry/api';
 import type { SessionStartLimit } from './guard.ts';
-import type { StopReason } from './sandbox.ts';
+import type { SandboxSource, StopReason } from './sandbox.ts';
 
 /** How a turn ended, `sandbox-died` being the one the harness never reports. */
 export type TurnEnd = StopReason | 'sandbox-died';
 
 /** How far getting a thread a usable sandbox got. */
 export type MintResult = 'ok' | 'mint-failed' | 'attach-failed';
-
-/**
- * Whether the thread's sandbox was built for it or was already standing under
- * its name when it asked. The two are separate series because a cold start is
- * the number being chased and an `adopted` one never paid it: averaging them
- * would hide exactly the cost a warm-spare pool would be built to remove.
- */
-export type SandboxSource = 'fresh' | 'adopted';
 
 /**
  * The durations behind one `minted` call, present only for the steps that

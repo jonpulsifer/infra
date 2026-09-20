@@ -97,6 +97,7 @@ describe('config from the environment', () => {
         checkoutRef: 'main',
         model: 'opencode-go/qwen3.8-flash',
         turnTimeoutMs: 45 * 60_000,
+        spares: 0,
         credentials: null,
       },
     });
@@ -129,5 +130,23 @@ describe('config from the environment', () => {
     expect(() =>
       readSandboxConfig({ ...kube, MATE_GITHUB_TOKEN_REF: 'the-token-itself' }),
     ).toThrow('must be an op:// reference');
+  });
+
+  // The pool ships off, and a spare holds a whole sandbox's memory: switching
+  // it on is a Deployment change somebody makes on purpose.
+  test('keeps no warm spares unless a number is given', () => {
+    const kube = {
+      ...minimal,
+      MATE_SANDBOXES: 'kube',
+      MATE_SANDBOX_IMAGE: 'ghcr.io/jonpulsifer/mate-sandbox:latest',
+    };
+    const read = (env: Record<string, string>) =>
+      readConfig(env).sandboxes as { sandbox: { spares: number } };
+    expect(read(kube).sandbox.spares).toBe(0);
+    expect(read({ ...kube, MATE_SPARES: '1' }).sandbox.spares).toBe(1);
+    expect(read({ ...kube, MATE_SPARES: '0' }).sandbox.spares).toBe(0);
+    expect(() => readConfig({ ...kube, MATE_SPARES: '-1' })).toThrow(
+      'MATE_SPARES',
+    );
   });
 });
