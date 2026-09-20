@@ -132,11 +132,17 @@ export class FakeKube {
   readonly pods = new Map<string, Json>();
   readonly execs: ExecRecord[] = [];
   readonly patches: Patched[] = [];
+  /** Every request, so a test can pin what a path asks for and what it does not. */
+  readonly requests: { method: string; path: string; query: string }[] = [];
   script: AgentScript = {};
   /** When false, a minted Sandbox stays not-Ready until `markReady` is called. */
   readyOnCreate = true;
   /** Answers every PATCH 403, the way a Role without `patch` does. */
   patchFails = false;
+  /** Answers every DELETE 500, the way an apiserver having a bad day does. */
+  deleteFails = false;
+  /** Fails a one-shot command, which is how the refresh exec is made to lose. */
+  commandFails: string | null = null;
   readonly namespace = 'mate';
 
   private readonly server: Server<SocketData>;
@@ -161,7 +167,17 @@ export class FakeKube {
           // Anything that is not the ACP harness is a one-shot command: it
           // exits and the apiserver closes the stream behind it.
           if (!ws.data.exec.command.includes('acp')) {
-            ws.send(frame(STATUS, JSON.stringify({ status: 'Success' })));
+            const said = fake.commandFails;
+            ws.send(
+              frame(
+                STATUS,
+                JSON.stringify(
+                  said
+                    ? { status: 'Failure', message: said }
+                    : { status: 'Success' },
+                ),
+              ),
+            );
             ws.close(1000, 'command completed');
           }
         },
@@ -210,6 +226,26 @@ export class FakeKube {
     this.emit(this.sandboxWatchers, 'MODIFIED', sandbox);
   }
 
+  /** Marks a Sandbox terminating without removing it, the way a finalizer does. */
+  terminating(name: string): void {
+    const sandbox = this.sandboxes.get(name);
+    if (!sandbox) throw new Error(`no sandbox ${name}`);
+    (sandbox.metadata as Json).deletionTimestamp = new Date().toISOString();
+    this.bump(sandbox);
+    this.emit(this.sandboxWatchers, 'MODIFIED', sandbox);
+  }
+
+  /** Takes a Sandbox's Ready condition away, the way a pod going under does. */
+  markNotReady(name: string): void {
+    const sandbox = this.sandboxes.get(name);
+    if (!sandbox) throw new Error(`no sandbox ${name}`);
+    (sandbox.status as Json).conditions = [
+      { type: 'Ready', status: 'False', reason: 'PodNotRunning' },
+    ];
+    this.bump(sandbox);
+    this.emit(this.sandboxWatchers, 'MODIFIED', sandbox);
+  }
+
   /** Deletes the pod out from under a live Sandbox, the way a node eviction would. */
   killPod(name: string): void {
     const pod = this.pods.get(name);
@@ -250,6 +286,11 @@ export class FakeKube {
   ): Response | Promise<Response> | undefined {
     const url = new URL(request.url);
     const path = url.pathname;
+    this.requests.push({
+      method: request.method,
+      path,
+      query: url.searchParams.toString(),
+    });
     const sandboxes = `/apis/agents.x-k8s.io/v1beta1/namespaces/${this.namespace}/sandboxes`;
     const pods = `/api/v1/namespaces/${this.namespace}/pods`;
 
@@ -285,6 +326,9 @@ export class FakeKube {
     const sandbox = this.sandboxes.get(name);
     if (request.method === 'DELETE') {
       if (!sandbox) return status(404, `no sandbox ${name}`, 'NotFound');
+      if (this.deleteFails) {
+        return status(500, `sandboxes "${name}" could not be deleted`, 'Error');
+      }
       this.sandboxes.delete(name);
       this.killPod(name);
       this.emit(this.sandboxWatchers, 'DELETED', sandbox);

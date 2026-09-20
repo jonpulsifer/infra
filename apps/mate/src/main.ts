@@ -319,10 +319,9 @@ process.on('SIGINT', () => void shutdown('SIGINT'));
 process.on('SIGTERM', () => void shutdown('SIGTERM'));
 
 /**
- * The warm pool's cadence, and the only thing that renews a spare's short
- * TTL: mate stopping is therefore what hands the spares back. With
- * `MATE_SPARES` unset the pass returns without asking the apiserver anything,
- * so this timer costs a bot with no pool configured nothing.
+ * The warm pool's cadence, which is also the renewal `SPARE_TTL_MS` is sized
+ * against. With `MATE_SPARES` unset the pass returns without asking the
+ * apiserver anything, so this timer costs a bot with no pool nothing.
  */
 const sweep = () =>
   void sandboxes

@@ -164,6 +164,8 @@ export class StubSandboxes implements Sandboxes {
 
   async mint(thread: ThreadRef): Promise<SandboxRef> {
     this.mints += 1;
+    // Ahead of `mintFails`, and faithfully so: a thread that takes a spare
+    // never reaches the path that a broken mint breaks.
     const spare = this.warm.shift();
     if (spare) {
       // The whole of what a spare buys: the wait a fresh one pays is one
