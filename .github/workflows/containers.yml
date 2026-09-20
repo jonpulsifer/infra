@@ -6,16 +6,62 @@ on:
   pull_request:
     branches:
       - main
+  # The reconcile path. A push only ever builds what that push changed, so any
+  # run that does not finish leaves its images pinned at the build before it,
+  # with nothing later that would ever build them again. `queue: max` below
+  # stops the cancellation that was causing that; this catches every other way
+  # a build goes missing — a red build nobody re-ran, a runner that vanished, a
+  # human who cancelled the wrong run — and costs a day of latency instead of a
+  # pin that is stale forever. It builds nothing on a day when nothing is
+  # stale, which is most days.
+  schedule:
+    - cron: "17 9 * * *"
+  workflow_dispatch:
+    inputs:
+      images:
+        description: >-
+          Images to build, space separated. Empty means whatever is stale.
+        required: false
+        default: ""
 
-# Cancel superseded runs on a pull request instead of letting them pile up.
-# **Never on `main`**: this workflow builds from a changed-files matrix, so a
-# cancelled push run's images are never built by any later one — the next
-# commit's matrix contains only what *it* changed. A push landing seconds after
-# another would otherwise silently drop the earlier commit's images, and the
-# only symptom is a stale digest nobody bumped. Queue them instead.
+# Queue runs in this group. Never drop one.
+#
+# **The diagnosis this comment has always carried is correct.** This workflow
+# builds from a changed-files matrix, so a cancelled run's images are never
+# built by any later one — the next commit's matrix contains only what *it*
+# changed. A push landing seconds after another silently drops the earlier
+# commit's images, and the only symptom is a stale digest nobody bumped.
+#
+# **The remedy it used to name — `cancel-in-progress: false` on `main` — does
+# not do that, and never did.** `cancel-in-progress` governs a run that has
+# already started. It says nothing about one still waiting for the group. Of
+# `concurrency`, GitHub documents: "By default, any existing `pending` job or
+# workflow in the same concurrency group will be canceled and the new queued
+# job or workflow will take its place." That sentence is not conditioned on
+# `cancel-in-progress`, and the measurement agrees. 28 of the last 100 runs of
+# this workflow on `main` ended `cancelled`, each reporting `total_count: 0`
+# jobs — they never started one, so they built nothing. Every continuous
+# delivery digest merge is itself a push to `main`, which is what makes the
+# collision routine rather than rare: six runs created between 17:14:38 and
+# 17:15:39 on 2026-09-20 each cancelled the one before it, one to two seconds
+# after the next was created. `mate-sandbox` sat on its pre-toolset digest for
+# two and a half hours that way, and was only ever built because a human
+# pressed re-run.
+#
+# `queue: max` is the setting that actually holds the earlier run: up to 100
+# runs wait in the group and start in the order they began waiting, instead of
+# evicting each other. Measured on a probe branch of this repository — three
+# pushes two seconds apart behind a held run left three runs simultaneously
+# `pending` and cancelled none of them.
+#
+# It cannot be combined with `cancel-in-progress: true`, which GitHub rejects
+# as a workflow validation error, so pull requests no longer cancel a
+# superseded run and queue behind it instead. That is the whole price, and it
+# is close to nothing: 3 of the last 133 pull-request runs were ever cancelled
+# as superseded, against the 28 in 100 this stops dropping on `main`.
 concurrency:
   group: containers-${{ github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  queue: max
 
 permissions:
   contents: read
@@ -29,13 +75,71 @@ jobs:
       has_changes: ${{ steps.set-matrix.outputs.has_changes }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          # The reconcile path asks which commit last touched each image's
+          # inputs. A depth-1 clone does not refuse that question, it answers
+          # it with the only commit it has — so every image would read as
+          # stale and the schedule would rebuild the world nightly. Only the
+          # reconcile path pays for the full history; a push still gets the
+          # shallow clone it has always had.
+          #
+          # Quoted, because GitHub expressions treat the number 0 as false and
+          # `cond && 0 || 1` is therefore always 1.
+          fetch-depth: ${{ (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && '0' || '1' }}
+
+      # Two ways to fill the matrix, and exactly one of them runs. A push or a
+      # pull request builds what it changed, unchanged from before this job
+      # learned anything else. A schedule or a dispatch builds what is stale,
+      # or what an operator named.
       - id: changed
+        if: github.event_name == 'push' || github.event_name == 'pull_request'
         uses: tj-actions/changed-files@24d32ffd492484c1d75e0c0b894501ddb9d30d62 # v47
         with:
           separator: "\n"
+
+      - id: stale
+        if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+        env:
+          REGISTRY_OWNER: ${{ github.repository_owner }}
+          REQUESTED: ${{ github.event.inputs.images }}
+        run: |
+          set -euo pipefail
+
+          # A digest that has been built and is waiting on its delivery pull
+          # request is a build that already got here, so the staleness read has
+          # to see it or the schedule would order a rebuild on top of it every
+          # night until that pull request merged. Same refspec and same
+          # namespace the delivery step uses, so both read the queue the same
+          # way. A wildcard matching nothing is a success, so a repository with
+          # no digest branch open stays quiet while a network failure is loud.
+          git fetch --no-tags origin "+refs/heads/cd/*:refs/cd/queued/*"
+
+          # An operator who named images gets those images. Naming them is the
+          # override for the case this cannot detect — an image whose
+          # provenance is unreadable, which `stale` deliberately refuses to
+          # guess about.
+          # `:-` because a `schedule` run declares this variable from an
+          # expression with nothing behind it, and the step runs under `set
+          # -u`. The same reason the delivery step below reads `${CD_ACTOR:-}`.
+          requested="${REQUESTED:-}"
+          if [ -n "${requested// /}" ]; then
+            echo "Building images named by hand: $requested"
+            echo "images=$requested" >>"$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          images=$(bash .github/scripts/cd-stale-images.sh stale | tr '\n' ' ')
+          if [ -z "${images// /}" ]; then
+            echo "Every deployed image is pinned at a build of the newest commit touching it."
+          else
+            echo "::notice::Rebuilding images whose pin is behind main: $images"
+          fi
+          echo "images=$images" >>"$GITHUB_OUTPUT"
+
       - id: set-matrix
         env:
           CHANGED_FILES: ${{ steps.changed.outputs.all_changed_files }}
+          BUILD_IMAGES: ${{ steps.stale.outputs.images }}
         run: bash .github/scripts/detect-containers.sh
 
   # The digest rewrite and the ancestry guard it defers to live in
@@ -44,13 +148,20 @@ jobs:
   # `paths:` filter, so the test gates every pull request, including one that
   # only edits the step that calls it.
   #
-  # Two suites, because the two ways this has broken are different. The unit
+  # Three suites, because the ways this has broken are different. The unit
   # suite asks whether the script decides correctly. The step suite runs the
   # delivery step itself, against a git remote on disk and stubbed `gh` and
   # `curl`, because the failure that survived the first version of this guard
   # was not a wrong decision — it was a correct decision taken on half its
   # inputs, which only running the step can catch. It reads the step out of
   # this file with `yq`, so the two cannot drift apart.
+  #
+  # The third covers the read that points the other way: whether what is
+  # already pinned is behind `main`. That one decides what the nightly
+  # reconcile rebuilds, so its expensive mistake is the opposite one — an image
+  # wrongly called stale is rebuilt and republished every night forever, which
+  # is why its suite spends most of its assertions on the cases that must come
+  # back `current`.
   cd-guard:
     runs-on: ubuntu-latest
     steps:
@@ -64,6 +175,7 @@ jobs:
           install_args: yq
       - run: bash .github/scripts/cd-digest-update_test.sh
       - run: bash .github/scripts/cd-digest-step_test.sh
+      - run: bash .github/scripts/cd-stale-images_test.sh
 
   build:
     needs: detect
@@ -123,7 +235,10 @@ jobs:
         with:
           # PRs validate images but never publish them. Spell the publishing
           # authority positively so adding another event cannot make it push.
-          push: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+          # The reconcile events are named here because a rebuild that does not
+          # publish heals nothing; a dispatch from any other ref still only
+          # validates.
+          push: ${{ (github.event_name == 'push' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main' }}
           context: ${{ matrix.context }}
           file: ${{ matrix.file }}
           build-args: ${{ matrix.build-args }}
@@ -171,14 +286,14 @@ jobs:
       - name: Mint a continuous-delivery App token
         id: cd-app-token
         if: >-
-          github.event_name == 'push' && github.ref == 'refs/heads/main'
+          (github.event_name == 'push' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main'
           && vars.CD_APP_ID != ''
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
         with:
           app-id: ${{ vars.CD_APP_ID }}
           private-key: ${{ secrets.CD_APP_PRIVATE_KEY }}
       - name: Update manifest digest for selective continuous delivery
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        if: (github.event_name == 'push' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main'
         env:
           IMAGE_NAME: ${{ matrix.image }}
           DIGEST: ${{ steps.push.outputs.digest }}
