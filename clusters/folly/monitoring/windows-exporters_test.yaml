@@ -115,15 +115,21 @@ tests:
         values: 92x40
       - series: 'ohm_superio_revolutions_per_minute{instance="tallboy",hardware="Nuvoton",sensor="Fan #1",hw_instance="0",job="windows-exporter"}'
         values: 0x40
-      - series: 'ohm_storage_celsius{instance="tallboy",hardware="Samsung 990 PRO",sensor="Temperature",hw_instance="0",job="windows-exporter"}'
+      - series: 'ohm_hdd_celsius{instance="tallboy",hardware="Samsung 990 PRO",sensor="Temperature",hw_instance="0",job="windows-exporter"}'
         values: 75x40
+      # Static SMART thresholds, reported as sensors in the same family. They
+      # are always above the alert threshold and must never reach it.
+      - series: 'ohm_hdd_celsius{instance="tallboy",hardware="Samsung 990 PRO",sensor="Critical Temperature",hw_instance="0",job="windows-exporter"}'
+        values: 85x40
+      - series: 'ohm_hdd_celsius{instance="tallboy",hardware="Samsung 990 PRO",sensor="Warning Temperature",hw_instance="0",job="windows-exporter"}'
+        values: 82x40
       # atomic is idle with a semi-passive fan curve: the fan is stopped and
       # that is exactly what should happen.
       - series: 'ohm_cpu_celsius{instance="atomic",hardware="Intel Core i7",sensor="CPU Package",hw_instance="0",job="windows-exporter"}'
         values: 40x40
       - series: 'ohm_superio_revolutions_per_minute{instance="atomic",hardware="ITE",sensor="Fan #1",hw_instance="0",job="windows-exporter"}'
         values: 0x40
-      - series: 'ohm_storage_celsius{instance="atomic",hardware="Crucial MX500",sensor="Temperature",hw_instance="0",job="windows-exporter"}'
+      - series: 'ohm_hdd_celsius{instance="atomic",hardware="Crucial MX500",sensor="Temperature",hw_instance="0",job="windows-exporter"}'
         values: 35x40
     alert_rule_test:
       - eval_time: 11m

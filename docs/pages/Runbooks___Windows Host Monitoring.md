@@ -63,6 +63,19 @@ tags:: runbook, monitoring, windows
 - # If temperatures or fans are missing
 	- The sensor rules only fire on series that exist, so a host without OhmGraphite is silent rather than alarming. Check the port answers and that `ohm_` series are present (see Quick checks).
 	- A GPU that reports utilisation but no temperature is the expected split: utilisation comes from `windows_exporter`'s `gpu` collector, temperature from OhmGraphite. Missing temperature means OhmGraphite, missing utilisation means the `gpu` collector was never enabled.
+- # If CPU temperature and board fans are missing but the GPU and drives are fine
+	- This is Memory Integrity, not a broken install, and it is the expected state on a current Windows 11 desk. Confirmed on `tallboy` (11 Pro, build 26200) on 2026-09-20.
+	- LibreHardwareMonitor reads CPU package temperature over MSRs and SuperIO fan and voltage over LPC port I/O, and both need its ring0 kernel driver. That driver is WinRing0-derived, it is on Microsoft's vulnerable-driver blocklist, and HVCI refuses to load it. The GPU comes from NVML and drive temperatures from the Windows storage APIs, neither of which needs a driver, so those keep working and the failure looks partial rather than total.
+	- Check both switches:
+	- ```powershell
+	  Get-CimInstance -Namespace root\Microsoft\Windows\DeviceGuard -ClassName Win32_DeviceGuard |
+	    Select-Object SecurityServicesRunning, VirtualizationBasedSecurityStatus
+	  Get-ItemProperty HKLM:\SYSTEM\CurrentControlSet\Control\CI\Config -Name VulnerableDriverBlocklistEnable
+	  ```
+	- `SecurityServicesRunning` containing `2` is HVCI running. The blocklist value is `1` when on. Either one alone is enough to block the driver.
+	- The tell in the metrics is `ohm_cpu_watts` reading a flat `0` while `ohm_cpu_load_percent` is live: load comes from performance counters, package power comes from an MSR. No `ohm_cpu_celsius` series at all, and no `superio` or `motherboard` hardware, is the same symptom.
+	- There is no fix that keeps both. Turning Memory Integrity off buys CPU temperature and case-fan RPM at the cost of the protection it provides, on a desktop that also plays games and browses. `WindowsCpuTempHigh` and `WindowsFanStopped` simply never fire on a host in this state — they are written so an absent series is silent rather than wrong.
+	- The GPU is unaffected, so `WindowsGpuTempHigh` still covers the part of a gaming desk most likely to cook.
 - # If a collector is failing
 	- `WindowsCollectorFailing` fires on `windows_exporter_collector_success == 0`. A failing collector returns nothing rather than erroring the scrape, so its metrics simply vanish and every panel and rule built on them goes quiet — this alert is the only thing that notices.
 	- The usual cause is a damaged performance-counter registry. From an elevated prompt:
