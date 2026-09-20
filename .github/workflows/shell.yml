@@ -9,12 +9,18 @@ name: shell
 # So: one job that runs the mise tasks, on every path that feeds them. mise is
 # the command source of truth, and a second hand-rolled glob in YAML is how the
 # two drifted apart in the first place.
+#
+# .github/scripts/ is in that list because `mise run lint` already globs it,
+# and CI routing is an allow-list: a path no workflow claims runs no jobs at
+# all and still reports green, so the scripts CI itself depends on were the
+# ones nothing checked.
 
 on:
   push:
     branches: [main]
     paths: &paths
       - 'scripts/**'
+      - '.github/scripts/**'
       - 'dotfiles/**'
       - 'mise.toml'
       - '.github/workflows/shell.yml'

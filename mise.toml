@@ -64,6 +64,13 @@ run = "nix develop -c cargo test --locked --manifest-path apps/fml-derive-rs/Car
 description = "Test validation-impact routing"
 run = "bash .github/scripts/validation-impact_test.sh"
 
+[tasks."cd-digest:test"]
+description = "Test the continuous-delivery digest rewrite and its never-go-backwards guard"
+run = [
+  "bash .github/scripts/cd-digest-update_test.sh",
+  "bash .github/scripts/cd-digest-step_test.sh",
+]
+
 [tasks.alerts]
 description = "Firing Alertmanager alerts on every cluster (optional substring filter)"
 run = "bash scripts/alerts.sh"
