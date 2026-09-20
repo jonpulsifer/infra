@@ -27,10 +27,17 @@ REAL=/usr/local/libexec/gh
 # extension, a script it runs — inherits the token already resolved rather than
 # going back to the vault for a second copy.
 if [ -z "${GH_TOKEN:-}" ] && [ -n "${MATE_GITHUB_TOKEN_REF:-}" ]; then
-  # The bound is why `timeout` is here: `op` against a Connect host it cannot
-  # reach prints nothing and hangs, which `apps/mate/src/sandboxes.ts` spells
-  # out where it sets the same bound for git.
-  if token=$(timeout 10 op read --no-newline "$MATE_GITHUB_TOKEN_REF"); then
+  # Two ways this read fails and neither announces itself, so both are caught
+  # here rather than left to gh. `op` against a Connect host it cannot reach
+  # prints nothing and hangs, which is what `timeout` bounds and what
+  # `apps/mate/src/sandboxes.ts` spells out where it sets the same bound for
+  # git. And `op read` exits 0 on a field that exists and is blank — what a PAT
+  # looks like for the window of a manual rotation — so an empty value has to
+  # count as a failure too: exporting it makes gh print the same "please run gh
+  # auth login" it printed before this wrapper existed, and the answer an agent
+  # needs is "the field is empty", not "the wrapper is not installed".
+  if token=$(timeout 10 op read --no-newline "$MATE_GITHUB_TOKEN_REF") \
+    && [ -n "$token" ]; then
     GH_TOKEN=$token
     export GH_TOKEN
   else
