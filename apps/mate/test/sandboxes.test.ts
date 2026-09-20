@@ -74,6 +74,12 @@ function podTemplate(): Record<string, any> {
   return spec.podTemplate.spec;
 }
 
+function envOf(container: Record<string, any>): Record<string, any> {
+  return Object.fromEntries(
+    (container.env ?? []).map((e: Record<string, unknown>) => [e.name, e]),
+  );
+}
+
 async function attach(): Promise<SandboxRef> {
   const ref = await sandboxes.mint(THREAD);
   await sandboxes.attach(ref);
@@ -119,7 +125,8 @@ describe('mint', () => {
       'https://github.com/jonpulsifer/infra',
       WORKSPACE,
     ]);
-    // The clone runs as the harness uid or git refuses the tree it made.
+    // The clone runs as the harness uid so every file it writes is the
+    // agent's; the mount root above them is settled by the git env instead.
     expect(pod.initContainers[0].securityContext.runAsUser).toBe(1337);
 
     const harness = pod.containers[0];
@@ -130,9 +137,7 @@ describe('mint', () => {
       requests: { cpu: '250m', memory: '512Mi' },
       limits: { cpu: '2000m', memory: '4Gi' },
     });
-    const env = Object.fromEntries(
-      harness.env.map((e: Record<string, unknown>) => [e.name, e]),
-    );
+    const env = envOf(harness);
     expect(env.OPENCODE_API_KEY.valueFrom.secretKeyRef).toEqual({
       name: 'mate-opencode',
       key: 'OPENCODE_API_KEY',
@@ -144,6 +149,29 @@ describe('mint', () => {
       autoupdate: false,
       share: 'disabled',
     });
+  });
+
+  test('hands both containers the git config the checkout needs', async () => {
+    await sandboxes.mint(THREAD);
+    const pod = podTemplate();
+
+    // fsGroup leaves the emptyDir root uid 0 and git checks the worktree root,
+    // so without safe.directory the clone lands and every command after it
+    // dies of dubious ownership: opencode stops seeing a repository and the
+    // agent's own git calls fail. The ident is the other half — the image's
+    // agent user has none, so `git commit` would refuse to write one.
+    for (const container of [pod.initContainers[0], pod.containers[0]]) {
+      const env = envOf(container);
+      expect(env.GIT_CONFIG_COUNT.value).toBe('3');
+      expect(env.GIT_CONFIG_KEY_0.value).toBe('safe.directory');
+      expect(env.GIT_CONFIG_VALUE_0.value).toBe(WORKSPACE);
+      expect(env.GIT_CONFIG_KEY_1.value).toBe('user.name');
+      expect(env.GIT_CONFIG_VALUE_1.value).toBe('rowbutt');
+      expect(env.GIT_CONFIG_KEY_2.value).toBe('user.email');
+      expect(env.GIT_CONFIG_VALUE_2.value).toBe(
+        '22780844+rowbutt@users.noreply.github.com',
+      );
+    }
   });
 
   test('waits for the controller to report Ready', async () => {
