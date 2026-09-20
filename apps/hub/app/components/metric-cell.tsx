@@ -88,12 +88,6 @@ export function MetricCell({
         <span className="truncate text-[0.6rem] font-semibold uppercase tracking-[0.08em]">
           {label}
         </span>
-        {isLeader && (
-          <ChevronUp
-            className="h-3 w-3 shrink-0 text-slate-300"
-            aria-label="highest of the compared stations"
-          />
-        )}
       </span>
       <span className="flex items-baseline gap-1 truncate text-[1.05rem] font-bold tabular-nums text-white">
         {numberText}
@@ -101,6 +95,12 @@ export function MetricCell({
           <span className="text-[0.62rem] font-semibold text-slate-500">
             {unit}
           </span>
+        )}
+        {isLeader && (
+          <ChevronUp
+            className="h-3 w-3 shrink-0 text-slate-300"
+            aria-label="highest of the compared stations"
+          />
         )}
         {trailing}
       </span>

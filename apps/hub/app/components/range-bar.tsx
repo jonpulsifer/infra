@@ -1,3 +1,4 @@
+import { clockTimeFromEpochSeconds } from '~/lib/format-time';
 import type { MetricExtremes } from '~/lib/weatherflow/types';
 
 interface RangeBarProps {
@@ -8,12 +9,6 @@ interface RangeBarProps {
   /** Matches the panel's card colour so the marker's ring reads as a cutout. */
   ringColor?: string;
 }
-
-const clockTime = (epochSeconds: number) =>
-  new Date(epochSeconds * 1000).toLocaleTimeString([], {
-    hour: '2-digit',
-    minute: '2-digit',
-  });
 
 /**
  * Where the current temperature sits inside the last 24 hours: a cold-to-warm
@@ -58,8 +53,8 @@ export function RangeBar({
         )}
       </div>
       <div className="flex justify-between text-[0.6rem] tabular-nums text-slate-500">
-        <span>{clockTime(extremes.minAt)}</span>
-        <span>{clockTime(extremes.maxAt)}</span>
+        <span>{clockTimeFromEpochSeconds(extremes.minAt)}</span>
+        <span>{clockTimeFromEpochSeconds(extremes.maxAt)}</span>
       </div>
     </div>
   );

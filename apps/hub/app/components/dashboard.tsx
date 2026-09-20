@@ -1,6 +1,7 @@
 import { AlertCircle } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { useWeather } from '~/hooks/use-weather';
+import { clockTime } from '~/lib/format-time';
 import { stationAccent } from '~/lib/station-accent';
 import { computeLeaders } from '~/lib/weatherflow/leader';
 import { DevControls } from './DevControls';
@@ -54,36 +55,22 @@ export default function Dashboard() {
                   weekday: 'short',
                   month: 'short',
                   day: 'numeric',
-                  year: 'numeric',
                 })
               : '---, --- --'}
           </span>
         </div>
 
-        <div className="absolute left-1/2 -translate-x-1/2 bg-clip-text text-[1.35rem] font-black tracking-wider tabular-nums text-transparent [background-image:linear-gradient(to_right,#60a5fa,#c084fc,#f472b6)] sm:text-[1.65rem]">
-          <span className="sm:hidden">
-            {currentTime
-              ? currentTime.toLocaleTimeString([], {
-                  hour: '2-digit',
-                  minute: '2-digit',
-                })
-              : '--:--'}
-          </span>
-          <span className="hidden sm:inline">
-            {currentTime
-              ? currentTime.toLocaleTimeString([], {
-                  hour: '2-digit',
-                  minute: '2-digit',
-                  second: '2-digit',
-                })
-              : '--:--:--'}
-          </span>
+        <div className="absolute left-1/2 -translate-x-1/2 text-[1.4rem] font-bold tracking-[0.04em] tabular-nums text-slate-100 sm:text-[1.7rem]">
+          {currentTime ? clockTime(currentTime) : '--:--'}
         </div>
 
         <div className="flex items-center gap-3">
           {spread != null && (
-            <span className="hidden text-[0.64rem] font-bold uppercase tracking-wide tabular-nums text-slate-500 sm:inline">
-              {spread.toFixed(1)}° spread
+            <span className="hidden items-baseline gap-1.5 text-[0.64rem] font-bold uppercase tracking-wide text-slate-500 sm:inline-flex">
+              Spread
+              <span className="tabular-nums text-slate-300">
+                {spread.toFixed(1)}°
+              </span>
             </span>
           )}
           {(error || fetchError) && (
@@ -98,7 +85,7 @@ export default function Dashboard() {
 
       <main className="min-h-0 flex-1 overflow-y-auto pb-[env(safe-area-inset-bottom)] sm:overflow-hidden sm:pb-0">
         {stations.length > 0 && now != null ? (
-          <div className="flex min-h-full flex-col gap-px bg-white/[0.07] sm:flex-row">
+          <div className="flex min-h-full flex-col gap-px bg-white/[0.07] sm:h-full sm:min-h-0 sm:flex-row">
             {stations.map((station, index) => {
               const temp = station.observation?.temperature;
               const other = stations.length === 2 ? stations[1 - index] : null;

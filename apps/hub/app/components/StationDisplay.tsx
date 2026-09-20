@@ -11,6 +11,7 @@ import {
   X,
   Zap,
 } from 'lucide-react';
+import { clockTimeFromEpochSeconds } from '~/lib/format-time';
 import type { LeaderMap } from '~/lib/weatherflow/leader';
 import type {
   StationHistory,
@@ -73,10 +74,7 @@ function getFreshness(
     return { dotClass: 'bg-slate-500', text: 'No data' };
   }
   const ageMinutes = (now / MS_PER_SECOND - obsTimestamp) / 60;
-  const updated = new Date(obsTimestamp * MS_PER_SECOND).toLocaleTimeString(
-    [],
-    { hour: '2-digit', minute: '2-digit' },
-  );
+  const updated = clockTimeFromEpochSeconds(obsTimestamp);
   if (ageMinutes < 3) {
     return { dotClass: 'bg-emerald-400', text: `Updated ${updated}` };
   }
@@ -235,10 +233,10 @@ export function StationDisplay({
         accent={accent}
         gradientId={`spark-${index}`}
         label={`${label} temperature over the last 24 hours`}
-        className="h-16 min-h-0 flex-1 sm:h-auto"
+        className="h-24 sm:h-auto sm:max-h-48 sm:min-h-12 sm:flex-1"
       />
 
-      <div className="grid shrink-0 grid-cols-2 gap-x-4 gap-y-3 sm:grid-cols-4">
+      <div className="mt-auto grid shrink-0 grid-cols-2 gap-x-4 gap-y-3 sm:grid-cols-4">
         <MetricCell
           icon={<Droplets className={ICON} />}
           label="Humidity"
