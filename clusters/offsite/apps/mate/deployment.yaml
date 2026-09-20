@@ -170,7 +170,7 @@ spec:
             # unanchored sed when the image is named without a digest beside
             # it, which would stamp this digest over mate's own.
             - name: MATE_SANDBOX_IMAGE
-              value: ghcr.io/jonpulsifer/mate-sandbox:latest@sha256:6f135be2df9ddf2cca529e845b3325cba5c6e72c8587c1ce48ec30bd5b10cbac
+              value: ghcr.io/jonpulsifer/mate-sandbox:latest@sha256:842e34469b9258056971085bdecc06334fb517390d1c0dcb9395efc17d33ad94
             # Gateway session info (session id, resume URL, sequence) lands
             # here so a container restart inside the same pod resumes instead
             # of spending an identify from the daily budget. An emptyDir is
