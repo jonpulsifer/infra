@@ -1,0 +1,163 @@
+# Desired state for the Windows side of the desk: the applications mise has no
+# business owning, and the OS settings that make the rest of the bootstrap
+# possible. Everything else -- eza, fzf, bat, ripgrep, fd, delta, gh, zoxide,
+# kubectl -- comes from mise, the same source macOS and NixOS use.
+#
+# Apply with:  winget configure --file configuration.winget
+# Preview with: winget configure --file configuration.winget --what-if
+#
+# v3 schema; needs winget >= 1.11, which installs the dscv3 processor itself.
+# OS settings are expressed as native Microsoft.Windows/Registry resources
+# rather than the adapted Microsoft.Windows.Developer/* ones: the native
+# resources need no PowerShell module bootstrap and evaluate in seconds instead
+# of minutes.
+$schema: https://raw.githubusercontent.com/PowerShell/DSC/main/schemas/2023/08/config/document.json
+metadata:
+  winget:
+    processor:
+      identifier: dscv3
+resources:
+
+# --- OS settings ------------------------------------------------------------
+
+# Load-bearing, and it has to land before deploy-dotfiles.ps1 runs: without
+# Developer Mode, creating a symlink requires an elevated process, and the
+# whole deploy is symlinks.
+- type: Microsoft.Windows/Registry
+  name: DeveloperMode
+  properties:
+    keyPath: HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\AppModelUnlock
+    valueName: AllowDevelopmentWithoutDevLicense
+    valueData:
+      DWord: 1
+    _exist: true
+  metadata:
+    winget:
+      securityContext: elevated
+    description: Developer Mode, so a non-elevated shell can create symlinks
+
+- type: Microsoft.Windows/Registry
+  name: LongPaths
+  properties:
+    keyPath: HKLM\SYSTEM\CurrentControlSet\Control\FileSystem
+    valueName: LongPathsEnabled
+    valueData:
+      DWord: 1
+    _exist: true
+  metadata:
+    winget:
+      securityContext: elevated
+    description: Win32 long path support
+
+- type: Microsoft.Windows/Registry
+  name: ShowFileExtensions
+  properties:
+    keyPath: HKCU\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\Advanced
+    valueName: HideFileExt
+    valueData:
+      DWord: 0
+    _exist: true
+  metadata:
+    description: Explorer shows file extensions
+
+- type: Microsoft.Windows/Registry
+  name: ShowHiddenFiles
+  properties:
+    keyPath: HKCU\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\Advanced
+    valueName: Hidden
+    valueData:
+      DWord: 1
+    _exist: true
+  metadata:
+    description: Explorer shows hidden files
+
+# --- Shell and terminal -----------------------------------------------------
+
+- type: Microsoft.WinGet/Package
+  name: PowerShell
+  properties:
+    id: Microsoft.PowerShell
+    source: winget
+    useLatest: true
+  metadata:
+    winget:
+      securityContext: elevated
+    description: PowerShell 7 -- the shell this desk actually uses
+
+- type: Microsoft.WinGet/Package
+  name: WindowsTerminal
+  properties:
+    id: Microsoft.WindowsTerminal
+    source: winget
+    useLatest: true
+  metadata:
+    description: Windows Terminal
+
+# --- Tooling ----------------------------------------------------------------
+
+- type: Microsoft.WinGet/Package
+  name: Git
+  properties:
+    id: Git.Git
+    source: winget
+    useLatest: true
+  metadata:
+    winget:
+      securityContext: elevated
+    description: Git for Windows -- needed to clone the repo this file lives in
+
+# Portable zip installer, user scope. mise then owns every other CLI tool.
+- type: Microsoft.WinGet/Package
+  name: Mise
+  properties:
+    id: jdx.mise
+    source: winget
+    useLatest: true
+  metadata:
+    description: mise -- the source of truth for every other CLI tool
+
+- type: Microsoft.WinGet/Package
+  name: WSL
+  properties:
+    id: Microsoft.WSL
+    source: winget
+    useLatest: true
+  metadata:
+    winget:
+      securityContext: elevated
+    description: WSL itself; the distro is bootstrap.ps1 -WithWsl's business
+
+# --- Desktop ----------------------------------------------------------------
+
+- type: Microsoft.WinGet/Package
+  name: OnePassword
+  properties:
+    id: AgileBits.1Password
+    source: winget
+    useLatest: true
+  metadata:
+    description: 1Password -- SSH agent and commit signing (MSIX, user scope)
+
+- type: Microsoft.WinGet/Package
+  name: OnePasswordCLI
+  properties:
+    id: AgileBits.1Password.CLI
+    source: winget
+    useLatest: true
+  metadata:
+    description: 1Password CLI
+
+- type: Microsoft.WinGet/Package
+  name: VSCode
+  properties:
+    id: Microsoft.VisualStudioCode
+    source: winget
+    useLatest: true
+  metadata:
+    description: Visual Studio Code
+
+# CaskaydiaCove Nerd Font is not in the winget catalogue -- winget's font
+# support does not cover the ryanoasis patched families, and Microsoft's own
+# Cascadia Code package is absent too. Install-NerdFont.ps1 handles it instead,
+# per-user and idempotent, so the terminal font matches the one ghostty uses on
+# macOS and NixOS.

@@ -1,0 +1,69 @@
+{
+    "$help": "https://aka.ms/terminal-documentation",
+    "$schema": "https://aka.ms/terminal-profiles-schema",
+
+    "//": "Deliberately minimal. No profiles list: Terminal generates PowerShell and WSL profiles dynamically, and their GUIDs differ per machine, so hardcoding them here would produce a settings file that only works on one box. Everything shared lives in profiles.defaults. Argonaut and CaskaydiaCove match the ghostty config the other platforms use.",
+
+    "defaultProfile": "{574e775e-4f2a-5b96-ac1e-a2962a402336}",
+
+    "copyOnSelect": true,
+    "copyFormatting": "none",
+    "startingDirectory": null,
+    "useAcrylicInTabRow": true,
+    "theme": "dark",
+
+    "profiles": {
+        "defaults": {
+            "colorScheme": "Argonaut",
+            "font": {
+                "face": "CaskaydiaCove Nerd Font",
+                "size": 12
+            },
+            "opacity": 90,
+            "useAcrylic": true,
+            "padding": "8",
+            "scrollbarState": "hidden",
+            "historySize": 100000,
+            "antialiasingMode": "grayscale",
+            "cursorShape": "bar"
+        }
+    },
+
+    "schemes": [
+        {
+            "name": "Argonaut",
+            "background": "#0E1019",
+            "foreground": "#FFFAF4",
+            "cursorColor": "#FF0018",
+            "selectionBackground": "#002A3B",
+            "black": "#232323",
+            "red": "#FF000F",
+            "green": "#8CE10B",
+            "yellow": "#FFB900",
+            "blue": "#008DF8",
+            "purple": "#6D43A6",
+            "cyan": "#00D8EB",
+            "white": "#FFFFFF",
+            "brightBlack": "#444444",
+            "brightRed": "#FF2740",
+            "brightGreen": "#ABE15B",
+            "brightYellow": "#FFD242",
+            "brightBlue": "#0092FF",
+            "brightPurple": "#9A5FEB",
+            "brightCyan": "#67FFF0",
+            "brightWhite": "#FFFFFF"
+        }
+    ],
+
+    "actions": [
+        { "command": { "action": "splitPane", "split": "right", "splitMode": "duplicate" }, "keys": "alt+shift+plus" },
+        { "command": { "action": "splitPane", "split": "down", "splitMode": "duplicate" }, "keys": "alt+shift+-" },
+        { "command": { "action": "copy", "singleLine": false }, "keys": "ctrl+shift+c" },
+        { "command": "paste", "keys": "ctrl+shift+v" },
+        { "command": "find", "keys": "ctrl+shift+f" },
+        { "command": { "action": "moveFocus", "direction": "left" }, "keys": "alt+left" },
+        { "command": { "action": "moveFocus", "direction": "right" }, "keys": "alt+right" },
+        { "command": { "action": "moveFocus", "direction": "up" }, "keys": "alt+up" },
+        { "command": { "action": "moveFocus", "direction": "down" }, "keys": "alt+down" }
+    ]
+}

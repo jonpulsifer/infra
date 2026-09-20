@@ -1,0 +1,22 @@
+# ~/.gitconfig on Windows.
+#
+# The shared config is not forked. Git on Windows reads ~/.config/git/config the
+# same way it does on Unix, deploy-dotfiles.ps1 symlinks the repo's copy there,
+# and this file includes it and then overrides only what genuinely differs.
+# Later values win in git, so everything below the include is the Windows delta.
+
+[include]
+	path = ~/.config/git/config
+
+[core]
+	# dotfiles/.gitattributes pins eol=lf for this repo, but autocrlf=true is
+	# the Git for Windows installer default and would still rewrite every other
+	# repo on checkout. LF everywhere, on every platform.
+	autocrlf = false
+
+[gpg "ssh"]
+	# 1Password installs an app execution alias in
+	# %LOCALAPPDATA%\Microsoft\WindowsApps, which is on PATH by default -- so
+	# this needs no absolute path and no username in it. The WSL side uses the
+	# op-ssh-sign-wsl.exe sibling instead; see dotfiles/mise.toml.
+	program = op-ssh-sign.exe

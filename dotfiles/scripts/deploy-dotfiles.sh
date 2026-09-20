@@ -5,7 +5,21 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DOTFILES_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
-echo "Deploying dotfiles from ${DOTFILES_DIR}..."
+# --dry-run resolves every source without touching the filesystem. CI runs it:
+# a link whose source has been renamed or deleted is otherwise invisible until
+# a machine deploys and quietly loses a config.
+DRY_RUN=0
+if [[ "${1:-}" == "--dry-run" ]]; then
+  DRY_RUN=1
+fi
+
+PROBLEMS=0
+
+if [[ "$DRY_RUN" == "1" ]]; then
+  echo "Checking dotfiles links from ${DOTFILES_DIR}..."
+else
+  echo "Deploying dotfiles from ${DOTFILES_DIR}..."
+fi
 
 # Helper function to create parent directories and atomic symlinks
 link_file() {
@@ -14,6 +28,12 @@ link_file() {
 
   if [[ ! -e "$src" && ! -L "$src" ]]; then
     echo "Warning: Source $src does not exist, skipping." >&2
+    PROBLEMS=$((PROBLEMS + 1))
+    return 0
+  fi
+
+  if [[ "$DRY_RUN" == "1" ]]; then
+    echo "Would link $dst -> $src"
     return 0
   fi
 
@@ -71,4 +91,13 @@ link_file "${DOTFILES_DIR}/.pi/agent/themes" "${HOME}/.pi/agent/themes"
 link_file "${DOTFILES_DIR}/.claude/settings.json" "${HOME}/.claude/settings.json"
 link_file "${DOTFILES_DIR}/.claude/statusline.sh" "${HOME}/.claude/statusline.sh"
 
-echo "Dotfiles successfully deployed!"
+if [[ "$PROBLEMS" -gt 0 ]]; then
+  echo "${PROBLEMS} missing source(s) -- see warnings above." >&2
+  exit 1
+fi
+
+if [[ "$DRY_RUN" == "1" ]]; then
+  echo "All dotfiles sources resolve."
+else
+  echo "Dotfiles successfully deployed!"
+fi
