@@ -8,10 +8,33 @@ import { FATAL_CLOSE_CODES } from '../src/gateway.ts';
 import { silentLog } from '../src/log.ts';
 import { getInstruments } from '../src/metrics.ts';
 import {
+  ATTACH_BOUNDARIES,
+  MINT_BOUNDARIES,
   otlpEndpoint,
   startTelemetry,
   stopTelemetry,
 } from '../src/telemetry.ts';
+
+/** The bucket layout the exporter actually put on the wire for one histogram. */
+function boundsOf(body: string, metric: string): number[] {
+  const payload = JSON.parse(body) as {
+    resourceMetrics: {
+      scopeMetrics: {
+        metrics: {
+          name: string;
+          histogram?: { dataPoints: { explicitBounds: number[] }[] };
+        }[];
+      }[];
+    }[];
+  };
+  return (
+    payload.resourceMetrics
+      .flatMap((resource) => resource.scopeMetrics)
+      .flatMap((scope) => scope.metrics)
+      .find((one) => one.name === metric)?.histogram?.dataPoints[0]
+      ?.explicitBounds ?? []
+  );
+}
 
 describe('the OTLP endpoint', () => {
   test('mate keeps its own name and falls back to the standard one', () => {
@@ -49,17 +72,11 @@ describe('the SDK', () => {
   });
 
   test('an instrument minted after the SDK reaches the collector, and the exit flushes it', async () => {
-    // Captured as bytes, not JSON: the OTLP/HTTP exporter posts protobuf, and
-    // its strings survive in the wire bytes well enough to assert on.
     const bodies: string[] = [];
     const collector = Bun.serve({
       port: 0,
       fetch: async (request) => {
-        bodies.push(
-          new TextDecoder('utf-8', { fatal: false }).decode(
-            await request.arrayBuffer(),
-          ),
-        );
+        bodies.push(await request.text());
         return new Response(null, { status: 200 });
       },
     });
@@ -81,7 +98,7 @@ describe('the SDK', () => {
       getInstruments().minted('ok', {
         source: 'fresh',
         mintMs: 42_000,
-        attachMs: 1_500,
+        attachMs: 420,
       });
       // Nothing waits for the 15s export interval — the exit path's flush is
       // what has to carry the last counter out, and this is that path.
@@ -100,6 +117,15 @@ describe('the SDK', () => {
     expect(sent).toContain('mate_attach_duration_milliseconds');
     // The resource attribute the collector turns into the `exported_job` label.
     expect(sent).toContain('service.name');
+    // A view is only observable on the wire. Without these two the SDK's own
+    // boundaries apply, and they stop at 10 000 ms — under the mint recorded
+    // above, and under an attach that is running out of harness timeout.
+    expect(boundsOf(sent, 'mate_mint_duration_milliseconds')).toEqual([
+      ...MINT_BOUNDARIES,
+    ]);
+    expect(boundsOf(sent, 'mate_attach_duration_milliseconds')).toEqual([
+      ...ATTACH_BOUNDARIES,
+    ]);
   });
 });
 

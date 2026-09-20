@@ -13,24 +13,23 @@ export type TurnEnd = StopReason | 'sandbox-died';
 export type MintResult = 'ok' | 'mint-failed' | 'attach-failed';
 
 /**
- * Where the sandbox a thread ended up on came from. Every one is built for
- * the thread that asked for it, so `fresh` is the only value mate emits — the
- * label is here so that the day a thread adopts a spare that was already warm,
- * the two are separate series rather than one that quietly changes meaning
- * halfway through its own history.
+ * Whether the thread's sandbox was built for it or was already standing under
+ * its name when it asked. The two are separate series because a cold start is
+ * the number being chased and an `adopted` one never paid it: averaging them
+ * would hide exactly the cost a warm-spare pool would be built to remove.
  */
-export type SandboxSource = 'fresh';
+export type SandboxSource = 'fresh' | 'adopted';
 
+/**
+ * The durations behind one `minted` call, present only for the steps that
+ * finished. A step that gives up takes its own timeout rather than its own
+ * time, so letting a failure in would move these quantiles by an amount that
+ * says nothing about how long a usable sandbox takes to arrive;
+ * `mate_mints_total` is where failures are counted. There is no sample at all
+ * when nothing was timed.
+ */
 export interface MintSample {
   source: SandboxSource;
-  /**
-   * How long each step took, and set only for a step that finished. One that
-   * gives up takes its own timeout rather than its own time — five minutes
-   * waiting for Ready, or the harness timeouts on an attach — so admitting
-   * failures would move these quantiles by an amount that says nothing about
-   * how long a sandbox a thread can use takes to arrive. `mate_mints_total`
-   * is where the failures are counted.
-   */
   mintMs?: number | null;
   attachMs?: number | null;
 }
@@ -56,7 +55,7 @@ export interface Instruments {
   gatewayClosed(code: number, fatal: boolean): void;
   sandboxesLive(count: number): void;
   queueDepth(depth: number): void;
-  minted(result: MintResult, sample: MintSample): void;
+  minted(result: MintResult, sample?: MintSample): void;
   turnStarted(): void;
   turnEnded(reason: TurnEnd, sample: TurnSample): void;
   teardown(reason: TeardownReason): void;
@@ -169,6 +168,7 @@ export function getInstruments(): Instruments {
     },
     minted: (result, sample) => {
       mints.add(1, { result });
+      if (!sample) return;
       const { source } = sample;
       if (typeof sample.mintMs === 'number') {
         mintDuration.record(sample.mintMs, { source });

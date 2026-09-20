@@ -36,15 +36,29 @@ export const EXPORT_INTERVAL_MS = 15_000;
 export const EXPORT_TIMEOUT_MS = 5_000;
 
 /**
- * Getting a thread a sandbox is the one thing here measured in minutes: the
- * mint waits on a kata VM booting and an image landing, and gives up at
- * `READY_TIMEOUT_MS`, five minutes. Both steps share these boundaries so a
- * mint and the attach behind it read off one axis, and the top one is that
- * timeout — a sample can reach it, and anything past it is a mint that never
- * happened.
+ * A mint waits on a kata VM booting, an image landing and a shallow clone
+ * finishing, and gives up at `READY_TIMEOUT_MS`, five minutes. The edges
+ * crowd the seconds because that is the range the answer lives in and a
+ * bucket spanning 5 s to 15 s would report its own edges: `histogram_quantile`
+ * interpolates inside whichever bucket it lands in, so every mint from six
+ * seconds to fourteen would read the same p50 of ten. The top edge is the
+ * timeout — nothing past it is ever recorded, and without it a mint that
+ * nearly hit it would read as two minutes.
  */
-const SANDBOX_BOUNDARIES = [
-  1_000, 5_000, 15_000, 30_000, 60_000, 120_000, 300_000,
+export const MINT_BOUNDARIES = [
+  2_000, 3_000, 5_000, 7_500, 10_000, 15_000, 30_000, 60_000, 120_000, 300_000,
+];
+
+/**
+ * An attach is two calls to the API server and then an ACP handshake against
+ * a VM that is already up, so it belongs to a different decade of the clock
+ * than the mint does: the question is whether it costs a quarter second or
+ * two, not whether it costs ten seconds or a hundred. The top edge is far
+ * past any healthy attach and is only there to keep one that is nearly out
+ * of harness timeout from reading as a minute.
+ */
+export const ATTACH_BOUNDARIES = [
+  100, 250, 500, 1_000, 2_500, 5_000, 10_000, 30_000, 60_000, 150_000,
 ];
 
 /**
@@ -73,14 +87,14 @@ const VIEWS: ViewOptions[] = [
     instrumentName: 'mate_mint_duration_milliseconds',
     aggregation: {
       type: AggregationType.EXPLICIT_BUCKET_HISTOGRAM,
-      options: { boundaries: SANDBOX_BOUNDARIES },
+      options: { boundaries: MINT_BOUNDARIES },
     },
   },
   {
     instrumentName: 'mate_attach_duration_milliseconds',
     aggregation: {
       type: AggregationType.EXPLICIT_BUCKET_HISTOGRAM,
-      options: { boundaries: SANDBOX_BOUNDARIES },
+      options: { boundaries: ATTACH_BOUNDARIES },
     },
   },
 ];

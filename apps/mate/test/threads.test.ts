@@ -931,14 +931,22 @@ describe('metrics', () => {
     // records nothing, so this counter is the only thing that sees it.
     expect(metrics.mints).toEqual(['mint-failed']);
     expect(metrics.teardowns).toEqual([]);
-    // No duration either: what a refusal took is its timeout, not a reading
-    // of how long getting a sandbox takes.
-    expect(metrics.mintSamples).toEqual([{ source: 'fresh' }]);
+    expect(metrics.mintSamples).toEqual([]);
 
-    const attaching = build({ attachFails: 'the harness never answered' });
+    const attaching = build({
+      attachFails: 'the harness never answered',
+      mintDelayMs: 9_000,
+    });
     await attaching.threads.onMessage(mention('go'));
+    await clock.advance(9_000);
     await settle();
     expect(metrics.mints.at(-1)).toBe('attach-failed');
+    // The mint behind a failed attach is a finished mint, so it is still one
+    // of the readings this histogram is for.
+    expect(metrics.mintSamples.at(-1)).toEqual({
+      source: 'fresh',
+      mintMs: 9_000,
+    });
 
     const working = build({ script: streaming('alpha') });
     await working.threads.onMessage(mention('go'));
@@ -955,9 +963,6 @@ describe('metrics', () => {
     await threads.onMessage(mention('go'));
     await clock.advance(60_000);
 
-    // Split rather than totalled, because the two are fixed by different
-    // things: a warm sandbox would take the first number to nothing and
-    // leave the second exactly where it is.
     expect(metrics.mintSamples).toEqual([
       { source: 'fresh', mintMs: 40_000, attachMs: 2_000 },
     ]);

@@ -137,9 +137,9 @@ export class RecordingInstruments implements Instruments {
   gatewayClosed(code: number, fatal: boolean): void {
     this.closes.push({ code, fatal });
   }
-  minted(result: MintResult, sample: MintSample): void {
+  minted(result: MintResult, sample?: MintSample): void {
     this.mints.push(result);
-    this.mintSamples.push(sample);
+    if (sample) this.mintSamples.push(sample);
   }
   sandboxesLive(count: number): void {
     this.live = count;
