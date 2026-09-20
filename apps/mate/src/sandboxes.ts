@@ -58,6 +58,13 @@ export const CHECKOUT_CONTAINER = 'checkout';
 export const WORKSPACE = '/workspace';
 export const AGENT_HOME = '/home/agent';
 export const AGENT_UID = 1337;
+/**
+ * Who the agent commits as. The image's agent user is made with no GECOS and
+ * the sandbox carries no git config of its own, so without an ident handed in
+ * `git commit` dies on an empty ident name.
+ */
+const GIT_USER = 'rowbutt';
+const GIT_EMAIL = '22780844+rowbutt@users.noreply.github.com';
 
 export const TTL_MS = 2 * 60 * 60_000;
 const READY_TIMEOUT_MS = 300_000;
@@ -173,6 +180,35 @@ export function opencodeConfig(model: string): string {
   });
 }
 
+/**
+ * The git configuration both containers are handed as environment.
+ * `GIT_CONFIG_COUNT` and its numbered pairs are git's command scope, which is
+ * protected configuration, so `safe.directory` is honoured there and nothing
+ * has to be written into an image or a home directory to make it stick.
+ *
+ * It is what makes the checkout usable at all. kubelet's fsGroup chown sets an
+ * emptyDir mount root's gid and leaves its uid as root, so the workspace root
+ * is uid 0 whoever clones into it, and git checks the worktree root as well as
+ * the git directory: the clone succeeds and every command after it dies
+ * `detected dubious ownership`. opencode reads that as "not a repository" and
+ * silently drops its snapshots, and the agent's own git commands fail the same
+ * way.
+ */
+export function gitEnv(): { name: string; value: string }[] {
+  const settings: [string, string][] = [
+    ['safe.directory', WORKSPACE],
+    ['user.name', GIT_USER],
+    ['user.email', GIT_EMAIL],
+  ];
+  return [
+    { name: 'GIT_CONFIG_COUNT', value: String(settings.length) },
+    ...settings.flatMap(([key, value], index) => [
+      { name: `GIT_CONFIG_KEY_${index}`, value: key },
+      { name: `GIT_CONFIG_VALUE_${index}`, value },
+    ]),
+  ];
+}
+
 export interface SandboxDeclaration {
   name: string;
   namespace: string;
@@ -232,8 +268,10 @@ export function sandboxManifest(declaration: SandboxDeclaration): Sandbox {
             {
               name: CHECKOUT_CONTAINER,
               image: config.image,
-              // Cloned by the uid the harness runs as: git refuses to operate
-              // in a tree owned by another user ("dubious ownership").
+              // Cloned by the uid the harness runs as, so every file in the
+              // checkout is the agent's to write. That settles the files and
+              // nothing else: the mount root itself stays uid 0, which is
+              // what `gitEnv()` is for.
               command: [
                 'git',
                 'clone',
@@ -244,6 +282,7 @@ export function sandboxManifest(declaration: SandboxDeclaration): Sandbox {
                 config.checkoutRepo,
                 WORKSPACE,
               ],
+              env: gitEnv(),
               volumeMounts: [{ name: 'workspace', mountPath: WORKSPACE }],
               securityContext: CONTAINER_SECURITY,
               resources: {
@@ -274,6 +313,7 @@ export function sandboxManifest(declaration: SandboxDeclaration): Sandbox {
                 // npm requests at every start, and npm is not in the sandbox's
                 // egress allow-list.
                 { name: 'OPENCODE_DISABLE_PROJECT_CONFIG', value: '1' },
+                ...gitEnv(),
               ],
               volumeMounts: [
                 { name: 'home', mountPath: AGENT_HOME },
