@@ -27,7 +27,7 @@
 FROM debian:bookworm-slim@sha256:3783cc01769c7b2b1b83a5c5ad96c815348e28ed7da68e2e3687004faa906251 AS base
 
 # Every tool is fetched in a stage that is thrown away, so the unpacking
-# tooling never reaches a sandbox and the whole toolset lands as one layer.
+# tooling never reaches a sandbox and the whole toolset arrives without it.
 FROM base AS toolset
 RUN apt-get update && apt-get install -y --no-install-recommends \
       ca-certificates \
@@ -103,8 +103,12 @@ ARG YQ_VERSION=4.53.6
 # the prometheus distribution and drags the 142 MB server binary along for a
 # tool that lints rules, where naming the one path inside the same tarball
 # costs 46 MB compressed.
+#
+# gh is the one that lands in `libexec` rather than `bin`, because the name
+# `gh` on PATH belongs to the wrapper copied in below and the real binary has
+# to sit somewhere the wrapper can exec without finding itself.
 RUN set -eux; \
-    mkdir -p /out/bin; \
+    mkdir -p /out/bin /out/libexec; \
     cd "$(mktemp -d)"; \
     raw() { curl -fsSL --retry 3 --retry-all-errors -o "/out/bin/$1" "$2"; }; \
     arc() { curl -fsSL --retry 3 --retry-all-errors -o archive "$1"; }; \
@@ -132,7 +136,7 @@ RUN set -eux; \
     arc "https://github.com/junegunn/fzf/releases/download/v${FZF_VERSION}/fzf-${FZF_VERSION}-linux_amd64.tar.gz"; \
     tar -xzf archive --no-same-owner -C /out/bin fzf; \
     arc "https://github.com/cli/cli/releases/download/v${GH_VERSION}/gh_${GH_VERSION}_linux_amd64.tar.gz"; \
-    tar -xzf archive --no-same-owner -C /out/bin --strip-components=2 "gh_${GH_VERSION}_linux_amd64/bin/gh"; \
+    tar -xzf archive --no-same-owner -C /out/libexec --strip-components=2 "gh_${GH_VERSION}_linux_amd64/bin/gh"; \
     arc "https://get.helm.sh/helm-v${HELM_VERSION}-linux-amd64.tar.gz"; \
     tar -xzf archive --no-same-owner -C /out/bin --strip-components=1 linux-amd64/helm; \
     arc "https://github.com/kubernetes-sigs/kustomize/releases/download/kustomize%2Fv${KUSTOMIZE_VERSION}/kustomize_v${KUSTOMIZE_VERSION}_linux_amd64.tar.gz"; \
@@ -151,7 +155,7 @@ RUN set -eux; \
     tar -xzf archive --no-same-owner -C /out/bin terraform-docs; \
     arc "https://github.com/opentofu/opentofu/releases/download/v${TOFU_VERSION}/tofu_${TOFU_VERSION}_linux_amd64.tar.gz"; \
     tar -xzf archive --no-same-owner -C /out/bin tofu; \
-    chmod 0755 /out/bin/*
+    chmod 0755 /out/bin/* /out/libexec/*
 
 FROM base
 
@@ -170,6 +174,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # outright, so a login shell opencode spawns would drop a prepended directory
 # and keep this one.
 COPY --from=toolset /out/bin/ /usr/local/bin/
+COPY --from=toolset /out/libexec/ /usr/local/libexec/
+
+# What `gh` means in a sandbox, so that opening a pull request needs no
+# preamble; why a git credential helper does not already cover it, and what
+# this does and does not keep out of reach, is in the file.
+COPY gh /usr/local/bin/gh
 
 # mise reads this before any config in the checkout; why it is in the image at
 # all, and what each setting is doing, is in the file.
@@ -222,6 +232,21 @@ RUN set -eux; \
     kubectl version --client >/dev/null; \
     kustomize version >/dev/null; \
     pixlet version >/dev/null
+
+# The `gh` above is the wrapper with nothing to resolve, which proves the half
+# of it that execs straight through. This is the other half, and it is proven
+# here because the alternative is the first thread that needs a pull request
+# finding out: a stand-in `op` first on PATH prints a token, and `gh auth token`
+# — which reports the credential gh would use and talks to no network to do it
+# — has to print the same one back.
+RUN set -eux; \
+    d="$(mktemp -d)"; \
+    { echo '#!/bin/sh'; echo 'printf %s "a-pat-for($3)"'; } >"$d/op"; \
+    chmod 0755 "$d/op"; \
+    token="$(PATH="$d:$PATH" GH_CONFIG_DIR="$d/gh" \
+             MATE_GITHUB_TOKEN_REF=op://v/i/f gh auth token)"; \
+    test "$token" = 'a-pat-for(op://v/i/f)'; \
+    rm -rf "$d"
 
 ENTRYPOINT ["/usr/bin/tini", "--"]
 CMD ["sleep", "infinity"]
