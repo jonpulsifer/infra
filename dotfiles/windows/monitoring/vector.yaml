@@ -21,6 +21,11 @@ transforms:
     inputs: [windows_events]
     source: |
       .host = get_hostname!()
+      # VictoriaLogs reads the log line from `_msg`. The source puts the
+      # rendered event text in `message`, and without the move every entry
+      # stores the literal "missing _msg field; see ..." placeholder as its
+      # line, which is what a logs panel shows.
+      ._msg = del(.message)
 
 sinks:
   victoria_logs:
