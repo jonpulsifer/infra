@@ -17,13 +17,26 @@ tags:: runbook, windows, dotfiles
 	- The stages, each idempotent: PowerShell 7 → `winget configure` the desired state in `dotfiles/windows/configuration.winget` → sparse clone to `%USERPROFILE%\src\github.com\jonpulsifer\infra` → `mise run bootstrap` → terminal font → optionally WSL.
 	- The clone is blobless and sparse to `dotfiles/` only. `git pull` there is how the desk takes an update.
 - # What owns what
-	- **winget** owns the things mise has no business owning: PowerShell 7, Windows Terminal, Git, WSL, 1Password, VS Code, and the OS settings. Declared as a DSC v3 configuration, applied with `winget configure`, previewable with `--what-if`.
+	- **winget** owns the things mise has no business owning: PowerShell 7, Windows Terminal, Git, WSL, 1Password, VS Code, and the OS settings. Declared as a DSC v3 configuration in `dotfiles/windows/configuration.winget`, applied with `winget configure`, previewable with `--what-if`. That one file is the bundle — `winget export`/`import` describes a strictly smaller thing (no OS settings, no dependency order, no elevation), so there is no second list to keep in step.
+	- **Which source a package comes from** is per-package. `source: msstore` with a Store product id for Windows Terminal (`9N0DX20HK701`) and WSL (`9P9TQF7MRM4R`): both sources ship the same MSIX and the same package family, but a sideloaded MSIX carries no Store licence and so never auto-updates, and the community manifests lag. `source: winget` for everything else — PowerShell deliberately, because the Store build runs in a sandbox that virtualizes parts of the filesystem and registry and that is a poor fit for the shell everything else runs inside; 1Password because its community manifest is already the same MSIX the Store delivers; Git and mise because they are not on the Store at all.
+	- **Two things are in neither catalogue** and get pinned, hash-verified, per-user installers of their own, run from `bootstrap.ps1`: the CaskaydiaCove Nerd Font (`Install-NerdFont.ps1`) and vibranceGUI (`Install-VibranceGui.ps1`). Both check the download against a pinned SHA256 before it goes anywhere.
 	- **mise** owns every CLI tool, from the same registry macOS and NixOS use. Windows has no Homebrew and no home-manager, so `mise-global-config.toml` carries an `os = ["windows"]` block for the shell tooling those two provide elsewhere. `btop` is absent there: it ships no Windows build.
 	- **`deploy-dotfiles.ps1`** owns the symlinks, all of them on the Windows side. The shared `dotfiles/.config/git` is reused rather than forked — git on Windows reads `~/.config/git/config` too, and `dotfiles/windows/gitconfig` lands at `~/.gitconfig` to include it and override only what differs.
 - # The shell
 	- `dotfiles/windows/profile.ps1` is a loader; the content is in `dotfiles/windows/profile.d/`, loaded in filename order. The numeric prefixes are the order and they matter — mise has to be on PATH before anything looks for a tool.
 	- The prompt is hand-rolled, in the same two-line shape as pure on the other platforms. There is no prompt engine. PowerShell has no RPROMPT, so the right-aligned duration and kube context are drawn by the prompt function itself before it returns the `❯`.
 	- Set `DOTFILES_PROMPT_GIT=0` to turn off git information in the prompt entirely.
+- # If a Store package will not install
+	- `winget configure` runs with `--disable-interactivity`. A Store package that wants a licence acquired interactively fails there rather than prompting. Run the pass on its own to see the prompt:
+	- ```powershell
+	  winget configure --file dotfiles\windows\configuration.winget
+	  ```
+	- Check a Store product id against the catalogue before changing one — the ids are opaque, and installing the wrong one is silent:
+	- ```bash
+	  curl -s "https://displaycatalog.mp.microsoft.com/v7.0/products/9N0DX20HK701?market=US&languages=en-us&fieldsTemplate=Details" | head -c 400
+	  ```
+- # If vibranceGUI stops matching its hash
+	- `Install-VibranceGui.ps1` pins upstream `juv/vibranceGUI` v2.5.0 by URL and SHA256, and refuses to install anything else. Upstream has published no newer release; a v3.0.0 exists on a fork with no established provenance, and this does not follow it. Moving deliberately means changing both `-Url` and `-Sha256`.
 - # If the deploy refuses with "Developer Mode is off"
 	- Creating a symlink needs Developer Mode or an elevated shell. The configuration pass turns it on, so run that first:
 	- ```powershell

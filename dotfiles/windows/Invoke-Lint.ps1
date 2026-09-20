@@ -24,7 +24,10 @@ if (-not (Get-Module -ListAvailable -Name PSScriptAnalyzer)) {
 Import-Module PSScriptAnalyzer
 
 $settings = Join-Path $PSScriptRoot 'PSScriptAnalyzerSettings.psd1'
-$results = Invoke-ScriptAnalyzer -Path $Path -Recurse -Severity Error, Warning -Settings $settings
+# @() so a single finding is still a collection: StrictMode makes .Count on a
+# lone record a terminating error, which would hide the finding behind a
+# different failure.
+$results = @(Invoke-ScriptAnalyzer -Path $Path -Recurse -Severity Error, Warning -Settings $settings)
 
 if ($results) {
     $results | Format-Table -AutoSize -Property Severity, ScriptName, Line, RuleName, Message
