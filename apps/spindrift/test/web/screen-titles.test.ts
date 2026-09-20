@@ -6,29 +6,32 @@
  */
 import { describe, expect, test } from 'bun:test';
 import { titleOf } from '../../src/web/app.tsx';
+import { PRODUCT_NAME } from '../../src/web/brand.ts';
 
 describe('titleOf', () => {
   test.each([
-    ['/', 'Spindrift'],
-    ['', 'Spindrift'],
-    ['/apps', 'Apps · Spindrift'],
-    ['/apps/hub', 'hub · Spindrift'],
-    ['/hub', 'hub · Spindrift'],
-    ['/apps/new', 'New App · Spindrift'],
-    ['/apps/new/7', 'New App · Spindrift'],
-    ['/deploys', 'Deploys · Spindrift'],
-    ['/deploys/42', 'Deploy #42 · Spindrift'],
-    ['/builds', 'Builds · Spindrift'],
-    ['/builds/9', 'Build #9 · Spindrift'],
-    ['/sources', 'Sources · Spindrift'],
-    ['/artifacts', 'Artifacts · Spindrift'],
-    ['/datastores', 'Datastores · Spindrift'],
-    ['/settings', 'Settings · Spindrift'],
-    ['/settings/connections', 'Settings · Spindrift'],
-    ['/targets', 'Settings · Spindrift'],
-    ['/repos', 'Settings · Spindrift'],
-    ['/storage', 'Settings · Spindrift'],
-  ])('%s → %s', (path, title) => {
-    expect(titleOf(path)).toBe(title);
+    ['/', undefined],
+    ['', undefined],
+    ['/apps', 'Apps'],
+    ['/apps/hub', 'hub'],
+    ['/hub', 'hub'],
+    ['/apps/new', 'New App'],
+    ['/apps/new/7', 'New App'],
+    ['/deploys', 'Deploys'],
+    ['/deploys/42', 'Deploy #42'],
+    ['/builds', 'Builds'],
+    ['/builds/9', 'Build #9'],
+    ['/sources', 'Sources'],
+    ['/artifacts', 'Artifacts'],
+    ['/datastores', 'Datastores'],
+    ['/settings', 'Settings'],
+    ['/settings/connections', 'Settings'],
+    ['/targets', 'Settings'],
+    ['/repos', 'Settings'],
+    ['/storage', 'Settings'],
+  ])('%s → %s', (path, page) => {
+    expect(titleOf(path)).toBe(
+      page === undefined ? PRODUCT_NAME : `${page} · ${PRODUCT_NAME}`,
+    );
   });
 });

@@ -20,9 +20,12 @@
  * final crumb carries no path at all: a link to the page you are on is a
  * control that does nothing, and readers press it to try to reload.
  *
- * The literal `SPINDRIFT /` stays. It is the product's name in the one piece of
- * chrome present on every screen, and `object-explorer.test.tsx` pins it.
+ * The trail's root stays the wordmark. It is the product's name in the one
+ * piece of chrome present on every screen, and `object-explorer.test.tsx` pins
+ * it.
  */
+
+import { WORDMARK } from '../brand.ts';
 
 export interface Crumb {
   readonly label: string;
@@ -117,7 +120,7 @@ export function Breadcrumbs({
   return (
     <nav aria-label="Breadcrumb" className="min-w-0">
       <ol className="flex min-w-0 items-center gap-1.5 font-mono text-micro font-bold tracking-eyebrow text-muted-foreground">
-        <li className="shrink-0">SPINDRIFT /</li>
+        <li className="shrink-0">{WORDMARK} /</li>
         {crumbs.map((crumb, index) => (
           <li key={crumb.label} className="flex min-w-0 items-center gap-1.5">
             {index > 0 ? <span aria-hidden="true">/</span> : null}

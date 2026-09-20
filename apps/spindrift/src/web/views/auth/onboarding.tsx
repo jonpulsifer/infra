@@ -72,6 +72,7 @@ import { CircleAlert, PartyPopper, Rocket } from 'lucide-react';
 import { type CSSProperties, type ReactNode, useEffect, useState } from 'react';
 import type { StepStatus } from '../../../commands/views.ts';
 import { command } from '../../client.ts';
+import { Wordmark } from '../../components/wordmark.tsx';
 import type { Path } from '../../forms/document.ts';
 import { valueAt } from '../../forms/document.ts';
 import { manifestFieldAt, manifestIssues } from '../../forms/manifest.ts';
@@ -781,9 +782,7 @@ function OnboardingShell({
   return (
     <main className="mx-auto flex min-h-dvh w-full max-w-[880px] flex-col gap-8 px-5 pb-16 pt-[12vh]">
       <div className="flex flex-col items-center gap-2 text-center">
-        <span className="font-mono text-xl font-bold tracking-[0.25em] text-foreground">
-          SPINDRIFT
-        </span>
+        <Wordmark className="font-mono text-xl font-bold tracking-[0.25em] text-foreground" />
         <p className="text-xs text-muted-foreground">
           Nothing here is configured yet. Three answers and it is.
         </p>

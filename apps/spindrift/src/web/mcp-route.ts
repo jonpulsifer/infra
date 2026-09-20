@@ -38,6 +38,7 @@ import {
   dispatch,
 } from '../commands/registry.ts';
 import type { CommandContext, Principal } from '../commands/types.ts';
+import { MACHINE_NAME } from './brand.ts';
 
 export const MCP_PATH = '/mcp';
 
@@ -115,7 +116,9 @@ async function handle(request: Request, deps: McpRouteDeps): Promise<Response> {
   if (request.method !== 'POST') {
     // Clients probe with GET before opening an SSE stream; this endpoint has
     // none, and every tool here is an act besides.
-    return new Response('spindrift MCP: POST JSON-RPC here\n', { status: 405 });
+    return new Response(`${MACHINE_NAME} MCP: POST JSON-RPC here\n`, {
+      status: 405,
+    });
   }
 
   // Authenticate before reading the body: an anonymous caller should not be
@@ -154,7 +157,7 @@ async function handle(request: Request, deps: McpRouteDeps): Promise<Response> {
       return reply({
         protocolVersion: PROTOCOL_VERSION,
         capabilities: { tools: {} },
-        serverInfo: { name: 'spindrift', version: '1' },
+        serverInfo: { name: MACHINE_NAME, version: '1' },
       });
     case 'tools/list':
       return reply({ tools: TOOLS });

@@ -16,6 +16,7 @@
  */
 import { describe, expect, test } from 'bun:test';
 import { renderToStaticMarkup } from 'react-dom/server';
+import { PRODUCT_NAME, WORDMARK } from '../../src/web/brand.ts';
 import { crumbsFor } from '../../src/web/components/breadcrumbs.tsx';
 import {
   filterPalette,
@@ -95,7 +96,7 @@ describe('the footer says what is running', () => {
     );
 
     expect(markup).toContain('<footer');
-    expect(markup).toContain('Spindrift sha256:57fa33c28109');
+    expect(markup).toContain(`${PRODUCT_NAME} sha256:57fa33c28109`);
   });
 
   test('and nothing where the deployment states none', () => {
@@ -107,7 +108,7 @@ describe('the crumb carries the object', () => {
   test('a detail route says which one, under the product name', () => {
     const markup = shell('/deploys/1187');
 
-    expect(markup).toContain('SPINDRIFT /');
+    expect(markup).toContain(`${WORDMARK} /`);
     expect(markup).toContain('#1187');
   });
 

@@ -6,6 +6,7 @@ import type {
   BuildListItem,
   DeployLedgerItem,
 } from '../../src/commands/views.ts';
+import { WORDMARK } from '../../src/web/brand.ts';
 import type {
   AppDeletion,
   AppDeletionControls,
@@ -40,7 +41,7 @@ describe('the object-first shell', () => {
     for (const label of ['Overview', 'Apps', 'Builds', 'Deploys', 'Settings']) {
       expect(markup).toContain(label);
     }
-    expect(markup).toContain('SPINDRIFT /');
+    expect(markup).toContain(`${WORDMARK} /`);
     expect(markup).toContain('aria-current="page"');
   });
 
