@@ -47,6 +47,23 @@ export interface SandboxConfig {
   readonly model: string;
   /** How long one turn may run before the harness call is abandoned. */
   readonly turnTimeoutMs: number;
+  /** How a sandbox reads a credential, or `null` when it holds none. */
+  readonly credentials: CredentialsConfig | null;
+}
+
+/**
+ * What a sandbox needs to read a secret at the moment it needs it: the
+ * in-cluster 1Password Connect API, the Secret holding the token that reaches
+ * it, and one `op://` reference carrying the vault, the item and the field
+ * together. The reference is one string rather than three knobs because it is
+ * one thing that moves — an item that is renamed or re-created changes all of
+ * it at once, and `op read` takes exactly this shape.
+ */
+export interface CredentialsConfig {
+  readonly connectHost: string;
+  /** The Secret holding the Connect token as `OP_CONNECT_TOKEN`. */
+  readonly connectSecret: string;
+  readonly githubTokenRef: string;
 }
 
 type Env = Record<string, string | undefined>;
@@ -106,6 +123,33 @@ function text(env: Env, key: string, fallback: string): string {
   return env[key]?.trim() || fallback;
 }
 
+/**
+ * Off unless the reference is set, so a sandbox holds a credential only where
+ * somebody said which one: with this unset the harness gets no Connect
+ * address, no token and no git credential helper, which is also the rollback
+ * if handing an agent a GitHub token turns out to be a mistake.
+ */
+function credentials(env: Env): CredentialsConfig | null {
+  const githubTokenRef = env.MATE_GITHUB_TOKEN_REF?.trim();
+  if (!githubTokenRef) return null;
+  // A value that is not a secret reference is a typo that would otherwise
+  // surface as a failed `git push` inside somebody's thread.
+  if (!githubTokenRef.startsWith('op://')) {
+    throw new ConfigError(
+      `MATE_GITHUB_TOKEN_REF must be an op:// reference, got ${githubTokenRef}`,
+    );
+  }
+  return {
+    connectHost: text(
+      env,
+      'MATE_CONNECT_HOST',
+      'http://onepassword-connect.external-secrets.svc.cluster.local:8080',
+    ),
+    connectSecret: text(env, 'MATE_CONNECT_SECRET', 'mate-onepassword'),
+    githubTokenRef,
+  };
+}
+
 export function readSandboxConfig(env: Env): SandboxConfig {
   const turnTimeoutMs = integer(env, 'MATE_TURN_MINUTES', 45) * 60_000;
   // TTL_MS is the furthest out mate ever sets `spec.shutdownTime`, so a cap
@@ -129,6 +173,7 @@ export function readSandboxConfig(env: Env): SandboxConfig {
     checkoutRef: text(env, 'MATE_CHECKOUT_REF', 'main'),
     model: text(env, 'MATE_SANDBOX_MODEL', 'opencode-go/qwen3.8-flash'),
     turnTimeoutMs,
+    credentials: credentials(env),
   };
 }
 

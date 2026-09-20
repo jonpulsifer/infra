@@ -5,7 +5,7 @@
  * that dies mid-thread cannot leak one.
  */
 import { AcpClient } from './acp.ts';
-import type { SandboxConfig } from './config.ts';
+import type { CredentialsConfig, SandboxConfig } from './config.ts';
 import {
   type Kube,
   type KubeList,
@@ -65,6 +65,54 @@ export const AGENT_UID = 1337;
  */
 const GIT_USER = 'rowbutt';
 const GIT_EMAIL = '22780844+rowbutt@users.noreply.github.com';
+/**
+ * How much history the checkout carries. One commit is enough to branch from
+ * and enough to push from — both measured against a genuinely shallow clone —
+ * so the depth is not what makes a pull request possible. It is what makes one
+ * fit in: this repo's commit subjects are a house style, and an agent asked to
+ * match them can only do that by reading them, which at depth 1 means reading
+ * the single commit it is standing on. Thirty is the window a person gets from
+ * `git log --oneline -30`; fifty leaves room above it, and measured 136 KiB
+ * more than depth 1 on a 15 MB clone of this repo — inside the run-to-run
+ * noise of the clone itself.
+ */
+const CHECKOUT_DEPTH = 50;
+/**
+ * Where the GitHub token's `op://` reference reaches the sandbox. The helper
+ * below spells the same name, so it is one constant rather than two strings
+ * that can drift — and the agent's own commands can read it, which is how a
+ * call to `api.github.com` gets a token without one being in the environment.
+ */
+const TOKEN_REF_ENV = 'MATE_GITHUB_TOKEN_REF';
+/**
+ * Scoped to the one URL rather than set as a bare `credential.helper`: git
+ * tries every helper that matches, in the order the configs are read, and the
+ * first answer wins. This one is the last read, so a generic helper — one the
+ * agent sets itself, one a future base image ships — would answer for
+ * github.com before it. Setting the key to an empty value first resets that
+ * list for this URL only, which was measured both ways: with the reset the
+ * helper below answers, without it the other one does, and a request for any
+ * other host still reaches whatever else is configured.
+ */
+const CREDENTIAL_KEY = 'credential.https://github.com.helper';
+/** Long enough for an in-cluster call, short enough that a wedged one is not a wedged turn. */
+const OP_TIMEOUT_SECONDS = 10;
+/**
+ * What git runs when a push to github.com needs a password: `op read` against
+ * the reference above, printed in git's credential format and never stored.
+ * The token is therefore in a process for the length of one push instead of in
+ * the environment for the length of the thread — which is not the same as out
+ * of the agent's reach, since the agent can run `op read` too.
+ *
+ * The snippet is a constant with nothing interpolated into it, and git passes
+ * a `GIT_CONFIG_VALUE_n` through verbatim, so there is no quoting layer
+ * between here and the shell. `timeout` is load-bearing rather than tidy: `op`
+ * against a Connect host it cannot reach prints nothing and hangs, so without
+ * a bound a failed read would hold the turn open until its own timeout. Only
+ * `get` is answered because git calls the same helper to store and to erase,
+ * and there is nothing here to write to.
+ */
+const CREDENTIAL_HELPER = `!f() { test "$1" = get || exit 0; t=$(timeout ${OP_TIMEOUT_SECONDS} op read --no-newline "$${TOKEN_REF_ENV}") || exit 1; printf "username=${GIT_USER}\\npassword=%s\\n" "$t"; }; f`;
 
 export const TTL_MS = 2 * 60 * 60_000;
 const READY_TIMEOUT_MS = 300_000;
@@ -216,19 +264,66 @@ export function opencodeConfig(model: string): string {
  * `detected dubious ownership`. opencode reads that as "not a repository" and
  * silently drops its snapshots, and the agent's own git commands fail the same
  * way.
+ *
+ * The credential helper rides in the same mechanism, for the containers that
+ * are given one: it is configuration git already reads from here, so nothing
+ * is written into the image or into the checkout's `.git/config`, where a
+ * credential would outlive the push. The checkout is handed none — it clones a
+ * public repository anonymously — and the count and the indices are derived
+ * from the list so a setting cannot be added without both moving with it.
  */
-export function gitEnv(): { name: string; value: string }[] {
+export function gitEnv(
+  credentials: CredentialsConfig | null,
+): { name: string; value: string }[] {
   const settings: [string, string][] = [
     ['safe.directory', WORKSPACE],
     ['user.name', GIT_USER],
     ['user.email', GIT_EMAIL],
   ];
+  if (credentials) {
+    settings.push([CREDENTIAL_KEY, ''], [CREDENTIAL_KEY, CREDENTIAL_HELPER]);
+  }
   return [
     { name: 'GIT_CONFIG_COUNT', value: String(settings.length) },
     ...settings.flatMap(([key, value], index) => [
       { name: `GIT_CONFIG_KEY_${index}`, value: key },
       { name: `GIT_CONFIG_VALUE_${index}`, value },
     ]),
+    // A helper that fails leaves git asking for a username, and whether that
+    // question blocks depends on whether the agent's tool gave the command a
+    // terminal. This makes it an error either way.
+    ...(credentials ? [{ name: 'GIT_TERMINAL_PROMPT', value: '0' }] : []),
+  ];
+}
+
+/**
+ * The 1Password Connect environment the credential helper runs under: an
+ * address and a token, and the reference that says which secret to read.
+ *
+ * `OP_SERVICE_ACCOUNT_TOKEN` is absent and has to stay absent. With both it
+ * and `OP_CONNECT_HOST` set, `op` takes the Connect path without saying so,
+ * and a token belonging to the other path then fails as a hang rather than as
+ * an error.
+ */
+function connectEnv(credentials: CredentialsConfig): Record<string, unknown>[] {
+  return [
+    { name: 'OP_CONNECT_HOST', value: credentials.connectHost },
+    {
+      name: 'OP_CONNECT_TOKEN',
+      valueFrom: {
+        secretKeyRef: {
+          name: credentials.connectSecret,
+          key: 'OP_CONNECT_TOKEN',
+          // A missing Secret would otherwise hold every sandbox in
+          // CreateContainerConfigError until it arrives, and a thread that
+          // wanted an answer rather than a pull request would never get one.
+          // Unset instead fails at the push, where the credential is what is
+          // missing.
+          optional: true,
+        },
+      },
+    },
+    { name: TOKEN_REF_ENV, value: credentials.githubTokenRef },
   ];
 }
 
@@ -319,13 +414,13 @@ export function sandboxManifest(declaration: SandboxDeclaration): Sandbox {
                 'git',
                 'clone',
                 '--depth',
-                '1',
+                String(CHECKOUT_DEPTH),
                 '--branch',
                 config.checkoutRef,
                 config.checkoutRepo,
                 WORKSPACE,
               ],
-              env: gitEnv(),
+              env: gitEnv(null),
               volumeMounts: [{ name: 'workspace', mountPath: WORKSPACE }],
               securityContext: CONTAINER_SECURITY,
               resources: {
@@ -360,7 +455,8 @@ export function sandboxManifest(declaration: SandboxDeclaration): Sandbox {
                 // declares one MCP server, and its command is `nix`, which
                 // this image does not carry.
                 { name: 'OPENCODE_DISABLE_PROJECT_CONFIG', value: '1' },
-                ...gitEnv(),
+                ...(config.credentials ? connectEnv(config.credentials) : []),
+                ...gitEnv(config.credentials),
               ],
               volumeMounts: [
                 { name: 'home', mountPath: AGENT_HOME },
