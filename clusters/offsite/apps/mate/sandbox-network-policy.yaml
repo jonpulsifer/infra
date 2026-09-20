@@ -8,14 +8,21 @@
 # Three rules allow, in widening order:
 #   - `opencode.ai`, the Go base the harness prompts, and `models.opencode.ai`,
 #     the catalogue it fetches at start — a sandbox that cannot reach the second
-#     never finishes `session/new` — plus `github.com`, for the init container's
-#     shallow clone of the public repo. npm is deliberately absent: the
-#     checkout's own `.opencode/package.json` fires hundreds of npm requests per
-#     start, `OPENCODE_DISABLE_PROJECT_CONFIG` is what stops it, and this is the
-#     second lock on that door.
+#     never finishes `session/new` — plus two GitHub names. `github.com` is the
+#     init container's shallow clone of the public repo, and is also the whole
+#     of a `git push`: smart HTTP never leaves the host it cloned from.
+#     `api.github.com` is the separate host every REST call goes to, opening a
+#     pull request among them, so an agent handed a credential can finish the
+#     loop its checkout starts. The GitHub names left out are deliberate:
+#     `codeload.github.com`, `objects.githubusercontent.com` and
+#     `uploads.github.com` move tarballs and release assets, a file-shaped way
+#     out of here that a commit and a pull request never need. npm is absent
+#     for a related reason: the checkout's own `.opencode/package.json` fires
+#     hundreds of npm requests per start, `OPENCODE_DISABLE_PROJECT_CONFIG` is
+#     what stops it, and this is the second lock on that door.
 #   - cluster DNS, which `toFQDNs` cannot work without. The lookup itself is not
 #     restricted: `matchPattern: "*"` lets CoreDNS resolve and forward any name,
-#     so DNS is a name-shaped channel out of here that the three entries above
+#     so DNS is a name-shaped channel out of here that the four entries above
 #     do not close. It is the same trade the bot policy makes, and narrowing it
 #     is a `matchName` list rather than a rewrite.
 #   - every pod in every namespace, on every port. This is the widest line in
@@ -58,7 +65,7 @@ spec:
   egress:
     # `toFQDNs` is enforced against names Cilium's DNS proxy has seen resolved,
     # and the proxy only sees a lookup that a rule like this one sends through
-    # it. Drop this rule or narrow its `matchPattern` past the three names below
+    # it. Drop this rule or narrow its `matchPattern` past the four names below
     # and they never map to an allowed identity: the sandbox comes up, the clone
     # and the model call both fail closed, and the thread gets a plain error.
     - toEndpoints:
@@ -78,6 +85,7 @@ spec:
         - matchName: opencode.ai
         - matchName: models.opencode.ai
         - matchName: github.com
+        - matchName: api.github.com
       toPorts:
         - ports:
             - port: "443"
