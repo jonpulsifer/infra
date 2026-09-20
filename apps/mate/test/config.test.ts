@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { readConfig } from '../src/config.ts';
+import { TTL_MS } from '../src/sandboxes.ts';
 
 const minimal = {
   DISCORD_TOKEN: 'token',
@@ -11,7 +12,7 @@ const minimal = {
 describe('config from the environment', () => {
   test('applies the contract defaults', () => {
     const config = readConfig(minimal);
-    expect(config.quietMs).toBe(15 * 60_000);
+    expect(config.quietMs).toBe(30 * 60_000);
     expect(config.maxTurnsPerThread).toBe(30);
     expect(config.maxTurnsPerDay).toBe(120);
     expect(config.maxConcurrent).toBe(3);
@@ -80,12 +81,12 @@ describe('config from the environment', () => {
     expect(() => readConfig({ ...minimal, MATE_SANDBOXES: 'kube' })).toThrow(
       'MATE_SANDBOX_IMAGE is required',
     );
-    const config = readConfig({
+    const kube = {
       ...minimal,
       MATE_SANDBOXES: 'kube',
       MATE_SANDBOX_IMAGE: 'ghcr.io/jonpulsifer/mate-sandbox:latest',
-    });
-    expect(config.sandboxes).toEqual({
+    };
+    expect(readConfig(kube).sandboxes).toEqual({
       mode: 'kube',
       sandbox: {
         image: 'ghcr.io/jonpulsifer/mate-sandbox:latest',
@@ -95,7 +96,14 @@ describe('config from the environment', () => {
         checkoutRepo: 'https://github.com/jonpulsifer/infra',
         checkoutRef: 'main',
         model: 'opencode-go/qwen3.8-flash',
+        turnTimeoutMs: 45 * 60_000,
       },
     });
+    expect(() => readConfig({ ...kube, MATE_TURN_MINUTES: '0' })).toThrow(
+      'MATE_TURN_MINUTES',
+    );
+    expect(() =>
+      readConfig({ ...kube, MATE_TURN_MINUTES: String(TTL_MS / 60_000) }),
+    ).toThrow('must be under the sandbox TTL');
   });
 });

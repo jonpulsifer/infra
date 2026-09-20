@@ -16,8 +16,9 @@
 #     which is the whole point of keying on recency;
 #   - MateNotReporting stays silent while mate is down, so an outage pages
 #     once rather than twice;
-#   - MateSandboxesAtCap needs the condition to have held for a real half
-#     hour, not merely for as long as Prometheus has been running.
+#   - MateSandboxesAtCap needs the condition to have held for a real three
+#     quarters of an hour, not merely for as long as Prometheus has been
+#     running.
 rule_files:
   - mate.yaml
 
@@ -125,17 +126,18 @@ tests:
         alertname: MateGatewayFatalClose
         exp_alerts: []
 
-  # Three slots held without a dip. The window has to be full: half an hour of
-  # data, not half an hour of Prometheus.
+  # Both slots held without a dip. The window has to be full: three quarters
+  # of an hour of data, not that long of Prometheus. It also has to outlast a
+  # quiet teardown, so 44 minutes of a held cap is still ordinary.
   - interval: 1m
     input_series:
       - series: 'mate_sandboxes_live{exported_job="mate",otel_scope_name="mate",job="opentelemetry-collector",namespace="monitoring",instance="10.101.1.173:8889"}'
-        values: 3x60
+        values: 2x60
     alert_rule_test:
-      - eval_time: 29m
+      - eval_time: 44m
         alertname: MateSandboxesAtCap
         exp_alerts: []
-      - eval_time: 33m
+      - eval_time: 48m
         alertname: MateSandboxesAtCap
         exp_alerts:
           - exp_labels:
@@ -146,16 +148,16 @@ tests:
               namespace: monitoring
               instance: 10.101.1.173:8889
             exp_annotations:
-              message: "mate has been at its sandbox cap for half an hour"
-              description: "All three sandbox slots have been held continuously for thirty minutes, so any further thread is queued behind them. Compare `mate_queue_depth`: with nobody waiting this is three busy threads, and with a queue it is starvation. `kubectl --context offsite get sandboxes -n mate` names them — a Sandbox with no live thread behind it is a leak, and its `lolwtf.ca/thread` label says which thread it thinks it belongs to."
+              message: "mate has been at its sandbox cap for three quarters of an hour"
+              description: "Both sandbox slots have been held continuously for forty-five minutes, so any further thread is queued behind them. Compare `mate_queue_depth`: with nobody waiting this is two busy threads, and with a queue it is starvation. `kubectl --context offsite get sandboxes -n mate` names them — a Sandbox with no live thread behind it is a leak, and its `lolwtf.ca/thread` label says which thread it thinks it belongs to."
 
   # One slot frees for a minute at t=20. Busy is not stuck.
   - interval: 1m
     input_series:
       - series: 'mate_sandboxes_live{exported_job="mate",otel_scope_name="mate",job="opentelemetry-collector",namespace="monitoring",instance="10.101.1.173:8889"}'
-        values: 3x19 2x1 3x60
+        values: 2x19 1x1 2x60
     alert_rule_test:
-      - eval_time: 45m
+      - eval_time: 60m
         alertname: MateSandboxesAtCap
         exp_alerts: []
 
@@ -209,15 +211,15 @@ tests:
   # is routine rather than exotic.
   #
   # The old series runs to t=29 and the new one takes over at t=30, both flat:
-  # nothing has actually happened to mate. Evaluated at t=50m, `offset 30m`
-  # lands at t=20m, inside the *old* series, so every comparison below spans
-  # the roll.
+  # nothing has actually happened to mate. Each alert is evaluated where its
+  # own `offset` lands inside the *old* series — t=50m for the counters' 30m
+  # and t=65m for the cap's 45m — so every comparison below spans the roll.
   #
   # Without `ignoring(pod, instance)` the `unless` arms find no match on the
   # right, keep the whole left side, and report a lifetime counter as this
   # window's — two spurious warnings for half an hour after every collector
   # restart. MateSandboxesAtCap fails the other way: its `and` finds no match
-  # and goes silent for the same half hour.
+  # and goes silent for its own window's worth.
   - interval: 1m
     input_series:
       - series: 'mate_turns_ended_total{reason="error",exported_job="mate",otel_scope_name="mate",job="opentelemetry-collector",namespace="monitoring",pod="opentelemetry-collector-68db544b7d-bwnt6",instance="10.101.0.154:8889"}'
@@ -229,9 +231,9 @@ tests:
       - series: 'mate_mints_total{result="mint-failed",exported_job="mate",otel_scope_name="mate",job="opentelemetry-collector",namespace="monitoring",pod="opentelemetry-collector-6f8df4944d-jwcb7",instance="10.101.1.173:8889"}'
         values: _x29 5x40
       - series: 'mate_sandboxes_live{exported_job="mate",otel_scope_name="mate",job="opentelemetry-collector",namespace="monitoring",pod="opentelemetry-collector-68db544b7d-bwnt6",instance="10.101.0.154:8889"}'
-        values: 3x29 _x40
+        values: 2x29 _x40
       - series: 'mate_sandboxes_live{exported_job="mate",otel_scope_name="mate",job="opentelemetry-collector",namespace="monitoring",pod="opentelemetry-collector-6f8df4944d-jwcb7",instance="10.101.1.173:8889"}'
-        values: _x29 3x40
+        values: _x29 2x40
     alert_rule_test:
       # Nothing failed across the roll, so neither counter alert may fire.
       - eval_time: 50m
@@ -240,9 +242,9 @@ tests:
       - eval_time: 50m
         alertname: MateSandboxMintFailing
         exp_alerts: []
-      # The cap genuinely has been held for the full half hour, across the
-      # roll, so this one must still fire.
-      - eval_time: 50m
+      # The cap genuinely has been held for its full window, across the roll,
+      # so this one must still fire.
+      - eval_time: 65m
         alertname: MateSandboxesAtCap
         exp_alerts:
           - exp_labels:
@@ -254,8 +256,8 @@ tests:
               pod: opentelemetry-collector-6f8df4944d-jwcb7
               instance: 10.101.1.173:8889
             exp_annotations:
-              message: "mate has been at its sandbox cap for half an hour"
-              description: "All three sandbox slots have been held continuously for thirty minutes, so any further thread is queued behind them. Compare `mate_queue_depth`: with nobody waiting this is three busy threads, and with a queue it is starvation. `kubectl --context offsite get sandboxes -n mate` names them — a Sandbox with no live thread behind it is a leak, and its `lolwtf.ca/thread` label says which thread it thinks it belongs to."
+              message: "mate has been at its sandbox cap for three quarters of an hour"
+              description: "Both sandbox slots have been held continuously for forty-five minutes, so any further thread is queued behind them. Compare `mate_queue_depth`: with nobody waiting this is two busy threads, and with a queue it is starvation. `kubectl --context offsite get sandboxes -n mate` names them — a Sandbox with no live thread behind it is a leak, and its `lolwtf.ca/thread` label says which thread it thinks it belongs to."
 
   # The daily turn budget. The window is Prometheus's rolling 24h, not the
   # in-memory one mate enforces — mate's own count empties on every restart,
