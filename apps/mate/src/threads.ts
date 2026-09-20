@@ -30,7 +30,7 @@ import {
   WAITING,
 } from './notices.ts';
 import { Progress } from './progress.ts';
-import { EDIT_CADENCE_MS, Reply } from './reply.ts';
+import { EDIT_CADENCE_MS, Reply, RUN_GRACE_MS } from './reply.ts';
 import type {
   MintedRef,
   PromptResult,
@@ -108,6 +108,8 @@ export interface ThreadsDeps {
   log: Log;
   config: ThreadsConfig;
   editCadenceMs?: number;
+  /** How long a run of text is a step before it becomes the answer. */
+  runGraceMs?: number;
   progressCadenceMs?: number;
   metrics?: Instruments;
 }
@@ -605,6 +607,7 @@ export class Threads {
       log,
       thread.ref.id,
       this.deps.editCadenceMs ?? EDIT_CADENCE_MS,
+      this.deps.runGraceMs ?? RUN_GRACE_MS,
     );
     reply.startWorking();
     try {

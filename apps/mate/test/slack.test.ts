@@ -422,6 +422,27 @@ describe('tool cards', () => {
     expect(api.streamed()).toBe('');
   });
 
+  test('a step is a complete card of its own, cut to one line', async () => {
+    const painter = canvas();
+    await painter.step(
+      'Before I make a change,\nlet me confirm the tooling can push.',
+    );
+    await painter.step('x'.repeat(400));
+    await painter.final('No token here.', 'done');
+    const cards = api.cards();
+    expect(cards).toEqual([
+      {
+        id: 'say-1',
+        title: 'Before I make a change, let me confirm the tooling can push.',
+        status: 'complete',
+      },
+      { id: 'say-2', title: `${'x'.repeat(119)}…`, status: 'complete' },
+    ]);
+    // Complete the moment it is drawn, so the sweep that closes a turn's
+    // unfinished cards leaves it alone — and the answer is only the answer.
+    expect(api.streamed()).toBe('No token here.');
+  });
+
   test('one card per call, mutated by its id, interleaved with the answer', async () => {
     const painter = canvas();
     await painter.tool({ id: 'c1', title: 'read files', state: 'in_progress' });
@@ -577,10 +598,13 @@ describe('a stream Slack has already ended', () => {
 
 describe('the renderer against Slack', () => {
   test('coalesces to one append per cadence and ends with the stream stopped', async () => {
-    const reply = new Reply(canvas(), clock, silentLog, TS, 1_000);
+    const reply = new Reply(canvas(), clock, silentLog, TS, 1_000, 3_000);
     reply.update({ kind: 'status', line: 'thinking' });
     await clock.advance(0);
+    // Held as a step until the run outlives the grace, then streamed.
     reply.update({ kind: 'text', delta: 'a' });
+    await clock.advance(3_000);
+    expect(api.streamed()).toBe('');
     reply.update({ kind: 'text', delta: 'b' });
     await clock.advance(1_000);
     expect(api.streamed()).toBe('ab');
@@ -1004,6 +1028,9 @@ describe('a turn stopped from Slack', () => {
         maxConcurrent: 3,
       },
       editCadenceMs: 100,
+      // Scaled with the cadence above, so a turn the fake harness writes a
+      // word at a time still has the run behind it become the answer.
+      runGraceMs: 100,
       metrics,
     });
     // The wiring the socket is given, so what a test drives is the route an

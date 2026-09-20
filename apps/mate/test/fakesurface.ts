@@ -36,8 +36,11 @@ export class FakeCanvas implements Canvas {
   readonly frames: Frame[] = [];
   /** Every tool card painted, in order, as the surface was told of it. */
   readonly cards: ToolCall[] = [];
+  /** Every step painted, in order: what the agent said between tool calls. */
+  readonly steps: string[] = [];
   working_ = 0;
   failTool: Error | null = null;
+  failStep: Error | null = null;
 
   async live(text: string, status: string | null): Promise<void> {
     this.frames.push({ text, status, outcome: null });
@@ -54,6 +57,11 @@ export class FakeCanvas implements Canvas {
   async tool(call: ToolCall): Promise<void> {
     if (this.failTool) throw this.failTool;
     this.cards.push(call);
+  }
+
+  async step(text: string): Promise<void> {
+    if (this.failStep) throw this.failStep;
+    this.steps.push(text);
   }
 
   /** What the last frame says, which is what a human would be looking at. */

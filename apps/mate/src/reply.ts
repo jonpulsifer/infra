@@ -4,6 +4,12 @@
  * any of that reaches a human — and whatever else the surface draws around a
  * turn in flight — is the `Canvas`'s; this holds only the parts that are the
  * same wherever mate answers.
+ *
+ * A harness writes a turn as runs of text with tool calls between them, and
+ * only the last of those runs is an answer: the rest are the agent saying
+ * what it is about to do. They are cut apart here rather than left to the
+ * surfaces, because both of them need the same cut and neither can take text
+ * back once it is out — Slack's stream only ever appends.
  */
 import type { Clock, Handle } from './clock.ts';
 import { type Log, plain } from './log.ts';
@@ -17,12 +23,32 @@ const WORKING_INTERVAL_MS = 8_000;
 export const PLACEHOLDER = '…';
 /** Marks a turn the human stopped; a turn stopped before any text is only this. */
 export const STOPPED = '*stopped*';
+/**
+ * How long one run of text may keep arriving before it stops being a step and
+ * becomes the answer. The cut is retroactive — a run is a step because a tool
+ * call came after it — and nothing says in advance which run is the last one,
+ * so a run held for the whole of its arrival is a run that cannot stream. A
+ * turn that ends in prose is therefore answered all at once, which for the
+ * one-sentence "I'll check X" this exists to catch is right and for a page of
+ * findings is a wait with nothing moving.
+ *
+ * Past this, the run is called the answer and streams from there. The cost of
+ * being wrong is one stray paragraph above the answer, which is what every
+ * turn looked like before any of this; the gain is that a long answer is read
+ * as it is written. It also bounds what a step can be: a step is a run that
+ * arrived in under this, so the status line below never has to show more than
+ * a few seconds' worth of tokens.
+ */
+export const RUN_GRACE_MS = 3_000;
+
+/** One line of at most `STATUS_MAX` characters, with no bold or italics left. */
+export function oneLine(line: string): string {
+  const flat = line.replace(/\s+/g, ' ').trim().replaceAll('*', '');
+  return flat.length > STATUS_MAX ? `${flat.slice(0, STATUS_MAX - 1)}…` : flat;
+}
 
 export function statusLine(line: string): string {
-  const flat = line.replace(/\s+/g, ' ').trim().replaceAll('*', '');
-  const cut =
-    flat.length > STATUS_MAX ? `${flat.slice(0, STATUS_MAX - 1)}…` : flat;
-  return `*${cut}*`;
+  return `*${oneLine(line)}*`;
 }
 
 /** Splits `text` so the head fits `budget`, preferring the last line break. */
@@ -37,7 +63,16 @@ export function splitAt(text: string, budget: number): [string, string] {
 export type { Outcome };
 
 export class Reply implements PromptSink {
-  private text = '';
+  /** The answer: the runs of text that no tool call came after. */
+  private answer = '';
+  /** The run of text in flight, which is a step until something says it is not. */
+  private run = '';
+  private runAt = 0;
+  /** Set once the run in flight has outlasted the grace and become the answer. */
+  private answering = false;
+  /** The run in flight as the status line shows it, and the last one cut off. */
+  private runLine: string | null = null;
+  private lastStep: string | null = null;
   private status: string | null = null;
   private dirty = false;
   private painted = false;
@@ -55,6 +90,7 @@ export class Reply implements PromptSink {
     private readonly log: Log,
     private readonly threadId: string,
     private readonly cadenceMs = EDIT_CADENCE_MS,
+    private readonly graceMs = RUN_GRACE_MS,
   ) {}
 
   /** Shows the surface's "working" sign until the first visible frame lands. */
@@ -71,13 +107,56 @@ export class Reply implements PromptSink {
   update(update: Update): void {
     if (this.outcome) return;
     if (update.kind === 'tool') {
+      this.cut();
       this.paintTool(update.call);
       return;
     }
-    if (update.kind === 'text') this.text += update.delta;
+    if (update.kind === 'text') this.take(update.delta);
     else this.status = update.line;
     this.dirty = true;
     this.schedule();
+  }
+
+  /**
+   * One delta of text. It joins the answer only once the run it belongs to
+   * has outlasted the grace; until then it is a step in the making, shown on
+   * the status line and nowhere the turn will keep it.
+   */
+  private take(delta: string): void {
+    if (this.answering) {
+      this.answer += delta;
+      return;
+    }
+    if (!this.run) this.runAt = this.clock.now();
+    this.run += delta;
+    if (this.clock.now() - this.runAt >= this.graceMs) {
+      this.answer += this.run;
+      this.run = '';
+      this.runLine = null;
+      this.answering = true;
+      return;
+    }
+    this.runLine = this.run;
+  }
+
+  /**
+   * A tool call ends the run of text in front of it, which makes that run a
+   * step: what the harness said it was about to do, not a part of the answer.
+   * A canvas that draws steps gets it; every surface gets it on the status
+   * line already, for as long as it was the run in flight.
+   */
+  private cut(): void {
+    this.runLine = null;
+    this.answering = false;
+    const step = this.run.trim();
+    this.run = '';
+    if (!step) return;
+    this.lastStep = step;
+    const paint = this.canvas.step;
+    if (!paint) return;
+    this.chain = this.chain
+      .then(() => paint.call(this.canvas, step))
+      .catch((error) => this.cardFailed('step', error));
   }
 
   /**
@@ -92,14 +171,14 @@ export class Reply implements PromptSink {
     if (!paint) return;
     this.chain = this.chain
       .then(() => paint.call(this.canvas, call))
-      .catch((error) => this.cardFailed(error));
+      .catch((error) => this.cardFailed('tool', error));
   }
 
   /** A card that cannot be painted is one warning; the answer is the turn. */
-  private cardFailed(error: unknown): void {
+  private cardFailed(what: string, error: unknown): void {
     this.cardFailures += 1;
     if (this.cardFailures > 1) return;
-    this.log.warn('a tool card could not be painted', {
+    this.log.warn(`a ${what} card could not be painted`, {
       threadId: this.threadId,
       error: plain(error),
     });
@@ -113,10 +192,17 @@ export class Reply implements PromptSink {
     if (this.outcome) return;
     this.outcome = outcome;
     this.stopTimers();
+    // Nothing came after the run in flight, so it is the answer. A turn that
+    // ended on a tool call has no such run, and the last thing it did say is
+    // worth more to the thread than "the harness sent no reply".
+    this.answer += this.run;
+    this.run = '';
+    if (!this.answer && this.lastStep) this.answer = this.lastStep;
     this.status = null;
+    this.runLine = null;
     this.dirty = true;
     if (outcome === 'stopped')
-      this.text += `${this.text ? '\n\n' : ''}${STOPPED}`;
+      this.answer += `${this.answer ? '\n\n' : ''}${STOPPED}`;
     this.chain = this.chain.then(() => this.flush(outcome));
     await this.chain;
   }
@@ -162,8 +248,12 @@ export class Reply implements PromptSink {
     this.painted = true;
     this.lastFlushAt = this.clock.now();
     this.stopWorking();
-    if (final) await this.canvas.final(this.text, final);
-    else await this.canvas.live(this.text, this.status);
+    if (final) await this.canvas.final(this.answer, final);
+    // The harness's own status wins while it has one: a tool is running and
+    // what it is beats whatever the agent last said it was about to do. The
+    // run in flight is what fills the line the rest of the time, which is
+    // every moment a turn spends writing rather than running something.
+    else await this.canvas.live(this.answer, this.status ?? this.runLine);
   }
 
   private stopTimers(): void {

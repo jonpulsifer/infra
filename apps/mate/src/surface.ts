@@ -97,6 +97,17 @@ export interface Canvas {
    * declares no `tool`, so its turns are painted by the status line alone.
    */
   tool?(call: ToolCall): Promise<void>;
+  /**
+   * One thing the harness said it was about to do before it did it — a run of
+   * text with a tool call behind it — for a surface that keeps a record of
+   * what a turn did. It goes beside the tool calls rather than into the
+   * answer, which is the whole point: the answer is what the turn concluded,
+   * and a thread that carries every sentence leading up to it is unreadable.
+   * Declared alongside `tool` and for the same reason: Discord has nowhere to
+   * keep one, so there a step is the status line while it is current and
+   * nothing afterwards.
+   */
+  step?(text: string): Promise<void>;
 }
 
 /**

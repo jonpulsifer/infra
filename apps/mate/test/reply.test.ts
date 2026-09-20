@@ -4,6 +4,7 @@ import { silentLog } from '../src/log.ts';
 import {
   NO_REPLY,
   Reply,
+  RUN_GRACE_MS,
   STATUS_MAX,
   splitAt,
   statusLine,
@@ -47,15 +48,22 @@ describe('a streamed reply', () => {
     const [message] = discord.inThread('t');
     expect(message!.content).toBe('*reading files*');
     expect(message!.hasStop).toBe(true);
+    // A run of text is a step until it outlives the grace, so the answer
+    // only starts repainting once this one has.
     reply.update({ kind: 'text', delta: 'a' });
+    await clock.advance(RUN_GRACE_MS);
     reply.update({ kind: 'text', delta: 'b' });
-    await clock.advance(999);
-    expect(message!.edits).toBe(0);
-    await clock.advance(1);
+    await clock.advance(0);
     expect(message!.content).toBe('*reading files*\n\nab');
-    expect(message!.edits).toBe(1);
+    const edits = message!.edits;
+    reply.update({ kind: 'text', delta: 'c' });
+    await clock.advance(999);
+    expect(message!.edits).toBe(edits);
+    await clock.advance(1);
+    expect(message!.content).toBe('*reading files*\n\nabc');
+    expect(message!.edits).toBe(edits + 1);
     await reply.finish('done');
-    expect(message!.content).toBe('ab');
+    expect(message!.content).toBe('abc');
     expect(message!.hasStop).toBe(false);
   });
 
@@ -91,7 +99,9 @@ describe('a streamed reply', () => {
     const discord = new FakeDiscord();
     const reply = new Reply(discord.canvas('t'), clock, silentLog, 't', 1_000);
     const text = 'word '.repeat(1_000);
-    reply.update({ kind: 'text', delta: text });
+    reply.update({ kind: 'text', delta: text.slice(0, 5) });
+    await clock.advance(RUN_GRACE_MS);
+    reply.update({ kind: 'text', delta: text.slice(5) });
     await clock.advance(0);
     const chunks = discord.inThread('t');
     expect(chunks.length).toBe(Math.ceil(text.length / CHUNK_BUDGET));
@@ -178,7 +188,9 @@ describe('tool calls', () => {
       call: { id: 'c1', title: 'read files', state: 'in_progress' },
     });
     await clock.advance(0);
-    reply.update({ kind: 'text', delta: 'an answer' });
+    reply.update({ kind: 'text', delta: 'an ' });
+    await clock.advance(RUN_GRACE_MS);
+    reply.update({ kind: 'text', delta: 'answer' });
     await clock.advance(1_000);
     expect(discord.contentsIn('t')).toEqual(['*read files*\n\nan answer']);
     await reply.finish('done');
@@ -208,6 +220,99 @@ describe('tool calls', () => {
   });
 });
 
+describe('what the agent says between tool calls', () => {
+  test('is a step of its own, and the closing run is the answer', async () => {
+    const clock = new FakeClock();
+    const canvas = new FakeCanvas();
+    const reply = new Reply(canvas, clock, silentLog, 't', 1_000);
+    reply.update({ kind: 'text', delta: "I'll check the auth first." });
+    reply.update({
+      kind: 'tool',
+      call: { id: 'c1', title: 'gh auth status', state: 'in_progress' },
+    });
+    reply.update({
+      kind: 'tool',
+      call: { id: 'c1', title: 'gh auth status', state: 'complete' },
+    });
+    reply.update({ kind: 'text', delta: 'No token here.' });
+    await reply.finish('done');
+    expect(canvas.steps).toEqual(["I'll check the auth first."]);
+    expect(canvas.answer).toBe('No token here.');
+  });
+
+  test('fills the status line for as long as it is the run in flight', async () => {
+    const clock = new FakeClock();
+    const discord = new FakeDiscord();
+    const reply = new Reply(discord.canvas('t'), clock, silentLog, 't', 1_000);
+    // The harness clears its own status on the first token of a run, so
+    // without the run behind it the line would go empty exactly when there
+    // is something to say.
+    reply.update({ kind: 'text', delta: 'Let me look at the vault item.' });
+    reply.update({ kind: 'status', line: null });
+    await clock.advance(0);
+    expect(discord.contentsIn('t')).toEqual([
+      '*Let me look at the vault item.*',
+    ]);
+    // A tool call takes the line back: what is running beats what the agent
+    // last said it was about to run.
+    reply.update({
+      kind: 'tool',
+      call: { id: 'c1', title: 'op read', state: 'in_progress' },
+    });
+    reply.update({ kind: 'status', line: 'op read…' });
+    await clock.advance(1_000);
+    expect(discord.contentsIn('t')).toEqual(['*op read…*']);
+  });
+
+  test('is answer text once it outlives the grace, tool call behind it or not', async () => {
+    const clock = new FakeClock();
+    const canvas = new FakeCanvas();
+    const reply = new Reply(canvas, clock, silentLog, 't', 1_000);
+    reply.update({ kind: 'text', delta: 'a long preamble ' });
+    await clock.advance(RUN_GRACE_MS);
+    reply.update({ kind: 'text', delta: 'that kept going.' });
+    reply.update({
+      kind: 'tool',
+      call: { id: 'c1', title: 'read files', state: 'in_progress' },
+    });
+    reply.update({ kind: 'text', delta: ' The answer.' });
+    await reply.finish('done');
+    expect(canvas.steps).toEqual([]);
+    expect(canvas.answer).toBe('a long preamble that kept going. The answer.');
+  });
+
+  test('is the answer of a turn that ended on a tool call', async () => {
+    const clock = new FakeClock();
+    const canvas = new FakeCanvas();
+    const reply = new Reply(canvas, clock, silentLog, 't', 1_000);
+    reply.update({ kind: 'text', delta: 'Writing the file now.' });
+    reply.update({
+      kind: 'tool',
+      call: { id: 'c1', title: 'write', state: 'complete' },
+    });
+    await reply.finish('done');
+    expect(canvas.steps).toEqual(['Writing the file now.']);
+    expect(canvas.answer).toBe('Writing the file now.');
+  });
+
+  test('a step card that cannot be painted is one warning and still an answer', async () => {
+    const clock = new FakeClock();
+    const canvas = new FakeCanvas();
+    const log = new RecordingLog();
+    const reply = new Reply(canvas, clock, log, 't', 1_000);
+    canvas.failStep = new Error('invalid_blocks');
+    reply.update({ kind: 'text', delta: 'about to look' });
+    reply.update({
+      kind: 'tool',
+      call: { id: 'c1', title: 'read files', state: 'complete' },
+    });
+    reply.update({ kind: 'text', delta: 'the answer' });
+    await reply.finish('done');
+    expect(log.of('a step card could not be painted')).toHaveLength(1);
+    expect(canvas.answer).toBe('the answer');
+  });
+});
+
 describe('delivery failures', () => {
   test('a failed edit mid-stream is logged once and re-sent by the next flush', async () => {
     const clock = new FakeClock();
@@ -215,19 +320,22 @@ describe('delivery failures', () => {
     const log = new RecordingLog();
     const reply = new Reply(discord.canvas('t'), clock, log, 't', 1_000);
     reply.update({ kind: 'text', delta: 'a' });
-    await clock.advance(0);
-    discord.failEdits = new Error('429 past retries');
+    await clock.advance(RUN_GRACE_MS);
     reply.update({ kind: 'text', delta: 'b' });
-    await clock.advance(1_000);
+    await clock.advance(0);
+    expect(discord.inThread('t')[0]!.content).toBe('ab');
+    discord.failEdits = new Error('429 past retries');
     reply.update({ kind: 'text', delta: 'c' });
+    await clock.advance(1_000);
+    reply.update({ kind: 'text', delta: 'd' });
     await clock.advance(1_000);
     expect(log.of('reply edit failed; the next flush re-sends')).toHaveLength(
       1,
     );
-    expect(discord.inThread('t')[0]!.content).toBe('a');
+    expect(discord.inThread('t')[0]!.content).toBe('ab');
     discord.failEdits = null;
     await reply.finish('done');
-    expect(discord.inThread('t')[0]!.content).toBe('abc');
+    expect(discord.inThread('t')[0]!.content).toBe('abcd');
   });
 
   test('a failed final send rejects finish once; a second finish is a no-op', async () => {
