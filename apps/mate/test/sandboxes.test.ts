@@ -1009,6 +1009,12 @@ describe('the warm pool', () => {
     expect(log.of('condemned a spare that stopped being ready')).toHaveLength(
       1,
     );
+    // Carried for the reason the renewal carries one: the only thing that
+    // moves a spare between the list and this patch is a thread claiming it,
+    // and a condemned sandbox's labels must not land on the thread that won.
+    const took = fake.patches.filter((patch) => patch.name === broken).at(0);
+    const meta = (took?.body.metadata ?? {}) as Record<string, unknown>;
+    expect(meta.resourceVersion).toBeDefined();
 
     const standing = spareNames();
     expect(standing).toHaveLength(1);

@@ -1075,11 +1075,16 @@ export class KubeSandboxes implements Sandboxes {
    * labels, and a spare marker the pool does not select on — and the delete
    * is not, because by then nothing can be handed the object either way and
    * `destroy` waits up to three minutes on a teardown nobody is blocked on.
+   *
+   * A caller condemning something it only saw in a list passes the revision
+   * it saw it at, and takes the 409 as its answer: what is being taken away
+   * here is deleted straight afterwards, so doing it to an object that has
+   * moved since would be doing it to whatever moved it.
    */
-  private async condemn(name: string): Promise<void> {
+  private async condemn(name: string, resourceVersion?: string): Promise<void> {
     const labels = condemnLabels();
     await this.patch(name, {
-      metadata: { labels },
+      metadata: { labels, ...(resourceVersion ? { resourceVersion } : {}) },
       spec: { podTemplate: { metadata: { labels } } },
     });
     void this.destroy(name).catch((failure) =>
@@ -1166,11 +1171,18 @@ export class KubeSandboxes implements Sandboxes {
       // permanent: a spare's TTL is the only thing that ever takes one away.
       const name = spare.metadata.name;
       try {
-        await this.condemn(name);
+        await this.condemn(name, spare.metadata.resourceVersion);
         log.info('condemned a spare that stopped being ready', {
           sandbox: name,
         });
       } catch (error) {
+        // The precondition is here for the reason it is on the renewal below,
+        // and losing to it is the wanted outcome: the only thing that moves a
+        // spare between the list and the patch is a thread claiming it or the
+        // controller reaping it, and neither of those wants a condemned
+        // sandbox's labels written over it. The pool is one short either way,
+        // and the mint below is what answers that.
+        if (error instanceof KubeError && error.status === 409) continue;
         stuck += 1;
         log.warn('could not condemn a spare that stopped being ready', {
           sandbox: name,
