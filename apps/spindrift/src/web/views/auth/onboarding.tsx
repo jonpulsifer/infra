@@ -72,6 +72,7 @@ import { CircleAlert, PartyPopper, Rocket } from 'lucide-react';
 import { type CSSProperties, type ReactNode, useEffect, useState } from 'react';
 import type { StepStatus } from '../../../commands/views.ts';
 import { command } from '../../client.ts';
+import { Roflcopter } from '../../components/roflcopter.tsx';
 import { Wordmark } from '../../components/wordmark.tsx';
 import type { Path } from '../../forms/document.ts';
 import { valueAt } from '../../forms/document.ts';
@@ -780,21 +781,27 @@ function OnboardingShell({
   readonly children: ReactNode;
 }) {
   return (
-    <main className="mx-auto flex min-h-dvh w-full max-w-[880px] flex-col gap-8 px-5 pb-16 pt-[12vh]">
-      <div className="flex flex-col items-center gap-2 text-center">
-        <Wordmark className="font-mono text-xl font-bold tracking-[0.25em] text-foreground" />
-        <p className="text-xs text-muted-foreground">
-          Nothing here is configured yet. Three answers and it is.
-        </p>
-      </div>
-      {rail === undefined ? (
-        <div className="mx-auto w-full max-w-[640px]">{children}</div>
-      ) : (
-        <div className="grid gap-8 md:grid-cols-[210px_minmax(0,1fr)]">
-          <div className="md:sticky md:top-8 md:self-start">{rail}</div>
-          <div className="min-w-0">{children}</div>
+    <>
+      {/* The other screen nobody has signed in on yet — see `gate.tsx` for
+          the sibling instance and `components/roflcopter.tsx` for why each
+          screen owns its own rather than sharing one mounted higher up. */}
+      <Roflcopter />
+      <main className="mx-auto flex min-h-dvh w-full max-w-[880px] flex-col gap-8 px-5 pb-16 pt-[12vh]">
+        <div className="flex flex-col items-center gap-2 text-center">
+          <Wordmark setting="hero" className="text-foreground" />
+          <p className="text-xs text-muted-foreground">
+            Nothing here is configured yet. Three answers and it is.
+          </p>
         </div>
-      )}
-    </main>
+        {rail === undefined ? (
+          <div className="mx-auto w-full max-w-[640px]">{children}</div>
+        ) : (
+          <div className="grid gap-8 md:grid-cols-[210px_minmax(0,1fr)]">
+            <div className="md:sticky md:top-8 md:self-start">{rail}</div>
+            <div className="min-w-0">{children}</div>
+          </div>
+        )}
+      </main>
+    </>
   );
 }

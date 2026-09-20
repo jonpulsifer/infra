@@ -47,6 +47,7 @@ import {
 import type { ReactNode } from 'react';
 import { useEffect, useRef, useState } from 'react';
 import {
+  type DeployPhase,
   type DeployView,
   isInFlight,
   type SourceView,
@@ -61,6 +62,7 @@ import {
   type Stage as ProgressStage,
   StageProgress,
 } from '../../components/progress.tsx';
+import { flyover } from '../../components/roflcopter.tsx';
 import { formatDuration, RunningTime } from '../../components/running-time.tsx';
 import { PhasePill, StepGlyph, statusWord } from '../../components/status.tsx';
 import { subscribeAttempt } from '../../stream-client.ts';
@@ -577,6 +579,34 @@ function UrlBlock({ view }: { view: DeployView }) {
   const serving = view.urlLive;
   const previous = !serving && view.previousReleaseServing;
 
+  /*
+    The register glitch, once, for the address itself starting to serve —
+    the arrival §"the roflcopter" names as worth it, on the one screen a
+    person watching a Deploy is staring at when it happens.
+
+    `wasServing` seeds from this render's own value, so an attempt that is
+    already live on the first paint has not just arrived at anything and
+    plays nothing — the same "no replay on a load that already finds it so"
+    rule `BuildDrawer`'s `priorStatus` ref keeps above.
+
+    `arrived` is state latched by the effect, not a value derived during
+    render: deriving `!wasServing.current && serving` fresh on every render
+    is true for exactly the one render where the transition is caught, and a
+    stream message landing anywhere in the 600ms after it — the attempt
+    stream keeps posting through the LIVE transition — re-renders this before
+    the animation is done, recomputes it back to `false`, and a `key` swap
+    keyed on it would remount the address mid-glitch. Latched, the flip to
+    `true` happens once and sticks, so the class is added to the same `<a>`
+    exactly once and the animation plays to completion whatever renders
+    after it.
+  */
+  const wasServing = useRef(serving);
+  const [arrived, setArrived] = useState(false);
+  useEffect(() => {
+    if (!wasServing.current && serving) setArrived(true);
+    wasServing.current = serving;
+  }, [serving]);
+
   return (
     <div className="ml-auto flex flex-col items-end gap-1 text-right">
       <Eyebrow>{serving || previous ? 'Serving' : 'Reserved'}</Eyebrow>
@@ -587,6 +617,7 @@ function UrlBlock({ view }: { view: DeployView }) {
           serving || previous
             ? 'border-b border-current text-accent-foreground'
             : 'pointer-events-none text-muted-foreground',
+          arrived && 'motion-safe:animate-register',
         )}
       >
         {view.url}
@@ -1083,6 +1114,29 @@ function DeployDrawer({ view }: { view: DeployView }) {
 }
 
 /**
+ * Whether a phase change is this attempt landing on `LIVE` — as opposed to
+ * moving somewhere else, or having already been there.
+ *
+ * `previous` is `undefined` for a phase this tab has not seen yet, and that
+ * is what keeps a fly-over from firing on a load that already finds the
+ * runway occupied: `DeployScreen`'s first read seeds the ref this is called
+ * with rather than asking this about it, so an attempt that is `LIVE` on
+ * first paint has not just arrived at anything a person watching it saw
+ * happen.
+ *
+ * Exported for `test/web/roflcopter.test.tsx`, which is the whole of what
+ * decides a fly-over fires: the transport around it — `subscribeAttempt` and
+ * `getDeployDetail` — is already asserted by `stream-client.test.ts` and
+ * `streams.test.ts`.
+ */
+export function enteredLive(
+  previous: DeployPhase | undefined,
+  next: DeployPhase,
+): boolean {
+  return previous !== undefined && previous !== 'LIVE' && next === 'LIVE';
+}
+
+/**
  * One Deploy, live.
  *
  * Not a `useRead`: this screen has an edge a cadence would only approximate.
@@ -1109,6 +1163,11 @@ export function DeployScreen({
     null,
   );
   const [reloadToken, setReloadToken] = useState(0);
+  // What this tab last saw this attempt's phase as, for `enteredLive` below.
+  // Seeded by the first read rather than left `undefined` through it, which
+  // is what keeps an already-`LIVE` deploy from flying over the moment this
+  // screen is opened on it.
+  const priorPhase = useRef<DeployPhase | undefined>(undefined);
 
   useEffect(() => {
     let live = true;
@@ -1130,6 +1189,7 @@ export function DeployScreen({
         if (!live) return;
         if (result.ok) {
           setState({ type: 'success', deploy: result.value.deploy });
+          priorPhase.current = result.value.deploy.phase;
           stopStream = subscribeAttempt(
             {
               buildId: result.value.deploy.buildId,
@@ -1141,6 +1201,16 @@ export function DeployScreen({
               void command('getDeployDetail', { id: parsedId }).then(
                 (fresh) => {
                   if (live && fresh.ok) {
+                    // The fly-over, fired for this attempt reaching LIVE
+                    // while this tab was watching — never for a poll that
+                    // finds it still moving, or one that finds it LIVE
+                    // again having already reported that once.
+                    if (
+                      enteredLive(priorPhase.current, fresh.value.deploy.phase)
+                    ) {
+                      flyover();
+                    }
+                    priorPhase.current = fresh.value.deploy.phase;
                     setState({
                       type: 'success',
                       deploy: fresh.value.deploy,

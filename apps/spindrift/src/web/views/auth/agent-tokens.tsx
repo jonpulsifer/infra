@@ -197,7 +197,7 @@ export function AgentTokensView({
       </CardHeader>
       <CardContent className="flex flex-col gap-3">
         {error && (
-          <p role="alert" className="text-sm text-terminal-destructive">
+          <p role="alert" className="text-sm text-destructive">
             {error}
           </p>
         )}

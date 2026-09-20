@@ -30,7 +30,14 @@ const button = cva(
         outline:
           'border border-border bg-card text-subtle hover:border-primary hover:text-foreground',
         ghost: 'text-subtle hover:bg-secondary hover:text-foreground',
-        destructive: 'bg-destructive text-background hover:opacity-90',
+        // A different shape from `default`, not only a different hue: with
+        // pink as the accent, `--bad` and `--accent` sit within 1.24:1 of each
+        // other's luminance and both take the same near-white/near-black
+        // label, so two solid fills read as the same kind of button. Soft
+        // fill at rest, solid only on press, is what still separates Delete
+        // from Deploy at a glance.
+        destructive:
+          'border border-destructive bg-destructive-soft text-destructive hover:bg-destructive hover:text-background',
         link: 'text-accent-foreground underline-offset-4 hover:underline',
       },
       size: {

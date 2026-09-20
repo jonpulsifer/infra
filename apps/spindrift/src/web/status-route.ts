@@ -220,14 +220,14 @@ ${waiting ? '<meta http-equiv="refresh" content="5">' : ''}
 body {
   margin: 0; min-height: 100vh;
   display: grid; place-items: center;
-  background: #0b1120; color: #e2e8f0;
+  background: #150b22; color: #f7f0fc;
   font: 16px/1.6 ui-sans-serif, system-ui, sans-serif;
 }
 main { max-width: 34rem; padding: 2rem; }
 h1 { font-size: 1.5rem; margin: 0 0 .5rem; font-weight: 600; }
-p { margin: 0 0 1.5rem; color: #94a3b8; }
-code { color: #e2e8f0; font-family: ui-monospace, monospace; }
-small { color: #64748b; }
+p { margin: 0 0 1.5rem; color: #cdb9dd; }
+code { color: #ff3fb5; font-family: ui-monospace, monospace; }
+small { color: #a892bf; }
 </style>
 </head>
 <body>
