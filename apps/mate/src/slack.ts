@@ -71,10 +71,9 @@ export const STREAM_CAP = 12_000;
  * Slack expires that status an hour after it is set — the session carries a
  * `date_status_processing_expire` of that moment plus 3601 seconds — and past
  * it the thread reads as idle with the harness still working, taking the stop
- * control Slack draws on a `processing` session with it. What holds a turn
- * inside that hour is the harness's own cap on one turn, `TURN_TIMEOUT_MS` in
- * `sandboxes.ts`: fifteen minutes, and injectable. So this guards a cap that
- * can be raised, not a length nothing bounds.
+ * control Slack draws on a `processing` session with it. The harness's own
+ * cap on one turn is `MATE_TURN_MINUTES`, so a turn can be configured past
+ * the hour and this renews for as long as one runs rather than once.
  *
  * It takes a call of its own. Measured against the workspace: another
  * `agents.sessions.setStatus` of `processing` moves the expiry to the moment

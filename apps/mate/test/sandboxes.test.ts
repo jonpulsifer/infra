@@ -11,6 +11,7 @@ import {
   KubeSandboxes,
   SESSION_ANNOTATION,
   sandboxName,
+  TTL_MS,
   TURN_ANNOTATION,
   WORKSPACE,
 } from '../src/sandboxes.ts';
@@ -35,6 +36,7 @@ const config: SandboxConfig = {
   checkoutRepo: 'https://github.com/jonpulsifer/infra',
   checkoutRef: 'main',
   model: 'opencode-go/qwen3.8-flash',
+  turnTimeoutMs: 4000,
 };
 
 class Collect implements PromptSink {
@@ -62,7 +64,6 @@ beforeEach(() => {
     log,
     readyTimeoutMs: 4000,
     goneTimeoutMs: 4000,
-    turnTimeoutMs: 4000,
   });
 });
 
@@ -73,6 +74,11 @@ afterEach(() => {
 function podTemplate(): Record<string, any> {
   const spec = fake.sandboxes.get(NAME)?.spec as Record<string, any>;
   return spec.podTemplate.spec;
+}
+
+function shutdownTime(): number {
+  const spec = fake.sandboxes.get(NAME)?.spec as Record<string, any>;
+  return Date.parse(spec.shutdownTime);
 }
 
 function envOf(container: Record<string, any>): Record<string, any> {
@@ -543,6 +549,21 @@ describe('the turn mark', () => {
     expect((await sandboxes.list())[0]?.turnInFlight).toBe(false);
     const object = fake.sandboxes.get(NAME) as Record<string, any>;
     expect(object.metadata.annotations[TURN_ANNOTATION]).toBeUndefined();
+  });
+
+  test('takes the sandbox with it, so a long turn is not reaped mid-answer', async () => {
+    fake.script = { chunks: ['one', 'two'], chunkDelayMs: 60 };
+    const ref = await sandboxes.mint(THREAD);
+    const session = await sandboxes.attach(ref);
+
+    await Bun.sleep(5);
+    const started = Date.now();
+    const turn = sandboxes.prompt(session, 'go', new Collect());
+    await Bun.sleep(30);
+    // A whole TTL measured from the turn's own start, which the deadline the
+    // attach slide left behind — five milliseconds older — cannot satisfy.
+    expect(shutdownTime()).toBeGreaterThanOrEqual(started + TTL_MS);
+    await turn;
   });
 
   test('a turn nothing ever finished stays marked for the next mate', async () => {

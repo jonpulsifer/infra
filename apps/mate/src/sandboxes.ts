@@ -1,8 +1,8 @@
 /**
  * Sandboxes on the cluster: one bare `agents.x-k8s.io/v1beta1` Sandbox per
  * thread, the harness reached by exec-ing `opencode acp` in its pod,
- * and `spec.shutdownTime` slid forward after every turn so a mate that dies
- * mid-thread cannot leak one.
+ * and `spec.shutdownTime` slid forward at both ends of every turn so a mate
+ * that dies mid-thread cannot leak one.
  */
 import { AcpClient } from './acp.ts';
 import type { SandboxConfig } from './config.ts';
@@ -69,7 +69,6 @@ const GIT_EMAIL = '22780844+rowbutt@users.noreply.github.com';
 export const TTL_MS = 2 * 60 * 60_000;
 const READY_TIMEOUT_MS = 300_000;
 const GONE_TIMEOUT_MS = 180_000;
-const TURN_TIMEOUT_MS = 15 * 60_000;
 const REAP_TIMEOUT_MS = 15_000;
 const WATCH_SECONDS = 60;
 /** A watch that ends without an event — an expired revision, a proxy dropping
@@ -109,7 +108,6 @@ export interface KubeSandboxesDeps {
   guildId: string;
   log: Log;
   ttlMs?: number;
-  turnTimeoutMs?: number;
   readyTimeoutMs?: number;
   goneTimeoutMs?: number;
 }
@@ -600,7 +598,7 @@ export class KubeSandboxes implements Sandboxes {
       session.id,
       text,
       sink,
-      this.deps.turnTimeoutMs ?? TURN_TIMEOUT_MS,
+      this.deps.config.turnTimeoutMs,
     );
     // The turn already happened; a failed slide is a shorter TTL and a stale
     // turn mark, not a failed answer.
@@ -769,8 +767,18 @@ export class KubeSandboxes implements Sandboxes {
     });
   }
 
+  /**
+   * Opens the turn mark, and slides the TTL with it. The controller deletes a
+   * sandbox the moment `shutdownTime` passes and does not care that a turn is
+   * streaming out of it. Sliding only at the ends of a turn left the next one
+   * whatever the quiet timer had not already spent, which made
+   * `MATE_QUIET_MINUTES` a silent bound on how long a turn could run; sliding
+   * here is what decouples them, so a turn's window is the TTL and nothing
+   * else.
+   */
   private async mark(name: string): Promise<void> {
     await this.patch(name, {
+      spec: { shutdownTime: this.shutdownTime() },
       metadata: {
         annotations: { [TURN_ANNOTATION]: new Date().toISOString() },
       },

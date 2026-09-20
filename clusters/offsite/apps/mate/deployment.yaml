@@ -108,14 +108,33 @@ spec:
               value: UAR78LSKC
             - name: MATE_SLACK_ALLOWED_CHANNEL_IDS
               value: CARBAMA05,C062BS4GADR
-            # The thread contract's numbers: quiet after 15 minutes, 30 turns
-            # per thread, 120 per day, 2 sandboxes at once. That last one is
-            # capacity and not policy: a sandbox will not schedule on a
-            # control-plane node, offsite has exactly one other node, and a
-            # third sandbox at its 4Gi limit does not fit in what that node
+            # The thread contract's numbers: one turn capped at 45 minutes,
+            # quiet 30 minutes after it, 30 turns per thread, 120 per day, 2
+            # sandboxes at once.
+            #
+            # Both clocks answer to a ceiling that is not a knob: a sandbox
+            # carries `spec.shutdownTime` two hours out and the controller
+            # deletes it at that moment whatever is streaming. A turn is
+            # capped at 45 of those 120 minutes and quiet at 30, so neither
+            # clock comes within an hour of the ceiling. mate refuses to boot
+            # on a MATE_TURN_MINUTES that does reach it.
+            #
+            # Quiet is what generosity costs. Teardown is total — the Sandbox
+            # goes, and with it the /workspace clone, every uncommitted edit
+            # and the harness's own state — so this is how long work survives
+            # someone stepping away, and equally how long that thread holds
+            # one of the two slots below. Archiving the Discord thread hands
+            # the slot back early; a Slack thread cannot be archived, so there
+            # these 30 minutes are the only release.
+            #
+            # That 2 is capacity and not policy: a sandbox will not schedule
+            # on a control-plane node, offsite has exactly one other node, and
+            # a third sandbox at its 4Gi limit does not fit in what that node
             # has left.
+            - name: MATE_TURN_MINUTES
+              value: "45"
             - name: MATE_QUIET_MINUTES
-              value: "15"
+              value: "30"
             - name: MATE_MAX_TURNS_PER_THREAD
               value: "30"
             - name: MATE_MAX_TURNS_PER_DAY

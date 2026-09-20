@@ -326,6 +326,10 @@ log.info('mate starting', {
   slack: Boolean(config.slack),
   maxConcurrent: config.maxConcurrent,
   quietMinutes: config.quietMs / 60_000,
+  turnMinutes:
+    config.sandboxes.mode === 'kube'
+      ? config.sandboxes.sandbox.turnTimeoutMs / 60_000
+      : null,
   port: config.port,
 });
 await budget.waitForBudget(new AbortController().signal);

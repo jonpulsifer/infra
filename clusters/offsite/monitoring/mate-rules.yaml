@@ -140,41 +140,44 @@ spec:
             message: "Discord closed mate's gateway with code {{ $labels.code }}"
             description: "A close code mate treats as a configuration error, so it exited instead of reconnecting and will crash-loop until the cause is fixed. 4004 is the token — check whether `rowbutt discord bot token` was rotated in 1Password and whether the mate-discord ExternalSecret carried it through. 4013/4014 are the intents, which live in apps/mate/src/gateway.ts and in the developer portal; Message Content is privileged and can be revoked there without anything in git changing."
 
-        # Three is MATE_MAX_CONCURRENT on the Deployment, and the queue is
-        # FIFO behind it, so at the cap the next thread is told to wait. A
-        # thread goes quiet fifteen minutes after its last turn, so half an
-        # hour without the count ever dipping is either three genuinely busy
-        # threads or sandboxes that are not being reaped.
+        # Two is MATE_MAX_CONCURRENT on the Deployment, and the queue is FIFO
+        # behind it, so at the cap the next thread is told to wait. The window
+        # has to outlast a quiet teardown or it catches threads behaving
+        # exactly as configured: a thread goes quiet MATE_QUIET_MINUTES — 30 —
+        # after its last turn, so three quarters of an hour without the count
+        # ever dipping is either two genuinely busy threads or sandboxes that
+        # are not being reaped.
         #
-        # `min_over_time` rather than `for: 30m` on purpose: this reads the
+        # `min_over_time` rather than `for: 45m` on purpose: this reads the
         # stored samples, so a Prometheus restart inside the window does not
         # put the clock back to zero. The other two arms are what make the
         # window mean something. The instant one keeps a stale series from
         # firing it — without it a mate that went down at the cap would alert
-        # off the samples it left behind. The `offset 30m` one requires the
+        # off the samples it left behind. The `offset 45m` one requires the
         # window to be *full*: a range selector only sees the samples that
         # exist, so five minutes after a fresh scrape target appears
         # `min_over_time` is already satisfied by five minutes of data.
         #
         # The `offset` arm matches `ignoring(pod, instance)` for the reason in
-        # the header. The trade that buys: for the half hour after a collector
-        # roll, `min_over_time` still only sees the new series' samples, so
-        # the "held continuously" claim rests on the instant arm and on the
-        # `offset` arm's single sample either side of the gap. That is the
-        # right way round — the alternative is being certain of nothing at all
-        # for thirty minutes after every collector restart.
+        # the header. The trade that buys: for the three quarters of an hour
+        # after a collector roll, `min_over_time` still only sees the new
+        # series' samples, so the "held continuously" claim rests on the
+        # instant arm and on the `offset` arm's single sample either side of
+        # the gap. That is the right way round — the alternative is being
+        # certain of nothing at all for that long after every collector
+        # restart.
         - alert: MateSandboxesAtCap
           expr: |
-            mate_sandboxes_live >= 3
+            mate_sandboxes_live >= 2
             and ignoring(pod, instance)
-            mate_sandboxes_live offset 30m >= 3
-            and min_over_time(mate_sandboxes_live[30m]) >= 3
+            mate_sandboxes_live offset 45m >= 2
+            and min_over_time(mate_sandboxes_live[45m]) >= 2
           for: 0m
           labels:
             severity: warning
           annotations:
-            message: "mate has been at its sandbox cap for half an hour"
-            description: "All three sandbox slots have been held continuously for thirty minutes, so any further thread is queued behind them. Compare `mate_queue_depth`: with nobody waiting this is three busy threads, and with a queue it is starvation. `kubectl --context offsite get sandboxes -n mate` names them — a Sandbox with no live thread behind it is a leak, and its `lolwtf.ca/thread` label says which thread it thinks it belongs to."
+            message: "mate has been at its sandbox cap for three quarters of an hour"
+            description: "Both sandbox slots have been held continuously for forty-five minutes, so any further thread is queued behind them. Compare `mate_queue_depth`: with nobody waiting this is two busy threads, and with a queue it is starvation. `kubectl --context offsite get sandboxes -n mate` names them — a Sandbox with no live thread behind it is a leak, and its `lolwtf.ca/thread` label says which thread it thinks it belongs to."
 
         # A turn that ends `error` is the harness or the provider failing; one
         # that ends `sandbox-died` is the pod going away underneath a running

@@ -1,3 +1,5 @@
+import { TTL_MS } from './sandboxes.ts';
+
 export class ConfigError extends Error {
   override readonly name = 'ConfigError';
 }
@@ -43,6 +45,8 @@ export interface SandboxConfig {
   readonly checkoutRepo: string;
   readonly checkoutRef: string;
   readonly model: string;
+  /** How long one turn may run before the harness call is abandoned. */
+  readonly turnTimeoutMs: number;
 }
 
 type Env = Record<string, string | undefined>;
@@ -103,6 +107,15 @@ function text(env: Env, key: string, fallback: string): string {
 }
 
 export function readSandboxConfig(env: Env): SandboxConfig {
+  const turnTimeoutMs = integer(env, 'MATE_TURN_MINUTES', 45) * 60_000;
+  // TTL_MS is the furthest out mate ever sets `spec.shutdownTime`, so a cap
+  // at or past it promises a turn a window no sandbox lives long enough to
+  // give.
+  if (turnTimeoutMs >= TTL_MS) {
+    throw new ConfigError(
+      `MATE_TURN_MINUTES must be under the sandbox TTL of ${TTL_MS / 60_000} minutes, got ${turnTimeoutMs / 60_000}`,
+    );
+  }
   return {
     image: required(env, 'MATE_SANDBOX_IMAGE'),
     runtimeClass: text(env, 'MATE_SANDBOX_RUNTIME_CLASS', 'kata-clh'),
@@ -115,6 +128,7 @@ export function readSandboxConfig(env: Env): SandboxConfig {
     ),
     checkoutRef: text(env, 'MATE_CHECKOUT_REF', 'main'),
     model: text(env, 'MATE_SANDBOX_MODEL', 'opencode-go/qwen3.8-flash'),
+    turnTimeoutMs,
   };
 }
 
@@ -148,7 +162,7 @@ export function readConfig(env: Env): Config {
     guildId: required(env, 'MATE_GUILD_ID'),
     allowedUserIds: ids(env, 'MATE_ALLOWED_USER_IDS'),
     allowedChannelIds: ids(env, 'MATE_ALLOWED_CHANNEL_IDS'),
-    quietMs: integer(env, 'MATE_QUIET_MINUTES', 15) * 60_000,
+    quietMs: integer(env, 'MATE_QUIET_MINUTES', 30) * 60_000,
     maxTurnsPerThread: integer(env, 'MATE_MAX_TURNS_PER_THREAD', 30),
     maxTurnsPerDay: integer(env, 'MATE_MAX_TURNS_PER_DAY', 120),
     maxConcurrent: integer(env, 'MATE_MAX_CONCURRENT', 3),
