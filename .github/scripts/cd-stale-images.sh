@@ -42,9 +42,7 @@ detect="${DETECT_CONTAINERS:-$here/detect-containers.sh}"
 manifest="${CONTAINERS_MANIFEST:-.github/containers.json}"
 
 # Where `cd-digest-update.sh pins-at` looks for a build that has already been
-# written to its delivery branch but has not merged yet. A digest waiting there
-# is a build that got here first just as much as one that merged, so it counts
-# as current and stops this from ordering a rebuild on top of it.
+# written to its delivery branch but has not merged yet.
 queued_prefix="${QUEUED_REF_PREFIX:-refs/cd/queued}"
 
 usage() {
@@ -79,6 +77,12 @@ verdict() {
     echo unknown
     return 0
   fi
+  # Depth is not the question; a truncated graph is. A checkout can hold both
+  # commits as objects and still have no path between them, because the history
+  # that joins them stops at a graft — and `merge-base` then reports "not an
+  # ancestor" about a commit that is one, so a pin genuinely left behind reads
+  # as current and never gets rebuilt. That answer is indistinguishable from a
+  # true one, so refuse before asking.
   if [ "$(git rev-parse --is-shallow-repository 2>/dev/null || echo unknown)" != "false" ]; then
     echo unknown
     return 0
@@ -116,9 +120,25 @@ watches_for() {
   awk -F'\t' -v img="$image" '$1 == img { print $2 }' <<<"$watch_map"
 }
 
+# The distinct verdicts one list of digests produces, one per line, for the
+# caller to test with `grep -qx`. Deciding is deliberately left out, so that
+# `stale` can ask this of two lists and answer differently for each.
+survey() {
+  local repository="$1" newest_commit="$2" digest commit
+  while IFS= read -r digest; do
+    [ -n "$digest" ] || continue
+    # A registry read that fails outright must not take the whole pass down
+    # with it: this runs unattended over every deployed image, and one bad read
+    # is an `unknown` for that image, not a reason to stop looking at the other
+    # nine.
+    commit=$("$cd_digest" revision "$repository" "$digest" || true)
+    verdict "$commit" "$newest_commit"
+  done | sort -u
+}
+
 stale() {
-  local images=("$@") image targets watches newest_commit candidates digest commit v
-  local saw_current saw_stale saw_unknown owner
+  local images=("$@") image targets watches newest_commit owner
+  local main_pins queued_pins main_said queued_said
 
   # The registry path every digest is read from. `cd-digest-update.sh revision`
   # takes `<owner>/<image>` because a digest is content addressed per
@@ -152,47 +172,42 @@ stale() {
     newest_commit=$(newest "${watches[@]}")
 
     # Both halves of "a build already got here", exactly as the delivery step
-    # reads them: what main pins, and what is queued on the delivery branch
-    # waiting to merge.
-    candidates=$(
-      {
-        "$cd_digest" pins "$image" "${targets[@]}"
-        "$cd_digest" pins-at "$queued_prefix/update-${image}-digest" "$image" "${targets[@]}"
-      } | sort -u
-    )
-    if [ -z "$candidates" ]; then
+    # reads them — but kept apart, because they do not speak for the same
+    # thing.
+    #
+    # The delivery branch speaks for the whole image: a digest waiting there is
+    # a build that already ran and is about to become what main pins, so
+    # ordering a rebuild on top of it is the daily-churn failure.
+    #
+    # Main pins speak per deploy target, and targets drift apart — a run that
+    # dropped one of an image's manifests leaves the others at the newest
+    # build. Folded into one set, that current sibling vouches for the target
+    # left behind and the permanently stale pin becomes invisible to the pass
+    # built to end it. So one stale main pin is enough to name the image.
+    main_pins=$("$cd_digest" pins "$image" "${targets[@]}")
+    queued_pins=$("$cd_digest" pins-at "$queued_prefix/update-${image}-digest" "$image" "${targets[@]}")
+    if [ -z "$main_pins$queued_pins" ]; then
       echo "::warning::$image is a deploy target but its manifests pin no digest, so it can never roll." >&2
       continue
     fi
 
-    saw_current=false saw_stale=false saw_unknown=false
-    while IFS= read -r digest; do
-      [ -n "$digest" ] || continue
-      # A registry read that fails outright must not take the whole pass down
-      # with it: this runs unattended over every deployed image, and one bad
-      # read is an `unknown` for that image, not a reason to stop looking at
-      # the other nine.
-      commit=$("$cd_digest" revision "$owner/$image" "$digest" || true)
-      v=$(verdict "$commit" "$newest_commit")
-      case "$v" in
-        current) saw_current=true ;;
-        stale) saw_stale=true ;;
-        *) saw_unknown=true ;;
-      esac
-    done <<<"$candidates"
+    main_said=$(survey "$owner/$image" "$newest_commit" <<<"$main_pins")
+    queued_said=$(survey "$owner/$image" "$newest_commit" <<<"$queued_pins")
 
-    if [ "$saw_current" = true ]; then
-      echo "$image is pinned at a build of the newest commit touching it." >&2
+    if grep -qx current <<<"$queued_said"; then
+      echo "$image has a build of the newest commit touching it queued on its delivery branch." >&2
       continue
     fi
-    if [ "$saw_unknown" = true ]; then
+    if grep -qx unknown <<<"$queued_said" || grep -qx unknown <<<"$main_said"; then
       echo "::warning::Cannot tell which commit every pinned $image digest was built from, so this leaves it alone rather than rebuild it on a guess." >&2
       continue
     fi
-    if [ "$saw_stale" = true ]; then
+    if grep -qx stale <<<"$main_said"; then
       echo "$image is pinned behind $newest_commit, the newest commit touching its inputs." >&2
       printf '%s\n' "$image"
+      continue
     fi
+    echo "$image is pinned at a build of the newest commit touching it." >&2
   done
 }
 

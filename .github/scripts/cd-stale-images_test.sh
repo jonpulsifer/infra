@@ -9,10 +9,13 @@
 # stubs, injected through the same environment variables the workflow leaves
 # unset.
 #
-# The cases that matter are the ones where the answer must be `current`
-# although the pin is old: a digest already queued on its delivery branch, and
-# a digest whose provenance cannot be read. Both are how a daily rebuild turns
-# into a daily rebuild *forever*, so both are asserted rather than assumed.
+# The cases that matter are the ones where the obvious reading is wrong, in
+# either direction. A pin must read `current` although it is old when a build
+# is already queued on its delivery branch, or when its provenance cannot be
+# read — that is how a daily rebuild becomes a daily rebuild *forever*. A pin
+# must read `stale` although a sibling pin is current when an image's deploy
+# targets have diverged — that is the permanently stale pin this whole path
+# exists to end. Neither is assumed.
 
 set -euo pipefail
 
@@ -134,7 +137,7 @@ cat >"$work/containers.json" <<'JSON'
 {
   "build": ["foo", "bar", "orphan"],
   "deploy": {
-    "foo": ["deploy/foo.yaml"],
+    "foo": ["deploy/foo.yaml", "deploy/foo-other.yaml"],
     "bar": ["deploy/bar.yaml"]
   },
   "ignore": []
@@ -177,6 +180,15 @@ printf '%s\n' "$foo_new" >"$fixtures/pins/foo"
 printf '%s\n' "$bar_new" >"$fixtures/pins/bar"
 assert_equal 'an image pinned at its newest input commit is left alone' \
   '' "$("$script" stale 2>/dev/null)"
+
+# Deploy targets drift apart: a run that dropped one of an image's manifests
+# leaves the other pinned at the newest build. The current sibling must not
+# vouch for the target left behind, or the permanently stale pin is invisible
+# to the pass built to find it.
+reset_fixtures
+printf '%s\n%s\n' "$foo_old" "$foo_new" >"$fixtures/pins/foo"
+assert_equal 'a main pin behind names the image although another main pin is current' \
+  foo "$("$script" stale foo 2>/dev/null)"
 
 # A build that already ran and is waiting on its delivery pull request has got
 # here first. Rebuilding on top of it would be the daily-churn failure.
@@ -224,6 +236,27 @@ assert_equal 'a shallow checkout tells nothing rather than something wrong' \
   unknown "$("$script" verdict "$first" "$latest_foo" 2>/dev/null)"
 assert_equal 'a shallow checkout names no newest commit' \
   '' "$("$script" newest apps/foo 2>/dev/null)"
+cd "$repo"
+
+# Depth is not what the guard is for; a truncated graph is. This clone is deep
+# enough to hold both commits as objects — the older one arrives as another
+# branch's tip — and still has no path between them, because main's history
+# stops at a graft two commits down. `merge-base` then answers "not an
+# ancestor" about a commit that is one, and without the guard the pin that is
+# genuinely behind reads as current and is never rebuilt.
+git -C "$repo" branch -q built-here "$first"
+truncated="$work/truncated"
+git clone -q --depth 2 --no-single-branch "file://$repo" "$truncated"
+cd "$truncated"
+git cat-file -e "$first^{commit}" 2>/dev/null \
+  || fail 'fixture drift: the truncated clone no longer holds the pinned commit'
+git cat-file -e "$latest_foo^{commit}" 2>/dev/null \
+  || fail 'fixture drift: the truncated clone no longer holds the newest commit'
+if git merge-base --is-ancestor "$first" "$latest_foo" 2>/dev/null; then
+  fail 'fixture drift: this clone answers ancestry correctly, so it no longer reaches the guard'
+fi
+assert_equal 'a truncated graph holding both commits is unknown, not a confident wrong answer' \
+  unknown "$("$script" verdict "$first" "$latest_foo" 2>/dev/null)"
 cd "$repo"
 
 echo 'cd-stale-images: all assertions passed'
