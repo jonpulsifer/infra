@@ -210,11 +210,6 @@ iot:
     color: Charcoal
     mac: d4:f5:47:2e:de:48
     dev-id: 3418
-  Jon's Office Phone:
-    mac: ec:e1:a9:cc:ee:fc
-    model: Cisco SPA504G
-    dev-id: 4420
-    hostname: cathy
   AC Controller 69 Pro:
     mac: 68:b6:b3:51:d4:5c
     model: "69 Pro"
@@ -266,3 +261,14 @@ iot:
     mac: b4:8a:0a:27:07:f4
   Tidbyt Office:
     mac: cc:db:a7:1e:14:88
+
+# SIP handsets. `ip` is an octet of FML_CIDR (Management), and voip.tf turns
+# the reservation into a unifi_client so the address outlives a DHCP lease.
+voip:
+  cathy:
+    mac: ec:e1:a9:cc:ee:fc
+    model: Cisco SPA504G
+    dev-id: 4420
+    hostname: cathy
+    name: Jon's Office Phone
+    ip: 151
