@@ -99,7 +99,7 @@
       "id": 3,
       "type": "stat",
       "title": "Sandboxes live",
-      "description": "One per thread holding a sandbox. Three is MATE_MAX_CONCURRENT, at which the next thread is queued.",
+      "description": "One per thread holding a sandbox. Two is MATE_MAX_CONCURRENT, at which the next thread is queued. It counts threads, not Sandboxes, so the warm spare mate keeps beside them is not in it.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
