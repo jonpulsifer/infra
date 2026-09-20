@@ -179,6 +179,7 @@ export class FakeDiscord implements Discord {
   typing = 0;
   failCreateThread: Error | null = null;
   failEdits: Error | null = null;
+  failDeletes: Error | null = null;
   private serial = 0;
 
   constructor(private readonly me = 'bot') {}
@@ -258,6 +259,17 @@ export class FakeDiscord implements Discord {
     message.edits += 1;
     const entry = this.posted.find((m) => m.id === messageId);
     if (entry) entry.content = body.content;
+  }
+
+  async deleteMessage(channelId: string, messageId: string): Promise<void> {
+    if (this.failDeletes) throw this.failDeletes;
+    const at = this.messages.findIndex(
+      (m) => m.id === messageId && m.channelId === channelId,
+    );
+    if (at < 0) throw new Error(`no message ${messageId}`);
+    this.messages.splice(at, 1);
+    const entry = this.posted.findIndex((m) => m.id === messageId);
+    if (entry >= 0) this.posted.splice(entry, 1);
   }
 
   async archiveThread(threadId: string): Promise<void> {

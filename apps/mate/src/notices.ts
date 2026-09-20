@@ -5,6 +5,7 @@
  * part of the conversation.
  */
 import { NO_REPLY, PLACEHOLDER, STOPPED } from './reply.ts';
+import type { MintStep } from './sandbox.ts';
 
 export const SANDBOX_CLOSED = 'sandbox closed; message again to start fresh';
 export const RESTARTED =
@@ -20,11 +21,36 @@ export const HARNESS_FAILED = 'the harness failed';
 export const UNDELIVERED = 'the reply could not be delivered';
 export const THREAD_SPENT = 'this thread has used its';
 export const DAY_SPENT = 'the daily budget of';
+export const NEVER_STARTED =
+  'mate restarted before this could start; ask again and it runs from the top';
+
+/**
+ * What each step of a mint is, in the words of the human waiting on it. They
+ * are the acknowledgment mate holds while a thread has nothing else to show:
+ * `progress.ts` rewrites one line through them, and which of them a thread
+ * sees is which wait it is paying — a fresh boot, its own sandbox waking, or
+ * a warm one being handed over.
+ */
+export const MINT_STEPS: Record<MintStep, string> = {
+  reusing: 'waking the sandbox this thread already has',
+  adopting: 'taking a sandbox that was already warm',
+  refreshing: 'bringing its checkout up to date',
+  creating: 'asking for a sandbox',
+  booting: 'booting the sandbox and cloning the repo',
+};
+
+/** The step after every mint, and the last thing said before the turn itself. */
+export const ATTACHING = 'waking the agent';
 
 const PREFIXES: readonly string[] = [
   SANDBOX_CLOSED,
   RESTARTED,
+  NEVER_STARTED,
   WAITING,
+  ATTACHING,
+  // Spread rather than listed, so a step added to the mint cannot be left out
+  // of the filter and read back to a fresh harness as something mate said.
+  ...Object.values(MINT_STEPS),
   STOPPED_WAITING,
   MINT_FAILED,
   ATTACH_FAILED,

@@ -4,7 +4,7 @@
  */
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { silentLog } from '../src/log.ts';
-import { UNDELIVERED } from '../src/notices.ts';
+import { MINT_STEPS, UNDELIVERED } from '../src/notices.ts';
 import { NO_REPLY, Reply } from '../src/reply.ts';
 import { type Script, StubSandboxes } from '../src/sandbox.ts';
 import {
@@ -1083,7 +1083,12 @@ describe('a turn stopped from Slack', () => {
       expect(api.only('start')).toHaveLength(1);
       expect(api.streamed()).not.toContain('*stopped*');
       expect(metrics.turns).toEqual(['cancelled']);
-      expect(api.only('post')).toEqual([]);
+      // The only line posted in the thread is the acknowledgment of the
+      // wait, and the turn starting took it back out again.
+      expect(api.only('post').map((call) => call.text)).toEqual([
+        MINT_STEPS.creating,
+      ]);
+      expect(api.only('remove')).toHaveLength(1);
       expect(JSON.stringify(api.calls)).not.toContain(UNDELIVERED);
       expect(log.entries.filter((e) => e.level === 'error')).toEqual([]);
       expect(api.only('session').at(-1)?.status).toBe('active');

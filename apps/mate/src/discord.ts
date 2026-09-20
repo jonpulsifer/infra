@@ -22,6 +22,7 @@ import type {
   HistoryMessage,
   HistoryQuery,
   Inbound,
+  Notice,
   Outcome,
   Surface,
   ThreadRef,
@@ -49,6 +50,7 @@ export interface Discord {
     messageId: string,
     body: OutMessage,
   ): Promise<void>;
+  deleteMessage(channelId: string, messageId: string): Promise<void>;
   archiveThread(threadId: string): Promise<void>;
   joinThread(threadId: string): Promise<void>;
   showTyping(channelId: string): Promise<void>;
@@ -117,6 +119,9 @@ export function discordOver(api: API): Discord {
         components: body.components ?? [],
         allowed_mentions: NO_MENTIONS,
       });
+    },
+    async deleteMessage(channelId, messageId) {
+      await api.channels.deleteMessage(channelId, messageId);
     },
     async archiveThread(threadId) {
       await api.channels.edit(threadId, { archived: true });
@@ -187,6 +192,40 @@ export class DiscordCanvas implements Canvas {
   }
 }
 
+/**
+ * One line in a Discord thread that mate keeps editing. It is a message
+ * rather than the typing indicator because the indicator carries no words and
+ * expires ten seconds after it is raised; it is deleted rather than edited
+ * away at the end because Discord has no empty message, and a line saying
+ * mate was starting a sandbox is worth nothing once the answer is under it.
+ */
+export class DiscordNotice implements Notice {
+  private id: string | null = null;
+
+  constructor(
+    private readonly api: Discord,
+    private readonly threadId: string,
+  ) {}
+
+  async say(text: string): Promise<void> {
+    if (this.id) {
+      await this.api.editMessage(this.threadId, this.id, { content: text });
+      return;
+    }
+    this.id = await this.api.createMessage(this.threadId, { content: text });
+  }
+
+  async done(text: string | null): Promise<void> {
+    if (text !== null) {
+      await this.say(text);
+      return;
+    }
+    const id = this.id;
+    this.id = null;
+    if (id) await this.api.deleteMessage(this.threadId, id);
+  }
+}
+
 export interface DiscordSurfaceOptions {
   /** The bot user's id. */
   me: string;
@@ -209,6 +248,9 @@ export function discordSurface(
     },
     async post(thread, text) {
       await api.createMessage(thread.id, { content: text });
+    },
+    notice(thread) {
+      return new DiscordNotice(api, thread.id);
     },
     history(thread, query) {
       return api.history(thread.id, query);

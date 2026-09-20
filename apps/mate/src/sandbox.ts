@@ -39,6 +39,23 @@ export interface MintedRef extends SandboxRef {
   readonly source: SandboxSource;
 }
 
+/**
+ * How far a mint has got, for the human watching a thread that has not
+ * answered yet. They are steps rather than a percentage because they are the
+ * only boundaries the mint genuinely knows it has crossed, and they are named
+ * here rather than in the caller because only the path that took them knows
+ * which ones it took — the words each one is said in are `notices.ts`'s.
+ */
+export type MintStep =
+  | 'reusing'
+  | 'adopting'
+  | 'refreshing'
+  | 'creating'
+  | 'booting';
+
+/** Called as a mint crosses each step, so the wait can be narrated as it runs. */
+export type OnMintStep = (step: MintStep) => void;
+
 export interface Session {
   readonly id: string;
   readonly sandbox: SandboxRef;
@@ -79,7 +96,7 @@ export interface Sandboxes {
    * Creates the thread's sandbox, claims the one it already has, or takes one
    * the warm pool was holding; resolves once it is Ready.
    */
-  mint(thread: ThreadRef): Promise<MintedRef>;
+  mint(thread: ThreadRef, onStep?: OnMintStep): Promise<MintedRef>;
   /**
    * Tops the warm spare pool up to what is configured and renews what is
    * already in it. Called on a cadence and after a thread takes a spare, and
@@ -121,6 +138,13 @@ export interface StubOptions {
   script?: Script;
   mintDelayMs?: number;
   attachDelayMs?: number;
+  /**
+   * What adopting a warm spare costs: the relabel and the shallow fetch the
+   * cluster client pays, rather than nothing. A stub that hands a spare over
+   * in no time at all would model the one thing the pool exists to be
+   * measured on as free.
+   */
+  spareDelayMs?: number;
   mintFails?: string;
   attachFails?: string;
   costUsd?: number;
@@ -180,12 +204,16 @@ export class StubSandboxes implements Sandboxes {
     }
   }
 
-  async mint(thread: ThreadRef): Promise<MintedRef> {
+  async mint(thread: ThreadRef, onStep?: OnMintStep): Promise<MintedRef> {
     this.mints += 1;
     // Ahead of `mintFails`, and faithfully so: a thread that takes a spare
     // never reaches the path that a broken mint breaks.
     const spare = this.warm.shift();
     if (spare) {
+      onStep?.('adopting');
+      await this.spareWait();
+      onStep?.('refreshing');
+      await this.spareWait();
       // The whole of what a spare buys: the wait a fresh one pays is one
       // somebody already paid, and the name it was born with stays its name.
       const taken = { name: spare, thread };
@@ -193,11 +221,20 @@ export class StubSandboxes implements Sandboxes {
       void this.ensureSpares();
       return { ...taken, source: 'spare' };
     }
+    // Both steps before the wait, in the order the cluster client takes
+    // them: the delay below stands in for the boot, which is the step a
+    // human watching the line is actually watching.
+    onStep?.('creating');
+    onStep?.('booting');
     if (this.opts.mintDelayMs) await this.clock.sleep(this.opts.mintDelayMs);
     if (this.opts.mintFails) throw new Error(this.opts.mintFails);
     const ref = { name: `mate-${thread.id}`, thread };
     this.live.set(ref.name, ref);
     return { ...ref, source: 'fresh' };
+  }
+
+  private async spareWait(): Promise<void> {
+    if (this.opts.spareDelayMs) await this.clock.sleep(this.opts.spareDelayMs);
   }
 
   async attach(sandbox: SandboxRef): Promise<Session> {

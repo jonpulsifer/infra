@@ -99,6 +99,20 @@ export interface Canvas {
   tool?(call: ToolCall): Promise<void>;
 }
 
+/**
+ * One line mate keeps a hand on: rewritten in place as the news changes, and
+ * taken back when there is nothing left to say. Both surfaces post a message
+ * and edit it, because a thread has nowhere else to put words — Discord's
+ * typing indicator and Slack's agent session each say that mate is working
+ * and neither can say what it is working on.
+ */
+export interface Notice {
+  /** Says the line, or rewrites what it already says. */
+  say(text: string): Promise<void>;
+  /** The last word: a sentence replaces the line, `null` takes it away. */
+  done(text: string | null): Promise<void>;
+}
+
 export interface Surface {
   readonly name: SurfaceName;
   /** The bot's own user id here: what a mention looks like, and who "you" is. */
@@ -111,6 +125,11 @@ export interface Surface {
   openThread(message: Inbound, title: string): Promise<ThreadRef>;
   /** One plain line in the thread: everything mate says that is not an answer. */
   post(thread: ThreadRef, text: string): Promise<void>;
+  /**
+   * A line mate will keep rewriting, for news that is only true until the
+   * next thing happens — which is the wait for a sandbox, and nothing else.
+   */
+  notice(thread: ThreadRef): Notice;
   /** The thread's own messages, newest first. */
   history(thread: ThreadRef, query: HistoryQuery): Promise<HistoryMessage[]>;
   /**
