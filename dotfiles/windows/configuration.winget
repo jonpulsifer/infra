@@ -73,6 +73,11 @@ resources:
 
 # --- Shell and terminal -----------------------------------------------------
 
+# Deliberately NOT the Store build (9MZ1SNWT0N5D). The MSIX package runs in an
+# application sandbox that virtualizes parts of the filesystem and registry,
+# which is a poor fit for the shell everything else here runs inside --
+# Install-PSResource and profile paths are exactly the kind of thing it
+# redirects. The community manifest offers a machine-scope MSI.
 - type: Microsoft.WinGet/Package
   name: PowerShell
   properties:
@@ -84,14 +89,18 @@ resources:
       securityContext: elevated
     description: PowerShell 7 -- the shell this desk actually uses
 
+# From the Store, not the community source. Both ship the same MSIX and the
+# same package family (Microsoft.WindowsTerminal_8wekyb3d8bbwe), but a
+# sideloaded MSIX carries no Store licence and so never auto-updates; the
+# community manifest also lags well behind the Store listing.
 - type: Microsoft.WinGet/Package
   name: WindowsTerminal
   properties:
-    id: Microsoft.WindowsTerminal
-    source: winget
+    id: 9N0DX20HK701
+    source: msstore
     useLatest: true
   metadata:
-    description: Windows Terminal
+    description: Windows Terminal (Store)
 
 # --- Tooling ----------------------------------------------------------------
 
@@ -116,19 +125,26 @@ resources:
   metadata:
     description: mise -- the source of truth for every other CLI tool
 
+# Also from the Store, for the same reason: same package family
+# (MicrosoftCorporationII.WindowsSubsystemForLinux_8wekyb3d8bbwe), but the
+# Store keeps it current on its own.
 - type: Microsoft.WinGet/Package
   name: WSL
   properties:
-    id: Microsoft.WSL
-    source: winget
+    id: 9P9TQF7MRM4R
+    source: msstore
     useLatest: true
   metadata:
     winget:
       securityContext: elevated
-    description: WSL itself; the distro is bootstrap.ps1 -WithWsl's business
+    description: WSL itself (Store); the distro is bootstrap.ps1 -WithWsl's business
 
 # --- Desktop ----------------------------------------------------------------
 
+# The community manifest for this one is already InstallerType: msix with
+# PackageFamilyName Agilebits.1Password_amwd9z03whsfe -- the same package the
+# Store listing (9NZWS5X28P0J) delivers, and 1Password updates itself. Nothing
+# to gain by switching sources.
 - type: Microsoft.WinGet/Package
   name: OnePassword
   properties:
@@ -154,6 +170,8 @@ resources:
     source: winget
     useLatest: true
   metadata:
+    # A Store listing exists (XP9KHM4BK9FZ7Q); the Win32 build stays because its
+    # own updater is the canonical path and extensions expect that layout.
     description: Visual Studio Code
 
 # CaskaydiaCove Nerd Font is not in the winget catalogue -- winget's font
