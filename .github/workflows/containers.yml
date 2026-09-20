@@ -43,11 +43,27 @@ jobs:
   # test is a guard nobody will dare change later. This workflow carries no
   # `paths:` filter, so the test gates every pull request, including one that
   # only edits the step that calls it.
+  #
+  # Two suites, because the two ways this has broken are different. The unit
+  # suite asks whether the script decides correctly. The step suite runs the
+  # delivery step itself, against a git remote on disk and stubbed `gh` and
+  # `curl`, because the failure that survived the first version of this guard
+  # was not a wrong decision — it was a correct decision taken on half its
+  # inputs, which only running the step can catch. It reads the step out of
+  # this file with `yq`, so the two cannot drift apart.
   cd-guard:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4
+        with:
+          # The step suite reads the workflow with yq. Named rather than left
+          # to whatever the runner image happens to ship, because a guard that
+          # depends on an unpinned tool is a guard that stops running the day
+          # the image drops it.
+          install_args: yq
       - run: bash .github/scripts/cd-digest-update_test.sh
+      - run: bash .github/scripts/cd-digest-step_test.sh
 
   build:
     needs: detect
@@ -173,15 +189,14 @@ jobs:
           REGISTRY_REPOSITORY: ${{ github.repository_owner }}/${{ matrix.image }}
         run: |
           set -euo pipefail
-          mapfile -t targets < <(jq -r '.[]' <<<"$MANIFESTS")
-          if [ "${#targets[@]}" -eq 0 ]; then
-            echo "$IMAGE_NAME has no deploy targets in .github/containers.json"
-            exit 0
-          fi
 
           # Copied out of the tree before the checkout below replaces the
           # working tree with main's content. A step that swaps the program it
           # is running halfway through is a step nobody can reason about.
+          # Deliberately the built commit's copy and not main's: this step and
+          # that script are one program split across two files, and their
+          # argument contract moves together, so pairing an old step with a new
+          # script is a broken call nobody would see until a rerun made it.
           cd_digest="$RUNNER_TEMP/cd-digest-update.sh"
           cp .github/scripts/cd-digest-update.sh "$cd_digest"
 
@@ -205,6 +220,8 @@ jobs:
           else
             git fetch --no-tags origin main
           fi
+          # Pinned now, because the second fetch below moves FETCH_HEAD.
+          main_head=$(git rev-parse FETCH_HEAD)
 
           # One branch per image, not per commit. The branch is a queue with a
           # single slot: the newest build for an image force-pushes over the
@@ -214,7 +231,36 @@ jobs:
           # carrying an older digest — the regression the guard below exists to
           # prevent, reintroduced as a matter of routine.
           BRANCH_NAME="cd/update-${IMAGE_NAME}-digest"
-          git checkout -B "$BRANCH_NAME" FETCH_HEAD
+          QUEUED_REF="refs/cd/queued/update-${IMAGE_NAME}-digest"
+
+          # What is already sitting in that slot is an input to the guard
+          # below, so it has to be fetched, and a failure to fetch it has to be
+          # loud. A wildcard refspec gives both: matching no branch at all is a
+          # success, so "nothing queued" stays silent, while a network or auth
+          # failure exits non-zero and stops the step instead of reading as an
+          # empty queue. Naming the branch exactly would fail on the first push
+          # for every new image.
+          git fetch --no-tags origin "+refs/heads/cd/*:refs/cd/queued/*"
+
+          git checkout -B "$BRANCH_NAME" "$main_head"
+
+          # Deploy targets come from main's map for the same reason the
+          # manifests do. A target renamed or dropped on main since this commit
+          # was built is not a broken deploy map; it is a deploy map this run
+          # is behind, and reading the built commit's list here names a file
+          # main no longer has and fails the job — permanently, since every
+          # rerun reads the same stale list. `rewrite` keeps its `::error::`
+          # for a target main's own map names and main's own tree does not
+          # have, which really is broken.
+          mapfile -t targets < <(jq -r --arg img "$IMAGE_NAME" '.deploy[$img][]? // empty' .github/containers.json)
+          if [ "${#targets[@]}" -eq 0 ]; then
+            if [ "$(jq 'length' <<<"$MANIFESTS")" -gt 0 ]; then
+              echo "::notice::$IMAGE_NAME had deploy targets when $BUILT_COMMIT was built and main's .github/containers.json lists none, so this run has nothing to roll."
+            else
+              echo "$IMAGE_NAME has no deploy targets in .github/containers.json"
+            fi
+            exit 0
+          fi
 
           # Never roll backwards. Re-running an old workflow run is a real
           # recovery — a run cancelled before its jobs start builds nothing,
@@ -223,25 +269,50 @@ jobs:
           # that run again. But an old run checks out an old commit and would
           # happily stamp its older digest over a newer one.
           #
-          # What the manifests pin right now is the record of which build got
-          # there first, and `org.opencontainers.image.revision` on the pinned
-          # image says which commit that build came from. If this run's commit
-          # is an ancestor of that one, this run is the older of the two and
-          # has nothing to contribute — which is not a failure, so say it
-          # plainly and leave.
-          mapfile -t pinned_digests < <("$cd_digest" pins "$IMAGE_NAME" "${targets[@]}")
+          # A newer build can already be recorded in two places, and both
+          # count. What the manifests pin on main is the build that got there
+          # and merged; what `cd/update-<image>-digest` carries is the build
+          # that got there and is still waiting on its pull request. Reading
+          # only main loses the second one outright, and that is the case this
+          # guard exists for: a rerun is the thing an operator does once a
+          # digest looks stale, which is to say after newer commits have
+          # landed, so the newer digest it would overwrite is usually still
+          # open rather than merged. Simulated against a local remote, reading
+          # only main let a rerun of an older commit force-push its digest over
+          # an unmerged newer one, and the open pull request then merged the
+          # older digest.
+          #
+          # `org.opencontainers.image.revision` on each of those digests says
+          # which commit its build came from. If this run's commit is an
+          # ancestor of one of them, this run is the older and has nothing to
+          # contribute — which is not a failure, so say it plainly and leave.
+          #
+          # Through a file rather than a process substitution: a substitution
+          # hides the exit status of everything inside it, and a guard that
+          # quietly reads fewer candidates than exist is a guard that fails
+          # open.
+          candidates="$RUNNER_TEMP/$IMAGE_NAME-candidate-digests"
+          {
+            "$cd_digest" pins "$IMAGE_NAME" "${targets[@]}"
+            "$cd_digest" pins-at "$QUEUED_REF" "$IMAGE_NAME" "${targets[@]}"
+          } | sort -u >"$candidates"
+          mapfile -t pinned_digests <"$candidates"
+
           pinned_commits=()
           for pinned_digest in "${pinned_digests[@]}"; do
             pinned_commit=$("$cd_digest" revision "$REGISTRY_REPOSITORY" "$pinned_digest")
             if [ -n "$pinned_commit" ]; then
-              echo "$IMAGE_NAME is pinned at $pinned_digest, built from $pinned_commit"
+              echo "$IMAGE_NAME is pinned or queued at $pinned_digest, built from $pinned_commit"
               pinned_commits+=("$pinned_commit")
             else
               echo "::warning::Cannot tell which commit $IMAGE_NAME@$pinned_digest was built from; this run cannot be checked against it."
             fi
           done
           if [ "$("$cd_digest" decide "$BUILT_COMMIT" "${pinned_commits[@]}")" = "skip" ]; then
-            echo "::notice::$IMAGE_NAME already rolls a build newer than $BUILT_COMMIT, so this run leaves the manifests alone."
+            # Named loosely on purpose: the verdict covers every target at
+            # once, and the reason lines `decide` printed just above name the
+            # build and the commit that settled it.
+            echo "::notice::$IMAGE_NAME is already pinned or queued at a build that contains $BUILT_COMMIT, so this run leaves every manifest alone."
             exit 0
           fi
 

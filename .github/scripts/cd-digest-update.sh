@@ -15,6 +15,7 @@ set -euo pipefail
 usage() {
   cat >&2 <<'EOF'
 usage: cd-digest-update.sh pins <image> <manifest>...
+       cd-digest-update.sh pins-at <ref> <image> <manifest>...
        cd-digest-update.sh rewrite <image> <digest> <manifest>...
        cd-digest-update.sh revision <repository> <digest>
        cd-digest-update.sh decide <built-commit> [pinned-commit]...
@@ -72,6 +73,36 @@ pins() {
       printf '%s\n' "${match#@}"
     fi
   done | sort -u
+}
+
+# The same read, but of some other commit's copy of those manifests rather than
+# the working tree's.
+#
+# The digest a manifest pins on `main` is only half of what is already decided
+# for an image. The other half is sitting on `cd/update-<image>-digest`: a
+# digest some run already wrote, waiting on a pull request that has not merged
+# yet. Force-pushing over it is exactly how an older run wins — the branch is a
+# single-slot queue and whoever pushes last fills it — so that pin has to be a
+# candidate in the comparison too, not just the one on `main`.
+#
+# Materialising the files is what makes this the same code path as the working
+# tree read: one definition of "the digest this manifest pins for this image",
+# used for both sides of the comparison. A ref that does not exist yet, or that
+# does not carry one of these files, yields nothing — which is the right answer
+# for a queue slot nobody has filled.
+pins_at() {
+  local ref="$1" image="$2" tmp manifest status=0
+  shift 2
+
+  [ -n "$ref" ] || return 0
+  tmp=$(mktemp -d)
+  for manifest in "$@"; do
+    mkdir -p "$tmp/$(dirname "$manifest")"
+    git show "$ref:$manifest" >"$tmp/$manifest" 2>/dev/null || rm -f "$tmp/$manifest"
+  done
+  (cd "$tmp" && pins "$image" "$@") || status=$?
+  rm -rf "$tmp"
+  return "$status"
 }
 
 # Rewrites every manifest to pin this image at this digest. A declared target
@@ -168,8 +199,18 @@ revision() {
 }
 
 # Prints `skip` when the run building <built-commit> has nothing to add because
-# a manifest already pins an image built from a later commit; `write`
-# otherwise.
+# a later commit's build is already pinned or already queued; `write`
+# otherwise. The caller decides which commits to offer — what `main` pins and
+# what the delivery branch carries are both answers to "a build of this image
+# already got here first".
+#
+# The verdict covers the whole write, not one manifest at a time: one commit
+# ahead of this run skips every target. An image deployed in two places should
+# roll as one build, and writing the older digest into the targets that happen
+# to be behind would leave the fleet running a mixture nobody chose. A target
+# left stale that way is recovered the same way any missed build is — re-run
+# the newer build, whose commit is an ancestor of nothing here, so it writes
+# every target.
 #
 # The rule is deliberately one-sided: **skip only on proof**. Proof is that the
 # built commit is a strict ancestor of a pinned build's commit, with both
@@ -225,6 +266,11 @@ case "${1:-}" in
     [ "$#" -ge 3 ] || usage
     shift
     pins "$@"
+    ;;
+  pins-at)
+    [ "$#" -ge 4 ] || usage
+    shift
+    pins_at "$@"
     ;;
   rewrite)
     [ "$#" -ge 4 ] || usage

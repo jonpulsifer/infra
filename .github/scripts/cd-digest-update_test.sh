@@ -1,8 +1,12 @@
 #!/usr/bin/env bash
 # Covers the parts of continuous delivery that decide what gets written: which
-# digest a manifest is pinning, what the rewrite touches and refuses, and when
-# a run is too old to have anything to say. The registry read is the one piece
-# left uncovered, because it is network and nothing else.
+# digest a manifest is pinning — in the working tree and on the branch a digest
+# is already queued on — what the rewrite touches and refuses, and when a run is
+# too old to have anything to say.
+#
+# What the step then *does* with those answers is `cd-digest-step_test.sh`,
+# which runs the workflow step itself. That suite is also where the registry
+# read is exercised, against a stub; nothing here touches the network.
 
 set -euo pipefail
 
@@ -144,6 +148,11 @@ git -C "$repo" checkout -q main
 
 decide() { (cd "$repo" && "$script" decide "$@" 2>/dev/null); }
 
+# The reasons go to stderr, and several of them end in the same `write`. An
+# assertion on the verdict alone cannot tell which branch produced it, so the
+# branches that exist to *refuse to guess* are asserted on what they said.
+decide_reason() { (cd "$1" && "$script" decide "${@:2}" >/dev/null) 2>&1; }
+
 assert_equal 'decide writes when nothing is pinned to compare against' \
   write "$(decide "$last")"
 
@@ -165,12 +174,75 @@ assert_equal 'decide writes when the pinned build came from an unknown commit' \
 assert_equal 'decide writes when neither commit contains the other' \
   write "$(decide "$last" "$diverged")"
 
+assert_equal 'decide says the pinned build came from a commit it does not have' \
+  'Cannot compare: the pinned image was built from 0000000000000000000000000000000000000000, which is not a commit in this checkout.' \
+  "$(decide_reason "$repo" "$last" 0000000000000000000000000000000000000000)"
+
+assert_equal 'decide writes when its own commit is not in the checkout' \
+  write "$(decide 0000000000000000000000000000000000000000 "$last")"
+
+assert_equal 'decide says when its own commit is not in the checkout' \
+  'Cannot compare: 0000000000000000000000000000000000000000 is not a commit in this checkout.' \
+  "$(decide_reason "$repo" 0000000000000000000000000000000000000000 "$last")"
+
 # A checkout with no history cannot answer the ancestry question honestly, and
 # a guard that cannot answer must not be the thing that stops delivery.
 shallow="$work/shallow"
 git clone -q --depth=1 "file://$repo" "$shallow"
 assert_equal 'decide writes rather than guess from a shallow checkout' \
   write "$( (cd "$shallow" && "$script" decide "$first" "$last" 2>/dev/null) )"
+
+# Depth 1 is answered by the missing commit before the shallow test is reached,
+# so it leaves the shallow test itself unexercised. Depth 2 holds both commits
+# and is still shallow — `git merge-base` would answer, wrongly and
+# confidently, and only the shallow test stops it.
+shallow2="$work/shallow2"
+git clone -q --depth=2 "file://$repo" "$shallow2"
+assert_equal 'a two-deep clone really is shallow and really holds both commits' \
+  'true' "$(git -C "$shallow2" rev-parse --is-shallow-repository)"
+assert_equal 'decide writes rather than trust a truncated history that answers' \
+  write "$( (cd "$shallow2" && "$script" decide "$middle" "$last" 2>/dev/null) )"
+assert_equal 'decide says it will not read ancestry out of a truncated history' \
+  "Cannot compare $middle with the pinned build's $last: this checkout carries no commit history." \
+  "$(decide_reason "$shallow2" "$middle" "$last")"
+
+# --- pins-at ----------------------------------------------------------------
+#
+# What the delivery branch already carries is the other half of the guard's
+# input: a digest some run wrote that has not merged yet. Reading it has to be
+# the same reading as the working tree's, or the two halves mean different
+# things.
+
+queued="$work/queued"
+git init -q -b main "$queued"
+git -C "$queued" config user.email test@example.com
+git -C "$queued" config user.name test
+mkdir -p "$queued/clusters/app"
+queued_manifest=clusters/app/deployment.yaml
+printf 'image: ghcr.io/jonpulsifer/mate:latest@%s\n' "$one" >"$queued/$queued_manifest"
+git -C "$queued" add -A
+git -C "$queued" commit -q -m 'pin the first build'
+git -C "$queued" checkout -q -b cd/update-mate-digest
+printf 'image: ghcr.io/jonpulsifer/mate:latest@%s\n' "$two" >"$queued/$queued_manifest"
+git -C "$queued" commit -q -am 'queue a newer build'
+git -C "$queued" checkout -q main
+
+pins_at() { (cd "$queued" && "$script" pins-at "$@"); }
+
+assert_equal 'pins-at reads the branch, not the working tree beside it' \
+  "$two" "$(pins_at cd/update-mate-digest mate "$queued_manifest")"
+
+assert_equal 'pins reads the working tree, not the branch' \
+  "$one" "$( (cd "$queued" && "$script" pins mate "$queued_manifest") )"
+
+assert_equal 'pins-at is silent about a branch that does not exist yet' \
+  '' "$(pins_at refs/cd/queued/nothing-here mate "$queued_manifest")"
+
+assert_equal 'pins-at is silent about a file that ref does not carry' \
+  '' "$(pins_at cd/update-mate-digest mate clusters/app/absent.yaml)"
+
+assert_equal 'pins-at leaves nothing behind in the working tree' \
+  '' "$(git -C "$queued" status --porcelain)"
 
 # --- usage ------------------------------------------------------------------
 
