@@ -140,7 +140,8 @@ New-Link -Source (Join-Path $WindowsDir 'profile.d') -Target "$HOME\.config\powe
 # The shared config is reused, not forked: git on Windows reads
 # ~/.config/git/config just as it does on Unix. windows/gitconfig lands at
 # ~/.gitconfig, includes that file, and overrides the handful of things that
-# differ (autocrlf, the native op-ssh-sign.exe).
+# differ (autocrlf, Win32-OpenSSH, the native op-ssh-sign.exe and the public
+# key literal it signs with).
 New-Link -Source (Join-Path $DotfilesDir '.config\git') -Target "$HOME\.config\git"
 New-Link -Source (Join-Path $WindowsDir 'gitconfig') -Target "$HOME\.gitconfig"
 
@@ -156,8 +157,8 @@ New-Link -Source (Join-Path $DotfilesDir '.config\nvim') -Target "$env:LOCALAPPD
 
 # Deliberately not linked: .ssh/config. It carries ControlMaster and a
 # `Match exec "test $(uname -s) = Darwin"` block that Win32-OpenSSH does not
-# understand, and nothing on this box ssh's from PowerShell yet. The 1Password
-# Windows agent serves keys without it.
+# understand, and git -- the only thing here that ssh's -- needs nothing from
+# it. The 1Password Windows agent serves keys over its named pipe.
 
 # --- Terminal ---------------------------------------------------------------
 

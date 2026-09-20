@@ -14,6 +14,18 @@
 	# repo on checkout. LF everywhere, on every platform.
 	autocrlf = false
 
+	# Git for Windows ships its own MSYS2 ssh, which cannot open the Windows
+	# named pipe (\.\pipe\openssh-ssh-agent) that the 1Password agent serves
+	# keys on -- so every fetch and push over ssh dies with "Permission denied
+	# (publickey)". Win32-OpenSSH speaks that pipe natively.
+	sshCommand = C:/Windows/System32/OpenSSH/ssh.exe
+
+[user]
+	# The shared config points signingkey at ~/.ssh/id_ed25519. No private key
+	# is on disk here -- 1Password holds it -- so op-ssh-sign gets the public
+	# key literal instead, the same one dotfiles/mise.toml hands the WSL side.
+	signingkey = ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIJewr6lJtffl+uZpnWXTIE5Sd3VeytQRGXKMBv1s5R/v
+
 [gpg "ssh"]
 	# 1Password installs an app execution alias in
 	# %LOCALAPPDATA%\Microsoft\WindowsApps, which is on PATH by default -- so
