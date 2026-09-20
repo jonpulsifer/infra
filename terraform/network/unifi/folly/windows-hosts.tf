@@ -18,9 +18,14 @@ locals {
       cidr       = local.future_cidr
       fixed_ip   = local.lab_topology.TALLBOY_IP
     }
+    # No network_id. The provider turns one into a virtual-network override,
+    # and the controller answers VirtualNetworkOverrideUnsupportedForDefaultNetwork
+    # when the target is the default network, which Management is. A client
+    # takes its address from the network it connects on, so the reservation
+    # alone is both sufficient and the only thing the controller will accept.
     atomic = {
       client     = local.clients.desktops.atomic
-      network_id = unifi_network.fml.id
+      network_id = null
       cidr       = local.fml_cidr
       fixed_ip   = local.lab_topology.ATOMIC_IP
     }
