@@ -1009,7 +1009,7 @@ describe('the warm pool', () => {
     expect(discord.contentsIn(threadId).at(-1)).toBe('alpha ');
     // The forty seconds a mint costs, paid before the question was asked.
     expect(metrics.mintSamples.at(-1)).toEqual({
-      source: 'adopted',
+      source: 'spare',
       mintMs: 0,
       attachMs: 0,
     });

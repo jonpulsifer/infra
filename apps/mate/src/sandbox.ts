@@ -8,17 +8,35 @@ import type { ThreadRef, ToolCall } from './surface.ts';
 
 export type { ThreadRef };
 
+/**
+ * Which of three waits a thread paid for its sandbox, and the `source` label
+ * on `mate_mint_duration_milliseconds` and `mate_attach_duration_milliseconds`.
+ * They are three series rather than two because they are three different
+ * costs: a `fresh` mint pays a kata VM boot and a clone, which is the cold
+ * start being chased; `reused` is this thread's own sandbox from an earlier
+ * turn and pays neither; and `spare` is one the warm pool was already
+ * holding, which pays a relabel and a shallow fetch instead. Folding the last
+ * two together would hide exactly the difference the pool exists to make.
+ */
+export type SandboxSource = 'fresh' | 'reused' | 'spare';
+
 export interface SandboxRef {
-  /** Opaque: a sandbox adopted from the spare pool is named after no thread. */
+  /** Opaque: a sandbox taken from the spare pool is named after no thread. */
   readonly name: string;
   readonly thread: ThreadRef;
   /** Set by `list()` when the object says a turn was running: mate died under it. */
   readonly turnInFlight?: boolean;
   /**
-   * Set by `mint()` when the object was already there and this thread only
-   * claimed it — its own sandbox from an earlier turn, or a warm spare.
+   * Absent on a ref `list()` rebuilt from an object that outlived a restart,
+   * because no thread waited for that one. Every mint sets it, which is what
+   * `MintedRef` says.
    */
-  readonly adopted?: boolean;
+  readonly source?: SandboxSource;
+}
+
+/** What a mint hands back: the ref, and which wait the thread just paid. */
+export interface MintedRef extends SandboxRef {
+  readonly source: SandboxSource;
 }
 
 export interface Session {
@@ -58,10 +76,10 @@ export interface Sandboxes {
   /** Every sandbox this mate owns, for rehydration after a restart. */
   list(): Promise<SandboxRef[]>;
   /**
-   * Creates the thread's sandbox, claims one already under its name, or takes
-   * one the warm pool was holding; resolves once it is Ready.
+   * Creates the thread's sandbox, claims the one it already has, or takes one
+   * the warm pool was holding; resolves once it is Ready.
    */
-  mint(thread: ThreadRef): Promise<SandboxRef>;
+  mint(thread: ThreadRef): Promise<MintedRef>;
   /**
    * Tops the warm spare pool up to what is configured and renews what is
    * already in it. Called on a cadence and after a thread takes a spare, and
@@ -162,7 +180,7 @@ export class StubSandboxes implements Sandboxes {
     }
   }
 
-  async mint(thread: ThreadRef): Promise<SandboxRef> {
+  async mint(thread: ThreadRef): Promise<MintedRef> {
     this.mints += 1;
     // Ahead of `mintFails`, and faithfully so: a thread that takes a spare
     // never reaches the path that a broken mint breaks.
@@ -170,16 +188,16 @@ export class StubSandboxes implements Sandboxes {
     if (spare) {
       // The whole of what a spare buys: the wait a fresh one pays is one
       // somebody already paid, and the name it was born with stays its name.
-      const adopted = { name: spare, thread, adopted: true };
-      this.live.set(spare, adopted);
+      const taken = { name: spare, thread };
+      this.live.set(spare, taken);
       void this.ensureSpares();
-      return adopted;
+      return { ...taken, source: 'spare' };
     }
     if (this.opts.mintDelayMs) await this.clock.sleep(this.opts.mintDelayMs);
     if (this.opts.mintFails) throw new Error(this.opts.mintFails);
     const ref = { name: `mate-${thread.id}`, thread };
     this.live.set(ref.name, ref);
-    return ref;
+    return { ...ref, source: 'fresh' };
   }
 
   async attach(sandbox: SandboxRef): Promise<Session> {

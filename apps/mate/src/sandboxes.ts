@@ -17,6 +17,7 @@ import {
 } from './kube.ts';
 import { type Log, plain } from './log.ts';
 import type {
+  MintedRef,
   PromptResult,
   PromptSink,
   Sandboxes,
@@ -698,11 +699,11 @@ export class KubeSandboxes implements Sandboxes {
    * The sandbox this thread talks to, in the order that costs it least: the
    * one it already has, then a spare that is already warm, then a new one.
    */
-  async mint(thread: ThreadRef): Promise<SandboxRef> {
+  async mint(thread: ThreadRef): Promise<MintedRef> {
     const existing = await this.find(thread);
     if (existing) return this.reuse(existing, thread);
-    const adopted = await this.adopt(thread);
-    if (adopted) {
+    const taken = await this.adopt(thread);
+    if (taken) {
       // The pool is one short from here on, and the thread that just took the
       // spare is the last one that should be made to wait for its successor.
       void this.ensureSpares().catch((error) =>
@@ -710,7 +711,7 @@ export class KubeSandboxes implements Sandboxes {
           error: plain(error),
         }),
       );
-      return adopted;
+      return taken;
     }
     return this.mintFresh(thread);
   }
@@ -912,20 +913,18 @@ export class KubeSandboxes implements Sandboxes {
   private async reuse(
     existing: Sandbox,
     thread: ThreadRef,
-  ): Promise<SandboxRef> {
+  ): Promise<MintedRef> {
     const name = existing.metadata.name;
     if (existing.metadata.deletionTimestamp) {
       throw new Error(`sandbox ${name} is still terminating`);
     }
     this.deps.log.info('sandbox already existed', { sandbox: name });
     await this.waitUsable(name);
-    // Adopted for the same reason a spare is: the thread paid for none of the
-    // boot, so its wait says nothing about what a cold start costs.
-    return { name, thread, adopted: true };
+    return { name, thread, source: 'reused' };
   }
 
   /** Today's path, and the only one that names a sandbox after its thread. */
-  private async mintFresh(thread: ThreadRef): Promise<SandboxRef> {
+  private async mintFresh(thread: ThreadRef): Promise<MintedRef> {
     const { kube } = this.deps;
     const name = sandboxName(thread);
     const response = await kube.request(this.path(), {
@@ -946,7 +945,7 @@ export class KubeSandboxes implements Sandboxes {
       return this.reuse(await kube.json<Sandbox>(this.path(name)), thread);
     }
     await this.waitUsable(name);
-    return { name, thread, adopted: false };
+    return { name, thread, source: 'fresh' };
   }
 
   private async waitUsable(name: string): Promise<void> {
@@ -984,7 +983,7 @@ export class KubeSandboxes implements Sandboxes {
    * keeps answering for a sandbox named after no thread. Leaving the template
    * alone would have left the object disagreeing with itself.
    */
-  private async adopt(thread: ThreadRef): Promise<SandboxRef | null> {
+  private async adopt(thread: ThreadRef): Promise<MintedRef | null> {
     const { config, log } = this.deps;
     // Nothing to adopt and no question worth asking: with the pool off a mint
     // is the two requests it has always been, and an apiserver hiccup on a
@@ -1037,7 +1036,7 @@ export class KubeSandboxes implements Sandboxes {
         surface: thread.surface,
         threadId: thread.id,
       });
-      return { name, thread, adopted: true };
+      return { name, thread, source: 'spare' };
     }
     return null;
   }

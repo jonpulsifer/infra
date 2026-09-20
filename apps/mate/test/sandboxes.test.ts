@@ -197,7 +197,7 @@ async function until(what: () => boolean, ms = 2000): Promise<void> {
 describe('mint', () => {
   test('stamps the sandbox a thread gets', async () => {
     const ref = await sandboxes.mint(THREAD);
-    expect(ref).toEqual({ name: NAME, thread: THREAD, adopted: false });
+    expect(ref).toEqual({ name: NAME, thread: THREAD, source: 'fresh' });
 
     const sandbox = fake.sandboxes.get(NAME) as Record<string, any>;
     expect(sandbox.apiVersion).toBe('agents.x-k8s.io/v1beta1');
@@ -448,7 +448,7 @@ describe('mint', () => {
   test('says so when it only claimed a sandbox that was already standing', async () => {
     await sandboxes.mint(THREAD);
     const again = await sandboxes.mint(THREAD);
-    expect(again.adopted).toBe(true);
+    expect(again.source).toBe('reused');
   });
 
   test('gives up when Ready never arrives, saying why and taking the sandbox with it', async () => {
@@ -808,7 +808,7 @@ describe('the warm pool', () => {
     const [name] = spareNames();
 
     const ref = await pool.mint(THREAD);
-    expect(ref).toEqual({ name: name ?? '', thread: THREAD, adopted: true });
+    expect(ref).toEqual({ name: name ?? '', thread: THREAD, source: 'spare' });
 
     const adopted = fake.sandboxes.get(ref.name) as Record<string, any>;
     expect(adopted.metadata.labels['lolwtf.ca/thread']).toBe(THREAD.id);
@@ -859,7 +859,7 @@ describe('the warm pool', () => {
     // Whichever lost built its own, named after its thread as ever.
     const loser = first.name === spare ? second : first;
     expect(loser.name).toBe(sandboxName(loser.thread));
-    expect(loser.adopted).toBe(false);
+    expect(loser.source).toBe('fresh');
   });
 
   test('the thread is found again by its label, not by a name it no longer has', async () => {
@@ -869,6 +869,9 @@ describe('the warm pool', () => {
 
     const again = await pool.mint(THREAD);
     expect(again.name).toBe(first.name);
+    // And it says which of the two standing sandboxes it got: the pool is
+    // still holding one, and this is not that.
+    expect(again.source).toBe('reused');
     expect(log.of('sandbox already existed')).toHaveLength(1);
     expect(fake.sandboxes.has(sandboxName(THREAD))).toBe(false);
   });
@@ -880,7 +883,7 @@ describe('the warm pool', () => {
     expect(fake.requests).toEqual([]);
 
     const ref = await sandboxes.mint(THREAD);
-    expect(ref).toEqual({ name: NAME, thread: THREAD, adopted: false });
+    expect(ref).toEqual({ name: NAME, thread: THREAD, source: 'fresh' });
     expect([...fake.sandboxes.keys()]).toEqual([NAME]);
     // Objects are the easy half. The request shape is the claim: a mint that
     // asks one question more than it did is a mint with one more way to fail.
@@ -955,7 +958,7 @@ describe('the warm pool', () => {
     // There is a spare, and it is no use: the thread builds its own.
     const ref = await pool.mint(THREAD);
     expect(ref.name).toBe(NAME);
-    expect(ref.adopted).toBe(false);
+    expect(ref.source).toBe('fresh');
   });
 
   test('a refresh that fails takes the spare out rather than the thread', async () => {
@@ -967,7 +970,7 @@ describe('the warm pool', () => {
     const ref = await pool.mint(THREAD);
     // The slow path, because a current checkout is the thing a spare is only
     // worth having if it can be given.
-    expect(ref).toEqual({ name: NAME, thread: THREAD, adopted: false });
+    expect(ref).toEqual({ name: NAME, thread: THREAD, source: 'fresh' });
     expect(
       log.of('could not bring an adopted spare up to date; minting one'),
     ).toHaveLength(1);
@@ -1008,7 +1011,7 @@ describe('the warm pool', () => {
     // which is the hard failure `reuse` would raise on being handed it.
     const again = await pool.mint(THREAD);
     expect(again.name).not.toBe(adopted.name);
-    expect(again.adopted).toBe(true);
+    expect(again.source).toBe('spare');
   });
 });
 
