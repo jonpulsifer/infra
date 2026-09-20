@@ -44,6 +44,10 @@ jobs:
           # `turbo.json`'s `spindrift#test` and `spindrift#test:chart-pins`
           # inputs together name the same files — a path missing from all
           # three lists is a guard that cannot run in CI.
+          # The root `mise.toml`, the sandbox image's copy of its tool list and
+          # `dotfiles/skills/` are here for the same reason: mate's tests
+          # assert against all three, and each is a file nobody would think of
+          # as TypeScript while editing it.
           files: |
             apps/clankerbanker/**
             apps/hub/**
@@ -61,6 +65,9 @@ jobs:
             packages/archive/**
             packages/kthx/**
             packages/typescript-config/**
+            dotfiles/skills/**
+            images/mate-sandbox/mise.toml
+            mise.toml
             package.json
             bun.lock
             turbo.json

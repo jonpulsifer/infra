@@ -339,6 +339,51 @@
       groupSlug: 'agent-sandbox',
     },
     {
+      // The mate sandbox image pins roughly two dozen tools, so ungrouped they
+      // would be two dozen pull requests against a prConcurrentLimit of 15 and
+      // would crowd out everything else. The image build starts every binary
+      // it bakes, which is the check a reviewer would run anyway, so one
+      // grouped PR is one review.
+      description: 'mate sandbox toolset: one pull request for the whole image',
+      matchFileNames: ['images/mate-sandbox/Dockerfile'],
+      groupName: 'mate sandbox toolset',
+      groupSlug: 'mate-sandbox-toolset',
+    },
+    {
+      // Two of the sandbox's tools have to be the versions the repo already
+      // runs, not merely current ones: Atlantis applies with the `opentofu`
+      // the root mise.toml names, and `docs:diagrams` commits d2's output, so
+      // a sandbox on a different d2 rewrites every SVG it touches. Renovate
+      // sees each of them twice — once through the mise manager reading
+      // mise.toml, once through the ARG in the Dockerfile — and left ungrouped
+      // the two PRs merge minutes or days apart. A group each, rather than
+      // joining the toolset group above: these two carry pins the whole repo
+      // depends on, and any one tool whose release breaks the image build
+      // would otherwise hold them red indefinitely.
+      description: 'opentofu: the repo pin and the sandbox image move together',
+      matchDepNames: ['opentofu', 'opentofu/opentofu'],
+      groupName: 'opentofu',
+      groupSlug: 'opentofu',
+    },
+    {
+      description: 'd2: the repo pin and the sandbox image move together',
+      matchDepNames: ['d2', 'terrastruct/d2'],
+      groupName: 'd2',
+      groupSlug: 'd2',
+    },
+    {
+      // opencode is the harness mate execs, not one of the tools the image
+      // hands the agent: a regression in it is a live thread behaving oddly,
+      // not a command that is missing, and the build-time assertion that every
+      // baked binary starts cannot see it. Batched with two dozen unrelated
+      // tool bumps that regression arrives unreviewed and bisects to a commit
+      // that changed everything else too, so the harness pin stays its own
+      // pull request.
+      description: 'opencode: the harness binary is its own pull request',
+      matchDepNames: ['opencode-linux-x64'],
+      groupName: null,
+    },
+    {
       // The crds chart and the stack chart each carry their own copy of the
       // same prometheus-operator CRDs. Offsite takes its CRDs from the crds
       // release and its operator from the stack, so splitting them into two

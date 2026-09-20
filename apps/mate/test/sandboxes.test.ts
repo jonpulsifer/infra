@@ -168,6 +168,7 @@ describe('mint', () => {
     expect(JSON.parse(env.OPENCODE_CONFIG_CONTENT.value)).toEqual({
       model: 'opencode-go/qwen3.8-flash',
       instructions: [`${WORKSPACE}/AGENTS.md`],
+      skills: { paths: [`${WORKSPACE}/dotfiles/skills`] },
       permission: 'allow',
       autoupdate: false,
       share: 'disabled',
@@ -179,6 +180,37 @@ describe('mint', () => {
   test('names an instruction file the checkout really has', async () => {
     const root = new URL('../../../AGENTS.md', import.meta.url);
     expect(await Bun.file(root).exists()).toBe(true);
+  });
+
+  // The same trap one directory over, and quieter: opencode reports neither a
+  // skills path that is missing nor one that holds no skill, so a move would
+  // take the agent back to the eight under `.agents/skills/` in silence.
+  test('names a skills directory that really holds skills', async () => {
+    const dir = new URL('../../../dotfiles/skills/', import.meta.url);
+    const skills = [...new Bun.Glob('*/SKILL.md').scanSync(dir.pathname)];
+    expect(skills.length).toBeGreaterThan(0);
+  });
+
+  // The sandbox image's mise config turns off tool management by naming every
+  // tool, because mise has no wildcard for it. That list is a copy, and a tool
+  // added to the repo's mise.toml without being added here is a tool mise
+  // tries to resolve on every `mise run` — offline, that fails the run
+  // outright, and the agent loses the task list AGENTS.md sends it to.
+  test('disables every tool the repo declares in the sandbox image', async () => {
+    const toml = async <T>(path: string) =>
+      Bun.TOML.parse(
+        await Bun.file(new URL(path, import.meta.url)).text(),
+      ) as T;
+    const repo = await toml<{ tools: Record<string, unknown> }>(
+      '../../../mise.toml',
+    );
+    const image = await toml<{ settings: { disable_tools: string[] } }>(
+      '../../../images/mate-sandbox/mise.toml',
+    );
+
+    expect([...image.settings.disable_tools].sort()).toEqual(
+      Object.keys(repo.tools).sort(),
+    );
   });
 
   test('hands both containers the git config the checkout needs', async () => {
