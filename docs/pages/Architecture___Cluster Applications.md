@@ -40,7 +40,7 @@ tags:: architecture
 	  | `atlantis` | The Terraform apply path for every PR — see [[Architecture/GitOps]]. |
 	  | `descheduler` | Cluster-local descheduler release. |
 	  | `hub` | `apps/hub`, deployed through the first-party `packages/charts/app` chart. |
-	  | `mate` | `apps/mate`, the Discord bot Rowbutt connects through — [[Architecture/Mate]]. Raw manifests: the namespace, the token's ExternalSecret, one Deployment. |
+	  | `mate` | `apps/mate`, the bot Rowbutt connects through on Discord and Slack, answering each thread from a sandbox of its own — [[Architecture/Mate]]. Raw manifests, not a chart. |
 	  | `prowler` | Cloud security posture scanning, via `packages/charts/prowler`. |
 	  | `spindrift` | The Spindrift control plane itself — [[Architecture/Spindrift]]. |
 	  | `spindrift-target` | Pulled straight from `clusters/base/platform/spindrift-target`: namespace, RBAC, and network policy for Spindrift-owned workloads. |
