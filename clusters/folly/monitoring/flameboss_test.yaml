@@ -1,0 +1,231 @@
+---
+# Unit test for the alerts in flameboss-rules.yaml, run by
+# `mise run k8s:check-rules` against the rendered PrometheusRule. Not a
+# manifest: kustomization.yaml does not list it, so nothing applies it.
+#
+# What these cases are here to prove, beyond the expressions parsing:
+#   - the ramp from ambient, which is every cook's first hour, alerts about
+#     nothing;
+#   - a pit that settled and then fell away does alert, and the fuel-exhausted
+#     case is told apart from it by the blower;
+#   - silence alerts once and then resolves when the exporter retires the
+#     cook's series, rather than firing at a barbecue in the shed;
+#   - the probe alerts survive the label join, which is the one place these
+#     expressions can be wrong while still looking right: a meat probe series
+#     carries a `probe` label that `flameboss_cook_active` does not have.
+rule_files:
+  - flameboss.yaml
+
+evaluation_interval: 1m
+
+tests:
+  # A fire coming up from ambient, holding, then falling away with the blower
+  # flat out. One cook, and every alert in the file has an opinion about some
+  # part of it.
+  - interval: 1m
+    input_series:
+      - series: 'flameboss_cook_active{device="193415",namespace="monitoring",service="flameboss",job="flameboss",instance="10.2.0.9:8080"}'
+        values: 1x120
+      - series: 'flameboss_cook_start_timestamp_seconds{device="193415",namespace="monitoring",service="flameboss",job="flameboss",instance="10.2.0.9:8080"}'
+        values: 0x120
+      # Ambient for ten minutes, settled at set by twenty, then losing it.
+      - series: 'flameboss_pit_temp_fahrenheit{device="193415",namespace="monitoring",service="flameboss",job="flameboss",instance="10.2.0.9:8080"}'
+        values: '70+15x9 220x30 205-2x40 125x40'
+      - series: 'flameboss_pit_target_fahrenheit{device="193415",namespace="monitoring",service="flameboss",job="flameboss",instance="10.2.0.9:8080"}'
+        values: 225x120
+      - series: 'flameboss_pit_reached_target{device="193415",namespace="monitoring",service="flameboss",job="flameboss",instance="10.2.0.9:8080"}'
+        values: 0x9 1x111
+      - series: 'flameboss_pit_probe_connected{device="193415",namespace="monitoring",service="flameboss",job="flameboss",instance="10.2.0.9:8080"}'
+        values: 1x120
+      - series: 'flameboss_blower_percent{device="193415",namespace="monitoring",service="flameboss",job="flameboss",instance="10.2.0.9:8080"}'
+        values: 100x9 35x30 100x81
+    alert_rule_test:
+      # Three minutes in: the fire is lit and nothing about it is wrong.
+      - eval_time: 3m
+        alertname: FlameBossCookStarted
+        exp_alerts:
+          - exp_labels:
+              severity: info
+              device: "193415"
+              namespace: monitoring
+              service: flameboss
+              job: flameboss
+              instance: 10.2.0.9:8080
+            exp_annotations:
+              message: "A cook has started on Flame Boss 193415"
+              description: "Telemetry is arriving and the pit has not reached its set temperature yet, so the fire is coming up. The dashboard is Grafana -> Flame Boss; the cook's own log is at https://myflameboss.com/en/cooks. This clears itself once the pit settles."
+      # The ramp is 155F below set with the blower flat out, and says nothing.
+      - eval_time: 3m
+        alertname: FlameBossPitBelowTarget
+        exp_alerts: []
+      - eval_time: 3m
+        alertname: FlameBossFireStarving
+        exp_alerts: []
+      # Settled: the start notification is over and nothing has replaced it.
+      - eval_time: 25m
+        alertname: FlameBossCookStarted
+        exp_alerts: []
+      - eval_time: 25m
+        alertname: FlameBossPitBelowTarget
+        exp_alerts: []
+      # Falling away. The pit drops past 25F under set at minute 44, so at 50m
+      # the alert is pending rather than firing -- which is the `for: 10m`
+      # doing its job on a pit that is merely on its way down.
+      - eval_time: 50m
+        alertname: FlameBossPitBelowTarget
+        exp_alerts: []
+      - eval_time: 63m
+        alertname: FlameBossPitBelowTarget
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              device: "193415"
+              namespace: monitoring
+              service: flameboss
+              job: flameboss
+              instance: 10.2.0.9:8080
+            exp_annotations:
+              message: "Pit is 64F below set on Flame Boss 193415"
+              description: "The pit held its set temperature earlier in this cook and has now been more than 25F under it for ten minutes. The blower cannot fix a fire that has gone out or an intake that is closed: look at the coals. FlameBossFireStarving fires alongside this one when the blower is already flat out, which is the fuel-exhausted case."
+      # Same fire, read through the blower: fifteen minutes at 100% while
+      # under set is the fuel running out rather than a cold start.
+      - eval_time: 63m
+        alertname: FlameBossFireStarving
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              device: "193415"
+              namespace: monitoring
+              service: flameboss
+              job: flameboss
+              instance: 10.2.0.9:8080
+            exp_annotations:
+              message: "Blower flat out and 64F under set on Flame Boss 193415"
+              description: "Fifteen minutes at 100% duty cycle with the pit still under set. The controller has nothing left to give: the charcoal is spent, the fire has tunnelled, or the lid is open. Add fuel."
+
+  # A pit the controller cannot hold down, and the probe it cannot see.
+  - interval: 1m
+    input_series:
+      - series: 'flameboss_cook_active{device="1",namespace="monitoring",service="flameboss"}'
+        values: 1x30
+      - series: 'flameboss_pit_temp_fahrenheit{device="1",namespace="monitoring",service="flameboss"}'
+        values: 300x30
+      - series: 'flameboss_pit_target_fahrenheit{device="1",namespace="monitoring",service="flameboss"}'
+        values: 225x30
+      - series: 'flameboss_pit_probe_connected{device="1",namespace="monitoring",service="flameboss"}'
+        values: 0x30
+    alert_rule_test:
+      - eval_time: 12m
+        alertname: FlameBossPitAboveTarget
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              device: "1"
+              namespace: monitoring
+              service: flameboss
+            exp_annotations:
+              message: "Pit is 75F over set on Flame Boss 1"
+              description: "The controller can only slow a fire by starving it of air, so a sustained overshoot is a damper left open, a lid not seated, or too much lit charcoal. Close the top vent before the cook renders out."
+      - eval_time: 12m
+        alertname: FlameBossPitProbeDisconnected
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              device: "1"
+              namespace: monitoring
+              service: flameboss
+            exp_annotations:
+              message: "Pit probe is unplugged on Flame Boss 1"
+              description: "The controller regulates the blower from the pit probe, so without it there is no control loop -- only a fan and a guess. Reseat the probe."
+
+  # Meat. The join is `on (device)` because the probe series carries a label
+  # `flameboss_cook_active` does not; a plain `and` would match nothing and
+  # this alert would never fire at all.
+  - interval: 1m
+    input_series:
+      - series: 'flameboss_cook_active{device="193415",namespace="monitoring",service="flameboss"}'
+        values: 1x60
+      - series: 'flameboss_probe_temp_fahrenheit{device="193415",probe="1",namespace="monitoring",service="flameboss"}'
+        values: '150+2x50'
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: FlameBossMeatProbeAtWrapPoint
+        exp_alerts: []
+      # 165F at minute 8, and a minute of it to fire.
+      - eval_time: 10m
+        alertname: FlameBossMeatProbeAtWrapPoint
+        exp_alerts:
+          - exp_labels:
+              severity: info
+              device: "193415"
+              probe: "1"
+              namespace: monitoring
+              service: flameboss
+            exp_annotations:
+              message: "Probe 1 is at 170F on Flame Boss 193415"
+              description: "Through the stall and at the usual wrap point, and done for anything poultry. FlameBossMeatProbeAtTarget follows at 203F."
+      - eval_time: 10m
+        alertname: FlameBossMeatProbeAtTarget
+        exp_alerts: []
+      # 203F at minute 27.
+      - eval_time: 29m
+        alertname: FlameBossMeatProbeAtTarget
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              device: "193415"
+              probe: "1"
+              namespace: monitoring
+              service: flameboss
+            exp_annotations:
+              message: "Probe 1 is at 208F on Flame Boss 193415"
+              description: "The meat has reached the pull temperature for a brisket or a butt. Probe for tenderness and get it off the heat or into a rest."
+
+  # Silence: the exporter reports the cook as inactive for as long as it
+  # remembers the cook, and then drops the series. The alert has to resolve on
+  # that disappearance, not hold at a barbecue nobody is standing next to.
+  - interval: 1m
+    input_series:
+      - series: 'flameboss_cook_active{device="193415",namespace="monitoring",service="flameboss"}'
+        values: 1x5 0x25 _x30
+    alert_rule_test:
+      - eval_time: 8m
+        alertname: FlameBossCookSilent
+        exp_alerts: []
+      - eval_time: 12m
+        alertname: FlameBossCookSilent
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              device: "193415"
+              namespace: monitoring
+              service: flameboss
+            exp_annotations:
+              message: "Cook 193415 has gone quiet"
+              description: "No reading for five minutes from a controller that was cooking. If the cook is over and it was switched off, this resolves by itself half an hour after the last reading. If it is not over, the controller has lost power or wifi and the fire is now unattended."
+      - eval_time: 45m
+        alertname: FlameBossCookSilent
+        exp_alerts: []
+
+  # Nothing is watching the barbecue: the exporter's target is missing
+  # entirely, which `absent()` is the only arm that catches.
+  - interval: 1m
+    input_series:
+      - series: 'up{namespace="monitoring",service="flameboss",job="flameboss"}'
+        values: 1x5 _x40
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: FlameBossExporterDown
+        exp_alerts: []
+      - eval_time: 25m
+        alertname: FlameBossExporterDown
+        exp_alerts:
+          # `absent()` carries the equality matchers of its own selector, and
+          # nothing else -- there is no target left to take labels from.
+          - exp_labels:
+              severity: warning
+              namespace: monitoring
+              service: flameboss
+            exp_annotations:
+              message: "The Flame Boss exporter is not being scraped"
+              description: "Nothing is watching the barbecue. `kubectl --context folly -n monitoring get pods -l app.kubernetes.io/name=flameboss`. Fifteen minutes, because a deploy takes the only pod down first."

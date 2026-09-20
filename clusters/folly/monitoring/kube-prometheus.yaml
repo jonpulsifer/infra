@@ -98,7 +98,6 @@ spec:
         feature_toggles:
           publicDashboards: true
       plugins:
-        - grafana-mqtt-datasource
         - victoriametrics-logs-datasource
       additionalDataSources:
         - name: VictoriaLogs
@@ -136,16 +135,6 @@ spec:
               tags:
                 - key: pod
                   value: pod
-        - name: FlameBoss
-          type: grafana-mqtt-datasource
-          orgId: 1
-          version: 1
-          jsonData:
-            tlsSkipVerify: true
-            uri: tls://s4.myflameboss.com:8883
-            username: ${SECRET_FLAMEBOSS_USERNAME}
-          secureJsonData:
-            password: ${SECRET_FLAMEBOSS_PASSWORD}
       dashboardProviders:
         dashboardproviders.yaml:
           apiVersion: 1
