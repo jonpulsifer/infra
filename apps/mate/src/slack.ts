@@ -46,6 +46,7 @@ import {
   type Canvas,
   type HistoryMessage,
   type Inbound,
+  type Notice,
   type Outcome,
   type Surface,
   type ThreadRef,
@@ -196,6 +197,10 @@ export type SessionStatus = 'processing' | 'active' | 'closed';
 /** The calls and lookups mate makes; the fake in tests records them. */
 export interface SlackApi {
   post(channel: string, threadTs: string, text: string): Promise<string>;
+  /** Rewrites a message mate posted; only a plain one, never a streamed answer. */
+  edit(channel: string, ts: string, text: string): Promise<void>;
+  /** Takes one of mate's own messages back out of the thread. */
+  remove(channel: string, ts: string): Promise<void>;
   startStream(args: StreamStart): Promise<string>;
   appendStream(
     channel: string,
@@ -307,6 +312,12 @@ export function slackWeb(
         text,
       });
       return String(sent.ts);
+    },
+    async edit(channel, ts, text) {
+      await call('chat.update', { channel, ts, text });
+    },
+    async remove(channel, ts) {
+      await call('chat.delete', { channel, ts });
     },
     async startStream(args) {
       const started = await call('chat.startStream', {
@@ -682,6 +693,45 @@ export class SlackCanvas implements Canvas {
   }
 }
 
+/**
+ * One line in a Slack thread that mate keeps rewriting. It is a posted
+ * message rather than the agent session or a stream chunk, and each of those
+ * is ruled out for its own reason: the session carries a lifecycle enum and
+ * no words, and a stream chunk would enter the answer's own character
+ * accounting and be read back to a fresh harness as something mate said.
+ *
+ * Posting it is also the first thing that happens in a Slack thread at all —
+ * `openThread` makes no call, so until this lands a mention in a channel
+ * shows nothing whatsoever.
+ */
+export class SlackNotice implements Notice {
+  private ts: string | null = null;
+
+  constructor(
+    private readonly api: SlackApi,
+    private readonly thread: ThreadRef,
+  ) {}
+
+  async say(text: string): Promise<void> {
+    const body = escapeSlack(text);
+    if (this.ts) {
+      await this.api.edit(this.thread.channelId, this.ts, body);
+      return;
+    }
+    this.ts = await this.api.post(this.thread.channelId, this.thread.id, body);
+  }
+
+  async done(text: string | null): Promise<void> {
+    if (text !== null) {
+      await this.say(text);
+      return;
+    }
+    const ts = this.ts;
+    this.ts = null;
+    if (ts) await this.api.remove(this.thread.channelId, ts);
+  }
+}
+
 export interface SlackSurfaceDeps {
   api: SlackApi;
   /** The bot's own user id. */
@@ -730,6 +780,9 @@ export function slackSurface(deps: SlackSurfaceDeps): Surface {
     },
     async post(thread, text) {
       await deps.api.post(thread.channelId, thread.id, escapeSlack(text));
+    },
+    notice(thread) {
+      return new SlackNotice(deps.api, thread);
     },
     async history(thread, query) {
       const all = await deps.api.replies(thread.channelId, thread.id);

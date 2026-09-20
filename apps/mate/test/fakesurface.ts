@@ -18,6 +18,7 @@ import type {
   HistoryMessage,
   HistoryQuery,
   Inbound,
+  Notice,
   Outcome,
   Surface,
   SurfaceName,
@@ -69,6 +70,49 @@ interface Posted extends HistoryMessage {
   threadId: string;
 }
 
+/**
+ * A line the surface keeps a hand on, as both real adapters hold one: a
+ * message in the thread, rewritten where it stands and taken back out of it
+ * at the end. Holding it in `posted` is what makes it visible to the replay
+ * the way a real one is.
+ */
+class FakeNotice implements Notice {
+  constructor(
+    private readonly surface: FakeSurface,
+    private readonly threadId: string,
+  ) {}
+
+  private id: string | null = null;
+
+  async say(text: string): Promise<void> {
+    if (this.surface.failNotice) throw this.surface.failNotice;
+    this.surface.notices.push(text);
+    const held = this.id && this.surface.find(this.id);
+    if (held) {
+      held.content = text;
+      return;
+    }
+    this.id = this.surface.say(
+      this.threadId,
+      text,
+      this.surface.me,
+      'mate',
+      true,
+    );
+  }
+
+  async done(text: string | null): Promise<void> {
+    if (text !== null) {
+      await this.say(text);
+      return;
+    }
+    if (this.surface.failNotice) throw this.surface.failNotice;
+    const id = this.id;
+    this.id = null;
+    if (id) this.surface.remove(id);
+  }
+}
+
 export class FakeSurface implements Surface {
   readonly name: SurfaceName = 'slack';
   readonly canvases = new Map<string, FakeCanvas>();
@@ -78,6 +122,9 @@ export class FakeSurface implements Surface {
   readonly askers: string[] = [];
   /** Every thread told it is not working on anything, in order. */
   readonly settled: string[] = [];
+  /** Every line a notice was ever given, in order, whether or not it still stands. */
+  readonly notices: string[] = [];
+  failNotice: Error | null = null;
   private serial = 0;
 
   constructor(
@@ -121,6 +168,19 @@ export class FakeSurface implements Surface {
     this.settled.push(thread.id);
   }
 
+  notice(thread: ThreadRef): Notice {
+    return new FakeNotice(this, thread.id);
+  }
+
+  find(id: string): Posted | undefined {
+    return this.posted.find((m) => m.id === id);
+  }
+
+  remove(id: string): void {
+    const at = this.posted.findIndex((m) => m.id === id);
+    if (at >= 0) this.posted.splice(at, 1);
+  }
+
   canvas(thread: ThreadRef, asker: string): Canvas {
     this.askers.push(asker);
     const canvas = new FakeCanvas();
@@ -135,15 +195,17 @@ export class FakeSurface implements Surface {
     authorId: string,
     authorName = 'jawn',
     authorIsBot = false,
-  ): void {
+  ): string {
+    const id = `s-${++this.serial}`;
     this.posted.push({
       threadId,
-      id: `s-${++this.serial}`,
+      id,
       authorId,
       authorName,
       authorIsBot,
       content,
     });
+    return id;
   }
 
   answerIn(threadId: string): string {
@@ -159,6 +221,8 @@ export class FakeSurface implements Surface {
 
 export type SlackCall =
   | { call: 'post'; channel: string; threadTs: string; text: string }
+  | { call: 'edit'; ts: string; text: string }
+  | { call: 'remove'; ts: string }
   | { call: 'start'; args: StreamStart }
   | { call: 'append'; ts: string; chunks: StreamChunk[] }
   | { call: 'stop'; ts: string }
@@ -172,12 +236,22 @@ export class FakeSlack implements SlackApi {
   failSession: Error | null = null;
   failAppend: Error | null = null;
   failStart: Error | null = null;
+  failEdit: Error | null = null;
   private serial = 0;
 
   async post(channel: string, threadTs: string, text: string): Promise<string> {
     const ts = `p-${++this.serial}`;
     this.calls.push({ call: 'post', channel, threadTs, text });
     return ts;
+  }
+
+  async edit(_channel: string, ts: string, text: string): Promise<void> {
+    if (this.failEdit) throw this.failEdit;
+    this.calls.push({ call: 'edit', ts, text });
+  }
+
+  async remove(_channel: string, ts: string): Promise<void> {
+    this.calls.push({ call: 'remove', ts });
   }
 
   async startStream(args: StreamStart): Promise<string> {

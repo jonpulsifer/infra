@@ -18,6 +18,7 @@ import {
 import { type Log, plain } from './log.ts';
 import type {
   MintedRef,
+  OnMintStep,
   PromptResult,
   PromptSink,
   Sandboxes,
@@ -699,10 +700,10 @@ export class KubeSandboxes implements Sandboxes {
    * The sandbox this thread talks to, in the order that costs it least: the
    * one it already has, then a spare that is already warm, then a new one.
    */
-  async mint(thread: ThreadRef): Promise<MintedRef> {
+  async mint(thread: ThreadRef, onStep?: OnMintStep): Promise<MintedRef> {
     const existing = await this.find(thread);
-    if (existing) return this.reuse(existing, thread);
-    const taken = await this.adopt(thread);
+    if (existing) return this.reuse(existing, thread, onStep);
+    const taken = await this.adopt(thread, onStep);
     if (taken) {
       // The pool is one short from here on, and the thread that just took the
       // spare is the last one that should be made to wait for its successor.
@@ -713,7 +714,7 @@ export class KubeSandboxes implements Sandboxes {
       );
       return taken;
     }
-    return this.mintFresh(thread);
+    return this.mintFresh(thread, onStep);
   }
 
   /**
@@ -913,20 +914,26 @@ export class KubeSandboxes implements Sandboxes {
   private async reuse(
     existing: Sandbox,
     thread: ThreadRef,
+    onStep?: OnMintStep,
   ): Promise<MintedRef> {
     const name = existing.metadata.name;
     if (existing.metadata.deletionTimestamp) {
       throw new Error(`sandbox ${name} is still terminating`);
     }
     this.deps.log.info('sandbox already existed', { sandbox: name });
+    onStep?.('reusing');
     await this.waitUsable(name);
     return { name, thread, source: 'reused' };
   }
 
   /** Today's path, and the only one that names a sandbox after its thread. */
-  private async mintFresh(thread: ThreadRef): Promise<MintedRef> {
+  private async mintFresh(
+    thread: ThreadRef,
+    onStep?: OnMintStep,
+  ): Promise<MintedRef> {
     const { kube } = this.deps;
     const name = sandboxName(thread);
+    onStep?.('creating');
     const response = await kube.request(this.path(), {
       method: 'POST',
       body: sandboxManifest({
@@ -942,8 +949,16 @@ export class KubeSandboxes implements Sandboxes {
     // `find` just looked and saw nothing, so a name that is taken is taken by
     // an object no label can reach — the backstop, not the dedup.
     if (response.status === 409) {
-      return this.reuse(await kube.json<Sandbox>(this.path(name)), thread);
+      return this.reuse(
+        await kube.json<Sandbox>(this.path(name)),
+        thread,
+        onStep,
+      );
     }
+    // The whole of the cold start is inside this one wait — scheduling, the
+    // image, the microVM boot and the clone — so it is the step a human
+    // watching the line spends almost all of the wait looking at.
+    onStep?.('booting');
     await this.waitUsable(name);
     return { name, thread, source: 'fresh' };
   }
@@ -983,7 +998,10 @@ export class KubeSandboxes implements Sandboxes {
    * keeps answering for a sandbox named after no thread. Leaving the template
    * alone would have left the object disagreeing with itself.
    */
-  private async adopt(thread: ThreadRef): Promise<MintedRef | null> {
+  private async adopt(
+    thread: ThreadRef,
+    onStep?: OnMintStep,
+  ): Promise<MintedRef | null> {
     const { config, log } = this.deps;
     // Nothing to adopt and no question worth asking: with the pool off a mint
     // is the two requests it has always been, and an apiserver hiccup on a
@@ -993,6 +1011,7 @@ export class KubeSandboxes implements Sandboxes {
     for (const spare of await this.spares()) {
       if (!isReady(spare)) continue;
       const name = spare.metadata.name;
+      onStep?.('adopting');
       try {
         await this.patch(name, {
           metadata: {
@@ -1013,6 +1032,7 @@ export class KubeSandboxes implements Sandboxes {
         }
         throw error;
       }
+      onStep?.('refreshing');
       try {
         await this.refresh(spare);
       } catch (error) {

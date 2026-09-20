@@ -304,6 +304,12 @@ async function shutdown(signal: string): Promise<void> {
   // the drain is one Slack will not send again, and closing the socket is
   // what stops another from being taken and dropped.
   socket?.stop();
+  // Before the gateway goes, while both surfaces can still be written to: a
+  // thread watching a line about a sandbox being started is owed the news
+  // that it never will be.
+  await threads
+    .quiesce()
+    .catch((error) => log.warn('quiesce failed', { error: plain(error) }));
   try {
     await manager.destroy();
   } catch (error) {

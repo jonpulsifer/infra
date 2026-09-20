@@ -15,9 +15,12 @@ import {
 } from './metrics.ts';
 import {
   ATTACH_FAILED,
+  ATTACHING,
   DAY_SPENT,
   HARNESS_FAILED,
   MINT_FAILED,
+  MINT_STEPS,
+  NEVER_STARTED,
   RESTARTED,
   SANDBOX_CLOSED,
   SANDBOX_DIED,
@@ -26,6 +29,7 @@ import {
   UNDELIVERED,
   WAITING,
 } from './notices.ts';
+import { Progress } from './progress.ts';
 import { EDIT_CADENCE_MS, Reply } from './reply.ts';
 import type {
   MintedRef,
@@ -73,6 +77,8 @@ interface Thread {
   pending: Prompt[];
   turns: number;
   quiet: Handle | null;
+  /** The line the human is watching while this thread has no answer yet. */
+  progress: Progress | null;
   /** Set while the thread's harness has never been told what came before. */
   replay: boolean;
   /** Set by a Stop that lands before the turn reaches the harness. */
@@ -102,6 +108,7 @@ export interface ThreadsDeps {
   log: Log;
   config: ThreadsConfig;
   editCadenceMs?: number;
+  progressCadenceMs?: number;
   metrics?: Instruments;
 }
 
@@ -321,6 +328,8 @@ export class Threads {
       });
     } else if (thread.state === 'waiting') {
       this.leaveQueue(thread);
+      // Nobody is going to read it: the thread it is in has been sealed.
+      await this.endProgress(thread, null);
     }
   }
 
@@ -330,6 +339,9 @@ export class Threads {
     if (!thread) return;
     this.threads.delete(key);
     this.disarmQuiet(thread);
+    // The line's own redraw timer outlives the thread that owned it, so a
+    // thread dropped from the table has to be the end of it as well.
+    await this.endProgress(thread, null);
     const at = this.waiting.indexOf(key);
     if (at >= 0) this.waiting.splice(at, 1);
     if (thread.sandbox) {
@@ -346,6 +358,19 @@ export class Threads {
     this.pumpWaiting();
   }
 
+  /**
+   * Ends every line mate is holding, because a line saying it is starting a
+   * sandbox is the one thing it says that a dead process leaves reading as
+   * true. The signal that takes the process down takes them with it; a kill
+   * that skips this leaves the line, which is why it says what it is doing
+   * rather than promising an answer.
+   */
+  async quiesce(): Promise<void> {
+    for (const thread of this.threads.values()) {
+      if (thread.progress) await this.endProgress(thread, NEVER_STARTED);
+    }
+  }
+
   private ensure(surface: Surface, ref: ThreadRef): Thread {
     const key = threadKey(ref);
     let thread = this.threads.get(key);
@@ -360,6 +385,7 @@ export class Threads {
         pending: [],
         turns: 0,
         quiet: null,
+        progress: null,
         replay: false,
         stopRequested: false,
       };
@@ -402,8 +428,12 @@ export class Threads {
         case 'new':
         case 'closed':
           if (thread.pending.length === 0) return;
+          // Before either branch, because both of them are the wait: this is
+          // the first thing the human sees, and on Slack it is the first
+          // thing that happens in the thread at all.
+          this.acknowledge(thread);
           if (this.freeSlots() > 0) await this.mint(thread);
-          else await this.enqueue(thread);
+          else this.enqueue(thread);
           return;
         case 'attached':
           if (thread.pending.length > 0) await this.runTurn(thread);
@@ -424,6 +454,39 @@ export class Threads {
     }
   }
 
+  /**
+   * Raises the line the thread watches until it has something better to look
+   * at. The line belongs to the wait rather than to the prompt that started
+   * it, so a thread already watching one keeps it — which is what carries the
+   * same line from the queue into the mint that follows.
+   */
+  private acknowledge(thread: Thread): void {
+    if (thread.progress) return;
+    thread.progress = new Progress(
+      thread.surface.notice(thread.ref),
+      this.deps.clock,
+      this.deps.log,
+      thread.ref.id,
+      MINT_STEPS.creating,
+      this.deps.progressCadenceMs,
+    );
+  }
+
+  /**
+   * The last word on the wait, and the end of the line that carried it: a
+   * sentence replaces the line, `null` takes it away. The answer says whether
+   * it landed, because a surface that refused the rewrite has left the caller
+   * still owing the thread a sentence.
+   */
+  private async endProgress(
+    thread: Thread,
+    line: string | null,
+  ): Promise<boolean> {
+    const progress = thread.progress;
+    thread.progress = null;
+    return progress ? progress.end(line) : false;
+  }
+
   private freeSlots(): number {
     let held = 0;
     for (const thread of this.threads.values()) {
@@ -441,7 +504,9 @@ export class Threads {
     const asked = clock.now();
     let minted: MintedRef;
     try {
-      minted = await sandboxes.mint(thread.ref);
+      minted = await sandboxes.mint(thread.ref, (step) =>
+        thread.progress?.say(MINT_STEPS[step]),
+      );
       thread.sandbox = minted;
     } catch (error) {
       // Counted here because nothing else sees it: no sandbox exists, so the
@@ -456,6 +521,7 @@ export class Threads {
     // path that produced one knows which it was.
     const { source } = minted;
     const mintMs = ready - asked;
+    thread.progress?.say(ATTACHING);
     try {
       const session = await sandboxes.attach(thread.sandbox);
       thread.session = session;
@@ -483,10 +549,10 @@ export class Threads {
     await this.close(thread, { line: null, archive: false, reason: 'error' });
   }
 
-  private async enqueue(thread: Thread): Promise<void> {
+  private enqueue(thread: Thread): void {
     this.waiting.push(thread.key);
     this.to(thread, 'waiting');
-    await this.tell(thread, `${WAITING} (${this.waiting.length - 1} ahead)`);
+    thread.progress?.say(`${WAITING} (${this.waiting.length - 1} ahead)`);
     this.armQuiet(thread);
   }
 
@@ -522,6 +588,12 @@ export class Threads {
     this.metrics.turnStarted();
     this.to(thread, 'turn');
     this.disarmQuiet(thread);
+    // The turn's own frames take the thread from here, so the line that
+    // carried the wait is taken away rather than left standing above them.
+    // After the budgets are spent, not before: the count of turns taken today
+    // is read and written with no await between, so two threads starting at
+    // once cannot both pass a cap that only has room for one.
+    await this.endProgress(thread, null);
 
     const reply = new Reply(
       thread.surface.canvas(thread.ref, prompt.authorId),
@@ -701,7 +773,14 @@ export class Threads {
     if (thread.pending.length > 0) await this.pump(thread);
   }
 
+  /**
+   * One line to the thread. A thread still watching the acknowledgment has
+   * that line rewritten into this one instead of getting a second message
+   * below it — which is what makes every terminal path replace the wait
+   * rather than follow it, since all of them say their piece through here.
+   */
   private async tell(thread: Thread, content: string): Promise<void> {
+    if (await this.endProgress(thread, content)) return;
     await thread.surface.post(thread.ref, content).catch((error) =>
       this.deps.log.warn('message failed', {
         threadId: thread.ref.id,
