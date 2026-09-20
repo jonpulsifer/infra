@@ -5,6 +5,8 @@ resources:
   - kube-prometheus.yaml
   - grafana-dashboards
   - local-node-exporters.yaml
+  - windows-exporters.yaml
+  - victoria-logs-route.yaml
   - capsule.yaml
   - spore.yaml
   - tempo.yaml

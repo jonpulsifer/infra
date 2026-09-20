@@ -1,0 +1,172 @@
+---
+# Unit test for the alerts in windows-exporters.yaml, run by
+# `mise run k8s:check-rules` against the rendered PrometheusRule. Not a
+# manifest: kustomization.yaml does not list it, so nothing applies it.
+#
+# Two things here are worth more than the happy paths. The disk rules are
+# scoped to lettered volumes, and the EFI/recovery series that scoping exists
+# to exclude are in the input so a dropped filter fails this file rather than
+# paging every night. And the fan rule is a conjunction — a stopped fan is
+# only interesting on a hot CPU — so a cold host with a semi-passive curve is
+# here too.
+rule_files:
+  - windows-exporters.yaml
+
+evaluation_interval: 1m
+
+tests:
+  - interval: 1m
+    input_series:
+      # tallboy: system volume at 5% free — low, not yet critical.
+      - series: 'windows_logical_disk_free_bytes{instance="tallboy",volume="C:",job="windows-exporter"}'
+        values: 5e9x40
+      - series: 'windows_logical_disk_size_bytes{instance="tallboy",volume="C:",job="windows-exporter"}'
+        values: 1e11x40
+      # The EFI system partition, 1% free and sized to its contents. Real,
+      # permanent, and not a problem — the rules must never see it.
+      - series: 'windows_logical_disk_free_bytes{instance="tallboy",volume="HarddiskVolume1",job="windows-exporter"}'
+        values: 1e6x40
+      - series: 'windows_logical_disk_size_bytes{instance="tallboy",volume="HarddiskVolume1",job="windows-exporter"}'
+        values: 1e8x40
+      # atomic: genuinely out of room.
+      - series: 'windows_logical_disk_free_bytes{instance="atomic",volume="C:",job="windows-exporter"}'
+        values: 1e9x40
+      - series: 'windows_logical_disk_size_bytes{instance="atomic",volume="C:",job="windows-exporter"}'
+        values: 1e11x40
+      # tallboy is out of RAM; atomic has plenty.
+      - series: 'windows_memory_available_bytes{instance="tallboy",job="windows-exporter"}'
+        values: 1e9x40
+      - series: 'windows_memory_physical_total_bytes{instance="tallboy",job="windows-exporter"}'
+        values: 1e11x40
+      - series: 'windows_memory_available_bytes{instance="atomic",job="windows-exporter"}'
+        values: 5e10x40
+      - series: 'windows_memory_physical_total_bytes{instance="atomic",job="windows-exporter"}'
+        values: 1e11x40
+      # One collector returning nothing while the rest of the scrape succeeds.
+      - series: 'windows_exporter_collector_success{instance="tallboy",collector="gpu",job="windows-exporter"}'
+        values: 0x40
+      - series: 'windows_exporter_collector_success{instance="tallboy",collector="cpu",job="windows-exporter"}'
+        values: 1x40
+    alert_rule_test:
+      - eval_time: 29m
+        alertname: WindowsDiskFillingUp
+        exp_alerts: []
+      - eval_time: 31m
+        alertname: WindowsDiskFillingUp
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              instance: atomic
+              volume: "C:"
+              job: windows-exporter
+            exp_annotations:
+              message: "atomic volume C: is 1% free"
+              description: "Windows gets unpleasant below about 10% free on the system volume — search indexing, update staging and hibernation all need headroom."
+          - exp_labels:
+              severity: warning
+              instance: tallboy
+              volume: "C:"
+              job: windows-exporter
+            exp_annotations:
+              message: "tallboy volume C: is 5% free"
+              description: "Windows gets unpleasant below about 10% free on the system volume — search indexing, update staging and hibernation all need headroom."
+      # Only atomic is below 3%. tallboy at 5% stays out, and neither host's
+      # EFI partition appears at all.
+      - eval_time: 16m
+        alertname: WindowsDiskCritical
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              instance: atomic
+              volume: "C:"
+              job: windows-exporter
+            exp_annotations:
+              message: "atomic volume C: is 1% free"
+              description: "Below 3% free. Windows Update will fail and the pagefile cannot grow."
+      - eval_time: 21m
+        alertname: WindowsMemoryPressure
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              instance: tallboy
+              job: windows-exporter
+            exp_annotations:
+              message: tallboy has 1% of RAM available
+              description: "Sustained low available memory. Check the process collector or Task Manager for a leak."
+      - eval_time: 16m
+        alertname: WindowsCollectorFailing
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              instance: tallboy
+              collector: gpu
+              job: windows-exporter
+            exp_annotations:
+              message: "tallboy: windows_exporter collector gpu is failing"
+              description: "Usually a missing or corrupted performance counter. `lodctr /R` from an elevated prompt rebuilds the counter registry."
+
+  # Sensors, which come from OhmGraphite on its own port.
+  - interval: 1m
+    input_series:
+      # tallboy is cooking, with a dead CPU fan.
+      - series: 'ohm_cpu_celsius{instance="tallboy",hardware="AMD Ryzen 9",sensor="CPU Package",hw_instance="0",job="windows-exporter"}'
+        values: 95x40
+      - series: 'ohm_gpunvidia_celsius{instance="tallboy",hardware="NVIDIA RTX",sensor="GPU Hot Spot",hw_instance="0",job="windows-exporter"}'
+        values: 92x40
+      - series: 'ohm_superio_revolutions_per_minute{instance="tallboy",hardware="Nuvoton",sensor="Fan #1",hw_instance="0",job="windows-exporter"}'
+        values: 0x40
+      - series: 'ohm_storage_celsius{instance="tallboy",hardware="Samsung 990 PRO",sensor="Temperature",hw_instance="0",job="windows-exporter"}'
+        values: 75x40
+      # atomic is idle with a semi-passive fan curve: the fan is stopped and
+      # that is exactly what should happen.
+      - series: 'ohm_cpu_celsius{instance="atomic",hardware="Intel Core i7",sensor="CPU Package",hw_instance="0",job="windows-exporter"}'
+        values: 40x40
+      - series: 'ohm_superio_revolutions_per_minute{instance="atomic",hardware="ITE",sensor="Fan #1",hw_instance="0",job="windows-exporter"}'
+        values: 0x40
+      - series: 'ohm_storage_celsius{instance="atomic",hardware="Crucial MX500",sensor="Temperature",hw_instance="0",job="windows-exporter"}'
+        values: 35x40
+    alert_rule_test:
+      - eval_time: 11m
+        alertname: WindowsCpuTempHigh
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              instance: tallboy
+            exp_annotations:
+              message: tallboy CPU is at 95C
+              description: "Sustained above 90C. Expect thermal throttling; check the fan curve and the dust."
+      # The metric-name regex is what makes this find an NVIDIA card; a bare
+      # `ohm_gpu.*_celsius` would not be valid PromQL at all.
+      - eval_time: 11m
+        alertname: WindowsGpuTempHigh
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              instance: tallboy
+            exp_annotations:
+              message: tallboy GPU is at 92C
+              description: "Sustained above 88C. Hot Spot runs well above Core — a widening gap between them is degraded thermal paste."
+      # Both hosts have a stopped fan; only the hot one is a fault.
+      - eval_time: 11m
+        alertname: WindowsFanStopped
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              instance: tallboy
+              hardware: Nuvoton
+              sensor: "Fan #1"
+              hw_instance: "0"
+              job: windows-exporter
+            exp_annotations:
+              message: "tallboy fan Fan #1 reads 0 RPM while the CPU is above 70C"
+              description: "Zero RPM is normal in a semi-passive curve, so this only fires once the CPU is already hot."
+      - eval_time: 16m
+        alertname: WindowsStorageTempHigh
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              instance: tallboy
+              hardware: Samsung 990 PRO
+            exp_annotations:
+              message: tallboy drive Samsung 990 PRO is at 75C
+              description: "NVMe drives throttle around 70C and shorten their life well before that."
