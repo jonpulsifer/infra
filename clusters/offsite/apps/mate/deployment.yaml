@@ -110,7 +110,7 @@ spec:
               value: CARBAMA05,C062BS4GADR
             # The thread contract's numbers: one turn capped at 45 minutes,
             # quiet 30 minutes after it, 30 turns per thread, 120 per day, 2
-            # sandboxes at once.
+            # threads at once, and one sandbox kept warm for the next one.
             #
             # Both clocks answer to a ceiling that is not a knob: a sandbox
             # carries `spec.shutdownTime` two hours out and the controller
@@ -128,9 +128,10 @@ spec:
             # these 30 minutes are the only release.
             #
             # That 2 is capacity and not policy: a sandbox will not schedule
-            # on a control-plane node, offsite has exactly one other node, and
-            # a third sandbox at its 4Gi limit does not fit in what that node
-            # has left.
+            # on a control-plane node, and offsite has exactly one other node
+            # for them to land on. It is a cap on threads rather than on
+            # sandboxes — the warm spare below is a third one — and what the
+            # node can carry is measured against it there.
             - name: MATE_TURN_MINUTES
               value: "45"
             - name: MATE_QUIET_MINUTES
@@ -141,6 +142,25 @@ spec:
               value: "120"
             - name: MATE_MAX_CONCURRENT
               value: "2"
+            # One sandbox is kept warm for whoever asks next, because the
+            # wait it removes is the whole of the cold start. A fresh mint on
+            # oldschool measures 46.8 s; a thread handed a warm one pays a
+            # relabel and a shallow fetch instead. What survives either way
+            # is the ACP attach, measured at 4.9 s, and the harness's own
+            # time to first token, 4.4 s over nine turns — so this shortens
+            # the wait rather than removing it.
+            #
+            # What it costs is a whole sandbox's room on the node for as long
+            # as mate is up: one live sandbox measures about 1 GiB of
+            # oldschool's memory. With the cap above that is three sandboxes
+            # at peak rather than two, because the replacement is minted the
+            # moment a thread takes the one that was warm. A spare carries a
+            # half-hour `shutdownTime` that only mate's own sweep renews, so
+            # a mate that stops hands it back, and a roll discards the spare
+            # it inherits rather than serving a thread from an image, model
+            # or checkout that has moved on.
+            - name: MATE_SPARES
+              value: "1"
             - name: MATE_PORT
               value: "8080"
             # The cluster's OTLP collector, whose prometheus exporter this
