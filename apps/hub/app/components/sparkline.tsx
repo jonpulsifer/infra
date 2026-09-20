@@ -93,10 +93,15 @@ export function Sparkline({
 
   return (
     <div className={`relative ${className ?? ''}`}>
+      {/* Absolutely positioned, not `h-full`: a percentage height against a
+          parent whose own height is not definite resolves to auto, and an SVG
+          with a viewBox then takes its height from its intrinsic aspect ratio
+          - i.e. its width. On a phone that made a 192px slot render a 362px
+          chart straight over the metrics below it. */}
       <svg
         viewBox="0 0 100 100"
         preserveAspectRatio="none"
-        className="h-full w-full"
+        className="absolute inset-0 h-full w-full"
         role="img"
         aria-label={label}
       >
