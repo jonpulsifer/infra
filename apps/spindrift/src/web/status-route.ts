@@ -32,6 +32,7 @@ import {
   vanity,
   zoneFor,
 } from '../domain/naming.ts';
+import { PRODUCT_NAME } from './brand.ts';
 
 /**
  * The lowest-precedence path in the table.
@@ -234,7 +235,7 @@ small { color: #64748b; }
 <h1>${title}</h1>
 <p>${detail}</p>
 <p><code>${safeHost}</code></p>
-<small>spindrift${waiting ? ' &middot; this page refreshes itself' : ''}</small>
+<small>${PRODUCT_NAME.toLowerCase()}${waiting ? ' &middot; this page refreshes itself' : ''}</small>
 </main>
 </body>
 </html>

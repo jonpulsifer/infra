@@ -19,6 +19,7 @@
 import { describe, expect, test } from 'bun:test';
 import { commandNames } from '../../src/commands/registry.ts';
 import type { Principal } from '../../src/commands/types.ts';
+import { MACHINE_NAME } from '../../src/web/brand.ts';
 import {
   MCP_PATH,
   type McpRouteDeps,
@@ -87,7 +88,7 @@ describe('the tool list is the registry', () => {
   test('initialize answers with tools capability', async () => {
     const { result } = await call(authenticated, 'initialize');
     expect(result.capabilities.tools).toBeDefined();
-    expect(result.serverInfo.name).toBe('spindrift');
+    expect(result.serverInfo.name).toBe(MACHINE_NAME);
   });
 });
 

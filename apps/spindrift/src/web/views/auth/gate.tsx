@@ -34,6 +34,7 @@ import { KeyRound, ShieldCheck } from 'lucide-react';
 import { type ReactNode, useState } from 'react';
 import type { Principal } from '../../../commands/types.ts';
 import { CeremonyAbandonedError, enrol, signIn } from '../../auth-client.ts';
+import { Wordmark } from '../../components/wordmark.tsx';
 import { Button } from '../../ui/button.tsx';
 import { Card, CardContent, CardHeader, CardTitle } from '../../ui/card.tsx';
 import { Field } from '../../ui/field.tsx';
@@ -56,9 +57,7 @@ export function Gate({
   return (
     <main className="mx-auto flex min-h-dvh w-full max-w-[460px] flex-col justify-center gap-6 px-5 py-12">
       <div className="flex flex-col items-center gap-2 text-center">
-        <span className="font-mono text-xl font-bold tracking-[0.25em] text-foreground">
-          SPINDRIFT
-        </span>
+        <Wordmark className="font-mono text-xl font-bold tracking-[0.25em] text-foreground" />
         <p className="text-sm text-muted-foreground">
           Deploy to your own clusters and cloud projects. One button, one
           release.

@@ -14,12 +14,14 @@ import {
 import type { ReactNode } from 'react';
 import { useState, useSyncExternalStore } from 'react';
 import type { Principal } from '../../commands/types.ts';
+import { PRODUCT_NAME, WORDMARK_GLYPH } from '../brand.ts';
 import { isReconnecting, onConnectionChange } from '../connection-status.ts';
 import { Button } from '../ui/button.tsx';
 import { ToastHost } from '../ui/toast.tsx';
 import { cn } from '../ui/utils.ts';
 import { Breadcrumbs } from './breadcrumbs.tsx';
 import { CommandPalette } from './command-palette.tsx';
+import { Wordmark } from './wordmark.tsx';
 
 /**
  * The rail, and the one grouping in it.
@@ -282,7 +284,7 @@ export function AppShell({
       <aside className="sticky top-0 hidden h-dvh flex-col border-r border-rail-line bg-rail p-2 md:flex">
         <button
           type="button"
-          aria-label="Spindrift overview"
+          aria-label={`${PRODUCT_NAME} overview`}
           onClick={() => onNavigate('/')}
           className={cn(
             'mb-4 flex h-10 items-center gap-2.5 rounded-sm',
@@ -290,12 +292,10 @@ export function AppShell({
           )}
         >
           <span className="grid size-10 shrink-0 place-items-center rounded-sm bg-primary font-mono text-base font-black text-primary-foreground">
-            S
+            {WORDMARK_GLYPH}
           </span>
           {collapsed ? null : (
-            <span className="truncate font-mono text-body font-bold tracking-eyebrow text-rail-foreground">
-              SPINDRIFT
-            </span>
+            <Wordmark className="truncate font-mono text-body font-bold tracking-eyebrow text-rail-foreground" />
           )}
         </button>
         <nav aria-label="Primary navigation" className="flex flex-col gap-1">
@@ -372,7 +372,7 @@ export function AppShell({
           // reachable rather than hidden behind the fixed navigation.
           <footer className="px-4 pb-24 pt-2 text-[11px] text-muted-foreground sm:px-6 md:pb-3">
             <span className="font-mono" title={`Running ${version}`}>
-              Spindrift {version}
+              {PRODUCT_NAME} {version}
             </span>
           </footer>
         ) : null}

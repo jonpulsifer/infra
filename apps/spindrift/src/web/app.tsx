@@ -9,6 +9,7 @@ import { Monitor, Moon, Sun } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import type { Principal } from '../commands/types.ts';
 import { readSession, signOut } from './auth-client.ts';
+import { pageTitle } from './brand.ts';
 import { command } from './client.ts';
 import { AppShell } from './components/shell.tsx';
 import { useRoute } from './router.ts';
@@ -298,32 +299,32 @@ export function SignedIn({
  * Exported for `test/web/screen-titles.test.ts`, which pins the mapping.
  */
 export function titleOf(path: string): string {
-  if (path.startsWith('/settings')) return 'Settings · Spindrift';
+  if (path.startsWith('/settings')) return pageTitle('Settings');
   if (
     path.startsWith('/targets') ||
     path.startsWith('/repos') ||
     path.startsWith('/storage')
   )
-    return 'Settings · Spindrift';
-  if (path.startsWith('/sources')) return 'Sources · Spindrift';
-  if (path.startsWith('/artifacts')) return 'Artifacts · Spindrift';
+    return pageTitle('Settings');
+  if (path.startsWith('/sources')) return pageTitle('Sources');
+  if (path.startsWith('/artifacts')) return pageTitle('Artifacts');
   // No name in the path, so the tab says the noun. The id is a uuid: a title
   // holding one would be a title nobody can read a Datastore's name out of.
-  if (path.startsWith('/datastores')) return 'Datastores · Spindrift';
-  if (path.startsWith('/functions')) return 'Functions · Spindrift';
-  if (path.startsWith('/apps/new')) return 'New App · Spindrift';
+  if (path.startsWith('/datastores')) return pageTitle('Datastores');
+  if (path.startsWith('/functions')) return pageTitle('Functions');
+  if (path.startsWith('/apps/new')) return pageTitle('New App');
   if (path.startsWith('/deploys')) {
     const deployId = path.replace(/^\/deploys\/?/, '');
-    return deployId ? `Deploy #${deployId} · Spindrift` : 'Deploys · Spindrift';
+    return deployId ? pageTitle(`Deploy #${deployId}`) : pageTitle('Deploys');
   }
   if (path.startsWith('/builds')) {
     const buildId = path.replace(/^\/builds\/?/, '');
-    return buildId ? `Build #${buildId} · Spindrift` : 'Builds · Spindrift';
+    return buildId ? pageTitle(`Build #${buildId}`) : pageTitle('Builds');
   }
-  if (path === '/' || path === '') return 'Spindrift';
-  if (path === '/apps') return 'Apps · Spindrift';
+  if (path === '/' || path === '') return pageTitle();
+  if (path === '/apps') return pageTitle('Apps');
   const appName = path.replace(/^\/apps\//, '').replace(/^\//, '');
-  return `${appName} · Spindrift`;
+  return pageTitle(appName);
 }
 
 /**
