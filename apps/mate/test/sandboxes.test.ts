@@ -27,7 +27,8 @@ const GUILD = '1509024936717455381';
 const NAME = sandboxName(THREAD);
 
 const config: SandboxConfig = {
-  image: 'ghcr.io/jonpulsifer/mate-sandbox:latest',
+  image:
+    'ghcr.io/jonpulsifer/mate-sandbox:latest@sha256:6f135be2df9ddf2cca529e845b3325cba5c6e72c8587c1ce48ec30bd5b10cbac',
   runtimeClass: 'kata-clh',
   namespace: 'mate',
   secret: 'mate-opencode',
@@ -108,7 +109,19 @@ describe('mint', () => {
 
     const pod = podTemplate();
     expect(pod.runtimeClassName).toBe('kata-clh');
-    expect(pod.nodeSelector).toEqual({ 'node-role.kubernetes.io/worker': '' });
+    expect(
+      pod.affinity.nodeAffinity.requiredDuringSchedulingIgnoredDuringExecution
+        .nodeSelectorTerms,
+    ).toEqual([
+      {
+        matchExpressions: [
+          {
+            key: 'node-role.kubernetes.io/control-plane',
+            operator: 'DoesNotExist',
+          },
+        ],
+      },
+    ]);
     expect(pod.automountServiceAccountToken).toBe(false);
     expect(pod.securityContext).toMatchObject({
       runAsNonRoot: true,
@@ -185,7 +198,7 @@ describe('mint', () => {
     expect(fake.pods.has(NAME)).toBe(true);
   });
 
-  test('gives up when Ready never arrives, saying why', async () => {
+  test('gives up when Ready never arrives, saying why and taking the sandbox with it', async () => {
     fake.readyOnCreate = false;
     sandboxes = new KubeSandboxes({
       kube: new Kube(fake.config()),
@@ -193,8 +206,26 @@ describe('mint', () => {
       guildId: GUILD,
       log,
       readyTimeoutMs: 300,
+      goneTimeoutMs: 4000,
     });
-    expect(sandboxes.mint(THREAD)).rejects.toThrow(/was not ready in time/);
+    await expect(sandboxes.mint(THREAD)).rejects.toThrow(
+      /was not ready in time/,
+    );
+    expect(fake.sandboxes.has(NAME)).toBe(false);
+  });
+
+  test('pulls on every mint when the image is a bare tag', async () => {
+    sandboxes = new KubeSandboxes({
+      kube: new Kube(fake.config()),
+      config: { ...config, image: 'ghcr.io/jonpulsifer/mate-sandbox:latest' },
+      guildId: GUILD,
+      log,
+    });
+    await sandboxes.mint(THREAD);
+
+    const pod = podTemplate();
+    expect(pod.initContainers[0].imagePullPolicy).toBe('Always');
+    expect(pod.containers[0].imagePullPolicy).toBe('Always');
   });
 
   test('refuses a thread id that is not a snowflake', () => {
