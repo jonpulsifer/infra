@@ -27,13 +27,33 @@
 # Dockerfile's `--mount=type=secret` names.
 #
 # Input:  CHANGED_FILES env var — newline-separated list of changed file paths
+#         BUILD_IMAGES env var — space-separated images to build whatever
+#           changed. The reconcile path names the images it found stale this
+#           way; a `workflow_dispatch` names the ones an operator asked for.
 # Output: has_changes and matrix written to GITHUB_OUTPUT
+#
+# `--watches` instead prints `<image><TAB><path>` for every buildable image and
+# exits. The staleness check needs to know which paths feed which image, and
+# that map is derived here — from build.json, with the directory as the default
+# — so it is published from here rather than parsed a second time somewhere
+# else and left to drift.
 
 set -euo pipefail
+
+mode=matrix
+case "${1:-}" in
+  --watches) mode=watches ;;
+  "") ;;
+  *)
+    echo "usage: $0 [--watches]" >&2
+    exit 64
+    ;;
+esac
 
 manifest=".github/containers.json"
 
 mapfile -t changed_files <<<"${CHANGED_FILES:-}"
+read -r -a forced_images <<<"${BUILD_IMAGES:-}"
 # tj-actions' safe_output escapes the newline separator, so every element but
 # the last arrives with a trailing backslash. The per-path prefix globs below
 # tolerated that; the exact-match rebuild-all grep did not, which silently
@@ -97,6 +117,15 @@ for dockerfile in "${dockerfiles[@]}"; do
     # Only allowlisted images are eligible for the build matrix.
     [[ -n "${is_build[$image]:-}" ]] || continue
 
+    mapfile -t watches < <(jq -r --arg d "$dir" 'if .watch then .watch[] else $d end' <<<"$entry")
+
+    if [[ "$mode" == watches ]]; then
+      for watch in "${watches[@]}"; do
+        printf '%s\t%s\n' "$image" "$watch"
+      done
+      continue
+    fi
+
     context=$(jq -r --arg d "$dir" '.context    // $d' <<<"$entry")
     file=$(jq -r '.file        // ""' <<<"$entry")
     build_args=$(jq -r '."build-args" // ""' <<<"$entry")
@@ -108,8 +137,18 @@ for dockerfile in "${dockerfiles[@]}"; do
     deploy_manifests=$(jq -c --arg img "$image" '.deploy[$img] // []' "$manifest")
 
     should_build="$rebuild_all"
+    # An image named outright builds whatever changed. That is the reconcile
+    # path's whole mechanism: it decides staleness elsewhere and says so here,
+    # rather than teaching this script a second reason to build.
     if [[ "$should_build" != "true" ]]; then
-      mapfile -t watches < <(jq -r --arg d "$dir" 'if .watch then .watch[] else $d end' <<<"$entry")
+      for forced in ${forced_images[@]+"${forced_images[@]}"}; do
+        if [[ "$forced" == "$image" ]]; then
+          should_build=true
+          break
+        fi
+      done
+    fi
+    if [[ "$should_build" != "true" ]]; then
       for watch in "${watches[@]}"; do
         if path_changed "$watch"; then
           should_build=true
@@ -128,6 +167,10 @@ for dockerfile in "${dockerfiles[@]}"; do
     fi
   done
 done
+
+if [[ "$mode" == watches ]]; then
+  exit 0
+fi
 
 if [[ -n "${unclassified[*]:-}" ]]; then
   echo "error: Dockerfile image(s) missing from $manifest — add each to \"build\" or \"ignore\":" >&2
