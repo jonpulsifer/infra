@@ -1,0 +1,54 @@
+#!/bin/sh
+# Baked into the sandbox image at /usr/local/bin/gh, in front of the real
+# binary at the path below.
+#
+# Only git consults a git credential helper, and a helper is the whole of what
+# the harness container is handed. gh looks for a token in GH_TOKEN, in
+# GITHUB_TOKEN or in its own hosts.yml, finds none of the three, and answers
+# every subcommand with its own login instructions — so a sandbox that can push
+# a branch stops one step short of the pull request the push was for. This
+# reads the same `op://` reference git's helper reads and hands the token to gh
+# in its environment, which keeps what that helper bought: the token is inside
+# one process for the length of one command instead of in the pod for the
+# length of the thread. It is not out of the agent's reach and is not meant to
+# be — the agent can run `op read` itself, and can read /proc/<pid>/environ of
+# a gh it started. The vault is the boundary.
+#
+# /usr/local/libexec, rather than the real binary keeping a name of its own
+# beside this one: the wrapper has to be what PATH finds, /usr/local/bin is
+# already the first entry in Debian's own PATH, and a directory prepended at
+# runtime does not survive the login shells opencode spawns.
+set -eu
+
+REAL=/usr/local/libexec/gh
+
+# An inherited GH_TOKEN wins, which settles two cases at once: an agent that
+# exported a token of its own keeps it, and a gh that shells out to gh — an
+# extension, a script it runs — inherits the token already resolved rather than
+# going back to the vault for a second copy.
+if [ -z "${GH_TOKEN:-}" ] && [ -n "${MATE_GITHUB_TOKEN_REF:-}" ]; then
+  # Two ways this read fails and neither announces itself, so both are caught
+  # here rather than left to gh. `op` against a Connect host it cannot reach
+  # prints nothing and hangs, which is what `timeout` bounds and what
+  # `apps/mate/src/sandboxes.ts` spells out where it sets the same bound for
+  # git. And `op read` exits 0 on a field that exists and is blank — what a PAT
+  # looks like for the window of a manual rotation — so an empty value has to
+  # count as a failure too: exporting it makes gh print the same "please run gh
+  # auth login" it printed before this wrapper existed, and the answer an agent
+  # needs is "the field is empty", not "the wrapper is not installed".
+  if token=$(timeout 10 op read --no-newline "$MATE_GITHUB_TOKEN_REF") \
+    && [ -n "$token" ]; then
+    GH_TOKEN=$token
+    export GH_TOKEN
+  else
+    # Unauthenticated rather than fatal, because a hard exit here would take
+    # `gh --version` and `gh --help` down alongside the commands that need a
+    # token, and gh is about to report the missing credential itself in less
+    # useful words than these.
+    echo "gh: cannot read $MATE_GITHUB_TOKEN_REF; continuing unauthenticated" >&2
+  fi
+fi
+
+# exec, so gh owns the signals and the exit status, and so nothing outlives it
+# still holding the token.
+exec "$REAL" "$@"

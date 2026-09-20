@@ -421,6 +421,34 @@ describe('mint', () => {
     }
   });
 
+  // Only git consults a git credential helper, so the sandbox image puts a
+  // wrapper on PATH in front of gh that resolves the same reference. That
+  // wrapper spells the variable's name in a shell script two directories away,
+  // and this is the only thing joining the two: renaming the constant here
+  // leaves it reading something unset, exec'ing gh with no token, and meeting
+  // `gh pr create` with gh's own login instructions one step short of the
+  // pull request.
+  test('names the environment the image gh wrapper reads', async () => {
+    await sandboxes.mint(THREAD);
+    const env = envOf(podTemplate().containers[0]);
+    const wrapper = await Bun.file(
+      new URL('../../../images/mate-sandbox/gh', import.meta.url),
+    ).text();
+
+    const read = new Set<string>();
+    for (const [, name] of wrapper.matchAll(/\$\{?((?:MATE|OP)_[A-Z_]+)/g)) {
+      if (name) read.add(name);
+    }
+    expect(read.size).toBeGreaterThan(0);
+    for (const name of read) expect(env[name]).toBeDefined();
+
+    // That wrapper is the whole of how gh gets a token, which is the point:
+    // what the pod holds is a reference and the means to read it, never a
+    // credential that outlives the command asking for one.
+    expect(env.GH_TOKEN).toBeUndefined();
+    expect(env.GITHUB_TOKEN).toBeUndefined();
+  });
+
   test('hands the harness no credential path when none is configured', async () => {
     sandboxes = new KubeSandboxes({
       kube: new Kube(fake.config()),
