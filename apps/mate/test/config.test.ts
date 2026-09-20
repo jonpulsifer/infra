@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { readConfig } from '../src/config.ts';
+import { readConfig, readSandboxConfig } from '../src/config.ts';
 import { TTL_MS } from '../src/sandboxes.ts';
 
 const minimal = {
@@ -97,6 +97,7 @@ describe('config from the environment', () => {
         checkoutRef: 'main',
         model: 'opencode-go/qwen3.8-flash',
         turnTimeoutMs: 45 * 60_000,
+        credentials: null,
       },
     });
     expect(() => readConfig({ ...kube, MATE_TURN_MINUTES: '0' })).toThrow(
@@ -105,5 +106,28 @@ describe('config from the environment', () => {
     expect(() =>
       readConfig({ ...kube, MATE_TURN_MINUTES: String(TTL_MS / 60_000) }),
     ).toThrow('must be under the sandbox TTL');
+  });
+
+  test('a sandbox reads credentials only once a reference names one', () => {
+    const kube = {
+      ...minimal,
+      MATE_SANDBOXES: 'kube',
+      MATE_SANDBOX_IMAGE: 'ghcr.io/jonpulsifer/mate-sandbox:latest',
+    };
+    expect(readSandboxConfig(kube).credentials).toBeNull();
+    expect(
+      readSandboxConfig({
+        ...kube,
+        MATE_GITHUB_TOKEN_REF: 'op://a-vault/an-item/password',
+      }).credentials,
+    ).toEqual({
+      connectHost:
+        'http://onepassword-connect.external-secrets.svc.cluster.local:8080',
+      connectSecret: 'mate-onepassword',
+      githubTokenRef: 'op://a-vault/an-item/password',
+    });
+    expect(() =>
+      readSandboxConfig({ ...kube, MATE_GITHUB_TOKEN_REF: 'the-token-itself' }),
+    ).toThrow('must be an op:// reference');
   });
 });

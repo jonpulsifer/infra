@@ -3,6 +3,9 @@
  * how it attaches and prompts, what it patches, and what it deletes.
  */
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import type { SandboxConfig } from '../src/config.ts';
 import { Kube } from '../src/kube.ts';
 import type { PromptSink, SandboxRef, Update } from '../src/sandbox.ts';
@@ -37,6 +40,12 @@ const config: SandboxConfig = {
   checkoutRef: 'main',
   model: 'opencode-go/qwen3.8-flash',
   turnTimeoutMs: 4000,
+  credentials: {
+    connectHost:
+      'http://onepassword-connect.external-secrets.svc.cluster.local:8080',
+    connectSecret: 'mate-onepassword',
+    githubTokenRef: 'op://a-vault/an-item/password',
+  },
 };
 
 class Collect implements PromptSink {
@@ -85,6 +94,60 @@ function envOf(container: Record<string, any>): Record<string, any> {
   return Object.fromEntries(
     (container.env ?? []).map((e: Record<string, unknown>) => [e.name, e]),
   );
+}
+
+/**
+ * A directory to put first on PATH, holding a stand-in `op` with the body
+ * given and a stand-in `timeout` that records the bound it was handed and then
+ * execs what it was handed. Both leave a marker behind, so a test can ask
+ * whether the helper reached them at all.
+ */
+function fakeOp(body: string) {
+  const dir = mkdtempSync(join(tmpdir(), 'mate-op-'));
+  writeFileSync(join(dir, 'op'), `#!/bin/sh\n: >'${dir}/op.ran'\n${body}\n`, {
+    mode: 0o755,
+  });
+  writeFileSync(
+    join(dir, 'timeout'),
+    `#!/bin/sh\nprintf %s "$1" >'${dir}/timeout.bound'\nshift\nexec "$@"\n`,
+    { mode: 0o755 },
+  );
+  return dir;
+}
+
+/**
+ * `git credential <operation>` under the harness container's own environment,
+ * with `bin` first on PATH. No user or system config is in reach, which is the
+ * sandbox's shape rather than a convenience: the image writes no
+ * `/etc/gitconfig` and the pod backs HOME with an empty emptyDir, so the
+ * environment below is every helper git can find.
+ */
+function credential(
+  bin: string,
+  operation: 'fill' | 'approve' | 'reject',
+  host: string,
+  global = '/dev/null',
+) {
+  const env: Record<string, string> = {
+    PATH: `${bin}:${process.env.PATH}`,
+    GIT_CONFIG_GLOBAL: global,
+    GIT_CONFIG_SYSTEM: '/dev/null',
+  };
+  for (const entry of podTemplate().containers[0].env as {
+    name: string;
+    value?: string;
+  }[]) {
+    if (entry.value !== undefined) env[entry.name] = entry.value;
+  }
+  // `approve` and `reject` are given a credential to act on, the way git hands
+  // back what a fill returned. A fill is given none, or git answers it from
+  // stdin without asking a helper at all.
+  const answer =
+    operation === 'fill' ? '' : 'username=rowbutt\npassword=a-pat\n';
+  return Bun.spawnSync(['git', 'credential', operation], {
+    env,
+    stdin: Buffer.from(`protocol=https\nhost=${host}\n${answer}\n`),
+  });
 }
 
 async function attach(): Promise<SandboxRef> {
@@ -139,7 +202,7 @@ describe('mint', () => {
       'git',
       'clone',
       '--depth',
-      '1',
+      '50',
       '--branch',
       'main',
       'https://github.com/jonpulsifer/infra',
@@ -224,7 +287,6 @@ describe('mint', () => {
     // agent user has none, so `git commit` would refuse to write one.
     for (const container of [pod.initContainers[0], pod.containers[0]]) {
       const env = envOf(container);
-      expect(env.GIT_CONFIG_COUNT.value).toBe('3');
       expect(env.GIT_CONFIG_KEY_0.value).toBe('safe.directory');
       expect(env.GIT_CONFIG_VALUE_0.value).toBe(WORKSPACE);
       expect(env.GIT_CONFIG_KEY_1.value).toBe('user.name');
@@ -234,6 +296,107 @@ describe('mint', () => {
         '22780844+rowbutt@users.noreply.github.com',
       );
     }
+    // The checkout gets the ident and nothing else.
+    const checkout = envOf(pod.initContainers[0]);
+    expect(checkout.GIT_CONFIG_COUNT.value).toBe('3');
+    expect(checkout.OP_CONNECT_TOKEN).toBeUndefined();
+  });
+
+  test('points the harness at Connect and never at a service account', async () => {
+    await sandboxes.mint(THREAD);
+    const env = envOf(podTemplate().containers[0]);
+
+    expect(env.OP_CONNECT_HOST.value).toBe(
+      'http://onepassword-connect.external-secrets.svc.cluster.local:8080',
+    );
+    expect(env.OP_CONNECT_TOKEN.valueFrom.secretKeyRef).toEqual({
+      name: 'mate-onepassword',
+      key: 'OP_CONNECT_TOKEN',
+      optional: true,
+    });
+    expect(env.MATE_GITHUB_TOKEN_REF.value).toBe(
+      'op://a-vault/an-item/password',
+    );
+    // Never both authentication paths.
+    expect(env.OP_SERVICE_ACCOUNT_TOKEN).toBeUndefined();
+    // Whether an unanswered credential blocks otherwise depends on whether the
+    // agent's tool gave the command a terminal.
+    expect(env.GIT_TERMINAL_PROMPT.value).toBe('0');
+  });
+
+  // The helper is a shell snippet git runs, so the only proof it is the right
+  // shape is git running it. Everything below the fake `op` is what
+  // `sandboxManifest` stamped, handed to git as the kubelet would hand it to
+  // the container.
+  test('git fills a github.com credential with what op printed', async () => {
+    await sandboxes.mint(THREAD);
+    const dir = fakeOp('echo "a-pat-for($3)"');
+
+    const filled = credential(dir, 'fill', 'github.com');
+    expect(filled.stdout.toString()).toContain('username=rowbutt');
+    expect(filled.stdout.toString()).toContain(
+      'password=a-pat-for(op://a-vault/an-item/password)',
+    );
+
+    // Scoped to the one URL: no other host reaches this helper.
+    const other = credential(dir, 'fill', 'gitlab.com');
+    expect(other.exitCode).not.toBe(0);
+    expect(other.stdout.toString()).not.toContain('password=');
+
+    // The reset earns its line, proven by a decoy that wins without it.
+    const decoy = join(dir, 'decoy.gitconfig');
+    writeFileSync(
+      decoy,
+      '[credential]\n\thelper = "!echo username=somebody; echo password=not-the-pat"\n',
+    );
+    const contested = credential(dir, 'fill', 'github.com', decoy);
+    expect(contested.stdout.toString()).toContain('username=rowbutt');
+  });
+
+  // Both halves are about not hanging: a whole turn is what a stalled fill
+  // costs, and with MATE_MAX_CONCURRENT at 2 that is half the capacity.
+  test('a read that cannot answer fails the fill rather than stalling it', async () => {
+    await sandboxes.mint(THREAD);
+
+    const broken = fakeOp('exit 1');
+    const failed = credential(broken, 'fill', 'github.com');
+    expect(failed.exitCode).not.toBe(0);
+    expect(failed.stdout.toString()).not.toContain('password=');
+
+    // What this pins is that `op` is reached through a bound at all. That a
+    // bound which expires kills the child is coreutils' business, so no test
+    // here waits for one to fire.
+    const slow = fakeOp('echo a-pat');
+    expect(credential(slow, 'fill', 'github.com').exitCode).toBe(0);
+    const bound = Number(readFileSync(join(slow, 'timeout.bound'), 'utf8'));
+    expect(bound).toBeGreaterThan(0);
+  });
+
+  // `approve` and `reject` are git's names for the store and erase paths.
+  test('storing and erasing a credential never reach op', async () => {
+    await sandboxes.mint(THREAD);
+
+    for (const operation of ['approve', 'reject'] as const) {
+      const dir = fakeOp('echo a-pat');
+      expect(credential(dir, operation, 'github.com').exitCode).toBe(0);
+      expect(existsSync(join(dir, 'op.ran'))).toBe(false);
+    }
+  });
+
+  test('hands the harness no credential path when none is configured', async () => {
+    sandboxes = new KubeSandboxes({
+      kube: new Kube(fake.config()),
+      config: { ...config, credentials: null },
+      guildId: GUILD,
+      log,
+    });
+    await sandboxes.mint(THREAD);
+    const env = envOf(podTemplate().containers[0]);
+
+    expect(env.GIT_CONFIG_COUNT.value).toBe('3');
+    expect(env.OP_CONNECT_HOST).toBeUndefined();
+    expect(env.OP_CONNECT_TOKEN).toBeUndefined();
+    expect(env.MATE_GITHUB_TOKEN_REF).toBeUndefined();
   });
 
   test('waits for the controller to report Ready', async () => {

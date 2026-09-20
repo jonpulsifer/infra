@@ -171,6 +171,23 @@ spec:
             # it, which would stamp this digest over mate's own.
             - name: MATE_SANDBOX_IMAGE
               value: ghcr.io/jonpulsifer/mate-sandbox:latest@sha256:6f135be2df9ddf2cca529e845b3325cba5c6e72c8587c1ce48ec30bd5b10cbac
+            # Where the sandbox's git credential helper reads a GitHub token
+            # from — vault, item and field in the one string `op read` takes.
+            # It is configuration rather than a constant in mate because it
+            # names a 1Password item: an item re-created changes this line and
+            # nothing else. Unsetting it is the rollback.
+            #
+            # The token is a fine-grained PAT on rowbutt, this repository only,
+            # contents and pull requests writable. What reads it is the Connect
+            # token in the `mate-onepassword` Secret, which
+            # `external-secret.yaml` declares and where the vault boundary its
+            # claims draw is written down. The sharp edge is the account rather
+            # than the scope: `rowbutt` is both an Atlantis allowed user and an
+            # Atlantis policy-set owner, so a pull-request comment made with
+            # this token can clear the policy gate and start a Terraform apply,
+            # and a successful apply merges the pull request to `main`.
+            - name: MATE_GITHUB_TOKEN_REF
+              value: op://xf7fcsxke5yz32xqou4rsnrlqy/s7rxwheygnwhoh6esaqllism4i/password
             # Gateway session info (session id, resume URL, sequence) lands
             # here so a container restart inside the same pod resumes instead
             # of spending an identify from the daily budget. An emptyDir is
