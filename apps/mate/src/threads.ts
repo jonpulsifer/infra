@@ -11,6 +11,7 @@ import { type Log, plain } from './log.ts';
 import {
   type Instruments,
   lazyInstruments,
+  type SandboxSource,
   type TeardownReason,
 } from './metrics.ts';
 import {
@@ -432,28 +433,39 @@ export class Threads {
   }
 
   private async mint(thread: Thread): Promise<void> {
-    const { sandboxes } = this.deps;
+    const { clock, sandboxes } = this.deps;
     this.to(thread, 'minting');
     this.disarmQuiet(thread);
+    const source: SandboxSource = 'fresh';
+    // Timed from here rather than inside the sandbox client, because this is
+    // where the wait starts for the human who just asked a question. The two
+    // steps are kept apart so that "it took a minute" resolves to one of them
+    // rather than to their total.
+    const asked = clock.now();
     try {
       thread.sandbox = await sandboxes.mint(thread.ref);
     } catch (error) {
       // Counted here because nothing else sees it: no sandbox exists, so the
       // teardown that follows records none.
-      this.metrics.minted('mint-failed');
+      this.metrics.minted('mint-failed', { source });
       await this.failed(thread, `${MINT_FAILED}: ${plain(error)}`);
       return;
     }
+    const ready = clock.now();
     try {
       const session = await sandboxes.attach(thread.sandbox);
       thread.session = session;
       thread.replay = !session.resumed;
     } catch (error) {
-      this.metrics.minted('attach-failed');
+      this.metrics.minted('attach-failed', { source });
       await this.failed(thread, `${ATTACH_FAILED}: ${plain(error)}`);
       return;
     }
-    this.metrics.minted('ok');
+    this.metrics.minted('ok', {
+      source,
+      mintMs: ready - asked,
+      attachMs: clock.now() - ready,
+    });
     this.to(thread, 'attached');
     await this.pump(thread);
   }

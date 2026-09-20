@@ -78,6 +78,11 @@ describe('the SDK', () => {
       // Minted only now, which is the whole contract: an instrument built
       // before the line above would be a no-op and say nothing about it.
       getInstruments().gatewayClosed(4004, true);
+      getInstruments().minted('ok', {
+        source: 'fresh',
+        mintMs: 42_000,
+        attachMs: 1_500,
+      });
       // Nothing waits for the 15s export interval — the exit path's flush is
       // what has to carry the last counter out, and this is that path.
       await stopTelemetry();
@@ -89,6 +94,10 @@ describe('the SDK', () => {
     const sent = bodies[0] ?? '';
     expect(sent).toContain('mate_gateway_closes_total');
     expect(sent).toContain('4004');
+    // Spelled the way an alert or a dashboard query has to spell them, which
+    // is the only spelling the collector's prometheus exporter leaves alone.
+    expect(sent).toContain('mate_mint_duration_milliseconds');
+    expect(sent).toContain('mate_attach_duration_milliseconds');
     // The resource attribute the collector turns into the `exported_job` label.
     expect(sent).toContain('service.name');
   });

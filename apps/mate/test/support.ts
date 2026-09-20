@@ -10,6 +10,7 @@ import type { Fields, Log } from '../src/log.ts';
 import type {
   Instruments,
   MintResult,
+  MintSample,
   TeardownReason,
   TurnEnd,
   TurnSample,
@@ -126,6 +127,7 @@ export class RecordingInstruments implements Instruments {
   readonly teardowns: TeardownReason[] = [];
   readonly samples: TurnSample[] = [];
   readonly mints: MintResult[] = [];
+  readonly mintSamples: MintSample[] = [];
   readonly closes: { code: number; fatal: boolean }[] = [];
   started = 0;
   live = 0;
@@ -135,8 +137,9 @@ export class RecordingInstruments implements Instruments {
   gatewayClosed(code: number, fatal: boolean): void {
     this.closes.push({ code, fatal });
   }
-  minted(result: MintResult): void {
+  minted(result: MintResult, sample: MintSample): void {
     this.mints.push(result);
+    this.mintSamples.push(sample);
   }
   sandboxesLive(count: number): void {
     this.live = count;
