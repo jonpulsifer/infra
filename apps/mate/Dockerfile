@@ -4,7 +4,7 @@
 # dependencies from the repo's lockfile and the source is copied out of the
 # pruned tree exactly as committed. Runs as uid 65532 with nothing writable
 # but what the manifest mounts.
-FROM cgr.dev/chainguard/node:latest-dev@sha256:2a2df3a1f79cfe63317e3e6e2b7394cac434648fdfc82e4f702d0e6dc4d9a852 AS base
+FROM cgr.dev/chainguard/node:latest-dev@sha256:3eb79c0858f6d4c565323e64ac2dc8f3f1e3a6e5e0097bbe379de4a96963312f AS base
 ARG BUN_VERSION=1.4.0
 ENV BUN_INSTALL=/usr/local \
   TURBO_TELEMETRY_DISABLED=1
