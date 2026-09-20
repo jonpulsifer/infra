@@ -147,6 +147,18 @@ spec:
           url: http://victoria-logs-server.monitoring.svc.cluster.local:9428
           orgId: 1
           version: 1
+          jsonData:
+            # Every Vector sink writes with tenant_id "1", which VictoriaLogs
+            # reads as the AccountID header. A query that sends no header gets
+            # tenant 0, so without this Grafana reads an account nothing
+            # writes to and every log panel is empty while the store is full.
+            # Measured on folly: 13,459 entries in one hour under AccountID 1,
+            # 36 under 0, which is all Grafana could see.
+            #
+            # Strings, not numbers. The plugin rejects integers here.
+            multitenancyHeaders:
+              AccountID: "1"
+              ProjectID: "0"
         - name: Tempo
           type: tempo
           uid: tempo

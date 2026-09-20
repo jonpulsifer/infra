@@ -60,6 +60,27 @@ spec:
         journald:
           type: journald
           journal_directory: /var/log/journal
+      transforms:
+        # VictoriaLogs reads the log line from `_msg`. Both sources put it in
+        # `message`, so without this every entry it stores carries the literal
+        # "missing _msg field; see ..." placeholder as its line and the real
+        # text is only reachable by naming the `message` field in the query.
+        #
+        # One per source rather than one shared transform: each sink below
+        # labels its own stream, and a single transform feeding both would
+        # hand every journald line to the sink that stamps job=kubernetes.
+        kubernetes_message:
+          type: remap
+          inputs:
+            - kubernetes_logs
+          source: |
+            ._msg = del(.message)
+        journald_message:
+          type: remap
+          inputs:
+            - journald
+          source: |
+            ._msg = del(.message)
       sinks:
         # The loki sink appends /loki/api/v1/push to endpoint itself, so this
         # stops at /insert. Spelling the full path here posts it twice and
@@ -67,7 +88,7 @@ spec:
         victoria_logs_kubernetes:
           type: loki
           inputs:
-            - kubernetes_logs
+            - kubernetes_message
           endpoint: http://victoria-logs-server.monitoring.svc.cluster.local:9428/insert
           tenant_id: "1"
           encoding:
@@ -83,7 +104,7 @@ spec:
         victoria_logs_journald:
           type: loki
           inputs:
-            - journald
+            - journald_message
           endpoint: http://victoria-logs-server.monitoring.svc.cluster.local:9428/insert
           tenant_id: "1"
           encoding:
