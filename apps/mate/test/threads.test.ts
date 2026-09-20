@@ -113,6 +113,10 @@ function build(
     log,
     config: { ...config, ...opts.config },
     editCadenceMs: 1_000,
+    // Scaled to the scripts below, which write a turn in a few hundred
+    // milliseconds: a run of text is the answer after one of its steps
+    // rather than after three seconds of them.
+    runGraceMs: 100,
     metrics,
   });
   return { threads, sandboxes };
@@ -219,7 +223,10 @@ describe('streaming a reply', () => {
     const [reply] = discord.inThread(threadId);
     expect(reply!.content).toBe('*running `mise run docs:check`…*');
     expect(reply!.hasStop).toBe(true);
-    await clock.advance(1_000);
+    // Far enough for the second delta at 1100ms — which is what shows the
+    // run the first one opened to be the answer rather than a step — and
+    // for the repaint after it, without reaching the end of the turn.
+    await clock.advance(1_900);
     expect(reply!.content).toStartWith(
       '*running `mise run docs:check`…*\n\nalpha ',
     );

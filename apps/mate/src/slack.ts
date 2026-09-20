@@ -12,7 +12,8 @@
  *   `stopStream` take an array of chunks, so an answer is appended rather
  *   than a message rewritten. A `markdown_text` chunk is answer text; a
  *   `task_update` chunk merges by its id into a `task_card` block that
- *   mutates in place, which is exactly one ACP tool call. The mode is fixed
+ *   mutates in place, which is one ACP tool call or one sentence the agent
+ *   said before making one. The mode is fixed
  *   at `startStream`: a stream opened with `markdown_text` refuses chunks
  *   with `streaming_mode_mismatch`, so every stream here opens in chunks.
  * - Those same `task_update` chunks render two ways and `task_display_mode`
@@ -41,7 +42,7 @@
  */
 import type { Clock, Handle } from './clock.ts';
 import { type Log, plain } from './log.ts';
-import { NO_REPLY, splitAt } from './reply.ts';
+import { NO_REPLY, oneLine, splitAt } from './reply.ts';
 import {
   type Canvas,
   type HistoryMessage,
@@ -162,9 +163,9 @@ export interface SlackMessage {
 
 /**
  * One piece of a streamed message. Answer text is `markdown_text`; a tool
- * call is `task_update`, which Slack merges by `id` into the `task_card`
- * block it renders as `task-<id>` and mutates in place on every later chunk
- * carrying the same id.
+ * call and a step are both `task_update`, which Slack merges by `id` into the
+ * `task_card` block it renders as `task-<id>` and mutates in place on every
+ * later chunk carrying the same id.
  */
 export type StreamChunk =
   | { type: 'markdown_text'; text: string }
@@ -446,6 +447,8 @@ export class SlackCanvas implements Canvas {
   private renewing: Handle | null = null;
   /** Cards still running, so a turn that ends under them can close them. */
   private readonly running = new Map<string, string>();
+  /** Steps drawn this turn, which is where each one's card id comes from. */
+  private steps = 0;
 
   constructor(
     private readonly api: SlackApi,
@@ -508,6 +511,24 @@ export class SlackCanvas implements Canvas {
     if (call.state === 'in_progress') this.running.set(call.id, call.title);
     else this.running.delete(call.id);
     await this.card(call.id, call.title, call.state);
+  }
+
+  /**
+   * One thing the harness said it was about to do, as a card of its own in
+   * the same timeline as the tool calls it sits between. It is `complete` the
+   * moment it is drawn — the sentence is over, the tool call that ended it is
+   * the card after this one — and it is never in `running`, so the sweep that
+   * closes a turn's unfinished cards has nothing of this kind to close.
+   *
+   * A card carries a title and no body, so a step is one line: `oneLine` is
+   * the same cut Discord's status line takes, which keeps the two surfaces
+   * showing the same amount of the same sentence. The id is counted here
+   * rather than taken from the harness, which has no id for a sentence; the
+   * prefix is what keeps it out of the way of a `toolCallId`.
+   */
+  async step(text: string): Promise<void> {
+    this.steps += 1;
+    await this.card(`say-${this.steps}`, oneLine(text), 'complete');
   }
 
   /**
