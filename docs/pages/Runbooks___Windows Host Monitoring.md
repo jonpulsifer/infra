@@ -1,7 +1,8 @@
 tags:: runbook, monitoring, windows
 
-- Use this when a Windows desktop needs to appear in Grafana, when one has stopped reporting, or when its temperatures, GPU or Event Log are missing from an otherwise healthy host. The machines are `tallboy` and `atomic`. They are the only hosts in the fleet with no declarative layer at all — no [[Architecture/NixOS]] closure, no Flux — so every agent on them is installed by hand and this page is the record of what "installed correctly" means.
-- The cluster half *is* declared: `clusters/folly/monitoring/windows-exporters.yaml` for the scrape and the alerts, `clusters/folly/monitoring/victoria-logs-route.yaml` for the log endpoint, `terraform/network/unifi/folly/windows-hosts.tf` for the DHCP reservations. Change those in git, never on the box — see [[Architecture/GitOps]].
+- Use this when a Windows desktop needs to appear in Grafana, when one has stopped reporting, or when its temperatures, GPU or Event Log are missing from an otherwise healthy host. The machines are `tallboy` and `atomic`.
+- Both halves are in git. On the box, `dotfiles/windows/Install-Monitoring.ps1` installs the three agents and `dotfiles/windows/monitoring/` holds their configuration — the same pinned, hash-verified, idempotent shape the rest of the Windows desk uses, see [[Runbooks/Bootstrap a Windows Desk]]. In the cluster, `clusters/folly/monitoring/windows-exporters.yaml` is the scrape and the alerts, `clusters/folly/monitoring/victoria-logs-route.yaml` is the log endpoint, and `terraform/network/unifi/folly/windows-hosts.tf` holds the reservations.
+- Change those files, never the live box — see [[Architecture/GitOps]]. Windows has no operator watching git, so "apply" here means re-running the installer; everything it does is idempotent.
 - # Quick checks
 	- Is the host being scraped at all? From any lab host, which shares the Lab firewall zone with the cluster:
 	- ```bash
@@ -27,67 +28,30 @@ tags:: runbook, monitoring, windows
 	- The split between the first two is not redundancy. `windows_exporter`'s `gpu` collector reads Windows performance counters, which carry utilisation and memory but no temperature, power or clock; and its `thermalzone` collector reads ACPI zones, which on a desktop board is a single number that tracks nothing you care about. Real sensors need a kernel driver, which is what LibreHardwareMonitor provides and OhmGraphite exposes.
 	- Vector rather than an OpenTelemetry collector because the cluster already ships every other log with Vector over the Loki push protocol into VictoriaLogs (`clusters/base/monitoring/vector.yaml`); a Windows agent using the same source-and-sink shape lands in the same store with the same stream labels.
 - # Install on a new host
-	- ## windows_exporter
-		- Download the current `.msi` from the [releases page](https://github.com/prometheus-community/windows_exporter/releases) and install it from an **elevated** PowerShell. The `--%` is required — it stops PowerShell from eating the installer properties.
-		- ```powershell
-		  msiexec /i .\windows_exporter-0.31.8-amd64.msi --% ADDLOCAL=FirewallException ENABLED_COLLECTORS="[defaults],gpu,cpu_info,diskdrive"
-		  ```
-		- `ADDLOCAL=FirewallException` is what opens inbound 9182 in Windows Defender Firewall. Without it the service listens and nothing can reach it.
-		- `[defaults]` expands to the usual set (`cpu`, `logical_disk`, `memory`, `net`, `os`, `physical_disk`, `service`, `system`); the rest add GPU counters, CPU model information and per-drive health.
-		- **Installer properties beat the config file.** The MSI writes the collector list onto the service's command line, and a CLI flag always wins over `config.yaml`. Editing `C:\Program Files\windows_exporter\config.yaml` on a host that was installed with `ENABLED_COLLECTORS` changes nothing — check what the service is actually running with:
+	- From an elevated PowerShell 7, in the dotfiles checkout:
+	- ```powershell
+	  .\dotfiles\windows\Install-Monitoring.ps1
+	  ```
+	- Or as part of a desk bootstrap, which elevates for this stage on its own:
+	- ```powershell
+	  .\dotfiles\windows\bootstrap.ps1 -WithMonitoring
+	  ```
+	- Re-running it is how a host takes an update. Each agent is skipped when it is already at the pinned version with the declared configuration, and the OhmGraphite config is rewritten every run because unpacking the release overwrites it with the upstream Graphite default.
+	- `-SkipVector` installs the metrics half only. `-LogEndpoint` overrides where Event Log is pushed.
+	- ## Why none of this comes from winget
+		- `configuration.winget` owns everything else on the desk, and would be the right home for these too, except that each one fails it differently.
+		- **windows_exporter** is in the catalogue, but the manifest offers a portable build ahead of the MSI and carries no installer switches. Only the MSI registers the service and opens the firewall. Worse, the collector list has to be an installer property: the MSI writes `--collectors.enabled` onto the service command line, and a CLI flag always beats `config.yaml`, so a host installed without the property is pinned to `[defaults]` and editing that file afterwards changes nothing. Check what a service is actually running with:
 		- ```powershell
 		  (Get-CimInstance Win32_Service -Filter "Name='windows_exporter'").PathName
 		  ```
-		- A host installed with no properties shows `--collectors.enabled [defaults]`, and the only ways to change it are to re-run the MSI with the property set, or to rewrite the service's `ImagePath`.
-	- ## OhmGraphite
-		- Download the release from [OhmGraphite](https://github.com/nickbabcock/OhmGraphite/releases), unpack it somewhere permanent, and point it at Prometheus mode in `OhmGraphite.exe.config`:
-		- ```xml
-		  <add key="type" value="prometheus" />
-		  <add key="prometheus_host" value="*" />
-		  <add key="prometheus_port" value="4445" />
-		  ```
-		- Then register and start it from an elevated PowerShell, and open the port — OhmGraphite does not create its own firewall rule:
-		- ```powershell
-		  .\OhmGraphite.exe install
-		  New-NetFirewallRule -DisplayName "OhmGraphite" -Direction Inbound -Protocol TCP -LocalPort 4445 -Action Allow
-		  ```
-		- It needs to run as LocalSystem to load the LibreHardwareMonitor driver. Sensors read as zero or missing entirely is almost always the service running as something else.
-		- Metric names are `ohm_<hardwaretype>_<unit>` with `hardware`, `sensor` and `hw_instance` labels, so an NVIDIA card's temperature is `ohm_gpunvidia_celsius{sensor="GPU Core"}` and an AMD one is `ohm_gpuamd_celsius`. The alert rules match on `{__name__=~"ohm_gpu.+_celsius"}` for exactly that reason.
-	- ## Vector
-		- Install Vector for Windows per [its install page](https://vector.dev/docs/setup/installation/operating-systems/windows/), then write `C:\ProgramData\vector\vector.yaml`:
-		- ```yaml
-		  data_dir: C:\ProgramData\vector
-
-		  sources:
-		    windows_events:
-		      type: windows_event_log
-		      channels: [System, Application]
-
-		  transforms:
-		    identify:
-		      type: remap
-		      inputs: [windows_events]
-		      source: |
-		        .host = get_hostname!()
-
-		  sinks:
-		    victoria_logs:
-		      type: loki
-		      inputs: [identify]
-		      endpoint: https://logs.lolwtf.ca/insert
-		      tenant_id: "1"
-		      encoding:
-		        codec: json
-		      dangerously_allow_unconfined_template_resolution: true
-		      labels:
-		        job: windows-eventlog
-		        host: "{{ host }}"
-		        channel: "{{ channel }}"
-		        level: "{{ level }}"
-		  ```
-		- The endpoint stops at `/insert` on purpose. Vector's `loki` sink appends `/loki/api/v1/push` itself; spelling the full path here posts it twice and VictoriaLogs answers `400 unsupported path`. This is the same trap the in-cluster agent's config calls out.
-		- `read_existing_events` defaults to false, so a fresh agent starts from now rather than replaying the whole log. Set it true once if you want the backlog.
-		- The route only publishes `/insert`. Reads stay inside the cluster, so Vector can write but nothing on the LAN can query the log store.
+		- **OhmGraphite** is in neither the catalogue nor the Store.
+		- **Vector** ships an MSI with no Windows service in it — a console binary and a config path, and running it is left to you. `vector.exe` never calls `StartServiceCtrlDispatcher`, so `sc.exe create` produces a service the SCM kills with error 1053; the installer registers a startup scheduled task running as SYSTEM instead, which needs no wrapper binary.
+		- So all three are pinned by URL and SHA256 and verified before anything executes, the way `Install-NerdFont.ps1` and `Install-VibranceGui.ps1` already handle what winget cannot. Moving a version means changing both the URL and the hash.
+	- ## What each agent is configured to do
+		- `windows_exporter` runs `[defaults],gpu,cpu_info,diskdrive` on 9182. `thermalzone` is deliberately absent — on a desktop board it is one ACPI number that tracks nothing.
+		- OhmGraphite runs as LocalSystem on 4445, which is what lets LibreHardwareMonitor load its kernel driver. Sensors reading zero or missing entirely is almost always the service running as something else. Its metric names are `ohm_<hardwaretype>_<unit>` with `hardware`, `sensor` and `hw_instance` labels, so an NVIDIA card's temperature is `ohm_gpunvidia_celsius{sensor="GPU Core"}` and an AMD one is `ohm_gpuamd_celsius` — which is why the alert rules match on `{__name__=~"ohm_gpu.+_celsius"}`.
+		- Vector reads the System and Application channels and pushes to `https://logs.lolwtf.ca/insert`. The endpoint stops at `/insert` on purpose: the `loki` sink appends `/loki/api/v1/push` itself, and spelling the full path posts it twice for a `400 unsupported path`. The route publishes only `/insert`, so an agent can write and nothing on the LAN can query the log store.
+		- `read_existing_events` is false, so a fresh agent starts from now rather than replaying the whole log.
 - # If a host is missing from Grafana entirely
 	- Confirm the reservation still holds. The addresses live in `clusters/folly/config/lab-topology.json` and are reserved by `terraform/network/unifi/folly/windows-hosts.tf`; the EndpointSlice substitutes the same values, so the two cannot disagree without failing a plan. Check what the controller currently believes with [[Runbooks/Inspect UniFi Network]]:
 	- ```bash

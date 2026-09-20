@@ -17,7 +17,9 @@
          the Developer Mode that lets the deploy create symlinks unelevated.
       3. Clone the repo, sparse, just dotfiles/.
       4. mise run bootstrap, which routes to bootstrap:windows.
-      5. Optionally install WSL and hand off to the Linux bootstrap inside it.
+      5. Optionally install the monitoring agents, so the box reports to the
+         folly cluster's Grafana.
+      6. Optionally install WSL and hand off to the Linux bootstrap inside it.
 
     Windows is the outer ring here: it installs WSL, not the other way round.
     Nothing in this bootstrap reads anything from inside the distro.
@@ -27,12 +29,19 @@
     distro. Left out of a routine re-run so that reshaping the shell config
     never touches the distro.
 
+.PARAMETER WithMonitoring
+    Also install windows_exporter, OhmGraphite and Vector, so folly's
+    Prometheus and VictoriaLogs can see this box. Left out of a routine re-run
+    because it is the only stage that needs an elevated process; this one
+    prompts for it.
+
 .PARAMETER SkipConfiguration
     Skip the winget configure pass. Useful when only the dotfiles changed.
 #>
 [CmdletBinding()]
 param(
     [switch] $WithWsl,
+    [switch] $WithMonitoring,
     [switch] $SkipConfiguration
 )
 
@@ -179,7 +188,32 @@ Write-Stage 'Installing the terminal font'
 Write-Stage 'Installing vibranceGUI'
 & (Join-Path $dotfiles 'windows\Install-VibranceGui.ps1') -AutoStart
 
-# --- Stage 5: WSL -----------------------------------------------------------
+# --- Stage 5: monitoring ----------------------------------------------------
+
+# The only stage that installs machine-wide services, so the only one that
+# needs elevation. It is asked for rather than assumed, and re-launched with a
+# prompt rather than failing, because the rest of this bootstrap deliberately
+# runs unelevated.
+if ($WithMonitoring) {
+    Write-Stage 'Installing the monitoring agents'
+    $installMonitoring = Join-Path $dotfiles 'windows\Install-Monitoring.ps1'
+    $identity = [Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()
+
+    if ($identity.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
+        & $installMonitoring
+    }
+    else {
+        Write-Host 'Elevating -- the agents run as machine-wide services.'
+        $elevated = Start-Process -FilePath (Get-Process -Id $PID).Path `
+            -ArgumentList @('-NoProfile', '-File', "`"$installMonitoring`"") `
+            -Verb RunAs -Wait -PassThru
+        if ($elevated.ExitCode -ne 0) {
+            throw "Install-Monitoring.ps1 exited $($elevated.ExitCode)"
+        }
+    }
+}
+
+# --- Stage 6: WSL -----------------------------------------------------------
 
 if ($WithWsl) {
     Write-Stage 'Installing WSL and handing off to the Linux bootstrap'
