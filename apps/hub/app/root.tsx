@@ -21,6 +21,10 @@ export const links: Route.LinksFunction = () => [
     rel: 'stylesheet',
     href: 'https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,100..900;1,14..32,100..900&display=swap',
   },
+  { rel: 'manifest', href: '/manifest.webmanifest' },
+  { rel: 'icon', href: '/favicon.ico', sizes: '48x48' },
+  { rel: 'icon', href: '/icon-512.png', type: 'image/png', sizes: '512x512' },
+  { rel: 'apple-touch-icon', href: '/apple-touch-icon.png', sizes: '180x180' },
 ];
 
 export function Layout({ children }: { children: React.ReactNode }) {
@@ -28,22 +32,54 @@ export function Layout({ children }: { children: React.ReactNode }) {
     <html lang="en" className="dark">
       <head>
         <meta charSet="utf-8" />
+        {/* `viewport-fit=cover` lets the installed app paint under the notch
+            and the home indicator; the dashboard pads itself back out with
+            env(safe-area-inset-*). */}
         <meta
           name="viewport"
-          content="width=device-width, initial-scale=1, user-scalable=no"
+          content="width=device-width, initial-scale=1, user-scalable=no, viewport-fit=cover"
         />
         <meta name="theme-color" content="#0b0f15" />
+        <meta name="mobile-web-app-capable" content="yes" />
+        <meta name="apple-mobile-web-app-capable" content="yes" />
+        <meta name="apple-mobile-web-app-title" content="Weather Hub" />
+        <meta
+          name="apple-mobile-web-app-status-bar-style"
+          content="black-translucent"
+        />
         <Meta />
         <Links />
       </head>
       <body className="bg-[#0b0f15] text-white">
-        <div className="flex flex-col h-screen">
-          <div className="flex-grow overflow-hidden">{children}</div>
-        </div>
+        {children}
         <ScrollRestoration />
         <Scripts />
+        <ServiceWorker />
       </body>
     </html>
+  );
+}
+
+/**
+ * Registers the offline shell. Inlined rather than done from an effect so it
+ * runs on the very first paint, and skipped in development where a cached
+ * shell would shadow Vite's module graph.
+ *
+ * The kiosk Pis still pick up deployments the way they always have - the
+ * snapshot's build ID no longer matching theirs - because the worker serves
+ * documents and /api/weather network-first. The cache is what they fall back
+ * to when the wifi drops, not what they normally read.
+ */
+function ServiceWorker() {
+  if (import.meta.env.DEV) return null;
+  return (
+    <script
+      // biome-ignore lint/security/noDangerouslySetInnerHtml: a fixed literal, no interpolation
+      dangerouslySetInnerHTML={{
+        __html:
+          "if('serviceWorker' in navigator){addEventListener('load',function(){navigator.serviceWorker.register('/sw.js')})}",
+      }}
+    />
   );
 }
 

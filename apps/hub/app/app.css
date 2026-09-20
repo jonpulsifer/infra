@@ -7,23 +7,29 @@
 }
 
 /* ============================================================================
-   Weather Hub Layout - Optimized for 800x480 Raspberry Pi Display
-   ============================================================================ */
+   Weather Hub ground
+   ----------------------------------------------------------------------------
+   Two form factors share one layout: the 800x480 kiosk panel the Pis drive,
+   and a phone running the installed PWA. The dashboard owns its own height
+   (h-dvh) and decides where scrolling is allowed, so this file only sets the
+   ground colour and the behaviours a kiosk browser needs.
+   ========================================================================= */
 
 html,
-body,
-#root {
-  height: 100vh;
-  width: 100vw;
-  overflow: hidden;
+body {
   margin: 0;
   padding: 0;
+  min-height: 100%;
   background: #0b0f15; /* cool weather-night ground */
   color: white;
   color-scheme: dark;
+  /* The kiosk is a touchscreen with no address bar to reveal; a rubber-band
+     overscroll there is just the dashboard sliding off its own display. */
+  overscroll-behavior: none;
 }
 
-/* Hide scrollbars on small screen */
+/* A kiosk has no pointer to reveal a scrollbar for, and on a phone the panels
+   scroll under the header where a track would sit on top of the content. */
 * {
   scrollbar-width: none;
   -ms-overflow-style: none;
@@ -31,28 +37,4 @@ body,
 
 *::-webkit-scrollbar {
   display: none;
-}
-
-/* ============================================================================
-   Typography Utilities - Compact sizes for small display
-   ============================================================================ */
-
-.text-xs {
-  font-size: 0.65rem;
-}
-
-.text-sm {
-  font-size: 0.75rem;
-}
-
-/* Responsive typography adjustments */
-@media (max-width: 900px) {
-  .text-3xl {
-    font-size: 1.5rem;
-    line-height: 1.2;
-  }
-
-  .text-lg {
-    font-size: 0.9rem;
-  }
 }
