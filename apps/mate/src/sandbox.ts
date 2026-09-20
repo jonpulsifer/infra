@@ -87,6 +87,7 @@ export interface StubOptions {
   clock?: Clock;
   script?: Script;
   mintDelayMs?: number;
+  attachDelayMs?: number;
   mintFails?: string;
   attachFails?: string;
   costUsd?: number;
@@ -139,6 +140,8 @@ export class StubSandboxes implements Sandboxes {
   }
 
   async attach(sandbox: SandboxRef): Promise<Session> {
+    if (this.opts.attachDelayMs)
+      await this.clock.sleep(this.opts.attachDelayMs);
     if (this.attachFails) throw new Error(this.attachFails);
     if (!this.live.has(sandbox.name)) {
       throw new Error(`sandbox ${sandbox.name} is gone`);

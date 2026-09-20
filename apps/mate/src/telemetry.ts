@@ -36,6 +36,18 @@ export const EXPORT_INTERVAL_MS = 15_000;
 export const EXPORT_TIMEOUT_MS = 5_000;
 
 /**
+ * Getting a thread a sandbox is the one thing here measured in minutes: the
+ * mint waits on a kata VM booting and an image landing, and gives up at
+ * `READY_TIMEOUT_MS`, five minutes. Both steps share these boundaries so a
+ * mint and the attach behind it read off one axis, and the top one is that
+ * timeout — a sample can reach it, and anything past it is a mint that never
+ * happened.
+ */
+const SANDBOX_BOUNDARIES = [
+  1_000, 5_000, 15_000, 30_000, 60_000, 120_000, 300_000,
+];
+
+/**
  * The SDK's default buckets stop at 10 000, which is fine for milliseconds
  * only if nothing takes longer than ten seconds — the first measured round
  * trip took 7.65 s to its first token, so every real sample would pile into
@@ -55,6 +67,20 @@ const VIEWS: ViewOptions[] = [
     aggregation: {
       type: AggregationType.EXPLICIT_BUCKET_HISTOGRAM,
       options: { boundaries: [0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1] },
+    },
+  },
+  {
+    instrumentName: 'mate_mint_duration_milliseconds',
+    aggregation: {
+      type: AggregationType.EXPLICIT_BUCKET_HISTOGRAM,
+      options: { boundaries: SANDBOX_BOUNDARIES },
+    },
+  },
+  {
+    instrumentName: 'mate_attach_duration_milliseconds',
+    aggregation: {
+      type: AggregationType.EXPLICIT_BUCKET_HISTOGRAM,
+      options: { boundaries: SANDBOX_BOUNDARIES },
     },
   },
 ];

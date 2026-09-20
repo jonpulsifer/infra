@@ -86,6 +86,8 @@ function build(
   opts: {
     script?: Script;
     config?: Partial<ThreadsConfig>;
+    mintDelayMs?: number;
+    attachDelayMs?: number;
     mintFails?: string;
     attachFails?: string;
     costUsd?: number;
@@ -95,6 +97,8 @@ function build(
   const sandboxes = new StubSandboxes({
     clock,
     script: opts.script,
+    mintDelayMs: opts.mintDelayMs,
+    attachDelayMs: opts.attachDelayMs,
     mintFails: opts.mintFails,
     attachFails: opts.attachFails,
     costUsd: opts.costUsd,
@@ -927,6 +931,9 @@ describe('metrics', () => {
     // records nothing, so this counter is the only thing that sees it.
     expect(metrics.mints).toEqual(['mint-failed']);
     expect(metrics.teardowns).toEqual([]);
+    // No duration either: what a refusal took is its timeout, not a reading
+    // of how long getting a sandbox takes.
+    expect(metrics.mintSamples).toEqual([{ source: 'fresh' }]);
 
     const attaching = build({ attachFails: 'the harness never answered' });
     await attaching.threads.onMessage(mention('go'));
@@ -937,6 +944,23 @@ describe('metrics', () => {
     await working.threads.onMessage(mention('go'));
     await clock.advance(5_000);
     expect(metrics.mints.at(-1)).toBe('ok');
+  });
+
+  test('the wait for a sandbox is timed in two parts', async () => {
+    const { threads } = build({
+      script: streaming('alpha'),
+      mintDelayMs: 40_000,
+      attachDelayMs: 2_000,
+    });
+    await threads.onMessage(mention('go'));
+    await clock.advance(60_000);
+
+    // Split rather than totalled, because the two are fixed by different
+    // things: a warm sandbox would take the first number to nothing and
+    // leave the second exactly where it is.
+    expect(metrics.mintSamples).toEqual([
+      { source: 'fresh', mintMs: 40_000, attachMs: 2_000 },
+    ]);
   });
 
   test('the live and queued gauges follow the table', async () => {

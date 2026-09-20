@@ -13,6 +13,29 @@ export type TurnEnd = StopReason | 'sandbox-died';
 export type MintResult = 'ok' | 'mint-failed' | 'attach-failed';
 
 /**
+ * Where the sandbox a thread ended up on came from. Every one is built for
+ * the thread that asked for it, so `fresh` is the only value mate emits — the
+ * label is here so that the day a thread adopts a spare that was already warm,
+ * the two are separate series rather than one that quietly changes meaning
+ * halfway through its own history.
+ */
+export type SandboxSource = 'fresh';
+
+export interface MintSample {
+  source: SandboxSource;
+  /**
+   * How long each step took, and set only for a step that finished. One that
+   * gives up takes its own timeout rather than its own time — five minutes
+   * waiting for Ready, or the harness timeouts on an attach — so admitting
+   * failures would move these quantiles by an amount that says nothing about
+   * how long a sandbox a thread can use takes to arrive. `mate_mints_total`
+   * is where the failures are counted.
+   */
+  mintMs?: number | null;
+  attachMs?: number | null;
+}
+
+/**
  * Why a sandbox went away. The hard `shutdownTime` TTL is not here: the
  * controller enforces it, and mate only ever sees its result.
  */
@@ -33,7 +56,7 @@ export interface Instruments {
   gatewayClosed(code: number, fatal: boolean): void;
   sandboxesLive(count: number): void;
   queueDepth(depth: number): void;
-  minted(result: MintResult): void;
+  minted(result: MintResult, sample: MintSample): void;
   turnStarted(): void;
   turnEnded(reason: TurnEnd, sample: TurnSample): void;
   teardown(reason: TeardownReason): void;
@@ -124,6 +147,14 @@ export function getInstruments(): Instruments {
     { unit: 'ms' },
   );
   const cost = meter.createHistogram('mate_turn_cost_usd');
+  const mintDuration = meter.createHistogram(
+    'mate_mint_duration_milliseconds',
+    { unit: 'ms' },
+  );
+  const attachDuration = meter.createHistogram(
+    'mate_attach_duration_milliseconds',
+    { unit: 'ms' },
+  );
   const instruments: Instruments = {
     identifyLimit: (limit) => {
       latest = { limit, readAt: Date.now() };
@@ -136,7 +167,16 @@ export function getInstruments(): Instruments {
     queueDepth: (depth) => {
       queued = depth;
     },
-    minted: (result) => mints.add(1, { result }),
+    minted: (result, sample) => {
+      mints.add(1, { result });
+      const { source } = sample;
+      if (typeof sample.mintMs === 'number') {
+        mintDuration.record(sample.mintMs, { source });
+      }
+      if (typeof sample.attachMs === 'number') {
+        attachDuration.record(sample.attachMs, { source });
+      }
+    },
     turnStarted: () => turns.add(1),
     turnEnded: (reason, sample) => {
       ended.add(1, { reason });
@@ -158,7 +198,7 @@ export function lazyInstruments(): Instruments {
     gatewayClosed: (code, fatal) => getInstruments().gatewayClosed(code, fatal),
     sandboxesLive: (count) => getInstruments().sandboxesLive(count),
     queueDepth: (depth) => getInstruments().queueDepth(depth),
-    minted: (result) => getInstruments().minted(result),
+    minted: (result, sample) => getInstruments().minted(result, sample),
     turnStarted: () => getInstruments().turnStarted(),
     turnEnded: (reason, sample) => getInstruments().turnEnded(reason, sample),
     teardown: (reason) => getInstruments().teardown(reason),
