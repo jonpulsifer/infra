@@ -185,6 +185,28 @@ describe('mint', () => {
     expect(skills.length).toBeGreaterThan(0);
   });
 
+  // The sandbox image's mise config turns off tool management by naming every
+  // tool, because mise has no wildcard for it. That list is a copy, and a tool
+  // added to the repo's mise.toml without being added here is a tool mise
+  // tries to resolve on every `mise run` — offline, that fails the run
+  // outright, and the agent loses the task list AGENTS.md sends it to.
+  test('disables every tool the repo declares in the sandbox image', async () => {
+    const toml = async <T>(path: string) =>
+      Bun.TOML.parse(
+        await Bun.file(new URL(path, import.meta.url)).text(),
+      ) as T;
+    const repo = await toml<{ tools: Record<string, unknown> }>(
+      '../../../mise.toml',
+    );
+    const image = await toml<{ settings: { disable_tools: string[] } }>(
+      '../../../images/mate-sandbox/mise.toml',
+    );
+
+    expect([...image.settings.disable_tools].sort()).toEqual(
+      Object.keys(repo.tools).sort(),
+    );
+  });
+
   test('hands both containers the git config the checkout needs', async () => {
     await sandboxes.mint(THREAD);
     const pod = podTemplate();

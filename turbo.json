@@ -35,6 +35,16 @@
       "env": ["DATABASE_URL"],
       "outputs": []
     },
+    "mate#test": {
+      "dependsOn": ["build"],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/dotfiles/skills/**",
+        "$TURBO_ROOT$/mise.toml",
+        "$TURBO_ROOT$/images/mate-sandbox/mise.toml"
+      ],
+      "outputs": []
+    },
     "kthx#test": {
       "dependsOn": ["build"],
       "inputs": [

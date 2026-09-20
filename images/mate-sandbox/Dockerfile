@@ -117,7 +117,7 @@ RUN set -eux; \
     tar -xzf archive --no-same-owner -C /out/bin --strip-components=1 age/age age/age-keygen; \
     arc "https://github.com/sharkdp/bat/releases/download/v${BAT_VERSION}/bat-v${BAT_VERSION}-x86_64-unknown-linux-musl.tar.gz"; \
     tar -xzf archive --no-same-owner -C /out/bin --strip-components=1 "bat-v${BAT_VERSION}-x86_64-unknown-linux-musl/bat"; \
-    curl -fsSL --retry 3 --retry-all-errors -o archive "https://github.com/oven-sh/bun/releases/download/bun-v${BUN_VERSION}/bun-linux-x64.zip"; \
+    arc "https://github.com/oven-sh/bun/releases/download/bun-v${BUN_VERSION}/bun-linux-x64.zip"; \
     unzip -q -j archive bun-linux-x64/bun -d /out/bin; \
     arc "https://github.com/open-policy-agent/conftest/releases/download/v${CONFTEST_VERSION}/conftest_${CONFTEST_VERSION}_Linux_x86_64.tar.gz"; \
     tar -xzf archive --no-same-owner -C /out/bin conftest; \
@@ -139,7 +139,7 @@ RUN set -eux; \
     tar -xzf archive --no-same-owner -C /out/bin kustomize; \
     arc "https://github.com/jdx/mise/releases/download/v${MISE_VERSION}/mise-v${MISE_VERSION}-linux-x64.tar.gz"; \
     tar -xzf archive --no-same-owner -C /out/bin --strip-components=2 mise/bin/mise; \
-    curl -fsSL --retry 3 --retry-all-errors -o archive "https://cache.agilebits.com/dist/1P/op2/pkg/v${OP_VERSION}/op_linux_amd64_v${OP_VERSION}.zip"; \
+    arc "https://cache.agilebits.com/dist/1P/op2/pkg/v${OP_VERSION}/op_linux_amd64_v${OP_VERSION}.zip"; \
     unzip -q -j archive op -d /out/bin; \
     arc "https://github.com/tronbyt/pixlet/releases/download/v${PIXLET_VERSION}/pixlet_v${PIXLET_VERSION}_linux-amd64.tar.gz"; \
     tar -xzf archive --no-same-owner -C /out/bin pixlet; \
@@ -171,9 +171,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # and keep this one.
 COPY --from=toolset /out/bin/ /usr/local/bin/
 
-# mise is the repo's command source of truth, so the agent has to be able to
-# run `mise run <task>`; the settings that keep it from also trying to manage
-# the tools above are in the file itself.
+# mise reads this before any config in the checkout; why it is in the image at
+# all, and what each setting is doing, is in the file.
 COPY mise.toml /etc/mise/config.toml
 
 # opencode-ai@<version> resolves on linux/amd64 to this platform package; its

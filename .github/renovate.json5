@@ -356,12 +356,32 @@
       // a sandbox on a different d2 rewrites every SVG it touches. Renovate
       // sees each of them twice — once through the mise manager reading
       // mise.toml, once through the ARG in the Dockerfile — and left ungrouped
-      // the two PRs merge minutes or days apart. Grouping them means the skew
-      // never exists on main.
-      description: 'opentofu and d2: the repo pin and the sandbox image move together',
-      matchDepNames: ['opentofu', 'opentofu/opentofu', 'd2', 'terrastruct/d2'],
-      groupName: 'mate sandbox toolset',
-      groupSlug: 'mate-sandbox-toolset',
+      // the two PRs merge minutes or days apart. A group each, rather than
+      // joining the toolset group above: these two carry pins the whole repo
+      // depends on, and any one tool whose release breaks the image build
+      // would otherwise hold them red indefinitely.
+      description: 'opentofu: the repo pin and the sandbox image move together',
+      matchDepNames: ['opentofu', 'opentofu/opentofu'],
+      groupName: 'opentofu',
+      groupSlug: 'opentofu',
+    },
+    {
+      description: 'd2: the repo pin and the sandbox image move together',
+      matchDepNames: ['d2', 'terrastruct/d2'],
+      groupName: 'd2',
+      groupSlug: 'd2',
+    },
+    {
+      // opencode is the harness mate execs, not one of the tools the image
+      // hands the agent: a regression in it is a live thread behaving oddly,
+      // not a command that is missing, and the build-time assertion that every
+      // baked binary starts cannot see it. Batched with two dozen unrelated
+      // tool bumps that regression arrives unreviewed and bisects to a commit
+      // that changed everything else too, so the harness pin stays its own
+      // pull request.
+      description: 'opencode: the harness binary is its own pull request',
+      matchDepNames: ['opencode-linux-x64'],
+      groupName: null,
     },
     {
       // The crds chart and the stack chart each carry their own copy of the
