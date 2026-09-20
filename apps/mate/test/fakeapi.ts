@@ -301,6 +301,17 @@ export class FakeKube {
         contentType: request.headers.get('content-type'),
         body,
       });
+      // A merge patch carrying a resourceVersion is an update from that
+      // revision, which is how two writers racing for one object are told
+      // apart: the apiserver refuses the second.
+      const want = ((body.metadata ?? {}) as Json).resourceVersion;
+      if (want && want !== (sandbox.metadata as Json).resourceVersion) {
+        return status(
+          409,
+          `Operation cannot be fulfilled on sandboxes "${name}": the object has been modified`,
+          'Conflict',
+        );
+      }
       merge(sandbox, body);
       this.bump(sandbox);
       this.emit(this.sandboxWatchers, 'MODIFIED', sandbox);

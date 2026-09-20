@@ -13,10 +13,12 @@ export type TurnEnd = StopReason | 'sandbox-died';
 export type MintResult = 'ok' | 'mint-failed' | 'attach-failed';
 
 /**
- * Whether the thread's sandbox was built for it or was already standing under
- * its name when it asked. The two are separate series because a cold start is
- * the number being chased and an `adopted` one never paid it: averaging them
- * would hide exactly the cost a warm-spare pool would be built to remove.
+ * Whether the thread's sandbox was built for it, or was already standing when
+ * it asked — its own from an earlier turn, or one the warm pool was holding.
+ * The two are separate series because a cold start is the number being chased
+ * and an `adopted` one never paid it: it skips the kata VM boot and the clone
+ * and pays a relabel and a fetch instead, so averaging them would hide exactly
+ * the cost the pool exists to remove.
  */
 export type SandboxSource = 'fresh' | 'adopted';
 

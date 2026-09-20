@@ -92,6 +92,7 @@ function build(
     attachFails?: string;
     costUsd?: number;
     resumes?: boolean;
+    spares?: number;
   } = {},
 ) {
   const sandboxes = new StubSandboxes({
@@ -103,6 +104,7 @@ function build(
     attachFails: opts.attachFails,
     costUsd: opts.costUsd,
     resumes: opts.resumes,
+    spares: opts.spares,
   });
   const threads = new Threads({
     surfaces: [surface],
@@ -984,6 +986,50 @@ describe('metrics', () => {
     await clock.advance(5_000);
     expect(metrics.queued).toBe(0);
     expect(metrics.live).toBe(1);
+  });
+});
+
+describe('the warm pool', () => {
+  test('a thread takes a spare rather than waiting for a mint', async () => {
+    const { threads, sandboxes } = build({
+      script: streaming('alpha'),
+      spares: 1,
+      mintDelayMs: 40_000,
+    });
+    const warming = sandboxes.ensureSpares();
+    await clock.advance(40_000);
+    await warming;
+    // Warm and nobody's: a restart must not rehydrate it as a thread.
+    expect(sandboxes.spareCount).toBe(1);
+    expect(await sandboxes.list()).toEqual([]);
+
+    await threads.onMessage(mention('go'));
+    await clock.advance(5_000);
+    const threadId = discord.threads[0]?.id ?? '';
+    expect(discord.contentsIn(threadId).at(-1)).toBe('alpha ');
+    // The forty seconds a mint costs, paid before the question was asked.
+    expect(metrics.mintSamples.at(-1)).toEqual({
+      source: 'adopted',
+      mintMs: 0,
+      attachMs: 0,
+    });
+
+    // And the pool fills again behind it, on its own time rather than the
+    // thread's.
+    expect(sandboxes.spareCount).toBe(0);
+    await clock.advance(40_000);
+    expect(sandboxes.spareCount).toBe(1);
+  });
+
+  test('with no pool a thread mints its own, as it always has', async () => {
+    const { threads, sandboxes } = build({ script: streaming('alpha') });
+    await sandboxes.ensureSpares();
+    expect(sandboxes.spareCount).toBe(0);
+
+    await threads.onMessage(mention('go'));
+    await clock.advance(5_000);
+    expect(sandboxes.mintCount).toBe(1);
+    expect(metrics.mintSamples.at(-1)?.source).toBe('fresh');
   });
 });
 

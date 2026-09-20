@@ -7,7 +7,9 @@
 import { AcpClient } from './acp.ts';
 import type { CredentialsConfig, SandboxConfig } from './config.ts';
 import {
+  type ExecClose,
   type Kube,
+  KubeError,
   type KubeList,
   type KubeObject,
   kubeError,
@@ -40,6 +42,13 @@ export const SURFACE_LABEL = 'lolwtf.ca/surface';
  * what says which mate a sandbox belongs to whichever surface minted it.
  */
 export const GUILD_LABEL = 'lolwtf.ca/guild';
+/**
+ * On a sandbox nobody has claimed, and on nothing else. Swapping this one
+ * label for a thread's three is the whole of adoption, which is why a spare
+ * carries no thread labels at all rather than placeholder ones.
+ */
+export const SPARE_LABEL = 'lolwtf.ca/spare';
+const SPARE = 'true';
 /**
  * The harness's own session id, kept on the object rather than in a label:
  * mate stores whatever the harness minted, and a label value is restricted to
@@ -115,7 +124,19 @@ const OP_TIMEOUT_SECONDS = 10;
 const CREDENTIAL_HELPER = `!f() { test "$1" = get || exit 0; t=$(timeout ${OP_TIMEOUT_SECONDS} op read --no-newline "$${TOKEN_REF_ENV}") || exit 1; printf "username=${GIT_USER}\\npassword=%s\\n" "$t"; }; f`;
 
 export const TTL_MS = 2 * 60 * 60_000;
+/**
+ * A spare's own TTL, far under `TTL_MS` because the two are what is left when
+ * different things go wrong. Every turn slides a thread's sandbox, so its two
+ * hours only ever run down on a thread nobody came back to; a spare is slid
+ * by `ensureSpares` and by nothing else, so this is what a mate that died
+ * between sweeps leaves sitting on the node — half an hour of the room one
+ * sandbox takes, rather than a quarter of a day of it. Six sweeps fit inside
+ * it, so a sweep that fails a few times running does not reap a healthy spare.
+ */
+export const SPARE_TTL_MS = 30 * 60_000;
+export const SPARE_SWEEP_MS = 5 * 60_000;
 const READY_TIMEOUT_MS = 300_000;
+const REFRESH_TIMEOUT_MS = 60_000;
 const GONE_TIMEOUT_MS = 180_000;
 const REAP_TIMEOUT_MS = 15_000;
 const WATCH_SECONDS = 60;
@@ -190,6 +211,31 @@ export function sandboxName(thread: ThreadRef): string {
     );
   }
   return `mate-slack-${thread.channelId.toLowerCase()}-${thread.id.replace('.', '-')}`;
+}
+
+/**
+ * What a spare is called. It is minted before any thread has asked for one so
+ * it cannot be named after a thread, and it keeps this name once adopted,
+ * because renaming a live object is a delete and a create. Nothing reads a
+ * sandbox's name for meaning — `list()` rebuilds a thread from its labels and
+ * `resolvePod` follows `status.selector` — so the only thing lost is that
+ * `kubectl get sandbox` stops reading as one thread per row, which
+ * `-L lolwtf.ca/thread,lolwtf.ca/surface` puts back.
+ */
+function spareName(): string {
+  return `mate-spare-${crypto.randomUUID().slice(0, 8)}`;
+}
+
+/**
+ * What an adopted spare's workspace is brought up to date with. A spare's
+ * clone is as old as the spare, where a thread today always starts on one
+ * made for it, and a shallow fetch of the same ref asks only for what the
+ * checkout does not already have — the small half of the clone the init
+ * container ran. The reset is what moves the worktree onto it: a pull would
+ * try to merge into a shallow history.
+ */
+function refreshScript(ref: string): string {
+  return `set -e; cd ${WORKSPACE}; git fetch --depth 1 origin ${ref}; git reset --hard FETCH_HEAD`;
 }
 
 function condition(sandbox: Sandbox, type: string): Condition | undefined {
@@ -330,31 +376,48 @@ function connectEnv(credentials: CredentialsConfig): Record<string, unknown>[] {
 export interface SandboxDeclaration {
   name: string;
   namespace: string;
-  thread: ThreadRef;
-  guildId: string;
+  /** The object's labels, and the pod template's: one set, written once. */
+  labels: Record<string, string>;
   config: SandboxConfig;
   shutdownTime: string;
+}
+
+/**
+ * What every sandbox mate mints carries whoever it is for. The first of these
+ * is the one `sandbox-network-policy.yaml` selects on, which is why a spare —
+ * which runs the same image with the same permissions — has to carry it too.
+ */
+function baseLabels(guildId: string): Record<string, string> {
+  return {
+    'app.kubernetes.io/name': 'mate-sandbox',
+    'app.kubernetes.io/part-of': 'mate',
+    [MINTED_BY_LABEL]: MINTED_BY,
+    [GUILD_LABEL]: guildId,
+  };
+}
+
+/** The three that say whose sandbox this is; adoption is these arriving at once. */
+function threadLabels(thread: ThreadRef): Record<string, string> {
+  return {
+    [SURFACE_LABEL]: thread.surface,
+    [THREAD_LABEL]: thread.id,
+    [CHANNEL_LABEL]: thread.channelId,
+  };
 }
 
 export function sandboxLabels(
   thread: ThreadRef,
   guildId: string,
 ): Record<string, string> {
-  return {
-    'app.kubernetes.io/name': 'mate-sandbox',
-    'app.kubernetes.io/part-of': 'mate',
-    [MINTED_BY_LABEL]: MINTED_BY,
-    [SURFACE_LABEL]: thread.surface,
-    [THREAD_LABEL]: thread.id,
-    [CHANNEL_LABEL]: thread.channelId,
-    [GUILD_LABEL]: guildId,
-  };
+  return { ...baseLabels(guildId), ...threadLabels(thread) };
+}
+
+function spareLabels(guildId: string): Record<string, string> {
+  return { ...baseLabels(guildId), [SPARE_LABEL]: SPARE };
 }
 
 export function sandboxManifest(declaration: SandboxDeclaration): Sandbox {
-  const { name, namespace, thread, guildId, config, shutdownTime } =
-    declaration;
-  const labels = sandboxLabels(thread, guildId);
+  const { name, namespace, labels, config, shutdownTime } = declaration;
   return {
     apiVersion: SANDBOX_API,
     kind: 'Sandbox',
@@ -555,6 +618,8 @@ export function waitForPodGone(
 
 export class KubeSandboxes implements Sandboxes {
   private readonly attached = new Map<string, Attachment>();
+  /** The sweep in flight, so the cadence and a mint's replacement never run two. */
+  private warming: Promise<void> | null = null;
 
   constructor(private readonly deps: KubeSandboxesDeps) {}
 
@@ -570,6 +635,9 @@ export class KubeSandboxes implements Sandboxes {
     for (const sandbox of list.items) {
       if (sandbox.metadata.deletionTimestamp) continue;
       const labels = sandbox.metadata.labels ?? {};
+      // A spare belongs to no thread by design, so it is skipped before the
+      // warning below, which is about an object that should have had labels.
+      if (labels[SPARE_LABEL]) continue;
       const id = labels[THREAD_LABEL];
       const channelId = labels[CHANNEL_LABEL];
       // Discord is the default because its threads are the ones whose labels
@@ -590,45 +658,38 @@ export class KubeSandboxes implements Sandboxes {
     return refs;
   }
 
+  /**
+   * The sandbox this thread talks to, in the order that costs it least: the
+   * one it already has, then a spare that is already warm, then a new one.
+   */
   async mint(thread: ThreadRef): Promise<SandboxRef> {
-    const { kube, log } = this.deps;
-    const name = sandboxName(thread);
-    const response = await kube.request(this.path(), {
-      method: 'POST',
-      body: sandboxManifest({
-        name,
-        namespace: this.namespace,
-        thread,
-        guildId: this.deps.guildId,
-        config: this.deps.config,
-        shutdownTime: this.shutdownTime(),
-      }),
-    });
-    if (!ok(response, 409)) throw await kubeError(response);
-    await drain(response);
-    const adopted = response.status === 409;
+    const existing = await this.find(thread);
+    if (existing) return this.reuse(existing, thread);
+    const adopted = await this.adopt(thread);
     if (adopted) {
-      const existing = await kube.json<Sandbox>(this.path(name));
-      if (existing.metadata.deletionTimestamp) {
-        throw new Error(`sandbox ${name} is still terminating`);
-      }
-      log.info('sandbox already existed', { sandbox: name });
-    }
-    try {
-      await this.waitReady(name);
-    } catch (error) {
-      // `shutdownTime` is hours away, so an object left here outlives the
-      // thread that asked for it and can still be scheduled once whatever
-      // held it up clears — with nobody left to talk to it.
-      await this.teardown({ name, thread }).catch((failure) =>
-        log.warn('could not delete a sandbox that never came up', {
-          sandbox: name,
-          error: plain(failure),
+      // The pool is one short from here on, and the thread that just took the
+      // spare is the last one that should be made to wait for its successor.
+      void this.ensureSpares().catch((error) =>
+        this.deps.log.warn('minting a replacement spare failed', {
+          error: plain(error),
         }),
       );
-      throw error;
+      return adopted;
     }
-    return { name, thread, adopted };
+    return this.mintFresh(thread);
+  }
+
+  /**
+   * Tops the pool up and renews what is in it. Nothing else slides a spare's
+   * `shutdownTime` — a thread's sandbox is slid by its turns — so this pass
+   * stopping is what lets the controller take the spares back, whether mate
+   * died or the knob was simply turned down.
+   */
+  async ensureSpares(): Promise<void> {
+    this.warming ??= this.sweep().finally(() => {
+      this.warming = null;
+    });
+    return this.warming;
   }
 
   async attach(ref: SandboxRef): Promise<Session> {
@@ -729,19 +790,7 @@ export class KubeSandboxes implements Sandboxes {
   }
 
   async teardown(ref: SandboxRef): Promise<void> {
-    const { kube } = this.deps;
-    this.detach(ref.name);
-    const response = await kube.request(this.path(ref.name), {
-      method: 'DELETE',
-    });
-    if (!ok(response, 404)) throw await kubeError(response);
-    await drain(response);
-    await waitUntilGone(
-      kube,
-      this.path(),
-      ref.name,
-      this.deps.goneTimeoutMs ?? GONE_TIMEOUT_MS,
-    );
+    await this.destroy(ref.name);
   }
 
   /** The pod a live attachment is exec'd into, for the smoke's delete timing. */
@@ -761,6 +810,262 @@ export class KubeSandboxes implements Sandboxes {
 
   private shutdownTime(): string {
     return new Date(Date.now() + (this.deps.ttlMs ?? TTL_MS)).toISOString();
+  }
+
+  private spareShutdownTime(): string {
+    return new Date(Date.now() + SPARE_TTL_MS).toISOString();
+  }
+
+  private spareSelector(): string {
+    return `${this.selector()},${SPARE_LABEL}=${SPARE}`;
+  }
+
+  /**
+   * This thread's own sandbox, found by its label rather than by its name: a
+   * sandbox adopted from the pool answers to a name no thread would derive,
+   * and the label is the only thing that says whose it is. It reaches further
+   * than `list()` does on purpose — an object carrying a thread label and no
+   * channel one is not a thread mate can rehydrate, but it is still this
+   * thread's sandbox, and minting a second one beside it would leak the first.
+   */
+  private async find(thread: ThreadRef): Promise<Sandbox | undefined> {
+    const list = await this.deps.kube.json<KubeList<Sandbox>>(this.path(), {
+      query: {
+        labelSelector: `${this.selector()},${THREAD_LABEL}=${thread.id}`,
+      },
+    });
+    // The surface is checked rather than selected on, and defaulted the way
+    // `list()` defaults it: a Discord sandbox minted before that label existed
+    // carries the thread id and nothing naming the surface it is on.
+    return list.items.find(
+      (found) =>
+        (found.metadata.labels?.[SURFACE_LABEL] ?? 'discord') ===
+        thread.surface,
+    );
+  }
+
+  private async reuse(
+    existing: Sandbox,
+    thread: ThreadRef,
+  ): Promise<SandboxRef> {
+    const name = existing.metadata.name;
+    if (existing.metadata.deletionTimestamp) {
+      throw new Error(`sandbox ${name} is still terminating`);
+    }
+    this.deps.log.info('sandbox already existed', { sandbox: name });
+    await this.waitUsable(name);
+    // Adopted for the same reason a spare is: the thread paid for none of the
+    // boot, so its wait says nothing about what a cold start costs.
+    return { name, thread, adopted: true };
+  }
+
+  /** Today's path, and the only one that names a sandbox after its thread. */
+  private async mintFresh(thread: ThreadRef): Promise<SandboxRef> {
+    const { kube } = this.deps;
+    const name = sandboxName(thread);
+    const response = await kube.request(this.path(), {
+      method: 'POST',
+      body: sandboxManifest({
+        name,
+        namespace: this.namespace,
+        labels: sandboxLabels(thread, this.deps.guildId),
+        config: this.deps.config,
+        shutdownTime: this.shutdownTime(),
+      }),
+    });
+    if (!ok(response, 409)) throw await kubeError(response);
+    await drain(response);
+    // `find` just looked and saw nothing, so a name that is taken is taken by
+    // an object no label can reach — the backstop, not the dedup.
+    if (response.status === 409) {
+      return this.reuse(await kube.json<Sandbox>(this.path(name)), thread);
+    }
+    await this.waitUsable(name);
+    return { name, thread, adopted: false };
+  }
+
+  private async waitUsable(name: string): Promise<void> {
+    try {
+      await this.waitReady(name);
+    } catch (error) {
+      // `shutdownTime` is hours away, so an object left here outlives the
+      // thread that asked for it and can still be scheduled once whatever
+      // held it up clears — with nobody left to talk to it.
+      await this.destroy(name).catch((failure) =>
+        this.deps.log.warn('could not delete a sandbox that never came up', {
+          sandbox: name,
+          error: plain(failure),
+        }),
+      );
+      throw error;
+    }
+  }
+
+  /**
+   * Hands a warm spare to a thread: one merge patch that swaps the spare
+   * marker for the thread's labels and gives the object a thread's TTL.
+   *
+   * The `resourceVersion` listed at is what makes two mints at once safe. The
+   * apiserver reads a merge patch carrying one as an update from that
+   * revision, so the second of two threads reaching the same spare is refused
+   * with a 409 and goes looking for another.
+   *
+   * Relabelling does not disturb what is running inside. The sandbox
+   * controller builds pod labels from `spec.podTemplate` and does not re-apply
+   * a spec to a pod that already exists, so the pod keeps the labels it was
+   * born with — which is why the label the network policy selects on is on
+   * every sandbox mate mints and not only on a thread's.
+   */
+  private async adopt(thread: ThreadRef): Promise<SandboxRef | null> {
+    const { log } = this.deps;
+    for (const spare of await this.spares()) {
+      if (!isReady(spare)) continue;
+      const name = spare.metadata.name;
+      try {
+        await this.patch(name, {
+          metadata: {
+            resourceVersion: spare.metadata.resourceVersion,
+            labels: { ...threadLabels(thread), [SPARE_LABEL]: null },
+          },
+          spec: { shutdownTime: this.shutdownTime() },
+        });
+      } catch (error) {
+        if (error instanceof KubeError && error.status === 409) {
+          log.info('a spare was taken while this thread was reaching for it', {
+            sandbox: name,
+          });
+          continue;
+        }
+        throw error;
+      }
+      try {
+        await this.refresh(spare);
+      } catch (error) {
+        // A thread that cannot be given a current checkout is better served
+        // by the slow path than by an agent reading a repository that has
+        // moved on, and the object is no longer a spare anyone else can take.
+        log.warn('could not bring an adopted spare up to date; minting one', {
+          sandbox: name,
+          error: plain(error),
+        });
+        await this.destroy(name).catch((failure) =>
+          log.warn('could not delete a spare that would not refresh', {
+            sandbox: name,
+            error: plain(failure),
+          }),
+        );
+        return null;
+      }
+      log.info('adopted a warm spare', {
+        sandbox: name,
+        surface: thread.surface,
+        threadId: thread.id,
+      });
+      return { name, thread, adopted: true };
+    }
+    return null;
+  }
+
+  /**
+   * Brings an adopted spare's checkout up to date, in the harness container
+   * because that is where the git configuration and the one GitHub name the
+   * network policy allows already are, and before the ACP attach because
+   * opencode snapshots the workspace as it finds it.
+   */
+  private async refresh(spare: Sandbox): Promise<void> {
+    const { kube, config, log } = this.deps;
+    const name = spare.metadata.name;
+    const pod = await resolvePod(kube, this.namespace, spare);
+    let said = '';
+    const stream = await kube.exec({
+      namespace: this.namespace,
+      pod,
+      container: HARNESS_CONTAINER,
+      command: ['/bin/sh', '-c', refreshScript(config.checkoutRef)],
+      onStderr: (text) => {
+        said = `${said}${text}`.slice(0, STDERR_LIMIT);
+      },
+      timeoutMs: REFRESH_TIMEOUT_MS,
+    });
+    void stream.stdout.cancel().catch(() => {});
+    const timer = setTimeout(() => stream.close(), REFRESH_TIMEOUT_MS);
+    let close: ExecClose;
+    try {
+      close = await stream.closed;
+    } finally {
+      clearTimeout(timer);
+    }
+    // Success is required rather than a failure refused: a stream that ended
+    // carrying no status at all is a command whose exit nobody saw, and a
+    // workspace that may not have moved.
+    if (close.status?.status !== 'Success') {
+      throw new Error(
+        `git said ${said.trim() || close.status?.message || close.reason}`,
+      );
+    }
+    log.info('refreshed an adopted workspace', { sandbox: name, pod });
+  }
+
+  private async spares(): Promise<Sandbox[]> {
+    const list = await this.deps.kube.json<KubeList<Sandbox>>(this.path(), {
+      query: { labelSelector: this.spareSelector() },
+    });
+    return list.items.filter((spare) => !spare.metadata.deletionTimestamp);
+  }
+
+  private async sweep(): Promise<void> {
+    const want = this.deps.config.spares;
+    // With the pool off the pass costs nothing at all, not even the list: the
+    // default is off, and a mate nobody has configured a pool for should not
+    // be asking the apiserver about one every few minutes.
+    if (want === 0) return;
+    const held = await this.spares();
+    // Only what is wanted is renewed. Past that nothing is slid and nothing
+    // is deleted, because a spare's short `shutdownTime` already removes one
+    // nobody renews, and turning the knob down needs no second mechanism.
+    for (const spare of held.slice(0, want)) {
+      await this.patch(spare.metadata.name, {
+        spec: { shutdownTime: this.spareShutdownTime() },
+      });
+    }
+    // One that is still coming up counts as held, so a spare stuck pulling an
+    // image is waited out rather than joined by a new one every sweep.
+    for (let short = want - held.length; short > 0; short -= 1) {
+      await this.mintSpare();
+    }
+  }
+
+  private async mintSpare(): Promise<void> {
+    const { kube, log } = this.deps;
+    const name = spareName();
+    const response = await kube.request(this.path(), {
+      method: 'POST',
+      body: sandboxManifest({
+        name,
+        namespace: this.namespace,
+        labels: spareLabels(this.deps.guildId),
+        config: this.deps.config,
+        shutdownTime: this.spareShutdownTime(),
+      }),
+    });
+    if (!ok(response)) throw await kubeError(response);
+    await drain(response);
+    await this.waitUsable(name);
+    log.info('a spare is warm', { sandbox: name });
+  }
+
+  private async destroy(name: string): Promise<void> {
+    const { kube } = this.deps;
+    this.detach(name);
+    const response = await kube.request(this.path(name), { method: 'DELETE' });
+    if (!ok(response, 404)) throw await kubeError(response);
+    await drain(response);
+    await waitUntilGone(
+      kube,
+      this.path(),
+      name,
+      this.deps.goneTimeoutMs ?? GONE_TIMEOUT_MS,
+    );
   }
 
   private async waitReady(name: string): Promise<Sandbox> {

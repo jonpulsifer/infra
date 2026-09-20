@@ -30,6 +30,12 @@ const THREAD: ThreadRef = {
 const GUILD = '1509024936717455381';
 const NAME = sandboxName(THREAD);
 
+const OTHER_THREAD: ThreadRef = {
+  surface: 'discord',
+  id: '1509024937422356999',
+  channelId: '1509024937422356532',
+};
+
 const config: SandboxConfig = {
   image:
     'ghcr.io/jonpulsifer/mate-sandbox:latest@sha256:6f135be2df9ddf2cca529e845b3325cba5c6e72c8587c1ce48ec30bd5b10cbac',
@@ -40,6 +46,7 @@ const config: SandboxConfig = {
   checkoutRef: 'main',
   model: 'opencode-go/qwen3.8-flash',
   turnTimeoutMs: 4000,
+  spares: 0,
   credentials: {
     connectHost:
       'http://onepassword-connect.external-secrets.svc.cluster.local:8080',
@@ -154,6 +161,34 @@ async function attach(): Promise<SandboxRef> {
   const ref = await sandboxes.mint(THREAD);
   await sandboxes.attach(ref);
   return ref;
+}
+
+/** The same mate, with a pool of one behind it. */
+function withSpares(spares: number): KubeSandboxes {
+  return new KubeSandboxes({
+    kube: new Kube(fake.config()),
+    config: { ...config, spares },
+    guildId: GUILD,
+    log,
+    readyTimeoutMs: 4000,
+    goneTimeoutMs: 4000,
+  });
+}
+
+/** Unclaimed: the marker, not the name, is what still makes one a spare. */
+function spareNames(): string[] {
+  return [...fake.sandboxes.entries()]
+    .filter(([, object]) => (object.metadata as any).labels['lolwtf.ca/spare'])
+    .map(([name]) => name);
+}
+
+/** What a fire-and-forget replacement needs: a wait with a reason to stop. */
+async function until(what: () => boolean, ms = 2000): Promise<void> {
+  const deadline = Date.now() + ms;
+  while (!what()) {
+    if (Date.now() > deadline) throw new Error('it never happened');
+    await Bun.sleep(10);
+  }
 }
 
 describe('mint', () => {
@@ -727,6 +762,109 @@ describe('teardown and list', () => {
       { name: NAME, thread: THREAD, turnInFlight: false },
     ]);
     expect(log.of('sandbox has no thread labels; ignoring it')).toHaveLength(1);
+  });
+});
+
+describe('the warm pool', () => {
+  test('warms a sandbox that belongs to no thread', async () => {
+    const pool = withSpares(1);
+    await pool.ensureSpares();
+
+    const [name] = spareNames();
+    expect(name).toMatch(/^mate-spare-/);
+    const spare = fake.sandboxes.get(name ?? '') as Record<string, any>;
+    expect(spare.metadata.labels).toEqual({
+      'app.kubernetes.io/name': 'mate-sandbox',
+      'app.kubernetes.io/part-of': 'mate',
+      'lolwtf.ca/minted-by': 'mate',
+      'lolwtf.ca/guild': GUILD,
+      'lolwtf.ca/spare': 'true',
+    });
+    // The label the network policy selects on is the first one above; without
+    // it a spare would run the same image with the LAN in reach.
+    expect(spare.spec.podTemplate.metadata.labels).toEqual(
+      spare.metadata.labels,
+    );
+    // Its own short TTL, because nothing but the sweep renews a spare.
+    const ttl = Date.parse(spare.spec.shutdownTime) - Date.now();
+    expect(ttl).toBeGreaterThan(25 * 60_000);
+    expect(ttl).toBeLessThanOrEqual(30 * 60_000);
+
+    // Nobody's thread, so rehydration must not take it for one — and it is
+    // not the stray the warning is about either.
+    expect(await pool.list()).toEqual([]);
+    expect(log.of('sandbox has no thread labels; ignoring it')).toHaveLength(0);
+
+    await pool.ensureSpares();
+    expect(spareNames()).toHaveLength(1);
+  });
+
+  test('a thread takes the spare, and the spare takes its labels', async () => {
+    const pool = withSpares(1);
+    await pool.ensureSpares();
+    const [name] = spareNames();
+
+    const ref = await pool.mint(THREAD);
+    expect(ref).toEqual({ name: name ?? '', thread: THREAD, adopted: true });
+
+    const adopted = fake.sandboxes.get(ref.name) as Record<string, any>;
+    expect(adopted.metadata.labels['lolwtf.ca/thread']).toBe(THREAD.id);
+    expect(adopted.metadata.labels['lolwtf.ca/channel']).toBe(THREAD.channelId);
+    expect(adopted.metadata.labels['lolwtf.ca/surface']).toBe('discord');
+    expect(adopted.metadata.labels['lolwtf.ca/spare']).toBeUndefined();
+    // A thread's TTL from the same patch that claimed it, rather than the
+    // half hour it was warming on.
+    expect(Date.parse(adopted.spec.shutdownTime) - Date.now()).toBeGreaterThan(
+      110 * 60_000,
+    );
+    // The clone it came up with is as old as the spare, so the workspace is
+    // brought forward before anything attaches to it.
+    expect(fake.lastExec?.container).toBe(HARNESS_CONTAINER);
+    expect(fake.lastExec?.command.at(-1)).toContain(
+      'git fetch --depth 1 origin main',
+    );
+    // From here it is an ordinary thread, whatever it is called.
+    expect(await pool.list()).toEqual([
+      { name: ref.name, thread: THREAD, turnInFlight: false },
+    ]);
+    await until(() => spareNames().length === 1);
+  });
+
+  test('a second thread cannot take the spare the first one took', async () => {
+    const pool = withSpares(1);
+    await pool.ensureSpares();
+    const [spare] = spareNames();
+
+    const [first, second] = await Promise.all([
+      pool.mint(THREAD),
+      pool.mint(OTHER_THREAD),
+    ]);
+    expect(first.name).not.toBe(second.name);
+    expect([first, second].filter((ref) => ref.name === spare)).toHaveLength(1);
+    // Whichever lost built its own, named after its thread as ever.
+    const loser = first.name === spare ? second : first;
+    expect(loser.name).toBe(sandboxName(loser.thread));
+    expect(loser.adopted).toBe(false);
+  });
+
+  test('the thread is found again by its label, not by a name it no longer has', async () => {
+    const pool = withSpares(1);
+    await pool.ensureSpares();
+    const first = await pool.mint(THREAD);
+
+    const again = await pool.mint(THREAD);
+    expect(again.name).toBe(first.name);
+    expect(log.of('sandbox already existed')).toHaveLength(1);
+    expect(fake.sandboxes.has(sandboxName(THREAD))).toBe(false);
+  });
+
+  test('with no pool configured a mint is exactly what it was', async () => {
+    await sandboxes.ensureSpares();
+    expect(fake.sandboxes.size).toBe(0);
+
+    const ref = await sandboxes.mint(THREAD);
+    expect(ref).toEqual({ name: NAME, thread: THREAD, adopted: false });
+    expect([...fake.sandboxes.keys()]).toEqual([NAME]);
   });
 });
 
