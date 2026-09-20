@@ -137,7 +137,7 @@ export function CredentialSettingsView({
       </div>
 
       {error && (
-        <p role="alert" className="text-sm text-terminal-destructive">
+        <p role="alert" className="text-sm text-destructive">
           {error}
         </p>
       )}

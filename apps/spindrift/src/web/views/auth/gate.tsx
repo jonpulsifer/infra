@@ -34,6 +34,7 @@ import { KeyRound, ShieldCheck } from 'lucide-react';
 import { type ReactNode, useState } from 'react';
 import type { Principal } from '../../../commands/types.ts';
 import { CeremonyAbandonedError, enrol, signIn } from '../../auth-client.ts';
+import { Roflcopter } from '../../components/roflcopter.tsx';
 import { Wordmark } from '../../components/wordmark.tsx';
 import { Button } from '../../ui/button.tsx';
 import { Card, CardContent, CardHeader, CardTitle } from '../../ui/card.tsx';
@@ -55,21 +56,27 @@ export function Gate({
   onSignedIn,
 }: GateProps) {
   return (
-    <main className="mx-auto flex min-h-dvh w-full max-w-[460px] flex-col justify-center gap-6 px-5 py-12">
-      <div className="flex flex-col items-center gap-2 text-center">
-        <Wordmark className="font-mono text-xl font-bold tracking-[0.25em] text-foreground" />
-        <p className="text-sm text-muted-foreground">
-          Deploy to your own clusters and cloud projects. One button, one
-          release.
-        </p>
-        <Installation />
-      </div>
-      {claimed ? (
-        <SignIn gatewayUnlinked={gatewayUnlinked} onSignedIn={onSignedIn} />
-      ) : (
-        <Enrol onSignedIn={onSignedIn} />
-      )}
-    </main>
+    <>
+      {/* Nobody has signed in yet, which is exactly the screen the landing's
+          own mascot idles behind — see `components/roflcopter.tsx` for why
+          this is a separate instance from the one the shell mounts. */}
+      <Roflcopter />
+      <main className="mx-auto flex min-h-dvh w-full max-w-[460px] flex-col justify-center gap-6 px-5 py-12">
+        <div className="flex flex-col items-center gap-2 text-center">
+          <Wordmark setting="hero" className="text-foreground" />
+          <p className="text-sm text-muted-foreground">
+            Deploy to your own clusters and cloud projects. One button, one
+            release.
+          </p>
+          <Installation />
+        </div>
+        {claimed ? (
+          <SignIn gatewayUnlinked={gatewayUnlinked} onSignedIn={onSignedIn} />
+        ) : (
+          <Enrol onSignedIn={onSignedIn} />
+        )}
+      </main>
+    </>
   );
 }
 
@@ -274,7 +281,7 @@ function Ceremony({ running }: { running: boolean }) {
 function Problem({ children }: { children: ReactNode }) {
   if (!children) return null;
   return (
-    <p role="alert" className="text-sm text-terminal-destructive">
+    <p role="alert" className="text-sm text-destructive">
       {children}
     </p>
   );

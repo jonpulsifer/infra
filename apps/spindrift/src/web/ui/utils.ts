@@ -12,9 +12,25 @@
  * because it is merged last. That is what makes every component here
  * overridable at its call site without growing a prop for each thing somebody
  * might want to move.
+ *
+ * `extendTailwindMerge` rather than the bare export: plain `tailwind-merge`
+ * has never heard of `styles.css`'s own `text-micro`/`-caption`/`-body`/`-ui`/
+ * `-title`/`-display`/`-verdict` scale, so it classes each one as an unknown
+ * font-size utility and drops it the moment a real colour utility (`text-
+ * rail-foreground`, `text-rail-muted`, …) follows it in the same call — which
+ * every rail row, group label and `Kbd` does. Naming the scale here is what
+ * lets a size and a colour coexist the way `px-3`/`px-6` already do.
  */
 import { type ClassValue, clsx } from 'clsx';
-import { twMerge } from 'tailwind-merge';
+import { extendTailwindMerge } from 'tailwind-merge';
+
+const twMerge = extendTailwindMerge({
+  extend: {
+    theme: {
+      text: ['micro', 'caption', 'body', 'ui', 'title', 'display', 'verdict'],
+    },
+  },
+});
 
 export function cn(...inputs: ClassValue[]): string {
   return twMerge(clsx(inputs));

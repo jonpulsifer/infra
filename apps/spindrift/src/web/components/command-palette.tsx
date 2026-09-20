@@ -24,6 +24,14 @@
  * The trigger renders here too, beside the overlay, because they are one piece
  * of state. A shortcut nobody can see is a shortcut nobody uses, so the header
  * carries the affordance and `Kbd` carries the key.
+ *
+ * **`open`/`onOpenChange` are optional and controlled**, the seam that lets
+ * the rail's own Search row raise this same overlay instead of standing up a
+ * second one with a second catalogue read. Omitted, the component keeps its
+ * own state exactly as it always has — every existing caller, and Cmd/Ctrl-K,
+ * are untouched. `metaKeyGlyph` is exported for the same reason: the rail's
+ * row wants the identical ⌘/Ctrl hint beside its own `<kbd>`, and a second
+ * platform sniff is a second place for the two to disagree.
  */
 import { Boxes, Hammer, Rocket, Search, Server } from 'lucide-react';
 import { useEffect, useState } from 'react';
@@ -200,7 +208,7 @@ const GROUP_ICON: Record<string, typeof Boxes> = {
  * is read once and never re-derived. Guarded because this component is rendered
  * to static markup in tests, where there is no `navigator`.
  */
-function metaKeyGlyph(): string {
+export function metaKeyGlyph(): string {
   if (typeof navigator === 'undefined') return 'Ctrl';
   const platform = `${navigator.platform ?? ''} ${navigator.userAgent ?? ''}`;
   return /Mac|iPhone|iPad/.test(platform) ? '⌘' : 'Ctrl';
@@ -208,27 +216,49 @@ function metaKeyGlyph(): string {
 
 export function CommandPalette({
   onNavigate,
+  open: openProp,
+  onOpenChange,
+  triggerClassName,
 }: {
   readonly onNavigate: (path: string) => void;
+  /** Controlled from outside — see this file's header. Omitted, `openState` below owns it. */
+  readonly open?: boolean;
+  readonly onOpenChange?: (open: boolean) => void;
+  /**
+   * The header hides its own trigger past `md`, once the rail carries a
+   * Search row of its own — the trigger stays mounted and Cmd/Ctrl-K keeps
+   * working either way, so a phone never loses the affordance.
+   */
+  readonly triggerClassName?: string;
 }) {
-  const [open, setOpen] = useState(false);
+  const [openState, setOpenState] = useState(false);
+  const open = openProp ?? openState;
+  const setOpen = onOpenChange ?? setOpenState;
   const [query, setQuery] = useState('');
   const [active, setActive] = useState(0);
   const [catalogue, setCatalogue] = useState<PaletteCatalogue | null>(null);
   const [glyph] = useState(metaKeyGlyph);
 
+  // Whatever raised it — the trigger, the rail's row, Cmd/Ctrl-K — an opening
+  // palette starts from a clean query. Keyed on the transition rather than
+  // written at each call site, so a caller driving `open` from outside gets
+  // the same reset the trigger below always has.
+  useEffect(() => {
+    if (!open) return;
+    setQuery('');
+    setActive(0);
+  }, [open]);
+
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
         event.preventDefault();
-        setQuery('');
-        setActive(0);
-        setOpen((current) => !current);
+        setOpen(!open);
       }
     };
     addEventListener('keydown', onKey);
     return () => removeEventListener('keydown', onKey);
-  }, []);
+  }, [open, setOpen]);
 
   // Once, on first open. A failed read leaves `catalogue` null and the palette
   // still navigates — the verbs are the half that never needed the server.
@@ -269,12 +299,11 @@ export function CommandPalette({
     <>
       <button
         type="button"
-        onClick={() => {
-          setQuery('');
-          setActive(0);
-          setOpen(true);
-        }}
-        className="flex items-center gap-2 rounded-sm border border-border px-2.5 py-1.5 text-body text-muted-foreground hover:text-foreground"
+        onClick={() => setOpen(true)}
+        className={cn(
+          'flex items-center gap-2 rounded-sm border border-border px-2.5 py-1.5 text-body text-muted-foreground hover:text-foreground',
+          triggerClassName,
+        )}
       >
         <Search aria-hidden="true" className="size-3.5" />
         <span className="hidden sm:inline">Search</span>

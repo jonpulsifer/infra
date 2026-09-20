@@ -43,16 +43,25 @@ export function Badge({ className, tone, ...props }: BadgeProps) {
  * rather than as a global reduced-motion reset. A reader who asked for less
  * motion still gets the dot, and still gets the tone and the word beside it —
  * the animation was never the only thing saying "in flight".
+ *
+ * `hollow` is the fourth mark the rail's Apps group needs beside filled,
+ * pulsing and still: a ring rather than a second dot component, because it is
+ * the same shape answering the same question — "what tone is this row" — with
+ * a stroke instead of a fill for the one tone that means *nothing has run
+ * yet*, which a fourth solid colour would read as a state rather than an
+ * absence of one.
  */
 export function Dot({
   pulse = false,
+  hollow = false,
   className,
   ...props
-}: ComponentProps<'span'> & { pulse?: boolean }) {
+}: ComponentProps<'span'> & { pulse?: boolean; hollow?: boolean }) {
   return (
     <span
       className={cn(
-        'size-[7px] shrink-0 rounded-full bg-current',
+        'size-[7px] shrink-0 rounded-full',
+        hollow ? 'border border-current bg-transparent' : 'bg-current',
         pulse && 'motion-safe:animate-pulse',
         className,
       )}

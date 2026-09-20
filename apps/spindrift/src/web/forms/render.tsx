@@ -254,7 +254,7 @@ export function SchemaControl({
       return <UnionControl node={node} at={at} form={form} />;
     case 'unsupported':
       return (
-        <p className="flex items-center gap-1.5 text-xs text-terminal-destructive">
+        <p className="flex items-center gap-1.5 text-xs text-destructive">
           <CircleAlert aria-hidden="true" className="size-3.5" />
           This build of the form cannot edit a {node.type} field. Its current
           value is submitted unchanged.
@@ -723,7 +723,7 @@ function IssueList({
   return (
     <ul className="flex flex-col gap-0.5">
       {issues.map((issue) => (
-        <li key={issue} className="text-xs text-terminal-destructive">
+        <li key={issue} className="text-xs text-destructive">
           {issue}
         </li>
       ))}

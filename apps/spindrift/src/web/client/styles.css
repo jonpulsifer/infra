@@ -1,14 +1,14 @@
 /*
  * The design tokens, and the only stylesheet.
  *
- * The palette is one hue and its neutrals: a cold blue against slate, with a
- * near-black terminal for anything that is machine output. The neutrals carry
- * the accent's bias rather than being grey, which is what keeps a page of them
- * reading as one palette instead of as blue marks on unrelated ground. The
- * three status colours are semantic rather than decorative, because §6 makes
- * `blame` and phase the two things the deploy screen exists to say, and a UI
- * that renders them in an arbitrary hue is a UI that has to explain itself in
- * words.
+ * The palette is kthx's own: magenta on violet-black, with acid green as the
+ * second ink — the same two-ink identity the landing page wears, not a colour
+ * borrowed from it. The neutrals carry the accent's violet bias rather than
+ * being grey, which is what keeps a page of them reading as one palette
+ * instead of as pink marks on unrelated ground. The three status colours are
+ * semantic rather than decorative, because §6 makes `blame` and phase the two
+ * things the deploy screen exists to say, and a UI that renders them in an
+ * arbitrary hue is a UI that has to explain itself in words.
  *
  * Every token starts as a raw CSS variable that flips with the theme, then is
  * mapped into Tailwind's namespace by `@theme inline` so
@@ -35,42 +35,66 @@
  *
  * Every value here is measured, not chosen by eye: each text colour clears
  * 4.5:1 against every surface it is read on, in **both** themes — including
- * the two surfaces that stay dark in both, the rail and the terminal, which
- * are the ones a theme-flipping check forgets. Contrast is not a palette
- * preference.
+ * the one surface that stays dark in both, the terminal, which is the one a
+ * theme-flipping check forgets. The rail no longer needs that exemption: it
+ * flips with the theme now, the way the reference mock's sidebar does.
+ * Contrast is not a palette preference.
  */
 
 @import "tailwindcss";
 
+/*
+ * kthx's own fonts, self-hosted rather than a `<link>` to Google's CDN — one
+ * fewer third party a reader's browser has to trust to render this page. Each
+ * import is a package's default `@font-face` sheet; `Bun.build`'s CSS bundler
+ * follows it into `files/*.woff2` and, because every one of these files is
+ * under its 128 KiB inlining threshold, base64-encodes each straight into
+ * this file's built `chunk-*.css` rather than emitting a sibling asset — so
+ * there is no separate font file for `bundle.ts` to serve, only the one CSS
+ * chunk, which still content-hashes and still caches immutably as a whole.
+ * Only the weights the app sets are imported: DM Mono's 400 and 500 by name,
+ * and the variable form of DM Sans and Orbitron, whose single file covers
+ * every weight either one is set at.
+ */
+@import "@fontsource-variable/dm-sans";
+@import "@fontsource/dm-mono/400.css";
+@import "@fontsource/dm-mono/500.css";
+@import "@fontsource-variable/orbitron";
+
 :root {
   color-scheme: dark;
-  --ground: light-dark(#f5f7fc, #060c18);
-  --surface: light-dark(#ffffff, #0e1729);
-  --surface-2: light-dark(#ecf0f8, #152036);
-  --inspector: light-dark(#fafbfe, #0a1220);
-  --topbar: light-dark(#ffffff, #060c18);
-  --line: light-dark(#d8e0ef, #293a5c);
-  --line-soft: light-dark(#e6ebf6, #213050);
-  --ink: light-dark(#0e1a2e, #e9effc);
-  --ink-2: light-dark(#44536c, #a6b4cf);
-  --ink-3: light-dark(#54637e, #8e9fc0);
-  --accent: light-dark(#1a56c8, #6aa5f7);
-  --accent-soft: light-dark(#e1eafd, #152947);
-  --good: light-dark(#1c7550, #86dcb2);
-  --good-soft: light-dark(#ddf2e8, #12362a);
-  --warn: light-dark(#8f5f1a, #f2c07a);
-  --warn-soft: light-dark(#faeed7, #372a15);
-  --bad: light-dark(#ad3b3b, #f79a98);
-  --bad-soft: light-dark(#fae3e3, #3b1e20);
+  --ground: light-dark(#fbf8fe, #150b22);
+  --surface: light-dark(#ffffff, #1e1130);
+  --surface-2: light-dark(#f1eaf8, #281a42);
+  --inspector: light-dark(#f7f2fc, #190d28);
+  --topbar: light-dark(#fbf8fe, #150b22);
+  --line: light-dark(#dccfe9, #48305f);
+  --line-soft: light-dark(#e9dff2, #38234f);
+  --ink: light-dark(#1a0e2a, #f7f0fc);
+  --ink-2: light-dark(#4a3860, #cdb9dd);
+  --ink-3: light-dark(#69577f, #a892bf);
+  --accent: light-dark(#c2127c, #ff3fb5);
+  --accent-soft: light-dark(#fce4f3, #3f1237);
+  /* A border for a surface already tinted `--accent-soft`, where the surface
+     colour itself has used up the contrast a full `--accent` border would
+     have carried — the same relationship `--line` has to `--surface`, one
+     step in. */
+  --accent-line: light-dark(#eaa6d0, #8a2f75);
+  --good: light-dark(#3d6b00, #b6ff3b);
+  --good-soft: light-dark(#ecf9d2, #24350a);
+  --warn: light-dark(#855600, #ffc857);
+  --warn-soft: light-dark(#fdf0d3, #3a2a0c);
+  --bad: light-dark(#b3261e, #ff7a6b);
+  --bad-soft: light-dark(#fde7e4, #3d1716);
 
   /*
    * Text drawn *on* the accent, which is a different job from the accent
-   * itself. A filled primary button used to set its label to `--ground`, and
-   * on a light page that is near-white type on a mid blue — the surface colour
-   * doing a text colour's work, and failing the measurement every value above
-   * is held to.
+   * itself. A filled primary button that set its label to `--ground` would put
+   * the surface colour to a text colour's work: the pink is dark enough for
+   * white type on a light page and bright enough to need near-black on a dark
+   * one, and only a token of its own can say both.
    */
-  --on-accent: light-dark(#ffffff, #060c18);
+  --on-accent: light-dark(#ffffff, #0d0716);
 
   /*
    * The terminal does not flip. A build log is a verbatim transcript of
@@ -79,18 +103,35 @@
    * the ground shifts a shade, to sit on a light page without reading as a
    * hole punched in it.
    */
-  --terminal: light-dark(#0b1220, #040913);
-  --terminal-ink: #c6d2e4;
-  --terminal-bad: #f2938f;
-  --terminal-dim: #6e809c;
+  --terminal: light-dark(#1e1130, #0b0612);
+  --terminal-ink: #d9cde6;
+  --terminal-bad: #ff8d80;
+  --terminal-dim: #9a86b0;
 
-  /* The rail is dark in both themes, for the same reason the terminal is: it
-     is chrome, not page. */
-  --rail: light-dark(#0a1426, #040911);
-  --rail-active: #1d3560;
-  --rail-line: light-dark(#1e3358, #152441);
-  --rail-foreground: #eff4fe;
-  --rail-muted: light-dark(#a3b6d8, #8ea2c6);
+  /* The rail flips with the theme, the way the reference mock's sidebar does:
+     it is still chrome rather than page — it never takes `--surface` or
+     `--ground` directly — but chrome now reads the reader's choice instead of
+     overriding it. */
+  --rail: light-dark(#f4eefa, #0f0719);
+  --rail-active: light-dark(#e6daf1, #281a42);
+  --rail-line: light-dark(#dccfe9, #38234f);
+  --rail-foreground: light-dark(#1a0e2a, #f7f0fc);
+  --rail-muted: light-dark(#56446b, #b7a3cc);
+
+  /*
+   * The raw hot pink, undimmed and identical in both themes — decorative only.
+   * `components/wordmark.tsx` sets it on the wordmark's underscore, the roflcopter sets
+   * it on the rotor, and `::selection` mixes it into the selection tint. It is
+   * 2.8:1 on the light rail, short of even the 3:1 a large glyph needs, so
+   * nothing here may set it as the colour of text a reader has to read —
+   * `--accent` is that colour, and it is not this one.
+   */
+  --brand: #ff3fb5;
+  /* The raw acid green, kthx's second ink where it is worn decoratively rather
+     than semantically — the glitch's second colour, alongside `--brand`.
+     `--good` is the measured, theme-flipping green for things a reader reads;
+     this is the landing's fixed one, for things a reader only sees. */
+  --cool: #b6ff3b;
 
   /*
    * The three tokens a floating surface needs, which were previously typed as
@@ -99,20 +140,22 @@
    * this flips too.
    */
   --panel-shadow: light-dark(
-    0 18px 55px rgb(20 38 74 / 12%),
-    0 18px 55px rgb(0 0 0 / 32%)
+    0 18px 55px rgb(13 7 22 / 12%),
+    0 18px 55px rgb(13 7 22 / 32%)
   );
-  --overlay: light-dark(rgb(16 26 46 / 40%), rgb(3 7 16 / 62%));
+  --overlay: light-dark(rgb(13 7 22 / 40%), rgb(13 7 22 / 62%));
   /*
    * The band that sweeps a running progress fill. A highlight is lighter than
    * what it crosses, and which way that is flips with the theme: the three
    * `FILL` tones are dark ink on a light page and pale on a dark one, so a
-   * fixed white sweep is invisible in exactly one of them.
+   * fixed white sweep is invisible in exactly one of them. The dark-theme band
+   * carries the same violet-black as every other shade in this file rather
+   * than a neutral black, so a running bar still reads as this palette's.
    */
   --shimmer: linear-gradient(
     90deg,
     transparent,
-    light-dark(rgb(255 255 255 / 55%), rgb(6 12 24 / 34%)),
+    light-dark(rgb(255 255 255 / 55%), rgb(13 7 22 / 34%)),
     transparent
   );
   /*
@@ -123,6 +166,23 @@
    * reader who left the theme to their OS.
    */
   --logo-invert: light-dark(0, 1);
+
+  /*
+   * Status dots are marks, not prose: §6's phase colour is read as a colour
+   * beside a shape, never as text set in it, so these are held to 3:1 rather
+   * than 4.5:1 — the bar a non-text UI component gets. `--status-live` reuses
+   * `--good`'s hues; the other three are their own, because `--warn` and
+   * `--bad` are tuned for text weight, not a 7px dot's.
+   */
+  --status-live: light-dark(#4f8a00, #b6ff3b);
+  /* Both light values are darkened past their first pick so the active row's
+     own `--rail-active` ground — the one background these dots sit on that
+     is not `--rail` or `--surface` — clears 3:1 too: #b07400 and #8a7a9e
+     measured 2.93:1 and 2.92:1 there, just under the bar every other
+     status/surface pair in this file already clears. */
+  --status-building: light-dark(#a36b00, #ffc857);
+  --status-failed: light-dark(#d33a30, #ff7a6b);
+  --status-idle: light-dark(#807092, #7d6a94);
 }
 
 /* Explicit light, and the system choice when the OS asks for light. */
@@ -137,22 +197,30 @@
 }
 
 /*
- * The two motions this app has, defined here because it had none.
+ * The motions this app has, defined here because it had none.
  *
- * Everything that moved before this was `animate-pulse`, `animate-spin` and a
- * width transition — three utilities Tailwind ships, and nothing of the app's
- * own. What was missing is the vocabulary for something *arriving*: a value the
- * cloud just answered with, a step that just finished. Both are below, and both
- * are one-shot: nothing here loops, because a loop is a claim that something is
- * still happening and only the spinner is entitled to make it.
+ * Everything that moved before `rise` and `draw` arrived was `animate-pulse`,
+ * `animate-spin` and a width transition — three utilities Tailwind ships, and
+ * nothing of the app's own. What was missing is the vocabulary for something
+ * *arriving*: a value the cloud just answered with, a step that just
+ * finished. Both of those are one-shot: nothing about an arrival loops,
+ * because a loop is a claim that something is still happening and only the
+ * spinner is entitled to make it.
+ *
+ * `slip`, `register` and the roflcopter's `copter-drift`/`copter-pass`,
+ * further down, are a second vocabulary rather than an exception to the
+ * first — kthx's own brand identity, not this app's status language — and
+ * where either of them loops, the comment beside it argues why on its own
+ * terms rather than borrowing this one.
  *
  * Top level rather than inside `@theme`, which is `inline` here — the tokens
  * below name these, and a keyframe declared in a stylesheet exists whether or
  * not a utility references it.
  *
- * The reduced-motion reset at the foot of this file collapses both to 0.01ms.
- * Neither carries meaning a word does not: a risen row reads the same still,
- * and the drawn tick is a tick either way.
+ * The reduced-motion reset at the foot of this file collapses every duration
+ * here to 0.01ms. None of them carries meaning a word does not: a risen row
+ * reads the same still, the drawn tick is a tick either way, and the brand
+ * motions are decoration a reader who asked for less of it is owed none of.
  */
 @keyframes rise {
   from {
@@ -182,11 +250,12 @@
 }
 
 /*
- * The one loop this file adds, and the exception the header's rule already
- * names: a bar that is filling *is* the claim that something is still
- * happening, so it is entitled to say so continuously. It runs only under
- * `tone === 'running'` in `components/progress.tsx` and stops the moment the
- * deploy settles.
+ * The status vocabulary's one loop, and the exception its own header names: a
+ * bar that is filling *is* the claim that something is still happening, so it
+ * is entitled to say so continuously. It runs only under `tone === 'running'`
+ * in `components/progress.tsx` and stops the moment the deploy settles. The
+ * brand motions below carry two loops of their own, each argued for beside
+ * its keyframes rather than here.
  *
  * A sweep rather than the `animate-pulse` that was here: pulse fades the whole
  * bar to half opacity, which is the universal mark of *disabled*, and a deploy
@@ -201,6 +270,110 @@
   }
 }
 
+/*
+ * kthx's own glitch: the mark's ink lands a hair out of register in the
+ * brand's two inks and snaps together a beat later — the same handful of
+ * pixels the landing's `.big` and `.run .out a` wear
+ * (`packages/kthx/landing.html`). `slip` is the loop and `register` is the
+ * one-shot; see `components/wordmark.tsx` for where the loop is worn and
+ * `views/apps/deploy-detail.tsx`'s `UrlBlock` for the one-shot.
+ *
+ * `slip` is this file's second brand loop, beside `shimmer` above, and it is
+ * not the same argument: a status bar loops because the deploy it reports on
+ * is still deploying, and this mark loops because kthx's own identity is not
+ * a status any screen ever finishes rendering — it is worn, not reported.
+ *
+ * Both keyframes read the raw `--brand`/`--cool` pair rather than `--accent`
+ * — the same undimmed, non-theme-flipping ink the wordmark's underscore and
+ * the roflcopter's rotor already wear (see their definitions above), because
+ * a glitch tuned to a light page's dimmer accent would read as a rendering
+ * fault rather than a wink.
+ */
+@keyframes slip {
+  0%,
+  1.5% {
+    filter: drop-shadow(-4px 0 0 var(--cool)) drop-shadow(4px 0 0 var(--brand));
+    transform: translateX(2px);
+  }
+  1% {
+    transform: translateX(-2px);
+  }
+  2.5%,
+  100% {
+    filter: none;
+    transform: none;
+  }
+}
+
+@keyframes register {
+  from {
+    text-shadow:
+      -3px 0 0 var(--brand),
+      3px 0 0 var(--cool);
+  }
+  to {
+    text-shadow:
+      0 0 0 var(--brand),
+      0 0 0 var(--cool);
+  }
+}
+
+/*
+ * The rail wordmark's own glitch — not `slip` played faster, because a
+ * keyframe's percentages scale with whatever duration plays them: `slip`'s
+ * blip only occupies its first 2.5%, so replaying the same keyframes in
+ * `slip`'s own 175ms (2.5% of its 7s loop) would compress the blip to
+ * 2.5% of *that*, well under a single frame. `wink` spends the whole of its
+ * own duration on the same out-of-register shape instead, at `slip`'s own
+ * 40/20/40 proportions, so the hover glitch is the loop's blip at its
+ * natural speed rather than an invisible fraction of it.
+ */
+@keyframes wink {
+  0%,
+  60% {
+    filter: drop-shadow(-4px 0 0 var(--cool)) drop-shadow(4px 0 0 var(--brand));
+    transform: translateX(2px);
+  }
+  40% {
+    transform: translateX(-2px);
+  }
+  100% {
+    filter: none;
+    transform: none;
+  }
+}
+
+/*
+ * The roflcopter's own sky (`components/roflcopter.tsx`) — never its rotor,
+ * which is a 70ms text interval and not CSS, the same split the landing's own
+ * comment draws ("the sweep across the sky is CSS"). `copter-drift` is this
+ * file's third brand loop: the mark crosses behind the two screens nobody has
+ * signed in on yet for as long as either one is open, the way it drifts
+ * behind the landing. `copter-pass` is the one-shot a live deploy earns — the
+ * landing's own "flies over on each deploy" — and it never repeats on its
+ * own; the component restarts it by remounting the element the event fires.
+ */
+@keyframes copter-drift {
+  0% {
+    transform: translateX(-40vw);
+  }
+  55% {
+    transform: translateX(140vw);
+  }
+  100% {
+    transform: translateX(140vw);
+  }
+}
+
+@keyframes copter-pass {
+  from {
+    transform: translateX(-30vw);
+  }
+  to {
+    transform: translateX(130vw);
+  }
+}
+
 @theme inline {
   /*
    * Named animations, as Tailwind v4 theme tokens — `--animate-rise` is the
@@ -210,6 +383,26 @@
   --animate-rise: rise 220ms ease-out both;
   --animate-draw: draw 320ms ease-out both;
   --animate-shimmer: shimmer 1.6s linear infinite;
+
+  /*
+   * kthx's brand motion, named the same way as the status vocabulary above
+   * rather than folded into it — a caller reaching for "how does something
+   * arrive" should find `rise` and `draw` and never trip over the mark's own
+   * mascots by accident.
+   *
+   * `slip` and `wink` are the same glitch at two speeds, not two effects: the
+   * hero wordmark plays the loop, `7s` and 3-second-delayed exactly as the
+   * landing's `.big`; the rail wordmark plays the bare glitch once, on
+   * hover, over `175ms` — the length of time `slip`'s own blip actually
+   * plays inside its 7s loop (2.5% of 7s), not its keyframes replayed at
+   * `150ms` — see `components/wordmark.tsx` for why the rail earns a wink
+   * instead of the loop.
+   */
+  --animate-slip: slip 7s steps(1) 3s infinite;
+  --animate-wink: wink 175ms steps(1);
+  --animate-register: register 600ms ease-out both;
+  --animate-copter-drift: copter-drift 28s linear infinite;
+  --animate-copter-pass: copter-pass 6s linear both;
 
   --color-background: var(--ground);
   --color-foreground: var(--ink);
@@ -226,6 +419,7 @@
   --color-subtle: var(--ink-2);
   --color-accent: var(--accent-soft);
   --color-accent-foreground: var(--accent);
+  --color-accent-line: var(--accent-line);
   --color-border: var(--line);
   --color-border-soft: var(--line-soft);
   --color-input: var(--line);
@@ -239,6 +433,24 @@
   --color-destructive: var(--bad);
   --color-destructive-soft: var(--bad-soft);
 
+  /* Decorative-only: the raw acid pair, never a text colour. See their
+     definitions above for why. */
+  --color-brand: var(--brand);
+  --color-cool: var(--cool);
+
+  /* Non-text marks — a dot beside a phase, nothing a reader parses as a
+     letterform — so these are the 3:1-checked raw colours, not `--good`,
+     `--warn` and `--bad`, which are held to the higher, text bar. */
+  --color-status-live: var(--status-live);
+  --color-status-building: var(--status-building);
+  --color-status-failed: var(--status-failed);
+  --color-status-idle: var(--status-idle);
+
+  /* `components/log-pane.tsx` only — `--terminal-bad` and `--terminal-dim`
+     are tuned against the one ground that never flips, and read as low as
+     1.9:1 on a themed surface like `--surface` or `--bad-soft`. Themed text
+     reaches for `--destructive`/`--muted-foreground` instead, which flip
+     with it. */
   --color-terminal: var(--terminal);
   --color-terminal-foreground: var(--terminal-ink);
   --color-terminal-destructive: var(--terminal-bad);
@@ -298,19 +510,35 @@
      file, where a reader looking for it would look. */
   --spacing: 4px;
 
-  --radius-sm: 5px;
-  /* An alias, not a step. 56 call sites say `rounded-md`; pointing it at the
-     small radius makes every one of them correct today, and sweeping the class
-     name later is cosmetic. */
-  --radius-md: 5px;
+  /*
+   * A real middle step, not an alias any more. The layout reference's rows
+   * want `--radius-sm`'s tightness; the landing's cards and panels are cut at
+   * a generous `--radius-lg`. A `rounded-md` call site used to sit exactly on
+   * the small step because the two shared one number — now it is its own
+   * value, between the other two rather than equal to one of them.
+   */
+  --radius-sm: 4px;
+  --radius-md: 6px;
   --radius-lg: 10px;
 
+  /*
+   * kthx's own, self-hosted — see the `@import`s at the top of this file.
+   * "Variable" is the family name `@fontsource-variable` packages register,
+   * since a variable font and a static one of the same name would collide in
+   * the same document. `DM Mono` only ships the two weights this app uses
+   * (400, 500), so it never needed the variable form.
+   */
   --font-sans:
-    Inter, "Segoe UI Variable", "Segoe UI", ui-sans-serif, system-ui,
-    -apple-system, sans-serif;
+    "DM Sans Variable", "Segoe UI Variable", "Segoe UI", ui-sans-serif,
+    system-ui, -apple-system, sans-serif;
   --font-mono:
-    ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, "Liberation Mono",
-    monospace;
+    "DM Mono", ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas,
+    "Liberation Mono", monospace;
+  /* The display face — Orbitron at weight 900 is the landing's `--disp`. Kept
+     to `--font-display` rather than folded into `--font-sans`, because
+     nothing on a ledger-dense console but the wordmark itself should be set
+     in it. */
+  --font-display: "Orbitron Variable", system-ui, sans-serif;
 }
 
 @layer base {
@@ -320,21 +548,31 @@
 
   html {
     min-height: 100%;
+    -webkit-font-smoothing: antialiased;
+    /* Machine facts are everywhere in this UI, not only inside `code`/`pre` —
+       a replica count, a duration, a digest prefix sits in plain prose too.
+       Set here so the whole document gets fixed-width digits, rather than
+       only the elements below that used to carry the rule alone. */
+    font-variant-numeric: tabular-nums;
+    /* DM Mono ships only 400 and 500; DM Sans Variable and Orbitron Variable
+       cover their own whole weight range. A `font-semibold`/`-bold` call
+       against the mono face is therefore always a request past what it has,
+       and a browser's answer to that is a synthesized faux bold rather than
+       a refusal. Refusing it here is what keeps every future mono site at a
+       real cut instead of a smeared one, on top of the one call site this
+       stylesheet already holds to `font-medium`. */
+    font-synthesis-weight: none;
   }
 
   body {
+    /* Flat. kthx's own ground is one violet-black with nothing bleeding into
+       it; the brand's colour arrives as marks on that ground — the pink, the
+       second ink, the roflcopter — and a wash behind them would compete. */
     background-color: var(--color-background);
-    background-image: radial-gradient(
-      circle at 82% -12%,
-      rgb(64 116 232 / 14%),
-      transparent 36%
-    );
-    background-attachment: fixed;
     color: var(--color-foreground);
     font-family: var(--font-sans);
     font-size: var(--text-ui);
     line-height: 1.5;
-    -webkit-font-smoothing: antialiased;
   }
 
   /*
@@ -353,6 +591,16 @@
   :focus-visible {
     outline: 2px solid var(--color-ring);
     outline-offset: 2px;
+  }
+
+  /* A selection tinted with the brand pink rather than the platform default —
+     the one other place `--brand` is allowed to show, alongside the wordmark
+     and the roflcopter's rotor. `color-mix` rather than `--accent-soft`: the
+     highlight has to sit over ink the reader picked, in either theme, and the
+     soft tokens are tuned as surfaces underneath a fixed ink colour, not as a
+     wash over an arbitrary one. */
+  ::selection {
+    background-color: color-mix(in srgb, var(--brand) 35%, transparent);
   }
 
   /*
@@ -418,6 +666,20 @@
  * to every utility no matter how it is written, and would need `!important` on
  * each declaration to win. An unlayered rule wins by position in the cascade
  * instead, which is the mechanism rather than a fight with it.
+ *
+ * It reaches `slip`, `register`, `copter-drift` and `copter-pass` the same
+ * way it reaches everything else: an ordinary element, matched by `*`, needs
+ * no carve-out the way the view transition below does. `wordmark.tsx` and
+ * `roflcopter.tsx` still mark their own uses `motion-safe:` on top of this —
+ * belt and suspenders, the same doubling `ui/badge.tsx` already argued for.
+ * The one place this rule is not the whole story is the roflcopter's ambient
+ * drift: collapsed to 0.01ms it still ends *somewhere*, and `copter-drift`'s
+ * own endpoint is off past the right edge — technically still, same as the
+ * landing's, but invisible rather than parked in view the way the landing's
+ * reduced-motion rule explicitly repositions it. `roflcopter.tsx` carries a
+ * `motion-reduce:` of its own for exactly that reason, stating a resting
+ * position instead of inheriting whichever one the animation happened to end
+ * on.
  */
 @media (prefers-reduced-motion: reduce) {
   *,

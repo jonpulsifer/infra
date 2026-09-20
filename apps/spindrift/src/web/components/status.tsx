@@ -21,8 +21,12 @@ import { cn } from '../ui/utils.ts';
 /**
  * The tone each phase reads in. `LIVE` is the only green state there is — and
  * a faulty release is `LIVE` that no longer earns it.
+ *
+ * Exported for {@link appDotTone}, the rail's own reading of this same
+ * derivation — one function deciding what a phase means, not two that could
+ * disagree the day a phase is added.
  */
-function toneFor(phase: DeployPhase, faulty: boolean) {
+export function toneFor(phase: DeployPhase, faulty: boolean) {
   if (faulty || phase === 'FAILED') return 'destructive' as const;
   if (phase === 'LIVE') return 'success' as const;
   return 'warning' as const;
@@ -62,6 +66,67 @@ export function PhaseDot({
       <Dot pulse={isInFlight(phase)} title={word} />
       <span className="sr-only">{word}</span>
     </span>
+  );
+}
+
+/** The four tones the rail's Apps group draws a dot in. */
+export type AppDotTone = 'live' | 'building' | 'failed' | 'idle';
+
+/** {@link AppDotTone}, as the `text-status-*` colour a dot inherits its stroke or fill from. */
+const APP_DOT_TONE: Record<AppDotTone, string> = {
+  live: 'text-status-live',
+  building: 'text-status-building',
+  failed: 'text-status-failed',
+  idle: 'text-status-idle',
+};
+
+/**
+ * The rail's dot for one App list row, over the same ranking `listApps`
+ * already did (`commands/apps/list.ts`'s worst-Component-first reduce).
+ *
+ * `deployId` absent is what that ranking leaves on a row whose worst Component
+ * has never deployed — `toneFor` cannot see that, because it is only ever
+ * handed a phase, and the fallback `PENDING` a never-deployed Component reports
+ * is indistinguishable from one queued for its second release. So idle is
+ * checked first, ahead of `toneFor`, rather than folded into a fifth phase.
+ *
+ * Both halves are required. A row that reports a phase other than `PENDING`
+ * has something to say whether or not it names a Deploy, and the rail must
+ * never call idle what the Apps table beside it calls live.
+ */
+export function appDotTone(app: {
+  readonly phase: DeployPhase;
+  readonly faulty?: boolean;
+  readonly deployId?: number;
+}): AppDotTone {
+  if (app.deployId === undefined && app.phase === 'PENDING') return 'idle';
+  const tone = toneFor(app.phase, app.faulty ?? false);
+  if (tone === 'success') return 'live';
+  if (tone === 'destructive') return 'failed';
+  return 'building';
+}
+
+/**
+ * The Apps group's own dot — hollow for `idle`, pulsing for `building`,
+ * filled and still otherwise. `aria-hidden`, because the row it sits on is a
+ * link named by the App's own name; the tone is a scan aid beside it, not a
+ * second name for it.
+ */
+export function AppDot({
+  app,
+  className,
+}: {
+  readonly app: Parameters<typeof appDotTone>[0];
+  readonly className?: string;
+}) {
+  const tone = appDotTone(app);
+  return (
+    <Dot
+      aria-hidden="true"
+      pulse={tone === 'building'}
+      hollow={tone === 'idle'}
+      className={cn(APP_DOT_TONE[tone], className)}
+    />
   );
 }
 
