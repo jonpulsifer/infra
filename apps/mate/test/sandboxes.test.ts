@@ -20,7 +20,7 @@ import {
 } from '../src/sandboxes.ts';
 import type { ThreadRef, ToolCall } from '../src/surface.ts';
 import { FakeKube } from './fakeapi.ts';
-import { RecordingLog } from './support.ts';
+import { RecordingInstruments, RecordingLog } from './support.ts';
 
 const THREAD: ThreadRef = {
   surface: 'discord',
@@ -71,11 +71,13 @@ class Collect implements PromptSink {
 
 let fake: FakeKube;
 let log: RecordingLog;
+let metrics: RecordingInstruments;
 let sandboxes: KubeSandboxes;
 
 beforeEach(() => {
   fake = new FakeKube();
   log = new RecordingLog();
+  metrics = new RecordingInstruments();
   sandboxes = new KubeSandboxes({
     kube: new Kube(fake.config()),
     config,
@@ -166,13 +168,14 @@ async function attach(): Promise<SandboxRef> {
   return ref;
 }
 
-/** The same mate, with a pool of one behind it. */
+/** The same mate, with a pool of one behind it and its instruments recorded. */
 function withSpares(spares: number): KubeSandboxes {
   return new KubeSandboxes({
     kube: new Kube(fake.config()),
     config: { ...config, spares },
     guildId: GUILD,
     log,
+    metrics,
     readyTimeoutMs: 4000,
     goneTimeoutMs: 4000,
   });
@@ -987,6 +990,71 @@ describe('the warm pool', () => {
     const ref = await pool.mint(THREAD);
     expect(ref.name).toBe(NAME);
     expect(ref.source).toBe('fresh');
+  });
+
+  test('replaces a spare that stopped being ready', async () => {
+    const pool = withSpares(1);
+    await pool.ensureSpares();
+    const [broken] = spareNames();
+    const object = fake.sandboxes.get(broken ?? '') as Record<string, any>;
+    const held = Date.parse(object.spec.shutdownTime);
+    fake.markNotReady(broken ?? '');
+
+    await pool.ensureSpares();
+    // A pass that counted it would be a pool of nothing reading as full, and
+    // sliding its half hour every five minutes is what would have made that
+    // permanent: the TTL is the only thing that takes an unusable spare away.
+    expect(Date.parse(object.spec.shutdownTime)).toBe(held);
+    await until(() => !fake.sandboxes.has(broken ?? ''));
+    expect(log.of('condemned a spare that stopped being ready')).toHaveLength(
+      1,
+    );
+    // Carried for the reason the renewal carries one: the only thing that
+    // moves a spare between the list and this patch is a thread claiming it,
+    // and a condemned sandbox's labels must not land on the thread that won.
+    const took = fake.patches.filter((patch) => patch.name === broken).at(0);
+    const meta = (took?.body.metadata ?? {}) as Record<string, unknown>;
+    expect(meta.resourceVersion).toBeDefined();
+
+    const standing = spareNames();
+    expect(standing).toHaveLength(1);
+    expect(standing[0]).not.toBe(broken);
+    // Warm again rather than merely repopulated: the next thread is handed it.
+    expect((await pool.mint(THREAD)).source).toBe('spare');
+  });
+
+  test('reports what the pool holds against what it is for', async () => {
+    const pool = withSpares(1);
+    await pool.ensureSpares();
+    expect(metrics.pool).toEqual({ ready: 1, wanted: 1 });
+
+    const [broken] = spareNames();
+    fake.markNotReady(broken ?? '');
+    fake.patchFails = true;
+    await pool.ensureSpares();
+    // A pool holding one sandbox and nothing a thread could be handed. It is
+    // the only reading that separates a pool doing its job from one that has
+    // quietly stopped: every thread still gets an answer either way, at the
+    // cold start the pool was turned on to remove.
+    expect(metrics.pool).toEqual({ ready: 0, wanted: 1 });
+  });
+
+  test('a spare it could not take out is not joined by a replacement', async () => {
+    const pool = withSpares(1);
+    await pool.ensureSpares();
+    const [broken] = spareNames();
+    fake.markNotReady(broken ?? '');
+    fake.patchFails = true;
+
+    await pool.ensureSpares();
+    // What a spare takes is room on the one node sandboxes land on, so one
+    // mate could not take away is still holding a place in the pool. Minting
+    // beside it would put the pool over its size on the node least able to
+    // carry it, which is the failure the size is written against.
+    expect(spareNames()).toEqual([broken ?? '']);
+    expect(
+      log.of('could not condemn a spare that stopped being ready'),
+    ).toHaveLength(1);
   });
 
   test('a refresh that fails takes the spare out rather than the thread', async () => {

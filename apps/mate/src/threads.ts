@@ -456,9 +456,13 @@ export class Threads {
 
   /**
    * Raises the line the thread watches until it has something better to look
-   * at. The line belongs to the wait rather than to the prompt that started
-   * it, so a thread already watching one keeps it — which is what carries the
-   * same line from the queue into the mint that follows.
+   * at. A thread already watching one keeps it: the thread holds the only
+   * reference to a line and `end` is the only thing that stops a line's
+   * redraw, so a second line raised over the first would leave the first
+   * rewriting itself every few seconds for the life of the process with
+   * nothing able to reach it. The queue is not that case — `pumpWaiting`
+   * goes straight to `mint` and never comes back through here — so what this
+   * guards is a `pump` re-entered with a line still standing.
    */
   private acknowledge(thread: Thread): void {
     if (thread.progress) return;

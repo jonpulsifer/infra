@@ -323,3 +323,45 @@ tests:
             exp_annotations:
               message: "mate's Discord identify budget is approaching its reserve"
               description: "Fewer than 40% of the day's IDENTIFYs are left, against a reserve of 20% that mate will not spend into — below that it stops connecting until Discord's reset, and exhausting the budget outright makes Discord rotate the bot token. Something is reconnecting: read the pod for `gateway closed` lines and their codes, and check whether the Deployment is rolling (the digest-bump CD opens a PR per build)."
+
+  # The warm pool stops refilling: one spare, then none, and mate never gets
+  # another one up. The window has to be full before it fires — fifteen
+  # minutes of an empty pool is not yet four failed sweeps — and one sample of
+  # a full pool inside it is enough to clear it.
+  - interval: 1m
+    input_series:
+      - series: 'mate_spares_ready{exported_job="mate",otel_scope_name="mate",job="opentelemetry-collector",namespace="monitoring",instance="10.101.1.173:8889"}'
+        values: 1x10 0x50
+      - series: 'mate_spares_wanted{exported_job="mate",otel_scope_name="mate",job="opentelemetry-collector",namespace="monitoring",instance="10.101.1.173:8889"}'
+        values: 1x60
+    alert_rule_test:
+      - eval_time: 25m
+        alertname: MateWarmPoolShort
+        exp_alerts: []
+      - eval_time: 35m
+        alertname: MateWarmPoolShort
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              exported_job: mate
+              otel_scope_name: mate
+              job: opentelemetry-collector
+              namespace: monitoring
+              instance: 10.101.1.173:8889
+            exp_annotations:
+              message: "mate is not keeping a sandbox warm"
+              description: "For twenty minutes mate has held fewer Ready spares than MATE_SPARES asks for, so every thread has been paying the full cold start again — tens of seconds of a line saying `booting the sandbox` before a word of the answer. `kubectl --context offsite get sandboxes -n mate -l lolwtf.ca/spare` is what is standing: a spare that stops being Ready is condemned and replaced on the next sweep, so one that is still there is a delete the apiserver refused. mate's log names which half failed — `could not condemn a spare that stopped being ready`, or `warming a spare failed` with the reason the node or the apiserver gave."
+
+  # MATE_SPARES unset, which is the default and was the whole estate until
+  # one was turned on: nothing is wanted, nothing is held, and an alert about
+  # a pool must not fire at a mate that was never asked to keep one.
+  - interval: 1m
+    input_series:
+      - series: 'mate_spares_ready{exported_job="mate",otel_scope_name="mate",job="opentelemetry-collector",namespace="monitoring",instance="10.101.1.173:8889"}'
+        values: 0x60
+      - series: 'mate_spares_wanted{exported_job="mate",otel_scope_name="mate",job="opentelemetry-collector",namespace="monitoring",instance="10.101.1.173:8889"}'
+        values: 0x60
+    alert_rule_test:
+      - eval_time: 45m
+        alertname: MateWarmPoolShort
+        exp_alerts: []

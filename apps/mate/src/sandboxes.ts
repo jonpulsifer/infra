@@ -16,6 +16,7 @@ import {
   ok,
 } from './kube.ts';
 import { type Log, plain } from './log.ts';
+import type { Instruments } from './metrics.ts';
 import type {
   MintedRef,
   OnMintStep,
@@ -188,6 +189,13 @@ export interface KubeSandboxesDeps {
   config: SandboxConfig;
   guildId: string;
   log: Log;
+  /**
+   * Where the sweep reports the pool. Optional because the smoke harness
+   * drives the same class with no SDK behind it; a mate serving threads is
+   * wired with instruments in `main.ts`, and what they carry is the only view
+   * of the pool from outside the pod.
+   */
+  metrics?: Instruments;
   ttlMs?: number;
   readyTimeoutMs?: number;
   goneTimeoutMs?: number;
@@ -1067,11 +1075,16 @@ export class KubeSandboxes implements Sandboxes {
    * labels, and a spare marker the pool does not select on — and the delete
    * is not, because by then nothing can be handed the object either way and
    * `destroy` waits up to three minutes on a teardown nobody is blocked on.
+   *
+   * A caller condemning something it only saw in a list passes the revision
+   * it saw it at, and takes the 409 as its answer: what is being taken away
+   * here is deleted straight afterwards, so doing it to an object that has
+   * moved since would be doing it to whatever moved it.
    */
-  private async condemn(name: string): Promise<void> {
+  private async condemn(name: string, resourceVersion?: string): Promise<void> {
     const labels = condemnLabels();
     await this.patch(name, {
-      metadata: { labels },
+      metadata: { labels, ...(resourceVersion ? { resourceVersion } : {}) },
       spec: { podTemplate: { metadata: { labels } } },
     });
     void this.destroy(name).catch((failure) =>
@@ -1139,11 +1152,48 @@ export class KubeSandboxes implements Sandboxes {
     // be asking the apiserver about one every few minutes.
     if (want === 0) return;
     if (this.inherited) await this.discard();
-    const held = await this.spares();
+    const ready: Sandbox[] = [];
+    // Ones that stopped being Ready and would not go. They count against the
+    // pool even though no thread can be handed them, because what a spare
+    // takes is room on the one node sandboxes land on, and minting beside a
+    // sandbox that is still standing there would put the pool over its size.
+    let stuck = 0;
+    for (const spare of await this.spares()) {
+      if (isReady(spare)) {
+        ready.push(spare);
+        continue;
+      }
+      // `mintSpare` does not return until its spare is Ready and two passes
+      // never overlap, so one that is not Ready here was Ready and stopped
+      // being it — an evicted pod, a node that went away. `adopt` refuses
+      // such a thing, so leaving it in place holds the pool at nothing usable
+      // while it reads as full, and the renewal below is what would make that
+      // permanent: a spare's TTL is the only thing that ever takes one away.
+      const name = spare.metadata.name;
+      try {
+        await this.condemn(name, spare.metadata.resourceVersion);
+        log.info('condemned a spare that stopped being ready', {
+          sandbox: name,
+        });
+      } catch (error) {
+        // The precondition is here for the reason it is on the renewal below,
+        // and losing to it is the wanted outcome: the only thing that moves a
+        // spare between the list and the patch is a thread claiming it or the
+        // controller reaping it, and neither of those wants a condemned
+        // sandbox's labels written over it. The pool is one short either way,
+        // and the mint below is what answers that.
+        if (error instanceof KubeError && error.status === 409) continue;
+        stuck += 1;
+        log.warn('could not condemn a spare that stopped being ready', {
+          sandbox: name,
+          error: plain(error),
+        });
+      }
+    }
     // Only what is wanted is renewed. Past that nothing is slid and nothing
     // is deleted, because a spare's short `shutdownTime` already removes one
     // nobody renews, and turning the knob down needs no second mechanism.
-    for (const spare of held.slice(0, want)) {
+    for (const spare of ready.slice(0, want)) {
       try {
         await this.patch(spare.metadata.name, {
           metadata: { resourceVersion: spare.metadata.resourceVersion },
@@ -1162,11 +1212,11 @@ export class KubeSandboxes implements Sandboxes {
         });
       }
     }
-    // One that is still coming up counts as held, so a spare stuck pulling an
-    // image is waited out rather than joined by a new one every sweep.
-    for (let short = want - held.length; short > 0; short -= 1) {
+    let warm = ready.length;
+    for (let short = want - ready.length - stuck; short > 0; short -= 1) {
       try {
         await this.mintSpare();
+        warm += 1;
       } catch (error) {
         // The first failure ends the pass rather than asking for another
         // sandbox the apiserver or the node just refused. Nothing is waiting
@@ -1175,6 +1225,12 @@ export class KubeSandboxes implements Sandboxes {
         break;
       }
     }
+    // What a thread could be handed if it asked now — a condemned or stuck
+    // spare is room on the node and nothing else, so neither is in this. A
+    // pool that has stopped refilling looks healthy from every other angle:
+    // threads still get their answers, at the cold-start price the pool was
+    // turned on to stop paying.
+    this.deps.metrics?.spares(warm, want);
   }
 
   /**

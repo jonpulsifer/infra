@@ -106,6 +106,7 @@ const sandboxes: Sandboxes =
         config: config.sandboxes.sandbox,
         guildId: config.guildId,
         log,
+        metrics: lazyInstruments(),
       })
     : new StubSandboxes();
 const discord = discordOver(client.api);

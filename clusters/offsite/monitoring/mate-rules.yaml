@@ -221,6 +221,39 @@ spec:
             message: "mate cannot give a thread a sandbox"
             description: "More than two mints or attaches failed in the last thirty minutes, so a human asking mate a question is getting a plain refusal instead of an answer. A mint failure is the Sandbox never going Ready — the harness image digest, the kata-clh runtime class, or the namespace's restricted PSA. An attach failure is `pods/exec` into a Ready pod, which is the Role in ../../apps/mate/rbac.yaml or the harness not starting inside the sandbox."
 
+        # The pool is the sandbox mate keeps warm so the next thread is handed
+        # one instead of waiting out a cold start for it (MATE_SPARES on the
+        # Deployment, MATE_MAX_CONCURRENT beside it). A pool that has stopped
+        # refilling is the failure nothing else here can see: every thread
+        # still gets its answer, at the tens of seconds the pool was turned on
+        # to remove, so it shows up on the mint-duration panels and in nobody's
+        # alerts.
+        #
+        # A sweep runs every five minutes and mints inside the pass, so twenty
+        # minutes short is four passes that could not fix it — no room on the
+        # node, an apiserver refusing the object, or a spare that stopped being
+        # Ready and could not be taken away.
+        #
+        # `max_over_time` on the left is what makes the window mean something:
+        # one sample of a full pool inside it clears the alert, and the newest
+        # sample is in the range, so it carries the instant reading too. The
+        # `offset` arm requires the window to be full, for the reason it is on
+        # MateSandboxesAtCap. Both numbers report zero until the first sweep
+        # says otherwise, so a mate with no pool configured — and a mate that
+        # has only just started — cannot fire this.
+        - alert: MateWarmPoolShort
+          expr: |
+            max_over_time(mate_spares_ready[20m])
+            < min_over_time(mate_spares_wanted[20m])
+            and ignoring(pod, instance)
+            mate_spares_ready offset 20m < mate_spares_wanted offset 20m
+          for: 0m
+          labels:
+            severity: warning
+          annotations:
+            message: "mate is not keeping a sandbox warm"
+            description: "For twenty minutes mate has held fewer Ready spares than MATE_SPARES asks for, so every thread has been paying the full cold start again — tens of seconds of a line saying `booting the sandbox` before a word of the answer. `kubectl --context offsite get sandboxes -n mate -l lolwtf.ca/spare` is what is standing: a spare that stops being Ready is condemned and replaced on the next sweep, so one that is still there is a delete the apiserver refused. mate's log names which half failed — `could not condemn a spare that stopped being ready`, or `warming a spare failed` with the reason the node or the apiserver gave."
+
         # mate refuses a turn past 120 in a rolling day and says so in the
         # thread (MATE_MAX_TURNS_PER_DAY). 96 is 80% of that, so this fires
         # while there is still a day's quarter left to spend rather than after

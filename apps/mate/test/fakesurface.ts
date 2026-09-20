@@ -70,6 +70,11 @@ interface Posted extends HistoryMessage {
   threadId: string;
 }
 
+export type NoticeCall =
+  | { call: 'post'; id: string; text: string }
+  | { call: 'edit'; id: string; text: string }
+  | { call: 'remove'; id: string };
+
 /**
  * A line the surface keeps a hand on, as both real adapters hold one: a
  * message in the thread, rewritten where it stands and taken back out of it
@@ -90,15 +95,18 @@ class FakeNotice implements Notice {
     const held = this.id && this.surface.find(this.id);
     if (held) {
       held.content = text;
+      this.surface.noticeCalls.push({ call: 'edit', id: held.id, text });
       return;
     }
-    this.id = this.surface.say(
+    const id = this.surface.say(
       this.threadId,
       text,
       this.surface.me,
       'mate',
       true,
     );
+    this.id = id;
+    this.surface.noticeCalls.push({ call: 'post', id, text });
   }
 
   async done(text: string | null): Promise<void> {
@@ -109,7 +117,9 @@ class FakeNotice implements Notice {
     if (this.surface.failNotice) throw this.surface.failNotice;
     const id = this.id;
     this.id = null;
-    if (id) this.surface.remove(id);
+    if (!id) return;
+    this.surface.remove(id);
+    this.surface.noticeCalls.push({ call: 'remove', id });
   }
 }
 
@@ -124,6 +134,13 @@ export class FakeSurface implements Surface {
   readonly settled: string[] = [];
   /** Every line a notice was ever given, in order, whether or not it still stands. */
   readonly notices: string[] = [];
+  /**
+   * The calls behind those lines, as `FakeSlack` records its own: what a line
+   * was drawn with, and against which message. Content alone cannot tell a
+   * rewrite in place from a line taken away and the news posted under it, and
+   * in place is what every terminal path claims to do.
+   */
+  readonly noticeCalls: NoticeCall[] = [];
   failNotice: Error | null = null;
   private serial = 0;
 

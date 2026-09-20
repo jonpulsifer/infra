@@ -47,6 +47,13 @@ export interface Instruments {
   gatewayClosed(code: number, fatal: boolean): void;
   sandboxesLive(count: number): void;
   queueDepth(depth: number): void;
+  /**
+   * The warm pool as the sweep left it: what a thread could be handed right
+   * now against what `MATE_SPARES` asks for. Both numbers rather than one,
+   * because the pool being short is only worth knowing against the size it is
+   * meant to be, and that size is a knob on the Deployment.
+   */
+  spares(ready: number, wanted: number): void;
   minted(result: MintResult, sample?: MintSample): void;
   turnStarted(): void;
   turnEnded(reason: TurnEnd, sample: TurnSample): void;
@@ -62,6 +69,13 @@ let cached: { provider: MeterProvider; instruments: Instruments } | null = null;
 let latest: { limit: SessionStartLimit; readAt: number } | null = null;
 let live = 0;
 let queued = 0;
+/**
+ * Reported whether or not a pool is configured: with `MATE_SPARES` unset the
+ * sweep never says anything and these stay at nothing wanted and nothing
+ * held, which is the reading, and which is what keeps an alert comparing the
+ * two quiet on a mate that was never asked for a pool.
+ */
+let pool = { ready: 0, wanted: 0 };
 
 /**
  * Built on first use rather than at import so nothing is minted before a
@@ -128,6 +142,12 @@ export function getInstruments(): Instruments {
   meter
     .createObservableGauge('mate_queue_depth')
     .addCallback((result) => result.observe(queued));
+  meter
+    .createObservableGauge('mate_spares_ready')
+    .addCallback((result) => result.observe(pool.ready));
+  meter
+    .createObservableGauge('mate_spares_wanted')
+    .addCallback((result) => result.observe(pool.wanted));
   const closes = meter.createCounter('mate_gateway_closes_total');
   const mints = meter.createCounter('mate_mints_total');
   const turns = meter.createCounter('mate_turns_total');
@@ -157,6 +177,9 @@ export function getInstruments(): Instruments {
     },
     queueDepth: (depth) => {
       queued = depth;
+    },
+    spares: (ready, wanted) => {
+      pool = { ready, wanted };
     },
     minted: (result, sample) => {
       mints.add(1, { result });
@@ -190,6 +213,7 @@ export function lazyInstruments(): Instruments {
     gatewayClosed: (code, fatal) => getInstruments().gatewayClosed(code, fatal),
     sandboxesLive: (count) => getInstruments().sandboxesLive(count),
     queueDepth: (depth) => getInstruments().queueDepth(depth),
+    spares: (ready, wanted) => getInstruments().spares(ready, wanted),
     minted: (result, sample) => getInstruments().minted(result, sample),
     turnStarted: () => getInstruments().turnStarted(),
     turnEnded: (reason, sample) => getInstruments().turnEnded(reason, sample),

@@ -132,6 +132,7 @@ export class RecordingInstruments implements Instruments {
   started = 0;
   live = 0;
   queued = 0;
+  pool: { ready: number; wanted: number } | null = null;
 
   identifyLimit(_limit: SessionStartLimit): void {}
   gatewayClosed(code: number, fatal: boolean): void {
@@ -146,6 +147,9 @@ export class RecordingInstruments implements Instruments {
   }
   queueDepth(depth: number): void {
     this.queued = depth;
+  }
+  spares(ready: number, wanted: number): void {
+    this.pool = { ready, wanted };
   }
   turnStarted(): void {
     this.started += 1;
