@@ -158,11 +158,14 @@ spec:
             # comfortable half of that — 6626Mi of oldschool's 15772Mi
             # allocatable at the peak — and CPU is what binds first: a sandbox
             # requests 500m, so three of them commit 3157m of its 4000m and
-            # leave 843m for anything else that has to land there. A spare carries a
-            # half-hour `shutdownTime` that only mate's own sweep renews, so
-            # a mate that stops hands it back, and a roll discards the spare
-            # it inherits rather than serving a thread from an image, model
-            # or checkout that has moved on.
+            # leave 843m for anything else that has to land there.
+            #
+            # A spare carries a half-hour `shutdownTime` that only mate's
+            # own sweep renews, so a mate that stops hands it back, and a
+            # roll discards the spare it inherits rather than serving a
+            # thread from an image, model or checkout that has moved on. One
+            # that stops being Ready is condemned on the next sweep and
+            # replaced, because no thread can be handed it.
             - name: MATE_SPARES
               value: "1"
             - name: MATE_PORT
