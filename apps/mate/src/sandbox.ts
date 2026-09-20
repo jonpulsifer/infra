@@ -13,6 +13,8 @@ export interface SandboxRef {
   readonly thread: ThreadRef;
   /** Set by `list()` when the object says a turn was running: mate died under it. */
   readonly turnInFlight?: boolean;
+  /** Set by `mint()` when the object was already there and this thread only claimed it. */
+  readonly adopted?: boolean;
 }
 
 export interface Session {
@@ -51,7 +53,7 @@ export interface PromptResult {
 export interface Sandboxes {
   /** Every sandbox this mate owns, for rehydration after a restart. */
   list(): Promise<SandboxRef[]>;
-  /** Creates the thread's sandbox; resolves once it is Ready. */
+  /** Creates the thread's sandbox, or claims one already under its name; resolves once it is Ready. */
   mint(thread: ThreadRef): Promise<SandboxRef>;
   /** Opens the ACP session (`session/load`, else `session/new`). */
   attach(sandbox: SandboxRef): Promise<Session>;

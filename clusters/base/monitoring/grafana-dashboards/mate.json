@@ -773,7 +773,7 @@
       "id": 18,
       "type": "timeseries",
       "title": "Time to a Ready sandbox",
-      "description": "How long the Sandbox takes to go Ready, which is the whole of the wait before a first question is even read. Split by source so a sandbox that was already warm when the thread claimed it is its own line rather than quietly pulling this one down.",
+      "description": "How long the Sandbox takes to go Ready: a kata VM booting, the image landing and a shallow clone finishing, all of it ahead of the harness reading a word of the question. One line per source, and mints are rare enough that most of this panel is gaps.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -792,7 +792,7 @@
             "lineWidth": 1,
             "pointSize": 5,
             "showPoints": "never",
-            "spanNulls": true,
+            "spanNulls": false,
             "stacking": {
               "group": "A",
               "mode": "none"
@@ -831,7 +831,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "histogram_quantile(0.5, sum by (le, source) (rate(mate_mint_duration_milliseconds_bucket[1h])))",
+          "expr": "histogram_quantile(0.5, sum by (le, source) (rate(mate_mint_duration_milliseconds_bucket[6h])))",
           "refId": "A",
           "legendFormat": "{{source}} p50"
         },
@@ -840,7 +840,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "histogram_quantile(0.95, sum by (le, source) (rate(mate_mint_duration_milliseconds_bucket[1h])))",
+          "expr": "histogram_quantile(0.95, sum by (le, source) (rate(mate_mint_duration_milliseconds_bucket[6h])))",
           "refId": "B",
           "legendFormat": "{{source}} p95"
         }
@@ -850,7 +850,7 @@
       "id": 19,
       "type": "timeseries",
       "title": "Time to an ACP session",
-      "description": "The rest of that wait: exec into the harness, initialize, and load or open the session. A warm sandbox still pays this, so it is the floor any spare pool would leave behind.",
+      "description": "The rest of that wait: exec into the harness, initialize, and load or open the session. Paid on every mint, warm or cold. One line per source.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -869,7 +869,7 @@
             "lineWidth": 1,
             "pointSize": 5,
             "showPoints": "never",
-            "spanNulls": true,
+            "spanNulls": false,
             "stacking": {
               "group": "A",
               "mode": "none"
@@ -908,7 +908,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "histogram_quantile(0.5, sum by (le, source) (rate(mate_attach_duration_milliseconds_bucket[1h])))",
+          "expr": "histogram_quantile(0.5, sum by (le, source) (rate(mate_attach_duration_milliseconds_bucket[6h])))",
           "refId": "A",
           "legendFormat": "{{source}} p50"
         },
@@ -917,7 +917,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "histogram_quantile(0.95, sum by (le, source) (rate(mate_attach_duration_milliseconds_bucket[1h])))",
+          "expr": "histogram_quantile(0.95, sum by (le, source) (rate(mate_attach_duration_milliseconds_bucket[6h])))",
           "refId": "B",
           "legendFormat": "{{source}} p95"
         }

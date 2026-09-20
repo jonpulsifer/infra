@@ -504,7 +504,8 @@ export class KubeSandboxes implements Sandboxes {
     });
     if (!ok(response, 409)) throw await kubeError(response);
     await drain(response);
-    if (response.status === 409) {
+    const adopted = response.status === 409;
+    if (adopted) {
       const existing = await kube.json<Sandbox>(this.path(name));
       if (existing.metadata.deletionTimestamp) {
         throw new Error(`sandbox ${name} is still terminating`);
@@ -525,7 +526,7 @@ export class KubeSandboxes implements Sandboxes {
       );
       throw error;
     }
-    return { name, thread };
+    return { name, thread, adopted };
   }
 
   async attach(ref: SandboxRef): Promise<Session> {

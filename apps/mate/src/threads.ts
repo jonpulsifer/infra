@@ -436,34 +436,35 @@ export class Threads {
     const { clock, sandboxes } = this.deps;
     this.to(thread, 'minting');
     this.disarmQuiet(thread);
-    const source: SandboxSource = 'fresh';
     // Timed from here rather than inside the sandbox client, because this is
-    // where the wait starts for the human who just asked a question. The two
-    // steps are kept apart so that "it took a minute" resolves to one of them
-    // rather than to their total.
+    // where the wait starts for the human who just asked a question.
     const asked = clock.now();
     try {
       thread.sandbox = await sandboxes.mint(thread.ref);
     } catch (error) {
       // Counted here because nothing else sees it: no sandbox exists, so the
       // teardown that follows records none.
-      this.metrics.minted('mint-failed', { source });
+      this.metrics.minted('mint-failed');
       await this.failed(thread, `${MINT_FAILED}: ${plain(error)}`);
       return;
     }
     const ready = clock.now();
+    const source: SandboxSource = thread.sandbox.adopted ? 'adopted' : 'fresh';
+    const mintMs = ready - asked;
     try {
       const session = await sandboxes.attach(thread.sandbox);
       thread.session = session;
       thread.replay = !session.resumed;
     } catch (error) {
-      this.metrics.minted('attach-failed', { source });
+      // The mint itself finished, so it is still a reading; only the attach
+      // is the one that ran out of clock.
+      this.metrics.minted('attach-failed', { source, mintMs });
       await this.failed(thread, `${ATTACH_FAILED}: ${plain(error)}`);
       return;
     }
     this.metrics.minted('ok', {
       source,
-      mintMs: ready - asked,
+      mintMs,
       attachMs: clock.now() - ready,
     });
     this.to(thread, 'attached');

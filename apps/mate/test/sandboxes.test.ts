@@ -90,7 +90,7 @@ async function attach(): Promise<SandboxRef> {
 describe('mint', () => {
   test('stamps the sandbox a thread gets', async () => {
     const ref = await sandboxes.mint(THREAD);
-    expect(ref).toEqual({ name: NAME, thread: THREAD });
+    expect(ref).toEqual({ name: NAME, thread: THREAD, adopted: false });
 
     const sandbox = fake.sandboxes.get(NAME) as Record<string, any>;
     expect(sandbox.apiVersion).toBe('agents.x-k8s.io/v1beta1');
@@ -204,6 +204,12 @@ describe('mint', () => {
     setTimeout(() => fake.markReady(NAME), 60);
     await minted;
     expect(fake.pods.has(NAME)).toBe(true);
+  });
+
+  test('says so when it only claimed a sandbox that was already standing', async () => {
+    await sandboxes.mint(THREAD);
+    const again = await sandboxes.mint(THREAD);
+    expect(again.adopted).toBe(true);
   });
 
   test('gives up when Ready never arrives, saying why and taking the sandbox with it', async () => {
