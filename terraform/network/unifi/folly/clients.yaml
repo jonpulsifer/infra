@@ -143,6 +143,13 @@ desktops:
   tinytower:
     mac: 78:24:af:3c:a4:67
     dev-id: 2663
+  # On `future` (VLAN 1337), not Management, so its `ip` is an octet of
+  # FUTURE_CIDR. windows-hosts.tf resolves each host against its own network.
+  tallboy:
+    mac: cc:28:aa:b2:50:a9
+    network: future
+    ip: 2
+    hostname: tallboy
 
 laptops:
   Constance's Macbook Pro:
