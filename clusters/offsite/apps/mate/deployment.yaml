@@ -109,7 +109,11 @@ spec:
             - name: MATE_SLACK_ALLOWED_CHANNEL_IDS
               value: CARBAMA05,C062BS4GADR
             # The thread contract's numbers: quiet after 15 minutes, 30 turns
-            # per thread, 120 per day, 3 sandboxes at once.
+            # per thread, 120 per day, 2 sandboxes at once. That last one is
+            # capacity and not policy: a sandbox will not schedule on a
+            # control-plane node, offsite has exactly one other node, and a
+            # third sandbox at its 4Gi limit does not fit in what that node
+            # has left.
             - name: MATE_QUIET_MINUTES
               value: "15"
             - name: MATE_MAX_TURNS_PER_THREAD
@@ -117,7 +121,7 @@ spec:
             - name: MATE_MAX_TURNS_PER_DAY
               value: "120"
             - name: MATE_MAX_CONCURRENT
-              value: "3"
+              value: "2"
             - name: MATE_PORT
               value: "8080"
             # The cluster's OTLP collector, whose prometheus exporter this

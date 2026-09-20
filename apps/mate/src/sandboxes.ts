@@ -170,14 +170,10 @@ const CONTAINER_SECURITY = {
   seccompProfile: { type: 'RuntimeDefault' },
 };
 
-/**
- * `MATE_SANDBOX_IMAGE` carries a digest, so whatever the kubelet already has
- * under that digest is the image and re-pulling it buys nothing. The tag
- * beside the digest is what decides the default, and it is `latest`, which
- * Kubernetes reads as Always: a registry round-trip between a mention and the
- * first reply, on every mint.
- */
-const IMAGE_PULL_POLICY = 'IfNotPresent';
+/** A digest is already the whole identity of an image, so a cached copy of one is never stale. */
+function pullPolicy(image: string): string {
+  return image.includes('@sha256:') ? 'IfNotPresent' : 'Always';
+}
 
 /** What the harness reads instead of the checkout's own `.opencode/`. */
 export function opencodeConfig(model: string): string {
@@ -259,14 +255,25 @@ export function sandboxManifest(declaration: SandboxDeclaration): Sandbox {
         metadata: { labels },
         spec: {
           runtimeClassName: config.runtimeClass,
-          // Neither offsite node is tainted, so nothing else keeps a microVM
-          // full of agent-authored commands off `retrofit`, the cluster's only
-          // control-plane node — which is where the first live sandbox was
-          // scheduled. Terraform holds this label
-          // (clusters/offsite/bootstrap/node-labels.tf) and puts it on
-          // `oldschool` alone, so cordoning that node stops mate minting
-          // rather than spilling sandboxes back onto the apiserver's node.
-          nodeSelector: { 'node-role.kubernetes.io/worker': '' },
+          // A sandbox runs agent-authored commands with every permission
+          // allowed, and no node here is tainted, so this term is the only
+          // thing keeping one off a control-plane node.
+          affinity: {
+            nodeAffinity: {
+              requiredDuringSchedulingIgnoredDuringExecution: {
+                nodeSelectorTerms: [
+                  {
+                    matchExpressions: [
+                      {
+                        key: 'node-role.kubernetes.io/control-plane',
+                        operator: 'DoesNotExist',
+                      },
+                    ],
+                  },
+                ],
+              },
+            },
+          },
           restartPolicy: 'Always',
           automountServiceAccountToken: false,
           // The agent runs arbitrary commands; it does not need the address of
@@ -285,7 +292,7 @@ export function sandboxManifest(declaration: SandboxDeclaration): Sandbox {
             {
               name: CHECKOUT_CONTAINER,
               image: config.image,
-              imagePullPolicy: IMAGE_PULL_POLICY,
+              imagePullPolicy: pullPolicy(config.image),
               // Cloned by the uid the harness runs as, so every file in the
               // checkout is the agent's to write. That settles the files and
               // nothing else: the mount root itself stays uid 0, which is
@@ -313,7 +320,7 @@ export function sandboxManifest(declaration: SandboxDeclaration): Sandbox {
             {
               name: HARNESS_CONTAINER,
               image: config.image,
-              imagePullPolicy: IMAGE_PULL_POLICY,
+              imagePullPolicy: pullPolicy(config.image),
               env: [
                 {
                   name: 'OPENCODE_API_KEY',
@@ -489,7 +496,20 @@ export class KubeSandboxes implements Sandboxes {
       }
       log.info('sandbox already existed', { sandbox: name });
     }
-    await this.waitReady(name);
+    try {
+      await this.waitReady(name);
+    } catch (error) {
+      // `shutdownTime` is hours away, so an object left here outlives the
+      // thread that asked for it and can still be scheduled once whatever
+      // held it up clears — with nobody left to talk to it.
+      await this.teardown({ name, thread }).catch((failure) =>
+        log.warn('could not delete a sandbox that never came up', {
+          sandbox: name,
+          error: plain(failure),
+        }),
+      );
+      throw error;
+    }
     return { name, thread };
   }
 
