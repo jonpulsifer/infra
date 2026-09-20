@@ -171,6 +171,14 @@ mise run --cd $dotfiles bootstrap
 Write-Stage 'Installing the terminal font'
 & (Join-Path $dotfiles 'windows\Install-NerdFont.ps1')
 
+# Neither the winget catalogue nor the Store carries vibranceGUI, so it gets
+# the same treatment as the font: pinned, hash-verified, per-user. -AutoStart
+# is passed here rather than exposed as a flag -- a tray utility you install
+# and do not launch is not a desired state anyone wants. Drop it from this line
+# to keep the install without the login entry.
+Write-Stage 'Installing vibranceGUI'
+& (Join-Path $dotfiles 'windows\Install-VibranceGui.ps1') -AutoStart
+
 # --- Stage 5: WSL -----------------------------------------------------------
 
 if ($WithWsl) {
