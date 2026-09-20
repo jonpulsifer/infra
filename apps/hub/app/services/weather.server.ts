@@ -1,6 +1,13 @@
 import { WEATHERFLOW_CONFIG } from '~/lib/weatherflow/config';
+import {
+  buildHistory,
+  decodeDeviceObs,
+  type HistorySample,
+} from '~/lib/weatherflow/history';
 import type {
   BarometricTrend,
+  DeviceObsResponse,
+  StationHistory,
   StationObservation,
   StationObsResponse,
   StationSnapshot,
@@ -8,12 +15,26 @@ import type {
   WeatherSnapshot,
 } from '~/lib/weatherflow/types';
 
-type Station = { id: number; name: string; token: string };
+// Device types that report outdoor weather; a hub (HB) reports none, so
+// asking it for observations only wastes a request.
+const WEATHER_DEVICE_TYPES = new Set(['ST', 'AR', 'SK']);
+
+type Station = {
+  id: number;
+  name: string;
+  token: string;
+  // Devices whose raw observations the 24h window is built from. A Tempest is
+  // one device; an older station splits the metrics across an AIR and a SKY.
+  deviceIds: number[];
+};
 type PressureSample = { t: number; p: number };
 
-async function fetchJson<T>(url: string): Promise<T> {
+async function fetchJson<T>(
+  url: string,
+  timeout: number = WEATHERFLOW_CONFIG.API_TIMEOUT,
+): Promise<T> {
   const res = await fetch(url, {
-    signal: AbortSignal.timeout(WEATHERFLOW_CONFIG.API_TIMEOUT),
+    signal: AbortSignal.timeout(timeout),
   });
   if (!res.ok) {
     const err = new Error(`HTTP ${res.status}`) as Error & { status?: number };
@@ -47,6 +68,7 @@ class WeatherPoller {
   private ignoreStationIds: Set<number>;
   private stations: Station[] = [];
   private snapshots = new Map<number, StationSnapshot>();
+  private histories = new Map<number, StationHistory>();
   private pressureHistories = new Map<number, PressureSample[]>();
   private tokenErrors = new Map<string, string>();
   private firstTick: Promise<void> | null = null;
@@ -73,18 +95,28 @@ class WeatherPoller {
       setInterval(() => {
         this.tick();
       }, WEATHERFLOW_CONFIG.POLL_INTERVAL);
+      // History is deliberately not awaited: a day of samples per device is a
+      // much larger fetch, and the first snapshot should not wait on it. The
+      // panels render without a window and pick one up on a later poll.
+      this.firstTick.then(() => {
+        this.historyTick();
+        setInterval(() => {
+          this.historyTick();
+        }, WEATHERFLOW_CONFIG.HISTORY_INTERVAL);
+      });
     }
     await this.firstTick;
     return {
-      stations: this.stations.map(
-        (s) =>
-          this.snapshots.get(s.id) ?? {
-            stationId: s.id,
-            name: s.name,
-            observation: null,
-            updatedAt: null,
-          },
-      ),
+      stations: this.stations.map((s) => {
+        const snapshot = this.snapshots.get(s.id) ?? {
+          stationId: s.id,
+          name: s.name,
+          observation: null,
+          updatedAt: null,
+        };
+        const history = this.histories.get(s.id);
+        return history ? { ...snapshot, history } : snapshot;
+      }),
       configError: this.configError(),
       generatedAt: Date.now(),
       buildId: __BUILD_ID__,
@@ -123,6 +155,9 @@ class WeatherPoller {
           continue;
         }
         if (this.stations.some((s) => s.id === station.station_id)) continue;
+        const deviceIds = (station.devices ?? [])
+          .filter((d) => WEATHER_DEVICE_TYPES.has(d.device_type ?? ''))
+          .map((d) => d.device_id);
         this.stations.push({
           id: station.station_id,
           name:
@@ -130,10 +165,20 @@ class WeatherPoller {
             station.public_name ??
             `Station ${station.station_id}`,
           token,
+          deviceIds,
         });
         console.info(
-          `Discovered station ${station.station_id} (${station.name ?? 'unnamed'})`,
+          `Discovered station ${station.station_id} (${station.name ?? 'unnamed'}) with ${deviceIds.length} weather device(s)`,
         );
+        if (deviceIds.length === 0) {
+          // Without a device there is nothing to read raw observations from,
+          // so this station's panel shows current conditions and no 24h window
+          // — worth saying out loud rather than leaving it to look like a
+          // fetch that never finished.
+          console.warn(
+            `Station ${station.station_id} reports no ST/AR/SK device; it will have no 24h history.`,
+          );
+        }
       }
       this.undiscovered.delete(token);
       this.tokenErrors.delete(token);
@@ -149,6 +194,38 @@ class WeatherPoller {
       }
       console.error('Failed to fetch WeatherFlow stations:', error);
     }
+  }
+
+  // Never rejects, for the same reason tick() doesn't: a station whose history
+  // fetch fails keeps the window it already had.
+  private async historyTick(): Promise<void> {
+    await Promise.all(this.stations.map((s) => this.pollHistory(s)));
+  }
+
+  private async pollHistory(station: Station): Promise<void> {
+    if (station.deviceIds.length === 0) return;
+    const end = Math.floor(Date.now() / 1000);
+    const start = end - WEATHERFLOW_CONFIG.HISTORY_WINDOW;
+
+    const samples: HistorySample[] = [];
+    for (const deviceId of station.deviceIds) {
+      try {
+        const data = await fetchJson<DeviceObsResponse>(
+          `${WEATHERFLOW_CONFIG.REST_API_URL}/observations/device/${deviceId}` +
+            `?token=${station.token}&time_start=${start}&time_end=${end}`,
+          WEATHERFLOW_CONFIG.HISTORY_TIMEOUT,
+        );
+        samples.push(...decodeDeviceObs(data));
+      } catch (error) {
+        console.error(
+          `Failed to fetch 24h history for device ${deviceId} (station ${station.id}):`,
+          error,
+        );
+      }
+    }
+
+    const history = buildHistory(samples);
+    if (history) this.histories.set(station.id, history);
   }
 
   private async poll(station: Station): Promise<void> {

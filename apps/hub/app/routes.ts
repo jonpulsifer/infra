@@ -4,4 +4,5 @@ export default [
   index('routes/home.tsx'),
   route('api/weather', 'routes/api.weather.ts'),
   route('api/exit', 'routes/api.exit.ts'),
+  route('sw.js', 'routes/service-worker.ts'),
 ] satisfies RouteConfig;

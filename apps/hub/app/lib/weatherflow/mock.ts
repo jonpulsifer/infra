@@ -1,7 +1,11 @@
 // Development-only mock weather. Every reference is guarded behind
 // `import.meta.env.DEV` in use-weather.ts, so this module is tree-shaken out of
 // production bundles — it never ships to a real display.
+import { WEATHERFLOW_CONFIG } from './config';
 import type {
+  HistoryField,
+  MetricExtremes,
+  StationHistory,
   StationObservation,
   StationSnapshot,
   WeatherSnapshot,
@@ -53,11 +57,74 @@ export function mockObservation(seed: number, now: number): StationObservation {
   };
 }
 
+// Each mock range is deliberately a little wider than what mockObservation can
+// produce, so the current reading always sits inside its own 24h window and the
+// range-bar marker never pins to an end.
+function mockExtremes(
+  min: number,
+  max: number,
+  now: number,
+  lowHour: number,
+  highHour: number,
+): MetricExtremes {
+  const midnight = Math.floor(now / 1000) - 24 * 3600;
+  return {
+    min,
+    minAt: midnight + lowHour * 3600,
+    max,
+    maxAt: midnight + highHour * 3600,
+  };
+}
+
+/**
+ * A plausible 24h window: one diurnal temperature curve plus a low and a high
+ * per metric. Enough to exercise the range bars and the sparkline without a
+ * live token.
+ */
+export function mockHistory(seed: number, now: number): StationHistory {
+  const base = 3 + seed * 1.5;
+  const peak = 17 + seed * 1.5;
+  const to = Math.floor(now / 1000);
+  const from = to - WEATHERFLOW_CONFIG.HISTORY_WINDOW;
+  const points = WEATHERFLOW_CONFIG.HISTORY_POINTS;
+  const step = WEATHERFLOW_CONFIG.HISTORY_WINDOW / points;
+
+  const temperature: Array<[number, number]> = [];
+  for (let i = 0; i < points; i++) {
+    const at = Math.round(from + (i + 0.5) * step);
+    // Coldest a little before dawn, warmest mid-afternoon.
+    const hour = ((at / 3600) % 24) + 24;
+    const curve = (Math.cos(((hour - 15) / 24) * 2 * Math.PI) + 1) / 2;
+    temperature.push([at, round(base + curve * (peak - base), 1)]);
+  }
+
+  const extremes: Partial<Record<HistoryField, MetricExtremes>> = {
+    temperature: mockExtremes(base, peak, now, 5, 15),
+    humidity: mockExtremes(45, 98, now, 15, 5),
+    pressure: mockExtremes(1002 + seed, 1018 + seed, now, 9, 21),
+    windSpeed: mockExtremes(0, 7, now, 4, 14),
+    windGust: mockExtremes(0, 9.5, now, 4, 14),
+    uvIndex: mockExtremes(0, 8.5, now, 0, 13),
+    solarRadiation: mockExtremes(0, 950, now, 0, 13),
+    illuminance: mockExtremes(0, 105_000, now, 0, 13),
+  };
+
+  return {
+    from,
+    to,
+    samples: 24 * 60,
+    extremes,
+    temperature,
+    rainTotal: round(Math.max(0, (wave(seed, 2.2, now) - 0.6) * 9), 1),
+  };
+}
+
 export function mockStation(seed: number, now: number): StationSnapshot {
   return {
     stationId: 90_000 + seed,
     name: MOCK_NAMES[seed % MOCK_NAMES.length],
     observation: mockObservation(seed, now),
+    history: mockHistory(seed, now),
     updatedAt: now,
   };
 }
