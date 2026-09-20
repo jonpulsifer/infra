@@ -162,6 +162,7 @@ describe('mint', () => {
     expect(JSON.parse(env.OPENCODE_CONFIG_CONTENT.value)).toEqual({
       model: 'opencode-go/qwen3.8-flash',
       instructions: [`${WORKSPACE}/AGENTS.md`],
+      skills: { paths: [`${WORKSPACE}/dotfiles/skills`] },
       permission: 'allow',
       autoupdate: false,
       share: 'disabled',
@@ -173,6 +174,15 @@ describe('mint', () => {
   test('names an instruction file the checkout really has', async () => {
     const root = new URL('../../../AGENTS.md', import.meta.url);
     expect(await Bun.file(root).exists()).toBe(true);
+  });
+
+  // The same trap one directory over, and quieter: opencode reports neither a
+  // skills path that is missing nor one that holds no skill, so a move would
+  // take the agent back to the eight under `.agents/skills/` in silence.
+  test('names a skills directory that really holds skills', async () => {
+    const dir = new URL('../../../dotfiles/skills/', import.meta.url);
+    const skills = [...new Bun.Glob('*/SKILL.md').scanSync(dir.pathname)];
+    expect(skills.length).toBeGreaterThan(0);
   });
 
   test('hands both containers the git config the checkout needs', async () => {

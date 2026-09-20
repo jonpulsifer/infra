@@ -339,6 +339,31 @@
       groupSlug: 'agent-sandbox',
     },
     {
+      // The mate sandbox image pins roughly two dozen tools, so ungrouped they
+      // would be two dozen pull requests against a prConcurrentLimit of 15 and
+      // would crowd out everything else. The image build starts every binary
+      // it bakes, which is the check a reviewer would run anyway, so one
+      // grouped PR is one review.
+      description: 'mate sandbox toolset: one pull request for the whole image',
+      matchFileNames: ['images/mate-sandbox/Dockerfile'],
+      groupName: 'mate sandbox toolset',
+      groupSlug: 'mate-sandbox-toolset',
+    },
+    {
+      // Two of the sandbox's tools have to be the versions the repo already
+      // runs, not merely current ones: Atlantis applies with the `opentofu`
+      // the root mise.toml names, and `docs:diagrams` commits d2's output, so
+      // a sandbox on a different d2 rewrites every SVG it touches. Renovate
+      // sees each of them twice — once through the mise manager reading
+      // mise.toml, once through the ARG in the Dockerfile — and left ungrouped
+      // the two PRs merge minutes or days apart. Grouping them means the skew
+      // never exists on main.
+      description: 'opentofu and d2: the repo pin and the sandbox image move together',
+      matchDepNames: ['opentofu', 'opentofu/opentofu', 'd2', 'terrastruct/d2'],
+      groupName: 'mate sandbox toolset',
+      groupSlug: 'mate-sandbox-toolset',
+    },
+    {
       // The crds chart and the stack chart each carry their own copy of the
       // same prometheus-operator CRDs. Offsite takes its CRDs from the crds
       // release and its operator from the stack, so splitting them into two

@@ -1,0 +1,48 @@
+# Baked into the sandbox image at /etc/mise/config.toml.
+#
+# mise is in the image for `mise run <task>` and nothing else: AGENTS.md makes
+# the task list the command source of truth, and the tasks encode the binary
+# and the flags an agent would otherwise have to guess at. Every tool those
+# tasks reach for is already a plain binary in /usr/local/bin, so mise has no
+# tool to manage here — and left alone it would still try to resolve `latest`
+# for each of them over egress the sandbox denies, which is measurably the
+# difference between a task starting in 41 ms and one starting in 1.6-2.5 s
+# behind a wall of resolution warnings.
+#
+# `disable_tools` names every tool the repo's own mise.toml declares, whether
+# or not the image carries it, because the cost is the resolution attempt
+# rather than the install. It is spelled out because mise reads `*` as a tool
+# named `*` and resolves the rest anyway.
+[settings]
+offline = true
+disable_tools = [
+  "1password-cli",
+  "age",
+  "bat",
+  "cilium-cli",
+  "conftest",
+  "d2",
+  "delta",
+  "eza",
+  "flux2",
+  "fzf",
+  "gcloud",
+  "github:tronbyt/pixlet",
+  "go",
+  "helm",
+  "jq",
+  "k9s",
+  "kubectl",
+  "kustomize",
+  "opentofu",
+  "powershell",
+  "promtool",
+  "rust",
+  "shellcheck",
+  "shfmt",
+  "sops",
+  "terraform",
+  "terraform-docs",
+  "vim",
+  "yq",
+]

@@ -179,18 +179,26 @@ function pullPolicy(image: string): string {
  * What the harness reads instead of the checkout's own `.opencode/`.
  *
  * AGENTS.md has to be named here. opencode finds the repo's skills by walking
- * up from the cwd whatever the project config is doing, so the agent already
- * arrives holding every `SKILL.md` under `.agents/skills/` — and none of the
- * hard rules those skills are written on top of, because instruction files
- * come with the project config this harness turns off. The path is absolute
- * because a relative one resolves against opencode's own config directory, and
- * neither that nor a file that is not there is reported: a wrong path here
- * fails open.
+ * up from the cwd for `.agents/` and `.claude/` whatever the project config is
+ * doing, so the agent already arrives holding every `SKILL.md` under
+ * `.agents/skills/` — and none of the hard rules those skills are written on
+ * top of, because instruction files come with the project config this harness
+ * turns off.
+ *
+ * That walk is also why `dotfiles/skills/` has to be named: it is neither of
+ * the two directory names, so the six skills in it are invisible to the agent
+ * until something points at them. Measured in a clone with `opencode debug
+ * skill`, the checkout offers 14 and the walk alone finds 8.
+ *
+ * Both paths are absolute because a relative one resolves against opencode's
+ * own config directory, and neither that nor a file that is not there is
+ * reported: a wrong path here fails open.
  */
 export function opencodeConfig(model: string): string {
   return JSON.stringify({
     model,
     instructions: [`${WORKSPACE}/AGENTS.md`],
+    skills: { paths: [`${WORKSPACE}/dotfiles/skills`] },
     permission: 'allow',
     autoupdate: false,
     share: 'disabled',
