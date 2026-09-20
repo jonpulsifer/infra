@@ -19,6 +19,8 @@ jq = "latest"
 k9s = "latest"
 kubectl = "latest"
 kustomize = "latest"
+# Provides pwsh so the Windows dotfiles can be linted on a Linux runner.
+powershell = "latest"
 promtool = "latest"
 rust = "1.98.1"
 shellcheck = "latest"
@@ -181,9 +183,16 @@ run = """
 mise run _scripts | xargs shellcheck
 """
 
+[tasks."lint:ps"]
+description = "Lint PowerShell with PSScriptAnalyzer"
+# The aqua-installed pwsh is a framework-dependent .NET build that wants libicu,
+# which NixOS does not put where it looks. Linting needs no locale data.
+env = { DOTNET_SYSTEM_GLOBALIZATION_INVARIANT = "1" }
+run = "pwsh -NoProfile -File dotfiles/windows/Invoke-Lint.ps1"
+
 [tasks.check]
 description = "Run format check and lint"
-depends = ["format:check", "lint"]
+depends = ["format:check", "lint", "lint:ps"]
 
 [tasks.deploy]
 description = "Run dotfiles bootstrap deployment"
