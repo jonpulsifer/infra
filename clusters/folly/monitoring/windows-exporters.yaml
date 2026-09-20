@@ -192,8 +192,18 @@ spec:
             message: "{{ $labels.instance }} fan {{ $labels.sensor }} reads 0 RPM while the CPU is above 70C"
             description: "Zero RPM is normal in a semi-passive curve, so this only fires once the CPU is already hot."
 
+        # The bundled LibreHardwareMonitor still calls a drive HDD, whatever
+        # it actually is, so the family is ohm_hdd_celsius and not the
+        # ohm_storage_celsius today's upstream enum would suggest. Matched as
+        # a name regex so an OhmGraphite bump onto a newer library does not
+        # silently stop this firing. The sensor filter matters too: the same
+        # family carries each drive's static Critical and Warning thresholds
+        # as sensors, which are 85-90 and would trip this constantly.
         - alert: WindowsStorageTempHigh
-          expr: max by (instance, hardware) (ohm_storage_celsius{sensor=~"Temperature.*"}) > 70
+          expr: |
+            max by (instance, hardware) (
+              {__name__=~"ohm_(hdd|storage)_celsius", sensor=~"Temperature.*"}
+            ) > 70
           for: 15m
           labels:
             severity: warning
