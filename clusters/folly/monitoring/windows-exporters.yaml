@@ -1,0 +1,202 @@
+---
+# The Windows desktops, scraped the same way the bare NixOS hosts are: a
+# hand-written EndpointSlice standing in for the endpoints a Service would
+# otherwise get from pod selection.
+#
+# Addresses come from the lab-topology ConfigMap, which is also what
+# terraform/network/unifi/folly/windows-hosts.tf reserves them from, so the
+# DHCP reservation and the scrape target cannot drift apart.
+apiVersion: discovery.k8s.io/v1
+kind: EndpointSlice
+metadata:
+  name: windows-exporters
+  namespace: monitoring
+  labels:
+    kubernetes.io/service-name: windows-exporters
+    lolwtf.ca/service: windows-exporter
+addressType: IPv4
+ports:
+  - name: http-metrics
+    port: 9182
+    protocol: TCP
+  # OhmGraphite, which reads the motherboard and GPU sensors through
+  # LibreHardwareMonitor. windows_exporter cannot: its thermalzone collector
+  # only sees ACPI zones, which on a desktop board is one number that means
+  # nothing. Separate port because it is a separate service.
+  - name: sensors
+    port: 4445
+    protocol: TCP
+endpoints:
+  - addresses: ["${TALLBOY_IP}"]
+    nodeName: tallboy
+  - addresses: ["${ATOMIC_IP}"]
+    nodeName: atomic
+--- # trivy:ignore:avd-ksv-0108
+apiVersion: v1
+kind: Service
+metadata:
+  name: windows-exporters
+  namespace: monitoring
+  labels:
+    lolwtf.ca/service: windows-exporter
+    jobLabel: windows-exporter
+spec:
+  ports:
+    - name: http-metrics
+      port: 9182
+      protocol: TCP
+      targetPort: 9182
+    - name: sensors
+      port: 4445
+      protocol: TCP
+      targetPort: 4445
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: windows-exporters
+  namespace: monitoring
+  labels:
+    lolwtf.ca/service: windows-exporter
+    release: prom-stack
+spec:
+  jobLabel: jobLabel
+  endpoints:
+    - port: http-metrics
+      # A desktop scrape is heavier than a Pi's — the service collector alone
+      # is a few thousand series — and nothing here needs sub-minute
+      # resolution.
+      interval: 60s
+      scrapeTimeout: 30s
+      relabelings:
+        - action: replace
+          sourceLabels: [__meta_kubernetes_endpointslice_endpoint_node_name]
+          targetLabel: instance
+    - port: sensors
+      # OhmGraphite polls the sensors on scrape rather than in the background,
+      # and reading a SuperIO chip is not instant.
+      interval: 60s
+      scrapeTimeout: 30s
+      relabelings:
+        - action: replace
+          sourceLabels: [__meta_kubernetes_endpointslice_endpoint_node_name]
+          targetLabel: instance
+  selector:
+    matchLabels:
+      lolwtf.ca/service: windows-exporter
+  namespaceSelector:
+    matchNames:
+      - monitoring
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: windows-exporters
+  namespace: monitoring
+  labels:
+    lolwtf.ca/service: windows-exporter
+    release: prom-stack
+spec:
+  groups:
+    - name: windows-exporters
+      # Deliberately no target-missing alert. These are desktops: powering one
+      # off is the normal case, and an alert that fires every night is an
+      # alert nobody reads. What is worth knowing is stated while the machine
+      # is up, so every rule here resolves on its own when the host goes away.
+      rules:
+        # Scoped to lettered volumes. The logical_disk collector also emits
+        # HarddiskVolumeN for the EFI system and recovery partitions, which are
+        # sized to their contents and sit permanently near full — unfiltered,
+        # they fire this alert forever on every host.
+        - alert: WindowsDiskFillingUp
+          expr: |
+            windows_logical_disk_free_bytes{volume=~"[A-Z]:"}
+              / windows_logical_disk_size_bytes{volume=~"[A-Z]:"} < 0.10
+          for: 30m
+          labels:
+            severity: warning
+          annotations:
+            message: "{{ $labels.instance }} volume {{ $labels.volume }} is {{ $value | humanizePercentage }} free"
+            description: "Windows gets unpleasant below about 10% free on the system volume — search indexing, update staging and hibernation all need headroom."
+
+        - alert: WindowsDiskCritical
+          expr: |
+            windows_logical_disk_free_bytes{volume=~"[A-Z]:"}
+              / windows_logical_disk_size_bytes{volume=~"[A-Z]:"} < 0.03
+          for: 15m
+          labels:
+            severity: critical
+          annotations:
+            message: "{{ $labels.instance }} volume {{ $labels.volume }} is {{ $value | humanizePercentage }} free"
+            description: "Below 3% free. Windows Update will fail and the pagefile cannot grow."
+
+        - alert: WindowsMemoryPressure
+          expr: |
+            windows_memory_available_bytes / windows_memory_physical_total_bytes < 0.05
+          for: 20m
+          labels:
+            severity: warning
+          annotations:
+            message: "{{ $labels.instance }} has {{ $value | humanizePercentage }} of RAM available"
+            description: "Sustained low available memory. Check the process collector or Task Manager for a leak."
+
+        # A collector that fails returns nothing rather than erroring the
+        # scrape, so the metrics it owns simply vanish and every rule built on
+        # them goes quiet. This is the only thing that notices.
+        - alert: WindowsCollectorFailing
+          expr: windows_exporter_collector_success == 0
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            message: "{{ $labels.instance }}: windows_exporter collector {{ $labels.collector }} is failing"
+            description: "Usually a missing or corrupted performance counter. `lodctr /R` from an elevated prompt rebuilds the counter registry."
+
+    - name: windows-sensors
+      # These read OhmGraphite, which names every series
+      # ohm_<hardwaretype>_<unit> and labels it with the LibreHardwareMonitor
+      # hardware and sensor strings (OhmGraphite/PrometheusCollection.cs).
+      # An NVIDIA card is hardware type `gpunvidia`; AMD and Intel are
+      # `gpuamd` and `gpuintel`, hence the regex rather than one name. Until
+      # OhmGraphite is installed on a host these series do not exist and
+      # nothing here can fire.
+      rules:
+        - alert: WindowsCpuTempHigh
+          expr: max by (instance) (ohm_cpu_celsius{sensor=~"CPU Package|CPU Core.*"}) > 90
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            message: "{{ $labels.instance }} CPU is at {{ $value | printf \"%.0f\" }}C"
+            description: "Sustained above 90C. Expect thermal throttling; check the fan curve and the dust."
+
+        - alert: WindowsGpuTempHigh
+          expr: |
+            max by (instance) ({__name__=~"ohm_gpu.+_celsius", sensor=~"GPU Core|GPU Hot Spot"}) > 88
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            message: "{{ $labels.instance }} GPU is at {{ $value | printf \"%.0f\" }}C"
+            description: "Sustained above 88C. Hot Spot runs well above Core — a widening gap between them is degraded thermal paste."
+
+        - alert: WindowsFanStopped
+          expr: |
+            {__name__=~"ohm_(superio|motherboard)_revolutions_per_minute"} == 0
+              and on (instance)
+            max by (instance) (ohm_cpu_celsius{sensor="CPU Package"}) > 70
+          for: 10m
+          labels:
+            severity: critical
+          annotations:
+            message: "{{ $labels.instance }} fan {{ $labels.sensor }} reads 0 RPM while the CPU is above 70C"
+            description: "Zero RPM is normal in a semi-passive curve, so this only fires once the CPU is already hot."
+
+        - alert: WindowsStorageTempHigh
+          expr: max by (instance, hardware) (ohm_storage_celsius{sensor=~"Temperature.*"}) > 70
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            message: "{{ $labels.instance }} drive {{ $labels.hardware }} is at {{ $value | printf \"%.0f\" }}C"
+            description: "NVMe drives throttle around 70C and shorten their life well before that."

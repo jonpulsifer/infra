@@ -313,6 +313,31 @@ resource "unifi_firewall_policy" "prometheus_windows_exporters" {
   }
 }
 
+# The sensor half of the same scrape. OhmGraphite listens on its own port
+# rather than inside windows_exporter, so the policy above does not cover it.
+resource "unifi_firewall_policy" "prometheus_windows_sensors" {
+  name                 = "Allow Prometheus Windows Sensors"
+  action               = "ALLOW"
+  protocol             = "tcp"
+  ip_version           = "BOTH"
+  create_allow_respond = true
+  enabled              = true
+  logging              = false
+
+  source = {
+    matching_target    = "ANY"
+    port_matching_type = "ANY"
+    zone_id            = unifi_firewall_zone.lab.id
+  }
+
+  destination = {
+    matching_target    = "ANY"
+    port               = "4445"
+    port_matching_type = "SPECIFIC"
+    zone_id            = data.unifi_firewall_zone.internal.id
+  }
+}
+
 resource "unifi_firewall_policy" "nest_k8s_to_folly_k8s" {
   name                 = "Allow Nest k8s to Folly k8s"
   action               = "ALLOW"

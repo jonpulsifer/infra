@@ -12,6 +12,8 @@
     "SPORE_IP": "10.2.0.11",
     "FORGE_IP": "10.2.0.12",
     "CLOUDPI4_IP": "10.2.0.20",
-    "RADIOPI0_IP": "10.2.0.24"
+    "RADIOPI0_IP": "10.2.0.24",
+    "TALLBOY_IP": "10.13.37.2",
+    "ATOMIC_IP": "10.1.0.5"
   }
 }
