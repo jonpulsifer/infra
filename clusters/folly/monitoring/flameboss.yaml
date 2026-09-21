@@ -63,13 +63,8 @@ spec:
           type: RuntimeDefault
       containers:
         - name: flameboss
-          # Unpinned for exactly one merge: continuous delivery pins a digest
-          # from the registry, and there is no digest to pin until this image
-          # has been built once. The pin and this image's entry in the deploy
-          # map of .github/containers.json land together once it exists; until
-          # then `Always` is what makes a rebuilt `latest` actually roll.
-          image: ghcr.io/jonpulsifer/flameboss:latest
-          imagePullPolicy: Always
+          image: ghcr.io/jonpulsifer/flameboss:latest@sha256:18fb682b3a716d2a6531c26a6d137b009025eb5ded0a3bfe72c362ec868e7a18
+          imagePullPolicy: IfNotPresent
           ports:
             - name: http-metrics
               containerPort: 8080

@@ -25,6 +25,9 @@
     "atlantis": [
       "clusters/offsite/apps/atlantis/helm-release.yaml"
     ],
+    "flameboss": [
+      "clusters/folly/monitoring/flameboss.yaml"
+    ],
     "hub": [
       "clusters/offsite/apps/hub/helm-release.yaml"
     ],
