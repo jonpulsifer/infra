@@ -55,6 +55,20 @@ export interface Instruments {
    */
   spares(ready: number, wanted: number): void;
   minted(result: MintResult, sample?: MintSample): void;
+  /**
+   * Whether mate can mint a GitHub token right now, as the boot preflight and
+   * its re-check last found. It reports nothing at all where no App is
+   * configured: unsetting `MATE_GITHUB_APP_ID` is the documented rollback, and
+   * a gauge that read 0 in that state would make the rollback ship a
+   * permanently firing critical alert. Downstream that absence looks like
+   * `absent()`, exactly as the identify-budget gauges above go quiet rather
+   * than hold a reading that has stopped being true.
+   */
+  githubAppReady(ready: boolean | null): void;
+  /** One attempt to mint a turn's token; `ok` is the only non-failure spelling. */
+  githubTokenMinted(result: string): void;
+  /** One attempt to write a minted token into its sandbox. */
+  githubTokenStamped(result: string): void;
   turnStarted(): void;
   turnEnded(reason: TurnEnd, sample: TurnSample): void;
   teardown(reason: TeardownReason): void;
@@ -67,6 +81,8 @@ let cached: { provider: MeterProvider; instruments: Instruments } | null = null;
  * instrument does not lose what it was last told.
  */
 let latest: { limit: SessionStartLimit; readAt: number } | null = null;
+/** `null` until a preflight has run, and for good where no App is configured. */
+let appReady: boolean | null = null;
 let live = 0;
 let queued = 0;
 /**
@@ -148,11 +164,17 @@ export function getInstruments(): Instruments {
   meter
     .createObservableGauge('mate_spares_wanted')
     .addCallback((result) => result.observe(pool.wanted));
+  meter.createObservableGauge('mate_github_app_ready').addCallback((result) => {
+    if (appReady === null) return;
+    result.observe(appReady ? 1 : 0);
+  });
   const closes = meter.createCounter('mate_gateway_closes_total');
   const mints = meter.createCounter('mate_mints_total');
   const turns = meter.createCounter('mate_turns_total');
   const ended = meter.createCounter('mate_turns_ended_total');
   const teardowns = meter.createCounter('mate_teardowns_total');
+  const tokenMints = meter.createCounter('mate_github_token_mints_total');
+  const tokenStamps = meter.createCounter('mate_github_token_stamps_total');
   const firstToken = meter.createHistogram(
     'mate_turn_first_token_milliseconds',
     { unit: 'ms' },
@@ -181,6 +203,11 @@ export function getInstruments(): Instruments {
     spares: (ready, wanted) => {
       pool = { ready, wanted };
     },
+    githubAppReady: (ready) => {
+      appReady = ready;
+    },
+    githubTokenMinted: (result) => tokenMints.add(1, { result }),
+    githubTokenStamped: (result) => tokenStamps.add(1, { result }),
     minted: (result, sample) => {
       mints.add(1, { result });
       if (!sample) return;
@@ -215,6 +242,9 @@ export function lazyInstruments(): Instruments {
     queueDepth: (depth) => getInstruments().queueDepth(depth),
     spares: (ready, wanted) => getInstruments().spares(ready, wanted),
     minted: (result, sample) => getInstruments().minted(result, sample),
+    githubAppReady: (ready) => getInstruments().githubAppReady(ready),
+    githubTokenMinted: (result) => getInstruments().githubTokenMinted(result),
+    githubTokenStamped: (result) => getInstruments().githubTokenStamped(result),
     turnStarted: () => getInstruments().turnStarted(),
     turnEnded: (reason, sample) => getInstruments().turnEnded(reason, sample),
     teardown: (reason) => getInstruments().teardown(reason),

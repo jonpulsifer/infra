@@ -26,10 +26,9 @@
 #     carries that modifier. The rest of the label set (`job`, `namespace`,
 #     `exported_job`, `otel_scope_name`, `container`, `endpoint`, `service`)
 #     is stable across a roll and is left to match.
-#   - Those same labels ride into the notification, so the three alerts that do
-#     not aggregate (MateGatewayFatalClose, MateSandboxesAtCap,
-#     MateIdentifyBudgetLow) arrive tagged with the collector's identity and
-#     group under `namespace="monitoring"`, while MateDown groups under
+#   - Those same labels ride into the notification, so every alert here that
+#     does not aggregate arrives tagged with the collector's identity and
+#     groups under `namespace="monitoring"`, while MateDown groups under
 #     `namespace="mate"`. Alertmanager groups by `cluster, namespace,
 #     alertname` and no inhibit rule crosses alertnames, so this costs a
 #     reader a moment rather than an alert. It is not papered over with a
@@ -220,6 +219,79 @@ spec:
           annotations:
             message: "mate cannot give a thread a sandbox"
             description: "More than two mints or attaches failed in the last thirty minutes, so a human asking mate a question is getting a plain refusal instead of an answer. A mint failure is the Sandbox never going Ready — the harness image digest, the kata-clh runtime class, or the namespace's restricted PSA. An attach failure is `pods/exec` into a Ready pod, which is the Role in ../../apps/mate/rbac.yaml or the harness not starting inside the sandbox."
+
+        # The credential nothing exercises until a human wants something from
+        # it — which is why mate exercises it on its own. A real end-to-end
+        # mint, JWT to installation to token, runs at boot and again on a
+        # timer rather than being inferred from how the last turn went, and
+        # this gauge is that result: 1 for a key that became a token, 0 for a
+        # key that could not. A sandbox
+        # holding no usable token still clones, still answers and still runs
+        # every command the agent writes: what it cannot do is push, so the
+        # turn ends one step short of the pull request it was for and says
+        # nothing about why. That is the failure this whole group exists for,
+        # and ten minutes is short enough to catch it inside one turn.
+        #
+        # Guarded on the Deployment for the reason MateNotReporting is: the
+        # collector holds a `mate_*` series for five minutes after the last
+        # point, so a mate that died holding a 0 would page here as well as
+        # under MateDown. The guard costs nothing in the case that matters,
+        # because a mate that cannot mint a token is otherwise perfectly
+        # healthy and its pod is Ready throughout.
+        #
+        # A mate that has no App configured at all is not a broken credential
+        # and reports nothing rather than 0 — the same honesty the
+        # identify-budget gauges practise, where a reading that is no longer a
+        # fact is withheld instead of held. So this cannot fire at a mate that
+        # was never asked to hold a GitHub identity.
+        - alert: MateGitHubCredentialBroken
+          expr: |
+            mate_github_app_ready == 0
+            and on()
+            kube_deployment_status_replicas_available{namespace="mate",deployment="mate"} > 0
+          for: 10m
+          labels:
+            severity: critical
+          annotations:
+            message: "mate cannot mint a GitHub token"
+            description: "mate has held an unusable GitHub App credential for ten minutes, so every sandbox it stamps gets a token that cannot push and every turn meant to end in a pull request ends one step short instead. mate says which half failed on the way up: `kubectl --context offsite logs -n mate deploy/mate | grep -i github`. A key that does not parse is the `mate-github-app` Secret and the ExternalSecret that fills it; a key that parses and is refused is the App — MATE_GITHUB_APP_ID on the Deployment, or the installation on `jonpulsifer/infra` having been removed. Runbooks/Mate GitHub Credential walks both."
+
+        # The intermittent half of the same credential. The gauge above is the
+        # state mate is in right now; this counts the mints that failed while
+        # that state reads fine — GitHub answering 5xx, a clock far enough out
+        # that the signed JWT is refused, an App being reinstalled underneath a
+        # running mate. Neither alert can stand in for the other: a credential
+        # that is broken continuously never produces a burst, and a burst that
+        # ends leaves the gauge back at 1.
+        #
+        # `result!="ok"` rather than a list of reasons, for the reason
+        # MateGatewayFatalClose matches on `fatal` rather than on close codes:
+        # the expression cannot drift from what mate actually records, and a
+        # reason added later is counted without an edit here. It is a contract
+        # on the instrument rather than a convenience — success is spelled
+        # `ok`, everything else is a failure — and the test beside this file
+        # holds mate to it with an `ok` series that climbs throughout.
+        #
+        # Two, where the mint and turn alerts above ask for three. A GitHub
+        # mint is one per turn against a daily budget of 120, so three failures
+        # inside half an hour is a burst this workload cannot make; two is the
+        # smallest number that is not one bad minute.
+        #
+        # The second arm is the birth described in the header.
+        - alert: MateGitHubTokenMintFailing
+          expr: |
+            sum(increase(mate_github_token_mints_total{result!="ok"}[30m])) > 1
+            or sum(
+              mate_github_token_mints_total{result!="ok"}
+              unless ignoring(pod, instance)
+              mate_github_token_mints_total{result!="ok"} offset 30m
+            ) > 1
+          for: 0m
+          labels:
+            severity: warning
+          annotations:
+            message: "mate is failing to mint GitHub tokens"
+            description: "More than one installation token mint failed in the last thirty minutes against a credential that is otherwise working, so some threads got a sandbox that cannot push and others did not. Read the reason mate recorded: `kubectl --context offsite logs -n mate deploy/mate | grep -i github`. Compare `mate_github_token_stamps_total`, which counts the step after this one — a token minted and written into the sandbox pod — because a mint that works and a stamp that does not leaves the same thread unable to push. Runbooks/Mate GitHub Credential has the checks."
 
         # The pool is the sandbox mate keeps warm so the next thread is handed
         # one instead of waiting out a cold start for it (MATE_SPARES on the

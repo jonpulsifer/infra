@@ -5,10 +5,11 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import type { SandboxConfig } from '../src/config.ts';
 import { Kube } from '../src/kube.ts';
 import type { PromptSink, SandboxRef, Update } from '../src/sandbox.ts';
+import type { TokenSource } from '../src/sandboxes.ts';
 import {
   HARNESS_CONTAINER,
   KubeSandboxes,
@@ -50,12 +51,12 @@ const config: SandboxConfig = {
   model: 'opencode-go/qwen3.8-flash',
   turnTimeoutMs: 4000,
   spares: 0,
-  credentials: {
+  vault: {
     connectHost:
       'http://onepassword-connect.external-secrets.svc.cluster.local:8080',
     connectSecret: 'mate-onepassword',
-    githubTokenRef: 'op://a-vault/an-item/password',
   },
+  github: true,
 };
 
 class Collect implements PromptSink {
@@ -109,22 +110,15 @@ function envOf(container: Record<string, any>): Record<string, any> {
 }
 
 /**
- * A directory to put first on PATH, holding a stand-in `op` with the body
- * given and a stand-in `timeout` that records the bound it was handed and then
- * execs what it was handed. Both leave a marker behind, so a test can ask
- * whether the helper reached them at all.
+ * A stand-in for the file mate stamps at the start of a turn, and the path to
+ * it. `null` leaves the file absent, which is what a sandbox looks like
+ * before its first turn and after its last one.
  */
-function fakeOp(body: string) {
-  const dir = mkdtempSync(join(tmpdir(), 'mate-op-'));
-  writeFileSync(join(dir, 'op'), `#!/bin/sh\n: >'${dir}/op.ran'\n${body}\n`, {
-    mode: 0o755,
-  });
-  writeFileSync(
-    join(dir, 'timeout'),
-    `#!/bin/sh\nprintf %s "$1" >'${dir}/timeout.bound'\nshift\nexec "$@"\n`,
-    { mode: 0o755 },
-  );
-  return dir;
+function tokenFile(contents: string | null): string {
+  const dir = mkdtempSync(join(tmpdir(), 'mate-token-'));
+  const path = join(dir, '.github-token');
+  if (contents !== null) writeFileSync(path, contents, { mode: 0o600 });
+  return path;
 }
 
 /**
@@ -135,13 +129,13 @@ function fakeOp(body: string) {
  * environment below is every helper git can find.
  */
 function credential(
-  bin: string,
+  token: string,
   operation: 'fill' | 'approve' | 'reject',
   host: string,
   global = '/dev/null',
 ) {
   const env: Record<string, string> = {
-    PATH: `${bin}:${process.env.PATH}`,
+    PATH: process.env.PATH ?? '',
     GIT_CONFIG_GLOBAL: global,
     GIT_CONFIG_SYSTEM: '/dev/null',
   };
@@ -151,11 +145,14 @@ function credential(
   }[]) {
     if (entry.value !== undefined) env[entry.name] = entry.value;
   }
+  // The one value the pod's own environment cannot supply here: the file lives
+  // at an absolute path inside the sandbox, and this test is not in one.
+  env.MATE_GITHUB_TOKEN_FILE = token;
   // `approve` and `reject` are given a credential to act on, the way git hands
   // back what a fill returned. A fill is given none, or git answers it from
   // stdin without asking a helper at all.
   const answer =
-    operation === 'fill' ? '' : 'username=rowbutt\npassword=a-pat\n';
+    operation === 'fill' ? '' : 'username=x-access-token\npassword=a-pat\n';
   return Bun.spawnSync(['git', 'credential', operation], {
     env,
     stdin: Buffer.from(`protocol=https\nhost=${host}\n${answer}\n`),
@@ -331,11 +328,15 @@ describe('mint', () => {
       expect(env.GIT_CONFIG_KEY_0.value).toBe('safe.directory');
       expect(env.GIT_CONFIG_VALUE_0.value).toBe(WORKSPACE);
       expect(env.GIT_CONFIG_KEY_1.value).toBe('user.name');
-      expect(env.GIT_CONFIG_VALUE_1.value).toBe('rowbutt');
+      expect(env.GIT_CONFIG_VALUE_1.value).toBe('mate-sandbox[bot]');
       expect(env.GIT_CONFIG_KEY_2.value).toBe('user.email');
       expect(env.GIT_CONFIG_VALUE_2.value).toBe(
-        '22780844+rowbutt@users.noreply.github.com',
+        'mate-sandbox[bot]@users.noreply.github.com',
       );
+      // Who a commit is from, which is not who the push authenticates as: an
+      // installation token's username is fixed by GitHub and appears only in
+      // the credential helper.
+      expect(env.GIT_CONFIG_VALUE_1.value).not.toBe('x-access-token');
     }
     // The checkout gets the ident and nothing else.
     const checkout = envOf(pod.initContainers[0]);
@@ -355,9 +356,7 @@ describe('mint', () => {
       key: 'OP_CONNECT_TOKEN',
       optional: true,
     });
-    expect(env.MATE_GITHUB_TOKEN_REF.value).toBe(
-      'op://a-vault/an-item/password',
-    );
+    expect(env.MATE_GITHUB_TOKEN_FILE.value).toBe('/home/agent/.github-token');
     // Never both authentication paths.
     expect(env.OP_SERVICE_ACCOUNT_TOKEN).toBeUndefined();
     // Whether an unanswered credential blocks otherwise depends on whether the
@@ -366,61 +365,58 @@ describe('mint', () => {
   });
 
   // The helper is a shell snippet git runs, so the only proof it is the right
-  // shape is git running it. Everything below the fake `op` is what
+  // shape is git running it. Everything but the token's path is what
   // `sandboxManifest` stamped, handed to git as the kubelet would hand it to
   // the container.
-  test('git fills a github.com credential with what op printed', async () => {
+  test('git fills a github.com credential from the file mate stamped', async () => {
     await sandboxes.mint(THREAD);
-    const dir = fakeOp('echo "a-pat-for($3)"');
+    const token = tokenFile('ghs-a-token');
 
-    const filled = credential(dir, 'fill', 'github.com');
-    expect(filled.stdout.toString()).toContain('username=rowbutt');
-    expect(filled.stdout.toString()).toContain(
-      'password=a-pat-for(op://a-vault/an-item/password)',
-    );
+    const filled = credential(token, 'fill', 'github.com');
+    // The username GitHub fixes for an installation token, which is not the
+    // name the same sandbox commits under.
+    expect(filled.stdout.toString()).toContain('username=x-access-token');
+    expect(filled.stdout.toString()).toContain('password=ghs-a-token');
 
     // Scoped to the one URL: no other host reaches this helper.
-    const other = credential(dir, 'fill', 'gitlab.com');
+    const other = credential(token, 'fill', 'gitlab.com');
     expect(other.exitCode).not.toBe(0);
     expect(other.stdout.toString()).not.toContain('password=');
 
     // The reset earns its line, proven by a decoy that wins without it.
-    const decoy = join(dir, 'decoy.gitconfig');
+    const decoy = join(dirname(token), 'decoy.gitconfig');
     writeFileSync(
       decoy,
-      '[credential]\n\thelper = "!echo username=somebody; echo password=not-the-pat"\n',
+      '[credential]\n\thelper = "!echo username=somebody; echo password=not-the-token"\n',
     );
-    const contested = credential(dir, 'fill', 'github.com', decoy);
-    expect(contested.stdout.toString()).toContain('username=rowbutt');
+    const contested = credential(token, 'fill', 'github.com', decoy);
+    expect(contested.stdout.toString()).toContain('username=x-access-token');
   });
 
-  // Both halves are about not hanging: a whole turn is what a stalled fill
-  // costs, and with MATE_MAX_CONCURRENT at 2 that is half the capacity.
-  test('a read that cannot answer fails the fill rather than stalling it', async () => {
+  // Both are a token that is not there, and the difference between them is
+  // the whole reason the emptiness is checked: a blank password is reported
+  // by GitHub as a rejected credential, which sends whoever reads it looking
+  // for a revoked token rather than a missing one.
+  test('a token that is absent or blank fails the fill rather than answering', async () => {
     await sandboxes.mint(THREAD);
 
-    const broken = fakeOp('exit 1');
-    const failed = credential(broken, 'fill', 'github.com');
-    expect(failed.exitCode).not.toBe(0);
-    expect(failed.stdout.toString()).not.toContain('password=');
-
-    // What this pins is that `op` is reached through a bound at all. That a
-    // bound which expires kills the child is coreutils' business, so no test
-    // here waits for one to fire.
-    const slow = fakeOp('echo a-pat');
-    expect(credential(slow, 'fill', 'github.com').exitCode).toBe(0);
-    const bound = Number(readFileSync(join(slow, 'timeout.bound'), 'utf8'));
-    expect(bound).toBeGreaterThan(0);
+    for (const contents of [null, '']) {
+      const missing = credential(tokenFile(contents), 'fill', 'github.com');
+      expect(missing.exitCode).not.toBe(0);
+      expect(missing.stdout.toString()).not.toContain('password=');
+    }
   });
 
   // `approve` and `reject` are git's names for the store and erase paths.
-  test('storing and erasing a credential never reach op', async () => {
+  // Pointed at a file that is not there, so a helper which read before
+  // checking the operation would fail instead of returning quietly.
+  test('storing and erasing a credential never read the token', async () => {
     await sandboxes.mint(THREAD);
 
     for (const operation of ['approve', 'reject'] as const) {
-      const dir = fakeOp('echo a-pat');
-      expect(credential(dir, operation, 'github.com').exitCode).toBe(0);
-      expect(existsSync(join(dir, 'op.ran'))).toBe(false);
+      const result = credential(tokenFile(null), operation, 'github.com');
+      expect(result.exitCode).toBe(0);
+      expect(result.stdout.toString()).not.toContain('password=');
     }
   });
 
@@ -446,8 +442,8 @@ describe('mint', () => {
     for (const name of read) expect(env[name]).toBeDefined();
 
     // That wrapper is the whole of how gh gets a token, which is the point:
-    // what the pod holds is a reference and the means to read it, never a
-    // credential that outlives the command asking for one.
+    // what the pod holds is a path, and what is at that path is a credential
+    // that outlives no turn.
     expect(env.GH_TOKEN).toBeUndefined();
     expect(env.GITHUB_TOKEN).toBeUndefined();
   });
@@ -455,7 +451,7 @@ describe('mint', () => {
   test('hands the harness no credential path when none is configured', async () => {
     sandboxes = new KubeSandboxes({
       kube: new Kube(fake.config()),
-      config: { ...config, credentials: null },
+      config: { ...config, vault: null, github: false },
       guildId: GUILD,
       log,
     });
@@ -465,7 +461,7 @@ describe('mint', () => {
     expect(env.GIT_CONFIG_COUNT.value).toBe('3');
     expect(env.OP_CONNECT_HOST).toBeUndefined();
     expect(env.OP_CONNECT_TOKEN).toBeUndefined();
-    expect(env.MATE_GITHUB_TOKEN_REF).toBeUndefined();
+    expect(env.MATE_GITHUB_TOKEN_FILE).toBeUndefined();
   });
 
   test('waits for the controller to report Ready', async () => {
@@ -594,6 +590,116 @@ describe('attach', () => {
         new Collect(),
       ),
     ).rejects.toThrow(/not attached/);
+  });
+
+  // Everything about the turn's credential, driven through the same fake
+  // apiserver the harness runs on: a stamp is a one-shot exec beside the ACP
+  // stream, so what it sent and whether it ran are both readable here.
+  describe('the turn credential', () => {
+    class FakeApp implements TokenSource {
+      minted = 0;
+      readonly revoked: string[] = [];
+      failMint: Error | null = null;
+      async token(): Promise<{ token: string }> {
+        if (this.failMint) throw this.failMint;
+        this.minted += 1;
+        return { token: `ghs-token-${this.minted}` };
+      }
+      async revoke(token: string): Promise<void> {
+        this.revoked.push(token);
+      }
+    }
+
+    let app: FakeApp;
+
+    /** The same mate with a token source behind it, attached and ready to run. */
+    async function turning() {
+      app = new FakeApp();
+      sandboxes = new KubeSandboxes({
+        kube: new Kube(fake.config()),
+        config,
+        guildId: GUILD,
+        log,
+        metrics,
+        githubApp: app,
+      });
+      const ref = await sandboxes.mint(THREAD);
+      return sandboxes.attach(ref);
+    }
+
+    /** Every one-shot exec that wrote the token file, oldest first. */
+    function stamps() {
+      return fake.execs.filter((e) =>
+        e.command.some((word) => word.includes('.github-token')),
+      );
+    }
+
+    test('writes the token as an argument and never onto stdin', async () => {
+      const session = await turning();
+      await sandboxes.prompt(session, 'open a pull request', new Collect());
+
+      const [stamp] = stamps();
+      expect(stamp?.container).toBe(HARNESS_CONTAINER);
+      // argv, because the exec stream has no half-close: a command reading
+      // stdin would wait for an EOF that never arrives.
+      expect(stamp?.command).toEqual([
+        '/bin/sh',
+        '-c',
+        'umask 077; printf %s "$1" > /home/agent/.github-token',
+        'mate',
+        'ghs-token-1',
+      ]);
+      expect(stamp?.stdin.join('')).not.toContain('ghs-token-1');
+      expect(metrics.tokenMints).toEqual(['ok']);
+      expect(metrics.tokenStamps).toEqual(['ok']);
+    });
+
+    test('truncates the file and hands the token back when the turn ends', async () => {
+      const session = await turning();
+      await sandboxes.prompt(session, 'hi', new Collect());
+
+      // Two stamps: the token going in, and the empty string clearing it.
+      const wrote = stamps().map((e) => e.command.at(-1));
+      expect(wrote).toEqual(['ghs-token-1', '']);
+      expect(app.revoked).toEqual(['ghs-token-1']);
+    });
+
+    test('answers the turn anyway when no token can be minted', async () => {
+      const session = await turning();
+      app.failMint = new Error('422 from GitHub');
+
+      // The thread still gets its answer: a sandbox that cannot push can
+      // still read and explain, and taking the turn away would make a
+      // degraded feature an outage.
+      const result = await sandboxes.prompt(session, 'hi', new Collect());
+      expect(result.stopReason).toBe('end_turn');
+      // Truncated rather than left alone, so no turn ever pushes with the
+      // credential of a turn that has already ended.
+      expect(stamps().map((e) => e.command.at(-1))).toEqual(['']);
+      expect(metrics.tokenMints).toEqual(['mint-failed']);
+      expect(app.revoked).toEqual([]);
+      expect(
+        log.of('could not mint a GitHub token for this turn'),
+      ).toHaveLength(1);
+    });
+
+    test('spends the token at once when it cannot be stamped', async () => {
+      const session = await turning();
+      fake.commandFails = 'container not found';
+
+      const result = await sandboxes.prompt(session, 'hi', new Collect());
+      expect(result.stopReason).toBe('end_turn');
+      // It reached nobody, so nothing is served by letting it live its hour.
+      expect(app.revoked).toEqual(['ghs-token-1']);
+      expect(metrics.tokenStamps).toEqual(['stamp-failed']);
+    });
+
+    test('stamps nothing at all with no App configured', async () => {
+      const ref = await sandboxes.mint(THREAD);
+      const session = await sandboxes.attach(ref);
+      await sandboxes.prompt(session, 'hi', new Collect());
+      expect(stamps()).toEqual([]);
+    });
   });
 
   test('caps and redacts what the harness prints', async () => {

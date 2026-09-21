@@ -236,16 +236,23 @@ RUN set -eux; \
 # The `gh` above is the wrapper with nothing to resolve, which proves the half
 # of it that execs straight through. This is the other half, and it is proven
 # here because the alternative is the first thread that needs a pull request
-# finding out: a stand-in `op` first on PATH prints a token, and `gh auth token`
-# — which reports the credential gh would use and talks to no network to do it
-# — has to print the same one back.
+# finding out: a stand-in for the file mate stamps, and `gh auth token` —
+# which reports the credential gh would use and talks to no network to do it —
+# has to print back what is in it.
+#
+# The empty case is proven beside it, because it is not an edge: mate
+# truncates the file at the end of every turn, so an empty file is what the
+# wrapper meets most of the time it is run outside one. Answering it with an
+# exported empty GH_TOKEN would put gh back to reporting no credential at all.
 RUN set -eux; \
     d="$(mktemp -d)"; \
-    { echo '#!/bin/sh'; echo 'printf %s "a-pat-for($3)"'; } >"$d/op"; \
-    chmod 0755 "$d/op"; \
-    token="$(PATH="$d:$PATH" GH_CONFIG_DIR="$d/gh" \
-             MATE_GITHUB_TOKEN_REF=op://v/i/f gh auth token)"; \
-    test "$token" = 'a-pat-for(op://v/i/f)'; \
+    printf %s 'ghs-a-token' >"$d/token"; \
+    token="$(GH_CONFIG_DIR="$d/gh" MATE_GITHUB_TOKEN_FILE="$d/token" \
+             gh auth token)"; \
+    test "$token" = 'ghs-a-token'; \
+    : >"$d/token"; \
+    ! GH_CONFIG_DIR="$d/gh" MATE_GITHUB_TOKEN_FILE="$d/token" \
+      gh auth token >/dev/null 2>&1; \
     rm -rf "$d"
 
 ENTRYPOINT ["/usr/bin/tini", "--"]

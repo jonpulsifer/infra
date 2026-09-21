@@ -18,7 +18,11 @@
 #     once rather than twice;
 #   - MateSandboxesAtCap needs the condition to have held for a real three
 #     quarters of an hour, not merely for as long as Prometheus has been
-#     running.
+#     running;
+#   - the two GitHub credential alerts divide one failure between them without
+#     overlapping — the gauge is guarded so a dead mate pages once, and the
+#     mint counter counts only the results that are not `ok`, which is the
+#     contract that expression rests on and the only place it is checked.
 rule_files:
   - mate.yaml
 
@@ -202,6 +206,115 @@ tests:
         alertname: MateSandboxMintFailing
         exp_alerts: []
 
+  # mate is up, ready and answering, and the key it holds will not become an
+  # installation token. Nothing else in this group can see that: the sandbox
+  # still mints, the turn still runs, and the answer still arrives.
+  - interval: 1m
+    input_series:
+      - series: 'kube_deployment_status_replicas_available{namespace="mate",deployment="mate",job="kube-state-metrics",instance="10.101.1.123:8080"}'
+        values: 1x30
+      - series: 'mate_github_app_ready{exported_job="mate",otel_scope_name="mate",job="opentelemetry-collector",namespace="monitoring",instance="10.101.1.173:8889"}'
+        values: 0x30
+    alert_rule_test:
+      - eval_time: 9m
+        alertname: MateGitHubCredentialBroken
+        exp_alerts: []
+      - eval_time: 12m
+        alertname: MateGitHubCredentialBroken
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              exported_job: mate
+              otel_scope_name: mate
+              job: opentelemetry-collector
+              namespace: monitoring
+              instance: 10.101.1.173:8889
+            exp_annotations:
+              message: "mate cannot mint a GitHub token"
+              description: "mate has held an unusable GitHub App credential for ten minutes, so every sandbox it stamps gets a token that cannot push and every turn meant to end in a pull request ends one step short instead. mate says which half failed on the way up: `kubectl --context offsite logs -n mate deploy/mate | grep -i github`. A key that does not parse is the `mate-github-app` Secret and the ExternalSecret that fills it; a key that parses and is refused is the App — MATE_GITHUB_APP_ID on the Deployment, or the installation on `jonpulsifer/infra` having been removed. Runbooks/Mate GitHub Credential walks both."
+
+  # The guard. mate is gone and the collector is still serving the last
+  # reading it took, which is a 0 belonging to a process that no longer
+  # exists. MateDown is the alert for that, and this one stays quiet so the
+  # outage pages once.
+  - interval: 1m
+    input_series:
+      - series: 'kube_deployment_status_replicas_available{namespace="mate",deployment="mate",job="kube-state-metrics",instance="10.101.1.123:8080"}'
+        values: 0x30
+      - series: 'mate_github_app_ready{exported_job="mate",otel_scope_name="mate",job="opentelemetry-collector",namespace="monitoring",instance="10.101.1.173:8889"}'
+        values: 0x30
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: MateGitHubCredentialBroken
+        exp_alerts: []
+
+  # A credential that works, which is every other minute of mate's life.
+  - interval: 1m
+    input_series:
+      - series: 'kube_deployment_status_replicas_available{namespace="mate",deployment="mate",job="kube-state-metrics",instance="10.101.1.123:8080"}'
+        values: 1x30
+      - series: 'mate_github_app_ready{exported_job="mate",otel_scope_name="mate",job="opentelemetry-collector",namespace="monitoring",instance="10.101.1.173:8889"}'
+        values: 1x30
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: MateGitHubCredentialBroken
+        exp_alerts: []
+
+  # Mints failing in a burst while the credential itself reads fine, then
+  # stopping. The successful mints climbing throughout are what prove the
+  # `result!="ok"` matcher is doing the work rather than counting everything.
+  - interval: 1m
+    input_series:
+      - series: 'mate_github_token_mints_total{result="mint-failed",exported_job="mate",otel_scope_name="mate",job="opentelemetry-collector",namespace="monitoring",instance="10.101.1.173:8889"}'
+        values: 1+1x2 3x62
+      - series: 'mate_github_token_mints_total{result="ok",exported_job="mate",otel_scope_name="mate",job="opentelemetry-collector",namespace="monitoring",instance="10.101.1.173:8889"}'
+        values: 1+10x63
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: MateGitHubTokenMintFailing
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+            exp_annotations:
+              message: "mate is failing to mint GitHub tokens"
+              description: "More than one installation token mint failed in the last thirty minutes against a credential that is otherwise working, so some threads got a sandbox that cannot push and others did not. Read the reason mate recorded: `kubectl --context offsite logs -n mate deploy/mate | grep -i github`. Compare `mate_github_token_stamps_total`, which counts the step after this one — a token minted and written into the sandbox pod — because a mint that works and a stamp that does not leaves the same thread unable to push. Runbooks/Mate GitHub Credential has the checks."
+      # Half an hour of nothing failing, so it clears itself.
+      - eval_time: 60m
+        alertname: MateGitHubTokenMintFailing
+        exp_alerts: []
+
+  # The birth arm. mate restarted, the collector expired the old series, and
+  # the label set comes back already carrying its failures — which `increase()`
+  # reads as no failures at all, because it has nothing to subtract from.
+  - interval: 1m
+    input_series:
+      - series: 'mate_github_token_mints_total{result="mint-failed",exported_job="mate",otel_scope_name="mate",job="opentelemetry-collector",namespace="monitoring",instance="10.101.1.173:8889"}'
+        values: 2x70
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: MateGitHubTokenMintFailing
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+            exp_annotations:
+              message: "mate is failing to mint GitHub tokens"
+              description: "More than one installation token mint failed in the last thirty minutes against a credential that is otherwise working, so some threads got a sandbox that cannot push and others did not. Read the reason mate recorded: `kubectl --context offsite logs -n mate deploy/mate | grep -i github`. Compare `mate_github_token_stamps_total`, which counts the step after this one — a token minted and written into the sandbox pod — because a mint that works and a stamp that does not leaves the same thread unable to push. Runbooks/Mate GitHub Credential has the checks."
+      # An hour on, the series is no longer new and has not moved, so the
+      # birth clears rather than holding on a count that stays true forever.
+      - eval_time: 60m
+        alertname: MateGitHubTokenMintFailing
+        exp_alerts: []
+
+  # One failure, born or otherwise, is a bad minute rather than an alert.
+  - interval: 1m
+    input_series:
+      - series: 'mate_github_token_mints_total{result="mint-failed",exported_job="mate",otel_scope_name="mate",job="opentelemetry-collector",namespace="monitoring",instance="10.101.1.173:8889"}'
+        values: 1x70
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: MateGitHubTokenMintFailing
+        exp_alerts: []
+
   # A collector roll, which is the failure mode these expressions are most
   # exposed to: `pod` and `instance` on a `mate_*` series belong to the
   # opentelemetry-collector, not to mate, so replacing that pod retires every
@@ -230,17 +343,24 @@ tests:
         values: 5x29 _x40
       - series: 'mate_mints_total{result="mint-failed",exported_job="mate",otel_scope_name="mate",job="opentelemetry-collector",namespace="monitoring",pod="opentelemetry-collector-6f8df4944d-jwcb7",instance="10.101.1.173:8889"}'
         values: _x29 5x40
+      - series: 'mate_github_token_mints_total{result="mint-failed",exported_job="mate",otel_scope_name="mate",job="opentelemetry-collector",namespace="monitoring",pod="opentelemetry-collector-68db544b7d-bwnt6",instance="10.101.0.154:8889"}'
+        values: 4x29 _x40
+      - series: 'mate_github_token_mints_total{result="mint-failed",exported_job="mate",otel_scope_name="mate",job="opentelemetry-collector",namespace="monitoring",pod="opentelemetry-collector-6f8df4944d-jwcb7",instance="10.101.1.173:8889"}'
+        values: _x29 4x40
       - series: 'mate_sandboxes_live{exported_job="mate",otel_scope_name="mate",job="opentelemetry-collector",namespace="monitoring",pod="opentelemetry-collector-68db544b7d-bwnt6",instance="10.101.0.154:8889"}'
         values: 2x29 _x40
       - series: 'mate_sandboxes_live{exported_job="mate",otel_scope_name="mate",job="opentelemetry-collector",namespace="monitoring",pod="opentelemetry-collector-6f8df4944d-jwcb7",instance="10.101.1.173:8889"}'
         values: _x29 2x40
     alert_rule_test:
-      # Nothing failed across the roll, so neither counter alert may fire.
+      # Nothing failed across the roll, so no counter alert may fire.
       - eval_time: 50m
         alertname: MateTurnsFailing
         exp_alerts: []
       - eval_time: 50m
         alertname: MateSandboxMintFailing
+        exp_alerts: []
+      - eval_time: 50m
+        alertname: MateGitHubTokenMintFailing
         exp_alerts: []
       # The cap genuinely has been held for its full window, across the roll,
       # so this one must still fire.
