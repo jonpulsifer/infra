@@ -34,27 +34,29 @@ spec:
         - ports:
             - {port: "5060", protocol: UDP}
             - {port: "5060", protocol: TCP}
-    # RTP cannot be an FQDN rule and this is the honest reason: the media
-    # address arrives in an SDP body, from a host this pod never looked up. A
-    # toFQDNs egress rule permits the signalling and then silently drops every
-    # audio packet, which presents as a call that connects and is silent.
-    #
-    # Scoped as tightly as the fact allows — Asterisk's own RTP range, and only
-    # outbound. Narrowing it further needs the carrier's media ranges, which
-    # voip.ms does not publish as a stable list.
+    # RTP to the carrier cannot be an FQDN rule and this is the honest reason:
+    # the media address arrives in an SDP body, from a host this pod never
+    # looked up. A toFQDNs egress rule permits the signalling and then silently
+    # drops every audio packet — a call that connects and carries silence.
     - toEntities: [world]
       toPorts:
         - ports:
             - {port: "10000", endPort: 20000, protocol: UDP}
-    # cathy is a LAN host, not a cluster endpoint, so she is `world` to Cilium
-    # even though the packets never leave the building. This is the leg that
-    # rings her; the REGISTER that makes ringing possible is the ingress rule
-    # below.
+    # The handset. She is a LAN host, not a cluster endpoint, so she is `world`
+    # to Cilium even though the packets never leave the building.
+    #
+    # 5063 rather than 5060: lines 1-3 share 5060 and line 4 has always had its
+    # own port. Sending to 5060 would reach the lines still registered straight
+    # to voip.ms.
+    #
+    # The second range is the phone's own RTP window, read off its running
+    # config (RTP_Port_Min/Max). Omit it and the call sets up and is silent in
+    # one direction.
     - toCIDR: ["${CATHY_IP}/32"]
       toPorts:
         - ports:
-            - {port: "5060", protocol: UDP}
-            - {port: "5060", protocol: TCP}
+            - {port: "5063", protocol: UDP}
+            - {port: "16384", endPort: 16538, protocol: UDP}
   # The base policy names ingress rules, which makes ingress default-deny for
   # this endpoint — so without this the handset's REGISTER is dropped and the
   # only symptom is an endpoint that never comes online.
@@ -62,5 +64,8 @@ spec:
     - fromCIDR: ["${CATHY_IP}/32"]
       toPorts:
         - ports:
+            # SIP signalling and the media Asterisk receives.
             - {port: "5060", protocol: UDP}
-            - {port: "5060", protocol: TCP}
+            - {port: "10000", endPort: 20000, protocol: UDP}
+            # The provisioning profile the phone resyncs against.
+            - {port: "8080", protocol: TCP}

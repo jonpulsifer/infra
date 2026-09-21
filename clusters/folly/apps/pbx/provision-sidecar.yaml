@@ -1,0 +1,44 @@
+---
+# The provisioning server, patched into the shared Deployment because only
+# folly has a handset to provision. darkhttpd ships in the same image as
+# Asterisk, so this costs a container and no CI.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pbx
+  namespace: pbx
+spec:
+  template:
+    spec:
+      containers:
+        - name: provision
+          image: ghcr.io/jonpulsifer/asterisk:22.8.2
+          # Read-only, no directory listing, and bound above 1024 so it needs
+          # no capability the restricted profile would refuse.
+          command:
+            - /bin/darkhttpd
+            - /srv/provision
+            - --port
+            - "8080"
+            - --no-listing
+          ports:
+            - {name: provision, containerPort: 8080, protocol: TCP}
+          volumeMounts:
+            - name: provision
+              mountPath: /srv/provision
+              readOnly: true
+          livenessProbe:
+            httpGet: {path: /cathy.xml, port: provision}
+            periodSeconds: 60
+            failureThreshold: 3
+          securityContext:
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests: {cpu: 10m, memory: 16Mi}
+            limits: {memory: 32Mi}
+      volumes:
+        - name: provision
+          configMap: {name: pbx-provision, defaultMode: 0444}

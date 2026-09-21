@@ -5,7 +5,9 @@
 # registering.
 #
 # .100 is inside folly's LB pool (10.3.0.64/26) and well clear of the
-# sequential allocations, which as of writing reach .84.
+# sequential allocations, which as of writing reach .84. The value itself lives
+# in cluster-settings, because the provisioning profile has to name the same
+# address and a phone that resyncs against the wrong one goes quiet.
 apiVersion: v1
 kind: Service
 metadata:
@@ -14,7 +16,7 @@ metadata:
   labels:
     app.kubernetes.io/name: pbx
   annotations:
-    io.cilium/lb-ipam-ips: 10.3.0.100
+    io.cilium/lb-ipam-ips: ${PBX_SIP_VIP}
 spec:
   type: LoadBalancer
   selector:
@@ -22,3 +24,6 @@ spec:
   ports:
     - {name: sip-udp, port: 5060, targetPort: sip-udp, protocol: UDP}
     - {name: sip-tcp, port: 5060, targetPort: sip-tcp, protocol: TCP}
+    # The provisioning profile. Same address as the SIP service on purpose —
+    # the phone has one address for the PBX, not two.
+    - {name: provision, port: 80, targetPort: provision, protocol: TCP}

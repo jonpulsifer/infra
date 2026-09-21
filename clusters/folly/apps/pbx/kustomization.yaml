@@ -7,10 +7,40 @@ resources:
   - external-secret.yaml
   - network-policy.yaml
 
+patches:
+  - path: provision-sidecar.yaml
+
 namespace: pbx
 
 configMapGenerator:
+  # The handset's line-4 profile, served as a static file. Substitution stays
+  # ON for this one — unlike the Asterisk config it holds no ${...} of its own,
+  # and it has to learn the VIP from cluster-settings.
+  - name: pbx-provision
+    files:
+      - provision/cathy.xml
+
+  # The non-secret values render.sh substitutes. Separate from pbx-site because
+  # this one must go *through* Flux substitution and that one must not: the
+  # handset's address is owned by cluster-settings, and this is the only file
+  # in the app where a `${...}` means what Flux thinks it means.
+  - name: pbx-env
+    literals:
+      - PBX_CATHY_IP=${CATHY_IP}
+
   - name: pbx-site
     files:
       - config/pjsip.conf
       - config/extensions.conf
+    # Asterisk's dialplan and this render script are written in ${...}, which
+    # is also Flux's postBuild substitution syntax. Flux does not merely blank
+    # what it cannot resolve here — `${PBX_*}` and `${$name}` are not valid
+    # variable references, and envsubst fails the whole Kustomization with
+    # "missing closing brace", taking every other app on the cluster with it.
+    #
+    # Escaping each one as `$${...}` would work and would be unreadable, and
+    # every future dialplan line would have to remember. Opting the ConfigMap
+    # out is the version that cannot be got wrong later.
+    options:
+      annotations:
+        kustomize.toolkit.fluxcd.io/substitute: disabled

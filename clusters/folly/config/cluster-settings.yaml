@@ -21,3 +21,8 @@ data:
   # terraform/network/unifi/folly/clients.yaml holds the reservation this
   # mirrors, and voip.tf fails its plan if the two ever disagree.
   CATHY_IP: 10.1.0.151
+
+  # The PBX's LoadBalancer address. Pinned rather than assigned because two
+  # things outside this cluster hold it: the handset's SIP registration and the
+  # provisioning URL it resyncs against, both edited by hand on a desk phone.
+  PBX_SIP_VIP: 10.3.0.100

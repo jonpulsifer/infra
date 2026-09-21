@@ -30,6 +30,18 @@ configMapGenerator:
       - config/modules.conf
       - config/prometheus.conf
       - config/render.sh
+    # Asterisk's dialplan and this render script are written in ${...}, which
+    # is also Flux's postBuild substitution syntax. Flux does not merely blank
+    # what it cannot resolve here — `${PBX_*}` and `${$name}` are not valid
+    # variable references, and envsubst fails the whole Kustomization with
+    # "missing closing brace", taking every other app on the cluster with it.
+    #
+    # Escaping each one as `$${...}` would work and would be unreadable, and
+    # every future dialplan line would have to remember. Opting the ConfigMap
+    # out is the version that cannot be got wrong later.
+    options:
+      annotations:
+        kustomize.toolkit.fluxcd.io/substitute: disabled
 
 commonLabels:
   app.kubernetes.io/part-of: pbx
