@@ -29,7 +29,7 @@
     "@repo/archive": "workspace:*",
     "drizzle-orm": "0.45.2",
     "vercel": "59.16.0",
-    "zod": "4.6.4"
+    "zod": "4.6.5"
   },
   "devDependencies": {
     "@fontsource-variable/dm-sans": "5.3.0",
