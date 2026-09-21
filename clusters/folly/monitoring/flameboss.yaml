@@ -1,0 +1,146 @@
+# The barbecue, as a monitoring target.
+#
+# The Flame Boss controller publishes to Flame Boss's own cloud MQTT brokers,
+# never to the lab, so the only way to graph a cook is to be a client of that
+# cloud. apps/flameboss is that client: it follows the controller to whichever
+# server it is currently on and exports its `temps` uplinks as Prometheus
+# series, which is what makes a cook something Alertmanager can read. The
+# alerts are in flameboss-rules.yaml; the dashboard is in grafana-dashboards/.
+#
+# It lives in `monitoring` rather than an app namespace of its own because it
+# is an exporter — nothing else consumes it, and the ServiceMonitor,
+# PrometheusRule and dashboard that make it useful are all here.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: flameboss-credentials
+  namespace: monitoring
+type: Opaque
+stringData:
+  # Flux substitutes these from the `cluster-secrets` Secret; the plaintext
+  # lives only in clusters/folly/config/cluster-secrets.sops.yaml. The username
+  # is the `T-<user_id>` form from myflameboss.com/users/dev, and the exporter
+  # reads the account id out of it rather than keeping a third value in step.
+  username: ${SECRET_FLAMEBOSS_USERNAME}
+  password: ${SECRET_FLAMEBOSS_PASSWORD}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: flameboss
+  namespace: monitoring
+  labels:
+    app.kubernetes.io/name: flameboss
+    app.kubernetes.io/part-of: monitoring
+spec:
+  replicas: 1
+  # One MQTT client. A second pod would announce the same account, hold its own
+  # connections, and export the same cook twice under two instance labels.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: flameboss
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: flameboss
+        app.kubernetes.io/part-of: monitoring
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: flameboss
+          # Unpinned for exactly one merge: continuous delivery pins a digest
+          # from the registry, and there is no digest to pin until this image
+          # has been built once. The pin and this image's entry in the deploy
+          # map of .github/containers.json land together once it exists; until
+          # then `Always` is what makes a rebuilt `latest` actually roll.
+          image: ghcr.io/jonpulsifer/flameboss:latest
+          imagePullPolicy: Always
+          ports:
+            - name: http-metrics
+              containerPort: 8080
+              protocol: TCP
+          env:
+            - name: FLAMEBOSS_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: flameboss-credentials
+                  key: username
+            - name: FLAMEBOSS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: flameboss-credentials
+                  key: password
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http-metrics
+            initialDelaySeconds: 5
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http-metrics
+            initialDelaySeconds: 2
+            periodSeconds: 10
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            capabilities:
+              drop: ["ALL"]
+            seccompProfile:
+              type: RuntimeDefault
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              memory: 64Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: flameboss
+  namespace: monitoring
+  labels:
+    lolwtf.ca/service: flameboss
+    jobLabel: flameboss
+spec:
+  selector:
+    app.kubernetes.io/name: flameboss
+  ports:
+    - name: http-metrics
+      port: 8080
+      protocol: TCP
+      targetPort: http-metrics
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: flameboss
+  namespace: monitoring
+  labels:
+    lolwtf.ca/service: flameboss
+    release: prom-stack
+spec:
+  jobLabel: jobLabel
+  # The controller publishes about once a minute while it holds a steady pit,
+  # and far more often while the fire is moving. A 30s scrape is one sample per
+  # reading at worst and never the limiting factor on the graph.
+  endpoints:
+    - port: http-metrics
+      interval: 30s
+  selector:
+    matchLabels:
+      lolwtf.ca/service: flameboss
+  namespaceSelector:
+    matchNames:
+      - monitoring

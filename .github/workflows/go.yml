@@ -18,6 +18,7 @@ on:
     paths:
       - 'apps/bosun/**'
       - 'apps/ddnsd/**'
+      - 'apps/flameboss/**'
       - 'apps/fml-attest/**'
       - 'apps/fml-ceremony/**'
       - 'apps/fml-pki/**'
@@ -30,6 +31,7 @@ on:
     paths:
       - 'apps/bosun/**'
       - 'apps/ddnsd/**'
+      - 'apps/flameboss/**'
       - 'apps/fml-attest/**'
       - 'apps/fml-ceremony/**'
       - 'apps/fml-pki/**'
@@ -55,6 +57,7 @@ jobs:
         module:
           - apps/bosun
           - apps/ddnsd
+          - apps/flameboss
           - apps/fml-attest
           - apps/fml-ceremony
           - apps/fml-pki

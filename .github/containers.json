@@ -3,6 +3,7 @@
   "build": [
     "ai-agents",
     "ddnsd",
+    "flameboss",
     "netbench",
     "rackstat",
     "atlantis",

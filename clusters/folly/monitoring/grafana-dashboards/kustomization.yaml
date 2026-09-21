@@ -6,6 +6,7 @@ configMapGenerator:
   - name: dashboards
     files:
       - coredns.json
+      - flameboss.json
       - spore.json
       - windows.json
 generatorOptions:

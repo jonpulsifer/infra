@@ -21,6 +21,7 @@ icon:: 🚒
 	- [[Runbooks/Developer Connect GitHub OAuth]] — one-time browser authorization that moves the trusted-builds GitHub connection from PENDING_USER_OAUTH to COMPLETE
 	- [[Runbooks/Bootstrap a Windows Desk]] — the Windows side of the desk: one-liner installer, winget desired state, the riced PowerShell profile, and why nothing symlinks across the WSL boundary
 	- [[Runbooks/Windows Host Monitoring]] — the Windows desktops: windows_exporter, the sensor exporter that supplies the temperatures it cannot, and Event Log into VictoriaLogs
+	- [[Runbooks/Flame Boss Cook Monitoring]] — the barbecue as a monitoring target: how a cook reaches Prometheus from Flame Boss's cloud, why the dashboard is empty between cooks, and what each alert means
 	- [[Runbooks/Smiirl Counter]] — the split-flap counter that thinks the lab is Smiirl's cloud: checks, the byte-exact internet check, out-of-sync flaps and the firmware's calibration wizard
 - ## Conventions
 	- Tag runbook pages `#runbook`, lead with quick checks, then symptom-shaped sections ("If X…"), each with copy-pasteable commands and expected output.

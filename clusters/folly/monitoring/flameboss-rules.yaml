@@ -1,0 +1,150 @@
+# Alerts on a cook.
+#
+# Everything here reads the series apps/flameboss exports from the controller's
+# `temps` uplinks (see flameboss.yaml). Two of those series exist to make these
+# expressions honest:
+#
+#   - `flameboss_cook_active` is 1 only while telemetry is arriving, and the
+#     cook's series disappear entirely half an hour after the last reading. A
+#     cold pit therefore never graphs or alerts as a live cook, and the silence
+#     alert resolves on its own instead of firing until someone acknowledges a
+#     barbecue that has been put away.
+#   - `flameboss_pit_reached_target` latches once the pit has come within 5F of
+#     set during this cook. Without it every alert about the pit being below set
+#     would fire on the way up from ambient, which is every cook.
+#
+# Thresholds are in Fahrenheit and are meant to be edited: they are one cook's
+# tolerances, not a law. 203F is the pull point for a brisket or a butt; a
+# chicken wants 165F and a rib roast half that.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: flameboss
+  namespace: monitoring
+  labels:
+    lolwtf.ca/service: flameboss
+    release: prom-stack
+spec:
+  groups:
+    - name: flameboss
+      rules:
+        # The "there is a cook" notification. `pit_reached_target == 0` is what
+        # keeps it to the start of a fire: a cook whose pit is already settled
+        # is one this exporter joined late, not one that just started.
+        - alert: FlameBossCookStarted
+          expr: |
+            flameboss_cook_active == 1
+              and flameboss_pit_reached_target == 0
+              and (time() - flameboss_cook_start_timestamp_seconds) < 900
+          for: 2m
+          labels:
+            severity: info
+          annotations:
+            message: "A cook has started on Flame Boss {{ $labels.device }}"
+            description: "Telemetry is arriving and the pit has not reached its set temperature yet, so the fire is coming up. The dashboard is Grafana -> Flame Boss; the cook's own log is at https://myflameboss.com/en/cooks. This clears itself once the pit settles."
+
+        - alert: FlameBossPitBelowTarget
+          # The deficit leads the expression because `and` takes its value
+          # from the left-hand side, and this alert's whole message is that
+          # number. Written the other way round it reads "Pit is 1F below set".
+          expr: |
+            (flameboss_pit_target_fahrenheit - flameboss_pit_temp_fahrenheit) > 25
+              and flameboss_cook_active == 1
+              and flameboss_pit_reached_target == 1
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            message: "Pit is {{ $value | printf \"%.0f\" }}F below set on Flame Boss {{ $labels.device }}"
+            description: "The pit held its set temperature earlier in this cook and has now been more than 25F under it for ten minutes. The blower cannot fix a fire that has gone out or an intake that is closed: look at the coals. FlameBossFireStarving fires alongside this one when the blower is already flat out, which is the fuel-exhausted case."
+
+        - alert: FlameBossPitAboveTarget
+          expr: |
+            (flameboss_pit_temp_fahrenheit - flameboss_pit_target_fahrenheit) > 30
+              and flameboss_cook_active == 1
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            message: "Pit is {{ $value | printf \"%.0f\" }}F over set on Flame Boss {{ $labels.device }}"
+            description: "The controller can only slow a fire by starving it of air, so a sustained overshoot is a damper left open, a lid not seated, or too much lit charcoal. Close the top vent before the cook renders out."
+
+        - alert: FlameBossFireStarving
+          expr: |
+            (flameboss_pit_target_fahrenheit - flameboss_pit_temp_fahrenheit) > 15
+              and flameboss_cook_active == 1
+              and flameboss_pit_reached_target == 1
+              and flameboss_blower_percent >= 99
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            message: "Blower flat out and {{ $value | printf \"%.0f\" }}F under set on Flame Boss {{ $labels.device }}"
+            description: "Fifteen minutes at 100% duty cycle with the pit still under set. The controller has nothing left to give: the charcoal is spent, the fire has tunnelled, or the lid is open. Add fuel."
+
+        - alert: FlameBossPitProbeDisconnected
+          expr: flameboss_cook_active == 1 and flameboss_pit_probe_connected == 0
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            message: "Pit probe is unplugged on Flame Boss {{ $labels.device }}"
+            description: "The controller regulates the blower from the pit probe, so without it there is no control loop -- only a fan and a guess. Reseat the probe."
+
+        # 203F is where a brisket or a pork butt gives up. This one is meant to
+        # keep nagging: it stays firing until the meat comes off and the cook
+        # ends, which is the point.
+        - alert: FlameBossMeatProbeAtTarget
+          expr: |
+            flameboss_probe_temp_fahrenheit >= 203
+              and on (device) flameboss_cook_active == 1
+          for: 1m
+          labels:
+            severity: warning
+          annotations:
+            message: "Probe {{ $labels.probe }} is at {{ $value | printf \"%.0f\" }}F on Flame Boss {{ $labels.device }}"
+            description: "The meat has reached the pull temperature for a brisket or a butt. Probe for tenderness and get it off the heat or into a rest."
+
+        - alert: FlameBossMeatProbeAtWrapPoint
+          expr: |
+            flameboss_probe_temp_fahrenheit >= 165
+              and on (device) flameboss_cook_active == 1
+          for: 1m
+          labels:
+            severity: info
+          annotations:
+            message: "Probe {{ $labels.probe }} is at {{ $value | printf \"%.0f\" }}F on Flame Boss {{ $labels.device }}"
+            description: "Through the stall and at the usual wrap point, and done for anything poultry. FlameBossMeatProbeAtTarget follows at 203F."
+
+        # Silence, which is either the cook ending or the controller losing
+        # power or wifi in the middle of one. The series carrying this
+        # expression is dropped half an hour after the last reading, and that is
+        # what resolves the alert.
+        - alert: FlameBossCookSilent
+          expr: flameboss_cook_active == 0
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            message: "Cook {{ $labels.device }} has gone quiet"
+            description: "No reading for five minutes from a controller that was cooking. If the cook is over and it was switched off, this resolves by itself half an hour after the last reading. If it is not over, the controller has lost power or wifi and the fire is now unattended."
+
+        - alert: FlameBossCloudUnreachable
+          expr: flameboss_broker_connected == 0
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            message: "No MQTT connection to {{ $labels.server }}"
+            description: "The exporter is running but cannot hold a connection to the Flame Boss cloud, so a cook would be invisible rather than quiet. Check the pod: `kubectl --context folly logs -n monitoring deploy/flameboss`. Credentials come from cluster-secrets and can be re-read at https://myflameboss.com/users/dev."
+
+        - alert: FlameBossExporterDown
+          expr: |
+            (up{namespace="monitoring", service="flameboss"} == 0)
+              or absent(up{namespace="monitoring", service="flameboss"})
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            message: "The Flame Boss exporter is not being scraped"
+            description: "Nothing is watching the barbecue. `kubectl --context folly -n monitoring get pods -l app.kubernetes.io/name=flameboss`. Fifteen minutes, because a deploy takes the only pod down first."
