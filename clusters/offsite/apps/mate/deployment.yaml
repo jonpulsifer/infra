@@ -216,15 +216,18 @@ spec:
             # tokens beside this one are read in, through this same Connect
             # server.
             #
-            # The token is a fine-grained PAT on rowbutt, this repository only,
-            # contents and pull requests writable. What reads it is the Connect
-            # token in the `mate-onepassword` Secret, which
+            # The token is a fine-grained PAT on `jonpulsifer`, scoped to this
+            # repository with contents and pull requests writable. What reads
+            # it is the Connect token in the `mate-onepassword` Secret, which
             # `external-secret.yaml` declares and where the vault boundary its
             # claims draw is written down. The sharp edge is the account rather
-            # than the scope: `rowbutt` is both an Atlantis allowed user and an
-            # Atlantis policy-set owner, so a pull-request comment made with
-            # this token can clear the policy gate and start a Terraform apply,
-            # and a successful apply merges the pull request to `main`.
+            # than the scope, and the account is the repository owner's own:
+            # `jonpulsifer` is both an Atlantis allowed user and an Atlantis
+            # policy-set owner, so a pull-request comment made with this token
+            # can clear the policy gate and start a Terraform apply, and a
+            # successful apply merges the pull request to `main`. Nothing
+            # distinguishes such a comment from one a human wrote, because
+            # nothing about it is a bot.
             - name: MATE_GITHUB_TOKEN_REF
               value: op://xf7fcsxke5yz32xqou4rsnrlqy/s7rxwheygnwhoh6esaqllism4i/pat
             # Gateway session info (session id, resume URL, sequence) lands
