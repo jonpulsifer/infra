@@ -10,3 +10,14 @@ data:
   # 1Password "oauth2-proxy: folly" — the App whose callback is on
   # oauth2.${SECRET_DOMAIN}.
   OAUTH2_PROXY_ITEM: iy4vkwkvbfhvm4kd2g6slnxlca
+
+  # The office handset. A network fact, which normally belongs in
+  # cluster-topology.json — but that ConfigMap describes the cluster, and this
+  # is a desk phone on Management. It lives here because the folly apps
+  # Kustomization substitutes this ConfigMap and does not substitute
+  # lab-topology.json, and because the PBX NetworkPolicy has to name the one
+  # host it may ring.
+  #
+  # terraform/network/unifi/folly/clients.yaml holds the reservation this
+  # mirrors, and voip.tf fails its plan if the two ever disagree.
+  CATHY_IP: 10.1.0.151

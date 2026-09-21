@@ -1,0 +1,16 @@
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: pbx
+  namespace: pbx
+  labels:
+    app.kubernetes.io/name: pbx
+    release: prom-stack
+spec:
+  endpoints:
+    - port: http-metrics
+      interval: 30s
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: pbx

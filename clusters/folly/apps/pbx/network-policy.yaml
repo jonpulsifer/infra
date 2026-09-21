@@ -1,0 +1,66 @@
+---
+# folly egress. Two destinations: the carrier, and the handset on the LAN.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: pbx-egress
+  namespace: pbx
+  labels:
+    app.kubernetes.io/name: pbx
+spec:
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/name: pbx
+  egress:
+    # toFQDNs below is enforced by Cilium's DNS proxy, which only sees lookups
+    # this rule routes through it. Without the matchPattern the carrier's name
+    # never resolves to an allowed identity and every REGISTER fails closed.
+    - toEndpoints:
+        - matchLabels:
+            io.kubernetes.pod.namespace: kube-system
+            k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - {port: "53", protocol: UDP}
+            - {port: "53", protocol: TCP}
+          rules:
+            dns:
+              - matchPattern: "*.voip.ms"
+              - matchPattern: voip.ms
+    - toFQDNs:
+        - matchPattern: "*.voip.ms"
+        - matchName: voip.ms
+      toPorts:
+        - ports:
+            - {port: "5060", protocol: UDP}
+            - {port: "5060", protocol: TCP}
+    # RTP cannot be an FQDN rule and this is the honest reason: the media
+    # address arrives in an SDP body, from a host this pod never looked up. A
+    # toFQDNs egress rule permits the signalling and then silently drops every
+    # audio packet, which presents as a call that connects and is silent.
+    #
+    # Scoped as tightly as the fact allows — Asterisk's own RTP range, and only
+    # outbound. Narrowing it further needs the carrier's media ranges, which
+    # voip.ms does not publish as a stable list.
+    - toEntities: [world]
+      toPorts:
+        - ports:
+            - {port: "10000", endPort: 20000, protocol: UDP}
+    # cathy is a LAN host, not a cluster endpoint, so she is `world` to Cilium
+    # even though the packets never leave the building. This is the leg that
+    # rings her; the REGISTER that makes ringing possible is the ingress rule
+    # below.
+    - toCIDR: ["${CATHY_IP}/32"]
+      toPorts:
+        - ports:
+            - {port: "5060", protocol: UDP}
+            - {port: "5060", protocol: TCP}
+  # The base policy names ingress rules, which makes ingress default-deny for
+  # this endpoint — so without this the handset's REGISTER is dropped and the
+  # only symptom is an endpoint that never comes online.
+  ingress:
+    - fromCIDR: ["${CATHY_IP}/32"]
+      toPorts:
+        - ports:
+            - {port: "5060", protocol: UDP}
+            - {port: "5060", protocol: TCP}

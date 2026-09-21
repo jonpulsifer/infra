@@ -1,3 +1,10 @@
+locals {
+  # The Flux ConfigMap the folly apps Kustomization substitutes from. Read as
+  # YAML rather than restated, so the precondition below compares this root
+  # against the file the cluster actually reconciles.
+  folly_settings = yamldecode(file("../../../../clusters/folly/config/cluster-settings.yaml"))
+}
+
 # The Cisco SPA504G in Jon's office. It registers over SIP and is the one
 # handset on this network, so anything that watches or talks to it — a
 # Prometheus target, a syslog receiver, a PBX ACL — needs an address that
@@ -21,4 +28,16 @@ resource "unifi_client" "cathy" {
   # existing client instead of failing on one it did not create.
   allow_existing         = true
   skip_forget_on_destroy = true
+
+  # The folly PBX's NetworkPolicy names this address as the one LAN host it may
+  # ring, and Flux substitutes it from the cluster-settings ConfigMap — which
+  # cannot read this file. Two copies of a network fact drift silently, and the
+  # symptom would be a handset that registers and never rings. Fail the plan
+  # instead, the same way windows-hosts.tf guards lab-topology.json.
+  lifecycle {
+    precondition {
+      condition     = cidrhost(local.fml_cidr, local.clients.voip.cathy.ip) == local.folly_settings.data.CATHY_IP
+      error_message = "clusters/folly/config/cluster-settings.yaml's CATHY_IP disagrees with the clients.yaml octet for cathy."
+    }
+  }
 }

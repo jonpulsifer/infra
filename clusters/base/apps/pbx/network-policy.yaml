@@ -1,0 +1,31 @@
+---
+# Ingress only. Egress is declared per site, because what a PBX is allowed to
+# talk to is the one thing genuinely different between them — folly reaches one
+# voip.ms server, offsite reaches that and ElevenLabs.
+#
+# Naming any ingress rule makes ingress default-deny for this endpoint, which
+# is why the probe path is spelled out: `host` is the kubelet on this node
+# making the liveness request, and without it the container is killed every
+# thirty seconds by a probe the policy just dropped.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: pbx-ingress
+  namespace: pbx
+  labels:
+    app.kubernetes.io/name: pbx
+spec:
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/name: pbx
+  ingress:
+    - fromEntities: [host, remote-node]
+      toPorts:
+        - ports:
+            - {port: "8088", protocol: TCP}
+    - fromEndpoints:
+        - matchLabels:
+            io.kubernetes.pod.namespace: monitoring
+      toPorts:
+        - ports:
+            - {port: "8088", protocol: TCP}
