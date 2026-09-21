@@ -197,7 +197,7 @@ spec:
             # unanchored sed when the image is named without a digest beside
             # it, which would stamp this digest over mate's own.
             - name: MATE_SANDBOX_IMAGE
-              value: ghcr.io/jonpulsifer/mate-sandbox:latest@sha256:96aa00964d4ebd3572266099efb79ce9494cacb3e4033b632c38962b37f3fc69
+              value: ghcr.io/jonpulsifer/mate-sandbox:latest@sha256:cafba5ced9cdef3ddfb60db0fdc7cda704bf55441c7bac58ffaf06277c8b5cfd
             # Where the sandbox's git credential helper reads a GitHub token
             # from — vault, item and field in the one string `op read` takes.
             # It is configuration rather than a constant in mate because it
