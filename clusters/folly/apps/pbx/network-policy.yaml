@@ -47,8 +47,19 @@ spec:
         - ports:
             - {port: "10000", endPort: 20000, protocol: UDP}
     # cathy is a LAN host, not a cluster endpoint, so she is `world` to Cilium
-    # even though the packets never leave the building.
-    - toCIDR: ["10.1.0.151/32"]
+    # even though the packets never leave the building. This is the leg that
+    # rings her; the REGISTER that makes ringing possible is the ingress rule
+    # below.
+    - toCIDR: ["${CATHY_IP}/32"]
+      toPorts:
+        - ports:
+            - {port: "5060", protocol: UDP}
+            - {port: "5060", protocol: TCP}
+  # The base policy names ingress rules, which makes ingress default-deny for
+  # this endpoint — so without this the handset's REGISTER is dropped and the
+  # only symptom is an endpoint that never comes online.
+  ingress:
+    - fromCIDR: ["${CATHY_IP}/32"]
       toPorts:
         - ports:
             - {port: "5060", protocol: UDP}
