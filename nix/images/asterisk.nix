@@ -16,6 +16,7 @@
   bash,
   cacert,
   coreutils,
+  darkhttpd,
   dockerTools,
   gettext,
 }:
@@ -31,6 +32,10 @@ dockerTools.streamLayeredImage {
     # passwords arrive as environment variables from an ExternalSecret, and
     # Asterisk config files do not interpolate.
     gettext
+    # The provisioning server folly runs beside Asterisk. In the same image
+    # because it is one static directory served read-only on a LAN — a second
+    # image, and a second thing in CI, for 100KB of C.
+    darkhttpd
     cacert
   ];
 

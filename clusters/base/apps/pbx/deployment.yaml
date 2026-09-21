@@ -35,6 +35,11 @@ spec:
           envFrom:
             - secretRef:
                 name: pbx-secrets
+            # Optional because only folly generates it — offsite has no handset
+            # and so no non-secret site values to inject.
+            - configMapRef:
+                name: pbx-env
+                optional: true
           volumeMounts:
             - name: base-templates
               mountPath: /templates/base
