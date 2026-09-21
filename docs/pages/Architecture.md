@@ -1,7 +1,7 @@
 icon:: 🏗️
 tags:: architecture
 
-- The homelab is four layers, each managed as code in the [infra repo](https://github.com/jonpulsifer/infra), each with its own apply mechanism. Most day-to-day work happens in one layer at a time.
+- The homelab is four layers, each managed as code in the [infra repo](https://github.com/jonpulsifer/infra), each with its own apply mechanism. Most day-to-day work happens in one layer at a time, though cross-cutting concerns (networking, secrets) span them all.
 - ## The four layers
 	- ### Layer 1 — Bare metal ([[Architecture/NixOS]])
 		- NixOS configuration under `nix/` for every host. Declared in `flake.nix`, deployed with `nixos-rebuild`, self-healing via auto-upgrades that track `main`.
