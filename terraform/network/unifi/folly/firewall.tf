@@ -487,3 +487,46 @@ resource "unifi_firewall_policy" "folly_lb_to_nest_lan" {
     zone_id            = data.unifi_firewall_zone.vpn.id
   }
 }
+
+# The PBX and the handset it rings are in different zones, and nothing else
+# opens that direction. Management is a declared network, so unlike the
+# cross-site policies above this destination genuinely dispatches — the Lab ->
+# Internal chain is the one consulted, and it has no general allow.
+#
+# Both halves of a call need it, for different reasons:
+#
+#   - cathy REGISTERs to the LB VIP. The VIP is BGP-learned and in no zone, so
+#     her SYN takes Internal's -> WAN fall-through and is accepted; the reply is
+#     sourced from the VIP, which *is* in the Lab zone, and dies on Lab ->
+#     Internal. Same shape as folly_lb_to_nest_lan.
+#   - Ringing her is an INVITE the pod originates, SNAT'd to its node. That is
+#     the node CIDR, also Lab.
+#
+# So the source is folly_k8s_cidrs rather than just the LB range: drop the pod
+# and node prefixes and inbound calls reach Asterisk and never reach the phone.
+# The destination is one host — this is a desk phone, not a subnet — and the
+# ports are ANY because SIP signalling on 5060 and the RTP range travel
+# together and a port list here would be a second place to keep them in sync.
+resource "unifi_firewall_policy" "folly_pbx_to_handset" {
+  name                 = "Allow Folly PBX to Office Handset"
+  action               = "ALLOW"
+  protocol             = "all"
+  ip_version           = "BOTH"
+  create_allow_respond = true
+  enabled              = true
+  logging              = false
+
+  source = {
+    matching_target    = "IP"
+    ips                = local.folly_k8s_cidrs
+    port_matching_type = "ANY"
+    zone_id            = unifi_firewall_zone.lab.id
+  }
+
+  destination = {
+    matching_target    = "IP"
+    ips                = ["${cidrhost(local.fml_cidr, local.clients.voip.cathy.ip)}/32"]
+    port_matching_type = "ANY"
+    zone_id            = data.unifi_firewall_zone.internal.id
+  }
+}
