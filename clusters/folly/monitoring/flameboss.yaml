@@ -48,6 +48,13 @@ spec:
         app.kubernetes.io/part-of: monitoring
     spec:
       automountServiceAccountToken: false
+      # Off, because the Service in front of this pod is called `flameboss` and
+      # the link variables Kubernetes injects for it are named after it:
+      # `FLAMEBOSS_PORT=tcp://10.10.22.180:8080` landed on top of the exporter's
+      # own `FLAMEBOSS_PORT` and the process exited on "not a number". The pod
+      # reaches the Flame Boss cloud and nothing in the cluster, so it has no
+      # use for any of them.
+      enableServiceLinks: false
       securityContext:
         runAsNonRoot: true
         runAsUser: 65532
