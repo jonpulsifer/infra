@@ -1,0 +1,15 @@
+---
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ../../../base/apps/pbx
+  - external-secret.yaml
+  - network-policy.yaml
+
+namespace: pbx
+
+configMapGenerator:
+  - name: pbx-site
+    files:
+      - config/pjsip.conf
+      - config/extensions.conf

@@ -1,0 +1,126 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pbx
+  namespace: pbx
+spec:
+  # One. Two Asterisks would both register the same voip.ms sub-account and the
+  # carrier would deliver each inbound call to whichever registered last.
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: pbx
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: pbx
+    spec:
+      hostUsers: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      initContainers:
+        # Renders the templates into the config directory the main container
+        # reads. Same image, because the tool doing the rendering ships in it.
+        - name: render-config
+          image: ghcr.io/jonpulsifer/asterisk:22.8.2
+          command: ["/bin/bash", "/templates/base/render.sh"]
+          envFrom:
+            - secretRef:
+                name: pbx-secrets
+          volumeMounts:
+            - name: base-templates
+              mountPath: /templates/base
+              readOnly: true
+            - name: site-templates
+              mountPath: /templates/site
+              readOnly: true
+            - name: config
+              mountPath: /etc/asterisk
+          securityContext:
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests: {cpu: 10m, memory: 32Mi}
+            limits: {memory: 64Mi}
+        # Asterisk refuses to start on a config error, and a Deployment with a
+        # bad dialplan would otherwise CrashLoop with the reason buried in a
+        # restarting container's logs. This fails the init instead, which shows
+        # up as a stuck rollout with the parse error in one place.
+        - name: verify-config
+          image: ghcr.io/jonpulsifer/asterisk:22.8.2
+          args: ["-C", "/etc/asterisk/asterisk.conf", "-nq", "-x", "core show version"]
+          volumeMounts:
+            - name: config
+              mountPath: /etc/asterisk
+            - {name: run, mountPath: /var/run/asterisk}
+            - {name: log, mountPath: /var/log/asterisk}
+            - {name: spool, mountPath: /var/spool/asterisk}
+            - {name: cache, mountPath: /var/cache/asterisk}
+            - {name: db, mountPath: /var/lib/asterisk-db}
+          securityContext:
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests: {cpu: 50m, memory: 64Mi}
+            limits: {memory: 256Mi}
+      containers:
+        - name: asterisk
+          image: ghcr.io/jonpulsifer/asterisk:22.8.2
+          ports:
+            - {name: sip-udp, containerPort: 5060, protocol: UDP}
+            - {name: sip-tcp, containerPort: 5060, protocol: TCP}
+            - {name: http-metrics, containerPort: 8088, protocol: TCP}
+          volumeMounts:
+            - name: config
+              mountPath: /etc/asterisk
+              readOnly: true
+            - {name: run, mountPath: /var/run/asterisk}
+            - {name: log, mountPath: /var/log/asterisk}
+            - {name: spool, mountPath: /var/spool/asterisk}
+            - {name: cache, mountPath: /var/cache/asterisk}
+            - {name: db, mountPath: /var/lib/asterisk-db}
+          # /metrics answering is a weaker claim than "calls work", but it is
+          # the only one a probe can make without placing one. Registration
+          # state is an alert on the scraped metrics, not a probe.
+          startupProbe:
+            httpGet: {path: /metrics, port: http-metrics}
+            periodSeconds: 3
+            failureThreshold: 20
+          livenessProbe:
+            httpGet: {path: /metrics, port: http-metrics}
+            periodSeconds: 30
+            failureThreshold: 3
+          securityContext:
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests: {cpu: 100m, memory: 128Mi}
+            limits: {memory: 512Mi}
+      # A call in progress is the thing this must not cut off. Asterisk stops
+      # accepting new calls on SIGTERM and exits when the last one ends.
+      terminationGracePeriodSeconds: 300
+      volumes:
+        - name: base-templates
+          configMap: {name: pbx-config, defaultMode: 0444}
+        - name: site-templates
+          configMap: {name: pbx-site, defaultMode: 0444}
+        - {name: config, emptyDir: {}}
+        - {name: run, emptyDir: {}}
+        - {name: log, emptyDir: {}}
+        - {name: spool, emptyDir: {}}
+        - {name: cache, emptyDir: {}}
+        - {name: db, emptyDir: {}}

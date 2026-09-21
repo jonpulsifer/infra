@@ -1,0 +1,51 @@
+---
+# offsite egress. Carrier and agent, nothing else. No LAN destination: no
+# handset registers to this site.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: pbx-egress
+  namespace: pbx
+  labels:
+    app.kubernetes.io/name: pbx
+spec:
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/name: pbx
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            io.kubernetes.pod.namespace: kube-system
+            k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - {port: "53", protocol: UDP}
+            - {port: "53", protocol: TCP}
+          rules:
+            dns:
+              - matchPattern: "*.voip.ms"
+              - matchPattern: voip.ms
+              - matchPattern: "*.elevenlabs.io"
+    - toFQDNs:
+        - matchPattern: "*.voip.ms"
+        - matchName: voip.ms
+      toPorts:
+        - ports:
+            - {port: "5060", protocol: UDP}
+            - {port: "5060", protocol: TCP}
+    # 5061 for TLS, which is the transport the endpoint pins. 5060/TCP is
+    # allowed alongside it so a fallback to their TCP port does not need a
+    # policy change at the moment someone is debugging a handshake.
+    - toFQDNs:
+        - matchName: sip.rtc.elevenlabs.io
+      toPorts:
+        - ports:
+            - {port: "5061", protocol: TCP}
+            - {port: "5060", protocol: TCP}
+    # Media, from both far ends. See the same rule in folly's policy: an SDP
+    # body names a host nothing here ever resolved, so no FQDN rule can cover
+    # it, and without this the call connects and carries silence.
+    - toEntities: [world]
+      toPorts:
+        - ports:
+            - {port: "10000", endPort: 20000, protocol: UDP}

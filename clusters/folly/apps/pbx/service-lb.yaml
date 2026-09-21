@@ -1,0 +1,24 @@
+---
+# The address cathy's second line registers to. Pinned rather than assigned,
+# because the far end of this Service is a desk phone whose config is edited by
+# hand — an address that moves on reschedule is a phone that silently stops
+# registering.
+#
+# .100 is inside folly's LB pool (10.3.0.64/26) and well clear of the
+# sequential allocations, which as of writing reach .84.
+apiVersion: v1
+kind: Service
+metadata:
+  name: pbx-sip
+  namespace: pbx
+  labels:
+    app.kubernetes.io/name: pbx
+  annotations:
+    io.cilium/lb-ipam-ips: 10.3.0.100
+spec:
+  type: LoadBalancer
+  selector:
+    app.kubernetes.io/name: pbx
+  ports:
+    - {name: sip-udp, port: 5060, targetPort: sip-udp, protocol: UDP}
+    - {name: sip-tcp, port: 5060, targetPort: sip-tcp, protocol: TCP}
