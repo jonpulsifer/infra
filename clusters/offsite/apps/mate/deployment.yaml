@@ -204,6 +204,18 @@ spec:
             # names a 1Password item: an item re-created changes this line and
             # nothing else. Unsetting it is the rollback.
             #
+            # The field is a custom one named `pat` rather than the item's own
+            # `password`, and that is not a preference. 1Password Connect
+            # serves the canonical password field of a Password item with no
+            # `value` at all — only a `passwordDetails` block — however
+            # populated the item looks in the apps, and `op read` reports a
+            # field carrying no value as one that does not exist. The error
+            # therefore reads `could not find field`, which points at the
+            # field's name, which is the one thing not wrong with it. A custom
+            # concealed field comes back whole: it is the shape the Slack
+            # tokens beside this one are read in, through this same Connect
+            # server.
+            #
             # The token is a fine-grained PAT on rowbutt, this repository only,
             # contents and pull requests writable. What reads it is the Connect
             # token in the `mate-onepassword` Secret, which
@@ -214,7 +226,7 @@ spec:
             # this token can clear the policy gate and start a Terraform apply,
             # and a successful apply merges the pull request to `main`.
             - name: MATE_GITHUB_TOKEN_REF
-              value: op://xf7fcsxke5yz32xqou4rsnrlqy/s7rxwheygnwhoh6esaqllism4i/password
+              value: op://xf7fcsxke5yz32xqou4rsnrlqy/s7rxwheygnwhoh6esaqllism4i/pat
             # Gateway session info (session id, resume URL, sequence) lands
             # here so a container restart inside the same pod resumes instead
             # of spending an identify from the daily budget. An emptyDir is
