@@ -13,6 +13,7 @@ resources:
   - kata-demo
   - netbench
   - open-webui
+  - pbx
   - postgres
   - redis
   - smiirl

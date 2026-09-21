@@ -145,4 +145,12 @@
     kind = "package";
     module = ../images/hull-build-ubuntu.nix;
   };
+
+  # The PBX image both clusters run. A streamed OCI layer set, not a NixOS
+  # closure — `nix build .#asterisk-image` writes a script that pipes the
+  # image into `docker load`.
+  asterisk-image = {
+    kind = "package";
+    module = ../images/asterisk.nix;
+  };
 }

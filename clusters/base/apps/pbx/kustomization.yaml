@@ -1,0 +1,35 @@
+---
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - namespace.yaml
+  - deployment.yaml
+  - service.yaml
+  - service-monitor.yaml
+  - network-policy.yaml
+
+# The shared half of /etc/asterisk: the runtime, the log destination, the
+# module set and the metrics endpoint. The dialplan and the trunks are the
+# site's own, and each overlay generates `pbx-site` beside this.
+#
+# The generated name carries a content hash, so editing a config file here
+# changes the Deployment and rolls the pod. Asterisk reads its config once at
+# boot; without the roll the ConfigMap would change and the dialplan would not.
+# Without this the generated ConfigMaps land in no namespace while every other
+# object declares `pbx`, and kustomize's name-reference rewrite is
+# namespace-scoped: the volumes would keep pointing at the unsuffixed
+# `pbx-config` and the pod would sit in ContainerCreating forever.
+namespace: pbx
+
+configMapGenerator:
+  - name: pbx-config
+    files:
+      - config/asterisk.conf
+      - config/http.conf
+      - config/logger.conf
+      - config/modules.conf
+      - config/prometheus.conf
+      - config/render.sh
+
+commonLabels:
+  app.kubernetes.io/part-of: pbx

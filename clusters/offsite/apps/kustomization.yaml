@@ -9,6 +9,7 @@ resources:
   - identity-spike
   - kthx
   - mate
+  - pbx
   - prowler
   - spindrift
   - ../../base/platform/spindrift-target

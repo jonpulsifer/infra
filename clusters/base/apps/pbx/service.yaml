@@ -1,0 +1,16 @@
+---
+# Metrics only. Nothing dials this address: the trunks are outbound and the
+# one site with a handset publishes a LoadBalancer of its own.
+apiVersion: v1
+kind: Service
+metadata:
+  name: pbx-metrics
+  namespace: pbx
+  labels:
+    app.kubernetes.io/name: pbx
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: pbx
+  ports:
+    - {name: http-metrics, port: 8088, targetPort: http-metrics, protocol: TCP}
