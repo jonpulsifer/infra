@@ -54,7 +54,7 @@ class FakeGitHub {
   installationIds = [42];
   /** Installations whose mint answers 404, as an uninstalled App does. */
   readonly gone = new Set<number>();
-  slug = 'mate-sandbox';
+  slug = 'clanky-bot';
   minted = 0;
   revoked: string[] = [];
   /** Answers nothing at all, for the bounded-fetch case. */
@@ -146,7 +146,7 @@ function build(overrides: Partial<GithubAppOptions> = {}): Harness {
   const log = new RecordingLog();
   const github = new FakeGitHub(clock);
   const app = new GithubApp({
-    appId: 'REPLACE_ME_APP_ID',
+    appId: '5027196',
     privateKey,
     owner: 'jonpulsifer',
     repo: 'infra',
@@ -194,7 +194,7 @@ describe('the App JWT', () => {
       expect(jwt.claims.iat).toBe(now - 60);
       expect(jwt.claims.exp).toBe(now + 540);
       expect(jwt.claims.exp).toBeLessThan(now + 600);
-      expect(jwt.claims.iss).toBe('REPLACE_ME_APP_ID');
+      expect(jwt.claims.iss).toBe('5027196');
       // The signature is the whole point of the PKCS#1 path: a key that
       // loaded but signed wrongly would look identical up to here.
       const verifier = createVerify('RSA-SHA256');
@@ -210,7 +210,7 @@ describe('the App JWT', () => {
     let thrown: unknown;
     try {
       new GithubApp({
-        appId: 'REPLACE_ME_APP_ID',
+        appId: '5027196',
         privateKey: '-----BEGIN RSA PRIVATE KEY-----\nnope\n',
         owner: 'jonpulsifer',
         repo: 'infra',
@@ -254,7 +254,7 @@ describe('a mint', () => {
         1,
       );
       expect(github.minted).toBe(2);
-      expect(app.login).toBe('mate-sandbox[bot]');
+      expect(app.login).toBe('clanky-bot[bot]');
     } finally {
       github.stop();
     }
@@ -371,7 +371,7 @@ describe('the log', () => {
       await app.preflight();
       const written = JSON.stringify(log.entries);
       expect(written).toContain('42');
-      expect(written).toContain('mate-sandbox[bot]');
+      expect(written).toContain('clanky-bot[bot]');
       expect(written).not.toContain(token.token);
       expect(written).not.toContain('PRIVATE KEY');
     } finally {

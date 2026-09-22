@@ -93,8 +93,13 @@ export const AGENT_UID = 1337;
  * the sandbox carries no git config of its own, so without an ident handed in
  * `git commit` dies on an empty ident name.
  */
-const GIT_USER = 'mate-sandbox[bot]';
-const GIT_EMAIL = 'mate-sandbox[bot]@users.noreply.github.com';
+const GIT_USER = 'clanky-bot[bot]';
+/**
+ * The id prefix is the bot user's own numeric id, and it is what makes GitHub
+ * attribute a commit to the App's account and draw its avatar. The bare
+ * `login@users.noreply.github.com` form commits fine and links to nobody.
+ */
+const GIT_EMAIL = '332275392+clanky-bot[bot]@users.noreply.github.com';
 /**
  * The username half of an installation token, which GitHub fixes and which is
  * not the ident above. They were one string while the credential was a user's

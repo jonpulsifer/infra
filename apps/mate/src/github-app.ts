@@ -1,6 +1,6 @@
 /**
  * mate's own GitHub credential. mate holds a GitHub App private key — the
- * `mate-sandbox[bot]` App, installed on one repository — and mints a
+ * `clanky-bot[bot]` App, installed on one repository — and mints a
  * short-lived installation access token from it per turn. The key never
  * leaves this process: a sandbox is handed a token and nothing else, so a
  * sandbox that is compromised is compromised for an hour against one repo,
@@ -141,7 +141,7 @@ export class GithubApp {
     this.reuseFloorMs = options.turnTimeoutMs + REUSE_SLACK_MS;
   }
 
-  /** `mate-sandbox[bot]`, once an installation has been read. */
+  /** `clanky-bot[bot]`, once an installation has been read. */
   get login(): string {
     return this.slug ? `${this.slug}[bot]` : 'unknown[bot]';
   }

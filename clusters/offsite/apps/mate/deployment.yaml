@@ -201,7 +201,7 @@ spec:
             - name: MATE_SANDBOX_IMAGE
               value: ghcr.io/jonpulsifer/mate-sandbox:latest@sha256:cafba5ced9cdef3ddfb60db0fdc7cda704bf55441c7bac58ffaf06277c8b5cfd
             # mate's GitHub credential: the private key of the
-            # `mate-sandbox[bot]` App, mounted from the `mate-github-app`
+            # `clanky-bot[bot]` App, mounted from the `mate-github-app`
             # Secret at the path below. mate signs a
             # JWT with it and mints an installation access token once per turn,
             # then stamps that token into the sandbox pod. The sandbox holds a
@@ -210,7 +210,7 @@ spec:
             # the next turn replaces anyway.
             #
             # What the token carries is the App's installation identity —
-            # `mate-sandbox[bot]` on `jonpulsifer/infra` alone, contents and
+            # `clanky-bot[bot]` on `jonpulsifer/infra` alone, contents and
             # pull requests writable — and not a human's, which is the whole
             # reason for the App. `jonpulsifer` is both an Atlantis allowed
             # user and an Atlantis policy-set owner, so a pull-request comment
@@ -223,10 +223,12 @@ spec:
             # at all: the init container's clone of the public repo still
             # works, and a push or a pull request does not.
             #
-            # REPLACE_ME_APP_ID is a placeholder — the App has a slug and not
-            # yet an id, and its numeric app id lands here when it is created.
+            # The App's numeric id, which signs the JWT a mint starts from.
+            # GitHub also accepts the App's client id in that claim; the
+            # number is what mate validates, so a client id pasted here is
+            # the degraded state rather than a working one.
             - name: MATE_GITHUB_APP_ID
-              value: "REPLACE_ME_APP_ID"
+              value: "5027196"
             - name: MATE_GITHUB_APP_KEY_FILE
               value: /var/run/mate/github-app/private-key
             # MATE_CONNECT_SECRET is deliberately not set, and that is what

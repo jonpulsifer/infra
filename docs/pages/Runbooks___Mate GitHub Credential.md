@@ -1,12 +1,12 @@
 tags:: runbook, mate, github
 
-- Use this when a sandbox cannot push, when `MateGitHubCredentialBroken` or `MateGitHubTokenMintFailing` fires, or when the `mate-sandbox[bot]` App's private key is rotated or its installation changed. mate holds the App's private key and mints installation access tokens from it; a sandbox holds a token and never the key. The design is on [[Architecture/Mate]], the workload is `clusters/offsite/apps/mate/`, the minting is `apps/mate/src/github-app.ts`, and the alerts are `clusters/offsite/monitoring/mate-rules.yaml`.
+- Use this when a sandbox cannot push, when `MateGitHubCredentialBroken` or `MateGitHubTokenMintFailing` fires, or when the `clanky-bot[bot]` App's private key is rotated or its installation changed. mate holds the App's private key and mints installation access tokens from it; a sandbox holds a token and never the key. The design is on [[Architecture/Mate]], the workload is `clusters/offsite/apps/mate/`, the minting is `apps/mate/src/github-app.ts`, and the alerts are `clusters/offsite/monitoring/mate-rules.yaml`.
 - # Quick checks
 	- What mate said about the credential on the way up. Three lines matter and one grep catches all of them:
 	- ```bash
 	  kubectl --context offsite logs -n mate deploy/mate | grep -i github
 	  ```
-	- `github installation found` names the installation id and the repository it was found on. `github app ready` names that installation, the login — `mate-sandbox[bot]` — and when the token mate is holding expires. `github app private key does not parse` is the key itself: mate refuses it as it starts rather than meeting it as an OpenSSL sentence at the first push of the day.
+	- `github installation found` names the installation id and the repository it was found on. `github app ready` names that installation, the login — `clanky-bot[bot]` — and when the token mate is holding expires. `github app private key does not parse` is the key itself: mate refuses it as it starts rather than meeting it as an OpenSSL sentence at the first push of the day.
 	- Whether the credential works right now. `mate_github_app_ready` is 1 when a real mint last succeeded and 0 when it did not, and mate re-proves it on a timer rather than inferring it from how the last turn went — so the reading is current whether or not anyone has asked mate for anything:
 	- ```bash
 	  kubectl --context offsite -n monitoring port-forward svc/prometheus-operated 9090:9090 &

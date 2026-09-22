@@ -328,10 +328,10 @@ describe('mint', () => {
       expect(env.GIT_CONFIG_KEY_0.value).toBe('safe.directory');
       expect(env.GIT_CONFIG_VALUE_0.value).toBe(WORKSPACE);
       expect(env.GIT_CONFIG_KEY_1.value).toBe('user.name');
-      expect(env.GIT_CONFIG_VALUE_1.value).toBe('mate-sandbox[bot]');
+      expect(env.GIT_CONFIG_VALUE_1.value).toBe('clanky-bot[bot]');
       expect(env.GIT_CONFIG_KEY_2.value).toBe('user.email');
       expect(env.GIT_CONFIG_VALUE_2.value).toBe(
-        'mate-sandbox[bot]@users.noreply.github.com',
+        '332275392+clanky-bot[bot]@users.noreply.github.com',
       );
       // Who a commit is from, which is not who the push authenticates as: an
       // installation token's username is fixed by GitHub and appears only in
