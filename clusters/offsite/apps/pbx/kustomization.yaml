@@ -9,6 +9,14 @@ resources:
 namespace: pbx
 
 configMapGenerator:
+  # The non-secret half of the trunk. No ${...} of its own, so unlike pbx-site
+  # this one is left in Flux's substitution path.
+  - name: pbx-env
+    literals:
+      # The sub-account whose DID the agent answers.
+      - PBX_VOIPMS_USER=168847_elevenlabs
+      - PBX_VOIPMS_SERVER=ca.voip.ms
+
   - name: pbx-site
     files:
       - config/pjsip.conf

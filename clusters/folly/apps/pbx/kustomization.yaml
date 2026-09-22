@@ -27,6 +27,13 @@ configMapGenerator:
   - name: pbx-env
     literals:
       - PBX_CATHY_IP=${CATHY_IP}
+      # The sub-account whose DID this site answers. It has to be line 4's own
+      # account: the handset stops registering it the moment the provisioning
+      # profile lands, and if the PBX does not hold it instead, calls to that
+      # DID reach nobody.
+      - PBX_VOIPMS_USER=168847_1994
+      # What that account already registered to from the handset.
+      - PBX_VOIPMS_SERVER=ca.voip.ms
 
   - name: pbx-site
     files:
