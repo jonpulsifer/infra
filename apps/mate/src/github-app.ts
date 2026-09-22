@@ -189,21 +189,21 @@ export class GithubApp {
    * runs at boot and on a timer rather than being inferred from the last
    * turn. The token it makes is kept rather than thrown away — the next turn
    * is entitled to it under the same reuse rule as any other.
+   *
+   * It answers with what it learned and says nothing itself, for the reason
+   * this module records no metrics either: the caller is what publishes
+   * `mate_github_app_ready`, and a line written here as well would be the
+   * same news twice — which is exactly what it was, in the same millisecond,
+   * on the first boot this shipped to.
    */
   async preflight(): Promise<GithubAppStatus> {
     const minted = await this.mint();
     this.held = minted;
-    const status = {
+    return {
       installationId: this.installationId ?? 0,
       login: this.login,
       expiresAt: minted.expiresAt,
     };
-    this.options.log.info('github app ready', {
-      installationId: status.installationId,
-      login: status.login,
-      expiresAt: new Date(status.expiresAt).toISOString(),
-    });
-    return status;
   }
 
   private async mint(): Promise<InstallationToken> {
