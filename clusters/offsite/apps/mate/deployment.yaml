@@ -199,7 +199,7 @@ spec:
             # unanchored sed when the image is named without a digest beside
             # it, which would stamp this digest over mate's own.
             - name: MATE_SANDBOX_IMAGE
-              value: ghcr.io/jonpulsifer/mate-sandbox:latest@sha256:cafba5ced9cdef3ddfb60db0fdc7cda704bf55441c7bac58ffaf06277c8b5cfd
+              value: ghcr.io/jonpulsifer/mate-sandbox:latest@sha256:336a8d0ca33c0391d39005f0e730474cbff65bc5442376ce8d4974bb3cc4359e
             # mate's GitHub credential: the private key of the
             # `clanky-bot[bot]` App, mounted from the `mate-github-app`
             # Secret at the path below. mate signs a
