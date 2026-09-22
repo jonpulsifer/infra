@@ -128,7 +128,7 @@ const CHECKOUT_DEPTH = 50;
  * token. That it is readable is not a slip: the sandbox auto-allows every
  * command, so reach was never the property being bought. What is bought is
  * what the readable thing is worth — an hour, one repository, two
- * permissions, and revoked when the turn ends.
+ * permissions, and handed back within seconds of the turn ending.
  */
 const TOKEN_FILE_ENV = 'MATE_GITHUB_TOKEN_FILE';
 const TOKEN_FILE = `${AGENT_HOME}/.github-token`;

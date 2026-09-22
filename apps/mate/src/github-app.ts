@@ -49,6 +49,10 @@ const REUSE_SLACK_MS = 5 * 60_000;
 const TOKEN_PERMISSIONS = {
   contents: 'write',
   pull_requests: 'write',
+  // Read-only, and the one permission here the agent does not need to push:
+  // it is what lets it read why its own pull request's checks failed instead
+  // of asking the human to paste the log back.
+  actions: 'read',
 } as const;
 
 /**
@@ -158,9 +162,16 @@ export class GithubApp {
 
   /**
    * Hands the token back the moment the turn is done with it, so the window
-   * in which a copy of it is worth anything is the turn and not the hour.
-   * Authenticated with the token itself — there is nothing else that can
-   * revoke one.
+   * in which a copy of it is worth anything is about the turn rather than the
+   * hour. Authenticated with the token itself — there is nothing else that
+   * can revoke one.
+   *
+   * It is not instant, and nothing here should be written as though it were.
+   * Measured against GitHub: `DELETE` answers 204 immediately, the token
+   * still authorises reads and writes at two seconds, and is refused with a
+   * 401 by five. So this closes the window to seconds, not to zero, and a
+   * copy taken during a turn outlives the turn briefly. What bounds it
+   * absolutely is the hour on the token itself.
    */
   async revoke(token: string): Promise<void> {
     // A revoked token must never be handed out again, whoever asked for this.

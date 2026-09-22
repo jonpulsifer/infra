@@ -13,7 +13,8 @@
 # the length of the thread. It is not out of the agent's reach and is not meant
 # to be — the file is readable, and the agent can read /proc/<pid>/environ of a
 # gh it started. What the sandbox is protected by is what the token is worth:
-# one hour, one repository, two permissions, and handed back when the turn ends.
+# one hour, one repository, three narrow permissions, and handed back within
+# seconds of the turn ending.
 #
 # /usr/local/libexec, rather than the real binary keeping a name of its own
 # beside this one: the wrapper has to be what PATH finds, /usr/local/bin is

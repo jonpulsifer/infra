@@ -238,7 +238,11 @@ describe('a mint', () => {
       // widening the installation later does not widen a sandbox's token.
       expect(body).toEqual({
         repositories: ['infra'],
-        permissions: { contents: 'write', pull_requests: 'write' },
+        permissions: {
+          contents: 'write',
+          pull_requests: 'write',
+          actions: 'read',
+        },
       });
     } finally {
       github.stop();
