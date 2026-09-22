@@ -1,9 +1,15 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
+	"log/slog"
 	"reflect"
+	"strings"
 	"testing"
+	"time"
+
+	"github.com/prometheus/client_golang/prometheus/testutil"
 )
 
 func TestUserIDIsTheUsernameWithoutItsPrefix(t *testing.T) {
@@ -92,5 +98,77 @@ func TestTempsDecodesTheWirePayload(t *testing.T) {
 		Temps: []int{1305, -32767, -32767, -32767}, SetTemp: 1212, Blower: 0}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("Temps = %+v, want %+v", got, want)
+	}
+}
+
+func testRelay(t *testing.T, s *State) (*Relay, *bytes.Buffer) {
+	t.Helper()
+	var logs bytes.Buffer
+	return &Relay{
+		state:  s,
+		log:    slog.New(slog.NewJSONHandler(&logs, nil)),
+		logged: map[string]bool{},
+	}, &logs
+}
+
+// Every modelled uplink, in the shape the spec gives it, lands in state.
+func TestApplyModelledUplinks(t *testing.T) {
+	s := NewState(5*time.Minute, 30*time.Minute)
+	s.now = func() time.Time { return time.Unix(1000, 0) }
+	r, _ := testRelay(t, s)
+
+	for _, p := range []string{
+		`{"name":"temps","cook_id":7,"sec":1000,"temps":[1072,749,-32767,-32767],"set_temp":1072,"blower":2500}`,
+		`{"name":"labels","values":["Pit","Brisket","Butt","Turkey"]}`,
+		`{"name":"meat_alarm","sensor":1,"action":"on","done_temp":203,"warm_temp":170}`,
+		`{"name":"pit_alarm","enabled":true,"range":25}`,
+		`{"name":"dc_input","value":120}`,
+		`{"name":"opened"}`,
+		`{"name":"meat_alarm_triggered","sensor":1}`,
+		`{"name":"vent_advice"}`,
+	} {
+		var name struct{ Name string }
+		if err := json.Unmarshal([]byte(p), &name); err != nil {
+			t.Fatal(err)
+		}
+		if err := r.apply(1, name.Name, []byte(p)); err != nil {
+			t.Fatalf("apply %s: %v", name.Name, err)
+		}
+	}
+
+	for metric, want := range map[string]float64{
+		"flameboss_meat_alarm_enabled":            1,
+		"flameboss_pit_alarm_enabled":             1,
+		"flameboss_supply_volts":                  12,
+		"flameboss_lid_open":                      1,
+		"flameboss_meat_alarm_triggered":          1,
+		"flameboss_vent_advice_timestamp_seconds": 1000,
+	} {
+		if got := only(t, s, metric); got != want {
+			t.Errorf("%s = %v, want %v", metric, got, want)
+		}
+	}
+	if got := testutil.CollectAndCount(s, "flameboss_probe_info"); got != 3 {
+		t.Errorf("probe_info series = %d, want 3", got)
+	}
+}
+
+// The first payload of each unmeasured message is logged whole, once. `wifi`
+// is never logged at all: it carries the network's SSID and may carry its key.
+func TestEvidenceIsLoggedOnceAndNeverForWifi(t *testing.T) {
+	r, logs := testRelay(t, NewState(5*time.Minute, 30*time.Minute))
+	r.logFirst(1, "meat_alarm", []byte(`{"name":"meat_alarm","sensor":1,"done_temp":950}`))
+	r.logFirst(1, "meat_alarm", []byte(`{"name":"meat_alarm","sensor":2,"done_temp":740}`))
+	r.logFirst(1, "wifi", []byte(`{"name":"wifi","ssid":"home","key":"hunter2"}`))
+
+	out := logs.String()
+	if n := strings.Count(out, `"name":"meat_alarm"`); n != 1 {
+		t.Errorf("meat_alarm logged %d times, want once:\n%s", n, out)
+	}
+	if !strings.Contains(out, `done_temp\":950`) {
+		t.Errorf("the first meat_alarm payload is not in the log:\n%s", out)
+	}
+	if strings.Contains(out, "hunter2") || strings.Contains(out, "wifi") {
+		t.Errorf("a wifi payload reached the log:\n%s", out)
 	}
 }

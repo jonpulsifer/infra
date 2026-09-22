@@ -235,3 +235,116 @@ func only(t *testing.T, c prometheus.Collector, name string) float64 {
 	}
 	return found[0]
 }
+
+// A label is what makes a graph say "Brisket" rather than "Probe 1", and a
+// relabelled probe must not leave its old name behind as a second series.
+func TestProbeLabelsFollowTheController(t *testing.T) {
+	s := fixedState(t, time.Unix(1000, 0))
+	s.Labels(1, []string{"Pit", "Brisket", "", "Butt"})
+	want := `
+# HELP flameboss_probe_info 1, labelled with the name the controller shows for a meat probe.
+# TYPE flameboss_probe_info gauge
+flameboss_probe_info{device="1",label="Brisket",probe="1"} 1
+flameboss_probe_info{device="1",label="Butt",probe="3"} 1
+`
+	if err := testutil.CollectAndCompare(s, strings.NewReader(want), "flameboss_probe_info"); err != nil {
+		t.Error(err)
+	}
+	s.Labels(1, []string{"Pit", "Chicken"})
+	if got := testutil.CollectAndCount(s, "flameboss_probe_info"); got != 1 {
+		t.Errorf("probe_info series after relabelling = %d, want 1", got)
+	}
+}
+
+// Until the controller says whether an alarm is set, the exporter does not
+// know, and a false would read as "no alarm" to the rules that fall back on it.
+func TestAlarmSettingsAreUnknownUntilPublished(t *testing.T) {
+	s := fixedState(t, time.Unix(1000, 0))
+	for _, metric := range []string{"flameboss_meat_alarm_enabled", "flameboss_pit_alarm_enabled", "flameboss_supply_volts"} {
+		if got := testutil.CollectAndCount(s, metric); got != 0 {
+			t.Errorf("%s before the controller published it = %d series, want 0", metric, got)
+		}
+	}
+
+	s.MeatAlarm(1, 1, "on")
+	s.MeatAlarm(1, 2, "off")
+	s.MeatAlarm(1, 3, "keep_warm")
+	s.MeatAlarm(1, 4, "on") // no such probe
+	s.PitAlarm(1, true)
+	s.SupplyVoltage(1, 121)
+	want := `
+# HELP flameboss_meat_alarm_enabled 1 when a done alarm is configured on the probe on the controller itself.
+# TYPE flameboss_meat_alarm_enabled gauge
+flameboss_meat_alarm_enabled{device="1",probe="1"} 1
+flameboss_meat_alarm_enabled{device="1",probe="2"} 0
+flameboss_meat_alarm_enabled{device="1",probe="3"} 1
+# HELP flameboss_pit_alarm_enabled 1 when the controller's own pit alarm is enabled.
+# TYPE flameboss_pit_alarm_enabled gauge
+flameboss_pit_alarm_enabled{device="1"} 1
+# HELP flameboss_supply_volts The controller's DC input voltage.
+# TYPE flameboss_supply_volts gauge
+flameboss_supply_volts{device="1"} 12.1
+`
+	if err := testutil.CollectAndCompare(s, strings.NewReader(want),
+		"flameboss_meat_alarm_enabled", "flameboss_pit_alarm_enabled", "flameboss_supply_volts"); err != nil {
+		t.Error(err)
+	}
+}
+
+// Events belong to a cook. One that arrives with no cook is dropped; one that
+// arrives during a cook is gone when the next cook starts.
+func TestControllerEventsBelongToTheCook(t *testing.T) {
+	start := time.Unix(1000, 0)
+	s := fixedState(t, start)
+
+	s.Lid(1, true)
+	s.MeatAlarmTriggered(1, 1)
+	s.VentAdvice(1)
+	for _, metric := range []string{"flameboss_lid_open", "flameboss_meat_alarm_triggered", "flameboss_vent_advice_timestamp_seconds"} {
+		if got := testutil.CollectAndCount(s, metric); got != 0 {
+			t.Errorf("%s with no cook = %d series, want 0", metric, got)
+		}
+	}
+
+	s.Temps(1, Temps{Name: "temps", CookID: 7, Temps: []int{1072}, SetTemp: 1072})
+	if v := only(t, s, "flameboss_lid_open"); v != 0 {
+		t.Errorf("lid at the start of a cook = %v, want 0", v)
+	}
+	s.Lid(1, true)
+	if v := only(t, s, "flameboss_lid_open"); v != 1 {
+		t.Errorf("lid after opened = %v, want 1", v)
+	}
+	s.Lid(1, false)
+	if v := only(t, s, "flameboss_lid_open"); v != 0 {
+		t.Errorf("lid after closed = %v, want 0", v)
+	}
+
+	s.MeatAlarmTriggered(1, 2)
+	s.MeatAlarmTriggered(1, 9) // no such probe
+	s.now = func() time.Time { return start.Add(time.Minute) }
+	s.PitAlarmTriggered(1)
+	s.VentAdvice(1)
+	want := `
+# HELP flameboss_meat_alarm_triggered 1 once the controller's own done alarm has fired for the probe during this cook.
+# TYPE flameboss_meat_alarm_triggered gauge
+flameboss_meat_alarm_triggered{device="1",probe="2"} 1
+# HELP flameboss_pit_alarm_triggered_timestamp_seconds When the controller's own pit alarm last fired during this cook.
+# TYPE flameboss_pit_alarm_triggered_timestamp_seconds gauge
+flameboss_pit_alarm_triggered_timestamp_seconds{device="1"} 1060
+# HELP flameboss_vent_advice_timestamp_seconds When the controller last advised closing the vent during this cook.
+# TYPE flameboss_vent_advice_timestamp_seconds gauge
+flameboss_vent_advice_timestamp_seconds{device="1"} 1060
+`
+	if err := testutil.CollectAndCompare(s, strings.NewReader(want),
+		"flameboss_meat_alarm_triggered", "flameboss_pit_alarm_triggered_timestamp_seconds",
+		"flameboss_vent_advice_timestamp_seconds"); err != nil {
+		t.Error(err)
+	}
+
+	s.Temps(1, Temps{Name: "temps", CookID: 8, Temps: []int{600}, SetTemp: 1072})
+	for _, metric := range []string{"flameboss_meat_alarm_triggered", "flameboss_pit_alarm_triggered_timestamp_seconds", "flameboss_vent_advice_timestamp_seconds"} {
+		if got := testutil.CollectAndCount(s, metric); got != 0 {
+			t.Errorf("%s on a new cook = %d series, want 0", metric, got)
+		}
+	}
+}

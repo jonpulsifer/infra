@@ -43,6 +43,14 @@ type cook struct {
 	blower     int // 0-10000
 	reachedSet bool
 	pitPlugged bool
+
+	// What the controller itself reported during this cook. They belong to
+	// the cook rather than the device because each one is about this fire: a
+	// meat alarm that went off last weekend says nothing about tonight.
+	lidOpen       bool
+	meatTriggered [3]bool
+	pitAlarmAt    time.Time
+	ventAdviceAt  time.Time
 }
 
 type device struct {
@@ -50,6 +58,14 @@ type device struct {
 	server string
 	online bool
 	cook   *cook
+
+	// Settings, as the controller last published them. None of these has a
+	// zero value that means "off": until the controller says, the exporter
+	// does not know, and exports nothing rather than a false.
+	labels      [3]string // meat probes 1-3; the pit's own label is not used
+	meatAlarm   [3]*bool  // an alarm configured on the probe, whatever its temperature
+	pitAlarm    *bool
+	supplyDeciV *int
 	// Counters are per message name so an uplink this exporter does not model
 	// still shows up -- flameboss/<id>/send/data carries alarm and lid
 	// messages that a controller only publishes when they change, and the
@@ -170,6 +186,82 @@ func (s *State) Temps(id int, m Temps) {
 	}
 }
 
+// Labels records the names the controller shows for its probes. values[0] is
+// the pit, which the exporter already names; 1-3 are the meat probes.
+func (s *State) Labels(id int, values []string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	d := s.dev(id)
+	for i := range d.labels {
+		d.labels[i] = ""
+		if i+1 < len(values) {
+			d.labels[i] = values[i+1]
+		}
+	}
+}
+
+// MeatAlarm records whether a done alarm is configured on one probe. Only the
+// action is modelled: `off` against anything else. The temperature it fires at
+// is left out until a real payload shows its scale -- the spec's example reads
+// as Fahrenheit, and so did its example for `temps`, which is decidegrees
+// Celsius on the wire.
+func (s *State) MeatAlarm(id, sensor int, action string) {
+	if sensor < 1 || sensor > 3 {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	on := action != "off"
+	s.dev(id).meatAlarm[sensor-1] = &on
+}
+
+func (s *State) PitAlarm(id int, enabled bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.dev(id).pitAlarm = &enabled
+}
+
+// SupplyVoltage records the controller's DC input, in the decivolts the
+// controller publishes it in (it sends one whenever the input moves 0.1 V).
+func (s *State) SupplyVoltage(id, deciV int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.dev(id).supplyDeciV = &deciV
+}
+
+// cookEvent applies f to the device's current cook. An event that arrives
+// before any `temps` belongs to no cook this exporter has seen -- a lid opened
+// while the controller is idle is someone at the barbecue, not a fire -- and
+// is dropped.
+func (s *State) cookEvent(id int, f func(c *cook)) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if c := s.dev(id).cook; c != nil {
+		f(c)
+	}
+}
+
+func (s *State) Lid(id int, open bool) {
+	s.cookEvent(id, func(c *cook) { c.lidOpen = open })
+}
+
+func (s *State) MeatAlarmTriggered(id, sensor int) {
+	if sensor < 1 || sensor > 3 {
+		return
+	}
+	s.cookEvent(id, func(c *cook) { c.meatTriggered[sensor-1] = true })
+}
+
+func (s *State) PitAlarmTriggered(id int) {
+	now := s.now()
+	s.cookEvent(id, func(c *cook) { c.pitAlarmAt = now })
+}
+
+func (s *State) VentAdvice(id int) {
+	now := s.now()
+	s.cookEvent(id, func(c *cook) { c.ventAdviceAt = now })
+}
+
 // Descriptors. Temperatures are Fahrenheit because that is the scale the cook
 // is read in; the decidegree Celsius the wire carries appears nowhere outside
 // fahrenheit().
@@ -219,6 +311,30 @@ var (
 	descBlower = prometheus.NewDesc("flameboss_blower_percent",
 		"Blower duty cycle.",
 		[]string{"device"}, nil)
+	descProbeInfo = prometheus.NewDesc("flameboss_probe_info",
+		"1, labelled with the name the controller shows for a meat probe.",
+		[]string{"device", "probe", "label"}, nil)
+	descMeatAlarm = prometheus.NewDesc("flameboss_meat_alarm_enabled",
+		"1 when a done alarm is configured on the probe on the controller itself.",
+		[]string{"device", "probe"}, nil)
+	descPitAlarm = prometheus.NewDesc("flameboss_pit_alarm_enabled",
+		"1 when the controller's own pit alarm is enabled.",
+		[]string{"device"}, nil)
+	descSupply = prometheus.NewDesc("flameboss_supply_volts",
+		"The controller's DC input voltage.",
+		[]string{"device"}, nil)
+	descLid = prometheus.NewDesc("flameboss_lid_open",
+		"1 while the controller reports the cooker open.",
+		[]string{"device"}, nil)
+	descMeatTriggered = prometheus.NewDesc("flameboss_meat_alarm_triggered",
+		"1 once the controller's own done alarm has fired for the probe during this cook.",
+		[]string{"device", "probe"}, nil)
+	descPitAlarmAt = prometheus.NewDesc("flameboss_pit_alarm_triggered_timestamp_seconds",
+		"When the controller's own pit alarm last fired during this cook.",
+		[]string{"device"}, nil)
+	descVentAdviceAt = prometheus.NewDesc("flameboss_vent_advice_timestamp_seconds",
+		"When the controller last advised closing the vent during this cook.",
+		[]string{"device"}, nil)
 )
 
 func (s *State) Describe(ch chan<- *prometheus.Desc) {
@@ -226,6 +342,8 @@ func (s *State) Describe(ch chan<- *prometheus.Desc) {
 		descBroker, descReconnects, descOnline, descServer, descMessages,
 		descCook, descCookActive, descCookStart, descDataAt, descPit,
 		descPitPlugged, descTarget, descReached, descProbe, descBlower,
+		descProbeInfo, descMeatAlarm, descPitAlarm, descSupply, descLid,
+		descMeatTriggered, descPitAlarmAt, descVentAdviceAt,
 	} {
 		ch <- d
 	}
@@ -260,6 +378,22 @@ func (s *State) Collect(ch chan<- prometheus.Metric) {
 			ch <- prometheus.MustNewConstMetric(descMessages, prometheus.CounterValue,
 				float64(d.messages[name]), dev, name)
 		}
+		for i, label := range d.labels {
+			if label != "" {
+				gauge(descProbeInfo, 1, dev, strconv.Itoa(i+1), label)
+			}
+		}
+		for i, on := range d.meatAlarm {
+			if on != nil {
+				gauge(descMeatAlarm, boolValue(*on), dev, strconv.Itoa(i+1))
+			}
+		}
+		if d.pitAlarm != nil {
+			gauge(descPitAlarm, boolValue(*d.pitAlarm), dev)
+		}
+		if d.supplyDeciV != nil {
+			gauge(descSupply, float64(*d.supplyDeciV)/10, dev)
+		}
 
 		c := d.cook
 		if c == nil {
@@ -289,6 +423,18 @@ func (s *State) Collect(ch chan<- prometheus.Metric) {
 				continue
 			}
 			gauge(descProbe, fahrenheit(deci), dev, strconv.Itoa(i+1))
+		}
+		gauge(descLid, boolValue(c.lidOpen), dev)
+		for i, fired := range c.meatTriggered {
+			if fired {
+				gauge(descMeatTriggered, 1, dev, strconv.Itoa(i+1))
+			}
+		}
+		if !c.pitAlarmAt.IsZero() {
+			gauge(descPitAlarmAt, float64(c.pitAlarmAt.Unix()), dev)
+		}
+		if !c.ventAdviceAt.IsZero() {
+			gauge(descVentAdviceAt, float64(c.ventAdviceAt.Unix()), dev)
 		}
 	}
 }

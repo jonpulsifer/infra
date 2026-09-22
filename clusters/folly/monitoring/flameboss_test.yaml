@@ -229,3 +229,103 @@ tests:
             exp_annotations:
               message: "The Flame Boss exporter is not being scraped"
               description: "Nothing is watching the barbecue. `kubectl --context folly -n monitoring get pods -l app.kubernetes.io/name=flameboss`. Fifteen minutes, because a deploy takes the only pod down first."
+
+  # The controller's own alarms. The meat alarm names the probe by the label
+  # the controller shows for it, looked up in the annotation, and a probe the
+  # controller has no label for still gets a message rather than no alert.
+  - interval: 1m
+    input_series:
+      - series: 'flameboss_cook_active{device="193415",namespace="monitoring",service="flameboss"}'
+        values: 1x40
+      - series: 'flameboss_meat_alarm_triggered{device="193415",probe="1",namespace="monitoring",service="flameboss"}'
+        values: _x10 1x30
+      - series: 'flameboss_meat_alarm_triggered{device="193415",probe="2",namespace="monitoring",service="flameboss"}'
+        values: _x10 1x30
+      - series: 'flameboss_probe_info{device="193415",probe="1",label="Brisket",namespace="monitoring",service="flameboss"}'
+        values: 1x40
+      - series: 'flameboss_lid_open{device="193415",namespace="monitoring",service="flameboss"}'
+        values: 0x5 1x3 0x5 1x20
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: FlameBossMeatDone
+        exp_alerts: []
+      - eval_time: 12m
+        alertname: FlameBossMeatDone
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              device: "193415"
+              probe: "1"
+              namespace: monitoring
+              service: flameboss
+            exp_annotations:
+              message: "Probe 1 (Brisket) is done on Flame Boss 193415"
+              description: "The controller's own meat alarm fired, at the done temperature set on the controller. Get it off the heat or into a rest."
+          - exp_labels:
+              severity: warning
+              device: "193415"
+              probe: "2"
+              namespace: monitoring
+              service: flameboss
+            exp_annotations:
+              message: "Probe 2 is done on Flame Boss 193415"
+              description: "The controller's own meat alarm fired, at the done temperature set on the controller. Get it off the heat or into a rest."
+      # Opened for four minutes to wrap: nothing. Opened again at minute 16
+      # and left: an alert five minutes later.
+      - eval_time: 12m
+        alertname: FlameBossLidOpen
+        exp_alerts: []
+      - eval_time: 20m
+        alertname: FlameBossLidOpen
+        exp_alerts: []
+      - eval_time: 22m
+        alertname: FlameBossLidOpen
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              device: "193415"
+              namespace: monitoring
+              service: flameboss
+            exp_annotations:
+              message: "The lid has been open for five minutes on Flame Boss 193415"
+              description: "Opening to wrap or spritz takes a minute or two. Five is heat the pit will spend a long time getting back."
+
+  # Event timestamps: the alert holds for fifteen minutes after the controller
+  # publishes and then clears, since the controller never says an alarm ended.
+  - interval: 1m
+    input_series:
+      - series: 'flameboss_cook_active{device="1",namespace="monitoring",service="flameboss"}'
+        values: 1x40
+      - series: 'flameboss_vent_advice_timestamp_seconds{device="1",namespace="monitoring",service="flameboss"}'
+        values: _x5 300x35
+      - series: 'flameboss_pit_alarm_triggered_timestamp_seconds{device="1",namespace="monitoring",service="flameboss"}'
+        values: _x5 300x35
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: FlameBossVentAdvice
+        exp_alerts:
+          - exp_labels:
+              severity: info
+              device: "1"
+              namespace: monitoring
+              service: flameboss
+            exp_annotations:
+              message: "Flame Boss 1 says close the vent"
+              description: "The controller has held the pit above set for a long time with the blower idle, which it can only fix by starving the fire of air it is not blowing. Close the top vent a little."
+      - eval_time: 10m
+        alertname: FlameBossPitAlarm
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              device: "1"
+              namespace: monitoring
+              service: flameboss
+            exp_annotations:
+              message: "The controller's pit alarm went off on Flame Boss 1"
+              description: "The pit left the range set on the controller's own pit alarm. The controller publishes the alarm, not its end, so this holds for fifteen minutes after the last one and then clears."
+      - eval_time: 25m
+        alertname: FlameBossVentAdvice
+        exp_alerts: []
+      - eval_time: 25m
+        alertname: FlameBossPitAlarm
+        exp_alerts: []
