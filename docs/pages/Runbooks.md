@@ -23,6 +23,7 @@ icon:: 🚒
 	- [[Runbooks/Windows Host Monitoring]] — the Windows desktops: windows_exporter, the sensor exporter that supplies the temperatures it cannot, and Event Log into VictoriaLogs
 	- [[Runbooks/Flame Boss Cook Monitoring]] — the barbecue as a monitoring target: how a cook reaches Prometheus from Flame Boss's cloud, why the dashboard is empty between cooks, and what each alert means
 	- [[Runbooks/Smiirl Counter]] — the split-flap counter that thinks the lab is Smiirl's cloud: checks, the byte-exact internet check, out-of-sync flaps and the firmware's calibration wizard
+	- [[Runbooks/Mate GitHub Credential]] — the GitHub App mate mints sandbox tokens from: the boot line, the readiness gauge, forcing a resync, rotating the private key, reinstalling the App, and why a sandbox cannot push
 - ## Conventions
 	- Tag runbook pages `#runbook`, lead with quick checks, then symptom-shaped sections ("If X…"), each with copy-pasteable commands and expected output.
 	- Prefer `mise run <task>` where a task exists; it encodes the correct binary and flags. Give a raw invocation only where mise has no task — deploying to a live host, `sops`, `flux reconcile`.

@@ -31,11 +31,13 @@ spec:
         app.kubernetes.io/name: mate
         app.kubernetes.io/part-of: mate
       annotations:
-        # Every token here is an env var, which a running container never
-        # re-reads. Reloader rolls the pod when either ExternalSecret writes a
-        # rotated token, so rotation is one Recreate roll instead of waiting
-        # for Discord to close the stale session with 4004.
-        secret.reloader.stakater.com/reload: mate-discord,mate-slack
+        # The chat tokens are env vars, which a running container never
+        # re-reads, and the GitHub App key is a mounted file, which the kubelet
+        # replaces on its own schedule rather than mate's. Reloader rolls the
+        # pod when any of these ExternalSecrets writes a rotated value, so
+        # rotation is one Recreate roll instead of waiting for Discord to close
+        # the stale session with 4004, or for a mint to fail on a retired key.
+        secret.reloader.stakater.com/reload: mate-discord,mate-slack,mate-github-app
     spec:
       # The token is what mints Sandboxes and opens `pods/exec`; `rbac.yaml`
       # scopes it to this namespace, and `network-policy.yaml` is what makes
@@ -198,38 +200,46 @@ spec:
             # it, which would stamp this digest over mate's own.
             - name: MATE_SANDBOX_IMAGE
               value: ghcr.io/jonpulsifer/mate-sandbox:latest@sha256:cafba5ced9cdef3ddfb60db0fdc7cda704bf55441c7bac58ffaf06277c8b5cfd
-            # Where the sandbox's git credential helper reads a GitHub token
-            # from — vault, item and field in the one string `op read` takes.
-            # It is configuration rather than a constant in mate because it
-            # names a 1Password item: an item re-created changes this line and
-            # nothing else. Unsetting it is the rollback.
+            # mate's GitHub credential: the private key of the
+            # `clanky-bot[bot]` App, mounted from the `mate-github-app`
+            # Secret at the path below. mate signs a
+            # JWT with it and mints an installation access token once per turn,
+            # then stamps that token into the sandbox pod. The sandbox holds a
+            # token and never the key, so what a sandbox can leak is a
+            # credential that expires 60 minutes after it was minted and that
+            # the next turn replaces anyway.
             #
-            # The field is a custom one named `pat` rather than the item's own
-            # `password`, and that is not a preference. 1Password Connect
-            # serves the canonical password field of a Password item with no
-            # `value` at all — only a `passwordDetails` block — however
-            # populated the item looks in the apps, and `op read` reports a
-            # field carrying no value as one that does not exist. The error
-            # therefore reads `could not find field`, which points at the
-            # field's name, which is the one thing not wrong with it. A custom
-            # concealed field comes back whole: it is the shape the Slack
-            # tokens beside this one are read in, through this same Connect
-            # server.
+            # What the token carries is the App's installation identity —
+            # `clanky-bot[bot]` on `jonpulsifer/infra` alone, contents and
+            # pull requests writable — and not a human's, which is the whole
+            # reason for the App. `jonpulsifer` is both an Atlantis allowed
+            # user and an Atlantis policy-set owner, so a pull-request comment
+            # made as that account clears the policy gate and starts a
+            # Terraform apply that merges itself to `main`; the bot's slug is
+            # in neither list, so the same comment from a sandbox does nothing.
             #
-            # The token is a fine-grained PAT on `jonpulsifer`, scoped to this
-            # repository with contents and pull requests writable. What reads
-            # it is the Connect token in the `mate-onepassword` Secret, which
-            # `external-secret.yaml` declares and where the vault boundary its
-            # claims draw is written down. The sharp edge is the account rather
-            # than the scope, and the account is the repository owner's own:
-            # `jonpulsifer` is both an Atlantis allowed user and an Atlantis
-            # policy-set owner, so a pull-request comment made with this token
-            # can clear the policy gate and start a Terraform apply, and a
-            # successful apply merges the pull request to `main`. Nothing
-            # distinguishes such a comment from one a human wrote, because
-            # nothing about it is a bot.
-            - name: MATE_GITHUB_TOKEN_REF
-              value: op://xf7fcsxke5yz32xqou4rsnrlqy/s7rxwheygnwhoh6esaqllism4i/pat
+            # Unsetting MATE_GITHUB_APP_ID is the rollback. mate mints nothing,
+            # stamps nothing, and a sandbox comes up with no GitHub credential
+            # at all: the init container's clone of the public repo still
+            # works, and a push or a pull request does not.
+            #
+            # The App's numeric id, which signs the JWT a mint starts from.
+            # GitHub also accepts the App's client id in that claim; the
+            # number is what mate validates, so a client id pasted here is
+            # the degraded state rather than a working one.
+            - name: MATE_GITHUB_APP_ID
+              value: "5027196"
+            - name: MATE_GITHUB_APP_KEY_FILE
+              value: /var/run/mate/github-app/private-key
+            # MATE_CONNECT_SECRET is deliberately not set, and that is what
+            # takes 1Password out of the sandbox. It used to arrive because
+            # the GitHub token was read from a vault at push time; mate mints
+            # that token now, so the sandbox's Connect credential unlocks a
+            # vault holding nothing it needs — and a credential an
+            # auto-allowing agent can read, for no purpose, is only a
+            # liability. Setting this to `mate-onepassword` hands it back, for
+            # a sandbox whose vault has been stocked with something the agent
+            # is meant to read.
             # Gateway session info (session id, resume URL, sequence) lands
             # here so a container restart inside the same pod resumes instead
             # of spending an identify from the daily budget. An emptyDir is
@@ -244,6 +254,17 @@ spec:
           volumeMounts:
             - name: tmp
               mountPath: /tmp
+            # `readOnlyRootFilesystem: true` below does not reach this: it
+            # makes the container's own filesystem read-only and says nothing
+            # about a volume mounted over a path in it, and the kubelet mounts
+            # a secret volume read-only in any case — `readOnly: true` here is
+            # saying so rather than arranging it. The volume carries no
+            # `defaultMode` on purpose: the pod sets no `fsGroup`, so the key
+            # file is owned by root, and tightening it to 0400 would take it
+            # away from uid 65532, the only uid here that has to read it.
+            - name: github-app
+              mountPath: /var/run/mate/github-app
+              readOnly: true
           # Readiness only. /healthz is 503 whenever the gateway is not
           # connected, and that is deliberate during the identify-budget
           # guard's sleeps — a liveness probe on it would kill the process for
@@ -271,3 +292,15 @@ spec:
       volumes:
         - name: tmp
           emptyDir: {}
+        # `optional: true` for the reason the Slack tokens above carry it: a
+        # required secret volume holds the pod in CreateContainerConfigError
+        # until the Secret exists, and under `strategy: Recreate` the pod that
+        # was answering is already gone by then. While the 1Password item
+        # behind `mate-github-app` is still a placeholder the mount is simply
+        # empty, mate finds no key where MATE_GITHUB_APP_KEY_FILE points and
+        # mints nothing, and the bot keeps answering; reloader rolls the pod
+        # when the Secret finally lands.
+        - name: github-app
+          secret:
+            secretName: mate-github-app
+            optional: true

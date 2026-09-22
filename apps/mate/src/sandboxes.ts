@@ -5,7 +5,18 @@
  * that dies mid-thread cannot leak one.
  */
 import { AcpClient } from './acp.ts';
-import type { CredentialsConfig, SandboxConfig } from './config.ts';
+import type { SandboxConfig, VaultConfig } from './config.ts';
+/**
+ * What a turn needs of a GitHub App, which is less than the App is: mint one
+ * and hand it back. Narrow on purpose — the private key, the installation
+ * lookup and the preflight all live on the other side of it, so nothing here
+ * can reach them and a test can stand in without one.
+ */
+export interface TokenSource {
+  token(): Promise<{ token: string }>;
+  revoke(token: string): Promise<void>;
+}
+
 import {
   type ExecClose,
   type Kube,
@@ -82,8 +93,21 @@ export const AGENT_UID = 1337;
  * the sandbox carries no git config of its own, so without an ident handed in
  * `git commit` dies on an empty ident name.
  */
-const GIT_USER = 'rowbutt';
-const GIT_EMAIL = '22780844+rowbutt@users.noreply.github.com';
+const GIT_USER = 'clanky-bot[bot]';
+/**
+ * The id prefix is the bot user's own numeric id, and it is what makes GitHub
+ * attribute a commit to the App's account and draw its avatar. The bare
+ * `login@users.noreply.github.com` form commits fine and links to nobody.
+ */
+const GIT_EMAIL = '332275392+clanky-bot[bot]@users.noreply.github.com';
+/**
+ * The username half of an installation token, which GitHub fixes and which is
+ * not the ident above. They were one string while the credential was a user's
+ * PAT and the same name answered for both; an App's token authenticates as
+ * `x-access-token` whatever the commits say, so conflating them again would
+ * break the push and not the commit.
+ */
+const GIT_HTTPS_USER = 'x-access-token';
 /**
  * How much history the checkout carries. One commit is enough to branch from
  * and enough to push from — both measured against a genuinely shallow clone —
@@ -97,12 +121,17 @@ const GIT_EMAIL = '22780844+rowbutt@users.noreply.github.com';
  */
 const CHECKOUT_DEPTH = 50;
 /**
- * Where the GitHub token's `op://` reference reaches the sandbox. The helper
- * below spells the same name, so it is one constant rather than two strings
- * that can drift — and the agent's own commands can read it, which is how a
- * call to `api.github.com` gets a token without one being in the environment.
+ * Where mate writes the turn's GitHub token, and the variable naming it. The
+ * helper below and `images/mate-sandbox/gh` both spell this name, so it is
+ * one constant rather than three strings that can drift — and the agent's own
+ * commands can read the file, which is how a call to `api.github.com` gets a
+ * token. That it is readable is not a slip: the sandbox auto-allows every
+ * command, so reach was never the property being bought. What is bought is
+ * what the readable thing is worth — an hour, one repository, two
+ * permissions, and handed back within seconds of the turn ending.
  */
-const TOKEN_REF_ENV = 'MATE_GITHUB_TOKEN_REF';
+const TOKEN_FILE_ENV = 'MATE_GITHUB_TOKEN_FILE';
+const TOKEN_FILE = `${AGENT_HOME}/.github-token`;
 /**
  * Scoped to the one URL rather than set as a bare `credential.helper`: git
  * tries every helper that matches, in the order the configs are read, and the
@@ -114,24 +143,22 @@ const TOKEN_REF_ENV = 'MATE_GITHUB_TOKEN_REF';
  * other host still reaches whatever else is configured.
  */
 const CREDENTIAL_KEY = 'credential.https://github.com.helper';
-/** Long enough for an in-cluster call, short enough that a wedged one is not a wedged turn. */
-const OP_TIMEOUT_SECONDS = 10;
 /**
- * What git runs when a push to github.com needs a password: `op read` against
- * the reference above, printed in git's credential format and never stored.
- * The token is therefore in a process for the length of one push instead of in
- * the environment for the length of the thread — which is not the same as out
- * of the agent's reach, since the agent can run `op read` too.
+ * What git runs when a push to github.com needs a password: a read of the
+ * file mate stamped at the start of the turn, printed in git's credential
+ * format and never stored. There is no timeout on it and none is needed — a
+ * local read cannot hang, which is the whole of what the previous `op read`
+ * needed bounding for.
  *
  * The snippet is a constant with nothing interpolated into it, and git passes
  * a `GIT_CONFIG_VALUE_n` through verbatim, so there is no quoting layer
- * between here and the shell. `timeout` is load-bearing rather than tidy: `op`
- * against a Connect host it cannot reach prints nothing and hangs, so without
- * a bound a failed read would hold the turn open until its own timeout. Only
- * `get` is answered because git calls the same helper to store and to erase,
- * and there is nothing here to write to.
+ * between here and the shell. An empty file fails rather than answering with
+ * a blank password, because a blank password is how a rotation in progress
+ * looks and git would report it as a rejected credential rather than as a
+ * missing one. Only `get` is answered because git calls the same helper to
+ * store and to erase, and there is nothing here to write to.
  */
-const CREDENTIAL_HELPER = `!f() { test "$1" = get || exit 0; t=$(timeout ${OP_TIMEOUT_SECONDS} op read --no-newline "$${TOKEN_REF_ENV}") || exit 1; printf "username=${GIT_USER}\\npassword=%s\\n" "$t"; }; f`;
+const CREDENTIAL_HELPER = `!f() { test "$1" = get || exit 0; t=$(cat "$${TOKEN_FILE_ENV}" 2>/dev/null) || exit 1; test -n "$t" || exit 1; printf "username=${GIT_HTTPS_USER}\\npassword=%s\\n" "$t"; }; f`;
 
 export const TTL_MS = 2 * 60 * 60_000;
 /**
@@ -150,6 +177,12 @@ export const SPARE_TTL_MS = 30 * 60_000;
 export const SPARE_SWEEP_MS = 5 * 60_000;
 const READY_TIMEOUT_MS = 300_000;
 const REFRESH_TIMEOUT_MS = 60_000;
+/**
+ * One `printf` into a file on a pod that is already answering ACP. Short
+ * because a stamp that is not quick is a stamp that has gone wrong, and the
+ * human is waiting on the turn behind it.
+ */
+const STAMP_TIMEOUT_MS = 15_000;
 const GONE_TIMEOUT_MS = 180_000;
 const REAP_TIMEOUT_MS = 15_000;
 const WATCH_SECONDS = 60;
@@ -196,6 +229,14 @@ export interface KubeSandboxesDeps {
    * of the pool from outside the pod.
    */
   metrics?: Instruments;
+  /**
+   * What mints the GitHub token a turn is stamped with, or absent where no
+   * App is configured — which is both the rollback and what the smoke
+   * harness runs with. It is a dependency rather than something built here
+   * because the private key belongs to the process, never to a sandbox's
+   * configuration.
+   */
+  githubApp?: TokenSource | null;
   ttlMs?: number;
   readyTimeoutMs?: number;
   goneTimeoutMs?: number;
@@ -204,6 +245,8 @@ export interface KubeSandboxesDeps {
 interface Attachment {
   client: AcpClient;
   sessionId: string;
+  /** Already resolved by `attach`, and what a turn's token is stamped into. */
+  pod: string;
 }
 
 const SNOWFLAKE = /^\d{15,22}$/;
@@ -344,15 +387,13 @@ export function opencodeConfig(model: string): string {
  * public repository anonymously — and the count and the indices are derived
  * from the list so a setting cannot be added without both moving with it.
  */
-export function gitEnv(
-  credentials: CredentialsConfig | null,
-): { name: string; value: string }[] {
+export function gitEnv(github: boolean): { name: string; value: string }[] {
   const settings: [string, string][] = [
     ['safe.directory', WORKSPACE],
     ['user.name', GIT_USER],
     ['user.email', GIT_EMAIL],
   ];
-  if (credentials) {
+  if (github) {
     settings.push([CREDENTIAL_KEY, ''], [CREDENTIAL_KEY, CREDENTIAL_HELPER]);
   }
   return [
@@ -364,7 +405,15 @@ export function gitEnv(
     // A helper that fails leaves git asking for a username, and whether that
     // question blocks depends on whether the agent's tool gave the command a
     // terminal. This makes it an error either way.
-    ...(credentials ? [{ name: 'GIT_TERMINAL_PROMPT', value: '0' }] : []),
+    ...(github
+      ? [
+          { name: 'GIT_TERMINAL_PROMPT', value: '0' },
+          // Named for the helper above and read again by the image's `gh`
+          // wrapper, which is why it is env rather than a path either of them
+          // hardcodes: one name, one place it is written.
+          { name: TOKEN_FILE_ENV, value: TOKEN_FILE },
+        ]
+      : []),
   ];
 }
 
@@ -377,14 +426,14 @@ export function gitEnv(
  * and a token belonging to the other path then fails as a hang rather than as
  * an error.
  */
-function connectEnv(credentials: CredentialsConfig): Record<string, unknown>[] {
+function connectEnv(vault: VaultConfig): Record<string, unknown>[] {
   return [
-    { name: 'OP_CONNECT_HOST', value: credentials.connectHost },
+    { name: 'OP_CONNECT_HOST', value: vault.connectHost },
     {
       name: 'OP_CONNECT_TOKEN',
       valueFrom: {
         secretKeyRef: {
-          name: credentials.connectSecret,
+          name: vault.connectSecret,
           key: 'OP_CONNECT_TOKEN',
           // A missing Secret would otherwise hold every sandbox in
           // CreateContainerConfigError until it arrives, and a thread that
@@ -395,7 +444,6 @@ function connectEnv(credentials: CredentialsConfig): Record<string, unknown>[] {
         },
       },
     },
-    { name: TOKEN_REF_ENV, value: credentials.githubTokenRef },
   ];
 }
 
@@ -524,7 +572,7 @@ export function sandboxManifest(declaration: SandboxDeclaration): Sandbox {
                 config.checkoutRepo,
                 WORKSPACE,
               ],
-              env: gitEnv(null),
+              env: gitEnv(false),
               volumeMounts: [{ name: 'workspace', mountPath: WORKSPACE }],
               securityContext: CONTAINER_SECURITY,
               resources: {
@@ -559,8 +607,8 @@ export function sandboxManifest(declaration: SandboxDeclaration): Sandbox {
                 // declares one MCP server, and its command is `nix`, which
                 // this image does not carry.
                 { name: 'OPENCODE_DISABLE_PROJECT_CONFIG', value: '1' },
-                ...(config.credentials ? connectEnv(config.credentials) : []),
-                ...gitEnv(config.credentials),
+                ...(config.vault ? connectEnv(config.vault) : []),
+                ...gitEnv(config.github),
               ],
               volumeMounts: [
                 { name: 'home', mountPath: AGENT_HOME },
@@ -790,7 +838,7 @@ export class KubeSandboxes implements Sandboxes {
       client.close();
       throw error;
     }
-    const attachment: Attachment = { client, sessionId: session.id };
+    const attachment: Attachment = { client, sessionId: session.id, pod };
     this.attached.set(ref.name, attachment);
     void client.closed.then((close) => {
       if (this.attached.get(ref.name) === attachment) {
@@ -821,12 +869,22 @@ export class KubeSandboxes implements Sandboxes {
         error: plain(error),
       }),
     );
-    const result = await attachment.client.prompt(
-      session.id,
-      text,
-      sink,
-      this.deps.config.turnTimeoutMs,
-    );
+    const token = await this.stampToken(name, attachment.pod);
+    let result: PromptResult;
+    try {
+      result = await attachment.client.prompt(
+        session.id,
+        text,
+        sink,
+        this.deps.config.turnTimeoutMs,
+      );
+    } finally {
+      // In a `finally` because every way a turn can end is a way the token
+      // stops being needed: an answer, a stop, a timeout, a stream that died
+      // under it. Leaving one behind is what would make the hour matter
+      // rather than the turn.
+      await this.retireToken(name, attachment.pod, token);
+    }
     // The turn already happened; a failed slide is a shorter TTL and a stale
     // turn mark, not a failed answer.
     await this.slide(name).catch((error) =>
@@ -841,6 +899,118 @@ export class KubeSandboxes implements Sandboxes {
       firstTokenMs: result.firstTokenMs,
       costUsd: result.costUsd,
     };
+  }
+
+  /**
+   * Mints the turn's GitHub token and writes it into the sandbox, answering
+   * with what was written so the turn can hand it back.
+   *
+   * Neither half fails the turn. A thread that cannot push can still read,
+   * explain and answer, and taking the whole turn away because a credential
+   * is unavailable would turn a degraded feature into an outage. What says so
+   * instead is the metric, the alert, and — for the human waiting — the
+   * `gh` wrapper and the credential helper, which both report a token that is
+   * not there in words about the token.
+   *
+   * The token goes in argv rather than stdin because `ExecStream` has no
+   * half-close (`kube.ts`), so a `cat > file` would wait for an EOF that
+   * never comes. `refreshScript` passes a branch name the same way and for
+   * the same reason. That does put the token in the pod's own process table
+   * for the length of one `printf`, which is moot where every command is
+   * already the agent's, and in the apiserver audit log — which offsite does
+   * not run: its apiserver carries no `--audit-policy-file`, and without one
+   * Kubernetes writes no audit events at all. An estate that turns auditing
+   * on wants this served over a socket instead.
+   */
+  private async stampToken(name: string, pod: string): Promise<string | null> {
+    const { githubApp, log, metrics } = this.deps;
+    if (!githubApp) return null;
+    let token: string;
+    try {
+      token = (await githubApp.token()).token;
+      metrics?.githubTokenMinted('ok');
+    } catch (error) {
+      metrics?.githubTokenMinted('mint-failed');
+      log.error('could not mint a GitHub token for this turn', {
+        sandbox: name,
+        error: plain(error),
+      });
+      // Truncated rather than left alone, so a turn never pushes with the
+      // token of a turn that has already ended.
+      await this.writeToken(pod, '').catch(() => {});
+      return null;
+    }
+    try {
+      await this.writeToken(pod, token);
+      metrics?.githubTokenStamped('ok');
+      return token;
+    } catch (error) {
+      metrics?.githubTokenStamped('stamp-failed');
+      log.error('could not stamp the GitHub token into the sandbox', {
+        sandbox: name,
+        error: plain(error),
+      });
+      // Handed back at once: it reaches nobody, so nothing is served by
+      // letting it live out its hour.
+      await githubApp.revoke(token).catch(() => {});
+      return null;
+    }
+  }
+
+  /** Truncates the sandbox's copy and spends the token, both best-effort. */
+  private async retireToken(
+    name: string,
+    pod: string,
+    token: string | null,
+  ): Promise<void> {
+    if (!token) return;
+    await this.writeToken(pod, '').catch((error) =>
+      this.deps.log.warn('could not clear the GitHub token', {
+        sandbox: name,
+        error: plain(error),
+      }),
+    );
+    await this.deps.githubApp?.revoke(token).catch((error: unknown) =>
+      this.deps.log.warn('could not revoke the GitHub token', {
+        sandbox: name,
+        error: plain(error),
+      }),
+    );
+  }
+
+  /** One exec: the file written 0600, or truncated when the value is empty. */
+  private async writeToken(pod: string, token: string): Promise<void> {
+    const stream = await this.deps.kube.exec({
+      namespace: this.namespace,
+      pod,
+      container: HARNESS_CONTAINER,
+      // `umask` before the redirection, so the file is never briefly 0644 —
+      // `chmod` after the write would be exactly that race.
+      command: [
+        '/bin/sh',
+        '-c',
+        `umask 077; printf %s "$1" > ${TOKEN_FILE}`,
+        'mate',
+        token,
+      ],
+      timeoutMs: STAMP_TIMEOUT_MS,
+    });
+    void stream.stdout.cancel().catch(() => {});
+    const timer = setTimeout(() => stream.close(), STAMP_TIMEOUT_MS);
+    let close: ExecClose;
+    try {
+      close = await stream.closed;
+    } finally {
+      clearTimeout(timer);
+    }
+    // Required rather than merely not-a-failure, for the reason `refresh`
+    // gives: a stream that ended carrying no status is a command whose exit
+    // nobody saw, and here that means a file that may hold nothing.
+    if (close.status?.status !== 'Success') {
+      throw new Error(
+        `writing the token said ${close.status?.message || close.reason}`,
+      );
+    }
   }
 
   async cancel(session: Session): Promise<void> {

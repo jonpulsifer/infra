@@ -5,6 +5,7 @@ import {
 } from 'discord-api-types/v10';
 import { systemClock } from './clock.ts';
 import { clearGlobalCommands } from './commands.ts';
+import type { GithubAppConfig } from './config.ts';
 import { ConfigError, readConfig, type SlackConfig } from './config.ts';
 import {
   discordInbound,
@@ -14,6 +15,7 @@ import {
   STOP_PREFIX,
 } from './discord.ts';
 import { createGateway } from './gateway.ts';
+import { GithubApp } from './github-app.ts';
 import { Health } from './health.ts';
 import { discoverKube, Kube } from './kube.ts';
 import { jsonLog as log, plain } from './log.ts';
@@ -99,6 +101,58 @@ const { client, manager, budget } = createGateway({
   onClose: (code, fatal) => getInstruments().gatewayClosed(code, fatal),
   exit: exitAfterFlush,
 });
+/**
+ * The App a sandbox's GitHub token is minted from, or `null` where none is
+ * configured. A key that cannot be read is deliberately not fatal: mate runs
+ * one replica under `strategy: Recreate`, so refusing to boot over the
+ * credential for pushing would take both chat surfaces down to protect a
+ * feature neither of them needs. It is one error line and a gauge instead.
+ */
+const githubApp =
+  config.sandboxes.mode === 'kube' && config.sandboxes.githubApp
+    ? await openGithubApp(
+        config.sandboxes.githubApp,
+        config.sandboxes.sandbox.turnTimeoutMs,
+      )
+    : null;
+
+/**
+ * Reads the mounted PEM and builds the App. A missing or malformed key is one
+ * error line and `null` — the caller treats that as "no App configured", and
+ * `mate_github_app_ready` reports the same 0 it would for a key GitHub has
+ * stopped accepting, because to a thread that cannot push they are one thing.
+ */
+async function openGithubApp(
+  app: GithubAppConfig,
+  turnTimeoutMs: number,
+): Promise<GithubApp | null> {
+  try {
+    if (!/^\d+$/.test(app.appId)) {
+      throw new Error('MATE_GITHUB_APP_ID is not a numeric App id');
+    }
+    const privateKey = await Bun.file(app.keyFile).text();
+    return new GithubApp({
+      appId: app.appId,
+      privateKey,
+      owner: app.owner,
+      repo: app.repo,
+      turnTimeoutMs,
+      clock: systemClock,
+      log,
+    });
+  } catch (error) {
+    // Reported as a broken credential rather than as a missing one: somebody
+    // asked for an App by setting its id, so silence here would be the same
+    // shape of failure this whole path exists to stop being silent.
+    getInstruments().githubAppReady(false);
+    log.error('the GitHub App could not be opened', {
+      keyFile: app.keyFile,
+      error: plain(error),
+    });
+    return null;
+  }
+}
+
 const sandboxes: Sandboxes =
   config.sandboxes.mode === 'kube'
     ? new KubeSandboxes({
@@ -107,6 +161,7 @@ const sandboxes: Sandboxes =
         guildId: config.guildId,
         log,
         metrics: lazyInstruments(),
+        githubApp,
       })
     : new StubSandboxes();
 const discord = discordOver(client.api);
@@ -336,6 +391,39 @@ const sweep = () =>
     .catch((error) => log.warn('spare sweep failed', { error: plain(error) }));
 setInterval(sweep, SPARE_SWEEP_MS);
 sweep();
+
+/**
+ * Proves the GitHub credential rather than assuming it, on a cadence, and
+ * publishes the answer as `mate_github_app_ready`.
+ *
+ * This exists because of how the credential it replaces failed: nothing ever
+ * exercised it, so a broken one was discovered by a human asking for a pull
+ * request and being told the wrong reason. A mint at boot and every quarter
+ * hour costs one API call and makes the gauge a current fact rather than an
+ * inference from whenever a turn last ran.
+ */
+const PREFLIGHT_MS = 15 * 60_000;
+const preflight = () => {
+  if (!githubApp) return;
+  void githubApp
+    .preflight()
+    .then((status) => {
+      getInstruments().githubAppReady(true);
+      log.info('github app ready', {
+        installationId: status.installationId,
+        login: status.login,
+        expiresAt: new Date(status.expiresAt).toISOString(),
+      });
+    })
+    .catch((error) => {
+      getInstruments().githubAppReady(false);
+      log.error('github app NOT ready', { error: plain(error) });
+    });
+};
+if (githubApp) {
+  setInterval(preflight, PREFLIGHT_MS);
+  preflight();
+}
 
 log.info('mate starting', {
   sandboxes: config.sandboxes.mode,

@@ -133,6 +133,9 @@ export class RecordingInstruments implements Instruments {
   live = 0;
   queued = 0;
   pool: { ready: number; wanted: number } | null = null;
+  readonly tokenMints: string[] = [];
+  readonly tokenStamps: string[] = [];
+  appReady: boolean | null = null;
 
   identifyLimit(_limit: SessionStartLimit): void {}
   gatewayClosed(code: number, fatal: boolean): void {
@@ -147,6 +150,15 @@ export class RecordingInstruments implements Instruments {
   }
   queueDepth(depth: number): void {
     this.queued = depth;
+  }
+  githubAppReady(ready: boolean | null): void {
+    this.appReady = ready;
+  }
+  githubTokenMinted(result: string): void {
+    this.tokenMints.push(result);
+  }
+  githubTokenStamped(result: string): void {
+    this.tokenStamps.push(result);
   }
   spares(ready: number, wanted: number): void {
     this.pool = { ready, wanted };

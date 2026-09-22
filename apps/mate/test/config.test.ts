@@ -98,8 +98,10 @@ describe('config from the environment', () => {
         model: 'opencode-go/qwen3.8-flash',
         turnTimeoutMs: 45 * 60_000,
         spares: 0,
-        credentials: null,
+        vault: null,
+        github: false,
       },
+      githubApp: null,
     });
     expect(() => readConfig({ ...kube, MATE_TURN_MINUTES: '0' })).toThrow(
       'MATE_TURN_MINUTES',
@@ -109,27 +111,58 @@ describe('config from the environment', () => {
     ).toThrow('must be under the sandbox TTL');
   });
 
-  test('a sandbox reads credentials only once a reference names one', () => {
+  test('a sandbox reaches its vault only once a Secret names one', () => {
     const kube = {
       ...minimal,
       MATE_SANDBOXES: 'kube',
       MATE_SANDBOX_IMAGE: 'ghcr.io/jonpulsifer/mate-sandbox:latest',
     };
-    expect(readSandboxConfig(kube).credentials).toBeNull();
+    expect(readSandboxConfig(kube).vault).toBeNull();
     expect(
-      readSandboxConfig({
-        ...kube,
-        MATE_GITHUB_TOKEN_REF: 'op://a-vault/an-item/password',
-      }).credentials,
+      readSandboxConfig({ ...kube, MATE_CONNECT_SECRET: 'mate-onepassword' })
+        .vault,
     ).toEqual({
       connectHost:
         'http://onepassword-connect.external-secrets.svc.cluster.local:8080',
       connectSecret: 'mate-onepassword',
-      githubTokenRef: 'op://a-vault/an-item/password',
     });
+  });
+
+  test('the GitHub App is off until an id is set, and is never on the sandbox config', () => {
+    const kube = {
+      ...minimal,
+      MATE_SANDBOXES: 'kube',
+      MATE_SANDBOX_IMAGE: 'ghcr.io/jonpulsifer/mate-sandbox:latest',
+    };
+    const off = readConfig(kube).sandboxes;
+    expect(off.mode === 'kube' && off.githubApp).toBeNull();
+    expect(readSandboxConfig(kube).github).toBe(false);
+
+    const on = readConfig({ ...kube, MATE_GITHUB_APP_ID: '334190' }).sandboxes;
+    expect(on.mode === 'kube' && on.githubApp).toEqual({
+      appId: '334190',
+      keyFile: '/var/run/mate/github-app/private-key',
+      owner: 'jonpulsifer',
+      repo: 'infra',
+    });
+    // The flag the pod spec reads, and the key it must never be able to reach.
+    expect(
+      readSandboxConfig({ ...kube, MATE_GITHUB_APP_ID: '334190' }).github,
+    ).toBe(true);
+    expect(
+      Object.keys(
+        readSandboxConfig({ ...kube, MATE_GITHUB_APP_ID: '334190' }),
+      ).some((key) => /key|app/i.test(key)),
+    ).toBe(false);
+
+    // A turn that could outlive its own hour-long token is refused at boot.
     expect(() =>
-      readSandboxConfig({ ...kube, MATE_GITHUB_TOKEN_REF: 'the-token-itself' }),
-    ).toThrow('must be an op:// reference');
+      readConfig({
+        ...kube,
+        MATE_GITHUB_APP_ID: '334190',
+        MATE_TURN_MINUTES: '55',
+      }),
+    ).toThrow('while a GitHub App is configured');
   });
 
   // The pool ships off, and a spare holds a whole sandbox's memory: switching

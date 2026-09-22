@@ -69,6 +69,20 @@ spec:
         - ports:
             - port: "443"
               protocol: TCP
+    # api.github.com, and only it: minting an installation access token is a
+    # REST call (`POST /app/installations/{id}/access_tokens`) and every REST
+    # call goes to this one host. github.com is deliberately absent — cloning
+    # and pushing are the sandbox's work, on the sandbox's own policy, and mate
+    # never moves a commit itself. This is the only GitHub name mate's egress
+    # carries, and dropping it fails every mint closed in the quietest way
+    # there is: the lookup still resolves, the address maps to an identity no
+    # rule allows, and the connection hangs instead of answering.
+    - toFQDNs:
+        - matchName: api.github.com
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
     # Sandboxes are minted, watched and exec'd into through the API server,
     # which mate reaches by the address in KUBERNETES_SERVICE_HOST — an IP,
     # never a name, so this cannot be an FQDN rule.

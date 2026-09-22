@@ -13,7 +13,12 @@
 #     of a `git push`: smart HTTP never leaves the host it cloned from.
 #     `api.github.com` is the separate host every REST call goes to, opening a
 #     pull request among them, so an agent handed a credential can finish the
-#     loop its checkout starts. The GitHub names left out are deliberate:
+#     loop its checkout starts. The credential itself arrives as a file mate
+#     stamps into the pod — an installation token mate mints per turn from an
+#     App key that stays in mate's pod — so nothing here asks 1Password for a
+#     GitHub credential, and the 1Password Connect server the in-cluster rule
+#     below can reach is on no path a git command takes. The GitHub names left
+#     out are deliberate:
 #     `codeload.github.com`, `objects.githubusercontent.com` and
 #     `uploads.github.com` move tarballs and release assets, a file-shaped way
 #     out of here that a commit and a pull request never need. npm is absent

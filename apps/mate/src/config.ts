@@ -1,5 +1,12 @@
 import { TTL_MS } from './sandboxes.ts';
 
+/**
+ * The longest turn a GitHub App credential can carry. GitHub's installation
+ * tokens live sixty minutes; five of those are the margin the token cache
+ * holds back so a turn never starts on a token that cannot outlast it.
+ */
+const APP_TURN_CAP_MS = 55 * 60_000;
+
 export class ConfigError extends Error {
   override readonly name = 'ConfigError';
 }
@@ -32,7 +39,18 @@ export interface SlackConfig {
 /** What answers a thread: the in-process stub, or real Sandboxes on the cluster. */
 export type SandboxesChoice =
   | { readonly mode: 'stub' }
-  | { readonly mode: 'kube'; readonly sandbox: SandboxConfig };
+  | {
+      readonly mode: 'kube';
+      readonly sandbox: SandboxConfig;
+      /**
+       * Beside `sandbox` rather than inside it, and that placement is the
+       * whole security property: `sandboxManifest` takes a `SandboxConfig`
+       * and turns it into a pod spec, so anything reachable from there can
+       * be spread into a pod by an edit that meant no harm. The App's key
+       * is not reachable from there.
+       */
+      readonly githubApp: GithubAppConfig | null;
+    };
 
 export interface SandboxConfig {
   /** The harness image every sandbox runs; CD rewrites its digest on mate's Deployment. */
@@ -55,23 +73,52 @@ export interface SandboxConfig {
    * `MATE_MAX_CONCURRENT` is already spending.
    */
   readonly spares: number;
-  /** How a sandbox reads a credential, or `null` when it holds none. */
-  readonly credentials: CredentialsConfig | null;
+  /**
+   * The 1Password Connect address and token a sandbox is handed, or `null`
+   * when it is handed neither. This is no longer how the GitHub credential
+   * arrives — mate mints that itself — so it is off unless somebody names a
+   * Secret, and what it is for is whatever else the sandbox's own vault is
+   * stocked with.
+   */
+  readonly vault: VaultConfig | null;
+  /**
+   * Whether the pod gets a git credential helper and somewhere for a token
+   * to land. It follows the App being configured, because the helper reads a
+   * file only mate writes: with no App nothing ever writes it, and a helper
+   * pointing at a file that will never exist is worse than no helper at all.
+   */
+  readonly github: boolean;
 }
 
 /**
  * What a sandbox needs to read a secret at the moment it needs it: the
- * in-cluster 1Password Connect API, the Secret holding the token that reaches
- * it, and one `op://` reference carrying the vault, the item and the field
- * together. The reference is one string rather than three knobs because it is
- * one thing that moves — an item that is renamed or re-created changes all of
- * it at once, and `op read` takes exactly this shape.
+ * in-cluster 1Password Connect API and the Secret holding the token that
+ * reaches it. The vault those claims name is the boundary — a sandbox runs
+ * agent-authored commands with every permission auto-allowed, so whatever is
+ * in that vault is readable by whatever the agent decides to run.
  */
-export interface CredentialsConfig {
+export interface VaultConfig {
   readonly connectHost: string;
   /** The Secret holding the Connect token as `OP_CONNECT_TOKEN`. */
   readonly connectSecret: string;
-  readonly githubTokenRef: string;
+}
+
+/**
+ * The GitHub App mate mints a sandbox's token from. mate holds the key and
+ * the sandbox never does, which is the point: an installation token lives an
+ * hour and names one repository, and the key that makes them lives on the
+ * other side of a `pods/exec`.
+ *
+ * `keyFile` rather than the PEM itself, because a mounted file keeps the key
+ * out of mate's own `/proc/self/environ` — where an env var would sit for
+ * anything that can read the process to find.
+ */
+export interface GithubAppConfig {
+  readonly appId: string;
+  readonly keyFile: string;
+  /** Parsed from the checkout, so the App is never pointed at a repo nobody clones. */
+  readonly owner: string;
+  readonly repo: string;
 }
 
 type Env = Record<string, string | undefined>;
@@ -135,30 +182,73 @@ function text(env: Env, key: string, fallback: string): string {
 }
 
 /**
- * Off unless the reference is set, so a sandbox holds a credential only where
- * somebody said which one: with this unset the harness gets no Connect
- * address, no token and no git credential helper, which is also the rollback
- * if handing an agent a GitHub token turns out to be a mistake.
+ * Off unless a Secret is named. Nothing the sandbox needs depends on this any
+ * more — the GitHub token arrives from mate — so it is switched on only where
+ * somebody has stocked the sandbox's vault with something and wants the agent
+ * able to read it.
  */
-function credentials(env: Env): CredentialsConfig | null {
-  const githubTokenRef = env.MATE_GITHUB_TOKEN_REF?.trim();
-  if (!githubTokenRef) return null;
-  // A value that is not a secret reference is a typo that would otherwise
-  // surface as a failed `git push` inside somebody's thread.
-  if (!githubTokenRef.startsWith('op://')) {
-    throw new ConfigError(
-      `MATE_GITHUB_TOKEN_REF must be an op:// reference, got ${githubTokenRef}`,
-    );
-  }
+function vault(env: Env): VaultConfig | null {
+  const connectSecret = env.MATE_CONNECT_SECRET?.trim();
+  if (!connectSecret) return null;
   return {
     connectHost: text(
       env,
       'MATE_CONNECT_HOST',
       'http://onepassword-connect.external-secrets.svc.cluster.local:8080',
     ),
-    connectSecret: text(env, 'MATE_CONNECT_SECRET', 'mate-onepassword'),
-    githubTokenRef,
+    connectSecret,
   };
+}
+
+/**
+ * Off unless an app id is set, which is the rollback: with it unset mate
+ * mints nothing, a sandbox gets no credential helper and no token file, and
+ * threads carry on answering questions they can answer without pushing.
+ *
+ * Neither a malformed id nor an unreadable key is a `ConfigError`, and that is
+ * deliberate rather than lax. mate runs one replica under
+ * `strategy: Recreate`, so refusing to boot over the credential for a side
+ * feature takes both chat surfaces down with it — a typo in this one value
+ * would be a chat outage. Every such failure is caught where the App is
+ * opened, and says so through `mate_github_app_ready`, which an alert watches:
+ * loud, and survivable.
+ *
+ * The checkout is the exception and stays fatal. It is not about the App —
+ * mate cannot clone from a URL it cannot parse either, so a sandbox built on
+ * one is useless whether or not it could push.
+ */
+function githubApp(env: Env, checkoutRepo: string): GithubAppConfig | null {
+  const appId = env.MATE_GITHUB_APP_ID?.trim();
+  if (!appId) return null;
+  const slug = repoSlug(checkoutRepo);
+  if (!slug) {
+    throw new ConfigError(
+      `MATE_CHECKOUT_REPO must name a GitHub owner and repository to mint App tokens for, got ${checkoutRepo}`,
+    );
+  }
+  return {
+    appId,
+    keyFile: text(
+      env,
+      'MATE_GITHUB_APP_KEY_FILE',
+      '/var/run/mate/github-app/private-key',
+    ),
+    ...slug,
+  };
+}
+
+/**
+ * The owner and repository a checkout URL names. It is read from the checkout
+ * rather than configured twice, so the App can only ever mint for the
+ * repository the sandbox actually clones.
+ */
+export function repoSlug(url: string): { owner: string; repo: string } | null {
+  const match = /github\.com[/:]([^/]+)\/([^/]+?)(?:\.git)?\/?$/.exec(
+    url.trim(),
+  );
+  const owner = match?.[1];
+  const repo = match?.[2];
+  return owner && repo ? { owner, repo } : null;
 }
 
 export function readSandboxConfig(env: Env): SandboxConfig {
@@ -169,6 +259,15 @@ export function readSandboxConfig(env: Env): SandboxConfig {
   if (turnTimeoutMs >= TTL_MS) {
     throw new ConfigError(
       `MATE_TURN_MINUTES must be under the sandbox TTL of ${TTL_MS / 60_000} minutes, got ${turnTimeoutMs / 60_000}`,
+    );
+  }
+  // A GitHub App installation token lives an hour and is minted at the start
+  // of a turn, so a turn allowed to run longer than one can outlive its own
+  // credential and fail its push at the end, having done the work. The margin
+  // is what the token cache already reserves.
+  if (env.MATE_GITHUB_APP_ID?.trim() && turnTimeoutMs >= APP_TURN_CAP_MS) {
+    throw new ConfigError(
+      `MATE_TURN_MINUTES must be under ${APP_TURN_CAP_MS / 60_000} minutes while a GitHub App is configured, got ${turnTimeoutMs / 60_000}`,
     );
   }
   return {
@@ -185,14 +284,18 @@ export function readSandboxConfig(env: Env): SandboxConfig {
     model: text(env, 'MATE_SANDBOX_MODEL', 'opencode-go/qwen3.8-flash'),
     turnTimeoutMs,
     spares: integer(env, 'MATE_SPARES', 0, 0),
-    credentials: credentials(env),
+    vault: vault(env),
+    github: Boolean(env.MATE_GITHUB_APP_ID?.trim()),
   };
 }
 
 function sandboxes(env: Env): SandboxesChoice {
   const mode = text(env, 'MATE_SANDBOXES', 'stub');
   if (mode === 'stub') return { mode };
-  if (mode === 'kube') return { mode, sandbox: readSandboxConfig(env) };
+  if (mode === 'kube') {
+    const sandbox = readSandboxConfig(env);
+    return { mode, sandbox, githubApp: githubApp(env, sandbox.checkoutRepo) };
+  }
   throw new ConfigError(`MATE_SANDBOXES must be stub or kube, got ${mode}`);
 }
 
