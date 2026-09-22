@@ -67,6 +67,37 @@ retires them, so a cold pit never reads as a live cook.
 | `flameboss_messages_total{device,name}` | uplinks by message name |
 | `flameboss_broker_connected{server}` | this process's own connections |
 | `flameboss_broker_reconnects_total{server}` | |
+| `flameboss_probe_info{device,probe,label}` | 1, labelled with the name the controller shows for the probe |
+| `flameboss_meat_alarm_enabled{device,probe}` | 1 when a done alarm is set on the controller for the probe |
+| `flameboss_pit_alarm_enabled{device}` | 1 when the controller's pit alarm is on |
+| `flameboss_supply_volts{device}` | DC input |
+| `flameboss_lid_open{device}` | 1 while the controller reports the cooker open |
+| `flameboss_meat_alarm_triggered{device,probe}` | 1 once the controller's done alarm fired this cook |
+| `flameboss_pit_alarm_triggered_timestamp_seconds{device}` | when the controller's pit alarm last fired this cook |
+| `flameboss_vent_advice_timestamp_seconds{device}` | when the controller last advised closing the vent this cook |
+
+The settings (`probe_info`, `*_alarm_enabled`, `supply_volts`) are absent
+until the controller publishes them, never a guessed 0. The events belong to a
+cook: one that arrives before any `temps` is dropped, and a new `cook_id`
+clears them.
+
+### Controller uplinks
+
+`send/data` carries the controller's settings and events. It publishes them
+when one changes, and all of them in a burst when it reconnects — so a quiet
+`send/data` is a controller with nothing new to say, not a broken
+subscription.
+
+`opened`/`closed` are the lid events on this firmware; the spec marks them
+deprecated for `open_pit`, but `open_pit` is the lid-pause *setting*.
+
+The temperatures in `meat_alarm` and `pit_alarm` are not exported yet. The
+spec's examples for them read as Fahrenheit, and so did its example for
+`temps`, which is decidegrees Celsius on the wire. The first `meat_alarm`,
+`pit_alarm`, `device_temp`, `dc_input`, `temp_scale`, `disconnected`, `cook`
+and `mtemps` payload each process sees is logged whole (`"msg":"first uplink"`)
+so a real cook settles their format. The list is an allow-list because `wifi`
+carries the network's SSID and may carry its key.
 
 `flameboss_pit_reached_target` is what keeps the band alerts quiet during the
 ramp from ambient, which is otherwise every cook's first hour.

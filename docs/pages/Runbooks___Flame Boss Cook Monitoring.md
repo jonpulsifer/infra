@@ -30,6 +30,7 @@ tags:: runbook, monitoring, flameboss
 	- `FlameBossMeatProbeAtWrapPoint` (info, 165 °F) and `FlameBossMeatProbeAtTarget` (warning, 203 °F) — a meat probe crossing the usual wrap point and the usual pull point. These are one cook's numbers, not a law: edit the thresholds in `flameboss-rules.yaml` for what is actually on the grill.
 	- `FlameBossPitProbeDisconnected` (warning) — the controller regulates from the pit probe, so without it there is no control loop.
 	- `FlameBossCookSilent` (warning) — five minutes of nothing from a controller that was cooking. Either the cook ended and it was switched off, or it lost power or wifi mid-cook.
+	- `FlameBossMeatDone` (warning), `FlameBossPitAlarm` (warning), `FlameBossLidOpen` (warning, five minutes) and `FlameBossVentAdvice` (info) — the controller's own alarms and events, so they fire at what is set on the controller. The meat alarm names the probe by the label the controller shows for it. They run beside the threshold alerts rather than replacing them until a real cook has shown these arrive live, not only in the burst a controller sends when it reconnects.
 	- `FlameBossCloudUnreachable` and `FlameBossExporterDown` (warning) — the watching, rather than the cooking, is broken.
 	- Delivery is the shared Discord receiver, so `info` arrives too — the stack is described on [[Architecture/Kubernetes]].
 - # If a cook is running and Grafana is empty
@@ -43,5 +44,11 @@ tags:: runbook, monitoring, flameboss
 	- ```bash
 	  mise run k8s:check-rules
 	  ```
+- # Reading what the controller actually sends
+	- The exporter logs the first payload of each controller message whose format is still unmeasured, once per pod, so after a cook the evidence is already in the log:
+	- ```bash
+	  kubectl --context folly -n monitoring logs deploy/flameboss | grep '"first uplink"'
+	  ```
+	- `wifi` is deliberately never logged; it carries the network's SSID and may carry its key.
 - # Historical cooks
 	- Prometheus holds what it scraped; Flame Boss holds every cook in full at three-second resolution. `https://myflameboss.com/en/cooks/<cook_id>/raw` is that log as CSV (`time,set_temp,pit_temp,meat_temp1,meat_temp2,meat_temp3,duty_cycle`, same decidegree Celsius scale), which is the source to reach for when a cook needs to be studied after the fact rather than watched.

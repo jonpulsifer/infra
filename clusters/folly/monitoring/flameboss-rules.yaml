@@ -116,6 +116,51 @@ spec:
             message: "Probe {{ $labels.probe }} is at {{ $value | printf \"%.0f\" }}F on Flame Boss {{ $labels.device }}"
             description: "Through the stall and at the usual wrap point, and done for anything poultry. FlameBossMeatProbeAtTarget follows at 203F."
 
+        # The controller's own alarms. These fire at what is set on the
+        # controller rather than at a threshold written here, which is the
+        # point of reading them. They are additive for now: the threshold
+        # alerts above still fire beside them, because a silenced fallback is
+        # only safe once a real cook has shown these uplinks arrive live
+        # rather than only in the burst a controller sends when it reconnects.
+        - alert: FlameBossMeatDone
+          expr: |
+            flameboss_meat_alarm_triggered == 1
+              and on (device) flameboss_cook_active == 1
+          labels:
+            severity: warning
+          annotations:
+            message: "Probe {{ $labels.probe }}{{ with printf `flameboss_probe_info{device=%q,probe=%q}` $labels.device $labels.probe | query }} ({{ . | first | label `label` }}){{ end }} is done on Flame Boss {{ $labels.device }}"
+            description: "The controller's own meat alarm fired, at the done temperature set on the controller. Get it off the heat or into a rest."
+
+        - alert: FlameBossPitAlarm
+          expr: |
+            (time() - flameboss_pit_alarm_triggered_timestamp_seconds) < 900
+              and flameboss_cook_active == 1
+          labels:
+            severity: warning
+          annotations:
+            message: "The controller's pit alarm went off on Flame Boss {{ $labels.device }}"
+            description: "The pit left the range set on the controller's own pit alarm. The controller publishes the alarm, not its end, so this holds for fifteen minutes after the last one and then clears."
+
+        - alert: FlameBossLidOpen
+          expr: flameboss_lid_open == 1 and on (device) flameboss_cook_active == 1
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            message: "The lid has been open for five minutes on Flame Boss {{ $labels.device }}"
+            description: "Opening to wrap or spritz takes a minute or two. Five is heat the pit will spend a long time getting back."
+
+        - alert: FlameBossVentAdvice
+          expr: |
+            (time() - flameboss_vent_advice_timestamp_seconds) < 900
+              and flameboss_cook_active == 1
+          labels:
+            severity: info
+          annotations:
+            message: "Flame Boss {{ $labels.device }} says close the vent"
+            description: "The controller has held the pit above set for a long time with the blower idle, which it can only fix by starving the fire of air it is not blowing. Close the top vent a little."
+
         # Silence, which is either the cook ending or the controller losing
         # power or wifi in the middle of one. The series carrying this
         # expression is dropped half an hour after the last reading, and that is

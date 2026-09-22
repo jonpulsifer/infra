@@ -580,9 +580,9 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "flameboss_probe_temp_fahrenheit",
+          "expr": "(flameboss_probe_temp_fahrenheit * on (device, probe) group_left (label) flameboss_probe_info) or on (device, probe) flameboss_probe_temp_fahrenheit",
           "refId": "C",
-          "legendFormat": "Probe {{probe}}"
+          "legendFormat": "Probe {{probe}} {{label}}"
         },
         {
           "datasource": {
@@ -978,6 +978,91 @@
         }
       ],
       "description": "Positive is over set. The band alerts fire at +30F and -25F once the pit has settled once."
+    },
+    {
+      "id": 16,
+      "type": "stat",
+      "title": "Supply",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 8,
+        "y": 22
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "volt",
+          "decimals": 1,
+          "noValue": "-",
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "none",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "textMode": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "flameboss_supply_volts",
+          "refId": "A"
+        }
+      ]
     }
-  ]
+  ],
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": {
+          "type": "grafana",
+          "uid": "-- Grafana --"
+        },
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      },
+      {
+        "datasource": {
+          "type": "prometheus",
+          "uid": "prometheus"
+        },
+        "enable": true,
+        "iconColor": "orange",
+        "name": "Lid open",
+        "expr": "flameboss_lid_open == 1",
+        "step": "30s",
+        "titleFormat": "Lid open",
+        "tagKeys": "device"
+      }
+    ]
+  }
 }

@@ -53,6 +53,7 @@ type Relay struct {
 	conns   map[string]*conn // server FQDN -> connection
 	devices map[int]string   // device id -> server FQDN
 	entry   *conn
+	logged  map[string]bool // evidence names already logged
 }
 
 type conn struct {
@@ -82,6 +83,7 @@ func NewRelay(opts Options, state *State, log *slog.Logger) *Relay {
 		log:     log,
 		conns:   map[string]*conn{},
 		devices: map[int]string{},
+		logged:  map[string]bool{},
 	}
 }
 
@@ -224,20 +226,97 @@ func (r *Relay) onMessage(_ mqtt.Client, m mqtt.Message) {
 		return
 	}
 	r.state.CountMessage(dev, probe.Name)
-	if probe.Name != "temps" {
-		// Everything else on send/data is counted, not modelled: the alerting
-		// this feeds reads the cook out of temps, and a controller publishes
-		// the rest only when a setting changes, which is never during the one
-		// silent hour that matters.
-		r.log.Debug("uplink", "topic", topic, "name", probe.Name)
+	r.logFirst(dev, probe.Name, m.Payload())
+	if err := r.apply(dev, probe.Name, m.Payload()); err != nil {
+		r.log.Warn("undecodable uplink", "topic", topic, "name", probe.Name, "err", err)
+	}
+}
+
+// uplink is the union of the fields the modelled messages carry. Each message
+// fills only its own; json leaves the rest at their zero values.
+type uplink struct {
+	Sensor  int      `json:"sensor"`
+	Action  string   `json:"action"`
+	Enabled *bool    `json:"enabled"`
+	Value   *int     `json:"value"`
+	Values  []string `json:"values"`
+}
+
+// apply turns one uplink into state. Anything not named here is counted and
+// otherwise ignored.
+func (r *Relay) apply(dev int, name string, payload []byte) error {
+	if name == "temps" {
+		var t Temps
+		if err := json.Unmarshal(payload, &t); err != nil {
+			return err
+		}
+		r.state.Temps(dev, t)
+		return nil
+	}
+
+	var u uplink
+	if err := json.Unmarshal(payload, &u); err != nil {
+		return err
+	}
+	switch name {
+	case "labels":
+		r.state.Labels(dev, u.Values)
+	case "meat_alarm":
+		r.state.MeatAlarm(dev, u.Sensor, u.Action)
+	case "meat_alarm_triggered":
+		r.state.MeatAlarmTriggered(dev, u.Sensor)
+	case "pit_alarm":
+		if u.Enabled != nil {
+			r.state.PitAlarm(dev, *u.Enabled)
+		}
+	case "pit_alarm_triggered":
+		r.state.PitAlarmTriggered(dev)
+	case "vent_advice":
+		r.state.VentAdvice(dev)
+	// The spec marks these deprecated in favour of `open_pit`, but `open_pit`
+	// is the lid-pause *setting*, and these two are what this firmware
+	// actually publishes when the lid moves.
+	case "opened":
+		r.state.Lid(dev, true)
+	case "closed":
+		r.state.Lid(dev, false)
+	case "dc_input":
+		if u.Value != nil {
+			r.state.SupplyVoltage(dev, *u.Value)
+		}
+	}
+	return nil
+}
+
+// evidence names the uplinks whose wire format is still unmeasured: a scale
+// the spec's examples do not settle, or a message the spec does not list. The
+// first of each is logged whole, once per process, so the next cook records
+// what they actually carry.
+//
+// It is an allow-list on purpose. `wifi` carries the network's SSID and may
+// carry its key, and a payload logged here ends up in VictoriaLogs.
+var evidence = map[string]bool{
+	"meat_alarm":   true,
+	"pit_alarm":    true,
+	"device_temp":  true,
+	"dc_input":     true,
+	"temp_scale":   true,
+	"disconnected": true,
+	"cook":         true,
+	"mtemps":       true,
+}
+
+func (r *Relay) logFirst(dev int, name string, payload []byte) {
+	if !evidence[name] {
 		return
 	}
-	var t Temps
-	if err := json.Unmarshal(m.Payload(), &t); err != nil {
-		r.log.Warn("undecodable temps", "topic", topic, "err", err)
-		return
+	r.mu.Lock()
+	seen := r.logged[name]
+	r.logged[name] = true
+	r.mu.Unlock()
+	if !seen {
+		r.log.Info("first uplink", "device", dev, "name", name, "payload", string(payload))
 	}
-	r.state.Temps(dev, t)
 }
 
 func (r *Relay) onControl(payload []byte) {
