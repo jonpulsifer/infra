@@ -24,7 +24,7 @@ spec:
   values:
     # The containers workflow rewrites this digest on every kthx build that
     # lands on main (`.github/containers.json`, `deploy.kthx`).
-    image: ghcr.io/jonpulsifer/kthx:latest@sha256:bf82f71030fa5dcaf21f3a75d4fbb64398190c3da3654d26d3e4eecc913f8d8b
+    image: ghcr.io/jonpulsifer/kthx:latest@sha256:6629384438cbd321fdbd8973d77924fdc749e87b88b3f10f948b3b2ee647a320
     zone: kthx.dev
     # Claiming and site control answer on this name alone; the public apex
     # keeps the page, the directory, the SDK and the CLI, and every
