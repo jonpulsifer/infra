@@ -143,6 +143,15 @@ export class FakeKube {
   deleteFails = false;
   /** Fails a one-shot command, which is how the refresh exec is made to lose. */
   commandFails: string | null = null;
+  /** Refuses every TokenRequest with this message, the way a missing RBAC rule does. */
+  tokenRequestFails: string | null = null;
+  /** Every TokenRequest served, so a test can read what was asked for. */
+  readonly tokenRequests: {
+    account: string;
+    expirationSeconds: number;
+    audiences: string[];
+  }[] = [];
+  private minted = 0;
   readonly namespace = 'mate';
 
   private readonly server: Server<SocketData>;
@@ -280,6 +289,35 @@ export class FakeKube {
     for (const watcher of watchers) watcher.push(type, object);
   }
 
+  /**
+   * TokenRequest, as the apiserver answers it: a bearer token for the named
+   * ServiceAccount, and the expiry it actually granted. The asked-for
+   * `expirationSeconds` is recorded so a test can pin that a turn never gets
+   * a token it can outlive.
+   */
+  private async tokenRequest(
+    request: Request,
+    account: string,
+  ): Promise<Response> {
+    if (this.tokenRequestFails) {
+      return status(403, this.tokenRequestFails, 'Forbidden');
+    }
+    const body = (await request.json()) as {
+      spec?: { expirationSeconds?: number; audiences?: string[] };
+    };
+    this.tokenRequests.push({
+      account,
+      expirationSeconds: body.spec?.expirationSeconds ?? 0,
+      audiences: body.spec?.audiences ?? [],
+    });
+    this.minted += 1;
+    return Response.json({
+      apiVersion: 'authentication.k8s.io/v1',
+      kind: 'TokenRequest',
+      status: { token: `sa-token-${this.minted}` },
+    });
+  }
+
   private route(
     request: Request,
     server: Server<SocketData>,
@@ -303,6 +341,10 @@ export class FakeKube {
       return this.one(request, path.slice(sandboxes.length + 1));
     }
     if (path === pods) return this.list(this.pods, this.podWatchers, url);
+    const token = /\/serviceaccounts\/([^/]+)\/token$/.exec(path);
+    if (token && request.method === 'POST') {
+      return this.tokenRequest(request, token[1] as string);
+    }
     return status(404, `no route ${path}`, 'NotFound');
   }
 

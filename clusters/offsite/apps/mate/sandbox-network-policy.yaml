@@ -105,3 +105,36 @@ spec:
         - matchExpressions:
             - key: k8s:io.kubernetes.pod.namespace
               operator: Exists
+    # This cluster's own apiserver, as an entity rather than an address. It is
+    # not a pod and not a ClusterIP backend, so neither selector above reaches
+    # it; `kube-apiserver` is the identity Cilium gives it whatever address it
+    # answers on. What the agent does with it is `sandbox-rbac.yaml`'s to say —
+    # read anything, exec into anything, change nothing.
+    - toEntities:
+        - kube-apiserver
+      toPorts:
+        - ports:
+            - port: "6443"
+              protocol: TCP
+    # The fleet itself: SSH to any host, and the other cluster's apiserver.
+    # `CILIUM_NATIVE_ROUTING_CIDR` is the estate's own routable range from
+    # `cluster-topology.json` rather than a subnet written down twice, and it
+    # is the only declared value that spans both sites — folly's nodes are not
+    # in this cluster's ConfigMap, and a literal for them here would be exactly
+    # the hardcoded network fact the repo forbids.
+    #
+    # Two ports and no more. This is what makes the agent an SRE companion
+    # rather than a chat window: it can read a journal on the host that is
+    # actually broken. The identity it logs in as is `rowbutt`, which is in
+    # `wheel` on every host with `wheelNeedsPassword = false` — so a turn that
+    # reaches this rule is a turn that can do anything on any box. That is the
+    # deliberate shape of this agent, written down here because the policy is
+    # where somebody will look for the blast radius.
+    - toCIDRSet:
+        - cidr: ${CILIUM_NATIVE_ROUTING_CIDR}
+      toPorts:
+        - ports:
+            - port: "22"
+              protocol: TCP
+            - port: "6443"
+              protocol: TCP

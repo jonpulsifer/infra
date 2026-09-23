@@ -153,15 +153,43 @@ async function openGithubApp(
   }
 }
 
+/**
+ * The SSH key a turn is stamped with, or `null`. Read once, here, rather than
+ * per turn: it is a file on mate's own pod, it does not change under a running
+ * process, and a read that happens at boot is a read whose failure is one log
+ * line at a known moment instead of a surprise in somebody's thread.
+ *
+ * Unreadable is never fatal, for the reason the App key is not: one replica
+ * under `strategy: Recreate` means refusing to boot over a credential for a
+ * side feature takes both chat surfaces down with it.
+ */
+async function readSshKey(path: string | null): Promise<string | null> {
+  if (!path) return null;
+  try {
+    return await Bun.file(path).text();
+  } catch (error) {
+    log.error('the sandbox SSH key could not be read', {
+      keyFile: path,
+      error: plain(error),
+    });
+    return null;
+  }
+}
+
+const kubeConfig =
+  config.sandboxes.mode === 'kube' ? await discoverKube() : null;
+
 const sandboxes: Sandboxes =
-  config.sandboxes.mode === 'kube'
+  config.sandboxes.mode === 'kube' && kubeConfig
     ? new KubeSandboxes({
-        kube: new Kube(await discoverKube()),
+        kube: new Kube(kubeConfig),
         config: config.sandboxes.sandbox,
         guildId: config.guildId,
         log,
         metrics: lazyInstruments(),
         githubApp,
+        clusterCa: kubeConfig.ca ?? null,
+        sshKey: await readSshKey(config.sandboxes.sshKeyFile),
       })
     : new StubSandboxes();
 const discord = discordOver(client.api);

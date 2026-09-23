@@ -50,6 +50,13 @@ export type SandboxesChoice =
        * is not reachable from there.
        */
       readonly githubApp: GithubAppConfig | null;
+      /**
+       * Where mate's own pod holds the SSH private key a sandbox logs into
+       * hosts with, or `null` for no host access. Beside `githubApp` and for
+       * the same reason: `sandboxManifest` never sees it, so no edit there
+       * can put a private key into a pod spec.
+       */
+      readonly sshKeyFile: string | null;
     };
 
 export interface SandboxConfig {
@@ -88,6 +95,13 @@ export interface SandboxConfig {
    * pointing at a file that will never exist is worse than no helper at all.
    */
   readonly github: boolean;
+  /**
+   * The ServiceAccount a sandbox debugs the cluster as, or `null` for a
+   * sandbox with no cluster access at all — which is the default and the
+   * rollback. mate mints a bound token for it per turn; the account itself is
+   * declared in `sandbox-rbac.yaml` and is not the one mate runs as.
+   */
+  readonly kubeServiceAccount: string | null;
 }
 
 /**
@@ -286,6 +300,7 @@ export function readSandboxConfig(env: Env): SandboxConfig {
     spares: integer(env, 'MATE_SPARES', 0, 0),
     vault: vault(env),
     github: Boolean(env.MATE_GITHUB_APP_ID?.trim()),
+    kubeServiceAccount: env.MATE_SANDBOX_KUBE_SA?.trim() || null,
   };
 }
 
@@ -294,7 +309,12 @@ function sandboxes(env: Env): SandboxesChoice {
   if (mode === 'stub') return { mode };
   if (mode === 'kube') {
     const sandbox = readSandboxConfig(env);
-    return { mode, sandbox, githubApp: githubApp(env, sandbox.checkoutRepo) };
+    return {
+      mode,
+      sandbox,
+      githubApp: githubApp(env, sandbox.checkoutRepo),
+      sshKeyFile: env.MATE_SSH_KEY_FILE?.trim() || null,
+    };
   }
   throw new ConfigError(`MATE_SANDBOXES must be stub or kube, got ${mode}`);
 }

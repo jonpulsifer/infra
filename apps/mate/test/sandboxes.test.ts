@@ -56,6 +56,7 @@ const config: SandboxConfig = {
       'http://onepassword-connect.external-secrets.svc.cluster.local:8080',
     connectSecret: 'mate-onepassword',
   },
+  kubeServiceAccount: 'mate-sandbox-debug',
   github: true,
 };
 
@@ -634,7 +635,14 @@ describe('attach', () => {
       );
     }
 
-    test('writes the token as an argument and never onto stdin', async () => {
+    /** The four values one stamp wrote, in the order the script consumes them. */
+    function wrote(at: number) {
+      const stamp = stamps()[at];
+      const [, , , , github, kube, ssh, sshConfig] = stamp?.command ?? [];
+      return { github, kube, ssh, sshConfig };
+    }
+
+    test('writes every credential as an argument and never onto stdin', async () => {
       const session = await turning();
       await sandboxes.prompt(session, 'open a pull request', new Collect());
 
@@ -642,44 +650,83 @@ describe('attach', () => {
       expect(stamp?.container).toBe(HARNESS_CONTAINER);
       // argv, because the exec stream has no half-close: a command reading
       // stdin would wait for an EOF that never arrives.
-      expect(stamp?.command).toEqual([
-        '/bin/sh',
-        '-c',
-        'umask 077; printf %s "$1" > /home/agent/.github-token',
-        'mate',
-        'ghs-token-1',
-      ]);
+      expect(stamp?.command.slice(0, 2)).toEqual(['/bin/sh', '-c']);
+      expect(stamp?.command[2]).toContain('umask 077');
+      expect(stamp?.command[2]).toContain('/home/agent/.github-token');
+      expect(stamp?.command[2]).toContain('/home/agent/.kube/config');
+      expect(stamp?.command[2]).toContain('/home/agent/.ssh/id_ed25519');
+      expect(wrote(0).github).toBe('ghs-token-1');
       expect(stamp?.stdin.join('')).not.toContain('ghs-token-1');
       expect(metrics.tokenMints).toEqual(['ok']);
       expect(metrics.tokenStamps).toEqual(['ok']);
     });
 
-    test('truncates the file and hands the token back when the turn ends', async () => {
+    test('mints cluster access that outlasts the turn, and verifies the apiserver', async () => {
+      const session = await turning();
+      await sandboxes.prompt(
+        session,
+        'why is the pod crashlooping',
+        new Collect(),
+      );
+
+      expect(fake.tokenRequests).toHaveLength(1);
+      const [asked] = fake.tokenRequests;
+      expect(asked?.account).toBe('mate-sandbox-debug');
+      // A token that expires under a running kubectl is a diagnosis that
+      // stops halfway with an authentication error rather than an answer.
+      expect(asked?.expirationSeconds).toBeGreaterThan(
+        config.turnTimeoutMs / 1000,
+      );
+      expect(asked?.audiences).toEqual(['https://kubernetes.default.svc:443']);
+
+      const kubeconfig = wrote(0).kube ?? '';
+      expect(kubeconfig).toContain('token: sa-token-1');
+      expect(kubeconfig).toContain(
+        'server: https://kubernetes.default.svc:443',
+      );
+      // Never skip-verify: inheriting a trust store is a different decision
+      // from turning verification off, and is not made on an agent's behalf.
+      expect(kubeconfig).not.toContain('insecure-skip-tls-verify');
+    });
+
+    test('truncates everything and hands the token back when the turn ends', async () => {
       const session = await turning();
       await sandboxes.prompt(session, 'hi', new Collect());
 
-      // Two stamps: the token going in, and the empty string clearing it.
-      const wrote = stamps().map((e) => e.command.at(-1));
-      expect(wrote).toEqual(['ghs-token-1', '']);
+      // Two stamps: the credentials going in, and empty strings clearing them.
+      expect(stamps()).toHaveLength(2);
+      expect(wrote(1)).toEqual({
+        github: '',
+        kube: '',
+        ssh: '',
+        sshConfig: '',
+      });
       expect(app.revoked).toEqual(['ghs-token-1']);
     });
 
-    test('answers the turn anyway when no token can be minted', async () => {
+    test('answers the turn anyway when no credential can be minted', async () => {
       const session = await turning();
       app.failMint = new Error('422 from GitHub');
+      fake.tokenRequestFails = 'no RBAC for serviceaccounts/token';
 
-      // The thread still gets its answer: a sandbox that cannot push can
-      // still read and explain, and taking the turn away would make a
-      // degraded feature an outage.
+      // The thread still gets its answer: a sandbox that cannot push or reach
+      // the cluster can still read and explain, and taking the turn away
+      // would make a degraded feature an outage.
       const result = await sandboxes.prompt(session, 'hi', new Collect());
       expect(result.stopReason).toBe('end_turn');
-      // Truncated rather than left alone, so no turn ever pushes with the
-      // credential of a turn that has already ended.
-      expect(stamps().map((e) => e.command.at(-1))).toEqual(['']);
+      expect(wrote(0)).toEqual({
+        github: '',
+        kube: '',
+        ssh: '',
+        sshConfig: '',
+      });
       expect(metrics.tokenMints).toEqual(['mint-failed']);
       expect(app.revoked).toEqual([]);
       expect(
         log.of('could not mint a GitHub token for this turn'),
+      ).toHaveLength(1);
+      expect(
+        log.of('could not mint cluster access for this turn'),
       ).toHaveLength(1);
     });
 
@@ -694,10 +741,58 @@ describe('attach', () => {
       expect(metrics.tokenStamps).toEqual(['stamp-failed']);
     });
 
-    test('stamps nothing at all with no App configured', async () => {
+    test('stamps an SSH key and the client config that finds it', async () => {
+      const app = new FakeApp();
+      sandboxes = new KubeSandboxes({
+        kube: new Kube(fake.config()),
+        config,
+        guildId: GUILD,
+        log,
+        metrics,
+        githubApp: app,
+        sshKey: 'PRIVATE-KEY-BYTES',
+      });
+      const ref = await sandboxes.mint(THREAD);
+      const session = await sandboxes.attach(ref);
+      await sandboxes.prompt(session, 'ssh to oldschool', new Collect());
+
+      const first = wrote(0);
+      expect(first.ssh).toBe('PRIVATE-KEY-BYTES');
+      expect(first.sshConfig).toContain('User rowbutt');
+      expect(first.sshConfig).toContain(
+        'IdentityFile /home/agent/.ssh/id_ed25519',
+      );
+      // `accept-new` and not `yes`: the agent's home is a fresh emptyDir, so
+      // it has met no host and `yes` would refuse every one of them.
+      expect(first.sshConfig).toContain('StrictHostKeyChecking accept-new');
+      // 0700 on the directory, because ssh refuses a key it can read wider.
+      expect(stamps()[0]?.command[2]).toContain('umask 077');
+      expect(stamps()[0]?.command[2]).toContain('mkdir -p /home/agent/.ssh');
+    });
+
+    test('writes no key and no client config when mate holds none', async () => {
+      const session = await turning();
+      await sandboxes.prompt(session, 'hi', new Collect());
+      // An ssh config naming an IdentityFile that will never exist is worse
+      // than none: it makes every failure look like a rejected key.
+      expect(wrote(0).ssh).toBe('');
+      expect(wrote(0).sshConfig).toBe('');
+    });
+
+    test('stamps nothing at all with no App and no cluster account', async () => {
+      sandboxes = new KubeSandboxes({
+        kube: new Kube(fake.config()),
+        config: { ...config, kubeServiceAccount: null },
+        guildId: GUILD,
+        log,
+      });
       const ref = await sandboxes.mint(THREAD);
       const session = await sandboxes.attach(ref);
       await sandboxes.prompt(session, 'hi', new Collect());
+      expect(fake.tokenRequests).toEqual([]);
+      // Not even an exec writing empty strings: with nothing configured there
+      // is nothing to write and nothing to clear, and a turn should cost no
+      // round trip for credentials it was never going to be given.
       expect(stamps()).toEqual([]);
     });
   });

@@ -56,6 +56,20 @@ rules:
     verbs:
       - get
       - create
+  # TokenRequest for the debug identity in `sandbox-rbac.yaml`, and for that
+  # one alone — `resourceNames` is what stops this being "mint a token for any
+  # ServiceAccount in this namespace", which would include mate's own. The
+  # token mate asks for is bound and short-lived, so a sandbox is handed
+  # cluster access that expires rather than a credential somebody has to
+  # remember to rotate.
+  - apiGroups:
+      - ""
+    resources:
+      - serviceaccounts/token
+    resourceNames:
+      - mate-sandbox-debug
+    verbs:
+      - create
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
