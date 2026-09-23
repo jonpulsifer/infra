@@ -45,6 +45,11 @@ spec:
     # from the HTTPRoute and cert-manager issues the certificate, so this line
     # is the whole of what makes the UI reachable with TLS.
     hostname: spindrift.${SECRET_DOMAIN}
+    # The public name the tunnel forwards the webhook, the bosun outbox, and
+    # `/mcp` on. Every other route answers on `hostname` alone.
+    env:
+      - name: SPINDRIFT_PUBLIC_HOSTNAME
+        value: spindrift-control.${SPINDRIFT_DOMAIN}
     # The Secret carries only the one-time enrolment token and optional
     # integration credentials.
     envFromSecret: spindrift-env
