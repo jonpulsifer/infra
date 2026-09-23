@@ -18,7 +18,7 @@ GitOps-driven application deployments.
 | [`packages/`](./packages) | Reusable building blocks, including the Helm charts Flux consumes. |
 | [`images/`](./images) | Base and tool OCI images. |
 | [`dotfiles/`](./dotfiles) | mise-managed dotfiles, carried onto NixOS hosts by the system closure. |
-| [`docs/`](./docs) | The Logseq graph published as the wiki. |
+| [`docs/`](./docs) | The Markdown pages published as the wiki. |
 
 ## Getting started
 
@@ -50,7 +50,7 @@ apply it — do not mutate live infrastructure by hand.
 A host config deployed from a branch reverts on the next auto-upgrade. Merge
 promptly.
 
-See [Architecture/GitOps](./docs/pages/Architecture___GitOps.md) for the detail,
+See [How changes ship](./docs/platform/how-changes-ship.md) for the detail,
 and [`AGENTS.md`](./AGENTS.md) if you are an agent working in this repo.
 
 ## Common tasks

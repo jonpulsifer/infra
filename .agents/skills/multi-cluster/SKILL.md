@@ -5,15 +5,15 @@ description: >-
   clusters using the clusters/base/ pattern. Use when a change should apply to
   both clusters rather than one.
 metadata:
-  runbook: docs/pages/Runbooks___Add Shared Kubernetes Resource.md
-  wiki: https://wiki.lolwtf.ca/runbooks/add-shared-kubernetes-resource/
+  runbook: docs/runbooks/add-a-shared-kubernetes-resource.md
+  wiki: https://wiki.lolwtf.ca/runbooks/add-a-shared-kubernetes-resource/
 ---
 
 # Multi-Cluster
 
-Canonical human runbook: `docs/pages/Runbooks___Add Shared Kubernetes
-Resource.md`. Layer background: `docs/pages/Architecture___Kubernetes.md`. This
-file holds only the agent-specific guidance.
+Canonical human runbook: `docs/runbooks/add-a-shared-kubernetes-resource.md`.
+Layer background: `docs/platform/kubernetes.md`. This file holds only the
+agent-specific guidance.
 
 ## Agent notes
 

@@ -254,7 +254,7 @@ spec:
             severity: critical
           annotations:
             message: "mate cannot mint a GitHub token"
-            description: "mate has held an unusable GitHub App credential for ten minutes, so every sandbox it stamps gets a token that cannot push and every turn meant to end in a pull request ends one step short instead. mate says which half failed on the way up: `kubectl --context offsite logs -n mate deploy/mate | grep -i github`. A key that does not parse is the `mate-github-app` Secret and the ExternalSecret that fills it; a key that parses and is refused is the App — MATE_GITHUB_APP_ID on the Deployment, or the installation on `jonpulsifer/infra` having been removed. Runbooks/Mate GitHub Credential walks both."
+            description: "mate has held an unusable GitHub App credential for ten minutes, so every sandbox it stamps gets a token that cannot push and every turn meant to end in a pull request ends one step short instead. mate says which half failed on the way up: `kubectl --context offsite logs -n mate deploy/mate | grep -i github`. A key that does not parse is the `mate-github-app` Secret and the ExternalSecret that fills it; a key that parses and is refused is the App — MATE_GITHUB_APP_ID on the Deployment, or the installation on `jonpulsifer/infra` having been removed. The runbook at https://wiki.lolwtf.ca/runbooks/repair-the-rowbutt-github-credential/ walks both."
 
         # The intermittent half of the same credential. The gauge above is the
         # state mate is in right now; this counts the mints that failed while
@@ -291,7 +291,7 @@ spec:
             severity: warning
           annotations:
             message: "mate is failing to mint GitHub tokens"
-            description: "More than one installation token mint failed in the last thirty minutes against a credential that is otherwise working, so some threads got a sandbox that cannot push and others did not. Read the reason mate recorded: `kubectl --context offsite logs -n mate deploy/mate | grep -i github`. Compare `mate_github_token_stamps_total`, which counts the step after this one — a token minted and written into the sandbox pod — because a mint that works and a stamp that does not leaves the same thread unable to push. Runbooks/Mate GitHub Credential has the checks."
+            description: "More than one installation token mint failed in the last thirty minutes against a credential that is otherwise working, so some threads got a sandbox that cannot push and others did not. Read the reason mate recorded: `kubectl --context offsite logs -n mate deploy/mate | grep -i github`. Compare `mate_github_token_stamps_total`, which counts the step after this one — a token minted and written into the sandbox pod — because a mint that works and a stamp that does not leaves the same thread unable to push. The runbook at https://wiki.lolwtf.ca/runbooks/repair-the-rowbutt-github-credential/ has the checks."
 
         # The pool is the sandbox mate keeps warm so the next thread is handed
         # one instead of waiting out a cold start for it (MATE_SPARES on the

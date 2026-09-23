@@ -5,7 +5,8 @@ signer** certs off the FML Intermediate CA (private key read from 1Password at
 plan time). Each cluster's OIDC discovery documents live in `oidc/<cluster>/`
 and are served at **https://oidc.lolwtf.ca/<cluster>** via Cloudflare Pages
 (project/domain/DNS in `terraform/network/cloudflare/oidc.tf`, deployed by
-`.github/workflows/oidc.yml`). See the FML PKI ADR in the wiki for the
+`.github/workflows/oidc.yml`). The PKI section of
+[Secrets and PKI](../../docs/platform/secrets-and-pki.md) covers the
 architecture.
 
 **This root requires OpenTofu** (`tofu`): it uses the `opentofu/tls` provider

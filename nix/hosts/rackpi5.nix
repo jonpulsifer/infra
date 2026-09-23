@@ -1,6 +1,7 @@
 # rackpi5 is now the image-only host config spore's signed-RAM-boot
 # publisher consumes (`services.spore.nativeBootTargets.rackpi5` in
-# nix/lib/registry.nix) while the live host runs from NVMe as [[Fleet/forge]].
+# nix/lib/registry.nix) while the live host runs from NVMe as forge
+# (docs/hosts/forge.md).
 # The full toplevel is still built here -- the kernelboot bootloader,
 # initrd services, and initrd SSH all stay -- so spore can keep signing
 # and serving `boot.img` + `nix-store.squashfs` for the box's EEPROM

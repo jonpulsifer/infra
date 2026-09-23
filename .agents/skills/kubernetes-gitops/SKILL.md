@@ -6,14 +6,14 @@ description: >-
   secrets. Use when changing anything under clusters/ or diagnosing why a
   manifest has not taken effect.
 metadata:
-  runbook: docs/pages/Runbooks___Kubernetes GitOps Change.md
-  wiki: https://wiki.lolwtf.ca/runbooks/kubernetes-gitops-change/
+  runbook: docs/runbooks/apply-a-kubernetes-change.md
+  wiki: https://wiki.lolwtf.ca/runbooks/apply-a-kubernetes-change/
 ---
 
 # Kubernetes GitOps
 
-Canonical human runbook: `docs/pages/Runbooks___Kubernetes GitOps Change.md`.
-Layer background: `docs/pages/Architecture___Kubernetes.md`. This file holds
+Canonical human runbook: `docs/runbooks/apply-a-kubernetes-change.md`.
+Layer background: `docs/platform/kubernetes.md`. This file holds
 only the agent-specific guidance.
 
 ## Agent notes
@@ -55,5 +55,5 @@ only the agent-specific guidance.
   ```
   Prefer the native tool generally (`kubectl cnpg`, `flux`, `talosctl`) over
   reassembling what it does out of `kubectl`. Procedure:
-  `docs/pages/Runbooks___Managed Postgres.md`.
+  `docs/runbooks/operate-postgres.md`.
 - For changes to `clusters/base/`, also use the `multi-cluster` skill.

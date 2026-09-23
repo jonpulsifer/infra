@@ -81,6 +81,19 @@
       "env": ["DATABASE_URL"],
       "outputs": []
     },
+    "wiki#build": {
+      "dependsOn": ["^build"],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/docs/**",
+        "$TURBO_ROOT$/apps/spindrift/src/web/client/diagrams/**"
+      ],
+      "outputs": ["dist/**"]
+    },
+    "wiki#test": {
+      "inputs": ["$TURBO_DEFAULT$"],
+      "outputs": []
+    },
     "k6-scripts#typecheck": {
       "dependsOn": ["^typecheck"],
       "inputs": [
