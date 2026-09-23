@@ -1,0 +1,110 @@
+---
+# Unit test for pbx-rules.yaml, run by `mise run k8s:check-rules` against the
+# rendered PrometheusRule. Not a manifest: kustomization.yaml does not list it.
+#
+# What these cases prove, beyond the expressions parsing:
+#   - a PBX rollout, which drops the handset for up to a minute, pages nobody;
+#   - a PBX that is simply gone — no series at all — still alerts, which is the
+#     case every `!=` comparison in this file is blind to;
+#   - the trunk alert tells a rejected registration from a lost one.
+rule_files:
+  - pbx.yaml
+
+evaluation_interval: 1m
+
+tests:
+  # Healthy throughout, except a two-minute handset gap: a pod rollout.
+  - interval: 1m
+    input_series:
+      - series: 'up{namespace="pbx", job="pbx-metrics", instance="10.100.2.210:8088"}'
+        values: 1x30
+      - series: 'asterisk_pjsip_outbound_registration_status{namespace="pbx", job="pbx-metrics", domain="sip:ca.voip.ms", username="sip:168847_1994@ca.voip.ms"}'
+        values: 1x30
+      - series: 'asterisk_endpoints_state{namespace="pbx", job="pbx-metrics", resource="cathy", id="PJSIP/cathy"}'
+        values: 2x5 1x2 2x23
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: PBXHandsetOffline
+        exp_alerts: []
+      - eval_time: 10m
+        alertname: PBXTrunkNotRegistered
+        exp_alerts: []
+      - eval_time: 10m
+        alertname: PBXDown
+        exp_alerts: []
+
+  # The carrier rejects the credentials, and the handset drops off for good.
+  - interval: 1m
+    input_series:
+      - series: 'up{namespace="pbx", job="pbx-metrics", instance="10.100.2.210:8088"}'
+        values: 1x30
+      - series: 'asterisk_pjsip_outbound_registration_status{namespace="pbx", job="pbx-metrics", domain="sip:ca.voip.ms", username="sip:168847_1994@ca.voip.ms"}'
+        values: 1x5 2x25
+      - series: 'asterisk_endpoints_state{namespace="pbx", job="pbx-metrics", resource="cathy", id="PJSIP/cathy"}'
+        values: 2x5 1x25
+    alert_rule_test:
+      # Three minutes in to each fault: pending, not yet firing.
+      - eval_time: 8m
+        alertname: PBXTrunkNotRegistered
+        exp_alerts: []
+      - eval_time: 15m
+        alertname: PBXTrunkNotRegistered
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              namespace: pbx
+              job: pbx-metrics
+              domain: "sip:ca.voip.ms"
+              username: "sip:168847_1994@ca.voip.ms"
+            exp_annotations:
+              message: "The PBX is not registered to sip:ca.voip.ms"
+              description: "Registration status is 2 (0 unregistered, 2 rejected by the carrier) and has been for five minutes, so calls to this trunk's DID reach nothing. 2 means the carrier refused the credentials — check the sub-account password in 1Password item \"voip.ms sub accounts\". 0 is usually the network. `asterisk -C /etc/asterisk/asterisk.conf -rx 'pjsip show registrations'` in the pod shows the live state."
+      - eval_time: 15m
+        alertname: PBXHandsetOffline
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              namespace: pbx
+              job: pbx-metrics
+              resource: cathy
+              id: PJSIP/cathy
+            exp_annotations:
+              message: The office handset is not registered to the PBX
+              description: "Line 4 of the office SPA504G has not been registered for five minutes. Inbound calls reach the PBX and ring nobody. Lines 1-3 go straight to voip.ms and are unaffected. Check the phone has power and network, then whether it can still fetch http://10.3.0.100/cathy.xml — its profile is what points line 4 here."
+
+  # The PBX is gone entirely: not a single series. Every `!=` above is silent.
+  - interval: 1m
+    input_series:
+      - series: 'up{namespace="monitoring", job="unrelated"}'
+        values: 1x20
+    alert_rule_test:
+      - eval_time: 3m
+        alertname: PBXDown
+        exp_alerts: []
+      - eval_time: 6m
+        alertname: PBXDown
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              namespace: pbx
+              job: pbx-metrics
+            exp_annotations:
+              message: The folly PBX is down
+              description: "Prometheus has had no metrics from the PBX for five minutes. The trunk and handset alerts cannot fire while this does — their series come from the PBX itself — so the office line should be assumed dead. Check the pbx Deployment in the pbx namespace; the asterisk container logs say why it stopped."
+
+  # Scraped, but failing: the same alert, the same labels.
+  - interval: 1m
+    input_series:
+      - series: 'up{namespace="pbx", job="pbx-metrics", instance="10.100.2.210:8088"}'
+        values: 0x20
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: PBXDown
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              namespace: pbx
+              job: pbx-metrics
+            exp_annotations:
+              message: The folly PBX is down
+              description: "Prometheus has had no metrics from the PBX for five minutes. The trunk and handset alerts cannot fire while this does — their series come from the PBX itself — so the office line should be assumed dead. Check the pbx Deployment in the pbx namespace; the asterisk container logs say why it stopped."
