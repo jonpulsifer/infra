@@ -65,6 +65,23 @@
   <Preferred_Codec_4_ group="Ext_4/Audio_Configuration">G722</Preferred_Codec_4_>
   <Use_Pref_Codec_Only_4_ group="Ext_4/Audio_Configuration">No</Use_Pref_Codec_Only_4_>
 
+  <!--
+    Stop subscribing to BroadWorks call park on this line.
+
+    BroadWorks is the carrier softswitch platform many ITSPs run, and
+    x-broadworks-callpark is its proprietary SIP event package: the phone
+    SUBSCRIBEs so the switch can tell it when a call is parked or comes back.
+    The SPA504G turns that on per line by default. Asterisk is not BroadWorks
+    and registers no handler for the event, so it refuses each SUBSCRIBE and
+    logs a warning — every thirty seconds, forever.
+
+    Harmless, and entirely cosmetic: it touches no call. It is switched off
+    because a log line that means nothing trains you to ignore the log.
+
+    Line 4 only. Lines 1-3 still talk to voip.ms and keep whatever they had.
+  -->
+  <Call_Park_Monitor_Enable_4_ group="Ext_4/Call_Feature_Settings">No</Call_Park_Monitor_Enable_4_>
+
   <!-- The line key's label. Dial_Plan_4_ is deliberately absent: the plan the
        phone already has is the one that works. -->
   <Short_Name_4_ group="Phone/Line_Key_4">PBX</Short_Name_4_>
