@@ -29,3 +29,16 @@ spec:
       toPorts:
         - ports:
             - {port: "8088", protocol: TCP}
+    # Media from the carriers, on the range rtp.conf pins Asterisk to.
+    #
+    # Without this, return audio is admitted only as the reply half of a flow
+    # the pod opened first — so a leg where the far end speaks first gets
+    # nothing until Asterisk happens to send. A carrier that latches its media
+    # to our first packet then waits forever, and an agent that greets the
+    # caller before they speak is silent. `world` here is not the internet at
+    # large: nothing unsolicited crosses CGNAT and the UDM to a pod address, so
+    # in practice this admits the carriers' media and nothing else routable.
+    - fromEntities: [world]
+      toPorts:
+        - ports:
+            - {port: "10000", endPort: 20000, protocol: UDP}
