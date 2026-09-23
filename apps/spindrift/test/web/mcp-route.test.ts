@@ -119,6 +119,30 @@ describe('this surface has its own key', () => {
   });
 });
 
+describe('an agent token cannot mint its own successor', () => {
+  const agent: McpRouteDeps = {
+    authenticate: async () => ({
+      kind: 'authenticated',
+      principal: { ...OPERATOR, kind: 'agent' },
+    }),
+    context: (principal) => ({ ...context, principal }),
+  };
+
+  test('mintAgentToken is refused as a tool result, before anything is written', async () => {
+    const response = await handler(agent)(
+      rpc('tools/call', { name: 'mintAgentToken', arguments: {} }),
+    );
+    expect(response.status).toBe(200);
+    const { result } = await response.json();
+    expect(result.isError).toBe(true);
+    expect(JSON.parse(result.content[0].text)).toEqual({
+      code: 'FORBIDDEN',
+      message:
+        'an agent token cannot mint another — sign in and mint one from Settings',
+    });
+  });
+});
+
 describe('protocol', () => {
   test('an unknown tool is a tool result, not a transport error', async () => {
     // The model is meant to read the sentence and pick a real tool, which it

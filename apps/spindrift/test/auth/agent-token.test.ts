@@ -30,8 +30,12 @@ import {
   SESSION_COOKIE,
   SESSION_LIFETIME_MS,
 } from '../../src/auth/session.ts';
+import { dispatch } from '../../src/commands/registry.ts';
+import type { CommandContext, Principal } from '../../src/commands/types.ts';
 import { sessions } from '../../src/db/schema.ts';
+import { AUTO_DEPLOY_PRINCIPAL } from '../../src/reconciler/auto-deploy.ts';
 import { createAuthenticator } from '../harness/authenticator.ts';
+import { unreachableContext } from '../harness/context.ts';
 import { withIsolatedDatabase } from '../harness/db.ts';
 
 const database = withIsolatedDatabase();
@@ -344,5 +348,82 @@ describe('a token you cannot list is a token you cannot revoke', () => {
         .where(eq(sessions.kind, 'browser'));
       expect(row!.lastUsedAt).toBeNull();
     });
+  });
+});
+
+describe('only a human mints an agent token', () => {
+  async function asCaller(
+    deps: EnrolmentDeps,
+    principal: Principal,
+  ): Promise<CommandContext> {
+    return {
+      ...(await unreachableContext()),
+      principal,
+      db: deps.db,
+      clock: deps.clock,
+    };
+  }
+
+  const agentRows = (deps: EnrolmentDeps) =>
+    deps.db.select().from(sessions).where(eq(sessions.kind, 'agent'));
+
+  test('a signed-in operator mints one that opens /mcp', async () => {
+    const clock = movableClock();
+    const { deps, sessionToken } = await enrolled(clock);
+    const human = await resolveSession(cookie(sessionToken), deps);
+    expect(human?.kind).toBe('human');
+
+    const result = await dispatch(
+      'mintAgentToken',
+      {},
+      await asCaller(deps, human!),
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    const { token } = result.value as { token: string };
+    expect(await resolveAgentToken(bearer(token), deps)).not.toBeNull();
+  });
+
+  test('an agent token cannot mint its own successor', async () => {
+    const clock = movableClock();
+    const { deps, principal } = await enrolled(clock);
+    const { token } = await openAgentToken(deps, principal);
+    const agent = await resolveAgentToken(bearer(token), deps);
+    expect(agent?.kind).toBe('agent');
+
+    const result = await dispatch(
+      'mintAgentToken',
+      {},
+      await asCaller(deps, agent!),
+    );
+    expect(result).toEqual({
+      ok: false,
+      failure: {
+        code: 'FORBIDDEN',
+        message:
+          'an agent token cannot mint another — sign in and mint one from Settings',
+      },
+    });
+    expect(await agentRows(deps)).toHaveLength(1);
+  });
+
+  test('a principal no credential vouched for is refused too', async () => {
+    const clock = movableClock();
+    const { deps, principal } = await enrolled(clock);
+
+    for (const caller of [
+      AUTO_DEPLOY_PRINCIPAL,
+      { id: principal.id, displayName: principal.displayName },
+    ]) {
+      const result = await dispatch(
+        'mintAgentToken',
+        {},
+        await asCaller(deps, caller),
+      );
+      expect(result.ok).toBe(false);
+      if (!result.ok) expect(result.failure.code).toBe('FORBIDDEN');
+    }
+    expect(await agentRows(deps)).toHaveLength(0);
   });
 });

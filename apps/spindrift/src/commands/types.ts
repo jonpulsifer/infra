@@ -48,14 +48,19 @@ import type { SupplyChain } from '../supply-chain/sign.ts';
  * Who is acting.
  *
  * §"First run and identity": every enrolled user is one fully privileged
- * kind, so there is no role here to branch on — a command knows *who*, and v1
- * never asks *whether*.
+ * kind, so there is no role here to branch on. What a command may branch on is
+ * the credential the act arrived with.
  */
 export interface Principal {
   /** The `users` row this act is attributed to. */
   readonly id: string;
   readonly displayName: string;
+  /** Set only by the request authenticators; absent means not a human. */
+  readonly kind?: PrincipalKind;
 }
+
+/** `human` arrived with a browser session or a linked Gateway identity. */
+export type PrincipalKind = 'human' | 'agent';
 
 /**
  * Time, injected.
@@ -299,7 +304,9 @@ export type CommandFailureCode =
    */
   | 'NOT_REMOVABLE'
   /** The caller saved an older revision than the server currently owns. */
-  | 'STALE_EDIT';
+  | 'STALE_EDIT'
+  /** The credential this act arrived with may not perform it. */
+  | 'FORBIDDEN';
 
 /** The assertable identity of a failure, plus the sentence a user reads. */
 export interface CommandFailure {

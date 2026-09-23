@@ -80,7 +80,11 @@ export async function authenticateRequest(
       }
     : {
         kind: 'authenticated',
-        principal: { id: user.id, displayName: user.displayName },
+        principal: {
+          id: user.id,
+          displayName: user.displayName,
+          kind: 'human',
+        },
       };
 }
 
