@@ -483,7 +483,7 @@ describe('tool cards', () => {
       title: 'run `bun test`',
       state: 'in_progress',
     });
-    await painter.final('partial\n\n*stopped*', 'stopped');
+    await painter.final('partial', 'stopped');
     // Slack has no cancelled card, and one left running would spin for ever
     // on a turn that has ended; the call that did finish is untouched.
     expect(api.cards().at(-1)).toEqual({
@@ -552,7 +552,7 @@ describe('a stream Slack has already ended', () => {
       const painter = canvas();
       await painter.live('partial ', null);
       api.failAppend = ended(code);
-      await painter.final('partial \n\n*stopped*', 'stopped');
+      await painter.final('partial ', 'stopped');
       // Nothing to append to and nothing worth opening a second message
       // for: the human asked for the turn to stop and it stopped.
       expect(api.streamed()).toBe('partial ');

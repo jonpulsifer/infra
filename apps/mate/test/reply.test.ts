@@ -1,14 +1,7 @@
 import { describe, expect, test } from 'bun:test';
-import { CHUNK_BUDGET, MESSAGE_CAP } from '../src/discord.ts';
+import { CARD_RESERVE, CHUNK_BUDGET, TEXT_CAP } from '../src/discord.ts';
 import { silentLog } from '../src/log.ts';
-import {
-  NO_REPLY,
-  Reply,
-  RUN_GRACE_MS,
-  STATUS_MAX,
-  splitAt,
-  statusLine,
-} from '../src/reply.ts';
+import { Reply, RUN_GRACE_MS, STOPPED, splitAt } from '../src/reply.ts';
 import { FakeCanvas } from './fakesurface.ts';
 import { FakeClock, FakeDiscord, RecordingLog, settle } from './support.ts';
 
@@ -25,28 +18,27 @@ describe('the chunk rule', () => {
     expect(tail).toHaveLength(30);
   });
 
-  test('a status line plus a full chunk never exceeds the message cap', () => {
-    const status = statusLine('x'.repeat(500));
-    expect(status.length).toBeLessThanOrEqual(STATUS_MAX + 2);
-    expect(`${status}\n\n`.length + CHUNK_BUDGET).toBeLessThanOrEqual(
-      MESSAGE_CAP,
-    );
-  });
-
-  test('a status line is one italic line without stray asterisks', () => {
-    expect(statusLine(' running\n`x` **now** ')).toBe('*running `x` now*');
+  test('a full chunk leaves the card its reserve under the text cap', () => {
+    expect(CHUNK_BUDGET + CARD_RESERVE).toBe(TEXT_CAP);
   });
 });
 
 describe('a streamed reply', () => {
-  test('flushes the first change at once, coalesces the rest, and drops the status and button on finish', async () => {
+  test('flushes the first change at once, coalesces the rest, and swaps the card for a footer on finish', async () => {
     const clock = new FakeClock();
     const discord = new FakeDiscord();
-    const reply = new Reply(discord.canvas('t'), clock, silentLog, 't', 1_000);
+    const reply = new Reply(
+      discord.canvas('t', clock),
+      clock,
+      silentLog,
+      't',
+      1_000,
+    );
     reply.update({ kind: 'status', line: 'reading files' });
     await clock.advance(0);
     const [message] = discord.inThread('t');
-    expect(message!.content).toBe('*reading files*');
+    expect(message!.content).toBe('');
+    expect(message!.subtext).toEqual(['-# ⟳ reading files']);
     expect(message!.hasStop).toBe(true);
     // A run of text is a step until it outlives the grace, so the answer
     // only starts repainting once this one has.
@@ -54,16 +46,18 @@ describe('a streamed reply', () => {
     await clock.advance(RUN_GRACE_MS);
     reply.update({ kind: 'text', delta: 'b' });
     await clock.advance(0);
-    expect(message!.content).toBe('*reading files*\n\nab');
+    expect(message!.content).toBe('ab');
+    expect(message!.subtext).toEqual(['-# ⟳ reading files']);
     const edits = message!.edits;
     reply.update({ kind: 'text', delta: 'c' });
     await clock.advance(999);
     expect(message!.edits).toBe(edits);
     await clock.advance(1);
-    expect(message!.content).toBe('*reading files*\n\nabc');
+    expect(message!.content).toBe('abc');
     expect(message!.edits).toBe(edits + 1);
     await reply.finish('done');
     expect(message!.content).toBe('abc');
+    expect(message!.subtext).toEqual(['-# ✓ 4s']);
     expect(message!.hasStop).toBe(false);
   });
 
@@ -84,14 +78,28 @@ describe('a streamed reply', () => {
     });
   });
 
-  test('a stopped reply with no text still says so', async () => {
+  test('a stopped reply with no text still says so, in the footer', async () => {
     const clock = new FakeClock();
     const discord = new FakeDiscord();
     const reply = new Reply(discord.canvas('t'), clock, silentLog, 't', 1_000);
     reply.update({ kind: 'status', line: 'thinking' });
     await clock.advance(0);
     await reply.finish('stopped');
-    expect(discord.contentsIn('t')).toEqual(['*stopped*']);
+    expect(discord.contentsIn('t')).toEqual(['']);
+    expect(discord.inThread('t')[0]!.subtext).toEqual(['-# ⏹️ stopped · 0s']);
+  });
+
+  test('leaves the stopped marker to the canvas, which is told the outcome', async () => {
+    const canvas = new FakeCanvas();
+    const reply = new Reply(canvas, new FakeClock(), silentLog, 't', 1_000);
+    reply.update({ kind: 'text', delta: 'partial' });
+    await reply.finish('stopped');
+    expect(canvas.frames.at(-1)).toEqual({
+      text: 'partial',
+      status: null,
+      outcome: 'stopped',
+    });
+    expect(canvas.answer).not.toContain(STOPPED);
   });
 
   test('seals full chunks in order and keeps the button only on the live message', async () => {
@@ -125,7 +133,8 @@ describe('a streamed reply', () => {
       1_000,
     );
     await reply.finish('done');
-    expect(discord.contentsIn('t')).toEqual([NO_REPLY]);
+    expect(discord.contentsIn('t')).toEqual(['']);
+    expect(discord.inThread('t')[0]!.subtext).toEqual(['-# ✓ no reply · 0s']);
   });
 
   test('a status that clears with no text behind it ends with the same plain line', async () => {
@@ -136,7 +145,7 @@ describe('a streamed reply', () => {
     await clock.advance(0);
     reply.update({ kind: 'status', line: null });
     await reply.finish('done');
-    expect(discord.contentsIn('t')).toEqual([NO_REPLY]);
+    expect(discord.inThread('t')[0]!.subtext).toEqual(['-# ✓ no reply · 0s']);
   });
 
   test('a failed turn with nothing to show posts nothing of its own', async () => {
@@ -178,23 +187,64 @@ describe('tool calls', () => {
     expect(canvas.answer).toBe('a');
   });
 
-  test('are nothing to a canvas with no cards, and the turn is unchanged', async () => {
+  test('are listed on the Discord card, stand in for the status line, and are counted in the footer', async () => {
     const clock = new FakeClock();
     const discord = new FakeDiscord();
-    const reply = new Reply(discord.canvas('t'), clock, silentLog, 't', 1_000);
-    reply.update({ kind: 'status', line: 'read files' });
+    const reply = new Reply(
+      discord.canvas('t', clock),
+      clock,
+      silentLog,
+      't',
+      1_000,
+    );
+    reply.update({ kind: 'status', line: 'read files…' });
     reply.update({
       kind: 'tool',
       call: { id: 'c1', title: 'read files', state: 'in_progress' },
     });
-    await clock.advance(0);
+    await clock.advance(1_000);
+    const [card] = discord.inThread('t');
+    expect(card!.subtext).toEqual(['-# ⟳ read files']);
+    reply.update({
+      kind: 'tool',
+      call: { id: 'c1', title: 'read files', state: 'complete' },
+    });
+    reply.update({ kind: 'status', line: null });
+    // A tool call moving is a repaint of its own, with no text or status
+    // change behind it.
+    reply.update({
+      kind: 'tool',
+      call: { id: 'c2', title: 'bun test', state: 'error' },
+    });
+    await clock.advance(1_000);
+    expect(card!.subtext).toEqual(['-# ✓ read files', '-# ✗ bun test']);
     reply.update({ kind: 'text', delta: 'an ' });
     await clock.advance(RUN_GRACE_MS);
     reply.update({ kind: 'text', delta: 'answer' });
     await clock.advance(1_000);
-    expect(discord.contentsIn('t')).toEqual(['*read files*\n\nan answer']);
+    expect(card!.content).toBe('an answer');
     await reply.finish('done');
     expect(discord.contentsIn('t')).toEqual(['an answer']);
+    expect(card!.subtext).toEqual(['-# ✓ 2 tools · 6s']);
+    expect(card!.hasStop).toBe(false);
+  });
+
+  test('fold into a count once the Discord card has listed its share', async () => {
+    const clock = new FakeClock();
+    const discord = new FakeDiscord();
+    const reply = new Reply(discord.canvas('t'), clock, silentLog, 't', 1_000);
+    for (let i = 1; i <= 9; i += 1) {
+      reply.update({
+        kind: 'tool',
+        call: { id: `c${i}`, title: `step ${i}`, state: 'complete' },
+      });
+    }
+    await clock.advance(1_000);
+    const lines = discord.inThread('t')[0]!.subtext;
+    expect(lines[0]).toBe('-# … 3 earlier');
+    expect(lines.slice(1)).toEqual(
+      [4, 5, 6, 7, 8, 9].map((i) => `-# ✓ step ${i}`),
+    );
   });
 
   test('a card that cannot be painted is one warning and still an answer', async () => {
@@ -250,9 +300,8 @@ describe('what the agent says between tool calls', () => {
     reply.update({ kind: 'text', delta: 'Let me look at the vault item.' });
     reply.update({ kind: 'status', line: null });
     await clock.advance(0);
-    expect(discord.contentsIn('t')).toEqual([
-      '*Let me look at the vault item.*',
-    ]);
+    const [card] = discord.inThread('t');
+    expect(card!.subtext).toEqual(['-# ⟳ Let me look at the vault item.']);
     // A tool call takes the line back: what is running beats what the agent
     // last said it was about to run.
     reply.update({
@@ -261,7 +310,13 @@ describe('what the agent says between tool calls', () => {
     });
     reply.update({ kind: 'status', line: 'op read…' });
     await clock.advance(1_000);
-    expect(discord.contentsIn('t')).toEqual(['*op read…*']);
+    // The sentence is kept, as a step on the card, and the running call is
+    // the line that moves.
+    expect(card!.subtext).toEqual([
+      '-# 💬 Let me look at the vault item.',
+      '-# ⟳ op read',
+    ]);
+    expect(card!.content).toBe('');
   });
 
   test('is answer text once it outlives the grace, tool call behind it or not', async () => {

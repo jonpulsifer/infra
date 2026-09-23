@@ -4,25 +4,25 @@
  * harness is handed the thread's history, and mate's own bookkeeping is not
  * part of the conversation.
  */
-import { NO_REPLY, PLACEHOLDER, STOPPED } from './reply.ts';
+import { NO_REPLY, STOPPED } from './reply.ts';
 import type { MintStep } from './sandbox.ts';
 
-export const SANDBOX_CLOSED = 'sandbox closed; message again to start fresh';
+export const SANDBOX_CLOSED = '💤 sandbox closed — reply to pick this back up';
 export const RESTARTED =
-  'mate restarted, so the turn that was running is gone; ask again and it runs from the top';
-export const WAITING = 'waiting for a sandbox';
+  '🔄 mate restarted mid-turn, so that answer is lost — ask again';
+export const WAITING = '⏳ waiting for a free sandbox';
 export const STOPPED_WAITING =
-  'stopped waiting for a sandbox; message again to start fresh';
-export const MINT_FAILED = 'the sandbox did not start';
+  '💤 gave up waiting for a sandbox — reply to try again';
+export const MINT_FAILED = "⚠️ couldn't start a sandbox";
 export const ATTACH_FAILED =
-  'the sandbox started but the harness did not answer';
-export const SANDBOX_DIED = 'the sandbox died mid-turn';
-export const HARNESS_FAILED = 'the harness failed';
-export const UNDELIVERED = 'the reply could not be delivered';
-export const THREAD_SPENT = 'this thread has used its';
-export const DAY_SPENT = 'the daily budget of';
+  "⚠️ the sandbox started but the agent didn't answer";
+export const SANDBOX_DIED = '⚠️ the sandbox died mid-turn';
+export const HARNESS_FAILED = '⚠️ the agent hit an error';
+export const UNDELIVERED = "⚠️ couldn't deliver the reply";
+export const THREAD_SPENT = '🛑 this thread has used its';
+export const DAY_SPENT = '🛑 the daily budget of';
 export const NEVER_STARTED =
-  'mate restarted before this could start; ask again and it runs from the top';
+  '🔄 mate restarted before this could start — ask again';
 
 /**
  * What each step of a mint is, in the words of the human waiting on it. They
@@ -32,15 +32,15 @@ export const NEVER_STARTED =
  * a warm one being handed over.
  */
 export const MINT_STEPS: Record<MintStep, string> = {
-  reusing: 'waking the sandbox this thread already has',
-  adopting: 'taking a sandbox that was already warm',
-  refreshing: 'bringing its checkout up to date',
-  creating: 'asking for a sandbox',
-  booting: 'booting the sandbox and cloning the repo',
+  reusing: "⏳ waking this thread's sandbox",
+  adopting: '⏳ grabbing a warm sandbox',
+  refreshing: '⏳ updating its checkout',
+  creating: '⏳ asking for a sandbox',
+  booting: '⏳ booting a sandbox and cloning the repo',
 };
 
 /** The step after every mint, and the last thing said before the turn itself. */
-export const ATTACHING = 'waking the agent';
+export const ATTACHING = '🔌 connecting to the agent';
 
 const PREFIXES: readonly string[] = [
   SANDBOX_CLOSED,
@@ -65,6 +65,6 @@ const PREFIXES: readonly string[] = [
 
 export function isNotice(content: string): boolean {
   const text = content.trim();
-  if (!text || text === PLACEHOLDER) return true;
+  if (!text) return true;
   return PREFIXES.some((prefix) => text.startsWith(prefix));
 }

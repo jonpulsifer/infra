@@ -259,7 +259,7 @@ describe('the line when the wait ends badly', () => {
     void threads.onMessage(queued);
     await settle();
 
-    expect(surface.linesIn(queued.id)).toEqual([`${WAITING} (0 ahead)`]);
+    expect(surface.linesIn(queued.id)).toEqual([`${WAITING} · next up`]);
 
     // Nobody freed a slot, so the quiet timer takes it out of the queue —
     // and the line it was watching says that rather than waiting forever.

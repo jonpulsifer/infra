@@ -27,7 +27,7 @@
  *   something mate said.
  * - A channel thread has no free-text status. `agents.sessions.setStatus`
  *   takes a lifecycle enum and no words, and `assistant.threads.setStatus`
- *   answers `ok` and does nothing at all here. So the italic line Discord
+ *   answers `ok` and does nothing at all here. So the status line Discord
  *   paints has no home: the tool cards say what mate is doing, and the
  *   session says that it is doing something.
  * - Stop is Slack's own control, drawn on a `processing` agent session for an
@@ -42,7 +42,7 @@
  */
 import type { Clock, Handle } from './clock.ts';
 import { type Log, plain } from './log.ts';
-import { NO_REPLY, oneLine, splitAt } from './reply.ts';
+import { NO_REPLY, oneLine, STOPPED, splitAt } from './reply.ts';
 import {
   type Canvas,
   type HistoryMessage,
@@ -521,7 +521,7 @@ export class SlackCanvas implements Canvas {
    * closes a turn's unfinished cards has nothing of this kind to close.
    *
    * A card carries a title and no body, so a step is one line: `oneLine` is
-   * the same cut Discord's status line takes, which keeps the two surfaces
+   * the same cut Discord's status line and tool list take, which keeps the two surfaces
    * showing the same amount of the same sentence. The id is counted here
    * rather than taken from the harness, which has no id for a sentence; the
    * prefix is what keeps it out of the way of a `toolCallId`.
@@ -548,7 +548,10 @@ export class SlackCanvas implements Canvas {
 
   async final(text: string, outcome: Outcome): Promise<void> {
     try {
-      await this.stream(text, true);
+      await this.stream(
+        outcome === 'stopped' ? `${text}${text ? '\n\n' : ''}${STOPPED}` : text,
+        true,
+      );
       await this.closeCards(outcome === 'done' ? 'complete' : 'error');
       // A turn with nothing to say still says so, exactly as it does on
       // Discord — except a failed one, whose reason is its own line, and one

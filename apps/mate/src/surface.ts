@@ -93,8 +93,8 @@ export interface Canvas {
   working?(): Promise<void>;
   /**
    * One tool call, where the surface renders them itself. Slack has a card
-   * per call that mutates in place; Discord has nothing of the kind and
-   * declares no `tool`, so its turns are painted by the status line alone.
+   * per call that mutates in place; Discord lists them on the turn's live
+   * card. A surface with neither is painted by the status line alone.
    */
   tool?(call: ToolCall): Promise<void>;
   /**
@@ -103,9 +103,8 @@ export interface Canvas {
    * what a turn did. It goes beside the tool calls rather than into the
    * answer, which is the whole point: the answer is what the turn concluded,
    * and a thread that carries every sentence leading up to it is unreadable.
-   * Declared alongside `tool` and for the same reason: Discord has nowhere to
-   * keep one, so there a step is the status line while it is current and
-   * nothing afterwards.
+   * Declared alongside `tool` and for the same reason: each surface keeps it
+   * wherever it keeps the tool calls, in the order they happened.
    */
   step?(text: string): Promise<void>;
 }
@@ -123,6 +122,15 @@ export interface Notice {
   /** The last word: a sentence replaces the line, `null` takes it away. */
   done(text: string | null): Promise<void>;
 }
+
+/** One human message, where a surface can mark it. */
+export interface MessageRef {
+  readonly channelId: string;
+  readonly id: string;
+}
+
+/** How far mate has got with one message: picked up, or how its turn ended. */
+export type Mark = 'seen' | Outcome;
 
 export interface Surface {
   readonly name: SurfaceName;
@@ -163,4 +171,10 @@ export interface Surface {
    * the process, so it declares no `settle`.
    */
   settle?(thread: ThreadRef): Promise<void>;
+  /**
+   * Marks the human's own message, for a surface where that is how a glance
+   * at the channel tells what mate did with it. Discord reacts on it; Slack's
+   * agent session already says it and declares no `mark`.
+   */
+  mark?(message: MessageRef, mark: Mark): Promise<void>;
 }

@@ -285,6 +285,7 @@ client.once(GatewayDispatchEvents.Ready, async ({ data }) => {
       me,
       allowedUserIds: config.allowedUserIds,
       allowedChannelIds: config.allowedChannelIds,
+      clock: systemClock,
     }),
   );
   log.info('ready', {

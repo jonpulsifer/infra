@@ -4,8 +4,20 @@
  * stops, what an error and a quiet thread say.
  */
 import { beforeEach, describe, expect, test } from 'bun:test';
+import { CHUNK_BUDGET } from '../src/discord.ts';
 import { silentLog } from '../src/log.ts';
-import { RESTARTED, SANDBOX_CLOSED } from '../src/notices.ts';
+import {
+  DAY_SPENT,
+  HARNESS_FAILED,
+  MINT_FAILED,
+  RESTARTED,
+  SANDBOX_CLOSED,
+  SANDBOX_DIED,
+  STOPPED_WAITING,
+  THREAD_SPENT,
+  UNDELIVERED,
+  WAITING,
+} from '../src/notices.ts';
 import { type Script, StubSandboxes } from '../src/sandbox.ts';
 import { type Surface, threadKey } from '../src/surface.ts';
 import {
@@ -140,6 +152,7 @@ beforeEach(() => {
     me: ME,
     allowedUserIds: new Set([OWNER]),
     allowedChannelIds: new Set([CHANNEL]),
+    clock,
   });
   log = new RecordingLog();
   metrics = new RecordingInstruments();
@@ -205,7 +218,7 @@ describe('starting a thread', () => {
 });
 
 describe('streaming a reply', () => {
-  test('one message is edited in place with an italic status line above the text and a Stop button, both gone when the turn ends', async () => {
+  test('one card is edited in place with a subtext status line above the text and a Stop button, both swapped for a footer when the turn ends', async () => {
     const script: Script = () => [
       { status: 'running `mise run docs:check`…' },
       { wait: 100 },
@@ -221,25 +234,26 @@ describe('streaming a reply', () => {
     const threadId = discord.threads[0]!.id;
     await clock.advance(100);
     const [reply] = discord.inThread(threadId);
-    expect(reply!.content).toBe('*running `mise run docs:check`…*');
+    expect(reply!.content).toBe('');
+    expect(reply!.subtext).toEqual(['-# ⟳ running `mise run docs:check`…']);
     expect(reply!.hasStop).toBe(true);
     // Far enough for the second delta at 1100ms — which is what shows the
     // run the first one opened to be the answer rather than a step — and
     // for the repaint after it, without reaching the end of the turn.
     await clock.advance(1_900);
-    expect(reply!.content).toStartWith(
-      '*running `mise run docs:check`…*\n\nalpha ',
-    );
+    expect(reply!.content).toStartWith('alpha ');
+    expect(reply!.subtext).toEqual(['-# ⟳ running `mise run docs:check`…']);
     expect(reply!.hasStop).toBe(true);
     await clock.advance(5_000);
     expect(discord.inThread(threadId)).toHaveLength(1);
     expect(reply!.content).toBe('alpha beta ');
+    expect(reply!.subtext).toEqual(['-# ✓ 2s']);
     expect(reply!.hasStop).toBe(false);
   });
 
-  test('text past the cap seals the message and continues in a new one; no message exceeds 2000 characters', async () => {
+  test('text past the cap seals the message and continues in a new one; no message exceeds the text cap', async () => {
     const paragraph = `${'lorem ipsum '.repeat(40).trim()}\n`;
-    const long = paragraph.repeat(12);
+    const long = paragraph.repeat(24);
     const script: Script = () => [
       { text: long.slice(0, 1500) },
       { wait: 1_000 },
@@ -253,7 +267,7 @@ describe('streaming a reply', () => {
     const chunks = discord.inThread(threadId);
     expect(chunks.length).toBeGreaterThan(1);
     for (const chunk of chunks)
-      expect(chunk.content.length).toBeLessThanOrEqual(2000);
+      expect(chunk.content.length).toBeLessThanOrEqual(CHUNK_BUDGET);
     expect(chunks.map((c) => c.content).join('')).toBe(long);
     expect(chunks.slice(0, -1).every((c) => !c.hasStop)).toBe(true);
     expect(chunks.at(-1)!.hasStop).toBe(false);
@@ -288,7 +302,7 @@ describe('stopping a turn', () => {
     expect(discord.acks).toEqual(['i-1']);
     expect(threads.stateOf(key(threadId))).toBe('attached');
     const reply = discord.inThread(threadId)[0]!;
-    expect(reply.content).toEndWith('*stopped*');
+    expect(reply.subtext.at(-1)).toStartWith('-# ⏹️ stopped');
     expect(reply.content).not.toContain('five');
     expect(reply.hasStop).toBe(false);
   });
@@ -314,7 +328,7 @@ describe('errors', () => {
     await settle();
     const threadId = discord.threads[0]!.id;
     expect(discord.contentsIn(threadId)).toEqual([
-      'the sandbox did not start: ImagePullBackOff',
+      `${MINT_FAILED}: ImagePullBackOff`,
     ]);
     expect(threads.stateOf(key(threadId))).toBe('closed');
   });
@@ -331,7 +345,7 @@ describe('errors', () => {
     const threadId = discord.threads[0]!.id;
     expect(discord.contentsIn(threadId)).toEqual([
       'partial ',
-      'the harness failed: provider returned 402',
+      `${HARNESS_FAILED}: provider returned 402`,
     ]);
     expect(threads.stateOf(key(threadId))).toBe('attached');
   });
@@ -350,7 +364,7 @@ describe('errors', () => {
       await sandboxes.teardown(sandbox);
     await clock.advance(2_000);
     expect(discord.contentsIn(threadId).at(-1)).toStartWith(
-      'the sandbox died mid-turn: ',
+      `${SANDBOX_DIED}: `,
     );
     expect(threads.stateOf(key(threadId))).toBe('closed');
   });
@@ -429,12 +443,8 @@ describe('capacity', () => {
     expect(threads.stateOf(key(first))).toBe('turn');
     expect(threads.stateOf(key(second))).toBe('waiting');
     expect(threads.stateOf(key(third))).toBe('waiting');
-    expect(discord.contentsIn(second)).toEqual([
-      'waiting for a sandbox (0 ahead)',
-    ]);
-    expect(discord.contentsIn(third)).toEqual([
-      'waiting for a sandbox (1 ahead)',
-    ]);
+    expect(discord.contentsIn(second)).toEqual([`${WAITING} · next up`]);
+    expect(discord.contentsIn(third)).toEqual([`${WAITING} · 1 ahead`]);
     await clock.advance(5_000);
     expect(threads.stateOf(key(second))).toBe('waiting');
     await threads.onThreadArchived(ref(first));
@@ -464,9 +474,7 @@ describe('capacity', () => {
     await clock.advance(1);
     expect(threads.stateOf(key(second))).toBe('closed');
     expect(threads.waitingIds).toHaveLength(0);
-    expect(discord.contentsIn(second).at(-1)).toBe(
-      'stopped waiting for a sandbox; message again to start fresh',
-    );
+    expect(discord.contentsIn(second).at(-1)).toBe(STOPPED_WAITING);
   });
 
   test('a second message to a waiting thread keeps its quiet timer running', async () => {
@@ -482,9 +490,7 @@ describe('capacity', () => {
     await clock.advance(QUIET_MS + 1);
     expect(threads.stateOf(key(second))).toBe('closed');
     expect(threads.waitingIds).toHaveLength(0);
-    expect(discord.contentsIn(second).at(-1)).toBe(
-      'stopped waiting for a sandbox; message again to start fresh',
-    );
+    expect(discord.contentsIn(second).at(-1)).toBe(STOPPED_WAITING);
   });
 });
 
@@ -529,9 +535,7 @@ describe('delivery failures', () => {
     expect(
       discord
         .contentsIn(threadId)
-        .filter(
-          (c) => c === 'the reply could not be delivered: thread archived',
-        ),
+        .filter((c) => c === `${UNDELIVERED}: thread archived`),
     ).toHaveLength(2);
     await clock.advance(QUIET_MS);
     expect(threads.stateOf(key(threadId))).toBe('closed');
@@ -552,7 +556,7 @@ describe('turn budgets', () => {
     await threads.onMessage(inThread(threadId, 'three'));
     await clock.advance(5_000);
     expect(discord.contentsIn(threadId).at(-1)).toBe(
-      'this thread has used its 2 turns; start a new thread',
+      `${THREAD_SPENT} 2 turns — start a new thread`,
     );
     expect(
       discord.contentsIn(threadId).filter((c) => c === 'ok '),
@@ -571,13 +575,71 @@ describe('turn budgets', () => {
     await clock.advance(5_000);
     const third = discord.threads[2]!.id;
     expect(discord.contentsIn(third)).toEqual([
-      'the daily budget of 2 turns is spent; try again later',
+      `${DAY_SPENT} 2 turns is spent — try again later`,
     ]);
     await clock.advance(QUIET_MS);
     await clock.advance(24 * 3_600_000);
     await threads.onMessage(inThread(third, 'tomorrow'));
     await clock.advance(5_000);
     expect(discord.contentsIn(third).at(-1)).toBe('ok ');
+  });
+});
+
+describe('marking the message', () => {
+  test('is 👀 while mate works on it, and ✅ once the turn is done', async () => {
+    const { threads } = build({ script: streaming('ok') });
+    const start = mention('go');
+    await threads.onMessage(start);
+    await settle();
+    expect(discord.reactionsOn(CHANNEL, start.id)).toEqual(['👀']);
+    await clock.advance(5_000);
+    expect(discord.reactionsOn(CHANNEL, start.id)).toEqual(['✅']);
+    const threadId = discord.threads[0]!.id;
+    const next = inThread(threadId, 'again');
+    await threads.onMessage(next);
+    await clock.advance(5_000);
+    expect(discord.reactionsOn(threadId, next.id)).toEqual(['✅']);
+  });
+
+  test('is ⏹️ for a turn the human stopped', async () => {
+    const { threads } = build({ script: streaming('one two three four five') });
+    const start = mention('go');
+    await threads.onMessage(start);
+    await clock.advance(250);
+    await threads.onStop(key(discord.threads[0]!.id), OWNER, async () => {});
+    await clock.advance(2_000);
+    expect(discord.reactionsOn(CHANNEL, start.id)).toEqual(['⏹️']);
+  });
+
+  test('is ⚠️ for a turn that never ran, whatever stopped it', async () => {
+    const { threads } = build({ mintFails: 'ImagePullBackOff' });
+    const start = mention('go');
+    await threads.onMessage(start);
+    await settle();
+    expect(discord.reactionsOn(CHANNEL, start.id)).toEqual(['⚠️']);
+  });
+
+  test('is ⚠️ for a message the budget refused', async () => {
+    const { threads } = build({
+      script: streaming('ok'),
+      config: { maxTurnsPerThread: 1 },
+    });
+    await threads.onMessage(mention('one'));
+    await clock.advance(5_000);
+    const threadId = discord.threads[0]!.id;
+    const refused = inThread(threadId, 'two');
+    await threads.onMessage(refused);
+    await settle();
+    expect(discord.reactionsOn(threadId, refused.id)).toEqual(['⚠️']);
+  });
+
+  test('that cannot be marked is a warning, and the answer still lands', async () => {
+    discord.failReactions = new Error('Missing Permissions');
+    const { threads } = build({ script: streaming('ok') });
+    await threads.onMessage(mention('go'));
+    await clock.advance(5_000);
+    expect(discord.contentsIn(discord.threads[0]!.id).at(-1)).toBe('ok ');
+    expect(log.of('a message could not be marked').length).toBeGreaterThan(0);
   });
 });
 
@@ -799,7 +861,9 @@ describe('replaying the transcript', () => {
     await clock.advance(5_000);
 
     expect(sandboxes.prompts).not.toContain('third question');
-    expect(discord.contentsIn(threadId).at(-1)).toBe('*stopped*');
+    expect(discord.inThread(threadId).at(-1)?.subtext).toEqual([
+      '-# ⏹️ stopped · 1s',
+    ]);
     expect(metrics.turns.at(-1)).toBe('cancelled');
     expect(threads.stateOf(key(threadId))).toBe('attached');
   });

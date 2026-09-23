@@ -4,7 +4,7 @@
  */
 import { beforeEach, describe, expect, test } from 'bun:test';
 import { SANDBOX_CLOSED, WAITING } from '../src/notices.ts';
-import { PLACEHOLDER, STOPPED } from '../src/reply.ts';
+import { STOPPED } from '../src/reply.ts';
 import type { Surface } from '../src/surface.ts';
 import {
   REPLAY_CHARS,
@@ -59,7 +59,6 @@ describe('replaying a thread', () => {
     human('hello');
     mate(SANDBOX_CLOSED);
     mate(`${WAITING} (1 ahead)`);
-    mate(PLACEHOLDER);
     mate(STOPPED);
     discord.posted.push({
       channelId: THREAD,

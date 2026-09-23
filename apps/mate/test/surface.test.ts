@@ -6,7 +6,7 @@
  * checks that the caps are mate's rather than either surface's.
  */
 import { beforeEach, describe, expect, test } from 'bun:test';
-import { SANDBOX_CLOSED } from '../src/notices.ts';
+import { MINT_FAILED, SANDBOX_CLOSED, WAITING } from '../src/notices.ts';
 import { type Script, StubSandboxes } from '../src/sandbox.ts';
 import { sandboxName } from '../src/sandboxes.ts';
 import { type Inbound, threadKey } from '../src/surface.ts';
@@ -239,7 +239,7 @@ describe('a thread on a surface that is not Discord', () => {
     await threads.onStop(key(start.id), OWNER, async () => {});
     await clock.advance(2_000);
     expect(threads.stateOf(key(start.id))).toBe('attached');
-    expect(surface.answerIn(start.id)).toEndWith('*stopped*');
+    expect(surface.canvases.get(start.id)?.outcome).toBe('stopped');
     expect(surface.answerIn(start.id)).not.toContain('five');
   });
 
@@ -290,7 +290,7 @@ describe('a thread on a surface that is not Discord', () => {
     await threads.onMessage(start);
     await settle();
     expect(surface.linesIn(start.id)).toEqual([
-      'the sandbox did not start: ImagePullBackOff',
+      `${MINT_FAILED}: ImagePullBackOff`,
     ]);
   });
 });
@@ -460,9 +460,7 @@ describe('two surfaces, one mate', () => {
     const discordThreadId = discord.threads[0]?.id ?? '';
     expect(threads.stateOf(`discord:${discordThreadId}`)).toBe('turn');
     expect(threads.stateOf(key(second.id))).toBe('waiting');
-    expect(surface.linesIn(second.id)).toEqual([
-      'waiting for a sandbox (0 ahead)',
-    ]);
+    expect(surface.linesIn(second.id)).toEqual([`${WAITING} · next up`]);
 
     await clock.advance(5_000);
     await threads.onThreadArchived({

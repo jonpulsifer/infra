@@ -40,6 +40,8 @@ import type {
 } from './sandbox.ts';
 import {
   type Inbound,
+  type Mark,
+  type MessageRef,
   type Outcome,
   type Surface,
   type SurfaceName,
@@ -64,6 +66,8 @@ interface Prompt {
   text: string;
   raw: string;
   authorId: string;
+  /** The human's message, which a surface that marks messages reacts on. */
+  message: MessageRef;
 }
 
 interface Thread {
@@ -83,6 +87,12 @@ interface Thread {
   replay: boolean;
   /** Set by a Stop that lands before the turn reaches the harness. */
   stopRequested: boolean;
+  /**
+   * The thread's marks, in order: a turn refused the moment it is accepted
+   * marks its message twice in one tick, and a surface that took the second
+   * first would leave the first standing.
+   */
+  marks: Promise<void>;
 }
 
 export const THREAD_NAME_MAX = 100;
@@ -262,6 +272,7 @@ export class Threads {
       text: stripMention(message.content, surface.me),
       raw: message.content,
       authorId: message.authorId,
+      message: { channelId: message.channelId, id: message.id },
     };
     const known = message.threadId
       ? this.threads.get(
@@ -390,6 +401,7 @@ export class Threads {
         progress: null,
         replay: false,
         stopRequested: false,
+        marks: Promise.resolve(),
       };
       this.threads.set(key, thread);
     }
@@ -420,6 +432,7 @@ export class Threads {
 
   private accept(thread: Thread, prompt: Prompt): void {
     thread.pending.push(prompt);
+    this.mark(thread, [prompt], 'seen');
     this.disarmQuiet(thread);
     void this.pump(thread);
   }
@@ -551,14 +564,17 @@ export class Threads {
   /** One plain sentence, the queued prompts dropped, and whatever exists torn down. */
   private async failed(thread: Thread, line: string): Promise<void> {
     await this.tell(thread, line);
-    thread.pending = [];
+    this.drop(thread);
     await this.close(thread, { line: null, archive: false, reason: 'error' });
   }
 
   private enqueue(thread: Thread): void {
     this.waiting.push(thread.key);
     this.to(thread, 'waiting');
-    thread.progress?.say(`${WAITING} (${this.waiting.length - 1} ahead)`);
+    const ahead = this.waiting.length - 1;
+    thread.progress?.say(
+      `${WAITING} · ${ahead > 0 ? `${ahead} ahead` : 'next up'}`,
+    );
     this.armQuiet(thread);
   }
 
@@ -573,7 +589,7 @@ export class Threads {
     const at = this.waiting.indexOf(thread.key);
     if (at >= 0) this.waiting.splice(at, 1);
     this.disarmQuiet(thread);
-    thread.pending = [];
+    this.drop(thread);
     this.to(thread, 'closed');
   }
 
@@ -583,7 +599,8 @@ export class Threads {
     if (!prompt || !thread.session) return;
     const refusal = this.budgetRefusal(thread);
     if (refusal) {
-      thread.pending = [];
+      this.mark(thread, [prompt], 'failed');
+      this.drop(thread);
       await this.tell(thread, refusal);
       this.armQuiet(thread);
       return;
@@ -616,6 +633,7 @@ export class Threads {
         thread.stopRequested = false;
         this.metrics.turnEnded('cancelled', {});
         await this.deliver(thread, reply, 'stopped');
+        this.mark(thread, [prompt], 'stopped');
         return;
       }
       let result: PromptResult;
@@ -624,6 +642,7 @@ export class Threads {
       } catch (error) {
         this.metrics.turnEnded('sandbox-died', {});
         await this.deliver(thread, reply, 'failed');
+        this.mark(thread, [prompt], 'failed');
         log.warn('sandbox died mid-turn', {
           threadId: thread.ref.id,
           error: plain(error),
@@ -637,15 +656,16 @@ export class Threads {
         return;
       }
       this.metrics.turnEnded(result.stopReason, result);
+      const outcome: Outcome =
+        result.stopReason === 'error'
+          ? 'failed'
+          : result.stopReason === 'cancelled'
+            ? 'stopped'
+            : 'done';
+      await this.deliver(thread, reply, outcome);
+      this.mark(thread, [prompt], outcome);
       if (result.stopReason === 'error') {
-        await this.deliver(thread, reply, 'failed');
         await this.tell(thread, `${HARNESS_FAILED}: ${plain(result.error)}`);
-      } else {
-        await this.deliver(
-          thread,
-          reply,
-          result.stopReason === 'cancelled' ? 'stopped' : 'done',
-        );
       }
     } finally {
       if (thread.state === 'turn') {
@@ -703,17 +723,44 @@ export class Threads {
     }
   }
 
+  /** Every queued prompt dropped, each marked as the turn it will never get. */
+  private drop(thread: Thread): void {
+    this.mark(thread, thread.pending, 'failed');
+    thread.pending = [];
+  }
+
+  /**
+   * Marks messages on a surface that marks them. Never awaited and never
+   * fatal: a reaction is a glance's worth of news, and a turn is not held
+   * for one or failed by one.
+   */
+  private mark(thread: Thread, prompts: readonly Prompt[], mark: Mark): void {
+    const surface = thread.surface;
+    if (!surface.mark) return;
+    for (const { message } of prompts) {
+      thread.marks = thread.marks
+        .then(() => surface.mark?.(message, mark))
+        .catch((error) =>
+          this.deps.log.warn('a message could not be marked', {
+            threadId: thread.ref.id,
+            mark,
+            error: plain(error),
+          }),
+        );
+    }
+  }
+
   private budgetRefusal(thread: Thread): string | null {
     const { config, clock } = this.deps;
     if (thread.turns >= config.maxTurnsPerThread) {
-      return `${THREAD_SPENT} ${config.maxTurnsPerThread} turns; start a new thread`;
+      return `${THREAD_SPENT} ${config.maxTurnsPerThread} turns — start a new thread`;
     }
     const floor = clock.now() - DAY_MS;
     while (this.dayTurns.length > 0 && (this.dayTurns[0] ?? 0) < floor) {
       this.dayTurns.shift();
     }
     if (this.dayTurns.length >= config.maxTurnsPerDay) {
-      return `${DAY_SPENT} ${config.maxTurnsPerDay} turns is spent; try again later`;
+      return `${DAY_SPENT} ${config.maxTurnsPerDay} turns is spent — try again later`;
     }
     return null;
   }
