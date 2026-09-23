@@ -20,11 +20,8 @@
   dockerTools,
   gettext,
 }:
-dockerTools.streamLayeredImage {
-  name = "ghcr.io/jonpulsifer/asterisk";
-  tag = asterisk.version;
-
-  contents = [
+let
+  runtime = [
     asterisk
     bash
     coreutils
@@ -38,6 +35,32 @@ dockerTools.streamLayeredImage {
     darkhttpd
     cacert
   ];
+
+  # The tag carries a hash of what is in the image, not just the Asterisk
+  # version, and that is load-bearing rather than decorative.
+  #
+  # A tag of `asterisk.version` alone does not move when the *contents* change
+  # — adding darkhttpd left it at 22.8.2 — so the registry gets a new image
+  # under an old name. Kubernetes defaults a non-`latest` tag to
+  # imagePullPolicy IfNotPresent, the node keeps the copy it already has, and
+  # the pod runs an image that no longer matches the manifest that asked for
+  # it. That is how the provisioning sidecar ended up executing a binary its
+  # own Dockerfile-equivalent contained: `exec: "/bin/darkhttpd": no such file
+  # or directory`, against an image where it very much existed.
+  #
+  # Hashing the store paths means any component changing produces a new tag,
+  # the manifest has to name it, and the CI guard beside this fails the pull
+  # request until it does. Tags stop being mutable, so IfNotPresent becomes
+  # correct rather than dangerous.
+  contentTag = builtins.substring 0 8 (
+    builtins.hashString "sha256" (builtins.concatStringsSep ":" (map toString runtime))
+  );
+in
+dockerTools.streamLayeredImage {
+  name = "ghcr.io/jonpulsifer/asterisk";
+  tag = "${asterisk.version}-${contentTag}";
+
+  contents = runtime;
 
   # Asterisk opens these on boot. Kubernetes mounts an emptyDir over each
   # writable one and the config over /etc/asterisk; they exist here so the
