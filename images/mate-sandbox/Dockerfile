@@ -77,7 +77,7 @@ ARG KUBECTL_VERSION=1.37.0
 # renovate: datasource=github-releases depName=kubernetes-sigs/kustomize extractVersion=^kustomize/v(?<version>.*)$
 ARG KUSTOMIZE_VERSION=5.8.1
 # renovate: datasource=github-releases depName=jdx/mise
-ARG MISE_VERSION=2026.9.11
+ARG MISE_VERSION=2026.9.12
 # 1Password publishes the CLI from its own CDN and mirrors it nowhere Renovate
 # has a datasource for, so this is the one pin that moves by hand.
 ARG OP_VERSION=2.39.0
