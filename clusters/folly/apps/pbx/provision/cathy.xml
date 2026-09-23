@@ -5,7 +5,8 @@
     An SPA flat profile is a PARTIAL config: the phone changes only the
     parameters named here and leaves every other one alone. That is the whole
     retention strategy — lines 1, 2 and 3 stay registered straight to voip.ms,
-    byte for byte, because this file never mentions them.
+    byte for byte, because this file never mentions them. The exceptions are
+    phone-wide settings with no per-line form, each marked where it appears.
 
     Named cathy.xml rather than using the $MA macro. $MA expands to the MAC in
     a case this config does not state, and a profile fetch that 404s is a
@@ -34,7 +35,15 @@
   <Use_Outbound_Proxy_4_ group="Ext_4/Proxy_and_Registration">No</Use_Outbound_Proxy_4_>
   <Outbound_Proxy_4_ group="Ext_4/Proxy_and_Registration"></Outbound_Proxy_4_>
   <Register_4_ group="Ext_4/Proxy_and_Registration">Yes</Register_4_>
-  <Register_Expires_4_ group="Ext_4/Proxy_and_Registration">300</Register_Expires_4_>
+  <!--
+    60 seconds, not the 300 this line used against a carrier. Asterisk keeps
+    registrations in an emptyDir, so every PBX rollout forgets the handset
+    until its next REGISTER — up to five minutes of an unreachable line at 300.
+    The PBX is two hops away on the LAN; re-registering every minute costs
+    nothing. 60 is also Asterisk's default minimum_expiration, so it is the
+    shortest it will grant without a change on that side.
+  -->
+  <Register_Expires_4_ group="Ext_4/Proxy_and_Registration">60</Register_Expires_4_>
 
   <!--
     NAT traversal off, both of it. These exist so a handset can reach a carrier
@@ -81,6 +90,18 @@
     Line 4 only. Lines 1-3 still talk to voip.ms and keep whatever they had.
   -->
   <Call_Park_Monitor_Enable_4_ group="Ext_4/Call_Feature_Settings">No</Call_Park_Monitor_Enable_4_>
+
+  <!--
+    Silence the "secure call" beep — the one that sounded like it came with HD
+    audio. It is the tone the SPA plays when a call is encrypted, and every
+    call on lines 1-3 is both G.722 and SRTP to voip.ms, so the two always
+    arrived together. Switching codec would not have stopped it.
+
+    This setting is phone-wide, not per line: it silences the tone on all four
+    lines. The one deliberate exception to this profile naming only line 4.
+    Encryption itself is untouched — Secure_Call_Setting stays on.
+  -->
+  <Secure_Call_Indication_Tone group="Regional/Call_Progress_Tones"></Secure_Call_Indication_Tone>
 
   <!-- The line key's label. Dial_Plan_4_ is deliberately absent: the plan the
        phone already has is the one that works. -->
