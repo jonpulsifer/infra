@@ -35,6 +35,7 @@ import {
   githubAppWebhookSecret,
 } from '../integrations/github/app-auth.ts';
 import { BOSUN_SECRET_VAR } from './bosun-route.ts';
+import { PUBLIC_HOSTNAME_VAR, scopeToHost } from './host-scope.ts';
 import { type ClientRoute, webRoutes } from './routes.ts';
 import { type StreamSocketData, streamWebSocket } from './streams.ts';
 
@@ -271,10 +272,19 @@ export async function start(
     },
   );
 
+  const instrumented = instrumentRoutes(rawRoutes);
+
   const server = Bun.serve<StreamSocketData>({
     port: Number(Bun.env.PORT ?? 3000),
     development,
-    routes: instrumentRoutes(rawRoutes),
+    // Development's client is an HTMLBundle no handler can wrap, served on
+    // whatever origin the developer's browser uses.
+    routes: development
+      ? instrumented
+      : scopeToHost(instrumented, {
+          controlPlane: manifest.controlPlane.hostname,
+          public: Bun.env[PUBLIC_HOSTNAME_VAR]?.trim() || null,
+        }),
     websocket: streamWebSocket,
     // The abuse floor for a surface anybody can post bytes to. A console
     // upload has never been near it.
