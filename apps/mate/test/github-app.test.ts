@@ -368,16 +368,29 @@ describe('every call', () => {
 });
 
 describe('the log', () => {
-  test('names the installation and the expiry, and never the secret', async () => {
+  test('never carries the token or the key', async () => {
     const { app, github, log } = build();
     try {
       const token = await app.token();
       await app.preflight();
       const written = JSON.stringify(log.entries);
-      expect(written).toContain('42');
-      expect(written).toContain('clanky-bot[bot]');
       expect(written).not.toContain(token.token);
       expect(written).not.toContain('PRIVATE KEY');
+    } finally {
+      github.stop();
+    }
+  });
+
+  // The caller logs the readiness line and sets the gauge beside it. A line
+  // from in here as well is the same news twice, which is what shipped: two
+  // identical `github app ready` entries in the same millisecond.
+  test('a preflight reports its answer and says nothing itself', async () => {
+    const { app, github, log } = build();
+    try {
+      const status = await app.preflight();
+      expect(status.login).toBe('clanky-bot[bot]');
+      expect(status.installationId).toBe(42);
+      expect(log.of('github app ready')).toHaveLength(0);
     } finally {
       github.stop();
     }
