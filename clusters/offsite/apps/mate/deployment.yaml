@@ -240,6 +240,32 @@ spec:
             # liability. Setting this to `mate-onepassword` hands it back, for
             # a sandbox whose vault has been stocked with something the agent
             # is meant to read.
+            #
+            # What makes the agent an SRE companion rather than a code-writing
+            # one: the ServiceAccount it debugs this cluster as, declared in
+            # `sandbox-rbac.yaml`. mate mints a bound token for it per turn
+            # through TokenRequest and hands the sandbox a kubeconfig; nothing
+            # long-lived is written for it anywhere. Unsetting this is the
+            # rollback and a sandbox goes back to having no cluster access.
+            #
+            # That account reads everything this cluster holds, Secrets
+            # included, and can exec into any pod. That is deliberate — an
+            # agent that cannot open a shell in a broken pod cannot do the job
+            # this is for — and the boundary that remains is time: the token
+            # lasts one turn.
+            - name: MATE_SANDBOX_KUBE_SA
+              value: mate-sandbox-debug
+            # The SSH key a sandbox logs into hosts with, mounted from the
+            # `mate-sandbox-ssh` Secret and stamped into the pod per turn the
+            # same way. The identity is `rowbutt`, which `nix/system/user.nix`
+            # puts in `wheel` on every host while `nix/profiles/fleet.nix`
+            # sets `wheelNeedsPassword = false` — so a turn holding this can
+            # do anything on any box in the fleet, including the node its own
+            # sandbox runs on. This agent is a proxy for its operator and is
+            # built to have that reach; it is written down here because the
+            # Deployment is where somebody counts the blast radius.
+            - name: MATE_SSH_KEY_FILE
+              value: /var/run/mate/ssh/private-key
             # Gateway session info (session id, resume URL, sequence) lands
             # here so a container restart inside the same pod resumes instead
             # of spending an identify from the daily budget. An emptyDir is
@@ -264,6 +290,11 @@ spec:
             # away from uid 65532, the only uid here that has to read it.
             - name: github-app
               mountPath: /var/run/mate/github-app
+              readOnly: true
+            # The same arrangement and the same reasoning about modes: mounted
+            # read-only, no `defaultMode`, read once at boot by uid 65532.
+            - name: ssh
+              mountPath: /var/run/mate/ssh
               readOnly: true
           # Readiness only. /healthz is 503 whenever the gateway is not
           # connected, and that is deliberate during the identify-budget

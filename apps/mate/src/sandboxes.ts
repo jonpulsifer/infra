@@ -132,6 +132,43 @@ const CHECKOUT_DEPTH = 50;
  */
 const TOKEN_FILE_ENV = 'MATE_GITHUB_TOKEN_FILE';
 const TOKEN_FILE = `${AGENT_HOME}/.github-token`;
+const KUBECONFIG_FILE = `${AGENT_HOME}/.kube/config`;
+const SSH_DIR = `${AGENT_HOME}/.ssh`;
+const SSH_KEY_FILE = `${SSH_DIR}/id_ed25519`;
+const SSH_CONFIG_FILE = `${SSH_DIR}/config`;
+/**
+ * What `ssh` is told before the agent has to remember to tell it. `accept-new`
+ * rather than `no`, which would accept a changed host key silently, and rather
+ * than `yes`, which refuses every host the sandbox has never met — and a
+ * sandbox has met none, because its home is an emptyDir that is new every
+ * time. So `yes` would make host login impossible and `no` would make it
+ * unsafe; `accept-new` trusts first contact and then notices a key that
+ * changes under it, within the life of one sandbox.
+ */
+const SSH_CLIENT_CONFIG = [
+  'Host *',
+  '  User rowbutt',
+  `  IdentityFile ${SSH_KEY_FILE}`,
+  '  IdentitiesOnly yes',
+  '  StrictHostKeyChecking accept-new',
+  `  UserKnownHostsFile ${SSH_DIR}/known_hosts`,
+  '',
+].join('\n');
+/**
+ * The audience a sandbox's kubeconfig token is minted for, and the address it
+ * is spent at. Both are the in-cluster Service: a bound token is refused by
+ * any audience it was not asked for, so these two are one fact written once.
+ */
+const CLUSTER_URL = 'https://kubernetes.default.svc:443';
+/**
+ * How much longer than the turn a cluster token lives. The turn is what it is
+ * for, and a token that expires under a running `kubectl` is a diagnosis that
+ * stops halfway with an authentication error rather than an answer. The
+ * apiserver's own floor is ten minutes, which a short turn cap would
+ * otherwise fall under.
+ */
+const TOKEN_SLACK_SECONDS = 5 * 60;
+const TOKEN_FLOOR_SECONDS = 600;
 /**
  * Scoped to the one URL rather than set as a bare `credential.helper`: git
  * tries every helper that matches, in the order the configs are read, and the
@@ -237,6 +274,15 @@ export interface KubeSandboxesDeps {
    * configuration.
    */
   githubApp?: TokenSource | null;
+  /**
+   * The cluster CA, so a sandbox's kubeconfig verifies the apiserver rather
+   * than being told to skip it. It comes from mate's own `KubeConfig` — the
+   * same bundle the kubelet projected for mate — so there is no second source
+   * of truth for it and no second place it can be wrong.
+   */
+  clusterCa?: string | null;
+  /** The SSH private key a turn is stamped with, read once at boot. */
+  sshKey?: string | null;
   ttlMs?: number;
   readyTimeoutMs?: number;
   goneTimeoutMs?: number;
@@ -387,6 +433,47 @@ export function opencodeConfig(model: string): string {
  * public repository anonymously — and the count and the indices are derived
  * from the list so a setting cannot be added without both moving with it.
  */
+/**
+ * The kubeconfig a turn is handed. It is generated rather than templated from
+ * a file so that the only two things in it that can be wrong — the address
+ * and the CA — come from the same `KubeConfig` mate itself is using.
+ *
+ * A cluster with no CA in that config is one mate reaches over a trusted
+ * system store, and the sandbox gets the same arrangement: no
+ * `certificate-authority-data` and no `insecure-skip-tls-verify` either,
+ * because skipping verification is a different decision from inheriting a
+ * trust store and must never be made silently on an agent's behalf.
+ */
+export function kubeconfig(token: string, ca: string | null): string {
+  const cluster = [
+    `    server: ${CLUSTER_URL}`,
+    ...(ca
+      ? [
+          `    certificate-authority-data: ${Buffer.from(ca).toString('base64')}`,
+        ]
+      : []),
+  ];
+  return [
+    'apiVersion: v1',
+    'kind: Config',
+    'clusters:',
+    '  - name: cluster',
+    '    cluster:',
+    ...cluster,
+    'users:',
+    '  - name: sandbox',
+    '    user:',
+    `      token: ${token}`,
+    'contexts:',
+    '  - name: cluster',
+    '    context:',
+    '      cluster: cluster',
+    '      user: sandbox',
+    'current-context: cluster',
+    '',
+  ].join('\n');
+}
+
 export function gitEnv(github: boolean): { name: string; value: string }[] {
   const settings: [string, string][] = [
     ['safe.directory', WORKSPACE],
@@ -609,6 +696,15 @@ export function sandboxManifest(declaration: SandboxDeclaration): Sandbox {
                 { name: 'OPENCODE_DISABLE_PROJECT_CONFIG', value: '1' },
                 ...(config.vault ? connectEnv(config.vault) : []),
                 ...gitEnv(config.github),
+                // Named rather than left to `kubectl`'s default, because the
+                // default is under `$HOME/.kube` and the agent's home is an
+                // emptyDir — so the two agree today and would stop agreeing
+                // the moment either moved. With no service account
+                // configured there is no file, and a `KUBECONFIG` pointing at
+                // one that will never exist is worse than none.
+                ...(config.kubeServiceAccount
+                  ? [{ name: 'KUBECONFIG', value: KUBECONFIG_FILE }]
+                  : []),
               ],
               volumeMounts: [
                 { name: 'home', mountPath: AGENT_HOME },
@@ -922,54 +1018,121 @@ export class KubeSandboxes implements Sandboxes {
    * Kubernetes writes no audit events at all. An estate that turns auditing
    * on wants this served over a socket instead.
    */
+  /**
+   * Whether a turn has any credential to be given at all. With none
+   * configured there is nothing to write and nothing to clear, so a turn
+   * costs no exec either side of it — which is what a mate running against
+   * the stub, or with every credential rolled back, should cost.
+   */
+  private get credentialled(): boolean {
+    return Boolean(
+      this.deps.githubApp ||
+        this.deps.config.kubeServiceAccount ||
+        this.deps.sshKey,
+    );
+  }
+
   private async stampToken(name: string, pod: string): Promise<string | null> {
     const { githubApp, log, metrics } = this.deps;
-    if (!githubApp) return null;
-    let token: string;
+    if (!this.credentialled) return null;
+    const github = githubApp ? await this.mintGithub(name) : null;
+    const kube = await this.mintCluster(name);
+    const ssh = this.deps.sshKey ?? '';
     try {
-      token = (await githubApp.token()).token;
+      await this.writeCredentials(pod, { github: github ?? '', kube, ssh });
+      if (githubApp) metrics?.githubTokenStamped(github ? 'ok' : 'mint-failed');
+      return github;
+    } catch (error) {
+      metrics?.githubTokenStamped('stamp-failed');
+      log.error("could not stamp the turn's credentials into the sandbox", {
+        sandbox: name,
+        error: plain(error),
+      });
+      // Handed back at once: it reached nobody, so nothing is served by
+      // letting it live out its hour. The cluster token has no such call and
+      // simply expires; the SSH key is mate's own and outlives every turn.
+      if (github) await githubApp?.revoke(github).catch(() => {});
+      return null;
+    }
+  }
+
+  /** The turn's GitHub token, or `null` with the reason already logged. */
+  private async mintGithub(name: string): Promise<string | null> {
+    const { githubApp, log, metrics } = this.deps;
+    try {
+      const token = (await githubApp?.token())?.token ?? null;
       metrics?.githubTokenMinted('ok');
+      return token;
     } catch (error) {
       metrics?.githubTokenMinted('mint-failed');
       log.error('could not mint a GitHub token for this turn', {
         sandbox: name,
         error: plain(error),
       });
-      // Truncated rather than left alone, so a turn never pushes with the
-      // token of a turn that has already ended.
-      await this.writeToken(pod, '').catch(() => {});
-      return null;
-    }
-    try {
-      await this.writeToken(pod, token);
-      metrics?.githubTokenStamped('ok');
-      return token;
-    } catch (error) {
-      metrics?.githubTokenStamped('stamp-failed');
-      log.error('could not stamp the GitHub token into the sandbox', {
-        sandbox: name,
-        error: plain(error),
-      });
-      // Handed back at once: it reaches nobody, so nothing is served by
-      // letting it live out its hour.
-      await githubApp.revoke(token).catch(() => {});
       return null;
     }
   }
 
-  /** Truncates the sandbox's copy and spends the token, both best-effort. */
+  /**
+   * A kubeconfig for the turn, or the empty string where the sandbox is to
+   * have no cluster access — which is the default and the rollback.
+   *
+   * The token is bound and expires on its own, and nothing revokes one. So
+   * unlike the GitHub token, all the end of a turn can do is truncate the
+   * sandbox's copy; what bounds a copy taken during the turn is the expiry
+   * asked for here.
+   */
+  private async mintCluster(name: string): Promise<string> {
+    const { config, kube, log } = this.deps;
+    const account = config.kubeServiceAccount;
+    if (!account) return '';
+    const seconds = Math.max(
+      TOKEN_FLOOR_SECONDS,
+      Math.ceil(config.turnTimeoutMs / 1000) + TOKEN_SLACK_SECONDS,
+    );
+    try {
+      const minted = await kube.json<{ status?: { token?: string } }>(
+        `/api/v1/namespaces/${this.namespace}/serviceaccounts/${account}/token`,
+        {
+          method: 'POST',
+          body: {
+            apiVersion: 'authentication.k8s.io/v1',
+            kind: 'TokenRequest',
+            spec: { audiences: [CLUSTER_URL], expirationSeconds: seconds },
+          },
+        },
+      );
+      const token = minted.status?.token;
+      if (!token) throw new Error('TokenRequest answered no token');
+      return kubeconfig(token, this.deps.clusterCa ?? null);
+    } catch (error) {
+      log.error('could not mint cluster access for this turn', {
+        sandbox: name,
+        serviceAccount: account,
+        error: plain(error),
+      });
+      return '';
+    }
+  }
+
+  /** Truncates every credential the turn held, and spends the GitHub token. */
   private async retireToken(
     name: string,
     pod: string,
     token: string | null,
   ): Promise<void> {
-    if (!token) return;
-    await this.writeToken(pod, '').catch((error) =>
-      this.deps.log.warn('could not clear the GitHub token', {
+    if (!this.credentialled) return;
+    await this.writeCredentials(pod, {
+      github: '',
+      kube: '',
+      ssh: '',
+    }).catch((error) =>
+      this.deps.log.warn("could not clear the turn's credentials", {
         sandbox: name,
         error: plain(error),
       }),
     );
+    if (!token) return;
     await this.deps.githubApp?.revoke(token).catch((error: unknown) =>
       this.deps.log.warn('could not revoke the GitHub token', {
         sandbox: name,
@@ -978,20 +1141,43 @@ export class KubeSandboxes implements Sandboxes {
     );
   }
 
-  /** One exec: the file written 0600, or truncated when the value is empty. */
-  private async writeToken(pod: string, token: string): Promise<void> {
+  /**
+   * One exec for all of them, each written 0600 or truncated when its value
+   * is empty. One rather than three because a human is waiting on the turn
+   * behind it, and because three would make partial failure a state somebody
+   * has to reason about.
+   */
+  private async writeCredentials(
+    pod: string,
+    values: { github: string; kube: string; ssh: string },
+  ): Promise<void> {
     const stream = await this.deps.kube.exec({
       namespace: this.namespace,
       pod,
       container: HARNESS_CONTAINER,
-      // `umask` before the redirection, so the file is never briefly 0644 —
-      // `chmod` after the write would be exactly that race.
+      // `umask` before every mkdir and redirection, so no file and no
+      // directory is ever briefly world-readable — a `chmod` after the write
+      // would be exactly that race. The SSH client refuses a key it can read
+      // wider than its owner, so for that one the mode is not hygiene, it is
+      // whether the thing works at all.
       command: [
         '/bin/sh',
         '-c',
-        `umask 077; printf %s "$1" > ${TOKEN_FILE}`,
+        [
+          'umask 077',
+          `mkdir -p ${SSH_DIR} "$(dirname ${KUBECONFIG_FILE})"`,
+          `printf %s "$1" > ${TOKEN_FILE}`,
+          `printf %s "$2" > ${KUBECONFIG_FILE}`,
+          `printf %s "$3" > ${SSH_KEY_FILE}`,
+          `printf %s "$4" > ${SSH_CONFIG_FILE}`,
+        ].join('; '),
         'mate',
-        token,
+        values.github,
+        values.kube,
+        values.ssh,
+        // Written beside the key rather than with it, so a turn with no key
+        // still has no stale client config telling ssh to look for one.
+        values.ssh ? SSH_CLIENT_CONFIG : '',
       ],
       timeoutMs: STAMP_TIMEOUT_MS,
     });

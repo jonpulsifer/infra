@@ -100,8 +100,10 @@ describe('config from the environment', () => {
         spares: 0,
         vault: null,
         github: false,
+        kubeServiceAccount: null,
       },
       githubApp: null,
+      sshKeyFile: null,
     });
     expect(() => readConfig({ ...kube, MATE_TURN_MINUTES: '0' })).toThrow(
       'MATE_TURN_MINUTES',
