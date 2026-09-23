@@ -20,16 +20,9 @@ metadata:
     app.kubernetes.io/part-of: mate
 automountServiceAccountToken: false
 ---
-# What the agent can do to this cluster. Read everything, exec into anything,
-# change nothing.
-#
-# `secrets` are in that "read everything" and that is a decision rather than
-# an oversight. `pods/exec` below is read access to every Secret mounted into
-# every pod — a shell in a pod can cat its own service-account token and its
-# own mounted files — so a rule excluding Secrets from the read grant would
-# describe a boundary that the next rule already walks through. This says what
-# is true instead: an agent turn can see any credential this cluster holds.
-# The boundary that remains is time. The token behind this lasts one turn.
+# Reads everything but Secrets and changes nothing. pods/exec still reaches
+# any pod's mounted Secrets and token: defence in depth, not a boundary. No
+# deny in RBAC, so core omits `secrets` and an unnamed group is unreadable.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
@@ -38,13 +31,70 @@ metadata:
     app.kubernetes.io/name: mate-sandbox
     app.kubernetes.io/part-of: mate
 rules:
-  # Every group, every resource, read-only — including the custom resources
-  # that carry the interesting answers on this estate: Flux Kustomizations and
-  # HelmReleases, Cilium policies and endpoints, ExternalSecrets, Sandboxes,
-  # PrometheusRules. An allow-list of API groups would be a list that rots one
-  # operator at a time, and each rot is an agent answering "I cannot see that"
-  # about something it is meant to diagnose.
-  - apiGroups: ["*"]
+  - apiGroups: [""]
+    resources:
+      - componentstatuses
+      - configmaps
+      - endpoints
+      - events
+      - limitranges
+      - namespaces
+      - nodes
+      - persistentvolumeclaims
+      - persistentvolumes
+      - pods
+      - podtemplates
+      - replicationcontrollers
+      - resourcequotas
+      - serviceaccounts
+      - services
+    verbs: ["get", "list", "watch"]
+  - apiGroups:
+      - acme.cert-manager.io
+      - actions.github.com
+      - admissionregistration.k8s.io
+      - agents.x-k8s.io
+      - apiextensions.k8s.io
+      - apiregistration.k8s.io
+      - apps
+      - authentication.k8s.io
+      - authorization.k8s.io
+      - autoscaling
+      - batch
+      - certificates.k8s.io
+      - cert-manager.io
+      - cilium.io
+      - coordination.k8s.io
+      - discovery.k8s.io
+      - events.k8s.io
+      - extensions.agents.x-k8s.io
+      - externaldns.k8s.io
+      - external-secrets.io
+      - flowcontrol.apiserver.k8s.io
+      - fluxcd.controlplane.io
+      - gateway.networking.k8s.io
+      - gateway.networking.x-k8s.io
+      - generators.external-secrets.io
+      - helm.toolkit.fluxcd.io
+      - kustomize.toolkit.fluxcd.io
+      - kyverno.io
+      - metrics.k8s.io
+      - monitoring.coreos.com
+      - networking.k8s.io
+      - node.k8s.io
+      - onepassword.com
+      - policies.kyverno.io
+      - policy
+      - postgresql.cnpg.io
+      - rbac.authorization.k8s.io
+      - reports.kyverno.io
+      - resource.k8s.io
+      - scheduling.k8s.io
+      - source.toolkit.fluxcd.io
+      - storage.k8s.io
+      - tailscale.com
+      - valkey.io
+      - wgpolicyk8s.io
     resources: ["*"]
     verbs: ["get", "list", "watch"]
   # Reading a crashlooping container's last words is most of diagnosis.
