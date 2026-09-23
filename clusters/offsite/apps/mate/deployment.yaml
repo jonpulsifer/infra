@@ -248,8 +248,8 @@ spec:
             # long-lived is written for it anywhere. Unsetting this is the
             # rollback and a sandbox goes back to having no cluster access.
             #
-            # That account reads everything this cluster holds, Secrets
-            # included, and can exec into any pod. That is deliberate — an
+            # That account reads everything this cluster holds but Secrets,
+            # and can exec into any pod. That is deliberate — an
             # agent that cannot open a shell in a broken pod cannot do the job
             # this is for — and the boundary that remains is time: the token
             # lasts one turn.
