@@ -32,6 +32,10 @@ spec:
         - matchName: voip.ms
       toPorts:
         - ports:
+            # TLS signalling, which the trunk uses.
+            - {port: "5061", protocol: TCP}
+            # Plain SIP. Nothing on this site uses it now; it stays as the
+            # fallback while TLS proves itself, and goes when it has.
             - {port: "5060", protocol: UDP}
             - {port: "5060", protocol: TCP}
     # RTP to the carrier cannot be an FQDN rule and this is the honest reason:

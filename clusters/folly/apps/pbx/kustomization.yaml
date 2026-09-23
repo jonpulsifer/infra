@@ -32,8 +32,11 @@ configMapGenerator:
       # profile lands, and if the PBX does not hold it instead, calls to that
       # DID reach nobody.
       - PBX_VOIPMS_USER=168847_1994
-      # What that account already registered to from the handset.
-      - PBX_VOIPMS_SERVER=ca.voip.ms
+      # A numbered server: voip.ms requires one for encrypted calls, and
+      # ca.voip.ms is an alias. montreal10 is where lines 1-3 already
+      # register. voip.ms delivers each DID from the POP set on that DID, so
+      # the DID's POP has to name this server too.
+      - PBX_VOIPMS_SERVER=montreal10.voip.ms
 
   - name: pbx-site
     files:
