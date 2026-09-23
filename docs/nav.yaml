@@ -1,0 +1,65 @@
+sections:
+  - title: Apps
+    index: apps/index.md
+    items:
+      - path: apps/kthx.md
+        children: [apps/kthx/built-apps.md]
+      - apps/mate.md
+      - apps/smiirl.md
+      - apps/flameboss.md
+      - apps/bosun.md
+  - title: Platform
+    index: platform/index.md
+    items:
+      - platform/how-changes-ship.md
+      - platform/nixos.md
+      - platform/kubernetes.md
+      - platform/workloads.md
+      - platform/network.md
+      - platform/secrets-and-pki.md
+      - platform/opentofu.md
+      - platform/build-and-release.md
+  - title: Hosts
+    index: hosts/index.md
+    items:
+      - group: Kubernetes nodes
+        items: [hosts/optiplex.md, hosts/riptide.md, hosts/shale.md, hosts/retrofit.md, hosts/oldschool.md]
+      - group: Raspberry Pis
+        items: [hosts/spore.md, hosts/capsule.md, hosts/forge.md, hosts/homepi4.md, hosts/weatherpi4.md, hosts/cloudpi4.md, hosts/radiopi0.md, hosts/blinkypi0.md]
+      - group: Other
+        items: [hosts/oldboy.md, hosts/eviropico.md]
+  - title: Runbooks
+    index: runbooks/index.md
+    items:
+      - group: Hosts
+        items:
+          - runbooks/deploy-a-nixos-host.md
+          - runbooks/repair-a-kiosk.md
+          - runbooks/install-a-windows-desktop.md
+          - runbooks/install-windows-monitoring.md
+      - group: Kubernetes
+        items:
+          - runbooks/apply-a-kubernetes-change.md
+          - runbooks/add-a-shared-kubernetes-resource.md
+          - runbooks/operate-postgres.md
+          - runbooks/get-cluster-admin-access.md
+          - runbooks/adopt-the-folly-monitoring-crds.md
+          - runbooks/adopt-the-folly-prometheus-operator-crds.md
+      - group: Cloud and network
+        items:
+          - runbooks/apply-a-terraform-change.md
+          - runbooks/inspect-the-unifi-network.md
+          - runbooks/authorize-developer-connect.md
+      - group: Secrets
+        items:
+          - runbooks/manage-sops-secrets.md
+          - runbooks/initialize-openbao.md
+      - group: Apps
+        items:
+          - runbooks/install-kthx.md
+          - runbooks/connect-an-agent-to-kthx.md
+          - runbooks/connect-an-agent-to-the-wiki.md
+          - runbooks/repair-the-rowbutt-github-credential.md
+      - group: Every change
+        items:
+          - runbooks/test-a-change.md

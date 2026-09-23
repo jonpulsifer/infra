@@ -1,0 +1,134 @@
+---
+title: Install kthx
+description: "Stand up a kthx installation from nothing: Terraform bootstrap, the Flux HelmRelease and Secret, first-operator enrolment, and Targets."
+---
+
+Use this to stand up a kthx installation from nothing: the Terraform that provisions what it federates into, the Flux-delivered chart consumer, the first-operator passkey enrolment, and connecting Targets. What kthx is and where its ownership boundary sits is [Built apps](../apps/kthx/built-apps.md) — this page only installs it. No installation is declared under `clusters/` today; the full set of cluster declarations a running installation carries is in git history, and reverting the clusters-teardown PR restores every one of them at once — the declaration section below states the shape so this page stands on its own either way.
+
+## Before you start
+
+Everything here ships through git. Terraform applies through Atlantis on the PR ([Apply a Terraform change](apply-a-terraform-change.md)); Kubernetes applies on merge to `main` through Flux ([How changes ship](../platform/how-changes-ship.md)). Nothing below is a `kubectl apply` or a local `tofu apply`.
+
+The operator age key from [Manage SOPS secrets](manage-sops-secrets.md) is needed to author the installation Secret.
+
+Pick the control plane's hostname before anything else. It must be a real origin: the first-operator ceremony is a passkey scoped to it, and a browser refuses a ceremony whose relying party is not a suffix of the origin it is on — an installation with a placeholder hostname cannot enrol anybody.
+
+## Terraform bootstrap
+
+The bootstrap is module calls: `terraform/modules/` carries the kthx shapes, a root is a page that wires them, and each root applies through Atlantis on its own PR.
+
+**Apply the two roots in three phases.** The supply chain and the vessel each need the other to have applied first, in opposite directions: the vessel's admission policy names the attestor the supply chain creates, and the supply chain grants to the `spindrift-controller` service account the vessel creates. Neither ordering works on its own, so the sequence is supply chain, then vessel, then supply chain again.
+
+- The supply chain's first apply **is expected to fail** its controller-side grants — granting to a service account that does not exist is a 400. It still creates the ring, key, attestor and note, which is what the vessel's second-phase apply needs. Read that failure as the phase boundary, not as a defect.
+- The vessel's apply then creates the account, and the supply chain re-applied lands the grants that failed.
+
+A greenfield vessel has an ordering trap of its own. `controller_member` is a derived string rather than a reference to the service account — referencing it would cycle through the module's own `iam.googleapis.com` enablement — and a string carries no dependency edge, so nothing orders the module's grants against the account they name. The `depends_on` belongs **on the module call, pointing at the account**. On the account pointing at the module it pins the order backwards and every grant fails; that is not an eventual-consistency error a second apply converges, so it fails every time until the edge is turned around.
+
+### The vessel project — `terraform/modules/spindrift-vessel` + `terraform/modules/vessel-network`
+
+A vessel root is a page: backend, providers, the services and roles lists in its own `services.tf` and `iam.tf`, a `spindrift-vessel` call (enabled APIs, the `spindrift-runtime` service account the controller acts as, the controller's project roles, the Binary Authorization admission policy — its `attestor` input takes the supply-chain module's `attestor` output), and a `vessel-network` call (VPC, subnet, private service connection) where the vessel holds Cloud SQL or Memorystore. The spindrift-vessel README says why the two lists live in the root's files rather than beside the module.
+
+The home-vessel extras — the `spindrift-controller` service account, its federation bindings (next section), the source bundle bucket — belong in the home vessel's root beside the module calls. `terraform/gcp/projects/bluenose/` is the home vessel project; today its root carries each cluster's external-secrets read path into the project's Secret Manager (`iam.tf`), and a rebuild adds the module calls and the extras beside it.
+
+### Federation — `terraform/gcp/projects/homelab-ng/workload-identity.tf`
+
+The `fml-pool` workload identity pool, one provider per cluster. A subject is `<cluster>:system:serviceaccount:<namespace>:<name>` — so an installation in a new namespace is a new subject, and it holds nothing until `terraform/gcp/projects/bluenose/iam.tf` binds it. An installation needs two bindings there — `roles/iam.workloadIdentityUser` and `roles/iam.serviceAccountTokenCreator` on `spindrift-controller` — each with the installation's own namespace in the subject.
+
+### Supply chain — `terraform/modules/spindrift-supply-chain`
+
+A supply-chain root — its own or the vessel's — calls the module with the artifacts project, the principal wiring (controller member, attester principals, verifier agents), and the Artifact Registry repository to grant on. With defaults it provisions the whole chain: the KMS key ring and signer key, the `provenance` Binary Authorization attestor with its container-analysis note and their IAM, the build/log/occurrence project grants, and the registry reader/writer members. An installation bringing its own key or attestor passes `signer_key` / `attestor` instead; the module then creates neither and wires only the grants that can attach to what was provided — its README states what such a caller arranges where the resource lives.
+
+The module never creates the repository. `terraform/gcp/projects/trusted-builds/` declares the `i` repository, shared with a non-kthx consumer, and sweeps images older than 24h by design: it is admission staging, and ghcr.io holds the durable copy of every digest. An empty repository is the policy working, not a missing artifact.
+
+The outputs wire the rest of the install: `attestor` feeds the vessel module, and `signer_uri` plus `registry_namespace` are what the installation manifest's `supplyChain` block names.
+
+Two first-apply facts: a fresh key's version can still be `PENDING_GENERATION` when the attestor registration reads its public half — the apply fails once and the second converges. And GCP never deletes KMS rings or keys, so a rebuild in a project holding orphaned ones either imports them or picks fresh `key_ring_name`/`signer_key_name` values.
+
+### The Apps edge — `terraform/network/cloudflare/`
+
+The tunnel a `reach: public` App is served through, its single static wildcard ingress rule, and the escrow of the tunnel credential into 1Password (homelab vault, "spindrift cloudflared") are in git history in this root; reverting the tunnel-retirement PR restores them. The `lolwtf.dev` zone itself stays declared.
+
+Two shared prerequisites are already Flux-owned on both clusters through `clusters/base/platform/`: Kyverno itself, and the `gcp-secret-manager` `ClusterSecretStore`. The kthx-specific cluster prerequisites — the image-admission `ClusterPolicy` pinning the `trusted-builds` signer's public key, and the least-privilege target surface (the `spindrift-apps` namespace, the App chart's `OCIRepository` consumer, and the `ClusterRole` limiting delivery to that namespace) — ship with the installation's cluster declarations: reverting the clusters-teardown PR restores them alongside everything in the next section.
+
+## Declare the installation
+
+The chart is `packages/charts/spindrift`. `.github/workflows/spindrift-charts.yml` publishes it to `oci://ghcr.io/jonpulsifer/charts/spindrift` on every merge that touches it, tagged with the version its `Chart.yaml` carries — bumping the chart without bumping the consumer's tag ships nothing, and the workflow's header comment explains the pairing.
+
+A new installation is one directory under `clusters/offsite/apps/`, added to that level's `kustomization.yaml`, carrying six files:
+
+- its own `kustomization.yaml` listing the other five;
+- `namespace.yaml` — the installation's namespace, which is also the namespace in its federation subject;
+- `ca-bundle.yaml` — a ConfigMap carrying the FML root chain (next section);
+- `secret.sops.yaml` — the installation Secret ("The installation Secret" below);
+- `oci-repository.yaml` — a Flux `OCIRepository` at `oci://ghcr.io/jonpulsifer/charts/spindrift`, `ref.tag` pinned to the exact version `packages/charts/spindrift/Chart.yaml` carries — a tag ahead of the published version fails to pull, a version ahead of the tag ships nothing;
+- `helm-release.yaml` — a `HelmRelease` whose `chartRef` names that `OCIRepository`, with the values below.
+
+The values a first install stands or falls on:
+
+- `image` — pinned by digest.
+- `hostname` — the real origin. The chart renders the Gateway and HTTPRoute from it; cert-manager issues the certificate and external-dns publishes the record, so this one line is the whole edge. The `${SPINDRIFT_DOMAIN}` substitution is defined in `clusters/base/cluster-settings.yaml` (the offsite config patches that base), and `${SECRET_DOMAIN}` comes from the cluster secrets, both via the Flux apps Kustomization. Only this name reaches the UI and the rest of the control plane; any other name gets the App status page.
+- `SPINDRIFT_PUBLIC_HOSTNAME` in `env` — the tunnel's `spindrift-control` name. The GitHub webhook, the bosun outbox, and `/mcp` answer on it as well as on `hostname`; nothing else does.
+- `serviceAccount.token.gcpAudience` and `gcpImpersonationUrl` — the cluster's `fml-pool` provider and the `spindrift-controller` impersonation URL. This is the identity the Terraform above binds; a mismatch between the namespace here and the subject in `iam.tf` is refused at every GCP call.
+- `serviceAccount.token.caConfigMap` — **not** the chart's default `kube-root-ca.crt`. The runtime does no partial-chain verification, so the bundle in `ca-bundle.yaml` must carry each Target cluster's full chain up to a self-signed root; the certificates come from `terraform/pki/certs/`. An issuing CA without its root answers `unable to get issuer certificate` on every call to that Target.
+- `envFromSecret` — the installation Secret, next section.
+- `database.enabled` — the chart declares a CNPG `Cluster` named `<release>-db` beside the two processes, with a migration Job that holds both below Ready until the schema is present. [Operate Postgres](operate-postgres.md) is how to reach it. `keepOnDelete` decides whether uninstalling keeps the rows.
+- `reconciler.enabled` — the second process off the same image; nothing deploys without it.
+
+There is no `manifest:` value: the chart installs a control plane and says nothing about what the installation is. A release with no stored row seeds the placeholder, and every genuine choice is made in the product ("Configure in the product" below). An installation that has been configured before comes back from the file Settings writes, restored on onboarding's first screen.
+
+## The installation Secret
+
+`envFromSecret` names a sops-encrypted Secret in the installation's namespace carrying two keys:
+
+- `SPINDRIFT_ENROLMENT_TOKEN` — the token the first operator spends to claim the installation. Consumed on use; rotating it in this Secret is the whole recovery procedure.
+- `SPINDRIFT_CREDENTIAL_KEYRING` — the versioned keyring durable connector credentials are encrypted under (one active key, legacy keys decrypt only). Without it a registry or GitHub credential has nowhere durable to be kept. The document's shape is defined in `apps/spindrift/src/crypto/credential-envelope.ts`.
+- `SPINDRIFT_GITHUB_APP_ID` and `SPINDRIFT_GITHUB_APP_PRIVATE_KEY` — optional, and only together: adopts a GitHub App that already exists instead of creating one from the Repositories screen. `SPINDRIFT_GITHUB_WEBHOOK_SECRET` pairs with an adopted App's own webhook, which is configured directly in GitHub's settings; absent, every webhook delivery is refused, the same posture as no App identity at all.
+
+Author it like any cluster secret: `clusters/**/*.sops.yaml` matches the first creation rule in `.sops.yaml` and encrypts `data`/`stringData` to the operator key. The mechanics are on [Apply a Kubernetes change](apply-a-kubernetes-change.md); key handling is on [Manage SOPS secrets](manage-sops-secrets.md). Generate both values fresh — never reuse another installation's. A keyring key is exactly 32 bytes, base64url-encoded: `bun -e "console.log(require('crypto').randomBytes(32).toString('base64url'))"` mints one (`openssl rand -base64` emits `+/=` characters the keyring refuses).
+
+## Deliver and verify
+
+Merge the PR. Flux applies `clusters/` on `main`; forcing a sync and chasing a stale revision are covered by [Apply a Kubernetes change](apply-a-kubernetes-change.md).
+
+Watch the chain come up, in dependency order:
+
+```bash
+flux --context offsite get sources oci -n <namespace>
+flux --context offsite get helmreleases -n <namespace>
+kubectl --context offsite cnpg status <release>-db -n <namespace>
+kubectl --context offsite get pods -n <namespace>
+```
+
+An `OCIRepository` stuck at `OCIArtifactPullFailed` with a 401 means the GHCR chart package is private — a fresh GHCR package is created private on first push and has to be flipped to public on its settings page once; neither consumer carries a `secretRef`.
+
+Both Deployments hold below Ready until the migration Job's journal is present; a pending Job usually means the database is still bootstrapping.
+
+## Enrol the first operator
+
+Open `https://<hostname>`. One screen, two states: an installation nobody has claimed shows enrolment, a claimed one shows sign-in, and there is no toggle between them.
+
+Enter the value of `SPINDRIFT_ENROLMENT_TOKEN` and complete the passkey ceremony. The ceremony is scoped to the origin in the address bar; the token is consumed on use, so the window in which anyone else could claim the installation closes the moment enrolment completes.
+
+Recovery — a lost device, a compromised token — is rotating `SPINDRIFT_ENROLMENT_TOKEN` in the Secret and enrolling again: spending a token whose hash the installation has not seen replaces every credential and session that came before it. There is no reset endpoint; editing the Secret is the procedure.
+
+## Configure in the product
+
+First sign-in on a placeholder-seeded installation lands in the onboarding wizard. It asks the genuine choices — what the installation is called, whose GitHub App it speaks as, where its artifacts publish — confirms the cloud facts discovery read, and writes once at the end. Everything else is derived from the chart or from discovery, and the settings surface keeps every key afterwards.
+
+## Connect Targets and repositories
+
+Targets → Connect is probe-then-confirm: give an address, the probe reads what is there and writes nothing, the discovered components (gateway, authenticated edge, config store) come back as cards to include or leave out, and confirm writes the Target. Connect always succeeds — the checklist that follows is the test, and unlike a preflight it keeps being true tomorrow.
+
+An unmet prerequisite row carries the Terraform that clears it and the root it belongs in; kthx opens the stanza as a pull request on this repository and Atlantis applies it. The boundary — kthx proposes, Terraform owns — is stated on [Built apps](../apps/kthx/built-apps.md).
+
+A Kubernetes Target also needs two things declared beside the installation in `clusters/`: an Apps `Gateway` in the `spindrift-apps` namespace — its own load-balancer address pinned (the address every `reach: private` App publishes), a wildcard TLS listener for the App zone, and the cert-manager gateway-shim annotation issuing its certificate — and the RBAC binding the installation's ServiceAccount to the shared target surface. Both are among the cluster declarations the clusters-teardown PR revert restores, per Target cluster.
+
+A static hosting Target names each site after the App and Component it serves, and a site id is spent permanently the first time it is used — deleting the site does not release the name, and nothing in any project can create it again. Deleting an App tears its site down, which burns the name — the review says so before the confirmation, because it is the one consequence of confirming that nothing undoes. A deploy onto a site id that is already spent fails with the id named, and the way past it is renaming the App or the Component so the next deploy asks for a fresh one.
+
+Connecting a repository is a GitHub App installation. An installation with no App identity yet offers GitHub's manifest flow on the Repositories screen: one form POST creates the App, GitHub's confirmation page needs one human click, and the returned key comes back sealed — never shown again. If the pre-filled name collides with an existing public App, pick another name on that page and create again. Once an identity exists — created this way, or adopted through the installation Secret's App-key pair above — press Connect, install the App on the account and select repositories on GitHub, and kthx re-reads what the installation grants. The App's repository access on GitHub gates what can be connected — a repository the App is not installed on cannot appear. A **private** App installs on its owning account and nowhere else, and GitHub renders no account picker to say so — the install page simply never offers the other account. Connecting a repository owned by any other user or organization needs the App made public first, and that control is a **Make public** button under **Advanced → Danger zone** on the App's settings (`/settings/apps/<slug>/advanced`), not on its General page and not under the creation form's "Where can this GitHub App be installed?" wording. A public App cannot be made private again while it is installed on another account. Configuration pull requests are opened by the App's own bot user.
+
+The App-level webhook is inactive until enabled by hand: in the App's GitHub settings, turn it on with `https://spindrift-control.lolwtf.dev/internal/github/webhook` — already routed by a path-scoped ingress rule in `terraform/network/cloudflare/spindrift.tf` — and a secret, then paste the same secret into the installation Secret as `SPINDRIFT_GITHUB_WEBHOOK_SECRET`. An App created fresh through the manifest flow activates its webhook automatically from the same form; an adopted App does not.
+
+An App's source can be an uploaded archive instead of a connected repository. The upload boundary (`packages/archive/archive-format.ts`) takes a gzipped tar or a ZIP, decided by the bytes' magic number rather than the filename, and refuses anything else with a `400` that names what arrived — before a bundle is staged or a build is spent. A ZIP is converted to a gzipped tar there, because every build route opens a staged bundle with `tar -xz`.
+
+The digest describes the converted bytes. A ZIP upload's `bundleDigest` names the tarball the builders fetch and re-check, not the file that left the operator's machine — so verifying a source receipt by hand means hashing what the depot holds. The conversion is deterministic, so the same upload keeps the same digest.
