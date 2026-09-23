@@ -264,8 +264,13 @@ spec:
             # sandbox runs on. This agent is a proxy for its operator and is
             # built to have that reach; it is written down here because the
             # Deployment is where somebody counts the blast radius.
-            - name: MATE_SSH_KEY_FILE
-              value: /var/run/mate/ssh/private-key
+            #
+            # MATE_SSH_KEY_FILE is deliberately unset, which is what leaves
+            # host login switched off: mate reads no key, stamps none, and a
+            # turn gets neither the key nor the client config beside it. The
+            # code path is whole and tested; turning it on is this variable, a
+            # Secret volume at the path it names, and an ExternalSecret to
+            # fill it.
             # Gateway session info (session id, resume URL, sequence) lands
             # here so a container restart inside the same pod resumes instead
             # of spending an identify from the daily budget. An emptyDir is
@@ -290,11 +295,6 @@ spec:
             # away from uid 65532, the only uid here that has to read it.
             - name: github-app
               mountPath: /var/run/mate/github-app
-              readOnly: true
-            # The same arrangement and the same reasoning about modes: mounted
-            # read-only, no `defaultMode`, read once at boot by uid 65532.
-            - name: ssh
-              mountPath: /var/run/mate/ssh
               readOnly: true
           # Readiness only. /healthz is 503 whenever the gateway is not
           # connected, and that is deliberate during the identify-budget
