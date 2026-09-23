@@ -38,7 +38,7 @@ It applies `windows/configuration.winget`, sparse-clones this repo to
 `bootstrap:windows`. Add `-WithWsl` to install WSL and import a NixOS distro too.
 
 Windows keeps its own clone. Nothing symlinks across the WSL boundary in either direction —
-see [Bootstrap a Windows Desk](../docs/pages/Runbooks___Bootstrap%20a%20Windows%20Desk.md) for why.
+see [Install a Windows desktop](../docs/runbooks/install-a-windows-desktop.md) for why.
 
 On NixOS hosts this all runs automatically on every activation
 (`nix/system/mise-dotfiles.nix`) via `mise run bootstrap`.

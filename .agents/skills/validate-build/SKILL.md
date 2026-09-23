@@ -5,13 +5,13 @@ description: >-
   builds, kustomize renders, OpenTofu validate, and the wiki build. Use after
   editing nix/, clusters/, terraform/, or docs/, and before opening a PR.
 metadata:
-  runbook: docs/pages/Runbooks___Validate Infra Changes.md
-  wiki: https://wiki.lolwtf.ca/runbooks/validate-infra-changes/
+  runbook: docs/runbooks/test-a-change.md
+  wiki: https://wiki.lolwtf.ca/runbooks/test-a-change/
 ---
 
 # Validate Build
 
-Canonical human runbook: `docs/pages/Runbooks___Validate Infra Changes.md`.
+Canonical human runbook: `docs/runbooks/test-a-change.md`.
 This file holds only the agent-specific guidance.
 
 ## Agent notes
@@ -39,9 +39,12 @@ Validate by change area — running everything is slow and usually unnecessary.
   HelmRepository or OCIRepository are named and skipped, not silently passed.
 - `nix flake check` evaluates every host and is slow. When iterating on one
   host, build just that closure.
-- `mise run docs:check` enforces the docs contract: every wikilink resolves,
-  every referenced repo path exists, no past-tense archaeology. It runs in CI,
-  so run it locally before pushing docs.
+- `mise run docs:check` enforces the docs contract: the renderer's own
+  validation passes (frontmatter, nav, links, anchors, images), every
+  referenced repo path exists, no past-tense archaeology, and every wiki URL or
+  `docs/…md` path named in a Markdown file, a skill, or a monitoring rule
+  resolves to a page. It runs in CI, so run it locally before pushing docs or
+  renaming a page.
 - Report what actually ran and what remains unverified. Do not claim a
   validation passed if you skipped it, and do not pad the output with unrelated
   follow-up suggestions.

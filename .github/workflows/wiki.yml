@@ -7,22 +7,34 @@ on:
     paths:
       - 'docs/**'
       - 'apps/wiki/**'
-      # The page marks the wiki serves; they live with the spindrift client
-      # because its Docker build prunes to that package. See apps/wiki/build.ts.
-      - 'apps/spindrift/src/web/client/logos/**'
-      - 'AGENTS.md'
-      - 'README.md'
+      # Diagrams the wiki serves at /assets/; they live with the spindrift
+      # client because its Docker build prunes to that package. See
+      # apps/wiki/build.ts.
+      - 'apps/spindrift/src/web/client/diagrams/**'
+      # The contract checks every reference into the wiki from these, and the
+      # wiki keeps no redirects, so a rename anywhere has to run it.
+      - '**/*.md'
+      - '.agents/**'
+      - 'clusters/**/monitoring/**'
+      # setup-bun reads the Bun version from packageManager.
+      - 'package.json'
       - '.github/scripts/docs-contract.sh'
       - '.github/workflows/wiki.yml'
   pull_request:
     paths:
       - 'docs/**'
       - 'apps/wiki/**'
-      # The page marks the wiki serves; they live with the spindrift client
-      # because its Docker build prunes to that package. See apps/wiki/build.ts.
-      - 'apps/spindrift/src/web/client/logos/**'
-      - 'AGENTS.md'
-      - 'README.md'
+      # Diagrams the wiki serves at /assets/; they live with the spindrift
+      # client because its Docker build prunes to that package. See
+      # apps/wiki/build.ts.
+      - 'apps/spindrift/src/web/client/diagrams/**'
+      # The contract checks every reference into the wiki from these, and the
+      # wiki keeps no redirects, so a rename anywhere has to run it.
+      - '**/*.md'
+      - '.agents/**'
+      - 'clusters/**/monitoring/**'
+      # setup-bun reads the Bun version from packageManager.
+      - 'package.json'
       - '.github/scripts/docs-contract.sh'
       - '.github/workflows/wiki.yml'
 
@@ -40,14 +52,22 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
-
-      # Gates the deploy below: every wikilink resolves, every referenced repo
-      # path exists, no past-tense archaeology. See AGENTS.md "Writing rule".
-      - name: Docs contract
-        run: bash .github/scripts/docs-contract.sh
+        with:
+          # The renderer needs Bun.markdown; pin to the workspace's Bun.
+          bun-version-file: package.json
 
       - name: Install
         run: bun install --frozen-lockfile
+
+      # Gates the deploy below: the renderer's own validation, every referenced
+      # repo path exists, no past-tense archaeology, and every reference into
+      # the wiki resolves. See AGENTS.md "Writing rule".
+      - name: Docs contract
+        run: bash .github/scripts/docs-contract.sh
+
+      - name: Test
+        working-directory: apps/wiki
+        run: bun test
 
       - name: Build
         working-directory: apps/wiki

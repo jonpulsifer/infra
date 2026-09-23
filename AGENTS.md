@@ -5,7 +5,7 @@ Terraform-managed cloud and network fabric, first-party apps and images.
 
 This file is a **router**, not a manual. It holds the rules you must know before
 you touch anything, and pointers to where the depth lives. Depth lives in
-`docs/pages/` (published at [wiki.lolwtf.ca](https://wiki.lolwtf.ca)) and in
+`docs/` (published at [wiki.lolwtf.ca](https://wiki.lolwtf.ca)) and in
 `.agents/skills/`.
 
 ## Hard rules
@@ -18,7 +18,7 @@ after the fact is too late.
   controller: Flux owns its platform namespace and prerequisites; Spindrift
   owns resources in the `spindrift-apps` namespaces and inside pre-provisioned
   vessel projects through their APIs. That ownership boundary is declared in
-  [Architecture/Spindrift](docs/pages/Architecture___Spindrift.md); it is not
+  [Built apps](docs/apps/kthx/built-apps.md); it is not
   permission for an agent or operator to make the same changes out of band.
 - **Never `kubectl apply`** to author state. `kubectl`, `flux get`, and
   `flux reconcile` are for inspection or forcing a sync — nothing else.
@@ -41,7 +41,7 @@ after the fact is too late.
 | NixOS | `nixos-rebuild` | on deploy, and on each host's auto-upgrade from `main` |
 | Wiki | `wiki.yml` → Cloudflare Pages | on merge to `main` |
 
-See [Architecture/GitOps](docs/pages/Architecture___GitOps.md) for the full
+See [How changes ship](docs/platform/how-changes-ship.md) for the full
 picture of each path.
 
 ## Commands
@@ -62,7 +62,7 @@ For anything mise does not own — deploying to a live host, `sops`,
 `flux reconcile` — the runbooks carry the exact invocation.
 
 `mise` does not own the SOPS / age-key workflow. Start at
-[[Runbooks/SOPS Secrets and Age Keys]]; the matching skill
+[Manage SOPS secrets](docs/runbooks/manage-sops-secrets.md); the matching skill
 (`.agents/skills/sops-secrets/`) holds only the agent-side notes — the
 runbook is the canonical procedure. The two facts that bite first-timers
 hardest: the operator age key is at `~/.config/age/keys.txt` (NOT the
@@ -84,7 +84,7 @@ file does not list contents.
 | `packages/` | Reusable building blocks, including the Helm charts Flux consumes. |
 | `images/` | Base and tool OCI images. |
 | `dotfiles/` | mise-managed dotfiles, carried onto NixOS hosts by the system closure. |
-| `docs/` | The Logseq graph published as the wiki. |
+| `docs/` | The Markdown pages published as the wiki; `docs/nav.yaml` orders the sidebar. |
 | `.agents/skills/` | Repo-local agent skills. Tool-agnostic source; `.claude/skills` is a symlink to it. |
 
 ## Single sources of truth
@@ -111,23 +111,23 @@ its selected host addresses aligned with `clients.yaml` DHCP reservations.
 
 ## Where depth lives
 
-- [Architecture](docs/pages/Architecture.md) — the layers and how they fit
-  together.
-- [Runbooks](docs/pages/Runbooks.md) — step-by-step operational procedures.
+- [Platform](docs/platform/index.md) — the layers and how they fit together.
+- [Apps](docs/apps/index.md) — the first-party apps, one page each.
+- [Runbooks](docs/runbooks/index.md) — step-by-step operational procedures.
   Skills point here rather than restating them.
-- [Fleet](docs/pages/Fleet.md) — every host, its hardware, and its quirks.
+- [Hosts](docs/hosts/index.md) — every host, its hardware, and its quirks.
 - `.agents/skills/` — task-scoped agent guidance. A skill carries a `runbook:`
   pointer in its frontmatter and holds only agent-specific notes; the runbook
   stays the canonical procedure.
 
-Inside `docs/`, pages link each other with Logseq `[[wikilinks]]`. This file is
-not part of the graph, so it uses paths.
+Inside `docs/`, pages link each other with relative `.md` paths. This file is
+not part of the site, so it uses repo-root paths.
 
 ## Agent skills
 
 ### sops-secrets
 
-Working with `nix/secrets/*.sops.yaml` (operator and host decryption, harmonia keypair generation, two-stage recipient setup): see `.agents/skills/sops-secrets/SKILL.md` and [[Runbooks/SOPS Secrets and Age Keys]]. The dev-machine operator key lives at `~/.config/age/keys.txt` and in 1Password (homelab vault, "sops homelab age key"); per-host recipients are derived from each host's ed25519 host key via `ssh-to-age`, which only works after the host has booted once.
+Working with `nix/secrets/*.sops.yaml` (operator and host decryption, harmonia keypair generation, two-stage recipient setup): see `.agents/skills/sops-secrets/SKILL.md` and [Manage SOPS secrets](docs/runbooks/manage-sops-secrets.md). The dev-machine operator key lives at `~/.config/age/keys.txt` and in 1Password (homelab vault, "sops homelab age key"); per-host recipients are derived from each host's ed25519 host key via `ssh-to-age`, which only works after the host has booted once.
 
 ### Issue tracker
 
@@ -139,7 +139,7 @@ Five canonical roles, written as `Status:` values on each ticket file (local tra
 
 ### Domain docs
 
-Single-context: `AGENTS.md` router + the `docs/pages/` wiki graph (no `CONTEXT.md`/ADR). See `docs/agents/domain.md`.
+Single-context: `AGENTS.md` router + the `docs/` wiki pages (no `CONTEXT.md`/ADR). See `docs/agents/domain.md`.
 
 ## Writing rule for these docs
 
@@ -158,13 +158,20 @@ you edit documentation:
    what the repo runs.
 
 Run `mise run docs:check` before pushing docs. It enforces what a script can:
-every wikilink resolves, every referenced repo path exists, and no past-tense
-archaeology. It runs in CI and gates the wiki deploy. Rules 2 and 3 are on you —
-no script catches "this list was right when it was written".
+the renderer's own validation passes (frontmatter, nav, links, anchors,
+images), every referenced repo path exists, there is no past-tense archaeology,
+and every wiki URL or `docs/…md` path named in a Markdown file, a skill, or a
+monitoring rule resolves to a page. It runs in CI and gates the wiki deploy.
+Rules 2 and 3 are on you — no script catches "this list was right when it was
+written".
 
-`docs/` is a Logseq graph: page properties are `key:: value` at the top of the
-file, every block starts with `- `, nesting is tabs, and a `/` in a page name is
-`___` in the filename. The renderer (`apps/wiki/build.ts`) supports outline
-text, `[[wikilinks]]`, properties, `#tags`, tables, and code fences — **not**
-block refs `((…))`, embeds, or `{{query}}`. Extend the renderer before using
-those.
+`docs/` is plain GitHub Markdown in a folder tree that mirrors the URLs:
+`docs/<section>/<page>.md` is `/<section>/<page>/`, an `index.md` is its
+folder's URL, and file names are lowercase kebab-case. Every page opens with
+YAML frontmatter carrying a `title` and a one-sentence `description`. The title
+is the page's H1, so the body has no H1 and its sections start at `##`. Pages
+link each other with relative `.md` paths (optionally with an `#anchor`) and
+reference images in `docs/assets/`. `docs/nav.yaml` orders the sidebar, and a
+page it does not list fails the build. `docs/agents/` is agent-facing and is
+not rendered. The renderer (`apps/wiki/build.ts`) handles GitHub-flavoured
+Markdown and `> [!NOTE]`-style alerts; extend it before using anything else.

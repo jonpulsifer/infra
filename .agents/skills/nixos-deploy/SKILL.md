@@ -4,15 +4,15 @@ description: >-
   Build, validate, and deploy NixOS host configurations in this infra repo. Use
   when rebuilding a host, adding a new one, building an image, or rolling back.
 metadata:
-  runbook: docs/pages/Runbooks___Deploy a NixOS Host.md
+  runbook: docs/runbooks/deploy-a-nixos-host.md
   wiki: https://wiki.lolwtf.ca/runbooks/deploy-a-nixos-host/
 ---
 
 # NixOS Deploy
 
-Canonical human runbook: `docs/pages/Runbooks___Deploy a NixOS Host.md`. Layer
-background: `docs/pages/Architecture___NixOS.md`. Host inventory:
-`docs/pages/Fleet.md`. This file holds only the agent-specific guidance.
+Canonical human runbook: `docs/runbooks/deploy-a-nixos-host.md`. Layer
+background: `docs/platform/nixos.md`. Host inventory:
+`docs/hosts/index.md`. This file holds only the agent-specific guidance.
 
 ## Agent notes
 

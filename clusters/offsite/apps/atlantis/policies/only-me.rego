@@ -6,7 +6,7 @@ import rego.v1
 # opens its pull requests as (`containers.yml`, app id 334190). It replaced
 # `github-actions[bot]` there because a pull request opened with GITHUB_TOKEN
 # never gets its checks run, so the digest could not merge — see
-# [[Architecture/GitOps]]. The App is a new identity to this policy, and every
+# docs/platform/how-changes-ship.md. The App is a new identity to this policy, and every
 # CD pull request fails the plan hook until it is named here.
 #
 # `clanky-bot[bot]` is the App a mate sandbox pushes and opens pull requests

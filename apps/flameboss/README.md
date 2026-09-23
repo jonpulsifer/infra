@@ -11,7 +11,7 @@ controller.
 
 Deployed on folly as `clusters/folly/monitoring/flameboss.yaml`, with its
 alerts in `flameboss-rules.yaml` and its dashboard in `grafana-dashboards/`.
-Operationally: `docs/pages/Runbooks___Flame Boss Cook Monitoring.md`.
+Operationally: `docs/apps/flameboss.md`.
 
 ## The protocol, as measured
 

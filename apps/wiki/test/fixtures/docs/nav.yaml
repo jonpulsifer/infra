@@ -1,0 +1,27 @@
+sections:
+  - title: Apps
+    index: apps/index.md
+    items:
+      - path: apps/kthx.md
+        children: [apps/kthx/built-apps.md]
+      - apps/mate.md
+  - title: Platform
+    index: platform/index.md
+    items:
+      - platform/network.md
+  - title: Hosts
+    index: hosts/index.md
+    items:
+      - group: Kubernetes nodes
+        items: [hosts/optiplex.md]
+  - title: Runbooks
+    index: runbooks/index.md
+    items:
+      - group: Hosts
+        items: [runbooks/deploy-a-nixos-host.md]
+      - group: Kubernetes
+        items:
+          - runbooks/adopt-the-folly-monitoring-crds.md
+          - runbooks/adopt-the-folly-prometheus-operator-crds.md
+      - group: Cloud and network
+        items: [runbooks/inspect-the-unifi-network.md]

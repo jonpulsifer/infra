@@ -7,9 +7,10 @@ exploring the codebase.
 
 - **`AGENTS.md`** at the repo root. It is a router, not a manual: hard rules,
   how changes ship, the repo map, and the single sources of truth.
-- **The wiki** in `docs/pages/`, which is where depth lives. Start from
-  `Architecture.md` and read the layer page for the area you are about to touch.
-  `Fleet.md` covers the hosts; `Runbooks.md` covers procedures.
+- **The wiki** in `docs/`, which is where depth lives. Start from
+  `docs/platform/index.md` and read the layer page for the area you are about to
+  touch. `docs/apps/` covers the first-party apps, `docs/hosts/` the hosts, and
+  `docs/runbooks/` the procedures.
 
 There is no `CONTEXT.md` and no ADR namespace in this repo. Decisions are
 recorded as present-tense architecture, not as a decision log — the rationale
@@ -20,17 +21,19 @@ for a choice lives on the page describing the thing itself.
 ```
 /
 ├── AGENTS.md              # router (CLAUDE.md is a symlink to it)
-└── docs/
-    ├── agents/            # this directory — agent-facing repo config
-    └── pages/             # the Logseq graph, published at wiki.lolwtf.ca
-        ├── Architecture.md
-        ├── Architecture___<Layer>.md
-        ├── Fleet.md
-        ├── Fleet___<host>.md
-        └── Runbooks___<procedure>.md
+└── docs/                  # Markdown pages, published at wiki.lolwtf.ca
+    ├── agents/            # this directory — agent-facing, not rendered
+    ├── nav.yaml           # sidebar order
+    ├── index.md           # → /
+    ├── apps/<app>.md      # → /apps/<app>/
+    ├── platform/<layer>.md
+    ├── hosts/<host>.md
+    ├── runbooks/<procedure>.md
+    └── assets/            # diagrams
 ```
 
-A `/` in a Logseq page name is `___` in the filename.
+The folder tree is the URL: `docs/<section>/<page>.md` is `/<section>/<page>/`,
+and `index.md` is its folder's URL.
 
 Note: `docs/` is published publicly at wiki.lolwtf.ca. Never put decrypted SOPS
 content or credentials in it.
@@ -51,7 +54,7 @@ When your output edits documentation, follow the rules in `AGENTS.md`:
 
 When your output names a concept — in an issue title, a refactor proposal, a
 hypothesis, a test name — use the term the repo uses. The layer pages under
-`docs/pages/Architecture*` are the vocabulary. Don't drift to synonyms.
+`docs/platform/` are the vocabulary. Don't drift to synonyms.
 
 If a concept you need has no page, that is a signal: either you're inventing
 language the project doesn't use (reconsider), or there's a real documentation
@@ -62,7 +65,7 @@ gap worth filling.
 If your output contradicts what an architecture page states, surface it
 explicitly rather than silently overriding:
 
-> _Contradicts [[Architecture/Kubernetes]] on how the root sync is owned — but
+> _Contradicts `docs/platform/kubernetes.md` on how the root sync is owned — but
 > worth reopening because…_
 
 If the page is simply stale, fix the page in the same change. Documentation

@@ -121,7 +121,7 @@ run = [
 ]
 
 [tasks."docs:build"]
-description = "Build the Logseq wiki with the first-party Bun SSG"
+description = "Build the wiki from docs/ with the first-party Bun renderer"
 run = "bun run --cwd apps/wiki build"
 
 [tasks."docs:diagrams"]
@@ -154,7 +154,7 @@ description = "Check a ceremony transcript: canonical form, hash chain, share st
 run = "go -C apps/fml-attest run . ${TRANSCRIPT:-../fml-ceremony/testdata/transcript.example.json}"
 
 [tasks."docs:check"]
-description = "Docs contract: wikilinks resolve, referenced paths exist, no archaeology"
+description = "Docs contract: renderer validation, referenced paths exist, no archaeology, references into the wiki resolve"
 run = "bash .github/scripts/docs-contract.sh"
 
 [tasks."tf:plan"]

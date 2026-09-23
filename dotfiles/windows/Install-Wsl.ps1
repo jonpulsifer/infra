@@ -87,6 +87,6 @@ Write-Host @"
   cd ~/src/github.com/jonpulsifer/infra
 
   # the sops operator age key goes to ~/.config/age/keys.txt first;
-  # see docs/pages/Runbooks___SOPS Secrets and Age Keys.md
+  # see docs/runbooks/manage-sops-secrets.md
   sudo nixos-rebuild switch --flake .#wsl
 "@

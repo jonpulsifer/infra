@@ -15,10 +15,11 @@
 #      lives outside certs/, clusters/offsite/apps/spindrift/ca-bundle.yaml.
 #
 # Commit the result and let Atlantis upload the refreshed documents, then deploy
-# the control planes per the Kubernetes GitOps runbook. Requires: tofu, sops
-# (>= 3.9 for --filename-override), jq and go. All certificate handling goes
-# through apps/fml-pki, so there is no openssl or python dependency. Run from
-# anywhere in the repo; needs op auth only indirectly (tofu reads state, not 1P).
+# the control planes per docs/runbooks/apply-a-kubernetes-change.md. Requires:
+# tofu, sops (>= 3.9 for --filename-override), jq and go. All certificate
+# handling goes through apps/fml-pki, so there is no openssl or python
+# dependency. Run from anywhere in the repo; needs op auth only indirectly (tofu
+# reads state, not 1P).
 
 set -euo pipefail
 

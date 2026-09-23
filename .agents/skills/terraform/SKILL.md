@@ -6,14 +6,14 @@ description: >-
   alongside it) plus clusters/<site>/bootstrap/. Use when changing, validating,
   or planning infrastructure code, or when a change needs an Atlantis apply.
 metadata:
-  runbook: docs/pages/Runbooks___Terraform Change.md
-  wiki: https://wiki.lolwtf.ca/runbooks/terraform-change/
+  runbook: docs/runbooks/apply-a-terraform-change.md
+  wiki: https://wiki.lolwtf.ca/runbooks/apply-a-terraform-change/
 ---
 
 # Terraform
 
-Canonical human runbook: `docs/pages/Runbooks___Terraform Change.md`. Layer
-background: `docs/pages/Architecture___Terraform.md`. This file holds only the
+Canonical human runbook: `docs/runbooks/apply-a-terraform-change.md`. Layer
+background: `docs/platform/opentofu.md`. This file holds only the
 agent-specific guidance.
 
 ## Agent notes

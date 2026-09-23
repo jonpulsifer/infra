@@ -27,7 +27,8 @@
     The cluster half of this is declared in git and needs no action here:
     clusters/folly/monitoring/windows-exporters.yaml is the scrape and the
     alerts, and the UniFi reservations and firewall policies live in
-    terraform/network/unifi/folly/. See the Windows Host Monitoring runbook.
+    terraform/network/unifi/folly/. See
+    docs/runbooks/install-windows-monitoring.md.
 
 .PARAMETER SkipVector
     Leave Event Log shipping out. The metrics half still installs.

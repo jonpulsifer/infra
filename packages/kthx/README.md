@@ -1,6 +1,6 @@
 # @repo/kthx
 
-The half of [kthx](../../docs/pages/Architecture___kthx.md) that has no runtime
+The half of [kthx](../../docs/apps/kthx.md) that has no runtime
 behind it: the files a host serves as bytes, and the `/_/` contract `kthx dev`
 answers.
 

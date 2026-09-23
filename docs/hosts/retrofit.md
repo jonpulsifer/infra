@@ -1,0 +1,20 @@
+---
+title: retrofit
+description: "An HP EliteDesk 800 G2 mini PC that is the offsite cluster's control-plane node, with a TPM 1.2."
+specs:
+  vendor: HP
+  model: EliteDesk 800 G2 DM 65W
+  year: "~2016"
+  serial: MXL7211HNN
+  sku: "W3X40UC#ABA"
+  cpu: "Intel Core i7-6700T @ 2.80GHz (4c/8t)"
+  ram: 16 GB DDR4 SODIMM
+  gpu: Intel HD Graphics 530
+  storage: "512 GB Timetec SD08 SATA SSD (root 91 GB, 50% used)"
+  os: NixOS 26.05 (Yarara)
+  firmware: N21 Ver. 02.21 (2016-11-01)
+---
+
+offsite control-plane. Chassis asset tag matches the serial (MXL7211HNN).
+
+TPM 1.2 enumerated: `tpm0` (version 1), `/dev/tpm0` present, dmesg reports `tpm_tis 00:02: 1.2 TPM (device-id 0x1B, rev-id 16)`. Too old for `systemd-cryptenroll`/TPM-backed disk encryption, which need TPM 2.0. Reachable over the LAN at `10.89.0.10` (or via the tailnet).

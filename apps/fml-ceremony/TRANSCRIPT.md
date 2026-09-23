@@ -67,7 +67,7 @@ default is out.
 
 ### It never goes in `docs/`
 
-`docs/` is the public Logseq wiki, and the repository rule is that nothing
+`docs/` is the public wiki, and the repository rule is that nothing
 decrypted goes there. Nothing in this schema is decrypted material, so the rule
 is not what keeps the transcript out — but the transcript still does not live
 there, for a different reason: it is a **byte-exact signed artifact**, and the

@@ -2,8 +2,8 @@
 name: unifi-network
 description: Discover, query, inspect, and reason about the live homelab UniFi network — controller, networks/VLANs, WLANs, adopted devices, and connected clients. Use when asked to look at, audit, debug, or reason about the UniFi network, find a client/device by name/IP/MAC, check what VLANs/subnets/DHCP exist, or reconcile live state against terraform/network/unifi/. Authenticates against the UDM Pro using creds from 1Password (op).
 metadata:
-  runbook: docs/pages/Runbooks___Inspect UniFi Network.md
-  wiki: https://wiki.lolwtf.ca/runbooks/inspect-unifi-network/
+  runbook: docs/runbooks/inspect-the-unifi-network.md
+  wiki: https://wiki.lolwtf.ca/runbooks/inspect-the-unifi-network/
 ---
 
 # unifi-network
@@ -14,7 +14,7 @@ This is the live counterpart to the desired state in `terraform/network/unifi/fo
 (the on-site controller; the remote-site gateway is `terraform/network/unifi/offsite/`) — use
 it to see what the controller *actually* has before editing the Terraform.
 
-Canonical public runbook: `docs/pages/Runbooks___Inspect UniFi Network.md`.
+Canonical public runbook: `docs/runbooks/inspect-the-unifi-network.md`.
 
 The driver is **`.agents/skills/unifi-network/unifi.sh`** (paths below are
 relative to the repo root). It pulls the `terraform` Super Admin creds from

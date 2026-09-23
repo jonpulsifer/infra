@@ -9,7 +9,8 @@ description: >-
   (homelab vault) and at ~/.config/age/keys.txt — NOT at the sops binary's
   default of ~/.config/sops/age/keys.txt.
 metadata:
-  runbook: docs/pages/Runbooks___SOPS Secrets and Age Keys.md
+  runbook: docs/runbooks/manage-sops-secrets.md
+  wiki: https://wiki.lolwtf.ca/runbooks/manage-sops-secrets/
 ---
 
 # sops-secrets
@@ -22,8 +23,8 @@ from each host's ed25519 SSH host key** (`ssh-to-age` on
 `/etc/ssh/ssh_host_ed25519_key.pub`), so a compromised host only exposes
 secrets scoped to itself.
 
-Canonical public runbook: `docs/pages/Runbooks___SOPS Secrets and Age Keys.md`.
-Layer background: `docs/pages/Architecture___Secrets and PKI.md`.
+Canonical public runbook: `docs/runbooks/manage-sops-secrets.md`.
+Layer background: `docs/platform/secrets-and-pki.md`.
 
 ## Where the keys live (the part that's easy to mis-spend an hour on)
 
