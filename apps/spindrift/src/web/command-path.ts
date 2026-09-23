@@ -56,7 +56,6 @@ export function pathFor(name: CommandName): string {
 export type TransportFailureCode =
   | CommandFailureCode
   | 'UNAUTHENTICATED'
-  | 'FORBIDDEN'
   | 'METHOD_NOT_ALLOWED'
   | 'MALFORMED_REQUEST'
   | 'INTERNAL';

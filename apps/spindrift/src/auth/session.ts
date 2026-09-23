@@ -24,7 +24,7 @@
  * reads a header from the proxy.
  */
 import { and, desc, eq, gt } from 'drizzle-orm';
-import type { Clock, Principal } from '../commands/types.ts';
+import type { Clock, Principal, PrincipalKind } from '../commands/types.ts';
 import type { Database } from '../db/client.ts';
 import { credentials, sessions, users } from '../db/schema.ts';
 import {
@@ -61,6 +61,11 @@ export const SESSION_LIFETIME_MS = 24 * 60 * 60 * 1000;
  */
 export const SESSION_KINDS = ['browser', 'agent'] as const;
 export type SessionKind = (typeof SESSION_KINDS)[number];
+
+const PRINCIPAL_KIND = {
+  browser: 'human',
+  agent: 'agent',
+} as const satisfies Record<SessionKind, PrincipalKind>;
 
 /**
  * How long an agent token lasts: ninety days.
@@ -187,7 +192,11 @@ async function mint(
   return {
     token,
     expiresAt,
-    principal: { id: user.id, displayName: user.displayName },
+    principal: {
+      id: user.id,
+      displayName: user.displayName,
+      kind: PRINCIPAL_KIND[kind],
+    },
   };
 }
 
@@ -202,11 +211,10 @@ export function openSession(
 /**
  * Mint an agent token for an enrolled user.
  *
- * Deliberately *not* reachable without an existing browser session: the command
- * that calls this runs on the session-authenticated dispatch surface, so a
- * passkey assertion is upstream of every token that exists. The token is what
- * an agent presents; the session is what authorises its creation, and the two
- * never swap roles.
+ * Deliberately *not* reachable without a human principal: the command that
+ * calls this refuses an agent, so a passkey assertion is upstream of every
+ * token that exists. The token is what an agent presents; the session is what
+ * authorises its creation, and the two never swap roles.
  */
 export function openAgentToken(
   deps: SessionStore,
@@ -246,7 +254,11 @@ async function resolveRow(
     ? null
     : {
         sessionId: row.sessionId,
-        principal: { id: row.id, displayName: row.displayName },
+        principal: {
+          id: row.id,
+          displayName: row.displayName,
+          kind: PRINCIPAL_KIND[kind],
+        },
       };
 }
 

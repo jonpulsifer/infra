@@ -6,9 +6,10 @@
  * matters here: the acts in `src/auth/` are *pre-session* — they exist to
  * produce a principal, so they cannot ride a surface that requires one. These
  * three are the other way round. Minting an agent token is something an
- * already-signed-in operator does, so it belongs on the session-authenticated
- * command surface, and putting it there is what guarantees a passkey assertion
- * sits upstream of every token that exists.
+ * already-signed-in operator does, so {@link mintAgentToken} refuses every
+ * principal that is not human — `/mcp` dispatches this same registry — and
+ * that refusal is what guarantees a passkey assertion sits upstream of every
+ * token that exists.
  *
  * The token is returned exactly once, by {@link mintAgentToken}, and never
  * again by anything: `sessions.token_hash` is a SHA-256 and there is nothing to
@@ -47,6 +48,12 @@ export const mintAgentToken: Command<
   MintAgentTokenInput,
   MintedAgentToken
 > = async (_input, context) => {
+  if (context.principal.kind !== 'human') {
+    return failed(
+      'FORBIDDEN',
+      'an agent token cannot mint another — sign in and mint one from Settings',
+    );
+  }
   const minted = await openAgentToken(context, context.principal);
   return ok({
     token: minted.token,

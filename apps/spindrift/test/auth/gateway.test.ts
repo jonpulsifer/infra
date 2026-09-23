@@ -74,7 +74,10 @@ describe('resolving a Gateway assertion', () => {
         }),
         deps(),
       ),
-    ).toEqual({ kind: 'authenticated', principal });
+    ).toEqual({
+      kind: 'authenticated',
+      principal: { ...principal, kind: 'human' },
+    });
   });
 
   test('an unknown assertion is forbidden rather than provisioned', async () => {
@@ -109,7 +112,7 @@ describe('resolving a Gateway assertion', () => {
 
     expect(await authenticateRequest(withBoth, deps())).toEqual({
       kind: 'authenticated',
-      principal,
+      principal: { ...principal, kind: 'human' },
     });
   });
 
