@@ -19,6 +19,21 @@ metadata:
     io.cilium/lb-ipam-ips: ${PBX_SIP_VIP}
 spec:
   type: LoadBalancer
+  # Load-bearing, not a tuning knob. Cilium runs in SNAT mode here
+  # (bpf-lb-mode unset, masquerade on), so under the default `Cluster` policy
+  # the handset's source address is rewritten to the node's before the packet
+  # reaches Asterisk.
+  #
+  # Two things key on that address and both would fail silently: pjsip.conf
+  # identifies line 4 by `match = ${CATHY_IP}` because it carries no password,
+  # and the CiliumNetworkPolicy admits SIP and the provisioning fetch
+  # `fromCIDR` the same host. Seen as 10.3.0.x, the REGISTER matches no
+  # endpoint and is rejected.
+  #
+  # `Local` keeps the client address. The cost is that only a node running the
+  # pod answers the VIP, which is what Cilium already announces over BGP, and
+  # with one replica there is nothing to spread anyway.
+  externalTrafficPolicy: Local
   selector:
     app.kubernetes.io/name: pbx
   ports:
