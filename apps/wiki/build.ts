@@ -1,574 +1,560 @@
 /**
- * wiki — a tiny static site generator for the docs/ Logseq graph.
- *
- * Reads docs/pages/*.md + docs/journals/*.md (Logseq outline markdown:
- * `- ` blocks, tab nesting, `key:: value` page properties, [[wikilinks]])
- * and renders a static site to dist/: pages, backlinks, namespace listings,
- * tag pages, a client-side search index, and a force-directed graph view.
+ * The wiki: docs/ (Markdown with YAML frontmatter, ordered by docs/nav.yaml)
+ * rendered to a static site in dist/, plus search.json for the client,
+ * graph.json for /graph/, and pages.json for the MCP endpoint in functions/.
+ * `bun run build.ts --check` runs every validation without writing dist/.
  */
+import { existsSync, statSync } from "node:fs";
+import { cp, rm } from "node:fs/promises";
+import { join, posix, relative } from "node:path";
 import { codeToHtml } from "shiki";
-import { readdir, mkdir, rm, cp } from "node:fs/promises";
-import { join, dirname } from "node:path";
 
-const ROOT = join(import.meta.dir, "..", "..");
-const DOCS = join(ROOT, "docs");
-const OUT = join(import.meta.dir, "dist");
-const SITE = "wiki.lolwtf.ca";
 const REPO = "https://github.com/jonpulsifer/infra";
+const SITE = "https://wiki.lolwtf.ca";
+const ROOT = join(import.meta.dir, "..", "..");
+const KEYS = ["title", "description", "status", "cards", "specs"];
+const STATUSES = ["live", "parked", "experiment", "unplugged", "off-git", "unverified"];
+const ALERT = /^<p>\[!(NOTE|TIP|IMPORTANT|WARNING|CAUTION)\](?:\n|(?=<\/p>))/i;
+const FAVICON =
+  "data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🛰️</text></svg>";
 
-/**
- * The platform marks, shared with the spindrift client rather than copied.
- *
- * They live inside that app because its Docker build runs `turbo prune
- * spindrift`, which keeps only spindrift and its declared workspace deps — an
- * asset its client imports has to be reachable from there. This build has the
- * whole checkout, so it reads the same directory instead of keeping a second
- * copy to drift. A move breaks this build loudly, at the `cp` below.
- */
-const LOGOS = join(ROOT, "apps", "spindrift", "src", "web", "client", "logos");
-const logoNames = new Set<string>();
-
-/**
- * Rendered d2 diagrams, served at `/assets/`.
- *
- * Two sources for the same reason the marks have one: a diagram the spindrift
- * client imports has to survive `turbo prune spindrift`, so the flows it shows
- * on its own screens live inside that package and the wiki reads them from
- * there. Everything drawn only for the wiki lives in `docs/assets/`. Both are
- * `mise run docs:diagrams` output, committed, because neither this build nor
- * the image build has d2.
- */
-const ASSETS = [
-  join(DOCS, "assets"),
-  join(ROOT, "apps", "spindrift", "src", "web", "client", "diagrams"),
-];
-
-// ── model ────────────────────────────────────────────────────────────────────
-
-interface Block {
-  depth: number;
-  lines: string[];
-  children: Block[];
+export interface Options {
+  docs: string;
+  out: string;
+  repo: string;
+  /** Directories merged and served at /assets/. */
+  assets: string[];
+  check?: boolean;
 }
 
-interface Page {
-  name: string; // "ADR/0001 GitOps apply model"
-  file: string; // path relative to repo root, for edit links
-  kind: "page" | "journal";
-  props: Record<string, string>;
-  blocks: Block[];
-  url: string; // "/adr/0001-gitops-apply-model/"
-}
+export const defaults = (): Options => ({
+  docs: join(ROOT, "docs"),
+  out: join(import.meta.dir, "dist"),
+  repo: ROOT,
+  // The kthx client imports its own diagrams, and its image build prunes to its
+  // package, so those live there and are served from here too.
+  assets: [
+    join(ROOT, "docs", "assets"),
+    join(ROOT, "apps", "spindrift", "src", "web", "client", "diagrams"),
+  ],
+});
 
-interface Ref {
-  page: Page;
+interface Heading {
+  level: number;
+  id: string;
+  text: string;
+}
+interface NavPage {
+  file: string;
+  children: NavPage[];
+}
+interface NavGroup {
+  group: string;
+  items: NavPage[];
+}
+interface Section {
+  id: string;
+  title: string;
+  index?: string;
+  items: (NavPage | NavGroup)[];
+}
+export interface Page {
+  file: string;
+  path: string;
+  url: string;
+  title: string;
+  description: string;
+  status?: string;
+  cards: string[];
+  specs: [string, string][];
+  markdown: string;
+  section?: Section;
   html: string;
+  text: string;
+  headings: Heading[];
+  code: { code: string; lang: string }[];
+}
+interface Link {
+  from: Page;
+  to: Page;
+  anchor: string;
+  href: string;
+}
+interface Ctx {
+  o: Options;
+  pages: Map<string, Page>;
+  sections: Section[];
+  order: Page[];
+  links: Link[];
+  fail: (file: string, msg: string) => void;
 }
 
-const pages = new Map<string, Page>(); // lowercased name -> page
-const backlinks = new Map<string, Ref[]>(); // lowercased target name -> refs
-const tagged = new Map<string, Page[]>(); // tag -> pages
-
-// ── parsing ──────────────────────────────────────────────────────────────────
-
-function parse(src: string): { props: Record<string, string>; blocks: Block[] } {
-  const lines = src.split("\n");
-  const props: Record<string, string> = {};
-  let i = 0;
-  while (i < lines.length && /^[A-Za-z][\w-]*:: /.test(lines[i])) {
-    const at = lines[i].indexOf(":: ");
-    props[lines[i].slice(0, at).toLowerCase()] = lines[i].slice(at + 3).trim();
-    i++;
+const ENT: Record<string, string> = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" };
+const esc = (s: string) => s.replace(/[&<>"']/g, (c) => ENT[c]);
+const unesc = (s: string) =>
+  s.replace(/&(amp|lt|gt|quot|#39);/g, (e) => Object.keys(ENT).find((k) => ENT[k] === e)!);
+const inline = (html: string) => unesc(html.replace(/<[^>]*>/g, "")).trim();
+const decode = (s: string) => {
+  try {
+    return decodeURIComponent(s);
+  } catch {
+    return s;
   }
-  const blocks: Block[] = [];
-  const stack: Block[] = [];
-  for (; i < lines.length; i++) {
-    const m = lines[i].match(/^(\t*)- (.*)$/);
-    if (m) {
-      const b: Block = { depth: m[1].length, lines: [m[2]], children: [] };
-      while (stack.length && stack[stack.length - 1].depth >= b.depth) stack.pop();
-      (stack.length ? stack[stack.length - 1].children : blocks).push(b);
-      stack.push(b);
-    } else if (stack.length && lines[i].trim() !== "") {
-      // continuation line: strip the block's tab indent + two-space alignment
-      stack[stack.length - 1].lines.push(lines[i].replace(/^\t*(?: {2})?/, ""));
+};
+const list = (v: unknown): unknown[] => (v == null ? [] : Array.isArray(v) ? v : [v]);
+
+/** github-slugger: lowercase, drop punctuation, spaces to hyphens. */
+const slug = (s: string) =>
+  s
+    .toLowerCase()
+    .replace(/[^\p{L}\p{M}\p{N}\p{Pc}\- ]/gu, "")
+    .replace(/ /g, "-");
+
+// ── loading ─────────────────────────────────────────────────────────────────
+
+function parsePage(file: string, raw: string, fail: Ctx["fail"]): Page {
+  const m = raw.match(/^---\r?\n([\s\S]*?)\r?\n---[ \t]*(?:\r?\n|$)/);
+  let fm: Record<string, unknown> = {};
+  if (!m) fail(file, "no frontmatter; start the file with a --- block holding title and description");
+  else {
+    try {
+      const v = Bun.YAML.parse(m[1]);
+      if (v && typeof v === "object" && !Array.isArray(v)) fm = v as Record<string, unknown>;
+      else fail(file, "frontmatter must be a YAML map");
+    } catch (e) {
+      fail(file, `frontmatter is not valid YAML: ${(e as Error).message}`);
     }
   }
-  return { props, blocks };
-}
-
-function slug(name: string): string {
-  return name
-    .split("/")
-    .map((s) =>
-      s
-        .toLowerCase()
-        .replace(/[^a-z0-9]+/g, "-")
-        .replace(/^-+|-+$/g, ""),
-    )
-    .join("/");
-}
-
-function pageUrl(name: string, kind: Page["kind"]): string {
-  if (kind === "journal") return `/journals/${slug(name)}/`;
-  if (name.toLowerCase() === "home") return "/";
-  return `/${slug(name)}/`;
-}
-
-// ── inline rendering ─────────────────────────────────────────────────────────
-
-const esc = (s: string) =>
-  s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
-
-function wikilink(name: string, current: Page): string {
-  const target = pages.get(name.toLowerCase());
-  if (target) return `<a class="wl" href="${target.url}">${esc(target.name)}</a>`;
-  return `<span class="wl broken" title="no such page (yet)">${esc(name)}</span>`;
-}
-
-function inline(s: string, page: Page, refs?: Set<string>): string {
-  s = esc(s);
-  const codes: string[] = [];
-  s = s.replace(/`([^`]+)`/g, (_, c) => `\u0000${codes.push(c) - 1}\u0000`);
-  // Linked to itself: a diagram wide enough to be worth drawing is wider than
-  // this column, and `max-width: 100%` alone shrinks its labels to nothing.
-  s = s.replace(
-    /!\[([^\]]*)\]\(([^)\s]+)\)/g,
-    `<a class="fig" href="$2" title="$1 — open full size"><img alt="$1" src="$2" loading="lazy"></a>`,
-  );
-  s = s.replace(/\[([^\]]+)\]\((https?:[^)\s]+)\)/g, `<a href="$2" rel="noopener">$1</a>`);
-  s = s.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, `<a href="$2">$1</a>`);
-  s = s.replace(/\[\[([^\]]+)\]\]/g, (_, n) => {
-    refs?.add(n.toLowerCase());
-    return wikilink(n, page);
-  });
-  s = s.replace(
-    /(^|[\s(])#([A-Za-z][\w/-]*)/g,
-    (_, sp, t) => `${sp}<a class="tag" href="/tags/${slug(t)}/">#${t}</a>`,
-  );
-  s = s.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
-  s = s.replace(/(^|[\s(>])\*([^*\n]+)\*(?=[\s).,;:!?]|$)/g, "$1<em>$2</em>");
-  s = s.replace(/==([^=]+)==/g, "<mark>$1</mark>");
-  s = s.replace(/\u0000(\d+)\u0000/g, (_, i) => `<code>${esc(codes[+i])}</code>`);
-  return s;
-}
-
-// ── block rendering ──────────────────────────────────────────────────────────
-
-async function highlight(code: string, lang: string): Promise<string> {
-  const opts = {
-    themes: { light: "catppuccin-latte", dark: "tokyo-night" },
-    defaultColor: false,
-  } as const;
-  try {
-    return await codeToHtml(code, { lang: lang || "text", ...opts });
-  } catch {
-    return await codeToHtml(code, { lang: "text", ...opts });
-  }
-}
-
-async function renderBlockContent(
-  b: Block,
-  page: Page,
-  refs: Set<string>,
-): Promise<{ html: string; heading: boolean }> {
-  const text = b.lines.join("\n").trim();
-
-  const fence = text.match(/^```(\S*)\n?([\s\S]*?)\n?```$/);
-  if (fence) return { html: await highlight(fence[2], fence[1]), heading: false };
-
-  const rows = text.split("\n");
-  if (rows.length > 1 && rows.every((r) => r.trim().startsWith("|"))) {
-    const cells = (r: string) =>
-      r
-        .trim()
-        .replace(/^\||\|$/g, "")
-        .split("|")
-        .map((c) => inline(c.trim(), page, refs));
-    const head = cells(rows[0]);
-    const body = rows.slice(2).map(cells);
-    return {
-      html:
-        `<div class="tablewrap"><table><thead><tr>` +
-        head.map((h) => `<th>${h}</th>`).join("") +
-        `</tr></thead><tbody>` +
-        body.map((r) => `<tr>${r.map((c) => `<td>${c}</td>`).join("")}</tr>`).join("") +
-        `</tbody></table></div>`,
-      heading: false,
-    };
-  }
-
-  const h = text.match(/^(#{1,4}) (.*)$/s);
-  if (h) {
-    const level = h[1].length + 1; // # -> h2
-    return { html: `<h${level}>${inline(h[2], page, refs)}</h${level}>`, heading: true };
-  }
-
-  const html = text
-    .split("\n")
-    .map((l) => inline(l, page, refs))
-    .join("<br>");
-  return { html: `<p>${html}</p>`, heading: false };
-}
-
-async function renderBlocks(blocks: Block[], page: Page, refs: Set<string>): Promise<string> {
-  let out = `<ul class="outline">`;
-  for (const b of blocks) {
-    const { html, heading } = await renderBlockContent(b, page, refs);
-    const kids = b.children.length ? await renderBlocks(b.children, page, refs) : "";
-    out += `<li class="block${heading ? " hblock" : ""}"><div class="bc">${html}</div>${kids}</li>`;
-  }
-  return out + `</ul>`;
-}
-
-// collect backlink refs: flat render of a single block (without children) for the refs panel
-async function blockSnippet(b: Block, page: Page): Promise<string> {
-  const { html } = await renderBlockContent(b, page, new Set());
-  return html;
-}
-
-// ── chrome ───────────────────────────────────────────────────────────────────
-
-const NAV_ORDER = ["Home", "Architecture", "Runbooks", "Fleet"];
-
-function nav(current: Page | null): string {
-  const item = (name: string) => {
-    const p = pages.get(name.toLowerCase());
-    if (!p) return "";
-    const here = current && p.name === current.name ? ` aria-current="page"` : "";
-    const kids = [...pages.values()]
-      .filter((c) => c.name.startsWith(name + "/") && !c.name.endsWith("/Template"))
-      .sort((a, b) => a.name.localeCompare(b.name));
-    return (
-      `<li><a href="${p.url}"${here}>${esc(name)}</a>` +
-      (kids.length
-        ? `<ul>` +
-          kids
-            .map((c) => {
-              const cur = current && c.name === current.name ? ` aria-current="page"` : "";
-              return `<li><a href="${c.url}"${cur}>${esc(c.name.slice(name.length + 1))}</a></li>`;
-            })
-            .join("") +
-          `</ul>`
-        : "") +
-      `</li>`
-    );
+  for (const k of Object.keys(fm)) if (!KEYS.includes(k)) fail(file, `unknown frontmatter key "${k}" (allowed: ${KEYS.join(", ")})`);
+  for (const k of ["title", "description"])
+    if (typeof fm[k] !== "string" || !fm[k].trim()) fail(file, `frontmatter needs a ${k}`);
+  const status = fm.status == null ? undefined : String(fm.status);
+  if (status && !STATUSES.includes(status)) fail(file, `status "${status}" is not one of ${STATUSES.join(", ")}`);
+  const specs = fm.specs ?? {};
+  if (typeof specs !== "object" || Array.isArray(specs) || Object.values(specs).some((v) => typeof v === "object"))
+    fail(file, "specs must be a map of name: value");
+  if (!file.replace(/\.md$/, "").split("/").every((s) => /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(s)))
+    fail(file, "file names are lowercase kebab-case");
+  const path = file.replace(/\.md$/, "").replace(/(?:^|\/)index$/, "");
+  return {
+    file,
+    path,
+    url: path ? `/${path}/` : "/",
+    title: String(fm.title ?? ""),
+    description: String(fm.description ?? ""),
+    status,
+    cards: list(fm.cards).map(String),
+    specs: Object.entries(specs as object).map(([k, v]) => [k, String(v)]),
+    markdown: m ? raw.slice(m[0].length) : raw,
+    html: "",
+    text: "",
+    headings: [],
+    code: [],
   };
-  return (
-    `<ul class="nav">` +
-    NAV_ORDER.map(item).join("") +
-    `<li><a href="/graph/"${current?.name === "__graph" ? ` aria-current="page"` : ""}>Graph</a></li>` +
-    `<li><a href="/journals/"${current?.kind === "journal" ? ` aria-current="page"` : ""}>Journals</a></li>` +
-    `</ul>`
+}
+
+function readNav(raw: unknown, pages: Map<string, Page>, fail: Ctx["fail"]): Section[] {
+  const seen = new Set<string>();
+  const entry = (v: unknown): NavPage[] => {
+    const file = typeof v === "string" ? v : (v as { path?: unknown })?.path;
+    if (typeof file !== "string") {
+      fail("nav.yaml", `expected a path, {path, children} or {group, items}, got ${JSON.stringify(v)}`);
+      return [];
+    }
+    const children = list((v as { children?: unknown }).children).flatMap(entry);
+    if (file === "index.md") fail("nav.yaml", "index.md is the root page; leave it out of the nav");
+    else if (!pages.has(file)) fail("nav.yaml", `${file} has no file`);
+    else if (seen.has(file)) fail("nav.yaml", `${file} is listed twice`);
+    else {
+      seen.add(file);
+      return [{ file, children }];
+    }
+    return [];
+  };
+  const sections = list((raw as { sections?: unknown })?.sections).map((s) => {
+    const { title, index, items } = (s ?? {}) as Record<string, unknown>;
+    if (typeof title !== "string") fail("nav.yaml", `section without a title: ${JSON.stringify(s)}`);
+    return {
+      id: String(title).toLowerCase(),
+      title: String(title),
+      index: index == null ? undefined : entry(index)[0]?.file,
+      items: list(items).flatMap((i): (NavPage | NavGroup)[] => {
+        const g = i as { group?: unknown; items?: unknown };
+        return g && typeof g === "object" && "group" in g
+          ? [{ group: String(g.group), items: list(g.items).flatMap(entry) }]
+          : entry(i);
+      }),
+    };
+  });
+  for (const f of pages.keys())
+    if (f !== "index.md" && !seen.has(f)) fail(f, "not in nav.yaml, so no reader can reach it");
+  return sections;
+}
+
+function navOrder(ctx: Ctx): Page[] {
+  const order: Page[] = [];
+  const add = (n: NavPage, s: Section) => {
+    const p = ctx.pages.get(n.file)!;
+    p.section = s;
+    order.push(p);
+    for (const c of n.children) add(c, s);
+  };
+  const root = ctx.pages.get("index.md");
+  if (root) order.push(root);
+  for (const s of ctx.sections) {
+    if (s.index) add({ file: s.index, children: [] }, s);
+    for (const i of s.items) for (const n of "group" in i ? i.items : [i]) add(n, s);
+  }
+  return order;
+}
+
+// ── rendering ───────────────────────────────────────────────────────────────
+
+function resolve(raw: string, p: Page, ctx: Ctx, image: boolean): string {
+  if (/^[a-z][a-z\d+.-]*:|^\/\//i.test(raw)) return raw;
+  const hash = raw.indexOf("#");
+  const target = hash < 0 ? raw : raw.slice(0, hash);
+  const anchor = hash < 0 ? "" : raw.slice(hash + 1);
+  if (!target) {
+    ctx.links.push({ from: p, to: p, anchor, href: raw });
+    return raw;
+  }
+  if (target.startsWith("/")) {
+    ctx.fail(p.file, `${raw}: link with a relative path, not a site path`);
+    return raw;
+  }
+  const rel = posix.normalize(posix.join(posix.dirname(p.file), decode(target)));
+  const to = ctx.pages.get(rel) ?? ctx.pages.get(posix.join(rel, "index.md"));
+  if (to && !image) {
+    ctx.links.push({ from: p, to, anchor, href: raw });
+    return to.url + (anchor ? `#${anchor}` : "");
+  }
+  const asset = rel.replace(/^assets\//, "");
+  if (asset !== rel && !rel.endsWith(".d2") && ctx.o.assets.some((d) => existsSync(join(d, asset))))
+    return `/${rel}`;
+  if (image) {
+    ctx.fail(p.file, `image ${raw} is not in docs/assets`);
+    return raw;
+  }
+  const abs = join(ctx.o.docs, rel);
+  const repoPath = relative(ctx.o.repo, abs);
+  if (repoPath.startsWith("..") || !existsSync(abs)) {
+    ctx.fail(p.file, `broken link ${raw}`);
+    return raw;
+  }
+  const kind = statSync(abs).isDirectory() ? "tree" : "blob";
+  return `${REPO}/${kind}/main/${repoPath}${hash < 0 ? "" : raw.slice(hash)}`;
+}
+
+const badge = (s?: string) => (s ? `<span class="badge" data-status="${s}">${s}</span>` : "");
+
+function card(p: Page): string {
+  return `<a class="card" href="${p.url}"><span class="card-head"><span class="card-title">${esc(p.title)}</span>${badge(p.status)}</span><span class="card-desc">${esc(p.description)}</span></a>`;
+}
+
+function cards(p: Page, ctx: Ctx, heading: (level: number, html: string) => string): string {
+  let out = "";
+  for (const id of p.cards) {
+    const s = ctx.sections.find((x) => x.id === id);
+    if (!s) {
+      ctx.fail(p.file, `cards: no nav section "${id}" (have: ${ctx.sections.map((x) => x.id).join(", ")})`);
+      continue;
+    }
+    const own = s === p.section;
+    const index = s.index && ctx.pages.get(s.index);
+    if (!own) out += heading(2, index ? `<a href="${index.url}">${esc(s.title)}</a>` : esc(s.title));
+    let run: NavPage[] = [];
+    const flush = () => {
+      if (run.length) out += `<div class="cards">${run.map((n) => card(ctx.pages.get(n.file)!)).join("")}</div>\n`;
+      run = [];
+    };
+    for (const i of s.items) {
+      if (!("group" in i)) run.push(i);
+      else {
+        flush();
+        out += heading(own ? 2 : 3, esc(i.group));
+        run = i.items;
+        flush();
+      }
+    }
+    flush();
+  }
+  return out;
+}
+
+function render(p: Page, ctx: Ctx): void {
+  const seen = new Map<string, number>();
+  const heading = (level: number, html: string) => {
+    const text = inline(html);
+    const base = slug(text);
+    let id = base;
+    while (seen.has(id)) {
+      seen.set(base, seen.get(base)! + 1);
+      id = `${base}-${seen.get(base)}`;
+    }
+    seen.set(id, 0);
+    p.headings.push({ level, id, text });
+    return `<h${level} id="${id}">${html}<a class="hash" href="#${id}" aria-label="Link to this section">#</a></h${level}>\n`;
+  };
+  const cell = (tag: string, c: string, m?: { align?: string }) =>
+    `<${tag}${m?.align ? ` style="text-align:${m.align}"` : ""}>${c}</${tag}>`;
+  const body = Bun.markdown.render(
+    p.markdown,
+    {
+      text: esc,
+      heading: (c, { level }) => {
+        if (level === 1) ctx.fail(p.file, `H1 "${inline(c)}" in the body; the title is the H1, so start sections at ##`);
+        return heading(level, c);
+      },
+      paragraph: (c) => `<p>${c}</p>\n`,
+      blockquote: (c) => {
+        const m = c.match(ALERT);
+        if (!m) return `<blockquote>${c}</blockquote>\n`;
+        const rest = c.slice(m[0].length);
+        const inner = rest.startsWith("</p>") ? rest.slice(4) : `<p>${rest}`;
+        const kind = m[1].toLowerCase();
+        return `<div class="alert ${kind}" role="note"><p class="alert-title">${kind}</p>${inner}</div>\n`;
+      },
+      code: (c, m) => `\0${p.code.push({ code: unesc(c), lang: m?.language ?? "" }) - 1}\0`,
+      list: (c, m) =>
+        m.ordered ? `<ol${m.start && m.start !== 1 ? ` start="${m.start}"` : ""}>${c}</ol>\n` : `<ul>${c}</ul>\n`,
+      listItem: (c, m) =>
+        m.checked === undefined
+          ? `<li>${c}</li>`
+          : `<li class="task"><input type="checkbox" disabled${m.checked ? " checked" : ""} aria-label="${m.checked ? "done" : "to do"}"> ${c}</li>`,
+      hr: () => "<hr>\n",
+      table: (c) => `<div class="table"><table>${c}</table></div>\n`,
+      thead: (c) => `<thead>${c}</thead>`,
+      tbody: (c) => `<tbody>${c}</tbody>`,
+      tr: (c) => `<tr>${c}</tr>`,
+      th: (c, m) => cell("th", c, m),
+      td: (c, m) => cell("td", c, m),
+      strong: (c) => `<strong>${c}</strong>`,
+      emphasis: (c) => `<em>${c}</em>`,
+      strikethrough: (c) => `<del>${c}</del>`,
+      codespan: (c) => `<code>${c}</code>`,
+      link: (c, { href, title }) => {
+        // Autolinked www. and email addresses arrive without a scheme.
+        if (c === esc(href) && /^www\./.test(href)) href = `https://${href}`;
+        else if (c === esc(href) && /^[^\s/:]+@[^\s/:]+\.[a-z]+$/i.test(href)) href = `mailto:${href}`;
+        const url = resolve(href, p, ctx, false);
+        const ext = /^https?:/.test(url) ? ' rel="noopener"' : "";
+        return `<a href="${esc(url)}"${title ? ` title="${esc(title)}"` : ""}${ext}>${c}</a>`;
+      },
+      image: (c, { src, title }) => {
+        const url = esc(resolve(src, p, ctx, true));
+        // Linked to itself: a diagram shrunk to the column loses its labels.
+        return `<a class="fig" href="${url}"><img src="${url}" alt="${c.replace(/<[^>]*>/g, "")}"${title ? ` title="${esc(title)}"` : ""} loading="lazy"></a>`;
+      },
+    },
+    { noHtmlBlocks: true, noHtmlSpans: true, autolinks: true },
   );
+  p.text = unesc(
+    body
+      .replace(/<a class="hash"[^>]*>#<\/a>/g, "")
+      .replace(/\0(\d+)\0/g, (_, i) => ` ${esc(p.code[+i].code)} `)
+      .replace(/<\/(?:p|li|h\d|t[dh]|div|blockquote)>|<hr>/g, " ")
+      .replace(/<[^>]*>/g, ""),
+  )
+    .replace(/\s+/g, " ")
+    .trim();
+  p.html = body + cards(p, ctx, heading);
 }
 
-function chip(k: string, v: string, page: Page): string {
-  if (k === "tags")
-    return v
-      .split(",")
-      .map((t) => t.trim())
-      .filter(Boolean)
-      .map((t) => `<a class="tag" href="/tags/${slug(t)}/">#${esc(t)}</a>`)
-      .join(" ");
-  if (k === "status") return `<span class="chip status-${esc(v.split(" ")[0])}">${esc(v)}</span>`;
-  return `<span class="chip"><b>${esc(k)}</b> ${inline(v, page)}</span>`;
+async function highlight(p: Page): Promise<void> {
+  const themes = { light: "vitesse-light", dark: "vitesse-dark" };
+  const blocks = await Promise.all(
+    p.code.map(async ({ code, lang }) => {
+      const src = code.replace(/\n$/, "");
+      const html = await codeToHtml(src, { lang: lang || "text", themes, defaultColor: false }).catch(() =>
+        codeToHtml(src, { lang: "text", themes, defaultColor: false }),
+      );
+      return `<div class="code"${lang ? ` data-lang="${esc(lang)}"` : ""}>${html}</div>\n`;
+    }),
+  );
+  p.html = p.html.replace(/\0(\d+)\0/g, (_, i) => blocks[+i]);
 }
 
-function layout(title: string, current: Page | null, body: string, desc = ""): string {
+// ── chrome ──────────────────────────────────────────────────────────────────
+
+const svg = (d: string, fill = false) =>
+  `<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" ${fill ? 'fill="currentColor"' : 'fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"'}>${d}</svg>`;
+const ICON = {
+  menu: svg('<path d="M4 6h16M4 12h16M4 18h16"/>'),
+  search: svg('<circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/>'),
+  theme: svg('<circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 0 0 18z" fill="currentColor"/>'),
+  github: svg(
+    '<path d="M12 .5a11.5 11.5 0 0 0-3.64 22.41c.58.1.79-.25.79-.56v-2c-3.2.7-3.87-1.37-3.87-1.37-.52-1.33-1.28-1.69-1.28-1.69-1.05-.72.08-.7.08-.7 1.16.08 1.77 1.19 1.77 1.19 1.03 1.77 2.7 1.26 3.36.96.1-.75.4-1.26.73-1.55-2.55-.29-5.24-1.28-5.24-5.68 0-1.26.45-2.28 1.19-3.09-.12-.29-.52-1.46.11-3.05 0 0 .97-.31 3.17 1.18a11 11 0 0 1 5.77 0c2.2-1.49 3.17-1.18 3.17-1.18.63 1.59.23 2.76.11 3.05.74.81 1.19 1.83 1.19 3.09 0 4.41-2.69 5.38-5.26 5.67.41.36.78 1.06.78 2.14v3.17c0 .31.21.67.8.56A11.5 11.5 0 0 0 12 .5Z"/>',
+    true,
+  ),
+};
+
+function sidebar(ctx: Ctx, cur?: Page): string {
+  const a = (file: string, label?: string) => {
+    const p = ctx.pages.get(file)!;
+    return `<a href="${p.url}"${p === cur ? ' aria-current="page"' : ""}>${esc(label ?? p.title)}</a>`;
+  };
+  const node = (n: NavPage): string =>
+    `<li>${a(n.file)}${n.children.length ? `<ul>${n.children.map(node).join("")}</ul>` : ""}</li>`;
+  return ctx.sections
+    .map((s) => {
+      const items = s.items
+        .map((i) =>
+          "group" in i
+            ? `<li class="group"><span class="eyebrow">${esc(i.group)}</span><ul>${i.items.map(node).join("")}</ul></li>`
+            : node(i),
+        )
+        .join("");
+      const open = !cur?.section || cur.section === s ? " open" : "";
+      return `<details${open}><summary>${esc(s.title)}</summary><ul>${s.index ? `<li>${a(s.index, "Overview")}</li>` : ""}${items}</ul></details>`;
+    })
+    .join("\n");
+}
+
+function crumbs(p: Page, ctx: Ctx): string {
+  if (!p.path) return "";
+  const segs = p.path.split("/");
+  const parts = ['<a href="/">Home</a>'];
+  for (let i = 1; i < segs.length; i++) {
+    const dir = segs.slice(0, i).join("/");
+    const q = ctx.pages.get(`${dir}/index.md`) ?? ctx.pages.get(`${dir}.md`);
+    parts.push(q ? `<a href="${q.url}">${esc(q.title)}</a>` : `<span>${esc(segs[i - 1])}</span>`);
+  }
+  parts.push(`<span aria-current="page">${esc(p.title)}</span>`);
+  return `<nav class="crumbs" aria-label="Breadcrumb"><ol>${parts.map((x) => `<li>${x}</li>`).join("")}</ol></nav>`;
+}
+
+function layout(ctx: Ctx, head: { title: string; description: string; url?: string }, main: string, cur?: Page, toc = ""): string {
+  const title = head.url === "/" ? "infra wiki" : `${head.title} · infra wiki`;
   return `<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>${esc(title)} · infra wiki</title>
-<meta name="description" content="${esc(desc || `${title} — jonpulsifer/infra wiki`)}">
-<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🛰️</text></svg>">
+<title>${esc(title)}</title>
+<meta name="description" content="${esc(head.description)}">
+<meta property="og:title" content="${esc(title)}">
+<meta property="og:description" content="${esc(head.description)}">
+${head.url ? `<link rel="canonical" href="${SITE}${head.url}">` : ""}
+<link rel="icon" href="${FAVICON}">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400..700&family=Geist+Mono:wght@400..600&display=swap">
 <link rel="stylesheet" href="/style.css">
-<script>document.documentElement.classList.toggle("dark",(localStorage.theme??"dark")==="dark")</script>
+<script>try{const t=localStorage.getItem("theme");if(t)document.documentElement.dataset.theme=t}catch{}</script>
 </head>
 <body>
-<div class="layout">
-<input type="checkbox" id="menu" hidden>
-<aside class="sidebar">
-  <a class="logo" href="/"><span class="logo-mark">🛰️</span> <span class="logo-text">infra<b>wiki</b></span></a>
-  <button class="searchbtn" data-search>Search… <kbd>⌘K</kbd></button>
-  ${nav(current)}
-  <div class="side-foot">
-    <button class="themebtn" data-theme-toggle title="toggle theme">◐</button>
-    <a href="${REPO}" rel="noopener">GitHub</a>
-  </div>
-</aside>
-<main>
-<label for="menu" class="hamburger" aria-label="menu">☰</label>
-${body}
-<footer class="foot">Built from <a href="${REPO}/tree/main/docs" rel="noopener">docs/</a> with <a href="${REPO}/tree/main/apps/wiki" rel="noopener">bun + ~400 lines of TypeScript</a> · deployed on Cloudflare Pages</footer>
+<a class="skip" href="#main">Skip to content</a>
+<header class="top">
+<button class="icon-btn menu" type="button" data-menu aria-controls="side" aria-expanded="false" aria-label="Menu">${ICON.menu}</button>
+<a class="brand" href="/">infra<span>_</span>wiki</a>
+<button class="search-btn" type="button" data-search aria-label="Search">${ICON.search}<span>Search</span><kbd>⌘K</kbd></button>
+<button class="icon-btn" type="button" data-theme-toggle aria-label="Toggle dark mode">${ICON.theme}</button>
+<a class="icon-btn" href="${REPO}" rel="noopener" aria-label="Source on GitHub">${ICON.github}</a>
+</header>
+<div class="shell">
+<nav class="side" id="side" aria-label="Wiki">${sidebar(ctx, cur)}</nav>
+<main class="main" id="main">
+${main}
+<footer class="foot">Built from <a href="${REPO}/tree/main/docs" rel="noopener">docs/</a> by <a href="${REPO}/tree/main/apps/wiki" rel="noopener">apps/wiki</a> · <a href="/graph/">Link graph</a></footer>
 </main>
+${toc}
 </div>
-<div class="search-modal" hidden><div class="search-box"><input type="search" placeholder="Search the wiki…" aria-label="search"><ul class="search-results"></ul></div></div>
+<dialog class="search" aria-label="Search the wiki">
+<input type="search" placeholder="Search the wiki" aria-label="Search the wiki" autocomplete="off" spellcheck="false" aria-controls="search-results">
+<ul id="search-results" role="listbox" aria-label="Results"></ul>
+<p class="search-hint"><kbd>↑</kbd><kbd>↓</kbd> move <kbd>↵</kbd> open <kbd>esc</kbd> close</p>
+</dialog>
 <script src="/client.js" defer></script>
 </body>
-</html>`;
+</html>
+`;
 }
 
-function breadcrumbs(p: Page): string {
-  const parts = p.name.split("/");
-  if (parts.length === 1 && p.kind === "page") return "";
-  let acc = "";
-  const crumbs = parts.slice(0, -1).map((part) => {
-    acc = acc ? `${acc}/${part}` : part;
-    const t = pages.get(acc.toLowerCase());
-    return t ? `<a href="${t.url}">${esc(part)}</a>` : `<span>${esc(part)}</span>`;
-  });
-  if (p.kind === "journal") crumbs.unshift(`<a href="/journals/">Journals</a>`);
-  return crumbs.length ? `<nav class="crumbs">${crumbs.join(`<span class="sep">/</span>`)}</nav>` : "";
+function pageHtml(p: Page, i: number, ctx: Ctx): string {
+  const from = [...new Set(ctx.links.filter((l) => l.to === p && l.from !== p).map((l) => l.from))];
+  const pager = (q: Page | undefined, label: string, cls: string) =>
+    q ? `<a class="${cls}" href="${q.url}"><span class="eyebrow">${label}</span>${esc(q.title)}</a>` : "<span></span>";
+  const specs = p.specs.length
+    ? `<div class="table specs"><table><tbody>${p.specs.map(([k, v]) => `<tr><th scope="row">${esc(k)}</th><td>${esc(v)}</td></tr>`).join("")}</tbody></table></div>`
+    : "";
+  const main = `${crumbs(p, ctx)}
+<article class="doc">
+<header class="doc-head"><h1>${esc(p.title)}</h1><p class="lead">${esc(p.description)}</p>${p.status ? `<p class="doc-meta">${badge(p.status)}</p>` : ""}</header>
+${specs}
+<div class="prose">
+${p.html}</div>
+<p class="edit"><a href="${REPO}/edit/main/${encodeURI(relative(ctx.o.repo, join(ctx.o.docs, p.file)))}" rel="noopener">Edit on GitHub</a></p>
+<nav class="pager" aria-label="Previous and next">${pager(ctx.order[i - 1], "Previous", "prev")}${pager(ctx.order[i + 1], "Next", "next")}</nav>
+${from.length ? `<details class="backlinks"><summary>Linked from <span class="count">${from.length}</span></summary><ul>${from.map((q) => `<li><a href="${q.url}">${esc(q.title)}</a><span>${esc(q.description)}</span></li>`).join("")}</ul></details>` : ""}
+</article>`;
+  const toc = p.headings.filter((h) => h.level <= 3);
+  const rail = toc.length
+    ? `<aside class="toc" aria-label="On this page"><p class="eyebrow">On this page</p><ul>${toc.map((h) => `<li${h.level === 3 ? ' class="sub"' : ""}><a href="#${h.id}">${esc(h.text)}</a></li>`).join("")}</ul></aside>`
+    : '<aside class="toc"></aside>';
+  return layout(ctx, p, main, p, rail);
 }
 
-// ── build ────────────────────────────────────────────────────────────────────
+// ── build ───────────────────────────────────────────────────────────────────
 
-async function loadPages() {
-  for (const kind of ["pages", "journals"] as const) {
-    const dir = join(DOCS, kind);
-    const files = ((await readdir(dir).catch(() => [])) as string[]).filter((f) => f.endsWith(".md"));
-    for (const f of files) {
-      const raw = await Bun.file(join(dir, f)).text();
-      const { props, blocks } = parse(raw);
-      const name =
-        kind === "journals"
-          ? f.replace(/\.md$/, "").replace(/_/g, "-")
-          : f.replace(/\.md$/, "").replace(/___/g, "/");
-      const page: Page = {
-        name,
-        file: `docs/${kind}/${f}`,
-        kind: kind === "journals" ? "journal" : "page",
-        props,
-        blocks,
-        url: pageUrl(name, kind === "journals" ? "journal" : "page"),
-      };
-      pages.set(name.toLowerCase(), page);
-    }
+async function emit(ctx: Ctx): Promise<void> {
+  const { o, order } = ctx;
+  await rm(o.out, { recursive: true, force: true });
+  for (const dir of o.assets)
+    if (existsSync(dir)) await cp(dir, join(o.out, "assets"), { recursive: true, filter: (s) => !s.endsWith(".d2") });
+  await Promise.all(order.map(highlight));
+  const write = (file: string, body: string) => Bun.write(join(o.out, file), body);
+  const edges = [...new Set(ctx.links.filter((l) => l.from !== l.to).map((l) => `${order.indexOf(l.from)} ${order.indexOf(l.to)}`))].map((e) => e.split(" ").map(Number));
+  const doc = (title: string, lead: string, body = "") =>
+    `<article class="doc"><header class="doc-head"><h1>${title}</h1><p class="lead">${lead}</p></header>${body}</article>`;
+  await Promise.all([
+    ...order.map((p, i) => write(join(p.path, "index.html"), pageHtml(p, i, ctx))),
+    write("404.html", layout(ctx, { title: "Not found", description: "No page at this address." }, doc("Not found", 'No page lives at this address. Try <button class="linkish" type="button" data-search>search</button> or go <a href="/">home</a>.'))),
+    write("graph/index.html", layout(ctx, { title: "Link graph", description: "Every wiki page and the links between them.", url: "/graph/" }, doc("Link graph", "Every page and the links between them. Drag to pan, scroll to zoom, select a node to open it.", '<canvas id="graph" aria-label="Link graph of every wiki page"></canvas>'))),
+    write("graph.json", JSON.stringify({ nodes: order.map((p) => ({ t: p.title, u: p.url, d: 1 + edges.filter((e) => e.includes(order.indexOf(p))).length })), links: edges })),
+    write("search.json", JSON.stringify(order.map((p) => ({ t: p.title, d: p.description, u: p.url, s: p.section?.title ?? "", h: p.headings.filter((h) => h.level <= 3).map((h) => [h.text, h.id]), x: p.text })))),
+    write("pages.json", JSON.stringify(order.map((p) => ({ path: p.path, url: p.url, title: p.title, description: p.description, section: p.section?.title ?? null, status: p.status ?? null, markdown: p.markdown })))),
+    cp(join(import.meta.dir, "assets", "style.css"), join(o.out, "style.css")),
+    cp(join(import.meta.dir, "assets", "client.js"), join(o.out, "client.js")),
+  ]);
+}
+
+/** Loads, validates and (unless `check`) writes the site. Problems come back in `errors`; nothing is written when there are any. */
+export async function build(o: Options): Promise<{ pages: Page[]; errors: string[] }> {
+  const errors: string[] = [];
+  const fail = (file: string, msg: string) => errors.push(`${relative(o.repo, join(o.docs, file))}: ${msg}`);
+  const pages = new Map<string, Page>();
+  const byUrl = new Map<string, string>();
+  const files = [...new Bun.Glob("**/*.md").scanSync({ cwd: o.docs })].filter((f) => !f.startsWith("agents/")).sort();
+  for (const file of files) {
+    const p = parsePage(file, await Bun.file(join(o.docs, file)).text(), fail);
+    if (byUrl.has(p.url)) fail(file, `same URL ${p.url} as ${byUrl.get(p.url)}`);
+    byUrl.set(p.url, file);
+    pages.set(file, p);
   }
+  if (!pages.has("index.md")) fail("index.md", "missing; it is the home page");
+  let nav: unknown;
+  try {
+    nav = Bun.YAML.parse(await Bun.file(join(o.docs, "nav.yaml")).text());
+  } catch (e) {
+    fail("nav.yaml", `unreadable: ${(e as Error).message}`);
+  }
+  const ctx: Ctx = { o, pages, sections: readNav(nav, pages, fail), order: [], links: [], fail };
+  ctx.order = navOrder(ctx);
+  for (const p of pages.values()) render(p, ctx);
+  for (const l of ctx.links)
+    if (l.anchor && !l.to.headings.some((h) => h.id === decode(l.anchor)))
+      fail(l.from.file, `${l.href}: no heading #${l.anchor} in ${l.to.file}`);
+  if (!errors.length && !o.check) await emit(ctx);
+  return { pages: ctx.order, errors };
 }
 
-function plainText(blocks: Block[], acc: string[] = []): string[] {
-  for (const b of blocks) {
-    acc.push(
-      b.lines
-        .join(" ")
-        .replace(/```\S*/g, "")
-        .replace(/\[\[([^\]]+)\]\]/g, "$1")
-        .replace(/[*`#|]+/g, " ")
-        .replace(/\s+/g, " ")
-        .trim(),
-    );
-    plainText(b.children, acc);
+if (import.meta.main) {
+  const o = { ...defaults(), check: process.argv.includes("--check") };
+  const { pages, errors } = await build(o);
+  if (errors.length) {
+    console.error(`wiki: ${errors.length} problem${errors.length === 1 ? "" : "s"}\n${errors.map((e) => `  ${e}`).join("\n")}`);
+    process.exit(1);
   }
-  return acc;
+  console.log(o.check ? `wiki: ${pages.length} pages OK` : `wiki: built ${pages.length} pages → ${o.out}`);
 }
-
-async function collectRefs() {
-  // walk every block of every page; record outgoing wikilinks with a snippet
-  for (const page of pages.values()) {
-    if (page.name.toLowerCase() === "contents") continue;
-    const walk = async (bs: Block[]) => {
-      for (const b of bs) {
-        const refs = new Set<string>();
-        const text = b.lines.join("\n");
-        for (const m of text.matchAll(/\[\[([^\]]+)\]\]/g)) refs.add(m[1].toLowerCase());
-        if (refs.size) {
-          const html = await blockSnippet(b, page);
-          for (const r of refs) {
-            if (!backlinks.has(r)) backlinks.set(r, []);
-            backlinks.get(r)!.push({ page, html });
-          }
-        }
-        await walk(b.children);
-      }
-    };
-    await walk(page.blocks);
-  }
-  for (const page of pages.values()) {
-    for (const t of (page.props["tags"] ?? "").split(",").map((s) => s.trim()).filter(Boolean)) {
-      if (!tagged.has(t)) tagged.set(t, []);
-      tagged.get(t)!.push(page);
-    }
-  }
-}
-
-async function emit(path: string, html: string) {
-  const file = join(OUT, path.replace(/^\//, ""), "index.html");
-  await mkdir(dirname(file), { recursive: true });
-  await Bun.write(file, html);
-}
-
-async function renderPage(p: Page): Promise<string> {
-  const refs = new Set<string>();
-  const content = await renderBlocks(p.blocks, p, refs);
-  // `icon::` takes an emoji or the name of a mark in LOGOS — a page about a
-  // thing with its own logo should wear it rather than the nearest emoji.
-  const icon = !p.props["icon"]
-    ? ""
-    : logoNames.has(p.props["icon"])
-      ? `<img class="picon" src="/logos/${p.props["icon"]}.svg" alt="">`
-      : `<span class="picon">${p.props["icon"]}</span>`;
-  const meta = Object.entries(p.props)
-    .filter(([k]) => k !== "icon")
-    .map(([k, v]) => chip(k, v, p))
-    .join(" ");
-  const kids = [...pages.values()]
-    .filter((c) => c.name.startsWith(p.name + "/"))
-    .sort((a, b) => a.name.localeCompare(b.name));
-  const bl = (backlinks.get(p.name.toLowerCase()) ?? []).filter((r) => r.page.name !== p.name);
-  const title = p.kind === "journal" ? p.name : p.name.split("/").pop()!;
-
-  return layout(
-    p.name,
-    p,
-    `${breadcrumbs(p)}
-<article>
-<h1 class="ptitle">${icon}${esc(title)}</h1>
-${meta ? `<div class="props">${meta}</div>` : ""}
-${content}
-${
-  kids.length
-    ? `<section class="panel"><h2>Sub-pages</h2><ul class="reflist">` +
-      kids.map((k) => `<li><a class="wl" href="${k.url}">${esc(k.name)}</a></li>`).join("") +
-      `</ul></section>`
-    : ""
-}
-${
-  bl.length
-    ? `<section class="panel"><h2>Linked references <span class="count">${bl.length}</span></h2>` +
-      bl
-        .map(
-          (r) =>
-            `<div class="ref"><a class="ref-src" href="${r.page.url}">${esc(r.page.name)}</a><div class="ref-body">${r.html}</div></div>`,
-        )
-        .join("") +
-      `</section>`
-    : ""
-}
-<p class="editlink"><a href="${REPO}/edit/main/${encodeURI(p.file)}" rel="noopener">Edit this page on GitHub</a></p>
-</article>`,
-    plainText(p.blocks).join(" ").slice(0, 155),
-  );
-}
-
-async function build() {
-  await rm(OUT, { recursive: true, force: true });
-  await mkdir(OUT, { recursive: true });
-
-  await cp(LOGOS, join(OUT, "logos"), { recursive: true, filter: (s) => !s.endsWith(".ts") });
-  for (const f of await readdir(join(OUT, "logos"))) logoNames.add(f.replace(/\.svg$/, ""));
-
-  for (const dir of ASSETS) {
-    await cp(dir, join(OUT, "assets"), {
-      recursive: true,
-      // The .d2 sources stay in the repo; only what a browser can render ships.
-      filter: (s) => !s.endsWith(".d2"),
-    });
-  }
-
-  await loadPages();
-  await collectRefs();
-
-  // pages
-  for (const p of pages.values()) {
-    if (p.name.toLowerCase() === "contents") continue;
-    await emit(p.url, await renderPage(p));
-  }
-
-  // journals index
-  const journals = [...pages.values()]
-    .filter((p) => p.kind === "journal")
-    .sort((a, b) => b.name.localeCompare(a.name));
-  let jbody = `<article><h1 class="ptitle">Journals</h1>`;
-  for (const j of journals) {
-    jbody += `<section class="journal"><h2><a class="wl" href="${j.url}">${esc(j.name)}</a></h2>${await renderBlocks(j.blocks, j, new Set())}</section>`;
-  }
-  await emit("/journals/", layout("Journals", null, jbody + `</article>`));
-
-  // tag pages
-  for (const [tag, tps] of tagged) {
-    await emit(
-      `/tags/${slug(tag)}/`,
-      layout(
-        `#${tag}`,
-        null,
-        `<article><h1 class="ptitle"><span class="picon">#</span>${esc(tag)}</h1><ul class="reflist">` +
-          tps
-            .sort((a, b) => a.name.localeCompare(b.name))
-            .map((p) => `<li><a class="wl" href="${p.url}">${esc(p.name)}</a></li>`)
-            .join("") +
-          `</ul></article>`,
-      ),
-    );
-  }
-
-  // graph page + data
-  const ids = [...pages.values()].filter((p) => p.name.toLowerCase() !== "contents");
-  const index = new Map(ids.map((p, i) => [p.name.toLowerCase(), i]));
-  const links: [number, number][] = [];
-  for (const [target, refs] of backlinks) {
-    const t = index.get(target);
-    if (t === undefined) continue;
-    for (const r of refs) {
-      const s = index.get(r.page.name.toLowerCase());
-      if (s !== undefined && s !== t) links.push([s, t]);
-    }
-  }
-  const deg = new Array(ids.length).fill(1);
-  for (const [s, t] of links) (deg[s] += 1), (deg[t] += 1);
-  await Bun.write(
-    join(OUT, "graph.json"),
-    JSON.stringify({
-      nodes: ids.map((p, i) => ({ t: p.name, u: p.url, d: deg[i] })),
-      links,
-    }),
-  );
-  await emit(
-    "/graph/",
-    layout(
-      "Graph",
-      { name: "__graph" } as Page,
-      `<article class="grapharticle"><h1 class="ptitle">Graph</h1><p class="dim">Every page, every link. Drag to pan, scroll to zoom, click to visit.</p><canvas id="graph"></canvas></article>`,
-    ),
-  );
-
-  // search index
-  await Bun.write(
-    join(OUT, "search.json"),
-    JSON.stringify(
-      ids.map((p) => ({ t: p.name, u: p.url, x: plainText(p.blocks).join(" ").slice(0, 2000) })),
-    ),
-  );
-
-  // full-text dump for the MCP endpoint (functions/mcp.ts)
-  await Bun.write(
-    join(OUT, "pages.json"),
-    JSON.stringify(
-      ids.map((p) => ({ t: p.name, u: p.url, x: plainText(p.blocks).join("\n") })),
-    ),
-  );
-
-  // 404
-  await Bun.write(
-    join(OUT, "404.html"),
-    layout(
-      "404",
-      null,
-      `<article><h1 class="ptitle">404</h1><p>No such page. It would render as a <span class="wl broken">broken link</span> — maybe it's waiting to be written. <a class="wl" href="/">Go home</a>.</p></article>`,
-    ),
-  );
-
-  // static assets
-  await cp(join(import.meta.dir, "assets", "style.css"), join(OUT, "style.css"));
-  await cp(join(import.meta.dir, "assets", "client.js"), join(OUT, "client.js"));
-
-  console.log(`built ${ids.length} pages, ${links.length} graph edges → ${OUT}`);
-}
-
-await build();
