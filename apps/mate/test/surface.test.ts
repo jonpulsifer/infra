@@ -217,15 +217,29 @@ describe('a thread on a surface that is not Discord', () => {
     expect(sandboxes.prompts).toHaveLength(1);
   });
 
-  test('a reply in a thread mate owns continues it, whoever sent it', async () => {
+  test("the allowlisted user's reply in a thread mate owns continues it", async () => {
     const { threads, sandboxes } = build({ script: streaming('ok') });
     const start = mention('start');
     await threads.onMessage(start);
     await clock.advance(5_000);
-    await threads.onMessage(inThread(start.id, 'and me', STRANGER));
+    await threads.onMessage(inThread(start.id, 'and again'));
     await clock.advance(5_000);
-    expect(sandboxes.liveCount).toBe(1);
-    expect(surface.answerIn(start.id)).toBe('ok ');
+    expect(sandboxes.prompts).toEqual(['start', 'and again']);
+    expect(surface.askers).toEqual([OWNER, OWNER]);
+  });
+
+  test('a reply from anyone else in a thread mate owns is silence', async () => {
+    const { threads, sandboxes } = build({ script: streaming('ok') });
+    const start = mention('start');
+    await threads.onMessage(start);
+    await clock.advance(5_000);
+    const stranger = inThread(start.id, 'and me', STRANGER);
+    await threads.onMessage(stranger);
+    await threads.onMessage({ ...stranger, mentionsMe: true });
+    await clock.advance(5_000);
+    expect(sandboxes.prompts).toEqual(['start']);
+    expect(surface.askers).toEqual([OWNER]);
+    expect(threads.stateOf(key(start.id))).toBe('attached');
   });
 
   test("the allowlisted user's Stop ends the turn; anyone else's is ignored", async () => {

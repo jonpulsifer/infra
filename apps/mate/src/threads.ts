@@ -259,11 +259,13 @@ export class Threads {
     const surface = this.surfaces.get(message.surface);
     if (!surface || message.authorIsBot) return;
     // Belt and braces on the worst failure this has: a message in a thread
-    // mate owns is accepted without an allowlist or a mention, so one post of
-    // its own read back as a human's would answer itself until the turn
-    // budget ran out. Discord marks its own messages as a bot's; Slack's
-    // shapes are not all observed, and this holds whatever one of them omits.
+    // mate owns is accepted without a mention, so one post of its own read
+    // back as a human's would answer itself until the turn budget ran out.
+    // Discord marks its own messages as a bot's; Slack's shapes are not all
+    // observed, and this holds whatever one of them omits.
     if (message.authorId === surface.me) return;
+    // A reply in a thread mate owns needs no mention, so this is its only gate.
+    if (!surface.allowedUserIds.has(message.authorId)) return;
     if (this.hydrating) {
       this.backlog.push(message);
       return;
@@ -289,8 +291,7 @@ export class Threads {
     }
     if (
       !surface.allowedChannelIds.has(message.channelId) ||
-      !message.mentionsMe ||
-      !surface.allowedUserIds.has(message.authorId)
+      !message.mentionsMe
     ) {
       return;
     }

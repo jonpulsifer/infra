@@ -37,12 +37,17 @@ function render(message: HistoryMessage, me: string): string {
   return `${who}: ${message.content.trim()}`;
 }
 
+/** Only what a live session would have heard: mate and the allowlist. */
 function eligible(
   message: HistoryMessage,
+  allowed: ReadonlySet<string>,
   { me, skip }: ReplayOptions,
 ): boolean {
-  if (message.authorIsBot && message.authorId !== me) return false;
-  if (message.authorId === me && isNotice(message.content)) return false;
+  if (message.authorId === me) {
+    if (isNotice(message.content)) return false;
+  } else if (message.authorIsBot || !allowed.has(message.authorId)) {
+    return false;
+  }
   const text = message.content.trim();
   if (!text) return false;
   return !skip.includes(text);
@@ -66,7 +71,7 @@ export async function replayPreamble(
     if (batch.length === 0) break;
     before = batch.at(-1)?.id;
     for (const message of batch) {
-      if (!eligible(message, options)) continue;
+      if (!eligible(message, surface.allowedUserIds, options)) continue;
       const line = render(message, options.me);
       if (characters + line.length + 1 > REPLAY_CHARS) {
         full = true;
