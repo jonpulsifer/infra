@@ -109,7 +109,8 @@ spec:
     # not a pod and not a ClusterIP backend, so neither selector above reaches
     # it; `kube-apiserver` is the identity Cilium gives it whatever address it
     # answers on. What the agent does with it is `sandbox-rbac.yaml`'s to say —
-    # read anything but Secrets, exec into anything, change nothing.
+    # read all but Secrets and write nothing with its own token, but exec into
+    # any pod, and so into that pod's mounted Secrets and token.
     - toEntities:
         - kube-apiserver
       toPorts:

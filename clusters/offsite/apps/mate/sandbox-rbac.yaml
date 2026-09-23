@@ -20,9 +20,9 @@ metadata:
     app.kubernetes.io/part-of: mate
 automountServiceAccountToken: false
 ---
-# Read everything but Secrets, exec into anything, change nothing. RBAC has
-# no deny, so the core group is listed without `secrets` and every other
-# group this cluster serves is named; a group missing here is unreadable.
+# Reads everything but Secrets and changes nothing. pods/exec still reaches
+# any pod's mounted Secrets and token: defence in depth, not a boundary. No
+# deny in RBAC, so core omits `secrets` and an unnamed group is unreadable.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:

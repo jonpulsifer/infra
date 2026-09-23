@@ -249,10 +249,12 @@ spec:
             # rollback and a sandbox goes back to having no cluster access.
             #
             # That account reads everything this cluster holds but Secrets,
-            # and can exec into any pod. That is deliberate — an
-            # agent that cannot open a shell in a broken pod cannot do the job
-            # this is for — and the boundary that remains is time: the token
-            # lasts one turn.
+            # and can exec into any pod, which reaches that pod's mounted
+            # Secrets and token, and through a privileged pod's token every
+            # Secret. Exec is deliberate — an agent that cannot open a shell
+            # in a broken pod cannot do the job this is for — so leaving
+            # Secrets out of the read grant is defence in depth, and the
+            # boundary that remains is time: the token lasts one turn.
             - name: MATE_SANDBOX_KUBE_SA
               value: mate-sandbox-debug
             # The SSH key a sandbox logs into hosts with, mounted from the
