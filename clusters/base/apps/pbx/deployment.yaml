@@ -19,6 +19,13 @@ spec:
         app.kubernetes.io/name: pbx
     spec:
       hostUsers: false
+      # The Services here are named pbx-sip and pbx-metrics, so Kubernetes'
+      # legacy service links inject PBX_SIP_* and PBX_METRICS_* into every
+      # container — the same prefix render.sh collects to build its envsubst
+      # list. Nothing reads them, and no config names one today, but a variable
+      # this deployment does not control landing in that list is one rename
+      # away from substituting something unexpected.
+      enableServiceLinks: false
       securityContext:
         runAsNonRoot: true
         runAsUser: 1000
@@ -57,29 +64,6 @@ spec:
           resources:
             requests: {cpu: 10m, memory: 32Mi}
             limits: {memory: 64Mi}
-        # Asterisk refuses to start on a config error, and a Deployment with a
-        # bad dialplan would otherwise CrashLoop with the reason buried in a
-        # restarting container's logs. This fails the init instead, which shows
-        # up as a stuck rollout with the parse error in one place.
-        - name: verify-config
-          image: ghcr.io/jonpulsifer/asterisk:22.8.2
-          args: ["-C", "/etc/asterisk/asterisk.conf", "-nq", "-x", "core show version"]
-          volumeMounts:
-            - name: config
-              mountPath: /etc/asterisk
-            - {name: run, mountPath: /var/run/asterisk}
-            - {name: log, mountPath: /var/log/asterisk}
-            - {name: spool, mountPath: /var/spool/asterisk}
-            - {name: cache, mountPath: /var/cache/asterisk}
-            - {name: db, mountPath: /var/lib/asterisk-db}
-          securityContext:
-            readOnlyRootFilesystem: true
-            allowPrivilegeEscalation: false
-            capabilities:
-              drop: ["ALL"]
-          resources:
-            requests: {cpu: 50m, memory: 64Mi}
-            limits: {memory: 256Mi}
       containers:
         - name: asterisk
           image: ghcr.io/jonpulsifer/asterisk:22.8.2
