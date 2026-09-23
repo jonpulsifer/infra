@@ -1,6 +1,6 @@
 /**
- * One streamed reply: what the answer says and when it is repainted, with an
- * italic status line naming the current tool call until the turn ends. How
+ * One streamed reply: what the answer says and when it is repainted, with a
+ * status line naming the current tool call until the turn ends. How
  * any of that reaches a human — and whatever else the surface draws around a
  * turn in flight — is the `Canvas`'s; this holds only the parts that are the
  * same wherever mate answers.
@@ -18,10 +18,13 @@ import type { Canvas, Outcome, ToolCall } from './surface.ts';
 
 export const STATUS_MAX = 120;
 export const EDIT_CADENCE_MS = 1_000;
-export const NO_REPLY = 'the harness sent no reply';
+export const NO_REPLY = '(no reply)';
 const WORKING_INTERVAL_MS = 8_000;
-export const PLACEHOLDER = '…';
-/** Marks a turn the human stopped; a turn stopped before any text is only this. */
+/**
+ * Marks a turn the human stopped, on a surface that writes it into the answer;
+ * a turn stopped before any text is only this. The outcome reaches every
+ * canvas, and Discord says it in the footer instead.
+ */
 export const STOPPED = '*stopped*';
 /**
  * How long one run of text may keep arriving before it stops being a step and
@@ -41,14 +44,10 @@ export const STOPPED = '*stopped*';
  */
 export const RUN_GRACE_MS = 3_000;
 
-/** One line of at most `STATUS_MAX` characters, with no bold or italics left. */
-export function oneLine(line: string): string {
+/** One line of at most `max` characters, with no bold or italics left. */
+export function oneLine(line: string, max = STATUS_MAX): string {
   const flat = line.replace(/\s+/g, ' ').trim().replaceAll('*', '');
-  return flat.length > STATUS_MAX ? `${flat.slice(0, STATUS_MAX - 1)}…` : flat;
-}
-
-export function statusLine(line: string): string {
-  return `*${oneLine(line)}*`;
+  return flat.length > max ? `${flat.slice(0, max - 1)}…` : flat;
 }
 
 /** Splits `text` so the head fits `budget`, preferring the last line break. */
@@ -171,7 +170,21 @@ export class Reply implements PromptSink {
     if (!paint) return;
     this.chain = this.chain
       .then(() => paint.call(this.canvas, call))
+      .then(() => this.repaint())
       .catch((error) => this.cardFailed('tool', error));
+  }
+
+  /**
+   * A card landed, so the live frame is due again on the cadence: a canvas
+   * that lists calls on the frame has nothing else to redraw it, and one that
+   * streams only the answer finds nothing new to send. It is asked for once
+   * the card is in rather than when the call arrives, because a flush queued
+   * between the two would clear the frame's dirt before the card it was for.
+   */
+  private repaint(): void {
+    if (this.outcome) return;
+    this.dirty = true;
+    this.schedule();
   }
 
   /** A card that cannot be painted is one warning; the answer is the turn. */
@@ -201,8 +214,6 @@ export class Reply implements PromptSink {
     this.status = null;
     this.runLine = null;
     this.dirty = true;
-    if (outcome === 'stopped')
-      this.answer += `${this.answer ? '\n\n' : ''}${STOPPED}`;
     this.chain = this.chain.then(() => this.flush(outcome));
     await this.chain;
   }

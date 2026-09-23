@@ -1,9 +1,15 @@
+import {
+  type APIMessageTopLevelComponent,
+  ComponentType,
+} from 'discord-api-types/v10';
 import type { Clock, Handle } from '../src/clock.ts';
 import {
   type Discord,
   DiscordCanvas,
   discordSurface,
   type OutMessage,
+  STOP_PREFIX,
+  spoken,
 } from '../src/discord.ts';
 import type { SessionStartLimit } from '../src/guard.ts';
 import type { Fields, Log } from '../src/log.ts';
@@ -113,9 +119,49 @@ export async function settle(rounds = 8): Promise<void> {
 export interface Sent {
   channelId: string;
   id: string;
+  /** What the message says as conversation: the answer, or a notice's words. */
   content: string;
+  /** Every subtext line on it — status, tool list, footer — mark included. */
+  subtext: string[];
   hasStop: boolean;
   edits: number;
+  /** The body as last sent, for what only its wire shape shows. */
+  body: OutMessage;
+}
+
+function components(body: OutMessage): APIMessageTopLevelComponent[] {
+  return 'components' in body ? body.components : [];
+}
+
+function flat(
+  list: readonly APIMessageTopLevelComponent[],
+): APIMessageTopLevelComponent[] {
+  return list.flatMap((c) =>
+    c.type === ComponentType.Container ? flat(c.components) : [c],
+  );
+}
+
+/** A body as the fake records it: what it says, what is small, whether it can Stop. */
+function read(
+  body: OutMessage,
+): Pick<Sent, 'content' | 'subtext' | 'hasStop' | 'body'> {
+  const all = flat(components(body));
+  const lines = all.flatMap((c) =>
+    c.type === ComponentType.TextDisplay ? c.content.split('\n') : [],
+  );
+  if ('content' in body) lines.push(body.content);
+  return {
+    body,
+    content: spoken(body),
+    subtext: lines.filter((line) => line.startsWith('-# ')),
+    hasStop: all.some(
+      (c) =>
+        c.type === ComponentType.ActionRow &&
+        c.components.some(
+          (b) => 'custom_id' in b && b.custom_id.startsWith(STOP_PREFIX),
+        ),
+    ),
+  };
 }
 
 interface Posted extends HistoryMessage {
@@ -196,6 +242,8 @@ export class FakeDiscord implements Discord {
   failCreateThread: Error | null = null;
   failEdits: Error | null = null;
   failDeletes: Error | null = null;
+  failReactions: Error | null = null;
+  private readonly reactions = new Set<string>();
   private serial = 0;
 
   constructor(private readonly me = 'bot') {}
@@ -225,20 +273,15 @@ export class FakeDiscord implements Discord {
 
   async createMessage(channelId: string, body: OutMessage): Promise<string> {
     const id = `msg-${++this.serial}`;
-    this.messages.push({
-      channelId,
-      id,
-      content: body.content,
-      hasStop: (body.components?.length ?? 0) > 0,
-      edits: 0,
-    });
+    const seen = read(body);
+    this.messages.push({ channelId, id, ...seen, edits: 0 });
     this.posted.push({
       channelId,
       id,
       authorId: this.me,
       authorName: 'mate',
       authorIsBot: true,
-      content: body.content,
+      content: seen.content,
     });
     return id;
   }
@@ -270,11 +313,10 @@ export class FakeDiscord implements Discord {
       (m) => m.id === messageId && m.channelId === channelId,
     );
     if (!message) throw new Error(`no message ${messageId}`);
-    message.content = body.content;
-    message.hasStop = (body.components?.length ?? 0) > 0;
+    Object.assign(message, read(body));
     message.edits += 1;
     const entry = this.posted.find((m) => m.id === messageId);
-    if (entry) entry.content = body.content;
+    if (entry) entry.content = message.content;
   }
 
   async deleteMessage(channelId: string, messageId: string): Promise<void> {
@@ -304,6 +346,23 @@ export class FakeDiscord implements Discord {
     this.acks.push(interactionId);
   }
 
+  async react(channelId: string, messageId: string, emoji: string) {
+    if (this.failReactions) throw this.failReactions;
+    this.reactions.add(`${channelId}/${messageId}/${emoji}`);
+  }
+
+  async unreact(channelId: string, messageId: string, emoji: string) {
+    this.reactions.delete(`${channelId}/${messageId}/${emoji}`);
+  }
+
+  /** mate's own reactions on one message, in the order they were added. */
+  reactionsOn(channelId: string, messageId: string): string[] {
+    const prefix = `${channelId}/${messageId}/`;
+    return [...this.reactions]
+      .filter((r) => r.startsWith(prefix))
+      .map((r) => r.slice(prefix.length));
+  }
+
   inThread(threadId: string): Sent[] {
     return this.messages.filter((m) => m.channelId === threadId);
   }
@@ -313,16 +372,17 @@ export class FakeDiscord implements Discord {
   }
 
   /** The canvas a turn in this thread paints on, as the real surface builds it. */
-  canvas(threadId: string): Canvas {
-    return new DiscordCanvas(this, threadId, `discord:${threadId}`);
+  canvas(threadId: string, clock: Clock = new FakeClock()): Canvas {
+    return new DiscordCanvas(this, threadId, `discord:${threadId}`, clock);
   }
 
   surface(options: {
     me: string;
     allowedUserIds: ReadonlySet<string>;
     allowedChannelIds: ReadonlySet<string>;
+    clock?: Clock;
   }): Surface {
-    return discordSurface(this, options);
+    return discordSurface(this, { clock: new FakeClock(), ...options });
   }
 }
 
