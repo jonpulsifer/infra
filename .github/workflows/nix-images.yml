@@ -65,27 +65,45 @@ jobs:
           echo "name=$(nix eval --raw .#asterisk-image.imageName)" >>"$GITHUB_OUTPUT"
           echo "tag=$(nix eval --raw .#asterisk-image.imageTag)" >>"$GITHUB_OUTPUT"
 
-      # This image is pinned by version tag rather than by digest, because the
-      # selective-delivery machinery lives in the other workflow. A tag pin is
-      # only honest while something checks it, and the way it goes wrong is
-      # specific: bumping flake.lock moves Asterisk to a new version, this
-      # workflow publishes that new tag, and the Deployment goes on pulling the
-      # old one — no error anywhere, just a PBX that never upgrades. So fail
-      # here instead, on the pull request that moved the lock.
-      - name: Deployment must pin the version that was just built
+      # This image is pinned by tag rather than by digest, because the
+      # selective-delivery machinery lives in the other workflow. That is only
+      # honest while the tag is content-addressed and something checks it.
+      #
+      # The first version of this guard compared the Asterisk *version*, which
+      # does not move when only the contents change: adding darkhttpd
+      # republished 22.8.2, the node kept its cached copy under
+      # IfNotPresent, and the sidecar failed with `exec: "/bin/darkhttpd": no
+      # such file or directory` against an image that contained it. The tag now
+      # hashes the closure, so any change produces a new one and this step
+      # fails the pull request until every manifest names it.
+      - name: Every manifest must pin the tag that was just built
         env:
           IMAGE: ${{ steps.build.outputs.name }}
           TAG: ${{ steps.build.outputs.tag }}
         run: |
           set -euo pipefail
-          manifest=clusters/base/apps/pbx/deployment.yaml
-          if ! grep -qF "image: ${IMAGE}:${TAG}" "$manifest"; then
-            echo "::error file=${manifest}::built ${IMAGE}:${TAG}, but this manifest pins:"
-            grep -n 'image:' "$manifest" >&2
-            echo "::error::update the pin in ${manifest} to ${TAG}" >&2
+
+          # Every manifest that names this image, found rather than listed: the
+          # sidecar lives in a cluster overlay, and the first version of this
+          # guard checked only the base Deployment — so a stale pin in the
+          # overlay would have passed.
+          mapfile -t manifests < <(grep -rl "image: ${IMAGE}:" clusters/ || true)
+          if [ ${#manifests[@]} -eq 0 ]; then
+            echo "::error::built ${IMAGE}:${TAG} but no manifest references it" >&2
             exit 1
           fi
-          echo "pin matches ${IMAGE}:${TAG}"
+
+          status=0
+          for manifest in "${manifests[@]}"; do
+            if grep -q "image: ${IMAGE}:" "$manifest" \
+               && ! grep -q "image: ${IMAGE}:${TAG}" "$manifest"; then
+              echo "::error file=${manifest}::pins a different tag than the ${TAG} just built:" >&2
+              grep -n "image: ${IMAGE}:" "$manifest" >&2
+              status=1
+            fi
+          done
+          [ "$status" -eq 0 ] || { echo "::error::update those pins to ${TAG}" >&2; exit 1; }
+          printf 'pinned at %s in: %s\n' "${TAG}" "${manifests[*]}"
 
       - name: Login to GitHub Container Registry
         # Pull requests build to validate and never publish, exactly as

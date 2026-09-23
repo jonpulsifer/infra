@@ -37,7 +37,7 @@ spec:
         # Renders the templates into the config directory the main container
         # reads. Same image, because the tool doing the rendering ships in it.
         - name: render-config
-          image: ghcr.io/jonpulsifer/asterisk:22.8.2
+          image: ghcr.io/jonpulsifer/asterisk:22.8.2-6866cdd5
           command: ["/bin/bash", "/templates/base/render.sh"]
           envFrom:
             - secretRef:
@@ -66,7 +66,7 @@ spec:
             limits: {memory: 64Mi}
       containers:
         - name: asterisk
-          image: ghcr.io/jonpulsifer/asterisk:22.8.2
+          image: ghcr.io/jonpulsifer/asterisk:22.8.2-6866cdd5
           ports:
             - {name: sip-udp, containerPort: 5060, protocol: UDP}
             - {name: sip-tcp, containerPort: 5060, protocol: TCP}
