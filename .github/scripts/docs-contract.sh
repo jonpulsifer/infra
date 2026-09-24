@@ -1,22 +1,6 @@
 #!/usr/bin/env bash
-# Docs contract.
-#
-# The documentation in this repo rotted once because it restated what the tree
-# already said and then drifted from it. These checks catch the mechanical half
-# of that. The other half — "don't enumerate what the tree enumerates" — is a
-# review rule, stated in AGENTS.md, that no script can enforce.
-#
-#   1. the renderer's own validation passes: frontmatter, nav, relative links,
-#      anchors, images (apps/wiki/build.ts --check; needs `bun install`)
-#   2. every backticked repo path named in the docs actually exists
-#   3. no past-tense archaeology ("formerly", "used to", "migrated from", …)
-#   4. every wiki URL and every docs/…md path named outside the site resolves
-#      to something the renderer serves, anchor included, and nothing uses the
-#      retired Logseq [[Page]] syntax. The wiki serves no redirects, so a
-#      renamed page breaks every reference to it. Markdown, skills and alert
-#      rules fail the check; any other file only warns, because code comments
-#      are not rendered anywhere.
-#
+# Checks the docs: the wiki renderer's validation, backticked repo paths, past
+# tense in docs/, and references into the wiki from anywhere in the repo.
 # Usage: .github/scripts/docs-contract.sh [repo-root]
 set -uo pipefail
 cd "${1:-$(git rev-parse --show-toplevel)}" || exit 2
@@ -26,18 +10,10 @@ note() { printf '%s\n' "$*"; }
 manifest="$(mktemp)"
 trap 'rm -f "$manifest"' EXIT
 
-# ── 1. the renderer validates ────────────────────────────────────────────────
-# It also lists every URL it serves, which section 4 resolves against.
+# --manifest lists every URL the site serves, for the reference check below.
 note "==> renderer"
 if bun run --cwd apps/wiki check --manifest="$manifest"; then note "    ok"; else status=1; fi
 
-# ── 2. referenced repo paths exist ───────────────────────────────────────────
-# Only consider a backticked token a repo path when its first segment is a real
-# top-level entry. That keeps CIDRs (10.0.0.0/8), image refs
-# (ghcr.io/jonpulsifer/hub), label keys (node-role.kubernetes.io/worker), action
-# refs (opentofu/setup-opentofu) and git refs (refs/heads/main) out of scope.
-# A token with a space is a path followed by arguments when its first word
-# exists on its own.
 note "==> repo paths"
 missing=0
 # shellcheck disable=SC2016  # the backticks below are regex literals, not a subshell
@@ -46,9 +22,10 @@ while IFS= read -r path; do
   [[ "$path" == *"<"* || "$path" == *"*"* || "$path" == *'$'* ]] && continue # placeholders
   [[ "$path" == .* ]] && continue                                            # relative fragments
   [[ -e "${path%/}" ]] && continue
+  # A token with a space is a path plus arguments when its first word exists.
   first="${path%% *}"
   [[ "$path" == *" "* && -e "${first%/}" ]] && continue
-  # first segment must name something at the repo root
+  # Skips CIDRs, image refs, label keys and git refs, which name no root entry.
   [[ -e "${path%%/*}" ]] || continue
   note "    MISSING ${path}"
   missing=1
@@ -57,7 +34,6 @@ done < <(grep -rhoE '`[A-Za-z0-9_.-]+/[A-Za-z0-9_./ -]*`' \
   | tr -d '`' | sort -u)
 if ((missing)); then status=1; else note "    ok"; fi
 
-# ── 3. no archaeology ────────────────────────────────────────────────────────
 # docs/agents/ and the style guide state the rule, so they quote the words it forbids.
 note "==> archaeology"
 mapfile -t prose < <(find docs -name '*.md' -not -path 'docs/agents/*' -not -path 'docs/reference/style-guide.md' | sort)
@@ -69,10 +45,8 @@ else
   note "    ok"
 fi
 
-# ── 4. references into the wiki resolve ──────────────────────────────────────
-# The renderer's manifest is every URL the site serves: pages, their heading
-# anchors, assets and generated files. /<fn> is a Pages Function in
-# apps/wiki/functions/.
+# The manifest holds every URL the site serves: pages, heading anchors, assets
+# and generated files. /<fn> is a Pages Function in apps/wiki/functions/.
 note "==> references into the wiki"
 
 declare -A served=()
@@ -121,6 +95,7 @@ gone_re='(^|[^A-Za-z0-9_./-])(\.\.?/)*docs/(pages|journals|logseq)([^A-Za-z0-9_-
 logseq_re='\[\[(Home|Architecture|Fleet|Runbooks)(/[^]]*)?\]\]|\b(Architecture|Fleet|Runbooks)/[A-Z][A-Za-z]*( [A-Z][A-Za-z]*)*'
 strip_lead() { sed -E 's#^[^.d]##; s#[^A-Za-z0-9_-]$##'; }
 
+# Markdown, skills and alert rules fail on a broken reference; other files warn.
 strict=('*.md' '.agents/**' ':(glob)clusters/**/monitoring/*.yaml'
   ':(exclude,glob)**/fixtures/**' ':(exclude,glob)**/testdata/**')
 loose=('.' ':(exclude)*.md' ':(exclude).agents/**'
@@ -129,9 +104,8 @@ loose=('.' ':(exclude)*.md' ':(exclude).agents/**'
   ':(exclude)*_test.*' ':(exclude)*.test.*'
   ':(exclude).github/scripts/docs-contract.sh')
 
-# Prints "file:line<TAB>ref" for every reference that does not resolve. A line
-# whose docs/pages/… path was already reported is not reported again as a
-# retired directory.
+# Prints "file:line<TAB>ref" per unresolved reference. A line already reported
+# for its docs/ path is not reported again as a retired directory.
 unresolved() {
   local -A seen=()
   local file line ref key

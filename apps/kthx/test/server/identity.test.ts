@@ -1,11 +1,7 @@
 /**
- * Ownership by tailnet login: which door believes a header, which peer may
- * send one, and what a login opens once it is believed.
- *
- * The shape under test is the one measured behind `ingressClassName:
- * tailscale`: the proxy strips whatever the client sent, sets
- * `tailscale-user-login`, preserves `Host`, and puts the caller's own tailnet
- * address at the head of `x-forwarded-for`.
+ * Ownership by tailnet login: which door believes a header, which peer may send
+ * one, and what it opens. The Tailscale proxy sets `tailscale-user-login`,
+ * keeps `Host`, and appends the caller's tailnet address to `x-forwarded-for`.
  */
 import { describe, expect, test } from 'bun:test';
 import { tarGz } from '../../cli/tar.ts';
@@ -15,7 +11,7 @@ import { ask, withServer, ZONE } from '../harness/server.ts';
 
 const CONTROL = 'ops.kthx-private.test';
 const IDENTITY = 'kthx.tailnet.test';
-/** The proxy pod, which is the only peer allowed to speak for a person. */
+/** The proxy pod, the only peer allowed to speak for a person. */
 const PROXY = '10.42.0.7';
 
 const kthx = withServer({
@@ -31,13 +27,7 @@ const SITE = tarGz([
   { path: 'index.html', bytes: new TextEncoder().encode('<h1>hi</h1>') },
 ]);
 
-/**
- * A socket peer, the way Bun hands one to the handler.
- *
- * Every test here needs one: a request with no peer at all is a handler called
- * directly, which the resolver reads as a test harness rather than a network,
- * and which would therefore believe every header it was given.
- */
+/** Every test needs a peer: without one the handler believes every header. */
 function peer(address: string): Bun.Server<unknown> {
   return {
     requestIP: () => ({ address, port: 1, family: 'IPv4' }),
@@ -90,8 +80,7 @@ describe('the identity header', () => {
     );
     expect(believed).toEqual({ status: 200, body: { login: DAD } });
 
-    // The public apex and the agent control host both answer to callers who
-    // can write any header they please.
+    // Callers of the public apex and the control host can write any header.
     for (const host of [ZONE, CONTROL]) {
       const response = await kthx().fetch(
         ask('/api/whoami', { host, headers: as(DAD) }),
@@ -125,18 +114,15 @@ describe('a site', () => {
       (await json(await ontailnet(`/api/sites/${dads.name}`, DAD))).body,
     ).toMatchObject({ name: dads.name, owner: DAD });
 
-    // The bearer keeps working, on the host where reach is the credential and
-    // no login is ever asserted: an agent has no other way in.
+    // The bearer still works on the control host, where agents have no login.
     const byBearer = await kthx().fetch(
       ask(`/api/sites/${dads.name}`, { host: CONTROL, token: dads.token }),
       peer(PROXY),
     );
     expect(byBearer.status).toBe(200);
 
-    // Somebody else on the same tailnet opens her own sites and not his. A
-    // login that is not this site's is not a credential *offered* for it, so
-    // the answer stays the 401 an anonymous read gets — which is what keeps
-    // "401 means claimed, 404 means free" true on this host too.
+    // Another login is no credential offered for his site, so the answer stays
+    // the 401 an anonymous read gets.
     const moms = await claimAs(MOM, 'moms');
     expect((await ontailnet(`/api/sites/${moms.name}`, MOM)).status).toBe(200);
     expect((await ontailnet(`/api/sites/${dads.name}`, MOM)).status).toBe(401);
@@ -145,8 +131,7 @@ describe('a site', () => {
       token: moms.token,
     });
     expect(wrong.status).toBe(403);
-    // Reach alone opens nothing, which is the whole difference between this
-    // host and the control host.
+    // Reach alone opens nothing here, unlike on the control host.
     expect((await ontailnet(`/api/sites/${dads.name}`, null)).status).toBe(401);
   });
 
@@ -156,9 +141,7 @@ describe('a site', () => {
       update sites set token_hash = null where name = ${dads.name}
     `;
 
-    // The hash is gone, so the bearer that was minted with it opens nothing —
-    // and the comparison is never reached, which is what the live column being
-    // nullable had made a throw.
+    // Without the hash the bearer opens nothing, and the compare is skipped.
     const byBearer = await kthx().fetch(
       ask(`/api/sites/${dads.name}`, { host: CONTROL, token: dads.token }),
       peer(PROXY),
@@ -204,8 +187,7 @@ describe('your websites', () => {
     expect(names).toContain(dads.name);
     expect(names).not.toContain(moms.name);
 
-    // The public list still holds both, with nobody's address on it but the
-    // reader's own.
+    // The public list holds both and names only the reader as an owner.
     const all = await json(await ontailnet('/api/sites', DAD));
     const seen = all.body.items as { name: string; owner: string | null }[];
     expect(seen.find((item) => item.name === dads.name)?.owner).toBe(DAD);
@@ -245,8 +227,7 @@ describe('GET /api/names/:name', () => {
       yours: null,
     });
 
-    // A deleted name is taken forever: its row is what answers 410 on the site
-    // host, so there is no `deleted_at` filter here.
+    // A deleted row answers 410 forever, so the name stays taken.
     const removed = await ontailnet(`/api/sites/${taken.name}`, DAD, {
       method: 'DELETE',
     });
@@ -258,10 +239,6 @@ describe('GET /api/names/:name', () => {
   });
 
   test('tells a person their own address apart from somebody else’s', async () => {
-    // Owner-blind, this said TAKEN about the caller's own name, and both
-    // readers printed it as somebody else's — which sent him off to rename an
-    // address he had already paid a database and a role for, and made the
-    // stranded one unreachable, since typing it back in met the same sentence.
     const mine = await claimAs(DAD, 'mine-empty');
     const asDad = async (name: string) =>
       json(await ontailnet(`/api/names/${name}`, DAD));
@@ -272,8 +249,7 @@ describe('GET /api/names/:name', () => {
       yours: 'empty',
     });
 
-    // With a page on it the answer changes again: it is his, and it is a
-    // website rather than a claim waiting to be finished.
+    // With a page on it, it is his website, not a claim to finish.
     await ontailnet(`/api/sites/${mine.name}/releases`, DAD, {
       method: 'POST',
       headers: {
@@ -284,8 +260,7 @@ describe('GET /api/names/:name', () => {
     });
     expect((await asDad(mine.name)).body).toMatchObject({ yours: 'live' });
 
-    // Somebody else's is somebody else's, and so is the same name asked for by
-    // nobody at all on the public apex.
+    // Hers is not his, and an anonymous caller on the public apex owns nothing.
     const hers = await claimAs(MOM, 'hers-empty');
     expect((await asDad(hers.name)).body).toMatchObject({
       available: false,
@@ -296,8 +271,7 @@ describe('GET /api/names/:name', () => {
       (await json(await kthx().fetch(ask(`/api/names/${mine.name}`)))).body,
     ).toMatchObject({ why: 'TAKEN', yours: null });
 
-    // A deleted name is nobody's, its old owner least of all: the row is what
-    // answers 410 forever, so offering it back to him is the same dead end.
+    // A deleted name is nobody's, its old owner's included.
     const gone = await claimAs(DAD, 'mine-deleted');
     expect(
       (await ontailnet(`/api/sites/${gone.name}`, DAD, { method: 'DELETE' }))
@@ -346,14 +320,13 @@ describe('the caller', () => {
     expect(resolve(IDENTITY, { ...as(DAD), ...forwarded }, PROXY).bucket).toBe(
       DAD,
     );
-    // No login — a tagged node — still gets its own bucket rather than sharing
-    // one with everybody who reaches the host.
+    // A tagged node has no login and still gets a bucket of its own.
     expect(resolve(IDENTITY, forwarded, PROXY).bucket).toBe('100.104.133.114');
     // Off the identity door `x-forwarded-for` is a header the client wrote.
     expect(resolve(ZONE, forwarded, PROXY).bucket).toBe(PROXY);
     expect(resolve(IDENTITY, forwarded, '10.99.0.3').bucket).toBe('10.99.0.3');
-    // A proxy appends, so a client that wrote its own entry is at the head of
-    // the list and the hop this server trusts is at the tail.
+    // A proxy appends, so the trusted hop is the tail and a client-written
+    // entry the head.
     expect(
       resolve(
         IDENTITY,
@@ -401,9 +374,8 @@ describe('the config', () => {
   });
 
   test('refuses an identity host with no hop to believe', () => {
-    // Booting would render a reachable name that answers every caller on it as
-    // anonymous and lets them claim sites tied to no account — worse than not
-    // having the host at all, and silent.
+    // It would silently treat every caller as anonymous and let them claim
+    // sites tied to no account.
     expect(() => readConfig({ ...env, KTHX_IDENTITY_HOST: IDENTITY })).toThrow(
       'KTHX_TAILNET_PROXIES',
     );
@@ -425,7 +397,7 @@ describe('the config', () => {
     });
     expect(both.trustedProxies).toEqual(['10.42.0.0/16']);
     expect(both.tailnetProxies).toEqual(['10.42.0.7']);
-    // And with no identity host at all, trusting nobody is the default.
+    // With no identity host, the default trusts nobody.
     expect(readConfig(env).tailnetProxies).toEqual([]);
   });
 });

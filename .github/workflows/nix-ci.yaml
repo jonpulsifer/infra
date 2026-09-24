@@ -49,11 +49,8 @@ jobs:
   nixos:
     runs-on: ubuntu-latest
     needs: changed-paths
-    # Push-to-main only: a PR proves the whole fleet still evaluates (`check`),
-    # and the merge proves it builds — with the artifacts pushed to cachix
-    # instead of discarded, which is all the PR builds ever did. An
-    # unbuildable merge surfaces here within minutes, and hosts upgrading
-    # from main fail safe by keeping their running generation.
+    # Push to main only: a pull request's `check` proves the fleet evaluates,
+    # and the merge builds it and pushes to cachix.
     if: github.event_name == 'push' && needs.changed-paths.outputs.nix_changed == 'true'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -72,11 +69,6 @@ jobs:
     name: Build native Spore package and host
     runs-on: ubuntu-24.04-arm
     needs: changed-paths
-    # Push-to-main only: a PR proves the whole fleet still evaluates (`check`),
-    # and the merge proves it builds — with the artifacts pushed to cachix
-    # instead of discarded, which is all the PR builds ever did. An
-    # unbuildable merge surfaces here within minutes, and hosts upgrading
-    # from main fail safe by keeping their running generation.
     if: github.event_name == 'push' && needs.changed-paths.outputs.nix_changed == 'true'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -95,17 +87,11 @@ jobs:
           .#nixosConfigurations.spore.config.system.build.toplevel
   images:
     needs: changed-paths
-    # Push-to-main only: a PR proves the whole fleet still evaluates (`check`),
-    # and the merge proves it builds — with the artifacts pushed to cachix
-    # instead of discarded, which is all the PR builds ever did. An
-    # unbuildable merge surfaces here within minutes, and hosts upgrading
-    # from main fail safe by keeping their running generation.
     if: github.event_name == 'push' && needs.changed-paths.outputs.nix_changed == 'true'
     runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
-      # Build the complete image set rather than maintaining a second copy of
-      # the Nix import graph to guess which outputs a change affects.
+      # Every image: choosing by change would need a copy of the Nix import graph.
       matrix:
         include:
           - image: container

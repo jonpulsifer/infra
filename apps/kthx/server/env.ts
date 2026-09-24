@@ -1,15 +1,7 @@
 /**
- * Everything the process is told, read once and refused early.
- *
- * A missing key is a boot failure rather than a 500 on the first request that
- * needs it: this is a public anonymous-write zone, and the two HMAC keys are
- * what keep a visitor cookie and a site's database password unforgeable. A
- * process that started without them looks healthy right up until it mints
- * something signed with `undefined`.
- *
- * Two keys rather than one because they rotate for different reasons: turning
- * over cookie signatures must not change every site's derived database
- * password, which is what a single key would make it do.
+ * Process configuration, read once at boot. A missing or short HMAC key fails
+ * boot. The cookie key and the Postgres password key are separate, so rotating
+ * one leaves the other's output unchanged.
  */
 
 export class ConfigError extends Error {
@@ -20,116 +12,70 @@ export interface Config {
   /** The zone sites live under. `Host === zone` is the apex. */
   readonly zone: string;
   /**
-   * The private host claiming and site control answer on, or `null` when the
-   * apex answers them itself. Outside the zone by construction: a label
-   * inside it would shadow the site of that name.
+   * The private host for claims and site control, or `null` for the apex. It
+   * must be outside the zone, where a label would shadow the site of that name.
    */
   readonly controlHost: string | null;
   /**
-   * The tailnet host an identity header is believed on, or `null`.
-   *
-   * Outside the zone and never the control host, for the reason above and
-   * because the two doors believe different things: the control host is
-   * reach-is-identity and an agent's bearer, this one is a person the tailnet
-   * vouched for. `null` reads the header nowhere, which is the kill switch.
+   * The tailnet host where the identity header is read; `null` reads it
+   * nowhere. It must be outside the zone and differ from the control host.
    */
   readonly identityHost: string | null;
-  /**
-   * The header {@link identityHost} is read from — the tailnet proxy's, which
-   * strips whatever the client sent before setting its own.
-   */
+  /** The tailnet proxy replaces any client-sent copy of this header. */
   readonly identityHeader: string;
-  /** The depot bucket, or `null` for the local-disk fallback. */
+  /** `null` uses the local-disk depot. */
   readonly bucket: string | null;
   /** Where release directories are unpacked. */
   readonly sitesDir: string;
   readonly databaseUrl: string;
-  /** Signs the visitor cookie (used from ticket 03 on). */
+  /** Signs the visitor cookie. */
   readonly meKey: string;
-  /** Verification only, so a rotation re-mints lazily instead of logging out. */
+  /**
+   * Verifies only, so after a rotation each cookie is re-signed on its next
+   * call and keeps its id.
+   */
   readonly mePreviousKey: string | null;
   /** Derives per-site Postgres passwords. */
   readonly pgKey: string;
   /**
-   * Who opens `DELETE /api/sites`, the nuke: tailnet logins, by name.
-   *
-   * A login and not a key, because there is no longer anything a key buys.
-   * The identity host already knows who is calling and a proxy this server
-   * trusts is what says so, and an address cannot be mistyped into a demo, be
-   * guessed at wire speed, be left in a `sessionStorage` on a shared laptop,
-   * or need a rate limiter of its own to stay unguessable.
-   *
-   * Empty is not a disabled feature: the route answers 404 like a path this
-   * server does not have, and the page's control stays hidden. It is also the
-   * default, so a deployment that says nothing has no nuke.
+   * Tailnet logins that may `DELETE /api/sites`. Empty, the default, answers
+   * 404 as though the route did not exist.
    */
   readonly adminLogins: readonly string[];
-  /**
-   * What the template database and the group role are called: `template_kthx`
-   * and `kthx_site`.
-   *
-   * ponytail: a knob only because both are cluster-wide names, so two test
-   * runs against one Postgres would otherwise fight over the template — a
-   * clone fails while any session is on it. Production never sets it.
-   */
+  /** Names the template database `template_<prefix>` and role `<prefix>_site`. */
+  // ponytail: a field only so test runs sharing one Postgres do not collide.
   readonly pgPrefix: string;
-  /** The site database ceiling, measured by `pg_database_size`. */
+  /** Measured by `pg_database_size`. */
   readonly maxDbBytes: number;
-  /** Collections one site may hold. */
+  /** Per site. */
   readonly maxCollections: number;
-  /** The OpenAI-compatible upstream `/api/ai` forwards to. */
+  /** An OpenAI-compatible base URL. */
   readonly aiUrl: string;
-  /**
-   * The upstream's key, or `null` when this deployment has none.
-   *
-   * Null is not a disabled route: `/api/ai` answers 502 `AI_UPSTREAM`, which is
-   * what an upstream with no key would have answered anyway, one round trip
-   * later and on the operator's bill.
-   */
+  /** `null` makes `/api/ai` answer 502 `AI_UPSTREAM` without calling out. */
   readonly aiKey: string | null;
-  /** What a request that names no model gets. */
+  /** For a request that names no model. */
   readonly aiModel: string;
-  /** The models a site may name. Empty is every model the upstream has. */
+  /** The models a site may name. Empty allows every upstream model. */
   readonly aiModels: readonly string[];
-  /** The ceiling `max_tokens` is clamped to, named or not, on `/api/ai`. */
+  /** `/api/ai` clamps `max_tokens` to this, and applies it when none is sent. */
   readonly aiMaxTokens: number;
   /**
-   * The same ceiling for the authenticated build route.
-   *
-   * Two numbers because `/api/ai` is anonymous on every site in the zone and
-   * the clamp is also the floor a silent answer is billed, while a route that
-   * generates a whole document needs thousands of completion tokens. One
-   * global is what makes raising the second raise the first. Unset is the
-   * public ceiling, so a deployment that says nothing raises nothing.
+   * The build route writes full pages, so it gets its own ceiling; `/api/ai`
+   * is anonymous. Unset uses {@link aiMaxTokens}.
    */
   readonly aiBuildMaxTokens: number;
-  /**
-   * What writes a whole page on the build route, and what is tried when it
-   * never answers a first byte.
-   *
-   * Not {@link aiModel}: that one is picked for short answers under a 4096
-   * ceiling, and the two questions have different right answers — the model
-   * measured best at writing a complete document took 26 s to do it and 12 s
-   * to start, which is a terrible way to answer one sentence. The fallback is
-   * `null` where a deployment names none, and a build then fails rather than
-   * silently spending a second call on the same model that just went quiet.
-   */
+  /** The build route's model; {@link aiModel} is chosen for short answers. */
   readonly aiBuildModel: string;
+  /** Tried when the build model writes no content. `null` means no fallback. */
   readonly aiBuildFallbackModel: string | null;
   /**
-   * The peers whose `cf-connecting-ip` is believed: the Gateway hop in front of
-   * this pod. Empty means no peer is, so every address-keyed bucket falls back
-   * to the socket address — which behind a proxy is one key for the whole zone.
-   * The chart sets it; a deployment that does not is rate limiting itself.
+   * Peers whose `cf-connecting-ip` is trusted. Empty keys every bucket by the
+   * socket address, which behind a proxy puts every caller on one key.
    */
   readonly trustedProxies: readonly string[];
   /**
-   * The peers whose identity header and `x-forwarded-for` are believed: the
-   * tailnet proxy, and nothing else.
-   *
-   * Separate from {@link trustedProxies} and empty by default because that one
-   * is the whole pod CIDR in the chart — reusing it would let any pod in the
-   * cluster assert it is anybody.
+   * Peers whose identity header and `x-forwarded-for` are trusted. Separate
+   * from {@link trustedProxies}, which can span the pod CIDR.
    */
   readonly tailnetProxies: readonly string[];
   readonly port: number;
@@ -137,7 +83,7 @@ export interface Config {
 
 type Env = Record<string, string | undefined>;
 
-/** ≥ 32 bytes, per the contract — a shorter HMAC key is a weaker one. */
+/** The minimum HMAC key length. */
 const KEY_BYTES = 32;
 
 function required(env: Env, name: string): string {
@@ -146,19 +92,13 @@ function required(env: Env, name: string): string {
   return value;
 }
 
-/**
- * A positive number, or the default.
- *
- * `Number('four')` is `NaN`, and a `NaN` ceiling is no ceiling: it serialises
- * as `null` on the wire and turns the token billing into a statement Postgres
- * refuses. A typo in a chart value must not quietly remove a spend control.
- */
+// A `NaN` ceiling serialises as `null` and breaks token billing, so a typo
+// falls back to the default.
 function positive(raw: string | undefined, fallback: number): number {
   const asked = Number(raw?.trim() ?? '');
   return Number.isFinite(asked) && asked > 0 ? asked : fallback;
 }
 
-/** A comma-separated list of peers, blanks dropped. */
 function peers(raw: string | undefined): readonly string[] {
   return (raw ?? '')
     .split(',')
@@ -192,17 +132,13 @@ export function readConfig(env: Env = Bun.env): Config {
     if (identityHost === zone || identityHost.endsWith(`.${zone}`)) {
       throw new ConfigError(`KTHX_IDENTITY_HOST must be outside ${zone}`);
     }
-    // One host cannot be two doors: the control host believes reach and the
-    // identity host believes a header, and a host that was both would hand
-    // every agent on the lab network whatever login it cared to assert.
+    // The control host trusts reach and the identity host trusts a header, so
+    // one host serving both would let any client assert any login.
     if (identityHost === controlHost) {
       throw new ConfigError('KTHX_IDENTITY_HOST must not be KTHX_CONTROL_HOST');
     }
-    // An identity host with nobody to believe is the worst of both: it renders
-    // a reachable name, answers every caller on it as anonymous, and lets them
-    // claim sites that are tied to no account at all. Refusing here is the same
-    // class of failure as the two guards above — a deployment that is wrong
-    // rather than a request that is.
+    // With no trusted proxy, every caller there is anonymous and could claim
+    // sites tied to no login.
     if (tailnetProxies.length === 0) {
       throw new ConfigError(
         'KTHX_IDENTITY_HOST needs KTHX_TAILNET_PROXIES: the hop whose identity header is believed',
@@ -214,11 +150,8 @@ export function readConfig(env: Env = Bun.env): Config {
     .split(',')
     .map((entry) => entry.trim())
     .filter((entry) => entry !== '');
-  // A default outside its own allow-list is refused here rather than per
-  // request: `/api/ai` writes the default into a body that names no model and
-  // only then checks it, so one typo in a chart value answers every keyless
-  // call 400 INVALID_MODEL, as though the page had asked for something it may
-  // not have.
+  // `/api/ai` fills in the default before checking the allow-list, so a bad
+  // default would fail every call that names no model.
   if (aiModels.length > 0 && !aiModels.includes(aiModel)) {
     throw new ConfigError(
       `KTHX_AI_MODEL ${aiModel} is not one of KTHX_AI_MODELS`,
@@ -226,11 +159,7 @@ export function readConfig(env: Env = Bun.env): Config {
   }
   const aiBuildModel = env.KTHX_AI_BUILD_MODEL?.trim() || aiModel;
   const aiBuildFallbackModel = env.KTHX_AI_BUILD_FALLBACK_MODEL?.trim() || null;
-  // The same refusal, for the same reason: a build model outside the allow-list
-  // is not a request that fails, it is the whole builder failing for everyone on
-  // the tailnet — and the value that did it is a chart line nobody reads until
-  // then. `prepare` would answer INVALID_MODEL as though the page had asked for
-  // something it may not have.
+  // Likewise, a build model outside the allow-list would fail every build.
   for (const named of [aiBuildModel, aiBuildFallbackModel]) {
     if (named === null || aiModels.length === 0 || aiModels.includes(named)) {
       continue;

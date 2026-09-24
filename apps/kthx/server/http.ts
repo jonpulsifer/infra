@@ -1,17 +1,9 @@
 /**
- * The shape every refusal takes, and the three facts every handler needs from
- * a request: which host, which id, and whether the caller is same-origin.
- *
- * One fixed sentence per code, from the contract's error table. Fixed because
- * the cause is not the caller's to read: an upload that fails because the depot
- * answered 403 and one that fails because the disk is full are both
- * `STORAGE_FAILURE` on the wire, and the difference goes to the log under the
- * `x-request-id` the caller was handed. An `x-filename` a caller sent is never
- * echoed anywhere.
+ * Refusals and the request facts every handler reads. Each code has one fixed
+ * message; the cause goes only to the log, under the caller's `x-request-id`.
  */
 import { timingSafeEqual } from 'node:crypto';
 
-/** The codes this process answers with. Later tickets add their own rows. */
 export type Code =
   | 'INVALID_NAME'
   | 'RESERVED'
@@ -107,33 +99,19 @@ const ERRORS: Record<Code, readonly [number, string]> = {
   SITE_FULL: [507, 'this site is full; delete something to add something'],
 };
 
-/**
- * Two strings compared without leaking how far they match.
- *
- * Both a cookie's HMAC and a bearer's hash are checked this way, so the
- * comparison lives here rather than once per caller.
- */
 export function timingSafeEquals(a: string, b: string): boolean {
   const left = Buffer.from(a);
   const right = Buffer.from(b);
   return left.length === right.length && timingSafeEqual(left, right);
 }
 
-/** Never absent: a caller with no cause to read still gets one to quote. */
 export function requestId(): string {
   return crypto.randomUUID();
 }
 
 const BASE_HEADERS = { 'x-content-type-options': 'nosniff' } as const;
 
-/**
- * The body {@link refuse} would have sent, for a route whose status is already
- * 200 by the time it fails.
- *
- * A streamed answer cannot go back and change its status, so its refusals
- * travel as a frame — and they say the same sentence per code as every other
- * refusal here rather than a second wording of the same fault.
- */
+/** The {@link refuse} body, for a stream whose status is already 200. */
 export function problem(code: Code): { code: Code; message: string } {
   return { code, message: ERRORS[code][1] };
 }
@@ -188,17 +166,8 @@ export function empty(id: string): Response {
 }
 
 /**
- * The whole body, `null` once it goes past `maxBytes`, or a rejection once the
- * deadline passes.
- *
- * `fetch` has no deadline of its own, so a caller that opens a `PUT` and then
- * sends a byte a minute holds a slot — an unpack slot for a release, one of the
- * eight file writes — for as long as the kernel keeps the socket.
- *
- * Read a chunk at a time and cancelled the moment it goes over, because
- * `content-length` is absent on a chunked body and the server-wide ceiling is
- * 32 MiB: materialising first would let every caller pin more than its own
- * route allows, times however many the route runs at once.
+ * `null` past `maxBytes`; rejects after `ms`, so a slow sender cannot hold a
+ * slot. Read in chunks, because a chunked body has no `content-length`.
  */
 export async function bodyWithin(
   request: Request,
@@ -236,16 +205,13 @@ export async function bodyWithin(
   return Buffer.concat(parts);
 }
 
-/** What the caller is told nothing about, written where an operator can find it. */
+/** Logs the cause a refusal hides from the caller. */
 export function logCause(id: string, what: string, cause: unknown): void {
   console.error(
     `[${id}] ${what}: ${cause instanceof Error ? (cause.stack ?? cause.message) : String(cause)}`,
   );
 }
 
-// --- the host ---------------------------------------------------------------
-
-/** Lowercased, trailing dot and port stripped — the only name a site has. */
 export function hostOf(request: Request): string {
   return (request.headers.get('host') ?? '')
     .trim()
@@ -255,12 +221,8 @@ export function hostOf(request: Request): string {
 }
 
 /**
- * The kthx name this host is: `''` for the apex, the label for a site, `null`
- * for a host outside the zone.
- *
- * A deeper label (`a.b.<zone>`) comes back as `a.b`, which no row can match and
- * which therefore answers the 404 page rather than leaking that the zone has a
- * wildcard behind it.
+ * `''` for the apex, the label for a site, `null` outside the zone. A deeper
+ * host `a.b.<zone>` returns `a.b`, which matches no site and gets the 404 page.
  */
 export function siteOf(host: string, zone: string): string | null {
   if (host === zone) return '';
@@ -268,54 +230,38 @@ export function siteOf(host: string, zone: string): string | null {
   return host.slice(0, -zone.length - 1);
 }
 
-/**
- * `https://<label>.<zone>` — or plain http on the port a local run listens on,
- * because nothing terminates TLS in front of `kthx.localhost` and a URL a
- * developer cannot open is not a URL.
- */
+/** Plain http and the port for a `.localhost` zone, which has no TLS. */
 export function siteUrl(zone: string, label?: string, port?: string): string {
   const host = label === undefined ? zone : `${label}.${zone}`;
   if (!zone.endsWith('.localhost')) return `https://${host}`;
   return `http://${host}${port ? `:${port}` : ''}`;
 }
 
-/** The port the request named, for the URL a local run hands back. */
 export function portOf(request: Request): string {
   return /:(\d+)$/.exec(request.headers.get('host')?.trim() ?? '')?.[1] ?? '';
 }
 
 /**
- * The same-site guard.
- *
- * `kthx.dev` is not on the Public Suffix List, so a browser treats every
- * `*.kthx.dev` as one site and `SameSite=Lax` protects nothing between
- * siblings. A non-browser client sends no `Origin` at all and is let through;
- * a browser must be on this exact host.
+ * `kthx.dev` is not on the Public Suffix List, so `SameSite=Lax` does not
+ * separate sibling sites. A request with no `Origin` passes; a browser must be
+ * on this exact host.
  */
 export function sameOrigin(request: Request, host: string, port = ''): boolean {
   const origin = request.headers.get('origin');
   if (origin === null) return true;
-  // With the port, because an `Origin` carries one whenever the browser is on
-  // a non-default port and a local run is the whole reason that happens.
+  // An `Origin` carries the port when it is non-default, as in a local run.
   const authority = port === '' ? host : `${host}:${port}`;
   return origin === `https://${authority}` || origin === `http://${authority}`;
 }
 
-/** JSON routes take JSON, parameters ignored. */
 export function isJson(request: Request): boolean {
   const type = request.headers.get('content-type') ?? '';
   return type.split(';')[0]?.trim().toLowerCase() === 'application/json';
 }
 
 /**
- * The address a bucket is keyed by, IPv6 truncated to its /64.
- *
- * `cf-connecting-ip` is a header, so it is worth exactly as much as the peer
- * that sent it: the Gateway is reachable on the LAN and the tailnet as well as
- * through cloudflared, and a client that arrives that way would otherwise
- * rotate one header and defeat every address-keyed bucket. It is honoured only
- * from a peer in `KTHX_TRUSTED_PROXIES`, or when there is no socket peer at all
- * (a handler called directly, which is a test and not a network).
+ * The Gateway is reachable around cloudflared, so `cf-connecting-ip` is read
+ * only from a peer in `KTHX_TRUSTED_PROXIES`, or with no peer (a test).
  */
 export function addressOf(
   request: Request,
@@ -333,7 +279,7 @@ export function addressOf(
 
 let warned = false;
 
-/** Once per process: a line an operator can find, not one per request. */
+/** Once per process, so the log is not flooded. */
 function warnIgnored(peer: string): void {
   if (warned) return;
   warned = true;
@@ -342,14 +288,10 @@ function warnIgnored(peer: string): void {
   );
 }
 
-/**
- * The /64 an address belongs to, which is what one residential customer gets
- * and therefore what a bucket has to be keyed by. IPv4 keys by itself.
- */
+/** IPv6 is keyed by its /64, the block one residential customer gets. */
 export function prefix(raw: string): string {
   const address = (raw.split('%')[0] ?? raw).trim().toLowerCase();
-  // No colon is IPv4; a dot inside a colon form is a v4-mapped address, whose
-  // /64 is meaningless — key it whole.
+  // A v4-mapped address has a dot and no meaningful /64, so it is kept whole.
   if (!address.includes(':') || address.includes('.')) return address;
   const [head = '', tail] = address.split('::');
   const left = head === '' ? [] : head.split(':');
@@ -367,13 +309,8 @@ export function prefix(raw: string): string {
     .join(':');
 }
 
-/**
- * Whether this socket peer may speak for someone else.
- *
- * ponytail: IPv4 CIDRs and exact addresses. The Gateway and cloudflared are
- * IPv4 in this cluster, so a prefix is only ever needed for v4; an IPv6 entry
- * has to be written out in full. Widen the day the pod network is dual-stack.
- */
+// ponytail: CIDRs are IPv4 only and an IPv6 entry must match exactly; widen
+// when the pod network goes dual-stack.
 export function trustedPeer(peer: string, trusted: readonly string[]): boolean {
   const address = peer.startsWith('::ffff:') ? peer.slice(7) : peer;
   return trusted.some((entry) => {

@@ -1,8 +1,3 @@
-/**
- * The Discord adapter: which gateway messages reach the state machine, the
- * key a thread is known by once they do, and how a turn is drawn and read
- * back.
- */
 import { describe, expect, test } from 'bun:test';
 import {
   type APIMessageTopLevelComponent,

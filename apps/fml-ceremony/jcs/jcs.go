@@ -17,12 +17,8 @@ import (
 	"unicode/utf16"
 )
 
-// Canonical rewrites a JSON document into its canonical form.
-//
-// It rejects duplicate object keys, which encoding/json silently resolves
-// last-wins. A transcript is verified by strangers against bytes someone else
-// produced: two readers must not be able to disagree about what a document
-// says, and last-wins means a document that says two things at once.
+// Canonical rewrites a JSON document into its canonical form. It rejects the
+// duplicate keys encoding/json resolves last-wins, so no two readers disagree.
 func Canonical(raw []byte) ([]byte, error) {
 	dec := json.NewDecoder(bytes.NewReader(raw))
 	dec.UseNumber()
@@ -30,8 +26,7 @@ func Canonical(raw []byte) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	// Anything after the top-level value would be a second document sharing a
-	// signature with the first.
+	// Trailing data would be a second document sharing the first one's signature.
 	if _, err := dec.Token(); err != io.EOF {
 		return nil, fmt.Errorf("jcs: trailing data after the top-level value")
 	}
@@ -42,9 +37,8 @@ func Canonical(raw []byte) ([]byte, error) {
 	return out.Bytes(), nil
 }
 
-// Marshal is Canonical over encoding/json's output, which is how the ceremony
-// serialises a transcript struct. json.Marshal already refuses NaN and
-// Infinity, which RFC 8785 also forbids.
+// Marshal canonicalises encoding/json's output. json.Marshal already refuses
+// NaN and Infinity, as RFC 8785 requires.
 func Marshal(v any) ([]byte, error) {
 	raw, err := json.Marshal(v)
 	if err != nil {
@@ -53,10 +47,8 @@ func Marshal(v any) ([]byte, error) {
 	return Canonical(raw)
 }
 
-// member keeps a key alongside its UTF-16 code units. RFC 8785 sorts property
-// names as arrays of UTF-16 code units, not as UTF-8 bytes: the two orders
-// disagree for anything above the basic multilingual plane, which is why the
-// specification's own "weird" vector puts an emoji next to a Hebrew letter.
+// RFC 8785 sorts keys by UTF-16 code units, an order that differs from UTF-8
+// bytes above the basic multilingual plane.
 type member struct {
 	key   string
 	units []uint16
@@ -117,7 +109,6 @@ func parseObject(dec *json.Decoder) (object, error) {
 }
 
 func parseArray(dec *json.Decoder) ([]any, error) {
-	// Non-nil so an empty array marshals as [] rather than null.
 	arr := []any{}
 	for {
 		tok, err := dec.Token()
@@ -192,10 +183,8 @@ func write(w *bytes.Buffer, v any) error {
 	return nil
 }
 
-// escapes is ECMAScript's JSON.stringify escaping, which RFC 8785 adopts: the
-// six two-character escapes, \u00xx for the remaining C0 controls, and literal
-// UTF-8 for everything else. Notably U+007F and U+0080 are not escaped, and a
-// solidus is never escaped.
+// RFC 8785 adopts JSON.stringify's escaping: these, \u00xx for other C0
+// controls, and literal UTF-8 for the rest, U+007F and "/" included.
 var escapes = map[byte]string{
 	'"':  `\"`,
 	'\\': `\\`,

@@ -1,8 +1,7 @@
 /**
- * The homelab wiki over the Model Context Protocol: a Cloudflare Pages
- * Function deployed with the static site. Stateless streamable HTTP, one
- * JSON-RPC request in and one JSON response out, public and read-only.
- * Content comes from the pages.json that build.ts writes, in nav order.
+ * The wiki over MCP, as a Cloudflare Pages Function: stateless streamable HTTP,
+ * public and read-only, one JSON-RPC request in and one JSON response out.
+ * Pages come from the pages.json that build.ts writes, in nav order.
  */
 
 export interface Doc {
@@ -130,7 +129,7 @@ const json = (body: unknown) =>
     headers: { "content-type": "application/json", ...CORS },
   });
 
-/** Pages Functions supply the static assets binding; typed here to avoid a dependency on @cloudflare/workers-types. */
+/** The Pages Functions context, typed here to avoid depending on @cloudflare/workers-types. */
 type Ctx = { request: Request; env: { ASSETS: { fetch: (req: Request | URL | string) => Promise<Response> } } };
 
 export const onRequest = async (ctx: Ctx) => {

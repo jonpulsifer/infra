@@ -1,21 +1,15 @@
 /**
- * `sdk.js` against the real server.
+ * `sdk.js` evaluated as a classic script against the real server, which checks
+ * the paths, verbs and headers that are only strings in the SDK.
  *
- * The SDK is a classic script with no build step, so the check is the same: it
- * is evaluated as one, given a `window`, a `location` and a `fetch` that lands
- * on this site's host. What that catches is the half of the SDK that is only
- * strings — a path, a verb, a header, the key a body is read out of — which is
- * exactly the half a server-side test cannot see.
- *
- * ponytail: the socket is stubbed. Its server half is `ws.test.ts` and its
- * client half is reconnection logic that wants a browser; the day that breaks,
- * a headless page is the way to find out.
+ * ponytail: the socket is stubbed. Its server half is `ws.test.ts`; its
+ * reconnection logic needs a headless browser to test.
  */
 import { afterAll, describe, expect, test } from 'bun:test';
 import { SDK_PATH } from '@repo/kthx/assets';
 import { ask, withServer, ZONE } from '../harness/server.ts';
 
-/** Enough of an upstream for `ai.chat` to have something to read a string out of. */
+/** Enough of an upstream for `ai.chat` to read a string out of. */
 const upstream = Bun.serve({
   port: 0,
   async fetch(request) {
@@ -25,8 +19,7 @@ const upstream = Bun.serve({
         usage: { total_tokens: 9 },
       });
     }
-    // Split across the frame boundary on purpose: the reader has to hold half
-    // a frame back rather than parse it.
+    // Split across a frame boundary: the reader must hold half a frame back.
     return new Response(
       new ReadableStream<Uint8Array>({
         start(controller) {
@@ -115,7 +108,7 @@ interface Sdk {
   };
 }
 
-/** `sdk.js` run as a classic script over the `fetch` it is given. */
+/** `sdk.js` run as a classic script over the given `fetch`. */
 async function evaluated(
   location: { origin: string; protocol: string; host: string },
   call: (path: string, init?: RequestInit) => Promise<Response>,
@@ -148,7 +141,7 @@ async function evaluated(
   return sdk;
 }
 
-/** The SDK, evaluated the way a `<script>` tag would, pointed at one site. */
+/** The SDK as a `<script>` tag loads it, pointed at one site. */
 async function loaded(label: string): Promise<Sdk> {
   const name = kthx().name(label);
   const claim = await kthx().fetch(
@@ -169,7 +162,7 @@ async function loaded(label: string): Promise<Sdk> {
     protocol: 'https:',
     host,
   };
-  // A browser's cookie jar, which is what makes two calls the same visitor.
+  // A cookie jar, so two calls are the same visitor.
   const call = async (path: string, init: RequestInit = {}) => {
     const headers = new Headers(init.headers);
     if (cookies.length > 0) headers.set('cookie', cookies.join('; '));
@@ -194,7 +187,7 @@ describe('sdk.js', () => {
     const made = (await notes.create({ title: 'one', n: 1 })) as Doc;
     expect(made.id).toMatch(/^[0-9a-f-]{36}$/);
     expect(await notes.get(made.id)).toEqual(made);
-    // Quick's name for the same call, which the SDK's own docblock promises.
+    // `findById` is Quick's name for `get`.
     expect(await notes.findById(made.id)).toEqual(made);
     expect(await notes.get('missing')).toBeNull();
     expect(await notes.findById('missing')).toBeNull();
@@ -205,7 +198,6 @@ describe('sdk.js', () => {
     const replaced = await notes.update(made.id, { n: 3 }, { overwrite: true });
     expect(replaced.title).toBeUndefined();
 
-    // The CAS loop the SDK exists to make easy.
     await expect(
       notes.update(made.id, { n: 4 }, { ifMatch: merged.etag }),
     ).rejects.toMatchObject({ status: 412, code: 'PRECONDITION_FAILED' });
@@ -261,8 +253,8 @@ describe('sdk.js', () => {
             }),
           ),
       );
-      // The contract has `ready` reject rather than hang; what must not happen
-      // is every socket-backed call becoming an unhandled rejection of its own.
+      // `ready` rejects instead of hanging, and socket-backed calls must not
+      // each raise an unhandled rejection.
       await expect(sdk.ready).rejects.toThrow(/503/);
       expect(sdk.db.collection('notes').subscribe({})).toBeInstanceOf(Function);
       await Bun.sleep(20);
@@ -276,12 +268,11 @@ describe('sdk.js', () => {
 
   test('ai.chat reaches the passthrough, and baseURL is absolute', async () => {
     const sdk = await loaded('ai');
-    // Absolute because the OpenAI SDK throws on a relative one at request time.
+    // Absolute: the OpenAI SDK throws on a relative one at request time.
     expect(sdk.ai.baseURL).toBe(
       `https://${kthx().name('ai')}.${ZONE}/api/ai/v1`,
     );
-    // A string prompt becomes one user message, and what comes back is the
-    // content rather than the envelope around it.
+    // A string prompt becomes one user message; the answer is the content.
     expect(await sdk.ai.chat('hello')).toBe('an answer');
 
     const deltas: string[] = [];
@@ -304,7 +295,7 @@ describe('sdk.js', () => {
     });
     expect(sdk.files.url('notes/a.txt')).toBe(text.url);
 
-    // An object is JSON, and a Blob carries its own type.
+    // An object is sent as JSON; a Blob carries its own type.
     const json = await sdk.files.upload('data.json', { a: 1 });
     expect(json.type).toBe('application/json');
     const blob = await sdk.files.upload(
@@ -312,7 +303,7 @@ describe('sdk.js', () => {
       new Blob([new Uint8Array([1, 2])], { type: 'image/png' }),
     );
     expect(blob).toMatchObject({ type: 'image/png', size: 2 });
-    // A File brings its own name, so the path is the whole of what is left out.
+    // A File brings its own name.
     const named = await sdk.files.upload(
       new File(['x,y'], 'table.csv', { type: 'text/csv' }),
     );

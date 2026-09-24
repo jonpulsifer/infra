@@ -7,22 +7,13 @@ import (
 	"strings"
 )
 
-// formatNumber renders a float64 the way ECMAScript's Number::toString does,
-// which is what RFC 8785 section 3.2.2.3 requires. Go's own %v is close but not
-// the same: it switches to exponent notation at different magnitudes and spells
-// the exponent differently, so a transcript formatted by strconv alone would
-// canonicalise differently from every JavaScript verifier.
-//
-// The algorithm is ECMA-262's, transcribed. Given the shortest round-tripping
-// decimal digits s of k digits and an exponent n such that the value is
-// s x 10^(n-k), the notation is chosen by where n sits relative to 0, k and 21.
+// formatNumber renders a float64 as ECMAScript's Number::toString, as RFC 8785
+// requires. strconv picks exponent notation at other magnitudes and spells it differently.
 func formatNumber(v float64) (string, error) {
 	if math.IsNaN(v) || math.IsInf(v, 0) {
 		return "", fmt.Errorf("jcs: %v is not representable in JSON", v)
 	}
-	// Negative zero prints as "0": ECMAScript's ToString maps -0 to "0", and
-	// a canonical form that distinguished them would sign bytes that compare
-	// equal as numbers.
+	// ECMAScript's ToString maps -0 to "0".
 	if v == 0 {
 		return "0", nil
 	}
@@ -31,8 +22,7 @@ func formatNumber(v float64) (string, error) {
 		sign = "-"
 		v = -v
 	}
-	// 'e' with precision -1 is the shortest representation that round-trips,
-	// which is exactly ECMAScript's "k is as small as possible" condition.
+	// Precision -1 gives the shortest round-tripping digits: ECMAScript's smallest k.
 	shortest := strconv.FormatFloat(v, 'e', -1, 64)
 	mantissa, expPart, ok := strings.Cut(shortest, "e")
 	if !ok {
@@ -46,6 +36,8 @@ func formatNumber(v float64) (string, error) {
 	k := len(digits)
 	n := exp + 1
 
+	// ECMA-262 picks the notation from n against 0, k and 21, where the value is
+	// digits x 10^(n-k).
 	switch {
 	case k <= n && n <= 21:
 		return sign + digits + strings.Repeat("0", n-k), nil

@@ -20,8 +20,6 @@ func writeFile(t *testing.T, path, content string) {
 	}
 }
 
-// writeTestHull writes a minimal hull directory (hull.json, kernel, initrd)
-// under dir/name and returns its path.
 func writeTestHull(t *testing.T, dir, name string, devices []hullDevice) string {
 	t.Helper()
 	hullDir := filepath.Join(dir, name)
@@ -143,8 +141,6 @@ func TestLoadHullMissingFile(t *testing.T) {
 	}
 }
 
-// The guest's half of the contract, read straight off a directory: a status
-// file it wrote, or the absence of one because it never finished.
 func TestReadBuildResult(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -197,8 +193,7 @@ func TestReadBuildResult(t *testing.T) {
 			if got.Detail != tt.wantDetail {
 				t.Errorf("detail = %q, want %q", got.Detail, tt.wantDetail)
 			}
-			// The log always comes back, whatever the status: it is the only
-			// evidence of a build that never wrote one.
+			// The log comes back whatever the status, even with no status file.
 			if got.Log != "build output\n" {
 				t.Errorf("log = %q, want the guest's build.log", got.Log)
 			}

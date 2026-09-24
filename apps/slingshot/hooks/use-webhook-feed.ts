@@ -15,16 +15,8 @@ import {
   setCachedWebhooks,
 } from '@/lib/webhook-cache';
 
-/**
- * Everything about a project's live webhook feed: the local-first cache, the
- * freshness poll, and which webhook is selected.
- *
- * One module owns the list. Previously the state was split between
- * `webhook-section` (hydrate plus a refreshKey handshake) and `webhook-viewer`
- * (six effects), with both halves re-reading the cache the other half wrote -
- * so there was no single place to fix a bug in it, and no interface a test
- * could cross.
- */
+// A project's live webhook feed: the local-first cache, the freshness poll and
+// the selection.
 
 const POLL_INTERVAL_MS = 2000;
 
@@ -33,9 +25,8 @@ export interface WebhookFeed {
   /** The webhook being inspected, or null when the feed is empty. */
   selected: Webhook | null;
   select: (webhook: Webhook) => void;
-  /** Delete every webhook for this project, server and cache. */
+  /** Deletes the project's webhooks on the server and in the cache. */
   clear: () => Promise<void>;
-  /** Force a poll now - after sending a webhook, say. */
   refresh: () => void;
   /** True until the first list (cached or fetched) is in hand. */
   isLoading: boolean;
@@ -54,9 +45,8 @@ export function useWebhookFeed(projectSlug: string): WebhookFeed {
   const [isLoading, setIsLoading] = useState(true);
   const [isStale, setIsStale] = useState(false);
 
-  // The head of the list at the time of the last render, so a newly arrived
-  // webhook can take over the selection only when the user was already
-  // watching the newest one.
+  // The newest id at the last update. A new arrival takes the selection only
+  // when the user was on the newest one.
   const headIdRef = useRef<string | null>(null);
 
   const applyList = useCallback((next: Webhook[]) => {
@@ -68,18 +58,14 @@ export function useWebhookFeed(projectSlug: string): WebhookFeed {
       if (current === null) {
         return next[0].id;
       }
-      // Selection followed the head, so keep following it.
       if (current === headIdRef.current && next[0].id !== current) {
         return next[0].id;
       }
-      // Selection was dropped from the buffer.
       return next.some((w) => w.id === current) ? current : next[0].id;
     });
     headIdRef.current = next[0]?.id ?? null;
   }, []);
 
-  // Local-first hydrate. Runs on mount and whenever the project changes: reset,
-  // show the cache immediately if there is one, and refresh behind it.
   useEffect(() => {
     let cancelled = false;
 
@@ -132,8 +118,8 @@ export function useWebhookFeed(projectSlug: string): WebhookFeed {
     };
   }, [projectSlug, applyList]);
 
-  // Freshness poll. The cached etag is read at call time rather than captured,
-  // so a poll never asks with an etag the cache has already moved past.
+  // The etag is read from the cache on each call, so a poll never sends one the
+  // cache has moved past.
   const {
     data: poll,
     mutate,
@@ -165,8 +151,7 @@ export function useWebhookFeed(projectSlug: string): WebhookFeed {
     setIsLoading(false);
   }, [poll, projectSlug, applyList]);
 
-  // A ?webhook= id in the URL wins over the auto-advance, but only once the
-  // webhook it names has actually arrived.
+  // A ?webhook= id overrides the auto-advance once that webhook has arrived.
   useEffect(() => {
     if (!selectedIdFromQuery) {
       return;
@@ -179,8 +164,7 @@ export function useWebhookFeed(projectSlug: string): WebhookFeed {
   const select = useCallback(
     (webhook: Webhook) => {
       setSelectedId(webhook.id);
-      // Selecting by hand detaches from the head, so a new arrival does not
-      // yank the pane out from under the user.
+      // Detached from the head, so a new arrival leaves the selection alone.
       headIdRef.current = null;
       writeSelectionToUrl(projectSlug, webhook.id);
     },
@@ -216,10 +200,6 @@ export function useWebhookFeed(projectSlug: string): WebhookFeed {
   };
 }
 
-/**
- * Reflect the selection in the URL so it can be linked, without a navigation.
- * Skipped when the pathname has already moved on to another project.
- */
 function writeSelectionToUrl(projectSlug: string, webhookId: string) {
   if (typeof window === 'undefined') {
     return;

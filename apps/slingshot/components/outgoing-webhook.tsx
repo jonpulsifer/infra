@@ -39,14 +39,8 @@ import {
 } from '@/lib/request-draft';
 import type { Webhook } from '@/lib/types';
 
-/**
- * The compose-and-send form. All of the pairs/raw-JSON conversion and the
- * decision about what actually goes on the wire live in `lib/request-draft`;
- * this module holds the draft and renders it.
- *
- * There is one send path. It goes through `sendOutgoingWebhookAction`, which
- * enforces the domain allowlist and resolved-IP checks and records the result.
- */
+// The compose-and-send form. It holds the draft; lib/request-draft converts it
+// and builds the request. Every send goes through sendOutgoingWebhookAction.
 
 interface OutgoingWebhookProps {
   projectSlug: string;

@@ -1,9 +1,6 @@
 /**
- * The thread state machine: one thread owns at most one sandbox, and every
- * transition in the state table lives here. The surface a thread is on and
- * the sandbox side are both ports, so the whole contract runs against fakes,
- * and the caps below are mate's rather than any one surface's — one process,
- * one queue, one daily budget, however many places it answers in.
+ * The thread state machine. Each thread owns at most one sandbox. The
+ * concurrency cap, the queue and the daily turn budget span every surface.
  */
 import type { Clock, Handle } from './clock.ts';
 import type { Config } from './config.ts';
@@ -66,12 +63,11 @@ interface Prompt {
   text: string;
   raw: string;
   authorId: string;
-  /** The human's message, which a surface that marks messages reacts on. */
   message: MessageRef;
 }
 
 interface Thread {
-  /** The name this thread is known by, unique across every surface. */
+  /** Unique across every surface. */
   key: string;
   ref: ThreadRef;
   surface: Surface;
@@ -81,16 +77,15 @@ interface Thread {
   pending: Prompt[];
   turns: number;
   quiet: Handle | null;
-  /** The line the human is watching while this thread has no answer yet. */
+  /** The status line shown while the thread waits for a sandbox. */
   progress: Progress | null;
-  /** Set while the thread's harness has never been told what came before. */
+  /** Set when the session did not resume; the next prompt carries the transcript. */
   replay: boolean;
-  /** Set by a Stop that lands before the turn reaches the harness. */
+  /** Catches a Stop that arrives before the prompt reaches the harness. */
   stopRequested: boolean;
   /**
-   * The thread's marks, in order: a turn refused the moment it is accepted
-   * marks its message twice in one tick, and a surface that took the second
-   * first would leave the first standing.
+   * Serializes marks: a turn refused on arrival marks its message twice in
+   * one tick, and applied out of order the stale mark would stay.
    */
   marks: Promise<void>;
 }
@@ -111,7 +106,6 @@ export type ThreadsConfig = Pick<
 >;
 
 export interface ThreadsDeps {
-  /** Every place mate answers; each carries its own identity and allowlists. */
   surfaces: readonly Surface[];
   sandboxes: Sandboxes;
   clock: Clock;
@@ -163,33 +157,25 @@ export class Threads {
     return this.waiting;
   }
 
-  /** Every place mate is answering right now. */
   get surfaceNames(): SurfaceName[] {
     return [...this.surfaces.keys()];
   }
 
-  /** A thread mate owns from an earlier life: known, and closed until spoken to. */
+  /** Registers a thread from before a restart, so a reply in it needs no mention. */
   adopt(ref: ThreadRef): void {
     const surface = this.surfaces.get(ref.surface);
     if (surface) this.ensure(surface, ref);
   }
 
-  /**
-   * Registers a surface and picks up what was left on it. Surfaces arrive
-   * independently — Slack's socket opens before the Discord gateway, and
-   * either one can be down while the other answers — so each rehydrates as it
-   * arrives rather than all of them at once.
-   */
+  /** Surfaces connect independently, so each rehydrates only its own sandboxes. */
   async add(surface: Surface): Promise<void> {
     this.surfaces.set(surface.name, surface);
     await this.rehydrate(surface.name);
   }
 
   /**
-   * Re-attaches to the sandboxes found at start. Messages that land meanwhile
-   * are held and handled afterwards, so a thread is never minted twice. With
-   * a surface named, only that surface's sandboxes are claimed and the rest
-   * are left for whichever surface comes up to claim them.
+   * Re-attaches to existing sandboxes, `only` one surface's when given. Messages
+   * that arrive meanwhile wait until it ends, so no thread is minted twice.
    */
   async rehydrate(only?: SurfaceName): Promise<void> {
     const { sandboxes, log } = this.deps;
@@ -215,10 +201,8 @@ export class Threads {
         }
         thread.sandbox = sandbox;
         this.to(thread, 'rehydrating');
-        // The object says a turn was running when the process died, and the
-        // human is owed the reason their answer never arrived — and the
-        // surface owed the news too, where its working sign belongs to the
-        // thread and so outlived the turn it was raised for.
+        // A turn was running when the process died: explain the missing answer
+        // and clear a thread-level working sign that outlived it.
         if (sandbox.turnInFlight) {
           await this.tell(thread, RESTARTED);
           await thread.surface.settle?.(thread.ref).catch((error) =>
@@ -258,11 +242,8 @@ export class Threads {
     const { log } = this.deps;
     const surface = this.surfaces.get(message.surface);
     if (!surface || message.authorIsBot) return;
-    // Belt and braces on the worst failure this has: a message in a thread
-    // mate owns is accepted without a mention, so one post of its own read
-    // back as a human's would answer itself until the turn budget ran out.
-    // Discord marks its own messages as a bot's; Slack's shapes are not all
-    // observed, and this holds whatever one of them omits.
+    // Read back as a human's, mate's own post would answer itself. Not every
+    // Slack message shape flags a bot.
     if (message.authorId === surface.me) return;
     // A reply in a thread mate owns needs no mention, so this is its only gate.
     if (!surface.allowedUserIds.has(message.authorId)) return;
@@ -325,8 +306,7 @@ export class Threads {
     const thread = this.threads.get(key);
     if (!thread?.surface.allowedUserIds.has(userId)) return;
     if (thread.state !== 'turn') return;
-    // A turn still reading the thread's transcript has nothing to cancel yet,
-    // so the flag is what stops it; the harness only hears about one it holds.
+    // A turn still building its prompt has nothing in the harness to cancel.
     thread.stopRequested = true;
     if (thread.session) await sandboxes.cancel(thread.session);
   }
@@ -342,7 +322,7 @@ export class Threads {
       });
     } else if (thread.state === 'waiting') {
       this.leaveQueue(thread);
-      // Nobody is going to read it: the thread it is in has been sealed.
+      // The thread is archived, so nobody would read a closing sentence.
       await this.endProgress(thread, null);
     }
   }
@@ -353,8 +333,7 @@ export class Threads {
     if (!thread) return;
     this.threads.delete(key);
     this.disarmQuiet(thread);
-    // The line's own redraw timer outlives the thread that owned it, so a
-    // thread dropped from the table has to be the end of it as well.
+    // The line's redraw timer outlives the thread, so end it here.
     await this.endProgress(thread, null);
     const at = this.waiting.indexOf(key);
     if (at >= 0) this.waiting.splice(at, 1);
@@ -373,11 +352,8 @@ export class Threads {
   }
 
   /**
-   * Ends every line mate is holding, because a line saying it is starting a
-   * sandbox is the one thing it says that a dead process leaves reading as
-   * true. The signal that takes the process down takes them with it; a kill
-   * that skips this leaves the line, which is why it says what it is doing
-   * rather than promising an answer.
+   * Ends every status line at shutdown, so none still claims a sandbox is
+   * starting. A kill skips this, which is why no line promises an answer.
    */
   async quiesce(): Promise<void> {
     for (const thread of this.threads.values()) {
@@ -409,7 +385,7 @@ export class Threads {
     return thread;
   }
 
-  /** The one place a thread changes state, so every move leaves a line. */
+  /** The only place a thread changes state, so every change is logged. */
   private to(thread: Thread, state: ThreadState): void {
     thread.state = state;
     this.deps.log.info('thread state', {
@@ -444,9 +420,7 @@ export class Threads {
         case 'new':
         case 'closed':
           if (thread.pending.length === 0) return;
-          // Before either branch, because both of them are the wait: this is
-          // the first thing the human sees, and on Slack it is the first
-          // thing that happens in the thread at all.
+          // Before mint or enqueue: the status line is the first thing the human sees.
           this.acknowledge(thread);
           if (this.freeSlots() > 0) await this.mint(thread);
           else this.enqueue(thread);
@@ -471,14 +445,8 @@ export class Threads {
   }
 
   /**
-   * Raises the line the thread watches until it has something better to look
-   * at. A thread already watching one keeps it: the thread holds the only
-   * reference to a line and `end` is the only thing that stops a line's
-   * redraw, so a second line raised over the first would leave the first
-   * rewriting itself every few seconds for the life of the process with
-   * nothing able to reach it. The queue is not that case — `pumpWaiting`
-   * goes straight to `mint` and never comes back through here — so what this
-   * guards is a `pump` re-entered with a line still standing.
+   * Raises the status line once. The thread holds the only reference to a line
+   * and only `end` stops its redraw, so a second line would orphan the first.
    */
   private acknowledge(thread: Thread): void {
     if (thread.progress) return;
@@ -493,10 +461,8 @@ export class Threads {
   }
 
   /**
-   * The last word on the wait, and the end of the line that carried it: a
-   * sentence replaces the line, `null` takes it away. The answer says whether
-   * it landed, because a surface that refused the rewrite has left the caller
-   * still owing the thread a sentence.
+   * A sentence replaces the status line; null removes it. False when there was
+   * no line or the surface refused the rewrite, and the caller must post instead.
    */
   private async endProgress(
     thread: Thread,
@@ -519,8 +485,7 @@ export class Threads {
     const { clock, sandboxes } = this.deps;
     this.to(thread, 'minting');
     this.disarmQuiet(thread);
-    // Timed from here rather than inside the sandbox client, because this is
-    // where the wait starts for the human who just asked a question.
+    // The human's wait starts here, so the mint is timed from here.
     const asked = clock.now();
     let minted: MintedRef;
     try {
@@ -529,16 +494,12 @@ export class Threads {
       );
       thread.sandbox = minted;
     } catch (error) {
-      // Counted here because nothing else sees it: no sandbox exists, so the
-      // teardown that follows records none.
+      // No sandbox exists, so the teardown that follows records nothing.
       this.metrics.minted('mint-failed');
       await this.failed(thread, `${MINT_FAILED}: ${plain(error)}`);
       return;
     }
     const ready = clock.now();
-    // Read off the mint rather than decided here: a fresh mint, this thread's
-    // own sandbox and a warm spare are three different waits, and only the
-    // path that produced one knows which it was.
     const { source } = minted;
     const mintMs = ready - asked;
     thread.progress?.say(ATTACHING);
@@ -547,8 +508,7 @@ export class Threads {
       thread.session = session;
       thread.replay = !session.resumed;
     } catch (error) {
-      // The mint itself finished, so it is still a reading; only the attach
-      // is the one that ran out of clock.
+      // The mint finished, so its time is still recorded.
       this.metrics.minted('attach-failed', { source, mintMs });
       await this.failed(thread, `${ATTACH_FAILED}: ${plain(error)}`);
       return;
@@ -562,7 +522,6 @@ export class Threads {
     await this.pump(thread);
   }
 
-  /** One plain sentence, the queued prompts dropped, and whatever exists torn down. */
   private async failed(thread: Thread, line: string): Promise<void> {
     await this.tell(thread, line);
     this.drop(thread);
@@ -612,11 +571,8 @@ export class Threads {
     this.metrics.turnStarted();
     this.to(thread, 'turn');
     this.disarmQuiet(thread);
-    // The turn's own frames take the thread from here, so the line that
-    // carried the wait is taken away rather than left standing above them.
-    // After the budgets are spent, not before: the count of turns taken today
-    // is read and written with no await between, so two threads starting at
-    // once cannot both pass a cap that only has room for one.
+    // The first await after the budget check and dayTurns push, so two turns
+    // starting at once cannot both pass a cap with room for one.
     await this.endProgress(thread, null);
 
     const reply = new Reply(
@@ -676,11 +632,7 @@ export class Threads {
     }
   }
 
-  /**
-   * The first prompt of a session the harness could not reload carries the
-   * thread's own history: the thread is the durable log, and a harness that
-   * starts empty would otherwise answer as if nothing had been said.
-   */
+  /** Prefixes the thread's transcript to the first prompt of a session that did not resume. */
   private async withHistory(thread: Thread, prompt: Prompt): Promise<string> {
     if (!thread.replay) return prompt.text;
     thread.replay = false;
@@ -707,7 +659,6 @@ export class Threads {
     }
   }
 
-  /** Lands the reply's final state; a failure is one line in the thread, never a stuck turn. */
   private async deliver(
     thread: Thread,
     reply: Reply,
@@ -724,17 +675,12 @@ export class Threads {
     }
   }
 
-  /** Every queued prompt dropped, each marked as the turn it will never get. */
   private drop(thread: Thread): void {
     this.mark(thread, thread.pending, 'failed');
     thread.pending = [];
   }
 
-  /**
-   * Marks messages on a surface that marks them. Never awaited and never
-   * fatal: a reaction is a glance's worth of news, and a turn is not held
-   * for one or failed by one.
-   */
+  /** Never awaited and never fatal: a turn neither waits for a reaction nor fails on one. */
   private mark(thread: Thread, prompts: readonly Prompt[], mark: Mark): void {
     const surface = thread.surface;
     if (!surface.mark) return;
@@ -813,9 +759,6 @@ export class Threads {
     thread.replay = false;
     this.to(thread, 'closed');
     if (opts.line) await this.tell(thread, opts.line);
-    // Discord archives the thread; Slack closes the agent session on its
-    // parent. A surface with neither declares no `archive`, so there is
-    // simply nothing here to call.
     if (opts.archive && thread.pending.length === 0) {
       await thread.surface.archive?.(thread.ref).catch((error) =>
         log.warn('archive failed', {
@@ -828,12 +771,7 @@ export class Threads {
     if (thread.pending.length > 0) await this.pump(thread);
   }
 
-  /**
-   * One line to the thread. A thread still watching the acknowledgment has
-   * that line rewritten into this one instead of getting a second message
-   * below it — which is what makes every terminal path replace the wait
-   * rather than follow it, since all of them say their piece through here.
-   */
+  /** Posts one line, or rewrites the status line into it when one is up. */
   private async tell(thread: Thread, content: string): Promise<void> {
     if (await this.endProgress(thread, content)) return;
     await thread.surface.post(thread.ref, content).catch((error) =>

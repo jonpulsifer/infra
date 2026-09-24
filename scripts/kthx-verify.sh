@@ -1,18 +1,8 @@
 #!/usr/bin/env bash
-# Verify kthx against production, end to end, on a throwaway name.
-#
-# Claim -> upload a zip -> serve -> `/api/me` -> `/api/db` -> `/api/ws` -> a
-# second release -> roll back -> hold -> release -> a wrong bearer -> delete ->
-# 410 -> the site database is gone. Run it after the HTTPRoute is live and after
-# `scripts/kthx-carry-over.sh`; it touches nothing that exists already.
-#
-# The smoke site is deleted on the way out even when a check fails -- a kthx
-# name is never freed, so an abandoned run would take one forever.
-#
-# Needs: curl, jq, bun, `kthx` on PATH (`bun add -g https://kthx.dev/cli/kthx.tgz`),
-# kubectl with the cnpg plugin, and either zip or python3 for the one zip.
-# `$XDG_CONFIG_HOME` is pointed at a temp directory, so the operator's own
-# `~/.config/kthx/sites.json` is not touched.
+# Checks kthx in production end to end on a throwaway site, then deletes it; a
+# kthx name is never freed, so each run uses one up. Usage: kthx-verify.sh [name].
+# Needs curl, jq, bun, kubectl with cnpg, zip or python3, and the kthx CLI
+# (`bun add -g https://kthx.dev/cli/kthx.tgz`).
 set -euo pipefail
 
 ZONE=${KTHX_ZONE:-kthx.dev}
@@ -22,8 +12,8 @@ CLUSTER=${KTHX_CLUSTER:-kthx-db}
 DATABASE=${KTHX_DATABASE:-kthx}
 
 APEX="https://$ZONE"
-# Where claiming and site control answer: the private host, when the
-# deployment has one, else the apex. `KTHX_ORIGIN` is the CLI's own name for it.
+# Claims and site control answer on the private host when there is one, else on
+# the apex. `KTHX_ORIGIN` is the CLI's name for it.
 CONTROL="${KTHX_ORIGIN:-$APEX}"
 NAME=${1:-smoke-$(date -u +%s)}
 SITE="https://$NAME.$ZONE"
@@ -41,7 +31,7 @@ tmp=$(mktemp -d)
 TOKEN=""
 cleanup() {
   local code=$?
-  # Best effort, and harmless twice: a deleted name answers 410 here.
+  # Harmless after the final delete: a deleted name answers 410.
   [[ -z $TOKEN ]] \
     || curl -sS -o /dev/null -X DELETE "$CONTROL/api/sites/$NAME" \
       -H "authorization: Bearer $TOKEN" || true
@@ -55,8 +45,6 @@ head=$tmp/head
 pass=0
 fail=0
 
-# `req METHOD URL [curl args...]` prints the status; the body lands in $body and
-# the response headers in $head.
 req() {
   local method=$1 url=$2
   shift 2
@@ -73,11 +61,8 @@ check() {
   fi
 }
 
-# Cloudflare caches a site's static responses on the origin's terms, and the
-# origin says `public, max-age=60`. A check that runs straight after a release
-# change or a delete would otherwise read the previous release out of the edge.
-# A unique query string is a different cache key and the server ignores it — it
-# dispatches on the path alone.
+# A unique query string misses any edge cache after a release change or a
+# delete. The server dispatches on the path alone.
 nonce=0
 fresh() {
   nonce=$((nonce + 1))
@@ -99,12 +84,8 @@ zip_dir() {
   fi
 }
 
-# --- fixtures ---------------------------------------------------------------
-
-# Release 1 carries a `404.html` and no `200.html`, so an unknown path is a 404.
-# Release 2 carries a `200.html`, so the same path is Quick's SPA fallback and
-# answers 200. That difference is what makes the rollback below observable from
-# the outside rather than only in the control API.
+# Release 1 has a `404.html` and release 2 a `200.html` SPA fallback, so the
+# status of an unknown path shows from outside which release serves.
 mkdir -p "$tmp/v1/about" "$tmp/v2/about"
 echo '<!doctype html><title>smoke</title>release one' >"$tmp/v1/index.html"
 echo '<!doctype html>about one' >"$tmp/v1/about/index.html"
@@ -116,8 +97,6 @@ zip_dir "$tmp/v1" "$tmp/v1.zip"
 
 echo "kthx: $SITE"
 
-# --- claim ------------------------------------------------------------------
-
 echo
 echo "claim"
 check 'POST /api/sites' 201 "$(req POST "$CONTROL/api/sites" \
@@ -125,16 +104,14 @@ check 'POST /api/sites' 201 "$(req POST "$CONTROL/api/sites" \
 TOKEN=$(jq -r '.token // empty' <"$body")
 [[ -n $TOKEN ]] || die "the claim returned no token: $(cat "$body")"
 
-# The CLI reads its token store and its apex from the environment, so pointing
-# both at the temp directory keeps this run out of the operator's own config.
+# The CLI takes its token store and origin from the environment, so this run
+# stays out of the operator's own config.
 export XDG_CONFIG_HOME="$tmp/config"
 export KTHX_ORIGIN="$CONTROL"
 mkdir -p "$XDG_CONFIG_HOME/kthx"
 jq -n --arg o "$CONTROL" --arg n "$NAME" --arg t "$TOKEN" '{($o): {($n): $t}}' \
   >"$XDG_CONFIG_HOME/kthx/sites.json"
 printf '{"name":"%s"}\n' "$NAME" >"$tmp/v2/kthx.json"
-
-# --- release 1, served ------------------------------------------------------
 
 echo
 echo "release 1 (zip, curl)"
@@ -153,8 +130,6 @@ req GET "$SITE/" >/dev/null
 etag=$(grep -i '^etag:' "$head" | head -1 | sed 's/^[^:]*: *//' | tr -d '\r')
 check 'GET / with if-none-match' 304 "$(req GET "$SITE/" -H "if-none-match: $etag")"
 
-# --- /api/me ----------------------------------------------------------------
-
 echo
 echo "visitor"
 check 'GET /api/me' 200 "$(req GET "$SITE/api/me")"
@@ -165,13 +140,10 @@ me=$(jq -r '.id // empty' <"$body")
 req GET "$SITE/api/me" -H "cookie: $cookie" >/dev/null
 check '  keeps a signed cookie' "$me" "$(jq -r '.id // empty' <"$body")"
 
-# --- /api/db ----------------------------------------------------------------
-
 echo
 echo "documents"
-# Every non-GET `/api/*` from a browser has to carry a same-host `Origin`, and
-# every JSON route a `content-type` -- `kthx.dev` is not on the Public Suffix
-# List, so a sibling site is same-site to a cookie and the guard is the header.
+# As a browser sends them: a non-GET `/api/*` with an `Origin` must name this
+# host, and a JSON route needs a `content-type`.
 json=(-H "cookie: $cookie" -H "origin: $SITE" -H 'content-type: application/json')
 
 check 'POST /api/db/notes' 201 "$(req POST "$SITE/api/db/notes" "${json[@]}" \
@@ -196,12 +168,9 @@ check 'DELETE the document' 204 "$(req DELETE "$SITE/api/db/notes/$doc" \
 check 'GET the deleted document' 404 "$(req GET "$SITE/api/db/notes/$doc" \
   -H "cookie: $cookie")"
 
-# --- /api/ws ----------------------------------------------------------------
-
 echo
 echo "realtime"
-# Subscribe, write over HTTP, and wait for the frame the write fans out. In
-# process and single replica by construction, so this is the whole of it.
+# Subscribe, write over HTTP, and wait for the create frame the write fans out.
 # shellcheck disable=SC2016 # the single quotes are the point: this is JavaScript
 saw=$(bun -e '
 const [site, cookie] = Bun.argv.slice(-2);
@@ -236,8 +205,6 @@ console.log(announced === (await wrote.json()).id ? "yes" : "wrong id");
 ' "$SITE" "$cookie" 2>"$tmp/ws.log" || echo "no: $(tail -1 "$tmp/ws.log")")
 check 'a subscriber sees the write' yes "$saw"
 
-# --- release 2, rollback, hold ----------------------------------------------
-
 echo
 echo "releases"
 if kthx deploy "$tmp/v2" >"$tmp/deploy.log" 2>&1; then
@@ -249,8 +216,7 @@ req GET "$CONTROL/api/sites/$NAME" -H "authorization: Bearer $TOKEN" >/dev/null
 check '  serving' 2 "$(jq -r '.serving // empty' <"$body")"
 check '  /nope is now the SPA fallback' 200 "$(req GET "$(fresh "$SITE/nope")")"
 
-# `kthx rollback` and `kthx release` read `kthx.json` from the working
-# directory, not from an argument.
+# `kthx rollback` and `kthx release` read `kthx.json` from the working directory.
 (cd "$tmp/v2" && kthx rollback 1) >"$tmp/rollback.log" 2>&1 \
   || cat "$tmp/rollback.log"
 req GET "$CONTROL/api/sites/$NAME" -H "authorization: Bearer $TOKEN" >/dev/null
@@ -262,8 +228,6 @@ check '  release 1 answers 404 again' 404 "$(req GET "$(fresh "$SITE/nope")")"
 req GET "$CONTROL/api/sites/$NAME" -H "authorization: Bearer $TOKEN" >/dev/null
 check 'kthx release drops the hold' false "$(jq -r '.held' <"$body")"
 check '  the newest release serves' 2 "$(jq -r '.serving // empty' <"$body")"
-
-# --- the bearer, and the end ------------------------------------------------
 
 echo
 echo "delete"

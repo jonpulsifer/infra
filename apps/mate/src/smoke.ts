@@ -1,12 +1,6 @@
 /**
- * One sandbox, one prompt, one teardown — with no Discord in the loop.
- *
- *   bun run smoke          mint, prompt, tear down, print the wall clock
- *   bun run smoke -- --kill  delete the Sandbox mid-turn and report the transport
- *
- * It needs a kubeconfig or a ServiceAccount mount that can reach the cluster,
- * `MATE_SANDBOX_IMAGE`, and `MATE_SANDBOX_NAMESPACE` when the context's
- * namespace is not the one sandboxes are minted in.
+ * `bun run smoke` mints one sandbox, runs one prompt and tears it down, with no
+ * Discord in the loop. With `-- --kill` it deletes the Sandbox mid-turn.
  */
 import { StreamClosed } from './acp.ts';
 import { readSandboxConfig } from './config.ts';
@@ -118,8 +112,6 @@ try {
       killedAt = Date.now();
       void deleteSandbox(name);
     };
-    // Mid-turn means once the model has started answering, with a fallback in
-    // case it never does.
     armed = setInterval(() => {
       if (sink.firstTextAt !== null) fire();
     }, 250);
@@ -147,8 +139,8 @@ try {
     killedMidTurn: killedAt !== null,
   });
 
-  // In kill mode the delete already went out mid-turn; the teardown below is
-  // then the 404-tolerant wait for what it started.
+  // In kill mode the delete already went out; teardown tolerates the 404 and
+  // waits.
   const deletedAt = killedAt ?? Date.now();
   await sandboxes.teardown(sandbox);
   const sandboxGoneMs = Date.now() - deletedAt;

@@ -1,10 +1,6 @@
-# Makes a fleet host a bosun host: it keeps a warm pool of skiffs, each an
-# ephemeral microVM serving exactly one GitHub Actions job.
-#
-# Nothing in the skiff data path needs root. virtiofsd runs with
-# `--sandbox namespace`, passt runs unprivileged, and /dev/kvm is a group
-# membership -- so bosun is an ordinary system user. What it does need is the
-# egress filter below, which every skiff inherits.
+# Makes a host a bosun host: a warm pool of skiffs, microVMs that each run one
+# GitHub Actions job. bosun runs as an ordinary system user, and every skiff
+# inherits the egress filter below.
 {
   config,
   lib,
@@ -20,11 +16,8 @@ let
     ;
   cfg = config.services.bosun;
 
-  # buildkitd's own config. The GC policy is the point: this cache shares a
-  # boot disk with every workspace image, and BuildKit's default keeps a
-  # fraction of the whole filesystem, which is not a number this host can
-  # afford to discover mid-build. `all = true` sweeps every cache record
-  # rather than only the unshared ones, so keepBytes is a real ceiling.
+  # `all = true` sweeps every cache record, so keepBytes is a real ceiling on a
+  # cache that shares its disk with the workspace images.
   buildkitConfig = (pkgs.formats.toml { }).generate "buildkitd.toml" {
     worker.oci = {
       enabled = true;
@@ -38,8 +31,7 @@ let
         }
       ];
     };
-    # containerd's worker would need a containerd to talk to; this host runs
-    # podman for the cache service and nothing else.
+    # OCI worker only; this host runs no containerd.
     worker.containerd.enabled = false;
   };
 
@@ -88,8 +80,7 @@ let
 in
 {
   # nixpkgs ships an unrelated `services.bosun` (Stack Exchange's monitoring
-  # daemon) and an unrelated `pkgs.bosun` to go with it. The fleet will never
-  # run either, so the name is claimed here rather than the project renamed.
+  # daemon); disabling it claims the name.
   disabledModules = [ "services/monitoring/bosun.nix" ];
 
   options.services.bosun = {
@@ -216,11 +207,8 @@ in
     };
 
     drainTimeout = mkOption {
-      # positive, not unsigned: 0 would read as "stop immediately" but the
-      # daemon treats a non-positive value as unset and drains for the 15 min
-      # default anyway, while TimeoutStopSec would drop to 60 -- a stop that
-      # ends in a cgroup SIGKILL mid-drain. The immediate-stop spelling is
-      # `systemctl kill bosun`, not a zero here.
+      # positive: the daemon reads 0 as unset and drains 15 min while TimeoutStopSec
+      # drops to 60, a SIGKILL mid-drain. `systemctl kill bosun` is the fast stop.
       type = types.ints.positive;
       default = 900;
       description = ''
@@ -382,20 +370,8 @@ in
       );
     };
 
-    # A GitHub-Actions cache service on this host's own disk, announced to
-    # every skiff as `bosun.cache=<url>` on the cmdline. The Ubuntu hull
-    # patches its runner so the stock actions/cache action talks to it
-    # instead of GitHub's cache service -- the bench measured 49-76 s of
-    # `actions/cache` restore over the internet against 0 s from local disk,
-    # and this is that number for workflows that were never taught about
-    # SKIFF_CACHE.
-    #
-    # The server binds a dummy interface that exists only for this purpose,
-    # and the skiffs' egress filter gains exactly that /32: systemd's most-
-    # specific-match rule lets it through the RFC1918 deny without opening
-    # the host's real address, its loopback, or anything else on the LAN.
-    # The server itself validates each runner's GitHub-signed JWT against
-    # GitHub's JWKS, so an address is all a caller gets, not a cache.
+    # A GitHub Actions cache service on local disk, announced as `bosun.cache=`.
+    # It binds a dummy /32 the egress filter allows, and checks each runner's JWT.
     cache = {
       enable = mkEnableOption "a host-local GitHub Actions cache service for the skiffs";
 
@@ -439,24 +415,9 @@ in
       };
     };
 
-    # A BuildKit daemon on this host's own disk, announced to every skiff as
-    # `bosun.buildkit=<url>` on the cmdline. The Ubuntu hull points buildx's
-    # remote driver at it, so a `docker buildx build` in a job gets a layer
-    # cache that outlives the skiff running it.
-    #
-    # This is the one benchmark row the pool lost: a cold image build measured
-    # 34 s against a hosted runner's 25 s, and it was cold every time because
-    # an ephemeral guest starts with no layers. The cache service already makes
-    # exactly this trade for actions/cache.
-    #
-    # Same containment as the cache service: a dummy interface that exists only
-    # for this, and one /32 in the skiffs' egress filter.
-    #
-    # ponytail: the builder is shared by every skiff on this host, so its cache
-    # is a channel between jobs that are otherwise one-job-per-VM. That is the
-    # same boundary `persist = true` already crosses per slot, widened to the
-    # host. Fine for this repo's own CI; if untrusted fork PRs are ever served
-    # here, this wants a per-class builder or turning off.
+    # A BuildKit daemon on local disk, announced as `bosun.buildkit=`, so a job's
+    # `docker buildx build` keeps its layer cache. Same dummy /32 containment.
+    # ponytail: its cache is shared across jobs; fork PRs need a per-class builder.
     buildkit = {
       enable = mkEnableOption "a host-local BuildKit the skiffs build through";
 
@@ -505,8 +466,7 @@ in
 
     boot.kernelModules = [ "kvm-intel" ];
 
-    # Restoring a snapshot with memory_restore_mode=ondemand needs this, and
-    # it defaults to 0. Harmless otherwise.
+    # Snapshot restore with memory_restore_mode=ondemand needs this; default 0.
     boot.kernel.sysctl."vm.unprivileged_userfaultfd" = 1;
 
     users.users.bosun = {
@@ -517,14 +477,8 @@ in
     };
     users.groups.bosun = { };
 
-    # Nothing in bosun deletes a retired skiff's logs, so this is the only
-    # bound on logDir: one directory per skiff ever booted, plus whatever job
-    # code chose to write into the diagnostic share.
-    #
-    # The workspace directory is tmpfiles' rather than a second
-    # StateDirectory=, because StateDirectoryMode is per-unit and the metrics
-    # directory below has to stay 0755 for node-exporter while a skiff's
-    # scratch disk should not be readable by anything else on the host.
+    # Ages out logDir, which bosun never cleans. The workspace uses tmpfiles, since
+    # StateDirectoryMode is per-unit and the metrics directory needs 0755.
     systemd.tmpfiles.rules = [
       "e ${cfg.logDir} - - - ${cfg.logRetention}"
       "d ${cfg.workspaceDir} 0700 bosun bosun -"
@@ -532,9 +486,8 @@ in
     ++ lib.optional cfg.cache.enable "d ${cfg.cache.storageDir} 0700 root root -"
     ++ lib.optional cfg.buildkit.enable "d ${cfg.buildkit.storageDir} 0700 root root -";
 
-    # The dummy interface the cache service binds. A netdev with no carrier
-    # and no routes beyond the host: the address exists so the skiffs' egress
-    # exception can name exactly one /32 that serves nothing but cache.
+    # A dummy netdev, so the egress exception names one /32 that serves only the
+    # cache.
     systemd.network.netdevs."20-bosun-cache" = mkIf cfg.cache.enable {
       netdevConfig = {
         Name = "bosun-cache0";
@@ -547,9 +500,7 @@ in
       linkConfig.ActivationPolicy = "always-up";
     };
 
-    # The dummy interface buildkitd binds, for the same reason the cache
-    # service has one: the address exists so the skiffs' egress exception can
-    # name exactly one /32 that serves nothing but the builder.
+    # The builder's dummy netdev, for the same reason.
     systemd.network.netdevs."20-bosun-buildkit" = mkIf cfg.buildkit.enable {
       netdevConfig = {
         Name = "bosun-buildkit0";
@@ -562,16 +513,12 @@ in
       linkConfig.ActivationPolicy = "always-up";
     };
 
-    # buildkitd runs as root with the OCI worker: it unshares namespaces and
-    # mounts overlayfs per build step, which rootless mode only manages with a
-    # slower snapshotter. It is reachable on one host-local /32 and nowhere
-    # else, so the exposure is the skiffs, which are already running the job
-    # code that would drive it.
+    # Root with the OCI worker, since rootless needs a slower snapshotter. Only
+    # the skiffs reach its /32, and they already run the job code that drives it.
     systemd.services.bosun-buildkit = mkIf cfg.buildkit.enable {
       description = "BuildKit the skiffs build through, with a cache that outlives them";
       wantedBy = [ "multi-user.target" ];
-      # The address it binds belongs to the dummy netdev above, and binding
-      # before the interface is configured fails the unit rather than waiting.
+      # Binding before the dummy netdev is configured fails the unit.
       after = [ "network-online.target" ];
       wants = [ "network-online.target" ];
       path = [ pkgs.runc ];
@@ -592,9 +539,7 @@ in
       backend = "podman";
       containers.bosun-cache = {
         image = cfg.cache.image;
-        # Published on the dummy address only: the host's real interfaces
-        # never listen, so nothing off-host can reach the server even before
-        # any firewall has an opinion.
+        # Published on the dummy address only, so nothing off-host can reach it.
         ports = [ "${cfg.cache.address}:${toString cfg.cache.port}:3000" ];
         volumes = [ "${cfg.cache.storageDir}:/data" ];
         environment = {
@@ -624,59 +569,32 @@ in
         User = "bosun";
         Group = "bosun";
         SupplementaryGroups = [ "kvm" ];
-        # always, not on-failure: bosun exits 0 on SIGTERM, and on-failure
-        # reads that as "done" -- leaving the pool empty and every skiff label
-        # unserviced until someone notices. An explicit `systemctl stop` still
-        # stops it.
+        # always: bosun exits 0 on SIGTERM, which on-failure reads as done.
         Restart = "always";
         RestartSec = "5s";
 
-        # Drain needs the stop signal to reach the daemon alone: the default
-        # KillMode=control-group SIGTERMs every process in the cgroup at
-        # stop, killing the very VMMs drain exists to let finish. mixed still
-        # SIGKILLs the whole cgroup at the timeout, so the no-orphans
-        # guarantee stands -- the backstop moved, the mechanism changed.
-        #
-        # The trade lives on the crash path: when the daemon dies uncleanly
-        # with skiffs booted, nothing SIGTERMs the surviving VMMs, so the
-        # restart waits out the full stop timeout while the orphaned runners
-        # keep serving jobs on their own -- a crash costs minutes of stale
-        # pool where control-group killed everything in seconds. A startup
-        # crash loop boots no VMMs and still cycles at RestartSec.
+        # mixed: SIGTERM reaches only the daemon, so drain lets VMMs finish; the
+        # timeout SIGKILLs the cgroup, which also bounds VMMs a crash orphans.
         KillMode = "mixed";
         TimeoutStopSec = cfg.drainTimeout + 60;
 
         RuntimeDirectory = "bosun";
         RuntimeDirectoryMode = "0700";
-        # systemd removes a RuntimeDirectory when the service stops, which
-        # would delete the per-skiff state on the way down -- exactly what
-        # sweep-on-start reads to deregister runners whose VMM was killed with
-        # the cgroup and never got to tear itself down. Without this, every
-        # restart leaks a ghost registration.
+        # sweep-on-start reads the per-skiff state to deregister runners killed
+        # with the cgroup; removing it on stop would leak them.
         RuntimeDirectoryPreserve = "yes";
         LogsDirectory = "bosun";
-        # Holds metricsFile. 0755 so node-exporter -- which reads it from
-        # outside this unit, as a DaemonSet mounting the host path -- can.
-        #
-        # The directory name is the fleet's, not bosun's:
-        # nix/services/spore-native-boot.nix already drops a .prom file here.
-        # ponytail: StateDirectory chowns it to bosun, so one writer per host.
-        # A second host service wanting the same directory wants tmpfiles and
-        # an explicit ReadWritePaths instead.
+        # Holds metricsFile, 0755 for node-exporter.
+        # nix/services/spore-native-boot.nix writes here too.
+        # ponytail: StateDirectory chowns it to bosun; a second unit wants tmpfiles.
         StateDirectory = "prometheus-node-exporter-text-files";
         StateDirectoryMode = "0755";
 
-        # ProtectSystem=strict makes everything outside the unit's own
-        # runtime/state/logs read-only, and the workspace directory is neither.
+        # ProtectSystem=strict would leave the workspace directory read-only.
         ReadWritePaths = [ cfg.workspaceDir ];
 
-        # Every skiff is a child of this unit, so one filter covers the whole
-        # pool: job code reaches the public internet and nothing on the LAN.
-        # systemd's IP filtering is hierarchical and inherits down the entire
-        # cgroup subtree, which is why there is no per-skiff rule anywhere.
-        # "any" is /0 and systemd's most-specific-match rule means the deny
-        # prefixes below still bite; the cache /32, when enabled, is more
-        # specific than 10.0.0.0/8 and punches exactly one host-local hole.
+        # Skiffs inherit this unit's IP filter: job code reaches the internet and
+        # nothing on the LAN. The /32 allows beat the broader 10.0.0.0/8 deny.
         IPAddressAllow = [
           "any"
         ]
@@ -688,11 +606,7 @@ in
           "192.168.0.0/16"
           # Link-local, which is where a cloud metadata service lives.
           "169.254.0.0/16"
-          # The tailnet. RFC1918 is not the whole LAN on a host that runs
-          # tailscale -- every enrolled fleet host also answers on a CGNAT
-          # address, and reaching one is reaching the homelab. riptide force-
-          # disables tailscale so this never bit there; a `gcp`-tagged host
-          # does not.
+          # The tailnet: a host running tailscale also answers on a CGNAT address.
           "100.64.0.0/10"
         ];
 

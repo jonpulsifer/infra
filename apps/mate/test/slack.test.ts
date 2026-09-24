@@ -1,7 +1,3 @@
-/**
- * The Slack half: what it reads off the socket and refuses to read twice,
- * what it streams, and what it does with Slack's own stop.
- */
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { silentLog } from '../src/log.ts';
 import { MINT_STEPS, UNDELIVERED } from '../src/notices.ts';
@@ -136,10 +132,8 @@ describe('reading a message off the socket', () => {
   });
 
   test('one human sentence is one message, whatever else the app subscribes to', () => {
-    // An app_mention carries the same channel, ts, user and text under its
-    // own event id, so nothing downstream would dedupe it: the type is what
-    // keeps one sentence from being answered twice, rather than a dashboard
-    // setting no code can read.
+    // An app_mention repeats a message under its own event id, so only the
+    // type check keeps one sentence from being answered twice.
     expect(
       slackInbound(
         {
@@ -285,9 +279,7 @@ describe('streaming a turn', () => {
         },
       },
     ]);
-    // A channel thread has no free-text status, so the line Discord paints
-    // is not sent here, and Slack draws the stop itself: the answer's own
-    // message is the only one a turn posts.
+    // A channel thread has no free-text status, so the status line is not sent.
     expect(JSON.stringify(api.calls)).not.toContain('reading files');
   });
 
@@ -337,8 +329,7 @@ describe('streaming a turn', () => {
     const painter = canvas();
     await painter.tool({ id: 't1', title: 'read files', state: 'complete' });
     await painter.final('', 'done');
-    // The card is not an answer: the line goes into the same message, which
-    // is the one Slack will not let a second message be edited into.
+    // A card is not an answer, so the no-reply line streams into the same message.
     expect(api.streamed()).toBe(NO_REPLY);
     expect(api.only('post')).toEqual([]);
     expect(api.only('stop')).toHaveLength(1);
@@ -384,8 +375,7 @@ describe('streaming a turn', () => {
 
   test('what the model says cannot mention anyone, across frames', async () => {
     const painter = canvas();
-    // The delta ends mid-pair: the `<` is held back until the next frame
-    // rather than meeting its `@` in the rendered message unescaped.
+    // A trailing `<` is held until the next frame, so it is escaped with its `@`.
     await painter.live('ping <', null);
     expect(api.streamed()).toBe('ping ');
     await painter.live(`ping <@${OWNER}> and <!channel> and <#C0X>`, null);
@@ -438,8 +428,7 @@ describe('tool cards', () => {
       },
       { id: 'say-2', title: `${'x'.repeat(119)}…`, status: 'complete' },
     ]);
-    // Complete the moment it is drawn, so the sweep that closes a turn's
-    // unfinished cards leaves it alone — and the answer is only the answer.
+    // Steps are drawn complete, so the end-of-turn sweep leaves them alone.
     expect(api.streamed()).toBe('No token here.');
   });
 
@@ -455,8 +444,7 @@ describe('tool cards', () => {
     });
     await painter.tool({ id: 'c2', title: 'run `bun test`', state: 'error' });
     await painter.final('looking. done', 'done');
-    // Slack merges a task_update into the card its id names, so the same id
-    // twice is one card that moved rather than two cards.
+    // Slack merges a task_update into the card its id names.
     expect(api.cards()).toEqual([
       { id: 'c1', title: 'read files', status: 'in_progress' },
       { id: 'c1', title: 'read files', status: 'complete' },
@@ -484,8 +472,7 @@ describe('tool cards', () => {
       state: 'in_progress',
     });
     await painter.final('partial', 'stopped');
-    // Slack has no cancelled card, and one left running would spin for ever
-    // on a turn that has ended; the call that did finish is untouched.
+    // Slack has no cancelled card, and a running one would spin forever.
     expect(api.cards().at(-1)).toEqual({
       id: 'c2',
       title: 'run `bun test`',
@@ -498,9 +485,7 @@ describe('tool cards', () => {
     const painter = canvas();
     await painter.tool({ id: 'c1', title: 'read files', state: 'in_progress' });
     await painter.final('done', 'done');
-    // Leaving it is not leaving the harness's last word: `chat.stopStream`
-    // stamps a card still `in_progress` as `error` itself, so a successful
-    // turn would render a failed call.
+    // `chat.stopStream` marks a card still `in_progress` as `error`.
     expect(api.cards()).toEqual([
       { id: 'c1', title: 'read files', status: 'in_progress' },
       { id: 'c1', title: 'read files', status: 'complete' },
@@ -509,8 +494,7 @@ describe('tool cards', () => {
 
   test('a card title cannot ping a human, however the model writes it', async () => {
     const painter = canvas();
-    // Slack folds the title into the streamed message's `text` byte for
-    // byte, where a raw `<@U…>` is indistinguishable from a real mention.
+    // Slack copies the title into the message `text` verbatim, where `<@U…>` is a real mention.
     await painter.tool({
       id: 'c1',
       title: `ping <@${OWNER}> and <!channel>`,
@@ -553,15 +537,11 @@ describe('a stream Slack has already ended', () => {
       await painter.live('partial ', null);
       api.failAppend = ended(code);
       await painter.final('partial ', 'stopped');
-      // Nothing to append to and nothing worth opening a second message
-      // for: the human asked for the turn to stop and it stopped.
       expect(api.streamed()).toBe('partial ');
       expect(api.only('start')).toHaveLength(1);
       expect(api.only('post')).toEqual([]);
       expect(log.entries.filter((e) => e.level !== 'info')).toEqual([]);
-      // Quiet is not silent: an answer that stops mid-sentence leaves a line
-      // saying so, because a human's stop is the usual cause and not the only
-      // one Slack could have for ending a stream itself.
+      // Logged, since a human's stop is not the only reason Slack ends a stream.
       expect(log.of('the stream was already over')).not.toEqual([]);
       expect(api.only('session').at(-1)?.status).toBe('active');
     });
@@ -628,8 +608,7 @@ describe('the renderer against Slack', () => {
     await clock.advance(0);
     reply.update({ kind: 'text', delta: 'thinking hard' });
     await clock.advance(1_000);
-    // Slack expires `processing` an hour after it is set, which a turn
-    // reaches only if the harness's own turn cap is raised past it.
+    // Slack expires `processing` an hour after it is set.
     expect(
       api.only('session').filter((c) => c.status === 'processing'),
     ).toEqual([{ call: 'session', threadTs: TS, status: 'processing' }]);
@@ -640,8 +619,7 @@ describe('the renderer against Slack', () => {
 
     await reply.finish('done');
     const after = api.only('session').length;
-    // And stops the moment the turn does: a renewal past the last frame
-    // would put a settled thread back to working.
+    // A renewal after the turn would mark a settled thread working again.
     await clock.advance(PROCESSING_RENEW_MS * 3);
     expect(api.only('session')).toHaveLength(after);
     expect(clock.pendingTimers).toBe(0);
@@ -728,8 +706,7 @@ describe('the surface', () => {
   });
 
   test('teardown closes the thread’s agent session', async () => {
-    // Nothing moves a session to `closed` on its own, so a torn-down thread
-    // that was never told would keep reading as one mate is living in.
+    // Slack never closes an agent session on its own.
     await surface().archive?.(THREAD);
     expect(api.only('session')).toEqual([
       { call: 'session', threadTs: TS, status: 'closed' },
@@ -749,8 +726,7 @@ describe('the surface', () => {
       { ts: '2.000002', bot_id: 'B0OTHER', username: 'cd', text: 'a digest' },
     );
     const page = await surface().history(THREAD, { limit: 10 });
-    // The replay keeps what mate said and drops what other bots said, so an
-    // answer read back without a `user` has to still be mate's.
+    // Replay drops other bots, so an answer read back without a `user` must stay mate's.
     expect(page.map((m) => m.authorId)).toEqual(['B0OTHER', ME]);
   });
 });
@@ -790,8 +766,7 @@ describe('a Web API call', () => {
         ok: false,
         error: 'message_not_in_streaming_state',
       })) as unknown as typeof fetch;
-    // Telling a stream that is already over from one that is broken is a
-    // reading of this field, and re-parsing the message would be a worse one.
+    // The error code alone tells an ended stream from a broken one.
     const failed = await web()
       .appendStream(CHANNEL, TS, [{ type: 'markdown_text', text: 'x' }])
       .catch((error: unknown) => error);
@@ -800,10 +775,8 @@ describe('a Web API call', () => {
   });
 
   /**
-   * The encoding is not a style choice. A read sent as JSON comes back
-   * `invalid_arguments` naming a field that is right there in the body, or
-   * `user_not_found` for a user who exists — a lie that reads like a
-   * permission problem and leaves the transcript replay silently empty.
+   * A read sent as JSON fails with `invalid_arguments` or a false
+   * `user_not_found`, and the transcript replay comes back empty.
    */
   test('a read is form-encoded and a write that carries chunks is JSON', async () => {
     const sent: { url: string; type: string; body: string }[] = [];
@@ -838,8 +811,7 @@ describe('a Web API call', () => {
       chunks: [{ type: 'markdown_text', text: 'hi' }],
       recipient_user_id: OWNER,
       recipient_team_id: TEAM,
-      // A card per call rather than one plan block summarising them: the
-      // same chunks render either way and only this says which.
+      // One card per call, not one plan block.
       task_display_mode: 'timeline',
     });
   });
@@ -852,7 +824,7 @@ describe('a Web API call', () => {
     await client.session(CHANNEL, TS, 'processing');
     await client.session(CHANNEL, TS, 'active');
     expect(log.of('slack agent session')).toHaveLength(1);
-    // The one Slack sends today would otherwise silence every later one.
+    // Deduped per warning, so the first does not silence the rest.
     warning = 'something_else_entirely';
     await client.session(CHANNEL, TS, 'processing');
     expect(log.of('slack agent session')).toHaveLength(2);
@@ -903,8 +875,7 @@ describe('the socket', () => {
     void socket.run();
     await settle();
     const wire = sockets[0] as FakeSocket;
-    // mate draws no buttons, so nothing acts on an interactive payload — but
-    // an unacknowledged envelope is one Slack sends again, and again.
+    // Slack redelivers any unacknowledged envelope.
     wire.deliver({
       type: 'interactive',
       envelope_id: 'i1',
@@ -989,11 +960,7 @@ describe('the socket', () => {
   });
 });
 
-/**
- * The whole path a stop takes: the envelope Slack sends, read the way the
- * wiring reads it, into the one cancel the state machine has — which is the
- * same one the Discord button reaches.
- */
+/** From Slack's stop envelope through the socket wiring to `Threads.onStop`. */
 describe('a turn stopped from Slack', () => {
   const streaming =
     (text: string): Script =>
@@ -1028,13 +995,11 @@ describe('a turn stopped from Slack', () => {
         maxConcurrent: 3,
       },
       editCadenceMs: 100,
-      // Scaled with the cadence above, so a turn the fake harness writes a
-      // word at a time still has the run behind it become the answer.
+      // Scaled with the cadence, so word-at-a-time output still becomes the answer.
       runGraceMs: 100,
       metrics,
     });
-    // The wiring the socket is given, so what a test drives is the route an
-    // envelope really takes rather than a second reading of it.
+    // The same wiring the socket gets.
     const deliver = (event: Record<string, unknown>) =>
       slackEvent(event, ME, {
         stopped: (stop) =>
@@ -1100,18 +1065,15 @@ describe('a turn stopped from Slack', () => {
       const { metrics, deliver } = build(streaming('one two three four'));
       deliver(ask);
       await clock.advance(250);
-      // Slack ends the stream as it sends the event, so every frame mate
-      // still had in flight is refused from here on.
+      // Slack ends the stream as it sends the event, refusing every later frame.
       api.failAppend = ended(code);
       deliver(stopping());
       await clock.advance(3_000);
-      // The last frame never landed and no second message was opened to
-      // hold it, so the stop mark is not in the thread at all.
+      // The last frame was refused, and no second message opens for the stop mark.
       expect(api.only('start')).toHaveLength(1);
       expect(api.streamed()).not.toContain('*stopped*');
       expect(metrics.turns).toEqual(['cancelled']);
-      // The only line posted in the thread is the acknowledgment of the
-      // wait, and the turn starting took it back out again.
+      // The only post is the status line, removed when the turn started.
       expect(api.only('post').map((call) => call.text)).toEqual([
         MINT_STEPS.creating,
       ]);

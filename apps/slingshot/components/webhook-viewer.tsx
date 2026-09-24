@@ -16,11 +16,8 @@ import { WebhookDetail } from './webhook-detail';
 import { WebhookDiffModal } from './webhook-diff-modal';
 import { WebhookList } from './webhook-list';
 
-/**
- * Renders a feed. Owns only presentation state - the layout split, which
- * detail tab is open, and the diff modal. The list, the selection, and the
- * polling belong to `useWebhookFeed`.
- */
+// Renders a feed and holds only presentation state. The list, the selection
+// and the polling belong to useWebhookFeed.
 
 const methodBadge = (method: string) => {
   const colors: Record<string, string> = {

@@ -5,18 +5,12 @@ import (
 	"os/exec"
 )
 
-// launcher starts a child process. execLauncher is the real adapter; tests
-// substitute a fake that records argv and simulates exit.
-//
-// stdout/stderr are *os.File, not io.Writer: virtiofsd forks a worker that
-// inherits its stdio and outlives the parent's exit, so a piped io.Writer
-// would leave Wait's copy goroutine blocked on the survivor. A real file (or
-// /dev/null) has no such goroutine.
+// launcher starts a child process. Output goes to *os.File: virtiofsd's forked
+// worker inherits stdio and outlives it, so a pipe would block Wait forever.
 type launcher interface {
 	Start(name string, args []string, stdout, stderr *os.File) (proc, error)
 }
 
-// proc is a running child process.
 type proc interface {
 	Wait() error
 	Kill() error

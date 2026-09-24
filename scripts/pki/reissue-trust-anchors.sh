@@ -1,23 +1,7 @@
 #!/usr/bin/env bash
-# Reissue the FML Root and Intermediate CA certificates with pathLen constraints
-# that admit the per-cluster Kubernetes CAs beneath them.
-#
-# The hierarchy is Root -> Intermediate -> FML K8s <cluster> CA -> leaf, so two
-# CAs follow the root and one follows the intermediate. The root therefore needs
-# pathLen >= 2 and the intermediate pathLen >= 1. An anchor that carries less
-# than that forbids the chain it signs, and no client building a full path can
-# verify it. `mise run pki:verify` reports where the committed certificates
-# stand.
-#
-# The crypto lives in apps/fml-pki, which keeps the previous key, subject and
-# subjectKeyIdentifier, so the replacements are drop-in: everything already
-# issued beneath them still finds its issuer by that identifier. This script
-# only fetches the intermediate key and says what to do with the result.
-#
-# Private keys are read, never written. The root key stays offline and is
-# supplied by path; the intermediate key comes from 1Password unless overridden.
-#
-# Requires: go, and op unless --intermediate-key is given.
+# Reissues the FML Root and Intermediate certificates at pathLen 2 and 1, keeping
+# each key, subject and subject key ID, so the cluster CAs below them verify.
+# The root key stays offline; the intermediate key defaults to 1Password.
 
 set -euo pipefail
 
@@ -84,7 +68,7 @@ command -v go >/dev/null || {
   exit 1
 }
 
-# Everything secret lives here and nowhere else.
+# Holds this run's copy of the intermediate key, and is removed on exit.
 work="$(mktemp -d)"
 chmod 700 "$work"
 cleanup() { rm -rf "$work"; }

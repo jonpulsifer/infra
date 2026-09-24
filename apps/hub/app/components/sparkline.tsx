@@ -1,7 +1,6 @@
 import type { MetricExtremes } from '~/lib/weatherflow/types';
 
-// Percentage of the box kept clear above and below the curve so the marker
-// dots have room and the line never touches the edge.
+// Percent of the box kept clear above and below the curve for the marker dots.
 const PAD = 12;
 
 interface SparklineProps {
@@ -30,15 +29,8 @@ function nearestIndex(points: Array<[number, number]>, at: number): number {
 }
 
 /**
- * The 24h temperature curve under a station's headline reading.
- *
- * The SVG is drawn in a 0-100 box and stretched with
- * `preserveAspectRatio="none"` so it fills whatever width the panel has - which
- * is how the same component serves a 390px phone card and a 400px kiosk column
- * without measuring anything. `vector-effect="non-scaling-stroke"` keeps the
- * line an even 2px under that stretch, and the three markers are positioned as
- * HTML over the box rather than as SVG circles, which the stretch would squash
- * into ellipses.
+ * The 24 h temperature curve, stretched to any width by `preserveAspectRatio="none"`.
+ * Markers are HTML over the SVG, because the stretch would squash SVG circles.
  */
 export function Sparkline({
   points,
@@ -93,11 +85,8 @@ export function Sparkline({
 
   return (
     <div className={`relative ${className ?? ''}`}>
-      {/* Absolutely positioned, not `h-full`: a percentage height against a
-          parent whose own height is not definite resolves to auto, and an SVG
-          with a viewBox then takes its height from its intrinsic aspect ratio
-          - i.e. its width. On a phone that made a 192px slot render a 362px
-          chart straight over the metrics below it. */}
+      {/* Absolutely positioned: a percentage height against an indefinite
+          parent height resolves to auto, and the SVG then sizes from its width. */}
       <svg
         viewBox="0 0 100 100"
         preserveAspectRatio="none"

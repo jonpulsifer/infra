@@ -1,6 +1,6 @@
 /**
- * The abuse floor on its own: what a bucket refuses, and what a flood of fresh
- * keys does to a key that is being held.
+ * The rate limits on their own: what a bucket refuses, and what a flood of
+ * fresh keys does to a key that is being held.
  */
 import { describe, expect, test } from 'bun:test';
 import { addressOf } from '../../server/http.ts';
@@ -65,8 +65,8 @@ describe('the three write buckets', () => {
         now,
       ),
     ).toBe(false);
-    // The site bucket is empty now, so the next call is refused — and the
-    // visitor must come out of it with the allowance it went in with.
+    // The site bucket is empty, so this is refused and the visitor keeps its
+    // allowance.
     expect(
       spendAll(
         [
@@ -80,8 +80,7 @@ describe('the three write buckets', () => {
   });
 
   test('a bucket this request cannot be keyed by is skipped, not refused', () => {
-    // No cookie yet, and no address behind an untrusted proxy: what remains
-    // still bounds the call.
+    // No cookie yet, and no address behind an untrusted proxy.
     const address = new TokenBucket(WRITE_ADDRESS);
     const site = new TokenBucket(WRITE_SITE);
     expect(
@@ -98,7 +97,6 @@ describe('the daily cap', () => {
   test('charges the act, not the attempt', () => {
     const cap = new DailyCap(2);
     expect(cap.full('site')).toBe(false);
-    // Asking does not spend: twenty refused claims must not cost a day.
     expect(cap.full('site')).toBe(false);
     cap.count('site');
     cap.count('site');
@@ -115,9 +113,7 @@ describe('the daily cap', () => {
 
 describe('the address a bucket is keyed by', () => {
   test('two addresses in one /64 are one key', () => {
-    // What a residential customer is handed is a /64, so two addresses out of
-    // it must not be two allowances — compressed, which is the form that
-    // arrives, as much as expanded.
+    // A residential customer gets one /64, and addresses arrive compressed.
     expect(addressOf(from('2001:db8::1'), undefined)).toBe(
       addressOf(from('2001:db8::2'), undefined),
     );

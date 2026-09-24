@@ -6,10 +6,7 @@ import (
 	"testing"
 )
 
-// TestVectorD is SPEC.md's versioning-and-length vector. It asserts two things
-// the design leans on: a branch version bump really does rotate, and the L=32
-// output is a literal prefix of the L=64 output, which is why a leaf's key type
-// is pinned by the tree declaration rather than chosen at the call site.
+// SPEC.md's versioning-and-length vector.
 func TestVectorD(t *testing.T) {
 	master := mustHex(t, strings.Repeat("00", 32))
 
@@ -52,9 +49,8 @@ func TestVectorD(t *testing.T) {
 	if got := hex.EncodeToString(long); got != want {
 		t.Fatalf("L=64 okm = %s", got)
 	}
-	// Not a curiosity: RFC 5869 does not bind L into the expansion input, so a
-	// leaf declared at two lengths would be prefix-related rather than
-	// independent. SPEC.md 4.3 exists because of this line.
+	// RFC 5869 does not bind L into the expansion input, so a leaf declared at
+	// two lengths gets prefix-related keys.
 	if !strings.HasPrefix(hex.EncodeToString(long), "08b07ea669f9329cae8cb7728d0904273a34c88de605c5e67116d42c1b4fb13c") {
 		t.Fatal("L=32 is no longer a prefix of L=64")
 	}
@@ -105,13 +101,10 @@ func TestBranchAndLeafShape(t *testing.T) {
 	if err := CheckLeafPath("fml/infra/v1", "fml/infra/v1/v2"); err == nil {
 		t.Error("a 4-component leaf was accepted")
 	}
-	// The check that stops the wallet-branch holder from minting an
-	// infra-looking key nobody can reproduce.
 	if err := CheckLeafPath("fml/wallet/v1", "fml/infra/v1/pki/root/v1"); err == nil {
 		t.Error("a leaf outside its branch was accepted")
 	}
-	// A prefix match must be on a component boundary: fml/infra/v1 must not
-	// swallow fml/infra/v11.
+	// The prefix must end on a component boundary.
 	if err := CheckLeafPath("fml/infra/v1", "fml/infra/v11/pki/root/v1"); err == nil {
 		t.Error("a sibling branch was accepted as a descendant")
 	}
@@ -128,10 +121,8 @@ func TestSeedLengthRejection(t *testing.T) {
 	}
 }
 
-// TestCeremonyMasterSplit is SPEC.md section 9's deliberate asymmetry: the
-// library must derive from the all-zero master because vector A depends on it,
-// and the ceremony must refuse the same seed because a constant means entropy
-// collection failed.
+// The library derives from a constant master, which vector A needs. The
+// ceremony refuses one, because it means entropy collection failed.
 func TestCeremonyMasterSplit(t *testing.T) {
 	for _, seed := range [][]byte{make([]byte, 32), mustHex(t, strings.Repeat("ff", 32))} {
 		if _, err := Branch(seed, "fml/infra/v1"); err != nil {
@@ -170,8 +161,7 @@ func TestTreeMembership(t *testing.T) {
 			t.Errorf("declared leaf %q does not descend from %q: %v", d.Path, d.Branch, err)
 		}
 	}
-	// Every declared leaf must hang off a minted branch, or it would have no
-	// share set and would die with the master.
+	// A leaf off an unminted branch has no share set and dies with the master.
 	minted := map[string]bool{}
 	for _, b := range MintedBranches {
 		minted[b] = true
@@ -201,9 +191,8 @@ func TestBech32Rejection(t *testing.T) {
 			t.Errorf("%s: accepted %q", name, s)
 		}
 	}
-	// Non-zero padding in the 5-to-8 conversion: append a data character that
-	// leaves bits set past the last whole octet, then re-checksum so the only
-	// remaining fault is the padding itself.
+	// Append a character that sets padding bits, then re-checksum so the padding
+	// is the only fault.
 	lower := strings.ToLower(good)
 	sep := strings.LastIndexByte(lower, '1')
 	body := lower[sep+1 : len(lower)-6]

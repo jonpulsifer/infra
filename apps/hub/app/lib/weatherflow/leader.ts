@@ -1,11 +1,7 @@
-// Pure "who leads each metric" computation for the station-card comparison.
-// Replaces the old dedicated difference column: instead of a numeric delta, the
-// UI highlights the station holding the extreme (highest) value per metric.
+// Which station holds the highest reading of each metric.
 import type { StationObservation } from './types';
 
-// Metric fields with a meaningful leader (the highest reading). Wind direction
-// is excluded — a compass bearing has no max. Feels-like / timestamp aren't
-// compared either.
+// Wind direction is excluded: a compass bearing has no maximum.
 export const LEADER_FIELDS = [
   'temperature',
   'humidity',
@@ -22,8 +18,7 @@ export const LEADER_FIELDS = [
 export type LeaderField = (typeof LEADER_FIELDS)[number];
 
 // Per-field index of the station holding the unique maximum. A field is absent
-// from the map when fewer than two stations report it, or the maximum is tied —
-// in both cases there's nothing to single out.
+// when fewer than two stations report it or the maximum is tied.
 export type LeaderMap = Partial<Record<LeaderField, number>>;
 
 export function computeLeaders(
@@ -50,7 +45,6 @@ export function computeLeaders(
       }
     });
 
-    // Only mark a leader when it actually beat at least one other station.
     if (reporters >= 2 && bestIndex >= 0 && !tied) {
       leaders[field] = bestIndex;
     }

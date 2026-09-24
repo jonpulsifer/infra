@@ -1,5 +1,4 @@
-# oldschool: offsite worker node that also carries the site's odd jobs —
-# yarr and the offsite harmonia binary cache.
+# oldschool: offsite worker node that also runs yarr.
 { ... }:
 {
   imports = [
@@ -13,18 +12,14 @@
   services.k8s.clusterCa.enable = true;
 
   homelab.disko.device = "/dev/sda";
-  # 200G root (default is 100G) — leaves headroom for the harmonia
-  # binary cache + remote-builder role on top of yarr.
+  # 200G, not the 100G default, leaves room for builds and a harmonia cache.
   homelab.disko.rootSize = "200G";
 
   sops.defaultSopsFile = ../secrets/oldschool.sops.yaml;
-  # harmonia's binary-cache signing key (public half committed at
-  # nix/secrets/oldschool-harmonia-cache.pub); wired into
-  # services.harmonia in the deploy-harmonia ticket.
+  # harmonia's signing key (public half: nix/secrets/oldschool-harmonia-cache.pub). No service reads it yet.
   sops.secrets."harmonia-cache-key" = { };
 
-  # bosun no longer runs here, and nothing prunes the drop box: a leftover
-  # bosun.prom keeps exporting the pool it last saw, frozen, forever.
+  # bosun does not run here, and nothing else deletes its textfile, which would export a frozen pool.
   systemd.tmpfiles.rules = [
     "r /var/lib/prometheus-node-exporter-text-files/bosun.prom"
   ];

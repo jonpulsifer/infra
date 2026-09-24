@@ -1,14 +1,6 @@
-// The offline shell, served from /sw.js.
-//
-// It is a route rather than a file in public/ so the cache name can carry the
-// build ID. A deploy therefore changes the worker's own bytes, which is what
-// makes the browser install it, drop every cache from the previous build, and
-// take over - no stale bundle can outlive a deployment.
-//
-// Everything but the content-addressed /assets/ files is network-first, so the
-// kiosk Pis still see a new build the moment the snapshot's build ID stops
-// matching theirs. The cache is what a display falls back to when its wifi
-// drops, not what it reads from normally.
+// The offline shell, served from /sw.js. The cache name carries the build ID, so
+// each deploy installs a new worker and drops the old caches. Everything outside
+// /assets/ is network-first, so kiosks still see a new build.
 
 const script = `
 const CACHE = 'hub-${__BUILD_ID__}';

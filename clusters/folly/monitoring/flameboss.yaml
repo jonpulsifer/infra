@@ -46,7 +46,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: flameboss
-          image: ghcr.io/jonpulsifer/flameboss:latest@sha256:96aad0f1adb756ad8929fe3fdabf0aa48edc69e730b558d9ebf3490ba5687d48
+          image: ghcr.io/jonpulsifer/flameboss:latest@sha256:5e90f68ef76cc83928039862cac977d376cf2484c4a46760ebdf54cb926abd67
           imagePullPolicy: IfNotPresent
           ports:
             - name: http-metrics

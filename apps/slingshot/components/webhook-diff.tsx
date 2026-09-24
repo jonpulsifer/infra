@@ -95,13 +95,12 @@ function getChangedLineSets(oldValue: string, newValue: string) {
 
   for (const part of comm) {
     if ('common' in part) {
-      // These lines are the same in both, skip them
       oldLineIndex += part.common.length;
       newLineIndex += part.common.length;
       continue;
     }
 
-    // Lines only in old (removed)
+    // buffer1 holds lines only in the old text, buffer2 lines only in the new.
     if (part.buffer1) {
       for (let i = 0; i < part.buffer1.length; i++) {
         changedOld.add(oldLineIndex + i);
@@ -109,7 +108,6 @@ function getChangedLineSets(oldValue: string, newValue: string) {
       oldLineIndex += part.buffer1.length;
     }
 
-    // Lines only in new (added)
     if (part.buffer2) {
       for (let i = 0; i < part.buffer2.length; i++) {
         changedNew.add(newLineIndex + i);
@@ -163,8 +161,8 @@ function PrettyCode({
 }) {
   const isBase = variant === 'base';
   const highlightColor = isBase
-    ? 'rgba(244,63,94,0.35)' // rose - more visible
-    : 'rgba(34,197,94,0.35)'; // emerald - more visible
+    ? 'rgba(244,63,94,0.35)'
+    : 'rgba(34,197,94,0.35)';
 
   const diffCodeStyle: Record<string, React.CSSProperties> = {
     ...dracula,
@@ -215,7 +213,6 @@ function PrettyCode({
           const idx = lineNumber - 1;
           const isChanged = changedLines.has(idx);
           if (isChanged) {
-            // Apply background color directly with inline style
             return {
               style: {
                 display: 'block',

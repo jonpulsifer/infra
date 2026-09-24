@@ -19,7 +19,6 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import type { Webhook } from '@/lib/types';
 
-// Format time consistently (client-side only to avoid hydration issues)
 function formatTime(timestamp: number): string {
   const date = new Date(timestamp);
   const hours = date.getHours();
@@ -32,7 +31,6 @@ function formatTime(timestamp: number): string {
 
 function formatDate(timestamp: number): string {
   const date = new Date(timestamp);
-  // Use consistent formatting to avoid hydration issues
   const month = date.toLocaleDateString('en-US', { month: 'short' });
   const day = date.getDate();
   const year = date.getFullYear();
@@ -236,7 +234,8 @@ ${webhook.body || ''}`;
     }
   }, [webhook?.body]);
 
-  // Update time/date on client side to avoid hydration issues
+  // Formatted after mount: the server's time zone can differ from the
+  // browser's, which breaks hydration.
   useEffect(() => {
     setMounted(true);
     if (webhook) {

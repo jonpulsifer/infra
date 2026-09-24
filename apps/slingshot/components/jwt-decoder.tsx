@@ -54,13 +54,10 @@ const codeCustomStyle = {
 
 function decodeBase64Url(base64Url: string): string {
   try {
-    // Replace URL-safe characters
     const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
 
-    // Add padding if needed
     const padded = base64 + '='.repeat((4 - (base64.length % 4)) % 4);
 
-    // Decode
     return decodeURIComponent(
       atob(padded)
         .split('')
@@ -135,7 +132,6 @@ export function JwtDecoder() {
   const [token, setToken] = useState('');
   const [decoded, setDecoded] = useState<DecodedJwt | null>(null);
 
-  // Auto-decode on token change
   useEffect(() => {
     if (!token.trim()) {
       setDecoded(null);
@@ -248,7 +244,6 @@ export function JwtDecoder() {
 
       {decoded?.isValid ? (
         <div className="space-y-4">
-          {/* Decoded Sections */}
           <Tabs defaultValue="payload" className="w-full">
             <div className="flex items-center justify-between gap-4 mb-4">
               <TabsList className="inline-flex h-9">
@@ -399,7 +394,6 @@ export function JwtDecoder() {
                           const description = getClaimDescription(key);
                           let displayValue: string;
 
-                          // Format special claim types
                           if (key === 'exp' || key === 'nbf' || key === 'iat') {
                             displayValue = formatDate(value as number);
                           } else if (

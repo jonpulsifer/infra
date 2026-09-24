@@ -64,11 +64,8 @@ func main() {
 		logger.Error("sweep", "error", err)
 		os.Exit(1)
 	}
-	// Reported against what was asked for, because it is routinely less: every
-	// class mints a JIT config to boot, so a GitHub that is down at start
-	// yields an empty pool. The poll loop's top-up is what recovers from that,
-	// and saying "filled" here regardless is what made an empty pool look like
-	// a working one.
+	// Every boot mints a JIT config, so a GitHub outage at start leaves the pool
+	// short; the poll loop's top-up recovers it.
 	wanted := 0
 	for _, class := range cfg.Classes {
 		wanted += class.Warm
@@ -79,10 +76,7 @@ func main() {
 		logger.Info("warm pool filled", "classes", len(cfg.Classes), "booted", booted)
 	}
 
-	// buildDone closes once buildLoop has returned, so shutdown can wait for
-	// it: buildLoop keeps running (heartbeating, then posting a result) past
-	// ctx's cancellation for a build already in flight, and letting main
-	// return while that is still happening would abandon the result mid-post.
+	// Shutdown waits on this: buildLoop finishes a build in flight after ctx ends.
 	var buildDone chan struct{}
 	if cfg.Spindrift != nil {
 		sdTokenRaw, err := os.ReadFile(cfg.Spindrift.TokenFile)
@@ -108,12 +102,8 @@ func main() {
 
 	p.pollLoop(ctx)
 
-	// SIGTERM landed: drain rather than die. Refills are already stopped by
-	// the cancelled run context; what remains is giving busy skiffs their
-	// window to finish, on a fresh context because the drain's own GitHub
-	// calls must outlive the one that just ended. Restoring the default
-	// signal disposition first keeps a second signal as the escape hatch:
-	// it kills the process outright, and sweep-on-start owns the mess.
+	// stop() restores default signal handling, so a second signal kills outright.
+	// The drain's GitHub calls need a context that outlives the run context.
 	stop()
 	logger.Info("draining", "timeout", cfg.DrainTimeout.String())
 	drainCtx, cancel := context.WithTimeout(context.Background(), time.Duration(cfg.DrainTimeout))

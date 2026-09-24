@@ -1,39 +1,28 @@
 /**
- * `/api/ws`: one socket per tab, carrying two things that look alike and are
- * not.
- *
- * A **subscription** is a collection someone wants told about: every write to
- * `/api/db` fans out to it, the writer's own tab included, so a list on screen
- * and the row behind it never disagree. A **room** is presence and chatter that
- * never lands in the database — cursors, typing, a game tick.
- *
- * Fan-out is Bun's pub/sub in this process. That is correct only because there
- * is one replica by construction, which the sites volume already assumes; the
- * upgrade path is Postgres `LISTEN`/`NOTIFY` the day a second one exists.
+ * `/api/ws`: one socket per tab. A subscription hears every `/api/db` write to
+ * a collection, the writer's tab included; a room carries presence and
+ * messages that never reach the database.
  */
 
 export const MAX_FRAME_BYTES = 16 * 1024;
-/** How large a document still rides along in its frame. */
 export const MAX_FRAME_DOC_BYTES = 16 * 1024;
 export const MAX_ROOMS = 32;
 export const MAX_SUBSCRIPTIONS = 32;
 export const MAX_ROOM_MEMBERS = 256;
 export const MAX_SOCKETS_PER_VISITOR = 8;
 export const MAX_SOCKETS_PER_ADDRESS = 32;
-/** Frames a socket may send in a second before the rest are dropped. */
+/** Per socket; frames over budget are dropped. */
 const FRAMES_PER_SECOND = 20;
 const MAX_ROOM_CHARS = 128;
 
-/** What a socket carries: who it is, where it is, and what it is listening to. */
 export interface SocketData {
   readonly kind: 'kthx';
   readonly site: string;
-  /** The `__Host-kthx_me` id, which is what a room shows the others. */
+  /** The visitor id, which a room shows the other peers. */
   readonly me: string;
   readonly address: string | null;
   readonly rooms: Set<string>;
   readonly subscriptions: Set<string>;
-  /** The send budget, refilled by time rather than by a timer. */
   budget: { tokens: number; at: number };
 }
 
@@ -43,8 +32,8 @@ const collectionTopic = (site: string, collection: string) =>
   `kthx:${site}:c:${collection}`;
 const roomTopic = (site: string, room: string) => `kthx:${site}:r:${room}`;
 
-// ponytail: one replica, so presence and the socket counts are plain maps in
-// this process. They go to Postgres with the fan-out when a second one exists.
+// ponytail: one replica, so fan-out, presence and socket counts live in this
+// process. A second replica needs Postgres `LISTEN`/`NOTIFY`.
 /** Room topic → peer id → how many of that peer's sockets are in the room. */
 const presence = new Map<string, Map<string, number>>();
 /** `site:key` → open sockets, for the two upgrade caps. */
@@ -57,7 +46,6 @@ function bump(key: string, by: number): number {
   return next;
 }
 
-/** Whether this visitor or address already has as many sockets as it may. */
 export function socketsFull(
   site: string,
   me: string,
@@ -72,7 +60,6 @@ export function socketsFull(
   );
 }
 
-/** Tell every tab subscribed to this collection what just happened to it. */
 export function publishDocument(
   server: Bun.Server<unknown> | undefined,
   site: string,
@@ -82,13 +69,12 @@ export function publishDocument(
   server?.publish(collectionTopic(site, collection), JSON.stringify(frame));
 }
 
-/** A document rides along when it is small; otherwise the etag is the signal. */
+/** A small document rides in its frame; otherwise the etag is the signal. */
 export function framed(document: Record<string, unknown>): unknown {
   const text = JSON.stringify(document);
   return Buffer.byteLength(text) <= MAX_FRAME_DOC_BYTES ? document : undefined;
 }
 
-/** The handlers `Bun.serve` is given for a kthx socket. */
 export const websocket = {
   idleTimeout: 120,
   maxPayloadLength: MAX_FRAME_BYTES,
@@ -161,7 +147,6 @@ export const websocket = {
   },
 };
 
-/** Twenty frames a second per socket, refilled by the clock. */
 function affordable(state: SocketData, now = Date.now()): boolean {
   const budget = state.budget;
   budget.tokens = Math.min(
@@ -179,8 +164,7 @@ function join(socket: Socket, state: SocketData, room: string): void {
   const peers = presence.get(topic) ?? new Map<string, number>();
   presence.set(topic, peers);
   if (!state.rooms.has(room)) {
-    // A full room takes no new peer; one of its own peers opening a second tab
-    // is not a new peer and is let in.
+    // A full room still admits another tab of a peer already in it.
     if (peers.size >= MAX_ROOM_MEMBERS && !peers.has(state.me)) return;
     state.rooms.add(room);
     socket.subscribe(topic);

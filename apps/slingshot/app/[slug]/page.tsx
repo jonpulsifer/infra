@@ -11,8 +11,8 @@ import { getProjectStore } from '@/lib/project-store-firestore';
 import { isReservedSlug } from '@/lib/slug';
 
 export async function generateStaticParams() {
-  // Cache Components requires at least one result, so an unreachable Firestore
-  // falls back to the default project rather than failing the build.
+  // Cache Components fails the build on an empty result, so an empty or
+  // unreachable store yields the default project.
   const fallback = [{ slug: DEFAULT_PROJECT_SLUG }];
   try {
     const store = await getProjectStore();

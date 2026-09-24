@@ -16,7 +16,6 @@ import (
 	"github.com/jonpulsifer/infra/apps/fml-ceremony/derive"
 )
 
-// notBefore is pinned from the ceremony's declared start, never from the clock.
 var notBefore = time.Date(2026, 8, 26, 0, 0, 0, 0, time.UTC)
 
 func subject(t *testing.T, cn string) []byte {
@@ -34,8 +33,6 @@ type anchors struct {
 	rootCert, intCert *x509.Certificate
 }
 
-// mint runs the whole anchor half of the ceremony from a master seed: derive
-// both Ed25519 leaves, self-sign the root, sign the intermediate under it.
 func mint(t *testing.T, masterHex string) anchors {
 	t.Helper()
 	master, err := hex.DecodeString(masterHex)
@@ -50,9 +47,7 @@ func mint(t *testing.T, masterHex string) anchors {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// pathLen 2 on the root and 1 on the intermediate: two CAs follow the root
-	// and one follows the intermediate. An anchor holding less than the chain
-	// requires forbids the chain it signs.
+	// Two CA levels sit below the root and one below the intermediate.
 	rootDER, err := SelfSigned(rootMat.Ed25519, Profile{
 		Path:       rootMat.Leaf.Path,
 		RawSubject: subject(t, "Folly Mountain Laboratories Root CA"),
@@ -84,12 +79,7 @@ func mint(t *testing.T, masterHex string) anchors {
 	return anchors{rootDER, intDER, rootMat.Ed25519, intMat.Ed25519, rootCert, intCert}
 }
 
-// TestMintIsBitIdentical is the property the whole design rests on: the same
-// master seed, minted twice, produces the same certificate octet for octet.
-//
-// It is available only because the anchors are Ed25519 — RFC 8032 signatures
-// are deterministic, unlike ECDSA's or a PSS RSA's. The scope of the claim is
-// stated honestly in TestDeterminismScope below.
+// Only Ed25519 anchors can pass this: RFC 8032 signatures are deterministic.
 func TestMintIsBitIdentical(t *testing.T) {
 	const master = "2d85dabefa504eefea7740977b1f9110daf404cc24422896a209b41eca970218"
 	a := mint(t, master)
@@ -100,18 +90,13 @@ func TestMintIsBitIdentical(t *testing.T) {
 	if !bytes.Equal(a.intDER, b.intDER) {
 		t.Fatalf("intermediate DER differs between runs:\n%x\n%x", a.intDER, b.intDER)
 	}
-	// A different master must produce different anchors, or the test above
-	// would pass on a constant.
+	// Guards against the equality above passing on a constant.
 	c := mint(t, "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f")
 	if bytes.Equal(a.rootDER, c.rootDER) {
 		t.Fatal("two different masters minted the same root")
 	}
 }
 
-// TestSignatureIgnoresRandomness proves the reproducibility rather than
-// asserting it: mint once with a reader that refuses to produce a byte, and
-// once with the real CSPRNG. Identical output means no randomness reached the
-// certificate, which is stronger than minting twice the same way.
 func TestSignatureIgnoresRandomness(t *testing.T) {
 	key := ed25519.NewKeyFromSeed(bytes.Repeat([]byte{7}, 32))
 	p := Profile{
@@ -138,32 +123,13 @@ func TestSignatureIgnoresRandomness(t *testing.T) {
 	}
 }
 
-// TestDeterminismScope records what "identical" is actually true of, so nobody
-// reads the test above as a promise about the year 2046.
-//
-// Deterministic, forever: the derivation, the key, the serial, the subject key
-// identifier, the timestamps. Those are all computed in this repository from
-// pinned inputs.
-//
-// Not promised by anything: the order crypto/x509 emits extensions in, and the
-// exact DER it builds around them. That order is whatever the emitting code in
-// crypto/x509 does, no specification pins it, and Go's compatibility promise
-// does not cover it. So the honest claim is "bit-identical under a pinned
-// toolchain", not "bit-identical in twenty years" — which is why the ceremony
-// transcript records the Go version, and why the certificate's own SHA-256 is
-// recorded rather than a promise to recompute it.
+// Byte equality holds only under a pinned toolchain: Go's compatibility promise
+// does not cover crypto/x509's extension order or DER layout.
 func TestDeterminismScope(t *testing.T) {
 	a := mint(t, "2d85dabefa504eefea7740977b1f9110daf404cc24422896a209b41eca970218")
 
-	// The pinned-toolchain claim, made operational. These are the SHA-256s of
-	// the two anchors minted from that master under the Go this test last
-	// passed on. If a toolchain bump changes how crypto/x509 builds DER, this
-	// fails here, on a PR, instead of at a ceremony where a certificate was
-	// supposed to come out identical to one minted years earlier.
-	//
-	// A failure is not necessarily a defect. It means the byte-equality claim
-	// now holds only within a toolchain range, and the transcript's recorded Go
-	// version is what tells a future verifier which range they are in.
+	// A failure means a toolchain bump changed crypto/x509's DER output. The
+	// transcript's recorded Go version tells a verifier which output applies.
 	for _, tc := range []struct{ name, der, want string }{
 		{"root", string(a.rootDER), "1444dc58af29362e9580f88695dae3fe9ebd0f166fb73d5a9f75a5a34b77119d"},
 		{"intermediate", string(a.intDER), "968abc141cd7520de0c7d5605a5fe29fe42fd9b847d001ea79a3225dd0b051eb"},
@@ -174,10 +140,6 @@ func TestDeterminismScope(t *testing.T) {
 		}
 	}
 
-	// The extensions Go emits, in the order it emits them. A change here is
-	// exactly the kind of toolchain drift that would break byte-equality with
-	// a certificate minted under an older Go, and it should fail this test
-	// rather than surface during a re-birth.
 	var got []string
 	for _, e := range a.rootCert.Extensions {
 		got = append(got, e.Id.String())
@@ -197,8 +159,6 @@ func TestDeterminismScope(t *testing.T) {
 	}
 }
 
-// TestSerialProperties is ticket 07's checklist: positive, at most 20 octets
-// encoded, and unique across every key in the tree.
 func TestSerialProperties(t *testing.T) {
 	seen := map[string]string{}
 	for _, master := range []string{
@@ -226,13 +186,12 @@ func TestSerialProperties(t *testing.T) {
 			if sn.Sign() <= 0 {
 				t.Errorf("%s under %s: serial is not positive", d.Path, master[:8])
 			}
-			// DER encodes a positive INTEGER with a leading zero octet when
-			// the high bit is set, so the encoded length can be one more than
-			// the value length. RFC 5280 caps it at 20.
 			encoded, err := asn1.Marshal(sn)
 			if err != nil {
 				t.Fatal(err)
 			}
+			// Minus the tag and length octets. RFC 5280 caps the value, leading
+			// zero octet included, at 20.
 			if n := len(encoded) - 2; n > 20 {
 				t.Errorf("%s: serial encodes to %d octets", d.Path, n)
 			}
@@ -243,9 +202,8 @@ func TestSerialProperties(t *testing.T) {
 			seen[key] = master[:8] + "/" + d.Path
 		}
 	}
-	// Same key, different path: the path is in the derivation, so the serials
-	// must differ. Without that a leaf reissued at a new path would reuse a
-	// serial, which RFC 5280 forbids for one issuer.
+	// One key at two paths needs two serials: RFC 5280 forbids reusing a serial
+	// under one issuer.
 	pub, _, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
 		t.Fatal(err)
@@ -263,9 +221,6 @@ func TestSerialProperties(t *testing.T) {
 	}
 }
 
-// TestChainLinks asserts the minted pair is usable: the intermediate is signed
-// by the root, both are CAs, the identifiers link, and pathLen admits a cluster
-// CA and a leaf beneath it.
 func TestChainLinks(t *testing.T) {
 	a := mint(t, "2d85dabefa504eefea7740977b1f9110daf404cc24422896a209b41eca970218")
 
@@ -278,11 +233,6 @@ func TestChainLinks(t *testing.T) {
 	if !bytes.Equal(a.intCert.AuthorityKeyId, a.rootCert.SubjectKeyId) {
 		t.Error("the intermediate's authorityKeyIdentifier does not name the new root")
 	}
-	// A re-birth mints new keys, so the identifiers necessarily change. That is
-	// the opposite of apps/fml-pki's reissue path, which carries the previous
-	// SubjectKeyId precisely so already-issued certificates still find their
-	// issuer. Everything issued under the old anchors keeps pointing at the old
-	// identifier and must be reissued; nothing here can paper over that.
 	if bytes.Equal(a.rootCert.SubjectKeyId, a.intCert.SubjectKeyId) {
 		t.Error("the two anchors share a subject key identifier")
 	}
@@ -296,9 +246,8 @@ func TestChainLinks(t *testing.T) {
 		t.Errorf("the root's validity is %s..%s", a.rootCert.NotBefore, a.rootCert.NotAfter)
 	}
 
-	// A cluster CA issued under the new intermediate must build a full path to
-	// the new root, which is what an OpenSSL client does and a Go client does
-	// not: Go anchors on whatever is in the trust store and never walks up.
+	// Only the root is trusted, so the cluster CA must chain through the
+	// intermediate to it.
 	_, clusterKey, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
 		t.Fatal(err)

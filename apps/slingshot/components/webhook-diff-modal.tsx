@@ -27,7 +27,6 @@ export function WebhookDiffModal({
     initialCompareId || (webhooks.length > 1 ? webhooks[1].id : null),
   );
 
-  // Reset to initial values when modal opens
   useEffect(() => {
     if (open) {
       setBaseId(initialBaseId || (webhooks.length > 0 ? webhooks[0].id : null));

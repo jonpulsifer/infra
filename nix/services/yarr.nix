@@ -49,7 +49,6 @@ in
       };
     };
 
-    # https://github.com/NixOS/nixpkgs/issues/360592
     sonarr.enable = true;
 
     bazarr.enable = true;

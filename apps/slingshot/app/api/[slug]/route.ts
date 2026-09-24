@@ -6,12 +6,9 @@ import { sanitizeHeaders } from '@/lib/sanitize-headers';
 import { isReservedSlug } from '@/lib/slug';
 import type { Webhook } from '@/lib/types';
 
-const MAX_BODY_SIZE = 5 * 1024 * 1024; // 5MB
+const MAX_BODY_SIZE = 5 * 1024 * 1024;
 
-/**
- * Webhook ingestion for `/api/{slug}`. Accepts any method, rate limits per
- * project at 5 RPS, and records the request through the project store.
- */
+// Webhook ingestion for /api/{slug}: any method, rate limited per project.
 
 function rateLimitHeaders(result: {
   limit: number;

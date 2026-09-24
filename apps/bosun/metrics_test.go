@@ -50,8 +50,7 @@ func TestRenderExposesPoolStateAndCounters(t *testing.T) {
 		}
 	}
 
-	// Every series needs its metadata, or the textfile collector rejects the
-	// whole file rather than the line.
+	// The textfile collector rejects the whole file if a series lacks metadata.
 	for _, name := range []string{"bosun_skiffs", "bosun_skiffs_desired", "bosun_skiff_boots_total", "bosun_skiff_exits_total", "bosun_skiff_time_to_online_seconds", "bosun_github_errors_total", "bosun_build_claims_total", "bosun_build_results_total", "bosun_spindrift_errors_total"} {
 		if !strings.Contains(got, "# TYPE "+name+" ") {
 			t.Errorf("missing TYPE line for %s", name)
@@ -59,8 +58,7 @@ func TestRenderExposesPoolStateAndCounters(t *testing.T) {
 	}
 }
 
-// The mtime is the heartbeat, so the publish path has to actually land a file
-// even when nothing has happened yet.
+// The mtime is the heartbeat, so a file must be written before anything happens.
 func TestPublishWritesTextfileAndCountsAGuestHalt(t *testing.T) {
 	p, _, fl := testPool(t)
 	p.cfg.MetricsFile = filepath.Join(t.TempDir(), "sub", "bosun.prom")

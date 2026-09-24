@@ -1,17 +1,11 @@
-//! Cross-check CLI for the FML derivation spec.
-//!
-//! Prints one derived value per invocation on stdout, so a harness can diff it
-//! against another implementation without linking to either.
+//! Cross-check CLI for the FML derivation spec. It prints one derived value per
+//! invocation, so a harness can diff it against another implementation.
 //!
 //! ```text
 //! fml-derive <master-hex> <path> [--len N] [--as FORM]
 //! ```
 //!
-//! `<path>` with 3 components is a branch and prints the branch secret;
-//! 5 or more is a leaf and prints its OKM. `--as` maps the OKM through §7:
-//! `hex` (default), `ed25519-pub`, `age-identity`, `age-recipient`, `bip39`.
-//! `prk` prints the HKDF-Extract PRK for the level that produced the value,
-//! which is what localises a disagreement to a level (§11).
+//! `--as prk` prints the HKDF-Extract PRK of the level that produced the value.
 
 use fml_derive::*;
 
@@ -64,8 +58,8 @@ fn run() -> Result<String> {
     let path = positional[1];
     let n = components(path)?.len();
 
-    // A branch secret is fixed at 32 octets by §5.1 and is a sharding input,
-    // never a key: neither --len nor a §7 mapping is meaningful there.
+    // A branch secret is 32 octets and a sharding input, never a key, so neither
+    // --len nor a key mapping applies.
     if n == 3 {
         if len.is_some() {
             return Err("--len does not apply to a branch path: §5.1 fixes it at 32".to_string());

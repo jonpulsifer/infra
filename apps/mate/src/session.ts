@@ -9,12 +9,8 @@ export interface SessionStore {
 
 const WRITE_DEBOUNCE_MS = 1_000;
 
-/**
- * Session info lands in a file so a container restart inside the same pod
- * resumes instead of spending an identify. The library updates the sequence
- * on every dispatch, so writes are debounced; a `null` (session invalidated)
- * removes the file at once.
- */
+// A container restart in the same pod resumes from this file and spends no
+// identify. Writes are debounced: the sequence changes on every dispatch.
 export function fileSessionStore(path: string, log: Log): SessionStore {
   let current: SessionInfo | null = null;
   let timer: ReturnType<typeof setTimeout> | null = null;

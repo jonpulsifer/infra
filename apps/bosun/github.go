@@ -20,30 +20,20 @@ import (
 	"time"
 )
 
-// githubClient is the port bosun talks to the GitHub Actions runner API
-// through. ghClient is the real adapter; tests substitute a fake.
-//
-// There is deliberately no "list runners" method: GitHub's list accumulates
-// unconsumed JIT registrations as ghosts, so it is never authoritative for
-// pool size. Every call here addresses one runner by id.
+// githubClient addresses one runner by id and has no list method: GitHub's list
+// keeps unconsumed JIT registrations as ghosts.
 type githubClient interface {
-	// GenerateJITConfig mints a just-in-time runner registration. The
-	// returned config expires ~1h from this call if never consumed, so
-	// callers must mint it immediately before boot, never stockpile it.
+	// The config expires ~1h from this call if unconsumed, so mint just before boot.
 	GenerateJITConfig(ctx context.Context, repo, name string, labels []string) (runnerID int64, encodedJITConfig string, err error)
-	// GetRunner reports one runner's live status.
 	GetRunner(ctx context.Context, repo string, runnerID int64) (status string, busy bool, err error)
 	DeleteRunner(ctx context.Context, repo string, runnerID int64) error
 }
 
 const githubAPIBase = "https://api.github.com"
 
-// ghClient is the real githubClient, talking to api.github.com. base is
-// overridable so tests can point it at an httptest server.
 type ghClient struct {
 	httpClient *http.Client
-	// token resolves the bearer for a call against repo. Production wires
-	// (*appAuth).Token; tests use a fixed value.
+	// Resolves the bearer for repo; production wires (*appAuth).Token.
 	token func(ctx context.Context, repo string) (string, error)
 	base  string
 }
@@ -104,9 +94,8 @@ func (c *ghClient) DeleteRunner(ctx context.Context, repo string, runnerID int64
 	return doRequest(ctx, c.httpClient, http.MethodDelete, url, bearer, nil, nil)
 }
 
-// doRequest is the one place an HTTP call against the GitHub API is made,
-// shared by ghClient (bearer = an installation token) and appAuth itself
-// (bearer = the App's own JWT, for the two endpoints that mint one).
+// doRequest serves ghClient with an installation token and appAuth with the
+// App's own JWT.
 func doRequest(ctx context.Context, client *http.Client, method, url, bearer string, body, out any) error {
 	var reqBody io.Reader
 	if body != nil {
@@ -143,8 +132,7 @@ func doRequest(ctx context.Context, client *http.Client, method, url, bearer str
 	return json.NewDecoder(resp.Body).Decode(out)
 }
 
-// httpStatusError is a >=300 response from doRequest. Its statusCode is what
-// appAuth checks to tell "installation gone" (404) from any other failure.
+// A >=300 response; callers read statusCode to spot a 404.
 type httpStatusError struct {
 	method, url, status string
 	statusCode          int
@@ -155,40 +143,22 @@ func (e *httpStatusError) Error() string {
 	return fmt.Sprintf("github %s %s: %s: %s", e.method, e.url, e.status, e.body)
 }
 
-// runnerGone reports whether err is a DeleteRunner that found nothing to
-// delete. A 404 is the outcome the call exists to produce, not a failure to
-// reach GitHub — and the callers that keep a runner id around to retry a
-// failed deregistration would otherwise keep this one forever.
-//
-// The method check is what makes this safe, not a detail. DeleteRunner's own
-// auth chain 404s too — resolveInstallation GETs /repos/{repo}/installation
-// and mintInstallationToken POSTs for a token, and DeleteRunner wraps both —
-// so errors.As alone matches "this App is not installed on the repo" and reads
-// it as "that runner is already gone". Deleting the runner id on the strength
-// of a DELETE that never left the process is the exact failure the id is kept
-// to prevent, and it would be silent.
+// runnerGone treats a 404 from the DELETE itself as success. The method check
+// matters: DeleteRunner's auth calls also 404 when the App is not installed.
 func runnerGone(err error) bool {
 	var se *httpStatusError
 	return errors.As(err, &se) && se.statusCode == http.StatusNotFound && se.method == http.MethodDelete
 }
 
-// appAuth mints GitHub App installation tokens: it signs its own short-lived
-// JWTs with the App's private key, resolves which installation owns a repo,
-// and caches the resulting installation token against its ~1h expiry. Go
-// stdlib only -- crypto/rsa signs the JWT by hand, so no JWT library earns
-// its place.
-//
-// Ticket-13's mint-immediately-before-boot rule lives in pool.go and is
-// untouched by this: it mints a JIT config, which is a distinct ~1h-lived
-// credential from the installation token below. Two clocks, both satisfied
-// by minting each at the moment it is needed rather than stockpiling either.
+// appAuth signs App JWTs by hand and caches one installation token per
+// installation until near its ~1h expiry.
 type appAuth struct {
 	appID int64
-	key   *rsa.PrivateKey // read from the key file once, at construction; never re-read or logged
+	key   *rsa.PrivateKey // read once at construction; never logged
 
 	httpClient *http.Client
-	base       string           // overridable so tests can point it at an httptest server
-	now        func() time.Time // overridable so tests can control cache expiry deterministically
+	base       string           // overridable for tests
+	now        func() time.Time // overridable for tests
 
 	mu            sync.Mutex
 	installations map[string]int64      // repo -> installation id
@@ -201,18 +171,13 @@ type cachedToken struct {
 }
 
 const (
-	jwtClockSkew = 60 * time.Second // iat backdated per GitHub's own doc, to tolerate clock drift
+	jwtClockSkew = 60 * time.Second // iat is backdated for clock drift, as GitHub advises
 	jwtLifetime  = 9 * time.Minute  // GitHub caps exp at 10 minutes from iat; a minute of margin
 
-	// tokenRefreshMargin is how far ahead of an installation token's 1h
-	// expiry a cached one is treated as stale, so a mint in flight never
-	// races the token dying mid-use.
+	// A cached token this close to its 1h expiry counts as stale, so none dies mid-call.
 	tokenRefreshMargin = 5 * time.Minute
 )
 
-// newAppAuth reads and parses privateKeyFile once. The parsed key lives only
-// in memory for the process lifetime; it is never re-read from disk and
-// never logged.
 func newAppAuth(appID int64, privateKeyFile string) (*appAuth, error) {
 	key, err := loadPrivateKey(privateKeyFile)
 	if err != nil {
@@ -229,9 +194,7 @@ func newAppAuth(appID int64, privateKeyFile string) (*appAuth, error) {
 	}, nil
 }
 
-// loadPrivateKey parses the App's PEM key. GitHub's key generator and the
-// manifest-conversion endpoint both emit PKCS#1 ("BEGIN RSA PRIVATE KEY");
-// PKCS#8 is accepted too so a key re-exported by other tooling still works.
+// GitHub emits PKCS#1 keys; PKCS#8 is accepted for keys re-exported elsewhere.
 func loadPrivateKey(path string) (*rsa.PrivateKey, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -279,10 +242,8 @@ func (a *appAuth) signJWT() (string, error) {
 	return signingInput + "." + base64.RawURLEncoding.EncodeToString(sig), nil
 }
 
-// Token returns a bearer suitable for repo: an installation token, minted
-// (or reused, inside its refresh margin) against the installation that owns
-// repo. Both the installation id and the token are cached in memory for the
-// life of the process; nothing here is ever logged.
+// Token returns an installation token for repo, cached until its refresh
+// margin. Nothing here is logged.
 func (a *appAuth) Token(ctx context.Context, repo string) (string, error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -305,9 +266,8 @@ func (a *appAuth) Token(ctx context.Context, repo string) (string, error) {
 	if err != nil {
 		var herr *httpStatusError
 		if errors.As(err, &herr) && herr.statusCode == http.StatusNotFound {
-			// The installation is gone -- app uninstalled, or reinstalled
-			// under a new id. Drop the cache so the next call re-resolves
-			// instead of retrying a dead id forever.
+			// The installation is gone (uninstalled or reinstalled under a new id), so
+			// the next call re-resolves.
 			delete(a.installations, repo)
 			delete(a.tokens, instID)
 		}
@@ -332,10 +292,8 @@ func (a *appAuth) resolveInstallation(ctx context.Context, repo string) (int64, 
 	return resp.ID, nil
 }
 
-// mintInstallationToken narrows the mint to Administration:write -- the one
-// permission GenerateJITConfig/GetRunner/DeleteRunner need -- even though
-// the App's own grant may carry more, so a stolen token can do only what
-// this process does.
+// Narrowed to Administration: write, the one permission bosun uses, so a stolen
+// token can do only what bosun does.
 func (a *appAuth) mintInstallationToken(ctx context.Context, instID int64) (cachedToken, error) {
 	jwt, err := a.signJWT()
 	if err != nil {

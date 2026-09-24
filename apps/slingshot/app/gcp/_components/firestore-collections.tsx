@@ -99,7 +99,6 @@ export default function FirestoreCollections({
                     </TableHeader>
                     <TableBody>
                       {collection.sampleDocuments.map((doc, docIdx) => {
-                        // Parse "type (count)" format
                         const match = doc.id.match(/^(.+?)\s+\((\d+)\)$/);
                         const type = match ? match[1] : doc.type || doc.id;
                         const count = match

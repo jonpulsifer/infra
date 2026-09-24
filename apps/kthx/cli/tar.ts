@@ -1,13 +1,11 @@
 /**
- * A directory as the gzipped tar a release is: the wire format every reader
- * of a staged bundle opens, written the one way (ustar, GNU long names, no
- * timestamps) so the same files always upload as the same bytes.
+ * Packs a site directory as a gzipped tar with no timestamps (ustar, GNU long
+ * names), so the same files always upload as the same bytes.
  */
 import { readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { KthxError } from './error.ts';
 
-/** What a site carries: no dotfiles, no `node_modules`, and never `kthx.json`. */
 export function included(path: string): boolean {
   return (
     path !== 'kthx.json' &&
@@ -24,10 +22,9 @@ export interface Packed {
   readonly size: number;
 }
 
-/** The files under `dir` that a site carries, as one gzipped tar. */
 export function pack(dir: string): Packed {
-  // Glob's own file filter skips symlinks; a linked file is a file here, and a
-  // dangling one is an error rather than a quietly smaller site.
+  // Glob's `onlyFiles` skips symlinks, so stat decides. A dangling link is an
+  // error, never a silently smaller site.
   const paths = [
     ...new Bun.Glob('**/*').scanSync({
       cwd: dir,
@@ -66,7 +63,7 @@ export interface TarEntry {
 }
 
 const BLOCK = 512;
-/** The header's name field; a longer path rides in a GNU long-name entry before it. */
+/** The header's name field; a longer path goes in a GNU long-name entry first. */
 const NAME_LIMIT = 100;
 
 export function tarGz(entries: readonly TarEntry[]): Uint8Array<ArrayBuffer> {
@@ -107,7 +104,6 @@ function header(name: string, size: number, typeFlag: string): Uint8Array {
   return block;
 }
 
-/** Entry data, rounded up to the block size tar counts in. */
 function padded(bytes: Uint8Array): Uint8Array {
   const block = new Uint8Array(Math.ceil(bytes.length / BLOCK) * BLOCK);
   block.set(bytes, 0);

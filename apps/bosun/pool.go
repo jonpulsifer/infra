@@ -17,13 +17,8 @@ import (
 	"time"
 )
 
-// skiff is one running microVM: its GitHub runner registration, on-disk
-// state, and the child processes bosun launched for it.
-//
-// Everything under mu is the skiff's own state machine — what GitHub has said
-// about its runner, and what bosun has decided to do about it. The poll loop,
-// the drain path and awaitExit all reach that state from different
-// goroutines, so they reach it only through the methods below.
+// skiff is one running microVM. The poll loop, drain and awaitExit reach the
+// state under mu from different goroutines, so only through its methods.
 type skiff struct {
 	id       string
 	class    string
@@ -43,21 +38,16 @@ type skiff struct {
 	helpers    []proc // virtiofsd(s) + passt
 	ch         proc   // cloud-hypervisor; Wait() on this is "did the job finish"
 
-	// build marks a skiff spawned for a Spindrift build request rather than a
-	// GitHub runner. It carries no registration to poll or deregister, and
-	// awaitExit never spawns a replacement for one -- buildLoop's own claim
-	// loop is what decides whether another skiff boots.
+	// A build skiff runs one claimed build request: no registration to poll or
+	// deregister, and awaitExit never replaces it.
 	build   bool
 	buildID string
-	// done closes once retire has finished tearing this build skiff down, so
-	// runBuild knows it is safe to read the diag share for a result.
+	// done closes after retire, when the diag share is safe to read.
 	done chan struct{}
 }
 
-// observe folds one GitHub reading of this skiff's runner into the state the
-// reaping rules read. It reports whether this reading is the runner's first
-// online transition — the one observation with a side effect outside the
-// skiff — and the consecutive offline count the wedge rule debounces on.
+// observe folds one GitHub reading into the skiff's state. justConnected is
+// true only on the runner's first online reading.
 func (s *skiff) observe(now time.Time, status string, busy bool) (justConnected bool, offlineStreak int) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -70,17 +60,14 @@ func (s *skiff) observe(now time.Time, status string, busy bool) (justConnected 
 	} else {
 		s.offlineStreak = 0
 	}
-	// The busy transition is recorded once, so maxLifetime is measured from
-	// when the job started, not from boot (which would let warm idle time eat
-	// a job's budget).
+	// Recorded once, so maxLifetime runs from the job's start and warm idle time
+	// never eats its budget.
 	if busy && s.busySince.IsZero() {
 		s.busySince = now
 	}
 	return justConnected, s.offlineStreak
 }
 
-// streak is the consecutive-offline count the wedge rule fires on, read back
-// for the log line that reports it.
 func (s *skiff) streak() int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -94,8 +81,6 @@ func (s *skiff) busy() bool {
 	return !s.busySince.IsZero()
 }
 
-// busyFor is how long this skiff has been on its job, and zero if it never
-// took one.
 func (s *skiff) busyFor(now time.Time) time.Duration {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -105,74 +90,37 @@ func (s *skiff) busyFor(now time.Time) time.Duration {
 	return now.Sub(s.busySince)
 }
 
-// markBusyFromBoot makes a skiff busy for the whole of its life without a
-// GitHub reading behind it. Only a build skiff is: it is busy by
-// construction, so its class's lifetime budget runs from the moment it boots
-// rather than from a status transition it will never have.
+// Build skiffs only: they are busy from boot, so the class's lifetime budget
+// runs from then.
 func (s *skiff) markBusyFromBoot() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.busySince = s.mintedAt
 }
 
-// verdict answers what, if anything, should end this skiff now: the empty
-// string, or the reason to condemn it with.
-//
-//   - Offline after having been online, and never busy: the guest is wedged
-//     holding a credential it will never spend. ch-remote ping cannot tell a
-//     hung guest from a healthy one — both answer with a live VMM — so
-//     GitHub's own view of the runner is the only signal. It takes
-//     wedgeThreshold consecutive offline observations, because a runner
-//     briefly loses its connection whenever the network hiccups. (The streak
-//     is what says the latest reading was offline: any other status resets
-//     it.)
-//
-//     A skiff that has gone busy is exempt. The same signal on a running job
-//     is indistinguishable from a job whose runner is merely quiet, and
-//     killing on it destroys the job *and* the evidence of why. maxLifetime
-//     is the reaper there: it bounds a wedged busy skiff to the budget its
-//     class already declares, which is why that budget may not be zero.
-//
-//   - Busy past maxLifetime: measured from busySince, never from boot, so
-//     warm idle time never eats a job's budget.
-//
-//   - Idle past jitExpiry: the credential this skiff registered with is now
-//     dead and it never connected; recycle it for a fresh one.
-//
-// fresh says whether a current reading of the runner stands behind this call.
-// It gates the expiry rule alone, and that rule is the only one it could
-// safely gate:
-//
-//   - busySince is set only by observe, so on a poll whose GitHub read failed,
-//     a zero busySince means "bosun has not seen it take a job" rather than
-//     "it is idle". A skiff's runner holds its own connection to the Actions
-//     service, so GitHub can hand it a job while api.github.com is refusing
-//     bosun's reads — and reaping on a stale zero destroys that job. Expiry is
-//     garbage collection for a warm slot holding a dead credential; it has no
-//     deadline of its own and simply waits for a reading.
-//   - The lifetime rule needs no gate: busySince being non-zero is a fact an
-//     earlier successful reading established, and a wall clock does not stop
-//     because an API did.
-//   - The wedge rule needs no gate either. It fires on the consecutive-offline
-//     streak, which only observe advances, so a failed read cannot move it.
+// verdict returns the reason to end this skiff now, or "" to keep it.
 func (s *skiff) verdict(now time.Time, maxLifetime time.Duration, fresh bool) string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	switch {
+	// Online once, then offline for wedgeThreshold polls while idle. A hung guest
+	// still answers ch-remote ping, so GitHub's view is the only signal.
 	case s.busySince.IsZero() && s.everOnline && s.offlineStreak >= wedgeThreshold:
 		return exitWedged
+	// The only reaper of a busy skiff, wedged or working. It runs from busySince,
+	// so warm idle time never counts.
 	case !s.busySince.IsZero() && maxLifetime > 0 && now.Sub(s.busySince) > maxLifetime:
 		return exitLifetime
+	// Needs fresh: after a failed read, a zero busySince may hide a job GitHub
+	// handed over while its API was refusing bosun.
 	case fresh && s.busySince.IsZero() && now.Sub(s.mintedAt) > jitExpiry:
 		return exitJITExpired
 	}
 	return ""
 }
 
-// condemn records why bosun is about to kill this skiff and reports whether
-// this call is the one that decided it — the poll loop and the drain path
-// both condemn, and the first reason wins. awaitExit's retire reads it on
-// another goroutine to count the exit.
+// condemn records why bosun will kill this skiff. The poll loop and drain both
+// condemn; the first reason wins and returns true.
 func (s *skiff) condemn(reason string) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -189,8 +137,7 @@ func (s *skiff) reason() string {
 	return s.exitReason
 }
 
-// scuttle records the outcome of drain's registration-first scuttle: the
-// GitHub registration is already gone, and the exit belongs to the stop path.
+// scuttle marks a skiff drain already deregistered, so it exits as drained.
 func (s *skiff) scuttle() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -198,65 +145,44 @@ func (s *skiff) scuttle() {
 	s.exitReason = exitDrained
 }
 
-// registered reports whether this skiff still has a GitHub registration for
-// retire to delete. An idle-scuttled skiff's was already deleted — first, on
-// purpose, because that is what proved no job could land on it — and a build
-// skiff never registered with GitHub in the first place.
+// An idle-scuttled skiff was deregistered first, which proved no job could
+// be assigned to it; a build skiff never registered.
 func (s *skiff) registered() bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return !s.build && !s.deregistered
 }
 
-// pool keeps every class's warm count full. On start it sweeps stale state
-// left by a prior run, then for every skiff that exits — cleanly via the
-// guest's own poweroff, or because bosun scuttled it — boots a replacement
-// for the same class. There is no dispatch and no inbound connectivity:
-// GitHub hands a JIT-registered runner a job unprompted, so bosun's only
-// jobs are minting/booting, polling GitHub's view of runner state, and
-// noticing when the VMM process exits.
+// pool keeps every class at its warm count, replacing each skiff that exits.
 type pool struct {
 	cfg    *Config
 	gh     githubClient
 	launch launcher
 	logger *slog.Logger
 	stats  *metrics
-	// host is baked into every runner's name (skiff-<host>-<id>) so a job's
-	// own "Set up job" log says which bosun host to look at.
+	// In every runner name, so a job's "Set up job" log names the bosun host.
 	host string
-	// now is overridable so tests can drive the reaping rules deterministically,
-	// at the durations the daemon actually ships with.
+	// Overridable so tests drive the reaping rules at the shipped durations.
 	now func() time.Time
 
 	mu     sync.Mutex
 	skiffs map[string]*skiff
-	// slots is which workspace slot of a persisting class is currently held,
-	// per class. Tracked rather than derived from skiffs because a slot is
-	// claimed before there is a skiff to derive it from -- see claimSlot.
+	// Held workspace slots per persisting class. Tracked, since a slot is claimed
+	// before its skiff exists.
 	slots map[string]map[int]struct{}
-	// draining refuses new spawns and, with booting, lets drain wait out a
-	// refill that raced the stop signal: a skiff between mint and map-add is
-	// in neither the map nor the process table, and without the counter
-	// drain could declare the pool empty while one was mid-boot.
+	// draining refuses new spawns. With booting, it lets drain wait out a refill
+	// that raced the stop signal.
 	draining bool
-	// booting counts, per class, the skiffs on their way into the map but not
-	// in it yet. spawn brackets itself; awaitExit brackets the wider window
-	// from retire — which removes the outgoing skiff — to its replacement's
-	// map-add. topUp reads it alongside the map to decide how short a class
-	// is, so both gaps have to be covered or the backstop double-boots into
-	// them and the class settles one slot over its declared warm count.
+	// Per class, skiffs on their way into the map. shortfall counts them, or the
+	// top-up double-boots into the gap and settles one over the warm count.
 	booting map[string]int
-	// spawnFailures and holdoff are the top-up's backoff: consecutive failed
-	// spawns per class, and how many ticks that class still sits out. See
-	// heldBack.
+	// The top-up's backoff: consecutive failed spawns, and ticks left to sit out.
 	spawnFailures map[string]int
 	holdoff       map[string]int
 }
 
-// maxHoldoffShift caps the top-up's backoff at 2^6 = 64 ticks — a little over
-// half an hour at the default 30s poll. Long enough that a permanently broken
-// class stops churning registrations, short enough that a host fixed by a
-// rebuild refills without waiting on an operator to restart the unit.
+// Caps the backoff at 2^6 = 64 ticks, about half an hour at a 30s poll: quiet
+// for a broken class, yet a fixed host refills without a restart.
 const maxHoldoffShift = 6
 
 func newPool(cfg *Config, gh githubClient, launch launcher, logger *slog.Logger) *pool {
@@ -277,9 +203,6 @@ func newPool(cfg *Config, gh githubClient, launch launcher, logger *slog.Logger)
 	}
 }
 
-// runnerName is what GitHub shows in a job's "Set up job" header. It carries
-// the bosun host because that is the first thing anyone debugging a job needs
-// and nothing else in the job log says it.
 func (p *pool) runnerName(id string) string {
 	if p.host == "" {
 		return "skiff-" + id
@@ -287,18 +210,14 @@ func (p *pool) runnerName(id string) string {
 	return "skiff-" + p.host + "-" + id
 }
 
-// workspaceSlotName is the image a persisting class's slot always reuses. Named
-// after the class and the slot rather than after a skiff, because the whole
-// point is that it outlives every skiff that mounts it.
+// Named for the class and slot, since the image outlives every skiff that
+// mounts it.
 func workspaceSlotName(className string, slot int) string {
 	return fmt.Sprintf("%s-%d.img", className, slot)
 }
 
-// claimSlot reserves the lowest free workspace slot for a persisting class.
-//
-// Reserved rather than computed from the live skiff map, because two skiffs
-// finishing at once each spawn a replacement on their own goroutine: both would
-// read the same lowest-free index and hand two running guests the same disk.
+// claimSlot reserves the lowest free slot. Two replacements spawning at once
+// would otherwise read the same free index and share a disk.
 func (p *pool) claimSlot(className string) int {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -321,9 +240,8 @@ func (p *pool) releaseSlot(className string, slot int) {
 	delete(p.slots[className], slot)
 }
 
-// publish writes the metrics textfile, if one is configured. Called after
-// every pool change and on every poll tick, so its mtime doubles as bosun's
-// heartbeat.
+// publish writes the metrics textfile after every pool change and poll tick,
+// so its mtime is bosun's heartbeat.
 func (p *pool) publish() {
 	if p.cfg.MetricsFile == "" {
 		return
@@ -350,11 +268,8 @@ func (p *pool) publish() {
 	}
 }
 
-// sweep clears every entry under runtimeDir and deletes the GitHub
-// registration for any that had one. A cgroup kill (bosun's own restart, or
-// a host reboot before that on tmpfs) leaves no chance to run teardown, so
-// whatever is on disk at start is by definition orphaned — there is no
-// process left to reconcile against, hence no re-adoption path either.
+// sweep removes everything under runtimeDir and deletes each GitHub runner it
+// names. A cgroup kill skips teardown, so all of it is orphaned.
 func (p *pool) sweep(ctx context.Context) error {
 	if err := os.MkdirAll(p.cfg.RuntimeDir, 0o755); err != nil {
 		return fmt.Errorf("sweep: ensure runtime dir: %w", err)
@@ -369,11 +284,7 @@ func (p *pool) sweep(ctx context.Context) error {
 			if idRaw, err := os.ReadFile(filepath.Join(path, "runner-id")); err == nil {
 				if id, perr := strconv.ParseInt(strings.TrimSpace(string(idRaw)), 10, 64); perr == nil {
 					if err := p.gh.DeleteRunner(ctx, p.cfg.Repo, id); err != nil && !runnerGone(err) {
-						// Keep the id and retry on the next start rather than
-						// dropping the only handle on it. Boot is the one time
-						// this runs with nothing else holding the
-						// registration, so a GitHub that is unreachable right
-						// now is exactly when the handle matters.
+						// Keep the id so the next start retries.
 						p.logger.Warn("sweep: delete stale runner", "skiff", e.Name(), "runner_id", id, "error", err)
 						keepRunnerID(path, id, p.logger)
 						continue
@@ -389,20 +300,8 @@ func (p *pool) sweep(ctx context.Context) error {
 	return nil
 }
 
-// sweepWorkspaces clears the workspace directory of everything a prior run left
-// behind — except the slot images of a class that persists.
-//
-// Workspace images sit on real storage rather than tmpfs, so unlike per-skiff
-// runtime state they survive a reboot as well as a restart, and nothing else
-// ever deletes one whose skiff was killed with the cgroup. A persisting class's
-// slot images are the exception and the point: they hold the caches the next
-// skiff is meant to find, and bosun restarts on every token rotation and every
-// rebuild of this host. Throwing them away there would make the warm cache a
-// thing that only ever works between two consecutive jobs.
-//
-// Slots at or above a class's current warm count are *not* kept, so lowering
-// warm reclaims the space on the next start rather than leaving images nothing
-// will ever mount again.
+// sweepWorkspaces removes leftover workspace images, which survive reboots,
+// except persisting slots below the class's warm count: those hold the cache.
 func (p *pool) sweepWorkspaces() {
 	entries, err := os.ReadDir(p.cfg.WorkspaceDir)
 	if err != nil {
@@ -431,29 +330,14 @@ func (p *pool) sweepWorkspaces() {
 	}
 }
 
-// fill boots every class up to its configured warm count and reports how many
-// skiffs it booted. Called once at start, where a class starting short is
-// worth saying out loud.
+// fill boots every class to its warm count and returns how many it booted.
 func (p *pool) fill(ctx context.Context) int { return p.bootShortfall(ctx, 0) }
 
-// topUp is fill's backstop on the poll loop, capped at one skiff per class per
-// tick.
-//
-// awaitExit replaces a skiff 1:1 the moment its VMM exits, and that is the
-// fast path — but nothing guarantees the replacement boots. A GitHub 5xx on
-// the JIT mint, a host with no room for the workspace image: spawn logs the
-// failure and returns, and with no reconcile anywhere the class stayed one
-// slot short for the life of the process. That is a one-way ratchet — every
-// transient error is permanent — and it is invisible, because a class quietly
-// serving at half its declared warm count looks exactly like a class working.
-//
-// The cap is what keeps this cheap: spawn boots processes synchronously on the
-// poll goroutine, so a class several slots short converges over several ticks
-// rather than stalling one.
+// topUp boots a class's missing skiffs, at most one per tick since spawn
+// blocks the poll loop. Without it a failed replacement leaves a class short.
 func (p *pool) topUp(ctx context.Context) int { return p.bootShortfall(ctx, 1) }
 
-// bootShortfall boots each class's missing warm skiffs, at most perClass of
-// them (perClass <= 0 means all of them), and reports the total booted.
+// perClass caps boots per class; <= 0 means no cap.
 func (p *pool) bootShortfall(ctx context.Context, perClass int) int {
 	booted := 0
 	for _, name := range sortedClasses(p.cfg.Classes) {
@@ -476,17 +360,8 @@ func (p *pool) bootShortfall(ctx context.Context, perClass int) int {
 	return booted
 }
 
-// heldBack reports whether this class is serving out a backoff, and consumes
-// one tick of it if so.
-//
-// A spawn attempt is not free and not local: it mints a real GitHub
-// registration, opens a helpers log, and creates a diagnostic directory that
-// nothing removes inside the retention window. For a class that cannot boot at
-// all — a hull path that does not exist, a workspace that will not fit, a
-// renamed helper binary — retrying once per tick forever churns all three
-// against a condition an operator is already paged for. Doubling, capped, and
-// cleared by any success, so a transient failure still recovers on the next
-// tick and a permanent one goes quiet.
+// heldBack consumes one tick of a class's backoff. Each failed spawn mints a
+// registration and leaves a diag directory, so the doubling hold stops churn.
 func (p *pool) heldBack(className string) bool {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -512,16 +387,8 @@ func (p *pool) spawnSucceeded(className string) {
 	delete(p.holdoff, className)
 }
 
-// shortfall is how many skiffs a class needs to reach its warm count: the
-// declared count, less the ones already in the pool and the ones on their way
-// in.
-//
-// Build skiffs in the map are not counted. One is claimed work rather than a
-// warm slot, and letting it stand in for one would leave the class with
-// nothing for GitHub to hand a job to. An in-flight build spawn is counted,
-// because booting is not split by berth — that only ever delays a top-up by a
-// tick, never overshoots, and it self-corrects the moment the build skiff
-// lands in the map.
+// Build skiffs in the map are not warm slots, so they do not count. Booting
+// ones do, which can delay a top-up by a tick but never overshoots.
 func (p *pool) shortfall(className string) int {
 	class, ok := p.cfg.Classes[className]
 	if !ok {
@@ -530,7 +397,7 @@ func (p *pool) shortfall(className string) int {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if p.draining {
-		return 0 // the stop path's whole job is to stop replacing
+		return 0 // drain stops all replacement
 	}
 	have := p.booting[className]
 	for _, s := range p.skiffs {
@@ -544,8 +411,8 @@ func (p *pool) shortfall(className string) int {
 	return class.Warm - have
 }
 
-// reserve and release bracket a skiff on its way into the pool but not in the
-// map yet, so shortfall never reads the gap as a class running short.
+// reserve and release bracket a skiff on its way into the map, so shortfall
+// never reads the gap as a short class.
 func (p *pool) reserve(className string) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -569,42 +436,28 @@ func sortedClasses(classes map[string]Class) []string {
 	return names
 }
 
-// A berth is the job a skiff is born to do: crew a GitHub Actions runner, or
-// run one claimed Spindrift build. Both births are otherwise the same
-// sequence — the draining guard, the class lookup, the id, the hull, the
-// paths, the slot claim, boot, and the handoff to awaitExit — so spawn owns
-// all of that and the berth supplies only what differs: which class boots,
-// what its log lines call it, and the credential or request the guest finds
-// in the skiff's state directory.
-//
-// A struct of funcs rather than an interface with two implementations,
-// because the GitHub berth has to carry a minted registration from mint to
-// prepare and on into the booted line: closures over the mint's own locals
-// say that in a few lines, where an interface would need a struct of the same
-// fields behind it.
+// A berth is the job a skiff boots for: a GitHub Actions runner or one
+// claimed build. spawn owns the shared sequence; the berth supplies the rest.
 type berth struct {
 	class string
-	// noun is what a log line calls this skiff: "skiff" or "build skiff".
+	// "skiff" or "build skiff", for log lines.
 	noun string
-	// fields are added to the logger for every line this birth writes.
+	// Logger fields for every line of this spawn.
 	fields []any
-	// mint acquires whatever the job needs from the outside world. It runs
-	// before any workspace slot is claimed and logs its own failure, because a
-	// failure here returns with no skiff and so no retire to release anything.
+	// mint runs before a workspace slot is claimed and logs its own failure,
+	// since nothing retires a skiff that was never built.
 	mint func(ctx context.Context, logger *slog.Logger, id string) error
-	// prepare stamps the berth onto the constructed skiff and writes its state
-	// directory. It logs its own failure; spawn retires the skiff.
+	// prepare writes the skiff's state directory and logs its own failure; spawn
+	// retires the skiff.
 	prepare func(logger *slog.Logger, s *skiff, hullDigest string) error
-	// booted are the extra fields on the "<noun> booted" line.
+	// Extra fields for the "<noun> booted" line.
 	booted func() []any
 }
 
-// runnerBerth is a skiff born to crew a GitHub Actions runner for className:
-// it registers with a JIT config minted for exactly this skiff, and awaitExit
-// replaces it 1:1 when it exits.
+// runnerBerth registers a JIT config minted for this skiff alone; awaitExit
+// replaces the skiff when it exits.
 func (p *pool) runnerBerth(className string) berth {
-	// Minted by mint, spent by prepare and by the booted line: a berth serves
-	// exactly one spawn.
+	// Set by mint, read by prepare and booted: a berth serves one spawn.
 	var runnerID int64
 	var jitConfig string
 	return berth{
@@ -616,10 +469,8 @@ func (p *pool) runnerBerth(className string) berth {
 			var err error
 			runnerID, jitConfig, err = p.gh.GenerateJITConfig(ctx, p.cfg.Repo, p.runnerName(id), []string{className})
 			if err != nil {
-				// Counted, not only logged: a mint that fails is the way a
-				// class loses a warm slot, and bosun_github_errors_total is
-				// what makes an intermittently-failing one visible next to the
-				// top-up that keeps papering over it.
+				// Counted, since a failing mint is how a class loses a warm slot while
+				// the top-up hides it.
 				p.stats.githubError()
 				logger.Error("generate jitconfig", "error", err)
 			}
@@ -637,9 +488,8 @@ func (p *pool) runnerBerth(className string) berth {
 	}
 }
 
-// buildBerth is a skiff born to run one claimed Spindrift build. It carries no
-// GitHub registration: nothing to mint, nothing to poll, and nothing for
-// retire or sweep to deregister.
+// buildBerth runs one claimed build. It has no GitHub registration to mint,
+// poll or deregister.
 func (p *pool) buildBerth(claim *buildClaim) berth {
 	return berth{
 		class:  claim.Class,
@@ -661,19 +511,11 @@ func (p *pool) buildBerth(claim *buildClaim) berth {
 	}
 }
 
-// spawn boots one skiff for berth b and hands its lifetime off to awaitExit.
-// Errors are logged before they are returned, and fill and awaitExit ignore
-// them: a single failed spawn should not take down the rest of the pool.
-//
-// Returns (nil, errDraining) when a stop is in progress: bosun never ran the
-// build, so runBuild must NOT post a result -- staying silent lets the claim's
-// lease expire and another host pick the request up, where a FAILED post
-// would close the Spindrift build permanently for work nobody attempted. Any
-// other nil return is a real setup failure, already logged; runBuild reports
-// that one, and Spindrift's lease expiry is not waited on for it.
+// spawn boots a skiff and hands it to awaitExit; errors are logged. errDraining
+// means nothing ran, so runBuild posts no result and the claim's lease expires.
 func (p *pool) spawn(ctx context.Context, b berth) (*skiff, error) {
-	// Checked under the same mutex drain sets it under, so every spawn either
-	// happens-before drain's first scuttle pass or is refused outright.
+	// Checked under drain's mutex, so each spawn precedes drain's first scuttle
+	// pass or is refused.
 	p.mu.Lock()
 	if p.draining {
 		p.mu.Unlock()
@@ -683,10 +525,7 @@ func (p *pool) spawn(ctx context.Context, b berth) (*skiff, error) {
 	p.mu.Unlock()
 	defer p.release(b.class)
 
-	// The berth's own fields first, so an unknown class says which birth path
-	// hit it: a build claim names one bosun no longer boots, a refill names one
-	// removed from the config under a live pool, and they are otherwise the
-	// same line.
+	// The berth's fields first, so an unknown-class error says which path hit it.
 	logger := p.logger.With("class", b.class).With(b.fields...)
 
 	class, ok := p.cfg.Classes[b.class]
@@ -718,9 +557,8 @@ func (p *pool) spawn(ctx context.Context, b berth) (*skiff, error) {
 		return nil, err
 	}
 
-	// Claimed after the mint, because every exit path past this point hands the
-	// skiff to retire, which is what releases it. A slot claimed before a
-	// failing mint would leak.
+	// After the mint: every exit past here goes through retire, which releases
+	// the slot. Claimed before a failing mint, it would leak.
 	slot := -1
 	if class.Workspace != "" {
 		if class.Persist {
@@ -748,10 +586,8 @@ func (p *pool) spawn(ctx context.Context, b berth) (*skiff, error) {
 
 	p.mu.Lock()
 	if p.draining {
-		// Drain began mid-boot. Anything the berth minted above may postdate
-		// drain's scuttle pass, so this skiff must not join the pool: retire
-		// deregisters it and kills what boot started, and the spawning
-		// counter keeps drain from returning before that finishes.
+		// Drain began mid-boot, so the mint may postdate drain's scuttle pass.
+		// Retire it; the booting counter keeps drain waiting until that finishes.
 		p.mu.Unlock()
 		logger.Info("drain: scuttling " + b.noun + " spawned mid-stop")
 		s.condemn(exitDrained)
@@ -768,8 +604,8 @@ func (p *pool) spawn(ctx context.Context, b berth) (*skiff, error) {
 	return s, nil
 }
 
-// writeState makes runtimeDir/<id> — bosun's entire state for this skiff.
-// /run is tmpfs, so a reboot clears it; there is no database.
+// writeState makes runtimeDir/<id>, all of bosun's state for the skiff. /run
+// is tmpfs, so a reboot clears it.
 func (p *pool) writeState(dir string, runnerID int64, jitConfig, hullDigest string) error {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return err
@@ -783,10 +619,8 @@ func (p *pool) writeState(dir string, runnerID int64, jitConfig, hullDigest stri
 	return os.WriteFile(filepath.Join(dir, "hull"), []byte(hullDigest), 0o600)
 }
 
-// writeBuildState is writeState's build-skiff sibling: request.json where a
-// GitHub skiff has jitconfig, plus the same hull digest. No runner-id file --
-// a build skiff never registers with GitHub, so retire and sweep have
-// nothing to deregister for it.
+// writeBuildState writes request.json and the hull digest. With no runner-id,
+// retire and sweep have nothing to deregister.
 func (p *pool) writeBuildState(dir string, request json.RawMessage, hullDigest string) error {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return err
@@ -797,11 +631,8 @@ func (p *pool) writeBuildState(dir string, request json.RawMessage, hullDigest s
 	return os.WriteFile(filepath.Join(dir, "hull"), []byte(hullDigest), 0o600)
 }
 
-// boot starts the credential virtiofsd, one virtiofsd per hull-declared
-// device share, passt, and finally cloud-hypervisor — in that order, since
-// cloud-hypervisor connects to sockets the others must already be listening
-// on. Processes started before a failing step are left running on s for the
-// caller to retire.
+// boot starts the virtiofsds and passt before cloud-hypervisor, which connects
+// to their sockets. The caller retires whatever started before a failure.
 func (p *pool) boot(s *skiff, h *hull, class Class, logger *slog.Logger) error {
 	helpersLog, err := os.OpenFile(filepath.Join(p.cfg.LogDir, s.id+".helpers.log"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
 	if err != nil {
@@ -809,8 +640,7 @@ func (p *pool) boot(s *skiff, h *hull, class Class, logger *slog.Logger) error {
 	}
 	s.helpersLog = helpersLog
 
-	// Before any helper, so a host that cannot spare the space costs one
-	// failed spawn rather than four processes to unwind.
+	// Before any helper, so a full disk costs one failed spawn and no processes.
 	if s.paths.workspace != "" {
 		if err := ensureWorkspace(s.paths.workspace, class.Workspace, class.Persist); err != nil {
 			return fmt.Errorf("create workspace disk: %w", err)
@@ -823,14 +653,9 @@ func (p *pool) boot(s *skiff, h *hull, class Class, logger *slog.Logger) error {
 		return fmt.Errorf("start credential virtiofsd: %w", err)
 	}
 
-	// The guest's only writable path onto the host, and the whole reason it
-	// exists: a skiff's root is a tmpfs overlay, so a guest that dies mid-job
-	// takes the runner's own diagnostic log with it and leaves the serial
-	// console — which carries no _diag — as the only evidence.
-	//
-	// ponytail: no quota. Untrusted job code can fill logDir; the tmpfiles
-	// rule in module.nix only ages files out. A loopback filesystem or an
-	// XFS project quota is the answer if a job ever does it.
+	// The guest's only writable path to the host. Its root is a tmpfs overlay, so
+	// the runner's _diag log would otherwise die with it.
+	// ponytail: no quota; job code can fill logDir. Add an XFS project quota if one does.
 	if err := os.MkdirAll(s.paths.diagDir, 0o755); err != nil {
 		return fmt.Errorf("create diag dir: %w", err)
 	}
@@ -860,10 +685,8 @@ func (p *pool) boot(s *skiff, h *hull, class Class, logger *slog.Logger) error {
 	return nil
 }
 
-// startHelper launches one side-car on s and reaps it in the background.
-// bosun's lifecycle signal is cloud-hypervisor's exit alone, so nothing else
-// ever Wait()s a helper — and an unwaited child that exits stays a zombie in
-// bosun's process table until bosun itself restarts.
+// startHelper reaps the helper in the background: only cloud-hypervisor's exit
+// is waited on, and an unwaited child stays a zombie.
 func (p *pool) startHelper(s *skiff, name string, args []string) error {
 	pr, err := p.launch.Start(name, args, s.helpersLog, s.helpersLog)
 	if err != nil {
@@ -881,28 +704,19 @@ func binPath(override, fallback string) string {
 	return fallback
 }
 
-// awaitExit blocks until the skiff's cloud-hypervisor process exits —
-// completion is free: the guest's own "poweroff -f" exits the VMM with
-// status 0, so wait(2) is the entire completion signal, whether the guest
-// finished on its own or bosun killed it for being wedged or over budget.
+// awaitExit waits for cloud-hypervisor to exit. The guest's poweroff -f exits
+// the VMM with status 0, so wait(2) is the completion signal.
 func (p *pool) awaitExit(ctx context.Context, s *skiff, logger *slog.Logger) {
 	err := s.ch.Wait()
-	// A clean guest poweroff exits 0. A non-zero exit with no reason already
-	// set means the VMM died without bosun asking -- the cgroup OOM killer is
-	// the one that happens -- and calling that "completed" would hide it in
-	// the one metric that says whether jobs are finishing.
+	// A non-zero exit with no reason set is a VMM that died unasked, in practice
+	// the cgroup OOM killer.
 	if err != nil {
 		s.condemn(exitKilled)
 	}
 	logger.Info("skiff halted", "error", err)
 
-	// A runner skiff's replacement is reserved before retire takes the
-	// outgoing one out of the map, and held until spawn has put the incoming
-	// one in. Without it the top-up on the poll loop reads that window as the
-	// class running short and boots a second replacement into it, leaving the
-	// class permanently one over the warm count its host was sized for. A
-	// build skiff has no replacement to reserve — buildLoop's claim loop is
-	// what decides whether another one boots.
+	// Reserve the replacement before retire removes this skiff, or the top-up
+	// boots a second one into the gap.
 	if !s.build {
 		p.reserve(s.class)
 		defer p.release(s.class)
@@ -911,20 +725,17 @@ func (p *pool) awaitExit(ctx context.Context, s *skiff, logger *slog.Logger) {
 	p.retire(ctx, s, logger)
 	if s.build {
 		close(s.done) // runBuild is waiting to read the diag share for a result
-		return        // buildLoop's own claim loop decides whether another skiff boots
+		return        // buildLoop decides whether another skiff boots
 	}
 	if ctx.Err() != nil {
 		return // shutting down; do not refill
 	}
-	// A failure here is logged and dropped on purpose: the top-up on the next
-	// poll tick is what makes it recoverable rather than permanent.
+	// A failure is logged; the next tick's top-up recovers it.
 	p.spawn(ctx, p.runnerBerth(s.class))
 }
 
-// retire tears down everything bosun started for s: kills the helper
-// processes, deletes the GitHub runner registration, and removes its state
-// and socket files. Best effort throughout — /run is tmpfs, so anything left
-// behind here does not survive a reboot either way.
+// retire kills what bosun started for s, deregisters its runner and removes
+// its files, best effort throughout.
 func (p *pool) retire(ctx context.Context, s *skiff, logger *slog.Logger) {
 	reason := s.reason()
 	if reason == "" {
@@ -940,10 +751,8 @@ func (p *pool) retire(ctx context.Context, s *skiff, logger *slog.Logger) {
 		s.helpersLog.Close()
 	}
 
-	// Everything still registered deregisters here, on a context that survives
-	// shutdown: by the time a drain-era retire runs, the run context is
-	// cancelled, and a DELETE that never happens is a ghost registration until
-	// the next sweep.
+	// A context that outlives shutdown: a drain-era retire runs after the run
+	// context is cancelled, and a skipped DELETE leaves a ghost registration.
 	deregistered := true
 	if s.registered() {
 		dctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
@@ -951,10 +760,8 @@ func (p *pool) retire(ctx context.Context, s *skiff, logger *slog.Logger) {
 		switch err := p.gh.DeleteRunner(dctx, p.cfg.Repo, s.runnerID); {
 		case err == nil:
 		case runnerGone(err):
-			// Said out loud rather than swallowed: one is routine — GitHub
-			// ages out an ephemeral registration on its own — but a run of
-			// them against a repo whose mints are succeeding is not, and it
-			// would otherwise be the one GitHub outcome bosun never logs.
+			// Routine alone, since GitHub ages out ephemeral registrations, but a run
+			// of these against succeeding mints is worth seeing.
 			logger.Info("runner already gone", "runner_id", s.runnerID)
 		default:
 			logger.Warn("delete runner on retire", "runner_id", s.runnerID, "error", err)
@@ -962,24 +769,15 @@ func (p *pool) retire(ctx context.Context, s *skiff, logger *slog.Logger) {
 		}
 	}
 
-	// diagDir is deliberately not removed: it is the evidence, and this is
-	// the path a wedged skiff's own death takes.
-	//
-	// The state directory goes, except when the deregistration above failed.
-	// runner-id is then the only record of a registration bosun is about to
-	// stop tracking, and sweep-on-start is the only thing left that can delete
-	// it — so removing the directory anyway is how one unreachable GitHub
-	// during a retire became a ghost runner nothing could name again.
+	// diagDir stays as evidence. The state directory stays too if deregistration
+	// failed, since its runner-id is the only record sweep can retry from.
 	if deregistered {
 		os.RemoveAll(s.paths.dir)
 	} else {
 		keepRunnerID(s.paths.dir, s.runnerID, logger)
 	}
-	// An ephemeral workspace is removed, and must be — it is the one thing
-	// bosun reserves that a reboot would not free, and it is where untrusted
-	// job code wrote. A slot from a persisting class is instead handed back for
-	// the replacement to mount: what the last job left on it is the cache the
-	// next one is here for.
+	// An ephemeral workspace holds job-written data a reboot would not free, so it
+	// goes. A persisting slot is released for the replacement to mount.
 	if s.paths.workspace != "" {
 		if s.slot >= 0 {
 			p.releaseSlot(s.class, s.slot)
@@ -987,11 +785,8 @@ func (p *pool) retire(ctx context.Context, s *skiff, logger *slog.Logger) {
 			os.Remove(s.paths.workspace)
 		}
 	}
-	// Each helper drops a sidecar file beside its socket -- virtiofsd a
-	// "<sock>.pid", passt a "<sock>.repair" -- and neither is cleaned up by
-	// the helper on the way out. Removing only the sockets leaked both for as
-	// long as bosun ran, since sweep-on-start is what eventually collected
-	// them. os.Remove on a name that was never created is a no-op here.
+	// virtiofsd leaves <sock>.pid and passt leaves <sock>.repair; neither removes
+	// its own. Removing a name that was never created is a no-op.
 	for _, sock := range s.paths.sockets() {
 		os.Remove(sock)
 		os.Remove(sock + ".pid")
@@ -1003,17 +798,8 @@ func (p *pool) retire(ctx context.Context, s *skiff, logger *slog.Logger) {
 	p.mu.Unlock()
 }
 
-// keepRunnerID reduces a skiff's state directory to the one file
-// sweep-on-start needs to retry a deregistration that failed: the runner id.
-//
-// The credential goes with everything else. A jitconfig left on disk is a live
-// registration token, and the whole reason this directory is being kept is
-// that its registration is still live.
-//
-// The id is written rather than merely spared, so this works from whatever the
-// directory happens to hold — including nothing. A spawn whose prepare failed
-// after the mint has a registration and may have no state directory at all,
-// and that is precisely the skiff whose id is otherwise lost for good.
+// keepRunnerID leaves only runner-id, for sweep to retry deregistering; the
+// jitconfig is a live token. It writes the id, since the directory may be empty.
 func keepRunnerID(dir string, runnerID int64, logger *slog.Logger) {
 	entries, err := os.ReadDir(dir)
 	if err != nil && !os.IsNotExist(err) {
@@ -1046,9 +832,8 @@ func killBestEffort(pr proc, logger *slog.Logger, what string) {
 	}
 }
 
-// pollLoop polls every live skiff's GitHub runner status on cfg.PollInterval
-// until ctx is cancelled. This is the only inbound-looking traffic bosun
-// generates; it never lists runners and never listens for anything.
+// pollLoop polls each skiff's runner every PollInterval. bosun never lists
+// runners and never listens.
 func (p *pool) pollLoop(ctx context.Context) {
 	ticker := time.NewTicker(time.Duration(p.cfg.PollInterval))
 	defer ticker.Stop()
@@ -1066,30 +851,20 @@ func (p *pool) pollOnce(ctx context.Context) {
 	for _, s := range p.snapshot() {
 		p.pollSkiff(ctx, s)
 	}
-	// Every tick, whether anything changed or not: the file's mtime is the
-	// only signal that says bosun is still alive. Published before the top-up
-	// rather than after, because the top-up mints against the same GitHub that
-	// may be what made this tick slow, and the heartbeat must not queue behind
-	// it on exactly the tick that matters.
+	// Every tick, before the top-up: the mtime is the heartbeat, and the top-up
+	// mints against the GitHub that may be slowing this tick.
 	p.publish()
 
-	// After the poll, not before: a skiff this tick just condemned is still in
-	// the map — its awaitExit goroutine is what removes it — so the shortfall
-	// does not count it twice with the replacement that goroutine will reserve.
+	// After the poll: a skiff condemned this tick stays in the map until awaitExit
+	// reserves its replacement, so the top-up never boots a second one.
 	if n := p.topUp(ctx); n > 0 {
 		p.logger.Info("warm pool topped up", "booted", n)
-		p.publish() // the new skiffs, rather than making the gauges wait a tick
+		p.publish() // show the new skiffs now
 	}
 }
 
-// pollSkiff reconciles one skiff against GitHub's view of its runner: read
-// the status, fold it in, act on the verdict.
-//
-// The one thing decided here rather than in the verdict is the first online
-// observation, because it is the one with a side effect outside the skiff:
-// the JIT credential is revoked host-side. virtiofs passes the delete
-// through, so it vanishes in-guest with no guest cooperation, and untrusted
-// job code never sees a live credential again.
+// On the first online reading, jitconfig is deleted host-side; virtiofs passes
+// the delete through, so job code in the guest never sees a live credential.
 func (p *pool) pollSkiff(ctx context.Context, s *skiff) {
 	if s.build {
 		p.pollBuildSkiff(s)
@@ -1100,15 +875,8 @@ func (p *pool) pollSkiff(ctx context.Context, s *skiff) {
 	if err != nil {
 		p.stats.githubError()
 		logger.Warn("poll runner status", "error", err)
-		// Reap anyway. Every rule but the wedge one is a wall-clock judgement
-		// — a busy skiff past its class budget, an idle one past the expiry of
-		// the credential it registered with — and neither stops being true
-		// because GitHub stopped answering. Returning here instead froze
-		// maxLifetime, JIT expiry and the wedge rule together for the length
-		// of an outage, and the frozen skiff still published as live and idle,
-		// so no alert could see it either. The wedge rule cannot misfire from
-		// here: it fires on the consecutive-offline streak, and a read that
-		// failed never observed one.
+		// Reap anyway: a busy skiff's budget does not pause for a GitHub outage. With
+		// fresh false the expiry rule waits, and the wedge streak does not advance.
 		p.reap(s, p.now(), logger, false)
 		return
 	}
@@ -1129,10 +897,8 @@ func (p *pool) pollSkiff(ctx context.Context, s *skiff) {
 	p.reap(s, now, logger, true)
 }
 
-// reap acts on a skiff's own verdict: condemn it and kill the VMM, or leave it
-// alone. Split out of pollSkiff because both halves of a poll need it — the
-// one that read GitHub and the one that could not. fresh is that distinction;
-// see verdict for which rules it gates and why.
+// reap kills the skiff if its verdict says to. fresh is false when the GitHub
+// read failed; see verdict.
 func (p *pool) reap(s *skiff, now time.Time, logger *slog.Logger, fresh bool) {
 	switch reason := s.verdict(now, p.maxLifetime(s.class), fresh); reason {
 	case exitWedged:
@@ -1150,16 +916,10 @@ func (p *pool) reap(s *skiff, now time.Time, logger *slog.Logger, fresh bool) {
 	}
 }
 
-// pollBuildSkiff is a build skiff's entire reconciliation: it never
-// registers with GitHub, so the wedge and JIT-expiry arms of the verdict
-// cannot fire for one — it is busy by construction, from boot rather than
-// from a status transition — and the class's lifetime budget every busy
-// GitHub skiff is held to is the only thing left to reap it.
+// A build skiff has no registration, so only its lifetime budget can reap it.
 func (p *pool) pollBuildSkiff(s *skiff) {
 	now := p.now()
-	// fresh, because a build skiff's busy state needs no reading: it is busy
-	// by construction from boot, so the expiry rule the flag gates cannot
-	// apply to one either way.
+	// fresh is moot: a build skiff is busy from boot, so expiry never applies.
 	if s.verdict(now, p.maxLifetime(s.class), true) != exitLifetime {
 		return
 	}
@@ -1169,28 +929,13 @@ func (p *pool) pollBuildSkiff(s *skiff) {
 	killBestEffort(s.ch, logger, "expired cloud-hypervisor")
 }
 
-// drain is the stop path: the run context is already cancelled, so awaitExit
-// no longer refills, and what remains is emptying the pool without failing a
-// running job — the thing a plain stop did twice during the CI migration.
-//
-// Idle skiffs are scuttled registration-first: GitHub refuses to delete a
-// busy runner, so a successful DELETE proves no job can ever land on that
-// skiff and its VMM is safe to kill — bosun's own busy flag, up to a poll
-// interval stale, never gets a vote. A failed DELETE means the runner is
-// busy (the guest finishes its job and halts on its own) or GitHub is
-// unreachable (retried next tick).
-//
-// ctx is the drain budget, not the run context. When it expires, whatever
-// remains is killed here rather than left to systemd's cgroup SIGKILL, so
-// each skiff still gets a retire and a best-effort deregistration.
+// drain empties the pool without failing a running job. ctx is the drain
+// budget; at its end the rest are killed here, so each still gets a retire.
 func (p *pool) drain(ctx context.Context) {
 	p.mu.Lock()
 	p.draining = true
 	p.mu.Unlock()
-	// The last write before the process exits, so the drained exit counter
-	// reaches the textfile at all. The next start rewrites the file with
-	// fresh counters, so this is best-effort visibility for the scrape that
-	// lands in between, not durable accounting.
+	// Last write before exit, so the drained exits reach the textfile.
 	defer p.publish()
 	p.scuttleIdle(ctx)
 	check := time.NewTicker(100 * time.Millisecond)
@@ -1208,8 +953,7 @@ func (p *pool) drain(ctx context.Context) {
 			p.awaitEmpty(30 * time.Second)
 			return
 		case <-poll.C:
-			// Busy skiffs still need the lifetime reaper, and the metrics
-			// file's mtime is still the heartbeat.
+			// Busy skiffs still need the lifetime reaper, and the mtime is the heartbeat.
 			p.pollOnce(ctx)
 			p.scuttleIdle(ctx)
 		case <-check.C:
@@ -1241,15 +985,12 @@ func (p *pool) empty() bool {
 	return true
 }
 
-// scuttleIdle deregisters and kills every skiff not known to be busy and not
-// already condemned. Known-busy ones are skipped without an API call — the
-// DELETE would be refused anyway.
+// scuttleIdle deregisters idle skiffs before killing them: GitHub refuses to
+// delete a busy runner, so a successful DELETE proves no job can be assigned.
 func (p *pool) scuttleIdle(ctx context.Context) {
 	for _, s := range p.snapshot() {
 		if s.build {
-			// No GitHub registration to prove idle against, and busy by
-			// construction anyway; killRemaining condemns it at the drain
-			// deadline like any other busy skiff.
+			// Busy from boot; killRemaining takes it at the deadline.
 			continue
 		}
 		if s.busy() || s.reason() != "" {
@@ -1266,9 +1007,8 @@ func (p *pool) scuttleIdle(ctx context.Context) {
 	}
 }
 
-// killRemaining condemns whatever the drain budget ran out on. Every one of
-// these is a lost job or a wedged guest; the exit counter says which host and
-// class it cost.
+// killRemaining condemns what the drain budget ran out on: each is a lost job
+// or a wedged guest.
 func (p *pool) killRemaining() {
 	for _, s := range p.snapshot() {
 		if !s.condemn(exitDrained) {
@@ -1278,9 +1018,8 @@ func (p *pool) killRemaining() {
 	}
 }
 
-// awaitEmpty gives the awaitExit goroutines a bounded window to finish their
-// retires — deregistration included — before main returns and systemd
-// SIGKILLs the cgroup.
+// awaitEmpty gives pending retires, deregistration included, a bounded window
+// before systemd kills the cgroup.
 func (p *pool) awaitEmpty(limit time.Duration) {
 	deadline := time.Now().Add(limit)
 	for !p.empty() && time.Now().Before(deadline) {
@@ -1288,14 +1027,8 @@ func (p *pool) awaitEmpty(limit time.Duration) {
 	}
 }
 
-// maxLifetime is the class's busy-time budget — the only thing that reaps a
-// busy skiff, wedged or working, so LoadConfig guarantees every class carries
-// a non-zero one.
-//
-// A class that is not in the config at all yields zero, which verdict reads as
-// "no budget to exceed" and never reaps on. Zero must not mean "expired the
-// instant it went busy": a class going missing under a running skiff would
-// then kill the job it is in the middle of.
+// Zero for a class missing from the config, which verdict reads as no budget,
+// so a class removed under a running skiff never kills its job.
 func (p *pool) maxLifetime(className string) time.Duration {
 	return time.Duration(p.cfg.Classes[className].MaxLifetime)
 }

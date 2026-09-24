@@ -18,11 +18,8 @@ func mustHex(t *testing.T, s string) []byte {
 	return b
 }
 
-// TestRFC5869Case1 pins Go's hkdf.Extract argument order, which is the reverse
-// of RFC 5869's prose HKDF-Extract(salt, IKM). Swapping them produces a
-// well-formed wrong answer with no error, so every other vector in this file
-// would still look self-consistent while disagreeing with every other
-// implementation. SPEC.md section 10 requires this check to run first.
+// Pins Go's hkdf.Extract argument order. Swapped arguments still give
+// well-formed output that disagrees with every other implementation.
 func TestRFC5869Case1(t *testing.T) {
 	ikm := mustHex(t, strings.Repeat("0b", 22))
 	salt := mustHex(t, "000102030405060708090a0b0c")
@@ -45,10 +42,7 @@ func TestRFC5869Case1(t *testing.T) {
 	}
 }
 
-// TestAgeSpecExample is the age specification's own published pair. It pins
-// Bech32, the uppercase-after-checksum rule and the X25519 basepoint
-// multiplication together, so a failure here localises before the tree vectors
-// are trusted.
+// The age specification's published example pair.
 func TestAgeSpecExample(t *testing.T) {
 	const (
 		identity  = "AGE-SECRET-KEY-1GFPYYSJZGFPYYSJZGFPYYSJZGFPYYSJZGFPYYSJZGFPYYSJZGFPQ4EGAEX"
@@ -104,13 +98,13 @@ func TestBIP39WordlistIdentity(t *testing.T) {
 	}
 }
 
-// specLeaf is one row of a SPEC.md section 11 vector.
+// specLeaf is one leaf row of a SPEC.md test vector.
 type specLeaf struct {
 	path string
-	// okm is also the ed25519 seed or the bip39 entropy, per key type.
+	// Also the ed25519 seed or the bip39 entropy, per key type.
 	okm string
-	// pub is the ed25519 public key; identity/recipient the age pair;
-	// mnemonic the bip39 words. Exactly one group is populated.
+	// One group is set, per key type: pub for ed25519, identity and recipient
+	// for age, mnemonic for bip39.
 	pub, identity, recipient, mnemonic string
 }
 
@@ -128,9 +122,8 @@ type specVector struct {
 	branches []specBranch
 }
 
-// specVectors is SPEC.md section 11 transcribed verbatim, every published PRK
-// included. The PRKs are what localise a disagreement to a level instead of
-// leaving two implementations to argue about a public key.
+// SPEC.md's published vectors verbatim. The PRKs localise a disagreement to one
+// derivation level.
 var specVectors = []specVector{
 	{
 		name:   "A",
@@ -218,8 +211,6 @@ var specVectors = []specVector{
 	},
 }
 
-// TestMasterC confirms vector C's master really is SHA-256 of the 27 ASCII
-// octets, so the vector is reproducible from the sentence rather than copied.
 func TestMasterC(t *testing.T) {
 	sum := sha256.Sum256([]byte("Folly Mountain Laboratories"))
 	if got := hex.EncodeToString(sum[:]); got != specVectors[2].master {
@@ -278,9 +269,7 @@ func TestSpecVectors(t *testing.T) {
 							t.Errorf("%s mnemonic = %q", l.path, m.Mnemonic)
 						}
 					}
-					// The same leaf must come out of the master-seed entry
-					// point too, which is the claim that a branch holder and
-					// the master holder derive the same key.
+					// A branch holder and the master holder derive the same key.
 					fromMaster, err := MintFromMaster(master, l.path)
 					if err != nil {
 						t.Fatal(err)

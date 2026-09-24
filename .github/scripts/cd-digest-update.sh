@@ -1,14 +1,7 @@
 #!/usr/bin/env bash
-# Owns the two file-level decisions behind selective continuous delivery: which
-# digest a manifest pins for an image right now, and whether the run asking to
-# rewrite it is newer than the run that wrote what is there. The containers
-# workflow keeps the git and pull-request plumbing, because that needs a real
-# remote; everything here is a function of files, a registry read and the local
-# commit graph, so it can be tested — and a guard nobody can test is a guard
-# nobody will dare change later.
-#
-# Callers pass arguments and read stdout. Every explanation goes to stderr, so
-# a verdict can be captured without parsing prose around it.
+# The file-level half of selective CD: the digest a manifest pins for an image,
+# and whether this run is newer than the run that wrote it. `decide` prints its
+# verdict on stdout and its reasons on stderr.
 
 set -euo pipefail
 
@@ -23,32 +16,14 @@ EOF
   exit 64
 }
 
-# Anchored on this image's own reference, so a manifest may pin other images
-# beside it. That is not hypothetical: the in-cluster build route pins the
-# BuildKit engine in the same document Spindrift's own image is pinned in, and
-# the blanket rewrite this replaces refused the whole file rather than stamp
-# Spindrift's digest onto BuildKit — correctly, but the effect was that every
-# push stopped rolling out and said so only in a workflow log.
-#
-# The name must be followed by `:` or `@` so that a repository whose path
-# merely starts with this one — `spindrift` and `spindrift-demo` are both
-# published here — is not rewritten by it.
-#
-# The registry is anchored to ghcr.io because that is the only place the
-# workflow pushes. A digest is content-addressed per registry, so stamping this
-# one onto a ref that resolves anywhere else yields a pin that cannot be pulled
-# — and the failure lands on the cluster, long after CI goes green.
+# Anchored on ghcr.io, the only registry the workflow pushes to, and ended by
+# `:` or `@` so that `spindrift` never matches `spindrift-demo`.
 image_ref() {
   printf '%s' "ghcr\.io/[^[:space:]\"']*/$1(:[^@[:space:]]+)?"
 }
 
-# Prints the digest each manifest pins for this image, one per line.
-#
-# Reading is deliberately best-effort where writing, below, is strict: this
-# feeds a guard, and a guard that cannot read its input has learned "cannot
-# tell", not "fail the build". A manifest that has moved on main, or that was
-# never there, simply contributes nothing to the comparison and the strict
-# checks in `rewrite` still get their say a moment later.
+# Prints the digest each manifest pins for this image, one per line. A missing
+# manifest prints nothing; `rewrite` is the strict check.
 pins() {
   local image="$1" ref manifest anchored lines match
   shift
@@ -63,10 +38,8 @@ pins() {
       continue
     fi
 
-    # The unanchored shape — a chart that splits `repository:` from `tag:` —
-    # only says which image it means while the file pins exactly one digest.
-    # That is the same condition `rewrite` insists on before it touches such a
-    # file, so reader and writer agree on what "this image's pin" means.
+    # A chart that splits `repository:` from `tag:` names no image beside the
+    # digest, so it counts only when the file pins one digest, as in `rewrite`.
     lines=$(grep -cE '@sha256:[0-9a-f]{64}' "$manifest" || true)
     if [ "${lines:-0}" -eq 1 ]; then
       match=$(grep -oE '@sha256:[0-9a-f]{64}' "$manifest" | head -n1 || true)
@@ -75,21 +48,8 @@ pins() {
   done | sort -u
 }
 
-# The same read, but of some other commit's copy of those manifests rather than
-# the working tree's.
-#
-# The digest a manifest pins on `main` is only half of what is already decided
-# for an image. The other half is sitting on `cd/update-<image>-digest`: a
-# digest some run already wrote, waiting on a pull request that has not merged
-# yet. Force-pushing over it is exactly how an older run wins — the branch is a
-# single-slot queue and whoever pushes last fills it — so that pin has to be a
-# candidate in the comparison too, not just the one on `main`.
-#
-# Materialising the files is what makes this the same code path as the working
-# tree read: one definition of "the digest this manifest pins for this image",
-# used for both sides of the comparison. A ref that does not exist yet, or that
-# does not carry one of these files, yields nothing — which is the right answer
-# for a queue slot nobody has filled.
+# `pins` for another ref's copy of the manifests, such as an unmerged
+# cd/update-<image>-digest branch. A missing ref or file prints nothing.
 pins_at() {
   local ref="$1" image="$2" tmp manifest status=0
   shift 2
@@ -105,10 +65,8 @@ pins_at() {
   return "$status"
 }
 
-# Rewrites every manifest to pin this image at this digest. A declared target
-# that is missing, or that pins no digest, means the deploy map is wrong: fail
-# loudly, because a silent no-op here is indistinguishable from a successful
-# deploy.
+# A target that is missing or pins no digest fails: a silent no-op would look
+# like a successful deploy.
 rewrite() {
   local image="$1" digest="$2" ref manifest pins_count
   shift 2
@@ -120,9 +78,8 @@ rewrite() {
       exit 1
     fi
 
-    # Refuse rather than rewrite when the manifest pins this image from
-    # somewhere other than ghcr.io, so the mismatch is a red build instead of
-    # an ImagePullBackOff nobody is watching for.
+    # A pin of this image from another registry fails here, before it can
+    # become an ImagePullBackOff on the cluster.
     if grep -qE "[^[:space:]\"']*/${image}(:[^@[:space:]]+)?@sha256:[0-9a-f]{64}" "$manifest" \
       && ! grep -qE "${ref}@sha256:[0-9a-f]{64}" "$manifest"; then
       echo "::error::$manifest pins $image from a registry this job does not publish to; only ghcr.io digests are valid here"
@@ -136,10 +93,8 @@ rewrite() {
       continue
     fi
 
-    # A chart that splits `repository:` from `tag:` puts the digest on a line
-    # that never names the image, so there is nothing to anchor on and the
-    # blanket rewrite is the only thing that reaches it. It is safe exactly
-    # while the file pins one digest, which is what the count below is for.
+    # A chart that splits `repository:` from `tag:` has no image name to anchor
+    # on, so the unanchored rewrite is safe only while the file pins one digest.
     pins_count=$(grep -cE '@sha256:[0-9a-f]{64}' "$manifest" || true)
     if [ "$pins_count" -eq 0 ]; then
       echo "::error::$manifest pins no image digest, so $image can never roll from it"
@@ -154,36 +109,23 @@ rewrite() {
   done
 }
 
-# Prints the commit a published digest was built from, or nothing when that
-# cannot be established.
-#
-# `docker/metadata-action` stamps `org.opencontainers.image.revision` onto
-# every image the workflow builds, which makes the registry — not the git
-# history of a branch nobody can trust — the record of where a pin came from.
-# Reading it needs the manifest and then the config blob, never the layers.
+# Prints the commit a published digest was built from, or nothing. It reads the
+# org.opencontainers.image.revision label that docker/metadata-action stamps.
 revision() {
   local repository="$1" digest="$2" accept token doc platform config blob
 
   accept='application/vnd.oci.image.index.v1+json,application/vnd.docker.distribution.manifest.list.v2+json,application/vnd.oci.image.manifest.v1+json,application/vnd.docker.distribution.manifest.v2+json'
 
-  # GHCR wants a bearer token even for a public repository, and hands an
-  # anonymous one to anybody who asks for pull scope. Every image this workflow
-  # publishes is public, so there is nothing to authenticate with; if that ever
-  # stops being true this read returns nothing and `decide` takes its
-  # cannot-tell branch rather than guessing. The retries are there because that
-  # branch writes: a registry hiccup should not be the thing that decides a
-  # digest is safe to overwrite.
+  # GHCR wants a bearer token even for a public image and issues anonymous pull
+  # tokens. The retries matter because an empty answer makes `decide` write.
   token=$(curl -fsS --retry 3 --retry-connrefused "https://ghcr.io/token?scope=repository:${repository}:pull&service=ghcr.io" | jq -r '.token // empty') || return 0
   [ -n "$token" ] || return 0
 
   doc=$(curl -fsS --retry 3 --retry-connrefused -H "Authorization: Bearer $token" -H "Accept: $accept" \
     "https://ghcr.io/v2/${repository}/manifests/${digest}") || return 0
 
-  # The workflow builds with `provenance:` and `sbom:` on, so what it pushes is
-  # an index holding the real platform images plus attestation manifests that
-  # declare themselves unknown/unknown. The labels live on a platform image's
-  # config; an attestation manifest has none and would read as an unlabelled
-  # digest.
+  # With provenance and SBOM on, the push is an index that also holds
+  # unknown/unknown attestation manifests. Only a platform image has labels.
   platform=$(jq -r '[.manifests[]? | select(.platform.os != "unknown" and .platform.architecture != "unknown")][0].digest // empty' <<<"$doc")
   if [ -n "$platform" ]; then
     doc=$(curl -fsS --retry 3 --retry-connrefused -H "Authorization: Bearer $token" -H "Accept: $accept" \
@@ -198,34 +140,8 @@ revision() {
   jq -r '.config.Labels["org.opencontainers.image.revision"] // empty' <<<"$blob"
 }
 
-# Prints `skip` when the run building <built-commit> has nothing to add because
-# a later commit's build is already pinned or already queued; `write`
-# otherwise. The caller decides which commits to offer — what `main` pins and
-# what the delivery branch carries are both answers to "a build of this image
-# already got here first".
-#
-# The verdict covers the whole write, not one manifest at a time: one commit
-# ahead of this run skips every target. An image deployed in two places should
-# roll as one build, and writing the older digest into the targets that happen
-# to be behind would leave the fleet running a mixture nobody chose. A target
-# left stale that way is recovered the same way any missed build is — re-run
-# the newer build, whose commit is an ancestor of nothing here, so it writes
-# every target.
-#
-# The rule is deliberately one-sided: **skip only on proof**. Proof is that the
-# built commit is a strict ancestor of a pinned build's commit, with both
-# commits present in a checkout deep enough to answer honestly. Everything else
-# writes and says why on stderr.
-#
-# Failing open is the wrong reflex for a guard, so it needs a reason. An
-# unreadable pin — no revision label, a digest the registry does not hold, a
-# commit that is not in this history — is a pin whose provenance nobody
-# recorded, and refusing to write over it would wedge continuous delivery for
-# that image permanently, with no recovery but editing the manifest by hand.
-# Writing costs at most one stale pin, and it is self-correcting: the write
-# records provenance, so every run after it can compare. Refusing costs an
-# image that never rolls again while every check reports green, which is the
-# exact failure this guard exists to end.
+# Prints `skip` when a pinned commit descends from <built-commit>, else `write`.
+# One verdict covers every target, so an image never runs a mix of two builds.
 decide() {
   local built="$1" pinned shallow
   shift
@@ -258,6 +174,8 @@ decide() {
     echo "This run's $built is not an ancestor of the pinned build's $pinned." >&2
   done
 
+  # Anything unproven writes: refusing an unreadable pin would stop the image
+  # rolling for good, and the new pin carries a label the next run can read.
   echo write
 }
 

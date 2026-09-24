@@ -1,17 +1,7 @@
 /**
- * The visitor: an anonymous id a site can remember someone by, signed so it
- * cannot be chosen.
- *
- * v1 handed out a bare uuid and believed whatever came back. That is enough to
- * count votes and no more: anyone could send someone else's id, and every
- * per-visitor bound — the write bucket, the socket cap, a file's owner — would
- * be one header away from being nothing. So the cookie carries an HMAC over
- * the site and the id, and a cookie that does not verify is replaced rather
- * than trusted.
- *
- * `__Host-` because `kthx.dev` is not on the Public Suffix List: a browser
- * refuses to store such a cookie with a `Domain`, which is what stops one site
- * host from writing a cookie its siblings would send.
+ * The visitor: an anonymous id in a cookie signed over site and id, so it
+ * cannot be chosen. `__Host-` forbids a `Domain`, so one site host cannot set a
+ * cookie its siblings would send; the zone is not on the Public Suffix List.
  */
 import { createHmac } from 'node:crypto';
 
@@ -21,10 +11,9 @@ export const ME_COOKIE = '__Host-kthx_me';
 const ME_LIFETIME_S = 365 * 24 * 60 * 60;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
-/** Who this browser is, and the header that says so when it was not yet. */
 export interface Me {
   readonly id: string;
-  /** Absent when the request already carried a cookie signed by the live key. */
+  /** `null` when the request carried a cookie signed by the live key. */
   readonly setCookie: string | null;
 }
 
@@ -34,7 +23,7 @@ function sign(key: string, site: string, id: string): string {
     .digest('base64url');
 }
 
-/** Every value sent under this name, so a duplicate is caught rather than picked. */
+/** Every value under this name: a duplicated cookie mints a new visitor. */
 function cookies(request: Request, name: string): string[] {
   const found: string[] = [];
   for (const part of (request.headers.get('cookie') ?? '').split(';')) {
@@ -45,10 +34,8 @@ function cookies(request: Request, name: string): string[] {
 }
 
 /**
- * The visitor this request is, minting one when it is nobody yet.
- *
- * `previous` verifies but never signs, so rotating `KTHX_ME_KEY` re-mints each
- * visitor's cookie on their next call instead of forgetting who they are.
+ * `previous` verifies but never signs, so rotating `KTHX_ME_KEY` re-signs each
+ * visitor's cookie on their next call and keeps their id.
  */
 export function meOf(
   request: Request,
@@ -62,8 +49,6 @@ export function meOf(
     if (UUID.test(id)) {
       if (timingSafeEquals(signature, sign(key, site, id)))
         return { id, setCookie: null };
-      // Signed by the key this deployment has just rotated away from: the
-      // visitor keeps their id and is handed a cookie under the live key.
       if (
         previous !== null &&
         timingSafeEquals(signature, sign(previous, site, id))

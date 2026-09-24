@@ -1,4 +1,4 @@
-/** Any OpenAI-compatible chat endpoint over raw fetch; env is read per call. */
+/** Any OpenAI-compatible chat endpoint; env is read per call. */
 export const brainReady = () =>
   Boolean(process.env.LLM_BASE_URL && process.env.LLM_MODEL);
 

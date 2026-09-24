@@ -1,29 +1,8 @@
 name: spindrift-charts
 
-# Publishes both Spindrift charts as independently pinned, extractable OCI
-# artifacts instead of paths this repository's own GitRepository source has to
-# be checked out to reach. Each is pushed under the version its own Chart.yaml
-# carries, and each has a consumer that pins that version by tag:
-#
-#   packages/charts/spindrift      → clusters/offsite/apps/spindrift/oci-repository.yaml
-#   packages/charts/spindrift-app  → clusters/base/platform/spindrift-target/oci-repository.yaml
-#
-# The App chart's consumer is in the per-Target base because every Kubernetes
-# Target needs its own copy of that source object — Spindrift points each
-# rendered HelmRelease's chartRef at the one in the Target's own delivery
-# namespace.
-#
-# **Bumping a chart's version without bumping its consumer's tag ships
-# nothing**, and bumping the consumer's tag before this workflow has pushed
-# that version leaves the source object failing to pull. The conformance suite
-# holds the pair together (apps/spindrift/test/conformance/), so the drift is a
-# red test rather than a silent no-op.
-#
-# **A chart added here needs one manual step the first time.** GHCR creates the
-# package private on its first push and neither consumer carries a secretRef,
-# so the new package has to be flipped to public on its settings page once —
-# GITHUB_TOKEN cannot do it. Until then the OCIRepository sits at
-# OCIArtifactPullFailed with a 401.
+# Pushes packages/charts/spindrift and spindrift-app to GHCR at their Chart.yaml
+# versions; apps/spindrift/test/conformance/ checks that each consumer's OCIRepository
+# pins that tag. A new GHCR package starts private; make it public once, or pulls get a 401.
 on:
   push:
     branches:
@@ -40,10 +19,8 @@ on:
       - 'packages/charts/spindrift-app/**'
       - '.github/workflows/spindrift-charts.yml'
 
-# Cancel superseded runs on a pull request instead of letting them pile up.
-# **Never on `main`**: a cancelled push run leaves the chart version in its
-# Chart.yaml unpublished, and the consumer that pins that version by tag then
-# fails to pull with nothing here saying why. Queue them instead.
+# In-progress push runs are never cancelled: a cancelled push leaves its chart
+# version unpublished, and the consumer that pins it fails to pull.
 concurrency:
   group: spindrift-charts-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
@@ -74,18 +51,13 @@ jobs:
           helm package packages/charts/spindrift -d dist
           helm package packages/charts/spindrift-app -d dist
       - name: Login to GitHub Container Registry
-        # Only needed for the push (on main); PRs lint and package to validate
-        # without pushing, matching the pattern containers.yml uses for images —
-        # a fork's PR has no access to this credential either way.
+        # Pull requests lint and package without pushing.
         if: github.event_name != 'pull_request'
         run: |
           echo "${{ secrets.GITHUB_TOKEN }}" | \
             helm registry login ghcr.io --username "${{ github.actor }}" --password-stdin
       - name: Push charts
-        # Each named explicitly rather than through a `dist/spindrift-*.tgz`
-        # glob, which `spindrift-app-*.tgz` also satisfies — a glob would push
-        # the App chart under the installer's loop and get its version from the
-        # wrong Chart.yaml.
+        # Named one by one: a `dist/spindrift-*.tgz` glob also matches spindrift-app.
         if: github.event_name != 'pull_request'
         run: |
           set -euo pipefail

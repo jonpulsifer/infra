@@ -29,8 +29,6 @@ func TestLoadConfigDefaults(t *testing.T) {
 	if time.Duration(cfg.PollInterval) != defaultPollInterval {
 		t.Errorf("pollInterval default: got %s", cfg.PollInterval)
 	}
-	// Not optional: the busy-time budget is the only thing that reaps a skiff
-	// whose guest wedged mid-job, so a class that declares none still gets one.
 	if time.Duration(cfg.Classes["skiff-nixos"].MaxLifetime) != defaultMaxLifetime {
 		t.Errorf("maxLifetime default: got %s", cfg.Classes["skiff-nixos"].MaxLifetime)
 	}
@@ -140,9 +138,6 @@ func TestLoadConfigRejectsUnparseableWorkspaceSize(t *testing.T) {
 	}
 }
 
-// persist is what a class trades the "leaves nothing behind" stance for, and
-// what it buys is a warm cache on a disk. A class that persists nothing is a
-// declaration whose only possible effect is to mislead whoever reads it.
 func TestLoadConfigRejectsPersistWithoutAWorkspace(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.json")
@@ -156,8 +151,6 @@ func TestLoadConfigRejectsPersistWithoutAWorkspace(t *testing.T) {
 	}
 }
 
-// Slot images live in one flat directory named <class>-<slot>.img, and sweep
-// tells a slot image from an orphan by that shape alone.
 func TestLoadConfigRejectsAPersistingClassNameThatWouldEscapeItsImageName(t *testing.T) {
 	for _, name := range []string{"skiff/ubuntu", "skiff.ubuntu"} {
 		dir := t.TempDir()
@@ -255,9 +248,6 @@ func TestLoadConfigRejectsSpindriftWithNoClasses(t *testing.T) {
 	}
 }
 
-// A build class Spindrift is told to claim for must also be a class bosun
-// actually knows how to boot -- otherwise a claim would arrive for a class
-// spawn can never resolve.
 func TestLoadConfigRejectsSpindriftClassNotDeclaredInClasses(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.json")
@@ -272,8 +262,6 @@ func TestLoadConfigRejectsSpindriftClassNotDeclaredInClasses(t *testing.T) {
 	}
 }
 
-// The same names are fine when nothing persists: only the slot image naming
-// constrains them.
 func TestLoadConfigAllowsADottedClassNameThatDoesNotPersist(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.json")

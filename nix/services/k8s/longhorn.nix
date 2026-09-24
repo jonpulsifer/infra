@@ -6,13 +6,13 @@
 }:
 {
   config = lib.mkIf config.services.k8s.enable {
-    # TODO(2025-09-21): this is probably not required
+    # TODO: confirm longhorn still needs this.
     environment.systemPackages = [ pkgs.openiscsi ];
 
     systemd.services.containerd.path = [
       pkgs.openiscsi
 
-      # TODO(2025-09-21): double check these are still required
+      # TODO: confirm these are still required.
       "/run/wrappers/bin"
       "/run/current-system/sw/bin/"
     ];

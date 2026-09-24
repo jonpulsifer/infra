@@ -1,7 +1,5 @@
-# blinkypi0: same board family as radiopi0 (Pi Zero W, armv6l), same cross-build
-# story -- but the physical device is currently unplugged, so this config is
-# derived from docs/hosts/blinkypi0.md and mirrors radiopi0 rather than
-# being verified against live hardware.
+# blinkypi0: Pi Zero W with a Blinkt! HAT, configured like radiopi0. The device is
+# unplugged, so this config is untested on its hardware.
 { ... }:
 {
   imports = [ ../profiles/pi-zero.nix ];

@@ -33,17 +33,8 @@ import {
 import { Threads } from './threads.ts';
 
 const EXIT_CONFIG = 64;
-/**
- * How long an exiting process waits for the last metrics export. The order
- * between these two numbers is load-bearing and that is why it is written as
- * arithmetic rather than a literal: the flush is one export, which the
- * exporter itself allows `EXPORT_TIMEOUT_MS` to finish, so a budget shorter
- * than that would call `process.exit` on a collector that is merely slow and
- * throw the export away. That export is the only reason
- * MateGatewayFatalClose can fire at all, since the process dies immediately
- * after counting the close. The spare second covers the shutdown around it,
- * and the whole budget sits well inside the pod's 30s termination grace.
- */
+// Must exceed EXPORT_TIMEOUT_MS, or a slow collector loses the last export,
+// which carries the fatal-close count. The extra second covers shutdown.
 const FLUSH_BUDGET_MS = EXPORT_TIMEOUT_MS + 1_000;
 
 function loadConfig() {
@@ -59,15 +50,10 @@ function loadConfig() {
 }
 
 const config = loadConfig();
-// Before anything can reach a meter: an instrument minted ahead of the SDK is
-// a no-op for the life of the process.
+// Before any meter is used: an instrument created ahead of the SDK stays a
+// no-op for the life of the process.
 startTelemetry(process.env, log);
 
-/**
- * Exit once the last export is away, or once the budget runs out. The two
- * exits below both mean a configuration error that will not fix itself, and
- * the counter that says which one is only useful if it leaves the process.
- */
 function exitAfterFlush(code: number): void {
   const done = () => process.exit(code);
   const timer = setTimeout(done, FLUSH_BUDGET_MS);
@@ -101,13 +87,8 @@ const { client, manager, budget } = createGateway({
   onClose: (code, fatal) => getInstruments().gatewayClosed(code, fatal),
   exit: exitAfterFlush,
 });
-/**
- * The App a sandbox's GitHub token is minted from, or `null` where none is
- * configured. A key that cannot be read is deliberately not fatal: mate runs
- * one replica under `strategy: Recreate`, so refusing to boot over the
- * credential for pushing would take both chat surfaces down to protect a
- * feature neither of them needs. It is one error line and a gauge instead.
- */
+// An unreadable key is not fatal: with one replica, refusing to boot would
+// take both chat surfaces down over the credential for pushing.
 const githubApp =
   config.sandboxes.mode === 'kube' && config.sandboxes.githubApp
     ? await openGithubApp(
@@ -116,12 +97,6 @@ const githubApp =
       )
     : null;
 
-/**
- * Reads the mounted PEM and builds the App. A missing or malformed key is one
- * error line and `null` — the caller treats that as "no App configured", and
- * `mate_github_app_ready` reports the same 0 it would for a key GitHub has
- * stopped accepting, because to a thread that cannot push they are one thing.
- */
 async function openGithubApp(
   app: GithubAppConfig,
   turnTimeoutMs: number,
@@ -141,9 +116,7 @@ async function openGithubApp(
       log,
     });
   } catch (error) {
-    // Reported as a broken credential rather than as a missing one: somebody
-    // asked for an App by setting its id, so silence here would be the same
-    // shape of failure this whole path exists to stop being silent.
+    // An App id is set, so a key that fails to open reports not ready.
     getInstruments().githubAppReady(false);
     log.error('the GitHub App could not be opened', {
       keyFile: app.keyFile,
@@ -153,16 +126,8 @@ async function openGithubApp(
   }
 }
 
-/**
- * The SSH key a turn is stamped with, or `null`. Read once, here, rather than
- * per turn: it is a file on mate's own pod, it does not change under a running
- * process, and a read that happens at boot is a read whose failure is one log
- * line at a known moment instead of a surprise in somebody's thread.
- *
- * Unreadable is never fatal, for the reason the App key is not: one replica
- * under `strategy: Recreate` means refusing to boot over a credential for a
- * side feature takes both chat surfaces down with it.
- */
+// Read once at boot, so a failure is one log line. Unreadable is not fatal,
+// for the same reason as the App key.
 async function readSshKey(path: string | null): Promise<string | null> {
   if (!path) return null;
   try {
@@ -194,13 +159,6 @@ const sandboxes: Sandboxes =
     : new StubSandboxes();
 const discord = discordOver(client.api);
 
-/**
- * The Slack half, opened before the gateway: its own socket, its own
- * identity, and no dependence on Discord being up. A Slack-side failure is
- * one loud line and a mate that answers on Discord alone, because the
- * alternative is a crash loop that takes the surface that was working down
- * with the one that was not.
- */
 async function openSlack(slack: SlackConfig) {
   const api = slackWeb(slack.botToken, { clock: systemClock, log });
   const identity = await api.identity();
@@ -235,9 +193,8 @@ async function openSlack(slack: SlackConfig) {
         since: Date.now(),
         onEvent: (payload) =>
           slackEvent(payload.event ?? {}, identity.userId, {
-            // Slack's own stop control: the same cancel the Discord button
-            // asks for, on the same thread key, and already acknowledged on
-            // the socket — which is the only ack Slack is waiting for.
+            // The socket already acked the envelope, the only ack Slack
+            // waits for.
             stopped: (stop) =>
               void threads.onStop(stop.key, stop.userId, async () => {}),
             message: (inbound) => void threads.onMessage(inbound),
@@ -249,6 +206,7 @@ async function openSlack(slack: SlackConfig) {
   };
 }
 
+// A Slack failure is not fatal: a crash loop would take Discord down with it.
 const slack = config.slack
   ? await openSlack(config.slack).catch((error) => {
       log.error('slack could not be opened; answering on Discord alone', {
@@ -268,10 +226,8 @@ const threads = new Threads({
 });
 let me = '';
 
-// Slack comes up on its own, before the gateway is dialled: the surfaces are
-// independent everywhere else, and a Discord token that is revoked, rate
-// limited or merely waiting out the identify budget must not leave the other
-// one silent with nothing in the log naming the reason.
+// Before the gateway: a revoked or rate-limited Discord token, or a wait on
+// the identify budget, must not hold Slack back.
 let socket: SocketMode | null = null;
 if (slack) {
   await threads.add(slack.surface);
@@ -385,13 +341,11 @@ client.on(GatewayDispatchEvents.InteractionCreate, ({ data }) => {
 
 async function shutdown(signal: string): Promise<void> {
   log.info('shutting down', { signal });
-  // First: an envelope is acknowledged on receipt, so one that arrived during
-  // the drain is one Slack will not send again, and closing the socket is
-  // what stops another from being taken and dropped.
+  // First: envelopes are acked on receipt, so one taken during the drain is
+  // lost for good.
   socket?.stop();
-  // Before the gateway goes, while both surfaces can still be written to: a
-  // thread watching a line about a sandbox being started is owed the news
-  // that it never will be.
+  // While both surfaces can still post, so a thread still waiting to start is
+  // told it never will.
   await threads
     .quiesce()
     .catch((error) => log.warn('quiesce failed', { error: plain(error) }));
@@ -409,11 +363,6 @@ async function shutdown(signal: string): Promise<void> {
 process.on('SIGINT', () => void shutdown('SIGINT'));
 process.on('SIGTERM', () => void shutdown('SIGTERM'));
 
-/**
- * The warm pool's cadence, which is also the renewal `SPARE_TTL_MS` is sized
- * against. With `MATE_SPARES` unset the pass returns without asking the
- * apiserver anything, so this timer costs a bot with no pool nothing.
- */
 const sweep = () =>
   void sandboxes
     .ensureSpares()
@@ -421,16 +370,8 @@ const sweep = () =>
 setInterval(sweep, SPARE_SWEEP_MS);
 sweep();
 
-/**
- * Proves the GitHub credential rather than assuming it, on a cadence, and
- * publishes the answer as `mate_github_app_ready`.
- *
- * This exists because of how the credential it replaces failed: nothing ever
- * exercised it, so a broken one was discovered by a human asking for a pull
- * request and being told the wrong reason. A mint at boot and every quarter
- * hour costs one API call and makes the gauge a current fact rather than an
- * inference from whenever a turn last ran.
- */
+// A real mint at boot and on a timer keeps `mate_github_app_ready` current
+// even when no turn has pushed.
 const PREFLIGHT_MS = 15 * 60_000;
 const preflight = () => {
   if (!githubApp) return;

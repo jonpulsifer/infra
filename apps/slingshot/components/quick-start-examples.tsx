@@ -4,11 +4,8 @@ import { DEFAULT_PROJECT_SLUG } from '@/lib/project-store';
 import { listProjectsCached } from '@/lib/projects-cache';
 import { HowToUseExamples } from './how-to-use-examples';
 
-/**
- * The home page's interactive examples, with the project picker populated from
- * the store. Distinct from `project-nav`, which is the sidebar list - the two
- * previously both exported a component called `ProjectsList`.
- */
+// The home page's interactive examples, with the project picker filled from
+// the store.
 
 async function Examples() {
   const projects = await listProjectsCached();

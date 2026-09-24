@@ -1,6 +1,4 @@
-//! Every published vector in SPEC.md §10 and §11, transcribed from the spec
-//! text. If one of these fails, the spec and this implementation disagree, and
-//! that is the entire point of this crate.
+//! Every published vector in SPEC.md, transcribed from the spec text.
 
 use fml_derive::*;
 
@@ -12,15 +10,10 @@ fn s32(v: Vec<u8>) -> [u8; 32] {
     v.try_into().expect("32 octets")
 }
 
-// ---------------------------------------------------------------------------
-// §11 — the FML vectors
-// ---------------------------------------------------------------------------
-
 struct Leaf {
     path: &'static str,
     okm: &'static str,
-    /// Ed25519 public key, age recipient, or the mnemonic — whichever §6.2
-    /// declares for this leaf.
+    /// Ed25519 public key, age recipient or mnemonic, per the leaf's declared type.
     mapped: &'static str,
     /// Only the age leaf publishes an identity string.
     identity: &'static str,
@@ -200,7 +193,7 @@ fn spec_11_vectors() {
                     v.name,
                     leaf.path
                 );
-                // The whole chain from the master must agree with the two steps.
+                // The full chain from the master must agree with the two steps.
                 assert_eq!(
                     derive_leaf_from_master(&master, leaf.path, 32).unwrap(),
                     okm,
@@ -260,7 +253,7 @@ fn spec_11_vectors() {
     }
 }
 
-/// §11 vector C's master is `SHA-256("Folly Mountain Laboratories")`.
+/// Vector C's master is `SHA-256("Folly Mountain Laboratories")`.
 #[test]
 fn spec_11_vector_c_master_provenance() {
     use sha2::{Digest, Sha256};
@@ -270,7 +263,7 @@ fn spec_11_vector_c_master_provenance() {
     );
 }
 
-/// §11 vector D — a version bump rotates, and §4.3's length-prefix property is real.
+/// Vector D: a version bump rotates, and L=32 output is a prefix of L=64.
 #[test]
 fn spec_11_vector_d() {
     let master = hx("0000000000000000000000000000000000000000000000000000000000000000");
@@ -319,11 +312,7 @@ fn spec_11_vector_d() {
     );
 }
 
-// ---------------------------------------------------------------------------
-// §10 — reference self-checks against the standards themselves
-// ---------------------------------------------------------------------------
-
-/// RFC 5869 test case 1. Pins HKDF and, crucially, the salt/IKM argument order.
+/// RFC 5869 test case 1. Pins HKDF and the salt/IKM argument order.
 #[test]
 fn spec_10_rfc5869_case_1() {
     use hkdf::Hkdf;
@@ -346,12 +335,8 @@ fn spec_10_rfc5869_case_1() {
     );
 }
 
-/// The age specification's own example pair.
-///
-/// Only the encode direction is exercised: this crate implements the
-/// derivation direction and has no Bech32 decoder. `encode(0x42 * 32)`
-/// reproducing the published identity pins the same charset, HRP, bit
-/// conversion and checksum that a decode-then-re-encode would.
+/// The age specification's example pair, encode direction only: this crate has
+/// no Bech32 decoder.
 #[test]
 fn spec_10_age_example_pair() {
     let identity = [0x42u8; 32];
@@ -375,7 +360,7 @@ fn spec_10_bip39_reference_vectors() {
     assert_eq!(bip39_mnemonic(&[0xffu8; 32]).unwrap(), want24);
 }
 
-/// §7.3: the wordlist is pinned by content and MUST be verified before use.
+/// The wordlist is pinned by content.
 #[test]
 fn spec_10_wordlist_identity() {
     let w = wordlist().unwrap();
@@ -383,10 +368,6 @@ fn spec_10_wordlist_identity() {
     assert_eq!(w[0], "abandon");
     assert_eq!(w[2047], "zoo");
 }
-
-// ---------------------------------------------------------------------------
-// §9 — what an implementation must reject
-// ---------------------------------------------------------------------------
 
 #[test]
 fn spec_9_rejects_bad_paths() {
@@ -440,7 +421,7 @@ fn spec_9_rejects_bad_paths() {
     );
 }
 
-/// §3.4 — a leaf must descend from the branch secret deriving it.
+/// A leaf must descend from the branch its secret came from.
 #[test]
 fn spec_3_4_leaf_must_descend_from_branch() {
     let secret = [0u8; 32];
@@ -450,9 +431,8 @@ fn spec_3_4_leaf_must_descend_from_branch() {
     assert!(derive_leaf(&secret, "fml/infra/v1", "fml/infra/v1/pki/root/v1", 32).is_ok());
 }
 
-/// §9 — master seed length is the only length check the *library* makes.
-/// All-zero and all-0xff are the ceremony's business, not the library's:
-/// vector A depends on the all-zero master deriving.
+/// Length is the library's only master check. Constant masters are the
+/// ceremony's to reject, because vector A uses the all-zero master.
 #[test]
 fn spec_9_master_seed_length() {
     assert!(derive_branch(&[0u8; 31], "fml/infra/v1").is_err());

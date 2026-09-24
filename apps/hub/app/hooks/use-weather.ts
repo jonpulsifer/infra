@@ -3,28 +3,16 @@ import { WEATHERFLOW_CONFIG } from '~/lib/weatherflow/config';
 import { mockSnapshot } from '~/lib/weatherflow/mock';
 import type { WeatherSnapshot } from '~/lib/weatherflow/types';
 
-/**
- * Fetch the server's weather snapshot on mount and every POLL_INTERVAL.
- * A failed fetch keeps the last snapshot; the UI derives staleness from
- * observation age rather than tracking connection state.
- *
- * In development (`import.meta.env.DEV`) the network is bypassed entirely: a
- * synthetic snapshot is generated locally so the display can be exercised
- * without a live TempestWx token, and the returned `dev` controls let you add
- * and remove mock stations on the fly. The whole mock path is a compile-time
- * constant branch, so it's tree-shaken out of production builds.
- */
 const RELOAD_AT_KEY = 'hub-last-auto-reload';
 
-// Vite compile-time constant — the mock branches below dead-code away in prod.
+// A Vite compile-time constant, so production builds drop the mock branches.
 const IS_DEV = import.meta.env.DEV;
 
-// Faster tick in dev so the smooth value drift (and the leaders shifting) is
-// visible while iterating; prod keeps the real cadence.
+// Fast enough in dev to watch the mock values drift.
 const DEV_POLL_INTERVAL = 2_000;
 
 export interface DevControls {
-  /** True only in a dev build; false (and the callbacks are no-ops) in prod. */
+  /** False in production builds, where the callbacks do nothing. */
   enabled: boolean;
   addStation: () => void;
   /** Remove a specific mock station, or the last one when omitted. */
@@ -39,10 +27,8 @@ export interface UseWeatherResult {
 }
 
 /**
- * A snapshot from a newer server build means this page's bundle is outdated
- * (the kiosk browser never navigates on its own). Reload to pick it up, at
- * most once every 5 minutes so a rolling deploy serving mixed versions can't
- * put the display in a reload loop.
+ * The kiosk never navigates on its own, so a newer server build reloads the page,
+ * at most every 5 minutes so a rolling deploy cannot cause a reload loop.
  */
 function reloadIfNewBuild(serverBuildId: string) {
   if (!serverBuildId || serverBuildId === __BUILD_ID__) return;
@@ -52,13 +38,16 @@ function reloadIfNewBuild(serverBuildId: string) {
   window.location.reload();
 }
 
+/**
+ * Polls the server's snapshot. A failed fetch keeps the last one, and the UI
+ * derives staleness from observation age. Dev builds use a local mock instead.
+ */
 export function useWeather(): UseWeatherResult {
   const [snapshot, setSnapshot] = useState<WeatherSnapshot | null>(null);
   const [fetchError, setFetchError] = useState<string | null>(null);
 
-  // Dev-only mock station list. The ref is the source of truth so the poll
-  // interval and the add/remove callbacks always see the current seeds without
-  // stale closures; snapshot state is what actually drives re-renders.
+  // Mock seeds live in a ref so the poll and the callbacks never read a stale
+  // closure; snapshot state drives re-renders.
   const seedsRef = useRef<number[]>([0, 1]);
   const nextSeedRef = useRef(2);
 

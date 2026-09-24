@@ -1,22 +1,8 @@
 #!/usr/bin/env bun
 /**
- * kthx: a directory becomes `https://<name>.kthx.dev`.
- *
- *   kthx init [dir]                claim a name, write kthx.json and SKILL.md
- *   kthx deploy [dir] [--name n]   upload the directory
- *   kthx dev [dir]                 serve it on :4321 against the live backends
- *   kthx rollback [n]              serve release n (default: the one before)
- *   kthx release                   drop the hold; the newest release serves
- *   kthx ls [--all]                this site, or every site of yours, or all
- *   kthx rm                        delete the site
- *   kthx open                      open the site in a browser
- *   kthx upgrade                   replace this copy with the apex's
- *   kthx nuke [--yes]              delete every site (a tailnet operator)
- *
- * The name is `kthx.json`, read from the directory and then from here. The
- * token that opens it is in `$XDG_CONFIG_HOME/kthx/sites.json`, never in the
- * directory — the directory is what gets uploaded. `KTHX_ORIGIN` points the
- * client somewhere else.
+ * kthx: a directory becomes `https://<name>.kthx.dev`. Tokens live in
+ * `$XDG_CONFIG_HOME/kthx/sites.json`, never in the uploaded directory.
+ * `KTHX_ORIGIN` points the client at another apex.
  */
 import {
   chmodSync,
@@ -46,14 +32,8 @@ export { KthxError } from './error.ts';
 export const origin = () =>
   (process.env.KTHX_ORIGIN?.trim() || 'https://kthx.dev').replace(/\/+$/, '');
 
-/**
- * Where the site's own backends answer: the zone the origin says it serves,
- * with the name as a label in front of it. Asked of the origin rather than
- * derived from it, because a deployment may answer claims on a private host
- * while its sites stay on the public zone — and never read from a file in the
- * project, which is committed and cloned and must not be what chooses where
- * `kthx dev` sends the owner bearer.
- */
+// Asked of the origin, since claims may run on a private host. Never read from
+// the committed project: this URL is where `kthx dev` sends the owner bearer.
 let apex: Promise<{ url: string }> | null = null;
 
 export async function siteUrl(name: string): Promise<string> {
@@ -62,14 +42,12 @@ export async function siteUrl(name: string): Promise<string> {
   return `${protocol}//${name}.${host}`;
 }
 
-// --- what is remembered -----------------------------------------------------
-
 export const sitesFile = () => join(configDir(), 'sites.json');
 
 /** origin → name → token */
 type Tokens = Record<string, Record<string, string>>;
 
-/** The file's JSON, `fallback` when there is no file, and never a guess at a broken one. */
+/** Only a missing file gets `fallback`; a corrupt one throws. */
 function readJson<T>(path: string, fallback: T): T {
   if (!existsSync(path)) return fallback;
   try {
@@ -95,7 +73,6 @@ function forget(name: string): void {
   });
 }
 
-/** Rewrite this origin's tokens, when there are any to rewrite. */
 function forgetWhere(edit: (known: Record<string, string>) => void): void {
   const path = sitesFile();
   const tokens = readJson<Tokens>(path, {});
@@ -121,9 +98,8 @@ function tokenFor(name: string): string {
 }
 
 /**
- * The name for `dir`, from `<dir>/kthx.json` and then from the current
- * directory's — so `kthx deploy dist` inside a project root deploys the
- * project's site rather than claiming a second name for its build output.
+ * Reads `<dir>/kthx.json`, then `./kthx.json`, so `kthx deploy dist` in a
+ * project root deploys the project's site.
  */
 function named(dir: string): string | undefined {
   for (const at of [join(dir, 'kthx.json'), 'kthx.json']) {
@@ -135,9 +111,8 @@ function named(dir: string): string | undefined {
         `${at} names ${JSON.stringify(name)}, which is not a name`,
       );
     }
-    // `kthx.json` is committed and cloned, and the string in it becomes a
-    // hostname to open and a path to call. The server's own rule, checked here
-    // before either is built.
+    // A cloned `kthx.json` becomes a hostname and an API path, so it must pass
+    // the server's name rule first.
     const problem = nameProblem(name);
     if (problem !== null) {
       throw new KthxError(
@@ -161,8 +136,6 @@ function nameOf(dir: string): string {
   return name;
 }
 
-// --- the API ----------------------------------------------------------------
-
 async function api<T>(
   path: string,
   init: RequestInit & { token?: string } = {},
@@ -185,7 +158,7 @@ const json = (body: unknown) => ({
   body: JSON.stringify(body),
 });
 
-/** The landing page's dice: `adj-animal-NN`. */
+/** The same `adj-animal-NN` dice as the landing page. */
 const ADJ = 'plum brisk quiet amber loose tiny wired damp clever spare'.split(
   ' ',
 );
@@ -197,12 +170,8 @@ export const mint = () =>
   `${pick(ADJ)}-${pick(ANI)}-${10 + Math.floor(Math.random() * 89)}`;
 
 /**
- * The name `dir` deploys to, claiming one when nothing names it yet.
- *
- * `kthx.json` is written where the name was asked for: the directory for
- * `init`, which is about making that directory a site, and the current one for
- * `deploy` and `dev`, so a build output directory that is rebuilt from scratch
- * does not lose the name with it.
+ * Claims a name when nothing names `dir` yet. `deploy` and `dev` write
+ * `kthx.json` to `.`, so a rebuilt output directory keeps its name.
  */
 async function nameFor(
   dir: string,
@@ -219,8 +188,7 @@ async function nameFor(
     }
     return already;
   }
-  // A name whose token is already here is one this machine claimed before:
-  // reuse it rather than spend a claim finding out it is taken.
+  // A token here means this machine already claimed the name.
   if (chosen !== undefined && knownToken(chosen) !== undefined) {
     write(writeTo, chosen);
     return chosen;
@@ -250,9 +218,6 @@ function write(dir: string, name: string): void {
   );
 }
 
-// --- commands ---------------------------------------------------------------
-
-/** The agent reference the apex publishes, or the copy this build carries. */
 async function skill(): Promise<string> {
   const response = await fetch(`${origin()}/skill.md`, {
     signal: AbortSignal.timeout(10_000),
@@ -279,7 +244,7 @@ export async function init(
   mkdirSync(dir, { recursive: true });
   const empty = readdirSync(dir).length === 0;
   const name = await nameFor(dir, options.name, dir);
-  // A hand-written SKILL.md is somebody's work, and there is no undo here.
+  // An existing SKILL.md may be hand-written, so it is never overwritten.
   const kept = !empty && existsSync(join(dir, 'SKILL.md'));
   if (!kept) writeFileSync(join(dir, 'SKILL.md'), await skill());
   if (empty) writeFileSync(join(dir, 'index.html'), STARTER);
@@ -373,7 +338,7 @@ export async function release(dir = '.'): Promise<number | null> {
   return serving;
 }
 
-/** One site as the public directory lists it. */
+/** One entry in the public directory. */
 interface Listed {
   readonly name: string;
   readonly url: string;
@@ -382,13 +347,6 @@ interface Listed {
   readonly at: string;
 }
 
-/**
- * What this directory serves — or, with no `kthx.json`, what this machine
- * holds tokens for, or, with `--all`, every site on the apex.
- *
- * A directory that is not a site is the moment someone asks "which of these
- * did I claim?", and `sites.json` has held the answer all along.
- */
 export async function ls(
   dir = '.',
   options: { all?: boolean } = {},
@@ -433,14 +391,7 @@ export async function ls(
   return found;
 }
 
-/**
- * Every site this machine has a token for at this origin.
- *
- * One `GET /api/sites/:name` each, because the token is what makes the answer
- * more than the public directory's. A token that no longer opens its site is
- * still printed: the name is what its owner recognises, and the code says what
- * became of it.
- */
+// A name whose token no longer works still prints, with the refusal code.
 async function listMySites(): Promise<void> {
   const names = Object.keys(
     readJson<Tokens>(sitesFile(), {})[origin()] ?? {},
@@ -465,7 +416,6 @@ async function listMySites(): Promise<void> {
   }
 }
 
-/** The public directory: every live site on the apex, newest claim first. */
 async function listEverySite(): Promise<void> {
   const page = await api<{ items: Listed[]; next: string | null }>(
     '/api/sites',
@@ -486,12 +436,7 @@ async function listEverySite(): Promise<void> {
 
 const serves = (n: number | null) => (n === null ? 'nothing yet' : `v${n}`);
 
-/**
- * Delete the site, once its name has been typed back.
- *
- * There is no undo and no account to restore from: the confirmation is the
- * only thing between a typo and a name that answers 410 forever.
- */
+// No undo: a deleted name answers 410 forever, so the name must be typed back.
 export async function rm(dir = '.', confirm = prompt): Promise<void> {
   const name = nameOf(dir);
   const typed = confirm(`  type ${name} to delete it, and everything in it: `);
@@ -505,16 +450,8 @@ export async function rm(dir = '.', confirm = prompt): Promise<void> {
 }
 
 /**
- * Every site on the zone gone, once `NUKE` has been typed back.
- *
- * There is no key to hold. The zone is opened by a person the tailnet vouched
- * for, so what this command carries is where it is pointed: run it against the
- * tailnet host from a device signed in to the tailnet, and the proxy in front
- * of the server says who is asking. Anywhere else the route is a 404, and the
- * error below is the only useful thing to say about that.
- *
- * `--yes` is for a script; without it and without a terminal to ask on,
- * `prompt` answers null and nothing is deleted, which is the right way round.
+ * Sends no credential: the server opens this to a login in `KTHX_ADMIN_LOGINS`
+ * on the identity host. With no terminal, `prompt` returns null.
  */
 export async function nuke(
   { yes = false } = {},
@@ -533,9 +470,7 @@ export async function nuke(
       method: 'DELETE',
     });
   } catch (cause) {
-    // 404 is the honest answer for both "this deployment has no operator" and
-    // "you are not on the host that knows who you are", and the second is the
-    // one that happens to a person.
+    // The server answers 404 when `KTHX_ADMIN_LOGINS` is empty.
     if (cause instanceof KthxError && cause.code === 'NOT_FOUND') {
       throw new KthxError(
         'NO_NUKE',
@@ -544,7 +479,7 @@ export async function nuke(
     }
     throw cause;
   }
-  // Every token this machine holds is now a token for a name anyone may claim.
+  // Every name is claimable again, so the local tokens are dead.
   forgetWhere((known) => {
     for (const name of Object.keys(known)) delete known[name];
   });
@@ -558,16 +493,13 @@ export async function openSite(dir = '.'): Promise<string> {
   console.log(`  ${link(url)}`);
   const opener = process.platform === 'darwin' ? 'open' : 'xdg-open';
   try {
-    // Unreferenced: the browser it starts outlives this command, and the
-    // command must not wait for it to be closed.
+    // unref: the browser outlives this command.
     Bun.spawn([opener, url], { stdio: ['ignore', 'ignore', 'ignore'] }).unref();
   } catch {
-    // No opener on this machine: the URL is printed, which is the point.
+    // No opener here; the URL is already printed.
   }
   return url;
 }
-
-// --- printing ---------------------------------------------------------------
 
 const kb = (n: number) =>
   n < 1024
@@ -585,10 +517,6 @@ const short = (hex: string) => {
   return `sha256:${bare.slice(0, 4)}…${bare.slice(-4)}`;
 };
 
-/**
- * The banner and the one line under it: which build this is, how to replace it,
- * and how someone reading over a shoulder installs their own.
- */
 const hello = () =>
   banner(
     `${versionLine()} — kthx upgrade · bun add -g ${origin()}/cli/kthx.tgz`,
@@ -633,9 +561,8 @@ if (import.meta.main) {
   }
   const [command, argument] = positionals;
   const dir = argument ?? '.';
-  // Started here and awaited at the end, so the request overlaps the command
-  // instead of following it. It resolves to `null` on every failure, including
-  // its own 1.5 s cap, and cannot change what the command prints or exits with.
+  // Started first so the request overlaps the command. It resolves `null` on any
+  // failure, so it never changes the output or the exit code.
   const nudge = updateNudge({
     origin: origin(),
     mine: buildId(),
@@ -646,8 +573,7 @@ if (import.meta.main) {
     if (values.version === true && command === undefined) {
       console.log(versionLine());
     } else if (command === undefined || values.help === true) {
-      // Nobody typed `kthx` to be told the usage is wrong. Exit 0: this is the
-      // answer to the question, not a refusal.
+      // Bare `kthx` asks for help, so this exits 0.
       console.log(hello());
       console.log(USAGE);
     } else {
@@ -660,8 +586,8 @@ if (import.meta.main) {
           break;
         case 'dev': {
           const name = await nameFor(dir, values.name, '.');
-          // Not `tokenFor`: `kthx.json` is committed and the token is not, so a
-          // clone of the project must still be able to run the loop.
+          // `knownToken`, not `tokenFor`: a fresh clone has no token and still
+          // runs the loop.
           (await import('./dev.ts')).dev(dir, {
             name,
             token: knownToken(name),
@@ -697,8 +623,7 @@ if (import.meta.main) {
           await nuke(values);
           break;
         case 'mcp':
-          // The reference this CLI writes names it; the stdio bridge is not in
-          // this build. One honest line beats usage and exit 2.
+          // This build has no stdio MCP bridge, so point at the HTTP endpoint.
           console.error(
             `MCP: not in this build — point the editor at ${await siteUrl(nameOf(dir))}/api/mcp with the bearer from ${sitesFile()}`,
           );

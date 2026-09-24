@@ -1,7 +1,3 @@
-/**
- * The replay a fresh harness is handed: what of the thread it carries, in
- * what order, and where it stops.
- */
 import { beforeEach, describe, expect, test } from 'bun:test';
 import { SANDBOX_CLOSED, WAITING } from '../src/notices.ts';
 import { STOPPED } from '../src/reply.ts';

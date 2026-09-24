@@ -30,11 +30,8 @@ import {
   useSidebar,
 } from './ui/sidebar';
 
-/**
- * The parts of the sidebar that do not depend on data: branding, navigation,
- * and the tools list. The project list is passed in as children so it can
- * stream separately.
- */
+// The sidebar parts that need no data. The project list arrives as children
+// so it can stream separately.
 
 const developerTools = [
   { name: 'Environment', url: '/environment', icon: Terminal },

@@ -11,8 +11,7 @@ import (
 	"time"
 )
 
-// The queries the fleet module reads. Named so the test adapter can answer
-// them by identity rather than by prefix-matching a string literal.
+// Named so the test adapter can match queries by identity.
 const (
 	queryNodeUp    = `up{job="node-exporter"}`
 	queryNodeTemp  = `max by (node, instance) (node_hwmon_temp_celsius)`
@@ -24,21 +23,17 @@ const (
 	queryCPUHistory = `100 * (1 - avg(rate(node_cpu_seconds_total{job="node-exporter",mode="idle"}[10m])))`
 )
 
-// promSample is one Prometheus series reduced to the labels and the value.
 type promSample struct {
 	Metric map[string]string
 	Value  float64
 }
 
-// promSource is the port the fleet module reads through. Two adapters
-// implement it: httpProm against a real Prometheus, and the canned source in
-// the tests.
+// promSource is implemented by httpProm and by the tests' cannedProm.
 type promSource interface {
 	Query(ctx context.Context, query string) ([]promSample, error)
 	Range(ctx context.Context, query string, window, step time.Duration) ([]float64, error)
 }
 
-// httpProm talks to a Prometheus HTTP API.
 type httpProm struct {
 	base   string // no trailing slash
 	client *http.Client

@@ -12,8 +12,7 @@ import (
 	"os"
 )
 
-// readBytes reads a file, or stdin when path is "-", so the rotation scripts
-// can pipe PEM straight from Terraform output without a temp file.
+// "-" reads stdin, so the rotation scripts can pipe PEM from Terraform output.
 func readBytes(path string) ([]byte, error) {
 	if path == "-" {
 		return io.ReadAll(os.Stdin)
@@ -21,9 +20,7 @@ func readBytes(path string) ([]byte, error) {
 	return os.ReadFile(path)
 }
 
-// readCert loads exactly one certificate. More than one is an error rather than
-// a silent first-wins: certs/ holds single-certificate files, and a bundle
-// arriving where an anchor belongs is the kind of mistake worth stopping on.
+// readCert loads exactly one certificate: a bundle where an anchor belongs is an error.
 func readCert(path string) (*x509.Certificate, error) {
 	raw, err := readBytes(path)
 	if err != nil {
@@ -58,9 +55,7 @@ func parseCert(raw []byte, path string) (*x509.Certificate, error) {
 	return found, nil
 }
 
-// readCerts loads every certificate in a file, in order. Bundles are ordered
-// leaf-most first by convention, and the order is load-bearing for anything
-// that walks the file as a chain.
+// readCerts keeps file order, leaf-most first, which chain walks depend on.
 func readCerts(path string) ([]*x509.Certificate, error) {
 	raw, err := readBytes(path)
 	if err != nil {
@@ -88,8 +83,8 @@ func readCerts(path string) ([]*x509.Certificate, error) {
 	return certs, nil
 }
 
-// readPrivateKey accepts PKCS#8, PKCS#1 and SEC1, which covers the Ed25519
-// anchors and the RSA cluster material without asking the caller which is which.
+// readPrivateKey accepts PKCS#8, PKCS#1 and SEC1, covering the Ed25519 anchors
+// and the RSA cluster material.
 func readPrivateKey(path string) (crypto.Signer, error) {
 	raw, err := readBytes(path)
 	if err != nil {
@@ -132,9 +127,8 @@ func writePEM(path, blockType string, der []byte, perm os.FileMode) error {
 	return os.WriteFile(path, encoded, perm)
 }
 
-// spkiSHA256 hashes the DER SubjectPublicKeyInfo. kube-apiserver derives a
-// ServiceAccount token's kid the same way, so this doubles as the JWKS kid
-// source and as the identity used to prove a key still matches its certificate.
+// kube-apiserver derives a ServiceAccount token's kid from the same hash, so it
+// is the JWKS kid and the check that a key matches its certificate.
 func spkiSHA256(pub crypto.PublicKey) ([32]byte, error) {
 	der, err := x509.MarshalPKIXPublicKey(pub)
 	if err != nil {

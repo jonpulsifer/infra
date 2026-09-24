@@ -13,21 +13,8 @@ in
 {
   programs.zsh.enable = true;
 
-  # Nix installs the binary and nothing else: no activation hook, no
-  # home-manager `programs.mise`. Everything past that -- runtimes, k8s
-  # tooling, the shims that put them on PATH -- mise manages itself out of
-  # ~/.local/share/mise, which is the point of having it.
-  #
-  # nixpkgs' own package rather than a pinned upstream tarball, so it
-  # substitutes from cache.nixos.org and no host builds it. It also carries no
-  # hash to go stale: the overlay this replaces had to be refreshed by hand on
-  # every bump, and a bump that skipped it broke every Nix build in the repo.
-  #
-  # Gated on the same flag the dotfiles bootstrap uses, which the pi-zero
-  # profile already sets false. armv6l has no cache and no upstream asset, so
-  # an unconditional entry here would put a from-source Rust build on the two
-  # hosts least able to do one -- the case the deleted overlay handled with a
-  # `throw` that only worked because nothing referenced pkgs.mise there.
+  # Nix installs only the mise binary; mise manages runtimes and shims under ~/.local/share/mise.
+  # armv6l has no mise release or cache, so the pi-zero profile turns this off.
   environment.systemPackages = lib.optional config.homelab.fleet.miseDotfiles pkgs.mise;
 
   users.mutableUsers = false;

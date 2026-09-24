@@ -1,30 +1,6 @@
-# rackpi5 is now the image-only host config spore's signed-RAM-boot
-# publisher consumes (`services.spore.nativeBootTargets.rackpi5` in
-# nix/lib/registry.nix) while the live host runs from NVMe as forge
-# (docs/hosts/forge.md).
-# The full toplevel is still built here -- the kernelboot bootloader,
-# initrd services, and initrd SSH all stay -- so spore can keep signing
-# and serving `boot.img` + `nix-store.squashfs` for the box's EEPROM
-# `BOOT_ORDER=0xf7` HTTP fallback. The Pi 5 EEPROM HTTP-loads a signed
-# `boot.img` from spore, then stage 1 downloads and SHA-256-verifies
-# the matching squashfs Nix store before mounting it read-only, with
-# no SD/NFS/TFTP fallback.
-#
-# The EEPROM configuration lives outside the Nix closure and is applied
-# by hand with `sudo rpi-eeprom-config --edit`:
-#
-#   BOOT_ORDER=0xf7
-#   HTTP_HOST=<SPORE_IP from clusters/folly/config/lab-topology.json>
-#   HTTP_PATH=rackpi5-ram
-#
-# Spore serves the signed artifacts as plain static files under
-# /rackpi5-ram/ (nix/services/spore-native-boot.nix), matching HTTP_PATH
-# above.
-#
-# HTTP boot downloads boot.sig and boot.img. The EEPROM must contain the
-# public half of Spore's /var/lib/pi-boot-sign/private.pem; stock EEPROM
-# updates erase that key, so re-enrol it before rebooting rackpi5 after
-# an EEPROM update.
+# rackpi5: image-only config that spore signs and serves as forge's EEPROM HTTP boot fallback.
+# The EEPROM loads the signed boot.img; stage 1 then fetches and SHA-256-verifies the squashfs it pins.
+# EEPROM settings and key enrolment are manual: docs/runbooks/change-the-forge-eeprom.md.
 {
   config,
   lib,
@@ -36,19 +12,16 @@ let
   lab = import ../lib/lab.nix;
   storeUrl = "http://${lab.hosts.spore}/rackpi5-ram";
   roStoreMount = "sysroot-nix-.ro\\x2dstore.mount";
-  # This key authenticates only the stage-1 debug sshd of a stateless image on
-  # the lab VLAN. It is intentionally ephemeral and embedded in boot.img.
+  # Only the stage-1 debug sshd uses this key. boot.img carries it and spore serves boot.img
+  # without auth, so treat the key as public.
   initrdSshHostKey = pkgs.runCommand "initrd-ssh-hostkey" { nativeBuildInputs = [ pkgs.openssh ]; } ''
     mkdir $out
     ssh-keygen -q -t ed25519 -N "" -C rackpi5-initrd -f $out/key
   '';
 in
 {
-  # Deliberately not the fleet baseline: this is a stateless RAM-booted image
-  # whose squashfs is fetched over HTTP on every boot, so it takes only the
-  # floor (../profiles/base.nix, applied by mkHost) plus the two modules its
-  # recovery path actually needs — ssh.nix for sshd and user.nix for the
-  # authorized keys the initrd sshd below reuses.
+  # A stateless RAM image takes only the base floor plus sshd and the user keys that the initrd
+  # sshd reuses.
   imports = [
     (modulesPath + "/installer/netboot/netboot-minimal.nix")
     ../hardware/pi5/base.nix

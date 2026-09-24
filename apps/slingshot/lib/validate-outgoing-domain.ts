@@ -1,21 +1,15 @@
-/**
- * Validates if an outgoing webhook URL is allowed based on environment configuration.
- * In production, only domains listed in WEBHOOK_ALLOWED_OUTGOING_DOMAINS are allowed.
- * In development, all domains are allowed.
- */
+// Outside production every domain passes. In production the hostname must be
+// in the comma-separated WEBHOOK_ALLOWED_OUTGOING_DOMAINS, and unset denies all.
 export function validateOutgoingDomain(url: string): {
   allowed: boolean;
   error?: string;
 } {
-  // In development, allow all domains
   if (process.env.NODE_ENV !== 'production') {
     return { allowed: true };
   }
 
-  // In production, check against allowed domains
   const allowedDomains = process.env.WEBHOOK_ALLOWED_OUTGOING_DOMAINS;
 
-  // If no restriction is set in production, deny all
   if (!allowedDomains) {
     return { allowed: false };
   }
@@ -24,23 +18,19 @@ export function validateOutgoingDomain(url: string): {
     const urlObj = new URL(url);
     const hostname = urlObj.hostname.toLowerCase();
 
-    // Parse allowed domains (comma-separated, trim whitespace)
     const allowedList = allowedDomains
       .split(',')
       .map((domain) => domain.trim().toLowerCase())
       .filter((domain) => domain.length > 0);
 
-    // Check if hostname matches any allowed domain
-    // Supports exact match and subdomain matching (e.g., *.example.com)
     const isAllowed = allowedList.some((allowedDomain) => {
-      // Exact match
       if (hostname === allowedDomain) {
         return true;
       }
 
-      // Wildcard subdomain match (e.g., *.example.com)
+      // *.example.com matches example.com and all of its subdomains.
       if (allowedDomain.startsWith('*.')) {
-        const baseDomain = allowedDomain.slice(2); // Remove '*.'
+        const baseDomain = allowedDomain.slice(2);
         return hostname === baseDomain || hostname.endsWith(`.${baseDomain}`);
       }
 

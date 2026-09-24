@@ -34,9 +34,7 @@ export default function Environment({ serverEnv }: EnvironmentProps) {
   const [activeTab, setActiveTab] = useState('server');
   const [clientEnv, setClientEnv] = useState<Record<string, string>>({});
 
-  // Vercel Framework Environment Variables for Next.js
-  // Reference: https://vercel.com/docs/environment-variables/framework-environment-variables
-  // Used for badge detection in the UI
+  // Vercel's framework environment variables for Next.js.
   const VERCEL_ENV_VARIABLES = [
     'NEXT_PUBLIC_VERCEL_ENV',
     'NEXT_PUBLIC_VERCEL_TARGET_ENV',
@@ -56,14 +54,11 @@ export default function Environment({ serverEnv }: EnvironmentProps) {
     'NEXT_PUBLIC_VERCEL_GIT_PULL_REQUEST_ID',
   ] as const;
 
-  // Compute client env on the client side to get actual values
-  // IMPORTANT: Next.js only bundles NEXT_PUBLIC_* variables that are STATICALLY referenced
-  // Dynamic access like process.env[key] won't work - we must reference each variable directly
   useEffect(() => {
     const rawClientEnv: Record<string, string> = {};
 
-    // Statically reference each variable so Next.js bundles them
-    // Next.js uses static analysis to determine which env vars to bundle at build time
+    // Next.js inlines only NEXT_PUBLIC_* variables referenced by name, so
+    // process.env[key] would read nothing here.
     const envVars: Record<string, string | undefined> = {
       NEXT_PUBLIC_BASE_URL: process.env.NEXT_PUBLIC_BASE_URL,
       NEXT_PUBLIC_ENVIRONMENT_VARIABLE:
@@ -98,15 +93,12 @@ export default function Environment({ serverEnv }: EnvironmentProps) {
         process.env.NEXT_PUBLIC_VERCEL_GIT_PULL_REQUEST_ID,
     };
 
-    // Process each variable - only include variables that are actually bundled
     for (const [key, value] of Object.entries(envVars)) {
       if (value !== undefined) {
         rawClientEnv[key] = value;
       }
-      // Skip variables that aren't bundled - don't display them
     }
 
-    // Sanitize sensitive environment variables (NEXT_PUBLIC_* vars are skipped as they're safe)
     const sanitized = sanitizeEnvVars(rawClientEnv);
     setClientEnv(sanitized);
   }, []);
@@ -181,11 +173,9 @@ export default function Environment({ serverEnv }: EnvironmentProps) {
                   </TableHeader>
                   <TableBody>
                     {filteredEnv.map(([key, value]) => {
-                      // Check if it's a Vercel framework variable
                       const isVercelFramework = (
                         VERCEL_ENV_VARIABLES as readonly string[]
                       ).includes(key);
-                      // Check if it's a Vercel system variable (starts with VERCEL_ but not a framework variable)
                       const isVercelSystem =
                         (key === 'VERCEL' || key.startsWith('VERCEL_')) &&
                         !isVercelFramework;

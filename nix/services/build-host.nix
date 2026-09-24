@@ -1,6 +1,5 @@
-# Native arm64 build, OCI image build, and binary-cache role. Forge imports
-# this module and is the build target for the Pi fleet, including the aarch64
-# build platform used by the armv6l cross configurations.
+# Native arm64 build, OCI image build and binary-cache role. forge imports it and builds for the
+# Pi fleet, including the armv6l cross configurations.
 {
   config,
   lib,
@@ -70,10 +69,7 @@ in
       distributedBuilds = cfg.serveRemoteBuilders;
     };
 
-    # The remote-builder listener is just sshd + the standard nix-daemon
-    # `nix` user; the daemon accepts a build from anyone presenting a key
-    # the operator trusts. Tailnet + lab-vlan firewall is the network-side
-    # gate; this host's firewall stays on (common.nix default).
+    # Remote builds arrive over sshd; the tailnet and the lab VLAN firewall are the network gate.
     services.openssh.openFirewall = mkIf cfg.serveRemoteBuilders true;
 
     virtualisation.docker.enable = cfg.ociBuilder;
@@ -81,14 +77,8 @@ in
       pkgs.docker-buildx
     ];
 
-    # Harmonia: the sops file (`sops.secrets."harmonia-cache-key"`) gives a
-    # 0444-mode file with the binary-cache signing private key. The public
-    # half lives in the clear at nix/secrets/<host>-harmonia-cache.pub and
-    # is what clients pin in their `trusted-public-keys`.
-    #
-    # Bound to 127.0.0.1:5000; the host's nginx fronts it on the lab VLAN
-    # + tailnet. The nginx vhost lives in the host config (not here) so
-    # this module stays host-agnostic.
+    # Clients pin the public half of the signing key, nix/secrets/<host>-harmonia-cache.pub.
+    # An nginx vhost in the host config fronts this localhost listener.
     services.harmonia.cache = mkIf (cfg.binaryCache == "harmonia") {
       enable = true;
       signKeyPaths = [ cfg.binaryCacheSigningKeyPath ];

@@ -1,22 +1,6 @@
 #!/usr/bin/env bash
-# unifi.sh — read-only discovery driver for the homelab UniFi controller.
-#
-# Authenticates as the `terraform` Super Admin user (creds pulled from the
-# homelab 1Password vault via `op`), opens a UniFi-OS cookie session against
-# the UDM Pro, and exposes read-only subcommands over the legacy Network API
-# (/proxy/network/api/...). Cookie + CSRF token are cached under a temp file
-# so repeated calls in a session reuse one login.
-#
-# Usage:  ./unifi.sh <command> [args]
-# Run     ./unifi.sh help   for the command list.
-#
-# Env overrides:
-#   UNIFI_HOST       controller base URL (default https://unifi.fml.pulsifer.ca)
-#   OP_VAULT         1Password vault id  (default homelab)
-#   OP_UNIFI_ITEM    1Password item id   (default unifi-terraform login)
-#   UNIFI_API_KEY    if set, also enables the Integration API (`integ` cmd)
-#   OP_SSH_ITEM      1Password item id for the UDM root SSH login
-#   UNIFI_SSH_HOST   SSH target host (default unifi.fml.pulsifer.ca)
+# Read-only queries of the UniFi console's legacy Network API, plus root SSH to
+# the gateway. Signs in as the `terraform` user with credentials from 1Password.
 set -euo pipefail
 
 HOST="${UNIFI_HOST:-https://unifi.fml.pulsifer.ca}"
@@ -54,21 +38,18 @@ login() {
   chmod 600 "$JAR" "$CSRF_FILE"
 }
 
-# GET an arbitrary legacy Network API path (path is appended to /proxy/network/api).
 get() {
   login
   curl -sk -b "$JAR" -H "x-csrf-token: $(cat "$CSRF_FILE")" -H 'Accept: application/json' \
     "$HOST/proxy/network/api$1"
 }
-# GET a site-scoped path: $1 is appended after /s/<site>
 sget() { get "/s/$SITE$1"; }
 
-# Run a command on the UDM over SSH (root). Needs sshpass; auto-fetched via
-# nix-shell if not on PATH. The controller requires keyboard-interactive auth.
 udm_ssh() {
   command -v op >/dev/null 2>&1 || die "op not found; needed for SSH password"
   local pass; pass=$(op item get "$OP_SSH_ITEM" --vault "$OP_VAULT" --fields password --reveal 2>/dev/null) \
     || die "could not read UDM SSH password from op"
+  # The UDM requires keyboard-interactive auth.
   local ssh_cmd="sshpass -e ssh -o PasswordAuthentication=yes -o ChallengeResponseAuthentication=yes \
     -o StrictHostKeyChecking=accept-new -o ConnectTimeout=10 root@$SSH_HOST"
   if command -v sshpass >/dev/null 2>&1; then

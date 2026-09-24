@@ -21,8 +21,7 @@ import (
 	"github.com/jonpulsifer/infra/apps/fml-ceremony/jcs"
 )
 
-// Schema names the document shape. apps/fml-attest refuses anything else
-// rather than guessing which fields a future version moved.
+// Schema names the document shape. apps/fml-attest refuses any other.
 const Schema = "fml-ceremony/transcript/v1"
 
 // Step names. Every entry is one of these; apps/fml-attest rejects the rest.
@@ -36,34 +35,21 @@ const (
 	StepClose       = "close"
 )
 
-// genesis is entry 0's prev. A fixed all-zero digest rather than an omitted
-// field, so every entry has the same shape and the chain check has no special
-// case to get wrong.
+// Entry 0's prev. A fixed digest keeps every entry the same shape.
 const genesis = "0000000000000000000000000000000000000000000000000000000000000000"
 
-// shardCheckTag domain-separates the shard check digest from the derivation's
-// HKDF inputs and from the entropy witness digests. Without a tag distinct from
-// every other hash over the same secret, publishing this digest could hand an
-// implementation bug somewhere else a matching value to compare against.
+// Domain-separates the shard check from every other hash over the same secret.
 const shardCheckTag = "fml-shard-check-v1"
 
-// ShardCheck is the digest published for a sharded secret: enough for a quorum
-// that has just reconstituted one to confirm they rebuilt the right thing,
-// before deriving anything from it.
-//
-// Safe to publish only because every sharded secret here is a full 256 bits, so
-// the digest is a 2^256 target rather than a guessable one -- the same floor
-// the entropy package applies to source witnesses. The wallet leaf deliberately
-// gets no equivalent: its branch already carries one, and a second digest would
-// only add a way to confirm a candidate wallet belongs to this estate.
+// ShardCheck lets a quorum confirm a reconstituted secret before deriving from
+// it. Publishing it is safe only because every sharded secret is 256 bits.
 func ShardCheck(secret []byte) string {
 	sum := sha256.Sum256(append([]byte(shardCheckTag), secret...))
 	return hex.EncodeToString(sum[:])
 }
 
-// Open is entry 0: what ran, under what, and who is accountable for saying so.
-// Every hash here is an operator assertion rather than a measurement, which is
-// what Notes says in the words the transcript publishes.
+// Open is entry 0: what ran, on what, and who vouches for it. Its hashes are
+// operator assertions, as Notes says.
 type Open struct {
 	Notes                string `json:"notes"`
 	SpecSHA256           string `json:"spec_sha256"`
@@ -80,27 +66,19 @@ type Open struct {
 	SignerSSHFingerprint string `json:"signer_ssh_fingerprint"`
 	SignatureNamespace   string `json:"signature_namespace"`
 	AllowedSigners       string `json:"allowed_signers"`
-	// PinnedTime is the one instant the ceremony declares. Certificate
-	// notBefore comes from here and not from the clock, so a certificate can be
-	// minted twice and compared byte for byte; an air-gapped host has no NTP and
-	// its RTC is not evidence of anything. Entries carry no timestamps of their
-	// own: order comes from the chain, which is checkable, and a per-entry clock
-	// reading is not.
+	// The one instant the ceremony declares, and certificate notBefore. Entries
+	// carry no timestamps: the chain gives their order.
 	PinnedTime string `json:"pinned_time"`
 }
 
-// Source is one entropy contribution. Bytes and MinEntropyBits describe the
-// contribution; WitnessSHA256 proves it took part without publishing it, and is
-// omitted for a source below the 128-bit floor where the digest would be a
-// brute-force target instead of a witness.
+// Source is one entropy contribution. WitnessSHA256 is omitted below the
+// 128-bit min-entropy floor, where it would be a brute-force target.
 type Source struct {
 	Label          string `json:"label"`
 	Bytes          int    `json:"bytes"`
 	MinEntropyBits int    `json:"min_entropy_bits"`
 	WitnessSHA256  string `json:"witness_sha256,omitempty"`
-	// Tally is the six d6 face counts, present only for the dice source. It is
-	// the number the operator compares against their own paper worksheet, so a
-	// reader can see the comparison was possible.
+	// The six d6 face counts, for the dice source only.
 	Tally []int `json:"tally,omitempty"`
 }
 
@@ -109,8 +87,7 @@ type Entropy struct {
 	Sources []Source `json:"sources"`
 }
 
-// Shards records one SLIP-39 share set. Thresholds and set identity only:
-// nothing here names or locates a holder, and no field in this schema can.
+// Shards records one SLIP-39 share set. No field names or locates a holder.
 type Shards struct {
 	Secret            string `json:"secret"`
 	Encoding          string `json:"encoding"`
@@ -118,16 +95,13 @@ type Shards struct {
 	Shares            int    `json:"shares"`
 	Extendable        bool   `json:"extendable"`
 	IterationExponent int    `json:"iteration_exponent"`
-	// Identifier is SLIP-39's 15-bit set id. It is printed on every share of
-	// the set already, so publishing it leaks nothing and lets a holder confirm
-	// the plate in their hand belongs to this ceremony.
+	// SLIP-39's 15-bit set id, already on every share, so a holder can match a plate.
 	Identifier  int    `json:"identifier"`
 	CheckSHA256 string `json:"check_sha256"`
 }
 
-// Leaf is one derived key, as its public half. Exactly one of Public,
-// Recipient or Words is set, by KeyType; a BIP-39 leaf has no public half at
-// all and records only that it was minted.
+// Leaf is one derived key's public half. One of Public, Recipient or Words is
+// set, by KeyType; a BIP-39 leaf records only its word count.
 type Leaf struct {
 	Path      string `json:"path"`
 	KeyType   string `json:"key_type"`
@@ -136,10 +110,8 @@ type Leaf struct {
 	Words     int    `json:"words,omitempty"`
 }
 
-// Certificate carries the certificate itself, base64 DER, rather than facts
-// about it. Subject, serial and validity are all inside the DER and a reader
-// recomputes them; restating them here would only create something to disagree
-// with. Base64 rather than PEM because the verifier then needs no PEM decoder.
+// Certificate carries the base64 DER itself; a reader recomputes subject,
+// serial and validity from it.
 type Certificate struct {
 	Role    string `json:"role"`
 	KeyPath string `json:"key_path"`
@@ -147,17 +119,13 @@ type Certificate struct {
 	DER     string `json:"der"`
 }
 
-// Reserved records branch names that were deliberately not minted, so reading
-// the transcript tells you what was left out on purpose.
+// Reserved records branch names left unminted.
 type Reserved struct {
 	Names []string `json:"names"`
 }
 
-// Close terminates the chain. Outcome is "complete" or "aborted": an abandoned
-// ceremony is published as an abandoned ceremony, which is the only way a
-// reader can tell the difference from a ceremony that was never published.
-// Attestations are procedural claims the signer is accountable for and nobody
-// can check -- apps/fml-attest prints them under a heading that says so.
+// Close ends the chain. Outcome is "complete" or "aborted". Attestations are
+// procedural claims the signer vouches for and nobody can check.
 type Close struct {
 	Outcome      string   `json:"outcome"`
 	Attestations []string `json:"attestations"`
@@ -174,12 +142,8 @@ func New(ceremony string) *Transcript {
 	return &Transcript{ceremony: ceremony, digest: genesis}
 }
 
-// Digest is the running head: the SHA-256 of the last entry's canonical bytes,
-// and through its prev field a commitment to every entry before it. The
-// ceremony reads it aloud after each step so witnesses can write it down. That
-// is the whole defence against a ceremony being run twice and only the
-// convenient run published -- a witness holding a digest that appears in no
-// published chain is holding a contradiction.
+// Digest is the SHA-256 of the last entry's canonical bytes, which commits to
+// every earlier entry. Witnesses record it after each step.
 func (t *Transcript) Digest() string { return t.digest }
 
 // Append canonicalises one entry, chains it and returns the new head.
@@ -187,9 +151,8 @@ func (t *Transcript) Append(step string, body any) (string, error) {
 	if step == "" {
 		return "", errors.New("transcript: entry with no step")
 	}
-	// Canonicalise per entry as well as per document. The chain hashes entry
-	// bytes, so those bytes have to be the same ones a reader recovers from the
-	// canonical document, and canonical form is recursive.
+	// Each entry is canonical on its own, so the hashed bytes are the ones a
+	// reader recovers from the canonical document.
 	c, err := jcs.Marshal(map[string]any{
 		"seq":  len(t.entries),
 		"step": step,
@@ -205,10 +168,8 @@ func (t *Transcript) Append(step string, body any) (string, error) {
 	return t.digest, nil
 }
 
-// Bytes returns the canonical document: the exact bytes to write to disk, to
-// sign, and to publish. There is no trailing newline, deliberately -- the
-// signature covers the file as it is, and a newline an editor added is a
-// signature that no longer verifies.
+// Bytes returns the canonical document to write, sign and publish. It has no
+// trailing newline, because the signature covers the exact bytes.
 func (t *Transcript) Bytes() ([]byte, error) {
 	if len(t.entries) == 0 {
 		return nil, errors.New("transcript: no entries")

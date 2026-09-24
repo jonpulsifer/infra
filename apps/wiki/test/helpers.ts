@@ -5,7 +5,7 @@ import { build } from "../build";
 
 const FIXTURES = join(import.meta.dir, "fixtures");
 
-/** Builds a copy of the fixture tree with `edits` applied (null deletes a file); docs paths are relative to docs/. */
+/** Builds a copy of the fixture tree with `edits` applied: keys are paths under docs/, and null deletes the file. */
 export async function site(edits: Record<string, string | null> = {}, check = false) {
   const dir = await mkdtemp(join(tmpdir(), "wiki-"));
   await cp(FIXTURES, dir, { recursive: true });

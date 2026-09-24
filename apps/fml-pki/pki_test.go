@@ -16,8 +16,7 @@ import (
 	"time"
 )
 
-// mintCA builds a CA the way a careless tool might, so the checks have
-// something real to reject. parent nil means self-signed.
+// A nil parent means self-signed.
 func mintCA(t *testing.T, cn string, maxPathLen int, pathLenSet bool, notAfter time.Time,
 	parent *x509.Certificate, parentKey ed25519.PrivateKey) (*x509.Certificate, ed25519.PrivateKey) {
 	t.Helper()
@@ -82,8 +81,7 @@ func TestCheckChainAcceptsAWellFormedHierarchy(t *testing.T) {
 
 func TestCheckChainRejectsTooTightPathLen(t *testing.T) {
 	far := time.Now().AddDate(50, 0, 0)
-	// The real defect: root pathLen:1 and intermediate pathLen:0 over a chain
-	// that puts two CAs below the root and one below the intermediate.
+	// Too tight for two CAs below the root and one below the intermediate.
 	root, rootKey := mintCA(t, "root", 1, true, far, nil, nil)
 	inter, interKey := mintCA(t, "intermediate", 0, true, far, root, rootKey)
 	leafCA, _ := mintCA(t, "cluster", 0, false, time.Now().AddDate(2, 0, 0), inter, interKey)
@@ -104,7 +102,6 @@ func TestCheckChainRejectsNonSelfSignedAnchor(t *testing.T) {
 	inter, interKey := mintCA(t, "intermediate", 1, true, far, root, rootKey)
 	leafCA, _ := mintCA(t, "cluster", 0, false, far.AddDate(-40, 0, 0), inter, interKey)
 
-	// Anchoring on the intermediate is what Kubernetes publishes today.
 	problems := checkChain("t", []named{{leafCA, "cluster-ca.pem"}, {inter, "int.pem"}})
 	if !strings.Contains(strings.Join(problems, "\n"), "is not self-signed") {
 		t.Errorf("non-self-signed anchor not reported: %v", problems)
@@ -122,8 +119,7 @@ func TestCheckChainRejectsAnIssuerThatExpiresFirst(t *testing.T) {
 	}
 }
 
-// TestReissuePreservesIdentity guards the property the whole ceremony rests on:
-// the replacements have to be interchangeable with what is already distributed.
+// Reissued anchors must be interchangeable with the ones already distributed.
 func TestReissuePreservesIdentity(t *testing.T) {
 	dir := t.TempDir()
 	far := time.Now().AddDate(10, 0, 0)
@@ -199,7 +195,7 @@ func TestReissuePreservesIdentity(t *testing.T) {
 		}
 	}
 
-	// The point of the exercise: the untouched cluster CA now chains through.
+	// The untouched cluster CA chains through the new anchors.
 	roots := x509.NewCertPool()
 	roots.AddCert(newRoot)
 	inter := x509.NewCertPool()
@@ -246,9 +242,8 @@ func TestReissueRefusesAMismatchedKey(t *testing.T) {
 	}
 }
 
-// TestJWKSKidMatchesApiserverDerivation pins the one value that cannot drift:
-// base64url(SHA256(DER SPKI)), which is how kube-apiserver labels the tokens it
-// mints. A different kid means every token fails to resolve.
+// kube-apiserver labels its tokens with base64url(SHA256(DER SPKI)); any other
+// kid fails to resolve.
 func TestJWKSKidMatchesApiserverDerivation(t *testing.T) {
 	dir := t.TempDir()
 	key, err := rsa.GenerateKey(rand.Reader, 2048)
@@ -346,9 +341,8 @@ func pemBytes(t *testing.T, der []byte) []byte {
 	return b
 }
 
-// TestChainFileMustBuildAPath covers the artifact pods actually receive. A
-// single non-self-signed CA is exactly today's state and exactly what OpenSSL
-// cannot anchor on.
+// Pods receive this file as ca.crt, and OpenSSL cannot anchor on a lone
+// non-self-signed CA.
 func TestChainFileMustBuildAPath(t *testing.T) {
 	dir := t.TempDir()
 	far := time.Now().AddDate(50, 0, 0)
@@ -373,8 +367,7 @@ func TestChainFileMustBuildAPath(t *testing.T) {
 		t.Errorf("a lone cluster CA should be rejected, got %v", problems)
 	}
 
-	// Truncated at the intermediate: linked, but anchored on something that is
-	// not self-signed, which is the err=2 case dressed up as a chain.
+	// Truncated at the intermediate: linked, but not anchored on a self-signed root.
 	truncated := filepath.Join(dir, "trunc-ca-chain.pem")
 	if err := os.WriteFile(truncated, concat(t, clusterCA.Raw, inter.Raw), 0o644); err != nil {
 		t.Fatal(err)

@@ -9,8 +9,7 @@
 let
   disko = inputs.disko.packages.${pkgs.stdenv.hostPlatform.system}.disko;
 
-  # The hosts homelab-install can provision: the x86 Kubernetes nodes, read
-  # from the fleet registry so this banner cannot fall behind it.
+  # The motd's host list: every Kubernetes node, by its cluster tag.
   installableHosts = lib.attrNames (
     lib.filterAttrs (
       _: entry:
@@ -40,7 +39,6 @@ in
     ../hardware/x86
   ];
 
-  # Provisioning tooling + instructions baked into the live image.
   environment.systemPackages = [
     disko
     homelab-install
@@ -57,7 +55,7 @@ in
   '';
 
   users.users = {
-    # Remove initialHashedPassword for root and nixos
+    # Drop the installer profile's empty passwords.
     root.initialHashedPassword = lib.mkForce null;
     nixos.initialHashedPassword = lib.mkForce null;
     jawn.extraGroups = [
@@ -73,9 +71,8 @@ in
   networking.hostName = "nixos-iso";
   networking.wireless.enable = true;
 
-  # why is this a thing that exists
+  # The installer profile permits root SSH login.
   services.openssh.settings.PermitRootLogin = lib.mkForce "no";
 
-  # auto log me in
   services.getty.autologinUser = lib.mkForce config.users.users.jawn.name;
 }

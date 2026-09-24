@@ -1,12 +1,6 @@
 #!/usr/bin/env bash
-# Covers the parts of continuous delivery that decide what gets written: which
-# digest a manifest is pinning — in the working tree and on the branch a digest
-# is already queued on — what the rewrite touches and refuses, and when a run is
-# too old to have anything to say.
-#
-# What the step then *does* with those answers is `cd-digest-step_test.sh`,
-# which runs the workflow step itself. That suite is also where the registry
-# read is exercised, against a stub; nothing here touches the network.
+# Tests cd-digest-update.sh without the network. cd-digest-step_test.sh covers
+# the workflow step and the registry read.
 
 set -euo pipefail
 
@@ -31,9 +25,8 @@ assert_equal() {
   fi
 }
 
-# A deployment that pins two sibling images, the shape mate and mate-sandbox
-# share, where anchoring on the image name is the only thing keeping one build
-# from stamping its digest onto the other.
+# Two sibling images in one manifest: only the name anchor keeps one build's
+# digest off the other.
 siblings="$work/deployment.yaml"
 cat >"$siblings" <<EOF
 spec:
@@ -45,8 +38,6 @@ spec:
           value: ghcr.io/jonpulsifer/mate-sandbox:latest@${two}
 EOF
 
-# A chart that splits repository from tag, so the digest sits on a line that
-# never names the image.
 split="$work/helm-release.yaml"
 cat >"$split" <<EOF
 spec:
@@ -70,8 +61,6 @@ assert_equal 'pins stays silent about a manifest that is not there' \
 
 assert_equal 'pins reports each manifest once' \
   "$one" "$("$script" pins mate "$siblings" "$siblings")"
-
-# --- rewrite ----------------------------------------------------------------
 
 rewritten="$work/rewrite.yaml"
 cp "$siblings" "$rewritten"
@@ -123,8 +112,6 @@ EOF
 refuses 'rewrite refuses to guess between two digests it cannot anchor' \
   atlantis "$work/ambiguous.yaml"
 
-# --- decide -----------------------------------------------------------------
-
 repo="$work/repo"
 git init -q -b main "$repo"
 git -C "$repo" config user.email test@example.com
@@ -148,9 +135,8 @@ git -C "$repo" checkout -q main
 
 decide() { (cd "$repo" && "$script" decide "$@" 2>/dev/null); }
 
-# The reasons go to stderr, and several of them end in the same `write`. An
-# assertion on the verdict alone cannot tell which branch produced it, so the
-# branches that exist to *refuse to guess* are asserted on what they said.
+# Several branches end in `write`, so the ones that refuse to guess are
+# asserted on their stderr reason.
 decide_reason() { (cd "$1" && "$script" decide "${@:2}" >/dev/null) 2>&1; }
 
 assert_equal 'decide writes when nothing is pinned to compare against' \
@@ -185,17 +171,13 @@ assert_equal 'decide says when its own commit is not in the checkout' \
   'Cannot compare: 0000000000000000000000000000000000000000 is not a commit in this checkout.' \
   "$(decide_reason "$repo" 0000000000000000000000000000000000000000 "$last")"
 
-# A checkout with no history cannot answer the ancestry question honestly, and
-# a guard that cannot answer must not be the thing that stops delivery.
 shallow="$work/shallow"
 git clone -q --depth=1 "file://$repo" "$shallow"
 assert_equal 'decide writes rather than guess from a shallow checkout' \
   write "$( (cd "$shallow" && "$script" decide "$first" "$last" 2>/dev/null) )"
 
-# Depth 1 is answered by the missing commit before the shallow test is reached,
-# so it leaves the shallow test itself unexercised. Depth 2 holds both commits
-# and is still shallow — `git merge-base` would answer, wrongly and
-# confidently, and only the shallow test stops it.
+# Depth 1 fails the missing-commit check first. Depth 2 holds both commits, so
+# only the shallow check stops merge-base from answering.
 shallow2="$work/shallow2"
 git clone -q --depth=2 "file://$repo" "$shallow2"
 assert_equal 'a two-deep clone really is shallow and really holds both commits' \
@@ -205,13 +187,6 @@ assert_equal 'decide writes rather than trust a truncated history that answers' 
 assert_equal 'decide says it will not read ancestry out of a truncated history' \
   "Cannot compare $middle with the pinned build's $last: this checkout carries no commit history." \
   "$(decide_reason "$shallow2" "$middle" "$last")"
-
-# --- pins-at ----------------------------------------------------------------
-#
-# What the delivery branch already carries is the other half of the guard's
-# input: a digest some run wrote that has not merged yet. Reading it has to be
-# the same reading as the working tree's, or the two halves mean different
-# things.
 
 queued="$work/queued"
 git init -q -b main "$queued"
@@ -243,8 +218,6 @@ assert_equal 'pins-at is silent about a file that ref does not carry' \
 
 assert_equal 'pins-at leaves nothing behind in the working tree' \
   '' "$(git -C "$queued" status --porcelain)"
-
-# --- usage ------------------------------------------------------------------
 
 if (cd "$repo" && "$script" decide >/dev/null 2>&1); then
   fail 'decide accepted a call with no commit to judge'

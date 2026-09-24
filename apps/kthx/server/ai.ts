@@ -1,30 +1,7 @@
 /**
- * `/api/ai`: an OpenAI-compatible passthrough with a per-site daily budget.
- *
- * The whole point is a key the site never sees. A page calls `/api/ai/v1/...`
- * on its own origin, this file puts the operator's `Authorization` on it and
- * relays the answer. Which means three things are not optional.
- *
- * **It is an allow-list, not a proxy.** Two paths by name, and only one of them
- * is forwarded. A blind `/api/ai/*` would forward image and audio generation —
- * endpoints priced per second and per megapixel, with no `usage` field to meter
- * — on a public anonymous-write zone, paid by the operator.
- *
- * **Headers are rebuilt, never passed.** The client's `Authorization` is
- * dropped rather than overwritten, because a site that could append one would
- * be choosing the account; the query string is dropped for the same reason. On
- * the way back only `content-type` survives.
- *
- * **The budget is in Postgres, not in this process.** It is money, so a restart
- * must not hand every site a fresh 200 requests, and the check and the
- * increment are one statement so two calls in flight cannot both read the last
- * one as free.
- *
- * Bytes are relayed as they arrive — an SSE stream reaches the page token by
- * token — while a bounded *tail* of the answer is kept, because `usage` is in
- * the last chunk and keeping the head would silently under-bill every long
- * stream. An answer that states no usage is billed its clamped ceiling, which
- * is also what an aborted stream is billed. Never zero.
+ * `/api/ai`: an OpenAI-compatible passthrough that adds the operator's key and
+ * meters a per-site daily budget. Only allow-listed paths are forwarded, and
+ * headers are rebuilt in both directions.
  */
 import { createHash } from 'node:crypto';
 import { bodyOf } from './documents.ts';
@@ -40,20 +17,16 @@ export const MAX_AI_TOKENS_DAY = 500_000;
 /** Under Cloudflare's 100 s origin timeout, for the first byte and each gap. */
 export const AI_FIRST_BYTE_MS = 90_000;
 export const AI_GAP_MS = 90_000;
-/** Bun's connection idle timeout for these routes: a model thinks for longer. */
+/** Bun's idle timeout for these routes; a model can think past the default. */
 export const AI_IDLE_SECONDS = 120;
 /** Concurrency, which is the cost ceiling a daily budget cannot express. */
 export const MAX_AI_IN_FLIGHT_SITE = 4;
 export const MAX_AI_IN_FLIGHT_ADDRESS = 2;
-/** How much of an answer's tail is kept, to read `usage` out of it. */
+/** How much of an answer's tail is kept to read `usage` from. */
 const MAX_SCAN_BYTES = 1024 * 1024;
 /**
- * The upstream paths this server has. Everything else is a 404.
- *
- * `/embeddings` is not one of them. Neither upstream base has the endpoint —
- * both answer `404 text/html` — so forwarding it spends a site's request and
- * bills it the never-zero floor for a marketing page. A path this server does
- * not have is a 404 here, before the budget is touched.
+ * Anything else is a 404 before the budget is touched. Image and audio
+ * endpoints report no `usage`, and neither upstream base has `/embeddings`.
  */
 const UPSTREAM = {
   '/chat/completions': 'POST',
@@ -62,12 +35,11 @@ const UPSTREAM = {
 
 type UpstreamPath = keyof typeof UPSTREAM;
 
-/** Today, the way the `ai_usage` primary key spells it. */
+/** As the `ai_usage` primary key spells the day. */
 export function utcDay(now = new Date()): string {
   return now.toISOString().slice(0, 10);
 }
 
-/** What this site has spent today: `{requests, tokens}`, both numbers. */
 export async function aiUsage(
   ctx: Ctx,
   name: string,
@@ -84,11 +56,8 @@ export async function aiUsage(
 }
 
 /**
- * Count one request against the day, or say the day is spent.
- *
- * One statement: the row is created at 1 or incremented only while both
- * ceilings still hold, so nothing between a read and a write can let a 201st
- * request through. No row comes back exactly when the budget is gone.
+ * One statement, so concurrent calls cannot both take the last request, kept in
+ * Postgres so a restart does not reset it. No row returns once the day is spent.
  */
 async function spendRequest(
   ctx: Ctx,
@@ -107,12 +76,7 @@ async function spendRequest(
   return spent.length > 0;
 }
 
-/**
- * What the answer actually cost, added once the answer is over.
- *
- * A failure here costs the operator money and the caller nothing, so it is
- * logged rather than raised: the response has already been sent.
- */
+/** Logged, never raised: the response has already been sent. */
 function bill(ctx: Ctx, name: string, day: string, tokens: number): void {
   if (tokens <= 0) return;
   void ctx.sql`
@@ -122,20 +86,8 @@ function bill(ctx: Ctx, name: string, day: string, tokens: number): void {
 }
 
 /**
- * The request this call spent, given back — only when the fault was ours.
- *
- * A request counts at dispatch, which is the only way two calls in flight
- * cannot both read the last one as free. That leaves a site charged for an
- * answer it never got whenever this deployment is the reason: a credential, a
- * base URL, a header this server owes the upstream, an upstream that is down.
- *
- * It is never called for a refusal the caller's own body earned. The 200 a day
- * is the only ceiling on outbound calls there is, and a body the upstream
- * reliably refuses would otherwise be free to send forever.
- *
- * `greatest` because the day's row is not locked here: a refund that raced a
- * reset would otherwise leave a negative count, and a negative count is a
- * budget that never runs out.
+ * Only for deployment faults: a body the upstream refuses keeps its charge, or
+ * it could loop for free. `greatest` keeps the unlocked row from going negative.
  */
 function refundRequest(ctx: Ctx, name: string, day: string): void {
   void ctx.sql`
@@ -146,18 +98,11 @@ function refundRequest(ctx: Ctx, name: string, day: string): void {
   );
 }
 
-// --- concurrency ------------------------------------------------------------
-
-/**
- * Calls in flight, per site and per address.
- *
- * ponytail: a counter map in this process, like every other bucket here — there
- * is one replica by construction. Postgres advisory locks are the upgrade the
- * day there is a second.
- */
+// ponytail: in-process counters, sound while the server runs one replica;
+// Postgres advisory locks when there is a second.
 const inFlight = new Map<string, number>();
 
-/** Take a slot in each of the named counters, or `null`. Call it to give back. */
+/** `null` when any counter is full. Call the result to give the slots back. */
 export function enter(
   keys: readonly (readonly [string, number])[],
 ): (() => void) | null {
@@ -177,29 +122,14 @@ export function enter(
   };
 }
 
-// --- the body ---------------------------------------------------------------
-
 interface Prepared {
-  /** The JSON this server sends, which is not byte-for-byte what it was sent. */
+  /** Rewritten, so not the bytes the client sent. */
   readonly body: string;
-  /** Billed when the answer carries no `usage` of its own. */
+  /** Billed when the answer states no `usage`, such as an aborted stream. */
   readonly fallbackTokens: number;
 }
 
-/**
- * The client's JSON, with the four things this server decides put back in.
- *
- * `stream_options.include_usage` is the load-bearing one: without it a streamed
- * completion reports no usage at all and every stream would bill its ceiling.
- *
- * `maxTokens` is an argument rather than `ctx.config.aiMaxTokens` read here,
- * because the ceiling belongs to the route and not to the deployment: it is
- * what an anonymous visitor on a public site may spend *and* the floor a
- * silent answer is billed, so a route that generates a whole document must be
- * able to ask for more without handing the same allowance to every site in the
- * zone. A caller that names no ceiling is given this one in writing rather
- * than left to the upstream's own default.
- */
+/** Without `include_usage` a streamed completion reports no usage. */
 function prepare(
   ctx: Ctx,
   parsed: unknown,
@@ -217,13 +147,10 @@ function prepare(
   }
   const out: Record<string, unknown> = { ...body, model };
 
-  // One completion per call. `n` multiplies the bill by a number the budget
-  // cannot see until it has already been spent.
+  // `n` multiplies the bill by a number the budget sees only after spending it.
   if (body.n !== undefined && Number(body.n) !== 1) return 'MALFORMED_REQUEST';
 
-  // Both spellings, independently. Clamping only the one this server picked and
-  // writing only that back forwarded the other verbatim, so a body carrying
-  // both bought a ceiling nobody here agreed to.
+  // Both spellings are clamped, so a body carrying both cannot pass the ceiling.
   let ceiling = 0;
   for (const key of ['max_tokens', 'max_completion_tokens'] as const) {
     if (body[key] === undefined) continue;
@@ -235,8 +162,7 @@ function prepare(
     out[key] = clamped;
     ceiling = Math.max(ceiling, clamped);
   }
-  // Neither spelling was sent: the ceiling is stated rather than left to the
-  // upstream's own default.
+  // Neither was sent, so the ceiling is stated to the upstream.
   if (ceiling === 0) {
     out.max_tokens = maxTokens;
     ceiling = maxTokens;
@@ -249,18 +175,13 @@ function prepare(
         : {};
     out.stream_options = { ...options, include_usage: true };
   }
-  // The most either spelling could have bought, so a body carrying both cannot
-  // talk the billing floor down to the smaller of the two.
+  // The larger of the two, so sending both cannot lower the billing floor.
   return { body: JSON.stringify(out), fallbackTokens: ceiling };
 }
 
 /**
- * `usage.total_tokens` out of an answer, or `null`.
- *
- * A stream carries it in the last `data:` frame and a single response carries it
- * at the top level, so both are tried. The scan keeps the tail, so a stream past
- * {@link MAX_SCAN_BYTES} still reports its real usage; only a single response
- * that long parses as neither and falls back.
+ * A stream carries `usage` in its last `data:` frame, a single response at the
+ * top level. A single response over {@link MAX_SCAN_BYTES} falls back.
  */
 export function tokensIn(text: string): number | null {
   let last: number | null = null;
@@ -286,14 +207,9 @@ function totalOf(raw: string): number | null {
   return typeof total === 'number' && Number.isFinite(total) ? total : null;
 }
 
-// --- the routes -------------------------------------------------------------
-
 /**
- * Dispatch under `/api/ai`, with `segments` the split pathname.
- *
- * A leading `v1` is optional on the three upstream paths: the contract
- * publishes `/api/ai/v1` as the OpenAI base URL and `/api/ai/…` as the
- * shorthand its own docs use. `/api/ai/usage` is neither and takes no `v1`.
+ * A leading `v1` is optional on upstream paths, because `/api/ai/v1` is the
+ * OpenAI base URL. `/api/ai/usage` takes no `v1`.
  */
 export async function aiApi(
   request: Request,
@@ -303,8 +219,7 @@ export async function aiApi(
   address: string | null,
 ): Promise<Response> {
   const tail = segments.slice(3);
-  // Read first, and deliberately not under `/v1`: `usage` is this server's own
-  // number, not an upstream path, and reading it spends nothing.
+  // `usage` is this server's own number and spends nothing.
   if (tail.length === 1 && tail[0] === 'usage') {
     if (request.method !== 'GET') return refuse('METHOD_NOT_ALLOWED', ctx.id);
     return today(ctx, name);
@@ -317,11 +232,8 @@ export async function aiApi(
   if (request.method !== UPSTREAM[route]) {
     return refuse('METHOD_NOT_ALLOWED', ctx.id);
   }
-  // Answered here, and never relayed. A `no-cors` GET carries no `Origin`, so
-  // the same-origin guard cannot see one either way: relaying this would leave
-  // any third-party page able to spend a victim site's whole day on `<img
-  // src=…/models>`. The allow-list is the whole truth about what this site may
-  // ask for, so the local answer is also the more honest one.
+  // Answered locally: a `no-cors` GET has no `Origin`, so a relayed one would
+  // let any page spend a site's day with `<img src=…/models>`.
   if (route === '/models') return models(ctx);
 
   let sent: Prepared = { body: '', fallbackTokens: 0 };
@@ -329,9 +241,7 @@ export async function aiApi(
     if (!isJson(request)) return refuse('MALFORMED_REQUEST', ctx.id);
     const body = await bodyOf(request, MAX_AI_BODY_BYTES);
     if ('code' in body) return refuse(body.code, ctx.id);
-    // Named here, not read inside `prepare`: this route is anonymous on every
-    // site in the zone, so it gets the public ceiling and a route that needs
-    // more says so at its own call site.
+    // Anonymous on every site, so this route gets the public ceiling.
     const prepared = prepare(ctx, body.json, ctx.config.aiMaxTokens);
     if (typeof prepared === 'string') return refuse(prepared, ctx.id);
     sent = prepared;
@@ -371,13 +281,7 @@ export async function aiApi(
   }
 }
 
-/**
- * The models a site may name, in the shape the OpenAI SDK expects.
- *
- * Free and unmetered because it is this server's own list: a model outside
- * `KTHX_AI_MODELS` is a 400 anyway, so relaying the upstream's catalogue would
- * advertise models no site here can ask for and cost money to read.
- */
+/** This server's own list, unmetered: a model outside it is a 400 anyway. */
 function models(ctx: Ctx): Response {
   const ids =
     ctx.config.aiModels.length > 0 ? ctx.config.aiModels : [ctx.config.aiModel];
@@ -390,7 +294,6 @@ function models(ctx: Ctx): Response {
   );
 }
 
-/** Today's numbers and the ceilings they are counted against. */
 async function today(ctx: Ctx, name: string): Promise<Response> {
   const day = utcDay();
   const spent = await aiUsage(ctx, name, day);
@@ -409,34 +312,14 @@ async function today(ctx: Ctx, name: string): Promise<Response> {
 }
 
 /**
- * The upstream's session id for this site.
- *
- * Without it the upstream's Go base answers `400 MissingSessionID` to every
- * call; the Zen base ignores it, which is what lets the header ship before the
- * base URL moves. It is routing metadata and nothing more — measured, two
- * turns under one id do not see each other, so a conversation still travels in
- * `messages` and reusing an id costs nothing.
- *
- * Derived from the site name, and never read from the request: a header a page
- * could set would let one site file its calls under another's. Hashed because
- * the value lands in a third party's logs, where a site's inventory is no more
- * their business than a visitor's cookie or a site's token would be — and the
- * site name is the one thing here that is stable enough to be worth grouping
- * by.
+ * OpenCode's Go base answers `400 MissingSessionID` without this. Derived from
+ * the site name, never the request, and hashed because it appears in their logs.
  */
 function sessionOf(name: string): string {
   return `kthx-${createHash('sha256').update(name).digest('hex').slice(0, 32)}`;
 }
 
-/**
- * The call itself: rebuilt headers out, relayed bytes back, tokens billed once.
- *
- * Every way this ends — the last chunk, a cancelled read, a 90 s gap, the page
- * navigating away, an upstream that never answers — runs through `settle`, so
- * the day is charged exactly once. The in-flight slot is given back as soon as
- * the response is handed off, because it bounds calls to the upstream and not
- * how long a client takes to read one.
- */
+/** Every way the call ends runs through `settle`, so the day is charged once. */
 async function forward(
   request: Request,
   ctx: Ctx,
@@ -449,15 +332,14 @@ async function forward(
   const key = ctx.config.aiKey;
   if (key === null) {
     slot();
-    // Refunded, like every other deployment fault: the request was counted at
-    // dispatch and a deployment with no key never made one.
+    // Refunded, like every deployment fault.
     refundRequest(ctx, name, day);
     logCause(ctx.id, 'the ai upstream', new Error('KTHX_AI_KEY is not set'));
     return refuse('AI_UPSTREAM', ctx.id);
   }
 
-  // Built from nothing: the client's `Authorization`, cookies, `x-forwarded-*`
-  // and query string are not dropped one by one, they are simply never here.
+  // Built from scratch, so the client's `Authorization`, cookies,
+  // `x-forwarded-*` and query string never reach the upstream.
   const headers = new Headers({
     authorization: `Bearer ${key}`,
     'user-agent': 'kthx',
@@ -495,12 +377,8 @@ async function forward(
       signal: upstream.signal,
     });
   } catch (cause) {
-    // An upstream that could not be reached at all is the same fault as one
-    // that answered 503, and is accounted the same way: no tokens, and the
-    // request back. Billing the clamped ceiling here — which is what a silent
-    // answer is billed, and the only number in scope — charged a site 4096
-    // tokens a try for an outage it did not cause and locked it out of AI for
-    // the rest of the day after about a hundred and twenty of them.
+    // An unreachable upstream is a deployment fault, like a 503: no tokens,
+    // and the request refunded.
     settle(0);
     refundRequest(ctx, name, day);
     logCause(ctx.id, `the ai upstream at ${path}`, cause);
@@ -508,27 +386,12 @@ async function forward(
   }
   clearTimeout(deadline);
 
-  // Whose fault it was decides two things, and they are the same question.
-  //
-  // 401, 403 and every 5xx are the deployment's — a credential, a base URL, a
-  // header this server owes the upstream. A page can act on none of them (a
-  // relayed 401 in particular sends it looking for a token it does not have),
-  // so the caller is told `AI_UPSTREAM`, and the day gets its request back:
-  // this site asked for 200 answers and that was not one of them.
-  //
-  // Every other 4xx is about the body the caller composed — a field this model
-  // will not take, a role it does not know — and it keeps the request it spent.
-  // Refunding those would leave nothing bounding outbound calls at all: a body
-  // the upstream reliably refuses is free to send, so one anonymous visitor on
-  // one public site could loop it forever on the operator's account. The 200 a
-  // day is the only ceiling there is, and a request that reached the upstream
-  // spent one whatever came back.
+  // 401, 403 and 5xx are deployment faults: `AI_UPSTREAM`, and the request is
+  // refunded. Any other 4xx is about the caller's body and stays charged.
   const ours =
     answer.status === 401 || answer.status === 403 || answer.status >= 500;
 
-  // Either way it is one line under the caller's `x-request-id`. An upstream
-  // that turns down a request this server composed is otherwise invisible
-  // until somebody reads a page's console.
+  // Logged, or an upstream refusal would show only in a page's console.
   if (!answer.ok) {
     logCause(
       ctx.id,
@@ -550,8 +413,7 @@ async function forward(
     'x-content-type-options': 'nosniff',
     'x-request-id': ctx.id,
   });
-  // A refusal the upstream composed is relayed with its status, but it is not
-  // an answer this site is charged tokens for.
+  // An upstream refusal is relayed with its status but bills no tokens.
   const fallback = answer.ok ? sent.fallbackTokens : 0;
   if (answer.body === null) {
     settle(fallback);
@@ -561,19 +423,16 @@ async function forward(
   const decoder = new TextDecoder();
   let scanned = '';
   deadline = setTimeout(cut, AI_GAP_MS);
-  // `cancel` is in the Streams standard and in Bun; the DOM lib's `Transformer`
-  // predates it, so the type is widened rather than the handler dropped.
+  // `cancel` is in the Streams standard and Bun, not the DOM lib's `Transformer`.
   const meter: Transformer<Uint8Array, Uint8Array> & { cancel(): void } = {
     transform(chunk, controller) {
-      // Enqueued first: nothing this file does may sit between a token the
-      // upstream produced and the page waiting for it.
+      // Enqueued first, so metering never delays a token.
       controller.enqueue(chunk);
       clearTimeout(deadline);
       deadline = setTimeout(cut, AI_GAP_MS);
       scanned += decoder.decode(chunk, { stream: true });
-      // The tail, because `usage` is in the last frame and keeping the head
-      // billed every long stream its fallback instead. Halved rather than
-      // trimmed every chunk, so a long answer still copies O(1) per byte.
+      // `usage` is in the last frame, so the tail is kept. Halving instead of
+      // trimming each chunk keeps the copying O(1) per byte.
       if (scanned.length > MAX_SCAN_BYTES) {
         scanned = scanned.slice(-MAX_SCAN_BYTES / 2);
       }
@@ -581,9 +440,8 @@ async function forward(
     flush() {
       settle(tokensIn(scanned) ?? fallback);
     },
-    // An upstream that errors mid-stream, or a client that cancels its read,
-    // never reaches `flush`; without this the day is charged only once the
-    // 90 s gap timer fires.
+    // A mid-stream error or a cancelled read skips `flush`; this bills at once
+    // instead of after the 90 s gap timer.
     cancel() {
       cut();
     },
@@ -593,10 +451,8 @@ async function forward(
     status: answer.status,
     headers: out,
   });
-  // The slot bounds calls to the upstream, not how slowly a client reads its
-  // answer: held until `flush`, four stalled readers closed a site's AI for
-  // 90 s at a time. The timers and the abort listener still run, so the tokens
-  // are billed exactly once whenever the stream actually ends.
+  // The slot bounds calls to the upstream, not how slowly a client reads. The
+  // timers and the abort listener still bill once when the stream ends.
   slot();
   return response;
 }

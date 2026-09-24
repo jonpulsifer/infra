@@ -64,9 +64,8 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Five minutes of quiet ends the cook's `active` flag; half an hour ends
-	// the cook. The controller publishes about once a minute while it holds a
-	// steady pit, so five minutes is several missed readings rather than one.
+	// The controller publishes about once a minute, so five minutes of quiet is
+	// several missed readings.
 	state := NewState(
 		envDuration("FLAMEBOSS_STALE_AFTER", 5*time.Minute, log),
 		envDuration("FLAMEBOSS_RETIRE_AFTER", 30*time.Minute, log),
@@ -100,9 +99,8 @@ func main() {
 
 	mux := http.NewServeMux()
 	mux.Handle("/metrics", promhttp.HandlerFor(registry, promhttp.HandlerOpts{}))
-	// Liveness only. Readiness cannot mean "the cloud answered": the barbecue
-	// is off most of the week, and a pod that reports unready whenever nobody
-	// is cooking is a pod Kubernetes restarts for no reason.
+	// Process liveness only. The barbecue is off most of the week, so cook or
+	// cloud state would keep the pod unready for days.
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ok\n"))
