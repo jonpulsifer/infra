@@ -5,8 +5,9 @@ app_id "callerid" and a name/number/verdict config - see
 docs/apps/tidbyt.md. Nothing pushes to it yet: wiring a caller into this app
 is separate work.
 
-With no number configured, main() cycles a demo through all four verdicts, so
-the app browser and a pixlet render with no args both show every state.
+With no verdict configured, main() cycles a demo through all four verdicts,
+so the app browser and a pixlet render with no args both show every state. A
+verdict with no number still renders that verdict, with an UNKNOWN number.
 """
 
 load("render.star", "canvas", "render")
@@ -53,19 +54,20 @@ def main(config):
         A render.Root object that will be rendered by the device.
     """
     scale = 2 if canvas.is2x() else 1
-    number = config.str("number", "")
+    verdict = config.get("verdict")
 
-    if number == "":
+    if verdict == None:
         return render.Root(
             delay = FRAME_MS // scale,
             show_full_animation = True,
             child = render.Sequence(children = demo_pages(scale)),
         )
 
-    name = config.str("name", "")
-    verdict = config.str("verdict", "ring")
     if verdict not in VERDICTS:
         verdict = "ring"
+
+    number = config.str("number", "")
+    name = config.str("name", "")
 
     return render.Root(
         delay = FRAME_MS // scale,
@@ -209,7 +211,7 @@ def get_schema():
             schema.Text(
                 id = "number",
                 name = "Number",
-                desc = "Caller ID number, digits only. Empty shows a demo of every verdict.",
+                desc = "Caller ID number, digits only. Empty renders as UNKNOWN.",
                 icon = "phone",
                 default = "",
             ),
