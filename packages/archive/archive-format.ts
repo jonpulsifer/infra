@@ -1,52 +1,13 @@
 /**
- * Normalizing an uploaded archive to the one container every route can open.
- *
- * §4 calls the upload "real bytes", and the creation flow's own tile offers a
- * "ZIP, artifact, or source archive" — but a staged bundle is fetched by three
- * different programs in three different runtimes, and every one of them opens
- * it the same way: `curl … | tar -xz` in the reusable workflow,
- * `wget -qO- … | tar -xz` in `adapters/build/buildkit.ts`, and `tar -xzf` in
- * the bosun build hull. A gzipped tar is therefore not a preference, it is the
- * wire format of a staged bundle, and `bundle.ts` beside this one reads a
- * `files` artifact back on the same assumption.
- *
- * Nothing enforced it. A ZIP was accepted, staged, signed for and dispatched,
- * and died in the builder at `tar: This does not look like a tar archive` —
- * surfacing four steps later as `ARTIFACT_UNAVAILABLE`, which names the
- * platform for what is a container-format mistake, and after a workflow run has
- * already been spent. So this module makes the invariant true at the one place
- * that sees the bytes: a ZIP is **transcoded** here, and anything that is
- * neither is **refused** here, with a sentence that says what arrived.
- *
- * **Why transcode rather than teach the fetchers.** Three programs would each
- * need a sniff and an unzip binary that two of their images do not carry, and
- * their silent divergence is what produced this defect in the first place. One
- * conversion at the boundary leaves all three unchanged and correct.
- *
- * **Why the digest is over the converted bytes.** §16 joins the source receipt
- * to the provenance document by a digest over exactly what was staged, and the
- * build hull re-checks it (`sha256sum` against `bundleDigest`, before it
- * extracts). A digest of the uploaded ZIP would name bytes no builder ever
- * holds. So conversion happens before staging, and the digest describes the
- * object in the depot — which is what every reader of it already assumes.
- *
- * The conversion is **deterministic**: entry order is the ZIP's own central
- * directory, and every field a tar header carries that is not in the ZIP is a
- * constant. The same upload therefore always yields the same digest, which is
- * what lets `uploadArchive`'s `onConflictDoNothing` mean "byte-identical input
- * lands on the Build row that already describes it".
- *
- * It is hand-written rather than a dependency for the reason `bundle.ts` gives
- * for its tar reader: §20's extraction contract wants a package that prunes to
- * something self-contained, and these are two fixed formats that have not moved
- * in thirty years.
+ * Normalizes an upload to a gzipped tar, the format every build route extracts
+ * with `tar -xz`. A ZIP is transcoded deterministically, so one upload always
+ * stages under one digest; anything else is refused. Digest the normalized
+ * bytes: build routes check the staged object's sha256 before extracting.
  */
 import { deflateRawSync, gunzipSync, inflateRawSync } from 'node:zlib';
 
-/** The containers an upload may arrive in. */
 export type ArchiveFormat = 'gzip' | 'zip';
 
-/** Why an upload could not be normalized. A closed set, so a caller can say which. */
 export type ArchiveFormatErrorCode =
   | 'UNKNOWN_FORMAT'
   | 'UNSUPPORTED_ZIP'
@@ -65,17 +26,13 @@ export class ArchiveFormatError extends Error {
 }
 
 /**
- * What these bytes are, by their magic number rather than by their name.
- *
- * A filename is a caller's assertion and an upload may carry none at all — the
- * route defaults it to `upload.zip`, which is exactly the claim that must not
- * be trusted here.
+ * Sniffs the magic number, never the filename: an upload with no name is
+ * called `upload.zip` whatever it holds.
  */
 export function sniffArchiveFormat(bytes: Uint8Array): ArchiveFormat | null {
   if (bytes.length >= 2 && bytes[0] === 0x1f && bytes[1] === 0x8b)
     return 'gzip';
-  // Local file header, end of central directory (an empty archive), or a
-  // spanned-archive marker. All three begin a file a ZIP reader will open.
+  // PK\3\4 local header, PK\5\6 end of an empty archive, PK\7\8 spanned marker.
   if (
     bytes.length >= 4 &&
     bytes[0] === 0x50 &&
@@ -89,20 +46,14 @@ export function sniffArchiveFormat(bytes: Uint8Array): ArchiveFormat | null {
 
 export interface NormalizedArchive {
   readonly bytes: Uint8Array;
-  /** Named for what it now is, so the depot object is not called `.zip`. */
+  /** Ends in `.tar.gz` after a transcode. */
   readonly filename: string;
   readonly from: ArchiveFormat;
 }
 
 /**
- * The gzipped tar these bytes are, or the one they convert to.
- *
- * Throws {@link ArchiveFormatError} for anything else, which is the whole point
- * of the function: the refusal belongs here, in front of the depot, rather than
- * inside a runner log nobody is watching.
- *
- * `maxBytes` bounds what a ZIP declares it unpacks to; an untrusted upload is
- * refused as `TOO_LARGE` before any entry is inflated.
+ * Passes a gzip through, transcodes a ZIP, and otherwise throws
+ * {@link ArchiveFormatError}. `maxBytes` caps a ZIP's declared unpacked size.
  */
 export function normalizeArchive(
   filename: string,
@@ -125,28 +76,13 @@ export function normalizeArchive(
 }
 
 /**
- * The same gzipped tar, wearing this module's own deterministic gzip framing.
- *
- * A repository host's tarball endpoint gives no promise about the *gzip* layer:
- * the compressor version, its settings, and the header's mtime/name fields are
- * the host's to change between any two fetches of the same commit. §16 digests
- * exactly what is staged, so an unstable wrapper mints a new depot object for
- * bytes whose tar content is identical — which is how the source bucket filled
- * with archives that are literally the same source. The tar inside *is* stable
- * per commit (`git archive` output), so stripping the wrapper and re-framing it
- * the way {@link gzip} frames a transcoded ZIP — no timestamp, no name, one
- * compressor at one setting — makes the digest a function of the commit again.
- *
- * The tar bytes themselves are untouched: symlinks, pax headers, and the
- * host's `owner-repo-sha/` prefix all pass through, so `tar -xz` extracts
- * exactly what the host archived and the §16 `sha256sum` check still describes
- * the staged object.
+ * Re-frames a gzipped tar with fixed settings so its digest follows the tar: a
+ * host may compress one commit's tarball differently on each fetch.
  */
 export function canonicalGzip(bytes: Uint8Array): Uint8Array {
   return gzip(new Uint8Array(gunzipSync(bytes)));
 }
 
-/** The first bytes, for a refusal that says what it saw rather than only what it wanted. */
 function describe(bytes: Uint8Array): string {
   if (bytes.length === 0) return 'empty';
   const head = [...bytes.subarray(0, 4)]
@@ -154,10 +90,6 @@ function describe(bytes: Uint8Array): string {
     .join(' ');
   return `with ${head}`;
 }
-
-// ---------------------------------------------------------------------------
-// ZIP, read far enough to get the files out of it
-// ---------------------------------------------------------------------------
 
 interface ZipEntry {
   readonly path: string;
@@ -168,7 +100,7 @@ interface ZipEntry {
 
 const EOCD_SIGNATURE = 0x06054b50;
 const CENTRAL_SIGNATURE = 0x02014b50;
-/** The largest an end-of-central-directory record can be: 22 bytes + a 64 KiB comment. */
+/** A 22-byte record plus a comment of up to 64 KiB. */
 const EOCD_MAX = 22 + 0xffff;
 const STORED = 0;
 const DEFLATED = 8;
@@ -183,9 +115,8 @@ function readZipEntries(
 
   const count = view.getUint16(eocd + 10, true);
   const start = view.getUint32(eocd + 16, true);
-  // Zip64 spends these fields as sentinels and puts the real values in a record
-  // this reader does not parse. Refused by name rather than half-read: a
-  // truncated bundle that builds is worse than one that never staged.
+  // Zip64 sets these to sentinels and keeps the real values in a record this
+  // reader does not parse, so it is refused instead of half-read.
   if (count === 0xffff || start === 0xffffffff) {
     throw new ArchiveFormatError(
       'UNSUPPORTED_ZIP',
@@ -193,8 +124,8 @@ function readZipEntries(
     );
   }
 
-  // Declared sizes first, so a bomb is refused before a byte of it inflates;
-  // `inflateEntry` holds each entry to its declaration.
+  // Sum declared sizes first so a zip bomb is refused before anything inflates;
+  // `inflateEntry` then holds each entry to its declared size.
   let declared = 0;
   for (let index = 0, scan = start; index < count; index += 1) {
     if (scan + 46 > zip.length) break;
@@ -261,14 +192,7 @@ function readZipEntries(
   return entries;
 }
 
-/**
- * Scan back for the end-of-central-directory record.
- *
- * Backwards, because the record sits at the end and a ZIP comment of arbitrary
- * length sits after it — there is no other way to find it, which is also why a
- * ZIP cannot be read from a pipe and why the fetchers were never going to open
- * one by accident.
- */
+// Scans backwards: a variable-length comment follows the record at the end.
 function findEndOfCentralDirectory(
   view: DataView,
   length: number,
@@ -300,8 +224,8 @@ function inflateEntry(
       `${filename} compresses ${path} with method ${method}; this boundary reads stored and deflated entries only.`,
     );
   }
-  // The local header's extra field may be a different length than the central
-  // directory's copy, so the data offset is only knowable from the local one.
+  // The local extra field can differ in length from the central copy, so the
+  // data offset comes from the local header.
   const nameLength = view.getUint16(localHeader + 26, true);
   const extraLength = view.getUint16(localHeader + 28, true);
   const from = localHeader + 30 + nameLength + extraLength;
@@ -331,11 +255,8 @@ function inflateEntry(
 }
 
 /**
- * The unix mode a ZIP recorded, or a sane constant.
- *
- * The executable bit is the reason this is read at all: a source bundle whose
- * `build.sh` arrives without `+x` builds differently than the tree it came
- * from. The high byte of `version made by` is the host system, and 3 is unix.
+ * Read so executable bits survive the transcode. The high byte of
+ * `version made by` is the host system, and 3 is unix.
  */
 function modeOf(
   madeBy: number,
@@ -348,14 +269,7 @@ function modeOf(
   return directory ? 0o755 : 0o644;
 }
 
-/**
- * Refuse a path that would write outside the extracted root.
- *
- * The same rule and the same reason as `bundle.ts`'s: this is untrusted input
- * from whoever uploaded it, and every consumer of the tar we are about to write
- * extracts it with `tar -x`, which will happily follow `../` out of the
- * workspace. Rejecting here means no route has to remember to.
- */
+/** Uploads are untrusted: refuse an entry that extracts outside the root. */
 function safePath(path: string, filename: string): string {
   const normalized = path.replaceAll('\\', '/').replace(/^\/+/, '');
   const escapes =
@@ -372,15 +286,11 @@ function safePath(path: string, filename: string): string {
   return normalized;
 }
 
-// ---------------------------------------------------------------------------
-// tar, written the one way every extractor reads
-// ---------------------------------------------------------------------------
-
 const BLOCK = 512;
 const REGULAR = '0';
 const DIRECTORY = '5';
 const GNU_LONG_NAME = 'L';
-/** Long enough that the 100-byte name field cannot hold it. */
+/** The ustar name field, in bytes. */
 const NAME_LIMIT = 100;
 
 function tarGzOf(entries: readonly ZipEntry[]): Uint8Array {
@@ -389,10 +299,8 @@ function tarGzOf(entries: readonly ZipEntry[]): Uint8Array {
     const name = entry.directory ? `${entry.path}/` : entry.path;
     const bytes = new TextEncoder().encode(name);
     if (bytes.length > NAME_LIMIT) {
-      // GNU's long-name entry: a pseudo-file whose *contents* are the real
-      // name. `bundle.ts` reads this form, and so does every tar in the wild;
-      // the ustar prefix field cannot express a long name with no `/` in the
-      // right place, which is why this is the form written.
+      // A GNU long-name entry, whose data is the full name. The ustar prefix
+      // field cannot hold a long name that has no `/` in the right place.
       blocks.push(
         header(`${'././@LongLink'}`, bytes.length + 1, 0o644, GNU_LONG_NAME),
       );
@@ -410,13 +318,13 @@ function tarGzOf(entries: readonly ZipEntry[]): Uint8Array {
       blocks.push(padded(entry.bytes));
     }
   }
-  // Two zero blocks end an archive, and tar warns about a short one.
+  // Two zero blocks end an archive; tar warns when there is only one.
   blocks.push(new Uint8Array(BLOCK * 2));
 
   return gzip(concat(blocks));
 }
 
-/** gzip framing around raw deflate, with no timestamp and no filename. */
+/** No mtime, no filename and a fixed level: equal input gives equal bytes. */
 function gzip(tar: Uint8Array): Uint8Array {
   const body = new Uint8Array(deflateRawSync(tar, { level: 9 }));
   const out = new Uint8Array(10 + body.length + 8);
@@ -447,7 +355,7 @@ function crc32(bytes: Uint8Array): number {
   return (crc ^ 0xffffffff) >>> 0;
 }
 
-/** A name the 100-byte field can hold; the long-name entry before it carries the rest. */
+/** Safe to cut: the long-name entry before this header has the full name. */
 function truncate(name: string): string {
   const bytes = new TextEncoder().encode(name);
   if (bytes.length <= NAME_LIMIT) return name;
@@ -474,14 +382,12 @@ function header(
   octal(0, 108, 8); // uid
   octal(0, 116, 8); // gid
   octal(size, 124, 12);
-  octal(0, 136, 12); // mtime — a constant, so the digest is a function of content
+  octal(0, 136, 12); // mtime, constant so the digest depends only on content
   write(typeFlag, 156, 1);
   write('ustar', 257, 6);
   write('00', 263, 2);
 
-  // The checksum is computed with its own field read as spaces, then written
-  // back into it. Every tar does this, and getting it wrong is the one mistake
-  // that produces an archive `tar` calls corrupt rather than merely odd.
+  // tar sums the header with its own checksum field read as spaces.
   block.fill(0x20, 148, 156);
   let sum = 0;
   for (const byte of block) sum += byte;
@@ -490,7 +396,6 @@ function header(
   return block;
 }
 
-/** Entry data, rounded up to the block size tar counts in. */
 function padded(bytes: Uint8Array): Uint8Array {
   const size = Math.ceil(bytes.length / BLOCK) * BLOCK;
   const block = new Uint8Array(size);

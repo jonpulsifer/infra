@@ -1,163 +1,98 @@
-# One App Component, as values.
-#
-# Three value classes, by who writes them. The boundary is enforced where a
-# Target's chart-values are saved, not here — a chart cannot know who set a
-# value.
-#
-#   app.*       Spindrift writes. Never an operator's to set.
-#   platform.*  The operator writes, per Target. Spindrift never renders into it.
-#   shared.*    Either may write. Spindrift's value wins where both do.
-
-# --- Spindrift's class ------------------------------------------------------
+# One App Component. The control plane writes `app.*`, the operator writes `platform.*`
+# per Target, and either writes `shared.*`, with the control plane's value winning.
 app:
-  # The App and Component this release runs. Both appear in selector labels, so
-  # neither is changeable in place — a rename is a new release.
+  # Both are in selector labels, so a rename is a new release.
   name: ""
   component: ""
 
-  # service | website | job. `job` is the one branch: it renders a CronJob
-  # rather than a Deployment. A website is a service with `expose` forced and a
-  # fixed port.
+  # service | website | job. Only `job` renders differently: a CronJob, no Deployment.
   kind: service
 
-  # Digest-pinned image reference. The supply chain correlates on digest, so a
-  # tag would break the join between what was signed and what runs.
+  # Digest-pinned: the supply chain matches what was signed to what runs by digest.
   image: ""
 
   # The port this non-job Component listens on.
   port: 8080
 
-  # Whether this non-job Component serves traffic. An unexposed service is a
-  # queue worker.
+  # False for a queue worker, which gets no Service and no route.
   expose: true
 
-  # Where this Component can be reached from: none | private | public. A route
-  # renders for a Component that is exposed and whose reach is not `none`.
-  # `private` publishes the gateway's own address, which is RFC1918 and so is
-  # not reachable from the internet whatever is attached to it; `public`
-  # publishes a proxied record pointing at the Target's tunnel.
+  # none | private | public. `private` publishes the gateway's RFC1918 address; `public`
+  # publishes a proxied record at the Target's tunnel.
   reach: private
 
-  # Whether the Target's authenticated edge stands in front: none | proxy.
-  # Independent of reach — an unauthenticated address on your own network and an
-  # authenticated public one are both expressible.
+  # none | proxy: whether the Target's authenticating proxy fronts the route, at any reach.
   auth: proxy
 
-  # Job only. Empty renders a suspended CronJob, so a manual run and a scheduled
-  # run are one object with a field flipped.
+  # Job only. Empty renders a suspended CronJob that only a manual run triggers.
   schedule: ""
 
-  # The Deploy this release came from. Rendered onto the pod template and
-  # **never** into a selector, which is immutable.
+  # On the pod template only, because selectors are immutable.
   deployId: ""
 
-  # What is running here, as a digest, so observe can report drift against
-  # core's desired state.
+  # The running digest, so observe can report drift from the desired state.
   artifactDigest: ""
 
-  # Hostnames the route answers on: the canonical name first, the vanity name
-  # after it where one exists.
+  # The canonical name first, then any vanity name.
   hostnames: []
 
-  # Plain environment. A value that is a secret arrives through `secretEnv` as a
-  # reference, never here.
+  # Plain values only; secrets arrive as references in `secretEnv`.
   env: []
-  # [{ name, secretName, remote: { key, version } }] — one secret per variable,
-  # not a blob. `name` is both the variable and the key inside the materialized
-  # Secret; `remote` is the **pinned** reference in the store of record, never a
-  # floating latest. The chart renders one ExternalSecret from these and the
-  # platform's secret operator materializes it.
+  # [{ name, secretName, remote: { key, version } }]. `name` is the variable and its key in
+  # the Secret; `remote` pins a version in the store of record.
   secretEnv: []
 
-  # One entry per attached Datastore, in two shapes:
-  #
-  #   [{ name, secretName, secretKey }]  the engine's operator generated a
-  #                                      credential and put it in a Secret
-  #   [{ name, value }]                  the engine authenticates nobody, so
-  #                                      the address is all there is
-  #
-  # `name` is fixed by the Datastore's engine and resolved before it reaches
-  # here, which is why there is no engine field: the chart would have nothing
-  # to do with one that the shape does not already say.
-  #
-  # The reference names the Secret the engine's operator owns, not one this
-  # chart materializes, so the credential never transits Spindrift and never
-  # travels the `secretEnv` pinned-store path — a rotation the operator performs
-  # is picked up with no Deploy either way.
-  #
-  # Which of the two secret shapes is rendered depends on where the Datastore
-  # is. A Datastore lives in a namespace of its own, because it outlives every
-  # App attached to it, and a `secretKeyRef` cannot cross one — so `secretName`
-  # is the direct reference used when the two namespaces coincide, and
-  # `remoteSecretName` is the one that does not, mirrored in by
-  # `templates/externalsecret.yaml` through `platform.datastoreSecretStore`.
-  # ESO reconciling that mirror is what keeps the rotation property true across
-  # the boundary; it is a delivery hop, not a copy Spindrift holds.
+  # Per attached Datastore: { name, secretName | remoteSecretName, secretKey }, or { name, value }
+  # for an engine without auth. A `remoteSecretName` is mirrored in from another namespace.
   datastores: []
 
   # Entrypoint overrides. Empty means the image's own.
   command: []
   args: []
 
-# --- The operator's class ---------------------------------------------------
 platform:
   # Sandbox runtime class.
   runtimeClassName: ""
 
   imagePullSecrets: []
 
-  # The shared gateway routes attach to, on its existing HTTP listener. This
-  # chart renders no Gateway and no certificate.
+  # The shared gateway routes attach to; this chart renders no Gateway or certificate.
   gateway:
     name: ""
     namespace: ""
 
-  # Gateway API ExternalAuth backend, rendered as a filter exactly when
-  # `app.auth` is `proxy`. The service and the cross-namespace ReferenceGrant
-  # are vessel resources.
+  # The ExternalAuth backend for `auth: proxy`. Its Service and ReferenceGrant live outside this chart.
   externalAuth:
     name: ""
     namespace: ""
     port: 80
 
-  # Where a route's DNS record points, per reach. `privateAddress` is the
-  # gateway's own load-balancer address, published unproxied; `tunnelHostname`
-  # is the Target's Cloudflare tunnel, published as a proxied CNAME. Each is
-  # required only for the reach that uses it.
+  # DNS targets: `privateAddress` (unproxied A) for private reach, `tunnelHostname` (proxied
+  # CNAME) for public. Each is required only for its reach.
   dns:
     privateAddress: ""
     tunnelHostname: ""
 
-  # The ClusterSecretStore config is fetched through — an admin-chosen Target
-  # property. Rendering config without it is refused rather than guessed; see
-  # templates/externalsecret.yaml.
+  # The ClusterSecretStore config is fetched through. Config does not render without it.
   secretStore:
     kind: ClusterSecretStore
     name: ""
 
-  # The store an attached Datastore's credential crosses namespaces through,
-  # scoped to the namespace Datastores are provisioned into. A different store
-  # from the one above and required only when something is attached from
-  # another namespace, which since per-App namespaces is the ordinary case.
-  #
-  # `refreshInterval` is not "0" here, unlike the pinned config path: this
-  # tracks a credential the datastore operator rotates underneath the release,
-  # with no Deploy to re-render on, so it has to poll.
+  # The store that mirrors a Datastore credential in, scoped to the Datastore namespace. Keep
+  # it separate from `secretStore`, so the config store never reads database credentials.
+  # Required only for a cross-namespace attachment.
   datastoreSecretStore:
     kind: ClusterSecretStore
     name: ""
+    # Polls, because the datastore operator rotates the credential without a Deploy.
     refreshInterval: 1h
 
   networkPolicy:
-    # Ingress is default-deny with a fixed exception shape whose **names are
-    # Target configuration**. Same-namespace siblings are always allowed; these
-    # are the namespaces outside it.
+    # Namespaces admitted besides the release's own; all other ingress is denied.
     allowedNamespaces: []
 
-# --- Written by both --------------------------------------------------------
 shared:
-  # The operator sets a Target's defaults; Spindrift overrides them per
-  # Component.
+  # The operator's Target defaults, which the control plane overrides per Component.
   resources:
     requests:
       cpu: 50m

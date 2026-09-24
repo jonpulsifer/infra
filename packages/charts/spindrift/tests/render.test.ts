@@ -210,9 +210,7 @@ describe('migration Job identity', () => {
 
 describe('ui-driven installation configuration', () => {
   test('renders deployments with no installation manifest to read at all', async () => {
-    // Configuration is the product's and lives in the row. There is no key on
-    // this chart that could declare one, so there is no path, no inline
-    // document, no ConfigMap and no volume for either process.
+    // The installation manifest lives in the database; no chart key can declare one.
     const objects = await render({
       reconciler: { enabled: true },
       envFromSecret: 'spindrift-env',
@@ -320,9 +318,7 @@ describe('the credential is the only copy of the federation', () => {
       'ConfigMap',
       'spindrift-federated-identity',
     );
-    // Every fact `cloud.federation` used to ask for by hand, rendered once,
-    // from values a release already sets. The manifest has no key for any of
-    // them, so nothing is left that could disagree.
+    // Rendered from release values alone, so no second copy can disagree.
     expect(JSON.parse(credential.data?.['gcp-credentials.json'] ?? '')).toEqual(
       {
         type: 'external_account',
@@ -334,8 +330,7 @@ describe('the credential is the only copy of the federation', () => {
       },
     );
 
-    // And the deployment points ADC at exactly that file, which is how the
-    // process finds it without being told a second time.
+    // ADC finds the credential through this path.
     const web = one(objects, 'Deployment', 'spindrift-web');
     expect(web.spec.template.spec.containers[0].env).toContainEqual({
       name: 'GOOGLE_APPLICATION_CREDENTIALS',
@@ -365,9 +360,7 @@ const envOf = (objects: RenderedObject[], name: string) =>
 describe('the relying party is the front door', () => {
   test('is the hostname this release serves, not a manifest key', async () => {
     const objects = await render({ hostname: 'spindrift.example.test' });
-    // One value, so there is nothing for a second copy to disagree with: the
-    // env the process binds its relying party from and the name the HTTPRoute
-    // answers on are the same `hostname`.
+    // The relying party and the HTTPRoute both come from `hostname`.
     expect(
       envOf(objects, 'spindrift-web').find(
         (item) => item.name === 'SPINDRIFT_HOSTNAME',
@@ -379,10 +372,7 @@ describe('the relying party is the front door', () => {
   });
 
   test('is unset for a release that serves no origin', async () => {
-    // The chart's `hostname` may be empty — no Gateway, no HTTPRoute, still a
-    // valid installation. It has no origin, so it has nothing to scope a
-    // ceremony to and enrols nobody; the process falls back to the hostname a
-    // browser refuses rather than to an empty string.
+    // An empty `hostname` is a valid installation with no origin, which enrols nobody.
     const objects = await render();
     expect(objects.some((object) => object.kind === 'HTTPRoute')).toBe(false);
     expect(
@@ -439,12 +429,8 @@ describe('the trust store', () => {
       ).projected.sources;
 
   test('the projected ca.crt follows the configured ConfigMap', async () => {
-    // `NODE_EXTRA_CA_CERTS` names exactly one file and a projected volume
-    // cannot merge two sources onto one path, so an installation holding a
-    // Target on another cluster has to replace the source rather than add one.
-    // Before this was configurable, `folly` failed all six prerequisites with
-    // "unable to verify the first certificate": the in-cluster
-    // `kube-root-ca.crt` carries this cluster's root and nothing else.
+    // `NODE_EXTRA_CA_CERTS` names one file, and a projected volume cannot merge two sources
+    // onto one path, so the configured ConfigMap replaces the default.
     const objects = await render(federated('spindrift-ca-bundle'));
     for (const name of ['spindrift-web', 'spindrift-reconciler']) {
       expect(trustSource(objects, name)).toContainEqual({
@@ -456,10 +442,8 @@ describe('the trust store', () => {
     }
   });
 
-  // The ConfigMap each Deployment actually projects at `ca.crt`, read back out
-  // of the rendered pod spec. The Reloader annotation is checked against this
-  // rather than against a literal, because the failure being guarded is the two
-  // disagreeing — an annotation naming *a* ConfigMap proves nothing.
+  // Read from the rendered pod spec: the guarded failure is the Reloader annotation
+  // disagreeing with the projected ConfigMap.
   const projectedBundle = (objects: RenderedObject[], name: string) =>
     trustSource(objects, name)?.find(
       (source: { configMap?: { items?: { path: string }[] } }) =>
@@ -474,20 +458,11 @@ describe('the trust store', () => {
     ];
 
   test('both processes roll when the bundle they project changes', async () => {
-    // The criterion that decides whether the mechanism is real. `NODE_EXTRA_CA_
-    // CERTS` is read once at process start, so a kubelet refresh of the mounted
-    // file is a correction the running process never sees — and the annotation
-    // has to name the ConfigMap the pod actually projects, on *both*
-    // Deployments. A bundle somebody else owns counts: `kube-root-ca.crt` is
-    // rewritten in place by a cluster CA rotation, and nothing else rolls these
-    // pods for it. Offsite's CA adoption is the recorded proof of that — every
-    // prerequisite failed "unable to verify the first certificate" against a
-    // ConfigMap that was already correct.
+    // `NODE_EXTRA_CA_CERTS` is read once at start, so only a restart applies a changed bundle,
+    // including `kube-root-ca.crt` after a cluster CA rotation.
     for (const values of [federated(), federated('spindrift-ca-bundle')]) {
       const objects = await render(values);
-      // Both names, so the half-fix that leaves a stale reconciler holding the
-      // old trust store fails here. `toBeString` so an unrendered pod spec
-      // cannot pass this by making both sides undefined.
+      // `toBeString` keeps an unrendered pod spec from passing as undefined on both sides.
       for (const name of ['spindrift-web', 'spindrift-reconciler']) {
         expect(projectedBundle(objects, name)).toBeString();
         expect(reloadsFor(objects, name)).toBe(projectedBundle(objects, name));
@@ -496,9 +471,7 @@ describe('the trust store', () => {
   });
 
   test('it defaults to the cluster’s own published root', async () => {
-    // Sufficient when that root is self-signed: an installation whose Targets
-    // are all in-cluster on such a cluster needs nothing else, and must not
-    // be made to declare a bundle to keep working.
+    // Enough for in-cluster Targets when the cluster's root is self-signed.
     expect(
       trustSource(await render(federated()), 'spindrift-web'),
     ).toContainEqual({

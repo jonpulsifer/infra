@@ -1,3 +1,3 @@
-/** `sdk.js` is imported as text; the declaration is what lets tsc see that. */
+/** `sdk.js`, imported as text. */
 declare const sdk: string;
 export default sdk;

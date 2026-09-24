@@ -1,33 +1,9 @@
 # syntax=docker/dockerfile:1
 #
-# mate-sandbox — the per-thread sandbox mate execs `opencode acp` in.
-#
-# opencode plus the toolset this repo's own tasks reach for: an agent asked to
-# change infrastructure here has to render manifests, validate OpenTofu, lint
-# shell, decrypt a sops file and open a pull request, and every one of those is
-# a binary it cannot install for itself — the sandbox's egress allow-list is
-# four FQDNs wide. What the image does not carry, the agent cannot do. The rest
-# is what the sandbox proof needs around it: git for the checkout an init
-# container clones at mint, ripgrep so opencode's grep and glob tools never
-# reach for a download, curl and ca-certificates for the reachability proofs run
-# from inside, procps for the orphan check after a deliberate stream close, and
-# tini as PID 1.
-#
-# The container's main process is a keepalive, not the harness. mate opens
-# `opencode acp` per session through pods/exec and holds its stdin open for
-# the session's life; tini reaps whatever an exec'd session orphans and
-# forwards SIGTERM to `sleep`, so a pod delete is prompt.
-#
-# Everything that varies per thread comes from the pod, none of it is baked:
-#   - an emptyDir mounted at /home/agent — opencode's state is
-#     $XDG_DATA_HOME/opencode/opencode.db and the image ships nothing there
-#   - the checkout, cloned by an init container and passed as `--cwd`
-#   - OPENCODE_API_KEY from the ESO-synced Secret — the one secret
-#   - OPENCODE_CONFIG_CONTENT carrying the model, permission and mcp overrides
+# The per-thread sandbox mate execs `opencode acp` in. Its tools are baked in
+# because the sandbox's egress policy blocks their downloads.
 FROM debian:bookworm-slim@sha256:3783cc01769c7b2b1b83a5c5ad96c815348e28ed7da68e2e3687004faa906251 AS base
 
-# Every tool is fetched in a stage that is thrown away, so the unpacking
-# tooling never reaches a sandbox and the whole toolset arrives without it.
 FROM base AS toolset
 RUN apt-get update && apt-get install -y --no-install-recommends \
       ca-certificates \
@@ -36,18 +12,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       xz-utils \
     && rm -rf /var/lib/apt/lists/*
 
-# Pinned, because a `latest` in an image means two sandboxes minted a week
-# apart run different tools and neither can be reproduced afterwards. Renovate
-# reads these through `customManagers:dockerfileVersions`, which is already in
-# `.github/renovate.json5` and is what the opencode pin below uses.
-#
-# Two of these have to agree with the repo rather than merely be current, and
-# `.github/renovate.json5` groups each pair into one pull request so they
-# cannot drift apart:
-#   - tofu, because Atlantis runs the version the root `mise.toml` names and a
-#     plan from a different one is a plan nobody will apply
-#   - d2, because `docs:diagrams` commits its output and a version bump here
-#     alone would rewrite every SVG the next time an agent ran the task
 # renovate: datasource=github-releases depName=FiloSottile/age
 ARG AGE_VERSION=1.3.2
 # renovate: datasource=github-releases depName=sharkdp/bat
@@ -56,6 +20,7 @@ ARG BAT_VERSION=0.26.1
 ARG BUN_VERSION=1.4.2
 # renovate: datasource=github-releases depName=open-policy-agent/conftest
 ARG CONFTEST_VERSION=0.70.1
+# Must equal d2 in the root mise.toml: `docs:diagrams` commits its output.
 # renovate: datasource=github-releases depName=terrastruct/d2
 ARG D2_VERSION=0.9.0
 # renovate: datasource=github-releases depName=dandavison/delta
@@ -78,8 +43,7 @@ ARG KUBECTL_VERSION=1.37.0
 ARG KUSTOMIZE_VERSION=5.8.1
 # renovate: datasource=github-releases depName=jdx/mise
 ARG MISE_VERSION=2026.9.12
-# 1Password publishes the CLI from its own CDN and mirrors it nowhere Renovate
-# has a datasource for, so this is the one pin that moves by hand.
+# No Renovate datasource covers 1Password's CDN, so this pin moves by hand.
 ARG OP_VERSION=2.39.0
 # renovate: datasource=github-releases depName=tronbyt/pixlet
 ARG PIXLET_VERSION=0.54.0
@@ -93,20 +57,14 @@ ARG SHFMT_VERSION=3.14.1
 ARG SOPS_VERSION=3.13.3
 # renovate: datasource=github-releases depName=terraform-docs/terraform-docs
 ARG TERRAFORM_DOCS_VERSION=0.24.0
+# Must equal opentofu in the root mise.toml: the repo's tasks run this binary
+# in its place.
 # renovate: datasource=github-releases depName=opentofu/opentofu
 ARG TOFU_VERSION=1.12.6
 # renovate: datasource=github-releases depName=mikefarah/yq
 ARG YQ_VERSION=4.53.6
 
-# Each archive is stripped to the binaries alone. promtool is the reason this
-# is spelled out rather than handed to a version manager: mise resolves it to
-# the prometheus distribution and drags the 142 MB server binary along for a
-# tool that lints rules, where naming the one path inside the same tarball
-# costs 46 MB compressed.
-#
-# gh is the one that lands in `libexec` rather than `bin`, because the name
-# `gh` on PATH belongs to the wrapper copied in below and the real binary has
-# to sit somewhere the wrapper can exec without finding itself.
+# gh goes to libexec: `gh` on PATH is the wrapper copied in below.
 RUN set -eux; \
     mkdir -p /out/bin /out/libexec; \
     cd "$(mktemp -d)"; \
@@ -168,28 +126,17 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       tini \
     && rm -rf /var/lib/apt/lists/*
 
-# /usr/local/bin rather than a directory of its own: /home/agent is an emptyDir
-# at runtime, so anything under HOME is masked, and anything else needs a PATH
-# that survives the agent's own shells — Debian's /etc/profile assigns PATH
-# outright, so a login shell opencode spawns would drop a prepended directory
-# and keep this one.
+# /usr/local/bin, because HOME is an emptyDir at runtime and Debian's
+# /etc/profile resets PATH in login shells, dropping a prepended directory.
 COPY --from=toolset /out/bin/ /usr/local/bin/
 COPY --from=toolset /out/libexec/ /usr/local/libexec/
 
-# What `gh` means in a sandbox, so that opening a pull request needs no
-# preamble; why a git credential helper does not already cover it, and what
-# this does and does not keep out of reach, is in the file.
 COPY gh /usr/local/bin/gh
 
-# mise reads this before any config in the checkout; why it is in the image at
-# all, and what each setting is doing, is in the file.
 COPY mise.toml /etc/mise/config.toml
 
-# opencode-ai@<version> resolves on linux/amd64 to this platform package; its
-# binary is byte-identical to the GitHub release asset of the same version.
-# The non-baseline build wants AVX2, which every x86 node in the fleet has;
-# opencode-linux-x64-baseline is published in lockstep and is the one-word
-# swap here if a node without it ever joins.
+# The platform package opencode-ai installs on linux/amd64. It needs AVX2;
+# opencode-linux-x64-baseline is the build for nodes without it.
 # renovate: datasource=npm depName=opencode-linux-x64
 ARG OPENCODE_VERSION=1.18.31
 RUN curl -fsSL "https://registry.npmjs.org/opencode-linux-x64/-/opencode-linux-x64-${OPENCODE_VERSION}.tgz" \
@@ -202,11 +149,8 @@ RUN groupadd -g 1337 agent \
 USER 1337:1337
 WORKDIR /home/agent
 
-# The environment the harness ran under in the bake-off. HOME and the XDG
-# roots all sit under the mount the pod backs with an emptyDir; opencode
-# creates its subdirectories itself. Autoupdate is off because the binary is
-# root-owned, and because a harness that swaps itself out from under a live
-# thread is not a version anyone can reason about afterwards.
+# HOME and the XDG roots sit on the pod's emptyDir. Autoupdate is off because
+# the binary is root-owned and pinned.
 ENV HOME=/home/agent \
     USER=agent \
     XDG_DATA_HOME=/home/agent/.local/share \
@@ -218,11 +162,8 @@ ENV HOME=/home/agent \
     NO_COLOR=1 \
     OPENCODE_DISABLE_AUTOUPDATE=1
 
-# Every binary is started as the uid that will start it, so one that cannot run
-# — a wrong architecture, a missing shared library, a truncated download — fails
-# the build here rather than the first thread that needs it. The four spelled
-# out separately answer `version` and reject `--version`, and kubectl's would
-# go looking for a cluster without `--client`.
+# Runs as the sandbox uid, so a binary that cannot start fails the build.
+# helm, kubectl, kustomize and pixlet reject `--version`.
 RUN set -eux; \
     for tool in age age-keygen bat bun conftest d2 delta eza flux fzf gh jq mise \
                 op opencode promtool shellcheck shfmt sops terraform-docs tofu yq; do \
@@ -233,17 +174,9 @@ RUN set -eux; \
     kustomize version >/dev/null; \
     pixlet version >/dev/null
 
-# The `gh` above is the wrapper with nothing to resolve, which proves the half
-# of it that execs straight through. This is the other half, and it is proven
-# here because the alternative is the first thread that needs a pull request
-# finding out: a stand-in for the file mate stamps, and `gh auth token` —
-# which reports the credential gh would use and talks to no network to do it —
-# has to print back what is in it.
-#
-# The empty case is proven beside it, because it is not an edge: mate
-# truncates the file at the end of every turn, so an empty file is what the
-# wrapper meets most of the time it is run outside one. Answering it with an
-# exported empty GH_TOKEN would put gh back to reporting no credential at all.
+# `gh auth token` needs no network. Through the wrapper it must print the token
+# file's contents. It must also fail when mate empties the file between turns,
+# but `set -e` ignores a `!` command, so the build does not enforce that case.
 RUN set -eux; \
     d="$(mktemp -d)"; \
     printf %s 'ghs-a-token' >"$d/token"; \
@@ -255,5 +188,7 @@ RUN set -eux; \
       gh auth token >/dev/null 2>&1; \
     rm -rf "$d"
 
+# sleep is a keepalive: mate execs each session. tini reaps what those sessions
+# orphan and forwards SIGTERM, so a pod delete is prompt.
 ENTRYPOINT ["/usr/bin/tini", "--"]
 CMD ["sleep", "infinity"]

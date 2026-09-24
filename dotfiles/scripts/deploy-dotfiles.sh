@@ -1,13 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Script location determines the dotfiles directory root
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DOTFILES_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
-# --dry-run resolves every source without touching the filesystem. CI runs it:
-# a link whose source has been renamed or deleted is otherwise invisible until
-# a machine deploys and quietly loses a config.
+# --dry-run only checks that every source exists. CI runs it.
 DRY_RUN=0
 if [[ "${1:-}" == "--dry-run" ]]; then
   DRY_RUN=1
@@ -21,7 +18,6 @@ else
   echo "Deploying dotfiles from ${DOTFILES_DIR}..."
 fi
 
-# Helper function to create parent directories and atomic symlinks
 link_file() {
   local src="$1"
   local dst="$2"
@@ -42,24 +38,15 @@ link_file() {
   echo "Linked $dst -> $src"
 }
 
-# 1. Base dotfiles pointer
 link_file "${DOTFILES_DIR}" "${HOME}/.dotfiles"
 
-# 2. Individual config files and directories
 link_file "${DOTFILES_DIR}/.tmux.conf" "${HOME}/.tmux.conf"
 link_file "${DOTFILES_DIR}/.vimrc" "${HOME}/.vimrc"
 link_file "${DOTFILES_DIR}/.config/.bunfig.toml" "${HOME}/.config/.bunfig.toml"
 link_file "${DOTFILES_DIR}/.config/git" "${HOME}/.config/git"
 link_file "${DOTFILES_DIR}/.config/ghostty/config" "${HOME}/.config/ghostty/config"
-# Everything home-manager's programs.zsh and programs.neovim generate. On a
-# NixOS host home-manager owns these outright (HM_ACTIVATED=1) and refuses to
-# overwrite a file it did not create, so deploying them here does not merely
-# shadow the generated versions -- it fails the whole home-manager activation,
-# taking every other programs.<x> with it.
-#
-# Everywhere else -- macOS, where Homebrew and these dotfiles are the whole
-# story and there is no home-manager -- the guard is false and all three
-# deploy exactly as before.
+# home-manager generates these where HM_ACTIVATED=1, and a file it did not create
+# fails its whole activation.
 if [[ "${HM_ACTIVATED:-0}" != "1" ]]; then
   link_file "${DOTFILES_DIR}/.zshenv" "${HOME}/.zshenv"
   link_file "${DOTFILES_DIR}/.config/zsh" "${HOME}/.config/zsh"
@@ -70,7 +57,6 @@ link_file "${DOTFILES_DIR}/.ssh/config" "${HOME}/.ssh/config"
 link_file "${DOTFILES_DIR}/.gnupg/gpg.conf" "${HOME}/.gnupg/gpg.conf"
 link_file "${DOTFILES_DIR}/mise-global-config.toml" "${HOME}/.config/mise/config.toml"
 
-# 3. Agent instructions and settings
 link_file "${DOTFILES_DIR}/.agents/AGENTS.md" "${HOME}/.agents/AGENTS.md"
 link_file "${DOTFILES_DIR}/.agents/AGENTS.md" "${HOME}/.claude/CLAUDE.md"
 link_file "${DOTFILES_DIR}/.agents/AGENTS.md" "${HOME}/.codex/AGENTS.md"
@@ -78,12 +64,10 @@ link_file "${DOTFILES_DIR}/.agents/AGENTS.md" "${HOME}/.pi/agent/AGENTS.md"
 link_file "${DOTFILES_DIR}/.agents/AGENTS.md" "${HOME}/.gemini/GEMINI.md"
 link_file "${DOTFILES_DIR}/.agents/AGENTS.md" "${HOME}/.config/opencode/agents/global.md"
 
-# 4. Agent skills
 link_file "${DOTFILES_DIR}/skills" "${HOME}/.agents/skills"
 link_file "${DOTFILES_DIR}/skills" "${HOME}/.claude/skills"
 link_file "${DOTFILES_DIR}/skills" "${HOME}/.gemini/config/skills"
 
-# 5. Agent prompts, extensions, settings, statusline
 link_file "${DOTFILES_DIR}/.pi/agent/agents" "${HOME}/.pi/agent/agents"
 link_file "${DOTFILES_DIR}/.pi/agent/extensions" "${HOME}/.pi/agent/extensions"
 link_file "${DOTFILES_DIR}/.pi/agent/prompts" "${HOME}/.pi/agent/prompts"

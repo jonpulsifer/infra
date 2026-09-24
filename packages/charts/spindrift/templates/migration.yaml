@@ -1,8 +1,6 @@
 {{/*
-Applies the image's committed migrations. The Job name digests its execution
-inputs, so an unchanged release reuses the completed Job and a new image creates
-a fresh attempt. The pod template excludes revision-varying chart labels because
-Jobs are immutable.
+Applies the image's committed migrations. The Job name hashes its execution inputs, so an
+unchanged release reuses the finished Job. A Job is immutable, so the pod omits revision labels.
 */}}
 {{- if and .Values.database.enabled .Values.database.migration.enabled }}
 apiVersion: batch/v1
@@ -14,9 +12,8 @@ metadata:
     {{- include "spindrift.labels" . | nindent 4 }}
     app.kubernetes.io/component: migration
 spec:
-  # Database startup and network readiness are eventually consistent. Retry this
-  # idempotent act until it succeeds; a finite backoff would leave the same
-  # declared release permanently failed.
+  # Retry until the database is reachable: the migration is idempotent, and a spent
+  # backoff would fail this release for good.
   backoffLimit: 2147483647
   template:
     metadata:

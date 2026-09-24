@@ -1,7 +1,7 @@
 FROM ghcr.io/runatlantis/atlantis:v0.47.1@sha256:5112319554630f6e4a93bfaf78c1fb9cea024a0eebd210e6563322c1c67df842
 USER root
 
-# Bump OpenTofu past the bundled 1.12.3.
+# Replaces the OpenTofu the base image bundles.
 ARG OPENTOFU_VERSION=1.12.5
 RUN apk add --no-cache unzip \
     && curl -fsSL "https://github.com/opentofu/opentofu/releases/download/v${OPENTOFU_VERSION}/tofu_${OPENTOFU_VERSION}_linux_amd64.zip" -o /tmp/tofu.zip \

@@ -1,42 +1,16 @@
 /**
- * Reading a `files` artifact back into the files it holds.
- *
- * §6's artifact is a digest and the addresses it can be pulled by, and for the
- * `files` shape what is at those addresses is **a gzipped tar**. That is not a
- * choice made here — `adapters/build/buildkit.ts` fetches a staged bundle with
- * `tar -xz`, so it is already the one format every route agrees on, and this is
- * the same format read from the other end.
- *
- * It is hand-written rather than a dependency, and the reason is §20: the
- * extraction contract wants a package that prunes to something self-contained,
- * and a tar reader is ninety lines of a format that has not changed since 1988.
- * What it deliberately does **not** do is anything a tar can do that a website
- * cannot contain — devices, hard links, symlinks — because a static host serves
- * bytes at paths and has no representation for any of them.
- *
- * **The bundle is untrusted input.** It arrives from a builder or from whoever
- * uploaded an archive, so {@link readBundle} refuses a path that escapes the
- * root rather than trusting that no `../` appears in one. A deploy that wrote
- * outside its own site would be the only path in this system by which one App
- * could reach another's.
+ * Reads a `files` artifact, a gzipped tar, into the files a static host serves.
+ * Devices, links and symlinks are skipped: a host serves bytes at paths only.
  */
 import { gunzipSync } from 'node:zlib';
 
-/** One file the bundle holds, at the path it will be served from. */
 export interface BundleFile {
-  /** Rooted at the site, with a leading slash — the shape hosting wants. */
+  /** Rooted at the site, with a leading slash. */
   readonly path: string;
-  /**
-   * Its contents, in a buffer this runtime's compression accepts.
-   *
-   * The explicit `ArrayBuffer` parameter is not decoration: a `Uint8Array` may
-   * be backed by shared memory, which cannot be compressed in place, and the
-   * type is what keeps a caller from discovering that at run time.
-   */
+  /** `ArrayBuffer`-backed, as `Bun.gzipSync` requires. */
   readonly bytes: Uint8Array<ArrayBuffer>;
 }
 
-/** Why a bundle could not be read. A closed set, so a caller can say which. */
 export type BundleErrorCode =
   | 'NOT_GZIP'
   | 'MALFORMED_TAR'
@@ -52,23 +26,16 @@ export class BundleError extends Error {
     this.name = 'BundleError';
   }
 }
-/** Tar's fixed block size, which every field offset below is relative to. */
 const BLOCK = 512;
 
-/** Header field offsets, as the format defines them. */
 const NAME = { at: 0, length: 100 };
 const SIZE = { at: 124, length: 12 };
 const TYPE_FLAG = 156;
 const PREFIX = { at: 345, length: 155 };
 
 /**
- * The type flags this reader understands.
- *
- * `\0` and `0` are both a regular file — the first is the original format, the
- * second is ustar, and archives in the wild carry both. `L` and `x` are the two
- * ways a long path arrives: GNU's own extension, and the pax record that
- * replaced it. Everything else is skipped with its data, which is what makes an
- * archive containing a symlink deploy the files around it rather than fail.
+ * `\0` (old tar) and `0` (ustar) are both regular files; `L` (GNU) and `x`
+ * (pax) carry long paths. Other types are skipped, so a symlink does not fail.
  */
 const REGULAR = new Set(['\0', '0']);
 const DIRECTORY = '5';
@@ -76,13 +43,8 @@ const GNU_LONG_NAME = 'L';
 const PAX_HEADER = 'x';
 
 /**
- * Read a gzipped tar into its files.
- *
- * Directories are dropped rather than represented: hosting has no directories,
- * only paths, and a bundle's empty directory has nothing to serve.
- *
- * `maxBytes` bounds the inflated tar, because the compressed size says nothing
- * about it: an untrusted upload is refused as `TOO_LARGE` before it is held.
+ * Drops directories, which a host has no use for. `maxBytes` caps the inflated
+ * tar; the compressed size says nothing about it.
  */
 export function readBundle(
   gzipped: Uint8Array<ArrayBuffer>,
@@ -115,8 +77,7 @@ export function readBundle(
 
   while (offset + BLOCK <= tar.length) {
     const header = tar.subarray(offset, offset + BLOCK);
-    // Two consecutive zero blocks end an archive; one is enough to stop on,
-    // because nothing valid follows a header with no name.
+    // tar ends with two zero blocks, but nothing valid follows even one.
     if (header.every((byte) => byte === 0)) break;
 
     const size = octal(header, SIZE);
@@ -129,7 +90,6 @@ export function readBundle(
       );
     }
     const data = tar.subarray(dataAt, dataAt + size);
-    // Entries are padded up to the next block boundary.
     offset = dataAt + Math.ceil(size / BLOCK) * BLOCK;
 
     if (flag === GNU_LONG_NAME) {
@@ -153,11 +113,8 @@ export function readBundle(
 }
 
 /**
- * A bundle path as the path it is served at.
- *
- * Three normalizations, in order: the leading `./` every archiver writes is
- * dropped, the result is checked for anything that would leave the bundle, and
- * a leading slash is added because that is the form hosting addresses files by.
+ * A bundle comes from a builder or an upload and is untrusted: a `..` segment
+ * would let one App write into another's site.
  */
 function servePath(name: string): string {
   const cleaned = name.replace(/^\.\//, '').replace(/^\/+/, '');
@@ -171,7 +128,7 @@ function servePath(name: string): string {
   return `/${segments.filter((segment) => segment !== '.').join('/')}`;
 }
 
-/** `prefix` and `name`, which is how ustar carries a path over 100 bytes. */
+/** ustar splits a path over 100 bytes into `prefix` and `name`. */
 function joinedName(header: Uint8Array): string {
   const name = text(header, NAME);
   const prefix = text(header, PREFIX);
@@ -179,11 +136,8 @@ function joinedName(header: Uint8Array): string {
 }
 
 /**
- * The `path` record of a pax extended header.
- *
- * Records are `<length> <key>=<value>\n`, and the length counts itself — which
- * is why this reads keys rather than splitting on newlines: a value is allowed
- * to contain one.
+ * A pax record is `<length> <key>=<value>\n` and its length counts itself, so
+ * records are walked by length: a value may contain a newline.
  */
 function paxPath(data: Uint8Array): string | null {
   const text = new TextDecoder().decode(data);
@@ -203,7 +157,6 @@ function paxPath(data: Uint8Array): string | null {
   return null;
 }
 
-/** A NUL-terminated ASCII field. */
 function text(
   header: Uint8Array,
   field: { at: number; length: number },
@@ -215,7 +168,7 @@ function text(
   );
 }
 
-/** A NUL- or space-padded octal field, which is how tar writes every number. */
+/** tar writes every number as NUL- or space-padded octal. */
 function octal(
   header: Uint8Array,
   field: { at: number; length: number },

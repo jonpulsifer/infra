@@ -11,7 +11,7 @@ const federation = {
   readToken: async () => 'projectedjwt',
 };
 
-/** The token exchange, then whatever the object read should answer. */
+/** Answers the token exchange, and every other request with `object`. */
 const farSide = (object: (request: Request) => Response) => {
   const requests: Request[] = [];
   const fetcher = async (request: Request) => {

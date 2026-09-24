@@ -13,7 +13,6 @@
 #>
 [CmdletBinding()]
 param(
-    # Bump to move to a newer Nerd Fonts release.
     [string] $Version = 'v3.5.1',
     [switch] $Force
 )
@@ -44,8 +43,7 @@ try {
 
     Expand-Archive -LiteralPath $archive -DestinationPath $work -Force
 
-    # Only the proportional family; the Mono and Propo variants are extra
-    # weight for a terminal that wants the default one.
+    # The filter skips the Mono and Propo variants.
     $fonts = Get-ChildItem -LiteralPath $work -Filter "$familyPrefix`NerdFont-*.ttf"
     if (-not $fonts) {
         throw "No $familyPrefix`NerdFont-*.ttf found in the archive -- did the release layout change?"
@@ -58,9 +56,7 @@ try {
         $destination = Join-Path $fontDir $font.Name
         Copy-Item -LiteralPath $font.FullName -Destination $destination -Force
 
-        # Windows reads the real family name out of the file's name table when
-        # it loads the font; this registry entry only has to exist and point at
-        # it, so a name derived from the filename is enough.
+        # Windows reads the family name from the font file. The registry name only has to exist.
         $displayName = [IO.Path]::GetFileNameWithoutExtension($font.Name) -replace '-', ' '
 
         Set-ItemProperty -Path $registryKey -Name "$displayName (TrueType)" -Value $destination

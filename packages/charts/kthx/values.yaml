@@ -1,133 +1,59 @@
-# The image is digest-pinned by the installation, not by this chart — the
-# containers workflow rewrites the pin on the HelmRelease the same way it does
-# for every other first-party workload. `required` at the point of use, so an
-# installation that forgets it fails to render rather than to pull.
+# The installation's HelmRelease pins the digest; the containers workflow updates it.
 image: ""
 port: 8080
 
-# The zone sites live under. `Host === zone` is the apex; `<name>.zone` is a
-# site host. It is the whole of what the route publishes, what the process
-# dispatches on, and what the readiness probe has to send as `Host` — one fact,
-# stated once.
+# The apex host; each site is `<name>.<zone>`.
 zone: kthx.dev
 
-# The depot: every release tar.gz, every uploaded file, and the nightly dump.
-# `terraform/gcp/projects/bluenose` owns it and outputs the name. `required` at
-# the point of use: empty is not "no depot yet", it is every release archive
-# living on one node's disk with no durable copy and nothing to notice.
+# The depot for release archives, uploads and the nightly dump, owned by
+# `terraform/gcp/projects/bluenose`.
 bucket: ""
 
-# The peers whose `cf-connecting-ip` this process believes. Empty means none,
-# which behind a gateway is one rate-limit key for the whole zone — so this is
-# load-bearing, not tuning. Cilium terminates the listener in a host-networked
-# Envoy, so the peer is a node address; the pod CIDR covers the case where it
-# is not. Both come from the cluster topology ConfigMap.
+# Peers whose `cf-connecting-ip` is believed. Empty makes the whole zone one rate-limit
+# key. The gateway Envoy is host-networked, so the peer is usually a node address.
 trustedProxies: ""
 
-# The identity host: the tailnet name a person opens, and the only host whose
-# `tailscale-user-login` header this process believes.
-#
-# Empty is the kill switch and the default. With no host the Ingress is not
-# rendered, the NetworkPolicy gains no clause, the server is told no identity
-# host, and every door behaves exactly as it did before any of this existed.
-#
-# `proxies` is deliberately its own list and not `trustedProxies` above. That
-# one is the node and pod CIDRs, because a rate-limit bucket keyed off a header
-# is worth little either way; this one decides whether a header is allowed to
-# say who somebody *is*, and handing that to every pod in the cluster is a
-# different kind of mistake. It still has to be a CIDR — the operator's proxy
-# takes an ordinary pod address — so what actually narrows it is the
-# NetworkPolicy beside it, which admits that one StatefulSet and this
-# namespace's own pods and nothing else.
+# The tailnet host whose `tailscale-user-login` header is believed. Empty renders no
+# Ingress, no NetworkPolicy clause and no identity host.
 identity:
   host: ""
-  # The tailnet tag the operator mints the proxy's auth key with, and the tag
-  # the policy grant points at. It is not `tag:k8s`: that is every proxy the
-  # operator runs, and a grant to it would hand a member the lot.
+  # The proxy's tailnet tag, which the policy grant names. `tag:k8s` would cover every
+  # proxy the operator runs.
   tag: tag:kthx-ingress
+  # CIDRs of the identity proxy, which has an ordinary pod address. The NetworkPolicy
+  # admits only that proxy and this namespace's own pods.
   proxies: ""
-  # The header the proxy sets. Named rather than assumed so a different
-  # identity-asserting hop is a values change; the default is tailscale's.
+  # The identity header; empty means `tailscale-user-login`.
   header: ""
-  # Comma-separated logins that open `DELETE /api/sites`, the nuke. Empty is the
-  # default and means the route answers 404 — a deployment with no operator does
-  # not advertise that a nuke exists. These are people, not a credential: a
-  # login is only ever set for a caller the identity proxy vouched for.
+  # Comma-separated logins allowed `DELETE /api/sites`. Empty makes the route answer 404.
   admins: ""
 
-# The AI passthrough. The key is not here: it arrives with the HMAC keys through
-# `envFromSecret`, because a chart value is rendered into a HelmRelease in a
-# public repository.
-#
-# `models` is an allow-list, and an empty one is every model the upstream has.
-# The plan behind the key is flat-rate, so the per-site daily numbers the server
-# enforces are a rate limiter rather than a spend control: what an anonymous
-# visitor can exhaust is the operator's subscription and its rate limits, not a
-# bill. That makes the list a decision about what works, and the daily caps the
-# thing standing between one site and everyone else's.
+# The AI passthrough. Its key arrives through `envFromSecret`, because chart values are public.
 ai:
-  # The subscription base. It is a different catalogue from the metered one and
-  # it refuses any call without an `x-opencode-session` header, which the server
-  # sends — so the image carrying that header must be live before this value
-  # moves, or every call answers 400.
+  # The subscription base refuses any call without an `x-opencode-session` header.
   url: https://opencode.ai/zen/go/v1
-  # What a request that names no model gets. Measured at this deployment's own
-  # 4096 ceiling: it answers a one-sentence question in 70 completion tokens and
-  # spends *zero* of them reasoning, which no other model on this base does. The
-  # rest reason first — 693 of 734 tokens on qwen3.7-plus — so a tight clamp
-  # buys their thinking and truncates their answer.
+  # The default: at the 4096-token ceiling it answers without spending tokens on reasoning.
   model: mimo-v2.5-pro
-  # Comma-separated, and an allow-list rather than a shortlist: a model absent
-  # here is 400 INVALID_MODEL before the call leaves the pod. Every entry was
-  # asked a real question on this base at this ceiling and answered it.
-  #
-  # What is deliberately absent, and why:
-  #   kimi-k2.5, glm-5, deepseek-v4-flash  upstream error or an empty answer
-  #   glm-5.1/5.2/5.3, glm-5.3-flash       spend the whole budget reasoning and
-  #                                        return no content at all
-  #   grok-4.6                             401, anthropic-shaped only
-  #   gpt-5.6-luna                         500
-  #   kimi-k3, qwen3.6-plus                first byte at 161 s and 99 s
-  #   nemotron-3.5-lightning-free          not in this catalogue
-  #
-  # minimax-m3 is here only because it was the default and a site may name it.
-  # It is the one model that writes its reasoning into `content` as a <think>
-  # block, so a page that renders the answer renders that too.
+  # Comma-separated allow-list; empty allows every upstream model, and any other model
+  # is 400 INVALID_MODEL. minimax-m3 writes its reasoning into `content` as a <think> block.
   models: mimo-v2.5-pro,kimi-k2.7-code,qwen3.7-plus,minimax-m2.5,deepseek-v4.1-flash,minimax-m3
-  # The public ceiling, and also the floor a silent answer is billed. It stays
-  # where it is: this route is anonymous on every site in the zone.
+  # The per-call ceiling for anonymous visitors on every site in the zone.
   maxTokens: 4096
-  # What writes a whole page on `POST /api/build`, which is a different question
-  # from the one `model` above answers and has a different right answer. Measured
-  # against six prompts a non-technical person would type, 12 requests at a time:
-  # kimi-k2.7-code proposed 6/6 valid names and returned 6/6 clean single
-  # documents; qwen3.7-plus dropped the name comment on one of the six, which is
-  # why it is the fallback and why the server never trusts that comment to be
-  # there. Both must also appear in `models` — the process refuses to boot
-  # otherwise, the same way it does for `model`.
+  # Writes a whole page for `POST /api/build`. Both build models must be in `models`,
+  # or the server refuses to boot.
   buildModel: kimi-k2.7-code
-  # Tried only when the first model never answers a first byte. Empty is no
-  # second attempt, which is a build that fails rather than one that spends a
-  # second call on a model that just went quiet.
+  # Tried when the build model fails before it starts writing. Empty means no second attempt.
   buildFallbackModel: qwen3.7-plus
-  # A whole HTML document is 3 000 to 14 000 completion tokens, and the models
-  # here reason before they write. Separate from `maxTokens` because that one is
-  # what an anonymous visitor on any public site may spend; this one is behind a
-  # tailnet login and a per-person daily budget.
+  # A page is 3,000 to 14,000 completion tokens after reasoning. The builder is only
+  # open to tailnet logins with a daily budget.
   buildMaxTokens: 16000
 
-# `KTHX_ME_KEY`, `KTHX_PG_KEY` and `KTHX_AI_KEY`. The process refuses to boot
-# without the first two and answers 502 on `/api/ai` without the third, and a
-# chart that generated them would rotate every visitor cookie and every site's
-# database password on each upgrade, so they arrive from 1Password through an
-# ExternalSecret the installation owns. `required` at the point of use, because
-# an omitted name renders a valid Deployment that dies on ConfigError.
+# The Secret with `KTHX_ME_KEY`, `KTHX_PG_KEY` and `KTHX_AI_KEY`, from the installation's
+# ExternalSecret. A key the chart generated would rotate on every upgrade.
 envFromSecret: ""
 
-# Both volumes are `local-path`, which is a directory on one node's disk, so the
-# pod and the Postgres instance have to be pinned to that node or they bind to a
-# volume that is not there. Empty means unpinned, which is only correct for a
-# `helm template` run.
+# The node holding both local-path volumes; the server and Postgres pin to it. Empty
+# suits only `helm template`.
 node: ""
 
 resources:
@@ -138,78 +64,47 @@ resources:
     memory: 1Gi
 
 sites:
-  # Release directories, unpacked. Losing it costs latency, never data: a
-  # release with no directory is refetched from the depot. Expansion is allowed
-  # live, so this starts at what the disk can spare rather than at a guess.
+  # A cache of the depot: a release with no directory is refetched.
   size: 50Gi
   mountPath: /sites
-  # Unset: offsite has exactly one storage class and it is the default, so
-  # naming it here would put an installation fact in the chart.
+  # Empty uses the cluster's default storage class.
   storageClass: ""
 
 database:
   size: 20Gi
   storageClass: ""
-  # The control database and the role that owns every site database. The role
-  # gets `CREATEDB CREATEROLE` from `postInitApplicationSQL` and deliberately
-  # does NOT appear under `managed.roles` — see the comment in database.yaml.
+  # The control database and its owner role, which creates every site database.
   name: kthx
   resources:
     requests: {cpu: 100m, memory: 512Mi}
     limits: {memory: 2Gi}
   parameters:
-    # 64 site pools of 2 connections, the control pool, the dump and the
-    # operator's own probes, with room left over.
+    # 64 site pools of 2 connections, the control pool, the dump and the operator's
+    # probes, with headroom.
     max_connections: "300"
     shared_buffers: 256MB
   backup:
-    # 04:23 UTC: after the server's own daily sweeps, before anyone is awake.
     schedule: "23 4 * * *"
-    # The Bun image has no `pg_dumpall`, so the dump runs in the same image
-    # family the instance does. The Cluster sets no `imageName`, so the
-    # operator's defaulting webhook picks the server's — bump this major with
-    # the operator's, or the day that default moves `pg_dumpall` refuses the
-    # server with a version mismatch and the only symptom is a failed Job.
-    # `KthxBackupFailing` in `clusters/offsite/monitoring/kthx-rules.yaml` is
-    # what makes that audible.
+    # Keep this major equal to the server's, which the CNPG operator's default image sets,
+    # or `pg_dumpall` refuses the server with a version mismatch.
     image: ghcr.io/cloudnative-pg/postgresql:18
-    # ...and that image has no GCS client, so the upload is its own step. gcloud
-    # reads an `external_account` document through `auth login --cred-file`, so
-    # the same federation the server uses covers this with no key anywhere.
     uploaderImage: gcr.io/google.com/cloudsdktool/google-cloud-cli:582.0.0-slim
-    # The gzipped dump lands here before it is uploaded. A cap rather than an
-    # unbounded emptyDir, because this shares the node's disk with both PVCs.
+    # Caps the dump's emptyDir, which shares the node's disk with both PVCs.
     scratchSize: 10Gi
 
-# The kthx names have no TLS listener: Cloudflare terminates and the tunnel
-# reaches this gateway on plain HTTP. No `sectionName` — the HTTP listener is
-# the only one a kthx name ever arrives on.
 gateway:
   name: spindrift-apps
   namespace: spindrift-apps
 
-# Where claiming and site control answer once they are not public. Empty is
-# the apex answering everything — a checkout, or a demo zone. Set, the host is
-# served on the named gateway listener alone, and the public apex answers
-# `403 PRIVATE` to everything under `/api/sites` but the directory; the sites
-# themselves stay public.
-#
-# The listener is named rather than inherited on purpose. The tunnel reaches
-# this gateway on its plain HTTP listener, so a private host that existed
-# there would be a name Cloudflare could carry. On a TLS listener whose
-# certificate is the lab's own wildcard, the name is reachable from the lab,
-# the offsite LAN and the tailnet, and from nowhere the tunnel serves.
-# external-dns publishes it at the gateway's private address, which is why
-# that route carries no hold-out annotation.
+# The private host for claiming and site control. Empty keeps them on the public apex.
+# Set, the apex answers `403 PRIVATE` under `/api/sites` except the directory.
 control:
   host: ""
+  # A TLS listener. The tunnel reaches only the HTTP listener, so Cloudflare cannot carry this host.
   listener: ""
 
-# Keyless GCP, exactly as the spindrift chart does it: the pod projects a
-# ServiceAccount token for this cluster's own OIDC issuer and mounts an ordinary
-# ADC `external_account` document beside it. The pool principal is
-# `offsite:system:serviceaccount:kthx:kthx`, so the ServiceAccount's name and
-# namespace are part of the credential.
+# Keyless GCP through a projected token. The pool principal is
+# `offsite:system:serviceaccount:kthx:kthx`, so the ServiceAccount's name and namespace matter.
 gcp:
   audience: ""
   impersonationUrl: ""

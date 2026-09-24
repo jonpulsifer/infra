@@ -44,7 +44,7 @@ if ($existing -contains $Name) {
     return
 }
 
-# --no-distribution turns on the WSL components without dragging in Ubuntu.
+# --no-distribution skips the default Ubuntu install.
 Write-Host '  enabling WSL components'
 wsl.exe --install --no-distribution
 

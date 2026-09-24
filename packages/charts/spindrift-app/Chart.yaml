@@ -5,8 +5,6 @@ type: application
 version: 0.5.0
 appVersion: "1"
 annotations:
-  # The value contract this chart speaks, read when a Target is pinned. Helm
-  # ignores unknown values silently, so a Target pinned to a chart whose
-  # contract has moved would apply cleanly, report green, and run without the
-  # config it was handed. Core turns that skew into a prerequisite failure.
+  # Read when a Target is pinned. Helm ignores unknown values silently, so a contract
+  # mismatch fails the Target's prerequisites.
   spindrift.dev/values-contract: "5"
