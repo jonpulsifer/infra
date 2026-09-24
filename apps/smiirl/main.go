@@ -58,7 +58,7 @@ const (
 )
 
 // "cycle" stays last, because cyclable is every mode before it.
-var modes = []string{"number", "clock", "days", "date", "countdown", "countup", "github", "cycle"}
+var modes = []string{"number", "clock", "days", "date", "countdown", "countup", "github", "robocalls", "cycle"}
 
 var cyclable = modes[:len(modes)-1]
 
@@ -93,6 +93,13 @@ type github struct {
 	Err   string    `json:"-"`
 }
 
+// robocalls needs no per-instance setting, so it holds only the last count VictoriaLogs gave.
+type robocalls struct {
+	Count int       `json:"count"`
+	At    time.Time `json:"at"`
+	Err   string    `json:"-"`
+}
+
 type persisted struct {
 	Cells       string    `json:"cells"`
 	UpdatedAt   time.Time `json:"updatedAt"`
@@ -105,11 +112,12 @@ type persisted struct {
 	Tick        int       `json:"tick"` // minutes between changes of a time-shaped mode
 	Cycle       cycle     `json:"cycle"`
 	GitHub      github    `json:"github"`
+	Robocalls   robocalls `json:"robocalls"`
 }
 
 func (p persisted) shows(m string) bool {
 	switch m {
-	case "number", "clock", "date":
+	case "number", "clock", "date", "robocalls":
 		return true
 	case "days":
 		return p.DaysDate != ""
@@ -301,6 +309,10 @@ func (s *server) cells(m string, now time.Time) string {
 		if p.GitHub.User != "" && !p.GitHub.At.IsZero() {
 			return numberToCells(clamp(p.GitHub.Count))
 		}
+	case "robocalls":
+		if !p.Robocalls.At.IsZero() {
+			return numberToCells(clamp(p.Robocalls.Count))
+		}
 	}
 	return p.Cells
 }
@@ -323,6 +335,10 @@ func (s *server) modeView(now time.Time) map[string]any {
 	if !p.GitHub.At.IsZero() {
 		fetched = p.GitHub.At
 	}
+	var robocallsAt any
+	if !p.Robocalls.At.IsZero() {
+		robocallsAt = p.Robocalls.At
+	}
 	return map[string]any{
 		"mode":      p.Mode,
 		"showing":   s.showing(now),
@@ -334,6 +350,7 @@ func (s *server) modeView(now time.Time) map[string]any {
 		"countdown": map[string]any{"at": p.CountdownAt, "left": left},
 		"countup":   map[string]any{"at": p.CountupAt, "elapsed": elapsed},
 		"github":    map[string]any{"user": p.GitHub.User, "what": p.GitHub.What, "count": p.GitHub.Count, "at": fetched, "error": errOrNil(p.GitHub.Err)},
+		"robocalls": map[string]any{"count": p.Robocalls.Count, "at": robocallsAt, "error": errOrNil(p.Robocalls.Err)},
 		"cycle":     map[string]any{"modes": p.Cycle.Modes, "every": p.Cycle.Every},
 	}
 }
@@ -744,7 +761,7 @@ func (s *server) handleMode(w http.ResponseWriter, r *http.Request) {
 		p.Tick = *body.Tick
 	}
 	switch body.Mode {
-	case "number", "clock", "date":
+	case "number", "clock", "date", "robocalls":
 	case "days":
 		if _, err := time.Parse(dayFormat, body.Date); err != nil {
 			s.mu.Unlock()
@@ -812,6 +829,9 @@ func (s *server) handleMode(w http.ResponseWriter, r *http.Request) {
 	if body.Mode == "github" {
 		go s.refreshGitHub() // the drums do not wait for the next tick
 	}
+	if body.Mode == "robocalls" {
+		go s.refreshRobocalls()
+	}
 	writeJSON(w, http.StatusOK, view)
 }
 
@@ -844,6 +864,32 @@ func (s *server) refreshGitHub() {
 	q.GitHub.Count, q.GitHub.At, q.GitHub.Err = n, s.now(), ""
 	if err := s.commit(q); err != nil {
 		log.Printf("github: %v", err)
+	}
+}
+
+func (s *server) refreshRobocalls() {
+	s.mu.Lock()
+	p := s.persisted
+	wanted := p.Mode == "robocalls" || (p.Mode == "cycle" && slices.Contains(p.Cycle.Modes, "robocalls"))
+	stale := s.now().Sub(p.Robocalls.At) >= robocallsEvery
+	now, loc := s.now(), s.loc
+	s.mu.Unlock()
+	if !wanted || !stale {
+		return
+	}
+	n, err := robocallsCount(now, loc)
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	q := s.persisted
+	if err != nil {
+		log.Printf("robocalls: %v", err)
+		s.persisted.Robocalls.Err = err.Error() // not persisted, so nothing to save
+		return
+	}
+	q.Robocalls.Count, q.Robocalls.At, q.Robocalls.Err = n, s.now(), ""
+	if err := s.commit(q); err != nil {
+		log.Printf("robocalls: %v", err)
 	}
 }
 
@@ -947,10 +993,12 @@ func main() {
 	}
 	s.tick()
 	go s.refreshGitHub()
+	go s.refreshRobocalls()
 	go func() {
 		for range time.Tick(30 * time.Second) {
 			s.tick()
 			s.refreshGitHub()
+			s.refreshRobocalls()
 		}
 	}()
 	addr := ":" + envOr("PORT", "8080")
