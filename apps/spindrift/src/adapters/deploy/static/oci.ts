@@ -1,29 +1,7 @@
 /**
- * Pulling a `files` artifact out of an OCI registry.
- *
- * Static hosting is the one backend where the **controller** must hold the
- * bytes: Cloud Run and Kubernetes hand a reference to a runtime that does its
- * own pulling, but the hosting API is fed files, so whatever this adapter
- * deploys it must first fetch. A `files` Build lands in the registry like
- * every other artifact — as a single-layer image whose one layer *is* the
- * gzipped tar `bundle.ts` reads (the build workflow's files arm produces
- * exactly that with `FROM scratch` + `COPY . /`) — and this module is the read
- * half of that agreement.
- *
- * It speaks just enough of the distribution API to resolve one digest to one
- * layer: manifest, index-to-child, blob. It is not a registry client; there is
- * deliberately no tag resolution, no listing, and no push.
- *
- * **Google-family registries only.** The adapter's identity is the federated
- * token it already presents to the hosting API, and Artifact Registry accepts
- * that same token as a Bearer credential on its Docker API. Nothing here can
- * read `ghcr.io` — that would take a credential the manifest deliberately does
- * not model (§13) — which is why the caller chooses the ref, not this module.
- *
- * The blob request may answer with a redirect to signed storage. The runtime's
- * fetch follows it, and undici drops the `Authorization` header on the
- * cross-origin hop — which is required, because a signed URL refuses a request
- * that also carries credentials.
+ * Pulls a `files` artifact, a single-layer image whose layer is the gzipped tar,
+ * from a Google-family registry with the adapter's federated token. It resolves
+ * one digest to one layer: no tags, listing or push.
  */
 import type { Fetcher, TokenProvider } from '../cloud/http.ts';
 
@@ -32,7 +10,6 @@ export class OciPullError extends Error {
   override readonly name = 'OciPullError';
 }
 
-/** One reference, split into the three parts the v2 API addresses. */
 export interface OciRef {
   readonly host: string;
   readonly repository: string;
@@ -50,13 +27,7 @@ export function parseOciRef(ref: string): OciRef | null {
   };
 }
 
-/**
- * The first reference on a registry the adapter's own token reads.
- *
- * The predicate is the build workflow's `googleHosts` one, read from the other
- * end: the hosts the runner logs into with the federated identity are exactly
- * the hosts that identity can read back from.
- */
+/** The first ref on a registry the federated token can read. */
 export function googleRegistryRef(refs: readonly string[]): string | null {
   return (
     refs.find((ref) => {
@@ -112,9 +83,6 @@ export async function pullFilesLayer(input: {
 
   const layers = image.layers ?? [];
   if (layers.length !== 1) {
-    // The one mismatch worth its own sentence: a multi-layer object at a
-    // files address is an *image* — a Build made by a route with no files arm
-    // — and "N layers" is what tells that story apart from a corrupt push.
     throw new OciPullError(
       `the artifact at ${input.ref} carries ${layers.length} layers — a files artifact is one gzipped tar, and this is an image`,
     );
@@ -129,6 +97,8 @@ export async function pullFilesLayer(input: {
     throw new OciPullError('the artifact names a layer with no digest');
   }
 
+  // A blob may redirect to signed storage, which refuses credentials; fetch
+  // drops `Authorization` on that cross-origin hop.
   const blob = await send(
     new Request(
       `https://${parsed.host}/v2/${parsed.repository}/blobs/${layer.digest}`,
@@ -143,7 +113,6 @@ export async function pullFilesLayer(input: {
   return new Uint8Array(await blob.arrayBuffer());
 }
 
-/** One manifest GET, refused as a sentence rather than a status. */
 async function manifestOf(
   send: Fetcher,
   authorization: string,
@@ -167,12 +136,8 @@ async function manifestOf(
 }
 
 /**
- * The image manifest under an index, or the manifest itself.
- *
- * The selection is the build workflow's own (`Attest the artifact`): a child
- * is something a runtime could run — not an attestation manifest, not an
- * `unknown/unknown` platform. `provenance: mode=max` hangs both off every
- * push, so this filter is the ordinary case rather than a defensive one.
+ * The image manifest under an index, or the manifest itself. `provenance: mode=max`
+ * adds an attestation manifest and an `unknown/unknown` platform to every push.
  */
 async function imageOf(
   send: Fetcher,

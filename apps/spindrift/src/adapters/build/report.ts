@@ -1,49 +1,20 @@
 /**
- * How a runner tells core what it built, on the one channel core already reads.
- *
- * §4 settles that **build logs are read, not pushed** — "reading is outbound
- * only, needs no public ingest endpoint, and surfaces the failures that happen
- * *before* the instrumented step". That decision has a consequence nobody states
- * but every route runs into: if core never exposes an ingest endpoint, a runner
- * has no way to hand back a digest either. So the result travels the same way
- * the logs do — the runner prints one line, core reads it out of the log it was
- * already fetching. No second channel, no callback, nothing to authenticate.
- *
- * **All three routes report this way, including the cloud builder.** Its API
- * does have a results field — but it is populated only for images the build
- * service itself pushed, and every route here pushes from BuildKit directly, so
- * that field is empty on exactly the builds that matter. One reporting path for
- * three routes also keeps §16's join real everywhere: the digest core checks is
- * the one the runner echoed, not one core already knew and copied.
- *
- * **Base64, so the log cannot corrupt the report.** A runner's stdout goes
- * through a CI's own log processing on the way here: it may be prefixed with a
- * timestamp, grouped, folded, or coloured. A base64 payload survives every one
- * of those, and — more to the point — cannot be *forged* by a build that
- * happens to print JSON, because the marker plus a valid base64 document is not
- * something an ordinary compiler emits.
+ * The report a runner prints as one marker line in the build log core already
+ * reads. The payload is base64, so CI log processing cannot alter it and
+ * ordinary build output does not match it by accident.
  */
 import { z } from 'zod';
 import { digestSchema as digest } from '../../domain/digest.ts';
 
 /**
- * The prefix a report line starts with.
- *
- * Deliberately not a `::workflow-command::`: one CI's command syntax is that
- * CI's, and a marker that means something to the runner's own log processor is
- * a marker the runner's log processor may swallow.
+ * Plain text: a CI's workflow-command syntax may be consumed by the runner's
+ * own log processor.
  */
 export const BUILD_REPORT_MARKER = 'spindrift-result';
 
 /**
- * What a runner reports.
- *
- * `bundleDigest` is here, echoed rather than inferred, because §16 makes it the
- * join between the source receipt and the provenance document — and a route
- * that echoes a digest it was *not* given is a route whose provenance points at
- * the wrong source. {@link parseBuildReport} does not check that; the adapter
- * does, against what it dispatched, which is the only place the expected value
- * exists.
+ * {@link parseBuildReport} does not check `bundleDigest`; `buildSucceeded`
+ * compares it with the digest the route dispatched.
  */
 export const buildReportSchema = z
   .object({
@@ -52,17 +23,11 @@ export const buildReportSchema = z
     /** Every address the digest was pushed to. At least one, or nothing can pull it. */
     refs: z.array(z.string().trim().min(1)).min(1),
     /**
-     * The base image, from the builder's own materials (§16). Null where the
-     * runner could not report one — a files artifact has no base, and a runner
-     * without the tooling to read its own provenance says so rather than
-     * guessing. Stale bases are surfaced, never auto-corrected.
+     * Null where the runner could not report one: a files artifact has no base,
+     * and some runners cannot read their own provenance.
      */
     baseDigest: digest.nullable(),
-    /**
-     * The backend's provenance document, opaque here and read by core (§16).
-     * Absent where the backend produced none; a route whose provenance is
-     * missing is one Task 26 refuses to sign, which is the point.
-     */
+    /** The backend's provenance document. Core refuses to sign a build without one. */
     statement: z.unknown().optional(),
     /** Registry reference to BuildKit's unsigned materials attestation. */
     buildkitProvenanceRef: z.string().trim().min(1).optional(),
@@ -73,22 +38,14 @@ export const buildReportSchema = z
 
 export type BuildReport = z.infer<typeof buildReportSchema>;
 
-/** Compose the line a runner prints. Used by the tests and by nothing in `src/`. */
+/** Only tests call this; the build programs print the line themselves. */
 export function encodeBuildReport(report: BuildReport): string {
   return `${BUILD_REPORT_MARKER} ${btoa(JSON.stringify(report))}`;
 }
 
 /**
- * The report a log carries, or `null` when it carries none.
- *
- * **The last marker wins.** A build that retried a step prints two, and the one
- * that describes what was actually pushed is the last one — taking the first
- * would report a digest that a later push replaced.
- *
- * Malformed is the same answer as absent, on purpose. The caller's next move is
- * identical either way — fail the build and say the runner reported nothing
- * usable — and distinguishing them would mean this function had an opinion
- * about *why* a runner misbehaved.
+ * The last valid report in the log, or `null`. A retried step prints more than
+ * one, and the last describes what was pushed. Malformed marker lines are skipped.
  */
 export function parseBuildReport(log: string): BuildReport | null {
   const prefix = `${BUILD_REPORT_MARKER} `;

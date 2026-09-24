@@ -1,26 +1,6 @@
 /**
- * The cloud store: Secret Manager (§10).
- *
- * §10: "the cloud Targets take the cloud store in the App's vessel, not a
- * choice." The project is therefore configuration, not a literal — an App's
- * vessel selects it (§14) — and this adapter is constructed per project.
- *
- * This is the `NATIVE` half of §10's pinning claim. Secret Manager versions
- * items itself and a version is addressable
- * (`projects/…/secrets/…/versions/7`), so a reference here is the version
- * resource and nothing has to be minted to make it immutable. The conformance
- * suite runs the same assertions against this and against the 1Password store,
- * which is the whole point of shipping two: §10 says the reference `put` returns
- * "has the same shape either way, and nothing above the seam can tell which
- * strategy produced it", and one implementation could not have falsified that.
- *
- * **Two things this adapter does not do**, both because §10 forbids them:
- *
- * - It never reads a payload back. `accessSecretVersion` exists on the far side
- *   and is not called anywhere here — values are write-only, so the read-back is
- *   `getSecretVersion`, which returns metadata only.
- * - It never reuses a version. `addVersion` is the only write, so a put is
- *   always a new version rather than an edit of one.
+ * The Secret Manager store, one per project. Secret Manager versions secrets
+ * itself, so a reference is the version resource.
  */
 import { createHash } from 'node:crypto';
 import type { StoreAdapter } from '../../config/manifest.schema.ts';
@@ -33,19 +13,11 @@ import type {
 } from './contract.ts';
 import { type StoreEndpoint, StoreHttp, StoreRequestError } from './http.ts';
 
-/**
- * Secret Manager's own API root — one hostname for every project, because
- * Google runs a single control plane rather than one per customer. Unlike
- * the 1Password Connect server this store's sibling reaches — a self-hosted
- * address that genuinely differs per installation — nothing here ever varied,
- * so this is the default `registry.ts` applies when `manifest.secretStore.endpoint`
- * is absent and the configured adapter is this one.
- */
+/** One API host serves every project, so the manifest may omit the endpoint. */
 export const DEFAULT_ENDPOINT = 'https://secretmanager.googleapis.com';
 
-/** Which project's Secret Manager this adapter writes to. */
 export interface SecretManagerStoreConfig extends StoreEndpoint {
-  /** The vessel's project holding this installation's App secrets (§14). */
+  /** The home vessel's project, which holds every App's secrets. */
   readonly project: string;
 }
 
@@ -68,19 +40,14 @@ interface ListVersionsResponse {
   nextPageToken?: string;
 }
 
-/** What `:access` answers with — the one payload-bearing read (§4). */
+/** The `:access` response, the one read that carries a payload. */
 interface AccessVersionResponse {
   payload?: { data?: string };
 }
 
 /**
- * The annotations every secret this adapter creates carries.
- *
- * They are the authority on what a secret is for; {@link secretId} below is only
- * a legible name. Keeping the scope here rather than parsing it back out of the
- * id is what lets {@link SecretManagerStore.put} detect the one hazard the
- * naming scheme has — two distinct scopes sanitizing to the same id — and refuse
- * loudly instead of silently sharing a secret between two Components.
+ * The exact scope of each secret, so {@link SecretManagerStore.put} can refuse
+ * two scopes that sanitize to one {@link secretId}.
  */
 const ANNOTATION = {
   app: 'spindrift-app',
@@ -96,30 +63,8 @@ const MAX_ID_LENGTH = 255;
 const DIGEST_LENGTH = 16;
 
 /**
- * A Secret Manager secret id: `[A-Za-z0-9_-]{1,255}`.
- *
- * Every character outside that alphabet becomes `_`, which is lossy on purpose —
- * the id is for a human reading the console, and {@link ANNOTATION} carries the
- * exact scope. `--` separates the four parts because a sanitized part can
- * contain a single `-` (App and Component names are DNS labels) but the pair is
- * only ever what this function put there.
- *
- * **The ceiling is the alphabet's other half and is enforced here.** App,
- * Component and Target names are DNS labels of up to 63 characters each and a
- * variable name has no ceiling at all, so four parts and three separators clear
- * 255 without anything unreasonable happening — and the API refuses the create,
- * not the character that pushed it over.
- *
- * Truncating alone would widen the one hazard this scheme already carries: two
- * distinct scopes landing on one id, which is what {@link assertScopeMatches}
- * exists to catch. So an id over the ceiling gives up the last
- * {@link DIGEST_LENGTH} characters of legibility to a digest of the **exact,
- * unsanitized** scope. Two long scopes now need both a shared prefix and a
- * 64-bit digest collision to meet, where sanitizing alone needed only a flatten
- * — so the truncated form separates strictly more pairs than the sanitized one,
- * which is what keeps this from trading a length bug for a collision bug.
- * `assertScopeMatches` still stands behind it: a digest is a legibility aid,
- * not a proof.
+ * A legible secret id in `[A-Za-z0-9_-]{1,255}`. Four names and an unbounded key
+ * can pass 255, so a long id ends in a digest of the unsanitized scope.
  */
 function secretId(scope: ConfigScope, key: string): string {
   const sanitize = (part: string) => part.replace(/[^A-Za-z0-9_-]/g, '_');
@@ -135,7 +80,6 @@ function secretId(scope: ConfigScope, key: string): string {
   return `${head}--${digest}`;
 }
 
-/** The version number out of a version resource name. */
 function versionNumber(name: string): string {
   const segments = name.split('/');
   return segments[segments.length - 1] ?? name;
@@ -185,8 +129,7 @@ export class SecretManagerStore implements SecretStore {
     const version = await this.http.json<SecretVersionResource>({
       method: 'POST',
       path: `${this.secretPath(id)}:addVersion`,
-      // Secret Manager takes the payload base64-encoded. This is the only
-      // plaintext that crosses the seam, and it crosses in one direction (§10).
+      // Secret Manager takes the payload base64-encoded.
       body: {
         payload: { data: Buffer.from(value, 'utf8').toString('base64') },
       },
@@ -206,9 +149,7 @@ export class SecretManagerStore implements SecretStore {
       method: 'GET',
       path: this.versionPath(reference.key, reference.version),
     });
-    // A destroyed version still answers, with its payload gone. §10's read-back
-    // proves a pinned document "still resolves", and one that cannot be
-    // delivered does not — so it reports absent, like a version that was purged.
+    // A destroyed version still answers, with no payload left to deliver.
     if (version === null || version.state === 'DESTROYED') return null;
 
     const secret = await this.http.json<SecretResource>({
@@ -221,13 +162,7 @@ export class SecretManagerStore implements SecretStore {
     return { reference, key, createdAt: new Date(version.createTime) };
   }
 
-  /**
-   * The contract's one read-back of a value, for build dispatch alone.
-   *
-   * `:access` rather than the metadata GET `describe` uses — that is the whole
-   * difference between the two verbs, and it is why the service account that
-   * only delivers runtime config does not need `secretAccessor` here.
-   */
+  /** Build dispatch only; see {@link SecretStore.open}. */
   async open(reference: SecretReference): Promise<string | null> {
     const version = await this.http.json<AccessVersionResponse>({
       method: 'GET',
@@ -243,9 +178,7 @@ export class SecretManagerStore implements SecretStore {
     const found: SecretVersion[] = [];
     let pageToken: string | undefined;
 
-    // Paginated because a key that has been rotated past the retention reaper
-    // more than a page's worth of times would otherwise report only its newest
-    // versions, and core reaps from exactly this list (§10).
+    // Every page, because core reaps from this list.
     do {
       const page: ListVersionsResponse | null = await this.http.json({
         method: 'GET',
@@ -271,18 +204,12 @@ export class SecretManagerStore implements SecretStore {
   }
 
   /**
-   * Idempotent, which this API is not.
-   *
-   * `destroy` on a version that is already destroyed answers
-   * `FAILED_PRECONDITION`, so idempotence has to be reconciled here rather than
-   * assumed. Asking first would still lose a race between two reaper passes, so
-   * the order is the other way round: attempt it, and accept the refusal only
-   * once the far side confirms the version is in the state that was wanted.
+   * Destroy first and re-read on refusal: a read-first check races another reaper
+   * pass. `FAILED_PRECONDITION` is success only if the version is destroyed or gone.
    */
   async destroy(reference: SecretReference): Promise<void> {
     try {
-      // A 404 is `null` from the transport — a version that is gone entirely is
-      // already the outcome this verb promises.
+      // The transport answers a 404 with `null`, which is success here.
       await this.http.send({
         method: 'POST',
         path: `${this.versionPath(reference.key, reference.version)}:destroy`,
@@ -311,14 +238,7 @@ export class SecretManagerStore implements SecretStore {
   }
 }
 
-/**
- * Refuse a secret whose annotations name a different scope.
- *
- * This is the one hazard {@link secretId} carries: two scopes that differ only
- * in a character sanitization flattens land on the same id. Writing anyway would
- * put one Component's value where another Component reads, which is the worst
- * outcome available here — so it fails loudly, naming both scopes.
- */
+/** Refuses a secret whose annotations name another scope, naming both. */
 function assertScopeMatches(
   secret: SecretResource,
   scope: ConfigScope,

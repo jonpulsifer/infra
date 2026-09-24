@@ -1,25 +1,7 @@
 /**
- * The Kubernetes deploy adapter (§6).
- *
- * Accepts an `image`. **The Target declares the delivery flavour**, and
- * Spindrift applies a `HelmRelease` or an Argo `Application` **through the
- * API** — using Flux or Argo is not the same as writing manifests to git, and
- * only the chart source lives in a repository. Status is read from those
- * objects' own conditions.
- *
- * **Nothing here watches.** `apply` polls the object it just wrote on a fast
- * cadence for a bounded window — an attempt, not a standing watch — and
- * `observe` is one read. The plan's transport shape says why: only one of the
- * three backends has a watch at all, a watch held across a WAN tunnel dies
- * while still looking connected, and any correct watch design needs a resync
- * poll underneath it anyway. So the poll is not the fallback; it is the design.
- *
- * The three verbs are one-shot and imperative. Reconciliation lives in core,
- * above this seam, and both delivery operators self-heal below it — which is
- * why `install.remediation.retries` is zero on the Flux side and why
- * `selfHeal` is on on the Argo side. Neither is a contradiction: the operator
- * keeps what is running running; it does not retry an attempt core did not ask
- * for.
+ * The Kubernetes deploy adapter: applies a Flux `HelmRelease` or Argo
+ * `Application` through the API, then polls it for a bounded window. It never
+ * watches: a watch across a WAN tunnel can die while still looking connected.
  */
 import type {
   StoreAdapter,
@@ -94,30 +76,18 @@ import {
 import type { DeliveryStatus } from './status.ts';
 import { chartValues, imageReference, VALUES_CONTRACT } from './values.ts';
 
-/** What the adapter needs that a Target's connection does not carry. */
 export interface KubernetesAdapterOptions {
   /**
-   * The chart, as this installation names it (§20's `charts.app`).
-   *
-   * An `oci://` artifact or a path inside the Target's configured repository,
-   * and the string itself is what decides which — `chartSourceKind`. Every
-   * read and write of a chart source in this adapter goes through that one
-   * function, so a Target cannot be checked against one kind and deployed
-   * against the other.
+   * The installation's `charts.app`: an `oci://` artifact or a repository path.
+   * Every chart source read and write goes through `chartSourceKind`.
    */
   readonly chart: string;
-  /** Mints a bearer token per request. Never a stored credential (§13). */
+  /** Mints a bearer token per request. Never a stored credential. */
   readonly token: TokenProvider;
-  /** Injected so a test can stand a fake far side behind the real client. */
   readonly fetch?: Fetcher;
-  /**
-   * The fast cadence, while an attempt is in flight. A bounded window, not a
-   * standing watch (plan, Transport shape).
-   */
   readonly pollIntervalMs?: number;
-  /** How long an attempt may run before it is `TIMEOUT` (§6). */
+  /** How long an attempt may run before it is `TIMEOUT`. */
   readonly timeoutMs?: number;
-  /** Injected so a test does not spend the cadence it is asserting about. */
   readonly sleep?: (ms: number) => Promise<void>;
   readonly now?: () => number;
 }
@@ -126,31 +96,23 @@ const DEFAULT_POLL_MS = 1_000;
 const DEFAULT_TIMEOUT_MS = 10 * 60 * 1_000;
 const RUNTIME_LOG_LIMIT_BYTES = 256 * 1024;
 
-/** Which store a `ClusterSecretStore`'s provider key names (§10). */
+/** `ClusterSecretStore` provider keys, mapped to store adapters. */
 const STORE_PROVIDERS: Record<string, StoreAdapter> = {
   onepassword: 'onepassword',
   gcpsm: 'gcp-secret-manager',
 };
 
-/**
- * The CRDs a datastore engine is discovered by (§3, §11).
- *
- * Imported rather than declared, because the kind a cluster is asked about and
- * the kind Spindrift writes to provision one must be the same kind. A second
- * table here could name an operator no cluster in the fleet installs, and the
- * symptom is silent: the engine discovers `false` everywhere and every Datastore
- * asking for it is a non-candidate for a reason no operator can act on.
- */
+/** Imported so the kind discovered is the kind the datastore adapter writes. */
 const ENGINE_KINDS = DATASTORE_ENGINE_KINDS;
 
-/** The policy engine `verifiedDeploy` is derived from (§32). */
+/** The policy engine `verifiedDeploy` is derived from. */
 const POLICY = {
   apiVersion: 'kyverno.io/v1',
   kind: 'ClusterPolicy',
   plural: 'clusterpolicies',
 } as const;
 
-/** The CNI object that means egress can be filtered by name (§8). */
+/** The CNI object that means egress can be filtered by name. */
 const EGRESS_POLICY = {
   apiVersion: 'cilium.io/v2',
   kind: 'CiliumNetworkPolicy',
@@ -162,16 +124,6 @@ const SECRET_STORE = {
   plural: 'clustersecretstores',
 } as const;
 
-/**
- * The two objects a job's runs are (§7, §17).
- *
- * The chart renders a CronJob for every job, scheduled or not, and a run is a
- * Job it owns — so "start a run" is creating a Job from the CronJob's own
- * `jobTemplate` rather than un-suspending it. Un-suspending would make the
- * next *scheduled* time fire, which for an unscheduled job is a date that never
- * occurs and for a scheduled one is a different act than the operator asked
- * for.
- */
 const CRON_JOB = {
   apiVersion: 'batch/v1',
   kind: 'CronJob',
@@ -180,52 +132,22 @@ const CRON_JOB = {
 
 const JOB = { apiVersion: 'batch/v1', kind: 'Job', plural: 'jobs' } as const;
 
-/**
- * The label the Job controller stamps on the pods of one run.
- *
- * The current one. The unprefixed label of the same name is set beside it and
- * is deprecated, so keying on this one is what keeps a job's tail reading the
- * run it was asked about rather than whichever label the cluster stops writing
- * first.
- */
+/** The Job controller's run label; the unprefixed twin is deprecated. */
 const JOB_NAME_LABEL = 'batch.kubernetes.io/job-name';
 
 /** What `kubectl create job --from` marks a run somebody asked for. */
 const MANUAL_RUN = 'cronjob.kubernetes.io/instantiate';
 
-/**
- * The parameter *names* a run was started with, on the Job itself.
- *
- * Names and never values: the Job spec already carries the values, and this
- * is what `executions` reads back into the timeline, so a value here would be
- * a value in a status line (§17, {@link RunOptions}).
- */
+/** Parameter names only, never values: the timeline shows this. */
 const RUN_WITH = 'spindrift.dev/run-with';
 
-/**
- * The longest name a run may carry.
- *
- * A Job's pods are named `<job>-<five random characters>`, and a pod's hostname
- * is a DNS label — so the six characters the Job controller appends have to fit
- * under 63 or the run starts and can never schedule a pod.
- */
+/** A pod adds six characters to its Job's name and must fit a DNS label (63). */
 const RUN_NAME_LIMIT = 57;
 
-/**
- * What a route attaches to. Read only by {@link KubernetesDeployAdapter.probe}
- * — the App chart renders an `HTTPRoute` and never a `Gateway`, so this
- * adapter's only interest in one is telling an operator which exist and where
- * each answers.
- */
-/**
- * What a namespace's admission labels are spelled with.
- *
- * `enforce`, `audit` and `warn` all share it, and copying by prefix rather than
- * by a list of three keeps a vessel that adds a `*-version` pin working without
- * this file learning the name of it.
- */
+/** Copied by prefix, so enforce, audit, warn and version pins carry over. */
 const POD_SECURITY_PREFIX = 'pod-security.kubernetes.io/';
 
+/** Read only by {@link KubernetesDeployAdapter.probe}. */
 const GATEWAY = {
   apiVersion: 'gateway.networking.k8s.io/v1',
   kind: 'Gateway',
@@ -234,7 +156,6 @@ const GATEWAY = {
 
 export class KubernetesDeployAdapter implements DeployAdapter {
   readonly adapter: TargetAdapter = 'kubernetes';
-  /** §6's table: `kubernetes` takes an image. */
   readonly artifactTypes: readonly ArtifactType[] = ['image'];
 
   private readonly events: DeployEvents;
@@ -252,8 +173,6 @@ export class KubernetesDeployAdapter implements DeployAdapter {
       return internalFailure('this Target is not a Kubernetes Target');
     }
     if (!this.artifactTypes.includes(desired.artifact.type)) {
-      // A foreign artifact reaching `apply` is a core bug, and §6 says so in
-      // the adapter's own vocabulary rather than by throwing.
       yield this.events.status('FAILED', { reason: 'INTERNAL' });
       return internalFailure(
         `kubernetes does not accept a ${desired.artifact.type} artifact`,
@@ -265,9 +184,8 @@ export class KubernetesDeployAdapter implements DeployAdapter {
       return internalFailure('the artifact carries no address to pull it by');
     }
 
-    // Both halves of the name are things a human chose, so a combination that
-    // is not a legal namespace is refused with both named rather than
-    // truncated into one the operator will not find with `kubectl`.
+    // Both halves of the name are human-chosen, so an illegal combination is
+    // refused, never truncated into a name the operator cannot find.
     const refusal = namespaceRefusal(connection, desired.app);
     if (refusal !== null) {
       yield this.events.status('FAILED', { reason: 'INTERNAL' });
@@ -281,9 +199,7 @@ export class KubernetesDeployAdapter implements DeployAdapter {
 
     yield this.events.status('APPLYING', { resource: resourceLabel(object) });
     try {
-      // Before the release, and only where the delivery mechanism cannot carry
-      // the admission labels itself (113). A namespace that already exists is
-      // converged on rather than recreated — this is a server-side apply.
+      // Before the release, and only on Flux: Argo creates its namespace.
       if (connection.delivery.flavour === 'flux-helmrelease') {
         await this.ensureNamespace(
           api,
@@ -332,9 +248,6 @@ export class KubernetesDeployAdapter implements DeployAdapter {
     return {
       ref,
       phase: status.phase,
-      // The digest actually serving, as the delivery object still carries it.
-      // Core compares it against the desired row to detect drift, which is
-      // surfaced and never silently corrected (§6).
       artifactDigest: appliedDigest(parsed.flavour, object),
       ...(status.reason === undefined ? {} : { reason: status.reason }),
       ...(status.detail === undefined ? {} : { detail: status.detail }),
@@ -343,23 +256,8 @@ export class KubernetesDeployAdapter implements DeployAdapter {
   }
 
   /**
-   * The workload behind a delivery object that reports itself ready (§6).
-   *
-   * Flux's `Ready` is the verdict on the last reconcile, and the `HelmRelease`
-   * this adapter renders never reconciles again on its own after a successful
-   * one — `interval` re-checks the chart, not the pods — so a workload that
-   * passes readiness and crashes afterwards leaves `Ready=True` standing for
-   * as long as nothing else changes. The Deployment's `Available` condition is
-   * the controller that does keep looking. So a ready delivery object costs
-   * one more read, the workload's, and an unavailable workload is a red: it
-   * takes the same read on red an attempt takes, once, and reports what it
-   * found the way `failed` does. Still a read on red and never a watch — the
-   * one extra list is the price of the delivery object's word being about the
-   * reconcile rather than about the pods.
-   *
-   * A job has no Deployment and no readiness to lose, so the delivery object's
-   * word stands; so does a workload whose Deployment cannot be found, because
-   * "not there" is drift's question and the digest read already asks it.
+   * Flux's `Ready` judges the last reconcile, not a crash since, so a ready
+   * service still fails when its Deployment reports `Available=False`.
    */
   private async workloadStatus(
     api: KubernetesApi,
@@ -383,9 +281,8 @@ export class KubernetesDeployAdapter implements DeployAdapter {
         )
         .catch(() => null)) ?? [];
     if (deployment === undefined) return status;
-    // Only an explicit `False` is the controller saying so. A condition not
-    // yet written is a Deployment nobody has judged, and treating that as red
-    // would have `diagnose` indict the developer over an empty pod list.
+    // Only an explicit `False`: a condition not yet written would have
+    // `diagnose` blame the developer for an empty pod list.
     const available = conditionOf(deployment, 'Available');
     if (available?.status !== 'False') return status;
 
@@ -403,7 +300,6 @@ export class KubernetesDeployAdapter implements DeployAdapter {
       phase: 'FAILED',
       reason: diagnosis.reason,
       detail: diagnosis.detail,
-      // §12, as in `failed`: the events this rests on expire within the hour.
       debug: {
         delivery: status.debug,
         workload: conditionsOf(deployment),
@@ -417,8 +313,6 @@ export class KubernetesDeployAdapter implements DeployAdapter {
     if (connection === null) return;
     const parsed = parseRef(ref);
     if (parsed === null) return;
-    // `delete` treats a 404 as success, which is the whole of §6's idempotence
-    // requirement: destroying what is already gone succeeds.
     await this.api(connection).delete({
       apiVersion: apiVersionOf(parsed.flavour),
       plural: pluralOf(parsed.flavour),
@@ -428,23 +322,8 @@ export class KubernetesDeployAdapter implements DeployAdapter {
   }
 
   /**
-   * Delete the App's namespace, which is the one thing here no ref names.
-   *
-   * {@link ensureNamespace} creates it — the delivery mechanism cannot, because
-   * `HelmRelease.spec.install.createNamespace` has no field to put the
-   * admission labels in — and Flux's own documentation says a namespace it
-   * created "will not be garbage collected". So every App ever deployed to a
-   * cluster left a namespace behind that nothing was ever going to remove.
-   *
-   * **It deletes only a namespace carrying Spindrift's own label.** The pattern
-   * is refused at the manifest boundary unless it contains `{app}`, so a
-   * namespace is per-App by construction — but a namespace an operator declared
-   * and Spindrift merely deployed into is not Spindrift's to remove, and the
-   * label is the difference. Anything else is refused by name rather than
-   * deleted, and `deleteApp` reports the refusal.
-   *
-   * Deleting the namespace takes the Helm release history secrets with it,
-   * which is the rest of what a placement's `destroy` leaves behind.
+   * Deletes the App's namespace, which no ref names and nothing else collects.
+   * Refuses one without our managed-by label: an operator declared that one.
    */
   async sweepApp(target: DeployTarget, app: string): Promise<void> {
     const connection = this.connectionOf(target);
@@ -456,8 +335,7 @@ export class KubernetesDeployAdapter implements DeployAdapter {
       plural: 'namespaces',
       name,
     });
-    // Already gone, or never created — a name too long for a label is refused
-    // on the write path and no namespace was ever made. Idempotent either way.
+    // Gone, or never created because the write path refused the name.
     if (namespace === null) return;
     const labels = (namespace.metadata?.labels ?? {}) as Record<string, string>;
     if (labels['app.kubernetes.io/managed-by'] !== 'spindrift') {
@@ -478,10 +356,8 @@ export class KubernetesDeployAdapter implements DeployAdapter {
       return { kind: 'stream', entries: [], cursor: null, reach: 0 };
     }
     const api = this.api(connection);
-    // A run's pods carry the Component's labels like every other pod the chart
-    // renders, so the subject narrows by one term rather than by a second
-    // query: with no execution named this is the Component's whole output, and
-    // with one it is that run's and no other run's.
+    // A run's pods also carry the Component's labels, so one more term narrows
+    // the tail to that run.
     const selector = [
       `app.kubernetes.io/name=${subject.component}`,
       `app.kubernetes.io/part-of=${subject.app}`,
@@ -489,11 +365,8 @@ export class KubernetesDeployAdapter implements DeployAdapter {
         ? []
         : [`${JOB_NAME_LABEL}=${subject.execution}`]),
     ].join(',');
-    // Not namespaced. The selector names one Component of one App, which is
-    // already narrower than a namespace, and a tail has only the subject to go
-    // on — no ref, so nothing here can say which namespace this Component's
-    // release chose. Searching by the labels finds it whether it is in the
-    // App's own namespace or still in the shared one it was placed in before.
+    // Not namespaced: a tail has no ref to say which namespace the release
+    // chose, and the selector already names one Component.
     const pods =
       (await api.list(
         { apiVersion: 'v1', plural: 'pods' },
@@ -559,48 +432,16 @@ export class KubernetesDeployAdapter implements DeployAdapter {
     return {
       kind: 'stream',
       entries,
-      // Always return the normalized per-pod offsets. A pod can retain its
-      // name while its log is truncated after restart; preserving the older
-      // cursor in that case would skip the beginning of the new log.
+      // Always the normalized offsets, which drop positions for pods that are
+      // gone or restarted.
       cursor: entries.at(-1)?.cursor ?? encodeRuntimeCursor(next),
       reach: connection.logHistorySeconds ?? 0,
     };
   }
 
   /**
-   * Start one run of the job this ref placed (§7, §17).
-   *
-   * A Job created from the CronJob's own `jobTemplate`, **owned by that
-   * CronJob**. Both halves are load-bearing. Creating from the template rather
-   * than un-suspending is what makes this run *now* instead of at the next
-   * scheduled time — which for an unscheduled job is a date that never occurs.
-   * And the owner reference is what makes §7's "a scheduled run and a manual
-   * run are the same object with a field flipped" true from the reading side:
-   * `getJobsToBeReconciled` selects the controller ref, so a manual run lands
-   * in `cleanupFinishedJobs` and is pruned by the same history limit rather
-   * than becoming an orphan that outlives every execution beside it.
-   *
-   * **The reference does not make `concurrencyPolicy: Forbid` hold a manual run
-   * off, and nothing here can.** The controller's Forbid check is
-   * `len(cj.Status.Active) > 0`, and `Status.Active` is appended only where the
-   * controller creates a Job itself — it never adopts a foreign Job into it. So
-   * a run started here at 02:59:55 does not stop the `0 3 * * *` fire, and the
-   * two run concurrently even though the policy says never. There is no API
-   * that asks a CronJob to run now; `kubectl create job --from=cronjob/x` does
-   * exactly this and does not set an owner at all. An in-flight check in
-   * `runComponent` would not change it either: the fire that overlaps comes
-   * from the controller, which does not consult Spindrift.
-   *
-   * The known cost of the reference is a `Warning UnexpectedJob "Saw a job that
-   * the controller did not create or forgot"` on every sync until the run
-   * finishes — `syncCronJob`'s `!found && !IsJobFinished(j)` arm. That is a
-   * true statement about a Job the controller did not create, and pruning is
-   * worth it.
-   *
-   * `blockOwnerDeletion` is deliberately absent from that reference: setting it
-   * needs `update` on the owner's `finalizers` subresource wherever the
-   * `OwnerReferencesPermissionEnforcement` admission plugin is on, and the
-   * garbage collection this wants happens without it.
+   * Creates a Job from the CronJob's `jobTemplate`, owned by the CronJob so its
+   * history limit prunes it. `Forbid` concurrency cannot hold a manual run off.
    */
   async run(
     target: DeployTarget,
@@ -637,10 +478,8 @@ export class KubernetesDeployAdapter implements DeployAdapter {
       );
     }
 
-    // The CronJob controller's own naming, at second rather than minute
-    // resolution: a name derived from when the run was asked for, so a second
-    // press within the same second is the *same* run rather than a second one.
-    // The API server enforces that for free — see the 409 below.
+    // Named by the second it was asked for, so a double press in one second
+    // is one run: the second create gets a 409.
     const name = workloadName(
       {
         app: owner.metadata.name,
@@ -666,6 +505,8 @@ export class KubernetesDeployAdapter implements DeployAdapter {
             ? {}
             : { [RUN_WITH]: parameters.map(([key]) => key).join(', ') }),
         },
+        // The controller warns UnexpectedJob until the run ends. No
+        // `blockOwnerDeletion`: it needs finalizer rights on the CronJob.
         ...(typeof uid === 'string'
           ? {
               ownerReferences: [
@@ -697,40 +538,18 @@ export class KubernetesDeployAdapter implements DeployAdapter {
         run,
       );
     } catch (cause) {
-      // The run this press names is already going. Reporting it as started is
-      // the honest answer and the idempotent one: a double press produced one
-      // run, which is what the operator asked for and what §6 asks of `destroy`
-      // for the same reason.
+      // This second's run already exists: a double press is one run.
       if (cause instanceof KubernetesRequestError && cause.status === 409) {
         return { kind: 'started', execution: startingRun(name) };
       }
       throw cause;
     }
-    // The name the API server stored, not the one that was asked for: `create`
-    // now answers with the object or raises, so this reports a run that exists.
     return { kind: 'started', execution: startingRun(created.metadata.name) };
   }
 
   /**
-   * Stamp the pod template so the controller replaces the pods (§6).
-   *
-   * The delivery object is read back and re-applied with one value changed:
-   * `shared.podAnnotations[RESTART_STAMP]`, which the chart carries verbatim
-   * onto a Deployment's pod template. One key is written *into* the operator's
-   * map rather than the map over it — the shared class is "either may write"
-   * (`values.ts`), and the operator's other annotations are theirs to keep.
-   * The next ordinary deploy renders `shared` afresh and the stamp drops out
-   * with it, which is right: that deploy rolls the pods on its own account.
-   *
-   * **A job is refused.** A CronJob has runs, not a process: stamping its
-   * template would change nothing until the next run, which picks the
-   * template up anyway.
-   *
-   * **`resourceVersion` rides along.** The read and the write are two calls
-   * and a deploy can land between them; without the precondition this write
-   * would re-apply the spec it read — the old digest — over the new release,
-   * and only the drift clock would notice. With it the API server answers
-   * 409, this throws, and the command reports the sentence.
+   * Re-applies the delivery object with `shared.podAnnotations[RESTART_STAMP]`
+   * set, which the chart puts on the pod template. Jobs are refused.
    */
   async restart(target: DeployTarget, ref: DeployRef): Promise<Restarted> {
     const connection = this.connectionOf(target);
@@ -764,6 +583,8 @@ export class KubernetesDeployAdapter implements DeployAdapter {
       string,
       string
     >;
+    // `withValues` keeps `resourceVersion`, so a deploy landing between the
+    // read and this write gets a 409, never the old digest re-applied.
     await api.apply(
       withValues(parsed.flavour, object, {
         ...values,
@@ -780,16 +601,7 @@ export class KubernetesDeployAdapter implements DeployAdapter {
     };
   }
 
-  /**
-   * The runs that have happened, newest first (§17).
-   *
-   * Listed by the Component's own labels rather than by ownership, because a
-   * Job the CronJob controller created and a Job this adapter created both
-   * carry the template's labels while only the second is guaranteed to still
-   * have an owner: garbage collection removes the reference before it removes
-   * the object. Listing by label reads both, which is the whole question — what
-   * has this Component run, however it was started.
-   */
+  /** Listed by label, which every run carries however it was started. */
   async executions(
     target: DeployTarget,
     ref: DeployRef,
@@ -811,13 +623,8 @@ export class KubernetesDeployAdapter implements DeployAdapter {
       },
       { labelSelector: placed.selector },
     );
-    // `list` answers `null` for a `404`, which {@link KubernetesApi.list} keeps
-    // apart from an empty list on purpose: it means the namespace is gone or
-    // this cluster does not serve `batch/v1`. Neither is "this job has never
-    // run", and `?? []` here would render both as the never-run empty state —
-    // the read half of the same silent-wrong-answer `create` had. Raised so it
-    // lands where a `403` on this call already lands, on `executionsOf`'s
-    // `because` arm: the runs could not be read, and the Run now button stays.
+    // `null` means the namespace or `batch/v1` is missing, not that the job
+    // never ran, so it throws as a 403 would.
     if (jobs === null) {
       throw new Error(
         `the API server answered 404 listing ${JOB.plural} in ${placed.namespace} — that namespace or ${JOB.apiVersion} is not there`,
@@ -834,15 +641,8 @@ export class KubernetesDeployAdapter implements DeployAdapter {
   }
 
   /**
-   * The job this ref placed, as the labels its objects carry.
-   *
-   * Read off the delivery object's **values** rather than derived from the ref,
-   * because the ref names the release and the workload is named by the chart —
-   * `spindrift-app.fullname` truncates plainly where {@link workloadName} keeps
-   * a digest, so the two names diverge for a long App and deriving one from the
-   * other would be a reimplementation of a chart helper that is free to change.
-   * The values are what Spindrift wrote and what the chart rendered from, so
-   * they are the one place both sides agree.
+   * Read off the delivery object's values: the chart's fullname truncates
+   * differently from {@link workloadName}, so the ref cannot derive it.
    */
   private async placedJob(
     api: KubernetesApi,
@@ -853,7 +653,6 @@ export class KubernetesDeployAdapter implements DeployAdapter {
         readonly app: string;
         readonly component: string;
         readonly selector: string;
-        /** Where this release's runs are, as the release itself states it. */
         readonly namespace: string;
       }
     | Extract<JobRuns, { kind: 'none' }>
@@ -890,22 +689,12 @@ export class KubernetesDeployAdapter implements DeployAdapter {
       kind: 'job',
       app: app.name,
       component: app.component,
-      // `spindrift-app.selectorLabels`, which is on every object the chart
-      // renders and on every pod a run of it creates.
+      // The chart's selector labels, on every pod a run creates.
       selector: `app.kubernetes.io/name=${app.component},app.kubernetes.io/part-of=${app.name}`,
       namespace,
     };
   }
 
-  /**
-   * One pass of §13's checklist and §3's discovery, in one call (§13's one
-   * loop).
-   *
-   * It reports **observations, never judgements**: `verifiedDeploy` and
-   * `offlineDeploy` are core's conclusions, so what comes back is what was
-   * seen — a policy engine's mode, the hosts an operator says this Target
-   * serves — and never what either of them implies.
-   */
   async inspect(target: DeployTarget): Promise<TargetInspection> {
     const connection = this.connectionOf(target);
     if (connection === null) {
@@ -917,24 +706,12 @@ export class KubernetesDeployAdapter implements DeployAdapter {
       this.checklist(api, connection),
       this.discover(api, connection),
     ]);
-    // A cluster *is* its `kubernetes` surface — there is no second service to
-    // have switched off — so getting this far is the whole probe. The reads
-    // above throw rather than degrade when the API server does not answer, and
-    // core reads that as `undetermined`, which is the honest arm: nothing was
-    // established about a cluster nobody could reach.
+    // A cluster is its only surface, so reaching here answers it. An API server
+    // that does not answer throws above, and core reads that as undetermined.
     return { prerequisites, discovery, surface: { kind: 'carried' } };
   }
 
-  /**
-   * Read a cluster that is not a Target yet (§13's connect, one step earlier).
-   *
-   * Every read is independently caught. §13's "connect always succeeds" has a
-   * mirror here: **probing always answers**, and a cluster that serves Flux but
-   * refuses to list its namespaces produces a screen with one field to pick
-   * from and one to type, rather than an error page about a cluster that is
-   * nearly ready. The one thing that is fatal is the address not answering at
-   * all, because then nothing on the screen would mean anything.
-   */
+  /** Each read is caught alone; only an unanswered address is fatal. */
   async probe(apiServer: string): Promise<ClusterProbe> {
     const api = new KubernetesApi({
       apiServer,
@@ -944,9 +721,8 @@ export class KubernetesDeployAdapter implements DeployAdapter {
         : { fetch: this.options.fetch }),
     });
 
-    // The liveness read, and the first half of the delivery answer. `servesKind`
-    // reads the discovery API, which every authenticated identity may read, so
-    // a failure here is the address rather than the permissions.
+    // Every authenticated identity may read discovery, so a failure here is
+    // the address, not permissions.
     let flux: boolean;
     try {
       flux = await api.servesKind(HELM_RELEASE.apiVersion, HELM_RELEASE.kind);
@@ -967,9 +743,7 @@ export class KubernetesDeployAdapter implements DeployAdapter {
         .servesKind(APPLICATION.apiVersion, APPLICATION.kind)
         .catch(() => false),
       api.list({ apiVersion: 'v1', plural: 'namespaces' }).catch(() => null),
-      // The kind this installation's own chart reference needs, and only that
-      // kind: a picker offering a `GitRepository` to an installation that
-      // deploys from OCI is a picker whose every option is a wrong answer.
+      // Only the kind this installation's chart reference needs.
       api.list(chartSourceKind(this.options.chart)).catch(() => null),
       api
         .list({
@@ -1002,24 +776,9 @@ export class KubernetesDeployAdapter implements DeployAdapter {
     };
   }
 
-  // --- apply's second half -------------------------------------------------
-
   /**
-   * Poll the object just written until it reaches a verdict.
-   *
-   * The cadence is fast because the window is bounded: §6's phases come from
-   * the controller, and this is the only period in which they change quickly.
-   * Once the attempt ends, nothing here keeps looking — the slow cadence that
-   * detects drift belongs to core's loop, and lives on `observe`.
-   *
-   * **The controller's sentence is emitted, not only its phase.** A Helm
-   * upgrade spends most of its life in one phase while saying a series of
-   * different things — pulling the chart, running the upgrade action, waiting
-   * on a Deployment. Reporting only phase transitions turned two or three
-   * minutes of legible progress into two events and a still screen, so every
-   * change in the `Ready` condition's message becomes a log line on the
-   * timeline. It is deduplicated on the message itself, so a controller
-   * repeating itself every poll does not fill the log with one sentence.
+   * Polls the object just written until a verdict or the deadline. Each new
+   * controller message becomes a log line, so progress within a phase shows.
    */
   private async *awaitVerdict(
     api: KubernetesApi,
@@ -1031,9 +790,8 @@ export class KubernetesDeployAdapter implements DeployAdapter {
     const resource = resourceLabel(object);
     const deadline =
       this.events.now() + (this.options.timeoutMs ?? DEFAULT_TIMEOUT_MS);
-    // `apply` emitted APPLYING before the write. Treat that as the first
-    // reported controller phase too, so an object whose status has not caught
-    // up to its generation does not duplicate the event on the timeline.
+    // `apply` already emitted APPLYING, so a status lagging its generation
+    // does not repeat it.
     let reported: DeployPhase = 'APPLYING';
     let said: string | undefined;
 
@@ -1058,10 +816,7 @@ export class KubernetesDeployAdapter implements DeployAdapter {
         });
       }
 
-      // The progress *within* a phase, which is where a rollout spends its
-      // time. Skipped on the terminal phases: `failed` writes the diagnosis
-      // below and `LIVE` is the verdict, so echoing either here would put the
-      // same sentence on the timeline twice.
+      // Skipped on terminal phases, whose sentence the verdict carries.
       if (
         status.detail !== undefined &&
         status.detail !== said &&
@@ -1073,8 +828,7 @@ export class KubernetesDeployAdapter implements DeployAdapter {
       }
 
       if (status.phase === 'LIVE') {
-        // No `url`: §9 gives a metal cluster no name of its own, so the
-        // canonical name is core's to mint and never comes back across here.
+        // No `url`: on a cluster, core mints the canonical name.
         return { phase: 'LIVE', ref };
       }
 
@@ -1097,7 +851,6 @@ export class KubernetesDeployAdapter implements DeployAdapter {
     }
   }
 
-  /** The read on red, once (§6), and the verdict it produces. */
   private async *failed(
     api: KubernetesApi,
     connection: KubernetesAdapterConnection,
@@ -1106,8 +859,7 @@ export class KubernetesDeployAdapter implements DeployAdapter {
     ref: DeployRef,
   ): AsyncGenerator<DeployEvent, DeployVerdict, void> {
     if (status.reason !== undefined) {
-      // The delivery object already said why, in terms §6 has a reason for.
-      // Reading pods would add nothing a developer can act on.
+      // The delivery object already named a reason; pods would add nothing.
       return {
         phase: 'FAILED',
         ref,
@@ -1129,29 +881,13 @@ export class KubernetesDeployAdapter implements DeployAdapter {
       ref,
       reason: diagnosis.reason,
       detail: diagnosis.detail,
-      // §12: the diagnosis is stored because the platform will not keep it —
-      // cluster events expire in about an hour.
       debug: { delivery: status.debug, diagnosis: diagnosis.debug },
     };
   }
 
   /**
-   * A deadline reached, and the one read that can still name a cause.
-   *
-   * `TIMEOUT` is the only reason §6's table leaves a dash in the blame column,
-   * which makes it the least useful thing this adapter can say: the developer
-   * is told the release did not settle and nothing about who to go and talk to.
-   * Most of the time something in the namespace already knows — a container
-   * backing off its image pull is a stalled rollout and an
-   * `ARTIFACT_UNAVAILABLE` at the same moment — and this module has always been
-   * able to read it. It simply never did, because the read was wired only to
-   * the delivery object's own verdict, and a deadline is not one.
-   *
-   * So a deadline now takes the same read a verdict does. What it does not take
-   * is {@link diagnose}'s last branch — see `evidence` for why an empty
-   * namespace means something different under a deadline than under a failure.
-   * Silence keeps `TIMEOUT`, which stays the honest answer when nothing
-   * observed says otherwise.
+   * Reads pods and events as a failure does, minus {@link diagnose}'s fallback,
+   * so with no evidence the verdict stays `TIMEOUT`.
    */
   private async *timedOut(
     api: KubernetesApi,
@@ -1189,21 +925,11 @@ export class KubernetesDeployAdapter implements DeployAdapter {
       ref,
       reason: found.reason,
       detail: found.detail,
-      // §12, as in `failed`: cluster events expire in about an hour, so what
-      // the read saw is stored rather than left where it will not survive.
       debug: { delivery: status.debug, diagnosis: found.debug },
     };
   }
 
-  /**
-   * The two lists every diagnosis is made from (§6).
-   *
-   * The namespace is the release's own — the one an apply just used, or the
-   * one the delivery object states — so a read on red follows the release
-   * that failed. A list that throws becomes an empty one: a diagnosis is a
-   * best effort over what came back, and losing the verdict because the
-   * second read failed would be the worse outcome.
-   */
+  /** A list that throws reads as empty, so the verdict is never lost. */
   private async readOnRed(
     api: KubernetesApi,
     namespace: string,
@@ -1225,8 +951,6 @@ export class KubernetesDeployAdapter implements DeployAdapter {
     ]);
     return { pods: pods ?? [], events: events ?? [] };
   }
-
-  // --- inspect's two halves ------------------------------------------------
 
   private async checklist(
     api: KubernetesApi,
@@ -1262,13 +986,8 @@ export class KubernetesDeployAdapter implements DeployAdapter {
       `the federated identity may not create ${kind.kind}s in ${delivery.namespace}`,
     );
 
-    // What this asserts changed with per-App namespaces (113). The old check
-    // was that the one shared namespace exists, because Spindrift would not
-    // create it. Now an App's namespace arrives with the release — so what can
-    // still be wrong, and what an operator can still act on, is the vessel
-    // failing to declare the admission policy every App namespace is stamped
-    // from. A Target whose declared namespace is absent or carries no Pod
-    // Security labels cannot have an App namespace built from it.
+    // Every App namespace copies its admission labels from the Target's
+    // declared namespace, so that namespace must exist and carry them.
     const admission = await this.admissionLabels(api, connection);
     set(
       'VESSEL',
@@ -1290,48 +1009,14 @@ export class KubernetesDeployAdapter implements DeployAdapter {
   }
 
   /**
-   * Whether what this Target last rendered speaks the contract this Spindrift
-   * writes.
+   * Whether running pods were rendered under this build's value contract. Helm
+   * ignores unknown values, so a skewed release would otherwise deploy green.
    *
-   * §7: "the chart declares its own value contract and version, **read at pin
-   * time**". The chart stamps that declaration onto every object it renders,
-   * pod template included (`spindrift-app.contractAnnotations`), so the
-   * contract a Target is actually running under is readable from the cluster
-   * itself — no second channel, and `list pods` in the App namespace is a grant
-   * Spindrift already holds. That matters because Spindrift's only route to a
-   * remote Target is its API server: the chart's own `Chart.yaml` lives behind
-   * a source-controller artifact URL inside *that* cluster, and the
-   * `argo-application` flavour has no artifact at all.
-   *
-   * Reading the render rather than the chart is also the stronger question.
-   * Skew is not "the chart is wrong" — it is a release whose stored values were
-   * written under an older contract, which a correct chart cannot tell you
-   * about. Helm ignores unknown values silently, so such a release applies
-   * cleanly, reports green, and runs without the config it was handed.
-   *
-   * Pods carrying no annotation are not chart output and are ignored, which
-   * also keeps a foreign pod sharing the namespace out of the verdict. An
-   * empty read is met — zero rendered objects is zero skew — but a read that
-   * did not happen is **not**: see below.
-   *
-   * ponytail: this observes the **last** render, not the next — a Target with
-   * nothing deployed reads green and a skew is caught one deploy late. §7's
-   * "read at pin time" wants the chart's own declaration *before* anything is
-   * applied, and the artifact that carries it is pinned
-   * (`clusters/base/platform/spindrift-target/oci-repository.yaml`) — but only
-   * source-controller inside the Target fetches it, and the
-   * `argo-application` flavour has no artifact at all. Upgrade path: pull the
-   * `charts.app` artifact from the registry here and read its annotations.
+   * ponytail: reads the last render, so skew shows one deploy late. Upgrade:
+   * pull the `charts.app` artifact here and read its annotations before apply.
    */
   private async chartContract(api: KubernetesApi): Promise<[boolean, string?]> {
-    // "Nothing is rendered here yet" and "I was not allowed to look" are
-    // different facts and only the first one is zero skew. Collapsing them —
-    // an empty array standing in for a refusal, `every` over it vacuously
-    // true — is a check reporting met without ever having observed the thing
-    // it names, which is the exact shape this check replaced. So an unreadable
-    // pod list is a prerequisite failure naming why, and the operator whose
-    // Role was never bound is told to bind it rather than told everything is
-    // fine.
+    // Unreadable pods fail the check: only an empty read is zero skew.
     const unreadable = (why: string): [boolean, string] => [
       false,
       `Spindrift could not read this cluster's pods (${why}), so the value contract this Target renders under is unknown`,
@@ -1339,11 +1024,8 @@ export class KubernetesDeployAdapter implements DeployAdapter {
 
     let pods: KubernetesObject[] | null;
     try {
-      // Not namespaced, because there is no longer one namespace holding every
-      // App: skew is a fact about this Target's releases wherever they landed,
-      // and reading only the shared namespace would go quietly green as it
-      // drains. Pods carrying no chart annotation are ignored below, which is
-      // what keeps a cluster-wide read to a verdict about chart output.
+      // Cluster-wide, since each App has its own namespace. Pods without the
+      // chart's annotation are skipped below.
       pods = await api.list({
         apiVersion: 'v1',
         plural: 'pods',
@@ -1357,16 +1039,8 @@ export class KubernetesDeployAdapter implements DeployAdapter {
     }
     if (pods === null) return unreadable('the API server does not serve them');
 
-    // Only what is desired *now* counts. A terminated pod is the residue of a
-    // render that is over, so a Completed run of a job would otherwise hold a
-    // Target red until the CronJob next fired; and of what is left only the
-    // newest pod of each Component counts, so a rolling update reads the
-    // render that is replacing the old one rather than reading both at once
-    // and calling the overlap skew.
-    //
-    // Filtered here rather than by `fieldSelector` because the grouping has to
-    // happen in this process anyway and a vessel namespace holds tens of pods,
-    // not thousands.
+    // Only the newest live pod per Component counts, so a finished job run or
+    // a rolling update's old pods never read as skew.
     const newest = new Map<string, { contract: string; at: string }>();
     for (const pod of pods) {
       const contract =
@@ -1374,8 +1048,7 @@ export class KubernetesDeployAdapter implements DeployAdapter {
       if (contract === undefined) continue;
       const phase = (pod.status as { phase?: string } | undefined)?.phase;
       if (phase === 'Succeeded' || phase === 'Failed') continue;
-      // `spindrift-app.selectorLabels` — one App's one Component, and the one
-      // grouping the chart itself guarantees is on every pod it renders.
+      // The chart's selector labels: one App's one Component.
       const labels = pod.metadata.labels ?? {};
       const component = `${labels['app.kubernetes.io/part-of']}/${labels['app.kubernetes.io/name']}`;
       const at = String(pod.metadata.creationTimestamp ?? '');
@@ -1386,8 +1059,7 @@ export class KubernetesDeployAdapter implements DeployAdapter {
     }
 
     const found = [...new Set([...newest.values()].map((pod) => pod.contract))];
-    // Met with nothing to say, rather than a sentence about a contract nobody
-    // named: this Target has rendered nothing under the App chart.
+    // Nothing rendered under the App chart yet.
     if (found.length === 0) return [true];
 
     return [
@@ -1396,27 +1068,14 @@ export class KubernetesDeployAdapter implements DeployAdapter {
     ];
   }
 
-  /**
-   * Whether the chart's source exists where the Target says it does, and
-   * serves the chart this installation declares.
-   */
+  /** Whether the Target's chart source exists and serves the declared chart. */
   private async chartSource(
     api: KubernetesApi,
     delivery: KubernetesDelivery,
   ): Promise<[boolean, string?]> {
     if (delivery.flavour === 'argo-application') {
-      // Argo fetches the repository itself, with credentials Spindrift never
-      // sees, so this flavour has no source object in the cluster to read —
-      // whether the operator is there at all is `DELIVERY_OPERATOR`'s question
-      // and it asks the API server directly.
-      //
-      // What is left is checkable, and in the artifact form it is checkable
-      // exactly. The Application carries the Target's own `repoUrl` and this
-      // installation's chart *name* under it, so a Target naming another
-      // registry pulls a different chart under this installation's declaration
-      // — the same gap the `OCIRepository` `url` comparison below closes for
-      // Flux, and nothing else would say so. The repository form has no such
-      // gap: the path is written into the Application itself.
+      // Argo fetches the chart itself, so there is no source object to read.
+      // For OCI, the Target's registry must be the one the reference names.
       if (chartSourceKind(this.options.chart) === OCI_REPOSITORY) {
         const declared = argoChartRef(this.options.chart).repository;
         return [
@@ -1429,10 +1088,7 @@ export class KubernetesDeployAdapter implements DeployAdapter {
         'this Target names no repository to fetch the App chart from',
       ];
     }
-    // Whichever kind this installation's chart reference implies, and never
-    // both: a cluster that carries a `GitRepository` of that name while the
-    // installation deploys from OCI is a cluster this Target cannot deploy to,
-    // and reading the wrong kind would report it green.
+    // Only the kind the chart reference implies: the other kind reads green.
     const kind = chartSourceKind(this.options.chart);
     const source = await api.get({
       apiVersion: kind.apiVersion,
@@ -1446,14 +1102,8 @@ export class KubernetesDeployAdapter implements DeployAdapter {
         `this cluster has no ${kind.kind} ${delivery.sourceRef.namespace}/${delivery.sourceRef.name} to fetch the App chart from`,
       ];
     }
-    // In the artifact form the reference the installation *declares* and the
-    // artifact every Component *pulls* live in two places: `charts.app` names
-    // the first, the source object's own `url` names the second, and the
-    // rendered `chartRef` carries only the object. So a Target whose
-    // `OCIRepository` points at another registry deploys a different chart
-    // under this installation's declaration, and nothing else would say so.
-    // The repository form has no such gap — the path is written into the
-    // release itself.
+    // `chartRef` names only the object, so a mismatched `url` would deploy a
+    // different chart under this installation's declaration.
     const url = (source.spec as { url?: string } | undefined)?.url;
     if (kind === OCI_REPOSITORY && url !== this.options.chart) {
       return [
@@ -1464,13 +1114,7 @@ export class KubernetesDeployAdapter implements DeployAdapter {
     return [true];
   }
 
-  /**
-   * Whether the federated identity may write the delivery object.
-   *
-   * A `SelfSubjectAccessReview` is the one call that answers §13's "OIDC both
-   * ways" without holding a credential: the API server answers about whoever
-   * the request authenticated as, which is exactly what federation produced.
-   */
+  /** A `SelfSubjectAccessReview` answers for the federated identity itself. */
   private async canWriteDelivery(
     api: KubernetesApi,
     delivery: KubernetesDelivery,
@@ -1561,9 +1205,8 @@ export class KubernetesDeployAdapter implements DeployAdapter {
       valkey,
       egressFiltering: egress,
       policyEngine: policy,
-      // §18: how far back a tail can honestly reach. The log store sits beside
-      // the cluster rather than in it, so this is the operator's statement and
-      // an unstated one is zero rather than a guess.
+      // The log store sits outside the cluster, so this is the operator's
+      // statement; unstated is zero.
       logHistorySeconds: connection.logHistorySeconds ?? 0,
       servedHosts: connection.servedHosts ?? [],
       reachableRegistries: connection.reachableRegistries ?? [],
@@ -1571,14 +1214,7 @@ export class KubernetesDeployAdapter implements DeployAdapter {
     };
   }
 
-  /**
-   * What the policy engine was found doing — installed, and in which mode.
-   *
-   * §32: `verifiedDeploy` "must discover **enforcing** mode, not merely
-   * installed — under an audit-only policy a green deploy proves nothing". The
-   * conclusion is core's to draw, so this reports both fields and neither
-   * implication.
-   */
+  /** Installed and mode only; core decides what either implies. */
   private async policyEngine(api: KubernetesApi): Promise<PolicyEngineState> {
     const installed = await api.servesKind(POLICY.apiVersion, POLICY.kind);
     if (!installed) return { installed: false, mode: null };
@@ -1600,8 +1236,6 @@ export class KubernetesDeployAdapter implements DeployAdapter {
     });
     return { installed: true, mode: enforcing ? 'ENFORCE' : 'AUDIT' };
   }
-
-  // --- plumbing ------------------------------------------------------------
 
   private api(connection: KubernetesAdapterConnection): KubernetesApi {
     return new KubernetesApi({
@@ -1647,10 +1281,8 @@ export class KubernetesDeployAdapter implements DeployAdapter {
         chart: this.options.chart,
         labels,
         values,
-        // Argo carries the admission labels itself, so Spindrift writes no
-        // Namespace on this flavour at all (§7, 113). The managed-by label
-        // rides along so `sweepApp` can tell a namespace this installation
-        // caused to exist from one an operator declared.
+        // Argo creates the namespace with these labels. The managed-by label
+        // lets `sweepApp` tell it from one an operator declared.
         namespaceMetadata: {
           ...admission,
           'app.kubernetes.io/managed-by': 'spindrift',
@@ -1670,19 +1302,8 @@ export class KubernetesDeployAdapter implements DeployAdapter {
   }
 
   /**
-   * The admission labels this vessel enforces, read off the namespace Flux
-   * declared.
-   *
-   * **Flux still owns admission policy** — that is the ownership boundary, and
-   * this is what keeps it literally true rather than nearly true. The labels
-   * are not a table in `src/` and not a manifest field: they are whatever the
-   * operator put on the Target's declared namespace, copied onto each App's.
-   * Change the policy in one Flux-declared object and every App namespace
-   * Spindrift goes on to create carries the new one.
-   *
-   * Empty when the namespace cannot be read, which is not silently permissive:
-   * on the Flux path {@link ensureNamespace} refuses to create a namespace with
-   * no admission labels rather than create an unprotected one.
+   * The Pod Security labels on the Target's declared namespace, so Flux keeps
+   * owning admission policy. Empty when unreadable.
    */
   private async admissionLabels(
     api: KubernetesApi,
@@ -1707,21 +1328,8 @@ export class KubernetesDeployAdapter implements DeployAdapter {
   }
 
   /**
-   * Make sure the App's namespace exists, carrying this vessel's admission
-   * labels.
-   *
-   * **Only on the Flux path.** `HelmRelease.spec.install.createNamespace` takes
-   * no metadata — there is no field to put a label in — and Flux's own
-   * documentation says the namespace it creates "will not be garbage
-   * collected". A namespace arriving that way would carry none of the Pod
-   * Security labels, and live driving proved that admission load-bearing twice.
-   * Argo can express it (`managedNamespaceMetadata`), so on that flavour the
-   * delivery mechanism does it and this is never called: Spindrift creates a
-   * namespace only where the mechanism cannot (113).
-   *
-   * **Refuses rather than creating an unlabelled namespace.** A namespace with
-   * no admission labels is one where a pod that should be refused is admitted,
-   * which is a worse outcome than a deploy that failed and said why.
+   * Flux only, since `install.createNamespace` takes no labels. Refuses without
+   * admission labels, which would admit pods the vessel should refuse.
    */
   private async ensureNamespace(
     api: KubernetesApi,
@@ -1759,7 +1367,6 @@ export class KubernetesDeployAdapter implements DeployAdapter {
   }
 }
 
-/** The half of a CronJob a run is made from. */
 interface JobTemplate {
   readonly metadata?: {
     readonly labels?: Record<string, string>;
@@ -1769,13 +1376,8 @@ interface JobTemplate {
 }
 
 /**
- * The template's spec with this run's parameters on every container.
- *
- * Appended after the template's own `env`, because the kubelet reads a
- * duplicated name by its last entry — so a parameter is the value the process
- * sees. Every container rather than the first: the chart renders one, and a
- * run with a name the operator typed reaching a sidecar is harmless where a
- * run that guessed which container was the workload is not.
+ * Appended after the template's `env`: a duplicated name resolves to its last
+ * entry. Every container, since guessing which is the workload is worse.
  */
 function withRunEnv(
   spec: Record<string, unknown>,
@@ -1801,29 +1403,16 @@ function withRunEnv(
   };
 }
 
-/** A refusal in the vocabulary both run verbs answer in (§17). */
 function refuse(because: string): Extract<JobRuns, { kind: 'none' }> {
   return { kind: 'none', because };
 }
 
-/**
- * A run that has just been asked for.
- *
- * `running` with no start time, which is what it is: the API server has the
- * Job and the controller has not created a pod for it yet. Reporting anything
- * else would be this adapter guessing at a status it can read a moment later.
- */
+/** No start time yet: the controller has not created a pod. */
 function startingRun(name: string): JobExecution {
   return { name, outcome: 'running', startedAt: null };
 }
 
-/**
- * One Job as a run (§17).
- *
- * `Complete` and `Failed` are the only conditions that end a Job; everything
- * else on the list — `SuccessCriteriaMet`, `FailureTarget`, `Suspended` — is
- * the controller narrating, and a run narrating is a run still going.
- */
+/** Only `Complete` and `Failed` end a Job; other conditions mean it runs. */
 function jobExecution(job: KubernetesObject): JobExecution {
   const status = job.status as
     | {
@@ -1861,7 +1450,7 @@ function jobExecution(job: KubernetesObject): JobExecution {
   };
 }
 
-/** What a run sorts by. A run with no start time yet is the newest there is. */
+/** A run with no start time yet sorts as the newest. */
 function startedAtOf(execution: JobExecution): number {
   return execution.startedAt?.getTime() ?? Number.MAX_SAFE_INTEGER;
 }
@@ -1942,8 +1531,6 @@ function runtimeLine(raw: string): {
   return { at: new Date(0), cursorAt: new Date(0).toISOString(), line: raw };
 }
 
-// --- flavour-shaped helpers ------------------------------------------------
-
 type Flavour = KubernetesDelivery['flavour'];
 
 function deliveryKind(flavour: Flavour): {
@@ -1971,12 +1558,6 @@ function statusOf(flavour: Flavour, object: KubernetesObject): DeliveryStatus {
     : helmReleaseStatus(object);
 }
 
-/**
- * The values the delivery object was applied with — what the chart rendered.
- *
- * The one read of them, because the two flavours keep them in different places
- * and a second branch could only ever read one of the two wrongly.
- */
 function valuesOf(
   flavour: Flavour,
   object: KubernetesObject,
@@ -1987,14 +1568,8 @@ function valuesOf(
 }
 
 /**
- * The same delivery object with its values replaced — the one write of them,
- * for the reason {@link valuesOf} is the one read.
- *
- * Only what Spindrift owns is sent back: the name, the labels, the spec. The
- * status, the managed fields and the rest of the server's metadata are the
- * API server's, and a server-side apply that carried them would be refused
- * or, worse, would take ownership of them. `resourceVersion` is the one
- * exception, kept on purpose as the precondition `restart` relies on.
+ * Sends back only name, labels and spec, never server-owned fields, plus
+ * `resourceVersion` as the precondition `restart` relies on.
  */
 function withValues(
   flavour: Flavour,
@@ -2024,15 +1599,7 @@ function withValues(
   };
 }
 
-/**
- * The namespace a delivery object's workloads land in, as it states itself.
- *
- * Read off the object rather than derived from the App, because the two
- * disagree for exactly as long as the migration to per-App namespaces takes: a
- * release placed before it still says the shared namespace, and its pods and
- * runs are still there. Deriving would send every read for those releases to a
- * namespace they were never in.
- */
+/** Read off the object: a release may predate per-App namespaces. */
 function workloadNamespace(
   flavour: Flavour,
   object: KubernetesObject,
@@ -2050,18 +1617,12 @@ function workloadNamespace(
   return typeof stated === 'string' && stated.length > 0 ? stated : null;
 }
 
-/** `spindrift-app.selectorLabels`: on every object the chart renders. */
+/** The chart's selector labels, on every object it renders. */
 function componentSelector(app: string, component: string): string {
   return `app.kubernetes.io/name=${component},app.kubernetes.io/part-of=${app}`;
 }
 
-/**
- * The workload a delivery object renders, as its objects can be listed.
- *
- * Read off the values for the reason `placedJob` reads them: the ref names
- * the release and the chart names the workload, and the values are the one
- * place both sides agree.
- */
+/** Read off the values for the same reason as `placedJob`. */
 function placedWorkload(
   flavour: Flavour,
   object: KubernetesObject,
@@ -2088,7 +1649,6 @@ function placedWorkload(
   };
 }
 
-/** One `status.conditions` entry, the shape every controller writes. */
 interface ObjectCondition {
   type?: string;
   status?: string;
@@ -2110,7 +1670,6 @@ function conditionOf(
   return conditionsOf(object).find((entry) => entry.type === type) ?? null;
 }
 
-/** The digest the delivery object was applied with — what is serving. */
 function appliedDigest(flavour: Flavour, object: KubernetesObject): string {
   const app = valuesOf(flavour, object).app as
     | { artifactDigest?: string }
@@ -2118,10 +1677,10 @@ function appliedDigest(flavour: Flavour, object: KubernetesObject): string {
   return app?.artifactDigest ?? '';
 }
 
-/** The longest name an object may carry, which every adapter shortens to. */
+/** A DNS label's length limit. */
 const RELEASE_NAME_LIMIT = 63;
 
-/** One release per (Component, Target), so a re-deploy is an upgrade. */
+/** One release per Component and Target, so a re-deploy is an upgrade. */
 function releaseName(desired: DesiredState): string {
   return workloadName(desired, RELEASE_NAME_LIMIT);
 }
@@ -2130,13 +1689,7 @@ function resourceLabel(object: KubernetesObject): string {
   return `${object.kind}/${object.metadata.namespace}/${object.metadata.name}`;
 }
 
-/**
- * The adapter's own handle on what `apply` placed — opaque to core (§6).
- *
- * The flavour is part of it because an operator may change a Target's flavour,
- * and a ref that did not say which object it named would then be read against
- * the wrong kind.
- */
+/** Carries the flavour, which an operator may change on the Target later. */
 function refOf(flavour: Flavour, object: KubernetesObject): DeployRef {
   return `${flavour}:${object.metadata.namespace}/${object.metadata.name}`;
 }
@@ -2158,23 +1711,13 @@ function parseRef(ref: DeployRef): ParsedRef | null {
   return { flavour, namespace, name };
 }
 
-/** A write that never landed, in §6's vocabulary. */
 function writeFailure(
   cause: unknown,
   ref: DeployRef,
 ): Extract<DeployVerdict, { phase: 'FAILED' }> {
   if (cause instanceof KubernetesRequestError) {
-    // A 4xx is the cluster refusing this object — an admission webhook, a
-    // quota, an invalid spec — which §6 puts under one reason and blames on the
-    // developer. Three of them are not that, and a 5xx is not either.
-    //
-    // 401 and 403 are Spindrift's own credential. A **404 on a write is the
-    // address, never the object**: a server-side apply creates what is not
-    // there, so the only things that can be missing are the namespace or the
-    // API group — the Target, which the operator configured, not the spec the
-    // developer wrote. Indicting the developer for a namespace that was deleted
-    // sends them reading their chart values, and §6 calls blame the most useful
-    // thing the UI knows. All three are `TARGET_UNREACHABLE`'s platform.
+    // A 4xx is the cluster refusing the object, except 401 and 403 (our
+    // credential) and 404: apply creates, so the namespace or group is missing.
     const platformFailure =
       cause.status === 401 || cause.status === 403 || cause.status === 404;
     const rejected = cause.status >= 400 && cause.status < 500;
@@ -2194,15 +1737,7 @@ function writeFailure(
   };
 }
 
-/**
- * The address a Gateway answers on, or null while it has none.
- *
- * The first `IPAddress` entry, and deliberately not a `Hostname` one: what
- * reads this is `platform.dns.privateAddress`, which the App chart publishes as
- * an A record. A gateway whose only address is a name has nothing to put there,
- * and saying so leaves the field for the operator rather than filling it with
- * something the record cannot hold.
- */
+/** Never a hostname: `platform.dns.privateAddress` becomes an A record. */
 function gatewayAddress(gateway: KubernetesObject): string | null {
   const status = gateway.status as
     | { addresses?: { type?: string; value?: string }[] }
@@ -2213,7 +1748,6 @@ function gatewayAddress(gateway: KubernetesObject): string | null {
   return address?.value ?? null;
 }
 
-/** What the nodes say this Target can run (§3's discovered half). */
 function nodeCapacity(nodes: readonly KubernetesObject[]): {
   arch: readonly string[];
   gpu: boolean;
@@ -2244,9 +1778,7 @@ function nodeCapacity(nodes: readonly KubernetesObject[]): {
   return {
     arch: [...arch].sort(),
     gpu,
-    // The ceiling is the largest single workload the Target will admit (§3),
-    // which is one node's allocatable — never the sum, because nothing here
-    // schedules across nodes.
+    // One node's allocatable, never the sum: a pod runs on one node.
     ceiling: {
       ...(cpu === null ? {} : { cpu: String(cpu) }),
       ...(memory === null

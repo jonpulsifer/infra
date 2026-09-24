@@ -1,17 +1,6 @@
 /**
- * What the two cloud deploy adapters conclude from a refused call, and how a
- * checklist is ordered.
- *
- * Both were written twice before this file existed, identically, which is the
- * signal that they are properties of the *contract* rather than of either
- * backend: §6's failure vocabulary is closed and shared, so two adapters
- * mapping a `403` differently would put two meanings on one word in a UI that
- * shows the user one timeline.
- *
- * Nothing backend-specific lives here. A cloud API's own reason codes are read
- * by the adapter that knows them — `cloudrun/status.ts` for a revision's
- * condition, `cloud/checklist.ts` for a probe's refusal — and only the part
- * that is the same for any HTTP control plane is shared.
+ * Failure verdicts and checklist order shared by the cloud deploy adapters.
+ * Only what holds for any HTTP control plane lives here.
  */
 import type {
   Prerequisite,
@@ -21,47 +10,27 @@ import { prerequisitesFor } from '../../../domain/capabilities.ts';
 import type { DeployRef, DeployVerdict } from '../contract.ts';
 import type { CloudResponse } from './http.ts';
 
-/** A refusal, as {@link CloudHttp} hands one back. */
 export type CloudFailure = Extract<CloudResponse<unknown>, { ok: false }>;
 
 /**
- * A step that produced something, or the refusal that stopped it.
- *
- * `apply` on an HTTP control plane is a sequence of calls, and any of them may
- * be the one that ends the attempt — so each step answers in this shape rather
- * than throwing, and the caller yields a status and returns
- * {@link cloudWriteFailure} of the failure it carries. Throwing would lose the
- * refusal's status and reason, which is precisely what decides the blame.
+ * A step returns its refusal instead of throwing, so the status and reason
+ * that decide the blame survive.
  */
 export type Outcome<Value> =
   | { readonly ok: true; readonly value: Value }
   | { readonly ok: false; readonly failure: CloudFailure };
 
 /**
- * A far side that answered successfully and left out what was asked for.
- *
- * `transport` rather than a status, because there is no status to reason about:
- * the call succeeded and the body is not what the API documents, which is as
- * un-actionable to the person deploying as a socket that died.
+ * A success whose body lacks what was asked for. `transport`, since there is
+ * no status to reason about.
  */
 export function missing(message: string): CloudFailure {
   return { ok: false, kind: 'transport', message };
 }
 
 /**
- * A call that never landed, in §6's vocabulary.
- *
- * Two lines separate three quite different situations, and the split is §6's
- * blame column rather than an HTTP convention:
- *
- * - **No status at all** — the socket died, DNS failed, the uplink is down.
- *   Unambiguously the Target being unreachable.
- * - **A 4xx that is not an auth failure** — the project refusing this document:
- *   an org policy, a quota, an invalid spec. §6 puts all of those under
- *   `REJECTED` and blames the developer, because every one is answered by
- *   changing the request.
- * - **An auth failure or a 5xx** — the project being unavailable to Spindrift,
- *   which indicts the platform and not the person deploying.
+ * No status, a 401/403 or a 5xx is `TARGET_UNREACHABLE`, blamed on the
+ * platform. Any other 4xx is `REJECTED`: changing the request answers it.
  */
 export function cloudWriteFailure(
   failure: CloudFailure,
@@ -87,12 +56,8 @@ export function cloudWriteFailure(
 }
 
 /**
- * A checklist in its adapter type's declared order (§13).
- *
- * The order is the one the UI shows, so it belongs to the adapter type rather
- * than to whichever probe happened to answer first. An item nobody answered is
- * filled in as unmet: `deriveHealth` reads an unanswered row as unmet anyway,
- * and saying "not assessed" is more useful than a row that is silently absent.
+ * In the adapter type's declared order, which the UI shows. An item no probe
+ * answered is filled in as unmet and unassessed.
  */
 export function orderedChecklist(
   results: readonly PrerequisiteResult[],

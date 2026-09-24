@@ -1,40 +1,6 @@
 /**
- * The cloud build route (§4).
- *
- * §4 names three routes and this is the middle one: "a cloud build service", in
- * §14's shared artifacts project, next to the registry every artifact is pushed
- * to. It is the route with the strongest isolation claim — a managed worker the
- * connected repository's maintainers cannot reach — which is why it is the only
- * one this installation can honestly offer above L2.
- *
- * `LIVE_TEXT`, and it is earned rather than declared: the build service writes
- * its steps' output to a log service that can be read while the build runs, so
- * the timeline fills in as it goes (§4's amendment). The read is a poll with a
- * page cursor and not a stream, for the same reason `observe` is a poll — a
- * long-lived connection over the uplink is a connection that stays open while
- * delivering nothing.
- *
- * **What it submits is the shared BuildKit program**, not the service's own
- * source-to-image path. That is §4's "build is always separate from deploy"
- * applied one level down: a backend's convenience path is a second engine with
- * its own frontends, its own defaults, and its own idea of what a website is,
- * and having one would make "one engine, two frontends" false the moment a
- * build moved between routes.
- *
- * **Two things the route adds around that program**, both of which the hosted
- * route gets from its runner and this one has to arrange:
- *
- *   * A registry credential. The shared program exports with `push=true`, and
- *     nothing in a build step authorizes that by itself — so the step mints its
- *     own identity from the metadata server and writes the Docker config
- *     BuildKit reads.
- *   * A Binary Authorization attestation, as a second step. §16's registry
- *     signature is core's and core makes it; the attestation is the *other*
- *     half of the same key, an occurrence in the authority's project rather
- *     than an object in the registry, and a cloud Target's admission reads that
- *     one. It runs after the report line and before the build concludes, so a
- *     failure to attest fails the build rather than reporting an artifact no
- *     Target will admit.
+ * The cloud build route: submits the shared BuildKit program to the cloud build
+ * service, reads its log while it runs, and attests the image it pushed.
  */
 
 import type { RegistryFlavour } from '../../domain/artifact-name.ts';
@@ -64,67 +30,45 @@ import {
   type PollingOptions,
 } from './route.ts';
 
-/** The transport, in the shape `fetch` already has. */
 export type Fetcher = (request: Request) => Promise<Response>;
 
-/** Mints a bearer token per request. Never a stored credential (§13). */
+/** Mints a bearer token per request, never a stored credential. */
 export type TokenProvider = () => string | Promise<string>;
 
-/** One build, as much of it as this route reads. */
 interface CloudBuild {
   readonly id: string;
   readonly status?: string;
   readonly statusDetail?: string;
 }
 
-/** One log entry, as much of it as this route reads. */
 interface LogEntry {
-  /**
-   * The log service's own identity for this entry. It is what makes re-reading
-   * a window cheap: the same entry seen twice is recognised rather than
-   * re-emitted, so the route never needs a cursor it cannot trust.
-   */
+  /** The log service's own entry id, used to skip entries already emitted. */
   readonly insertId?: string;
   readonly textPayload?: string;
   readonly timestamp?: string;
 }
 
 /**
- * How far behind the newest entry already read a fresh search reaches.
- *
- * Entries are ingested out of order, so a window that started exactly at the
- * newest timestamp would step over anything that arrived late. A minute is
- * generous against the log service's own ingestion latency, and re-reading a
- * minute costs nothing because {@link keyOf} recognises what was already
- * emitted.
+ * How far before the newest entry read each search reaches back. Entries are
+ * ingested out of order, and {@link keyOf} drops what was already emitted.
  */
 const LOG_LATENESS_MS = 60_000;
 
-/**
- * Pages one search follows before leaving the rest to the next poll.
- *
- * A bound rather than a limit anyone should hit: the next poll re-reads the
- * window anyway, so stopping early loses nothing but a few seconds of latency.
- */
+/** Pages per search. The next poll re-reads the window, so stopping early adds only latency. */
 const MAX_LOG_PAGES = 50;
 
 /**
- * How long a concluded build's log is drained for before the route gives up on
- * the report.
- *
- * The build being over does not mean its log is: ingestion runs behind the
- * writer, and the report line is written in the final seconds of the run. This
- * is the only budget spent waiting for something that has already happened.
+ * How long a finished build's log is read for its report. Ingestion lags the
+ * writer, and the report is written in the build's last seconds.
  */
 const LOG_TAIL_TIMEOUT_MS = 60_000;
 
-/** What the route carries between reads of one build's log. */
 interface LogTail {
   /** Entries already emitted, by {@link keyOf}. */
   readonly seen: Set<string>;
   /** The newest entry timestamp seen, which anchors the next search's window. */
   newest: Date | null;
-  /** Everything emitted, joined — what {@link parseBuildReport} reads. */
+  /** Everything emitted, for {@link parseBuildReport}. */
   log: string;
 }
 
@@ -136,43 +80,20 @@ export interface CloudBuildRouteOptions extends PollingOptions {
   readonly logsEndpoint: string;
   readonly project: string;
   readonly region: string;
-  /** The BuildKit image the build step runs. Pinned by the installation. */
   readonly image: string;
-  /** The zero-config BuildKit frontend the installation pinned (§4). */
   readonly zeroConfigFrontend: string;
-  /**
-   * The installation's signing key, as `supplyChain.signer` names it.
-   *
-   * Here for the attestation and not for a signature: core signs the digest it
-   * admits (`supply-chain/sign.ts`) and puts a cosign signature in the
-   * repository itself. What core cannot do is the *other* half — see
-   * {@link attestor}.
-   */
+  /** The installation's KMS signing key, used here only for the attestation. */
   readonly signer: string;
   /**
-   * `projects/<project>/attestors/<name>`, or empty where the installation
-   * enforces no Binary Authorization policy.
-   *
-   * A cloud runtime's admission reads an **attestation** — an occurrence on a
-   * note in the authority's own project — and not the registry signature core
-   * makes. One key, two verifiers, two artifacts, and a Target that enforces
-   * the second refuses a perfectly signed image that lacks it. The hosted route
-   * has carried this since it was written; without it here a cloud build is an
-   * artifact no such Target will admit.
+   * `projects/<project>/attestors/<name>`, or empty for no attestation. A cloud
+   * runtime's admission checks this attestation, not the registry signature.
    */
   readonly attestor: string;
   readonly token: TokenProvider;
-  /** Injected so a test can stand a fake far side behind the real client. */
   readonly fetch?: Fetcher;
 }
 
-/**
- * The statuses that mean the build is over.
- *
- * `EXPIRED` is in here and reads oddly: it is what a build that sat in the
- * queue past its own deadline becomes, so it is terminal even though nothing
- * ever ran.
- */
+/** `EXPIRED` is a build that waited in the queue past its deadline and never ran. */
 const TERMINAL = new Set([
   'SUCCESS',
   'FAILURE',
@@ -187,29 +108,11 @@ export class CloudBuildRoute implements BuildAdapter {
   readonly logFidelity: LogFidelity = 'LIVE_TEXT';
   readonly provenanceBuilderId =
     'https://cloudbuild.googleapis.com/GoogleHostedWorker';
-  /**
-   * §16's profile level. A managed, ephemeral worker nobody outside the build
-   * service can reach, running a program submitted by an authenticated caller —
-   * that is the L3 claim this service makes for its own builds, and the profile
-   * is a guarantee about the *route*. Whether a concrete Build achieved it is
-   * Task 26's question, asked before signing and never taken on trust.
-   */
+  /** L3: a managed, ephemeral worker the repository's maintainers cannot reach. */
   readonly buildLevel: BuildLevel = 3;
-  /**
-   * The build step's own environment is a place a secret can go: the step runs
-   * in a worker nobody outside the build service reaches, and the value is
-   * scoped to that container rather than to the build's own arguments — which
-   * are what a reader of the build resource sees.
-   */
+  /** Secrets ride the build step's environment, never the program text. */
   readonly carriesHeldSecret = true;
-  /**
-   * One vendor's registries, because that is what the metadata server issues a
-   * token for. Everything else this route publishes to needs a stored
-   * credential, and without one it is simply not a destination this route has —
-   * see {@link publishableRegistries}. That is why a cloud build lands in the
-   * artifact registry by default: not a preference, but the honest extent of
-   * what its own identity authorizes.
-   */
+  /** The step's metadata token covers one vendor's registries and nothing else. */
   readonly selfAuthorizedRegistries: readonly RegistryFlavour[] = [
     'artifactRegistry',
   ];
@@ -227,9 +130,6 @@ export class CloudBuildRoute implements BuildAdapter {
     const logs = { backend: this.name, fidelity: this.logFidelity } as const;
 
     if (source.origin.type === 'repo') {
-      // The bundle was staged once and every route fetches it (§15); a route
-      // that cloned again would build a second tree from the same commit and
-      // give the receipt nothing to join against.
       yield {
         type: 'log',
         at: now(),
@@ -247,8 +147,6 @@ export class CloudBuildRoute implements BuildAdapter {
     try {
       build = await this.submit(program, spec, dispatchId);
     } catch (error) {
-      // §4 story 48: the failure before the build step has to be readable as
-      // text, not as an empty log and a spinner.
       const detail = error instanceof Error ? error.message : String(error);
       yield { type: 'log', at: now(), line: `submit failed: ${detail}` };
       return buildFailed(
@@ -276,9 +174,8 @@ export class CloudBuildRoute implements BuildAdapter {
       if (TERMINAL.has(status)) break;
 
       if (budget.expired()) {
-        // Best-effort, like bosun's: the Build is failing either way, and a
-        // cancel that did not land leaves a worker the service's own timeout
-        // reclaims rather than a verdict anything reads.
+        // Best-effort: the Build fails either way, and the service's own timeout
+        // reclaims a worker the cancel missed.
         yield {
           type: 'log',
           at: now(),
@@ -295,20 +192,15 @@ export class CloudBuildRoute implements BuildAdapter {
       await budget.tick();
     }
 
-    // The log read above happened *before* the status read that ended the loop,
-    // so everything the build wrote in its last seconds is still unread — and
-    // that is precisely the region that carries the report (`report.ts`: the
-    // result travels the same way the logs do). A loop that stopped here would
-    // record a green build as `succeeded but reported no artifact`, so the read
-    // after the conclusion is the load-bearing one, not a courtesy.
+    // Read again after the build concludes: its last seconds, which carry the
+    // report, were written after the loop's final read.
     const drain = deadlineFrom({
       ...this.options,
       timeoutMs: LOG_TAIL_TIMEOUT_MS,
     });
     for (;;) {
       yield* this.readLog(build.id, tail, now);
-      // A red build's report is not coming; one final read for the operator's
-      // sake is the whole of what it is owed.
+      // A red build prints no report, so one read is enough.
       if (status !== 'SUCCESS') break;
       if (parseBuildReport(tail.log) !== null) break;
       if (drain.expired()) break;
@@ -318,10 +210,7 @@ export class CloudBuildRoute implements BuildAdapter {
     const log = tail.log;
 
     if (status !== 'SUCCESS') {
-      // The service's own `TIMEOUT` is core's `TIMEOUT` — a build that ran out
-      // of its own budget indicts nobody either (§6's dash). Nor does one
-      // that was cancelled: by this route's own budget, or by an operator
-      // through `cancel`, and the attempt log already says which.
+      // A build that timed out, expired or was cancelled blames nobody.
       return buildFailed(
         logs,
         status === 'TIMEOUT' || status === 'EXPIRED' || status === 'CANCELLED'
@@ -332,6 +221,8 @@ export class CloudBuildRoute implements BuildAdapter {
       );
     }
 
+    // The build's `results` lists only images the service pushed itself, so the
+    // report comes from the log.
     const report = parseBuildReport(log);
     if (report === null) {
       return buildFailed(
@@ -349,22 +240,15 @@ export class CloudBuildRoute implements BuildAdapter {
       level: this.buildLevel,
       report: {
         ...report,
-        // The build's own record of the run — §16's backend provenance, which
-        // core verifies against the Target's minimum before signing. The route
-        // reports it and never interprets it.
+        // The backend provenance core verifies before signing.
         statement: { build: build.id, project: this.options.project },
       },
     });
   }
 
   /**
-   * Cancel every build still going under the dispatch id's tag.
-   *
-   * The service assigns build ids, so the one thing this route can stamp on a
-   * build at submit is a tag — and a tag is what the list endpoint filters on.
-   * Every build under it rather than the first: a dispatch id is one attempt
-   * and one submit, so there is one, and cancelling by the set costs nothing
-   * if that ever stops being true.
+   * Cancel every unfinished build under the dispatch id's tag. The service
+   * assigns build ids, so the tag is how the route finds its build.
    */
   async cancel(handle: BuildHandle): Promise<void> {
     const filter = encodeURIComponent(`tags="${tagFor(handle.dispatchId)}"`);
@@ -378,7 +262,6 @@ export class CloudBuildRoute implements BuildAdapter {
     }
   }
 
-  /** `projects/<p>/locations/<r>` — the parent every call hangs off. */
   private get parent(): string {
     return `projects/${this.options.project}/locations/${this.options.region}`;
   }
@@ -397,10 +280,8 @@ export class CloudBuildRoute implements BuildAdapter {
   ): Promise<CloudBuild> {
     const attest = attestStep(spec.destinations, this.options);
     const dockerConfig = dockerConfigFor(spec.registryAuth);
-    // On the step's environment for the same reason the Docker config is —
-    // the program is readable in full on the build resource, its variables
-    // are not. `literalDollars` because a secret's value is text, never a
-    // substitution.
+    // Secrets stay out of the program text. `literalDollars` because a secret's
+    // value is text, never a substitution.
     const stepEnv = [
       ...(dockerConfig === null
         ? []
@@ -426,17 +307,13 @@ export class CloudBuildRoute implements BuildAdapter {
                   exportDigest(attest),
               ),
             ],
-            // On the step's environment and never in `args`: the arguments are
-            // the program, and the program is what a reader of this build
-            // resource sees in full. See REGISTRY_AUTH_VAR.
             ...(stepEnv.length === 0 ? {} : { env: stepEnv }),
           },
           ...(attest === null
             ? []
             : [{ ...attest, args: attest.args.map(literalDollars) }]),
         ],
-        // Read, never pushed: the build writes to the log service and this
-        // route polls it. Nothing is posted back to Spindrift (§4).
+        // The build's output goes to the log service, which `readLog` polls.
         options: { logging: 'CLOUD_LOGGING_ONLY' },
         // What `cancel` finds the build by, from the Build row alone.
         ...(dispatchId === undefined ? {} : { tags: [tagFor(dispatchId)] }),
@@ -457,24 +334,8 @@ export class CloudBuildRoute implements BuildAdapter {
   }
 
   /**
-   * Everything the build's log has gained since the last read, as events.
-   *
-   * **One poll is one search.** `entries.list`'s `nextPageToken` is a
-   * continuation of *this* search — "retrieve the next batch of results from
-   * the preceding call to this method" — and not a watermark on a live log. A
-   * route that saved one and presented it seconds later would be paginating a
-   * snapshot of the past, so the token is followed to the end of the search it
-   * belongs to and then dropped.
-   *
-   * What replaces it is a timestamp window plus per-entry identity: each poll
-   * re-searches the last {@link LOG_LATENESS_MS} and {@link keyOf} drops what
-   * was already emitted. That is what tolerates out-of-order ingestion, which a
-   * cursor never did.
-   *
-   * **An empty page carrying a token is not a caught-up log.** The vendor is
-   * explicit that it means "the search found no log entries so far but it did
-   * not have time to search all the possible log entries", so the token is
-   * followed rather than read as an end.
+   * New entries since the last read. A page token belongs to one search, so each
+   * poll starts a fresh search; an empty page carrying a token is not the end.
    */
   private async *readLog(
     id: string,
@@ -508,9 +369,8 @@ export class CloudBuildRoute implements BuildAdapter {
           },
         );
       } catch {
-        // A log service having a bad moment must not fail a build that is
-        // otherwise going fine — the status read is the authority on whether it
-        // is going fine, and the next pass searches the same window again.
+        // A failed log read never fails the build: the status read decides, and
+        // the next poll searches the same window again.
         return;
       }
 
@@ -564,16 +424,11 @@ export class CloudBuildRoute implements BuildAdapter {
   }
 }
 
-/**
- * The tag a build carries for its dispatch id. A dispatch id is a UUID and a
- * tag is `[\w][\w.-]{0,127}`, so the prefix is for a person reading the
- * console, not for validity.
- */
+/** The prefix is for a person reading the console; a UUID is already a valid tag. */
 function tagFor(dispatchId: string): string {
   return `spindrift-${dispatchId}`;
 }
 
-/** One step of a submitted build, as much of it as this route composes. */
 interface BuildStep {
   readonly name: string;
   readonly entrypoint: string;
@@ -581,47 +436,20 @@ interface BuildStep {
   readonly env?: readonly string[];
 }
 
-/**
- * Where the metadata server hands a step its own identity as a bearer token.
- *
- * `default` is the build's service account, which is the account the writer
- * grant on the registry names — so the credential the push needs is the one
- * identity this step already runs as, and no credential is stored anywhere
- * (§13).
- */
+/** `default` is the build's service account, which holds the registry writer grant. */
 const METADATA_TOKEN_URL =
   'http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token';
 
-/**
- * The one path two steps of a build share.
- *
- * `/workspace` is a volume across a build's steps; everything else a step
- * writes is its own container's. So a digest produced by the builder and read
- * by the attestation travels here and nowhere else.
- */
+/** `/workspace` is the only volume a build's steps share. */
 const DIGEST_PATH = '/workspace/spindrift-digest';
 
 /**
- * The tool image the attestation step runs.
- *
- * Not an installation choice, which is why it is not a manifest value beside
- * the BuildKit image: `sign-and-create` is one vendor's subcommand against one
- * vendor's API, and the vendor ships exactly one image carrying it. The full
- * image rather than `:slim`, because the subcommand lives on the `beta`
- * surface and these images have their component manager disabled — a slim
- * image cannot install what it is missing, it can only fail asking.
+ * The full image: `sign-and-create` is a `beta` command, and slim images cannot
+ * install missing components.
  */
 const ATTEST_IMAGE = 'gcr.io/google.com/cloudsdktool/cloud-sdk:stable';
 
-/**
- * The registry hosts a build step's own identity can authorize a push to.
- *
- * Spelled out rather than "every host", for the same reason the hosted route
- * splits its logins: this token authenticates to one vendor's registries and
- * to nothing else. A destination on some other host is **not** silently
- * dropped — it reaches the push with no credential and fails there, naming
- * itself, which is the failure an operator can act on.
- */
+/** Hosts the step's metadata token can push to. */
 function googleRegistryHosts(destinations: readonly string[]): string[] {
   const hosts = destinations.map(
     (destination) => destination.split('/')[0] ?? '',
@@ -633,13 +461,7 @@ function isGoogleRegistryHost(host: string): boolean {
   return host.endsWith('docker.pkg.dev') || host === 'gcr.io';
 }
 
-/**
- * The destinations the attestation step can read a manifest back out of.
- *
- * Same boundary as {@link googleRegistryHosts} and for the same reason — one
- * metadata token, one vendor's registries — but by destination rather than by
- * host, because what the step reads is a repository's manifest and not a host.
- */
+/** Destinations on those hosts, whose manifests the attestation step can read. */
 function googleRegistryDestinations(
   destinations: readonly string[],
 ): readonly string[] {
@@ -649,48 +471,18 @@ function googleRegistryDestinations(
 }
 
 /**
- * The registry credential the build step mints for itself before it builds.
- *
- * The shared program exports with `push=true` and BuildKit reads its registry
- * credentials from a Docker config — so without this the build runs to
- * completion and dies at the export with a `401`, which reads as a broken
- * builder rather than as a missing credential. The cloud builder is the route
- * that has to do this itself: the hosted one logs in with the run's own token,
- * and the in-cluster one runs as a service account the registry already
- * trusts.
- *
- * Minted by the step and not passed to it. A credential composed here would
- * be a credential in a submitted build body, readable by anyone who can read
- * the build — and it would be minted at submit time and expire mid-queue.
- *
- * **It folds into {@link REGISTRY_AUTH_VAR} rather than writing a Docker config
- * of its own**, and that is the load-bearing part. This installation pushes to
- * several registries (§16, `BuildSpec.destinations`), and the two halves of
- * that push authorize differently: the metadata token covers the vendor's own
- * registries and a *stored* credential covers the ones no federation reaches.
- * A prelude that wrote `$DOCKER_CONFIG/config.json` itself was overwritten a
- * few lines later by the shared program, which does `DOCKER_CONFIG=$(mktemp
- * -d)` whenever the variable is set — so an installation holding a stored
- * credential silently lost the vendor half and 401'd on the artifact registry
- * at the export, after the whole build. One writer, one document, both halves.
- */
-/**
- * Every dollar in a step's fields, escaped for the build service's template
- * engine.
- *
- * The service expands `$UPPERCASE` and `${UPPERCASE}` in a submitted step as
- * substitutions and refuses a template naming one it does not know — observed
- * live: the prelude's `"$SPINDRIFT_REGISTRY_AUTH"` failed the whole submit
- * with "not a valid built-in substitution". Nothing submitted here *is* a
- * substitution — the programs are shell, and every dollar is the shell's —
- * so every dollar is escaped uniformly (`$$` is the service's literal-dollar
- * escape) rather than this file knowing which spellings the template grammar
- * happens to claim.
+ * Escapes every `$` as `$$`. The build service expands `$NAME` in step fields
+ * and rejects names it does not know, and every dollar here is the shell's.
  */
 function literalDollars(field: string): string {
   return field.replaceAll('$', '$$$$');
 }
 
+/**
+ * Mints the step's registry token at run time, so none sits in the submitted
+ * build or expires in the queue. It merges into {@link REGISTRY_AUTH_VAR}
+ * because the shared program writes its own Docker config from that variable.
+ */
 function registryAuth(destinations: readonly string[]): string {
   const hosts = googleRegistryHosts(destinations);
   if (hosts.length === 0) return '';
@@ -722,20 +514,11 @@ export ${REGISTRY_AUTH_VAR}
 `;
 }
 
-/**
- * The one line the builder adds for the step after it.
- *
- * `$digest` is the shared program's own variable, set from the exporter's
- * metadata a few lines above — this appends to that program rather than
- * re-deriving it, because two places parsing one metadata file is two places
- * that can disagree about what was built. Nothing is written where no second
- * step will read it.
- */
+/** Hands the program's `$digest` to the attestation step, so one place parses the metadata. */
 function exportDigest(attest: BuildStep | null): string {
   return attest === null ? '' : `\nprintf '%s' "$digest" > ${DIGEST_PATH}\n`;
 }
 
-/** A KMS key, as the four flags `sign-and-create` wants it in. */
 interface SignerKey {
   readonly project: string;
   readonly location: string;
@@ -748,14 +531,8 @@ const SIGNER_PATTERN =
 const ATTESTOR_PATTERN = /^projects\/([^/]+)\/attestors\/([^/]+)$/;
 
 /**
- * The attestation step, or `null` where this installation asked for none.
- *
- * A malformed value **throws** rather than being skipped. Both halves are one
- * fact an operator configured, and the two ways of getting this wrong land in
- * very different places: a submit that fails here is a sentence in the build's
- * own log, while a quiet skip is a green build whose Deploy is refused later by
- * an admission webhook whose message is about a policy rather than about this
- * installation's manifest.
+ * The attestation step, or `null` where none is configured. A malformed signer
+ * or attestor throws, so the submit fails with a sentence in the build's log.
  */
 function attestStep(
   destinations: readonly string[],
@@ -787,9 +564,7 @@ function attestStep(
   return {
     name: ATTEST_IMAGE,
     entrypoint: 'bash',
-    // Without this a component the image does not carry stops to ask whether
-    // to install it, and a prompt in a build step is a hang followed by a
-    // timeout.
+    // Otherwise a missing component prompts to install and the step hangs.
     env: ['CLOUDSDK_CORE_DISABLE_PROMPTS=1'],
     args: [
       '-c',
@@ -923,13 +698,8 @@ done
 }
 
 /**
- * What makes two reads of the same entry the same entry.
- *
- * `insertId` is the log service's own identity and is what this relies on. The
- * fallback exists because an entry without one still has to be deduplicated
- * somehow, and it deliberately collapses two identical lines written in the
- * same second — losing a duplicated line is a smaller wrong than emitting the
- * whole window again on every poll.
+ * An entry's identity: `insertId`, else timestamp plus text. The fallback can
+ * merge two identical lines written in the same second.
  */
 function keyOf(entry: LogEntry): string {
   if (entry.insertId !== undefined && entry.insertId !== '') {

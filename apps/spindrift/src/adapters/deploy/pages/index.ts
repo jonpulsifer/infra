@@ -1,55 +1,7 @@
 /**
- * The edge static-hosting deploy adapter (§6, §9).
- *
- * A sibling of `deploy/static`, not a replacement: both accept `files`, both
- * serve `Public` only, and both put the bytes there themselves rather than
- * handing a runtime a reference. What differs is the boundary — an edge account
- * rather than a cloud project — and, load-bearingly, how a call to it is
- * authorized.
- *
- * **This is where §13's "nothing stored" meets a platform that federates no
- * identity.** Every other Target here is reached with a token minted per
- * request from a projected one; this platform's API has no such exchange to
- * make. So the credential is configured into the process rather than into a
- * row: `registry.ts` reads it from the environment and hands it in as the same
- * {@link TokenProvider} shape federation produces, and nothing about a Target,
- * a Vessel or a connect form can hold one. The rule §13 was protecting — a
- * credential is never a column, never in the manifest, never on a screen — is
- * intact; what is not available is the part of it that needed a far side
- * willing to trade tokens.
- *
- * **`Public` only** (§9), and by the same road the cloud static Target takes:
- * the site's own edge address answers whatever is put in front of it, so no
- * non-public rendering here has a non-bypassable origin. `ASSERTED_REACHES_BY_
- * ADAPTER['cloudflare-pages']` is `['public']`, so a Component asking for
- * anything else is excluded by the ordinary reach join — `REACH_UNSUPPORTED`,
- * not a special case — and one arriving at `apply` anyway is core's bug,
- * reported as `INTERNAL`.
- *
- * **The site names itself** (§9). The platform mints the address, so the
- * canonical name comes back on the verdict; the vanity name is attached to the
- * same project as a domain, which is what keeps "moving an App between backends
- * is one record re-point" true here too.
- *
- * **Nothing is labelled, so the digest travels in the deployment's commit
- * message.** The platform stores files and has no notion of an artifact, and a
- * deployment carries no free-form labels — but it does carry the trigger
- * metadata a direct upload supplies. `observe` reads the digest back out of it;
- * a deployment made by anything other than Spindrift carries no marker, reports
- * an empty digest, and shows as drift, which is correct because it is.
- *
- * **A re-apply finds the deployment it already made.** The platform mints a new
- * deployment on every create, so every mechanism that can re-run an attempt (a
- * lease reclaim, a crashed reconciler, a rollout replacing the pod mid-apply)
- * would otherwise be another production deployment. `apply` therefore reads
- * the project's recent deployments for one whose commit message carries this
- * Deploy's {@link DEPLOY_MARKER} before uploading anything, and adopts what it
- * finds unless the platform already called it failed — a failed deployment
- * never served, so creating its successor *is* the retry. The platform offers
- * no unique-name constraint to lean on, so read-then-create is not atomic, and
- * the read is one page deep: the window is bounded and stated, not a
- * guarantee, and a refused read falls through to create rather than blocking
- * the deploy.
+ * The Cloudflare Pages deploy adapter, for public `files` sites. The platform
+ * federates no identity, so its account token comes from the environment, and a
+ * deployment takes no labels, so the digest and Deploy ride its commit message.
  */
 
 import { type BundleFile, readBundle } from '@repo/archive/bundle';
@@ -128,79 +80,43 @@ import {
 } from './assets.ts';
 
 export interface PagesAdapterOptions {
-  /**
-   * Mints the account credential per call.
-   *
-   * The same shape federation produces, deliberately: what varies between this
-   * backend and its siblings is where the string comes from, and a different
-   * type here would push that difference into every call site.
-   */
+  /** Mints the account credential per call. */
   readonly token: TokenProvider;
   /**
-   * What authorizes reading the artifact, which is not the same far side.
-   *
-   * The bytes live in the installation's artifacts registry (§14), so this is
-   * the federated cloud token every other adapter already holds — the same
-   * split the Vercel backend makes, and for the same reason: it keeps a
-   * Cloudflare bearer from being sent to a registry and a cloud token from
-   * being sent to Cloudflare.
+   * The federated cloud token for the artifact registry, kept apart so neither
+   * credential is ever sent to the other's far side.
    */
   readonly artifactToken: TokenProvider;
   /**
-   * How this installation signs for an object in its source depot, or `null`
-   * where it configured none.
-   *
-   * Not a second account credential: a supplied upload was never built, so its
-   * bytes are a `gs://` object rather than a URL, and reading one takes a V4
-   * signature rather than any bearer this backend holds. `storage/signed-url.ts`
-   * is where that exchange and its one grant are written down.
+   * Signs a short-lived URL for a supplied upload's `gs://` object, or `null`
+   * where none is configured.
    */
   readonly federation?: FederationOptions | null;
-  /** Injected so a test can stand a fake far side behind the real client. */
   readonly fetch?: Fetcher;
   readonly now?: () => number;
 }
 
-/** How the operator would name the product in a sentence about enabling it. */
+/** The product's name in a sentence about enabling it. */
 const SERVICE_NAME = 'Cloudflare Pages';
 
-/**
- * The platform's own API root, which is the **account's** and not this
- * surface's — see `adapters/cloudflare.ts`, where it is declared.
- *
- * Re-exported under this name because that is what every caller already asks
- * for. `CloudflarePagesConnection.endpoint` remains the Target's override for a
- * perimeter or a mirror in front of the real API.
- */
+/** The account-wide API root; a Target's `endpoint` overrides it. */
 export const DEFAULT_ENDPOINT = CLOUDFLARE_API_ROOT;
 
 /**
- * The branch a project is created with, and the one a deployment names.
- *
- * A constant rather than a connection field, because it decides one thing —
- * whether a deployment is the live one or a preview — and there is only one
- * answer Spindrift wants. A project that already exists keeps its own; see
- * {@link PagesDeployAdapter.ensureProject}, which reads it back rather than
- * assuming this.
+ * The branch a new project is created with. An existing project keeps its own;
+ * see {@link PagesDeployAdapter.ensureProject}.
  */
 const PRODUCTION_BRANCH = 'production';
 
-/** A project name is capped here. See `domain/workload-name.ts`. */
+/** The platform's cap on a project name. */
 const PROJECT_NAME_LIMIT = 58;
 
 /** Where the digest and the deploy travel, since a deployment carries no labels. */
 const DIGEST_MARKER = 'spindrift-digest=';
 const DEPLOY_MARKER = 'spindrift-deploy=';
 
-/**
- * The one sentence every runtime question here is answered with (§17).
- *
- * Three questions — what is it saying, run it, what has it run — and one fact
- * behind all three: files are served, never executed.
- */
 const NOTHING_RUNS = 'Static files are served by the Target.';
 
-/** One project, as much of it as this adapter reads. */
 interface PagesProject {
   readonly name?: string;
   readonly subdomain?: string;
@@ -208,12 +124,8 @@ interface PagesProject {
 }
 
 /**
- * One custom domain on a project, as much of it as this adapter reads.
- *
- * The two `*_data` blocks carry the sentence Cloudflare writes when issuance
- * goes wrong, and they are the only place it exists — the envelope's own
- * `errors` array is empty for a domain that was accepted and then failed
- * validation.
+ * The `*_data` blocks hold Cloudflare's reason when issuance fails; the
+ * envelope's `errors` is empty for a domain that failed validation.
  */
 interface PagesDomain {
   readonly name?: string;
@@ -222,23 +134,16 @@ interface PagesDomain {
   readonly verification_data?: { readonly error_message?: string };
 }
 
-/** What a custom domain is doing, once its status has been read. */
 export interface PagesDomainState {
-  /** Whether the name is serving *now*, rather than merely accepted. */
+  /** Serving now, not merely accepted. */
   readonly serving: boolean;
   /** Cloudflare's own word for it, for the deploy log. */
   readonly status: string;
 }
 
 /**
- * Cloudflare's domain status, split on the only question a deploy has to
- * answer: is this a state that will become serving on its own, or one somebody
- * has to act on?
- *
- * `initializing` and `pending` resolve themselves once the certificate is
- * issued. `active` is done. Everything else — `deactivated`, `blocked`,
- * `error`, and any value Cloudflare adds later — is a refusal, because a status
- * this adapter does not recognise is not a status it may call healthy.
+ * Statuses that turn `active` on their own once the certificate issues. Any
+ * other status but `active`, including one Cloudflare adds later, is a refusal.
  */
 const SETTLING = ['initializing', 'pending'] as const;
 
@@ -266,7 +171,6 @@ function domainState(
   };
 }
 
-/** One deployment, as much of it as this adapter reads. */
 interface PagesDeployment {
   readonly id?: string;
   readonly url?: string;
@@ -278,7 +182,6 @@ interface PagesDeployment {
 
 export class PagesDeployAdapter implements DeployAdapter {
   readonly adapter: TargetAdapter = 'cloudflare-pages';
-  /** §6's table: static hosting takes files. */
   readonly artifactTypes: readonly ArtifactType[] = ['files'];
 
   private readonly events: DeployEvents;
@@ -314,15 +217,8 @@ export class PagesDeployAdapter implements DeployAdapter {
       );
     }
 
-    // Same choice the other files backends make — literally, via the same
-    // predicate — with two identities doing the reading: a staged address is a
-    // supplied upload's own and is fetched as such (a `gs://` object is not a
-    // URL, but a signature turns it into one), and among registry references
-    // only one in the installation's Google-family artifacts registry is
-    // readable, with the federated token this adapter is handed for exactly
-    // that. The account credential is for this platform and authorizes nothing
-    // at a registry, which is why the registry arm is a second token rather
-    // than the deploy one reused.
+    // The account credential authorizes nothing at a registry, so the registry
+    // arm reads with the federated token.
     const staged = artifactAddress(desired.artifact);
     const location =
       fetchableStagedAddress(staged) ??
@@ -352,9 +248,8 @@ export class PagesDeployAdapter implements DeployAdapter {
       return failure;
     }
 
-    // The idempotency read — see the file header. After the project is
-    // ensured, because the deployment list hangs off it; before any upload,
-    // because an adopted deployment's files are already there.
+    // Every create is a new production deployment, so a re-run adopts the one
+    // this Deploy already made unless it failed. Read-then-create is not atomic.
     const existing = await this.findDeployment(
       http,
       connection,
@@ -382,9 +277,7 @@ export class PagesDeployAdapter implements DeployAdapter {
       }
       yield this.events.log(`the bundle holds ${files.length} files`, project);
 
-      // Collected rather than yielded directly: `uploadAssets` reports
-      // progress through a callback because it is a loop over buckets, and a
-      // generator cannot yield from inside somebody else's await.
+      // A generator cannot yield from inside the progress callback.
       const lines: string[] = [];
       const uploaded = await uploadAssets({
         client: http,
@@ -427,8 +320,6 @@ export class PagesDeployAdapter implements DeployAdapter {
       yield this.events.log(`deployed ${deployment.id ?? project}`, project);
     }
 
-    // §9's one record re-point: the vanity name is a domain on the project that
-    // is already serving, so moving an App here moves one name.
     if (desired.hostname.vanity !== undefined) {
       const attached = await this.attachDomain(
         http,
@@ -444,10 +335,6 @@ export class PagesDeployAdapter implements DeployAdapter {
         });
         return failure;
       }
-      // Said as what it is. `initializing` is the state of every first attach
-      // and the name answers nothing until the certificate lands, so a log line
-      // claiming the name "is on this project" was the deploy's own account of
-      // a domain that did not work yet.
       yield this.events.log(
         attached.value.serving
           ? `${desired.hostname.vanity} is serving on this project`
@@ -456,9 +343,8 @@ export class PagesDeployAdapter implements DeployAdapter {
       );
     }
 
-    // The deployment's own address is one deployment's; the project's subdomain
-    // is what the production branch always answers on. §9 wants the canonical,
-    // which is the second — the first changes every release.
+    // Production always answers on the project's subdomain; a deployment's own
+    // address changes every release.
     const address =
       ensured.value.subdomain === undefined
         ? deployment.url
@@ -468,10 +354,8 @@ export class PagesDeployAdapter implements DeployAdapter {
       phase: 'LIVE',
       ref,
       ...(address === undefined ? {} : { url: address }),
-      // §9: nobody publishes the vanity record onto this project's own
-      // address today — `attachDomain` above only tells Cloudflare the name
-      // is allowed to serve here. `deploy-loop.ts` is what turns this into a
-      // record, and it needs the project's subdomain, not one deployment's.
+      // `attachDomain` only lets the name serve here. The deploy loop publishes
+      // the record, which must target the project, not one deployment.
       ...(ensured.value.subdomain === undefined
         ? {}
         : {
@@ -485,13 +369,8 @@ export class PagesDeployAdapter implements DeployAdapter {
   }
 
   /**
-   * What is serving, read from the latest deployment rather than from what was
-   * written.
-   *
-   * The digest comes out of the trigger metadata, which is the only place it
-   * can come from: there is nowhere else on a deployment to put it. A
-   * deployment made by something other than Spindrift therefore reports an
-   * empty digest and shows as drift — which is right, because it is.
+   * What the latest deployment serves. The digest rides the commit message, so a
+   * deployment made elsewhere reports an empty digest and shows as drift.
    */
   async observe(
     target: DeployTarget,
@@ -543,9 +422,7 @@ export class PagesDeployAdapter implements DeployAdapter {
       path: this.projectPath(connection, project),
     });
 
-    // The DELETE's own status is not trusted either way — read the project back
-    // instead. Absent is destroyed; present is a destroy that did not happen
-    // and must not be reported as one.
+    // The DELETE's status is not trusted; the read-back decides.
     const read = await http.json<Envelope<PagesProject>>({
       method: 'GET',
       path: this.projectPath(connection, project),
@@ -578,29 +455,22 @@ export class PagesDeployAdapter implements DeployAdapter {
   }
 
   /**
-   * There is nothing here to run, and saying so is the answer (§17).
-   *
-   * `KINDS_BY_ADAPTER['cloudflare-pages']` is `['website']`, so a job never
-   * reaches this backend and this refusal is unreachable through placement. It
-   * is written anyway, and as a refusal rather than left unimplemented, for the
-   * reason `tail` returns its `none` arm: a contract every adapter answers is a
-   * contract core can call without asking which one it is holding.
+   * A Pages Target runs no jobs, so placement never sends one here. It still
+   * refuses in a sentence, for a caller that skips the kind check.
    */
   async run(_target: DeployTarget, _ref: DeployRef): Promise<StartedRun> {
     return { kind: 'none', because: NOTHING_RUNS };
   }
 
-  /** Nothing runs here, so there is nothing to restart either. */
   async restart(_target: DeployTarget, _ref: DeployRef): Promise<Restarted> {
     return { kind: 'none', because: NOTHING_RUNS };
   }
 
-  /** The same fact from the reading side: no run ever happened here. */
   async executions(_target: DeployTarget, _ref: DeployRef): Promise<JobRuns> {
     return { kind: 'none', because: NOTHING_RUNS };
   }
 
-  /** One pass of §13's checklist and §3's discovery, in one call. */
+  /** The checklist, discovery and surface, from one probe. */
   async inspect(target: DeployTarget): Promise<TargetInspection> {
     const connection = this.connectionOf(target);
     if (connection === null) {
@@ -625,16 +495,12 @@ export class PagesDeployAdapter implements DeployAdapter {
     };
   }
 
-  // --- apply's steps -------------------------------------------------------
-
   /** Fetch the staged bundle and read it into files. Throws; `apply` catches. */
   private async fetchBundle(
     http: CloudHttp,
     location: string,
   ): Promise<readonly BundleFile[]> {
-    // What is fetched and what is *named* part company here on purpose: a
-    // signed URL is a bearer capability, so both sentences below name the
-    // address the artifact carries and never the one minted from it.
+    // Errors name `location`, never the signed URL, which is a bearer capability.
     let url: string;
     try {
       url = await fetchableBundleUrl(
@@ -652,18 +518,13 @@ export class PagesDeployAdapter implements DeployAdapter {
     if (/^https?:\/\//.test(url)) {
       const fetched = await http.bytes(url);
       if (!fetched.ok) {
-        // §6 blames the **platform** for an artifact that cannot be fetched,
-        // and this is exactly that: the build is green and the bytes are not
-        // there.
         throw new ArtifactUnavailable(
           `the artifact at ${location} could not be fetched: ${fetched.message}`,
         );
       }
       return readBundle(fetched.value);
     }
-    // Anything else is a registry reference — the shape every built artifact's
-    // ref has — and the bytes are the artifact's one layer, read with the
-    // federated identity rather than the account credential.
+    // Anything else is a registry ref, and the bytes are its one layer.
     let layer: Uint8Array<ArrayBuffer>;
     try {
       layer = await pullFilesLayer({
@@ -683,17 +544,9 @@ export class PagesDeployAdapter implements DeployAdapter {
   }
 
   /**
-   * The deployment an earlier attempt of this Deploy already created, if any.
-   *
-   * Keyed by {@link DEPLOY_MARKER} in the commit message, which every create
-   * stamps — the same field `observe` reads the digest out of, because it is
-   * the one field a direct upload carries that comes back on a read. One page
-   * deep on purpose: the deployment a re-run is looking for was created
-   * moments ago by an attempt that died, so it is at the top of the list, and
-   * paging the whole history would spend reads bounding a window one page
-   * already bounds. `null` means none was found **or the read was refused** —
-   * the two collapse on purpose, because a deploy blocked on a flaky list read
-   * would trade a bounded duplicate-create window for a new way to be stuck.
+   * The deployment an earlier attempt of this Deploy created, found by
+   * {@link DEPLOY_MARKER} on the first page. `null` also when the read is
+   * refused, so a flaky list never blocks a deploy.
    */
   private async findDeployment(
     http: CloudHttp,
@@ -721,13 +574,8 @@ export class PagesDeployAdapter implements DeployAdapter {
   }
 
   /**
-   * The project, ensured rather than created.
-   *
-   * A project is a durable place and a deploy is a revision of what it serves.
-   * So the only question is whether the place exists, and "it already does" is
-   * this function succeeding — which is also why the existing project's own
-   * production branch is what comes back, rather than the constant this would
-   * have created it with.
+   * The project, created only if absent. An existing project comes back with
+   * its own production branch.
    */
   private async ensureProject(
     http: CloudHttp,
@@ -753,9 +601,8 @@ export class PagesDeployAdapter implements DeployAdapter {
       path: `/accounts/${encodeURIComponent(connection.account)}/pages/projects`,
       body: { name: project, production_branch: PRODUCTION_BRANCH },
     });
-    // Losing a create race is the desired state arriving from somewhere else.
-    // Read it back rather than trusting the conflict's body, so what returns is
-    // a project this function actually saw.
+    // A 409 is a lost create race; read the project back instead of trusting
+    // the conflict's body.
     if (!created.ok && created.kind === 'status' && created.status === 409) {
       const after = unwrap(
         await http.json<Envelope<PagesProject>>({
@@ -774,12 +621,8 @@ export class PagesDeployAdapter implements DeployAdapter {
   }
 
   /**
-   * One deployment, from the manifest the upload produced.
-   *
-   * Multipart because that is what the endpoint takes, and the `branch` field
-   * is what decides this is the live site rather than a preview — a deployment
-   * on any other branch succeeds, answers with a URL, and serves nowhere the
-   * canonical name points.
+   * One deployment from the uploaded manifest. Only the production `branch`
+   * serves the canonical name; any other branch makes a preview.
    */
   private async deploy(
     http: CloudHttp,
@@ -792,9 +635,7 @@ export class PagesDeployAdapter implements DeployAdapter {
     const form = new FormData();
     form.append('manifest', JSON.stringify(manifest));
     form.append('branch', branch);
-    // The one field on a deployment that takes free text and comes back on a
-    // read. See the file header: this is where the digest lives, because there
-    // is nowhere else to put it.
+    // The one free-text field that comes back on a read.
     form.append(
       'commit_message',
       `${DIGEST_MARKER}${desired.artifact.digest} ${DEPLOY_MARKER}${desired.deploy}`,
@@ -814,21 +655,9 @@ export class PagesDeployAdapter implements DeployAdapter {
   }
 
   /**
-   * Put the vanity name on this project, and report what Cloudflare made of it.
-   *
-   * **A 200 here does not mean the name serves.** The response carries a
-   * `status` and it is `initializing` on every first attach — the certificate
-   * has not been issued and the domain answers nothing until it is. Two of the
-   * other states, `blocked` and `error`, are terminal refusals. Reading none of
-   * them is what let a deploy go LIVE announcing `the vanity name
-   * embarrassing.ca is on this project` while that name resolved to nothing,
-   * which is the one failure a person pointing an apex at Pages cannot debug:
-   * every surface they can see says it worked.
-   *
-   * Not a poll. Issuance is bounded by DNS propagation and an HTTP challenge
-   * and Cloudflare publishes no duration for it, so waiting would hold a deploy
-   * open on somebody else's clock — and the site is already serving on its own
-   * `pages.dev` address either way. Pending is reported as pending.
+   * Adds the vanity name and reports its status. A 200 does not mean it serves:
+   * a first attach is `initializing` until the certificate issues, which takes
+   * no published time, so the deploy does not wait for it.
    */
   private async attachDomain(
     http: CloudHttp,
@@ -842,12 +671,8 @@ export class PagesDeployAdapter implements DeployAdapter {
       body: { name: domain },
     });
     if (attached.ok) return domainState(unwrap(attached));
-    // Already on this project is the state being asked for — but *which* status
-    // it is in still matters, and the refusal for a duplicate is undocumented
-    // (409 is a guess; a 400 with an error code is as likely). So the second
-    // call is the answer rather than the status code: if the name is on the
-    // project, this read says so and says how it is doing. Only a name that is
-    // not there makes the POST's own refusal the failure.
+    // The duplicate refusal's status is undocumented, so a read decides: a name
+    // already here reports its state, and only an absent one keeps the error.
     const read = await http.json<Envelope<PagesDomain>>({
       method: 'GET',
       path: `${this.projectPath(connection, project)}/domains/${encodeURIComponent(domain)}`,
@@ -857,15 +682,11 @@ export class PagesDeployAdapter implements DeployAdapter {
       : { ok: false, failure: attached };
   }
 
-  // --- inspect's second half -----------------------------------------------
-
   private discover(
     connection: CloudflarePagesAdapterConnection,
   ): TargetDiscovery {
     return {
-      // Files are served, not run. An empty `arch` excludes no Target on
-      // architecture, which is right: there is nothing here for an architecture
-      // to be wrong about.
+      // An empty `arch` excludes no Target on architecture.
       arch: [],
       gpu: false,
       resourceCeiling: {},
@@ -873,26 +694,19 @@ export class PagesDeployAdapter implements DeployAdapter {
       postgres: false,
       valkey: false,
       egressFiltering: false,
-      // §16's verifiers check images at admission. Nothing is admitted here —
-      // there is no image and no runtime — so reporting an engine would make
-      // `verifiedDeploy` true of a Target that verifies nothing.
+      // No image is admitted here, and an engine would make `verifiedDeploy`
+      // true of a Target that verifies nothing.
       policyEngine: { installed: false, mode: null },
-      // §17: static hosting gets an **honest empty state** rather than a
-      // duration. Zero is that — no process ever wrote a line.
+      // No process ever writes a line here.
       logHistorySeconds: 0,
       servedHosts: connection.servedHosts ?? [],
       // Nothing is pulled: the files were uploaded, and the platform holds them.
       reachableRegistries: [],
-      // §10's reach rule from the other side: a site has no runtime to resolve
-      // a reference with, so it reaches no store — which is why §10's website
-      // exception exists.
+      // A site has no runtime to resolve a secret reference with.
       reachableSecretStores: [] as readonly StoreAdapter[],
     };
   }
 
-  // --- plumbing ------------------------------------------------------------
-
-  /** The one form of a project's resource name every call above hangs off. */
   private projectPath(
     connection: CloudflarePagesAdapterConnection,
     project: string,
@@ -900,7 +714,6 @@ export class PagesDeployAdapter implements DeployAdapter {
     return `/accounts/${encodeURIComponent(connection.account)}/pages/projects/${encodeURIComponent(project)}`;
   }
 
-  /** The API root this Target actually reaches, override or default. */
   private endpointOf(connection: CloudflarePagesAdapterConnection): string {
     return connection.endpoint ?? DEFAULT_ENDPOINT;
   }
@@ -925,24 +738,8 @@ export class PagesDeployAdapter implements DeployAdapter {
 }
 
 /**
- * §13's checklist, as this Target answers it.
- *
- * The same three rows the other tokened backend is assessed against, and the
- * middle one is why they match: `API_TOKEN` is `OIDC_FEDERATION`'s counterpart
- * where there is no federation to check, so a Cloudflare Target reading
- * `OIDC_FEDERATION: unmet` would send an operator to configure a trust
- * relationship that does not exist on either side.
- *
- * One call answers all three, for the reason `cloud/checklist.ts` gives:
- * separate probes are separate chances to be rate-limited and separate answers
- * that can disagree.
- *
- * | The probe said | Unmet | Because |
- * | --- | --- | --- |
- * | `200` | — | the API answered, the token may act, and the account exists |
- * | `401`/`403` | `API_TOKEN` | the bearer is refused, or is not scoped to Pages |
- * | `404` | `VESSEL` | there is no such account |
- * | anything else | all three | nothing was established, and saying so beats guessing |
+ * The prerequisite checklist from one probe. `API_TOKEN` stands in for
+ * `OIDC_FEDERATION`, since the platform has no federation to check.
  */
 export function pagesChecklist(
   probe: CloudResponse<unknown>,
@@ -952,13 +749,8 @@ export function pagesChecklist(
 }
 
 /**
- * Whether that same probe established the account carries this surface.
- *
- * Never `absent`, and that is the honest answer rather than a gap: Pages is not
- * a per-account switch that can be off, so no refusal means "this account does
- * not do static hosting". An account that answers carries it; one that does not
- * has established nothing, and reading a refusal as an absence would delete a
- * Target over an expired token.
+ * Whether the probe shows the account carries Pages. Never `absent`: Pages
+ * cannot be switched off, and a refusal is not an absence.
  */
 export function pagesSurfaceProbe(
   probe: CloudResponse<unknown>,
@@ -967,20 +759,13 @@ export function pagesSurfaceProbe(
   return tokenSurfaceProbe(probe, subjectOf(account));
 }
 
-/** What both answers above are said about — the product and the boundary. */
 function subjectOf(account: string): TokenChecklistSubject {
   return { service: SERVICE_NAME, vessel: account, noun: 'account' };
 }
 
 /**
- * Why nothing here can be fetched, said about the address that failed.
- *
- * The three cases the other files backends distinguish, worded for this one: no
- * address at all, a bundle staged somewhere nothing outside one process
- * reaches, and a built artifact homed only on a registry this identity cannot
- * read. Telling the middle one apart is the point — it used to take the
- * registry sentence, which sends an operator to a credential problem over a
- * bundle sitting on a disk.
+ * Why nothing can be fetched: no address, a bundle on one installation's own
+ * disk, or only registries this identity cannot read.
  */
 function unfetchableArtifact(
   artifact: Artifact,
@@ -997,17 +782,13 @@ function unfetchableArtifact(
 }
 
 /**
- * One project per (App, Component), within what the platform allows.
- *
- * Lowercased because a project name is a DNS label on the platform's own
- * subdomain, and `workloadName` is fed an App and a Component that core does
- * not case-fold.
+ * One project per (App, Component), lowercased because the name is a DNS label
+ * under the platform's own subdomain.
  */
 export function projectName(desired: DesiredState): string {
   return workloadName(desired, PROJECT_NAME_LIMIT).toLowerCase();
 }
 
-/** The adapter's own handle on what `apply` placed — opaque to core (§6). */
 function refOf(
   connection: CloudflarePagesAdapterConnection,
   project: string,
@@ -1015,7 +796,6 @@ function refOf(
   return scopedRef(connection.account, 'pages', project);
 }
 
-/** The project this ref names on this connection, or `null` for another's. */
 function parseRef(
   connection: CloudflarePagesAdapterConnection,
   ref: DeployRef,
@@ -1024,13 +804,8 @@ function parseRef(
 }
 
 /**
- * §6's phase, from the stage the platform reports.
- *
- * A direct upload has no build to watch, so the interesting states are few: the
- * deploy stage having succeeded is `LIVE`, any stage having failed or been
- * cancelled is `FAILED`, and everything else is still on its way. `WAITING`
- * rather than `APPLYING` for the in-between, because the bytes are already
- * there and what remains is the platform's own propagation.
+ * Neither failed nor deployed is `WAITING`, not `APPLYING`: the bytes are
+ * uploaded, and only the platform's own propagation remains.
  */
 function phaseOf(deployment: PagesDeployment): DeployPhase {
   const status = deployment.latest_stage?.status;
@@ -1049,5 +824,4 @@ function markerIn(message: string | undefined, marker: string): string {
   return found === undefined ? '' : found.slice(marker.length);
 }
 
-/** Re-exported so a caller need not know which file the refusal shape lives in. */
 export type { CloudFailure };

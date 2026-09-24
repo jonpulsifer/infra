@@ -1,28 +1,18 @@
 /**
- * The read on red (§6).
- *
- * "**Spindrift diagnoses on red**: on failure or stall it reads pods and events
- * (or the cloud log) **once** and fills in the detail. A read on red, not a
- * continuous watch." Two facts make that read worth doing at all: the delivery
- * object says a release failed without saying why, and **cluster events expire
- * in about an hour** — §12 stores the diagnosis precisely because the platform
- * will not keep it.
- *
- * Everything here is one pass over what two API calls returned. There is no
- * retry, no second look, and no branch that waits: a diagnosis that took time
- * to gather would be a watch wearing a different name.
+ * Names why a release went red from one read of its pods and events, with no
+ * retry and no wait. Cluster events expire in about an hour, so callers keep
+ * the diagnosis in the verdict's `debug`.
  */
 import type { Blame, FailureReason } from '../contract.ts';
 import { blameFor } from '../contract.ts';
 import type { KubernetesObject } from './api.ts';
 
-/** What one read on red concluded. */
 export interface Diagnosis {
   readonly reason: FailureReason;
   readonly blame: Blame | null;
   /** The sentence the developer reads, in the platform's own words. */
   readonly detail: string;
-  /** The raw payload, kept for the operator (§6, §12). */
+  /** The raw payload, kept for the operator. */
   readonly debug: unknown;
 }
 
@@ -45,13 +35,8 @@ const STARTUP_WAITING = new Set([
 ]);
 
 /**
- * Event reasons that mean something refused to admit the workload.
- *
- * Exported because the datastore adapter reads the same warnings for the same
- * reason — an operator whose children are refused reports that it is still
- * working, forever. One list, because a refusal is a refusal whichever
- * controller was owed the pod, and two lists would be two chances to learn
- * about a new admission verdict in only one of them.
+ * Event reasons that mean admission refused the workload. The datastore adapter
+ * shares the list, so a new refusal is learned in one place.
  */
 export const REJECTION_EVENTS = new Set([
   'FailedCreate',
@@ -78,12 +63,8 @@ interface PodEvent {
 }
 
 /**
- * Decide the reason from pods and events.
- *
- * Total by construction: every read ends in a reason, and it is allowed to
- * because its caller has already been told by the delivery object that this
- * release failed. {@link evidence} is the half of this that does not need that
- * guarantee, for the one caller that does not have it.
+ * Always names a reason, which is sound only once the delivery object has said
+ * the release failed. Without that verdict, call {@link evidence}.
  */
 export function diagnose(
   pods: readonly KubernetesObject[],
@@ -92,13 +73,8 @@ export function diagnose(
 ): Diagnosis {
   return (
     evidence(pods, events, fallbackDetail) ??
-    // No pod was ever created. Something between the release and the scheduler
-    // refused it — an admission webhook, a quota, an invalid spec — and §6 puts
-    // all three under one reason.
-    //
-    // Sound only because something has already declared this release failed.
-    // Absent that, "no pods" is equally "no pods *yet*", which is exactly why
-    // this branch is here rather than in `evidence`.
+    // No pod was created, so something between the release and the scheduler
+    // refused it. Without a failed verdict, no pods could mean no pods yet.
     conclude('REJECTED', fallbackDetail ?? 'the release produced no pods', {
       pods,
       events,
@@ -107,25 +83,8 @@ export function diagnose(
 }
 
 /**
- * The part of the read that rests on what was observed, or `null` when nothing
- * was.
- *
- * The order is the order the evidence is trustworthy in. A container that could
- * not pull its image is the least ambiguous thing in the list, and it is also
- * the one where every instinct is wrong — §6 calls `ARTIFACT_UNAVAILABLE` the
- * hardest justification for `blame` existing, because the build is green and
- * the developer is about to go and read their own code.
- *
- * Split out from {@link diagnose} for the deadline, which is the one red this
- * module is reached on without a verdict behind it. Handing that read to
- * `diagnose` would let its last branch conclude `REJECTED` — blame
- * `developer` — from an empty pod list, and an empty pod list under a deadline
- * is usually a chart still resolving or a wedged controller. Indicting the
- * developer for a platform stall is worse than the `TIMEOUT` it replaced,
- * which at least indicts nobody.
- *
- * Every branch below names something that was seen, so each is as true at a
- * deadline as it is at a verdict.
+ * `null` when nothing observed names a cause: at a deadline, no pods usually
+ * means a platform stall. Checks run from least to most ambiguous evidence.
  */
 export function evidence(
   pods: readonly KubernetesObject[],
@@ -175,8 +134,6 @@ export function evidence(
     );
   }
 
-  // Pods exist, none of them is ready, and nothing said why: the workload came
-  // up and never passed readiness, which is exactly `UNHEALTHY` (§6).
   if (
     statuses.length > 0 &&
     statuses.every((status) => status.ready !== true)

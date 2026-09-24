@@ -1,27 +1,6 @@
 /**
- * The adapters a running installation actually has (§6, §20).
- *
- * `CommandContext.adapters` is the whole of the far side a command may reach,
- * and until now nothing assembled one outside a test — `src/web/serve.ts` threw
- * rather than fabricating a registry, because a placeholder would have let a
- * command half-run. This is what replaces that throw.
- *
- * The shape of the answers is the interesting part, and it comes from
- * `AdapterRegistry`'s own contract: **lookups return `null` rather than
- * throwing**, because an installation with no adapter for a Target's declared
- * type is a configuration fact a command must report, not an exception it
- * should propagate. All three deploy backends, all three build routes, and
- * both datastore adapters are wired below; `null` here now means "this
- * installation didn't configure one" — no OAuth store for hosted CI, no route
- * by that name, `static`'s deliberate absence from `datastoreAdapters` — and
- * every caller already handles that: a Target whose adapter is missing is a
- * non-candidate with a stated reason (§3), which is exactly right for a
- * configuration gap.
- *
- * §13's one auth mode is why there is no credential in this file: "native OIDC
- * federation, nothing stored." The cluster Spindrift runs on is reached with
- * its own **projected** service account token, read from disk per request
- * because it rotates, and a projected token is not a held credential (§13).
+ * The adapters a running installation has. A lookup answers `null`, never a
+ * throw, when the installation configured none, so a command can report the gap.
  */
 
 import { createHash } from 'node:crypto';
@@ -89,25 +68,16 @@ import {
 import { OnePasswordStore } from './store/onepassword.ts';
 import { VercelSecretStore } from './store/vercel.ts';
 
-/**
- * Where Kubernetes projects a pod's service account token.
- *
- * Read on every request rather than once at boot: a projected token has a short
- * lifetime and the kubelet rewrites the file, so a value cached at start-up
- * stops working part way through the day — the classic failure this path exists
- * to avoid.
- */
 export const SERVICE_ACCOUNT_TOKEN_PATH =
   '/var/run/secrets/kubernetes.io/serviceaccount/token';
 /** Installer-declared path for the reconciler's audience-scoped token. */
 export const IDENTITY_TOKEN_PATH_VAR = 'SPINDRIFT_IDENTITY_TOKEN_PATH';
 
-/** Raised when something reaches for an adapter this installation cannot build. */
 export class AdapterUnavailableError extends Error {
   override readonly name = 'AdapterUnavailableError';
 }
 
-/** Reads the projected token from disk, freshly, on every call. */
+/** Reads the token file on every call, since the kubelet rotates it. */
 export function projectedServiceAccountToken(
   path: string = SERVICE_ACCOUNT_TOKEN_PATH,
 ): TokenProvider {
@@ -124,11 +94,8 @@ export function projectedServiceAccountToken(
 }
 
 /**
- * The Kubernetes credential projected for this process.
- *
- * The installer uses an explicit audience and mount rather than automounting a
- * default credential. Falling back keeps non-chart development environments
- * compatible with Kubernetes' conventional service-account path.
+ * The installer's audience-scoped token, or the default service account path
+ * outside the chart.
  */
 export function installationServiceAccountToken(
   env: Record<string, string | undefined> = Bun.env,
@@ -139,36 +106,28 @@ export function installationServiceAccountToken(
 
 export interface RegistryOptions {
   readonly manifest: InstallationManifest;
-  /** Required for the sealed GitHub App identity and registry credentials. */
+  /** Without it, no GitHub App identity, registry credentials or build outbox. */
   readonly db?: Database;
   /** Shared with commands so token expiry and rows agree on one time source. */
   readonly clock?: import('../commands/types.ts').Clock;
-  /** Injected so a test can stand a fake far side behind the real client. */
+  /** The cluster token; defaults to the projected service account token. */
   readonly token?: TokenProvider;
-  /** Injected for the same reason, for the repository host's transport. */
   readonly fetch?: Fetcher;
-  /** Defaults to the process environment; a test passes its own. */
+  /** Defaults to the process environment. */
   readonly env?: Record<string, string | undefined>;
-  /** Likewise for the store's own access path, which authorizes separately. */
+  /** Defaults by store adapter; see {@link storeTokenFor}. */
   readonly storeToken?: () => string | Promise<string>;
-  /** And for the two edge platforms, whose bearers are neither of the above. */
   readonly vercelToken?: TokenProvider;
   readonly cloudflareToken?: TokenProvider;
-  /**
-   * And for the cloud APIs — the runtimes a Target is deployed to and the build
-   * service a cloud build is submitted to, which are one credential.
-   */
+  /** One federated token for cloud runtimes and the cloud build service. */
   readonly cloudToken?: () => string | Promise<string>;
-  /** Source depot wiring, supplied by the live source-ingestion installation. */
+  /** Replaces the default repository source stager. */
   readonly source?: RepositorySourceStager;
 }
 
 /**
- * Assemble the registry one installation has.
- *
- * Adapters are built once and shared: they hold no per-request state, and their
- * one credential is a provider that is called per request rather than a value
- * captured here.
+ * Adapters are built once and shared: they hold no per-request state, and each
+ * credential is a provider called per request.
  */
 export function createAdapterRegistry(
   options: RegistryOptions,
@@ -179,27 +138,16 @@ export function createAdapterRegistry(
       options.token ?? installationServiceAccountToken(options.env ?? Bun.env),
   });
 
-  // §9's one DNS publisher, addressed once against the control-plane
-  // cluster's own Target — never per Target the way `kubernetes` above is,
-  // because a platform-named Target has no cluster of its own for the
-  // `DNSEndpoint` object to ride along with, so every publish lands on the
-  // same one. The same token as `kubernetes` above: the control-plane vessel
-  // is the cluster this process already runs on (§19), so the projected
-  // service-account token that reaches it reaches this too.
+  // One publisher on the control-plane cluster, since a platform-named Target
+  // has no cluster. This process runs there, so the same token reaches it.
   const dns = controlPlaneDnsPublisher(
     options.manifest,
     options.token ?? installationServiceAccountToken(options.env ?? Bun.env),
     options.fetch,
   );
 
-  // The connector exists where an identity can: an adopted App pasted into
-  // the installation Secret (`SPINDRIFT_GITHUB_APP_ID` + its key), or the
-  // sealed `github_app` row — Postgres for the ciphertext and an
-  // installation-Secret keyring to open it. Either way the identity and
-  // signing key are read **per mint**, never captured here: the row starts
-  // empty and is written mid-flight by the setup route while this registry
-  // keeps running, so a construction-time capture would answer "no App
-  // identity" until a restart nobody was told to run.
+  // The App identity comes from the installation Secret or the sealed
+  // `github_app` row, read per mint: setup writes the row while this runs.
   const env = options.env ?? Bun.env;
   const keyring = CredentialKeyring.fromEnvironment(env);
   const appAuth =
@@ -219,8 +167,8 @@ export function createAdapterRegistry(
           ...(options.fetch ? { fetch: options.fetch } : {}),
         })
       : null;
-  // Held as its concrete type because the hosted build route needs Actions
-  // calls beyond `RepositoryHost`; all calls share the same minting provider.
+  // The concrete type, because the hosted build route needs Actions calls
+  // beyond `RepositoryHost`.
   const app =
     appAuth === null
       ? null
@@ -246,12 +194,8 @@ export function createAdapterRegistry(
           repositories: () => app.availableRepositories(),
           installationFor: (fullName) => app.installationFor(fullName),
         };
-  // **Not the projected service account token this cluster is reached with.**
-  // That one is minted for this cluster's own API server and a cloud API
-  // refuses it; the failure would be a `401` on every cloud deploy, blamed on
-  // the Target. What belongs here is a federated token, which is what
-  // `cloudTokenFor` mints — see `@repo/archive/federation`. The cloud build route
-  // submits with it too, so it is resolved before the routes are built.
+  // A cloud API refuses the projected cluster token with a 401, so this is a
+  // federated one. Resolved first because the cloud build route uses it too.
   const cloud = cloudTokenFor(options);
 
   const store = createSecretStore(
@@ -260,11 +204,8 @@ export function createAdapterRegistry(
     options.fetch,
   );
 
-  // Built beside the manifest's store rather than instead of it, because §10
-  // makes the store a *Target* property: an installation can hold both, and a
-  // Component's own placement decides which one its config travels through.
-  // `null` where no team is named, which is what makes an installation with no
-  // Vercel Targets carry no Vercel store.
+  // Beside the manifest's store, since each Target reaches its own. `null` when
+  // no team is named.
   const team = vercelTeam(options.env ?? Bun.env);
   const vercelStore =
     team === null
@@ -278,32 +219,24 @@ export function createAdapterRegistry(
   const supplyChain = new CoreSupplyChain(
     new SlsaVerifier(),
     new CosignSigner({ key: options.manifest.supplyChain.signer }),
-    // §16: admission re-verifies the recorded signature against the recorded
-    // digest, pinned to Spindrift's own signer. The signer and verifier are
-    // the same pinned binary, so this is the process boundary around the
-    // verify half, not a second trust root.
+    // Admission re-verifies the recorded signature against the recorded digest,
+    // pinned to the manifest's signer.
     new SpindriftSignatureVerifier({
       signerKey: options.manifest.supplyChain.signer,
     }),
   );
 
-  // A fourth consumer of that one provider rather than a fourth credential.
   const discovery = new GcpDiscovery({
     token: cloud,
     ...(options.fetch ? { fetch: options.fetch } : {}),
   });
 
-  // The same relationship one vendor over: the account bearer the Pages
-  // adapter and the Workers deployer already hold, asked what the *account*
-  // carries rather than what one surface on it does.
   const cloudflare = cloudflareAccounts({
     token: options.cloudflareToken ?? cloudflareToken(options.env ?? Bun.env),
     ...(options.fetch ? { fetch: options.fetch } : {}),
   });
 
-  // The bosun route's outbox: built once, over the same `db` the registry
-  // credential store is, and `null` under the identical condition —
-  // "no database, no durable state this route can claim against".
+  // The bosun route claims against durable state: no database, no outbox.
   const outbox =
     options.db === undefined
       ? null
@@ -311,18 +244,16 @@ export function createAdapterRegistry(
           (options.clock ?? { now: () => new Date() }).now(),
         );
 
-  // §16's ordered list: the manifest's order *is* the admin rank, so the map is
-  // built from it in order and `buildRouteProfiles` reads it back the same way.
+  // The manifest's order is the admin rank; `buildRouteProfiles` reads it the
+  // same way.
   const buildRoutes = new Map<string, BuildAdapter>();
   for (const route of options.manifest.build.routes) {
     const built = createBuildRoute(route, options, app, cloud, outbox);
     if (built !== null) buildRoutes.set(route.name, built);
   }
 
-  // The two cloud adapters hold no per-Target state either: each Target's
-  // connection carries its own endpoint and project, so one instance drives
-  // every connected project the same way the cluster adapter drives every
-  // cluster.
+  // Each Target's connection carries its own endpoint and project, so one
+  // instance per adapter serves every Target.
   const deployAdapters: Partial<Record<TargetAdapter, DeployAdapter>> = {
     kubernetes,
     cloudrun: new CloudRunDeployAdapter({
@@ -331,30 +262,19 @@ export function createAdapterRegistry(
     }),
     static: new StaticDeployAdapter({
       token: cloud,
-      // The one adapter that also reads the source depot: a supplied upload
-      // was never built, so its bytes are a `gs://` object rather than a
-      // registry reference, and fetching one takes a signature rather than a
-      // bearer. The federation itself, because signing happens *before*
-      // impersonation — `storage/signed-url.ts` says why.
+      // A supplied upload is a `gs://` object, read by a URL signed with the
+      // federation itself, before impersonation.
       federation: options.manifest.cloud.federation,
       ...(options.fetch ? { fetch: options.fetch } : {}),
     }),
-    // The one adapter with two identities: the platform is driven with the
-    // installation's own bearer, and the artifact is read out of the artifacts
-    // registry with the federated token every other adapter already holds. The
-    // federation is neither of those — it is the signature a supplied upload's
-    // `gs://` object takes, the same one the static backend above needs.
+    // The edge backends drive the platform with its own bearer and read the
+    // artifact registry with the federated token.
     vercel: new VercelDeployAdapter({
       token: options.vercelToken ?? vercelToken(options.env ?? Bun.env),
       artifactToken: cloud,
       federation: options.manifest.cloud.federation,
       ...(options.fetch ? { fetch: options.fetch } : {}),
     }),
-    // The other edge backend, with the same two identities as the one above:
-    // the platform is driven with the installation's own bearer, and the
-    // artifact is read out of the artifacts registry with the federated token.
-    // The federation is neither of those — it is the signature a supplied
-    // upload's `gs://` object takes.
     'cloudflare-pages': new PagesDeployAdapter({
       token: options.cloudflareToken ?? cloudflareToken(options.env ?? Bun.env),
       artifactToken: cloud,
@@ -363,11 +283,8 @@ export function createAdapterRegistry(
     }),
   };
 
-  // §11's lifecycle, keyed the way the deploy adapters are. Both static
-  // hosting adapters are absent rather than mapped to a refusing one: neither
-  // has a runtime to dial a datastore from, so a Datastore placed there is not
-  // an unfinished path but a placement that never made sense — and `null`
-  // already says exactly that.
+  // Absent adapters answer `null`: static hosting has no runtime to dial a
+  // datastore from.
   const datastoreAdapters: Partial<Record<TargetAdapter, DatastoreAdapter>> = {
     kubernetes: new KubernetesDatastoreAdapter({
       token:
@@ -387,76 +304,32 @@ export function createAdapterRegistry(
       return datastoreAdapters[adapter] ?? null;
     },
 
-    /**
-     * The build route the installation configured under that name (§4).
-     *
-     * §4 makes the set of routes an installation's configuration rather than a
-     * closed vocabulary, so an unknown name is answered with `null` and
-     * `dispatchBuild` prints "this installation has no build route named X".
-     * The same `null` covers a route this installation configured but cannot
-     * construct — a hosted-CI route with no OAuth store — because the two are one
-     * fact to whoever is trying to build: the route is not available here.
-     */
+    /** An unknown route and one this process cannot construct both answer `null`. */
     build(route: string): BuildAdapter | null {
       return buildRoutes.get(route) ?? null;
     },
 
-    /**
-     * §10's store of record, built from the access path the manifest names.
-     *
-     * One today: the manifest configures a single store, so every other adapter
-     * answers `null` — and a Target that reaches only those is a Target this
-     * installation cannot deliver config to, which is a configuration fact a
-     * command reports rather than an exception it should propagate.
-     *
-     * Built once, like the deploy adapters and for the same reason: it holds no
-     * per-request state, and its credential is a provider called per request
-     * rather than a value captured here.
-     */
     store(adapter: StoreAdapter): SecretStore | null {
-      // The edge platform's own environment, which is a store this
-      // installation has whether or not its manifest selected one: §10 makes
-      // the store a Target property, and a Vercel Target reaches exactly this
-      // one and nothing else — its functions read no reference, so no other
-      // store could deliver to them.
+      // A Vercel Target's functions read no reference, so only the platform's
+      // own environment can deliver to them, whatever the manifest selects.
       if (adapter === 'vercel') return vercelStore;
       return adapter === options.manifest.secretStore.adapter ? store : null;
     },
 
-    /**
-     * §15's repository host, or `null` when durable OAuth is not configured.
-     *
-     * `null` rather than a throw, following the same rule the other lookups
-     * do: an installation with no repository integration is a configuration
-     * fact, and `connectRepository` reports it as a refusal an operator can
-     * act on.
-     */
+    /** `null` when the installation has no GitHub App identity. */
     repository(): RepositoryHost | null {
       return repositoryHost;
     },
 
-    /**
-     * §16's registries answer their own distribution API, with no credential
-     * and no adapter of their own. `options.fetch` is what a test substitutes,
-     * exactly as every other far side here takes it.
-     */
     registryTransport() {
       return options.fetch ?? fetch;
     },
 
-    /**
-     * Both halves or nothing, the same condition the OAuth connector is built
-     * under: Postgres for the ciphertext and an installation-Secret keyring to
-     * open it. An installation missing either has nowhere to keep a registry
-     * token durably, and the commands say so rather than keeping one in clear.
-     */
+    /** `null` without both a database and a keyring: no token is kept in clear. */
     registryCredentials() {
       const now = () => (options.clock ?? { now: () => new Date() }).now();
-      // Stored rows only. GHCR accepts no App installation token — it
-      // authenticates classic PATs, plus each Actions run's own
-      // `GITHUB_TOKEN`, which is why the hosted route self-authorizes `ghcr`
-      // and every other route needs a stored credential an operator pasted.
-      // A mint that can never be accepted would be a lie kept wired.
+      // Stored rows only: GHCR accepts no App installation token, only classic
+      // PATs and an Actions run's own `GITHUB_TOKEN`.
       return keyring === null || options.db === undefined
         ? null
         : registryCredentialStore(options.db, keyring, now);
@@ -465,26 +338,14 @@ export function createAdapterRegistry(
     source() {
       if (options.source !== undefined) return options.source;
       if (app === null) return null;
-      // §15 stages one immutable bundle "for either builder", so a repository
-      // commit lands in the same durable depot an upload does. It is the same
-      // fix and the same reason: a bundle on this pod's disk is unfetchable by
-      // a hosted runner whatever kind of source produced it.
+      // Commits stage into the same durable depot as uploads, since a hosted
+      // runner cannot fetch a bundle from this pod's disk.
       const depot = sourceDepotFor(options.manifest);
       const db = options.db;
       const defaultSourceStager: RepositorySourceStager = {
         async stageRepository(input) {
-          // The depot is content-addressed and immutable, so a commit already
-          // staged is already the answer — one metadata round trip instead of
-          // a tarball, a gunzip, a gzip and an upload. Without this, one push
-          // to a repository hosting N Apps fetched the same bytes N times,
-          // because `dispatchAutoDeploys` calls `deployApp` once per App and
-          // nothing between them remembered the commit.
-          //
-          // Nothing is skipped on a hit that would have to happen again: the
-          // source receipt is keyed on the bundle digest and is durable, so
-          // the one that was signed when these bytes were actually fetched is
-          // both already stored and the more honest of the two — it names when
-          // the far side was asked, not when a sibling App re-asked.
+          // The depot is content-addressed, so a staged commit is reused, not
+          // refetched once per App on a push. Its source receipt is already stored.
           const cached =
             db === undefined || depot === null
               ? null
@@ -499,19 +360,12 @@ export function createAdapterRegistry(
               credential: input.ref,
             },
             {
-              // The host's gzip wrapper is not stable between fetches, and §16
-              // digests exactly what is staged — so the wrapper is re-framed
-              // deterministically here, at the one seam that sees the bytes
-              // before the digest does. Same commit, same digest, same depot
-              // object, however many times it is staged.
+              // The host's gzip wrapper differs between fetches, so it is
+              // reframed deterministically before the digest is taken.
               fetcher: {
                 async fetchExactCommit(fetchInput) {
-                  // Retried here rather than inside the client, and here
-                  // rather than at either call site: this is where the archive
-                  // download actually happens, and both callers turn whatever
-                  // reaches them into a `NOT_BUILDABLE` an operator has to
-                  // press a button to undo. A reset connection partway through
-                  // a large tarball is the case in mind.
+                  // Retried here, at the download: both callers turn a failure
+                  // into a `NOT_BUILDABLE` an operator must clear by hand.
                   const fetched = await retryTransient(() =>
                     app.fetchExactCommit(fetchInput),
                   );
@@ -521,14 +375,12 @@ export function createAdapterRegistry(
               depot: {
                 async putImmutable(item) {
                   const archived = await stageArchiveBytes(
-                    // A gzipped tar, because that is what the repository host's
-                    // tarball endpoint answers with and what the reusable
-                    // workflow's `tar -xz` expects.
+                    // The host's tarball endpoint answers with a gzipped tar,
+                    // and the reusable workflow runs `tar -xz`.
                     `bundle-${item.digest.replace('sha256:', '')}.tgz`,
                     item.bytes,
                     depot,
-                    // Repository bundles expire (§15); the retention the domain
-                    // declared is what routes them under the expiring prefix.
+                    // The declared retention routes the bundle under the expiring prefix.
                     item.retention,
                   );
                   return { location: archived.location };
@@ -582,44 +434,18 @@ export function createAdapterRegistry(
     },
 
     /**
-     * The reads that answer what an operator would otherwise type (§20).
-     *
-     * Built on the same `cloud` provider resolved above, not on a second one:
-     * that is what makes discovery share `federation.ts`'s cache — one token
-     * exchange an hour for the whole process — instead of re-running the STS
-     * and impersonation round trip on every question asked.
-     *
-     * Never `null` here, even where this installation configured no federation.
-     * `cloudTokenFor` answers that case with a provider that refuses, and
-     * `CloudHttp` turns a refusing provider into a transport failure carrying
-     * its own sentence — so the screen reads "could not be reached, because…"
-     * rather than a client that is silently absent. `null` remains in the
-     * signature for the registries that do not build one at all.
+     * Shares `cloud` and its token cache. Without federation the provider
+     * refuses, so the screen says why a cloud is unreachable.
      */
     discovery(): GcpDiscovery {
       return discovery;
     },
 
-    /**
-     * Reading a connected Cloudflare account, on the same bearer its surfaces
-     * are driven with (§13).
-     *
-     * A reader rather than an adapter, and account-shaped rather than
-     * Pages-shaped, because what it answers is the boundary's: which zones are
-     * in it, whether Workers is switched on, what Pages already holds. The
-     * Target loop asks a surface; this is what the Vessel loop asks the
-     * account.
-     */
+    /** Reads a connected Cloudflare account, on the bearer its surfaces use. */
     cloudflare(): CloudflareAccounts {
       return cloudflare;
     },
 
-    /**
-     * §Functions' two deployers, built on the same Cloudflare and cloud
-     * providers every other far side above uses — a Cloudflare Target's
-     * bearer and `cloudTokenFor`'s federated one, not a credential of their
-     * own.
-     */
     functions() {
       return functionsFor({
         manifest: options.manifest,
@@ -630,11 +456,7 @@ export function createAdapterRegistry(
       });
     },
 
-    /**
-     * The same both-halves-or-nothing condition `registryCredentials` is built
-     * under, minus the database: the envelope lives on the function's own row,
-     * so all this needs is a keyring to seal it with.
-     */
+    /** Needs only a keyring: the sealed envelope lives on the function's row. */
     functionEnv() {
       return keyring === null ? null : functionEnvSealer(keyring);
     },
@@ -650,12 +472,8 @@ export function createAdapterRegistry(
 }
 
 /**
- * The build routes this installation has, in rank order, as selection sees them.
- *
- * Derived from the manifest rather than from the registry map, so a route the
- * installation configured but cannot construct still appears — placement should
- * be able to say "the hosted route is configured and this process has no OAuth
- * store" rather than silently pretending the route was never named.
+ * The configured build routes in rank order, including any this process cannot
+ * construct, so placement can say why one is unavailable.
  */
 export function buildRouteProfiles(
   manifest: InstallationManifest,
@@ -695,22 +513,9 @@ function createBuildRoute(
 }
 
 /**
- * §9's one `DnsPublisher`, from the manifest's own seed for the control-plane
- * vessel's Kubernetes Target.
- *
- * From the manifest and not a database read: `manifest.targets`/`.vessels`
- * already carry connection facts an operator seeded, "ordinary,
- * credential-free platform configuration" that "makes the connection
- * reproducible from Git" (`manifest.schema.ts`'s `targetSeedSchema`). The
- * control-plane vessel is the one Target every installation can state this
- * way honestly: it is the cluster this process already runs on (§19), so
- * there is nothing an install-time chart could not already know about it —
- * unlike an App's own Target, which an operator connects after the fact.
- *
- * `null` where the manifest states no `connection` for that Target, or no
- * `location` for that vessel — an installation that relies on connecting it
- * through the product instead of declaring it here. `deploy-loop.ts` reads
- * that `null` as one more configuration fact to log, not a hole to fill in.
+ * The DNS publisher on the control-plane vessel's Kubernetes Target, from the
+ * manifest seed. `null` when the manifest gives that Target no `connection` or
+ * its vessel no `location`.
  */
 function controlPlaneDnsPublisher(
   manifest: InstallationManifest,
@@ -722,9 +527,7 @@ function controlPlaneDnsPublisher(
       candidate.vessel === manifest.installation.controlPlaneVessel &&
       candidate.adapter === 'kubernetes',
   );
-  // The predicate above already guarantees this; restated so the compiler
-  // narrows the discriminated union the same way — `.find`'s own type does
-  // not carry a predicate's internal checks into its result.
+  // `.find` does not narrow the union, so the adapter is checked again.
   if (target === undefined || target.adapter !== 'kubernetes') return null;
   if (target.connection === undefined) return null;
 
@@ -740,34 +543,15 @@ function controlPlaneDnsPublisher(
       token,
       ...(fetch === undefined ? {} : { fetch }),
     }),
-    // The delivery namespace — where this cluster's Flux or Argo objects are
-    // created — rather than the Target's legacy catch-all `namespace`: it is
-    // the namespace this installation's own operator already reconciles, so
-    // a `DNSEndpoint` beside its `HelmRelease`s and `Application`s is one more
-    // object under the same GitOps eye instead of a stray one in an App's.
+    // The namespace the cluster's GitOps operator already reconciles, not the
+    // Target's catch-all `namespace`.
     namespace: target.connection.delivery.namespace,
   });
 }
 
 /**
- * How this installation reaches a cloud API — a Target's control plane, and the
- * build service the cloud build route submits to.
- *
- * **No credential, in either arm.** §13 settles one auth mode — "native OIDC
- * federation, nothing stored" — and `@repo/archive/federation` is the whole of it:
- * a projected token, exchanged, optionally impersonating. An installation that
- * configured no federation gets a provider that refuses rather than one that is
- * absent, because §13's "connect always succeeds" means a cloud Target still
- * exists and still has to be able to say why it is unreachable.
- *
- * **No `SPINDRIFT_BUILD_TOKEN`, and that is the point.** The cloud build route
- * once read a bearer token out of the environment under that name, and no
- * installation ever set it: the chart renders no such Secret key, so a route
- * configured against a real build service would have refused its first build
- * with a sentence about a variable nothing writes. The build service is a cloud
- * API in the shared artifacts project like any other, the workload identity
- * this process already carries is granted on it, and a second stored credential
- * beside it is exactly the credential §13 says does not exist.
+ * Cloud APIs are reached by federation, never a stored credential. Without it
+ * the provider refuses, so a cloud Target still connects and says why.
  */
 function cloudTokenFor(options: RegistryOptions): TokenProvider {
   if (options.cloudToken !== undefined) return options.cloudToken;
@@ -786,14 +570,7 @@ function cloudTokenFor(options: RegistryOptions): TokenProvider {
   });
 }
 
-/**
- * The bearer token core writes to a 1Password Connect store with.
- *
- * Read per call, never captured: the installation Secret is the only place it
- * lives, and a value read once at boot is a value that stops working the moment
- * the Secret is rotated. The name is the software's, identical in every
- * installation — it names no installation, so it is not a §20 literal.
- */
+/** The 1Password Connect bearer, read per call so a rotated Secret applies. */
 export const STORE_TOKEN_VARIABLE = 'SPINDRIFT_STORE_TOKEN';
 
 export function storeToken(env: Record<string, string | undefined> = Bun.env) {
@@ -809,39 +586,15 @@ export function storeToken(env: Record<string, string | undefined> = Bun.env) {
 }
 
 /**
- * The bearer the edge platform is driven with.
- *
- * Read per call and never captured, exactly like {@link storeToken} and for the
- * identical reason: the installation Secret is the only place it lives, and a
- * value read once at boot stops working the moment the Secret is rotated. It is
- * the same kind of credential as the Connect token — a long-lived bearer an
- * operator issues — rather than the federated one every cloud Target uses,
- * because the platform federates outward only and offers nothing to exchange a
- * projected token for.
- *
- * A Target on an installation that set none is not absent: the provider refuses,
- * `CloudHttp` turns that into a transport failure carrying this sentence, and
- * the Target connects with its whole checklist unmet and the reason stated —
- * §13's "connect always succeeds" rather than an adapter that is quietly
- * missing. Exactly what `cloudTokenFor` does for an installation with no
- * federation.
+ * The Vercel bearer, read per call like {@link storeToken}. Vercel offers no
+ * inbound federation, so this is a long-lived operator token.
  */
 export const VERCEL_TOKEN_VARIABLE = 'SPINDRIFT_VERCEL_TOKEN';
 
 /**
- * The team a Vercel config store writes projects' environments in.
- *
- * Installation-wide, and stated as an environment variable beside the bearer
- * for the reason the bearer is one: a team is the boundary that one credential
- * acts in, so an installation holding a single Vercel token effectively has a
- * single team. A Target's connection still carries its own `team` — the deploy
- * adapter reads that, because a deploy *is* addressed per Target — and an
- * installation whose Vercel Targets sit on two different teams can therefore
- * deploy to both and configure only the one named here.
- *
- * **Absent is a legitimate installation**, not a fault: `store('vercel')`
- * answers `null`, the Target reaches no store, and a Component placed there
- * simply cannot hold config — which placement already models and says.
+ * The team the Vercel config store writes in. Deploys use each Target's own
+ * team, so a Target on another team deploys but holds no config. Unset, there
+ * is no Vercel store.
  */
 export const VERCEL_TEAM_VARIABLE = 'SPINDRIFT_VERCEL_TEAM';
 
@@ -866,19 +619,10 @@ export function vercelToken(
 }
 
 /**
- * The bearer a Cloudflare account is driven with.
- *
- * The same posture as {@link vercelToken}, one vendor over and for the same
- * reason — that platform has no inbound OIDC either — so the two are deliberately
- * spelled the same way rather than each inventing a shape. Scope it to edit that
- * account's hosting product and nothing else: core reaches no zone with it, and
- * `test/extraction/no-dns-credential.test.ts` is what keeps that true.
- *
- * One consequence is stated rather than hidden: a value read from the
- * environment cannot vary by vessel, so an installation reaches one account.
- * **ponytail:** give it a per-vessel encrypted row
- * (`crypto/credential-envelope.ts`, as `storage/registry-credentials.ts` does)
- * when a second account is a real requirement rather than a hypothetical one.
+ * The Cloudflare account bearer, read per call like {@link vercelToken}. Scope it
+ * to the hosting product only: core reaches no zone with it.
+ * ponytail: one account per installation. Move it to a per-vessel sealed row
+ * when a second account is needed.
  */
 export const CLOUDFLARE_TOKEN_VARIABLE = 'SPINDRIFT_CLOUDFLARE_TOKEN';
 
@@ -897,20 +641,9 @@ export function cloudflareToken(
 }
 
 /**
- * The access path core writes to the store of record over, per adapter (§10).
- *
- * §13's "native OIDC federation, nothing stored" is not a posture the two stores
- * share, because the credential each takes is not the same kind of thing. A
- * Connect token is a long-lived bearer an operator issues, so it lives in the
- * installation Secret. A Google access token expires in an hour and is minted
- * from the projected token this pod already carries, so a copy in a Secret would
- * be a credential that is stale before the second write — the federation that
- * every cloud Target already goes through is the only usable path to it.
- *
- * So the store's credential follows the store, and the same provider serves the
- * cloud Targets, the build routes, discovery, and now the cloud store. Nothing
- * new is stored, and an installation on Secret Manager needs no
- * `SPINDRIFT_STORE_TOKEN` at all.
+ * The store's credential follows the store: a Connect bearer from the Secret,
+ * or the federated token for Secret Manager, whose hour-long tokens a Secret
+ * could not hold fresh.
  */
 export function storeTokenFor(
   manifest: InstallationManifest,
@@ -927,24 +660,15 @@ export function storeTokenFor(
 }
 
 /**
- * The store this installation's manifest selects, over the path it names.
- *
- * `manifest.secretStore.endpoint` is optional for the reason every deploy
- * adapter's own is now: Secret Manager's API root is the same hostname for
- * every project, not an installation fact, so an absent value defaults to it
- * rather than refusing. The 1Password store gets no such default — a Connect
- * server is self-hosted, and there is no universal address to guess — so an
- * installation on that adapter still has to state one, and the refusal below
- * is what makes the missing case loud instead of a `baseUrl: undefined` that
- * fails three calls later inside `StoreHttp`.
+ * The manifest's store. Secret Manager's endpoint defaults to its one API host;
+ * a self-hosted Connect server has none, so a missing endpoint is refused here.
  */
 export function createSecretStore(
   manifest: InstallationManifest,
   token: () => string | Promise<string> = storeToken(),
   fetch?: Fetcher,
 ): SecretStore {
-  // The container is the home vessel's, because that is the boundary the store
-  // of record lives in — one place, whatever reaches it.
+  // The home vessel's container: the store of record lives in one place.
   const { secretStoreContainer } = sharedServicesOf(manifest);
   const adapter = manifest.secretStore.adapter satisfies StoreAdapter;
   const baseUrl =

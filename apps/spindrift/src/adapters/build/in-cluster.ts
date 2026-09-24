@@ -1,23 +1,6 @@
 /**
- * The in-cluster build route (§4).
- *
- * §4 puts this route on a knife edge and then justifies it: "**the home cluster
- * never pushes across its uplink** — a geography constraint, not a capability
- * one — but a build that never crosses it is untouched by that rule, which is
- * what makes `in-cluster` legitimate." So this route exists for the cluster that
- * sits beside its own registry, and for the installation that has no cloud at
- * all — which is the case §20's extraction contract has to keep possible.
- *
- * **It is SLSA Build Level 1, and that is the whole of its cost.** A Job on a
- * cluster the App is also deployed to has no isolation claim worth making: the
- * same operators reach both. §16 turns that into a rule rather than a warning —
- * a Target with a minimum of L2 refuses this route, which is also why §4 says a
- * Target "cannot be both offline-capable and require L2 or above". `buildLevel`
- * below is what `selectBuildRoute` reads to enforce it.
- *
- * `LIVE_TEXT`, and here it is genuinely free: the runner is a pod on a cluster
- * this process is already connected to, so its log is one more read against an
- * API the adapter already holds (§4's amendment).
+ * The in-cluster build route: runs the shared BuildKit program as a Job on a
+ * cluster this process reaches. It is SLSA L1, so a Target requiring L2 refuses it.
  */
 
 import type { RegistryFlavour } from '../../domain/artifact-name.ts';
@@ -54,32 +37,20 @@ import {
 export interface InClusterRouteOptions extends PollingOptions {
   readonly name: string;
   readonly api: KubernetesApi;
-  /** Where the Job is created. Never created by Spindrift (§7). */
+  /** Where the Job runs. The route never creates the namespace. */
   readonly namespace: string;
-  /** The BuildKit image the Job runs. Pinned by the installation. */
+  /** A rootless BuildKit image, which the pod security context in `job` requires. */
   readonly image: string;
-  /** The zero-config BuildKit frontend the installation pinned (§4). */
   readonly zeroConfigFrontend: string;
   /**
-   * The service account the Job runs as.
-   *
-   * How the build authorizes its push without this process holding a registry
-   * credential: the cluster projects a token for that account, and the registry
-   * trusts it. §13's "nothing stored" reaches the builder the same way it
-   * reaches everything else.
+   * The Job's service account. The registry trusts its projected token, so this
+   * process holds no registry credential.
    */
   readonly serviceAccount: string;
-  /** Injected so a test can pin the Job name it asserts on. */
   readonly id?: () => string;
 }
 
-/**
- * How long a finished Job's objects — and therefore its log — stick around.
- *
- * The log is read once, at the end, and then it is core's: §12 says the platform
- * will not keep it, so the attempt log is the copy that survives. An hour is
- * enough for an operator who was watching to go back to the pod.
- */
+/** How long a finished Job and its pod log remain; the attempt log keeps the copy. */
 export const JOB_TTL_SECONDS = 3600;
 
 /** The label a build Job carries so its pod can be found. */
@@ -98,17 +69,9 @@ export class InClusterBuildRoute implements BuildAdapter {
   readonly logFidelity: LogFidelity = 'LIVE_TEXT';
   readonly buildLevel: BuildLevel = 1;
   readonly provenanceBuilderId = 'https://spindrift.dev/builders/in-cluster';
-  /**
-   * The Job's container is a place a secret can go. See the ceiling named on
-   * {@link InClusterBuildRoute.job}.
-   */
+  /** Secrets ride the Job's container environment; see the ponytail on `job`. */
   readonly carriesHeldSecret = true;
-  /**
-   * The Job runs as a service account, and what that account reaches is a
-   * workload identity binding on one vendor's registries. Anything else the
-   * installation pushes to needs a stored credential, which this route can
-   * carry — see {@link InClusterBuildRoute.carriesHeldSecret}.
-   */
+  /** The service account reaches one vendor's registries through workload identity. */
   readonly selfAuthorizedRegistries: readonly RegistryFlavour[] = [
     'artifactRegistry',
   ];
@@ -126,8 +89,7 @@ export class InClusterBuildRoute implements BuildAdapter {
     const logs = { backend: this.name, fidelity: this.logFidelity } as const;
     const { api, namespace } = this.options;
 
-    // Named by the dispatch id so `cancel` can address the Job from the Build
-    // row alone; the injected `id` is for a test that drives the route bare.
+    // Named by the dispatch id so `cancel` can address the Job from the Build row.
     const id =
       dispatchId ??
       (this.options.id ?? (() => crypto.randomUUID().slice(0, 8)))();
@@ -142,7 +104,6 @@ export class InClusterBuildRoute implements BuildAdapter {
     try {
       await api.apply(job, 'jobs');
     } catch (error) {
-      // §4 story 48: the failure before the build step is text, not a spinner.
       const detail = error instanceof Error ? error.message : String(error);
       yield {
         type: 'log',
@@ -170,9 +131,7 @@ export class InClusterBuildRoute implements BuildAdapter {
 
     for (;;) {
       log = (await this.readLog(name)) ?? log;
-      // Only what is new. The API serves the whole log every time, so a route
-      // that yielded all of it each pass would repeat the build's output once
-      // per poll interval.
+      // Only new lines: the API serves the full log on every read.
       const lines = log.split('\n');
       for (const line of lines.slice(delivered)) {
         if (line.trim() === '') continue;
@@ -184,11 +143,8 @@ export class InClusterBuildRoute implements BuildAdapter {
       if (outcome !== null) break;
 
       if (budget.expired()) {
-        // The Job carries the same budget as `activeDeadlineSeconds`, so the
-        // cluster ordinarily ends it first; this is the route's own copy of
-        // that act for the case where it did not, because a TIMEOUT that left
-        // the pod building would hold the node it landed on for as long as
-        // the build cared to run.
+        // `activeDeadlineSeconds` carries the same budget, so the cluster usually
+        // ends the Job first; deleting it here frees the node when it did not.
         yield {
           type: 'log',
           at: now(),
@@ -205,8 +161,7 @@ export class InClusterBuildRoute implements BuildAdapter {
       await budget.tick();
     }
 
-    // One last read: the log the pod wrote between the previous poll and the
-    // Job reaching a terminal count is the log that says why it failed.
+    // One last read: what the pod wrote after the previous poll says why it failed.
     log = (await this.readLog(name)) ?? log;
     for (const line of log.split('\n').slice(delivered)) {
       if (line.trim() === '') continue;
@@ -219,9 +174,7 @@ export class InClusterBuildRoute implements BuildAdapter {
       });
     }
     if (outcome !== 'succeeded') {
-      // Ended before a verdict — the cluster's deadline, or a delete, which
-      // now that `cancel` exists is most often an operator's. §6's `TIMEOUT`
-      // is the one reason that indicts nobody, and nobody is who this indicts.
+      // Ended by the cluster's deadline or a delete. `TIMEOUT` blames nobody.
       const ending =
         outcome === 'deadline'
           ? `Job ${name} was ended by the cluster for exceeding its deadline`
@@ -245,9 +198,7 @@ export class InClusterBuildRoute implements BuildAdapter {
       spec,
       logs,
       level: this.buildLevel,
-      // §16: the backend's provenance. A Job on a cluster can claim what ran
-      // and where, and nothing more — which is exactly what L1 means, and is
-      // why this document is small rather than absent.
+      // L1 provenance: what ran and where.
       report: { ...report, statement: { job: name, namespace } },
     });
   }
@@ -258,26 +209,8 @@ export class InClusterBuildRoute implements BuildAdapter {
   }
 
   /**
-   * The Job one build runs as.
-   *
-   * `backoffLimit: 0` because a retry is core's to decide, not the cluster's: a
-   * Job that retried itself would push a second artifact for one Build row, and
-   * §4's "no ordinal" rests on a Build recording one artifact.
-   *
-   * `activeDeadlineSeconds` is the route's own budget, handed to the cluster:
-   * the Job controller kills the pod and fails the Job when it passes, so a
-   * runaway build ends even when this process is not there to end it — and
-   * it lands on the control-plane node of a cluster that has exactly one.
-   *
-   * ponytail: a registry credential rides as a plain container environment
-   * variable, so it is readable by anyone with `get jobs` in the build
-   * namespace for the Job's TTL. That namespace is platform-owned and already
-   * holds the service account token this build pushes with, so it is the same
-   * trust boundary rather than a new one — but it is a wider blast radius than
-   * the credential needs. Upgrade path: a Secret created with an
-   * `ownerReferences` entry pointing at this Job, mounted at `DOCKER_CONFIG`,
-   * so it is garbage collected with the Job rather than depending on this
-   * route's own cleanup.
+   * ponytail: secrets ride plain container env, readable with `get jobs` in the
+   * build namespace until the TTL. Upgrade path: a Job-owned Secret as a volume.
    */
   private job(
     name: string,
@@ -285,9 +218,6 @@ export class InClusterBuildRoute implements BuildAdapter {
     dockerConfig: string | null,
     buildSecretEnv: Record<string, string>,
   ): KubernetesObject {
-    // The registry credential's ceiling above covers these too: a build
-    // secret rides the same container environment, in the same platform-owned
-    // namespace, with the same upgrade path.
     const env = [
       ...(dockerConfig === null
         ? []
@@ -306,7 +236,9 @@ export class InClusterBuildRoute implements BuildAdapter {
         labels: { [JOB_LABEL]: name },
       },
       spec: {
+        // Retries are core's call; a retried Job would push a second artifact.
         backoffLimit: 0,
+        // The cluster enforces the build budget even when this process is gone.
         activeDeadlineSeconds: Math.ceil(
           (this.options.timeoutMs ?? DEFAULT_BUILD_TIMEOUT_MS) / 1000,
         ),
@@ -316,25 +248,10 @@ export class InClusterBuildRoute implements BuildAdapter {
           spec: {
             restartPolicy: 'Never',
             serviceAccountName: this.options.serviceAccount,
-            // Rendered, not configured, because it is one coherent choice
-            // rather than a knob: this is the strictest context BuildKit can
-            // run under, and it is what makes the build namespace admissible
-            // at Pod Security `baseline` — the level the `spindrift`
-            // namespace itself enforces. A Job with no security context at all
-            // is rejected outright by anything above `privileged`, which is
-            // why this route could be configured and still never start.
-            //
-            // It follows that `image` must name a **rootless** BuildKit
-            // (`moby/buildkit:vX.Y.Z-rootless`). The stock image's entrypoint
-            // expects to be root and cannot honour `runAsNonRoot`.
-            //
-            // ponytail: `RuntimeDefault` seccomp, because `baseline` forbids
-            // `Unconfined` and upstream's own rootless example asks for it.
-            // Modern kernels admit unprivileged user namespaces under the
-            // default profile, so this is expected to hold. Upgrade path if a
-            // build dies in `unshare`: give the build namespace its own Pod
-            // Security level and relax this to `Unconfined` there — a change
-            // to one namespace label and this block, not to the route.
+            // The strictest context BuildKit runs under, admissible at Pod Security
+            // `baseline`, so `image` must be a rootless BuildKit.
+            // ponytail: `RuntimeDefault` seccomp, since `baseline` forbids `Unconfined`.
+            // If `unshare` fails, lower the namespace's level and use `Unconfined`.
             securityContext: {
               runAsNonRoot: true,
               runAsUser: 1000,
@@ -350,9 +267,7 @@ export class InClusterBuildRoute implements BuildAdapter {
                   allowPrivilegeEscalation: false,
                   capabilities: { drop: ['ALL'] },
                 },
-                // Absent entirely when there is nothing held, rather than
-                // present and empty: an installation that stores nothing should
-                // leave no trace of the mechanism on its build Jobs.
+                // Omitted when nothing is held, leaving no trace on the Job.
                 ...(env.length === 0 ? {} : { env }),
               },
             ],
@@ -370,8 +285,7 @@ export class InClusterBuildRoute implements BuildAdapter {
       namespace: this.options.namespace,
       name,
     });
-    // A Job that is gone is a Job something deleted mid-build — `cancel`, or
-    // an operator. Nothing pushed an artifact and nothing is left to wait for.
+    // Deleted mid-build, by `cancel` or an operator.
     if (job === null) return 'gone';
 
     const status = (job.status ?? {}) as {
