@@ -1,30 +1,6 @@
 /**
- * Enrolment — how an installation gets its operator (§"First run and identity").
- *
- * > 1. My first visit enrols a passkey against a token that shipped with the
- * >    installation, so I get a fully privileged account without standing up an
- * >    IdP first.
- * > 2. The enrolment token is **consumed on use**, so the window in which anyone
- * >    else could claim my installation closes the moment I finish.
- * > 4. Recovery means **rotating the token and replacing every passkey**, so
- * >    losing a device does not lose the installation.
- *
- * Those three are one mechanism, which is the thing worth understanding about
- * this file. There is one row per token ever spent (`enrolments`), and the
- * unique index on its hash is what makes story 2 true — not a check somebody
- * remembered to write, but a constraint the database enforces under
- * concurrency. Story 4 then costs nothing extra: a token whose hash is *not*
- * already in that table is by definition a rotated one, so consuming it clears
- * the credentials and sessions that came before it. **Editing the Secret is the
- * whole recovery procedure**, with no second act to remember and no reset
- * endpoint to protect.
- *
- * The token itself is never stored, only hashed — Spindrift never owned it. It
- * arrives in the installation Secret and is read from the environment
- * (`SPINDRIFT_ENROLMENT_TOKEN`), which is deliberately **not** the installation
- * manifest: the manifest describes an installation and is the document §20 asks
- * an operator to write by hand and hand around, while this is a credential that
- * claims one.
+ * First-run enrolment: a passkey enrolled against the token the installation
+ * shipped with. Each token is spent once; a new token replaces every passkey.
  */
 
 import { equalText } from '@repo/archive/bytes';
@@ -40,18 +16,11 @@ import {
 import { type AuthDeps, type AuthResult, authFailed, authOk } from './types.ts';
 import { SUPPORTED_ALGORITHMS, verifyRegistration } from './webauthn.ts';
 
-/** The display name a first operator gets. There is no field to type one into. */
+/** Every operator gets this name: enrolment has no name field. */
 const OPERATOR_NAME = 'Operator';
 
 export interface EnrolmentDeps extends AuthDeps {
-  /**
-   * The token this installation shipped with, or `null` if it shipped none.
-   *
-   * `null` is a legitimate state and it makes enrolment impossible, which is
-   * the correct posture: an installation whose Secret is missing the key cannot
-   * be claimed by anybody, and the alternative — enrolment open to whoever
-   * arrives first — is not a state worth being able to reach by omission.
-   */
+  /** `null` when the Secret has no token, which makes enrolment impossible. */
   readonly enrolmentToken: string | null;
 }
 
@@ -61,28 +30,18 @@ export interface EnrolmentChallenge {
   readonly rpId: string;
   readonly rpName: string;
   readonly userName: string;
-  /** The COSE algorithms to offer — exactly the ones sign-in can verify. */
+  /** The COSE algorithms sign-in can verify. */
   readonly algorithms: readonly number[];
-  /**
-   * `required`, so the credential is discoverable and sign-in needs no
-   * username. v1 has one operator and nowhere to type one.
-   */
+  /** Discoverable, so sign-in needs no username. */
   readonly residentKey: 'required';
 }
 
-/**
- * Whether a presented token is the shipped one, and whether it is still unspent.
- *
- * Both halves are checked at `begin` as a courtesy and again at `complete`
- * where it counts. The comparison is length-safe rather than a plain `===`
- * because the token is a bearer secret and an early-exit compare is a timing
- * oracle over its prefix.
- */
 async function checkToken(
   deps: EnrolmentDeps,
   presented: string,
 ): Promise<{ ok: true; hash: string } | AuthResult<never>> {
   const shipped = deps.enrolmentToken;
+  // Not `===`: an early-exit compare leaks the token's prefix through timing.
   if (shipped === null || shipped === '' || !equalText(shipped, presented)) {
     return authFailed(
       'TOKEN_INVALID',
@@ -107,13 +66,8 @@ async function checkToken(
 }
 
 /**
- * Begin an enrolment.
- *
- * Refusing here rather than issuing a challenge to anyone who asks means a
- * wrong token fails at the first press instead of after a passkey prompt the
- * operator then has to be told was pointless. It is not the security boundary —
- * {@link completeEnrolment} re-checks next to the write — it is the one that
- * makes the wrong token a readable answer.
+ * Checks the token so a wrong one fails before the passkey prompt. The security
+ * check is the one {@link completeEnrolment} repeats next to the write.
  */
 export async function beginEnrolment(
   deps: EnrolmentDeps,
@@ -132,11 +86,10 @@ export async function beginEnrolment(
   });
 }
 
-/** What a browser posts back from `navigator.credentials.create()`. */
 export interface EnrolmentResponse {
   readonly token: string;
   readonly credentialId: string;
-  /** SPKI from `getPublicKey()`, base64url — see `webauthn.ts` on why. */
+  /** SPKI from `getPublicKey()`, base64url. */
   readonly publicKey: string;
   readonly algorithm: number;
   readonly authenticatorData: string;
@@ -144,14 +97,8 @@ export interface EnrolmentResponse {
 }
 
 /**
- * Complete an enrolment: verify the ceremony, spend the token, open a session.
- *
- * The order is the design. The **challenge is spent first**, so a captured
- * ceremony is dead before anything else is read; the **token is re-checked**
- * next, so a challenge held from before somebody else's enrolment cannot be
- * cashed afterwards; and the writes then happen in **one transaction**, so an
- * installation is never left with the token marked spent and no passkey behind
- * it — which would be an installation nobody could ever claim.
+ * Spends the challenge first, then re-checks the token, then writes in one
+ * transaction so a spent token always has a passkey behind it.
  */
 export async function completeEnrolment(
   deps: EnrolmentDeps,
@@ -191,8 +138,7 @@ export async function completeEnrolment(
       response.algorithm as (typeof SUPPORTED_ALGORITHMS)[number],
     )
   ) {
-    // A browser that ignored the offered list would otherwise leave a
-    // credential enrolled that no sign-in could ever verify.
+    // A browser can ignore the offered list; sign-in could not verify the key.
     return authFailed(
       'CEREMONY_REFUSED',
       'that passkey uses an algorithm this installation cannot verify',
@@ -203,12 +149,8 @@ export async function completeEnrolment(
   const now = deps.clock.now();
 
   const user = await deps.db.transaction(async (tx) => {
-    // §"First run" story 4, and the reason it needs no separate reset path: a
-    // token that has not been spent before is a *rotated* token, so every
-    // passkey and every session that preceded it goes. Cascades from `users`
-    // would do the same thing by deleting the account, but the account is the
-    // thing recovery is supposed to give back — v1 has one operator, and
-    // accumulating one per rotation would be the wrong answer.
+    // An unspent token is a rotated one: recovery replaces every passkey and
+    // session but keeps the one operator account.
     await tx.delete(sessions);
     await tx.delete(credentials);
 
@@ -231,10 +173,8 @@ export async function completeEnrolment(
       createdAt: now,
     });
 
-    // Last, and inside the transaction: the unique index on `token_hash` is
-    // what makes "consumed on use" a fact under concurrency rather than a
-    // check. Two enrolments racing the same token both reach here and exactly
-    // one commits.
+    // Last: the unique index on `token_hash` lets exactly one of two racing
+    // enrolments commit.
     await tx.insert(enrolments).values({
       tokenHash: token.hash,
       userId: operator.id,

@@ -1,12 +1,5 @@
-/**
- * Static file server — serves dist/ for production, or src/ for dev.
- *
- * Beyond handing back files, it stamps one page — `/` — with the real runtime
- * the static host gave it, so a redeploy or a pod restart is visible on the
- * page rather than only in the UI that deployed it. The same facts are on
- * `/__runtime__` as JSON and `/healthz` as a liveness answer, so a probe or a
- * curious curl can read them without a browser.
- */
+// Serves dist/ in production or src/ in dev, and stamps `/` with this process's
+// runtime facts, which `/__runtime__` also returns as JSON.
 import { extname } from 'node:path';
 import { hostname, platform, arch } from 'node:os';
 import process from 'node:process';
@@ -14,16 +7,8 @@ import process from 'node:process';
 const dir = Bun.env.NODE_ENV === 'production' ? 'dist' : 'src';
 const startedAt = new Date();
 
-/**
- * Which hosting platform is this, in its own words.
- *
- * Ordered most-specific first: Firebase App Hosting runs on Cloud Run and so
- * carries the `K_*` set too, so it has to be tested before the raw Cloud Run
- * arm or it reads as "Cloud Run" on an App Hosting release — the wrong logo.
- * Cloudflare Pages and Vercel set their own markers; Kubernetes leaves
- * `KUBERNETES_SERVICE_HOST`; AWS container surfaces put an account-shaped var
- * here. "unknown" is an honest answer rather than a guess.
- */
+// Firebase App Hosting runs on Cloud Run and also sets the `K_*` vars, so it is
+// tested before Cloud Run.
 function detectPlatform(env: Record<string, string | undefined>): {
   id: string;
   name: string;
@@ -81,12 +66,8 @@ function detectPlatform(env: Record<string, string | undefined>): {
   return { id: 'unknown', name: 'Unknown host', by: '—' };
 }
 
-/**
- * Environment vars whose values are safe to print — they are platform-provided
- * identifiers, never operator secrets. Everything else is omitted, so wiring
- * a real secret to this App never leaks through the demo. The railpack
- * service's `/env` keeps the names-only surface plus this same curated set.
- */
+// Platform-set vars whose values are safe to print. Every other var is left out,
+// so a secret wired to the app never reaches the page.
 const SAFE_ENV = new Set([
   'K_SERVICE',
   'K_CONFIGURATION',
@@ -113,7 +94,6 @@ const SAFE_ENV = new Set([
   'DYNO',
 ]);
 
-/** A value-safe view of the environment: known-safe platform vars only. */
 function envView(env: Record<string, string | undefined>) {
   const values: Record<string, string> = {};
   for (const name of [...SAFE_ENV].sort()) {
@@ -123,7 +103,6 @@ function envView(env: Record<string, string | undefined>) {
   return { values, names: Object.keys(values) };
 }
 
-/** The facts one page needs. Computed per request so the uptime stays honest. */
 function runtimeFacts() {
   const plat = detectPlatform(process.env);
   const pm = runMode();
@@ -145,13 +124,12 @@ function runtimeFacts() {
   };
 }
 
-/** What "Node" version this is, including the Bun-in-Node-interop name it reports. */
 function runMode(): string {
   const bunVersion = (Bun as unknown as { version?: string }).version;
   return bunVersion ? `bun ${bunVersion}` : `node ${process.version}`;
 }
 
-/** JSON for an inline script must not let an environment value close the tag. */
+// Escapes <, > and & so an environment value cannot close the inline script.
 function inlineJson(value: unknown): string {
   return JSON.stringify(value)
     .replace(/</g, '\\u003c')
@@ -184,9 +162,6 @@ Bun.serve({
     const buf = Bun.file(file);
     if (!(await buf.exists())) return new Response('404', { status: 404 });
 
-    // Stamp `/` with the live runtime so the page carries the environment it
-    // was served from. Done here rather than at build time, because the facts
-    // are about *this* process, not the one that built the bundle.
     if (path === '/' || path === '/index.html') {
       let html = await buf.text();
       const inject = `<script>window.__SPINDRIFT_RUNTIME__=${inlineJson(runtimeFacts())};</script>`;
@@ -207,7 +182,6 @@ Bun.serve({
 console.log(
   `spindrift-demo → http://localhost:${Bun.env.PORT || 3000} (${dir}/)`,
 );
-// Tell the operator where it landed, in the server's own words, the way the job does.
 console.log(
   `spindrift-demo runtime → ${detectPlatform(process.env).name} (hostname ${hostname()})`,
 );

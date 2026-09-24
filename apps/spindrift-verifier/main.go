@@ -30,7 +30,6 @@ func main() {
 	case "sign-legacy":
 		runSignLegacyCommand(os.Args[2:])
 	default:
-		// Check if called as cosign legacy flag command: "spindrift-verifier sign ..."
 		if command == "sign" && len(os.Args) > 2 && os.Args[2] != "--request-path" {
 			runSignLegacyCommand(os.Args[2:])
 			return
@@ -67,7 +66,7 @@ func runSignCommand(args []string) {
 	fs := flag.NewFlagSet("sign", flag.ExitOnError)
 	requestPath := fs.String("request-path", "", "Path to sign request JSON file (stdin if empty)")
 
-	// Check if this is legacy cosign invocation: e.g. "sign --yes --key ..."
+	// cosign's form (`sign --yes --key ...`) goes to the legacy signer.
 	if len(args) > 0 && args[0] != "-request-path" && args[0] != "--request-path" {
 		runSignLegacyCommand(args)
 		return
@@ -94,7 +93,7 @@ func runSignCommand(args []string) {
 }
 
 func runVerifyImageLegacyCommand(args []string) {
-	// Flags matching slsa-verifier verify-image syntax
+	// Accepts slsa-verifier's verify-image arguments.
 	fs := flag.NewFlagSet("verify-image", flag.ExitOnError)
 	provenancePath := fs.String("provenance-path", "", "Path to provenance JSON file")
 	sourceURI := fs.String("source-uri", "", "Expected source URI")
@@ -114,7 +113,7 @@ func runVerifyImageLegacyCommand(args []string) {
 			*builderID = args[i+1]
 			i++
 		} else if args[i] == "--print-provenance" {
-			// boolean flag
+			// takes no value
 		} else if args[i][0] != '-' && ref == "" {
 			ref = args[i]
 		} else {
@@ -160,13 +159,13 @@ func runVerifyImageLegacyCommand(args []string) {
 		os.Exit(1)
 	}
 
-	// Print raw envelope on stdout for slsa-verifier compatibility
+	// Always prints the envelope on stdout, as slsa-verifier's --print-provenance does.
 	os.Stdout.Write(resp.Assessment.Envelope)
 	fmt.Println()
 }
 
 func runSignLegacyCommand(args []string) {
-	// Flags matching cosign sign syntax: --yes --key <key> --tlog-upload=false --bundle <bundlePath> <immutableRef>
+	// cosign sign syntax: --yes --key <key> --tlog-upload=false --bundle <path> <ref>
 	var key, bundlePath, ref string
 	for i := 0; i < len(args); i++ {
 		if args[i] == "--key" && i+1 < len(args) {
@@ -204,11 +203,8 @@ func runSignLegacyCommand(args []string) {
 	fmt.Println()
 }
 
-// runVerifySignatureCommand independently re-checks a recorded CoreSignature
-// bundle against the digest it is supposed to cover, pinned to Spindrift's
-// trusted signer key. Core admission calls this at every image deploy, on both
-// Kubernetes and Cloud Run paths: fail-closed admission consumes the real
-// signature format, not a stored placeholder.
+// runVerifySignatureCommand checks a recorded signature bundle against its
+// digest, pinned to the trusted signer key that Sign used.
 func runVerifySignatureCommand(args []string) {
 	fs := flag.NewFlagSet("verify-signature", flag.ExitOnError)
 	artifactDigest := fs.String("artifact-digest", "", "The digest the bundle must cover")

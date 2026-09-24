@@ -1,14 +1,7 @@
-/* ── runtime detection + render ──────────────────────────────────────────────
- *
- * Two sources, one answer. `window.__SPINDRIFT_RUNTIME__` is what the Bun server
- * (serve.ts) stamped onto `/` — the environment in its own words. Where it is
- * absent (a bare static host with no server, like the `plain/` scope on a
- * Pages/Hosting product) the URL host answers instead — `*.pages.dev`,
- * `*.vercel.app`, `*.run.app` — so the same card still names the platform,
- * just honestly marked `by: hostname` rather than `by: K_SERVICE`.
- */
+// Renders the runtime, environment and client panels from the facts serve.ts
+// injects as window.__SPINDRIFT_RUNTIME__, or from the URL host when there is no server.
 
-/** Where each platform's mark lives. `unknown` renders as an inline globe. */
+// A platform with no logo here renders UNKNOWN_MARK.
 const LOGOS = {
   'firebase-app-hosting': 'logos/firebase.svg',
   'firebase-hosting': 'logos/firebase.svg',
@@ -21,13 +14,11 @@ const LOGOS = {
   unknown: null,
 };
 
-/** A small globe for a host we don't carry a mark for. */
 const UNKNOWN_MARK =
   '<svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c3 3.5 3 14.5 0 18M12 3c-3 3.5-3 14.5 0 18"/></svg>';
 
 const serverFacts = window.__SPINDRIFT_RUNTIME__ ?? null;
 
-/** Best-effort platform from the URL when there is no server to ask. */
 function detectFromHost(host) {
   const h = host.toLowerCase();
   if (h.endsWith('.vercel.app'))
@@ -43,7 +34,6 @@ function detectFromHost(host) {
   return null;
 }
 
-/** One platform answer, server-preferred, host as the honest fallback. */
 function platform() {
   const s = serverFacts?.server;
   if (s) return { id: s.platform, name: s.platformName, by: s.detectedBy };
@@ -54,7 +44,7 @@ function platform() {
   return { id: 'unknown', name: location.host || 'unknown', by: 'hostname' };
 }
 
-/** Reads `data-rt-*` elements in the given panel and fills them. */
+/** Fills the panel's `data-rt-*` elements. */
 function renderRuntime(panel) {
   const plat = platform();
   const logo = LOGOS[plat.id] ?? null;
@@ -87,8 +77,6 @@ function renderRuntime(panel) {
     setText(panel, 'rt-build', '—');
   }
 
-  // Uptime ticks against the server start time, so it moves while the page
-  // sits open and resets on a restart — the thing that says "this changed".
   if (s?.startedAt) {
     const started = new Date(s.startedAt).getTime();
     const upEl = panel.querySelector('[data-rt-uptime]');
@@ -102,7 +90,6 @@ function renderRuntime(panel) {
   }
 }
 
-/** Curated, safe environment view — only known platform identifiers have values. */
 function renderEnv(panel) {
   const env = serverFacts?.env;
   const list = panel.querySelector('[data-rt-env]');
@@ -126,7 +113,6 @@ function renderEnv(panel) {
   if (count) count.textContent = String(env.names.length);
 }
 
-/** What the browser itself carries — the "client" half of the same idea. */
 function renderClient(panel) {
   const n = navigator;
   const ua = n.userAgent;
@@ -192,7 +178,7 @@ function escapeHtml(value) {
   );
 }
 
-/** Format a millisecond span as `1h 04m 03s` — short, fixed-width, no jitter. */
+/** Formats `ms` as `1h 04m 03s`. */
 function humanUptime(ms) {
   const s = Math.floor(ms / 1000) % 60;
   const m = Math.floor(ms / 60000) % 60;
@@ -201,5 +187,5 @@ function humanUptime(ms) {
   return `${h}h ${dd(m)}m ${dd(s)}s`;
 }
 
-/** Surface the renderers as one global, so a classic <script> client can drive them. */
+// client.js is a separate classic script, so the renderers go on a global.
 window.SpinRuntime = { renderRuntime, renderEnv, renderClient };

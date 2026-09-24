@@ -1,11 +1,6 @@
 /**
- * Authentication through an optional trusted front-door Gateway.
- *
- * The adapter begins at normalized request headers. Provider OAuth/OIDC, token
- * validation, and claim mapping belong to the Gateway; Spindrift's trust
- * boundary is the non-bypassable hop from that Gateway to this process. A
- * header is never enough to create a User: it must match an identity an
- * already-authenticated operator explicitly linked.
+ * Authentication through an optional trusted Gateway's identity header. The
+ * header never creates a User; it must match an identity the operator linked.
  */
 import { eq } from 'drizzle-orm';
 import type { Principal } from '../commands/types.ts';
@@ -24,12 +19,7 @@ export interface GatewayDeps extends AuthDeps {
   readonly gateway: GatewayAuthConfig | null;
 }
 
-/**
- * Stable storage key for one adapter/issuer/subject tuple.
- *
- * JSON encoding is unambiguous even when one field contains punctuation, and
- * keeps provider display claims out of the identity key.
- */
+/** JSON-encoded so punctuation in a field cannot make two tuples collide. */
 export function gatewayIdentityKey(
   config: GatewayAuthConfig,
   subject: string,
@@ -45,12 +35,8 @@ function gatewaySubject(
 }
 
 /**
- * Resolve the request to the one stable Spindrift User.
- *
- * A local session wins so an operator arriving through a newly configured
- * Gateway can still reach Settings and link its assertion. Once no local
- * session exists, an asserted-but-unlinked identity is forbidden rather than
- * silently ignored or provisioned.
+ * A local session wins, so an operator behind a newly configured Gateway can
+ * still reach Settings to link it. An unlinked asserted identity is forbidden.
  */
 export async function authenticateRequest(
   request: Request,
@@ -91,20 +77,10 @@ export async function authenticateRequest(
 export type SessionState = {
   readonly principal: Principal | null;
   readonly claimed: boolean;
-  /**
-   * The Gateway asserted an identity that still needs linking. This bootstrap
-   * read remains available so the operator can sign in with the root passkey
-   * and reach Settings; protected requests still receive 403.
-   */
+  /** The Gateway asserted an unlinked identity; protected requests get 403. */
   readonly gatewayUnlinked: boolean;
 };
 
-/**
- * Compose the two reads needed by the browser shell below the HTTP route.
- *
- * Keeping this here leaves `auth/routes.ts` with transport only: it chooses
- * GET, calls one operation, and serializes the result.
- */
 export async function readSessionState(
   request: Request,
   deps: GatewayDeps,
@@ -119,13 +95,7 @@ export async function readSessionState(
   };
 }
 
-/**
- * Read the stable identity asserted on this request.
- *
- * This only parses the trusted adapter boundary; it does not mutate a User.
- * `credential-admin.ts` is the sole linking path and calls this only after a
- * fresh passkey assertion.
- */
+/** Call only after a fresh passkey assertion, as `linkGatewayIdentity` does. */
 export function assertedGatewayIdentity(
   deps: GatewayDeps,
   request: Request,

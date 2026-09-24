@@ -11,12 +11,11 @@ export type SchemaWaitOptions = {
   sleep?: (milliseconds: number) => Promise<void>;
 };
 
-/** The timestamp Drizzle records for the newest migration in this image. */
+/** This image's newest journal `when`, which Drizzle records as created_at. */
 export function expectedMigrationAt(): number {
   return Math.max(0, ...journal.entries.map((entry) => entry.when));
 }
 
-/** Whether the database journal contains every migration expected by this image. */
 export async function schemaReady(client: SQL): Promise<boolean> {
   const [relation] = await client<{ journal: string | null }[]>`
     SELECT to_regclass('drizzle.__drizzle_migrations')::text AS journal
@@ -30,10 +29,7 @@ export async function schemaReady(client: SQL): Promise<boolean> {
   return Number(row?.latest ?? 0) >= expectedMigrationAt();
 }
 
-/**
- * Hold a process in its init container until the migration Job has brought
- * the database up to the migration journal embedded in the same image.
- */
+/** Holds the init container until this image's migrations are applied. */
 export async function waitForSchema(
   client: SQL,
   options: SchemaWaitOptions = {},

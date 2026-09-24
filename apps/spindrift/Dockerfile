@@ -1,19 +1,6 @@
 # syntax=docker/dockerfile:1
-#
-# One image, two process entrypoints (§19): `web` is the image default and the
-# installer selects `reconciler` with its own command.
-#
-# The client is built here and **served as files at runtime**, which is what
-# keeps the compile-time toolchain out of the running container. The server
-# entry (`src/web/server.ts`) imports no HTML module, so Tailwind, the bundler,
-# and TypeScript's toolchain are all build-stage only; `bun install
-# --production` in the `deps` stage is what actually drops them, and
-# `test/web/routes.test.ts` is what stops an import from quietly putting one
-# back.
-#
-# `src/web/dev.ts` is the other entry and does the opposite — Bun's HTML import,
-# compiled on demand, so `bun run dev` needs no build step. That convenience is
-# the thing production is not paying for.
+# One image, two processes: `web` is the default command and the chart starts
+# `reconciler` with its own. The client ships as prebuilt files in dist/.
 FROM cgr.dev/chainguard/node:latest-dev@sha256:ea7d0133c47e062b7754da987c05d4d1206e0a9e357a49679271d071f48e65e2 AS base
 ARG BUN_VERSION=1.4.0
 ENV BUN_INSTALL=/usr/local \
@@ -36,38 +23,33 @@ RUN bun install --frozen-lockfile
 COPY --from=pruner /app/out/full/ .
 RUN bun run build --filter=spindrift
 
-# The runtime's dependencies alone, resolved from the same lockfile so the two
-# stages cannot disagree about a version.
+# Production dependencies only, so no bundler or Tailwind. src/web/server.ts must
+# not import HTML; test/web/routes.test.ts enforces it.
 FROM base AS deps
 WORKDIR /app
 COPY --from=pruner /app/out/json/ .
 COPY --from=pruner /app/out/bun.lock ./bun.lock
 RUN bun install --frozen-lockfile --production
 
-# First-party artifact verifier (§35). Replaces upstream release binaries (cosign & slsa-verifier).
+# First-party stand-in for the cosign and slsa-verifier CLIs.
 FROM ghcr.io/jonpulsifer/spindrift-verifier:latest@sha256:c60d9b3fe104d7befe8993d7bd5a374baaca075ed9fd74c278abc34c48760812 AS supply-chain-tools
 
 FROM cgr.dev/chainguard/node:latest@sha256:3d462c24088fa9189404fc19b837f6b39636671571491c9c5dd7b75e3e2df550 AS runner
 ENV NODE_ENV=production \
   PORT=3000
 WORKDIR /app
-# The chart runs this as uid 65532 with a read-only root filesystem, so
-# everything is copied world-readable rather than owned by a build user.
+# The chart runs uid 65532 on a read-only root filesystem, so files are copied
+# world-readable.
 COPY --from=deps --chmod=755 /app ./
 COPY --from=builder --chmod=755 /app/apps/spindrift/src ./apps/spindrift/src
 COPY --from=builder --chmod=755 /app/apps/spindrift/dist ./apps/spindrift/dist
-# `deps` carries each workspace's package.json and the symlink to it, never its
-# source — and the server imports `@repo/archive`'s modules at run time. From
-# `pruner` rather than `builder` because that tree has had no install run in it,
-# so no `node_modules` rides along.
+# `deps` has each workspace's package.json and symlink but no source, and the
+# server imports archive source at run time. `pruner` has no node_modules to copy.
 COPY --from=pruner --chmod=755 /app/out/full/packages/archive ./packages/archive
 COPY --from=base /usr/local/bin/bun /usr/local/bin/bun
 COPY --from=supply-chain-tools /spindrift-verifier /usr/local/bin/spindrift-verifier
-# Fail the image build at the packaging seam rather than shipping a chart
-# command whose module the runtime image does not contain. The workspace
-# packages are asserted through the symlinks `deps` left behind, because that is
-# how the server resolves them and a bare `packages/<name>` check would pass
-# without one.
+# Fail the build when a chart command's module is missing. @repo/archive is
+# checked through its node_modules symlink, the path the server resolves.
 RUN test -f /app/apps/spindrift/src/web/server.ts \
   && test -f /app/apps/spindrift/src/reconciler/main.ts \
   && test -f /app/apps/spindrift/src/db/migrate.ts \

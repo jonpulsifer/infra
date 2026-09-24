@@ -1,64 +1,24 @@
 /**
- * The installation manifest: every value that names a particular installation
- * of Spindrift.
- *
- * Spec §20, line 3 — "everything naming this installation is a value in the
- * installation manifest; a literal outside it is a bug". That rule is
- * mechanical: `test/extraction/no-literals.test.ts` greps `src/` for
- * installation-specific literals, so nothing in this file may carry an example
- * value from the installation that happens to run it.
- *
- * There are no defaults for anything that names *this* installation. A missing
- * key fails the boot rather than falling back to whatever the first operator
- * happened to use.
- *
- * **One class of key is the deliberate exception: a vendor's own API root.**
- * `cloudrun`, `static`, `vercel`, `cloudflare-pages` and `gcp-secret-manager`
- * each connect to a single control plane the vendor runs, identical for every
- * installation — it is not a fact about this deployment the way `apiServer` or
- * `project` is, so treating it as one meant every operator retyped the same
- * constant. Each `endpoint` below is optional for exactly that reason, and the
- * default an absent one resolves to lives with the adapter that owns the API,
- * not here — see `DEFAULT_ENDPOINT` beside each adapter's implementation.
- *
- * **What names the installation and what names its deployment are not the same
- * set.** A value the installer chart already renders is read from the
- * deployment, never asked for here as well: a fact carried in both places
- * satisfies §20's grep and can still disagree with itself, and a disagreement
- * surfaces somewhere else entirely — once as an `iam.serviceAccounts.signBlob`
- * refusal that read as a code defect. Every removal is recorded at the block it
- * left, so the reason survives the key.
+ * The installation manifest: every value that names this installation. Those
+ * have no defaults; a vendor API `endpoint` defaults in its adapter. Values the
+ * installer chart renders come from the deployment instead.
  */
 
 import type { FederationConfig } from '@repo/archive/federation';
 import { z } from 'zod';
 
-/** A non-empty string with no surrounding whitespace. */
 const nonEmptyString = z.string().trim().min(1);
 
 /**
- * The pattern an App's namespace is named by, which must contain `{app}`.
- *
- * Refused rather than defaulted when it does not: a pattern with no placeholder
- * names one namespace for every App, which is the shared namespace this exists
- * to stop being — and it would fail silently, as one App's release quietly
- * landing on another's. The rest of the string is checked where the name is
- * built, because what makes a namespace name legal is the *result*.
+ * Must contain `{app}`, or every App's release goes to one namespace. The
+ * expanded name is checked where it is built.
  */
 const appNamespaceSchema = nonEmptyString.refine(
   (pattern) => pattern.includes('{app}'),
   { message: 'must contain {app}, or every App shares one namespace' },
 );
 
-/**
- * A Target or Vessel identifier accepted by both the manifest and the connect
- * act.
- *
- * One spelling for both nouns because a Target name and a Vessel name land in
- * the same places — a DNS-shaped label in a URL path and a column with a unique
- * index — and two regexes that had to agree would be two regexes that could
- * disagree.
- */
+/** A DNS label naming a vessel, shared with the connect act. */
 export const targetNameSchema = nonEmptyString
   .max(63)
   .regex(
@@ -66,24 +26,19 @@ export const targetNameSchema = nonEmptyString
     'must be lowercase letters, digits and hyphens',
   );
 
-/** A DNS zone apex, e.g. `apps.example.test` or `localhost`. */
 const zone = nonEmptyString.regex(
   /^(localhost|(?!-)[a-z0-9-]+(\.[a-z0-9-]+)+)$/,
   'must be a lowercase DNS name or localhost',
 );
 
-/** A trusted HTTP request header configured by the front-door Gateway. */
 const headerName = nonEmptyString.regex(
   /^[A-Za-z0-9-]+$/,
   'must be an HTTP header name',
 );
 
 /**
- * The optional authenticated-Gateway adapter.
- *
- * The Gateway owns the provider protocol and presents a normalized subject to
- * Spindrift over a non-bypassable hop. `adapterKey` distinguishes two Gateway
- * configurations that happen to use the same issuer and subject.
+ * The Gateway presents a normalized subject over a non-bypassable hop.
+ * `adapterKey` tells apart two Gateways with the same issuer and subject.
  */
 export const gatewayAuthSchema = z
   .object({
@@ -93,10 +48,6 @@ export const gatewayAuthSchema = z
   })
   .strict();
 
-/**
- * The delivery adapter a Target speaks (§6). One Target has exactly one
- * adapter type, because placement determines artifact shape (§13).
- */
 export const targetAdapterSchema = z.enum([
   'kubernetes',
   'cloudrun',
@@ -105,24 +56,12 @@ export const targetAdapterSchema = z.enum([
   'cloudflare-pages',
 ]);
 
-/**
- * The secret store this installation resolves the reach rule with (§10, §20).
- * v1 ships two so the pluggability claim is falsifiable.
- */
 export const storeAdapterSchema = z.enum([
   'onepassword',
   'gcp-secret-manager',
   'vercel',
 ]);
 
-/**
- * Which of §4's three build routes a configured route is one of.
- *
- * The *kind* is a closed vocabulary because each one is a different piece of
- * code; the *set of routes an installation has* is not, which is why `routes`
- * below is a list an operator writes rather than one of these three per
- * installation. §4: "which routes exist is an installation's configuration."
- */
 import {
   buildRouteAdapterSchema,
   buildRouteSchema,
@@ -157,111 +96,42 @@ const kubernetesDeliverySchema = z.discriminatedUnion('flavour', [
 
 const reachSchema = z.enum(['none', 'private', 'public']);
 
-/**
- * The facts every kind of vessel states about itself, whatever it is.
- *
- * Both are properties of the **boundary** — of the network a cluster or a
- * project sits on — so they are true for every surface on it and impossible for
- * two of those surfaces to disagree about. That is the whole reason they are
- * here rather than on a Target: `src/domain/vessel.ts` records what it cost
- * when they were stated per surface.
- *
- * Optional rather than defaulted, matching the row: absent means unstated, and
- * `[]` means stated-and-empty. A Target with no declared `reachableRegistries`
- * gets the first of `supplyChain.registry`, which is not the same answer as one
- * that reaches none.
- */
-/**
- * The installation-wide services one vessel holds for every other.
- *
- * These were four unrelated top-level keys — `sources.defaultBucket`,
- * `cloud.artifactsProject`, `secretStore.container` and
- * `cloud.homeVesselProject` — that happened to describe one boundary. Nothing
- * said they had to, so nothing noticed when they stopped: a bucket in one
- * project, a store in another and a `homeVesselProject` naming a third is a
- * document that validates and then fails at the first signed URL.
- *
- * Stated on the vessel they are one boundary's properties, and the fourth
- * collapses entirely — where the home vessel *is* is its `location`, which every
- * vessel already carries and which two keys can no longer disagree about.
- *
- * Only the vessel `installation.homeVessel` names may carry this block, and it
- * must: the document-level refinement below enforces both halves, so a reader
- * asking for the source bucket resolves exactly one answer.
- */
+/** Required on the home vessel and refused on every other. */
 export const sharedServicesSchema = z
   .object({
-    /** Where archive sources and artifacts are staged before a build (§4). */
+    /** Where archive sources and artifacts are staged before a build. */
     sourceBucket: nonEmptyString,
     /**
-     * Project holding immutable build artifacts and signing material, shared
-     * across every vessel (§14). Its own project rather than this vessel's: an
-     * installation may publish artifacts from a project it runs nothing in, and
-     * this one does.
+     * Holds build artifacts and signing material for every vessel. It may be a
+     * project the installation runs nothing in.
      */
     artifactsProject: nonEmptyString,
-    /**
-     * What holds the items inside the secret store: the vessel's project for
-     * Secret Manager, the vault for 1Password.
-     *
-     * One key rather than one per adapter, because the two are the same thing
-     * under different names, and a per-adapter block would let an installation
-     * configure a store it does not use.
-     */
+    /** The vessel's project for Secret Manager, the vault for 1Password. */
     secretStoreContainer: nonEmptyString,
   })
   .strict();
 
-/**
- * A repository-relative directory, checked the way §5's named scope is: no
- * leading slash and no traversal, and nothing said about the tree's layout.
- *
- * The layout is the installation's, not this software's — an installation whose
- * roots live somewhere else is not misconfigured — so the only thing enforced is
- * that the path stays inside the repository it is resolved against.
- */
 const repositoryPath = nonEmptyString.refine(
   (value) => !value.startsWith('/') && !value.split(/[\\/]/).includes('..'),
   'must stay inside the repository',
 );
 
+/** Absent means unstated; `[]` means stated and empty. */
 const vesselFacts = {
   name: targetNameSchema,
   servedHosts: z.array(nonEmptyString).optional(),
   reachableRegistries: z.array(nonEmptyString).optional(),
   shared: sharedServicesSchema.optional(),
   /**
-   * Where this boundary is declared in the infrastructure repository, as a
-   * directory relative to its root.
-   *
-   * What a generated remediation is *for*: §13's checklist states what is unmet
-   * and `domain/remediation.ts` states the Terraform that clears it, and a
-   * stanza with nowhere to go is a snippet. Declared here rather than derived
-   * from a naming convention, because a convention would let this software
-   * invent a path nothing in that repository has ever agreed to — and then
-   * open a pull request against it.
-   *
-   * Optional, and its absence is the honest answer rather than a gap: a
-   * boundary somebody connected through the UI genuinely has no root, and the
-   * remediation for it says exactly that instead of naming a directory.
+   * This boundary's directory in the infrastructure repository, where a
+   * generated remediation goes. Absent for a boundary connected in the UI.
    */
   terraformRoot: repositoryPath.optional(),
 };
 
 /**
- * A Vessel declared by installation desired state — §13's tenancy boundary,
- * named rather than spelled as a shared prefix of two Target names.
- *
- * Discriminated on `kind` for the reason `VesselLocation` is: a `cluster` with
- * a project id is not a state the domain has a name for, and the location's
- * shape follows from the kind rather than being a bag of optional keys beside
- * it. The `kind` inside {@link VesselLocation} is therefore not restated here —
- * it is this key, and a document that carried both could carry two answers.
- *
- * `location` is optional for exactly the reason the column is nullable: a
- * declaration may seed a boundary's identity and rank without stating how to
- * reach it, leaving the connect act to supply that. A Target is addressable
- * when its own connection **and** its vessel's location are both present.
+ * `location` is optional so a seed can leave the address to the connect act. A
+ * Target is addressable once its connection and its vessel's location exist.
  */
 export const vesselSeedSchema = z.discriminatedUnion('kind', [
   z
@@ -270,7 +140,6 @@ export const vesselSeedSchema = z.discriminatedUnion('kind', [
       kind: z.literal('cluster'),
       location: z
         .object({
-          /** §13's prerequisite is OIDC against this endpoint. */
           apiServer: z.url(),
         })
         .strict()
@@ -283,16 +152,10 @@ export const vesselSeedSchema = z.discriminatedUnion('kind', [
       kind: z.literal('gcp-project'),
       location: z
         .object({
-          /** The project every surface on this vessel deploys into (§14). */
           project: nonEmptyString,
           /**
-           * The network a Datastore on this vessel is reached over, when it
-           * has one — `GcpProjectNetwork` in `domain/vessel.ts`. Optional for
-           * the reason that type gives: a project serving only Cloud Run and
-           * Firebase Hosting needs none, and absence is a capability rather
-           * than an unmet prerequisite. The values are Terraform's
-           * `vessel-network` outputs, hand-carried here like every other
-           * installation fact (§20).
+           * The network a Datastore on this vessel is reached over. Absent for
+           * a project serving only Cloud Run and Firebase Hosting.
            */
           network: z
             .object({
@@ -312,12 +175,7 @@ export const vesselSeedSchema = z.discriminatedUnion('kind', [
       kind: z.literal('vercel-team'),
       location: z
         .object({
-          /**
-           * The team or account every surface on this vessel deploys into.
-           *
-           * A slug or a `team_…` id: the API takes either under `teamId`, and
-           * an operator reads the slug off the dashboard URL.
-           */
+          /** A slug or a `team_…` id: the API takes either as `teamId`. */
           team: nonEmptyString,
         })
         .strict()
@@ -330,12 +188,7 @@ export const vesselSeedSchema = z.discriminatedUnion('kind', [
       kind: z.literal('cloudflare-account'),
       location: z
         .object({
-          /** The account every surface on this vessel deploys into. */
           account: nonEmptyString,
-          /**
-           * The API root every surface on this account reaches. Optional;
-           * defaults to the vendor's own.
-           */
           endpoint: z.url().optional(),
         })
         .strict()
@@ -345,70 +198,31 @@ export const vesselSeedSchema = z.discriminatedUnion('kind', [
 ]);
 
 /**
- * A Target declared by installation desired state.
- *
- * Connection facts are optional so an operator may still seed an identity and
- * connect it through the product. When supplied, they are ordinary,
- * credential-free platform configuration and make the connection reproducible
- * from Git.
- *
- * **Only facts true of this runtime surface and not of its neighbours.** Where
- * the boundary is, and what it can reach, are declared once on the vessel this
- * names.
- *
- * **There is no `name`.** `vessel` and `adapter` are what identify a Target, so
- * a third field could only restate them or contradict them — and the spelling it
- * used to carry was a suffix that appeared only where a vessel had two surfaces,
- * which made the day a vessel gained one a day the other had to be renamed.
+ * `connection` is optional so an operator can seed a Target and connect it in
+ * the product. It holds no credentials; boundary facts live on the vessel.
  */
 export const targetSeedSchema = z.discriminatedUnion('adapter', [
   z
     .object({
-      /** The vessel this Target is a surface on, by name (§13). */
       vessel: targetNameSchema,
       adapter: z.literal('kubernetes'),
-      /**
-       * §3's asserted half, declared so a torn-down installation comes back
-       * knowing what it can serve rather than waiting for someone to re-state
-       * it. Absent means unasserted, which is not the same as `[]`.
-       */
+      /** Absent means unasserted, which differs from `[]`. */
       reaches: z.array(reachSchema).optional(),
       authReaches: z.array(reachSchema).optional(),
       connection: z
         .object({
           /**
-           * Where releases placed before per-App namespaces still live.
-           *
-           * No new release lands here — {@link appNamespaceSchema} decides
-           * that — but a Deploy carries its namespace in its own ref, so the
-           * ones already placed keep resolving to it until each is redeployed.
-           * It is also the namespace the connect probe reads a cluster's
-           * prerequisites in.
+           * Every App namespace copies its Pod Security labels, and the connect
+           * probe checks them here.
            */
           namespace: nonEmptyString,
-          /**
-           * The pattern an App's own namespace is named by (§20).
-           *
-           * A literal in `src/` would make a second operator's installation
-           * this fleet's, so the pattern is a manifest value like every other
-           * fact that names an installation. `{app}` is the only placeholder.
-           */
+          /** `{app}` is the only placeholder. */
           appNamespace: appNamespaceSchema.optional(),
-          /**
-           * Where Datastores are provisioned, which is no App's namespace.
-           *
-           * A Datastore outlives every App attached to it (§11), so it cannot
-           * live in a namespace named for one of them.
-           */
+          /** A Datastore outlives its Apps, so this is never an App's. */
           datastoreNamespace: nonEmptyString.optional(),
           delivery: kubernetesDeliverySchema,
           logHistorySeconds: z.number().int().nonnegative().optional(),
-          /**
-           * §7's operator class, verbatim. Untyped for the reason
-           * `KubernetesConnection.chartValues` gives: the chart's classes are
-           * the adapter's knowledge, and the boundary is enforced where this is
-           * saved rather than where it is declared.
-           */
+          /** Untyped: which keys the chart allows is the adapter's call. */
           chartValues: z.record(z.string(), z.unknown()).optional(),
         })
         .strict()
@@ -422,10 +236,9 @@ export const targetSeedSchema = z.discriminatedUnion('adapter', [
       connection: z
         .object({
           region: nonEmptyString,
-          /** The runtime's API root. Optional; defaults to the vendor's own. */
           endpoint: z.url().optional(),
           policyEndpoint: z.url().optional(),
-          /** The identity a revision runs as. See `CloudRunConnection`. */
+          /** The identity a revision runs as. */
           serviceAccount: nonEmptyString.optional(),
           logHistorySeconds: z.number().int().nonnegative().optional(),
         })
@@ -439,7 +252,6 @@ export const targetSeedSchema = z.discriminatedUnion('adapter', [
       adapter: z.literal('static'),
       connection: z
         .object({
-          /** The hosting product's API root. Optional; defaults to the vendor's own. */
           endpoint: z.url().optional(),
         })
         .strict()
@@ -452,7 +264,6 @@ export const targetSeedSchema = z.discriminatedUnion('adapter', [
       adapter: z.literal('vercel'),
       connection: z
         .object({
-          /** The platform's API root. Optional; defaults to the vendor's own. */
           endpoint: z.url().optional(),
         })
         .strict()
@@ -465,7 +276,6 @@ export const targetSeedSchema = z.discriminatedUnion('adapter', [
       adapter: z.literal('cloudflare-pages'),
       connection: z
         .object({
-          /** The platform's API root. Optional; defaults to the vendor's own. */
           endpoint: z.url().optional(),
         })
         .strict()
@@ -477,42 +287,15 @@ export const targetSeedSchema = z.discriminatedUnion('adapter', [
 export const installationManifestSchema = z
   .object({
     /**
-     * What this installation is, and which two vessels it is built on.
-     *
-     * The two pointers are scalars naming a declared vessel, and cardinality
-     * comes free with that: a field that names one vessel has nothing to
-     * constrain, no partial unique index, and no guard that can drift from the
-     * column it guards. An `is_home boolean` could express neither — it would be
-     * true of two rows and say nothing about which.
-     *
-     * "This vessel is undeletable" then stops being a column and becomes
-     * *something points at it*, which is the check `targets`' `restrict` already
-     * performs one noun down. Neither pointer is a foreign key, so the guard is
-     * explicit in the command paths rather than in the schema — see
-     * `disconnectTarget`.
+     * The two vessel pointers are not foreign keys, so `disconnectTarget`
+     * guards the vessels they name.
      */
     installation: z
       .object({
-        /**
-         * Opaque label for this installation. Appears in the UI and in logs; it
-         * carries no behaviour.
-         */
+        /** Shown in the UI and logs. */
         name: nonEmptyString,
-        /**
-         * The vessel this control plane runs on (§19).
-         *
-         * Being *also* an ordinary deploy Target is fine and needs no marking:
-         * it is the in-cluster destination, first in `targets` and rank 0, and
-         * an ordinary destination besides.
-         */
         controlPlaneVessel: targetNameSchema,
-        /**
-         * The vessel holding this installation's shared services — the source
-         * bucket, the secret store, the artifacts project and the signer.
-         *
-         * Where the installer put them, so it is an install-time fact rather
-         * than an operator choice; there is no act that moves it.
-         */
+        /** The vessel holding the shared services. */
         homeVessel: targetNameSchema,
       })
       .strict(),
@@ -520,9 +303,8 @@ export const installationManifestSchema = z
     auth: z
       .object({
         /**
-         * Null means passkeys are the only authentication path. A configured
-         * Gateway is additive: its assertions authenticate only after an
-         * operator links one from a fresh passkey-authenticated session.
+         * Null means passkeys only. A Gateway's assertions authenticate only
+         * after an operator links one from a fresh passkey session.
          */
         gateway: gatewayAuthSchema.nullable(),
       })
@@ -531,39 +313,15 @@ export const installationManifestSchema = z
     dns: z
       .object({
         /**
-         * The zones this installation mints names in, each stating what it is
-         * able to serve (§9).
-         *
-         * **A list rather than a zone named per reach, and the inversion is the
-         * point.** Naming a zone per reach made two the maximum an installation
-         * could have, and made "which zone" a question only reach could answer.
-         * An installation with a domain that exists solely to answer on the
-         * internet had nowhere to say so, and an App had no way to ask for one
-         * domain over another.
-         *
-         * Both readings the old shape had are still expressible, and the choice
-         * is the installation's rather than the product's. Point every zone at
-         * both reaches and flipping a Component's reach is a record re-point
-         * with a stable hostname; state a zone per reach — separate trust
-         * boundaries, split-horizon resolvers — and changing reach is a rename.
-         *
-         * **Order is the default.** An App that pins no zone mints in the first
-         * one here that serves its reach, so the list's head is what an
-         * installation gets by not choosing. Every zone is expected to be
-         * dedicated to generated names and disjoint from any hand-managed flat
-         * space; nothing here can check that, and an installation that mints
-         * into a zone it also hand-manages owns the collision.
+         * An App that pins no zone mints in the first one serving its reach.
+         * Zones must hold only generated names; nothing checks that.
          */
         zones: z
           .array(
             z
               .object({
                 name: zone,
-                /**
-                 * What this zone answers on. `none` is not a member: nothing
-                 * routes to a Component that has it, so there is no record for
-                 * a zone to publish.
-                 */
+                /** No `none`: nothing routes to such a Component. */
                 reaches: z.array(z.enum(['private', 'public'])).min(1),
               })
               .strict(),
@@ -574,106 +332,34 @@ export const installationManifestSchema = z
 
     sources: z
       .object({
-        /**
-         * First-party GCS buckets for staging archive sources and artifacts (§4, §13).
-         *
-         * **No `defaultBucket` beside it.** Which of them staging picks is a
-         * property of the home vessel — `shared.sourceBucket` — because a
-         * default stated here could name a bucket in a project nothing else in
-         * this document mentions.
-         */
+        /** First-party GCS buckets; staging uses `shared.sourceBucket`. */
         buckets: z.array(nonEmptyString).min(1),
       })
       .strict(),
 
-    /**
-     * **No `cloud` block at all, and that is now the whole of it.**
-     *
-     * §13's one auth mode — "native OIDC federation, nothing stored" — is an
-     * `external_account` credential document, and the installer chart already
-     * writes one from the workload-identity audience and mount path a release
-     * names. Asking for the same four facts here made a second copy, by hand,
-     * in a document the chart does not render; the two could disagree, they
-     * did, and the failure arrived as a `signBlob` refusal that read as a code
-     * defect. The two keys that stayed — `artifactsProject` and
-     * `homeVesselProject` — are properties of the vessel `installation.homeVessel`
-     * names, so the block has nothing authored left in it.
-     *
-     * `cloud.federation` is resolved from the mounted credential —
-     * `federation-credential.ts` — and appears on {@link InstallationManifest}
-     * without ever being authored.
-     */
-
     charts: z
       .object({
-        /**
-         * Reference to the App chart (§7) — the chart every deployed Component
-         * renders through.
-         *
-         * Authored, because no deployment renders it: the installer chart names
-         * itself and its own release, never the chart an App is deployed
-         * through, so there is no second copy for this one to disagree with.
-         * It is also a real
-         * installation choice — §7 wants the App chart pinned per Target, and
-         * an OCI reference is where that ends up.
-         */
+        /** The chart every deployed Component renders through. */
         app: nonEmptyString,
-        /**
-         * **No `installer` key.** It would name the chart this installation is
-         * installed from — the release restating itself into a document the
-         * release does not render — and nothing in the process reads it. A
-         * value that can only be wrong is not configuration.
-         */
       })
       .strict(),
 
     supplyChain: z
       .object({
         /**
-         * The registries every artifact is pushed to and pulled from (§16).
-         * Named here rather than derived from the artifacts project because a
-         * mirror in front of one is a legitimate installation choice, and
-         * `offlineDeploy` (§3, §33) is derived from which host the first names.
-         *
-         * **Several, because two Targets on one installation cannot always
-         * share one.** §16 named a single registry and a placement filter over
-         * it, which has no answer for an installation whose cluster pulls
-         * anonymously from GitHub Container Registry while its Cloud Run
-         * Target pulls through a cache mirror that cannot parse what was
-         * pushed there. Each is pushed to; each Target pins the one it can
-         * reach (`artifactAddress`).
-         *
-         * A bare string is the same document as a one-element list and stays
-         * legal, so an installation with one registry says one thing and no
-         * stored manifest needs rewriting to keep parsing. Order is meaningful
-         * only as a tie-break: the first is what a Target with no declared
-         * `reachableRegistries` gets, which is every Target until an operator
-         * says otherwise.
+         * Every artifact is pushed to each. A Target pulls from one it can
+         * reach, or from the first when it names none.
          */
         registry: z
           .union([nonEmptyString, z.array(nonEmptyString).min(1)])
           .transform((value) => (typeof value === 'string' ? [value] : value)),
-        /**
-         * Where signature verification fetches its material (§16) — the third
-         * of the deploy path's references `offlineDeploy` is checked over.
-         */
+        /** Where signature verification fetches its material. */
         verifier: nonEmptyString,
-        /**
-         * KMS key URI core hands to cosign (§16). It is a reference, not key
-         * material; the process authenticates through its workload identity.
-         */
+        /** A KMS key URI for cosign: a reference, never key material. */
         signer: nonEmptyString,
         /**
-         * The attestation authority a cloud Target's Binary Authorization
-         * asks, as `projects/<project>/attestors/<name>`.
-         *
-         * Optional because not every installation has a cloud Target with an
-         * enforcing admission policy, and naming an authority that nothing
-         * consults would be configuration with no effect. Where a cloud
-         * Target *does* enforce, an artifact with no attestation is refused
-         * at deploy time however well signed it is: the two boundaries want
-         * different objects made with the same key, and one cannot be derived
-         * from the other.
+         * `projects/<project>/attestors/<name>`. Where a cloud Target's Binary
+         * Authorization enforces, an unattested artifact is refused.
          */
         attestor: nonEmptyString.optional(),
       })
@@ -682,94 +368,34 @@ export const installationManifestSchema = z
     github: z
       .object({
         /**
-         * The repository host's web origin — where the manifest-flow form
-         * that creates the GitHub App POSTs, where `…/installations/new`
-         * links point, and what clone URLs are composed from.
-         *
-         * Separate from `apiBaseUrl` for GitHub Enterprise installations,
-         * whose web and REST origins differ. The App's identity itself —
-         * id, slug, client id, signing key — is **not** here: it lives
-         * sealed in the `github_app` row, written once by the manifest-flow
-         * conversion, because a signing key has no business in a ConfigMap.
-         *
-         * A document authored for the previous schema carries `clientId`
-         * and `oauthBaseUrl` instead; `manifest-upgrade.ts` moves
-         * `oauthBaseUrl` here and drops `clientId`, so neither an old
-         * stored row nor an old declaration can fail a parse whichever of
-         * the image and the declaration rolls out first.
+         * The web origin for the App manifest flow, install links and clone
+         * URLs. GitHub Enterprise's differs from its `apiBaseUrl`.
          */
         webBaseUrl: z
           .url()
           .refine((value) => !value.endsWith('/'), 'must not end with a slash'),
         /**
-         * Installation accounts this installation recognises as its own.
-         *
-         * A public App can be installed by strangers, and their
-         * installations arrive in the same `GET /app/installations`
-         * enumeration as the operator's. When this list is stated, the
-         * Repositories screen filters to it and `installationFor` refuses
-         * repositories owned by anyone else — filtered, not merely listed
-         * and inert. Absent means no filter, which is the honest state of a
-         * fresh installation whose App has not been installed anywhere yet.
+         * Accounts whose installations are this installation's; a public App
+         * can be installed by strangers. Absent means no filter.
          */
         accounts: z.array(nonEmptyString).min(1).optional(),
         /**
-         * The App's slug on the repository host — public, and only ever
-         * display-and-links material (`…/apps/<slug>/installations/new`).
-         *
-         * Declared for an **adopted** App, whose identity arrives through the
-         * installation Secret (`SPINDRIFT_GITHUB_APP_ID` and the private-key
-         * variable beside it) and therefore carries no slug of its own. The
-         * manifest-flow conversion stores its own slug and needs no
-         * declaration here.
+         * For an adopted App, whose identity comes from the installation Secret
+         * without a slug. A manifest-flow App stores its own.
          */
         appSlug: nonEmptyString.optional(),
         /**
-         * Where GitHub delivers this App's webhooks, as a full URL.
-         *
-         * Stated rather than derived from the control-plane hostname because
-         * the two are different names on purpose: the control plane is a LAN
-         * record GitHub's delivery servers cannot reach, and this is the
-         * path-scoped tunnel hostname that exists precisely so one route can
-         * be reached from outside. Absent means the created App declares no
-         * webhook and every delivery posture stays refuse-all — degraded,
-         * stated, and not a crash.
+         * A name GitHub can reach, unlike the control-plane hostname. Absent,
+         * the created App declares no webhook.
          */
         webhookUrl: z.url().optional(),
-        /**
-         * Base URL of the repository host's REST API, without a trailing
-         * slash.
-         *
-         * A value rather than a constant because an installation running
-         * against a self-hosted enterprise deployment reaches its own host, and
-         * §20 puts anything that names one installation's world here. The
-         * public host is a legitimate value for it; it is not a default,
-         * because there are none.
-         */
         apiBaseUrl: z
           .url()
           .refine((value) => !value.endsWith('/'), 'must not end with a slash'),
         /**
-         * The reusable build workflow the configuration PR's one caller calls
-         * (§15), as `owner/repo/.github/workflows/<file>@<ref>`.
-         *
-         * **The ref may move, and that is a named trade.** §15 gives the
-         * connected repository the Actions minutes and the billing, which
-         * means the workflow runs with that repository's own permissions — so
-         * whoever can move the ref runs arbitrary steps in every connected
-         * repository at once. A branch ref hands that power to the platform
-         * repository's own merge gate, and buys the fleet its currency: the
-         * caller written into each connected repository tracks the platform's
-         * present workflow instead of freezing at whatever commit was current
-         * when that repository connected — a freeze nothing walks back,
-         * because no fleet re-pin exists. An installation that wants the
-         * freeze anyway states a commit sha; the schema takes either.
-         *
-         * Nullable, stated the way `auth.gateway` is: an installation that has
-         * not published a reusable workflow yet has no honest value to put here,
-         * and a placeholder would be a configuration that looks complete
-         * and fails at the first build. Null means repositories cannot be
-         * connected — `connectRepository` says so — and nothing else changes.
+         * The reusable workflow every connected repository's caller runs with
+         * that repository's permissions, so whoever can move `<ref>` runs steps
+         * in all of them. Null means repositories cannot be connected.
          */
         buildWorkflow: nonEmptyString
           .regex(
@@ -778,21 +404,8 @@ export const installationManifestSchema = z
           )
           .nullable(),
         /**
-         * The repository holding this installation's infrastructure, as
-         * `owner/name` — where a generated remediation is opened as a pull
-         * request.
-         *
-         * Not the connected-repository set: those are somebody's applications,
-         * and a change to a boundary belongs where the boundary is declared.
-         * One key rather than one per vessel because the roots the vessels
-         * point at are directories inside it.
-         *
-         * Optional, with the same posture `buildWorkflow`'s null has: an
-         * installation whose infrastructure this host cannot reach has no
-         * honest value to put here, and a placeholder would be a pull request
-         * opened against a repository nobody reviews. Absent means a
-         * remediation is rendered and copied rather than opened, and nothing
-         * else changes.
+         * Where a generated remediation is opened as a pull request. Absent
+         * means a remediation can be copied but not opened.
          */
         infrastructureRepository: nonEmptyString
           .regex(/^[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+$/, 'must be owner/name')
@@ -803,14 +416,8 @@ export const installationManifestSchema = z
     build: z
       .object({
         /**
-         * Every build route this installation has, **in admin rank order**
-         * (§16: "an ordered list of build routes... the level is a threshold,
-         * then admin rank wins"). The order of this array is the rank.
-         *
-         * May be empty. An installation with no route can still deploy an
-         * uploaded archive of finished output, because a supplied artifact
-         * consults no route at all (§4) — so an empty list is a supported
-         * installation rather than a misconfiguration.
+         * Array order is admin rank. May be empty: a supplied artifact consults
+         * no route.
          */
         routes: z
           .array(buildRouteSchema)
@@ -820,13 +427,8 @@ export const installationManifestSchema = z
             'build route names must be unique',
           ),
         /**
-         * The zero-config BuildKit frontend, pinned by the installation (§4:
-         * "one engine, two frontends — the repo's Dockerfile if present, else
-         * a zero-config builder").
-         *
-         * A value rather than a constant because it is an image every build
-         * this installation runs pulls and trusts, so which one — and pinned to
-         * which digest — is the operator's call, not the software's.
+         * The BuildKit frontend for a scope with no Dockerfile. Every build
+         * pulls and trusts it, so the operator pins it.
          */
         zeroConfigFrontend: nonEmptyString,
       })
@@ -835,48 +437,19 @@ export const installationManifestSchema = z
     secretStore: z
       .object({
         /**
-         * Which store adapter this installation delivers config through.
-         *
-         * **Not every store in the vocabulary is selectable here**, and the
-         * exclusion is §10's own shape rather than a restriction: this field
-         * names the installation's *store of record*, the one a Kubernetes or
-         * cloud Target writes through. The edge platform's environment is a
-         * store too, but it belongs to the Target that runs the functions
-         * reading it — an installation cannot choose it for everything else,
-         * and a Vercel Target reaches it whether or not this field says so.
+         * The store of record Kubernetes and cloud Targets write through.
+         * Vercel's environment belongs to the Vercel Target, so it is excluded.
          */
         adapter: storeAdapterSchema.exclude(['vercel']),
         /**
-         * The access path core writes over — §10's "store of record plus one or
-         * more access paths", named as the one this process reaches.
-         *
-         * Core's path, not a Target's: the platform's own secret operator
-         * fetches from the same store of record over its own path, and neither
-         * needs to know the other's.
-         *
-         * Optional for `gcp-secret-manager`, whose API root is the same
-         * hostname for every project rather than an installation fact —
-         * `createSecretStore` in `adapters/registry.ts` applies its default
-         * when this is absent. `onepassword` gets no such default: a Connect
-         * server is self-hosted, so there is no universal address to assume,
-         * and the refinement below refuses the pair rather than letting the
-         * store constructor throw on the next request after the write.
+         * The endpoint this process writes through. Secret Manager defaults in
+         * `createSecretStore`; a self-hosted 1Password Connect server has none.
          */
         endpoint: z.string().url().optional(),
-        /**
-         * **No `container` here.** What holds the items is a property of the
-         * boundary they live in, so it is `shared.secretStoreContainer` on the
-         * home vessel — the same place the source bucket and the artifacts
-         * project moved to, and for the same reason.
-         */
       })
       .strict()
-      // Which adapter needs an endpoint is a fact the sibling key carries, and
-      // a refinement is where a fact about two keys belongs. It was left to
-      // `createSecretStore` to notice, which is one request too late: the
-      // document validates, the write lands, and the *next* command rebuilds
-      // the registry and throws — so a wizard could store a document that
-      // stops the installation answering, with nothing on screen saying why.
+      // Refused here, before the write: the next command's registry rebuild
+      // would otherwise throw.
       .refine(
         (store) =>
           store.adapter !== 'onepassword' || store.endpoint !== undefined,
@@ -888,21 +461,8 @@ export const installationManifestSchema = z
       ),
 
     /**
-     * The tenancy boundaries this installation deploys into (§13, §14).
-     *
-     * Declared rather than derived. Before this key existed, a vessel was
-     * spelled as the shared prefix of `<name>-cloudrun` and `<name>-static`,
-     * enforced here by a rule that made a naming convention load-bearing and
-     * left the boundary's own facts — where it is, what it can reach — stated
-     * twice, once per surface, where the two could disagree. Naming it is what
-     * makes the next backend additive: every one worth adding is a boundary
-     * hosting several runtimes, so the convention would only get more
-     * load-bearing, never less.
-     *
-     * A vessel states where the boundary is and what it can reach. It does not
-     * state which surfaces are on it — those are the `targets[]` entries that
-     * name it, and what a boundary really carries is established by probing it
-     * at connect.
+     * Tenancy boundaries: where each is and what it can reach. Its surfaces are
+     * the `targets[]` entries that name it.
      */
     vessels: z
       .array(vesselSeedSchema)
@@ -913,11 +473,7 @@ export const installationManifestSchema = z
         'vessel names must be unique',
       ),
 
-    /**
-     * Targets in rank order. A Target with connection facts is reconciled as
-     * connected; one without them exists for an operator to connect in-product.
-     * Rank is one global ordered list (§13), so array order is placement order.
-     */
+    /** Array order is rank, one global placement order. */
     targets: z
       .array(targetSeedSchema)
       .min(1)
@@ -930,24 +486,8 @@ export const installationManifestSchema = z
   })
   .strict()
   /**
-   * Every Target names a vessel this document declares.
-   *
-   * At the document level rather than on `targets`, because it is the one rule
-   * in this schema that reads two keys at once. It replaces the
-   * `<name>-cloudrun` / `<name>-static` pairing rule, and it is a stronger
-   * check than that one was: the pairing rule could only say that two names
-   * looked related, while this one refuses a reference that does not resolve —
-   * which is what `reconcileManifestTargets` needs, since it looks a vessel up
-   * by name and has nothing honest to do with a Target whose boundary is not
-   * in the document.
-   *
-   * **It asks whether this vessel declares this surface, not whether its kind
-   * carries the adapter.** A `targets[]` entry *is* the declaration — the
-   * uniqueness refine above is what keeps a vessel from declaring the same
-   * surface twice — and which runtimes a boundary actually has is established
-   * by probing it at connect. Holding the document to a table of surfaces per
-   * kind would refuse a project that genuinely runs a cluster, and would do it
-   * on the authority of a value whose only job is the shape of `location`.
+   * Every vessel reference resolves, and only the home vessel has shared
+   * services. A vessel's kind does not limit its adapters: connect probes that.
    */
   .superRefine((manifest, context) => {
     const declared = new Set(manifest.vessels.map((vessel) => vessel.name));
@@ -960,11 +500,6 @@ export const installationManifestSchema = z
       });
     });
 
-    // The two the installation itself is built on, resolved the same way a
-    // Target's `vessel` is. A pointer that does not resolve is the one shape of
-    // this document that cannot boot: the home vessel is where the source
-    // bucket, the store and the signer are read from, and nothing below can
-    // pick a fallback that would not be a guess about somebody's cloud.
     for (const key of ['controlPlaneVessel', 'homeVessel'] as const) {
       if (declared.has(manifest.installation[key])) continue;
       context.addIssue({
@@ -974,11 +509,6 @@ export const installationManifestSchema = z
       });
     }
 
-    // Exactly one vessel carries the shared services, and it is the one the
-    // pointer names. Both halves, because either alone leaves a reader with a
-    // question: none declared is a source bucket nobody stated, and a second
-    // one declared is two answers to `sourceBucket` with nothing to choose
-    // between them.
     manifest.vessels.forEach((vessel, index) => {
       const isHome = vessel.name === manifest.installation.homeVessel;
       if (isHome && vessel.shared === undefined) {
@@ -1007,23 +537,10 @@ export type VesselSeed = z.infer<typeof vesselSeedSchema>;
 export type SharedServices = z.infer<typeof sharedServicesSchema>;
 export type GatewayAuthConfig = z.infer<typeof gatewayAuthSchema>;
 
-/**
- * The manifest as it is authored, stored and edited — exactly the schema above.
- *
- * This is what a declaration carries, what the durable row holds, and what
- * `configureInstallation` accepts. It carries no derived key, so a write can
- * never persist a copy of something the deployment already declares.
- */
+/** The manifest as authored, stored and edited, with no derived key. */
 export type AuthoredManifest = z.infer<typeof installationManifestSchema>;
 
-/**
- * The authored document plus the deployment facts resolved around it.
- *
- * What every reader in the process is given. The split exists so that "what an
- * operator may write" and "what the software may read" are different types: a
- * derived value is present for readers and unreachable from any write path,
- * which is what makes disagreement impossible rather than merely discouraged.
- */
+/** The authored document plus the deployment facts, as every reader gets it. */
 export type InstallationManifest = AuthoredManifest & {
   readonly cloud: {
     /** Resolved from the credential the deployment mounts, never authored. */
@@ -1031,75 +548,32 @@ export type InstallationManifest = AuthoredManifest & {
   };
   readonly boundary: {
     /**
-     * Whether this deployment strips identity headers and restricts ingress to
-     * the trusted Gateway, attested by the deployment that renders the policy.
-     *
-     * A derived key for the same reason the two above are: the process cannot
-     * observe a NetworkPolicy from inside its own pod, so this is a fact about
-     * the deployment rather than about the installation, and nothing that can
-     * write a manifest can write it. `auth.gateway` is refused wherever this is
-     * false — at boot, and at the command that would set it.
+     * The chart attests the NetworkPolicy restricting ingress to the trusted
+     * Gateway, which the pod cannot observe. False refuses `auth.gateway`.
      */
     readonly trustedGateway: boolean;
   };
   readonly controlPlane: {
     /**
-     * Where this control plane's own UI is served, from the deployment that
-     * serves it — never authored.
-     *
-     * Two things read it and both genuinely need it. A passkey is scoped to a
-     * **relying party id**, which is this name, and a ceremony performed
-     * against any other origin is refused — so an installation that had this
-     * wrong could enrol nobody. And the status page has to tell its own address
-     * apart from an App's, which is the only way one process can serve both.
-     *
-     * Derived rather than authored, and that is what makes an installation
-     * reachable before anyone has configured it. The chart renders the Gateway
-     * and the HTTPRoute from one `hostname` value; a manifest key beside it was
-     * a second copy of the same fact, and the only way to keep two copies
-     * honest was for the chart to refuse a release where they disagreed and to
-     * carry a whole second placeholder document to seed the value into. Read it
-     * from the deployment and there is one copy, no refusal, and no document.
-     *
-     * It is not derived from `dns.zones`: the control plane is a platform
-     * workload (§19) and never one of its own Apps, so it does not live in the
-     * zone Apps are named in.
-     *
-     * Still bound once, at boot, on purpose — a passkey ceremony is scoped to
-     * the origin it began at, so re-resolving this mid-session would invalidate
-     * credentials rather than update them.
+     * The passkey relying party id. The web process binds it once at boot: a
+     * ceremony is scoped to the origin it began at.
      */
     readonly hostname: string;
     /**
-     * The second name the machine routes answer on, or `null`. Lowercased,
-     * because it is compared against `Host` and against minted names.
+     * The second name the machine routes answer on. Lowercased, because it is
+     * compared against `Host` and against minted names.
      */
     readonly publicHostname: string | null;
     /** Names another workload serves on the Apps gateway. Lowercased. */
     readonly reservedHostnames: readonly string[];
-    /**
-     * What this process is running, as the deployment states it —
-     * `SPINDRIFT_VERSION`, the same value telemetry reports as
-     * `service.version`. Digest-pinned delivery means a browser cannot
-     * otherwise tell which image answered it, so the shell repeats this in
-     * its footer. `null` where the deployment says nothing: an honest absence,
-     * not a placeholder a footer would then repeat as fact.
-     */
+    /** Shown in the shell footer; `null` when the deployment states none. */
     readonly version: string | null;
   };
 };
 
-/** The document both halves of a pointer are resolved against. */
 type PointedAt = Pick<AuthoredManifest, 'installation' | 'vessels'>;
 
-/**
- * The vessel one of the installation's two pointers names.
- *
- * Total, because the document-level refinement above already refused a pointer
- * that resolves to nothing — so a validated manifest cannot reach here without
- * an answer, and the throw is the assertion of that rather than a case a caller
- * has to handle.
- */
+/** Throws only for a document the schema would refuse. */
 function pointedVessel(manifest: PointedAt, name: string): VesselSeed {
   const vessel = manifest.vessels.find((declared) => declared.name === name);
   if (vessel === undefined) {
@@ -1108,24 +582,15 @@ function pointedVessel(manifest: PointedAt, name: string): VesselSeed {
   return vessel;
 }
 
-/** The vessel holding this installation's shared services. */
 export function homeVesselOf(manifest: PointedAt): VesselSeed {
   return pointedVessel(manifest, manifest.installation.homeVessel);
 }
 
-/** The vessel this control plane runs on (§19). */
 export function controlPlaneVesselOf(manifest: PointedAt): VesselSeed {
   return pointedVessel(manifest, manifest.installation.controlPlaneVessel);
 }
 
-/**
- * The source bucket, the artifacts project and the store container, read off
- * the one vessel that holds them.
- *
- * Total for the same reason {@link pointedVessel} is: the refinement requires
- * the home vessel to declare this block and forbids every other vessel from
- * carrying one, so there is exactly one answer and it is present.
- */
+/** Throws only for a document the schema would refuse. */
 export function sharedServicesOf(manifest: PointedAt): SharedServices {
   const home = homeVesselOf(manifest);
   if (home.shared === undefined) {
@@ -1134,15 +599,7 @@ export function sharedServicesOf(manifest: PointedAt): SharedServices {
   return home.shared;
 }
 
-/**
- * The project the home vessel is, or `null` where the declaration seeds its
- * identity without saying where it is.
- *
- * `null` rather than a throw because that half-ready state is one §13 intends to
- * be visible: `location` is optional on a vessel seed for the same reason the
- * column is nullable, and a bucket check against `undefined` is worse than a
- * stated absence.
- */
+/** `null` when the home vessel states no project location. */
 export function homeVesselProjectOf(manifest: PointedAt): string | null {
   const location = homeVesselOf(manifest).location;
   return location !== undefined && 'project' in location
@@ -1150,12 +607,7 @@ export function homeVesselProjectOf(manifest: PointedAt): string | null {
     : null;
 }
 
-/**
- * Whether this vessel is one the installation itself is built on.
- *
- * The predicate every guard and every read-only screen asks. Neither pointer is
- * a foreign key, so this is what stands in for one.
- */
+/** Neither installation pointer is a foreign key; this guard stands in. */
 export function isDeclaredInstallationVessel(
   manifest: Pick<AuthoredManifest, 'installation'>,
   vessel: string,
@@ -1166,14 +618,7 @@ export function isDeclaredInstallationVessel(
   );
 }
 
-/**
- * Where this boundary is declared in the infrastructure repository, or `null`
- * when nothing declares it.
- *
- * By name against the document rather than off the row, because it is a fact
- * about where the *declaration* lives: a boundary connected through the UI has
- * a row and no root, which is the state the null arm exists for.
- */
+/** Read from the document: a boundary connected in the UI has no root. */
 export function terraformRootOf(
   manifest: Pick<AuthoredManifest, 'vessels'>,
   vessel: string,
@@ -1183,18 +628,8 @@ export function terraformRootOf(
 }
 
 /**
- * Project a resolved manifest back down to the document an operator may write.
- *
- * The inverse of the join `resolveManifest` performs, and it exists because an
- * editing surface reads before it writes. `getInstallationManifest` answers
- * what a reader holds and `configureInstallation` accepts only what may be
- * authored; if those are different documents the round trip refuses itself on
- * a key the operator can neither see nor correct — the schema is `.strict()`,
- * so a derived key coming back in is an `Unrecognized key` on a form the
- * operator never touched.
- *
- * Lives here rather than beside the join because it is a fact about the two
- * types, and because the read command must stay free of server-only imports.
+ * Strips the derived keys so an edit form can save what it read: the strict
+ * schema refuses them.
  */
 export function toAuthoredManifest(
   manifest: InstallationManifest,

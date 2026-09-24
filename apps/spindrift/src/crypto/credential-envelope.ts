@@ -1,11 +1,6 @@
 /**
- * The small encryption boundary for durable connector credentials.
- *
- * This is intentionally KMS-lite rather than a general cryptography service:
- * one installation Secret supplies a versioned keyring, one key is active,
- * legacy keys decrypt only, and callers name the purpose of every envelope.
- * Rotation is additive—install a new active key while retaining the old key,
- * then reads opportunistically rewrite old ciphertext.
+ * AES-GCM envelopes for durable connector credentials, keyed from a versioned
+ * keyring in one installation Secret. One key seals; older keys only open.
  */
 
 import { base64urlDecode, base64urlEncode } from '@repo/archive/bytes';
@@ -14,15 +9,12 @@ import { z } from 'zod';
 export const CREDENTIAL_KEYRING_VAR = 'SPINDRIFT_CREDENTIAL_KEYRING';
 
 export type CredentialPurpose =
-  /** The GitHub App's private key — see `integrations/github/app-auth.ts`. */
   | 'spindrift-github-app-key'
-  /** The App-level webhook secret from the same conversion response. */
   | 'spindrift-github-webhook-secret'
-  /** The manifest-flow CSRF state — sealed rather than stored, see the setup route. */
+  /** The manifest-flow CSRF state, sealed into the flow and never stored. */
   | 'spindrift-github-setup-state'
-  /** A registry push credential — see `storage/registry-credentials.ts`. */
   | 'spindrift-registry-credential'
-  /** A Function's whole environment map — see `functions/env.ts`. */
+  /** One envelope holds a Function's whole environment map. */
   | 'spindrift-function-env';
 
 const keyId = z
@@ -50,12 +42,12 @@ const envelopeDocument = z
   })
   .strict();
 
-/** Configuration is refused at construction rather than on the first build. */
+/** Thrown when the keyring is built, not when a credential is first opened. */
 export class CredentialKeyringConfigError extends Error {
   override readonly name = 'CredentialKeyringConfigError';
 }
 
-/** Ciphertext or key selection failed. The message never contains plaintext. */
+/** The message never contains plaintext. */
 export class CredentialDecryptError extends Error {
   override readonly name = 'CredentialDecryptError';
 }
@@ -67,7 +59,7 @@ interface KeyMaterial {
 
 export interface OpenedCredential {
   readonly plaintext: string;
-  /** True when the envelope should be sealed again with the active key. */
+  /** Sealed with an inactive key; the caller should reseal. */
   readonly needsRotation: boolean;
 }
 
@@ -91,10 +83,8 @@ function decodeKey(id: string, encoded: string): Uint8Array<ArrayBuffer> {
 }
 
 /**
- * A parsed keyring.
- *
- * Imported WebCrypto keys are cached inside this object; plaintext credentials
- * are not. Both processes construct their own keyring from the same Secret.
+ * Caches imported WebCrypto keys, never plaintext. Each process builds its own
+ * keyring from the same Secret.
  */
 export class CredentialKeyring {
   private constructor(

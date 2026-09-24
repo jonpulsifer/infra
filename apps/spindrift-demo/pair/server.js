@@ -1,43 +1,7 @@
-/**
- * One scope's default entrypoint, and the half of the pair that reads.
- *
- * Every other scope in this directory is one Component. This one is **two**:
- * railpack's detected start command is this file, so the `service` Component
- * runs it by saying nothing, and the `job` Component beside it runs `job.js`
- * because somebody typed that into the entrypoint field at creation. Same
- * image, same digest, two workloads — which is what "one App to many
- * Components" is, an App being one scope.
- *
- * What passes between them is a **Datastore**, and nothing else: no import,
- * no name, no declared store on either side. That absence is the subject:
- *
- *   A Datastore attaches to the **App**, never to a Component
- *   (`attachDatastore({datastoreId, appId})`). Its connection arrives as a
- *   variable whose name is fixed by the engine and is never a field —
- *   `REDIS_URL` for valkey, `DATABASE_URL` for postgres
- *   (`apps/spindrift/src/domain/desired-state.ts`). So every Component in the
- *   App is handed it on its next Deploy, and two Components sharing state need
- *   no wiring between them because there is nothing to wire.
- *
- * Which is why this file has no configuration for where the job's data is. It
- * reads two fixed keys out of whatever `REDIS_URL` points at, and if nothing
- * points anywhere it says so in those terms rather than erroring — the
- * unattached state is half of what the demo demonstrates, because an attach
- * does not roll anything and the data appears on the *next* Deploy.
- *
- * Its Component must be a `service` rather than a `website`, and that is not a
- * preference: a website is static files served by the Target, with no process
- * and no environment, so no connection string can reach one. The `src/` and
- * `plain/` scopes are that side of the line.
- *
- * Node built-ins only, like its neighbours — a dependency here would prove
- * railpack can install one and would also make the demo fail, the first time a
- * registry is slow, for a reason that has nothing to do with Spindrift. No
- * Dockerfile either, so `buildkit.ts`'s `[ -f Dockerfile ]` switch routes this
- * scope through railpack; and no `spindrift.yaml`, because a scope carrying two
- * Components of two kinds has no single kind to declare — the kind and the
- * entrypoint are each Component's, chosen at creation.
- */
+// The pair's service entrypoint: renders the runs job.js records in Valkey. Both
+// Components get the same REDIS_URL from the valkey Datastore on their App.
+// Deploy as a service (a website gets no REDIS_URL); no spindrift.yaml, as its two Components differ in kind.
+// Node built-ins only and no Dockerfile: railpack builds it with this directory as context.
 
 import { createServer } from 'node:http';
 import { connect } from 'node:net';
@@ -47,18 +11,12 @@ import { talk } from './resp.js';
 const port = Number(process.env.PORT) || 3000;
 const startedAt = new Date();
 
-/** Fixed, because `job/` writes them and neither scope configures the other. */
+// Must match the keys job.js writes.
 const COUNTER = 'spindrift-demo:runs';
 const LOG = 'spindrift-demo:log';
 
-/**
- * What the job left, or why there is nothing.
- *
- * Three states, all of them true things to render: no store attached, a store
- * attached but unreachable, and a store with data in it. The first is not an
- * error — it is what every Component of this App looks like until a `valkey`
- * Datastore is attached *and* a Deploy has happened since.
- */
+// `unattached` means no REDIS_URL: no valkey Datastore, or no Deploy since one
+// was attached.
 async function readStore() {
   const url = process.env.REDIS_URL;
   if (!url) return { state: 'unattached' };
@@ -70,9 +28,6 @@ async function readStore() {
     return {
       state: 'attached',
       runs: runs === null ? 0 : Number(runs),
-      // A record this scope cannot read is shown as itself rather than
-      // dropped: a malformed entry is evidence about the writer, and hiding it
-      // would make the page lie about what is in the list.
       log: (entries ?? []).map((entry) => {
         try {
           return { parsed: JSON.parse(entry) };
@@ -86,17 +41,12 @@ async function readStore() {
   }
 }
 
-/** Which hosting platform this is, by the marker that says so. */
 function platform() {
   const env = process.env;
   if (env.KUBERNETES_SERVICE_HOST) return 'Kubernetes';
   if (env.K_SERVICE || env.CLOUD_RUN_JOB) return 'Google Cloud Run';
   return 'unknown backend';
 }
-
-// ---------------------------------------------------------------------------
-// the page
-// ---------------------------------------------------------------------------
 
 const html = (text) =>
   String(text).replace(
@@ -185,8 +135,7 @@ ${body}
 createServer((request, response) => {
   const path = new URL(request.url, `http://${request.headers.host}`).pathname;
 
-  // Cheap and independent of the store, so a probe pointed here does not go
-  // red because a Datastore is missing — this Component is up either way.
+  // Answered before the store is read, so a missing Datastore never fails a probe.
   if (path === '/healthz') {
     response.writeHead(200, { 'content-type': 'application/json' });
     response.end(JSON.stringify({ ok: true, since: startedAt.toISOString() }));
