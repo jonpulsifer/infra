@@ -1,21 +1,6 @@
 /**
- * One Datastore's screen — where a row goes when it is pressed.
- *
- * §11 makes a Datastore top-level and the ledger gave it a list; this is the
- * other half. The ledger's row holds six stored facts and nothing about the
- * thing itself, so without this screen the only way to answer "what is this
- * cluster actually configured as" is `kubectl`.
- *
- * **The object is the far side's, and the page says so.** It is the API
- * server's document, read at load: spec, the defaults the operator filled in,
- * and the `status` that is where a WAITING Datastore's reason lives. Nothing
- * here composes a manifest — `getDatastore`'s note argues why core could not
- * compose an honest one — so what is on screen is what is running, drift and
- * all.
- *
- * **Read, not act.** Create, Attach, Detach and Destroy live on the ledger,
- * which is where a reader who came to act already is. A second set of buttons
- * here would be a second place for a refusal to come back to.
+ * One Datastore's screen: its stored facts, and the far side's object as the
+ * API server holds it at load. Every act on a Datastore lives on the ledger.
  */
 import { Database } from 'lucide-react';
 import type { DatastoreDetailView } from '../../../commands/views.ts';
@@ -30,24 +15,12 @@ import { Timestamp } from '../../ui/timestamp.tsx';
 import { DetailSkeleton, ScreenFailure, ScreenNotFound } from '../screen.tsx';
 import { deployTone } from './deploys.tsx';
 
-/**
- * Which variable the connection arrives on. Fixed by engine, chosen by
- * nothing, and the one runtime fact a developer reading this page came for.
- */
 const CONNECTION_VARIABLE = {
   postgres: 'DATABASE_URL',
   valkey: 'REDIS_URL',
 } as const;
 
-/**
- * What the object pane says when there is no object.
- *
- * Four absences, four sentences, because they are four different situations
- * and only one of them is a fault. `getDatastore` distinguishes them on the
- * way out; collapsing them here to "nothing to show" would tell an operator
- * whose cluster is unreachable the same thing it tells one whose Datastore was
- * never provisioned.
- */
+/** Why there is no object. Only an unreadable one is a fault. */
 function absence(datastore: DatastoreDetailView): string {
   if (datastore.objectError !== undefined) {
     return `${datastore.target} could not be read: ${datastore.objectError}`;
@@ -85,12 +58,7 @@ export function DatastoreDetail({
         }
         actions={
           <>
-            {/*
-              By id, never by the name beside it — the ledger's inspector makes
-              the same point: two Apps may share a name and `getAppWorkspace`
-              resolves either, so a name opens whichever the database answered
-              with.
-            */}
+            {/* By id: two Apps may share a name. */}
             {datastore.appId !== null ? (
               <Button
                 variant="outline"
@@ -156,13 +124,7 @@ export function DatastoreDetail({
   );
 }
 
-/**
- * One Datastore, by id (§11).
- *
- * A `null` cadence rather than a poll: every act on a Datastore is on the
- * ledger, so nothing this one does can invalidate what it is showing. The far-side object
- * is read once with the row, and the retry is for the load that failed.
- */
+/** Never re-reads: nothing on this screen changes a Datastore. */
 export function DatastoreScreen({
   datastoreId,
   onNavigate,
@@ -176,9 +138,7 @@ export function DatastoreScreen({
 
   if (read.type === 'loading') return <DetailSkeleton />;
   if (read.type === 'error') {
-    // A malformed id fails input validation rather than the lookup, and "there
-    // is no Datastore with that id" is what both mean to a reader who followed
-    // a stale link.
+    // A malformed id fails validation, and to a reader it is also not found.
     return read.failure.code === 'NOT_FOUND' ||
       read.failure.code === 'INVALID_INPUT' ? (
       <ScreenNotFound

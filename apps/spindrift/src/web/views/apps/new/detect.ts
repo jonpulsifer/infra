@@ -1,38 +1,17 @@
 /**
- * What one read of a repository asks, and what the draft may take from it.
- *
- * Separate from the screen because the interesting part is a decision rather
- * than a rendering: which of the directories that came back — if any — the
- * draft is allowed to adopt. Two mistakes live here whenever this is a few
- * lines inside an effect, and both are silent:
- *
- * - A read nobody asked for **re-deciding a draft somebody already answered**.
- *   Drafts are durable rows reachable by URL, so the read that fills in a fresh
- *   draft runs again on every reopen; applying its proposal the second time
- *   reverts the kind, the Component name and the directory the operator
- *   corrected, and the save that follows makes it permanent.
- * - A read **about one directory answering with another**. A settled root
- *   directory asks about the path it now names; falling back to some other
- *   candidate moves the path out from under the operator, and leaving the old
- *   sentence standing describes a directory nobody named.
+ * What one repository read asks, and which detected directory the draft may
+ * adopt. A reopened draft keeps its answers, and a read about one directory
+ * never adopts another.
  */
 
 import type { Draft, DraftAction } from '../../../../domain/creation-draft.ts';
 import { serializeSpindriftFile } from '../../../../integrations/github/config-pr.ts';
 import type { InputOf, OutputOf } from '../../../client.ts';
 
-/** One directory `inspectRepository` had something to say about. */
 export type InspectedScope = OutputOf<'inspectRepository'>['scopes'][number];
 export type DetectedScope = Extract<InspectedScope, { outcome: 'detected' }>;
 
-/**
- * The read to issue: the whole repository, or the one directory named.
- *
- * §5's "named, never searched" is a property of the request, not of the
- * rendering — a subpath edit that re-read the whole tree would answer about
- * directories the operator did not ask about and leave the named one to be
- * found among them.
- */
+/** A named directory is read alone, never searched for in a whole-tree read. */
 export function inspection(
   fullName: string,
   scope?: string,
@@ -41,19 +20,8 @@ export function inspection(
 }
 
 /**
- * The `spindrift.yaml` this scope will get, as the writer would write it.
- *
- * Deploy is where a repository GitHub merely grants gets connected, and
- * connecting commits one of these per scope in the configuration pull request
- * (§15). Rendering it here is the difference between an operator agreeing to
- * "Deploy" and agreeing to a file landing in their repository — and it goes
- * through `serializeSpindriftFile`, the same emitter the commit uses, because a
- * preview composed by a second copy of the writer is a preview that drifts from
- * it.
- *
- * `null` for a scope detection could make nothing of: there is no proposal, so
- * there is no file, and §5's assertion path writes one only once the operator
- * has said what it should contain.
+ * The `spindrift.yaml` the configuration pull request commits for this scope,
+ * from the commit's own serializer. Null when detection proposed nothing.
  */
 export function spindriftFileFor(
   scope: InspectedScope | undefined,
@@ -76,7 +44,6 @@ export function spindriftFileFor(
   });
 }
 
-/** A fresh answer about one directory, in place, with the rest left alone. */
 export function mergeScopes(
   current: readonly InspectedScope[],
   found: readonly InspectedScope[],
@@ -87,24 +54,16 @@ export function mergeScopes(
   return [...merged, ...found.filter((scope) => !seen.has(scope.scope))];
 }
 
-/**
- * The one candidate, or nothing.
- *
- * §5's discovery is "a list for a human to choose from", and one entry is the
- * case where choosing is not a decision anybody makes differently. Two is.
- */
 function soleDetected(scopes: readonly InspectedScope[]): DetectedScope | null {
   const detected = scopes.filter((scope) => scope.outcome === 'detected');
   return detected.length === 1 ? detected[0]! : null;
 }
 
-/** What the screen does with what came back. */
 export type ReadOutcome =
-  /** Detection proposed something the draft can take. */
   | { readonly act: 'detect'; readonly action: DraftAction }
-  /** The list is the answer — the chooser below states it better than a sentence. */
+  /** Several candidates, or an answered draft: the chooser shows the list. */
   | { readonly act: 'offer' }
-  /** Nothing here is deployable, said about the directory that was asked about. */
+  /** Nothing deployable in the directory asked about. */
   | { readonly act: 'refuse'; readonly message: string };
 
 function detected(scope: DetectedScope): ReadOutcome {
@@ -120,12 +79,7 @@ function detected(scope: DetectedScope): ReadOutcome {
   };
 }
 
-/**
- * Whether anything on this draft is already an answer about what to deploy.
- *
- * Both halves are durable, which is the point: session state resets on the
- * reopen this guard exists for.
- */
+/** Reads durable fields only, since session state resets on reopen. */
 function answered(draft: Draft): boolean {
   return draft.scopeByOperator === true || draft.detection.scope !== undefined;
 }
@@ -136,9 +90,8 @@ export function outcomeOf(
     readonly fullName: string;
     /** The directory this read asked about, or undefined for the repository. */
     readonly scope: string | undefined;
-    /** What came back from this read. */
     readonly found: readonly InspectedScope[];
-    /** Everything known about the repository once this read is folded in. */
+    /** Every scope known once this read is merged in. */
     readonly merged: readonly InspectedScope[];
   },
 ): ReadOutcome {
@@ -154,8 +107,7 @@ export function outcomeOf(
     };
   }
 
-  // A whole-repository read fills in a draft nobody has answered, and only
-  // that. Reopening a draft is not a correction of it.
+  // A whole-repository read never overrides an answered draft, as on reopen.
   if (answered(draft)) return { act: 'offer' };
 
   const named = read.found.find(

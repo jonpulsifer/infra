@@ -1,28 +1,7 @@
 /**
- * One strip of tabs, replacing the three the tree had grown.
- *
- * There were three: boxed pills in a bordered box on the supply-chain header,
- * round chips on the landing screen, and a bordered segment in the settings
- * rail. All three were `<button>` elements carrying `aria-current="page"` — which
- * is a claim about *navigation*, and two of the three did not navigate. They set
- * a filter. A screen reader was told the current page was "In-Flight (2)".
- *
- * So this is `role="tablist"` with `aria-selected`, and the `line` variant is the
- * default because an underline is the one tab shape that reads as "these are
- * views of the thing below" rather than as "these are buttons". `pill` stays for
- * a filter strip, where the segments are peers of each other and not of a
- * heading.
- *
- * The keyboard behaviour is the part that is easy to skip and impossible to work
- * around: a roving `tabIndex` so Tab enters the strip once instead of stopping on
- * every tab, arrows to move within it, and focus following the arrow rather than
- * lagging on the tab that was pressed. Activation is automatic — arrowing selects
- * — which is correct for tabs whose panels are already loaded and wrong for tabs
- * that fetch. Every consumer here has its data in hand.
- *
- * It does not own a panel. `aria-controls` is deliberately absent: the callers
- * are route-driven or filter-driven and there is no single element these tabs
- * describe, and a dangling `aria-controls` is worse than none.
+ * A tab strip with `role="tablist"` and a roving `tabIndex`. Arrowing selects
+ * at once, which suits loaded data. No `aria-controls`, since no caller has one
+ * panel.
  */
 import { useEffect, useRef } from 'react';
 import { cn } from './utils.ts';
@@ -45,13 +24,11 @@ export function Tabs({
   readonly current: string;
   readonly onSelect: (id: string) => void;
   readonly variant?: 'line' | 'pill';
-  /** What this strip switches between, for anyone who cannot see the heading. */
   readonly label?: string;
   readonly className?: string;
 }) {
   const strip = useRef<HTMLDivElement>(null);
-  // Set only by an arrow press, so the strip never grabs focus on mount or when
-  // a route change moves the selection.
+  // Set only by an arrow press, so focus stays put on mount or a route change.
   const moved = useRef(false);
 
   useEffect(() => {

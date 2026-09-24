@@ -1,27 +1,7 @@
 /**
- * The Targets surface (§13, §18).
- *
- * It used to be a read-only list whose own header said Targets "are connected
- * by an operator" — true, and there was no way to be that operator here.
- * `connectTarget` existed as a command with no screen, so an installation with
- * a manifest-seeded Target and no connection had a permanently unhealthy row
- * and nothing to press.
- *
- * So this screen is two things at once, in the order they matter:
- *
- * 1. **What is left to do.** A Target whose `connection` is null is a manifest
- *    seed nobody finished, and it sits at the top with the form that finishes
- *    it. Cloud projects are grouped back into one act, because that is what
- *    §13 makes them.
- * 2. **What is running, and what was checked.** Each Target carries its whole
- *    standing checklist behind a disclosure, met rows included. §13's
- *    "an unmet item makes the Target a non-candidate with a stated reason" only
- *    helps if the reason is somewhere a person looks, and "why can I not deploy
- *    here" should be answered on the Target rather than in a deploy failure.
- *
- * The checklist is collapsed on healthy and open on unhealthy, which is §18's
- * rule for the build log applied to the same question: the one time it says
- * something other than "fine" is the time it should not need a click.
+ * The Targets section: manifest seeds waiting to be connected, with the form
+ * that finishes them, and each Target with its standing checklist. The
+ * checklist starts open on an unhealthy Target and collapsed on a healthy one.
  */
 import {
   Activity,
@@ -73,14 +53,8 @@ import { ConnectTargetForm } from './connect.tsx';
 type ConnectTargetInput = InputOf<'connectTarget'>;
 
 /**
- * The mark for a Target's adapter.
- *
- * Both cloud adapters get the same one on purpose: §13 makes a cloud Target a
- * matched `<name>-cloudrun`/`<name>-static` pair on one project, so what a
- * reader is placing work on is Google Cloud either way. `adapter` is a string
- * on the view model rather than the enum, so a Target the server grew and this
- * table has not is a missing key, not a crash — `TargetCard` keeps the generic
- * health icon for that case.
+ * Both cloud adapters run on one project and share a mark. An adapter missing
+ * here falls back to the health icon in `TargetCard`.
  */
 const ADAPTER_LOGO: Record<string, LogoName> = {
   kubernetes: 'kubernetes',
@@ -101,13 +75,6 @@ function kindIcon(kind: ComponentKind) {
   }
 }
 
-/**
- * What a connect established is not on the boundary it probed.
- *
- * Stated rather than left to be inferred from a Target that is not in the list:
- * "this project has no Cloud Run" and "the connect only half worked" look
- * identical from a list of what exists, and only one of them is true.
- */
 function AbsentSurfaces({ absent }: { absent: readonly string[] }) {
   if (absent.length === 0) return null;
   return (
@@ -120,19 +87,8 @@ function AbsentSurfaces({ absent }: { absent: readonly string[] }) {
 }
 
 /**
- * One checklist row, and — where it is unmet — the change that clears it.
- *
- * §13 makes an unmet item "a non-candidate with a stated reason", and a reason
- * is the diagnosis rather than the fix. What is rendered underneath one here is
- * the Terraform that clears it and the path it belongs at, so the operator's
- * next move is copy-and-commit or press the button, rather than work out from a
- * sentence what a cloud wants.
- *
- * **"No generated remediation" is a state with a sentence, never an empty
- * box.** Most rows are cleared by something other than Terraform, and rendering
- * that as a blank disclosure would say a change exists and is empty — the same
- * laundering `cloud-discovery.ts` keeps `found: []` and `unavailable` apart to
- * prevent.
+ * An unmet row shows the Terraform that clears it, or a sentence saying why
+ * none was generated.
  */
 function ChecklistRow({
   vessel,
@@ -186,7 +142,6 @@ type OpenState =
   | { readonly type: 'opened'; readonly number: number; readonly path: string }
   | { readonly type: 'error'; readonly message: string };
 
-/** The stanza, where it belongs, and the two ways to take it from here. */
 function RemediationDisclosure({
   vessel,
   adapter,
@@ -201,13 +156,7 @@ function RemediationDisclosure({
     { kind: 'generated' }
   >;
 }) {
-  /*
-    Open, and collapsible afterwards — the rule the checklist above it already
-    follows: "the one time it says something other than fine is the time it
-    should not need a click." Only an unmet row has a remediation at all, so
-    every one of these is that time; the disclosure is what lets an operator
-    who has read one put it away, not a gate in front of it.
-  */
+  // Starts open: only an unmet row has a remediation.
   const [open, setOpen] = useState(true);
   const [copied, setCopied] = useState(false);
   const [state, setState] = useState<OpenState>({ type: 'idle' });
@@ -263,11 +212,6 @@ function RemediationDisclosure({
           {remediation.summary}
         </p>
         {destination.kind === 'absent' ? (
-          /*
-            The honest arm. There is no file to append to and no pull request
-            to open, so the screen says which boundary has no root rather than
-            naming a directory nothing in that repository agreed to.
-          */
           <p className="text-[11px] text-subtle">
             {vessel} has no Terraform root. This is what one would contain, in a{' '}
             <span className="font-mono">{destination.file}</span> inside it.
@@ -296,11 +240,6 @@ function RemediationDisclosure({
                   : 'Open a pull request'}
             </Button>
           ) : null}
-          {/*
-            The whole of what a merged pull request does, and what it does not.
-            Applying is what clears the row, and the standing loop is what
-            notices — so there is nothing here to press afterwards.
-          */}
           <span className="text-[11px] text-subtle">
             Spindrift changes nothing here. Applying this is what clears the
             row, and the standing check is what notices.
@@ -349,12 +288,8 @@ export function TargetList({
   const configured = targets.filter((target) => target.configured);
   const [adding, setAdding] = useState(false);
   /**
-   * Carried into the add flow from whatever this installation already has.
-   *
-   * The pending entries hold the same proposal — it is derived per adapter kind,
-   * not per Target — so taking the first cluster one is taking the only one
-   * there is. With no pending entry there is nothing seeded either, and an empty
-   * proposal is the honest input: nothing has been learnt to carry.
+   * The proposal is derived per adapter kind, so the first pending cluster's is
+   * the only one. With no pending cluster there is nothing to carry.
    */
   const clusterProposal = pending.find((entry) => entry.kind === 'cluster')
     ?.proposal ?? { carriedFrom: null };
@@ -544,22 +479,9 @@ function ProviderTargets({
   readonly name: string;
   readonly logo: LogoName;
   readonly description: string;
-  /**
-   * What this provider's boundary carries, under the description.
-   *
-   * A slot rather than a field, because what there is to say is the provider's:
-   * a cloud project's inventory is already three other screens, and an account
-   * whose zones nothing else lists has nowhere else to say so.
-   */
+  /** Rendered under the description, beside the logo. */
   readonly detail?: ReactNode;
-  /**
-   * The provider's inventory, under the Target cards in the wide column.
-   *
-   * A second slot rather than more `detail`, because the two read at
-   * different widths: a sentence about the boundary fits beside the logo,
-   * while an account's zones are a listing and deserve the space the cards
-   * leave under them.
-   */
+  /** Rendered under the Target cards, in the wide column. */
   readonly inventory?: ReactNode;
 } & Parameters<typeof TargetCollection>[0]) {
   const connected = collection.targets.filter(
@@ -599,18 +521,8 @@ function ProviderTargets({
 }
 
 /**
- * What a connected Cloudflare account carries, under its card.
- *
- * The three facts that are the **account's** rather than any one surface's:
- * its zones, whether Workers is switched on, and what Pages already holds.
- * Until the boundary was read, an operator's whole view of a connected account
- * was its id and one Target named after one product.
- *
- * A `null` field is not an empty one, and the two do not read alike here: a
- * listing that answered with nothing says so in words, and one that was refused
- * shows the platform's own sentence. That is `CloudflareAccountDiscovery`'s
- * split rendered rather than flattened — "no zones" sends an operator to create
- * a zone they already have.
+ * An account's zones, Workers subdomain and Pages projects. A refused listing
+ * shows the platform's sentence, so it never reads as an empty one.
  */
 function CloudflareAccountDetail({
   accounts,
@@ -682,20 +594,8 @@ function CloudflareAccountDetail({
 }
 
 /**
- * The account's zones, each one answerable: is this a zone the installation
- * mints App names in?
- *
- * The discovery already lists what the account holds and the manifest already
- * says where names are minted; until this control the two only met inside an
- * operator's head, and the walk from "the account has clankerbanker.ca" to
- * "Apps can be named there" went through the manifest editor. A zone already
- * in `dns.zones` wears a check; one that is not carries the one-click grant.
- *
- * One click writes `reaches: [public]`, because a zone adopted from a
- * connections screen is being adopted to serve Apps on the internet — the
- * private/split shapes stay the manifest editor's. The write is the whole
- * document (`configureInstallation` takes no patch), re-read from the server
- * in the same breath so a stale screen cannot resurrect an edited manifest.
+ * A zone already in `dns.zones` shows a check. Any other gets a one-click grant
+ * that appends it with `reaches: [public]`; other reaches are set in Settings.
  */
 function ZonesFact({
   zones,
@@ -705,7 +605,10 @@ function ZonesFact({
 }: {
   readonly zones: CloudflareAccountDiscovery['zones'];
   readonly unreadable: string | undefined;
-  /** Zone names the manifest mints in, or `null` while nobody knows. */
+  /**
+   * Zones the manifest mints App names in, or `null` while the manifest is
+   * unread or unconfigured.
+   */
   readonly minted: ReadonlySet<string> | null;
   onMinted(): void;
 }) {
@@ -726,8 +629,8 @@ function ZonesFact({
   const mint = async (name: string) => {
     setBusy(name);
     setRefused(null);
-    // Fresh document, not the screen's copy: the append must land on what the
-    // manifest says now, and the save is refused with the server's sentence.
+    // `configureInstallation` takes the whole document, so re-read it and
+    // append to what the manifest says now.
     const current = await command('getInstallationManifest', {});
     if (!current.ok) {
       setRefused(current.failure.message);
@@ -811,11 +714,8 @@ function ZonesFact({
 }
 
 /**
- * One listing, in the three states it actually has.
- *
- * A refusal wins over a value, because a refusal means there is no value —
- * `unreadable` is only ever set beside a `null`, and rendering the sentence is
- * what keeps "nobody could look" from reading as "there is nothing there".
+ * `unreadable` wins: it is only set beside a `null` value, and its sentence
+ * keeps "nobody could look" from reading as "nothing there".
  */
 function AccountFact({
   label,
@@ -935,16 +835,8 @@ function TargetCollection({
 }
 
 /**
- * The boundaries themselves, with the checklist that is theirs.
- *
- * A section of its own rather than rows inside each Target card, because a
- * vessel may carry two surfaces and this is one fact about the boundary — folded
- * into the Targets it would be the same four answers rendered twice, which is
- * the duplication the vessel noun exists to remove.
- *
- * **Only the boundaries something is asked of appear here.** An app vessel's
- * catalogue is empty, so it has no rows, and a section listing it with nothing
- * under it would say something was checked when nothing was.
+ * Vessel checklists, apart from the Target cards since one Vessel may carry two
+ * surfaces. A Vessel with no checklist and no declared role is left out.
  */
 function VesselChecklists({
   vessels,
@@ -981,12 +873,6 @@ function VesselChecklists({
             {vessel.prerequisites.map((item) => (
               <ChecklistRow key={item.name} vessel={vessel.name} item={item} />
             ))}
-            {/*
-              Labelled as of-a-moment, for the reason a Target's checklist is:
-              this is the last pass of the loop, and saying when stops it from
-              being read as now. A boundary nobody has been past yet says so
-              rather than reading as four questions that passed.
-            */}
             <p className="text-[11px] text-subtle">
               {vessel.inspectedAt === null ? (
                 'never inspected'
@@ -1003,7 +889,6 @@ function VesselChecklists({
   );
 }
 
-/** The unfinished half, at the top, with the form that finishes it. */
 function PendingConnections({
   pending,
   connecting,
@@ -1068,14 +953,7 @@ function PendingConnections({
   );
 }
 
-/**
- * What this Target's boundary is to the installation, as a sentence fragment —
- * `null` for an ordinary one.
- *
- * Both roles when a boundary carries both, because an installation whose
- * control plane runs where its shared services live is one boundary doing two
- * jobs, and naming only the first would leave the other unexplained.
- */
+/** The boundary's roles as a sentence fragment, `null` for an ordinary one. */
 function declaredRole(roles: readonly VesselRole[]): string | null {
   const named = roles.flatMap((role) =>
     role === 'home'
@@ -1088,15 +966,8 @@ function declaredRole(roles: readonly VesselRole[]): string | null {
 }
 
 /**
- * The address fields an edit hands the connect form, per boundary kind.
- *
- * One function rather than a ternary at the call site, because the union it
- * destructures has three arms carrying three differently-named addresses and a
- * two-armed ternary could only ever get the third wrong silently — the address
- * being the one field where "reads as correct, points elsewhere" is the whole
- * failure. `carried` travels with the arm that has one for the same reason it
- * exists: one act writes the whole connection, so what this boundary already
- * states goes back with the edit or the act deletes it.
+ * Exhaustive over boundary kinds, so no kind gets another's address. `carried`
+ * goes back with the edit, because one act rewrites the whole connection.
  */
 function boundaryAddress(
   edit: NonNullable<TargetListItem['edit']>,
@@ -1136,12 +1007,6 @@ function TargetCard({
       <CardContent className="flex flex-col gap-3">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:gap-4">
           <div className="flex items-center gap-3">
-            {/*
-              The platform's own mark rather than a health glyph: health is
-              already said twice on the row beside it, as a tone and as a word,
-              and this anchor was the only place saying nothing about *where*
-              the Target is. An adapter with no mark keeps the glyph.
-            */}
             {logo ? (
               <Logo name={logo} />
             ) : (
@@ -1169,9 +1034,7 @@ function TargetCard({
               </div>
               <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1">
                 {target.canonical === null ? (
-                  // §9: `cloudrun` and `static` name their own workloads —
-                  // core mints nothing here, so the honest boundary is this
-                  // sentence, not a suffix core will never produce.
+                  // `cloudrun` and `static` name their own workloads.
                   <span className="text-xs text-subtle">
                     platform names its own
                   </span>
@@ -1195,18 +1058,8 @@ function TargetCard({
                 {kind}
               </span>
             ))}
-            {/*
-              The gateway, the authenticated edge, the config store and the
-              address a record points at are all on this Target's connection,
-              and until this button there was nowhere to correct one: the connect
-              form was reachable only from an unconfigured seed. It is the same
-              form and the same act — §13 makes connect idempotent by name — so
-              the edit is a re-connect rather than a second way to write these.
-
-              And a re-connect is a re-probe: it asks the boundary about every
-              surface again, which is how a project whose Cloud Run API was off
-              at connect time gets that Target once it is switched on.
-            */}
+            {/* An edit re-runs the connect, which is idempotent by name and
+                probes every surface on the boundary again. */}
             {declared === null && target.edit ? (
               <Button
                 variant={editing ? 'ghost' : 'outline'}
@@ -1222,15 +1075,8 @@ function TargetCard({
           </div>
         </div>
 
-        {/*
-          §6: "drift is detected and surfaced, never silently corrected",
-          applied to the manifest rather than to what it deploys. The row is what
-          every deploy renders from and it wins over the document a boot writes
-          back — but Settings still submits the whole document, so a Target that
-          has been corrected here says which paths a save would take back.
-          Paths, never values: a connection is credential-free today and this
-          line does not lean on it staying that way.
-        */}
+        {/* The row wins over the manifest at boot, but a Settings save sends
+            the whole manifest, so this names the paths a save would revert. */}
         {target.connectionDivergence.length > 0 ? (
           <div className="flex items-start gap-2 rounded-md border border-warning/40 bg-warning-soft px-3 py-2 text-xs">
             <AlertTriangle
@@ -1251,13 +1097,8 @@ function TargetCard({
 
         {declared === null ? null : (
           /*
-            Read-only, and the sentence is why rather than a disabled button.
-            This boundary reconciles from the mounted declaration on every boot,
-            so an edit made here would survive exactly until the next restart —
-            with the screen that accepted it then showing the old values and no
-            reason. Disconnect is refused for the same reason one level down:
-            `disconnectTarget` guards it, because neither pointer is a foreign
-            key and nothing else would stop it.
+            Read-only: this boundary reconciles from the mounted declaration on
+            every boot, so an edit here would last only until the next restart.
           */
           <div className="flex items-start gap-2 rounded-md border border-border-soft bg-secondary/40 px-3 py-2 text-xs text-muted-foreground">
             <Server aria-hidden="true" className="mt-0.5 size-3.5 shrink-0" />
@@ -1276,10 +1117,7 @@ function TargetCard({
               kind={target.edit.kind}
               vessel={target.vessel}
               {...boundaryAddress(target.edit)}
-              // The whole act, not this card: one connect asks the boundary
-              // about every surface its kind is probed for, and saying so is
-              // what stops the confirmation from under-reporting what it
-              // touches.
+              // The connect probes every surface on the boundary.
               surfaces={surfacesToProbe(target.edit.kind)}
               proposal={target.edit.proposal}
               connecting={connecting}
@@ -1310,13 +1148,6 @@ function TargetCard({
                   item={item}
                 />
               ))}
-              {/*
-                Labelled as of-a-moment on purpose. §18 makes "the live
-                checklist must be labelled as the live view" load-bearing, and
-                the inverse is the same rule: this one is a snapshot from the
-                last pass of the loop, and saying when stops it from being read
-                as now.
-              */}
               <p className="mt-1 text-[11px] text-subtle">
                 {target.inspectedAt === null ? (
                   'never inspected'
@@ -1477,17 +1308,8 @@ function DisconnectTargetControl({
 }
 
 /**
- * The Targets screen — the list, and the connect that rewrites it.
- *
- * Read once rather than on a cadence: what a Target *is* changes when somebody
- * connects one, which happens here and re-reads deliberately. The standing
- * checklist a connect produces is read back from the list rather than patched
- * in, because it came from a pass of the inspection loop and this side has no
- * second opinion about it (§13).
- *
- * Rendered inside the Connections stack and, when `embedded`, without a page
- * of its own — which is why its failure is a bare `ErrorState` in a `py-6`
- * rather than the centred column `ScreenFailure` gives a screen of its own.
+ * Read once: a Target changes when it is connected, and a connect re-reads. It
+ * renders inside the Connections stack, so a failure is an inline `ErrorState`.
  */
 export function TargetsScreen({
   embedded = false,
@@ -1500,11 +1322,8 @@ export function TargetsScreen({
   const [connecting, setConnecting] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   /**
-   * Surfaces the last connect established are not on the boundary it probed.
-   *
-   * Not an error — the connect succeeded — and not readable from the reloaded
-   * list either, because what it says is about a Target that deliberately does
-   * not exist. So it is the one part of the act's answer this screen keeps.
+   * Surfaces the last connect found missing, which the reloaded list cannot
+   * show.
    */
   const [absent, setAbsent] = useState<readonly string[]>([]);
 

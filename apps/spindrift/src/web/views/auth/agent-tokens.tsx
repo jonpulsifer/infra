@@ -1,33 +1,6 @@
 /**
- * Agent tokens: the credential that is not a passkey and not a cookie.
- *
- * It sits under Identity because that is what it is — a way in, belonging to
- * this operator — and beside the passkey card rather than inside it because the
- * two are minted by different means. A passkey change needs a fresh ceremony;
- * this needs only the session the operator already has, and pretending
- * otherwise would put a `navigator.credentials` prompt in front of an act that
- * does not need one.
- *
- * **The token is shown once.** `sessions.token_hash` is a SHA-256 and there is
- * nothing to read back, so the value lives in this component's state and dies
- * with it. That makes the reveal the one part of this screen with a real design
- * problem: a value that cannot be recovered has to be obviously
- * unrecoverable while it is on screen, or the operator closes the panel and
- * mints a second token to replace the one they did not copy. Hence the panel
- * says so in words, leads with the copy control, and does not disappear on its
- * own — it goes when the operator dismisses it, which is the only moment
- * anybody can be sure they are done with it.
- *
- * **A row says when it was last used, and from where.** That is what a revoke
- * decision is actually made on: a mint date tells two tokens apart only if the
- * operator remembers which day was which, and the one row worth finding — a
- * token minted and never presented — is invisible without it. The address and
- * the agent are the caller's own headers, so the card says so rather than
- * dressing them up as evidence; they answer "which machine", not "who".
- *
- * The rows still carry no nickname, because the row has no nickname column
- * (`src/commands/agent-tokens.ts`) — last use is the fact that made one
- * unnecessary for now.
+ * Agent tokens for the MCP endpoint. Only a SHA-256 of a token is stored, so the
+ * value shows once and stays until the operator dismisses it.
  */
 import { KeyRound, Plus, Trash2, TriangleAlert } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
@@ -109,20 +82,8 @@ export function AgentTokens() {
 }
 
 /**
- * When this token was last presented, and by what.
- *
- * Its own line rather than more of the dates above, because it is the line the
- * eye goes to: minted-and-expires are facts about the row, and this is a fact
- * about whether the row is doing anything.
- *
- * **Never used is stated, not left blank.** A token nobody has presented is the
- * one an operator most wants to revoke, and an empty space where a date goes
- * reads as a screen that has not loaded rather than as an answer.
- *
- * The address and the agent are the caller's own headers and the copy says so.
- * Whoever holds the token chooses both, so a row that presented them as
- * provenance would be inviting an operator to trust the one thing here that
- * cannot be trusted.
+ * States "never used" in words. The address and agent are the caller's own
+ * headers, so the copy marks them as reported.
  */
 function LastUsed({ token }: { readonly token: AgentTokenListItem }) {
   if (token.lastUsedAt === null) {
@@ -140,8 +101,6 @@ function LastUsed({ token }: { readonly token: AgentTokenListItem }) {
       {token.lastUsedIp === null ? null : (
         <>
           <span aria-hidden="true">·</span>
-          {/* "as reported": the caller sets both of these headers, so the
-              qualifier is the difference between a hint and a claim. */}
           <span>
             from <span className="font-mono">{token.lastUsedIp}</span> as
             reported
@@ -212,9 +171,7 @@ export function AgentTokensView({
               Copy this now — it is not shown again.
             </p>
             <div className="flex items-center gap-2">
-              {/* The value in full rather than shortened. A credential is the
-                  one thing truncation must never touch, and `break-all` keeps
-                  it inside the panel without hiding a character of it. */}
+              {/* In full: break-all wraps a credential without hiding a character. */}
               <code className="min-w-0 flex-1 font-mono text-xs break-all text-foreground">
                 {minted}
               </code>
@@ -254,9 +211,6 @@ export function AgentTokensView({
                       Minted <Timestamp at={token.createdAt} />
                     </span>
                     <span aria-hidden="true">·</span>
-                    {/* An expired token is dead but still a row, and the only
-                        thing to do with it is remove it. Saying which it is
-                        keeps `Revoke` from looking like it does something. */}
                     <span className="flex items-center gap-1">
                       {token.expired ? 'Expired' : 'Expires'}{' '}
                       <Timestamp at={token.expiresAt} />

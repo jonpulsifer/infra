@@ -1,27 +1,4 @@
-/**
- * Builds — the act between the two nouns, as a table of comparable attempts.
- *
- * The row used to carry three of the eight facts `BuildListItem` ships:
- * `#id · app`, `component · commit`, a status word and a time. `runner`,
- * `targetShape` and `artifactType` were stuffed into the Explorer's invisible
- * `search` string, so an operator could *filter* by runner and never *see* one
- * — and `artifactDigest`, the thing the whole act exists to produce, reached
- * only the inspector.
- *
- * `dispatchWaitingOn` is the one that mattered. `views.ts` calls it "what a
- * PENDING Build is stuck on, in the operator's own words", the Overview
- * rendered it, and the screen named after Builds did not — so a Build
- * permanently refused because no configured route meets its Target's threshold
- * looked exactly like one that started two seconds ago. It is a column here,
- * in the artifact slot, because a Build that is waiting has no artifact and the
- * reason it has none is the honest thing to put where one would go.
- *
- * The evidence panel is still a per-selection fetch and still does not follow a
- * running attempt: `getBuildDetail` is called once per selected Build, so the
- * step list beside a RUNNING row stays at whatever it was when the row was
- * clicked while the status badge updates from the list poll. That is a real gap
- * and it wants the attempt stream, not an interval.
- */
+/** The Builds ledger. A waiting Build shows why in the Artifact column. */
 import { useEffect, useState } from 'react';
 import type { BuildListItem } from '../../../commands/views.ts';
 import { command, type OutputOf } from '../../client.ts';
@@ -45,12 +22,8 @@ import { LedgerSkeleton, mergeLedger, ScreenFailure } from '../screen.tsx';
 import { SupplyChainFlow, SupplyChainTabs } from './tabs.tsx';
 
 /**
- * The tone a Build's state deserves, including the state that is not one.
- *
- * A PENDING Build refusing every tick is not "in progress" the way a RUNNING
- * one is — it needs an operator to configure the thing it is waiting on, which
- * is what `warning` already means everywhere else. Shared with the Overview so
- * the same Build is never two colours on two screens.
+ * A Build waiting on configuration reads `warning`, since only an operator can
+ * unblock it. Shared with the Overview so a Build has one colour everywhere.
  */
 export function buildTone(
   build: Pick<BuildListItem, 'status' | 'dispatchWaitingOn'>,
@@ -300,7 +273,7 @@ export function BuildLedger({
   );
 }
 
-/** Real step evidence for the selected Build, loaded only for its inspector. */
+/** Read once per selection, so its steps do not follow a running attempt. */
 function BuildEvidence({ buildId }: { readonly buildId: number }) {
   const [state, setState] = useState<
     | { type: 'loading' }
@@ -357,15 +330,8 @@ function BuildEvidence({ buildId }: { readonly buildId: number }) {
 }
 
 /**
- * The Builds screen — the ledger, the cadence it re-reads on, and the page the
- * reader can add below it.
- *
- * The two are why this screen merges rather than replaces: the tick asks for
- * the newest page and is authoritative about those rows, and everything the
- * reader paged in below it is older than anything the tick can answer with. So
- * the fresh page wins per id and `nextBefore` stays where paging left it —
- * taking the tick's cursor would put the reader back at the top of a list they
- * had scrolled through.
+ * Each tick merges the newest page over the older pages the reader loaded, and
+ * keeps the reader's `nextBefore` so paging does not restart at the top.
  */
 export function BuildsScreen({
   onNavigate,

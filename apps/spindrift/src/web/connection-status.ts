@@ -1,16 +1,7 @@
 /**
- * Whether any realtime stream this browser opened is between connections right
- * now — read the same way `router.ts` reads the hash: an external store,
- * subscribed to with `useSyncExternalStore` rather than an effect, because a
- * socket can drop between render and commit the same way the hash can change
- * mid-transition.
- *
- * Membership in a `Set` rather than a counter. A socket can close more than
- * once before its next successful message — the network dropping twice in a
- * row while `stream-client.ts` backs off is the ordinary case, not an edge
- * case — and a counter incremented on every close would drift above the
- * number of streams actually retrying. Each subscription owns one `symbol` for
- * its lifetime, so marking it twice or once reads the same.
+ * Whether any realtime stream is reconnecting, as a store for
+ * `useSyncExternalStore`. A set of per-stream symbols, since a socket can close
+ * twice while retrying and a counter would overcount.
  */
 
 const reconnecting = new Set<symbol>();
@@ -27,7 +18,7 @@ export function markReconnecting(id: symbol): void {
   notify();
 }
 
-/** That stream connected again, or gave up — either way it is done retrying. */
+/** The stream connected again or gave up. */
 export function markSettled(id: symbol): void {
   if (!reconnecting.delete(id)) return;
   notify();

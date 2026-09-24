@@ -1,8 +1,6 @@
 /**
- * The browser half of the server-owned creation draft.
- *
- * The vocabulary and reducer live in `domain/creation-draft.ts` so commands,
- * persistence, and the browser validate the same document.
+ * The browser half of the server-owned creation draft. The reducer lives in the
+ * domain so commands, persistence and the browser validate one document.
  */
 export {
   type Blocker,

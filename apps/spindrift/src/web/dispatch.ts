@@ -1,50 +1,6 @@
 /**
- * The browser command boundary (Task 36b).
- *
- * §21 declines to declare an external API, and a React client still needs
- * somewhere to call. The plan settles that tension by making the boundary
- * **generated**: the route table below is `Object.fromEntries` over
- * `commandNames`, so there is nowhere to write a route that is not a command,
- * and a command added without one is a compile error in `registry.ts` before it
- * is a missing route here.
- *
- * That is the whole mitigation for the risk the plan names — "watch for the
- * first hand-authored route; that is the drift". Three properties hold it:
- *
- * 1. **Generated, not authored.** Adding a path here means adding a command.
- * 2. **Explicitly unversioned and internal**, the same status as the webhook
- *    and build callbacks. The prefix says so. No stability promise, no docs
- *    page, and nothing outside this repo may depend on it.
- * 3. **Session-authenticated only.** There is no code path in this file that
- *    reads a bearer token — {@link DispatchDeps.authenticate} resolves a
- *    browser session (and, where configured, a trusted Gateway header) or
- *    returns a typed refusal.
- *
- *    This rule used to read "never a token", on the argument that a token is
- *    what turns an internal protocol into an API somebody scripts against.
- *    `mcp-route.ts` is that argument's answer: an agent driving this
- *    installation is a thing the operator wants, and what makes it an API is
- *    the *endpoint*, not the credential. So the surface an agent scripts
- *    against is its own route, with its own credential, and this one is
- *    unchanged — a bearer token presented here is not read, and a browser
- *    cookie presented there is not read either. Two doors, two keys, and
- *    neither key turns the other lock (`src/auth/session.ts`).
- *
- *    What has *not* changed is the reason: the browser boundary stays
- *    unversioned and internal, with no stability promise and nothing outside
- *    this repo depending on it.
- *
- * There is no domain logic in this file, and §21 requires that there be none.
- * What is left is transport: decode JSON, find a principal, call `dispatch`,
- * and choose a status code. Every decision about the act itself was already
- * made by the command.
- *
- * `pathFor`, `COMMAND_PATH_PREFIX`, and `TransportFailureCode` live in
- * `./command-path.ts` and are re-exported below rather than defined here,
- * because those three are the only edge `client.ts` needs into this file —
- * everything else pulls in `commands/registry.ts` as a value, which drags the
- * whole server-only command layer into the browser bundle.
- * `test/web/client-bundle.test.ts` guards against that edge coming back.
+ * The browser's command transport, unversioned and internal. Callers present a
+ * browser session or a trusted Gateway header; no bearer token is read here.
  */
 
 import type { RequestAuthentication } from '../auth/types.ts';
@@ -64,46 +20,20 @@ export type { TransportFailureCode };
 export { COMMAND_PATH_PREFIX, pathFor };
 
 export interface DispatchDeps {
-  /**
-   * Who is calling, or `null` for nobody.
-   *
-   * Auth is a parameter rather than an import because Task 37 owns passkey
-   * enrolment and sessions, and this boundary must be complete and testable
-   * before it lands. An installation that passes a resolver returning `null`
-   * gets a surface that rejects everything — which is the correct behaviour for
-   * a boundary whose authentication is not built yet, and is the reason this is
-   * not a stub that returns a fake principal.
-   */
   authenticate(request: Request): Promise<RequestAuthentication>;
   /**
-   * Everything a command may reach, assembled per request (§21).
-   *
-   * Asynchronous because configuration is the UI's to drive: a command that
-   * reads `context.manifest` has to see what `configureInstallation` last
-   * wrote, and the row is the only place that is known. A process-lifetime
-   * copy would have made every configuration change require a restart — the
-   * declared-change-that-does-nothing failure §20's authoring path exists to
-   * remove.
+   * Assembled per request, so a command reads the manifest that
+   * `configureInstallation` last wrote.
    */
   context(principal: Principal): CommandContext | Promise<CommandContext>;
 }
 
-/**
- * The HTTP status a refusal reads as.
- *
- * Deliberately a total map rather than a default with a fallback: a new code
- * should make somebody decide what it means over HTTP, and `satisfies` is what
- * forces that at the point the code is added.
- */
+// Total, so a new code must be given a status where it is added.
 const STATUS = {
   UNKNOWN_COMMAND: 404,
   INVALID_INPUT: 422,
   NOT_FOUND: 404,
-  // 409, not 422: the request is well formed and the caller has nothing to fix
-  // in it. What they are being told is a fact about the world — this Build has
-  // no artifact, this Target takes a different shape — which is the
-  // disabled-with-reasons grammar §3 uses everywhere, and a conflict is the
-  // status that means "not in this state".
+  // 409: the request is well formed, and the state of the world refuses it.
   NOT_DEPLOYABLE: 409,
   NOT_BUILDABLE: 409,
   NOT_RUNNABLE: 409,
@@ -117,13 +47,7 @@ const STATUS = {
   INTERNAL: 500,
 } as const satisfies Record<TransportFailureCode, number>;
 
-/**
- * Refuse in the same envelope a command refuses in.
- *
- * The browser has one shape to read whether the refusal came from a schema or
- * from this file, which is the property that lets `client.ts` return one result
- * type instead of branching on where the answer was decided.
- */
+/** The envelope a command refuses in, so the client reads one result shape. */
 function refuse(code: TransportFailureCode, message: string): Response {
   return Response.json(
     { ok: false, failure: { code, message } },
@@ -133,13 +57,7 @@ function refuse(code: TransportFailureCode, message: string): Response {
   );
 }
 
-/**
- * One route per command, and no way to write another.
- *
- * The return value is handed straight to `Bun.serve`'s `routes` option. It is
- * built from `commandNames` and nothing else, so the set of reachable paths and
- * the set of commands are the same set by construction rather than by review.
- */
+/** Built from `commandNames` alone, so no route exists without a command. */
 export function commandRoutes(
   deps: DispatchDeps,
 ): Record<string, (request: Request) => Promise<Response>> {
@@ -157,9 +75,7 @@ async function handle(
   deps: DispatchDeps,
 ): Promise<Response> {
   if (request.method !== 'POST') {
-    // A command is an act. Making one reachable by GET would make it
-    // link-followable, pre-fetchable, and cacheable — three ways to run it
-    // without anybody asking.
+    // A GET would make a command link-followable, prefetchable and cacheable.
     return refuse('METHOD_NOT_ALLOWED', 'a command is dispatched with POST');
   }
 

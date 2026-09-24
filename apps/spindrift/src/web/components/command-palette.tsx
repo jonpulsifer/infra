@@ -1,37 +1,6 @@
 /**
- * Everything in the installation, one keystroke away.
- *
- * Before this the entire application contained exactly one `onKeyDown` handler,
- * and reaching a named App meant: rail → Apps → wait for the list → filter →
- * press. Four of those five steps exist only because the reader had to arrive
- * somewhere that knows the name before they could type it. A palette collapses
- * them into typing the name.
- *
- * **It reads its own catalogue rather than being handed one.** The four lists
- * it searches live in four different screens' `useState`, so a palette fed from
- * props would only know about objects on the screen the reader happened to be
- * looking at — which is the navigation problem restated, not solved. Instead it
- * fires the same four reads `OverviewScreen` fires, once, the first time it is
- * opened: nothing is fetched for a reader who never presses ⌘K, and the result
- * is cached for the session because a palette that re-fetches on every open is
- * a palette with a spinner in it.
- *
- * **Navigation only.** Every entry resolves to a path. Destructive acts are not
- * in here and should not be: a palette is a place where the reader is typing
- * fast and confirming on muscle memory, and "delete" three characters away from
- * "deploys" is how an App goes missing. Acts stay beside the object they affect.
- *
- * The trigger renders here too, beside the overlay, because they are one piece
- * of state. A shortcut nobody can see is a shortcut nobody uses, so the header
- * carries the affordance and `Kbd` carries the key.
- *
- * **`open`/`onOpenChange` are optional and controlled**, the seam that lets
- * the rail's own Search row raise this same overlay instead of standing up a
- * second one with a second catalogue read. Omitted, the component keeps its
- * own state exactly as it always has — every existing caller, and Cmd/Ctrl-K,
- * are untouched. `metaKeyGlyph` is exported for the same reason: the rail's
- * row wants the identical ⌘/Ctrl hint beside its own `<kbd>`, and a second
- * platform sniff is a second place for the two to disagree.
+ * The ⌘K palette. It only navigates; destructive acts stay beside their object.
+ * It reads its own catalogue on first open and keeps it while mounted.
  */
 import { Boxes, Hammer, Rocket, Search, Server } from 'lucide-react';
 import { useEffect, useState } from 'react';
@@ -49,7 +18,7 @@ export interface PaletteItem {
   readonly id: string;
   readonly group: string;
   readonly label: string;
-  /** The second line: what distinguishes two rows that read alike. */
+  /** What tells apart two rows with the same label. */
   readonly hint?: string;
   readonly path: string;
 }
@@ -61,11 +30,7 @@ export interface PaletteCatalogue {
   readonly targets: readonly TargetListItem[];
 }
 
-/**
- * The verbs, which are the rail plus the two destinations the rail has no room
- * for. They are listed first so an empty query offers somewhere to go rather
- * than the twelve newest Builds.
- */
+// Listed first, so an empty query offers places to go.
 const VERBS: readonly PaletteItem[] = [
   { id: 'go:/', group: 'Go to', label: 'Overview', path: '/' },
   { id: 'go:/apps', group: 'Go to', label: 'Apps', path: '/apps' },
@@ -113,11 +78,6 @@ const VERBS: readonly PaletteItem[] = [
   },
 ];
 
-/**
- * A Target is `vessel/adapter` and never one of them alone — `views.ts`'s `TargetListItem` is
- * explicit about it, and two clusters both running `kubernetes` are otherwise
- * the same row twice.
- */
 export function paletteItems(
   catalogue: PaletteCatalogue | null,
 ): readonly PaletteItem[] {
@@ -148,6 +108,7 @@ export function paletteItems(
     ...catalogue.targets.map((target) => ({
       id: `target:${target.id}`,
       group: 'Targets',
+      // Both halves, or two clusters on one adapter read as the same row.
       label: `${target.vessel}/${target.adapter}`,
       hint: 'Connections',
       path: '/settings/connections',
@@ -156,12 +117,8 @@ export function paletteItems(
 }
 
 /**
- * Substring first, subsequence second, and nothing clever after that.
- *
- * A lower number sorts earlier. A direct hit scores by where it landed, so
- * typing `mor` puts `morrow` above `checkout-mortgage`; a subsequence match is
- * pushed behind every substring match by a constant, because `dpl` finding
- * `deploys` is useful and should never outrank a literal one.
+ * Lower sorts first, and -1 is no match. A substring scores by position, and a
+ * subsequence scores behind every substring.
  */
 function rank(haystack: string, needle: string): number {
   const text = haystack.toLowerCase();
@@ -176,7 +133,7 @@ function rank(haystack: string, needle: string): number {
   return 1_000 + at;
 }
 
-/** How many rows the overlay will draw. Beyond this nobody is reading. */
+/** Rows the overlay draws; nobody reads further. */
 const SHOWN = 12;
 
 export function filterPalette(
@@ -203,11 +160,7 @@ const GROUP_ICON: Record<string, typeof Boxes> = {
   Targets: Server,
 };
 
-/**
- * ⌘ on a Mac, Ctrl everywhere else — a fact about the reader's keyboard, so it
- * is read once and never re-derived. Guarded because this component is rendered
- * to static markup in tests, where there is no `navigator`.
- */
+/** Guarded because tests render this to static markup with no `navigator`. */
 export function metaKeyGlyph(): string {
   if (typeof navigator === 'undefined') return 'Ctrl';
   const platform = `${navigator.platform ?? ''} ${navigator.userAgent ?? ''}`;
@@ -221,14 +174,10 @@ export function CommandPalette({
   triggerClassName,
 }: {
   readonly onNavigate: (path: string) => void;
-  /** Controlled from outside — see this file's header. Omitted, `openState` below owns it. */
+  /** Lets the rail's Search row open this. Omitted, the palette owns it. */
   readonly open?: boolean;
   readonly onOpenChange?: (open: boolean) => void;
-  /**
-   * The header hides its own trigger past `md`, once the rail carries a
-   * Search row of its own — the trigger stays mounted and Cmd/Ctrl-K keeps
-   * working either way, so a phone never loses the affordance.
-   */
+  /** Hiding the trigger with this leaves Cmd/Ctrl-K working. */
   readonly triggerClassName?: string;
 }) {
   const [openState, setOpenState] = useState(false);
@@ -239,10 +188,7 @@ export function CommandPalette({
   const [catalogue, setCatalogue] = useState<PaletteCatalogue | null>(null);
   const [glyph] = useState(metaKeyGlyph);
 
-  // Whatever raised it — the trigger, the rail's row, Cmd/Ctrl-K — an opening
-  // palette starts from a clean query. Keyed on the transition rather than
-  // written at each call site, so a caller driving `open` from outside gets
-  // the same reset the trigger below always has.
+  // Every opening starts from a clean query, whatever raised it.
   useEffect(() => {
     if (!open) return;
     setQuery('');
@@ -260,8 +206,8 @@ export function CommandPalette({
     return () => removeEventListener('keydown', onKey);
   }, [open, setOpen]);
 
-  // Once, on first open. A failed read leaves `catalogue` null and the palette
-  // still navigates — the verbs are the half that never needed the server.
+  // Read on first open. A failed read leaves `catalogue` null and the verbs
+  // still navigate.
   useEffect(() => {
     if (!open || catalogue !== null) return;
     let live = true;
@@ -315,12 +261,8 @@ export function CommandPalette({
 
       {open ? (
         <div className="fixed inset-0 z-50 flex items-start justify-center p-4 pt-[12vh]">
-          {/* A press on the backdrop is a press on nothing, which is the
-              universal "I did not mean to open this". A real button rather than
-              a click handler on the overlay div, because that is what it is —
-              and it is out of the tab order because Escape is the keyboard's
-              way out and a tab stop labelled "close" ahead of the input would
-              be one press between the reader and typing. */}
+          {/* Out of the tab order: Escape is the keyboard's way out, and a tab
+              stop here would sit between the reader and the input. */}
           <button
             type="button"
             tabIndex={-1}

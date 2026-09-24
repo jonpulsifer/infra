@@ -1,25 +1,6 @@
 /**
- * The signed repository webhook, mounted (§15, §21).
- *
- * `src/integrations/github/webhook.ts` is the verify-then-classify handler;
- * this is the one route that reaches it, following `upload.ts`'s shape rather
- * than `dispatch.ts`'s — a delivery carries no session, so there is no
- * `deps.authenticate` here at all. **The signature is the only
- * authentication this route has**, and the secret behind it is the App-level
- * webhook secret sealed in the `github_app` row, read **per delivery** —
- * never captured at boot, because the row is written mid-flight by the setup
- * route while this process keeps running. An installation with no App, or
- * one whose conversion response carried no secret, refuses every delivery
- * before `handleWebhookDelivery` ever runs: nothing could have signed
- * anything, so there is nothing here for a delivery to prove.
- *
- * A verified delivery is classified and handed to `repo-loop.ts`'s
- * `applyWebhookDelivery` — the loop's own latency optimization, not a second
- * reconciliation path — and the passes it returns go straight to
- * `auto-deploy.ts`'s `dispatchAutoDeploys`. The poll loop's periodic pass
- * calls the same function over the same shape of value, which is what keeps
- * this route a shortcut: every branch here either does what the next poll
- * would have done anyway, or does nothing.
+ * The GitHub repository webhook route. The signature is its only
+ * authentication: a delivery carries no session.
  */
 import type { AdapterRegistry, Clock } from '../commands/types.ts';
 import type { InstallationManifest } from '../config/manifest.schema.ts';
@@ -40,12 +21,14 @@ export const WEBHOOK_PATH = '/internal/github/webhook';
 export interface WebhookRouteDeps {
   readonly db: Database;
   readonly clock: Clock;
-  /** The sealed App webhook secret, per delivery; `null` refuses them all. */
+  /**
+   * The sealed App webhook secret, read per delivery because setup writes it
+   * while the process runs; `null` refuses them all.
+   */
   secret(): Promise<string | null>;
   /**
-   * Current as of this request — mirrors `DispatchDeps.context`'s reasoning:
-   * `configureInstallation` writes the row this route would otherwise never
-   * re-read.
+   * Read per request, because `configureInstallation` rewrites it while the
+   * process runs.
    */
   current(): Promise<{
     readonly adapters: AdapterRegistry;
@@ -65,7 +48,6 @@ function refuse(status: number, code: string, message: string): Response {
   return Response.json({ ok: false, failure: { code, message } }, { status });
 }
 
-/** The status a rejection code reads as — an auth failure, or a bad request. */
 const REJECTION_STATUS: Record<WebhookRejectionCode, number> = {
   SIGNATURE_MISSING: 401,
   SIGNATURE_MALFORMED: 401,
@@ -109,9 +91,7 @@ async function handleWebhook(
 
   const { adapters, manifest } = await deps.current();
   const host = adapters.repository();
-  // No repository integration configured: there is nothing this delivery
-  // could name that this installation manages, so it is answered exactly as
-  // an `ignored` delivery is — authenticated, and nothing to do.
+  // With no repository integration, nothing a delivery names is managed here.
   const passes =
     host === null
       ? []
@@ -126,9 +106,7 @@ async function handleWebhook(
     );
   }
 
-  // §21's module: authenticated deliveries answer 202 whether or not they were
-  // about anything, so an attacker probing this endpoint cannot distinguish
-  // "ignored" from "acted on" any more than GitHub's own retry logic needs to.
+  // Every authenticated delivery answers 202, acted on or ignored.
   return Response.json(
     { ok: true, value: { classified: delivery.kind } },
     { status: 202 },

@@ -1,34 +1,6 @@
 /**
- * Rows of facts, as a table — because that is what they are.
- *
- * Four ledger screens (Builds, Deploys, Sources, Artifacts) rendered the same
- * four-slot row: a title, one `detail` string with every other fact flattened
- * into it by `·`, a status word, and a time. The tree contained zero `<table>`
- * elements. That flattening is what makes a ledger unreadable — a column of
- * commits is scannable and `a1b2c3d · service · Cloud Build · sha256:…` is not,
- * and it is also why those screens could not offer sorting: there was nothing to
- * sort by, only a sentence.
- *
- * Sorting is client-side and unapologetic about it. Every one of these screens
- * already holds its full page of rows in memory (the server paginates by
- * `before`, and the ledger asks for the next page explicitly), so a round trip
- * to reorder twelve rows would be a network request to answer a question the
- * browser can answer. When a screen grows past what it can hold, the sort
- * belongs in the query and this component should be *given* the order rather
- * than growing a mode.
- *
- * What it refuses: column resizing, column hiding, row virtualisation, grouping,
- * and selection checkboxes. Every one of those is a real feature of a real data
- * grid and none of them is a question this product's screens ask.
- *
- * A11y notes worth stating because they are easy to get silently wrong.
- * `aria-sort` goes on the `<th>` of the *active* column only — putting `none` on
- * every other header is legal and makes a screen reader announce sortability
- * three times per row. Rows carry a roving `tabIndex`, so a keyboard reader tabs
- * *into* the table once and then arrows through it, instead of tabbing past one
- * stop per row. Selection is `aria-current` rather than `aria-selected`, because
- * this is a table, not a listbox, and a `<tr>` outside a grid has no selected
- * state to report.
+ * Rows of facts as a sortable table. Sorting runs in the browser, over the page
+ * of rows the screen already holds.
  */
 import { ChevronDown, ChevronUp } from 'lucide-react';
 import { type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
@@ -40,12 +12,7 @@ export interface Column<T> {
   readonly cell: (row: T) => ReactNode;
   readonly align?: 'start' | 'end';
   readonly mono?: boolean;
-  /**
-   * Offer this column as a sort. It takes effect only together with
-   * {@link Column.sortValue} — a sortable header with nothing to compare is a
-   * control that does nothing when pressed, so the pairing is enforced here
-   * rather than trusted at 23 call sites.
-   */
+  /** Takes effect only with {@link Column.sortValue}. */
   readonly sortable?: boolean;
   readonly sortValue?: (row: T) => string | number;
   readonly width?: string;
@@ -56,15 +23,7 @@ export interface Sort {
   readonly direction: 'asc' | 'desc';
 }
 
-/**
- * The three-state cycle a header press walks: unsorted → ascending →
- * descending → unsorted.
- *
- * Returning to unsorted matters more than it sounds. The order the server sent
- * is itself an answer — newest first, for every one of these ledgers — and a
- * two-state toggle makes that original order unreachable once anything has been
- * pressed.
- */
+/** Ascending, descending, then unsorted, which restores the server's order. */
 export function nextSort(current: Sort | null, id: string): Sort | null {
   if (current?.id !== id) return { id, direction: 'asc' };
   if (current.direction === 'asc') return { id, direction: 'desc' };
@@ -81,8 +40,7 @@ export function sortRows<T>(
   const value = column?.sortValue;
   if (!value) return rows;
   const sign = sort.direction === 'asc' ? 1 : -1;
-  // Copied before sorting: `rows` is a read model the caller may be rendering
-  // elsewhere, and sorting in place would reorder it under them.
+  // Copied, since sorting in place would reorder the caller's rows.
   return [...rows].sort((left, right) => {
     const a = value(left);
     const b = value(right);
@@ -96,14 +54,6 @@ interface RowKeyEvent {
   preventDefault: () => void;
 }
 
-/**
- * Arrow-key navigation over a list of rows, as a handler.
- *
- * Exported because `ObjectExplorer` needs exactly this behaviour on its own
- * rows and a second implementation would be a second answer to "what does Home
- * do at the top of the list". `onActivate` is what Enter means — open, select,
- * inspect — and is the caller's word, not this module's.
- */
 export function rowKeyboard({
   count,
   active,
@@ -117,9 +67,7 @@ export function rowKeyboard({
 }): (event: RowKeyEvent) => void {
   return (event) => {
     if (count === 0) return;
-    // Clamped rather than wrapped. A ledger has a top and a bottom, and
-    // arrowing off the end into the other end loses the reader's place in a way
-    // that is invisible until they read the wrong row.
+    // Clamped at both ends, since wrapping would lose the reader's place.
     const move = (next: number) => {
       event.preventDefault();
       onActive(Math.min(count - 1, Math.max(0, next)));
@@ -159,24 +107,15 @@ export function DataTable<T>({
   readonly selectedKey?: string;
   readonly onRowSelect?: (row: T) => void;
   readonly empty?: ReactNode;
-  /**
-   * What this table is a table of, for anyone who cannot see that it is one.
-   * Rendered to screen readers only — the screen above it already carries the
-   * heading a sighted reader needs.
-   */
+  /** For screen readers only; the page heading serves sighted readers. */
   readonly caption?: string;
-  /**
-   * The order the rows arrive in, when it is not the order the server sent.
-   * A ledger that wants newest-first regardless of the query says so here
-   * instead of pre-sorting and losing the header state that explains why.
-   */
+  /** An order other than the server's, shown as the active header sort. */
   readonly initialSort?: Sort;
 }) {
   const [sort, setSort] = useState<Sort | null>(initialSort ?? null);
   const [active, setActive] = useState(0);
   const body = useRef<HTMLTableSectionElement>(null);
-  // Set only by the key handler, so the effect below never steals focus on
-  // mount or when the rows are replaced by a poll.
+  // Set only by the key handler, so focus never moves on mount or on a poll.
   const moved = useRef(false);
 
   const ordered = useMemo(
@@ -223,6 +162,8 @@ export function DataTable<T>({
                   key={column.id}
                   scope="col"
                   style={column.width ? { width: column.width } : undefined}
+                  // Unset on inactive columns: `none` makes screen readers
+                  // announce every header as sortable.
                   aria-sort={
                     activeSort
                       ? activeSort.direction === 'asc'
@@ -266,6 +207,7 @@ export function DataTable<T>({
             return (
               <tr
                 key={key}
+                // A `<tr>` outside a grid has no selected state.
                 aria-current={selected ? 'true' : undefined}
                 tabIndex={selectable ? (index === active ? 0 : -1) : undefined}
                 onFocus={selectable ? () => setActive(index) : undefined}

@@ -1,38 +1,7 @@
 /**
- * The two-pane read: one stable list beside one inspector.
- *
- * Two components live here because they are one idea at two densities.
- * `ObjectExplorer` takes a heterogeneous list — the Overview feed mixes Builds
- * and Deploys, and the Apps list is a single noun with three facts — where the
- * row is a summary and a table of four different shapes would be columns of
- * mostly-empty cells. `LedgerExplorer` takes a homogeneous one, where the row
- * is a record with six to eight comparable fields and the operator's task is
- * comparison down a column, so it renders `DataTable` and inherits its sort.
- *
- * Selection is deliberately local in both. Picking an object is inspection, not
- * navigation; callers put the durable detail route behind an explicit action
- * in the inspector. That keeps the list in place while a person compares rows.
- *
- * Two behaviours are load-bearing and easy to lose in a refactor.
- *
- * **Selection is sticky under the filter.** The previous list resolved the
- * selection against the *visible* rows, so typing one character that excluded
- * the selected object silently swapped the inspector to an unrelated one — on a
- * triage screen, from the failed Deploy you were reading to whatever sorted
- * first. The selection is resolved against the full list and the pane says the
- * row is hidden, because moving a reader's place without telling them is worse
- * than showing them something the filter excludes.
- *
- * **`aria-pressed` stays on the row.** It is the wrong word for single
- * selection and `aria-selected` in a listbox would be the right one, but the
- * rows are also the thing three test suites count, and a semantics change that
- * arrives with a behaviour change is two changes nobody can bisect. The
- * keyboard gap — no arrows, one Tab stop per row, fifty stops to reach the
- * inspector — is the half that actually cost an operator something, and it is
- * fixed here with the handler `DataTable` already exports.
- *
- * What this file refuses: hash-addressable selection (worth doing, and it is a
- * router change rather than a list change), type-ahead, and multi-select.
+ * A list beside an inspector: `ObjectExplorer` for mixed rows, `LedgerExplorer`
+ * for a sortable table. Selecting a row inspects it without navigating, and the
+ * selection survives a filter that hides its row.
  */
 import { Search } from 'lucide-react';
 import { type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
@@ -58,7 +27,7 @@ export interface ExplorerItem {
   readonly tone: ExplorerTone;
   readonly when?: string;
   readonly at?: string;
-  /** Extra searchable text that does not need to be repeated in the row. */
+  /** Searchable text the row does not show. */
   readonly search?: string;
   /** Marks a status whose work is still moving. */
   readonly active?: boolean;
@@ -91,14 +60,7 @@ export function ExplorerPageHeader({
   );
 }
 
-/**
- * The filter both panes share.
- *
- * The accessible name is the literal `Filter objects` in both, because it names
- * what the control does rather than what the screen is a screen of — a reader
- * tabbing into "Filter Builds" on one ledger and "Filter objects" on the next
- * has to work out whether they are the same control.
- */
+/** One accessible name on every screen, so a reader knows it is one control. */
 function FilterField({
   value,
   onChange,
@@ -126,7 +88,6 @@ function FilterField({
   );
 }
 
-/** The one no-match arm, with the way out of it the panes used to omit. */
 function NoMatch({ filter, onClear }: { filter: string; onClear: () => void }) {
   return (
     <EmptyState
@@ -238,8 +199,7 @@ export function ObjectExplorer({
                   }}
                   className={cn(
                     'grid w-full grid-cols-[minmax(0,1fr)_auto] gap-x-3 gap-y-1 border-b border-border-soft px-4 py-3.5 text-left transition-colors',
-                    // The panel clips at its own edge, so the global 2px ring
-                    // with 2px of offset lost its top and bottom rows.
+                    // The panel clips at its edge, cutting an outset ring.
                     'focus-visible:-outline-offset-2',
                     isSelected
                       ? 'bg-accent text-foreground shadow-[inset_3px_0_var(--accent)]'
@@ -298,21 +258,7 @@ export function ObjectExplorer({
   );
 }
 
-/**
- * A ledger: the same two panes, with the list as a real table.
- *
- * Four screens — Builds, Deploys, Sources, Artifacts — each held six to eight
- * facts per row and rendered three of them, flattening the rest into one `·`
- * sentence that could not be aligned, compared or sorted. They are the textbook
- * table: homogeneous rows, stable attributes, and an operator whose actual
- * question is "which one is unsigned / stuck / on the old runner".
- *
- * It is one component rather than four because the *only* thing that differs
- * between those screens is the column array and the inspector, and four copies
- * of a filter, a selection, a sticky-under-filter rule and a no-match arm is
- * four places for those to drift apart — which is what happened to the four
- * hand-built empty states this replaces.
- */
+/** The same two panes with the list as a table, for rows of like records. */
 export function LedgerExplorer<T>({
   columns,
   rows,
@@ -427,8 +373,7 @@ export function DefinitionGrid({
           <dt className="text-micro font-semibold uppercase tracking-eyebrow text-muted-foreground">
             {entry.label}
           </dt>
-          {/* The title is the whole point: this grid is where the digests live
-              and it truncates every one of them. */}
+          {/* Every value truncates, so the title holds it whole. */}
           <dd
             title={
               entry.title ??

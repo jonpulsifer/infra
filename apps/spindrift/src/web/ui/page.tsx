@@ -1,20 +1,6 @@
 /**
- * The three column widths this product has, and the one page header.
- *
- * There were three competing templates in the tree — `max-w-[1040px]` at 23
- * sites, `max-w-[1320px]` at 9, and a 640px wizard column — paired with three
- * different title sizes (`text-3xl`, `text-2xl`, `text-[27px]`). The visible
- * cost is not the inconsistency: six screens *load* at the reading width and
- * *land* at the wide one, so arriving anywhere shifts the whole page sideways
- * once the data comes back. Naming the widths is what lets a screen's skeleton
- * and its content agree.
- *
- * `wide` is a ledger — a table wants the room. `reading` is a screen of prose
- * and cards, where a full-width line of body text is unreadable. `focus` is one
- * decision at a time: the wizard, the gate, a create flow.
- *
- * No `Page` variant sets a background, a border, or vertical rhythm between its
- * children. A page is a width and a gutter; everything else is the screen's.
+ * The three column widths and the page header. A skeleton and its content share
+ * a width, so the page does not shift sideways when data arrives.
  */
 import type { ReactNode } from 'react';
 import { Eyebrow } from './card.tsx';
@@ -48,14 +34,6 @@ export function Page({
   );
 }
 
-/**
- * The header every screen writes, in the order a reader needs it.
- *
- * `breadcrumb` sits above the eyebrow rather than replacing it: the crumb says
- * where this is, the eyebrow says what kind of thing it is, and a screen that
- * has both should not have to choose. Only `title` is required, because a
- * screen with nothing to add should say nothing rather than pad the slot.
- */
 export function PageHeader({
   eyebrow,
   title,

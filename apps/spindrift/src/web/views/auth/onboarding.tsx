@@ -1,72 +1,7 @@
 /**
- * The first three questions, for an installation nobody has configured (§20).
- *
- * `loadStoredManifest` seeds an unseeded row with a placeholder document, and
- * every value in it is a stand-in — the registry is somebody else's namespace,
- * the signer names a key ring that does not exist. An installation in that
- * state does not *fail*; it
- * comes up, renders an Overview of nothing, and refuses the first act an
- * operator attempts, with a message about whichever placeholder that act
- * happened to read first. This screen is what stands in front of that.
- *
- * **Everything else is derived and never asked.** The manifest is three kinds
- * of value and only one of them is a question: the deployment's own facts are
- * the chart's, the cloud's facts are discovery's, and what is left — what this
- * installation is called, whose GitHub App it speaks as, where its artifacts
- * are published — is nobody's but the operator's. So this asks four things and
- * the settings surface keeps every key. It is deliberately *not* the settings
- * form with a progress bar: a first-run screen that opened the whole document
- * would be asking somebody who has never seen this software to make thirty
- * decisions before making one.
- *
- * **It names manifest keys, and it is the one screen that may.** `installation.tsx`
- * renders whatever the schema declares and names nothing, which is what keeps it
- * correct as keys leave and arrive. A wizard cannot be written that way — asking
- * a chosen four *is* the feature — so the four are named once, in
- * {@link ONBOARDING_ASKS}, and resolved through `manifestFields()` rather than
- * rendered by hand. A key that leaves the schema therefore leaves this screen
- * as a visible refusal rather than as a control writing somewhere nothing
- * reads, and `test/web/onboarding.test.tsx` walks all four through the schema so
- * the removal is a failing test rather than a discovery.
- *
- * **One write, at the end, through `configureInstallation`.** Every step edits
- * one document held here; nothing is saved until the last screen. That is not
- * only about not half-configuring an installation — `writeStoredManifest`
- * reconciles the Targets a document declares inside the same transaction, so a
- * wizard that saved per step would run reconciliation four times over four
- * documents that were each missing something.
- *
- * **This asks three of the four the predicate reads**, which is what keeps the
- * screen coherent without making it a fourth question:
- * `isUnconfiguredInstallation` answers over the genuine choices, and because it
- * is an **and** — unconfigured means all four are still stand-ins — answering
- * any one of the three asked here is what ends onboarding. A step asking
- * something the predicate ignores would be a question whose answer changed
- * nothing, which is why the fourth ask is discovery rather than another key: it
- * writes cloud facts, nobody's choice, and it is here because confirming them is
- * cheapest while the operator is already looking at the document.
- * `secretStore.adapter` is the fourth genuine choice and is deliberately *not*
- * asked: it is one of two values, both wrong for an installation that has not
- * decided, and answering any of the other three already ends this screen. The
- * asymmetry is safe only in that direction — a predicate that answered
- * unconfigured when *any* choice was still a stand-in would hand this
- * installation, which legitimately keeps two, a wizard instead of its product.
- *
- * **What an operator can authenticate as before any of this.** Nothing here is
- * reachable without a session, and a session is a passkey ceremony scoped to
- * `controlPlane.hostname` — bound once at boot, deliberately (`serve.ts`). That
- * hostname is a deployment fact rather than an authored one: `resolveManifest`
- * takes it from `SPINDRIFT_HOSTNAME`, the same value the chart renders the
- * Gateway and the HTTPRoute from, so an installation whose document is nothing
- * but stand-ins is still served at its own real origin and can enrol somebody.
- * That is what makes this screen reachable rather than academic.
- *
- * The one installation that still cannot is the one with no origin at all —
- * reachable only in-cluster, no Gateway, nothing to scope a relying party to,
- * so `resolveManifest` falls back to `UNSERVED_HOSTNAME` and a browser
- * refuses the ceremony. That is the missing Gateway saying so, not this screen,
- * and there is nothing here to close: an installation nobody can reach is not
- * an installation waiting on a wizard.
+ * First-run setup for an unconfigured installation. The steps edit one
+ * document, and `configureInstallation` writes it once: each write reconciles
+ * Targets.
  */
 import { CircleAlert, PartyPopper, Rocket } from 'lucide-react';
 import { type CSSProperties, type ReactNode, useEffect, useState } from 'react';
@@ -105,19 +40,10 @@ export type OnboardingAsk = {
 );
 
 /**
- * The three questions, in the order they are asked.
- *
- * The order is not cosmetic. The name comes first because it is the only answer
- * that needs nothing — no credential, no cloud, no prior step — so the first
- * thing an operator does is succeed. Discovery is second because it is the only
- * step that reads the world, and a step that can be slow or refuse belongs after
- * the ones that cannot. The registry is last because it is the answer most
- * likely to be a considered choice rather than a confirmation.
- *
- * GitHub is deliberately not a question. The App identity is not authored —
- * it is created through GitHub's manifest flow from the Repositories screen,
- * against the *stored* manifest — so the ceremony is offered when the
- * document has landed; see {@link OnboardingDone}.
+ * In the order asked: the name needs nothing, and discovery can be slow or
+ * refuse. The GitHub App is created after the write, from the stored manifest.
+ * Each asked key is one `isUnconfiguredInstallation` reads, so answering any
+ * one ends onboarding.
  */
 export const ONBOARDING_ASKS: readonly OnboardingAsk[] = [
   {
@@ -143,19 +69,8 @@ export const ONBOARDING_ASKS: readonly OnboardingAsk[] = [
 ];
 
 /**
- * The step that asks about a value, or `-1` for a value no step asks about.
- *
- * A wizard shows one control at a time, so an issue is only actionable on the
- * step that mounts the control it belongs to. Prefix rather than equality
- * because an issue names the value that is wrong and a step names the key it
- * asks for: a bad element of `supplyChain.registry` is reported at
- * `supplyChain.registry.0`, and the step that can fix it is the one asking for
- * `supplyChain.registry`.
- *
- * `-1` is a real answer and not a miss. Discovery applies cloud facts this
- * screen never asks for, so a document can be refused over a value with no
- * control on any step; {@link Onboarding} names those keys in the refusal
- * instead of navigating to a screen that would not show them.
+ * The step asking about `path`, or `-1`. A prefix match, since an issue at
+ * `supplyChain.registry.0` belongs to the step asking `supplyChain.registry`.
  */
 export function stepAsking(path: string): number {
   return ONBOARDING_ASKS.findIndex((ask) => {
@@ -165,20 +80,7 @@ export function stepAsking(path: string): number {
   });
 }
 
-/**
- * What is wrong with the answer the step in front of the operator asks for.
- *
- * The machinery for this has existed since the screen did and was consulted
- * exactly once, after the final write — so an empty installation name walked
- * through all three questions, and the commit press threw the operator back to
- * step one reading a sentence of dotted schema paths. The same map, filtered by
- * {@link stepAsking}, is a gate on `Continue`: an answer is checked where it is
- * given, by the schema that will refuse it, and the reason is on screen beside
- * the button that will not move.
- *
- * Exported because it is the whole of the gate and the one part of it worth
- * asserting without a browser.
- */
+/** Schema issues for the current step, which gate Continue. */
 export function stepIssues(document: unknown, step: number): FieldErrors {
   const issues = new Map<string, readonly string[]>();
   for (const [path, messages] of manifestIssues(document)) {
@@ -196,14 +98,8 @@ function answerTo(document: unknown, ask: OnboardingAsk): string | undefined {
 }
 
 /**
- * The four asks as the rail draws them, against where the operator is.
- *
- * Behind is `done` rather than "answered": this screen confirms values that
- * arrive already filled in, so "has a value" is true of every step from the
- * first render and would make the rail a row of four ticks that never move.
- * What it can honestly say is which questions have been walked past — and
- * `failed` overrides that, because a step the write came back refusing is not
- * a step behind you.
+ * A walked-past step is `done`, since every value arrives pre-filled. A step
+ * the write refused is `failed` wherever it is.
  */
 function railSteps(
   document: unknown,
@@ -224,27 +120,13 @@ function railSteps(
   }));
 }
 
-/**
- * The two maps of what is wrong, as one map for the controls.
- *
- * The server's issues and the schema's are the same kind of fact keyed the same
- * way, and a control that rendered only the first would stay silent about the
- * value that is stopping the button beside it. The server's win a collision:
- * it is the authority, and it has seen the whole document.
- */
+/** Issues from the last write attempt win a collision with the step check. */
 function merged(errors: FieldErrors, blocking: FieldErrors): FieldErrors {
   if (blocking.size === 0) return errors;
   return new Map([...blocking, ...errors]);
 }
 
-/**
- * The step the URL is on, clamped, and `0` for a URL that names none.
- *
- * The hash is already this app's router, so browser Back was moving the URL
- * under a wizard that neither followed it nor noticed. Clamped rather than
- * validated because the only input is something a human typed into an address
- * bar, and the honest answer to `#/setup/9` is the last question.
- */
+/** The step the hash names, clamped: `#/setup/9` opens the last one. */
 function stepInHash(): number {
   if (typeof location === 'undefined') return 0;
   const asked = /^#\/setup\/(\d+)/.exec(location.hash)?.[1];
@@ -252,23 +134,10 @@ function stepInHash(): number {
   return Math.min(Math.max(at - 1, 0), ONBOARDING_ASKS.length - 1);
 }
 
-/** Where the in-progress document is kept between two loads of one tab. */
+/** Session storage, so an unsaved document never outlives its tab. */
 const HELD = 'spindrift.setup';
 
-/**
- * The document a reload interrupted, or `undefined` for a fresh start.
- *
- * `sessionStorage` rather than `localStorage`, and it is the one-write design
- * that decides which: nothing is stored server-side until the last press, so
- * three answers live only here — but they are answers about *this* tab's visit
- * to *this* installation, and a document surviving until next week would be a
- * document proposed against an installation somebody else has since configured.
- *
- * Every failure answers "start fresh". Storage a browser refuses, a body
- * another version of this screen wrote, a private window that throws on read —
- * none of them are worth a screen of their own, and all of them are survivable
- * by asking the three questions again.
- */
+/** Any failure to read the held document starts fresh. */
 function restored(): unknown {
   try {
     const held = sessionStorage.getItem(HELD);
@@ -285,8 +154,7 @@ function remember(document: unknown): void {
   try {
     sessionStorage.setItem(HELD, JSON.stringify(document));
   } catch {
-    // A browser that will not store this is a browser where F5 costs four
-    // answers, which is where this screen started. It is not a refusal.
+    // Without storage, a reload loses the answers; nothing else breaks.
   }
 }
 
@@ -297,15 +165,8 @@ function refusedAs(path: string): string {
 }
 
 /**
- * The sentence a document the schema refuses is reported with.
- *
- * The paths are what the schema keys its issues by and they are the wrong
- * vocabulary for the one screen whose whole premise is naming keys in human
- * terms — `installation.name, supplyChain.registry are not valid` was the last
- * thing an operator read before being thrown back to step one. Every path a
- * step asks about is named as that step; the rest are named as themselves,
- * because discovery writes values this screen never offers a control for and
- * pointing at a question that does not ask them would be worse than the path.
+ * Names each refused path as the step that asks it. Paths discovery wrote
+ * have no step, so they are named as themselves.
  */
 export function refusalSentence(paths: readonly string[]): string {
   const asked = [
@@ -323,23 +184,13 @@ export function refusalSentence(paths: readonly string[]): string {
     .join(' ');
 }
 
-/**
- * Ask the four, then write the document once.
- *
- * `initial` rather than a read of its own: whoever decided this installation is
- * unconfigured had to read the manifest to know that, and re-reading it here
- * would be a second round trip for a document already in hand — and a chance
- * for the two to disagree about which document is being edited.
- */
+/** `initial` is the manifest the caller already read to find it unconfigured. */
 export function Onboarding({
   initial,
   onDone,
 }: {
   readonly initial: unknown;
-  /**
-   * Configuration landed. `next` is a path to open instead of the product's
-   * own first screen, or `null` for that screen.
-   */
+  /** `next` is a path to open, or `null` for the product's first screen. */
   onDone(next: string | null): void;
 }) {
   const [document, setDocument] = useState<unknown>(
@@ -350,13 +201,8 @@ export function Onboarding({
   const [outcome, setOutcome] = useState<SaveOutcome | null>(null);
   const [saving, setSaving] = useState(false);
 
-  // The step lives in the hash and the document in `sessionStorage`, which
-  // together make F5 and browser Back survivable. Both are consequences of the
-  // one-write-at-the-end design rather than complaints about it: nothing is
-  // stored server-side until the last press, so an in-memory document is four
-  // answers that a reload silently discards — and the hash is already this
-  // app's router, so Back was moving the URL under a wizard that neither
-  // followed it nor noticed.
+  // The step lives in the hash and the document in session storage, so reload
+  // and Back both survive.
   const setStep = (next: number) => {
     const clamped = Math.min(Math.max(next, 0), ONBOARDING_ASKS.length - 1);
     const move = () => {
@@ -364,15 +210,7 @@ export function Onboarding({
       if (typeof location !== 'undefined')
         location.hash = `/setup/${clamped + 1}`;
     };
-    // A view transition where the browser has one, and the same swap where it
-    // does not. The whole of what it buys is that the question leaving and the
-    // question arriving are one movement rather than two unrelated repaints —
-    // a wizard reads as one screen changing its mind, not as three screens.
-    //
-    // Nothing waits on it and nothing is conditional on it having run: the
-    // callback is the state update either way, so a browser without the API,
-    // or a reader who asked for less motion, gets the instant swap that was
-    // always here.
+    // A view transition where the browser has one; `move` runs either way.
     const view = globalThis.document as
       | { startViewTransition?: (update: () => void) => unknown }
       | undefined;
@@ -392,24 +230,14 @@ export function Onboarding({
   useEffect(() => remember(document), [document]);
 
   const finish = async () => {
-    // The same earlier-of-two-identical-checks the settings form runs, for the
-    // same reason: the command reports every offending key in one sentence,
-    // which is right for a log and wrong for a form. The command validates
-    // again regardless and is the authority.
+    // Checked here so each issue reaches its field; the command validates
+    // again and has the final say.
     const issues = manifestIssues(document);
     if (issues.size > 0) {
       const paths = [...issues.keys()];
       setErrors(issues);
-      // Back to the step that asks about the first refused value. This screen
-      // mounts one control at a time, so an issue against `installation` raised
-      // on the last step is an issue rendered against a control three steps
-      // back — the operator is told the manifest was refused and shown nothing
-      // that says what to do. The settings form has no equivalent problem
-      // because every field is mounted at once.
-      //
-      // An issue may still belong to no step: discovery applies cloud facts
-      // this screen never asks for. Naming the keys is what that case has
-      // instead of a control to point at.
+      // Back to the step asking the first refused value, since only one step's
+      // control is mounted. Values discovery wrote have no step.
       const asked = paths
         .map(stepAsking)
         .filter((at) => at >= 0)
@@ -465,14 +293,7 @@ export function Onboarding({
   );
 }
 
-/**
- * What is on screen, with nothing to fetch.
- *
- * Split from the state above for the reason `InstallationSettingsView` is: every
- * claim worth making about a wizard is a claim about *what a given step shows*,
- * and a component that owned its own step could only ever be asserted on its
- * first one.
- */
+/** Stateless, so a test can render any step. */
 export function OnboardingView({
   step,
   document,
@@ -493,14 +314,10 @@ export function OnboardingView({
   onChange(document: unknown): void;
   onStep(step: number): void;
   onFinish(): void;
-  /**
-   * A document arrived from a file instead of from the three questions. The
-   * same outcome the last press produces, because it is the same write.
-   */
+  /** A document restored from a file, reported like the final write. */
   onRestored(outcome: SaveOutcome): void;
   onDone(next: string | null): void;
 }) {
-  // A saved document is the end of this screen's job, whatever step it was on.
   if (outcome?.kind === 'saved') {
     return (
       <OnboardingShell>
@@ -512,15 +329,10 @@ export function OnboardingView({
   const ask = ONBOARDING_ASKS[step];
   if (ask === undefined) return null;
   const last = step === ONBOARDING_ASKS.length - 1;
-  // What the schema says about the answer in front of the operator, now, rather
-  // than what it will say after the write. The map exists either way; consulting
-  // it here is the difference between a refusal beside the control that caused
-  // it and a refusal three steps later naming a dotted path.
   const blocking = stepIssues(document, step);
   const held = [...blocking.values()][0]?.[0];
-  // The discovery step is the one with no form around it, so its primary button
-  // has nothing to submit — a `type="submit"` outside a form is a button that
-  // does nothing when pressed, which is how this step would have shipped.
+  // The discovery step has no form around it, so a submit button would do
+  // nothing.
   const submits = ask.kind !== 'discovery';
   const advance = () => {
     if (blocking.size > 0) return;
@@ -531,17 +343,14 @@ export function OnboardingView({
     document,
     errors: merged(errors, blocking),
     disabled: saving,
-    // One question on screen, so the control that asks it is where the cursor
-    // belongs. The first interaction with this product was a mouse hunt for the
-    // only box on the page.
+    // One question on screen, so its control takes focus.
     autoFocus: true,
     onChange,
   };
 
   const body = (
     <>
-      {/* Keyed by the step so React remounts it, which is what replays the
-          animation: a question is a new question, not the last one edited. */}
+      {/* Keyed by step, so each question remounts and replays the animation. */}
       <Card key={step} className="motion-safe:animate-rise">
         <CardHeader>
           <Rocket aria-hidden="true" className="mt-0.5 size-4 text-subtle" />
@@ -555,9 +364,6 @@ export function OnboardingView({
         </CardHeader>
         <CardContent>
           {ask.kind === 'discovery' ? (
-            // The same panel the settings surface mounts, editing the same
-            // document through the same `onChange`. A confirmed value is an
-            // unsaved edit here exactly as it is there.
             <DiscoveryPanel
               document={document}
               disabled={saving}
@@ -573,10 +379,6 @@ export function OnboardingView({
 
       <div className="flex flex-wrap items-center justify-between gap-3">
         {step === 0 ? (
-          // Nothing to go back to on the first question, and the one thing an
-          // operator might be here to do instead of answering it: a torn-down
-          // installation comes back from the file it exported, rather than from
-          // whatever document a chart happened to mount.
           <RestoreInstallation disabled={saving} onRestored={onRestored} />
         ) : (
           <Button
@@ -589,9 +391,6 @@ export function OnboardingView({
           </Button>
         )}
         <div className="flex items-center gap-3">
-          {/* Whatever the button is currently mumbling, said out loud. A
-              ceremony that takes as long as a cloud write takes was announced
-              to a screen reader by nothing at all. */}
           <p
             role="status"
             aria-live="polite"
@@ -631,9 +430,8 @@ export function OnboardingView({
     >
       <div>
         {ask.kind === 'discovery' ? (
-          // The one step with no form of its own, because it already has one:
-          // the discovery panel submits its narrowing, and a form nested in a
-          // form is markup a browser repairs into something neither meant.
+          // No form here: the discovery panel submits its own, and forms cannot
+          // nest.
           <div className="flex flex-col gap-6">{body}</div>
         ) : (
           <form
@@ -651,7 +449,7 @@ export function OnboardingView({
   );
 }
 
-/** One asked key, rendered by the schema rather than by hand. */
+/** One asked key, rendered from the manifest schema. */
 function AskedField({
   at,
   form,
@@ -684,11 +482,8 @@ function AskedField({
 }
 
 /**
- * Configuration landed, and the one thing that could not happen until it did.
- *
- * The manifest flow that creates the GitHub App renders its redirect URLs off
- * the stored manifest, so this is the first moment that creation can actually
- * run — and it runs on the connections screen, which owns that ceremony.
+ * The GitHub App's manifest flow reads the stored manifest, so it can run only
+ * after this write. The connections screen runs it.
  */
 function OnboardingDone({
   targets,
@@ -713,12 +508,8 @@ function OnboardingDone({
               <p className="mt-1 text-sm text-muted-foreground">
                 Targets reconciled, in rank order:
               </p>
-              {/* One at a time, in the order the write worked them: the
-                  reconciliation really is sequential inside one transaction,
-                  and rank really is the order, so the stagger is the shape of
-                  what happened rather than an effect over a finished list.
-                  Still one sentence to a reader who cannot see it — the list
-                  is comma-separated text with the delay on each item. */}
+              {/* Staggered in rank order, the order the write reconciled them.
+                  A screen reader hears one comma-separated sentence. */}
               <ul className="mt-1 flex flex-wrap gap-x-1 text-sm text-muted-foreground">
                 {targets.map((target, index) => (
                   <li
@@ -760,31 +551,19 @@ function OnboardingDone({
 }
 
 /**
- * The frame, which is the product's chrome deliberately absent.
- *
- * An unconfigured installation has no Apps, no Builds and no Targets, so the
- * navigation that reaches them would be five links to five empty screens and a
- * sixth to the settings form this screen exists to stand in front of.
- *
- * What it does have is a fixed position. The column was vertically centred, and
- * step three mounts a discovery panel that grows by five rows when the cloud
- * answers — so every Continue, and every successful ask, slid the whole screen
- * under the reader. A wizard reads as built mostly because its chrome does not
- * move, so the header and the rail are pinned and only the step changes height.
+ * No product navigation, since every screen it reaches is empty. The header
+ * and rail stay put while the step changes height.
  */
 function OnboardingShell({
   rail,
   children,
 }: {
-  /** The three questions, when there are three questions to show. */
+  /** Absent on the finished screen. */
   readonly rail?: ReactNode;
   readonly children: ReactNode;
 }) {
   return (
     <>
-      {/* The other screen nobody has signed in on yet — see `gate.tsx` for
-          the sibling instance and `components/roflcopter.tsx` for why each
-          screen owns its own rather than sharing one mounted higher up. */}
       <Roflcopter />
       <main className="mx-auto flex min-h-dvh w-full max-w-[880px] flex-col gap-8 px-5 pb-16 pt-[12vh]">
         <div className="flex flex-col items-center gap-2 text-center">

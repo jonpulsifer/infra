@@ -1,48 +1,6 @@
 /**
- * The two storage systems this installation is connected to.
- *
- * They belong beside repositories and Targets rather than on a screen of their
- * own, because all four are the same kind of thing: a system outside Spindrift
- * that Spindrift holds an address and possibly a credential for. A bucket is
- * where a Source is staged and a registry is where an Artifact is pushed — but
- * neither *is* the Source or the Artifact, and while they shared a screen with
- * a list of staged bundles that distinction had nowhere to live. The objects
- * are the supply-chain ledgers now; what is left here is the connection.
- *
- * The bucket section began as three controls buried in step one of the creation
- * flow: a `<select>` of the manifest's buckets, a "Custom bucket…" option that
- * let a developer type an undeclared bucket and stage a build into it, and a
- * "Test WIF Permissions" button whose result was a sentence nobody kept. All
- * three were configuration wearing the costume of a deploy form. The creation
- * flow now shows the default as a fact, and §20 puts every value naming this
- * installation in the manifest — which `useSourceBucket` writes to, after
- * verifying that the controller can actually write there.
- *
- * **Each section reads its own state.** Two independent far sides answering one
- * `Promise.all` meant a slow bucket check was a slow registry list, and either
- * refusal blanked both. A connection that is down should read as one row that
- * is down. An act re-reads rather than patching what it wrote, so what is on
- * screen is what the manifest now says and not a guess about it.
- *
- * **Verification is per row and on request**, in both sections that have any.
- * A screen that checked N destinations on load would be a screen slow in
- * proportion to how much storage an installation has. The default bucket is the
- * exception and verifies itself on arrival, because it is the one whose health
- * decides whether the next deploy works.
- *
- * **The two checks do not prove the same thing, and the words differ so that is
- * visible.** A bucket is checked with the federated identity that would write
- * to it, so `writable` is the claim. A registry with no held credential is
- * checked anonymously, because §13 leaves the push credential with the build
- * route that makes it — so the claim is only that it `answers`, and a registry
- * that asks who is calling is reachable rather than broken. Where a credential
- * *is* held, Verify completes the registry's own challenge with it, and then
- * the claim is the strong one.
- *
- * **A token is write-only from this screen.** The listing carries the username
- * and never the secret, so the field is empty even where one is stored: a
- * masked placeholder would suggest the value can be read back, and there is no
- * verb above the credential store that could.
+ * The Connections sections for source buckets, build routes and artifact
+ * registries. Each reads its own far side, so one that is down fails alone.
  */
 import {
   AlertTriangle,
@@ -76,16 +34,12 @@ type SourceStorageView = OutputOf<'listSourceBuckets'>;
 type BuildRoutesView = OutputOf<'listBuildRoutes'>;
 type BuildRouteRow = BuildRoutesView['routes'][number];
 
-/** What is known about one destination's reachability, right now. */
 type Reachability<Result> =
   | { readonly state: 'unchecked' }
   | { readonly state: 'checking' }
   | { readonly state: 'reachable'; readonly result: Result }
   | { readonly state: 'unreachable'; readonly message: string };
 
-// --- Source buckets ---------------------------------------------------------
-
-/** Where a Source is staged before any build route can fetch it (§4, §15). */
 export function SourceBuckets() {
   const read = useRead([['listSourceBuckets', {}]], null);
 
@@ -139,7 +93,7 @@ function SourceBucketList({
     }
   };
 
-  // The default only. See the module note: N buckets should not mean N calls.
+  // Only the default verifies on load, so N buckets do not cost N calls.
   useEffect(() => {
     if (!view.canVerify || view.defaultBucket === '') return;
     void verify(view.defaultBucket);
@@ -214,9 +168,6 @@ function SourceBucketList({
       {adding ? (
         <Card>
           <CardContent>
-            {/* A real form, so Enter in the one field does what the reader
-                expects. The second verb stays a button: adding as the default
-                is a different act, not the same act confirmed harder. */}
             <form
               className="flex flex-col gap-3"
               onSubmit={(event) => {
@@ -331,10 +282,6 @@ function BucketRow({
         </div>
       </div>
 
-      {/* Both halves were unlabelled monospace, so a region name and the two
-          IAM permissions the check actually exercised read as one undifferentiated
-          string — and the second one is the entire evidence behind the `writable`
-          badge above it, which is the fact worth naming. */}
       {check.state === 'reachable' ? (
         <dl className="flex flex-wrap gap-x-4 gap-y-0.5 pl-6 text-[11px] text-subtle">
           <div className="flex gap-1.5">
@@ -356,23 +303,9 @@ function BucketRow({
   );
 }
 
-// --- Build routes -------------------------------------------------------
-
 /**
- * Every configured build route — where a staged Source becomes an Artifact
- * (§4, §16).
- *
- * Read-only, unlike the two sections either side of it: rank is the
- * manifest's declared order and per-App narrowing is the Builder picker on
- * the App workspace, so there is nothing here for a press to do.
- *
- * **The one row this screen cannot otherwise see: bosun.** Every other route
- * is dialed — core reaches its API directly, so a broken one shows up the
- * moment a Build is dispatched to it. Bosun is polled *in*, over
- * `/internal/bosun/claim`, so a route can be declared, secreted, and ranked
- * and still have nothing on the other end — indistinguishable, from the rest
- * of this screen, from one that is merely quiet. The health line is what
- * tells the two apart without waiting for a Build to time out and find out.
+ * Read-only. Bosun hosts poll in for work and are never dialled, so a bosun
+ * route's health line is the only sign that a host is on the other end.
  */
 export function Builders() {
   const read = useRead([['listBuildRoutes', {}]], null);
@@ -421,7 +354,10 @@ function BuildRouteRowView({ route }: { route: BuildRouteRow }) {
   );
 }
 
-/** The claim-poll pulse and outbox depth — everything this process knows about the pool on the other end of one bosun route. */
+/**
+ * What this process has seen of one bosun route's pool: claim polls and outbox
+ * depth.
+ */
 function BosunPoolHealth({
   health,
 }: {
@@ -448,13 +384,9 @@ function BosunPoolHealth({
   );
 }
 
-// --- Artifact registries ----------------------------------------------------
-
 /**
- * What each registry product is called, where it is called something.
- *
- * A label and nothing more — the distribution API is the contract, so a registry
- * this list does not recognise behaves identically and simply says `Registry`.
+ * Labels only: every registry speaks the distribution API, so an unknown one
+ * just reads `Registry`.
  */
 const FLAVOUR_LABEL: Record<RegistryRow['flavour'], string> = {
   artifactRegistry: 'Artifact Registry',
@@ -463,7 +395,6 @@ const FLAVOUR_LABEL: Record<RegistryRow['flavour'], string> = {
   other: 'Registry',
 };
 
-/** Where every Artifact is pushed, and where a Target pulls it from (§16). */
 export function ArtifactRegistries() {
   const read = useRead([['listArtifactRegistries', {}]], null);
 
@@ -715,10 +646,8 @@ function RegistryRowView({
         </div>
       </div>
 
-      {/* GHCR authenticates classic PATs and each Actions run's own token,
-          and nothing else — an App installation token is refused outright. The
-          hosted route rides its run's token; every other route needs the PAT
-          stored here, so the prerequisite is said where the fix is. */}
+      {/* GHCR accepts only classic PATs and an Actions run's own token, never
+          an App token. Only the hosted route has a run token. */}
       {registry.flavour === 'ghcr' && registry.credentialUsername === null ? (
         <p className="pl-6 text-xs text-muted-foreground">
           Pushing here from any route but hosted Actions needs a stored classic
@@ -748,17 +677,8 @@ function RegistryRowView({
 }
 
 /**
- * Taking a registry token, and the one honest thing to say about it.
- *
- * The token is write-only from here: `listArtifactRegistries` answers with the
- * username and never the secret, so a stored credential can be *replaced* and
- * never read back. The field is therefore always empty when this opens, even
- * where one is already held — showing a masked placeholder would suggest the
- * value is retrievable, and it is not.
- *
- * The save proves the credential against the registry's own challenge before
- * storing it, which is what makes a typo a sentence here rather than an
- * `unauthorized` twenty minutes into a build.
+ * The token is write-only: the listing carries only the username, so the field
+ * starts empty even where a token is stored.
  */
 function RegistryCredentialForm({
   registry,
@@ -868,26 +788,13 @@ function RegistryCredentialForm({
   );
 }
 
-// --- Shared chrome ----------------------------------------------------------
-
-/** The frame a section keeps while it is loading or refusing. */
 function SectionShell({ children }: { children: ReactNode }) {
   return <section className="flex flex-col gap-4 py-6">{children}</section>;
 }
 
 /**
- * A section that has not answered yet, in the shape of the section that will.
- *
- * Each section reads its own far side, which is the right call and had one
- * visible cost: three grey sentences of one line each, resolving at three
- * different times, each replaced by a two-column block several hundred pixels
- * tall. The screen jumped three times and the reader lost their place twice.
- *
- * So this is not a spinner in a box — it is `ConnectionSection`'s own grid, with
- * the provider column and the ruled card the real section will put there. It
- * deliberately does not guess the row count: the caller knows how many rows this
- * particular connection usually has, and a skeleton that promised six where two
- * arrive is a jump in the other direction.
+ * `ConnectionSection`'s own grid, so the loaded section appears without a jump.
+ * The caller passes the row count its connection usually has.
  */
 function LoadingSection({ rows }: { rows: number }) {
   return (
@@ -904,15 +811,7 @@ function LoadingSection({ rows }: { rows: number }) {
   );
 }
 
-/**
- * One connected system, in the ruled row every provider on this screen uses.
- *
- * The same two-column shape as the repository and Target sections: the system
- * and its one-line state on the left, everything concrete about it on the
- * right. Matching them is the point — a bucket and a cluster are the same kind
- * of thing here, and a section that looked different would read as a different
- * kind of thing.
- */
+/** The two-column shape the repository and Target sections also use. */
 function ConnectionSection({
   name,
   mark,
@@ -977,7 +876,11 @@ function CheckBadge<Result>({
   reachedLabel,
 }: {
   check: Reachability<Result>;
-  /** What being reachable *means* here — the two checks do not prove the same. */
+  /**
+   * A bucket check uses the identity that writes to it and proves `writable`.
+   * A registry check with no stored credential is anonymous and proves it
+   * `answers`.
+   */
   reachedLabel: string;
 }) {
   switch (check.state) {

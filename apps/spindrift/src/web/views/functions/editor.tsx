@@ -1,12 +1,7 @@
 /**
- * One Function's screen — write it, run it in the preview sandbox, deploy it,
- * watch it, remove it. Everything a `fetch(request, env)` handler has: the
- * `ponytail:` note in `functions/contract.ts` keeps this a one-table feature
- * with no App, Build or Deploy of its own.
- *
- * A create and an edit are the same form: `existing` is `null` until the row
- * exists, `name` is the only field that closes once it does, and Save answers
- * both the same way — upsert, deploy, report the URL or the refusal on the row.
+ * One Function's screen: edit, preview, deploy, watch and delete it. The
+ * `ponytail:` note in the functions contract keeps it one table with no App.
+ * Create and edit share the form; `existing` is `null` until the row exists.
  */
 import { useEffect, useRef, useState } from 'react';
 import type {
@@ -76,21 +71,16 @@ function logLine(entry: FunctionLogEntry): LogLine {
   };
 }
 
-/** While not ready. Fast enough that "Live" replaces the warning within a beat. */
+/**
+ * Until the Function answers; short, so "Live" replaces the warning soon
+ * after.
+ */
 const PROBE_MS = 10_000;
 
-/**
- * Once ready. A redeploy changes `deployedAt`, which restarts this hook and
- * probes again immediately — nothing between here and there is worth a tick
- * over.
- */
+/** Once it answers. A redeploy changes `deployedAt` and re-probes at once. */
 const PROBE_SETTLED_MS = 5 * 60_000;
 
-/**
- * Whether a deployed Function is answering yet (`functions/readiness.ts`).
- * Its own component so it mounts only beside a URL that exists — probing a
- * Function with nothing to probe would be a call for an answer nobody asked.
- */
+/** Whether a deployed Function answers yet. Mounted only beside its URL. */
 function FunctionReadiness({
   name,
   deployedAt,
@@ -113,7 +103,6 @@ function FunctionReadiness({
   );
 }
 
-/** A native `<select>`, styled like `Input` beside it — this screen's only. */
 function NativeSelect({
   id,
   value,
@@ -146,10 +135,8 @@ function NativeSelect({
 }
 
 /**
- * The saved keys, edited as a pending diff (`Record<name, value | null>`)
- * rather than in place — values are write-only, so this section never holds
- * one it did not just receive from the person typing it, and Save is the only
- * thing that turns a pending set or delete into a stored one.
+ * Values are write-only, so edits are a pending diff that Save stores: a string
+ * sets a key and `null` deletes it.
  */
 function EnvironmentSection({
   envKeys,
@@ -342,11 +329,8 @@ function FunctionEditor({
           ? null
           : 'lowercase letters, digits and hyphens, starting with a letter';
 
-  /**
-   * Monaco's own TypeScript-worker formatter. Best-effort: the worker is a
-   * separate CDN fetch that Monaco tears down after idling and respawns on
-   * demand, so a format that never answers must not hold a Save hostage.
-   */
+  // Capped at 1.5 s: Monaco respawns an idle formatter worker from the CDN, and
+  // a format that never answers must not block Save.
   const format = () =>
     Promise.race([
       editor.current
@@ -374,8 +358,7 @@ function FunctionEditor({
         env: pendingEnv,
       });
       if (!outcome.ok) {
-        // A target this installation cannot reach refuses the deploy, not the
-        // save: the row is written, so a new function has a page to go to.
+        // NOT_DEPLOYABLE still writes the row, so a new function has a page.
         const saved = outcome.failure.code === 'NOT_DEPLOYABLE';
         notify({
           tone: saved ? 'warning' : 'destructive',
@@ -394,10 +377,8 @@ function FunctionEditor({
           detail: outcome.value.function.error,
         });
       } else if (newHostname) {
-        // Measured fact: a Workers custom domain answers instantly but its
-        // certificate takes ~160s to issue, so the success toast would be
-        // wrong for the next few minutes — `FunctionReadiness` says "Live"
-        // once it actually is.
+        // A new Workers custom domain answers at once, but its certificate
+        // takes minutes to issue. `FunctionReadiness` says "Live" when it is.
         notify({
           tone: 'warning',
           title: 'Deployed — the edge is issuing the certificate',
@@ -479,8 +460,7 @@ function FunctionEditor({
     }
   };
 
-  // Mounted once: `FunctionScreen` keys this whole tree on the name, so a
-  // different Function is a different mount rather than a value swap here.
+  // Runs once per Function: the router keys `FunctionScreen` on the name.
   useEffect(() => {
     let disposed = false;
     void loadMonaco().then((ns: MonacoNamespace) => {
@@ -772,12 +752,7 @@ export function FunctionScreen({
   return <ExistingFunctionScreen name={name} onNavigate={onNavigate} />;
 }
 
-/**
- * A `null` cadence: every act on a Function is on this screen, so nothing it
- * does can invalidate what it just loaded, and re-reading under an editor with
- * unsaved keystrokes would be the workspace's own re-read bug read the other
- * way — plausible facts replacing a source the reader is mid-sentence in.
- */
+/** Never re-reads: every change to a Function is made on this screen. */
 function ExistingFunctionScreen({
   name,
   onNavigate,

@@ -1,38 +1,6 @@
 /**
- * The attempt screen (Task 39, §18).
- *
- * **App-first, not attempt-first.** The order down the page is state and URL,
- * then diagnosis, then what this release *is*, then resources, then the logs —
- * and that order is the whole design. §18 rejects the stage rail every CI tool
- * reaches for, because here the running App is the product and the pipeline is
- * only how it got there. A rail puts the pipeline first and makes a green
- * deploy a screen about a build.
- *
- * **A release has a source, and only sometimes a build.** §4: "Repo and archive
- * share one pipeline — unpack, detect, build. An archive of *finished output* is
- * a supplied artifact, digested over the uploaded bundle." That release was
- * extracted, never built, and `uploadArchive` records it with a null runner
- * because "saying so is more useful than naming a runner that never ran". So
- * Source is a section that is always there and Build is a drawer that is not.
- *
- * **The same screen renders a Build with no Deploy.** Pressing Deploy on an App
- * with nothing deployable starts a Build and writes no intent (§4, §6), and that
- * press still has to land somewhere. `view.id === null` is that state: same
- * identity, same source, same log, no release — and the actions change to match.
- *
- * Four rules this file implements literally, each from §18:
- *
- * - **The log collapses on green and auto-opens on red or running.** A finished
- *   green build is the one case nobody reads the log for.
- * - **The live checklist is labelled as the live view** when the runner reports
- *   step status but withholds text (§4's `LIVE_STATUS`). That one line is
- *   load-bearing: without it the screen looks broken rather than honest.
- * - **`blame` earns its chip**, in the diagnosis block.
- * - **The red screen says the previous release is still serving.**
- *
- * No framework means owning navigation and streaming by hand. The screen still
- * takes one immutable view; its controller replaces that view as authenticated
- * attempt events arrive.
+ * The attempt screen: state and URL first, then diagnosis, the release, its
+ * resources and the logs. A Build with no Deploy renders here with a null `id`.
  */
 import {
   ArrowLeft,
@@ -81,29 +49,17 @@ import { notify } from '../../ui/toast.tsx';
 import { cn, normaliseUrl } from '../../ui/utils.ts';
 import { DetailSkeleton, ScreenFailure, ScreenNotFound } from '../screen.tsx';
 
-/**
- * What the operator can do from here, and which one is running.
- *
- * One object rather than three pairs of props: the actions are mutually
- * exclusive in practice — a release is either current, older, or not a release
- * yet — and `busy` naming which one is in flight keeps two buttons from both
- * claiming to be working.
- */
+/** `busy` names the act in flight, so only one button reads as working. */
 export interface AttemptActions {
-  /** Deploy the App's newest artifact again, or rebuild it if there is none. */
+  /** Deploys the App's newest artifact, or builds one if there is none. */
   readonly onRedeploy?: () => void;
-  /** Make this older release live again (§6: an ordinary deploy). */
   readonly onRollback?: () => void;
-  /** Place the artifact this finished Build produced. */
   readonly onDeployBuild?: () => void;
-  /** End a queued Build nobody intends to make dispatchable (§4). */
   readonly onCancel?: () => void;
-  /** Stop a Deploy that has not landed — the attempt honours it (§6). */
   readonly onCancelDeploy?: () => void;
   /**
-   * A cancel this screen already asked of the running Build, which its route
-   * reports on at its next poll. Shown as the pressed state rather than the
-   * act again, the way the Deploy button is on `cancelRequestedBy`.
+   * A cancel already asked of the running Build, which its route answers at
+   * its next poll.
    */
   readonly cancelRequested?: boolean;
   readonly busy?: 'redeploy' | 'rollback' | 'deploy' | 'cancel' | null;
@@ -131,14 +87,7 @@ export function DeployDetail({
         />
       ) : null}
 
-      {/*
-        Below the diagnosis, and never instead of it. The two can both be
-        absent, and only drift can be present on a green release — but a red
-        release that has also drifted leads with why it failed, because that is
-        the older and more actionable fact. A faulty release is the one case
-        where the two say the same thing — the soak and the drift pass read the
-        same observation — so the amber panel yields to the red one.
-      */}
+      {/* On a faulty release, drift repeats the diagnosis, so it is hidden. */}
       {view.drift && view.faultyAt === undefined ? (
         <DriftPanel
           drift={view.drift}
@@ -164,28 +113,11 @@ export function DeployDetail({
       ) : null}
 
       <BuildDrawer view={view} />
-      {/*
-        Every release has a deploy leg, so every release gets the drawer. It
-        used to be gated on a green build, which hid the log on precisely the
-        screen that needed it: a Deploy over a Build the supply chain refused
-        is red *at the deploy*, and gating on the build meant the only thing on
-        screen was a build log, saying the failure was somewhere it was not.
-        A Build with no intent (`id === null`) still has no deploy leg — that
-        one is an absence, not a hidden pane.
-      */}
       {view.id !== null ? <DeployDrawer view={view} /> : null}
     </Page>
   );
 }
 
-/**
- * What this attempt is, in one line: which Component, from which source, on
- * which Target, built by which runner — if one ran.
- *
- * It sits above the state rather than inside it because it is the same for
- * every phase — identity, not status. The runner carries its `logFidelity`
- * because that is the fact explaining why the log below may be silent (§4).
- */
 function Chrome({
   view,
   onNavigate,
@@ -222,23 +154,12 @@ function Chrome({
 }
 
 /**
- * Which builder ran this build — the platform, not just the route's name.
- *
- * "Building on hosted" names one installation's route and leaves an operator
- * unable to tell GitHub Actions from Cloud Build, which is the fact that
- * decides where to go look: the two fail in different places, over different
- * credentials, with different things to read. So the route name stays (it is
- * what an operator configured and what the manifest calls it) and the platform
- * is stated beside it, with its mark, exactly as a Target or a repository
- * identifies its platform.
- *
- * The mark is decorative — `Logo` hides it from assistive technology — so the
- * platform is named in words as well. A logo that is the only carrier of a fact
- * is a fact a screen reader never reads out.
+ * The build route with its platform. `Logo` is hidden from assistive
+ * technology, so the platform is named in words too.
  */
 function Builder({ view }: { view: DeployView }) {
   const build = view.build;
-  // §4's supplied artifact: no builder ran, so there is no platform to name.
+  // A supplied artifact: no builder ran.
   if (build === null) return <>none · extracted</>;
 
   const platform =
@@ -257,12 +178,10 @@ function Builder({ view }: { view: DeployView }) {
   );
 }
 
-/** What to call this attempt: a release has a number, a Build has its own. */
 function attemptName(view: DeployView): string {
   return view.id === null ? `build ${view.buildId}` : `deploy ${view.id}`;
 }
 
-/** The short form of a source, for a one-line header. */
 function sourceRef(source: SourceView): string {
   return source.kind === 'repo'
     ? shorten(source.commit)
@@ -286,12 +205,6 @@ function Meta({ label, value }: { label: string; value: ReactNode }) {
   );
 }
 
-/**
- * State and URL, side by side and above everything else.
- *
- * The URL is the answer to the only question a developer opens this screen
- * with, so it is never further down than the phase that describes it.
- */
 function Hero({
   view,
   actions,
@@ -309,13 +222,6 @@ function Hero({
             <PhasePill phase={view.phase} faulty={view.faultyAt !== undefined}>
               {view.phaseWord}
             </PhasePill>
-            {/*
-              While it is moving, the number that matters is how long it has
-              been moving — a screen whose only time reads "just now" for the
-              first minute of a rollout looks frozen. Once it settles, "8m ago"
-              is the right grain again and the timer goes away rather than
-              standing there having stopped.
-            */}
             {moving ? (
               <Eyebrow>
                 <RunningTime since={view.at} active className="tabular-nums" />
@@ -341,19 +247,8 @@ function Hero({
 }
 
 /**
- * The four legs every release has, in the order they happen.
- *
- * They are derived here rather than carried on {@link DeployView} because none
- * of them is a new fact: each one is a projection of state the read model
- * already states, and a fifth field restating them is a fifth field that can
- * disagree with the four it was derived from.
- *
- * **Live is its own leg, and not a duplicate of Deploy.** The two answer
- * different questions on the case that matters most: §9 never mutates exposure
- * on red, so a failed deploy leaves the previous release serving — Deploy is
- * `failed` and the App is still up. Collapsing them would make the strip say
- * the App is down when it is not, which is the single most frightening thing a
- * screen can get wrong.
+ * The four legs of a release. Live is separate from Deploy because a failed
+ * deploy leaves the previous release serving.
  */
 function stagesOf(view: DeployView): readonly ProgressStage[] {
   const build = view.build;
@@ -377,9 +272,7 @@ function stagesOf(view: DeployView): readonly ProgressStage[] {
       detail: sourceRef(view.source),
     },
     build === null
-      ? // §4's supplied artifact — finished output, recorded as-is. Green
-        // because nothing is owed, and labelled so it does not read as a build
-        // that quietly succeeded.
+      ? // A supplied artifact: nothing to build.
         { name: 'Build', status: 'done', detail: 'extracted' }
       : {
           name: 'Build',
@@ -389,23 +282,19 @@ function stagesOf(view: DeployView): readonly ProgressStage[] {
     {
       name: 'Deploy',
       status: deployStatus,
-      // While it is moving, what the strip cannot say is when it will stop —
-      // so it says what the history says instead, which is a fact rather than
-      // the fraction `progress.tsx` refuses to invent.
+      // While moving, the usual duration from history stands in for progress.
       detail:
         view.id !== null && isInFlight(view.phase) && view.expectedDuration
           ? `usually about ${formatDuration(view.expectedDuration.p90Ms)}, from ${view.expectedDuration.samples} deploys`
           : view.target,
     },
-    // Faulty is the Live leg going red after it went green: the rollout landed
-    // and the platform has since reported this release failed (§6's soak).
+    // Faulty: the release went live, then the platform reported it failed.
     view.faultyAt !== undefined
       ? { name: 'Live', status: 'failed', detail: 'faulty' }
       : view.urlLive
         ? { name: 'Live', status: 'done', detail: 'serving' }
         : view.previousReleaseServing
-          ? // Serving, just not this release. Neither green nor red: the App is
-            // up and this attempt did not put it there.
+          ? // The App is up, on the previous release.
             { name: 'Live', status: 'waiting', detail: 'previous release' }
           : {
               name: 'Live',
@@ -415,13 +304,8 @@ function stagesOf(view: DeployView): readonly ProgressStage[] {
 }
 
 /**
- * The acts this attempt admits, and no others.
- *
- * The branching is the point. A Build that finished is deployable and is not
- * redeployable, because there is no release to repeat; an older release is
- * rollable-back and a current one is not, because §6 refuses a "rollback" to
- * something that is not older. Rendering every button always and letting the
- * command refuse would teach the operator that half the buttons lie.
+ * Only the acts this attempt admits; an act that becomes possible later shows
+ * disabled.
  */
 function Actions({
   view,
@@ -441,12 +325,8 @@ function Actions({
   } = actions;
   const buttons = [];
 
-  // An artifact that exists is deployable, and the button keys on the artifact
-  // rather than on the Build's status. Those two disagree on the case that
-  // matters: a Build the supply chain refused is FAILED with an image in the
-  // registry, and hiding the act there says the artifact cannot be placed when
-  // it can. Only a Build that ended having produced nothing has nothing to
-  // offer — and that one gets Rebuild, below.
+  // Keyed on the artifact: a Build the supply chain refused is failed but still
+  // has an image to place. A failed Build with no artifact gets Build again.
   const nothingToPlace =
     view.artifactDigest === null && view.build?.status === 'failed';
 
@@ -458,8 +338,7 @@ function Actions({
         size="sm"
         onClick={onDeployBuild}
         disabled={!placeable || (busy !== null && busy !== undefined)}
-        // A Build still running has nothing to place yet. It is shown disabled
-        // rather than hidden so the next act is visible while you wait for it.
+        // Disabled while the Build runs, so the next act stays visible.
         title={placeable ? undefined : 'Available once an artifact exists'}
       >
         <Rocket aria-hidden="true" className="size-3.5" />
@@ -506,12 +385,8 @@ function Actions({
     );
   }
 
-  // While it is queued or running. A running Build still ends when its route
-  // writes the verdict and not before — the command stops the far side and the
-  // route reports what became of it, so the screen shows "cancel requested by"
-  // first and the verdict a poll later, which is the honest order of events.
-  // Until that verdict the button holds the pressed state: the row itself does
-  // not change, so nothing else on the screen would say the ask was made.
+  // A running Build ends only when its route writes the verdict, so the button
+  // stays pressed until then.
   if (
     onCancel &&
     (view.build?.status === 'waiting' || view.build?.status === 'running')
@@ -537,10 +412,7 @@ function Actions({
     );
   }
 
-  // Only while the Deploy has not landed. A request already stamped stays
-  // visible as the pressed state rather than as the button again: the attempt
-  // holding the claim honours it at its next event, and a second press would
-  // ask for what is already asked.
+  // A requested cancel shows as pressed until the attempt honours it.
   if (onCancelDeploy && view.id !== null && isInFlight(view.phase)) {
     const requested = view.cancelRequestedBy !== undefined;
     buttons.push(
@@ -566,40 +438,13 @@ function Actions({
   return <div className="flex flex-wrap gap-2 self-start">{buttons}</div>;
 }
 
-/**
- * The three honest things a name can be: serving this attempt, serving the
- * release before it, or reserved with nothing behind it yet.
- *
- * §21 wants an App to carry a lowest-precedence wildcard route from the
- * moment it exists, so a reserved name resolves to a status page instead of a
- * dead one — but that route is not built (see the README's "status page is
- * not served yet"), so the third case names only the state, not a page.
- */
+/** Serving this attempt, serving the previous release, or reserved. */
 function UrlBlock({ view }: { view: DeployView }) {
   const serving = view.urlLive;
   const previous = !serving && view.previousReleaseServing;
 
-  /*
-    The register glitch, once, for the address itself starting to serve —
-    the arrival §"the roflcopter" names as worth it, on the one screen a
-    person watching a Deploy is staring at when it happens.
-
-    `wasServing` seeds from this render's own value, so an attempt that is
-    already live on the first paint has not just arrived at anything and
-    plays nothing — the same "no replay on a load that already finds it so"
-    rule `BuildDrawer`'s `priorStatus` ref keeps above.
-
-    `arrived` is state latched by the effect, not a value derived during
-    render: deriving `!wasServing.current && serving` fresh on every render
-    is true for exactly the one render where the transition is caught, and a
-    stream message landing anywhere in the 600ms after it — the attempt
-    stream keeps posting through the LIVE transition — re-renders this before
-    the animation is done, recomputes it back to `false`, and a `key` swap
-    keyed on it would remount the address mid-glitch. Latched, the flip to
-    `true` happens once and sticks, so the class is added to the same `<a>`
-    exactly once and the animation plays to completion whatever renders
-    after it.
-  */
+  // Latched, so a stream re-render mid-animation cannot undo it. Seeded from
+  // the first render, so an attempt already live on first paint plays nothing.
   const wasServing = useRef(serving);
   const [arrived, setArrived] = useState(false);
   useEffect(() => {
@@ -627,16 +472,6 @@ function UrlBlock({ view }: { view: DeployView }) {
   );
 }
 
-/**
- * What this release is made of, and what it pinned.
- *
- * A Deploy row is written once and never edited into a different release: its
- * Build, its source, and the config document it captured (§10) are what it
- * delivered, which is what makes "roll back to this" a reproducible act rather
- * than a hopeful one. This section is where those facts are legible — and where
- * §10's version hash appears, because a release whose config you cannot name is
- * one you cannot claim to be able to reproduce.
- */
 function Provenance({
   view,
   onNavigate,
@@ -686,9 +521,7 @@ function Provenance({
           <Fact label="Artifact" value={view.artifactDigest} copy />
           <Fact label="Config version" value={view.configVersion} copy />
           <Fact label="Created" value={view.at} />
-          {/* Who asked: a name, or "auto-deploy on push". A Build-only attempt
-              has no Deploy to have asked for, and a release older than the
-              column records nobody — the dash says so. */}
+          {/* A Build with no Deploy has no requester; an older Deploy shows a dash. */}
           {view.id === null ? null : (
             <Fact label="Requested by" value={view.requestedBy ?? null} />
           )}
@@ -708,14 +541,7 @@ function Provenance({
   );
 }
 
-/**
- * One recorded fact, or the statement that it was never recorded.
- *
- * The em dash is not a placeholder for a value that is loading. §10 pins config
- * on the Deploy row when the intent is written, so a release with no version
- * is one that pinned nothing — and "—" says that, where an empty cell would
- * read as a rendering bug.
- */
+/** A dash stands for a value that was never recorded. */
 function Fact({
   label,
   value,
@@ -725,15 +551,6 @@ function Fact({
   label: string;
   value: string | null;
   note?: string;
-  /**
-   * Offer the value to the clipboard.
-   *
-   * On for the three facts whose entire purpose is to be pasted somewhere else
-   * — the commit into `git`, the artifact digest into `crane`, the config
-   * version into a support thread. Off for the rest, because a copy button on
-   * every line is a column of buttons and none of them reads as the one that
-   * matters.
-   */
   copy?: boolean;
 }) {
   return (
@@ -761,20 +578,8 @@ function Fact({
 }
 
 /**
- * The build, collapsed on green — and absent entirely when none ran.
- *
- * §18's "auto-opens on red or running" keys on **the build's** status, not on
- * the screen's. The distinction is load-bearing on exactly the case that
- * justifies the blame chip: an `ARTIFACT_UNAVAILABLE` deploy is red with a
- * green build, and springing the build log open there would contradict the
- * chip three lines above it that exists to say the build is fine. So a failed
- * deploy on a good build leaves this shut and sends the reader to the
- * diagnosis, which is the thing that knows something.
- *
- * Open-ness starts from that status and stays under the reader's control
- * after that — which is the reason `ui/collapsible.tsx` wraps Radix instead of
- * using `<details>`: the initial value is derived from state that arrives with
- * the data, and React cannot take back an uncontrolled `open`.
+ * Open while the build runs or after it fails. Keyed on the build's status,
+ * since a deploy can fail on a good build; a status change resets it.
  */
 function BuildDrawer({ view }: { view: DeployView }) {
   const build = view.build;
@@ -789,9 +594,7 @@ function BuildDrawer({ view }: { view: DeployView }) {
     setOpen(status !== null && status !== 'done');
   }, [build?.status]);
 
-  // §4's supplied artifact: nothing ran, so there is no drawer to open. The
-  // sentence replaces it rather than an empty log pane, which would read as a
-  // build whose output went missing.
+  // A supplied artifact: no build ran, so a notice replaces the log pane.
   if (build === null) {
     return (
       <Notice label="NO BUILD">
@@ -818,17 +621,8 @@ function BuildDrawer({ view }: { view: DeployView }) {
 }
 
 /**
- * One leg of the pipeline, as a card that looks exactly like the other one.
- *
- * Build and Deploy are **two stages, not one story with a tail**: a Build
- * records an artifact, a Deploy places one, and either can go red while the
- * other is fine. The screen has to be able to say that, and it can only say it
- * if the two read as peers — same header, same glyph, its own verdict on each.
- * A layout that made Deploy a section *inside* Build could not express "the
- * image is fine, the placement failed", which is the most common red there is.
- *
- * The ordinal is what makes the pairing legible at a glance: two numbered
- * stages, and the reader can see which one stopped.
+ * One numbered pipeline leg. Build and Deploy render as peers, because either
+ * can fail while the other is fine.
  */
 function Stage({
   ordinal,
@@ -879,17 +673,8 @@ function Stage({
 }
 
 /**
- * §4's `logFidelity`, stated rather than worked around.
- *
- * A runner that reports step status live but only releases text on completion
- * leaves the checklist above as the only live view. §18 makes saying so
- * mandatory — the alternative renders an empty pane and a spinner, which reads
- * as a broken stream rather than a known limit of that runner.
- *
- * **Stating the limit is necessary but not sufficient**: the text exists, it is
- * live, and it is simply somewhere Spindrift cannot read from yet. So where the
- * runner reports a page of its own, the sentence carries a way to go read it
- * instead of only apologising for not having it.
+ * The build log, or a notice when the runner withholds text until it finishes,
+ * with a link to the runner's own page when it reports one.
  */
 function BuildOutput({ view }: { view: DeployView }) {
   const build = view.build;
@@ -931,25 +716,8 @@ function BuildOutput({ view }: { view: DeployView }) {
 }
 
 /**
- * The runner's raw text, behind one more click and never the whole of it.
- *
- * The checkpoints above are the build. This is the evidence for them, and a
- * drawer that opened straight onto a thousand lines of BuildKit chatter buried
- * the seven lines that said what happened. So it stays shut on green — nobody
- * reads a successful build's transcript — and springs open on red, where the
- * last lines are the answer.
- *
- * `logTotal` is stated whenever it exceeds what is here. A tail presented as
- * the log is the UI editing evidence; a tail that says how much it is a tail
- * of, and where the rest lives, is not.
- *
- * The initial `open` is only half the contract — a `LIVE_TEXT` runner (§4)
- * releases text as it's written, so `BuildOutput` can hand this a non-null
- * `log` while the build is still `running`, well before red is known at
- * mount. Without re-deriving `open` on a status change, React keeps whatever
- * it picked at that early mount forever, and a running→failed transition
- * lands on a drawer that never sprang open. Same shape as `BuildDrawer`'s
- * prior-status effect above, for the same reason.
+ * The runner's log tail, open only on a failed build. A `LIVE_TEXT` runner
+ * sends text while running, so a status change re-derives `open`.
  */
 function Transcript({
   build,
@@ -1004,12 +772,8 @@ function Transcript({
 }
 
 /**
- * The whole attempt log as one text document, for a terminal or a paste.
- *
- * A plain `<a>` and nothing more: the route sits behind the same session the
- * stream does (`streams.ts`), and the browser sends that cookie by itself. With
- * a `deployId` the document is both legs of the attempt; without one, the
- * build's.
+ * The attempt log as plain text: both legs with a `deployId`, the build's
+ * without. The browser sends the session cookie itself.
  */
 function PlainTextLink({
   buildId,
@@ -1033,14 +797,7 @@ function PlainTextLink({
   );
 }
 
-/**
- * A way out to the runner's own view of this run.
- *
- * Rendered only from a URL the backend reported. Nothing here composes one out
- * of a run id and a host name: a guessed link that 404s is worse than no link,
- * because it is offered at the moment the reader has already been told the log
- * is elsewhere.
- */
+/** Only from a URL the backend reported, never one composed from a run id. */
 function RunLink({ url, inline }: { url: string | null; inline?: boolean }) {
   if (url === null) return null;
   return (
@@ -1059,15 +816,7 @@ function RunLink({ url, inline }: { url: string | null; inline?: boolean }) {
   );
 }
 
-/**
- * The deploy leg — stage 2, and never a consequence of stage 1.
- *
- * It reads its own phase and nothing else. The Build above it may be green,
- * red, or still going; what this stage says is what the platform said when the
- * artifact was placed. That independence is the point: an artifact that exists
- * is deployable to any supported Target, so a red Build is a fact about an
- * older artifact and not a reason to stop describing this placement.
- */
+/** The deploy leg, which reads only its own phase whatever the Build did. */
 function DeployDrawer({ view }: { view: DeployView }) {
   const autoOpen = view.phase !== 'LIVE';
   const [open, setOpen] = useState(autoOpen);
@@ -1114,20 +863,8 @@ function DeployDrawer({ view }: { view: DeployView }) {
 }
 
 /**
- * Whether a phase change is this attempt landing on `LIVE` — as opposed to
- * moving somewhere else, or having already been there.
- *
- * `previous` is `undefined` for a phase this tab has not seen yet, and that
- * is what keeps a fly-over from firing on a load that already finds the
- * runway occupied: `DeployScreen`'s first read seeds the ref this is called
- * with rather than asking this about it, so an attempt that is `LIVE` on
- * first paint has not just arrived at anything a person watching it saw
- * happen.
- *
- * Exported for `test/web/roflcopter.test.tsx`, which is the whole of what
- * decides a fly-over fires: the transport around it — `subscribeAttempt` and
- * `getDeployDetail` — is already asserted by `stream-client.test.ts` and
- * `streams.test.ts`.
+ * Whether this attempt just reached LIVE. `previous` is undefined until the tab
+ * has seen a phase, so an attempt already live on load never counts.
  */
 export function enteredLive(
   previous: DeployPhase | undefined,
@@ -1136,15 +873,7 @@ export function enteredLive(
   return previous !== undefined && previous !== 'LIVE' && next === 'LIVE';
 }
 
-/**
- * One Deploy, live.
- *
- * Not a `useRead`: this screen has an edge a cadence would only approximate.
- * The attempt stream tells it when something happened, and the re-read is the
- * answer to that event rather than to a timer — so the read is issued from the
- * subscription, and the subscription is opened from the first read, because the
- * ids it subscribes on are what that read returns.
- */
+/** One Deploy, re-read on each attempt stream event instead of on a timer. */
 export function DeployScreen({
   deployId,
   onNavigate,
@@ -1163,10 +892,7 @@ export function DeployScreen({
     null,
   );
   const [reloadToken, setReloadToken] = useState(0);
-  // What this tab last saw this attempt's phase as, for `enteredLive` below.
-  // Seeded by the first read rather than left `undefined` through it, which
-  // is what keeps an already-`LIVE` deploy from flying over the moment this
-  // screen is opened on it.
+  // Seeded by the first read, so a deploy LIVE on open never flies over.
   const priorPhase = useRef<DeployPhase | undefined>(undefined);
 
   useEffect(() => {
@@ -1193,18 +919,13 @@ export function DeployScreen({
           stopStream = subscribeAttempt(
             {
               buildId: result.value.deploy.buildId,
-              // Non-null on this screen by construction: `getDeployDetail`
-              // answers about a Deploy, so its view always carries that id.
+              // Never null: `getDeployDetail` always answers about a Deploy.
               deployId: result.value.deploy.id ?? parsedId,
             },
             () => {
               void command('getDeployDetail', { id: parsedId }).then(
                 (fresh) => {
                   if (live && fresh.ok) {
-                    // The fly-over, fired for this attempt reaching LIVE
-                    // while this tab was watching — never for a poll that
-                    // finds it still moving, or one that finds it LIVE
-                    // again having already reported that once.
                     if (
                       enteredLive(priorPhase.current, fresh.value.deploy.phase)
                     ) {
@@ -1245,8 +966,7 @@ export function DeployScreen({
     if (state.type !== 'success') return;
     setBusy('redeploy');
     try {
-      // The App's id, not its name: `apps` has no unique constraint on `name`,
-      // so redeploying by name would act on whichever row shares it.
+      // The App's id, since two Apps can share a name.
       const result = await command('deployApp', { name: state.deploy.appId });
       if (result.ok) {
         onNavigate(
@@ -1255,8 +975,6 @@ export function DeployScreen({
             : `/deploys/${result.value.deployId}`,
         );
       } else {
-        // Surfaced verbatim and acted on no further: a refused redeploy is a
-        // fact about this artifact and this Target, not a cue to build another.
         notify({
           tone: 'destructive',
           title: 'Redeploy refused',
@@ -1274,13 +992,6 @@ export function DeployScreen({
     }
   };
 
-  /**
-   * Make an older release live again (§6).
-   *
-   * An ordinary deploy with an older artifact named, which is what §6 makes it
-   * — there is no rollback path beside the deploy path, and nothing here
-   * retries or substitutes on a refusal.
-   */
   const handleRollback = async () => {
     if (state.type !== 'success') return;
     const view = state.deploy;
@@ -1292,9 +1003,6 @@ export function DeployScreen({
         buildId: view.buildId,
       });
       if (result.ok) {
-        // The scariest button in the product, and until now the only thing it
-        // said on success was a different id in the URL. The build number is
-        // what makes the sentence checkable against what the operator meant.
         notify({
           tone: 'success',
           title: `Rolled back to build ${view.buildId}`,
@@ -1320,12 +1028,8 @@ export function DeployScreen({
   };
 
   /**
-   * Ask the attempt to stop, then re-read rather than navigate away.
-   *
-   * The verdict is the point of the screen: a queued intent is failed on the
-   * spot, and an in-flight one comes back still moving with the request on it
-   * — the attempt log carries who asked, and the poll above carries the
-   * settle when the attempt honours it.
+   * Re-reads instead of navigating: a queued Deploy fails at once, and one in
+   * flight comes back still moving, with the request on it.
    */
   const handleCancel = async () => {
     if (state.type !== 'success' || state.deploy.id === null) return;
@@ -1389,12 +1093,7 @@ export function DeployScreen({
   );
 }
 
-/**
- * One Build as an artifact-production attempt (§4).
- *
- * It stays a Build after placement: a related Deploy answers a different
- * question, so this screen links across without replacing artifact evidence.
- */
+/** One Build, which links to its related Deploy once placed. */
 export function BuildScreen({
   buildId,
   onNavigate,
@@ -1438,8 +1137,7 @@ export function BuildScreen({
         attempt: result.value.attempt,
         deployId: result.value.deployId,
       });
-      // The ask is scoped to the run it was made of: a verdict, or a
-      // re-arm that queues a fresh attempt, is a Build the button offers again.
+      // A cancel request lasts only for the run it was made on.
       if (result.value.attempt.build?.status !== 'running') {
         setCancelRequested(false);
       }
@@ -1448,8 +1146,6 @@ export function BuildScreen({
     read()
       .then(() => {
         if (!live) return;
-        // The same authenticated stream the deploy screen uses, subscribed with
-        // no `deployId` because there is not one yet.
         stopStream = subscribeAttempt({ buildId: parsedId }, () => {
           void read();
         });
@@ -1470,9 +1166,6 @@ export function BuildScreen({
 
   const act = async (kind: 'redeploy' | 'deploy') => {
     if (state.type !== 'success') return;
-    // The word the button the operator just pressed used — "Build again" on a
-    // failed Build, "Redeploy" otherwise — so a refusal answers in the same
-    // verb the press was made in.
     const verb =
       kind === 'deploy'
         ? 'Deploy'
@@ -1481,10 +1174,8 @@ export function BuildScreen({
           : 'Redeploy';
     setBusy(kind);
     try {
-      // One command for both, because §4 gives the workspace button one
-      // meaning: deploy the newest artifact, or start the Build that would
-      // produce one. Pressing "Deploy this build" on a finished Build takes the
-      // first arm; pressing "Build again" on a failed one takes the second.
+      // `deployApp` places the App's newest artifact, or starts a Build when
+      // there is none.
       const result = await command('deployApp', { name: state.attempt.appId });
       if (result.ok) {
         onNavigate(
@@ -1511,14 +1202,8 @@ export function BuildScreen({
   };
 
   /**
-   * End a queued Build, or stop a running one, then re-read rather than
-   * navigate away.
-   *
-   * The verdict is the point of the screen: the attempt log now carries who
-   * cancelled it, and the reader stays where the sentence they were reading is.
-   * A running Build's verdict follows a poll later, from the route that was
-   * stopped — the re-read shows the line saying who asked, and the next one
-   * shows what became of it.
+   * Re-reads instead of navigating. A running Build's verdict arrives a poll
+   * later, from the route that was stopped.
    */
   const cancel = async () => {
     const parsedId = Number.parseInt(buildId, 10);

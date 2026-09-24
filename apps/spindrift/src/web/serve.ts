@@ -1,22 +1,6 @@
 /**
- * Everything the two entries share: validate the manifest, assemble the table,
- * listen.
- *
- * It exists so `server.ts` and `dev.ts` differ in exactly one expression — how
- * the client is served — rather than in two copies of a `Bun.serve` call that
- * would drift apart in the parts that must not differ.
- *
- * The three dependencies below are the whole of what the process is:
- *
- * - **`session`** resolves the opaque cookie to a principal, or to nobody. A
- *   command route with nobody behind it answers 401, which is §21's
- *   session-authenticated-only surface working rather than a boundary that is
- *   not built.
- * - **`context`** is built per request, after a principal exists, and carries
- *   the injected clock, the database, the manifest, and the adapters this
- *   installation actually has (`src/adapters/registry.ts`).
- * - **`auth`** is the one surface reachable without a session, because it is
- *   what produces one. `src/auth/routes.ts` carries why it cannot be a command.
+ * What the production and dev entries share: load the manifest, assemble the
+ * route table, and listen. They differ only in how the client is served.
  */
 import { createAdapterRegistry } from '../adapters/registry.ts';
 import type { EnrolmentDeps } from '../auth/enrol.ts';
@@ -40,13 +24,8 @@ import { type ClientRoute, webRoutes } from './routes.ts';
 import { type StreamSocketData, streamWebSocket } from './streams.ts';
 
 /**
- * Where the enrolment token arrives.
- *
- * The installation Secret, and deliberately **not** the installation manifest:
- * the manifest describes an installation and is the document §20 asks an
- * operator to write and hand around, while this is the credential that claims
- * one. Absent is a legal state — enrolment is then impossible, which is the
- * right posture for an installation nobody has been given the key to.
+ * Read from the installation Secret, never the manifest, which operators share.
+ * Unset means enrolment is impossible.
  */
 export const ENROLMENT_TOKEN_VAR = 'SPINDRIFT_ENROLMENT_TOKEN';
 
@@ -59,13 +38,8 @@ import {
 } from '../telemetry/index.ts';
 
 /**
- * Wrap every handler in a span and the two HTTP metrics.
- *
- * Two things it must not change about a handler, both of which the WebSocket
- * upgrades depend on: `Bun.serve` calls a route with `(request, server)` and the
- * upgrade handlers need that second argument, and a handler that upgraded
- * returns `undefined` rather than a `Response` because Bun has taken the socket.
- * Dropping either turns every stream into a 500.
+ * WebSocket upgrades need the `server` argument passed through, and return
+ * `undefined` once Bun takes the socket. Losing either breaks every stream.
  */
 export function instrumentRoutes<T extends Record<string, any>>(routes: T): T {
   const instrumented: Record<string, any> = {};
@@ -90,9 +64,7 @@ export function instrumentRoutes<T extends Record<string, any>>(routes: T): T {
                 ) => Promise<Response | undefined> | Response | undefined
               )(req, server);
               const durationSec = (Date.now() - startTime) / 1000;
-              // An upgraded WebSocket has no Response to report on. 101 is what
-              // it is, and it keeps the metric honest rather than counting a
-              // successful upgrade as a 200 that never went out.
+              // An upgraded WebSocket returns no Response, so it counts as 101.
               const status = res?.status ?? 101;
 
               httpRequestCounter.add(1, { path, status: String(status) });
@@ -145,21 +117,8 @@ export async function start(
     clock: systemClock,
   });
 
-  /**
-   * The configuration a command runs against, current as of this request.
-   *
-   * `configureInstallation` writes the row, so a process-lifetime copy would
-   * mean an operator watching a form save a value nothing then reads. The read
-   * is one `select` per command; the adapters are rebuilt only when the
-   * document actually changed, which is what makes doing this per request
-   * affordable — `createAdapterRegistry` is pure assembly whose credentials are
-   * providers called per request, so rebuilding opens nothing.
-   *
-   * Deliberately **not** current: `auth` below. `controlPlane.hostname` is the
-   * passkey relying-party id, and a ceremony is scoped to the origin it began
-   * at — re-reading it mid-session would invalidate credentials rather than
-   * update them. Changing where an installation is served is a restart.
-   */
+  // Re-read per request because `configureInstallation` writes the row at
+  // runtime. The adapters are rebuilt only when the document changed.
   let current = { manifest, adapters };
   const installationNow = async () => {
     const stored = await currentStoredManifest(db);
@@ -177,14 +136,6 @@ export async function start(
     return current;
   };
 
-  /**
-   * What every command runs against, whichever transport reached it.
-   *
-   * One function rather than one per surface: the dispatch endpoint and `/mcp`
-   * differ in who they will accept and in nothing else, and two copies of this
-   * would be two chances for a command to see a different world depending on
-   * which door it came through.
-   */
   const commandContext = async (principal: Principal) => {
     const installation = await installationNow();
     return {
@@ -196,6 +147,8 @@ export async function start(
     };
   };
 
+  // Read once: the hostname is the passkey relying-party id, so changing it
+  // needs a restart.
   const auth: EnrolmentDeps & GatewayDeps = {
     db,
     clock: systemClock,
@@ -208,12 +161,8 @@ export async function start(
     gateway: manifest.auth.gateway,
   };
 
-  /**
-   * The keyring that opens the sealed `github_app` row. Resolved once — it is
-   * an installation-Secret value, not a row — but everything opened *with* it
-   * is read per delivery / per request, because the row itself is written
-   * mid-flight by the setup route.
-   */
+  // The `github_app` row it opens is re-read per request: the setup route
+  // writes it at runtime.
   const keyring = CredentialKeyring.fromEnvironment(Bun.env);
 
   const rawRoutes = webRoutes(
@@ -227,9 +176,6 @@ export async function start(
       db,
       clock: systemClock,
       secret: () => githubAppWebhookSecret(db, keyring),
-      // Same accessor `context` above reads through: current as of this
-      // request, rebuilt only when `configureInstallation` actually changed
-      // something.
       current: installationNow,
     },
     {
@@ -257,11 +203,8 @@ export async function start(
     },
     { db, current: installationNow },
     {
-      // Deliberately *not* `authenticateRequest`: that resolver reads the
-      // session cookie and, where a Gateway is configured, a trusted header.
-      // Neither belongs on `/mcp`. An agent presents a token it was minted,
-      // and a cookie copied out of a browser must not open this surface —
-      // `src/auth/session.ts` carries why.
+      // Agent tokens only: `/mcp` never reads the session cookie or a Gateway
+      // header.
       authenticate: async (request) => {
         const principal = await resolveAgentToken(request, auth);
         return principal === null
@@ -277,8 +220,7 @@ export async function start(
   const server = Bun.serve<StreamSocketData>({
     port: Number(Bun.env.PORT ?? 3000),
     development,
-    // Development's client is an HTMLBundle no handler can wrap, served on
-    // whatever origin the developer's browser uses.
+    // Development's client is an HTMLBundle, which no handler can wrap.
     routes: development
       ? instrumented
       : scopeToHost(instrumented, {
@@ -287,8 +229,7 @@ export async function start(
           inCluster: inClusterHostnames(Bun.env),
         }),
     websocket: streamWebSocket,
-    // The abuse floor for a surface anybody can post bytes to. A console
-    // upload has never been near it.
+    // Caps what anybody can post to a public route.
     maxRequestBodySize: 32 * 1024 * 1024,
   });
 

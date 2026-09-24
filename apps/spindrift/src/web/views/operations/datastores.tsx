@@ -1,29 +1,6 @@
 /**
- * Datastores — every store this installation holds, attached or not.
- *
- * A Datastore is top-level (§11: "attached, not a field"), and this is the
- * screen a top-level noun gets: one ledger, independent of which App a reader
- * opened first.
- *
- * **Create lives here, and so does the rest of a Datastore's lifetime.**
- * `createDatastore` takes a name, an engine and a Vessel, and no App — storage
- * exists before anything reads it, which is the whole of what "top-level, not
- * a field" means — so the only picker this form needs is the one
- * `listDatastores` sends with the rows. Beside it are the acts that take only
- * a Datastore id: Detach and Destroy, one at a time and never both, because
- * the row already says which one core would accept — `destroyDatastore`
- * refuses while attached.
- *
- * **Attach is here too, with the App named rather than implied.** The ledger
- * has no App open, so the one thing `attachDatastore` needs that a row does not
- * carry is a picker — `listApps` supplies it. The App workspace attaches from
- * the other end, where the App is the one that is implied; both press the same
- * command, and every rule it enforces stays in it.
- *
- * Not a `SupplyChainTabs` member. §2's chain is Source + Build = Artifact;
- * a Datastore is never an input to that chain or an output of it, so tabbing
- * it in beside Builds and Sources would draw a fourth stage that does not
- * exist.
+ * The Datastores ledger: every store this installation holds, attached or not.
+ * Create is in the header; Attach, Detach and Destroy are in the inspector.
  */
 import { Database } from 'lucide-react';
 import { useState } from 'react';
@@ -49,22 +26,13 @@ import { Timestamp } from '../../ui/timestamp.tsx';
 import { LedgerSkeleton, ScreenFailure } from '../screen.tsx';
 import { deployTone } from './deploys.tsx';
 
-/**
- * Detaching or destroying one Datastore, by id.
- *
- * One shape for both: they take the same argument and answer the same
- * question, and every refusal either can carry is a sentence core composed
- * rather than one guessed at here.
- */
+/** Detach or Destroy, by id. A refusal carries the command's own message. */
 export type DatastoreAct = (
   datastoreId: string,
 ) => Promise<
   { readonly ok: true } | { readonly ok: false; readonly message: string }
 >;
 
-/**
- * Attaching one Datastore to one App, both named — the ledger implies neither.
- */
 export type AttachLedgerDatastore = (
   datastoreId: string,
   appId: string,
@@ -72,13 +40,6 @@ export type AttachLedgerDatastore = (
   { readonly ok: true } | { readonly ok: false; readonly message: string }
 >;
 
-/**
- * Creating one managed Datastore from the ledger.
- *
- * Three fields and no App, which is `createDatastore`'s own input minus the
- * size it defaults. The Vessel is named rather than implied because this is
- * the ledger, where no App is open to imply one.
- */
 export type CreateLedgerDatastore = (create: {
   readonly name: string;
   readonly engine: 'postgres' | 'valkey';
@@ -162,14 +123,8 @@ const COLUMNS: readonly Column<DatastoreListItem>[] = [
 ];
 
 /**
- * Detach or Destroy, with the refusal a press produced — never both acts at
- * once: `appId` already says which one applies, so offering the other is
- * offering a button whose only outcome is core's refusal.
- *
- * Its own component rather than inline state in `renderInspector`, because
- * the inspector is called fresh for whichever row is selected and a `busy` /
- * `refusal` pair declared there would survive the reader picking a different
- * Datastore. Keyed by id at the call site, so switching rows starts clean.
+ * Attach and Destroy for an unattached row, Detach for an attached one. Keyed
+ * by id at the call site, so `busy` and `refusal` reset with the selection.
  */
 function DatastoreRowActions({
   datastore,
@@ -179,7 +134,6 @@ function DatastoreRowActions({
   onDestroy,
 }: {
   readonly datastore: DatastoreListItem;
-  /** The Apps `attachDatastore` could be pointed at — the picker's whole list. */
   readonly apps: readonly AppListItem[];
   readonly onAttach: AttachLedgerDatastore;
   readonly onDetach: DatastoreAct;
@@ -207,11 +161,6 @@ function DatastoreRowActions({
         </p>
       ) : null}
       <div className="flex flex-wrap items-center gap-2">
-        {/*
-          Attach or detach, never both: `appId` already says which one applies,
-          and the picker travels with the act rather than above it, because an
-          App is the one thing this act needs that the row does not carry.
-        */}
         {datastore.appId === null && apps.length > 0 ? (
           <>
             <Select
@@ -261,7 +210,6 @@ function DatastoreRowActions({
   );
 }
 
-/** A `<select>` styled like the `Input` beside it, so the two do not diverge. */
 function Select({
   id,
   value,
@@ -297,18 +245,8 @@ function Select({
 }
 
 /**
- * Creating one managed Datastore — a name, a Vessel and an engine.
- *
- * **The engine list is the selected Vessel's, not the two the schema accepts.**
- * §3 makes Postgres and Valkey independent capabilities, so a cluster that
- * serves one and not the other is ordinary; offering both everywhere would put
- * a choice on screen whose only outcome on half the Vessels is core's "does not
- * serve" refusal. It is derived from the selection rather than corrected by an
- * effect, so switching Vessel can never leave a stale engine selected for the
- * length of a render.
- *
- * No size field: `storageGiB` is a defaulted command input because a developer
- * has no basis on day one for a number a resize command would own.
+ * Offers only the engines the selected Vessel serves. The engine is derived
+ * from the selection, so switching Vessel never leaves an unserved one chosen.
  */
 function NewDatastoreForm({
   vessels,
@@ -443,7 +381,6 @@ export function DatastoreLedger({
 }: {
   readonly datastores: readonly DatastoreListItem[];
   readonly vessels: readonly DatastoreVesselOption[];
-  /** The Apps an unattached row can be attached to. */
   readonly apps?: readonly AppListItem[];
   readonly onNavigate: (path: string) => void;
   readonly onCreate: CreateLedgerDatastore;
@@ -452,11 +389,7 @@ export function DatastoreLedger({
   readonly onDestroy: DatastoreAct;
 }) {
   const [adding, setAdding] = useState(false);
-  // No Vessel serves an engine, so there is nothing a form here could be
-  // pointed at. The button is withheld rather than shown and refused: the
-  // sentence below already says what is missing, and it is a connection fact
-  // about the boundary's hosting surface, not something a retry of this form
-  // fixes.
+  // With no Vessel serving an engine, a create form has nothing to target.
   const canCreate = vessels.length > 0;
 
   return (
@@ -547,24 +480,10 @@ export function DatastoreLedger({
               ]}
             />
             <div className="mt-6 flex flex-wrap gap-2">
-              {/*
-                The durable route this list's selection deliberately is not —
-                `ObjectExplorer`'s note: "picking an object is inspection, not
-                navigation; callers put the durable detail route behind an
-                explicit action in the inspector." It is where the far-side
-                object lives, which is the one thing no row here can carry.
-              */}
               <Button onClick={() => onNavigate(`/datastores/${datastore.id}`)}>
                 Open Datastore
               </Button>
-              {/*
-                By id, never by the name beside it. `getAppWorkspace` resolves
-                either — `or(eq(apps.name, …), eq(apps.id, …))` — so a name
-                works right up until two Apps share one, and this installation
-                allows that: the Apps list carries an id per row precisely
-                because two same-named Apps are two Apps. Navigating by name
-                would open whichever of them the database answered with.
-              */}
+              {/* By id: two Apps may share a name. */}
               {datastore.appId !== null ? (
                 <Button
                   variant="outline"
@@ -589,16 +508,7 @@ export function DatastoreLedger({
   );
 }
 
-/**
- * The top-level Datastores screen — every store this installation holds,
- * unscoped to any one App (§11's "top-level and attached, not a field", read
- * as a screen).
- *
- * Attach, Detach and Destroy are wired here rather than left to
- * {@link DatastoreLedger} calling `command` itself: the re-read after a
- * successful act belongs to whoever owns the list being re-read, and only this
- * screen holds it.
- */
+/** Owns the act handlers, because a successful act re-reads this list. */
 export function DatastoresScreen({
   onNavigate,
 }: {
@@ -607,29 +517,23 @@ export function DatastoresScreen({
   const read = useRead(
     [
       ['listDatastores', {}],
-      // The picker's list, read here rather than on the row: an App is what
-      // `attachDatastore` needs and a Datastore row does not carry one.
+      // For the attach picker.
       ['listApps', {}],
     ],
     null,
   );
 
-  /**
-   * One dispatch and no attach: the Datastore lands unattached, which is what
-   * §11 says it is until something attaches it.
-   */
   const handleCreate: CreateLedgerDatastore = async (create) => {
     try {
       const result = await command('createDatastore', {
         name: create.name,
         engine: create.engine,
         vesselId: create.vesselId,
-        // Restated rather than omitted: `InputOf` reads the schema's output,
-        // so a `.default()` is still a required property to a typed caller.
+        // The schema's default. `InputOf` is the schema's output type, where a
+        // `.default()` field is required.
         storageGiB: 10,
       });
-      // A refusal leaves no row behind — `createDatastore` deletes its insert
-      // when `provision` throws — so there is nothing new to re-read.
+      // A refused create leaves no row, so there is nothing to re-read.
       if (!result.ok) return { ok: false, message: result.failure.message };
       read.reload();
       return { ok: true };

@@ -1,14 +1,6 @@
 /**
- * Machine output, on the one dark surface in the app.
- *
- * The terminal colours do not flip with the theme. A build log is a verbatim
- * transcript of something a machine printed, and re-tinting it in light mode
- * would be the UI editing evidence — the same reason §6 persists a diagnosis
- * rather than re-deriving it later.
- *
- * `Notice` is next to it because the two are alternatives: where there is no
- * log text, §4's `logFidelity` says why, and §18 requires that sentence rather
- * than an empty pane or a spinner.
+ * Machine output on the app's one dark surface. The terminal colours ignore the
+ * theme, because a log is a verbatim transcript.
  */
 import type { ReactNode } from 'react';
 import { useEffect, useRef } from 'react';
@@ -20,14 +12,8 @@ const TONE = {
   muted: 'text-terminal-muted',
 } as const;
 
-/**
- * How close to the bottom counts as "watching the end", in pixels.
- *
- * Generous, because the test is applied *after* the new lines are in the DOM:
- * a reader pinned to the bottom is already this far from it by the time the
- * effect runs, and a tighter threshold would drop them off the tail on exactly
- * the fast-moving logs that most need following.
- */
+// Generous, because the check runs after new lines are in the DOM, when a
+// reader at the bottom is already this far from it.
 const FOLLOW_SLACK_PX = 120;
 
 export function LogPane({
@@ -37,12 +23,8 @@ export function LogPane({
 }: {
   lines: readonly LogLine[];
   /**
-   * Keep the newest line in view as output arrives.
-   *
-   * Set while the thing writing the log is still running, and never otherwise —
-   * a finished transcript is a document you read from the top. Following also
-   * caps the pane's height, because a pane that grows forever has no bottom to
-   * scroll to and would drag the whole page down instead.
+   * Keep the newest line in view while the writer runs. Also caps the pane's
+   * height, so it has a bottom to follow.
    */
   follow?: boolean;
   className?: string;
@@ -52,9 +34,7 @@ export function LogPane({
   useEffect(() => {
     const node = pane.current;
     if (!follow || node === null) return;
-    // Only if the reader is already at the end. Somebody who scrolled up to
-    // read an earlier line is reading it, and yanking them back to the tail
-    // every time the runner prints is how a live log becomes unusable.
+    // Only when the reader is at the end, so a reader scrolled up stays put.
     const distance = node.scrollHeight - node.scrollTop - node.clientHeight;
     if (distance > FOLLOW_SLACK_PX) return;
     node.scrollTop = node.scrollHeight;
@@ -72,8 +52,7 @@ export function LogPane({
     >
       {lines.map((line, index) => (
         <span
-          // Log lines repeat verbatim and arrive in order; position is the
-          // only identity they have.
+          // Lines repeat verbatim, so position is their only identity.
           key={index}
           className={line.tone ? TONE[line.tone] : undefined}
         >
@@ -85,13 +64,7 @@ export function LogPane({
   );
 }
 
-/**
- * A short standing statement, marked with the accent rule.
- *
- * Used for the two sentences §18 makes load-bearing — "the checklist is the
- * live view" and "the previous release is still serving" — and for nothing
- * that could be a badge instead.
- */
+/** A short standing statement, marked with the accent rule. */
 export function Notice({
   tone = 'accent',
   label,
@@ -124,14 +97,5 @@ export function Notice({
   );
 }
 
-/**
- * The honest empty state (§17) now lives in `ui/empty-state.tsx`, where the
- * ledgers and the workspace can reach it without importing a log pane.
- *
- * Re-exported from here rather than moved, because "there is no output to
- * stream, and here is why" is the pane's own alternative — the argument at the
- * top of this file is what made the component exist — and every call site that
- * reads `EmptyState` out of the log module is reading it from the right place
- * for the reason it is used there.
- */
+// Re-exported for callers that show it in place of a log.
 export { EmptyState } from '../ui/empty-state.tsx';

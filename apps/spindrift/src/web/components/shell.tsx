@@ -39,15 +39,8 @@ import { AppDot } from './status.tsx';
 import { Wordmark } from './wordmark.tsx';
 
 /**
- * One thing the rail or the phone bar can go to, and the roots that light it.
- *
- * `roots` is what {@link activeKey} scores against — the first of them is
- * *not* privileged, unlike `path`: a destination can be reached at one address
- * and lit by several, which is what lets Settings default to
- * `/settings/connections` on click while lighting for the whole of
- * `/settings`. That divergence is deliberate on Settings; on every other
- * entry `path` is one of its own `roots`, so clicking a row is what lights
- * it — `test/web/shell-chrome.test.tsx` pins that rule for the rest of them.
+ * `path` is where a click goes and `roots` are the prefixes that light the
+ * entry. Outside Settings, `path` is one of `roots`, so a click lights its row.
  */
 interface RailDestination {
   readonly key: string;
@@ -58,15 +51,8 @@ interface RailDestination {
 }
 
 /**
- * The rail's Workspace group.
- *
- * Apps is not in it — §18's live list belongs beside a status dot, not behind
- * a nav icon, so it is its own group below. Targets is: it navigates to its
- * own `/targets` — which `Screen` (`app.tsx`) resolves to the Connections
- * section of Settings, the same way `/repos` and `/storage` do — rather than
- * to `/settings/connections` directly, so a click lands on one of Targets'
- * own `roots` and lights the row that was just pressed instead of Settings'
- * footer entry.
+ * Targets links to `/targets`, which opens Connections, so a click lights
+ * Targets and not the Settings entry.
  */
 export const WORKSPACE: readonly RailDestination[] = [
   {
@@ -113,11 +99,7 @@ export const WORKSPACE: readonly RailDestination[] = [
   },
 ];
 
-/**
- * The rail's Developer group. CLI and SDK have no screen in this console, so
- * MCP — where an agent token is minted (`views/auth/agent-tokens.tsx`) — is
- * the only entry.
- */
+/** MCP opens the identity settings, where agent tokens are minted. */
 export const DEVELOPER: readonly RailDestination[] = [
   {
     key: 'mcp',
@@ -128,7 +110,7 @@ export const DEVELOPER: readonly RailDestination[] = [
   },
 ];
 
-/** The rail's footer entry — everything else `/settings` names. */
+/** Lights for any `/settings` path no more specific entry claims. */
 export const FOOTER_SETTINGS: RailDestination = {
   key: 'settings',
   label: 'Settings',
@@ -138,16 +120,9 @@ export const FOOTER_SETTINGS: RailDestination = {
 };
 
 /**
- * The phone bar's own seven, independent of the rail's groups: the mock's
- * Apps group has no room on a bottom bar, so it collapses to the one link
- * that already reaches all of it, and Targets/MCP fold back into Settings —
- * a phone reaches those from Connections' own tabs once it is there.
- * Datastores and Functions keep their own tap targets rather than folding the
- * same way: neither is a section of Settings for a phone to reach that way,
- * and each is the *only* rail-shaped path to its list — the tab strip a
- * detail screen's own back button lands on is not one.
+ * The phone bar: Apps is one link, and Targets and MCP fold into Settings.
+ * Datastores and Functions keep their own, since no Settings tab reaches them.
  */
-/** Exported for `test/web/shell-chrome.test.tsx`'s own coverage of the phone bar. */
 export const PHONE_NAV: readonly RailDestination[] = [
   {
     key: 'overview',
@@ -194,23 +169,15 @@ export const PHONE_NAV: readonly RailDestination[] = [
   },
 ];
 
-/** How many of the installation's Apps the rail shows before "All apps" takes over. */
+/** Apps the rail lists before "All apps" takes over. */
 const RAIL_APPS_CAP = 8;
 
-/**
- * Where the rail's width is remembered, beside the theme key.
- *
- * It is a preference about the reader's screen, not about this installation, so
- * it belongs in the same store `theme.ts` uses and travels with the browser
- * rather than the session.
- */
+// A per-browser preference, stored beside the theme key.
 const RAIL_KEY = 'spindrift.rail';
 
 /**
- * Read once, in a lazy initialiser, and guarded: this component is rendered to
- * static markup by three test files, and `localStorage` is a browser global
- * that a server render does not have. An unreadable preference is "expanded",
- * which is the state that shows the labels this rail exists to add.
+ * Guarded for static test renders, which have no `localStorage`. An unreadable
+ * preference means expanded.
  */
 function railCollapsed(): boolean {
   if (typeof localStorage === 'undefined') return false;
@@ -225,9 +192,7 @@ function rememberRail(collapsed: boolean): void {
   try {
     localStorage.setItem(RAIL_KEY, collapsed ? 'collapsed' : 'expanded');
   } catch {
-    // A blocked or full store loses the preference for this visit and nothing
-    // else. Refusing to navigate because a width could not be written would be
-    // the worse failure.
+    // A blocked or full store only loses the preference for this visit.
   }
 }
 
@@ -236,12 +201,7 @@ function under(path: string, root: string): boolean {
   return path === root || path.startsWith(`${root}/`);
 }
 
-/**
- * How specifically one candidate's roots match a path — the length of the
- * longest root that does, or `-1` for none. Every root here is a literal path
- * prefix, so the longer one that still matches is always the more specific
- * claim about where the reader is.
- */
+/** The length of the longest matching root, or -1 for none. */
 function specificity(path: string, roots: readonly string[]): number {
   let best = -1;
   for (const root of roots) {
@@ -251,19 +211,8 @@ function specificity(path: string, roots: readonly string[]): number {
 }
 
 /**
- * Which one candidate, of a set that may make competing claims about the same
- * path, actually lights — exactly one, or none.
- *
- * `/settings/identity` matches both a bare `/settings` root and MCP's own
- * `/settings/identity` root; `/targets` matches only Targets. The rule is the
- * same either way: **the most specific root wins**, so a destination naming
- * the whole of Settings never outshines one naming a section of it, and a
- * legacy alias root never lights the entry its target screen also answers to
- * directly.
- *
- * Exported for `test/web/shell-chrome.test.tsx`, which pins this rule against
- * the exact aliasing this file's own comments describe rather than against
- * rendered markup.
+ * The most specific root wins, so an entry for a section of Settings outranks
+ * the one for all of it. At most one candidate lights.
  */
 export function activeKey(
   path: string,
@@ -294,22 +243,8 @@ function initials(displayName: string): string {
 }
 
 /**
- * Who is signed in, and the two things they can do about it.
- *
- * This was a `<span title={displayName}>` in the bottom of the rail: not
- * focusable, not reachable by keyboard, and announcing the operator's name only
- * to a pointer that hovered over it for a second. The name is the one piece of
- * chrome that answers "am I about to press Deploy on production as the wrong
- * principal", so it is now a real control.
- *
- * A native `popover`, which means no state, no outside-click handler and no
- * focus trap of our own: the platform puts it in the top layer, closes it on
- * Escape and on a press elsewhere, and moves focus for us. That is the whole
- * reason not to reach for a menu component here.
- *
- * It lives in the header rather than the rail, because the rail is `md:flex` —
- * an account menu only signed-in operators on wide screens can reach is a
- * sign-out button that does not exist on a phone.
+ * A native popover, so the platform handles the top layer, Escape, outside
+ * presses and focus. It sits in the header because phones hide the rail.
  */
 function AccountMenu({
   principal,
@@ -368,7 +303,6 @@ function AccountMenu({
   );
 }
 
-/** The collapse/expand control, shared by its header spot in both rail states. */
 function RailToggle({
   collapsed,
   onToggle,
@@ -400,18 +334,8 @@ function RailToggle({
 }
 
 /**
- * One interactive row of the rail — an icon or a dot, a label the collapsed
- * rail drops to a tooltip, and the pink leading-edge marker when it is the
- * one thing on the path.
- *
- * A real `<button>` always, per §"the rail" of this component's own brief: a
- * row that only looks like a control is a control a keyboard cannot reach.
- *
- * `detail` names, in words, whatever a leading dot only encodes in colour —
- * an App row's live/building/failed/idle state, today. The dot itself stays
- * `aria-hidden`; colour alone is never this row's only answer to "what is
- * this", and a screen reader gets nothing from a dot even when a sighted
- * reader can tell two hues apart.
+ * Always a real `<button>`, so a keyboard reaches it. `detail` states in words
+ * what a leading dot shows only in colour.
  */
 function RailRow({
   active = false,
@@ -473,12 +397,8 @@ function RailRow({
 }
 
 /**
- * A labelled group of rows — the eyebrow names the list for a screen reader
- * exactly as it names it for a sighted one, `aria-labelledby` rather than a
- * repeated `aria-label`, so the two can never drift apart.
- *
- * The heading stays in the tree when the rail collapses rather than being
- * dropped: the group still needs a name, only the sighted label does not fit.
+ * Named by its visible heading, which stays for screen readers when the rail
+ * collapses.
  */
 function RailGroup({
   id,
@@ -514,7 +434,6 @@ function RailGroup({
   );
 }
 
-/** The dashed-border row that starts a new App, solid and pink-lined on hover. */
 function NewAppRow({
   collapsed,
   onClick,
@@ -540,7 +459,6 @@ function NewAppRow({
   );
 }
 
-/** Four rows the width of a name, standing in for the Apps group while it loads. */
 function RailAppSkeleton() {
   return (
     <div aria-hidden="true" className="flex h-8 items-center gap-2.5 px-2.5">
@@ -551,13 +469,8 @@ function RailAppSkeleton() {
 }
 
 /**
- * The Apps group's live list, over the same cadence `views/apps/list.tsx`
- * polls on: a rail row for an App mid-release is exactly the row that needs
- * to notice when it lands.
- *
- * A failed read is silent by design — `type: 'error'` and `type: 'loading'`
- * both resolve to "no rows yet" here, because the rail's job is to draw
- * without the list, never to explain why one screen's fetch did not answer.
+ * Polls faster while any App is mid-release. A failed read draws no rows and
+ * says nothing.
  */
 function useRailApps(): {
   readonly apps: readonly AppListItem[] | undefined;
@@ -584,31 +497,17 @@ export function AppShell({
 }: {
   readonly path: string;
   readonly principal: Principal;
-  /**
-   * What the answering process is running (`SPINDRIFT_VERSION`), or `null`
-   * where the deployment states nothing. Digest-pinned delivery rolls pods
-   * without a version anybody typed, so this is the one line that says which
-   * image the browser is talking to.
-   */
+  /** The server's `SPINDRIFT_VERSION`, or `null` when none is set. */
   readonly version?: string | null;
-  /**
-   * The rail's Apps group, when a caller already has it. Fetched with
-   * {@link useRailApps} otherwise — the fetch lives in an effect, which does
-   * not run under `renderToStaticMarkup`, so the three tests that render this
-   * shell without a network stay network-free by simply not passing this,
-   * rather than by this component special-casing a test environment.
-   */
+  /** Fetched in an effect when omitted, and a static render runs no effects. */
   readonly apps?: readonly AppListItem[];
   readonly onNavigate: (path: string) => void;
   readonly onSignOut: () => void;
   readonly themeControl: ReactNode;
   readonly children: ReactNode;
 }) {
-  // `isReconnecting` doubles as its own server snapshot: unlike
-  // `router.ts`'s hash, this store's state is `Set.size`, which reads the
-  // same — always `false` — with or without a `window`. React still requires
-  // the third argument from any `useSyncExternalStore` reached during a
-  // server render, so it is passed rather than left to the default.
+  // Also the server snapshot, since it reads `false` without a `window`. React
+  // requires the third argument during a server render.
   const reconnecting = useSyncExternalStore(
     onConnectionChange,
     isReconnecting,
@@ -656,10 +555,7 @@ export function AppShell({
               type="button"
               aria-label={`${PRODUCT_NAME} overview`}
               onClick={() => onNavigate('/')}
-              // `group` is what lets the mark's own hover glitch
-              // (`components/wordmark.tsx`) reach past the padding around it —
-              // the wink is a property of pointing at the mark, not just of the
-              // span it happens to be drawn in.
+              // `group` lets the wordmark's hover wink fire across this padding.
               className="group flex min-w-0 flex-1 items-center rounded-sm px-1.5 py-1 hover:bg-rail-active/60"
             >
               <Wordmark
@@ -781,33 +677,19 @@ export function AppShell({
 
       <div className="relative min-w-0">
         <header className="sticky top-0 z-30 flex h-12 items-center gap-4 border-b border-border bg-topbar/90 px-4 backdrop-blur sm:px-6">
-          {/* One instance for the whole product, silent until a Deploy this
-              tab is watching lands on LIVE (`views/apps/deploy-detail.tsx`
-              calls `flyover()`). A child of this `sticky` header rather than
-              of the column below — this column is not its own scroller, the
-              document is, so anchoring the pass to something that scrolls
-              away with it would fly it off-screen for anyone scrolled past
-              the header when a deploy lands, which is the normal posture for
-              watching one. `sticky` is a positioned value, so the header is
-              already this absolutely-positioned pass's containing block with
-              no `relative` of its own needed — it just never clips it, since
-              the pass carries its own `overflow-hidden`. */}
+          {/* The product's one flyover. Inside the sticky header, so the pass
+              stays on screen however far the document has scrolled. */}
           <Roflcopter flyover />
           <Breadcrumbs path={path} onNavigate={onNavigate} />
           <div className="ml-auto flex items-center gap-2">
-            {/* The rail carries its own Search row once it is on screen, so
-                this trigger — and the catalogue read behind it — only needs
-                to exist for a reader on a phone, where the rail is hidden. */}
+            {/* The trigger shows on phones only; the rail has its own Search row. */}
             <CommandPalette
               onNavigate={onNavigate}
               open={paletteOpen}
               onOpenChange={setPaletteOpen}
               triggerClassName="md:hidden"
             />
-            {/* The footer below carries this control once the rail is on
-                screen and open — `md:hidden` stands down only then, so a
-                collapsed rail (which drops its own copy for width) does not
-                strand the reader with no way to reach it at all. */}
+            {/* Hidden only where an expanded rail's footer carries it. */}
             <div className={collapsed ? undefined : 'md:hidden'}>
               {themeControl}
             </div>
@@ -829,12 +711,8 @@ export function AppShell({
           </div>
         </header>
         {reconnecting ? (
-          // Silent forever was the bug (`stream-client.ts`'s header explains
-          // the retry loop this reports on): a live pane that has stopped
-          // updating and says nothing looks identical to one with nothing new
-          // to show. This is the one place every screen with a stream passes
-          // through, which is why it renders here rather than on each screen
-          // that could show it.
+          // A stalled stream looks like a quiet one, so the shell says when it
+          // is retrying.
           <div
             role="status"
             className="flex items-center gap-2 border-b border-border bg-muted/60 px-4 py-1.5 text-xs text-muted-foreground sm:px-6"
@@ -845,8 +723,7 @@ export function AppShell({
         ) : null}
         <main className="min-w-0 pb-20 md:pb-0">{children}</main>
         {version ? (
-          // Below the phone bar's clearance on small screens, so the line is
-          // reachable rather than hidden behind the fixed navigation.
+          // Padded clear of the fixed phone bar, which would otherwise hide it.
           <footer className="px-4 pb-24 pt-2 text-[11px] text-muted-foreground sm:px-6 md:pb-3">
             <span className="font-mono" title={`Running ${version}`}>
               {PRODUCT_NAME} {version}
@@ -883,9 +760,7 @@ export function AppShell({
         })}
       </nav>
 
-      {/* Mounted once, here, because this is the one component every screen in
-          the product passes through — the same argument the two banners above
-          are already made on. `notify()` reaches it from anywhere. */}
+      {/* Mounted once in the shell; `notify()` reaches it from anywhere. */}
       <ToastHost />
     </div>
   );

@@ -1,28 +1,7 @@
 /**
- * Connecting a repository: one button, and what Spindrift found behind it.
- *
- * This screen used to ask for seven things — a scope, a kind, a build
- * frontend, a Dockerfile path, a build command, an output directory, and a
- * newline-separated list of watch paths — before it would open a pull request.
- * Every one of those is something §5's detector can read out of the repository,
- * and asking a person to type them made connecting a repo a form about how
- * deployment works rather than a decision about their code.
- *
- * So the shape is: **press Connect, read what it found, confirm.** The scan is
- * `inspectRepository`, which writes nothing; the confirm is
- * `connectRepository`, which detects again against the branch as it is at that
- * moment and opens the pull request. Nothing detection proposes travels through
- * the browser on its way into the repository.
- *
- * Two things stay visible that a shorter screen would have dropped, both §3's
- * disabled-with-reasons grammar:
- *
- * - **A directory Spindrift could not make sense of is listed anyway**, wearing
- *   the sentence saying why. "Nothing here" and "nine things here, seven of
- *   them libraries" are different answers and the screen says which.
- * - **The override is still reachable**, behind a disclosure, because story 32
- *   asks for progressive disclosure rather than for the escape hatch to be
- *   removed.
+ * Connecting a GitHub repository. Connect scans it with `inspectRepository`,
+ * which writes nothing; the confirm runs `connectRepository`, which detects
+ * again on the branch and opens the configuration pull request.
  */
 import {
   AlertTriangle,
@@ -219,15 +198,8 @@ export function RepositoryList({
 }
 
 /**
- * The connector's state as a sentence and a colour, rather than as its tag.
- *
- * The badge used to print the union member — an operator read the literal word
- * `unauthorized`, which is a name for a case in a type and not something anyone
- * says — and it wore the same amber as `unavailable`. Those two are the furthest
- * apart of the three: `unauthorized` is one create-and-install away from done
- * and nothing is wrong, while `unavailable` means this installation holds no
- * keyring and the fix is not on this screen or any other. Same colour for both
- * told the reader that the fixable one was as stuck as the unfixable one.
+ * `unauthorized` is the ordinary step before the App exists and reads idle;
+ * `unavailable` means no keyring, which no screen can fix.
  */
 function connectorStanding(connector: RepositoryConnectorView): {
   readonly label: string;
@@ -237,8 +209,6 @@ function connectorStanding(connector: RepositoryConnectorView): {
     case 'authorized':
       return { label: `speaking as ${connector.slug}`, tone: 'success' };
     case 'unauthorized':
-      // Idle, not warning: nothing has gone wrong, this is simply the step
-      // before the first one.
       return { label: 'no App yet', tone: 'idle' };
     default:
       return { label: 'no keyring', tone: 'destructive' };
@@ -246,13 +216,9 @@ function connectorStanding(connector: RepositoryConnectorView): {
 }
 
 /**
- * The App identity, which is a different act from connecting anything.
- *
- * Creating it is one form POST straight to GitHub — the manifest flow —
- * whose confirmation page GitHub insists a human clicks. The redirect lands
- * on the setup route, which seals the returned key and sends the operator
- * back here. Once the identity exists this collapses to one line; it is a
- * prerequisite, not a destination.
+ * Creating the App is a form POST to GitHub's manifest flow, whose confirmation
+ * page a person must click. The redirect reaches the setup route, which seals
+ * the key.
  */
 function ConnectorCard({
   connector,
@@ -332,7 +298,6 @@ function ConnectorCard({
   );
 }
 
-/** Everything the installation grants, each one row and one button. */
 function AvailableRepositories({
   options,
   connecting,
@@ -380,14 +345,7 @@ function AvailableRepositories({
   );
 }
 
-/**
- * One repository, and the scan that opens under it.
- *
- * The scan starts when the row opens rather than on a second press. A screen
- * that made you click Connect and then click Scan would be a screen with two
- * buttons for one intention, and the read is free — nothing is written until
- * the confirm at the bottom of the panel.
- */
+/** Opening the row starts the scan, which writes nothing until the confirm. */
 function RepositoryRow({
   option,
   open,
@@ -580,7 +538,6 @@ const KIND_ICON = {
   job: Timer,
 } as const satisfies Record<ComponentKind, typeof Globe>;
 
-/** One directory Spindrift knows what to do with, and how it knows. */
 function DetectedScope({ scope }: { scope: InspectedScope }) {
   if (scope.outcome !== 'detected') return null;
   const Icon = KIND_ICON[scope.kind];
@@ -621,13 +578,8 @@ function DetectedScope({ scope }: { scope: InspectedScope }) {
 }
 
 /**
- * Where a fact about a connected repository lives on the host.
- *
- * The same assumption the opened-pull-request link above already makes, named
- * once so it is visible: this templates the public host. `LinkedRepoView`
- * carries no clone URL, so an installation pointed at its own GitHub is the
- * case this gets wrong — and a commit that is one click away is worth more than
- * a hash that is zero clicks away and useless.
+ * Assumes github.com: `LinkedRepoView` carries no clone URL, so these links are
+ * wrong for a self-hosted GitHub.
  */
 function githubUrl(fullName: string, ...path: readonly string[]): string {
   return `https://github.com/${fullName}/${path.join('/')}`;
@@ -698,11 +650,6 @@ function ConnectedRepositories({
                   <p className="text-sm">{repo.error}</p>
                 </div>
               ) : null}
-              {/* Connected, and still waiting on the one merge that makes any
-                  of it authoritative. The row is the durable place to say so:
-                  the banner above answers the press that opened it and is gone
-                  on the next load, and creating an App from the wizard opens
-                  this pull request without ever visiting this screen. */}
               {repo.configPullRequest !== null ? (
                 <div className="flex items-start gap-2 rounded-md border border-warning/40 bg-warning-soft px-3 py-2 text-sm">
                   <AlertTriangle
@@ -729,9 +676,6 @@ function ConnectedRepositories({
                   </p>
                 </div>
               ) : null}
-              {/* Still connected, and the commit beside it is older than it
-                  looks: listing refreshes every row, and one the host would
-                  not answer about says so rather than passing for current. */}
               {repo.staleReason ? (
                 <div className="flex items-start gap-2 rounded-md border border-warning/40 bg-warning-soft px-3 py-2 text-warning">
                   <AlertTriangle
@@ -748,10 +692,8 @@ function ConnectedRepositories({
                   <span className="text-xs text-muted-foreground">
                     Deploying from
                   </span>
-                  {/* Each subpath is a directory an App is built out of, and the
-                      chip went nowhere. It links at the directory rather than at
-                      the App because the read model carries the path and not the
-                      App's id — see the note in the batch summary. */}
+                  {/* The read model carries only the subpath, so this links
+                      the directory. */}
                   {repo.appSubpaths.map((subpath) => (
                     <a
                       key={subpath}
@@ -792,16 +734,8 @@ function ErrorMessage({ message }: { message: string }) {
 }
 
 /**
- * The repositories screen — the list, and the connect that adds to it.
- *
- * Read once and never on a cadence: the far side is GitHub's own listing, and
- * a background tick every fifteen seconds spends an installation's rate limit
- * re-asking a question whose answer changes when somebody grants a repository.
- * The Refresh control is that reader saying they did.
- *
- * `refreshing` is the read's own outstanding flag rather than a second piece of
- * state beside it — the two could disagree, and the one that would be wrong is
- * the copy.
+ * Read once: each listing spends the installation's GitHub rate limit, and it
+ * changes only when a repository is granted. Refresh re-reads.
  */
 export function RepositoriesScreen({
   embedded = false,

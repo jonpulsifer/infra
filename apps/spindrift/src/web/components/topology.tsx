@@ -1,47 +1,7 @@
 /**
- * What this App is made of, and what it talks to (§2, §3, §11).
- *
- * The workspace already lists Components and names the Datastores an App reads
- * through. What a list cannot show is the **shape**: that two Components share
- * one store, that only one of them is reachable from outside, that a store is
- * one nobody here provisions. Those are facts about the edges between things,
- * and a column of rows has no edges.
- *
- * **Nothing here is new data.** Every value is already on `WorkspaceView` —
- * `reach` and `auth` decide whether an ingress edge exists and what it says,
- * `DATASTORE_VARIABLE` turns an engine into the variable its connection
- * arrives as, and `provenance` decides whether this platform owns the store's
- * lifetime. The picture is a second reading of the same read, not a second
- * read.
- *
- * **Every Component gets an edge to every Datastore, and that is not a
- * simplification.** §11 attaches a Datastore to the *App*, not to a Component —
- * `datastores.appId` is the column, and `attachDatastore` refuses a second
- * store of the same engine because "both would arrive as the same variable".
- * So the variable lands in every Component of the App, and the fan-out is the
- * honest drawing. `views.ts` calls `attachedTo` "the Component it is attached
- * to"; that comment is wrong, and `workspace.ts` already says so beside the
- * line that fills it with the App's first Component as a display convenience.
- *
- * **The picture is the selector, and it is the only one.** The workspace used to
- * draw this and then repeat it as a column of rows underneath, where pressing a
- * row was what chose which Component the hero, the runtime card and the config
- * keys were about. Two renderings of one list, one of them pressable, is a
- * screen that has to be read twice to find the control. So a Component box is
- * the button now, and the rows are gone.
- *
- * It is still not a place where anything is *written*. Attaching a store,
- * changing reach and moving a placement are edits to what the next release will
- * be, and they live on the Config tab with the rest of them — a diagram that
- * duplicated them would be a second place for each act to be wrong. What a box
- * does is change the subject, and a Datastore box goes to the screen that owns
- * the store's lifetime, because that is the answer to pressing its name.
- *
- * **The wires answer the hover.** Every Component reaches every Datastore
- * (above), so an App with three of each draws nine wires and none of them tells
- * you which are yours. Pointing at a box lights its own and dims the rest,
- * which is the one question a fan-out cannot answer standing still. It is
- * explanation, not decoration: the highlight says what the geometry cannot.
+ * An App's shape: ingress, Components and Datastores, from the workspace read.
+ * Every Component wires to every Datastore, because a Datastore attaches to the
+ * App. Pressing a Component box selects it; nothing here edits the App.
  */
 import { Database, Globe } from 'lucide-react';
 import { type ReactNode, useState } from 'react';
@@ -51,7 +11,6 @@ import { Card } from '../ui/card.tsx';
 import { cn } from '../ui/utils.ts';
 import { PhaseDot } from './status.tsx';
 
-/** The one node kind that is not a row in the read: the world outside. */
 export const INGRESS = 'ingress';
 
 export interface TopologyNode {
@@ -66,12 +25,9 @@ export interface TopologyNode {
 export interface TopologyEdge {
   readonly from: string;
   readonly to: string;
-  /** What travels along it — a reach, or the variable a connection arrives as. */
+  /** A reach, or the variable a connection arrives as. */
   readonly label: string;
-  /**
-   * A store whose lifetime this platform does not own (§11's `external`).
-   * Dashed rather than a legend entry: it is one encoding used in one place.
-   */
+  /** A store whose lifetime this platform does not own. */
   readonly dashed: boolean;
 }
 
@@ -82,28 +38,21 @@ export interface TopologyLayout {
   readonly height: number;
 }
 
-/*
- * The box sizes, and the two gaps that are not decoration.
- *
- * `INGRESS_GAP` and `STORE_GAP` are wide enough for the longest label each
- * carries, because an edge label is centred in its gap and the node cards are
- * painted over the wire layer — a label longer than its gap is a label with
- * its ends clipped by two boxes. `EVENTS_DATABASE_URL`-length names are the
- * ones that set the floor.
- */
 const NODE_W = 184;
 const COMPONENT_H = 78;
 const STORE_H = 66;
 const INGRESS_W = 124;
 const INGRESS_H = 56;
 const VGAP = 20;
+// Each gap fits the longest edge label it carries: the node cards paint over
+// the wire layer and would clip a longer one.
 const INGRESS_GAP = 104;
 const STORE_GAP = 148;
 
 const stackHeight = (count: number, each: number): number =>
   count <= 0 ? 0 : count * each + (count - 1) * VGAP;
 
-/** Centre a lane's stack against the tallest lane, so the rows read as rows. */
+/** Centres a lane's stack against the tallest lane. */
 const laneTop = (
   index: number,
   count: number,
@@ -111,18 +60,12 @@ const laneTop = (
   height: number,
 ): number => (height - stackHeight(count, each)) / 2 + index * (each + VGAP);
 
-/** Whether a Component is reachable from outside at all (§3). */
 const exposed = (component: { readonly reach: Reach }): boolean =>
   component.reach !== 'none';
 
 /**
- * Where every box goes and what every wire says.
- *
- * Separated from the rendering because this is the part with an opinion. The
- * lanes shift left when nothing is exposed and the canvas narrows when nothing
- * is attached, so an App with neither is one column of boxes rather than one
- * column of boxes and two columns of whitespace — which is what a fixed
- * three-lane grid gives a `job` that reads no store.
+ * The lanes shift left when nothing is exposed and the canvas narrows when
+ * nothing is attached, so an App with neither is one column.
  */
 export function topology(
   components: readonly ComponentView[],
@@ -176,9 +119,7 @@ export function topology(
     edges.push({
       from: INGRESS,
       to: `component:${component.id}`,
-      // The two facts §3 keeps apart: how far the address carries, and who
-      // gets past it. A reader who sees only "public" cannot tell a proxied
-      // App from an open one, and that is the difference that matters.
+      // Reach alone cannot tell a proxied App from an open one.
       label:
         component.auth === 'proxy'
           ? `${component.reach} · proxy`
@@ -200,15 +141,7 @@ export function topology(
   return { nodes, edges, width, height };
 }
 
-/**
- * One wire, as a curve that leaves rightwards and arrives rightwards.
- *
- * `lit` and `dim` are the two halves of one answer and never both true: with
- * nothing pointed at, every wire is neither, which is the resting state the
- * diagram is read in. A wire is only ever emphasised *against* others, so a
- * highlight with nothing to contrast against would be a colour that means
- * nothing.
- */
+/** `lit` and `dim` are never both true, and both are false at rest. */
 function wire(
   from: TopologyNode,
   to: TopologyNode,
@@ -250,9 +183,7 @@ function wire(
         x={(x1 + x2) / 2}
         y={(y1 + y2) / 2 - 7}
         textAnchor="middle"
-        // The halo. The node cards paint over this layer, so a label that
-        // overhangs its gap would be clipped rather than merely crowded; the
-        // stroke keeps it legible where it crosses the ruled background.
+        // A halo stroke keeps the label legible over the ruled background.
         className={cn(
           'stroke-card font-mono text-[10px] transition-[fill] duration-150 ease-out [paint-order:stroke] [stroke-width:5px]',
           lit ? 'fill-accent-foreground' : 'fill-muted-foreground',
@@ -264,19 +195,8 @@ function wire(
   );
 }
 /**
- * A box the reader can point at, press, or neither.
- *
- * One wrapper rather than a `<button>` copy of each card, because the three
- * kinds differ in what a press *does* and not in what they look like: a
- * Component changes the subject of the screen, a Datastore leaves for the
- * screen that owns it, and the Internet does neither. A card that renders as a
- * button and does nothing is the dead control this file's rule against
- * duplicated acts exists to prevent, so the element is a `div` wherever there
- * is no act — the hover affordance goes with it.
- *
- * `onPointerEnter`/`Leave` rather than CSS `:hover`, because the thing that
- * reacts is not this element: it is every wire touching it, drawn in a sibling
- * layer with no selector that can reach from here to there.
+ * A `<button>` only when a press does something, else a `div`. Hover goes
+ * through `onPoint`, because the wires that react sit in a sibling layer.
  */
 function Node({
   node,
@@ -287,12 +207,7 @@ function Node({
 }: {
   readonly node: TopologyNode;
   readonly onPress?: () => void;
-  /**
-   * Whether this box is the chosen one — and, by being present at all, that it
-   * is the *kind* of box that can be. A Component box always passes a boolean;
-   * a Datastore box passes nothing, because a control that leaves the screen is
-   * not one that stays pressed.
-   */
+  /** Passed on every Component box, never on one that navigates away. */
   readonly selected?: boolean;
   readonly onPoint: (id: string | null) => void;
   readonly children: ReactNode;
@@ -306,9 +221,7 @@ function Node({
 
   const skin = cn(
     'absolute flex flex-col justify-center gap-1 rounded-sm px-3 text-left',
-    // The three properties that actually change, named rather than `all`.
-    // `transform` is the press: `Button` acknowledges on pointer-down at
-    // 100ms, and a box that is a button acknowledges the same way.
+    // `transform` is the press, acknowledged in 100ms like `Button`.
     'transition-[border-color,background-color,transform] duration-100 ease-out',
     node.kind === INGRESS
       ? 'border border-dashed border-border'
@@ -337,10 +250,7 @@ function Node({
       onFocus={() => onPoint(node.id)}
       onBlur={() => onPoint(null)}
       {...point}
-      // On the Component boxes only, and on every one of them: a strip where
-      // one box says `true` and the rest say nothing is a set of toggles with
-      // no set — the unpressed ones have to say so for the pressed one to mean
-      // anything.
+      // Every Component box states it, so the pressed one means something.
       {...(selected === undefined ? {} : { 'aria-pressed': selected })}
       className={cn(
         skin,
@@ -363,42 +273,18 @@ export function Topology({
 }: {
   readonly components: readonly ComponentView[];
   readonly datastores: readonly DatastoreView[];
-  /**
-   * Which Component the rest of the screen is about — the box that is drawn as
-   * chosen. The id, because that is what the read resolves the selection to;
-   * {@link onSelect} answers in names, because that is what the command takes.
-   */
+  /** An id; `onSelect` answers with a name, which the command takes. */
   readonly selectedId?: string;
-  /**
-   * Change the screen's subject to this Component, by name.
-   *
-   * Absent where the screen reads a fixed view — the fixtures render this with
-   * no acts wired, and a box that could be pressed and changed nothing would
-   * be worse than one that cannot.
-   */
+  /** Absent on a fixed view, so no Component box can be pressed. */
   readonly onSelect?: (component: string) => void;
-  /** Where a Datastore box goes when it is pressed — its own screen. */
   readonly onNavigate?: (path: string) => void;
-  /**
-   * What the chosen box is, in words, under the picture.
-   *
-   * Inside this card rather than in one of its own: it is the caption of a
-   * figure, and a caption in a second bordered panel reads as a second
-   * section about a second thing.
-   */
+  /** The chosen box's caption, inside this card. */
   readonly children?: ReactNode;
 }) {
-  /**
-   * Which box the reader is pointing at, or `null`.
-   *
-   * The hover outranks the selection: a reader who has moved onto another box
-   * is asking about *that* one, and lighting the selected Component's wires
-   * underneath the question would answer the one they stopped asking.
-   */
+  // The pointed-at box outranks the selection.
   const [pointed, setPointed] = useState<string | null>(null);
 
-  // An App with nothing in it has no shape to draw, and the workspace owns that
-  // empty state — two of them is one too many.
+  // The workspace owns the empty state.
   if (components.length === 0) return null;
 
   const { nodes, edges, width, height } = topology(components, datastores);
@@ -414,29 +300,15 @@ export function Topology({
     pointed ?? (selectedId === undefined ? null : `component:${selectedId}`);
   const touches = (edge: TopologyEdge) =>
     edge.from === focus || edge.to === focus;
-  /*
-    Only where there is something to contrast against — some wire in, and some
-    wire out.
-
-    Both halves are load-bearing and each fails on its own App. A Component
-    nothing reaches and nothing is attached to would otherwise dim every wire
-    on the canvas to announce that it has none of them, which is a picture of
-    the wrong thing. And the single-Component App — the common one — has every
-    wire touching the selection, so lighting them all is a colour that
-    distinguishes nothing from nothing.
-  */
+  // Only when some wires touch the focus and some do not; otherwise it would
+  // dim every wire or light every wire.
   const emphasise =
     focus !== null && edges.some(touches) && !edges.every(touches);
 
   return (
     <Card>
       <div className="overflow-x-auto p-6">
-        {/*
-          The whole figure arrives at once, boxes and wires together. A stagger
-          would be right for a list; this is one drawing, and a box that rises
-          four pixels while the wire into it stays put is a picture of a wire
-          missing its box.
-        */}
+        {/* Boxes and wires animate together, so no box leaves its wire. */}
         <div
           className="relative motion-safe:animate-rise"
           style={{ width, height }}
@@ -497,8 +369,7 @@ export function Topology({
                       {component.kind}
                     </span>
                     {/* Right-aligned, so a column of boxes reads its phases
-                        down one edge rather than at whatever offset each
-                        kind's word happens to end at. */}
+                        down one edge. */}
                     <span className="ml-auto">
                       <PhaseDot phase={component.phase} />
                     </span>
@@ -548,12 +419,6 @@ export function Topology({
         <div className="border-t border-border-soft px-6 py-4">{children}</div>
       ) : null}
 
-      {/*
-        The one encoding that is not self-evident, stated only where it is used.
-        An external store is one somebody else authored the URL for: Spindrift
-        injects it and stays out of its lifetime, so nothing here provisions,
-        backs up or destroys it.
-      */}
       {datastores.some((datastore) => datastore.provenance === 'external') ? (
         <p className="flex items-center gap-2 border-t border-border-soft px-6 py-3 text-caption text-muted-foreground">
           <span

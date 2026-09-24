@@ -1,27 +1,6 @@
 /**
- * What just happened, said once, where the reader is looking.
- *
- * The app had exactly one answer for the result of an act: ten copies of a red
- * div pasted into `app.tsx`, one per screen, each rendering a refusal and none
- * rendering a success. So "Rolled back to build 1187" — the sentence an
- * operator most wants after the scariest button in the product — had nowhere to
- * appear, and a failure appeared in a box the reader may have scrolled past.
- *
- * A module-level listener store, subscribed with `useSyncExternalStore`, copied
- * from `connection-status.ts` on purpose: `notify()` is then callable from an
- * event handler, a promise chain, or a `catch` block in a module that renders
- * nothing, without any of them holding a context or a ref. No provider, no
- * dependency, no portal — `ToastHost` is mounted once in the shell and is the
- * only reader of this store.
- *
- * What it refuses to be is a queue with priorities, a place to put a form, or a
- * substitute for stating a refusal beside the control that caused it. A toast
- * is for the act that already left the screen it was pressed on. A field that
- * is invalid is `Field`'s `issue`, not this.
- *
- * Dismissal lives in the host, not the store: a timer started at `notify()`
- * would keep running in a server render and in a test that never mounts
- * anything, and would fire against a listener set nobody is in.
+ * Results of an act, announced once. A module-level store lets `notify()` run
+ * from any handler or promise; `ToastHost` in the shell is its only reader.
  */
 import { useCallback, useEffect, useSyncExternalStore } from 'react';
 import { Button } from './button.tsx';
@@ -37,22 +16,15 @@ export interface Toast {
   readonly action?: { readonly label: string; readonly onSelect: () => void };
 }
 
-/** How long a toast stands before the host retires it. */
 const DWELL_MS = 6_000;
 
-/**
- * A refusal is read, not glanced at, and the reader may have been in another
- * tab when it landed.
- */
+/** A refusal is read in full, and the reader may have been in another tab. */
 const DWELL_DESTRUCTIVE_MS = 12_000;
 
 let toasts: readonly Toast[] = [];
 const listeners = new Set<() => void>();
 
-/**
- * The server has no toasts, and this constant is the same object every call so
- * `useSyncExternalStore` does not see a new snapshot on every render.
- */
+/** One object for every call, so the server snapshot stays stable. */
 const NONE: readonly Toast[] = [];
 
 let sequence = 0;
@@ -89,13 +61,8 @@ const TONE = {
 } as const satisfies Record<Tone, string>;
 
 /**
- * Mounted once, in the shell.
- *
- * `role="status"`/`aria-live="polite"` rather than `alert`: even a destructive
- * result here is the outcome of something the reader just did, so interrupting
- * their current sentence to read it is the wrong trade. The region exists in
- * the DOM whether or not it holds anything, because a live region inserted at
- * the same moment as its content is not reliably announced.
+ * Polite, since the reader caused every result. The region always exists: one
+ * inserted together with its content is not reliably announced.
  */
 export function ToastHost() {
   const items = useSyncExternalStore(onToastChange, activeToasts, () => NONE);
@@ -117,6 +84,7 @@ export function ToastHost() {
 function ToastRow({ toast }: { toast: Toast }) {
   const dismiss = useCallback(() => dismissToast(toast.id), [toast.id]);
 
+  // The timer lives here, so a server render or a test never starts one.
   useEffect(() => {
     const timer = setTimeout(
       dismiss,
@@ -130,10 +98,6 @@ function ToastRow({ toast }: { toast: Toast }) {
       className={cn(
         'pointer-events-auto w-full max-w-sm rounded-sm border border-border border-l-2 bg-card px-3.5 py-3',
         'shadow-panel',
-        // The app's one word for something arriving, and the host is anchored
-        // to the bottom edge, so rising is also the direction it came from. A
-        // result that blinks into a corner the reader is not looking at is the
-        // jarring change this whole component exists to soften.
         'motion-safe:animate-rise',
         TONE[toast.tone],
       )}

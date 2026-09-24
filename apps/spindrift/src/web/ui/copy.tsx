@@ -1,26 +1,6 @@
 /**
- * The values whose whole purpose is to be pasted somewhere else.
- *
- * A digest exists to be handed to `crane`, a commit to `git show`, a config
- * version to a support conversation. The app rendered all of them as truncated
- * monospace text with no way to get the untruncated value out — one
- * `navigator.clipboard` call existed in the entire tree — so the operator's
- * options were to select carefully around an ellipsis or to go find the value in
- * a terminal, which is the exact work this screen was supposed to save.
- *
- * `Ref` is the pairing that matters: it shortens by *kind*, because the useful
- * prefix of a digest is not the useful prefix of a URL, and it always copies the
- * whole thing rather than what is on screen. Truncation is a display decision
- * and must never become a data decision.
- *
- * `copyValue` is separate from the button on purpose. The clipboard is a browser
- * capability that is absent in an insecure context and refusable by the reader,
- * so the failure is ordinary rather than exceptional, and it is the one part of
- * this file worth testing without a DOM.
- *
- * Not here: a toast on copy. `notify()` for something that happened inside the
- * button that was just pressed would be the loudest possible way to report the
- * least surprising outcome in the app.
+ * Values meant to be pasted elsewhere. `Ref` shortens each kind for display and
+ * always copies the full value.
  */
 import { Check, Copy } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
@@ -34,14 +14,11 @@ export async function copyValue(value: string): Promise<boolean> {
     await clipboard.writeText(value);
     return true;
   } catch {
-    // Denied permission, an insecure origin, or a browser that has no
-    // clipboard. None of those is an error the reader can act on, and all of
-    // them leave the value on screen to select by hand.
+    // Denied, an insecure origin, or no clipboard. The value stays selectable.
     return false;
   }
 }
 
-/** How long the confirmation stands before the button is a button again. */
 const CONFIRM_MS = 1_400;
 
 export function CopyButton({
@@ -91,15 +68,7 @@ export function CopyButton({
 
 export type RefKind = 'digest' | 'commit' | 'url' | 'id';
 
-/**
- * How much of each kind of reference is enough to recognise it.
- *
- * A digest keeps its algorithm prefix — `sha256:` is the half of it that says
- * what the rest of it is — and then the twelve hex characters `crane` and every
- * registry UI use. A commit is seven, which is git's own answer. An id is eight,
- * enough to tell two rows apart in a ledger. A URL keeps its host and drops the
- * scheme, because `https://` is the same on every row and the host is the fact.
- */
+/** Twelve digest characters as registry UIs show, and seven as git does. */
 function shorten(value: string, kind: RefKind): string {
   if (kind === 'commit') return value.slice(0, 7);
   if (kind === 'id') return value.slice(0, 8);
@@ -118,27 +87,12 @@ export function Ref({
 }: {
   readonly value: string;
   readonly kind: RefKind;
-  /**
-   * Words to put beside the hash — a commit's headline. The hash stays the
-   * value that is copied and sorted; this is only what makes it readable.
-   */
+  /** Shown beside the hash, such as a commit's headline. Never copied. */
   readonly headline?: string | null;
-  /**
-   * Where this reference is a thing rather than a string — a commit's page on
-   * the repository host, an artifact's page on the registry.
-   *
-   * Optional because most callers have no origin to compose one from: a
-   * reference is a value first, and a hash rendered as a dead link would
-   * promise a destination the screen does not have. The copy button stays
-   * beside it either way — the clipboard is what a digest is *for*, and a link
-   * does not replace it.
-   */
   readonly href?: string;
   readonly className?: string;
 }) {
   if (!value) return null;
-  // The full value is the title, so a hover answers what the ellipsis ate even
-  // where the clipboard is unavailable.
   const short = shorten(value, kind);
   return (
     <span className={cn('inline-flex min-w-0 items-center gap-1', className)}>

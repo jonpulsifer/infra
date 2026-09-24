@@ -1,15 +1,6 @@
 /**
- * The form atoms: a label, a text input, and the pairing of the two.
- *
- * `Field` exists so that no screen writes a label and an input that are not
- * associated — the `htmlFor`/`id` pair is generated from one `name` prop, so
- * forgetting it is not a shape this component can be called in.
- *
- * `Label` is Radix's rather than a bare `<label>`, which is what shadcn uses
- * and what the lint rule is asking for. The behaviour worth having is small and
- * annoying to reproduce: it suppresses the text selection a double-click on a
- * label otherwise causes, so clicking twice at a field focuses it instead of
- * highlighting its caption.
+ * Form atoms. `Field` derives `htmlFor` and `id` from one `name`, and Radix's
+ * `Label` keeps a double-click from selecting the caption.
  */
 import { Root as LabelRoot } from '@radix-ui/react-label';
 import type { ComponentProps, ReactNode } from 'react';
@@ -57,15 +48,7 @@ export function Field({
   name: string;
   label: string;
   hint?: string;
-  /**
-   * What is wrong with the value, said here rather than at the bottom of the
-   * page.
-   *
-   * A rule the form already knows is a rule the form can state where the value
-   * is: a transport refusal listing `appName` under a Deploy button is the same
-   * fact delivered where nobody can act on it. `aria-invalid` carries it to
-   * anyone not reading the sentence.
-   */
+  /** Shown under the input, which it marks `aria-invalid`. */
   issue?: string | null;
   children?: ReactNode;
 }) {

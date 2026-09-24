@@ -1,19 +1,6 @@
 /**
- * The plan, as rows that are already answered.
- *
- * Four rows — Code, Type, Name, Where it runs — each **label, the answer, why,
- * and an Edit that opens the correction in place**, because the whole claim of
- * this screen is that reading down it is enough. A row that needed a different
- * reading strategy would be a row that broke the claim.
- *
- * Corrections are disclosures rather than screens (story 32). A developer who
- * wants to change the kind should not lose sight of the Target that choice
- * decides, which is exactly what a five-step rail cost.
- *
- * The vocabulary on those four top lines is the reader's, not the platform's:
- * `KIND_LABEL`, `REACH_LABEL`, `AUTH_LABEL` and `ADAPTER_LABEL` are what a row
- * *states*, and the `*_NOTE` maps below are what a tile somebody is choosing
- * between *explains*. Those are two different jobs and they were one map.
+ * The creation plan as rows that are already answered, each with an Edit that
+ * opens its correction in place.
  */
 import { AlertTriangle, Lock, Pencil } from 'lucide-react';
 import type { ReactNode } from 'react';
@@ -28,25 +15,6 @@ import { Button } from '../../../ui/button.tsx';
 import { Eyebrow } from '../../../ui/card.tsx';
 import { cn } from '../../../ui/utils.ts';
 
-/**
- * One decided row.
- *
- * `why` is not decoration. Every value on this screen was chosen by something
- * other than the person reading it, and a default with no stated reason is
- * indistinguishable from a value somebody typed and forgot.
- *
- * **Open-ness belongs to the parent.** Each row used to own three pieces of
- * sticky state — a `useState<boolean | null>`, a ref for "was ever unsettled",
- * a ref for "was unsettled last render" — and derive its own openness from an
- * `unsettled` prop fed by asynchronous reads. Rows opened themselves when a
- * `listTargets` refetch answered, several hundred pixels appeared under the
- * reader's cursor, and everything below jumped. Worse, two rows could decide
- * to open at once and neither knew about the other.
- *
- * One `expanded` value in the parent replaces all of it: one row is open at a
- * time, it opens because a person pressed Edit or because that row is the one
- * holding an unmet prerequisite, and it never changes under a read landing.
- */
 export function Row({
   label,
   value,
@@ -62,17 +30,10 @@ export function Row({
   why?: ReactNode;
   /** Rendered beside the value — a health dot, a badge, an artifact type. */
   tone?: ReactNode;
-  /** Whether the correction is showing. Owned by the parent. */
+  /** Owned by the parent, so only one row is open at a time. */
   open?: boolean;
   onToggle?: () => void;
-  /**
-   * What stands between this row and a Deploy.
-   *
-   * Rendered here rather than in a stack at the foot of the page. A sentence
-   * saying "pick a Target that can run this" is unreadable eight sections away
-   * from the Targets; beside the row it is about, it is the caption of the
-   * thing it is complaining about.
-   */
+  /** Unmet prerequisites, shown beside the row they are about. */
   blockers?: readonly Blocker[];
   /** The correction, if this row has one. Absent makes the row a fact. */
   children?: ReactNode;
@@ -119,12 +80,6 @@ export function Row({
   );
 }
 
-/**
- * One unmet prerequisite, where the thing it is about is.
- *
- * The markup is what the foot-of-page stack used to render, unchanged — what
- * moved is where it appears, not how loudly it says it.
- */
 function Blocked({ blocker }: { blocker: Blocker }) {
   return (
     <div className="mt-1 flex w-full items-start gap-2.5 rounded-md border border-destructive bg-destructive-soft px-3 py-2.5">
@@ -143,13 +98,8 @@ function Blocked({ blocker }: { blocker: Blocker }) {
 }
 
 /**
- * A selectable tile — the one affordance every correction chooses with.
- *
- * §3's grammar lives here: an option that does not apply stays **on screen,
- * disabled, wearing its reason**. That is what makes "that is not what this
- * is" a correction somebody makes by reading rather than by guessing, and it
- * is why this takes `children` as well as a note — the Target rows need more
- * room and must not drift into their own styling.
+ * A selectable tile. An option that does not apply stays on screen, disabled,
+ * with its reason.
  */
 export function Choice({
   selected,
@@ -194,25 +144,12 @@ export const KIND_NOTE = {
   job: 'Runs to completion. A schedule is a field on it, never a separate noun.',
 } as const satisfies Record<ComponentKind, string>;
 
-/**
- * Derived from the note map rather than listed again, so a fourth
- * {@link ComponentKind} is a compile error here instead of a tile that silently
- * never renders.
- */
+/** Derived from {@link KIND_NOTE}, so a new kind cannot miss its tile. */
 export const KINDS = Object.keys(KIND_NOTE) as readonly ComponentKind[];
 
-/**
- * What each value is called on the top line of a row.
- *
- * The notes below are definitions and belong beside a tile somebody is
- * choosing between. A row's *value* is read by somebody who is not choosing
- * anything, and `service` is jargon there — it is the platform's word for the
- * thing, not the reader's. `satisfies` over the domain union for the reason
- * {@link KINDS} is derived: a fourth kind is a compile error, not a blank.
- */
+/** A kind as a row states it, in the reader's words. */
 export const KIND_LABEL = {
-  // Not "Web service": KIND_NOTE says a worker is a service that is not
-  // exposed, and at `reach: none` that is exactly what this is.
+  // Not "Web service": a worker is a service with no route.
   service: 'Long-running service',
   website: 'Website',
   job: 'Job',
@@ -226,10 +163,8 @@ export const REACH_NOTE = {
     'An address the internet reaches. The default is to put nothing in front of it.',
 } as const satisfies Record<Reach, string>;
 
-/** Derived, for the same reason {@link KINDS} is. */
 export const REACHES = Object.keys(REACH_NOTE) as readonly Reach[];
 
-/** Reach as a person would say it. See {@link KIND_LABEL}. */
 export const REACH_LABEL = {
   none: 'no address',
   private: 'only my network',
@@ -242,23 +177,14 @@ export const AUTH_NOTE = {
     "The platform's own sign-in stands in front. Only where that place offers one.",
 } as const satisfies Record<Auth, string>;
 
-/** Derived, for the same reason {@link KINDS} is. */
 export const AUTHS = Object.keys(AUTH_NOTE) as readonly Auth[];
 
-/** Auth as a person would say it. See {@link KIND_LABEL}. */
 export const AUTH_LABEL = {
   none: 'no sign-in',
   proxy: 'sign-in required',
 } as const satisfies Record<Auth, string>;
 
-/**
- * An adapter's product name, where it has one nobody has to learn.
- *
- * A plain `Record<string, string>` read through `?? adapter` rather than a
- * `satisfies` over a union, because `TargetOptionView.adapter` is typed
- * `string` — adapters are registered, not enumerated in the type system, so an
- * unknown one must render its own id rather than nothing.
- */
+/** Adapters are registered at runtime, so readers fall back to the id. */
 export const ADAPTER_LABEL: Record<string, string> = {
   kubernetes: 'Kubernetes',
   cloudrun: 'Cloud Run',
@@ -267,17 +193,7 @@ export const ADAPTER_LABEL: Record<string, string> = {
   'cloudflare-pages': 'Cloudflare Pages',
 };
 
-/**
- * The vessel, which is a fact rather than a decision — but only after this
- * screen.
- *
- * Not a row of its own any more. A row is a thing with a correction behind an
- * Edit, and this one never had one: it stated a value and offered nothing to do
- * about it, which made it a row that punished you for reading it. It says the
- * same sentence at the foot of "Where it runs", beside the Target that decides
- * it, and it keeps its lock because the one moment it is still changeable is
- * the one moment saying so is useful.
- */
+/** The vessel the chosen Target decides, fixed once the App is created. */
 export function VesselNote({
   name,
   note,

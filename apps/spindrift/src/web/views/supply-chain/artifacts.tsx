@@ -1,28 +1,6 @@
 /**
- * Artifacts — what the Builds left behind, and what the Deploys place.
- *
- * The noun between the two acts: **Source + Build = Artifact**, then
- * **Artifact + Config = Deploy**. A Build is an attempt with a status, a runner
- * and a log; the Artifact is immutable and outlives it, which is what makes
- * §2's "one Build → many Deploys" — and rollback without rebuilding — mean
- * anything. Reading this as a second view of the Builds ledger is exactly the
- * conflation the separation exists to undo.
- *
- * `deploys` is the column the screen is opened for: an Artifact nothing has
- * placed is a build that was never released, and that is not visible anywhere
- * a Build's status is the only thing on the row.
- *
- * Signature and provenance are columns rather than a colour. The row used to
- * encode `signed` as the difference between an `accent` dot and an `idle` one,
- * with no legend anywhere — so "which of these is unsigned" was a question
- * about a shade of grey, on the one screen whose subject is supply-chain
- * evidence. §16's verified level and core's own signature are two separate
- * claims and they get two separate cells; an unsigned row is `warning` because
- * that is the one an operator has to decide about.
- *
- * The full provenance envelope stays on the Build, beside the evidence that
- * produced it — a level here that was not derived from a document there would
- * be a claim about a claim.
+ * The Artifacts ledger: what each Build produced, its signature and verified
+ * provenance level, and how many Deploys placed it.
  */
 import { Boxes } from 'lucide-react';
 import type { OutputOf } from '../../client.ts';
@@ -260,13 +238,7 @@ export function ArtifactLedger({
   );
 }
 
-/**
- * The Artifacts screen — the ledger, and the read that fills it.
- *
- * Read once for the reason the Sources screen is: an Artifact is immutable and
- * outlives the attempt that made it, so a cadence would re-ask about rows that
- * cannot have changed.
- */
+/** Read once: an Artifact is immutable, but its Placed count is as of load. */
 export function ArtifactsScreen({
   onNavigate,
 }: {

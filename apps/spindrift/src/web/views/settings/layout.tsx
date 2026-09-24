@@ -1,21 +1,4 @@
-/**
- * The administrative rail, and the one tab strip left in this corner of the app.
- *
- * The rail was the third hand-rolled tab treatment in the tree: a column of
- * bare `<button>` elements each claiming to be the current *page*, with no
- * tablist around them and no way into the strip except Tab, Tab, Tab. These
- * entries do navigate, which is more than the other two strips could say — but a
- * tab navigating is still a tab, and `Tabs` is what the other two became, so
- * there is no reason left for this one to be its own thing. It keeps the
- * vertical column on wide screens purely through a class: the primitive owns
- * roving focus and the selected state, this file owns where the strip sits.
- *
- * `Danger zone` stays in the list. Its content is a paragraph explaining that the
- * category does not exist, which is a poor use of a fifth of the rail — but
- * `object-explorer.test.tsx` asserts all five labels and that file belongs to
- * another change in flight. Removing the entry and the assertion is one commit,
- * and it is not this one.
- */
+/** The Settings screen: a section rail, and the section the path names. */
 import type { ReactNode } from 'react';
 import { Eyebrow } from '../../ui/card.tsx';
 import { Tabs } from '../../ui/tabs.tsx';
@@ -100,16 +83,6 @@ export function EmptySettingsSection({
   );
 }
 
-/**
- * The Settings screen — which section the path names, and the one it falls back
- * to.
- *
- * The section is read off the path rather than held in state, so a settings
- * URL is a link somebody can send. An unrecognised section resolves to
- * connections rather than to a not-found: every route that lands here is
- * `/settings`-prefixed and the reader asked for settings, so the answer is the
- * section they most likely meant, not an error page.
- */
 export function SettingsScreen({
   path,
   onNavigate,
@@ -133,9 +106,6 @@ export function SettingsScreen({
       {section === 'connections' ? (
         <ConnectionsSettings onNavigate={onNavigate} />
       ) : section === 'identity' ? (
-        // Agent tokens are a third credential, not a third thing about
-        // passkeys, so they are a sibling card rather than a section inside a
-        // view whose every act needs a ceremony.
         <div className="flex flex-col gap-6">
           <IdentitySettings />
           <AgentTokens />
@@ -164,13 +134,8 @@ export function SettingsScreen({
 }
 
 /**
- * Every system outside Spindrift that Spindrift holds an address for, in the
- * order of the supply chain.
- *
- * Five sections in one ruled stack rather than five screens, because they are
- * all the same kind of thing and the order is the argument: where code comes
- * from, where a Source is staged, where a Source becomes an Artifact, where an
- * Artifact is pushed, and where it runs.
+ * Every external system this installation holds an address for, in supply
+ * chain order.
  */
 function ConnectionsSettings({
   onNavigate,

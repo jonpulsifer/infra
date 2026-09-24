@@ -1,32 +1,6 @@
 /**
- * Giving one Component new bytes (§4, §5).
- *
- * `deployApp` has always refused an archive App's Component with a sentence
- * naming the remedy — "upload an archive for this Component", "upload it again
- * to stage it in the depot" (`commands/apps/deploy.ts`) — and until this
- * control existed the remedy was reachable only by creating a *new* App, since
- * `/internal/upload` was called from the creation flow and nowhere else. A
- * refusal that names an act the screen does not offer is the failure mode a
- * green suite is worst at catching, which is the whole reason this is here.
- *
- * **It lives on the Component row, not on the App.** `uploadArchive` resolves
- * on `(componentId, targetId)` — §3 puts resolution before the build and has it
- * output "placement plus artifact shape", so a Build's key includes the shape
- * and there is no App-level act that could stand in for this one. An App with
- * three Components has three separate answers to "which one gets these bytes",
- * and a control in the header would have to invent a fourth question to ask.
- *
- * **Offered only where the Component is placed.** `serving` is every
- * (Component, Target) pair still standing; with none of them there is no Target
- * to resolve a shape against, and a first placement is `deployApp`'s to write
- * rather than this one's — which is exactly what the refusal says. Where a move
- * left two pairs standing, the Target is asked rather than guessed.
- *
- * Two steps, because the second question cannot be inferred: staging returns a
- * digest, and only then is §4's fork — *finished output* versus *source* —
- * answerable. The default follows the App: an archive App's uploads have always
- * been output it built elsewhere, a repo App reaching for this is vendoring
- * source it cannot fetch.
+ * Uploads new bytes for one placed Component. An upload resolves on a Component
+ * and Target pair, so it sits on the Component row.
  */
 import { Upload } from 'lucide-react';
 import { useId, useState } from 'react';
@@ -34,7 +8,7 @@ import type { ComponentView } from '../../../commands/views.ts';
 import { Button } from '../../ui/button.tsx';
 import { Card, CardContent } from '../../ui/card.tsx';
 
-/** What `/internal/upload` returns, which is the digest and where it went. */
+/** The body `/internal/upload` returns. */
 export interface StagedUpload {
   readonly digest: string;
   readonly location: string;
@@ -42,7 +16,7 @@ export interface StagedUpload {
   readonly size: number;
 }
 
-/** §4's two arms. Neither is inferable from the bytes, so it is asked. */
+/** The bytes cannot say which this is, so the form asks. */
 export type ArchiveContents = 'artifact' | 'source';
 
 export interface UploadRequest {
@@ -72,9 +46,8 @@ export function ComponentUploadButton({
   const [open, setOpen] = useState(false);
   const serving = component.serving ?? [];
 
-  // Nothing to resolve a shape against. The act that gives this Component its
-  // first Target is Deploy, and offering an upload here would collect bytes
-  // `uploadArchive` has nowhere to put.
+  // Unplaced: Deploy gives a first Target, and until then `uploadArchive` has
+  // nothing to resolve against.
   if (serving.length === 0) return null;
 
   return (
@@ -136,7 +109,6 @@ function UploadForm({
     try {
       setStaged(await onStage(chosen));
     } catch (cause: unknown) {
-      // The boundary's own sentence, unedited — it names what arrived.
       setError(cause instanceof Error ? cause.message : 'Staging failed');
     } finally {
       setBusy(false);
@@ -162,13 +134,8 @@ function UploadForm({
   if (staged === null) {
     return (
       <div className="grid gap-2">
-        {/*
-          A label around the input rather than a div with a click handler: the
-          file dialog then opens from a real control, so the keyboard and a
-          screen reader reach it without the drag handlers having to pretend to
-          be an activation they cannot be — there is no keyboard equivalent of
-          a drop, and `role="button"` here would claim one.
-        */}
+        {/* A label around the input keeps the file dialog on a real control.
+            A drop has no keyboard equivalent for `role="button"` to claim. */}
         <label
           className="grid cursor-pointer place-items-center gap-1 rounded-sm border border-border border-dashed p-5 text-center focus-within:border-primary"
           onDragOver={(event) => event.preventDefault()}
@@ -211,7 +178,6 @@ function UploadForm({
         </span>
       </div>
 
-      {/* Asked only where a move left two pairs standing. */}
       {serving.length > 1 ? (
         <label className="grid gap-1">
           <span className="text-muted-foreground text-xs">Target</span>

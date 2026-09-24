@@ -1,40 +1,7 @@
 /**
- * The landing screen, as an answer rather than a database browser.
- *
- * It was titled "Object explorer" and it earned the name: four object kinds —
- * Deploys, Builds, Targets, Apps — concatenated into one list in *array* order,
- * which is not time order and could never become time order, because two of the
- * four carry no instant at all. An operator opening the product was handed a
- * heterogeneous scroll and left to find the question themselves.
- *
- * So it is four named zones now, in the order the questions are asked.
- *
- * **Serving** is first and is the one this product exists to answer: what is in
- * front of users right now. `current` is the only field that knows — §6 keeps a
- * superseded release `LIVE`, so "which of these LIVE rows is the one serving" is
- * unanswerable from `phase` — and it was rendered nowhere on this screen. The
- * address is a real link only when `urlLive`, because a link to an address
- * serving someone else's release is worse than no link.
- *
- * **Counts** come second, and they say what they are. The tiles used to read
- * `deploys.length` off an array the caller had fetched with `limit: 12` and
- * present it as a fleet total, so a hundred-Deploy installation reported twelve.
- * When the caller says there is another page, the value carries a `+` and the
- * footnote scopes it to the newest N. A tile that cannot know the total must not
- * print one.
- *
- * **Standing state** is third: Apps and Targets, which have a condition rather
- * than a moment. Hoisting them out of the feed is what makes the feed sortable —
- * they were the rows with no `at`.
- *
- * **Activity** is last, sorted by `at` descending across Builds and Deploys, and
- * the tiles filter it: a count of three failures that leaves the reader to find
- * which three is a count doing half its job.
- *
- * What this screen refuses: a fleet activity command, a chart, and any total it
- * would have to invent. `listBuilds`/`listAllDeploys` return a page and a
- * cursor; a real fleet summary is a server read this screen does not have, and
- * inventing one from a page is exactly the bug being fixed.
+ * The landing screen: a verdict, what is serving, counts, Apps and Targets, and
+ * the newest Builds and Deploys. A count from a paged read carries a `+` and is
+ * scoped to the page, because this screen has no fleet total.
  */
 import { Radio } from 'lucide-react';
 import { useMemo, useState } from 'react';
@@ -85,12 +52,8 @@ interface Entry extends ExplorerItem {
 type Lane = 'all' | 'attention' | 'inflight' | 'builds' | 'deploys';
 
 /**
- * A Target's name is both halves of it.
- *
- * `views.ts` is explicit that neither the boundary nor the surface identifies a
- * Target alone, and two clusters both running `kubernetes` were the same word
- * twice on this screen. An unplaced App has no boundary yet, and says the
- * surface alone rather than inventing a `/`.
+ * Vessel and adapter, since neither identifies a Target alone. An unplaced App
+ * has no Vessel yet and shows the adapter by itself.
  */
 function targetName(vessel: string, adapter: string): string {
   return vessel ? `${vessel}/${adapter}` : adapter;
@@ -102,26 +65,14 @@ function appTone(phase: AppListItem['phase']): MetricTone {
   return 'warning';
 }
 
-/** A count that is only the newest page says so, in the value and beside it. */
+/** A `+` marks a count that is only the newest page. */
 function pageCount(loaded: number, hasMore: boolean): string {
   return hasMore ? `${loaded}+` : String(loaded);
 }
 
 /**
- * The sentence this screen exists to say, computed rather than written.
- *
- * The screen was headed `Operations` under the eyebrow `Control plane`, which
- * is the name of the machinery and not an answer to the question an operator
- * opens it with. Every count below was already on the page; what was missing
- * was the one line that reads them and says which way the installation is
- * pointing, so that arriving is not a scan.
- *
- * It is computed for the reason the pulsing dot is only set on a phase that is
- * moving: a banner that greets you the same way on the morning a Deploy is
- * down is a banner nobody reads the second time. The order of the branches is
- * the order an operator cares — something is red, something is moving,
- * everything is fine, nothing exists yet — and `FAILED` outranks in-flight
- * because a release that is still trying is not the thing you were paged for.
+ * The headline over the counts. Branch order is priority: a failed App outranks
+ * a Target needing attention, which outranks work in flight.
  */
 export function verdict(counts: {
   apps: number;
@@ -186,12 +137,7 @@ export function Overview({
   readonly builds: readonly BuildListItem[];
   readonly deploys: readonly DeployLedgerItem[];
   readonly targets: readonly TargetListItem[];
-  /**
-   * Whether the caller's Build/Deploy reads left a next page behind. Optional
-   * and false by default: a caller that has not been taught to keep its cursor
-   * gets the old, smaller claim — the loaded rows — rather than a `+` it cannot
-   * back up.
-   */
+  /** Whether the Build and Deploy reads left a next page: it adds the `+`. */
   readonly buildsHasMore?: boolean;
   readonly deploysHasMore?: boolean;
   readonly onNavigate: (path: string) => void;
@@ -295,9 +241,6 @@ export function Overview({
         ],
       };
     });
-    // Newest first across both kinds. This is the sort the old concatenation
-    // could not do: Targets and Apps have no instant, so a list holding them
-    // had no comparable key and stayed in the order the four reads returned.
     return [...fromDeploys, ...fromBuilds].sort((left, right) =>
       right.at.localeCompare(left.at),
     );
@@ -337,11 +280,6 @@ export function Overview({
         aria-label="The state of this installation"
         className="relative overflow-hidden rounded-lg border border-border bg-card px-6 py-8 sm:px-9 sm:py-11"
       >
-        {/*
-          The one flourish, and it is a token rather than a literal so it
-          follows the accent through both themes. Behind the text, never over
-          it: `aria-hidden` because it says nothing the sentence does not.
-        */}
         <div
           aria-hidden="true"
           className="pointer-events-none absolute inset-0 bg-[radial-gradient(120%_150%_at_96%_-30%,var(--accent-soft),transparent_58%)] opacity-70"
@@ -524,13 +462,8 @@ export function Overview({
 }
 
 /**
- * What is in front of users, and where.
- *
- * One row per desired release. The address is an anchor only where the read
- * model says that address currently serves *this* release: §6 leaves the
- * previous release exposed after a failure, so a link rendered from `url` alone
- * would send an operator to a page that disagrees with the row they clicked it
- * from.
+ * One row per desired release. The address links only when `urlLive`: after a
+ * failure the previous release stays exposed, so `url` may serve another one.
  */
 function Serving({
   serving,
@@ -665,13 +598,6 @@ function Serving({
   );
 }
 
-/**
- * The two kinds with a condition rather than a moment.
- *
- * They were rows in the feed, which is why the feed could not be sorted. Side
- * by side they answer the two standing questions instead: what exists, and what
- * it can be placed on.
- */
 function StandingState({
   apps,
   targets,
@@ -740,8 +666,6 @@ function StandingState({
       align: 'end',
       sortable: true,
       sortValue: (target) => target.health,
-      // The first unmet prerequisite is the whole reason a Target is amber, and
-      // it was reachable only by selecting the row on a list of four kinds.
       cell: (target) =>
         target.health === 'healthy' && target.configured ? (
           <Badge tone="success">healthy</Badge>
@@ -807,14 +731,7 @@ function StandingState({
   );
 }
 
-/**
- * The landing screen, loading.
- *
- * Its own shape rather than the shared `LedgerSkeleton` with more rows, because
- * the tile strip is the tallest thing above the fold: standing in for it with
- * rows moves the feed up by a hundred pixels and then drops it back down, which
- * is the jump a skeleton exists to prevent.
- */
+/** Holds the tile strip's height, so the feed does not jump when it loads. */
 function OverviewSkeleton() {
   return (
     <Page>
@@ -834,18 +751,8 @@ function OverviewSkeleton() {
 }
 
 /**
- * The landing screen — four reads, one answer.
- *
- * Four commands in one read rather than four screens' worth of independent
- * ones: the tiles are a single claim about the installation, and letting each
- * land on its own would draw a fleet that is four different ages across one
- * row of numbers.
- *
- * Both paged reads ask for twelve and answer with the cursor for the
- * thirteenth, which this screen used to drop on the floor — and then counted
- * the twelve it kept as if they were the fleet. Keeping the cursor is the whole
- * fix: nothing here pages, it only needs to know that "3 running" is three of
- * the newest twelve and not three in the installation.
+ * One read for all four, so the counts are the same age. Nothing here pages;
+ * `nextBefore` only says whether a count covers the whole ledger.
  */
 export function OverviewScreen({
   onNavigate,

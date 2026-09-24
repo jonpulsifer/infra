@@ -1,28 +1,6 @@
 /**
- * Deploys — the placement ledger, as a table with the act it was missing.
- *
- * Two facts the server computed and the screen threw away.
- *
- * `current` is the difference between "this release reached LIVE" and "this
- * release is what should be running": `views.ts` says outright that a LIVE
- * Deploy a newer intent has superseded is still LIVE, and only the desired row
- * knows. That was one `yes`/`no` cell in the inspector; it is a column now,
- * because the question "which of these seven LIVE rows is the one serving" is
- * the reason an operator opens this screen.
- *
- * `rollbackable` is computed by `commands/deploys/list.ts` under the *same*
- * comparison `rollbackDeploy` makes, and `views.ts` explains why: so the act is
- * offered only where it would be accepted, rather than offered everywhere and
- * refused half the time. It appeared nowhere in this area. The inspector now
- * carries the act itself — a rollback is an ordinary deploy naming an older
- * Build, so this posts the same intent the App workspace would and reports the
- * refusal verbatim when core declines it.
- *
- * What it refuses: an impact review before the press. `DisconnectTargetControl`
- * has the right precedent for a consequential act and rollback deserves it, but
- * a rollback is reversible by another rollback and a dialog primitive is out of
- * scope this session — so the button states what it will do, the result says
- * what happened, and neither pretends the ceremony exists.
+ * The Deploys ledger, with which release is serving and a rollback act. A row's
+ * `rollbackable` makes the same comparison `rollbackDeploy` does.
  */
 import { useEffect, useState } from 'react';
 import type { DeployLedgerItem, DeployPhase } from '../../../commands/views.ts';
@@ -48,17 +26,13 @@ import { Timestamp } from '../../ui/timestamp.tsx';
 import { notify } from '../../ui/toast.tsx';
 import { LedgerSkeleton, mergeLedger, ScreenFailure } from '../screen.tsx';
 
-/**
- * The tone a phase reads in. `faulty` is the soak's verdict on a `LIVE` row
- * (§6) and the one fact beside the phase that changes the answer.
- */
+/** `faulty` is the soak's verdict on a `LIVE` row, and overrides the phase. */
 export function deployTone(phase: DeployPhase, faulty = false): ExplorerTone {
   if (faulty || phase === 'FAILED') return 'destructive';
   if (phase === 'LIVE') return 'success';
   return 'accent';
 }
 
-/** The ledger's lower-case word for a phase, or `faulty` where the soak said so. */
 export function deployWord(phase: DeployPhase, faulty = false): string {
   return faulty ? 'faulty' : phase.toLowerCase();
 }
@@ -278,13 +252,6 @@ export function DeployLedger({
   );
 }
 
-/**
- * Go back to this release's Build, where core would accept it.
- *
- * Absent rather than disabled when `rollbackable` is false. A disabled button
- * says "you may do this later"; the truth is that this Build is not older than
- * what is desired, which is not a state waiting to change on this row.
- */
 function RollbackControl({
   deploy,
   onNavigate,
@@ -339,7 +306,6 @@ function RollbackControl({
   );
 }
 
-/** Real Build and placement evidence for the selected Deploy inspector. */
 function DeployEvidence({ deployId }: { readonly deployId: number }) {
   const [state, setState] = useState<
     | { type: 'loading' }
@@ -409,11 +375,8 @@ function DeployEvidence({ deployId }: { readonly deployId: number }) {
 }
 
 /**
- * The Deploys screen — the ledger and its two sources of rows.
- *
- * Merged on the tick for the reason the Builds screen is: the cadence owns the
- * newest page, the reader owns everything paged in below it, and `nextBefore`
- * belongs to whichever of the two last paged.
+ * Each tick merges the newest page over the older pages the reader loaded, and
+ * keeps the reader's `nextBefore`.
  */
 export function DeploysScreen({
   onNavigate,

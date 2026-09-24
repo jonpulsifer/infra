@@ -1,43 +1,6 @@
 /**
- * Deploying a new App: one question, then a card of answers.
- *
- * §18 named the creation flow Source → Component → Place → Configure → Review.
- * The rail went away — stories 31 and 32 say what the sequence was *for*,
- * "defaults carrying every step" and "corrections hidden behind progressive
- * disclosure", and five screens with a Continue button under each turned out to
- * be the rendering that made every default look like a question.
- *
- * What replaced it was nine pre-answered rows, and that had a worse problem:
- * **it was pre-answered about the wrong repository**. `startCreationDraft`
- * opened every draft on whichever active repository sorted first, so the screen
- * arrived named after a repo nobody picked, having already read it, with eight
- * rows below stating consequences of that choice. Reading down it was not
- * confirming a plan; it was auditing somebody else's.
- *
- * So the screen has two shapes. **Until there is a source there is one
- * question** — which repository, or an archive — and the picker is the entire
- * page, because nothing below it can be true yet. **Once there is one**, four
- * rows say what will happen: Code, Type, Name, Where it runs. Each states the
- * answer *and why it is the answer*, and each opens its correction in place.
- *
- * Five rows became one. Reach, Auth, Target, URL and Vessel are five facts
- * about a single question — where does this run and who can reach it — and
- * promoting each to its own row asked a person to hold five platform nouns to
- * read one sentence. `Where it runs` states that sentence and keeps every one
- * of those controls, unchanged, one Edit away.
- *
- * **The rows are in dependency order.** Placement is derived from kind, reach
- * and auth (§3) — the `listTargets` refetch below *is* that derivation — so
- * Where it runs comes last. Name is no longer first: it is derived from the
- * repository, and asking somebody to name a thing before saying what it is was
- * the order the old screen had.
- *
- * The reason any of this is honest is `inspectRepository`. The draft has always
- * carried a `detection` block and nothing could ever fill it, so every draft
- * opened claiming to be a service "until detection says otherwise" and
- * detection never said. Choosing a repository here runs the real §5 ladder over
- * the real default branch, and the kind, the scope, the build frontend and the
- * ruled-out kinds are what it found.
+ * Deploying a new App. Until the draft has a source the page is one question,
+ * which repository or archive; after that it is four answered rows.
  */
 import { Loader2, Rocket, Search } from 'lucide-react';
 import { type Dispatch, useEffect, useRef, useState } from 'react';
@@ -104,41 +67,21 @@ import {
 } from './summary.tsx';
 import { type DraftWrites, draftWrites } from './writes.ts';
 
-/** The four rows the card is, as ids the parent can hold one of. */
 type PlanRow = 'code' | 'type' | 'name' | 'where';
 
-/**
- * Which row each unmet prerequisite belongs beside.
- *
- * Total over {@link CreationBlockerCode} rather than a lookup with a fallback,
- * so a seventh blocker code is a compile error here instead of a sentence that
- * renders nowhere. That is the failure the foot-of-page stack could not have:
- * it showed everything, which is why it also showed everything eight sections
- * away from the thing it was about.
- */
 const BLOCKER_ROW = {
   SOURCE_UNAVAILABLE: 'code',
   REPOSITORY_UNAVAILABLE: 'code',
   BUILD_ROUTE_UNAVAILABLE: 'code',
   TARGET_UNAVAILABLE: 'where',
   VESSEL_UNAVAILABLE: 'where',
-  // Nothing on this screen supplies a value — the App's own Config tab does —
-  // so it sits with the thing it is about, which is the App as a whole.
+  // Config is set on the App's Config tab, so this sits with the App's name.
   CONFIG_INCOMPLETE: 'name',
 } as const satisfies Record<CreationBlockerCode, PlanRow>;
 
 /**
- * What stands between a repository with several Apps in it and a Deploy.
- *
- * The draft names a directory from the moment it exists — the root — and
- * deploying that because nobody corrected it is the silent first-hit this
- * screen refuses to make. So while detection is offering more than one
- * candidate and the draft names none of them, there is a prerequisite to clear,
- * stated the way every other unmet prerequisite on this screen is.
- *
- * A directory the operator typed is an answer, however detection reads it, and
- * a repository detection could make nothing of leaves the assertion path open:
- * §5's ladder proposes, and story 32 keeps the escape hatch.
+ * Blocks Deploy while detection offers several directories and the draft names
+ * none of them. A directory the operator typed counts as an answer.
  */
 function unchosenScope(
   draft: Draft,
@@ -157,39 +100,21 @@ function unchosenScope(
 }
 
 /**
- * What went wrong with the read, split on whether there was one.
- *
- * The two are different answers and only one of them is a prerequisite. A
- * repository that could not be read leaves every row below Source standing on
- * the draft's opening claim — a kind nothing checked, a directory nothing
- * looked in — so Deploy would build a guess. A repository that *was* read and
- * holds nothing buildable is the assertion path §5 keeps open: name the
- * directory, pick the kind, and Spindrift builds what you said.
+ * A repository read that failed (`unread`, which blocks Deploy) or found nothing
+ * buildable (`unsupported`, which leaves the operator free to name a directory
+ * and pick the kind).
  */
 export interface DetectionTrouble {
   readonly kind: 'unread' | 'unsupported';
   readonly message: string;
-  /** The repository the read was about. */
   readonly repo: string;
-  /**
-   * The directory it asked about, absent when it asked about the tree.
-   *
-   * What makes the sentence checkable against the draft rather than cleared on
-   * a guess: a complaint about `docs` stops being on screen when the root
-   * directory stops saying `docs`, and one about the repository as a whole does
-   * not, because naming a directory in it did not read it.
-   */
+  /** The directory the read asked about, absent for the whole tree. */
   readonly scope?: string;
 }
 
 /**
  * The last read's complaint, while the draft still names what it is about.
- *
- * Derived rather than cleared per action, which is the whole of the fix: an
- * enumeration of the actions that "move the input" cannot tell a sentence about
- * a directory from a sentence about a repository, and clearing an unreadable
- * repository on a keystroke in the root directory field re-enables Deploy on
- * the draft's opening claim — a kind nothing checked, in a tree nothing read.
+ * Derived, so editing the directory never clears a whole-repository complaint.
  */
 export function standingTrouble(
   draft: Draft,
@@ -211,34 +136,25 @@ function unreadRepository(
     {
       code: 'REPOSITORY_UNAVAILABLE',
       title: `Spindrift could not read ${draft.source.repo}.`,
-      // The message itself is already on screen, as the Source row's reason.
-      // Repeating it here read as two separate problems with one repository.
+      // The Code row already shows the read's message as its reason.
       remediation:
         'Until it can be read, nothing below came from the repository.',
     },
   ];
 }
 
-/** Whether anything has answered which directory this draft deploys. */
 function answeredScope(draft: Draft): boolean {
   return draft.scopeByOperator === true || draft.detection.scope !== undefined;
 }
 
-/** The schema's own complaint about one value, or `null`. */
 function issueWith(schema: ZodType<string>, value: string): string | null {
   const parsed = schema.safeParse(value);
   return parsed.success ? null : (parsed.error.issues[0]?.message ?? null);
 }
 
 /**
- * What creating the App did to the repository, said once, on the way out.
- *
- * Deploy is the only place a repository GitHub merely grants gets connected,
- * and connecting opens the one configuration pull request §15 makes
- * authoritative on merge. `connectRepository` fails open on that pull request —
- * the repository stays connected either way — so a silence here is the
- * difference between "merge this" and "your builds will never run on your own
- * repository", and neither was ever said on this screen.
+ * Reports the configuration pull request once, on the way out. Connecting
+ * succeeds even when the pull request fails to open, so only this says so.
  */
 function reportConfigPullRequest(app: {
   readonly configPullRequest: number | null;
@@ -272,13 +188,12 @@ function reportConfigPullRequest(app: {
   }
 }
 
-/** A refusal, and what the operator was doing when it arrived. */
 interface Refused {
   readonly failure: TransportFailure;
   readonly title?: string;
 }
 
-/** The two reads this screen opens with, in the order they are made. */
+/** The two reads the screen opens with, in order. */
 export type CreationLoad = 'draft' | 'options';
 
 const LOADING_NOTE = {
@@ -286,16 +201,7 @@ const LOADING_NOTE = {
   options: 'Reading the Targets and repositories it can use…',
 } as const satisfies Record<CreationLoad, string>;
 
-/**
- * The screen's own shape, while the two reads it opens with are in flight.
- *
- * A screen that is a card of decided rows loads as a card of rows: one pulsing
- * sentence says a page is coming and nothing about what will be on it, and the
- * layout shift when the real rows arrive is the reader losing their place. The
- * caption names the read actually outstanding, because the second one cannot
- * start until the first has answered — the draft says what to resolve placement
- * for (§3) — so "still loading" has two different meanings here.
- */
+/** A skeleton of the rows, captioned with the read still outstanding. */
 export function CreationSkeleton({ phase }: { phase: CreationLoad }) {
   return (
     <div
@@ -327,12 +233,8 @@ export function CreationSkeleton({ phase }: { phase: CreationLoad }) {
 }
 
 /**
- * Neither read answered, so there is no draft to show.
- *
- * Every one of the three reads behind this screen is idempotent — a start
- * replays onto the draft id it was handed, and the other two are queries — so
- * the retry is free, and without it a transient failure left the operator on a
- * screen with a sentence and nothing to press.
+ * Retrying is safe: a start replays onto the draft id it was handed, and the
+ * other reads are queries.
  */
 export function CreationLoadFailure({
   message,
@@ -361,27 +263,20 @@ export function NewApp({
 }: {
   initial: CreationDraftView;
   targets: readonly TargetOptionView[];
-  /** Repositories Spindrift holds a row for. */
+  /** Repositories with a stored row. */
   repos: readonly RepositoryOptionView[];
   /** Repositories GitHub currently grants this installation. */
   available: readonly GrantedRepositoryView[];
   onCreated?: (app: { readonly id: string; readonly name: string }) => void;
 }) {
   const [draft, setDraft] = useState(initial.draft);
-  // Placement is derived from kind, reach and auth (§3), so the options are
-  // only true for the draft they were resolved against. Correcting any of the
-  // three re-resolves them; leaving them stale is how a `website` ends up
-  // offered the candidates for a `service`.
   const [targets, setTargets] = useState(initialTargets);
   const [serverBlockers, setServerBlockers] = useState(initial.blockers);
   const [refusal, setRefusal] = useState<Refused | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [detecting, setDetecting] = useState(false);
   const [trouble, setTrouble] = useState<DetectionTrouble | null>(null);
-  // Everything the last read said about this repository, unsummarized. The
-  // wizard's job is to offer it, so it is kept as it arrived: dropping the
-  // scopes detection could not make sense of would leave "why not here"
-  // unanswerable, and dropping the ones it could would leave the screen picking.
+  // Unfiltered, so the chooser also lists what detection could not build.
   const [scopes, setScopes] = useState<readonly InspectedScope[] | null>(null);
   const scopesRef = useRef<readonly InspectedScope[]>([]);
   const draftRef = useRef(initial.draft);
@@ -400,10 +295,8 @@ export function NewApp({
     detected,
     draft.scopeByOperator === true,
   );
-  // The sentence under Component is a statement about one directory, and the
-  // draft can name another one — an edit that has not settled yet, or a
-  // directory detection could make nothing of. Saying which is what keeps the
-  // reason from reading as though it were about the path on screen.
+  // Detection's reason is about the directory it read, which can differ from
+  // the subpath.
   const readElsewhere =
     draft.source.kind === 'repo' &&
     draft.detection.scope !== undefined &&
@@ -416,12 +309,8 @@ export function NewApp({
   ];
   const blockers = [
     ...localBlockers,
-    // Deduped on what the blocker *says*, not on its code. Both sides mint
-    // `SOURCE_UNAVAILABLE` about different facts — "nothing is chosen to deploy
-    // from this repository" here, "no authoritative commit ready to stage"
-    // there — and matching on the code alone hid the server's sentence behind
-    // the local one, so clearing the first revealed a second, unrelated
-    // problem that had been there all along.
+    // Deduped on code and title, since both sides mint SOURCE_UNAVAILABLE
+    // about different facts.
     ...serverBlockers.filter(
       (server) =>
         !localBlockers.some(
@@ -431,7 +320,6 @@ export function NewApp({
   ];
   const target = targets.find((option) => option.targetId === draft.targetId);
   const choices = repositoryChoices(repos, available);
-  // The file the chosen directory will get, from the read that chose it.
   const spindriftFile = spindriftFileFor(
     (scopes ?? []).find(
       (scope) =>
@@ -444,55 +332,25 @@ export function NewApp({
     draft.componentName,
   );
 
-  /**
-   * Whether anything has said where the code comes from.
-   *
-   * The screen's one branch. Before this is true nothing below the picker can
-   * be true either — a kind read from no repository, a Target resolved for that
-   * kind, a URL minted from that Target — so none of it is rendered rather than
-   * rendered as a claim.
-   */
   const hasSource =
     draft.source.kind === 'repo'
       ? draft.source.repo !== ''
       : Boolean(draft.source.location);
 
   /**
-   * Which row is showing its correction, and who decided.
-   *
-   * `null` means nobody has pressed anything, so the row holding an unmet
-   * prerequisite opens itself — §3's disabled-with-reasons grammar only works
-   * when the alternatives are *visible*, and "nothing can run this" is
-   * unreadable while the list of places that cannot is behind a pencil. Once
-   * somebody presses Edit or Done the value is theirs and a read landing never
-   * moves it, which is what the three sticky refs inside every `Row` were
-   * failing to do.
+   * The row showing its correction. Null until someone presses Edit or Done;
+   * while null, the most troubled row opens itself.
    */
   const [expanded, setExpanded] = useState<PlanRow | 'none' | null>(null);
   const blockersIn = (row: PlanRow) =>
     blockers.filter((blocker) => BLOCKER_ROW[blocker.code] === row);
   /**
-   * Whether where-the-code-is is still the open question.
-   *
-   * Not every one of these is a blocker. A repository Spindrift read and could
-   * build nothing in creates nothing to clear — §5's assertion path is open, so
-   * naming a directory and picking a kind is a legal answer — but the list of
-   * what it *did* find is the whole of why that is a readable choice, and it is
-   * inside this row. A complaint about a directory with the list behind a
-   * pencil is §3's grammar with the alternatives hidden.
+   * Opens the Code row even when nothing blocks, since the directory list is
+   * inside it.
    */
   const codeUnsettled =
     draft.source.kind === 'repo' &&
     (standing !== null || !answeredScope(draft));
-  /**
-   * The row that opens itself, in the order the reasons outrank each other.
-   *
-   * A blocker first: it is the thing between this draft and a Deploy. Then a
-   * value the schema will refuse, because that message is attached to an input
-   * and is unreadable anywhere else — and it is about something the person is
-   * typing right now. An unanswered Code row last: it always states its
-   * question on the row itself, so it is the one that can afford to wait.
-   */
   const troubled: PlanRow | null =
     (['code', 'type', 'name', 'where'] as const).find(
       (row) => blockersIn(row).length > 0,
@@ -505,14 +363,9 @@ export function NewApp({
     setExpanded(isOpen(row) ? 'none' : row);
 
   /**
-   * Put the server's copy of the draft back on screen.
-   *
-   * The revision guard means one refused save refuses every save after it: the
-   * revision the tab holds is a version that no longer exists, so the next
-   * keystroke is refused for the same reason, forever. Re-reading is the whole
-   * recovery — the server's draft is the truth by definition here — and what it
-   * costs is whatever was typed since the other tab wrote, which is why it is
-   * said out loud rather than done quietly.
+   * Puts the server's draft back on screen. After a stale edit every later
+   * save is refused too, so re-reading is the only recovery; it drops local
+   * edits.
    */
   const resync = async (): Promise<void> => {
     try {
@@ -526,11 +379,7 @@ export function NewApp({
       draftRef.current = recovered.value.draft;
       setDraft(recovered.value.draft);
       setServerBlockers(recovered.value.blockers);
-      // Whatever the debounce is still holding was written against the version
-      // that just lost, and sending it would put a document nobody is looking
-      // at on the server at the revision just recovered — where it lands,
-      // because the revision is all the guard checks. Dropped after the read
-      // rather than before it, so an edit made while it was in flight goes too.
+      // After the read, so an edit made while it was in flight is dropped too.
       writes.current?.discard();
       unsaved.current = null;
       setRefusal({
@@ -591,9 +440,8 @@ export function NewApp({
     const next = draftReducer(previous, action);
     draftRef.current = next;
     setDraft(next);
-    // Compared rather than keyed off the action type: `entry` and `detect`
-    // change the kind too, and an enumeration here would drift the first time a
-    // new action moves one of the three.
+    // Targets depend on these three. Compared by value, since actions such as
+    // `entry` and `detect` change the kind too.
     if (
       next.kind !== previous.kind ||
       next.reach !== previous.reach ||
@@ -604,8 +452,7 @@ export function NewApp({
         reach: next.reach,
         auth: next.auth,
       }).then((result) => {
-        // Only the newest answer counts: a slower earlier read must not
-        // overwrite the options for the draft as it stands now.
+        // A slower earlier read must not overwrite the current draft's options.
         if (result.ok && draftRef.current === next)
           setTargets(result.value.options);
       });
@@ -614,19 +461,8 @@ export function NewApp({
   };
 
   /**
-   * Read a repository and offer what is in it.
-   *
-   * One read of the real default branch, through the same ladder that writes
-   * `spindrift.yaml`. Every directory it answered about is kept and shown, and
-   * `outcomeOf` decides what — if anything — the draft may take from it.
-   *
-   * `scope` names one directory, which is what an edited subpath asks about —
-   * §5's "named, never searched". Its answer replaces that directory's row and
-   * leaves the rest of the list alone, so correcting a path does not throw away
-   * the candidates beside it.
-   *
-   * Failing to read is not failing to select: the repo is still the source, the
-   * kind is still correctable, and the sentence says which of the two happened.
+   * Reads a repository, or one named directory in it, and applies what
+   * `outcomeOf` allows. A directory's answer replaces only its own row.
    */
   const inspect = async (fullName: string, scope?: string) => {
     setDetecting(true);
@@ -637,9 +473,7 @@ export function NewApp({
         inspection(fullName, scope),
       );
       if (!result.ok) {
-        // Recorded against the repository and no directory, whichever the
-        // request named: what failed is the reading of the tree, and only
-        // another repository — or another read — is a different answer.
+        // No scope even for a directory read: the repository failed to read.
         setTrouble({
           kind: 'unread',
           message: result.failure.message,
@@ -681,7 +515,6 @@ export function NewApp({
     }
   };
 
-  /** Selecting a repository reads it. Nothing is written until Deploy. */
   const selectRepo = (repo: RepositoryChoice) => {
     dispatch({
       type: 'repo',
@@ -706,11 +539,8 @@ export function NewApp({
   };
 
   /**
-   * A settled subpath edit asks about the directory it now names.
-   *
-   * And is the point the typing counts as an answer — the flag rides on this
-   * dispatch rather than on every keystroke, so a half-typed path no longer
-   * clears the prerequisite that says nothing has been chosen yet.
+   * Marks a typed directory as the operator's answer and reads it. Only on
+   * settle, so a half-typed path cannot clear the unchosen-directory blocker.
    */
   const settleSubpath = () => {
     const source = draftRef.current.source;
@@ -719,12 +549,8 @@ export function NewApp({
     void inspect(source.repo, source.subpath);
   };
 
-  // Detection runs for the repository the draft opens on, before anybody
-  // presses anything. A draft claims a kind from the moment it exists, and a
-  // screen that renders that claim without ever asking is the screen this
-  // whole flow was supposed to replace. Reading writes nothing, so the only
-  // thing it costs a draft nobody finishes is one request — and `outcomeOf`
-  // is what keeps a reopened draft reading rather than re-deciding.
+  // Reads the repository the draft opens on; `outcomeOf` keeps a reopened
+  // draft's answers.
   const opened = useRef(false);
   useEffect(() => {
     if (opened.current) return;
@@ -734,9 +560,7 @@ export function NewApp({
     void inspect(source.repo);
   }, []);
 
-  // A debounce that drops the last edit when the screen goes away is a
-  // debounce that loses work: navigating off within the window would leave the
-  // draft one keystroke behind what was on screen. Leaving sends it.
+  // Flushes on unmount, or leaving inside the debounce loses the last edit.
   useEffect(
     () => () => {
       void writes.current?.flush();
@@ -763,11 +587,8 @@ export function NewApp({
         setRefusal({ failure: outcome.failure, title: outcome.title });
         return;
       }
-      // The press is as capable of finding the stale revision as a keystroke
-      // is, and it lands there whenever the last edit was already saved: the
-      // flush sends nothing, so the completion is the first thing carrying the
-      // revision another tab has superseded. Reported rather than recovered, it
-      // is a refusal telling the operator to reload with no control that does.
+      // With nothing left to flush, completion is the first request to carry a
+      // revision another tab superseded.
       if (outcome.act === 'stale') {
         await resync();
         return;
@@ -779,18 +600,13 @@ export function NewApp({
       setRefusal(null);
       setServerBlockers(outcome.result.draft.blockers);
       if (outcome.result.app === null) return;
-      // Said before the navigation, because after it this screen is gone and
-      // the pull request is the one thing creation did that is not on the App
-      // it navigates to. §15 makes merging it the act that connects the
-      // repository, so an App created with an unmentioned pull request is an
-      // App whose next Build runs on the wrong repository's minutes.
+      // Before navigating: the App's page does not mention the pull request.
       reportConfigPullRequest(outcome.result.app);
       onCreated?.({
         id: outcome.result.app.appId,
         name: outcome.result.app.name,
       });
     } finally {
-      // Whatever happened, the button stops saying it is creating something.
       setSubmitting(false);
     }
   }
@@ -815,18 +631,10 @@ export function NewApp({
     />
   );
 
-  // Until something says where the code is, the picker *is* the page. Every
-  // row below it would be a statement about a repository nobody has chosen —
-  // which is exactly what this screen used to render, because the draft was
-  // born pointing at whichever repository sorted first.
+  // Until there is a source, every row would describe code nobody chose.
   if (!hasSource) {
     return (
       <div className="mx-auto flex w-full max-w-[760px] flex-col gap-5 px-5 py-6">
-        {/*
-          Both tiles are on this page, so the header names neither. It said
-          "Import a repository" over an Upload tile, which is the page arguing
-          with the control directly beneath it.
-        */}
         {header(
           'Import your code',
           'Say where the code comes from. Nothing is connected or written until you press Deploy.',
@@ -846,13 +654,8 @@ export function NewApp({
       ? 'Deploy an upload'
       : `Deploy from ${draft.source.repo}`;
 
-  // The read that follows choosing a repository, with nothing mounted under it.
-  // A card of rows drawn from a draft nothing has read yet is a card that
-  // rewrites itself a second later, and the reader loses their place in it.
-  //
-  // `answeredScope` is what keeps a reopened draft out of here: it has been
-  // answered, `outcomeOf` will apply nothing, and flashing a reading state at
-  // somebody returning to a finished draft says a question is being asked.
+  // Rows drawn before the first read would rewrite themselves when it arrives.
+  // An answered draft skips this, since the read changes nothing on it.
   if (detecting && scopes === null && !answeredScope(draft)) {
     return (
       <div className="mx-auto flex w-full max-w-[760px] flex-col gap-5 px-5 py-6">
@@ -883,15 +686,7 @@ export function NewApp({
           : 'Nothing has read your archive, so check the type and the name below, then deploy.',
       )}
 
-      {/*
-        Dependency order, top to bottom. Placement is *derived* from kind, reach
-        and auth (§3) — the `listTargets` refetch in `dispatch` is that
-        derivation, firing whenever one of the three moves — so `Where it runs`
-        is last and never asks anybody to accept a consequence before its cause.
-
-        Name is third. It is derived from the repository, so asking for it first
-        was asking somebody to name a thing before saying what it is.
-      */}
+      {/* Dependency order: placement derives from kind, reach and auth. */}
       <Card>
         <Row
           label="Code"
@@ -928,11 +723,7 @@ export function NewApp({
           value={KIND_LABEL[draft.kind]}
           why={
             draft.kind !== draft.detection.kind
-              ? // The badge says a correction happened; the reason underneath
-                // was still detection's, so the row read `Website` over "the
-                // default is a long-running service" and flatly contradicted
-                // the value beside it.
-                `You chose ${KIND_LABEL[draft.kind]}. Detection read ${KIND_LABEL[draft.detection.kind]} — ${draft.detection.reason}`
+              ? `You chose ${KIND_LABEL[draft.kind]}. Detection read ${KIND_LABEL[draft.detection.kind]} — ${draft.detection.reason}`
               : draft.detection.reason
           }
           tone={
@@ -965,10 +756,6 @@ export function NewApp({
           label="Name"
           value={draft.appName}
           why={
-            // Stated rather than assumed, the way the Code and Type rows above
-            // state theirs. A name the operator typed is their answer and a
-            // draft that has never seen a repository derived nothing, so one
-            // sentence claiming a derivation was false on both.
             draft.appNameByOperator === true
               ? 'You named it. It becomes part of the address.'
               : draft.source.kind === 'repo'
@@ -1011,14 +798,7 @@ export function NewApp({
           </div>
         </Row>
 
-        {/*
-          One row, five facts. Reach, Auth, Target, URL and Vessel each had a
-          row of their own, which asked a reader to hold five platform nouns to
-          answer one question: where does this run and who can reach it. The
-          sentence is the answer; the controls behind the Edit are unchanged,
-          in the order the derivation runs — the two that decide which Targets
-          are candidates, then the Targets, then the vessel that follows.
-        */}
+        {/* Reach and sign-in decide the candidate Targets, so they come first. */}
         <Row
           label="Where it runs"
           value={placement}
@@ -1031,21 +811,13 @@ export function NewApp({
             target === undefined
               ? 'Nowhere is chosen to run it yet.'
               : target.candidate
-                ? // The Target mints a hostname whatever the reach is, and at
-                  // `reach: none` nothing routes to it — so printing it under a
-                  // row whose own value reads `no address` contradicted the
-                  // line above it. The draft decides whether there is an
-                  // address; the Target only decides what it would be.
+                ? // A Target mints a hostname at any reach, but nothing routes to it at `none`.
                   draft.reach === 'none'
                   ? 'Nothing routes to it, so it has no address.'
-                  : // §9: `null` is not "pending" — it is `cloudrun`/`static`
-                    // reporting their own address back after deploy, which this
-                    // step cannot show early because nothing has deployed yet.
+                  : // Null when the adapter reports its own address after deploy.
                     (target.canonical ??
                     'Spindrift assigns the address on the first deploy.')
-                : // The sentences the picker below prints, not the bare
-                  // Exclusion codes they translate.
-                  target.reasons
+                : target.reasons
                     .map((reason, index) => target.detail[index] ?? reason)
                     .join('; ')
           }
@@ -1074,11 +846,7 @@ export function NewApp({
               </div>
             </div>
 
-            {/*
-              Offered separately because it is a separate fact, and hidden at
-              `reach: none` because there is no route to put a filter on — the
-              same refusal validation makes, stated by not asking.
-            */}
+            {/* Validation refuses sign-in at `reach: none`. */}
             {draft.reach !== 'none' && (
               <div className="flex flex-col gap-2">
                 <Eyebrow>
@@ -1134,9 +902,7 @@ export function NewApp({
                           : 'font-mono text-xs text-muted-foreground'
                       }
                     >
-                      {/* §9: `null` means this adapter names its own workloads
-                          — say so rather than showing a suffix core will never
-                          mint. */}
+                      {/* Null when the adapter assigns its own address. */}
                       {option.canonical ?? 'assigns its own address'}
                     </span>
                   ) : (
@@ -1171,12 +937,8 @@ export function NewApp({
       ) : null}
 
       {/*
-        Deploy is two acts, and only one of them is visible above. It creates
-        the App — and, for a repository Spindrift holds no row for, it commits
-        this file to that repository in the configuration pull request §15 makes
-        authoritative. Agreeing to the first is not agreeing to the second
-        unless the second is on screen, which is why the title is the consent
-        sentence rather than a description of a file.
+        Connecting a repository also commits this file, so the title states that
+        consent.
       */}
       {spindriftFile !== null && draft.source.kind === 'repo' ? (
         <Declaration
@@ -1209,15 +971,7 @@ export function NewApp({
       ) : null}
 
       <div className="flex flex-wrap items-center gap-3">
-        {/*
-          One gate and one alternate label. `saving` was an arm that only made
-          the button flicker through a burst of typing — `deployDraft` flushes
-          the debounce and refuses on a write that never landed, which is a
-          better answer than a button that was briefly not pressable. `detecting`
-          stays, because a press mid-read would land on a directory the read is
-          about to refuse, but it loses its label: the Code row's `reading`
-          badge already says which arm it is.
-        */}
+        {/* A press mid-read could deploy a directory the read will refuse. */}
         <Button
           disabled={blockers.length > 0 || submitting || detecting}
           onClick={start}
@@ -1242,16 +996,7 @@ interface UploadValue {
   readonly size: number;
 }
 
-/**
- * Archive upload, with byte progress.
- *
- * `fetch` has no cross-browser way to report how much of a request body has
- * gone out — the upload side of the streams `ReadableStream` request bodies
- * would need is not the broadly-supported half. `XMLHttpRequest.upload` has
- * carried this exact event since it was introduced, so this is the one
- * remaining reason the screen reaches for it instead of `client.ts`'s `fetch`
- * wrapper the rest of the app uses.
- */
+/** XMLHttpRequest, because fetch has no cross-browser upload progress event. */
 function uploadArchive(
   file: File,
   onProgress: (percent: number) => void,
@@ -1279,13 +1024,8 @@ function uploadArchive(
 }
 
 /**
- * Where the code comes from — the one thing on this screen that is genuinely
- * a question.
- *
- * Not a row. It is the whole page until it is answered, and the Code row's
- * correction after that, so it renders controls and nothing about how they are
- * framed. Choosing a repository detects immediately rather than waiting for a
- * Continue: everything downstream is wrong until it has.
+ * The source picker: the whole page until there is a source, then the Code
+ * row's correction.
  */
 function SourceControls({
   draft,
@@ -1317,8 +1057,7 @@ function SourceControls({
     setUploadError(null);
     setUploadPercent(0);
     try {
-      // No bucket named: which bucket sources stage to is installation
-      // configuration and lives on the Storage screen.
+      // The staging bucket is installation configuration, so none is named.
       const res = await uploadArchive(file, setUploadPercent);
       if (res.ok) {
         dispatch({
@@ -1328,9 +1067,7 @@ function SourceControls({
           location: res.value.location,
         });
       } else if (res.failure.code === 'UNAUTHENTICATED') {
-        // The 24h session expired mid-upload. This row has nothing sensible
-        // to render for that beyond the raw refusal — `App` (`app.tsx`) does,
-        // by re-gating to sign-in.
+        // The app shell answers an expired session by returning to sign-in.
         reportSessionExpired();
       } else {
         setUploadError(res.failure.message || 'Archive upload failed');
@@ -1348,11 +1085,9 @@ function SourceControls({
   return (
     <div className="flex flex-col gap-4">
       {/*
-          Selected by what the source *is*, not by `draft.entry`. A stored draft
-          may carry `service`, `website` or `discover` — values the enum keeps
-          and this list no longer offers — and matching on the id would leave
-          both tiles unselected on a draft that plainly has a repository in it.
-        */}
+        By source kind: a stored draft can carry entry ids this list does not
+        offer.
+      */}
       <div className="grid gap-2 sm:grid-cols-2">
         {ENTRIES.map((entry) => (
           <Choice
@@ -1374,12 +1109,6 @@ function SourceControls({
             selected={draft.source.repo === '' ? null : draft.source.repo}
             onSelect={onSelectRepo}
           />
-          {/*
-              Nothing to choose a directory *in* until a repository is chosen.
-              Offering "Root directory" over an empty picker asks for a path in
-              a tree that does not exist yet, which is the same mistake as the
-              rows that used to sit under an unchosen repo.
-            */}
           {draft.source.repo === '' ? null : (
             <>
               <ScopeChooser
@@ -1394,9 +1123,7 @@ function SourceControls({
                 onChange={(event) =>
                   dispatch({ type: 'subpath', subpath: event.target.value })
                 }
-                // Settled rather than per-keystroke: the reason on screen is a
-                // statement about one directory, and re-reading `apps/w` on the
-                // way to `apps/web` would describe a directory nobody named.
+                // Read on blur or Enter, so a half-typed path is never read.
                 onBlur={onSettleSubpath}
                 onKeyDown={(event) => {
                   if (event.key === 'Enter') onSettleSubpath();
@@ -1427,10 +1154,8 @@ function SourceControls({
             ) : null}
             <input
               type="file"
-              // Exactly what `@repo/archive/archive-format` sniffs — gzip magic
-              // or ZIP magic. A plain `.tar` in this list is an invitation
-              // the boundary answers with `UNKNOWN_FORMAT`, which makes the
-              // chooser the thing that was wrong.
+              // What the archive format sniffer accepts: gzip or ZIP magic,
+              // never a plain tar.
               accept=".zip,.tar.gz,.tgz"
               disabled={uploading}
               onChange={handleFileChange}
@@ -1455,26 +1180,8 @@ function SourceControls({
 }
 
 /**
- * Every directory the repository was read for, as one control to choose from.
- *
- * §5 says discovery "proposes a list of candidate directories for a human to
- * choose from", and this is that list rather than a summary of it. A directory
- * detection knows how to build is selectable and wears the kind and the
- * sentence behind it; one it does not is here too, disabled, wearing what it
- * found instead — §3's grammar, which only works if the alternatives stay
- * readable.
- *
- * **Bounded rows, not a tile grid and not a `<select>`.** A grid of tiles put a
- * monorepo's twenty directories between Source and every row below it. A
- * `<select>` bounded that, but a native option is one line of plain text, so
- * the directory, its kind and the sentence behind it were run together into a
- * single very long line — and the one thing an operator is scanning for, the
- * path, was the shortest part of it. Rows in a scroller of fixed height keep
- * §3's grammar legible and keep the section the same size whether the
- * repository holds two directories or forty.
- *
- * An empty list means nothing has been read yet, which is a different thing
- * from a repository with nothing in it.
+ * Every directory the reads covered, in a fixed-height scroller. A directory
+ * detection cannot build stays listed and disabled, with what it found.
  */
 function ScopeChooser({
   subpath,
@@ -1526,10 +1233,8 @@ function ScopeChooser({
         ) : (
           shown.map((scope) => {
             const detected = scope.outcome === 'detected';
-            // The directory the draft names is what it is deploying, whatever
-            // detection made of it — story 32 keeps that escape hatch open and
-            // Deploy is not blocked on it. So it reads as the row in force
-            // rather than as the one row that cannot be chosen.
+            // The draft's own directory is in force even when detection cannot
+            // build it.
             const current = scope.scope === subpath;
             return (
               <button
@@ -1572,15 +1277,8 @@ function ScopeChooser({
 }
 
 /**
- * What the server said when it would not do it.
- *
- * The code is shown alongside the sentence because it is a closed vocabulary
- * and therefore searchable — the same reason §6 keeps its eight failure reasons
- * rather than writing friendlier prose.
- *
- * `title` is what the operator was doing when it arrived. A refusal from a save
- * nobody watched, still on screen when Deploy is pressed, otherwise reads as
- * the answer to the press — and the two want different sentences.
+ * A server refusal. The code is a closed vocabulary, so it is shown for search;
+ * `title` says what the operator was doing when it arrived.
  */
 function Refusal({
   failure,
@@ -1612,26 +1310,8 @@ function Refusal({
 }
 
 /**
- * The creation screen — the two reads the flow opens with, and the draft they
- * resolve.
- *
- * **The draft first, the options after it.** Placement is derived from what is
- * being created (§3), so asking which Targets will take this workload before
- * the draft exists is asking about a different workload. Repositories load
- * alongside the Targets rather than behind them — that read depends on
- * nothing.
- *
- * **The path this screen rewrites is not navigation.** Starting a draft names
- * it, the URL becomes `/apps/new/<id>`, and that arrives back through the
- * router as a changed prop. Reloading for it would re-run both reads and throw
- * away everything typed since, which is the whole of what remounting on the id
- * used to cost — so the screen keeps its own record of which draft is loaded
- * and compares.
- *
- * Not a `useRead`: the two reads are sequential rather than parallel, the
- * second is composed from the first's answer, and the load has two phases the
- * skeleton names. One cadence over four commands is the wrong shape for all
- * three.
+ * Loads the draft first, since the Targets offered depend on it, then the
+ * Targets and repositories together.
  */
 export function NewAppScreen({
   draftId,
@@ -1652,8 +1332,8 @@ export function NewAppScreen({
       }
   >({ type: 'loading', phase: 'draft' });
   const [attempt, setAttempt] = useState(0);
-  // React Strict Mode replays effects in development. Supplying the identity
-  // makes both starts the same authenticated act instead of leaving an orphan.
+  // Strict Mode runs effects twice in development; one id makes both starts
+  // one draft.
   const startId = useRef(crypto.randomUUID());
   /** The draft on screen, so this screen's own URL rewrite is not navigation. */
   const loaded = useRef<string | null>(null);
@@ -1661,9 +1341,8 @@ export function NewAppScreen({
   useEffect(() => {
     if (draftId !== null && draftId === loaded.current) return;
     if (draftId === null && loaded.current !== null) {
-      // `New App` pressed while a draft is open: a genuinely new one needs an
-      // identity of its own, or `startCreationDraft` idempotently answers with
-      // the draft already on screen.
+      // New App while a draft is open needs a fresh id, or the start replays
+      // that draft.
       startId.current = crypto.randomUUID();
       loaded.current = null;
     }
