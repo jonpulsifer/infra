@@ -1,148 +1,189 @@
 # smiirl
 
-A stand-in for `api.smiirl.com` so the Smiirl flip counter (firmware
-`smiirl-2.0.7-1`) on the iot VLAN runs without Smiirl's cloud. The lab CoreDNS
-(`nix/services/coredns-sinkhole.nix`) resolves `api.smiirl.com`, and the page's
-`counter.<zone>` / `smiirl.<zone>` names, to this service's Gateway address;
-the counter polls it over plain HTTP and shows whatever the web page last set.
+smiirl is a Go service that answers as `api.smiirl.com`, so the Smiirl
+split-flap counter (firmware `smiirl-2.0.7-1`) runs without Smiirl's cloud. Its
+web page sets what the counter shows. The product page is
+[Smiirl counter](https://wiki.lolwtf.ca/apps/smiirl/), and the operator
+procedures are in
+[Operate the Smiirl counter](https://wiki.lolwtf.ca/runbooks/operate-the-smiirl-counter/).
 
-## How it works
-
-- The counter has five drums of twelve flaps each: the digits, a blank and a
-  striped flap. A display value is five **cells** over `0-9`, `a` (blank) and
-  `b` (striped), left to right. A number is right-aligned with leading blanks,
-  the way the real counter shows it: 302 is `aa302`, 0 is `aaaa0`.
-- Cells that are leading blanks followed by digits with no leading zero are a
-  plain number, and the firmware is told `{"number":302}`. Anything else
-  (striped flaps, embedded or trailing blanks, explicit leading zeros) has no
-  number and the firmware is told the raw cells as a string, `{"number":"14b30"}`,
-  which is how the cloud addresses individual flaps.
-- The firmware bootstraps with `GET /v1.0/<mac>/<key>`, reports itself with
-  `POST /v1.0/<mac>/<key>/status`, then polls `GET /<mac>/number` roughly every
-  20 seconds. The poll is held for up to 12 seconds and answered early when the
-  cells change (or at once when they changed between polls), so a new value
-  reaches the flaps within a couple of seconds. Two different values are never
-  handed to the device less than 10 seconds apart: a drum needs a few seconds
-  per flip and a full turn to reach a lower digit, and a value arriving
-  mid-turn leaves drums out of step until the counter is power-cycled.
-- On the device's hostname (`SMIIRL_DEVICE_HOST`, `api.smiirl.com` by default)
-  the app answers like the cloud: `GET /` is `{"smiirl":"api"}`, `GET /number`
-  is `{"number":1}` (the firmware's internet check after it joins Wi-Fi; it
-  gives up and falls back to setup mode without it), and any other path is a
-  200 `{"api":"front"}`. The page and its `/api` are not offered on that name.
-- The counter shows one of several **modes**. `number` shows the stored cells.
-  `clock` shows the local time in `TZ` as `HHbMM`: hours, the striped flap as
-  the separator, minutes, 24-hour and zero-padded (`09b05`, `14b30`), or
-  12-hour with the leading zero as a blank flap (`a9b05`, `a2b30`) when
-  `hour12` is on — midnight and noon are `12b00`, and no drum shows am/pm.
-  `date` shows today as `MMbDD`. `days` shows the whole calendar days between
-  today and a date, right-aligned like a number and clamped to 99999,
-  labelled `until` when the date is ahead, `since` when it is past and `today`
-  when it is today (0). Days are counted on local dates, so a DST change never
-  yields a 23-hour day. `countdown` shows the time left until a moment as
-  `HHbMM`, resting at `00b00` once it is past and stopping at `99b59`, and
-  `countup` the time since one, on its own moment.
-  `github` shows how many public commits or pull requests a GitHub login has;
-  the page holds the mode until a login is typed rather than guessing one.
-  `cycle` hands the drums to each of a list of modes in turn. The stored
-  number is kept in every mode: `/api/number` still edits it and the daily
-  step still moves it while the clock or a countdown is showing. Switching
-  mode wakes the device poll like a new value does, and the poll also checks
-  once a second whether the clock or countdown has moved on its own.
-- The counter turns a drum a **full revolution for any change at all**,
-  however small: `11112` to `11113` costs the same turn as `11112` to `40000`.
-  It sits still between changes. Measured on the device on 2026-09-07, both
-  through the integer form and the cells string. So the cost is per change,
-  not per flap, and the only lever on wear is how seldom a value changes:
-  `tick` coarsens `clock`, `countdown` and `countup` to a multiple of N
-  minutes, so a clock at `tick` 5 turns the drums twelve times an hour rather
-  than sixty. It is 1 by default, which is a turn a minute.
-- An optional daily step adds `step` to the number once a day at `at`
-  (24-hour local time in `TZ`, `Canada/Atlantic` by default), clamped to
-  `0..99999`. The check runs at startup and every 30 seconds; days missed while
-  the service was down are applied together (up to 366), and a day is skipped
-  but still marked done when the cells are not a plain number. `step` of 0
-  turns it off.
-- State lives in `number.json` under `SMIIRL_DATA_DIR`, written as a temp file
-  plus rename so a crash mid-write never leaves a torn file. A missing or
-  unreadable file starts the counter at 0; a file from before cells existed
-  (`{"number":N}`) loads as that number, and one without a `mode` (or with a
-  days mode but no valid `daysDate`) loads in number mode.
-- Every poll stamps the device's last-seen time; `/api/state` reports the
-  device `online` when it polled within the last 60 seconds.
-
-### Configuration
-
-| env var           | default           | meaning                          |
-| ----------------- | ----------------- | -------------------------------- |
-| `PORT`            | `8080`            | listen port                      |
-| `SMIIRL_DATA_DIR` | `/data`           | directory holding `number.json`  |
-| `TZ`              | `Canada/Atlantic` | clock for the daily step and every mode that reads a date or time |
-
-### Device API (what the firmware calls)
-
-- `GET /v1.0/register/<mac>` — `{"result":true}`
-- `GET /v1.0/recover/<code>/<mac>` — `{"result":true,"recovery":true,"id":<mac>,"token":<hex>}`
-- `GET /v1.0/<mac>/<key>` — bootstrap; the poll URL echoes the request's `Host`
-- `POST /v1.0/<mac>/<key>/status` — the bootstrap document plus `"status":true`
-- `GET /<mac>/number` — long-poll, `{"number":N}` or `{"number":"<cells>"}`,
-  whatever the current mode displays
-
-### UI API
-
-- `GET /api/state` —
-  `{"cells","number","updatedAt","mode","display","showing","tick","clock":{"cells","hour12"},"date":{"cells"},"days":{"date","days","label"},"countdown":{"at","left"},"countup":{"at","elapsed"},"github":{"user","what","count","at","error"},"cycle":{"modes","every"},"daily":{"step","at","next"},"device":{"lastPoll","lastStatus","online","lastSent","lastSentAt"}}`;
-  `cells`/`number` are the stored number (`number` is `null` when the cells
-  are not a plain number), `display` is what the drums show right now,
-  `showing` is the mode with the drums (it differs from `mode` under a cycle),
-  `clock.cells` is the time now as `HHbMM` and `clock.hour12` says whether the
-  clock is 12-hour, `days.days`/`days.label` are `null` until a date is set,
-  `countdown.left` and `countup.elapsed` are minutes, `github.at` is `null` until the first
-  fetch lands and `github.error` carries the last failure, `next` is `null`
-  when the daily step is off, and `device.lastSent` is what the counter was
-  actually handed, which differs from `display` while a change waits for the
-  flaps to settle and is the only value that moved the drums
-- `PUT /api/number` (or `POST`) — body `{"number":N}` with `N` in `0..99999`,
-  or `{"cells":"xxxxx"}`; answers `{"cells","number"}`
-- `PUT /api/daily` (or `POST`) — body `{"step":N,"at":"HH:MM"}` with `N` in
-  `-99999..99999`; the first step lands at the next `at` after the call
-- `PUT /api/mode` (or `POST`) — body `{"mode":"..."}` carrying that mode's
-  settings: `days` wants `"date":"YYYY-MM-DD"`, `countdown` and `countup` each want their own
-  `"at":"YYYY-MM-DDTHH:MM"` read in `TZ`, `github` wants `"user"` and
-  `"what":"commits"|"prs"`, `cycle` wants `"modes":[...]` and optionally
-  `"every":N` minutes (1..1440, 5 by default). `"hour12":true|false` and `"tick":N`
-  (1..60 minutes) may ride along with any mode. Answers the same shape as the `/api/state` mode fields.
-  An unknown mode, a bad setting, or a cycle left with fewer than two modes it
-  can show is a 400 `{"error"}`. Every setting stays remembered when switching
-  to another mode, so coming back needs no re-entry.
-- `GET /` — the embedded page
-- `GET /manifest.webmanifest`, `GET /sw.js`, `GET /icon.svg`, `GET /icon.png` —
-  the PWA, so the page installs to a home screen and opens offline. The
-  service worker caches the shell and never `/api`, and `icon.png` is drawn at
-  startup rather than committed as a blob (`icon.go`).
-- `GET /healthz`
-
-## Local development
+## Run
 
 ```bash
 go build -o smiirl .
+mkdir -p /tmp/smiirl
 SMIIRL_DATA_DIR=/tmp/smiirl ./smiirl
+```
+
+Then, from another shell:
+
+```bash
 curl -X PUT localhost:8080/api/number -d '{"number":302}'
-curl -X PUT localhost:8080/api/number -d '{"cells":"14b30"}'
-curl -X PUT localhost:8080/api/daily -d '{"step":1,"at":"08:00"}'
-curl -X PUT localhost:8080/api/mode -d '{"mode":"clock"}'
 curl -X PUT localhost:8080/api/mode -d '{"mode":"clock","hour12":true}'
-curl -X PUT localhost:8080/api/mode -d '{"mode":"days","date":"2026-12-25"}'
-curl -X PUT localhost:8080/api/mode -d '{"mode":"date"}'
-curl -X PUT localhost:8080/api/mode -d '{"mode":"countdown","at":"2026-12-25T08:00"}'
-curl -X PUT localhost:8080/api/mode -d '{"mode":"countup","at":"2026-01-01T00:00"}'
-curl -X PUT localhost:8080/api/mode -d '{"mode":"clock","tick":5}'
-curl -X PUT localhost:8080/api/mode -d '{"mode":"github","user":"jonpulsifer","what":"commits"}'
-curl -X PUT localhost:8080/api/mode -d '{"mode":"cycle","modes":["clock","date","github"],"every":5}'
+curl localhost:8080/api/state
 curl -H 'Host: api.smiirl.com' localhost:8080/v1.0/aabbccddeeff/00
 ```
 
-## Deploy
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `PORT` | `8080` | Listen port |
+| `SMIIRL_DATA_DIR` | `/data` | Directory that holds `number.json`. It must exist. |
+| `TZ` | `Canada/Atlantic` | Time zone for the daily step (a fixed amount added to the number once a day) and every mode that reads a date or time |
+| `SMIIRL_DEVICE_HOST` | `api.smiirl.com` | Host name on which the app answers as the cloud |
 
-GitOps via Flux: `clusters/folly/apps/smiirl`. The image is published by
-`.github/workflows/containers.yml` (registered in `.github/containers.json`).
+## Test
+
+```bash
+go test -race ./...
+```
+
+`-race` needs a C toolchain. `.github/workflows/go.yml` runs `go build`,
+`go vet` and `go test -race` on every change under `apps/smiirl/`.
+
+## Build and deploy
+
+`Dockerfile` builds a static binary on a distroless base.
+`.github/workflows/containers.yml` publishes `ghcr.io/jonpulsifer/smiirl`, and
+`.github/containers.json` maps the image to
+`clusters/folly/apps/smiirl/02-deployment.yaml`, so a build on `main` opens a
+pull request that bumps the pinned digest. Flux applies
+`clusters/folly/apps/smiirl/` on merge.
+
+## Display
+
+The counter has five drums of twelve flaps: the digits, a blank flap and a
+striped flap. A display value is five cells, left to right. Each cell is a
+digit, `a` (blank) or `b` (striped). A number is right-aligned with leading
+blanks: 302 is `aa302` and 0 is `aaaa0`.
+
+Cells that are leading blanks and then digits with no leading zero are a plain
+number, and the firmware gets `{"number":302}`. Other cells go as a string,
+`{"number":"14b30"}`.
+
+The counter turns the drums one full revolution for every change, whatever its
+size: `11112` to `11113` costs the same turn as `11112` to `40000`. `tick`
+limits `clock`, `countdown` and `countup` to one change every N minutes. It is
+1 by default.
+
+| Mode | Display |
+| --- | --- |
+| `number` | The stored cells |
+| `clock` | Local time as `HHbMM`, 24-hour and zero-padded (`09b05`), or 12-hour with a blank in place of the leading zero (`a9b05`) when `hour12` is on. With `hour12`, midnight and noon are `12b00`. |
+| `date` | Today as `MMbDD` |
+| `days` | Calendar days between today and a date, right-aligned and clamped to 99999. The label is `until`, `since` or `today`. Days count on local dates, so a DST change never gives a 23-hour day. |
+| `countdown` | Time left until the `countdown` moment as `HHbMM`, at most `99b59`. It stays at `00b00` after the moment. |
+| `countup` | Time since the `countup` moment as `HHbMM`. It stops at `99b59`, about four days after the moment. |
+| `github` | Public commits or pull requests of a GitHub login, from the unauthenticated search API, fetched at most every 5 minutes. Until the first count arrives, the drums show the stored number. A failed fetch keeps the last count and sets `github.error`. |
+| `cycle` | Each mode in `modes` in turn, `every` minutes each (1 to 1440, default 5). It skips a mode that has no settings, and it needs at least two modes it can show. |
+
+The stored number continues in every mode. `/api/number` edits it, and the
+daily step changes it while another mode shows. A new value or setting ends a
+long poll early. A long poll also checks each second whether the display value
+changed, for example at each new minute in `clock` mode.
+
+The daily step adds `step` to the number once a day at `at`, in `TZ`, clamped to
+`0..99999`. The check runs at startup and every 30 seconds. Missed days apply
+together, up to 366. A day whose cells are not a plain number is skipped and
+still marked done. A `step` of 0 turns the step off.
+
+## State
+
+State is `number.json` in `SMIIRL_DATA_DIR`, written to a temp file and renamed.
+A missing file, or one that is not valid JSON, starts at 0. Any other read error
+stops the app at startup. A file that holds only `{"number":N}` loads as that
+number. A file with no `mode`, or with `days` and no valid `daysDate`, loads in
+`number` mode.
+
+The Deployment runs one replica with the `Recreate` strategy, because two pods
+would race the rename.
+
+## Device API
+
+The firmware speaks plain HTTP to `api.smiirl.com` with
+`User-Agent: ESP32 HTTP Client/1.0`. On that host name the app answers as the
+cloud and does not serve the page or `/api`.
+
+- `GET /` is `{"smiirl":"api"}`.
+- A path that the app does not know, or one under `/api/`, is a 200
+  `{"api":"front"}`.
+- `GET /number` is `{"number":1}`, with `Content-Length: 12` and no trailing
+  newline. The firmware runs this check after it joins Wi-Fi, compares the
+  body byte for byte, and opens its setup wizard on any difference.
+- `GET /v1.0/register/<mac>` returns `{"result":true}`.
+- `GET /v1.0/recover/<code>/<mac>` returns
+  `{"result":true,"recovery":true,"id":<mac>,"token":<hex>}`.
+- `GET /v1.0/<mac>/<key>` is the bootstrap document. Its `url` is the poll URL
+  on the request's `Host`, and its `interval` is 20 (seconds).
+- `POST /v1.0/<mac>/<key>/status` returns the bootstrap document with
+  `"status":true`, and `/api/state` shows the posted body as
+  `device.lastStatus`.
+- `GET /<mac>/number` is the long poll. It returns `{"number":N}` or
+  `{"number":"<cells>"}` for the current display value.
+
+The app holds a long poll for up to 12 seconds and answers early when the
+display value changes. It sends two different values at least 10 seconds apart.
+A value that arrives while a drum turns leaves the drums at a fixed offset from
+the firmware.
+
+## Page API
+
+- `GET /api/state` returns the state, for example:
+
+  ```json
+  {
+    "cells": "aa302",
+    "number": 302,
+    "updatedAt": "2026-09-24T12:00:00Z",
+    "mode": "number",
+    "display": "aa302",
+    "showing": "number",
+    "tick": 1,
+    "clock": {"cells": "09b05", "hour12": false},
+    "date": {"cells": "09b24"},
+    "days": {"date": "", "days": null, "label": null},
+    "countdown": {"at": "", "left": null},
+    "countup": {"at": "2026-09-20T08:00", "elapsed": 5825},
+    "github": {"user": "", "what": "commits", "count": 0, "at": null, "error": null},
+    "cycle": {"modes": [], "every": 5},
+    "daily": {"step": 1, "at": "08:00", "next": "2026-09-25T08:00:00-03:00"},
+    "device": {
+      "lastPoll": "2026-09-24T12:05:00Z",
+      "lastStatus": {"eth": "", "wlan": "<counter-ip>", "version": "smiirl-2.0.7-1", "counter_type": "esp32"},
+      "online": true,
+      "lastSent": "aa302",
+      "lastSentAt": "2026-09-24T12:00:01Z"
+    }
+  }
+  ```
+
+  - `cells` and `number` are the stored number. `number` is `null` when the
+    cells are not a plain number.
+  - `display` is what the drums show now. `showing` is the mode on the drums
+    now. In `cycle` mode it differs from `mode`.
+  - `countdown.left` and `countup.elapsed` are minutes.
+  - `days.days` and `days.label` are `null` until a date is set, and
+    `github.at` is `null` until the first fetch. `daily.next` is `null` when
+    the daily step is off.
+  - `device.online` is `true` when the counter polled in the last 60 seconds.
+    `device.lastSent` is the value the counter received last. It differs from
+    `display` while a change waits for the 10-second gap.
+- `PUT /api/number` (or `POST`) takes `{"number":N}` with `N` in `0..99999`, or
+  `{"cells":"xxxxx"}`. It returns `{"cells","number"}`.
+- `PUT /api/daily` (or `POST`) takes `{"step":N,"at":"HH:MM"}` with `N` in
+  `-99999..99999`. The first step applies at the next `at` after the call.
+- `PUT /api/mode` (or `POST`) takes `{"mode":"..."}` and the settings of that
+  mode:
+  - `days`: `"date":"YYYY-MM-DD"`
+  - `countdown` and `countup`: `"at":"YYYY-MM-DDTHH:MM"`, read in `TZ`
+  - `github`: `"user"` and `"what":"commits"|"prs"`
+  - `cycle`: `"modes":[...]` and optionally `"every":N`
+  - any mode: `"hour12":true|false` and `"tick":N` (1 to 60 minutes)
+
+  It returns the mode fields of `/api/state`. An unknown mode, a bad setting,
+  or a cycle with fewer than two modes it can show is a 400 `{"error"}`.
+- `GET /` is the page. `GET /manifest.webmanifest`, `GET /sw.js`,
+  `GET /icon.svg` and `GET /icon.png` make it a progressive web app (PWA) that
+  installs to a home screen and opens offline. The service worker caches the
+  page and never `/api`. `icon.go` draws `icon.png` at startup.
+- `GET /healthz` returns `ok`. It takes no lock, so it answers while a write to
+  the data volume blocks every other route that reads state.

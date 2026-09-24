@@ -67,7 +67,7 @@ The kubelet rejects a pod whose `RuntimeClass` handler its containerd does not d
 
 ## Networking
 
-Cilium (CNI + BGP load balancing) and the Gateway API live under each cluster's `networking/`, built from shared Helm releases in `clusters/base/networking/{cert-manager,cloudflare,external-dns,tailscale}` plus per-cluster secrets and config. Full detail, including the cross-site firewall gating, is on [Network](network.md).
+Cilium (CNI + BGP load balancing) and the Gateway API live under each cluster's `networking/`, built from shared Helm releases in `clusters/base/networking/{cert-manager,cloudflare,external-dns,tailscale}` plus per-cluster secrets and config. Full detail is on [Network](network.md), and the cross-site firewall gating is on [Routing and firewall](network/routing-and-firewall.md).
 
 ## Network facts: the cluster-topology SSOT
 
@@ -79,7 +79,7 @@ Every other per-domain Flux `Kustomization` (`apps`, `networking`, `storage`, `m
 
 `.github/workflows/topology-contract.yml` runs `conftest` against both clusters' `cluster-topology.json` on every touching PR, enforcing the schema in `.github/policy/cluster-topology.rego`: every required key present and non-empty, IPs/CIDRs/ports/ASNs well-formed, `API_SERVER_IP` and `ROUTER_IP` inside `K8S_NODE_CIDR`, `LB_RANGE` disjoint from `K8S_NODE_CIDR`, and no CIDR overlap between the two clusters' files.
 
-Consumers beyond Flux: `nix/services/k8s/networks.nix` reads cluster topology with `builtins.fromJSON`; `nix/lib/lab.nix` projects lab topology. OpenTofu roots instantiate `terraform/modules/cluster-topology`, selecting the site and ConfigMap name. Full picture on [Network](network.md).
+Consumers beyond Flux: `nix/services/k8s/networks.nix` reads cluster topology with `builtins.fromJSON`; `nix/lib/lab.nix` projects lab topology. OpenTofu roots instantiate `terraform/modules/cluster-topology`, selecting the site and ConfigMap name. The rules for copies of these values are on [Network](network.md#rules).
 
 ## Secrets
 

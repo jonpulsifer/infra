@@ -116,4 +116,4 @@ CI additionally builds full closures for a subset (`.github/workflows/nix-ci.yam
 
 ## Not here
 
-Actual `nixos-rebuild`/`nix build` invocations, adding a new host, rollback, and the auto-upgrade branch-revert caveat in command form: [Deploy a NixOS host](../runbooks/deploy-a-nixos-host.md).
+The `nixos-rebuild` commands, rollback, adding a Kubernetes node and the auto-upgrade caveat are in [Deploy a NixOS host](../runbooks/deploy-a-nixos-host.md). Build commands are in [Test a change](../runbooks/test-a-change.md).

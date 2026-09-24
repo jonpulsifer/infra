@@ -8,30 +8,25 @@ import (
 	"log"
 )
 
-// The icon is a split-flap card on a dark ground: the drum's seam across the
-// middle is the whole read. It is drawn rather than committed as a blob so
-// there is no asset to regenerate, and it stays inside the middle 80% of the
-// square so a maskable crop never cuts it.
 var (
 	iconGround = color.RGBA{0x1b, 0x19, 0x17, 0xff}
 	iconCard   = color.RGBA{0xf3, 0xea, 0xdb, 0xff}
 	iconSeam   = color.RGBA{0xd9, 0x8a, 0x34, 0xff}
 )
 
-// iconPNG is the apple-touch-icon, drawn once at startup.
+// 180 px is the apple-touch-icon size. Drawing it at startup leaves no PNG
+// to regenerate.
 var iconPNG = drawIcon(180)
 
-// drawIcon renders the icon at size px square. It draws at 4x and box-filters
-// down, which is the whole of the antialiasing.
 func drawIcon(size int) []byte {
-	const ss = 4
+	const ss = 4 // supersampling factor; the box filter below is the only antialiasing
 	n := size * ss
 	big := image.NewRGBA(image.Rect(0, 0, n, n))
 	f := func(v float64) int { return int(v * float64(n)) }
 	fill(big, 0, 0, n, n, f(0.14), iconGround)
-	// The card sits in the middle 62%, well inside a maskable crop.
+	// The card spans the middle 62%, inside the 80% a maskable crop keeps.
 	fill(big, f(0.19), f(0.13), f(0.81), f(0.87), f(0.07), iconCard)
-	// The seam, and the shadow the top flap casts on the bottom one.
+	// The shadow the top flap casts, then the seam.
 	fill(big, f(0.19), f(0.47), f(0.81), f(0.50), 0, color.RGBA{0x2a, 0x25, 0x21, 0xff})
 	fill(big, f(0.19), f(0.50), f(0.81), f(0.53), 0, iconSeam)
 
@@ -51,12 +46,11 @@ func drawIcon(size int) []byte {
 	}
 	var buf bytes.Buffer
 	if err := png.Encode(&buf, out); err != nil {
-		log.Fatal(err) // a fixed image that cannot be encoded is a bug, not a runtime error
+		log.Fatal(err) // encoding a fixed image fails only on a bug
 	}
 	return buf.Bytes()
 }
 
-// fill paints the rectangle with corners rounded to radius r.
 func fill(img *image.RGBA, x0, y0, x1, y1, r int, c color.RGBA) {
 	for y := y0; y < y1; y++ {
 		for x := x0; x < x1; x++ {
@@ -67,8 +61,6 @@ func fill(img *image.RGBA, x0, y0, x1, y1, r int, c color.RGBA) {
 	}
 }
 
-// inRound reports whether x,y is inside the rounded rectangle. Only the four
-// corner squares need the distance check; everything else is inside already.
 func inRound(x, y, x0, y0, x1, y1, r int) bool {
 	cx, cy := x, y
 	switch {

@@ -158,8 +158,8 @@ func TestCells(t *testing.T) {
 	_, ts := newTest(t)
 	for _, tc := range []struct {
 		cells  string
-		number any // /api/state and /api/number
-		device any // what the firmware is told
+		number any
+		device any
 	}{
 		{"aa302", float64(302), float64(302)},
 		{"00302", nil, "00302"},
@@ -208,13 +208,11 @@ func TestLongPoll(t *testing.T) {
 		t.Fatalf("poll after a set between polls = %v after %v", out, time.Since(start))
 	}
 
-	// Two different values are never handed over closer than flapSettle,
-	// measured from the previous handover.
 	handed := time.Now()
 	flapSettle = 300 * time.Millisecond
 	do(t, ts, "PUT", "/api/number", `{"number":4}`, nil)
-	// The wait is measured from the handover inside the app, which happened a
-	// touch before handed was read here, so allow that much slack.
+	// The app times the wait from its own handover, just before handed is read,
+	// so allow 10 ms of slack.
 	if _, out := do(t, ts, "GET", "/aabbccddeeff/number", "", nil); out["number"] != float64(4) || time.Since(handed) < flapSettle-10*time.Millisecond {
 		t.Fatalf("second value handed over as %v %v after the first, before the flaps settled", out, time.Since(handed))
 	}
@@ -292,7 +290,7 @@ func TestDueDays(t *testing.T) {
 		// 2026-09-07T02:59Z is still 23:59 ADT on the 6th.
 		{"2026-09-07T02:59:59Z", "23:59", "", 1, "2026-09-06"},
 		{"2026-09-07T03:00:00Z", "00:00", "2026-09-06", 1, "2026-09-07"},
-		// Clocks sprang forward on 2026-03-08; two boundaries since the 7th.
+		// Clocks spring forward on 2026-03-08; two boundaries since the 7th.
 		{"2026-03-09T11:00:00Z", "08:00", "2026-03-07", 2, "2026-03-09"},
 	} {
 		days, upTo := dueDays(utc(tc.now), atlantic, daily{Step: 1, At: tc.at, Last: tc.last})
@@ -331,7 +329,6 @@ func TestDaily(t *testing.T) {
 	step("2026-09-06T11:00:00Z", "aa303")
 	step("2026-09-06T11:00:30Z", "aa303")
 
-	// Moving at later on a day that already fired does not fire it twice.
 	now = utc("2026-09-06T15:00:00Z") // 12:00 ADT
 	if _, out = do(t, ts, "PUT", "/api/daily", `{"step":1,"at":"20:00"}`, nil); out["next"] != "2026-09-07T20:00:00-03:00" {
 		t.Fatalf("next after moving at later = %v", out["next"])
@@ -347,7 +344,7 @@ func TestDaily(t *testing.T) {
 
 	do(t, ts, "PUT", "/api/daily", `{"step":5,"at":"08:00"}`, nil)
 	do(t, ts, "PUT", "/api/number", `{"number":99998}`, nil)
-	step("2026-09-09T12:00:00Z", "99998") // reconfigured after today's boundary: nothing owed
+	step("2026-09-09T12:00:00Z", "99998") // reconfigured after today's boundary, so nothing is owed
 	step("2026-09-10T11:00:00Z", "99999")
 
 	do(t, ts, "PUT", "/api/number", `{"cells":"bbbbb"}`, nil)
@@ -478,8 +475,8 @@ func TestDaysCells(t *testing.T) {
 		{"2026-09-07T03:00:00Z", "2026-09-07", 0, "today"},
 		{"2026-09-06T12:00:00Z", "2026-09-05", 1, "since"},
 		{"2026-09-06T12:00:00Z", "2026-01-01", 248, "since"},
-		// Clocks spring forward on 2026-03-08 and fall back on 2026-11-01:
-		// whole days either way, never 23 or 25 hours rounded off.
+		// Clocks spring forward on 2026-03-08 and fall back on 2026-11-01. Each
+		// span is a count of calendar days, never 23 or 25 hours rounded off.
 		{"2026-03-07T15:00:00Z", "2026-03-08", 1, "until"},
 		{"2026-03-07T15:00:00Z", "2026-03-09", 2, "until"},
 		{"2026-03-09T15:00:00Z", "2026-03-07", 2, "since"},
@@ -557,7 +554,6 @@ func TestModes(t *testing.T) {
 	if _, poll := do(t, ts, "GET", "/aabbccddeeff/number", "", nil); poll["number"] != "09b05" {
 		t.Fatalf("device in clock mode got %v", poll["number"])
 	}
-	// The stored number is untouched and still editable without leaving the mode.
 	if resp, out := do(t, ts, "PUT", "/api/number", `{"number":303}`, nil); resp.StatusCode != 200 || out["cells"] != "aa303" {
 		t.Fatalf("set in clock mode: status %d body %v", resp.StatusCode, out)
 	}
@@ -566,7 +562,6 @@ func TestModes(t *testing.T) {
 		t.Fatalf("clock state = %v", state)
 	}
 
-	// The 12-hour switch stands on its own: same mode, a different display.
 	resp, out = do(t, ts, "PUT", "/api/mode", `{"mode":"clock","hour12":true}`, nil)
 	if resp.StatusCode != 200 || out["display"] != "a9b05" || out["clock"].(map[string]any)["hour12"] != true {
 		t.Fatalf("12-hour clock: status %d body %v", resp.StatusCode, out)
@@ -574,7 +569,6 @@ func TestModes(t *testing.T) {
 	if _, poll := do(t, ts, "GET", "/aabbccddeeff/number", "", nil); poll["number"] != "a9b05" {
 		t.Fatalf("device on a 12-hour clock got %v", poll["number"])
 	}
-	// It survives a mode round trip and clears when asked.
 	do(t, ts, "PUT", "/api/mode", `{"mode":"number"}`, nil)
 	_, state = do(t, ts, "GET", "/api/state", "", nil)
 	if c := state["clock"].(map[string]any); c["hour12"] != true || c["cells"] != "a9b05" {
@@ -602,7 +596,6 @@ func TestModes(t *testing.T) {
 		t.Fatalf("after christmas state = %v", state)
 	}
 
-	// Back to number mode: the date is remembered for the page.
 	if _, out = do(t, ts, "PUT", "/api/mode", `{"mode":"number"}`, nil); out["display"] != "aa303" || out["days"].(map[string]any)["date"] != "2026-12-25" {
 		t.Fatalf("back to number = %v", out)
 	}
@@ -714,8 +707,6 @@ func TestSpanCells(t *testing.T) {
 	if _, _, err := spanCells(now, atlantic, "2026-09-06", false, 1); err == nil {
 		t.Error("a date with no time should not parse")
 	}
-	// Counting up is the same span the other way round, and it is the one
-	// that only ever increments.
 	for _, tc := range []struct {
 		at   string
 		want string
@@ -749,7 +740,6 @@ func TestDateAndCountdownModes(t *testing.T) {
 	if _, poll := do(t, ts, "GET", "/aabbccddeeff/number", "", nil); poll["number"] != "06b30" {
 		t.Fatalf("device counting down got %v", poll["number"])
 	}
-	// Counting up keeps its own moment, so the two do not tread on each other.
 	resp, out = do(t, ts, "PUT", "/api/mode", `{"mode":"countup","at":"2026-09-06T08:35"}`, nil)
 	if resp.StatusCode != 200 || out["display"] != "00b30" {
 		t.Fatalf("countup: status %d body %v", resp.StatusCode, out)
@@ -761,7 +751,6 @@ func TestDateAndCountdownModes(t *testing.T) {
 		t.Fatalf("countup view = %v", c)
 	}
 
-	// The target is remembered, so coming back needs no date again.
 	do(t, ts, "PUT", "/api/mode", `{"mode":"number"}`, nil)
 	_, state := do(t, ts, "GET", "/api/state", "", nil)
 	if state["countdown"].(map[string]any)["at"] != "2026-09-06T15:35" {
@@ -778,11 +767,10 @@ func TestCycleTakesTurns(t *testing.T) {
 	if resp.StatusCode != 200 || out["mode"] != "cycle" {
 		t.Fatalf("cycle: status %d body %v", resp.StatusCode, out)
 	}
-	// The repeat is dropped, and only what the counter can show is kept.
+	// The repeated clock is dropped.
 	if got := out["cycle"].(map[string]any)["modes"]; !reflect.DeepEqual(got, []any{"clock", "date"}) {
 		t.Fatalf("cycle modes = %v", got)
 	}
-	// Turns are keyed to the wall clock, so stepping five minutes swaps member.
 	seen := map[string]string{}
 	for i := range 4 {
 		at := now.Add(time.Duration(i) * 5 * time.Minute)
@@ -793,11 +781,9 @@ func TestCycleTakesTurns(t *testing.T) {
 	if len(seen) != 2 || seen["date"] != "09b06" || !strings.Contains(seen["clock"], "b") {
 		t.Fatalf("a lap showed %v", seen)
 	}
-	// A cycle needs two members it can actually show.
 	if resp, _ := do(t, ts, "PUT", "/api/mode", `{"mode":"cycle","modes":["clock","days"]}`, nil); resp.StatusCode != 400 {
 		t.Fatalf("days with no date should not be cyclable, got %d", resp.StatusCode)
 	}
-	// Losing a setting takes that member out of the rotation.
 	do(t, ts, "PUT", "/api/mode", `{"mode":"cycle","modes":["clock","date","countdown"],"every":5}`, nil)
 	_, state := do(t, ts, "GET", "/api/state", "", nil)
 	if got := state["cycle"].(map[string]any)["modes"]; !reflect.DeepEqual(got, []any{"clock", "date"}) {
@@ -805,7 +791,6 @@ func TestCycleTakesTurns(t *testing.T) {
 	}
 }
 
-// stubGitHub answers every search with total, recording what was asked.
 func stubGitHub(t *testing.T, total int, status int) func() []string {
 	t.Helper()
 	var mu sync.Mutex
@@ -833,8 +818,7 @@ func stubGitHub(t *testing.T, total int, status int) func() []string {
 	}
 }
 
-// waitFor polls until cond holds, so nothing depends on how fast the fetch
-// kicked off by the mode change lands.
+// A mode change starts the fetch in a goroutine, so tests poll for its result.
 func waitFor(t *testing.T, what string, cond func() bool) {
 	t.Helper()
 	for deadline := time.Now().Add(3 * time.Second); time.Now().Before(deadline); {
@@ -853,7 +837,6 @@ func TestGitHubMode(t *testing.T) {
 	if resp.StatusCode != 200 {
 		t.Fatalf("github: status %d body %v", resp.StatusCode, out)
 	}
-	// Switching to the mode asks GitHub at once rather than at the next tick.
 	var state map[string]any
 	waitFor(t, "the first count", func() bool {
 		_, state = do(t, ts, "GET", "/api/state", "", nil)
@@ -872,12 +855,10 @@ func TestGitHubMode(t *testing.T) {
 	if a := asked()[0]; !strings.Contains(a, "/search/commits") || !strings.Contains(a, "author%3Ajonpulsifer") {
 		t.Fatalf("asked %v", a)
 	}
-	// A fresh count stands; only a stale one is fetched again.
 	s.refreshGitHub()
 	if n := len(asked()); n != 1 {
 		t.Fatalf("refetched a fresh count: %v", asked())
 	}
-	// Switching what is counted starts over on the other search.
 	do(t, ts, "PUT", "/api/mode", `{"mode":"github","user":"jonpulsifer","what":"prs"}`, nil)
 	waitFor(t, "the pull request count", func() bool { return len(asked()) == 2 })
 	if a := asked()[1]; !strings.Contains(a, "/search/issues") || !strings.Contains(a, "is%3Apr") {
@@ -925,7 +906,7 @@ func TestPWAAssets(t *testing.T) {
 			t.Errorf("%s: status %d type %q %d bytes", tc.path, resp.StatusCode, resp.Header.Get("Content-Type"), len(b))
 		}
 	}
-	// The icon has to be a real PNG of the size the page asks iOS for.
+	// 180 px is the apple-touch-icon size the page declares.
 	resp, _ := http.Get(ts.URL + "/icon.png")
 	img, err := png.Decode(resp.Body)
 	resp.Body.Close()
@@ -934,8 +915,6 @@ func TestPWAAssets(t *testing.T) {
 	}
 }
 
-// The counter turns a drum a full revolution for any change at all, so the
-// only lever on wear is how seldom a timed mode changes.
 func TestTickCoarsensTheTimedModes(t *testing.T) {
 	s, ts := newTest(t)
 	now := utc("2026-09-06T12:08:00Z") // 09:08 ADT
@@ -948,8 +927,6 @@ func TestTickCoarsensTheTimedModes(t *testing.T) {
 	if resp.StatusCode != 200 || out["display"] != "09b05" || out["tick"] != float64(5) {
 		t.Fatalf("clock at tick 5: status %d body %v", resp.StatusCode, out)
 	}
-	// The same stretch of clock now holds a handful of values instead of one
-	// a minute, and each value it does not take is a revolution not turned.
 	values := func() int {
 		seen := map[string]bool{}
 		for i := range 30 {
@@ -959,8 +936,7 @@ func TestTickCoarsensTheTimedModes(t *testing.T) {
 		}
 		return len(seen)
 	}
-	// Seven, not six: the half hour starts at 09:08 and so clips a bucket at
-	// each end.
+	// The half hour from 09:08 clips a 5-minute bucket at each end, so 7 values.
 	if n := values(); n != 7 {
 		t.Fatalf("half an hour at tick 5 showed %d values, want 7", n)
 	}
@@ -969,7 +945,6 @@ func TestTickCoarsensTheTimedModes(t *testing.T) {
 		t.Fatalf("half an hour at tick 1 showed %d values, want 30", n)
 	}
 	do(t, ts, "PUT", "/api/mode", `{"mode":"clock","tick":5}`, nil)
-	// It coarsens a countdown the same way, and is remembered across modes.
 	resp, out = do(t, ts, "PUT", "/api/mode", `{"mode":"countdown","at":"2026-09-06T15:36"}`, nil)
 	if resp.StatusCode != 200 || out["display"] != "06b25" {
 		t.Fatalf("countdown at tick 5: status %d body %v", resp.StatusCode, out) // 6h28 floors to 6h25
@@ -981,8 +956,6 @@ func TestTickCoarsensTheTimedModes(t *testing.T) {
 	}
 }
 
-// The page reports what the counter was handed, not just what the app would
-// hand it now; the drums only ever moved for the former.
 func TestStateReportsWhatTheCounterWasHanded(t *testing.T) {
 	_, ts := newTest(t)
 	do(t, ts, "PUT", "/api/number", `{"number":11111}`, nil)
@@ -998,11 +971,8 @@ func TestStateReportsWhatTheCounterWasHanded(t *testing.T) {
 	}
 }
 
-// setMode takes an options object. It once took positional arguments, and two
-// call sites kept passing a bare date string through the change; spreading a
-// string into the request body yields {"0":"2","1":"0",...} and no "date", so
-// the server rejected every date the picker produced. Nothing in the page
-// catches that, so this does.
+// A string passed as setMode's options spreads into {"0":"2","1":"0",...} with
+// no "date", and nothing in the page catches it.
 func TestPageCallsSetModeWithAnObject(t *testing.T) {
 	page := string(indexHTML)
 	calls := regexp.MustCompile(`setMode\(([^;]*?)\)[;,\s]`).FindAllStringSubmatch(page, -1)
@@ -1020,18 +990,15 @@ func TestPageCallsSetModeWithAnObject(t *testing.T) {
 	}
 }
 
-// The shape the broken call sites produced, kept as the regression it is.
 func TestModeRejectsASpreadString(t *testing.T) {
 	_, ts := newTest(t)
 	spread := `{"mode":"days","0":"2","1":"0","2":"2","3":"6","4":"-","5":"1","6":"2","7":"-","8":"2","9":"5"}`
 	if resp, out := do(t, ts, "PUT", "/api/mode", spread, nil); resp.StatusCode != 400 || out["error"] == nil {
 		t.Fatalf("a body with no date should be a 400 with a reason: %d %v", resp.StatusCode, out)
 	}
-	// And the shape the picker actually sends now is accepted.
 	if resp, out := do(t, ts, "PUT", "/api/mode", `{"mode":"days","date":"2026-12-25"}`, nil); resp.StatusCode != 200 {
 		t.Fatalf("days with a date: %d %v", resp.StatusCode, out)
 	}
-	// The date sticks across a trip through another mode.
 	do(t, ts, "PUT", "/api/mode", `{"mode":"number"}`, nil)
 	_, state := do(t, ts, "GET", "/api/state", "", nil)
 	if state["days"].(map[string]any)["date"] != "2026-12-25" {

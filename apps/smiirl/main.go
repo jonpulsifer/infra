@@ -1,7 +1,6 @@
 // smiirl stands in for api.smiirl.com so a Smiirl flip counter (firmware
-// smiirl-2.0.7-1) runs without Smiirl's cloud. It answers the routes the
-// firmware calls over plain HTTP and exposes a small JSON API plus a web page
-// for setting what the five flap drums show.
+// smiirl-2.0.7-1) runs without Smiirl's cloud. It serves the firmware's HTTP
+// routes, a JSON API and a web page that sets what the five drums show.
 package main
 
 import (
@@ -36,17 +35,12 @@ var iconSVG []byte
 //go:embed sw.js
 var serviceWorkerJS []byte
 
-// pollTimeout bounds how long a firmware poll is held waiting for a change.
-// The cloud holds ~17 s and the device re-polls ~20 s after the previous
-// request started; 12 s leaves headroom for the round trip and stays under
-// Envoy's 15 s default route timeout even where the HTTPRoute's own timeout
-// is not honoured.
+// 12 s leaves round-trip headroom under Envoy's 15 s default route timeout,
+// which applies when the HTTPRoute's own timeout is ignored.
 var pollTimeout = 12 * time.Second
 
-// flapSettle is the least time between two different values handed to the
-// device. A drum needs a few seconds per flip and a full turn to reach a
-// lower digit; a new value arriving mid-turn has left drums out of step with
-// what the firmware believes they show.
+// The least gap between two different values sent to the device. A value
+// that arrives mid-turn leaves the drums out of step with the firmware.
 var flapSettle = 10 * time.Second
 
 const (
@@ -55,8 +49,7 @@ const (
 	defaultAt  = "08:00"
 	maxCatchUp = 366 // daily steps applied at once after downtime
 	dayFormat  = "2006-01-02"
-	// minFormat is a countdown target, in the shape the page's
-	// datetime-local input hands over.
+	// The shape the page's datetime-local input sends.
 	minFormat    = "2006-01-02T15:04"
 	maxCountdown = 99*60 + 59 // minutes the drums hold as HHbMM
 	defaultEvery = 5          // minutes a cycle holds each mode
@@ -64,8 +57,7 @@ const (
 	maxTick      = 60 // minutes between changes of a time-shaped mode
 )
 
-// modes is everything the drums can show. A cycle rotates through the others,
-// never through itself.
+// "cycle" stays last, because cyclable is every mode before it.
 var modes = []string{"number", "clock", "days", "date", "countdown", "countup", "github", "cycle"}
 
 var cyclable = modes[:len(modes)-1]
@@ -73,13 +65,11 @@ var cyclable = modes[:len(modes)-1]
 var (
 	macRe = regexp.MustCompile(`^[0-9a-f]{12}$`)
 	hexRe = regexp.MustCompile(`^[0-9a-f]+$`)
-	// Each drum has twelve flaps: the digits, a blank ('a') and a striped
-	// one ('b'); a cells value addresses all five drums.
-	cellsRe = regexp.MustCompile(`^[0-9ab]{5}$`)
-	// A canonical number: leading blanks, then digits without a leading zero.
+	// One character per drum: a digit, 'a' for the blank flap or 'b' for the striped one.
+	cellsRe  = regexp.MustCompile(`^[0-9ab]{5}$`)
 	numberRe = regexp.MustCompile(`^a*(0|[1-9][0-9]*)$`)
 	atRe     = regexp.MustCompile(`^([01][0-9]|2[0-3]):[0-5][0-9]$`)
-	// A GitHub login: alphanumerics and inner hyphens, up to 39 characters.
+	// GitHub's login rule: alphanumerics and inner hyphens, at most 39 characters.
 	userRe = regexp.MustCompile(`^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?$`)
 )
 
@@ -89,42 +79,34 @@ type daily struct {
 	Last string `json:"last"` // date of the last boundary applied
 }
 
-// cycle is the rotation: each mode in Modes holds the drums for Every
-// minutes, in turn.
 type cycle struct {
 	Modes []string `json:"modes"`
-	Every int      `json:"every"`
+	Every int      `json:"every"` // minutes each mode holds the drums
 }
 
-// github counts a person's public commits or pull requests. Count and At are
-// kept so a restart shows the last number instead of blanking the drums while
-// the first fetch is out.
 type github struct {
-	User  string    `json:"user"`
-	What  string    `json:"what"` // commits or prs
+	User string `json:"user"`
+	What string `json:"what"` // commits or prs
+	// Count and At persist so a restart shows the last count during the first fetch.
 	Count int       `json:"count"`
 	At    time.Time `json:"at"`
-	Err   string    `json:"-"` // the last fetch failure, for the page; not persisted
+	Err   string    `json:"-"`
 }
 
-// persisted is number.json. Cells is the stored number whatever the mode; the
-// daily step keeps moving it while another mode has the drums.
 type persisted struct {
 	Cells       string    `json:"cells"`
 	UpdatedAt   time.Time `json:"updatedAt"`
 	Daily       daily     `json:"daily"`
-	Mode        string    `json:"mode"`                  // one of modes
-	DaysDate    string    `json:"daysDate,omitempty"`    // the date days mode counts to
-	Clock12     bool      `json:"clock12,omitempty"`     // clock mode shows a 12-hour time
-	CountdownAt string    `json:"countdownAt,omitempty"` // the moment countdown mode runs to
-	CountupAt   string    `json:"countupAt,omitempty"`   // the moment countup mode runs from
-	Tick        int       `json:"tick"`                  // minutes between changes of a time-shaped mode
+	Mode        string    `json:"mode"`
+	DaysDate    string    `json:"daysDate,omitempty"`
+	Clock12     bool      `json:"clock12,omitempty"`
+	CountdownAt string    `json:"countdownAt,omitempty"`
+	CountupAt   string    `json:"countupAt,omitempty"`
+	Tick        int       `json:"tick"` // minutes between changes of a time-shaped mode
 	Cycle       cycle     `json:"cycle"`
 	GitHub      github    `json:"github"`
 }
 
-// shows reports whether p has what mode m needs. A mode that wants a setting
-// is not offered, kept or rotated to until the setting is there.
 func (p persisted) shows(m string) bool {
 	switch m {
 	case "number", "clock", "date":
@@ -143,16 +125,13 @@ func (p persisted) shows(m string) bool {
 	return false
 }
 
-// cycleMode is the member holding the drums at now. The turns are keyed to
-// the wall clock rather than to a timer, so nothing has to be scheduled and a
-// restart lands back in the rotation where it left off.
+// Turns follow the wall clock, so no timer is needed and a restart resumes
+// the rotation at the same member.
 func (p persisted) cycleMode(now time.Time) string {
 	turn := now.Unix() / int64(p.Cycle.Every*60)
 	return p.Cycle.Modes[int(turn%int64(len(p.Cycle.Modes)))]
 }
 
-// keepCyclable is ms with anything a cycle cannot rotate to dropped: another
-// cycle, a repeat, and any mode whose setting is missing.
 func keepCyclable(p persisted, ms []string) []string {
 	keep := []string{}
 	for _, m := range ms {
@@ -164,25 +143,25 @@ func keepCyclable(p persisted, ms []string) []string {
 }
 
 type server struct {
-	path string // number.json
+	path string
 	loc  *time.Location
 	now  func() time.Time
 
 	mu         sync.Mutex
 	persisted  persisted
 	lastPoll   time.Time
-	lastSent   string // cells last answered to the device; single device, so one is enough
+	lastSent   string // one device per server, so one value is enough
 	lastSentAt time.Time
 	devHost    string
 	lastStatus json.RawMessage
-	changed    chan struct{} // closed and replaced whenever cells change
+	changed    chan struct{} // closed and replaced to wake held polls
 }
 
 func newServer(dataDir string, loc *time.Location) (*server, error) {
 	s := &server{devHost: envOr("SMIIRL_DEVICE_HOST", "api.smiirl.com"), path: filepath.Join(dataDir, "number.json"), loc: loc, now: time.Now, changed: make(chan struct{})}
 	var file struct {
 		persisted
-		Number *int `json:"number"` // files written before cells existed
+		Number *int `json:"number"` // a file may hold a bare number instead of cells
 	}
 	b, err := os.ReadFile(s.path)
 	switch {
@@ -237,9 +216,8 @@ func newServer(dataDir string, loc *time.Location) (*server, error) {
 	return s, nil
 }
 
-// clockCells is the local time as HHbMM: the striped flap separates hours
-// and minutes. A 12-hour clock drops the leading zero to a blank flap, the
-// way a wall clock leaves the tens digit off; there is no flap for am/pm.
+// HHbMM, where 'b' is the striped flap. The 12-hour form blanks a leading
+// zero, and no flap can show am or pm.
 func clockCells(now time.Time, loc *time.Location, twelve bool) string {
 	if !twelve {
 		return now.In(loc).Format("15b04")
@@ -248,16 +226,13 @@ func clockCells(now time.Time, loc *time.Location, twelve bool) string {
 	return strings.Repeat("a", 5-len(c)) + c
 }
 
-// daysCells counts the whole calendar days between today (in loc) and date,
-// clamped to the drums, with the label "until", "since" or "today". Both
-// ends are taken as UTC midnights so a DST change never yields a 23-hour
-// day.
 func daysCells(now time.Time, loc *time.Location, date string) (int, string, error) {
 	target, err := time.Parse(dayFormat, date)
 	if err != nil {
 		return 0, "", err
 	}
 	y, m, d := now.In(loc).Date()
+	// Both ends are UTC midnights, so a DST change never yields a 23-hour day.
 	today := time.Date(y, m, d, 0, 0, 0, 0, time.UTC)
 	days := int(target.Sub(today) / (24 * time.Hour))
 	switch {
@@ -269,11 +244,6 @@ func daysCells(now time.Time, loc *time.Location, date string) (int, string, err
 	return 0, "today", nil
 }
 
-// spanCells is the distance between at and now, as HHbMM with the striped
-// flap between: 06b30 is six and a half hours. Counting down measures how
-// much is left, counting up how much has passed; either way it rests at
-// 00b00 on the wrong side of the moment and stops at 99b59, the most the
-// drums hold. tick coarsens it the same way it coarsens the clock.
 func spanCells(now time.Time, loc *time.Location, at string, up bool, tick int) (string, int, error) {
 	t, err := time.ParseInLocation(minFormat, at, loc)
 	if err != nil {
@@ -288,17 +258,13 @@ func spanCells(now time.Time, loc *time.Location, at string, up bool, tick int) 
 	return fmt.Sprintf("%02db%02d", mins/60, mins%60), mins, nil
 }
 
-// ticked is now rounded down to a multiple of tick minutes. The counter turns
-// a drum a full revolution for any change at all, however small, so a clock
-// that changes every minute costs a turn a minute; showing 11b40 for ten
-// minutes costs one turn where 11b41..11b49 would cost ten. Truncating the
-// instant aligns with local minutes in a whole-hour offset like Atlantic.
+// Each change turns a drum a full revolution, so fewer changes mean less wear.
+// Truncate aligns with local time only where the zone offset is whole hours.
 func ticked(now time.Time, tick int) time.Time {
 	return now.Truncate(time.Duration(tick) * time.Minute)
 }
 
-// showing is the mode with the drums at now: the mode itself, or the member a
-// cycle has reached. Caller holds s.mu.
+// Caller holds s.mu.
 func (s *server) showing(now time.Time) string {
 	if s.persisted.Mode == "cycle" {
 		return s.persisted.cycleMode(now)
@@ -306,13 +272,12 @@ func (s *server) showing(now time.Time) string {
 	return s.persisted.Mode
 }
 
-// display is what the drums should show at now. Caller holds s.mu.
+// Caller holds s.mu.
 func (s *server) display(now time.Time) string {
 	return s.cells(s.showing(now), now)
 }
 
-// cells is what mode m shows at now. A mode whose setting has gone falls back
-// to the stored number rather than to nothing. Caller holds s.mu.
+// Caller holds s.mu.
 func (s *server) cells(m string, now time.Time) string {
 	p := s.persisted
 	switch m {
@@ -340,8 +305,7 @@ func (s *server) cells(m string, now time.Time) string {
 	return p.Cells
 }
 
-// modeView is the mode part of /api/state and the /api/mode reply. Caller
-// holds s.mu.
+// Caller holds s.mu.
 func (s *server) modeView(now time.Time) map[string]any {
 	p := s.persisted
 	var days, label any
@@ -385,8 +349,7 @@ func clamp(n int) int {
 	return max(0, min(n, maxNumber))
 }
 
-// numberToCells right-aligns n on the drums with leading blanks, the way the
-// real counter shows short numbers.
+// Blank flaps pad n on the left, as the counter shows short numbers.
 func numberToCells(n int) string {
 	d := strconv.Itoa(n)
 	return strings.Repeat("a", 5-len(d)) + d
@@ -407,8 +370,8 @@ func numberOrNil(cells string) any {
 	return nil
 }
 
-// deviceValue is what the firmware gets: an int for a plain number, else the
-// raw cells as a string, the way the cloud addresses blank and striped flaps.
+// The cloud sends a plain number as an int and anything with blank or striped
+// flaps as the cells string.
 func deviceValue(cells string) any {
 	if n, ok := cellsNumber(cells); ok {
 		return n
@@ -420,7 +383,6 @@ func cellsView(cells string) map[string]any {
 	return map[string]any{"cells": cells, "number": numberOrNil(cells)}
 }
 
-// passed is the latest daily boundary at or before now.
 func passed(now time.Time, loc *time.Location, at string) time.Time {
 	hm, _ := time.Parse("15:04", at)
 	now = now.In(loc)
@@ -431,9 +393,6 @@ func passed(now time.Time, loc *time.Location, at string) time.Time {
 	return b
 }
 
-// dueDays counts the daily boundaries after d.Last that have passed by now,
-// at most maxCatchUp, and returns the date the count runs up to. An empty
-// Last owes today's boundary at most.
 func dueDays(now time.Time, loc *time.Location, d daily) (int, string) {
 	due := passed(now, loc, d.At)
 	last, err := time.ParseInLocation(dayFormat, d.Last, loc)
@@ -448,7 +407,6 @@ func dueDays(now time.Time, loc *time.Location, d daily) (int, string) {
 	return days, due.Format(dayFormat)
 }
 
-// tick applies the daily step for every boundary passed since Daily.Last.
 func (s *server) tick() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -493,7 +451,7 @@ func (s *server) handler() http.Handler {
 		fmt.Fprintln(w, "ok")
 	})
 	mux.HandleFunc("GET /number", func(w http.ResponseWriter, _ *http.Request) {
-		// The firmware's internet check after joining Wi-Fi; the cloud answers 1.
+		// The firmware's internet check after it joins Wi-Fi. The cloud answers 1.
 		writeJSON(w, http.StatusOK, map[string]int{"number": 1})
 	})
 	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
@@ -504,8 +462,8 @@ func (s *server) handler() http.Handler {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.Write(indexHTML)
 	})
-	// On the device's hostname, behave like the cloud: every other path is a
-	// 200 {"api":"front"}, and the page's writable API is not offered at all.
+	// On the device hostname, unknown paths and /api/ answer 200 {"api":"front"}
+	// as the cloud does, so the writable API is not reachable there.
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if s.deviceHost(r) {
 			if _, pattern := mux.Handler(r); pattern == "" || strings.HasPrefix(r.URL.Path, "/api/") {
@@ -517,8 +475,6 @@ func (s *server) handler() http.Handler {
 	})
 }
 
-// deviceHost reports whether the request arrived on the name the firmware
-// polls (SMIIRL_DEVICE_HOST, api.smiirl.com by default).
 func (s *server) deviceHost(r *http.Request) bool {
 	host := r.Host
 	if h, _, err := net.SplitHostPort(host); err == nil {
@@ -598,10 +554,9 @@ func (s *server) handleNumber(w http.ResponseWriter, r *http.Request) {
 	stale := s.display(s.now()) != s.lastSent
 	s.mu.Unlock()
 
-	// A value set between polls is answered at once instead of after the hold.
-	// The hold also ends when the clock or countdown moves on its own.
 	if !stale {
 		deadline := time.After(pollTimeout)
+		// Timed modes change the display without a commit, so the hold rechecks.
 		tick := time.NewTicker(time.Second)
 		defer tick.Stop()
 	hold:
@@ -670,22 +625,21 @@ func (s *server) handleState(w http.ResponseWriter, _ *http.Request) {
 		"lastPoll":   lastPoll,
 		"lastStatus": lastStatus,
 		"online":     s.now().Sub(s.lastPoll) < time.Minute,
-		// What the counter was actually handed, as opposed to what the app
-		// would hand it now. The two differ while a change waits for the
-		// flaps to settle, and only this one moved the drums.
+		// What the device last received. It differs from display while a
+		// change waits out flapSettle.
 		"lastSent":   s.lastSent,
 		"lastSentAt": lastSentAt,
 	}
 	writeJSON(w, http.StatusOK, v)
 }
 
-// dailyView is the daily object of /api/state. Caller holds s.mu.
+// Caller holds s.mu.
 func (s *server) dailyView() map[string]any {
 	d := s.persisted.Daily
 	var next any
 	if d.Step != 0 {
 		n := passed(s.now(), s.loc, d.At).AddDate(0, 0, 1)
-		// A day already recorded in Last never fires again (at moved later).
+		// A day already in Last never fires again, even after at moves later.
 		if n.Format(dayFormat) <= d.Last {
 			l, _ := time.ParseInLocation(dayFormat, d.Last, s.loc)
 			hm, _ := time.Parse("15:04", d.At)
@@ -746,9 +700,8 @@ func (s *server) handleDaily(w http.ResponseWriter, r *http.Request) {
 	}
 	s.mu.Lock()
 	p := s.persisted
-	// Last starts at the boundary just passed so the first step lands at the
-	// next one rather than retroactively; a day that already fired stays
-	// recorded so moving at later never fires it twice.
+	// Last starts at the boundary just passed, so the first step is at the next
+	// one. max keeps a day that fired from firing again when at moves later.
 	p.Daily = daily{Step: *body.Step, At: *body.At, Last: max(p.Daily.Last, passed(s.now(), s.loc, *body.At).Format(dayFormat))}
 	err := s.commit(p)
 	view := s.dailyView()
@@ -764,14 +717,14 @@ func (s *server) handleDaily(w http.ResponseWriter, r *http.Request) {
 func (s *server) handleMode(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Mode   string   `json:"mode"`
-		Date   string   `json:"date"`   // days
-		At     string   `json:"at"`     // countdown, countup
-		Hour12 *bool    `json:"hour12"` // clock
-		Tick   *int     `json:"tick"`   // clock, countdown, countup
-		User   string   `json:"user"`   // github
-		What   string   `json:"what"`   // github
-		Modes  []string `json:"modes"`  // cycle
-		Every  *int     `json:"every"`  // cycle
+		Date   string   `json:"date"`
+		At     string   `json:"at"`
+		Hour12 *bool    `json:"hour12"`
+		Tick   *int     `json:"tick"`
+		User   string   `json:"user"`
+		What   string   `json:"what"`
+		Modes  []string `json:"modes"`
+		Every  *int     `json:"every"`
 	}
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1024)).Decode(&body); err != nil {
 		badMode(w, `body must be {"mode":"..."} with that mode's settings`)
@@ -821,8 +774,6 @@ func (s *server) handleMode(w http.ResponseWriter, r *http.Request) {
 			badMode(w, `what must be "commits" or "prs"`)
 			return
 		}
-		// A different person or count starts over rather than showing the
-		// number that belonged to the last one.
 		if body.User != p.GitHub.User || body.What != p.GitHub.What {
 			p.GitHub = github{User: body.User, What: body.What}
 		}
@@ -849,7 +800,6 @@ func (s *server) handleMode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	p.Mode = body.Mode
-	// Dropping a setting a cycle was rotating to takes it out of the rotation.
 	p.Cycle.Modes = keepCyclable(p, p.Cycle.Modes)
 	err := s.commit(p)
 	view := s.modeView(s.now())
@@ -860,7 +810,7 @@ func (s *server) handleMode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if body.Mode == "github" {
-		go s.refreshGitHub() // the drums should not wait for the next tick
+		go s.refreshGitHub() // the drums do not wait for the next tick
 	}
 	writeJSON(w, http.StatusOK, view)
 }
@@ -869,9 +819,6 @@ func badMode(w http.ResponseWriter, msg string) {
 	writeJSON(w, http.StatusBadRequest, map[string]string{"error": msg})
 }
 
-// refreshGitHub fetches the count when a mode wants it and the last one has
-// gone stale. The fetch runs without the lock; a failure leaves the number on
-// the drums alone and is reported on the page.
 func (s *server) refreshGitHub() {
 	s.mu.Lock()
 	p := s.persisted
@@ -887,7 +834,7 @@ func (s *server) refreshGitHub() {
 	defer s.mu.Unlock()
 	q := s.persisted
 	if q.GitHub.User != p.GitHub.User || q.GitHub.What != p.GitHub.What {
-		return // the page moved on while the fetch was out
+		return // the settings changed during the fetch
 	}
 	if err != nil {
 		log.Printf("github: %v", err)
@@ -911,9 +858,8 @@ func (s *server) set(cells string) error {
 	return s.commit(p)
 }
 
-// commit persists p and wakes a held device poll when what the drums show
-// changed. Comparing the display rather than each setting means a new setting
-// needs nothing added here. Caller holds s.mu.
+// Caller holds s.mu. Held polls wake on any change to the display, so a new
+// setting needs no code here.
 func (s *server) commit(p persisted) error {
 	prev := s.persisted
 	moved := p.Cells != prev.Cells
@@ -934,8 +880,7 @@ func (s *server) commit(p persisted) error {
 	return nil
 }
 
-// save writes number.json atomically: a temp file in the same directory, then
-// a rename over the old one. Caller holds s.mu.
+// Caller holds s.mu. The temp file shares the directory so the rename is atomic.
 func (s *server) save() error {
 	b, err := json.Marshal(s.persisted)
 	if err != nil {
@@ -960,10 +905,8 @@ func (s *server) save() error {
 	return os.Rename(tmp.Name(), s.path)
 }
 
-// writeJSON sends the body byte for byte as the cloud does: no trailing
-// newline, an explicit length, the same content type. The firmware's
-// internet check compares the reply literally; a 13-byte {"number":1}
-// fails it.
+// The firmware's internet check compares the reply literally, so this matches
+// the cloud: no trailing newline, an explicit Content-Length, the same Content-Type.
 func writeJSON(w http.ResponseWriter, status int, v any) {
 	b, err := json.Marshal(v)
 	if err != nil {
@@ -976,9 +919,8 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 	w.Write(b)
 }
 
-// asset serves an embedded file. The page and its parts are rebuilt into the
-// image, so they carry no cache lifetime of their own; the service worker is
-// what keeps them around.
+// The files change with each image, so they carry no Cache-Control. The
+// service worker caches them.
 func asset(contentType string, body []byte) http.HandlerFunc {
 	return func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", contentType)

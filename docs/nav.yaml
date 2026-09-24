@@ -15,7 +15,11 @@ sections:
       - platform/nixos.md
       - platform/kubernetes.md
       - platform/workloads.md
-      - platform/network.md
+      - path: platform/network.md
+        children:
+          - platform/network/routing-and-firewall.md
+          - platform/network/ingress-and-dns.md
+          - platform/network/remote-access.md
       - platform/secrets-and-pki.md
       - platform/opentofu.md
       - platform/build-and-release.md
@@ -61,6 +65,11 @@ sections:
           - runbooks/operate-the-office-phone.md
           - runbooks/connect-an-agent-to-the-wiki.md
           - runbooks/repair-the-rowbutt-github-credential.md
+          - runbooks/operate-the-smiirl-counter.md
       - group: Every change
         items:
           - runbooks/test-a-change.md
+  - title: Reference
+    index: reference/index.md
+    items:
+      - reference/style-guide.md
