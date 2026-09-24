@@ -4,6 +4,14 @@ kind: Deployment
 metadata:
   name: pbx
   namespace: pbx
+  annotations:
+    # The trunk passwords are read once, when render-config builds pjsip.conf
+    # at pod start, so a password changed in 1Password reaches the Secret
+    # within the ExternalSecret's refresh and then sits unused until something
+    # restarts the pod. This rolls it when the Secret changes. The ConfigMaps
+    # need no entry: their generated names carry a content hash, so a config
+    # change is already a new Deployment spec.
+    reloader.stakater.com/reload: pbx-secrets
 spec:
   # One. Two Asterisks would both register the same voip.ms sub-account and the
   # carrier would deliver each inbound call to whichever registered last.
