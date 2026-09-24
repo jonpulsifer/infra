@@ -19,7 +19,11 @@
 #      GLOBAL(LAST911);
 #   5. nothing reachable from a context an inbound call starts in dials a
 #      trunk, runs a shell, spies, or grants a transfer (pbx-inbound-walk.awk);
-#   6. a site with [pbx-event] logs the line Grafana and the smiirl parse.
+#   6. a site with [pbx-event] logs the line Grafana and the smiirl parse;
+#   7. on folly, line 1's trunk is never screened, an open line, a contact and
+#      a 911 callback ring unanswered, a stranger on a screened line hears the
+#      press-5 prompt, and every prompt the dialplan plays is in the ConfigMap
+#      mounted for it.
 #
 # Usage: pbx-check.sh [site...]. The sites default to every
 # clusters/<site>/apps/pbx. PBX_CHECK_KEEP=1 keeps the work directory.
@@ -51,6 +55,8 @@ REQUIRED_MODULES=(
   res_srtp.so res_rtp_asterisk.so
   pbx_config.so app_dial.so app_stack.so res_prometheus.so
   codec_g722.so codec_ulaw.so
+  app_read.so app_playback.so app_waitforsilence.so res_musiconhold.so
+  func_groupcount.so func_timeout.so app_exec.so func_logic.so func_strings.so
 )
 # A second dial tone and a shell; modules.conf refuses them on every site.
 FORBIDDEN_MODULES=(app_disa.so app_system.so func_shell.so)
@@ -586,7 +592,7 @@ endpoint_param() { awk -v key="$2" '$1 == key && $2 == ":" { $1 = ""; $2 = ""; s
 
 check_reload_and_handsets() {
   local site=$1 ep show ctx trunk handset
-  local -a lines=() trunks=() roots=(from-voipms)
+  local -a lines=() trunks=() roots=(from-voipms) screened=()
   local -A shows=()
   for ep in $ENDPOINTS; do
     show=$(ast "pjsip show endpoint $ep")
@@ -602,6 +608,7 @@ check_reload_and_handsets() {
     elif [[ -n $ctx && $ctx != from-voipms ]]; then
       roots+=("$ctx")
     fi
+    if [[ $ctx == from-voipms && $(endpoint_param "$show" SCREEN) == yes ]]; then screened+=("$ep"); fi
   done
   INBOUND_ROOTS="${roots[*]}"
 
@@ -626,7 +633,14 @@ check_reload_and_handsets() {
     # shellcheck disable=SC2016 # ${EXTEN} is Asterisk's
     printf '[pbx-check-%s]\nexten => %s,1,Set(TRUNK=%s)\n same => n,Goto(%s,${EXTEN},1)\n\n' \
       "${lines[i]}" "$HANDSET_PATTERN" "${trunks[i]}" "$HANDSET_CONTEXT" >>"$ETC/pbx-check.conf"
+    # The handset dials 911 on line 1, so 911 calls back on line 1's trunk.
+    if [[ ${lines[i]} == line1 ]] && printf '%s\n' "${screened[@]}" | grep -qxF "${trunks[i]}"; then
+      fail "${trunks[i]} sets SCREEN=yes, but line1 dials 911 on it, so a callback from 911 would be screened"
+    fi
   done
+  if [[ $site == folly ]]; then
+    printf '%s\n' "${INBOUND_PROBE_CONTEXT[@]}" '' >>"$ETC/pbx-check.conf"
+  fi
   if has_context pbx-event; then
     printf '%s\n' '[pbx-check-event]' \
       'exten => s,1,Set(HANDSET=line4)' \
@@ -726,6 +740,80 @@ check_events() {
 
 # --- inbound ---------------------------------------------------------------
 
+# folly's inbound routes, each driven by a caller the check fakes: an open line
+# rings unanswered, a screened line rings unanswered for a contact or within an
+# hour of a 911, and answers anyone else with the press-5 prompt.
+# shellcheck disable=SC2016 # ${EPOCH} is Asterisk's
+INBOUND_PROBE_CONTEXT=(
+  '[pbx-check-inbound]'
+  'exten => open,1,Set(HANDSET=line1)'
+  ' same => n,Set(CALLERID(num)=6135550101)'
+  ' same => n,Goto(from-voipms,s,1)'
+  'exten => callback,1,Set(HANDSET=line4)'
+  ' same => n,Set(SCREEN=yes)'
+  ' same => n,Set(GLOBAL(LAST911)=${EPOCH})'
+  ' same => n,Set(CALLERID(num)=6135550102)'
+  ' same => n,Goto(from-voipms,s,1)'
+  'exten => contact,1,Set(HANDSET=line4)'
+  ' same => n,Set(SCREEN=yes)'
+  ' same => n,Set(GLOBAL(LAST911)=)'
+  ' same => n,Set(GLOBAL(CONTACT_6135550104)=Pbx Check)'
+  ' same => n,Set(CALLERID(num)=+1 613 555 0104)'
+  ' same => n,Goto(from-voipms,s,1)'
+  'exten => stranger,1,Set(HANDSET=line4)'
+  ' same => n,Set(SCREEN=yes)'
+  ' same => n,Set(GLOBAL(LAST911)=)'
+  ' same => n,Set(CALLERID(num)=6135550103)'
+  ' same => n,Goto(from-voipms,s,1)'
+)
+
+# Places probe $1 and fails unless its Executing lines hold $2 and not $3.
+expect_route() {
+  local name=$1 want=$2 refuse=$3 seen="" i
+  ast "channel originate Local/$name@pbx-check-inbound/n application Wait 1" >/dev/null
+  for ((i = 0; i < 50; i++)); do
+    seen=$(grep -F "(\"Local/$name@pbx-check-inbound-" "$SITE_DIR/asterisk.log" || true)
+    [[ $seen == *"$want"* ]] && break
+    sleep 0.1
+  done
+  if [[ $seen != *"$want"* ]]; then
+    fail "inbound probe '$name' never ran $want"
+  elif [[ -n $refuse && $seen == *"$refuse"* ]]; then
+    fail "inbound probe '$name' ran $refuse"
+  fi
+}
+
+check_inbound_routes() {
+  [[ $1 == folly ]] || return 0
+  local before=$SITE_FAILURES
+  expect_route open '"PJSIP/line1,25' '] Answer("'
+  expect_route callback '"PJSIP/line4,25' '] Answer("'
+  expect_route contact '"NOTICE,pbx-event kind=contact line=line4 caller=16135550104"' '] Answer("'
+  expect_route stranger '"DIGIT,/var/lib/pbx-sounds/captcha-greeting,1,,1,6"' '"PJSIP/line4,25'
+  ((SITE_FAILURES > before)) || say "    inbound probes: open line, 911 callback and contact ring; a stranger gets press 5"
+}
+
+# Every prompt the dialplan plays from a ConfigMap the asterisk container
+# mounts must be a key of that ConfigMap. Playback takes no extension.
+check_sounds() {
+  local pod="$SITE_DIR/pod.yaml" mount volume cm ref key refs
+  local -a missing=()
+  while IFS=$'\t' read -r mount volume; do
+    cm=$(V="$volume" yq '.volumes[] | select(.name == strenv(V)) | .configMap.name // ""' "$pod")
+    [[ -n $cm ]] || continue
+    doc ConfigMap "$cm" >"$SITE_DIR/sounds.yaml"
+    refs=$(grep -ohE "$mount/[^,)\"[:space:]]+" "$ETC"/*.conf | sort -u || true)
+    for ref in $refs; do
+      key=${ref#"$mount"/}
+      K="$key" yq -e '(.binaryData // {}) + (.data // {}) | keys | .[] | select(. == strenv(K) + ".ulaw" or . == strenv(K) + ".gsm" or . == strenv(K) + ".wav")' \
+        "$SITE_DIR/sounds.yaml" >/dev/null 2>&1 || missing+=("$ref")
+    done
+  done < <(yq '.containers[] | select(.name == "asterisk") | (.volumeMounts // [])[] | [.mountPath, .name] | @tsv' "$pod")
+  if ((${#missing[@]})); then
+    fail "the dialplan plays prompts its ConfigMap does not carry (give Playback no extension)" "${missing[@]}"
+  fi
+}
+
 check_inbound() {
   local out
   ast 'dialplan show' >"$SITE_DIR/dialplan.txt"
@@ -745,6 +833,7 @@ check_site() {
   mkdir -p "$SITE_DIR"
   say "==> $site"
   render "$site" full || return 1
+  check_sounds
   localize || return 1
   check_no_pjsip_noload
   boot || return 1
@@ -756,11 +845,14 @@ check_site() {
     SITE_DIR="$WORK/$site-degraded"
     mkdir -p "$SITE_DIR"
     say "==> $site (degraded: optional secrets absent)"
-    if render "$site" degraded && localize; then
-      check_no_pjsip_noload
-      if boot; then
-        say "    booted ($ISOLATION)"
-        run_checks "$site"
+    if render "$site" degraded; then
+      check_sounds
+      if localize; then
+        check_no_pjsip_noload
+        if boot; then
+          say "    booted ($ISOLATION)"
+          run_checks "$site"
+        fi
       fi
     fi
     stop_asterisk
@@ -777,6 +869,7 @@ run_checks() {
   check_pjsip_objects
   check_reload_and_handsets "$site"
   check_events
+  check_inbound_routes "$site"
   check_inbound
 }
 

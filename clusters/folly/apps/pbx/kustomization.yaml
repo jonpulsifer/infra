@@ -5,6 +5,7 @@ resources:
   - ../../../base/apps/pbx
   - service-lb.yaml
   - external-secret.yaml
+  - external-secret-contacts.yaml
   - network-policy.yaml
 
 patches:

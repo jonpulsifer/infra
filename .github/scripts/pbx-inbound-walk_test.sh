@@ -119,6 +119,16 @@ check 'a missing context is refused' 1 "reaches context 'nowhere', which does no
 check 'rebinding HANDSET is refused' 1 'rebinds HANDSET' \
   "$(inbound 's|2|Set(__HANDSET=vms-1994)')"
 
+check 'the press-5 screen and its spam sinks pass' 0 'inbound reaches 3 context(s)' \
+  "$(inbound 's|2|Read(DIGIT,/var/lib/pbx-sounds/captcha-greeting,1,,1,6)' \
+    's|3|GotoIf($["${DIGIT}" = "5"]?human,1)' 's|4|Goto(spam,s,1)' \
+    'human|1|Dial(PJSIP/${HANDSET},25,m)')$(context spam \
+      's|1|Set(CHANNEL(hangup_handler_push)=spam-held,s,1)' 's|2|MusicOnHold(default,20)' \
+      'lenny|1|WaitForSilence(1500,1,10)')$(context spam-held 's|1|Return()')"
+
+check 'a spy reachable from a spam sink is refused' 1 'calls chanspy()' \
+  "$(inbound 's|2|Goto(spam,s,1)')$(context spam 's|1|ChanSpy(,qg(spam))')"
+
 check 'a handset-only context may spy' 0 'none of them a trunk' \
   "$(inbound 's|2|Dial(PJSIP/${HANDSET},25)')$(handset)$(context toybox 's|1|ChanSpy(PJSIP/line1,q)')"
 

@@ -12,3 +12,13 @@
   value:
     name: sounds
     configMap: {name: pbx-sounds, defaultMode: 0444}
+# Optional: with no 1Password item there is no Secret, the directory is empty,
+# and the dialplan's #tryinclude finds nothing.
+- op: add
+  path: /spec/template/spec/containers/0/volumeMounts/-
+  value: {name: contacts, mountPath: /etc/pbx-contacts, readOnly: true}
+- op: add
+  path: /spec/template/spec/volumes/-
+  value:
+    name: contacts
+    secret: {secretName: pbx-contacts, optional: true, defaultMode: 0444}
