@@ -11,7 +11,7 @@ Use this runbook to change the OpenTofu code in `terraform/` or `clusters/<site>
 ## Before you start
 
 - Run `mise install`. Run every command with `tofu`, the OpenTofu binary that Atlantis and CI use.
-- Your GitHub account must be in `atlantis_users` in `clusters/offsite/apps/atlantis/policies/only-me.rego`.
+- To plan, your GitHub account must be in `atlantis_users` in `clusters/offsite/apps/atlantis/policies/only-me.rego`. To apply, it must be in `atlantis_appliers` in `appliers.rego` in the same directory.
 - A local plan takes the state lock, so it needs write access to objects in the `homelab-ng` state bucket. It also needs the provider credentials of the root, such as `OP_SERVICE_ACCOUNT_TOKEN`.
 - The backends of `terraform/gcp/projects/trusted-builds` and `terraform/gcp/projects/bluenose` impersonate `terraform@homelab-ng.iam.gserviceaccount.com`. A local plan of those roots needs the right to impersonate it.
 

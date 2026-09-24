@@ -2,11 +2,13 @@ package appliers
 
 import rego.v1
 
-# Who may comment `atlantis apply`. Planning identities live in only-me.rego;
-# a bot on that list can propose infrastructure but never apply it.
+# Who may comment `atlantis apply` or `atlantis import`. Plan runs the pull
+# request's code with Atlantis's credentials, so only-me.rego is a trust list too.
 atlantis_appliers := {"jonpulsifer"}
 
+allowed if input.user in atlantis_appliers
+
 deny contains msg if {
-    not input.user in atlantis_appliers
-    msg = sprintf("%s may not apply. Only %s can.", [input.user, atlantis_appliers])
+    not allowed
+    msg := sprintf("%v may not apply. Only %v can.", [object.get(input, "user", "<missing>"), atlantis_appliers])
 }

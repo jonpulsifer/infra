@@ -15,12 +15,9 @@ atlantis_users := {
     "github-actions[bot]",
 }
 
-allowed if {
-    some atlantis_user in atlantis_users
-    input.user == atlantis_user
-}
+allowed if input.user in atlantis_users
 
 deny contains msg if {
     not allowed
-    msg = sprintf("%s is not in the allowed users list. Want one of %s", [input.user, atlantis_users])
+    msg := sprintf("%v is not in the allowed users list. Want one of %v", [object.get(input, "user", "<missing>"), atlantis_users])
 }

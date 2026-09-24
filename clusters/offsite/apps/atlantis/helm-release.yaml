@@ -95,7 +95,7 @@ spec:
             commands: plan
           - run: /home/atlantis/apply-hook.sh
             description: Apply Hook
-            commands: apply
+            commands: apply, import
       workflows:
         default:
           plan:
