@@ -5,6 +5,7 @@ resources:
   - ../../base/apps/iperf3
   - atlantis
   - descheduler
+  - elevenlabs
   - hub
   - identity-spike
   - kthx

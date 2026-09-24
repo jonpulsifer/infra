@@ -1,0 +1,22 @@
+---
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: elevenlabs
+resources:
+  - namespace.yaml
+  - external-secret.yaml
+  - network-policy.yaml
+  - cronjob.yaml
+configMapGenerator:
+  - name: elevenlabs-reconcile
+    files:
+      - reconcile.sh
+  - name: elevenlabs-desired
+    files:
+      - desired/troll-agent.json
+      - desired/phone-number.json
+generatorOptions:
+  annotations:
+    # The script is bash and the prompt is free text: their ${...} is not
+    # Flux's to fill.
+    kustomize.toolkit.fluxcd.io/substitute: disabled

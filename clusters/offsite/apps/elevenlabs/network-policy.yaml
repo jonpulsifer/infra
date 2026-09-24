@@ -1,0 +1,36 @@
+---
+# The reconciler talks to the ElevenLabs API and nothing else.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: elevenlabs-reconcile
+  labels:
+    app.kubernetes.io/name: elevenlabs-reconcile
+spec:
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/name: elevenlabs-reconcile
+  # It serves nothing, so all ingress is denied.
+  enableDefaultDeny:
+    ingress: true
+    egress: true
+  egress:
+    # toFQDNs only matches names Cilium's DNS proxy saw resolved through this
+    # rule. The proxy refuses every other name, and musl stops a lookup at the
+    # first refused search domain, so the CronJob sets ndots to 1.
+    - toEndpoints:
+        - matchLabels:
+            io.kubernetes.pod.namespace: kube-system
+            k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - {port: "53", protocol: UDP}
+            - {port: "53", protocol: TCP}
+          rules:
+            dns:
+              - matchName: api.elevenlabs.io
+    - toFQDNs:
+        - matchName: api.elevenlabs.io
+      toPorts:
+        - ports:
+            - {port: "443", protocol: TCP}

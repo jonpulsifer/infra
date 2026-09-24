@@ -1,0 +1,16 @@
+---
+# Only the reconciler runs here. Its write key can re-point the phone number,
+# so it shares a namespace with nothing else.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: elevenlabs
+  labels:
+    kustomize.toolkit.fluxcd.io/prune: enabled
+    app.kubernetes.io/name: elevenlabs
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/enforce-version: latest
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/audit-version: latest
+    pod-security.kubernetes.io/warn: restricted
+    pod-security.kubernetes.io/warn-version: latest
