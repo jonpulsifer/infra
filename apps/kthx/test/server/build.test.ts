@@ -1,19 +1,7 @@
 /**
  * `POST /api/build`: which door has it, what is not trusted about an answer,
- * and what it costs.
- *
- * A real stub upstream that really streams, because every interesting claim
- * here is about time and framing rather than about a return value: the response
- * opens when the request is accepted, it says something every second the model
- * is quiet, and a model that thinks for forty seconds must not be cut off by a
- * connection timeout nobody sees fire.
- *
- * **A stub that answers instantly cannot fail on any of that**, which is how a
- * route that held its response for 71-95 s of empty socket passed this file all
- * the way into somebody's hands. So the stubs here are slow on purpose and the
- * assertions are timed: {@link thinksFor} and {@link writesSlowly} are the two
- * that can still fail, and {@link arriving} is what reads a body while it is
- * still arriving rather than after it has stopped.
+ * and what it costs. The claims are about timing, so the stubs are slow and
+ * {@link arriving} reads a body while it streams.
  */
 import { afterAll, beforeEach, describe, expect, test } from 'bun:test';
 import { LANDING_PATH } from '@repo/kthx/assets';
@@ -49,12 +37,10 @@ interface Seen {
 let asked: Seen[] = [];
 let answers: ((request: Request) => Response | Promise<Response>)[] = [];
 
-/** The upstream, near enough: it records what it was asked and answers in turn. */
+/** Records what it was asked and answers with the next of `answers`. */
 const upstream = Bun.serve({
   port: 0,
-  // A model that thinks for forty seconds is the point of one of these tests,
-  // and Bun's own default would cut the stub before the server under test ever
-  // got the chance to.
+  // Bun's default would cut a forty-second think before the server under test.
   idleTimeout: 255,
   async fetch(request) {
     const body = (await request.json()) as {
@@ -84,8 +70,7 @@ afterAll(() => {
 const kthx = withServer({
   controlHost: CONTROL,
   identityHost: IDENTITY,
-  // The loopback peers as well, because the one test that needs a real socket
-  // arrives over it and would otherwise be a caller nobody vouches for.
+  // Loopback too: the real-socket test arrives over it and must be vouched for.
   tailnetProxies: ['10.42.0.0/16', '127.0.0.1', '::1'],
   aiUrl: `http://127.0.0.1:${upstream.port}/v1`,
   aiKey: 'operator-key',
@@ -121,13 +106,8 @@ function writes(pieces: readonly string[], tokens = 900): Response {
 }
 
 /**
- * A model that thinks, writes a word, thinks again, then finishes.
- *
- * Both halves of a real generation, because the socket goes quiet in two
- * different ways: before the first content byte, where the route has nothing to
- * report but that it is waiting, and after it, where the route is a slow
- * response body. Bun's idle timer treats those differently, and the route has
- * to survive both.
+ * Quiet before the first content byte and again mid-body: Bun's idle timer
+ * treats the two differently, and the route must survive both.
  */
 function writesSlowly(
   before: number,
@@ -138,7 +118,7 @@ function writesSlowly(
   const encoder = new TextEncoder();
   const body = new ReadableStream<Uint8Array>({
     async start(controller) {
-      // Reasoning first, like the real base — see `thinksFor`.
+      // Reasoning first, as the real base streams it.
       controller.enqueue(
         encoder.encode(
           `data: ${JSON.stringify({ choices: [{ delta: { reasoning_content: 'mm' } }] })}\n\n`,
@@ -161,11 +141,8 @@ function writesSlowly(
 }
 
 /**
- * A model that thinks for a while before its first word.
- *
- * Written to survive being hung up on: the enqueue after the sleep lands on a
- * stream the server under test has already cancelled, and an unguarded one
- * would fail the run from inside this stub rather than inside a test.
+ * The enqueue after the sleep may hit a stream the server already cancelled;
+ * unguarded, it would fail the run from inside this stub.
  */
 function thinksFor(
   ms: number,
@@ -175,12 +152,8 @@ function thinksFor(
   const encoder = new TextEncoder();
   const body = new ReadableStream<Uint8Array>({
     async start(controller) {
-      // What the real base does while a model thinks, measured against it: the
-      // headers land in about a second and `reasoning_content` streams the
-      // whole way — 183 KB of it before the first content delta at 18.7 s. The
-      // silence is in the answer, not on the socket, and a stub that withheld
-      // its headers instead was modelling a different upstream and would have
-      // been cut by the clock that exists to catch a base nobody is listening on.
+      // The real base sends headers within a second and streams
+      // `reasoning_content` until the first content delta.
       controller.enqueue(
         encoder.encode(
           `data: ${JSON.stringify({ choices: [{ delta: { reasoning_content: 'mm' } }] })}\n\n`,
@@ -196,7 +169,7 @@ function thinksFor(
         controller.enqueue(encoder.encode(frames(rest)));
         controller.close();
       } catch {
-        // Nobody is reading this any more, which is the point of the test.
+        // The server hung up, as the test intends.
       }
     },
   });
@@ -252,12 +225,8 @@ function post(body: unknown, login: string | null = DAD) {
 }
 
 /**
- * Every frame as it lands, with the millisecond it landed on.
- *
- * The whole defect was invisible to a test that reads a response to the end and
- * then looks at it: a body that arrives all at once at ninety seconds and one
- * that arrives a line at a time from the first millisecond are the same array
- * afterwards, and only the second one is a page somebody sees.
+ * Each frame with the millisecond it arrived: a body sent all at once and one
+ * that streams are the same array once read to the end.
  */
 async function* arriving(
   response: Response,
@@ -282,7 +251,6 @@ async function* arriving(
   }
 }
 
-/** Every frame of an ndjson answer, in order. */
 async function read(response: Response): Promise<Record<string, unknown>[]> {
   const text = await response.text();
   return text
@@ -296,14 +264,7 @@ const done = (all: Record<string, unknown>[]) =>
 const failed = (all: Record<string, unknown>[]) =>
   all.find((frame) => frame.t === 'error') ?? null;
 
-/**
- * What this login has spent today.
- *
- * Slept on first: `bill` and `refundRequest` are `void ctx.sql…` — the answer
- * is not held for them, because a ledger write that failed costs the operator
- * money and the caller nothing — so a test that reads the row the moment the
- * response lands reads it before they arrive.
- */
+/** Sleeps first: the route does not await `bill` and `refundRequest`. */
 async function spent(
   login = DAD,
 ): Promise<{ requests: number; tokens: number }> {
@@ -400,15 +361,14 @@ describe('a page', () => {
     ];
     const all = await read(await post({ ask: 'A page for my woodworking.' }));
 
-    // The response is open before a model has been asked anything, and it names
-    // the one it is waiting on until that model's first word arrives.
+    // Open before any model is asked, naming the one it waits on.
     expect(all[0]).toEqual({ t: 'accepted' });
     expect(all[1]).toMatchObject({ t: 'thinking', model: 'writer' });
     expect(all.find((frame) => frame.t === 'start')).toEqual({
       t: 'start',
       model: 'writer',
     });
-    // Progress, not a spinner: the page says how much has been written.
+    // The page can say how much has been written.
     expect(all.some((frame) => frame.t === 'writing')).toBe(true);
     const last = done(all);
     expect(last).toMatchObject({
@@ -420,7 +380,7 @@ describe('a page', () => {
       url: `https://dartmouth-boards.${ZONE}`,
     });
 
-    // What the upstream was asked for, which is not what the caller sent.
+    // The build model and ceiling, whatever the caller sent.
     expect(asked[0]).toMatchObject({
       model: 'writer',
       maxTokens: 16000,
@@ -453,7 +413,6 @@ describe('a page', () => {
   });
 
   test('gets a name from what was typed when the model forgets to propose one', async () => {
-    // Measured: the fallback model dropped the comment on one prompt in six.
     answers = [() => writes([PAGE])];
     const last = done(await read(await post({ ask: 'MY CAT!!! Biscuit' })));
     expect(last?.name).toBe('my-cat-biscuit');
@@ -474,18 +433,14 @@ describe('a page', () => {
   });
 
   test('never offers this person their own address as somebody else’s', async () => {
-    // The model proposes from the description, so asking twice about the same
-    // business proposes the same name — measured, every time. Told that address
-    // was taken, he renamed, and the first name, its database and its role were
-    // spent for nothing.
+    // The same description proposes the same name, so it must read as his.
     const empty = await claimAs(DAD, 'his-own');
     answers = [() => writes([`<!-- kthx-name: ${empty} -->\n${PAGE}`])];
     expect(
       done(await read(await post({ ask: 'my woodworking' }))),
     ).toMatchObject({ name: empty, available: false, yours: 'empty' });
 
-    // And a website of his is not the same answer as a claim of his: one is
-    // finished by pressing the green button, the other needs its own name.
+    // An empty claim is finished by publishing; a live site needs a new name.
     const live = await claimAs(DAD, 'his-site');
     await publish(DAD, live, [{ path: 'index.html', bytes: bytes(PAGE) }]);
     answers = [() => writes([`<!-- kthx-name: ${live} -->\n${PAGE}`])];
@@ -511,9 +466,7 @@ describe('the upstream', () => {
     const all = await read(await post({ ask: 'a lawn care page' }));
 
     expect(all[0]).toEqual({ t: 'accepted' });
-    // The fallback used to run behind a held response, so the page had only its
-    // own clock to fill that silence with. It runs on an open one now, and the
-    // model named in `thinking` changing is the whole of the signal.
+    // The change of model in `thinking` is the only sign of the fallback.
     expect(
       all.filter((frame) => frame.t === 'thinking').map((frame) => frame.model),
     ).toEqual(['writer', 'second-writer']);
@@ -525,15 +478,13 @@ describe('the upstream', () => {
       'writer',
       'second-writer',
     ]);
-    // Two attempts, one of them this deployment's fault and given back — and
-    // only the one that wrote a page is billed any tokens.
+    // The deployment's fault is given back; only the page is billed tokens.
     expect(await spent()).toEqual({ requests: 1, tokens: 900 });
   });
 
   test('treats a model that only reasons as one that never answered', async () => {
-    // Measured: four models on this base spend the whole ceiling reasoning and
-    // emit no content at all. Nothing was written, so nothing may be published
-    // — but it answered, and what it spent reasoning is charged.
+    // Some models spend the whole ceiling reasoning and write nothing: nothing
+    // is published, but the reasoning is charged.
     answers = [() => thinksOnly(), () => thinksOnly()];
     const answer = await post({ ask: 'a page' });
     expect(answer.status).toBe(200);
@@ -545,11 +496,8 @@ describe('the upstream', () => {
   });
 
   test('bills nothing for a deployment fault, and hands the attempts back', async () => {
-    // The state production was in for weeks: a key with no credit answers 401
-    // to everything. Billing the token ceiling on a path where usage never
-    // arrived charged sixteen thousand tokens an attempt for an outage nobody
-    // asked for, and thirty-one presses of a button that wrote no page at all
-    // closed the day until UTC midnight.
+    // A key with no credit answers 401 to everything, which must neither bill
+    // the ceiling nor close the day.
     answers = [
       () => new Response('no credit', { status: 401 }),
       () => new Response('down', { status: 503 }),
@@ -561,12 +509,8 @@ describe('the upstream', () => {
   });
 
   test('hands the attempts back for a base URL this deployment got wrong', async () => {
-    // Unlike `/api/ai`, this route composes the whole URL out of `KTHX_AI_URL`
-    // — the caller cannot pick a path — so a 404 is only ever the operator's,
-    // and measured, a wrong path on this upstream answers 404 with a marketing
-    // page rather than a 5xx. Thirty presses against one would otherwise close
-    // a day in which nobody wrote a page, and then go on refusing after the URL
-    // was fixed. A 429 is the plan's concurrency, which is nobody's sentence.
+    // The whole URL comes from `KTHX_AI_URL`, so a 404 is the operator's (this
+    // upstream answers a wrong path with 404); a 429 is the plan's concurrency.
     for (const status of [404, 429]) {
       await kthx().sql`delete from build_usage where login = ${DAD}`;
       answers = [
@@ -582,11 +526,7 @@ describe('the upstream', () => {
   });
 
   test('bills nothing for an upstream that answers with no stream at all', async () => {
-    // The floor is for an upstream that opened a body and said nothing through
-    // it. Nothing was opened here, on a URL and a model that are both this
-    // deployment's, so charging the ceiling *and* keeping the attempt is that
-    // rule applied backwards: two presses would cost a day's worth of tokens
-    // for two generations that never started.
+    // The billing floor is for a body opened and left silent; none was opened.
     answers = [
       () => new Response(null, { status: 200 }),
       () => new Response(null, { status: 200 }),
@@ -598,10 +538,8 @@ describe('the upstream', () => {
   });
 
   test('keeps the attempt when the refusal is about the body', async () => {
-    // The other half of the same rule, and the half `/api/ai` was hardened to
-    // after it was found live: a refusal the caller's own material earned is
-    // free to ask for again, and the day is the only ceiling on outbound calls
-    // there is.
+    // A refusal the caller's material earned stays spent: the day is the only
+    // ceiling on outbound calls.
     answers = [
       () => new Response('context length', { status: 400 }),
       () => new Response('context length', { status: 400 }),
@@ -612,12 +550,8 @@ describe('the upstream', () => {
   });
 
   test('gives the slot back when the control database does not answer', async () => {
-    // The day is read before the response opens — it is the last thing here
-    // that can still be a status — and an ordinary CNPG blip rejects that
-    // await. The in-flight slot is taken before it: released on the paths that
-    // return and not on the one that throws, a single Postgres error left this
-    // login reading "one at a time" for the life of the pod, and four of them
-    // closed the builder for everybody on the tailnet.
+    // The in-flight slot is taken before the day is read, so a Postgres error
+    // there must still release it.
     await kthx().sql`alter table build_usage rename to build_usage_gone`;
     const broken = await post({ ask: 'a page' });
     expect(broken.status).toBe(500);
@@ -644,16 +578,8 @@ describe('the upstream', () => {
 
 describe('the silence before a model writes', () => {
   test('is answered at once, and spoken through', async () => {
-    // The defect this file could not see, and the reason it could not. Every
-    // other stub here answers in microseconds, so the response always arrived
-    // before anything could give up on it, and the 71-95 s of empty socket
-    // production measured — twice, against the real model — was invisible from
-    // in here. A browser abandons a `fetch` long before ninety seconds and
-    // rejects it with a sentence of its own making: "Load failed", which is
-    // what was on the screen.
-    //
-    // This stub is quiet for twenty seconds, twice Bun's default idle timeout,
-    // and the claim is that bytes reach the client all the way through it.
+    // Quiet for 20 s, twice Bun's default idle timeout. A browser abandons a
+    // silent `fetch`, so bytes must reach the client throughout.
     answers = [
       () => thinksFor(20_000, '<!-- kthx-name: patient -->\n', [PAGE]),
     ];
@@ -671,8 +597,7 @@ describe('the silence before a model writes', () => {
     expect(response.status).toBe(200);
     expect(response.headers.get('content-type')).toBe('application/x-ndjson');
 
-    // The status on its own proves nothing — `fetch` resolves on headers — so
-    // the frames are read as they land and timed against the model's silence.
+    // `fetch` resolves on headers, so the frames are timed as they arrive.
     const all: Record<string, unknown>[] = [];
     const at: number[] = [];
     for await (const landed of arriving(response)) {
@@ -681,38 +606,28 @@ describe('the silence before a model writes', () => {
       if (landed.frame.t === 'done' || landed.frame.t === 'error') break;
     }
 
-    // The assertion that would have caught it: a first byte while the model is
-    // twenty seconds from writing one. Asserted before the frame's shape so a
-    // failure here reads as the wait it is rather than as a renamed field.
+    // Before the shape checks, so a failure here reads as the wait it is.
     expect(at[0]).toBeLessThan(5_000);
     expect(all[0]).toEqual({ t: 'accepted' });
     const thinking = all.filter((frame) => frame.t === 'thinking');
-    // One a second through a twenty-second silence, every one of them naming
-    // the model that is busy — a reasoning model is working, not idle, and the
-    // page is now able to say so instead of spinning.
+    // One a second through the silence, each naming the busy model.
     expect(thinking.length).toBeGreaterThanOrEqual(10);
     expect(thinking.every((frame) => frame.model === 'writer')).toBe(true);
     expect(thinking.at(-1)?.ms).toBeGreaterThan(9_000);
-    // And they were not one burst at the end: the last of them landed while the
-    // model was still silent, which is the only reason the wait is countable.
+    // The last arrived while the model was still silent, not in a final burst.
     const last = all.reduce(
       (found, frame, index) => (frame.t === 'thinking' ? index : found),
       -1,
     );
     expect(at[last]).toBeGreaterThan(15_000);
-    // Not strictly less than the last frame of all: the model's first byte and
-    // a heartbeat tick can land in the same millisecond, and a test that fails
-    // one run in two hundred on a coincidence teaches people to re-run it.
+    // Not strictly less: a heartbeat and the first byte can share a tick.
     expect(at[last]).toBeLessThanOrEqual(at.at(-1) ?? 0);
-    // The page still arrives, which is the other half of the bargain.
     expect(done(all)).toMatchObject({ name: 'patient', document: PAGE });
   }, 60_000);
 
   test('ends in a frame, never in a status, however it ends', async () => {
-    // Moving where a request is accepted moves every upstream fault with it:
-    // once the body is a stream there is no status left to refuse with, so a
-    // page that reads a code has to find one in the frames. Both models refuse
-    // outright, and the answer is still 200.
+    // Once the body streams there is no status left to refuse with, so both
+    // models refusing still answers 200.
     answers = [
       () => new Response('down', { status: 503 }),
       () => new Response('down', { status: 503 }),
@@ -726,14 +641,12 @@ describe('the silence before a model writes', () => {
     expect(
       all.filter((frame) => frame.t === 'thinking').map((frame) => frame.model),
     ).toEqual(['writer', 'second-writer']);
-    // No model wrote a word, so there is no `start` and nothing to publish —
-    // and the last frame carries the same code and the same fixed sentence the
-    // 502 used to carry in a body nobody was left to read.
+    // No model wrote a word, so no `start`; the last frame carries the code.
     expect(all.some((frame) => frame.t === 'start')).toBe(false);
     expect(done(all)).toBeNull();
     expect(all.at(-1)).toMatchObject({ t: 'error', code: 'AI_UPSTREAM' });
     expect(all.at(-1)?.message).toBeString();
-    // It is still this deployment's fault, so it still costs him nothing.
+    // A deployment fault costs the caller nothing.
     expect(await spent()).toEqual({ requests: 0, tokens: 0 });
   });
 });
@@ -749,8 +662,7 @@ describe('a change', () => {
       await read(await post({ ask: 'make the heading green', site: name })),
     );
 
-    // The document the model was handed is the one that is live, and the name
-    // it proposed is discarded: this site already has one.
+    // The model gets the live document; its proposed name is discarded.
     expect(asked[0]?.messages[1]?.content).toContain(PAGE);
     expect(last).toMatchObject({ site: name, name, document: changed });
     // A refine has no name to offer, so there is no availability to read.
@@ -782,10 +694,8 @@ describe('a change', () => {
   });
 
   test('is refused when the page it would send back is too big to answer', async () => {
-    // The answer is capped at 512 KiB on the way out; the release route takes
-    // 32 MiB unpacked, so without the same cap on the way in one press of
-    // "Change it" reads thirty megabytes into this pod and posts it to the
-    // upstream once per model.
+    // The answer's 512 KiB cap applies on the way in too, or one press could
+    // read a 32 MiB release and post it once per model.
     const name = await claimAs(DAD, 'toobig');
     const huge = `<!doctype html><html><body>${'x'.repeat(600 * 1024)}</body></html>`;
     await publish(DAD, name, [{ path: 'index.html', bytes: bytes(huge) }]);
@@ -796,8 +706,7 @@ describe('a change', () => {
   });
 
   test('is refused on a site that was not written here', async () => {
-    // Two files means assets, and publishing one document over them would leave
-    // every image of that site in a release nobody is looking at.
+    // Two files means assets, which one published document would strand.
     const name = await claimAs(DAD, 'handmade');
     await publish(DAD, name, [
       { path: 'index.html', bytes: bytes(PAGE) },
@@ -811,15 +720,8 @@ describe('a change', () => {
 
 describe('the connection', () => {
   test('outlives a model that thinks for forty seconds', async () => {
-    // Bun closes a connection that has sent nothing for its idle timeout —
-    // 30 s in production, Bun's own 10 s here, both of them far under the
-    // 30-150 s a measured generation takes. The heartbeat is what keeps this
-    // socket busy now and `server.timeout` is the belt behind it, so this walks
-    // the whole road with a twenty-second think *and* a twenty-second gap
-    // mid-document, which is the half no frame-counting test reaches. Timed
-    // rather than mocked: `server.timeout` is a fact about a socket, and a fake
-    // that records the call would pass with the argument in seconds or in
-    // milliseconds.
+    // Bun's idle timeout is 10 s here and 30 s in production. Timed, not
+    // mocked: a fake `server.timeout` would pass with seconds or milliseconds.
     answers = [
       () =>
         writesSlowly(20_000, 20_000, '<!-- kthx-name: patient -->\n', [PAGE]),
@@ -844,11 +746,8 @@ describe('the connection', () => {
 
 describe('a caller who has gone away', () => {
   test('does not pay for the fallback model', async () => {
-    // Measured before this existed: abort 300 ms into the primary's think time
-    // and the fallback ran a whole paid generation, streaming a document into a
-    // response nothing was reading — on the surface where a 30-150 s wait is
-    // exactly when a phone gets backgrounded. Over a real socket, because the
-    // claim is about what a closed connection does to `request.signal`.
+    // A closed socket must stop the fallback from a paid generation. Real
+    // socket: the claim is about `request.signal`.
     answers = [
       () => thinksFor(3000, '<!-- kthx-name: nobody -->\n', [PAGE]),
       () => writes([PAGE]),
@@ -871,8 +770,7 @@ describe('a caller who has gone away', () => {
     await Bun.sleep(500);
 
     expect(asked.map((seen) => seen.model)).toEqual(['writer']);
-    // Nothing was written, so there is no draft: a partial document is not a
-    // page, and the generation stops when the socket does.
+    // A partial document is no page, so no draft is kept.
     const [row] = (await kthx().sql`
       select count(*)::int as drafts from builds
     `) as { drafts: number }[];
@@ -881,8 +779,7 @@ describe('a caller who has gone away', () => {
 });
 
 describe('a base that is not there', () => {
-  // Reserved by RFC 5737 and routed nowhere, so a connect hangs rather than
-  // refusing — the shape a wrong hostname actually has.
+  // RFC 5737 space routes nowhere, so a connect hangs as a wrong hostname does.
   const dead = withServer({
     identityHost: IDENTITY,
     tailnetProxies: [PROXY],
@@ -895,9 +792,7 @@ describe('a base that is not there', () => {
   });
 
   test('says so in seconds, not in minutes', async () => {
-    // One clock for "can you be reached" and "have you thought of a word yet"
-    // made a mis-set KTHX_AI_URL take 268 s to admit it — 133 s on the primary
-    // and 135 s again on the fallback, narrated the whole way as writing.
+    // Reaching the base runs on `HEADERS_MS`, not the thinking model's clock.
     const began = Date.now();
     const response = await dead().fetch(
       ask('/api/build', {
@@ -912,13 +807,12 @@ describe('a base that is not there', () => {
       }),
       peer(PROXY),
     );
-    // Still a frame on a 200 — the socket is never the thing that fails.
+    // Still a frame on a 200: the socket is never what fails.
     expect(response.status).toBe(200);
     const frames = await read(response);
     expect(frames.at(-1)).toMatchObject({ t: 'error', code: 'AI_UPSTREAM' });
 
-    // Two models, each on the short clock, and the whole thing inside what a
-    // person will sit through. The long clock is for a model that has answered.
+    // Two models, each on the short clock.
     const took = Date.now() - began;
     expect(took).toBeLessThan(2 * HEADERS_MS + 20_000);
   }, 120_000);
@@ -942,12 +836,8 @@ describe('the page every door serves', () => {
   });
 
   test('is one page, and the builder is on no door but that one', async () => {
-    // The landing page's breakage is what reverted a ticket once, and folding
-    // the builder into it is exactly the kind of change that does it again. So
-    // the assertion is on both halves: the attribute is absent on the other
-    // two doors, the gate that reads it is still in the sheet — nothing is
-    // rendered rather than something being hidden after the fact — and the
-    // furniture those doors had yesterday is still where it was.
+    // The gate stays in the sheet, the other doors lack the attribute, and
+    // they keep their own deck.
     const page = await Bun.file(LANDING_PATH).text();
     expect(page).toContain('#builder{display:none;');
     expect(page).toContain('html[data-identity] #builder{display:block}');
@@ -955,9 +845,7 @@ describe('the page every door serves', () => {
       const html = await (
         await kthx().fetch(ask('/', { host }), peer(PROXY))
       ).text();
-      // The tag, not the file: the sheet inside it names the attribute in the
-      // gate itself, and a bare search of the body would find that and read as
-      // a door this caller is not on.
+      // The tag only: the sheet names the attribute in the gate itself.
       const tag = /<html[^>]*>/.exec(html)?.[0] ?? '';
       expect(html).toContain('kthx.dev</title>');
       expect(tag).toContain(`data-zone="${ZONE}"`);
@@ -969,9 +857,8 @@ describe('the page every door serves', () => {
   });
 
   test('does not send the builder to a door that cannot use it', async () => {
-    // Hiding it with a selector still shipped the markup, its rules and
-    // thirty-five kilobytes of its script to every anonymous visitor on the
-    // public apex — who has no `POST /api/build` to reach and nobody to be.
+    // Hiding it with a selector would still ship its markup and script to
+    // every anonymous visitor.
     const onDoor = async (host: string) =>
       await (await kthx().fetch(ask('/', { host }), peer(PROXY))).text();
 
@@ -986,11 +873,9 @@ describe('the page every door serves', () => {
         expect(tailnet).toContain(gone);
         expect(html).not.toContain(gone);
       }
-      // The fence itself never reaches a browser either.
       expect(html).not.toContain('builder:start');
       expect(tailnet).not.toContain('builder:start');
-      // And it is a cut, not a rewrite: the page is meaningfully smaller and
-      // still ends where a page ends.
+      // A cut: much smaller, and still a whole page.
       expect(html.length).toBeLessThan(tailnet.length - 30_000);
       expect(html.trimEnd().endsWith('</html>')).toBe(true);
     }
@@ -998,15 +883,7 @@ describe('the page every door serves', () => {
 });
 
 describe('the whole road, as the page walks it', () => {
-  /**
-   * The page's own ZIP writer, lifted out of the file it lives in.
-   *
-   * It is twenty lines of hand-written ZIP that nothing else in this repo
-   * parses until an upload arrives, so the assertion worth having is that the
-   * release route reads what that page writes. One writer for both the deck
-   * and the builder, now that they are one file: a second copy is a second
-   * thing to get wrong.
-   */
+  /** The page's own ZIP writer, lifted out, so the release route must read it. */
   async function pageZip(): Promise<(name: string, bytes: Uint8Array) => Blob> {
     const html = await Bun.file(LANDING_PATH).text();
     const from = html.indexOf('let crcTable;');
@@ -1027,8 +904,7 @@ describe('the whole road, as the page walks it', () => {
     const first = done(await read(await post({ ask: 'a page for my boats' })));
     expect(first).toMatchObject({ name, available: true });
 
-    // What the page does with a confirmed name: claim, then publish the
-    // document through the ordinary release route, in a zip it wrote itself.
+    // As the page does: claim, then publish through the release route.
     const claimed = await ontailnet('/api/sites', DAD, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -1044,9 +920,7 @@ describe('the whole road, as the page walks it', () => {
     const site = await kthx().fetch(ask('/', { host: `${name}.${ZONE}` }));
     expect(await site.text()).toBe(PAGE);
 
-    // A second release, and then a rollback off it — which is what puts the
-    // latch on: every release after a rollback is stored and none of them
-    // serves until the hold comes off.
+    // A rollback holds the site: later releases are stored but do not serve.
     const second = await ontailnet(`/api/sites/${name}/releases`, DAD, {
       method: 'POST',
       headers: { origin: `https://${IDENTITY}` },
@@ -1073,8 +947,7 @@ describe('the whole road, as the page walks it', () => {
       body: zipOne('index.html', bytes(changed?.document as string)),
     });
     const numbered = (await again.json()) as { n: number; serving: number };
-    // Stored, numbered, and NOT serving — so publishing a change has to take
-    // the hold off, which is exactly what the page does next.
+    // Not serving, so publishing must take the hold off, as the page does next.
     expect(numbered.serving).not.toBe(numbered.n);
     expect(
       await (await kthx().fetch(ask('/', { host: `${name}.${ZONE}` }))).text(),
@@ -1092,7 +965,7 @@ describe('the whole road, as the page walks it', () => {
 });
 
 describe('the page, when the upload half of publishing fails', () => {
-  /** The page's `api`, as the browser's one behaves, against this server. */
+  /** The page's `api` helper, against this server. */
   function apiAs(login: string) {
     return async (
       method: string,
@@ -1129,12 +1002,8 @@ describe('the page, when the upload half of publishing fails', () => {
   }
 
   /**
-   * The page's own claim step, lifted out of the file it lives in.
-   *
-   * Claiming is the one step on that road which cannot be repeated — it makes a
-   * real database and a kthx name is taken for good — so what the page does
-   * when it is asked to claim twice is a claim about this server's answers, and
-   * belongs against this server rather than against a mock of it.
+   * The page's own claim step, lifted out. A claim cannot be repeated, so the
+   * page's retry is tested against this server.
    */
   async function pageClaim(api: ReturnType<typeof apiAs>): Promise<{
     claim: (name: string) => Promise<void>;
@@ -1159,10 +1028,8 @@ describe('the page, when the upload half of publishing fails', () => {
     const name = kthx().name('resume');
 
     await claim(name);
-    // The upload is what failed — a tailnet blip, a pod rolling under a merge —
-    // and the second press comes back through here. Before, the claim ran
-    // again, his own row conflicted, and the page told him the address he had
-    // just taken belonged to somebody else.
+    // After a failed upload the second press comes back here, and his own
+    // claim must not read as taken.
     await claim(name);
 
     await publish(DAD, name, [{ path: 'index.html', bytes: bytes(PAGE) }]);
@@ -1175,8 +1042,7 @@ describe('the page, when the upload half of publishing fails', () => {
     const { claim } = await pageClaim(apiAs(DAD));
     const mine = await claimAs(DAD, 'standing');
     await publish(DAD, mine, [{ path: 'index.html', bytes: bytes(PAGE) }]);
-    // His, but with a page on it: pressing the button twice means "finish
-    // this", never "write over the one I made last week".
+    // His, with a page on it: a second press finishes, never overwrites.
     await expect(claim(mine)).rejects.toMatchObject({ code: 'TAKEN' });
 
     const hers = await claimAs(MOM, 'hers');
@@ -1187,10 +1053,8 @@ describe('the page, when the upload half of publishing fails', () => {
     const name = await claimAs(DAD, 'unreachable');
     expect(await (await pageClaim(apiAs(DAD))).claimedEmpty(name)).toBe(true);
 
-    // A check that never arrived must not answer "not yours": one dropped
-    // packet would otherwise send him off to rename an address he owns. The
-    // page tells those apart by the status a refusal carries, so a rejection
-    // with none has to come back out of here rather than reading as a no.
+    // A check that never arrived must not answer "not yours": a rejection
+    // with no status is rethrown.
     const offline = await pageClaim(() => {
       throw Object.assign(new Error('offline'), { code: 'OFFLINE' });
     });
@@ -1203,14 +1067,7 @@ describe('the page, when the upload half of publishing fails', () => {
   });
 });
 
-/**
- * Just enough of a document for the handful of properties these screens touch.
- *
- * The page is lifted rather than rendered, the way its ZIP writer and its claim
- * step are: this file has no DOM, and what is worth asserting about a screen
- * here is which control on it is live — which is the whole of the defect, since
- * a screen with nothing live on it is where the person stops.
- */
+/** Just enough of a document for these screens; this file has no DOM. */
 interface Node {
   textContent: string;
   value: string;
@@ -1263,11 +1120,11 @@ describe('every refusal this page can meet has a sentence', () => {
     GOOD: Set<string>;
     BEFORE_CHANGING: Record<string, string>;
     sentence: (err: unknown, also?: Record<string, string>) => string;
-    /** Renders into the stub box below and answers what it was dressed as. */
+    /** Renders into a stub box and returns its class and text. */
     render: (err: unknown) => { className: string; text: string };
   }
 
-  /** The copy table, the lookup over it, and the box it lands in. */
+  /** The page's copy table, lookup and message box, lifted out. */
   async function pageSays(): Promise<Says> {
     const html = await Bun.file(LANDING_PATH).text();
     const from = html.indexOf('const SAYS = {');
@@ -1297,9 +1154,7 @@ describe('every refusal this page can meet has a sentence', () => {
 
   test('covers every code the routes it calls can refuse with', async () => {
     const { SAYS } = await pageSays();
-    // `POST /api/build`, `GET /api/build/:id`, `POST /api/sites`,
-    // `GET /api/names/:name`, `POST /api/sites/:name/releases` and
-    // `DELETE /api/sites/:name/hold`, as this page calls them.
+    // Every code the routes this page calls can answer with.
     for (const code of [
       'AI_BUDGET',
       'AI_UPSTREAM',
@@ -1324,8 +1179,7 @@ describe('every refusal this page can meet has a sentence', () => {
 
   test('never shows the browser its own English, or the server its own', async () => {
     const { SAYS, sentence } = await pageSays();
-    // What a dropped tailnet actually rejects with on a phone. It has no code,
-    // and its message is the one thing this screen must never read out.
+    // A dropped connection on a phone: no code, and a message never shown.
     expect(sentence(new TypeError('Load failed'))).toBe(SAYS.UNKNOWN);
     expect(sentence({ code: 'SITE_FULL', message: 'this site is full' })).toBe(
       SAYS.UNKNOWN,
@@ -1338,10 +1192,7 @@ describe('every refusal this page can meet has a sentence', () => {
 
   test('does not say good news in the colour kept for bad', async () => {
     const { SAYS, render } = await pageSays();
-    // Every one of these is a reassurance — the address is already yours, what
-    // you typed is still here — and they were landing in the red box kept for
-    // things going wrong. Told his site is fine in the colour of an alarm, a
-    // person learns not to trust the colour.
+    // Reassurances, so never the red box kept for failures.
     for (const code of ['PICKED_UP', 'CLAIMED', 'TYPED_BACK', 'PINNED']) {
       expect(SAYS[code]).toBeString();
       const shown = render({ code });
@@ -1355,10 +1206,8 @@ describe('every refusal this page can meet has a sentence', () => {
 
   test('does not send him round a circle no smaller change gets out of', async () => {
     const { BEFORE_CHANGING, sentence } = await pageSays();
-    // A site whose serving page is over the cap is refused 413 before a model
-    // is asked anything, so what was too big is the page that is already there
-    // — and asking for a smaller change cannot help, because the size is the
-    // same whatever he asks for.
+    // The serving page is too big before any model is asked, so a smaller
+    // change cannot help.
     const said = sentence({ code: 'TOO_LARGE', status: 413 }, BEFORE_CHANGING);
     expect(said).not.toMatch(/came back|smaller change/i);
     expect(said).toBeString();
@@ -1366,14 +1215,8 @@ describe('every refusal this page can meet has a sentence', () => {
 });
 
 /**
- * A span of the page's own script, by the comments that bound it.
- *
- * Lifted rather than rendered, the way the ZIP writer and the claim step are:
- * this file has no DOM, and the claims worth making about a screen are which
- * control on it is live and what it says — which is the whole of the defect,
- * since a screen with nothing live on it is where the person stops. The
- * builder shares the page with the deck now, so every marker here has to be
- * one only the builder has; `nameVerdict` is named as it is for that reason.
+ * A span of the page's script between two markers. The deck shares the page,
+ * so each marker must be one only the builder has.
  */
 async function slice(from: string, to: string): Promise<string> {
   const html = await Bun.file(LANDING_PATH).text();
@@ -1410,28 +1253,26 @@ describe('an address of his own, on the screens that offer it', () => {
       site: null,
       document: PAGE,
     };
-    // Nobody's: the ordinary road, and the green button is "Put it online".
+    // Nobody's: the ordinary case.
     expect(propose({ ...frame, available: true, yours: null })).toMatchObject({
       taken: false,
     });
     expect(said.at(-1)).toEqual({ code: null, lead: expect.any(String) });
 
-    // His, with nothing on it — the claim a failed upload stranded. The green
-    // button finishes it, and the box says so in the colour for good news.
+    // His, with nothing on it: a stranded claim the green button finishes.
     expect(
       propose({ ...frame, available: false, yours: 'empty' }),
     ).toMatchObject({ taken: false, yours: 'empty' });
     expect(said.at(-1)?.code).toBe('CLAIMED');
 
-    // His, with a website on it: the one answer that does need another name,
-    // and still not "belongs to somebody else".
+    // His, with a website on it: needs another name, but is not someone else's.
     expect(
       propose({ ...frame, available: false, yours: 'live' }),
     ).toMatchObject({ taken: true, yours: 'live' });
     expect(said.at(-1)?.code).toBe('YOURS');
     expect(said.at(-1)?.lead).toContain('already your website');
 
-    // Somebody else's, which is the only time the word taken is the truth.
+    // Somebody else's: the only case that is taken.
     expect(propose({ ...frame, available: false, yours: null })).toMatchObject({
       taken: true,
     });
@@ -1439,10 +1280,7 @@ describe('an address of his own, on the screens that offer it', () => {
   });
 
   test('is on the list, with the one thing left to do with it', async () => {
-    // A claim with no release is a name taken for good, a Postgres database
-    // and a role. Filtered out of "your websites" it was reachable from no
-    // screen on this page, and nothing on the server reclaims it — so a failed
-    // upload followed by "Start again" spent one silently and forever.
+    // Nothing reclaims a claim with no release, so "your websites" lists it.
     const src = await slice('/**\n * Every address of his', '/* ---- the wait');
     const page = screen();
     const list = new Function(
@@ -1498,17 +1336,14 @@ describe('an address of his own, on the screens that offer it', () => {
     expect(acts).toHaveLength(1);
     expect(acts[0]?.textContent).toBe('Put a page on it');
 
-    // And pressing it is the way back: the next page he makes goes on that
-    // address rather than on whatever the model proposes for it.
+    // Pressing it pins the next page to that address.
     acts[0]?.onclick?.();
     expect(list.pinnedNow()).toBe('stranded');
   });
 
   test('the address he picks does not cost him the sentence he typed', async () => {
-    // The button sits above the greeting, so the tap that reaches it is most
-    // often the one *after* he has typed a paragraph into the box below it.
-    // Answering "where does it go" by throwing away "what is it" makes the one
-    // recovery on the page a button nobody can afford to press.
+    // The tap usually follows typing into the box below, so picking an address
+    // keeps the sentence.
     const src = await slice('/**\n * Every address of his', '/* ---- the wait');
     const page = screen();
     const ask = page.el('b-ask');
@@ -1549,18 +1384,15 @@ describe('an address of his own, on the screens that offer it', () => {
     lifted.usePinned('stranded');
     expect(ask.value).toBe('cutting boards and birdhouses in Dartmouth');
 
-    // And a box a reload emptied is filled from the backup rather than left
-    // blank beside an address that is now waiting for a page.
+    // A box a reload emptied is refilled from the backup.
     ask.value = '';
     lifted.usePinned('stranded');
     expect(ask.value).toBe('a page for my woodworking');
   });
 
   test('leaves the name screen with something he can press', async () => {
-    // The screen has two buttons. Pushed here by a name that is not free it
-    // opens holding that name, so the green one starts disabled — and hiding
-    // the other left a screen with nothing live on it at all, the page he
-    // waited a minute for off it, and a reload the only way out.
+    // Opened on a name that is not free, the green button starts disabled, so
+    // the other must stay live.
     const src = await slice('function startNaming(', 'function nameVerdict(');
     const page = screen();
     const startNaming = new Function(
@@ -1606,8 +1438,8 @@ describe('an address of his own, on the screens that offer it', () => {
       async () => answers.shift() ?? {},
     ) as () => void;
 
-    // Typing the stranded address back in is the only way back to it once the
-    // draft is gone, and it was refused with "somebody already has that one".
+    // Typing the stranded address back is the only way to it once the draft
+    // is gone, so it must not read as taken.
     answers.push({ available: false, why: 'TAKEN', yours: 'empty' });
     paintName();
     await Bun.sleep(400);
@@ -1615,8 +1447,7 @@ describe('an address of his own, on the screens that offer it', () => {
     expect(verdicts.at(-1)?.kind).toBe('yes');
     expect(verdicts.at(-1)?.say).not.toContain('Somebody');
 
-    // A website of his is not usable here — writing a new page over it is not
-    // what this screen does — but the sentence says which it is.
+    // A website of his is not usable here, and the sentence says why.
     answers.push({ available: false, why: 'TAKEN', yours: 'live' });
     paintName();
     await Bun.sleep(400);
@@ -1632,15 +1463,7 @@ describe('an address of his own, on the screens that offer it', () => {
 });
 
 describe('the wait, now that the server talks through it', () => {
-  /**
-   * The wait screen and the frame reader, lifted together.
-   *
-   * They are adjacent in the file because they are one mechanism: the screen
-   * says what the stream says. The defect they replaced was a screen with
-   * nothing to say — held to the model's first content byte the socket was
-   * empty for 71-95 s, this counted its own seconds at it, and a browser gave
-   * up long before either of them did.
-   */
+  /** The wait screen and the frame reader, lifted together. */
   async function walk(frames: string[]): Promise<{
     done: Record<string, unknown> | null;
     refused: string | null;
@@ -1660,9 +1483,8 @@ describe('the wait, now that the server talks through it', () => {
     let at = 0;
     const reader = {
       async read(): Promise<{ done: boolean; value?: Uint8Array }> {
-        // Recorded one read late on purpose: this is the screen as it stood
-        // once the frame before it had been read, which is the only thing
-        // somebody holding the phone ever sees.
+        // One read late: the screen as it stood after the previous frame, which
+        // is what a person sees.
         if (at > 0) {
           screens.push({
             say: said['#b-say'] ?? '',
@@ -1699,9 +1521,7 @@ describe('the wait, now that the server talks through it', () => {
   }
 
   test('counts the server’s clock rather than this phone’s', async () => {
-    // A tab throttled in a pocket cannot count, and the thing worth counting
-    // is how long the model has been at it rather than how long this screen
-    // has been open. `ms` is the server's, so the two cannot drift apart.
+    // A throttled background tab cannot count, so `ms` is the server's.
     const { screens } = await walk([
       '{"t":"accepted"}',
       '{"t":"thinking","model":"writer","ms":0}',
@@ -1713,10 +1533,7 @@ describe('the wait, now that the server talks through it', () => {
   });
 
   test('says the fallback happened, which nothing else says', async () => {
-    // A change of model between two `thinking` frames IS the fallback signal —
-    // there is no frame that announces it — and a minute and a half of silence
-    // with no reason given is a minute and a half somebody spends wondering
-    // whether to press it again.
+    // A change of model between `thinking` frames is the only fallback signal.
     const { screens } = await walk([
       '{"t":"accepted"}',
       '{"t":"thinking","model":"writer","ms":0}',
@@ -1740,9 +1557,7 @@ describe('the wait, now that the server talks through it', () => {
   });
 
   test('reads a refusal that arrives as a frame as a refusal', async () => {
-    // Nothing about the upstream is a status any more, so the only place a
-    // refusal can arrive is here, in a 200 that has been open and talking
-    // since the first millisecond.
+    // Upstream refusals arrive only as frames in a 200.
     const { done, refused } = await walk([
       '{"t":"accepted"}',
       '{"t":"thinking","model":"writer","ms":0}',
@@ -1766,8 +1581,7 @@ describe('what an answer is read as', () => {
     );
     expect(documentIn('no page here')).toBe('NO_DOCUMENT');
     expect(documentIn('<!doctype html><html>')).toBe('NO_DOCUMENT');
-    // Refused rather than cut: half a document is a broken page that looks
-    // published.
+    // Refused whole: half a document is a broken page that looks published.
     const huge = `<!doctype html><html>${'x'.repeat(600 * 1024)}</html>`;
     expect(documentIn(huge)).toBe('TOO_LARGE');
   });
@@ -1790,7 +1604,7 @@ describe('what an answer is read as', () => {
     );
     expect(long.length).toBeLessThanOrEqual(40);
     expect(long).toBe('a-page-for-my-woodworking-i-make-cutting');
-    // A sentence with nothing nameable in it still has to produce a name.
+    // A sentence with nothing nameable still produces a name.
     expect(slugOf('!!!')).toMatch(/^site-[0-9a-f]{8}$/);
     expect(slugOf('admin')).toMatch(/^site-[0-9a-f]{8}$/);
   });
@@ -1818,8 +1632,7 @@ describe('the config', () => {
     const read = readConfig(env);
     expect(read.aiBuildModel).toBe('chat-model');
     expect(read.aiBuildFallbackModel).toBeNull();
-    // The document ceiling is the public one until a deployment raises it, so
-    // saying nothing raises nothing.
+    // The build ceiling defaults to the public one.
     expect(read.aiBuildMaxTokens).toBe(read.aiMaxTokens);
   });
 });

@@ -1,16 +1,7 @@
 /**
- * A release on disk: what an upload may be, how it becomes a directory, and how
- * a directory that is gone comes back.
- *
- * v1 held a parsed bundle in memory and served files out of a 64 MiB cache,
- * which cost about seven times the unpacked size in resident memory on every
- * cold read. A release is unpacked to the volume once, at upload, and served
- * with `Bun.file` after that — so the read path costs a `stat` and a sendfile,
- * and the process holds an archive only while it is unpacking one.
- *
- * The directory is a cache of the depot object, never the record: the release
- * row names a `location`, and a directory that is missing is refilled from it.
- * That is what makes the volume disposable.
+ * A release on disk: upload checks, unpacking and rehydration. A directory only
+ * caches the depot object its row's `location` names, so the volume is
+ * disposable.
  */
 import {
   mkdir,
@@ -34,40 +25,32 @@ import type { Code } from './http.ts';
 export const MAX_ARCHIVE_BYTES = 25 * 1024 * 1024;
 
 /**
- * What an archive may unpack to; the compressed size says nothing about it.
- *
- * A memory ceiling before it is a product one. The archive and its inflated tar
- * are both resident while a release is unpacked, and a rehydrate runs the same
- * code — so this, times {@link MAX_UNPACKS}, is what the pod has to hold.
+ * A memory ceiling: the archive and its inflated tar are both resident while
+ * unpacking, so this times {@link MAX_UNPACKS} is what the pod must hold.
  */
 export const MAX_UNPACKED_BYTES = 32 * 1024 * 1024;
 export const MAX_FILES = 2000;
 
 /**
- * How many archives may be unpacking at once, process-wide, uploads and
- * rehydrates together.
- *
- * The token bucket counts requests and says nothing about what one of them
- * costs. Two rather than one because the second is nearly free — it inflates
- * into pages the first already took from the kernel — and what buys the
- * headroom is {@link MAX_UNPACKED_BYTES}, not this number.
+ * Process-wide, uploads and rehydrates together: a token bucket counts
+ * requests, not what each one costs. Two: a second unpack reuses pages the
+ * first took; {@link MAX_UNPACKED_BYTES} buys the headroom.
  */
 export const MAX_UNPACKS = 2;
 
-/** Release rows kept per site past the serving one; older ones go. */
+/** Release rows kept per site besides the serving one. */
 export const KEEP_RELEASES = 50;
 
-/** Past this much of the volume, a directory nothing guarantees is evicted. */
+/** Past this fraction of the volume, unguaranteed directories are evicted. */
 const VOLUME_FULL = 0.8;
 
 let unpacking = 0;
 
-/** Whether every slot is held — a cheap probe that takes nothing. */
 export function slotsFull(): boolean {
   return unpacking >= MAX_UNPACKS;
 }
 
-/** Take one of the process-wide unpack slots, or `null` when they are full. */
+/** Returns the slot's release, or `null` when every slot is held. */
 export function takeSlot(): (() => void) | null {
   if (unpacking >= MAX_UNPACKS) return null;
   unpacking += 1;
@@ -79,7 +62,6 @@ export function takeSlot(): (() => void) | null {
   };
 }
 
-/** An upload this boundary will not take, in the contract's vocabulary. */
 export class UploadRefused extends Error {
   constructor(
     readonly code: Code,
@@ -90,7 +72,7 @@ export class UploadRefused extends Error {
   }
 }
 
-/** `readBundle`'s refusals, in the archive vocabulary the contract promises. */
+/** `readBundle` codes as the API's public archive error codes. */
 const BUNDLE_CODES: Record<string, Code> = {
   NOT_GZIP: 'UNKNOWN_FORMAT',
   MALFORMED_TAR: 'MALFORMED_ZIP',
@@ -101,16 +83,13 @@ const BUNDLE_CODES: Record<string, Code> = {
 export interface Release {
   readonly archive: NormalizedArchive;
   readonly files: readonly BundleFile[];
-  /** Lowercase sha256 hex of the normalized bytes — the depot object's name. */
+  /** sha256 hex of the normalized bytes; it names the depot object. */
   readonly digest: string;
 }
 
 /**
- * What these uploaded bytes are, refused here or nowhere.
- *
- * The archive is normalized to the one container everything downstream opens,
- * read back once so a bundle with no entry page is refused *before* it is
- * stored, and digested over what will actually be in the depot.
+ * Normalizes the archive, refuses one without an entry page before it is
+ * stored, and digests the bytes the depot will hold.
  */
 export function readRelease(filename: string, bytes: Uint8Array): Release {
   let archive: NormalizedArchive;
@@ -142,13 +121,8 @@ export function readRelease(filename: string, bytes: Uint8Array): Release {
 }
 
 /**
- * The one reader an upload and a rehydrate share: what a bundle unpacks to,
- * once every rule about it holds.
- *
- * Shared because a stored object is not automatically a trustworthy one — the
- * migration ticket carries in objects this boundary never wrote, and one of
- * those failing `mkdir` halfway through an unpack is a site that answers the
- * 503 page forever rather than an archive refused at the door.
+ * Shared with rehydrate: a depot object may not have passed these checks, and
+ * one failing halfway through an unpack serves the 503 page forever.
  */
 function readTree(bytes: Uint8Array): readonly BundleFile[] {
   const files = unwrap(readFiles(bytes));
@@ -173,11 +147,7 @@ function readFiles(bytes: Uint8Array): readonly BundleFile[] {
   }
 }
 
-/**
- * A lone top-level directory is the site, not a directory in it.
- *
- * A ZIP of a folder is the common case, and `notes/index.html` is not a site.
- */
+/** A lone top-level directory is the site: zipping a folder is common. */
 function unwrap(files: readonly BundleFile[]): readonly BundleFile[] {
   if (files.length === 0) return files;
   const tops = new Set(files.map((file) => file.path.split('/')[1]));
@@ -191,10 +161,8 @@ function unwrap(files: readonly BundleFile[]): readonly BundleFile[] {
 }
 
 /**
- * The two things a tar can describe that a directory tree cannot hold: a
- * control byte in a name, and one entry that is a file where another needs a
- * directory. `readBundle` has already dropped every entry that is not a regular
- * file and refused every path that leaves the root.
+ * What a tar can describe and a directory cannot hold. `readBundle` has already
+ * dropped non-regular entries and refused paths that leave the root.
  */
 function checkTree(files: readonly BundleFile[]): void {
   const paths = new Set(files.map((file) => file.path));
@@ -221,8 +189,6 @@ function checkTree(files: readonly BundleFile[]): void {
   }
 }
 
-// --- the directory ----------------------------------------------------------
-
 export function siteDir(sitesDir: string, name: string): string {
   return join(sitesDir, name);
 }
@@ -240,13 +206,8 @@ async function isDirectory(path: string): Promise<boolean> {
 }
 
 /**
- * Write the tree under a temp name, hand the temp path to `place`, and clean up
- * whatever is left.
- *
- * The rename `place` performs is what makes a release atomic: a reader either
- * finds the whole directory or finds none of it, and a crash mid-unpack leaves
- * a `.tmp-` directory the next prune sweeps rather than a site serving three of
- * its five files.
+ * The rename in `place` makes a release atomic. A crash leaves a `.tmp-`
+ * directory for {@link pruneSite} to sweep.
  */
 export async function writeTree<T>(
   sitesDir: string,
@@ -260,8 +221,7 @@ export async function writeTree<T>(
     for (const file of files) {
       const path = join(temp, file.path);
       await mkdir(dirname(path), { recursive: true, mode: 0o755 });
-      // Fixed modes regardless of what the archive recorded: a static host
-      // serves bytes, and an upload does not get to choose a mode bit.
+      // Fixed modes: an upload does not choose its mode bits.
       await writeFile(path, file.bytes, { mode: 0o644 });
     }
     return await place(temp);
@@ -270,23 +230,17 @@ export async function writeTree<T>(
   }
 }
 
-/** Move a finished temp tree to the release number the row just took. */
 export async function placeTree(temp: string, target: string): Promise<void> {
   await rm(target, { recursive: true, force: true });
   await rename(temp, target);
 }
 
-// --- rehydrate --------------------------------------------------------------
-
 /** Misses on the same release coalesce onto one fetch. */
 const filling = new Map<string, Promise<boolean>>();
 
 /**
- * Make sure a release's directory is on disk, refilling it from the depot when
- * it is not.
- *
- * `false` when the slots are full or the depot could not answer — both are the
- * 503 page, because the release exists and its bytes are merely not here yet.
+ * Refills a missing release directory from the depot. `false` when the slots
+ * are full or the depot has nothing: the caller answers 503.
  */
 export async function ensureRelease(
   sitesDir: string,
@@ -320,29 +274,19 @@ export async function ensureRelease(
   return fill;
 }
 
-// --- eviction ---------------------------------------------------------------
-
 /**
- * Drop the directories this site no longer needs.
+ * Removes directories no release row names and, past {@link VOLUME_FULL}, all
+ * but the guaranteed ones; anything evicted rehydrates.
  *
- * Two rules: a directory no release row names is always gone (the newest
- * {@link KEEP_RELEASES} rows are what a site keeps), and once the volume is
- * past {@link VOLUME_FULL} everything but the serving and previous releases
- * goes too — those two are what the contract guarantees on disk, and anything
- * else rehydrates.
- *
- * ponytail: this site only, run on its own uploads. A site that never uploads
- * again keeps its two guaranteed directories, so the volume is still bounded by
- * live sites × 2; what is missing is a sweep across *other* sites when one
- * site's own prune cannot free enough. Add that when the volume fills with
- * nobody uploading.
+ * ponytail: this site only, on its own uploads. Add a sweep across other sites
+ * if the volume fills while nobody uploads.
  */
 export async function pruneSite(
   sitesDir: string,
   name: string,
   known: ReadonlySet<number>,
   guaranteed: ReadonlySet<number>,
-  /** The volume reading, for a caller — a test — that has its own. */
+  /** Overrides the volume reading, for tests. */
   volumeIsFull?: boolean,
 ): Promise<void> {
   let entries: string[];
@@ -355,8 +299,7 @@ export async function pruneSite(
   for (const entry of entries) {
     const path = join(sitesDir, name, entry);
     if (entry.startsWith('.tmp-')) {
-      // Only a tree nobody is still writing: an upload in flight owns its temp
-      // directory, and sweeping that one would break a concurrent release.
+      // An upload in flight still owns its temp directory.
       if (await abandoned(path))
         await rm(path, { recursive: true, force: true });
       continue;
@@ -368,7 +311,7 @@ export async function pruneSite(
   }
 }
 
-/** Longer than any unpack this process permits: the writer is gone. */
+/** Far longer than any unpack, so the writer is gone. */
 const ABANDONED_MS = 60 * 60 * 1000;
 
 async function abandoned(path: string): Promise<boolean> {

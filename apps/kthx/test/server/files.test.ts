@@ -1,12 +1,7 @@
 /**
  * A site's files: who may write one, what may be in it, and what `/files/*`
- * hands back.
- *
- * The two claims worth the most here are the ones that keep a public store from
- * becoming a public site: a path belongs to the visitor who created it, and a
- * type that could be a document on this origin is refused at the door. The rest
- * — the budget, the write-through, the rehydrate — is the store behaving like
- * the release path it lives beside.
+ * hands back. A path belongs to its creator, and a type that could be a
+ * document on this origin is refused.
  */
 import { describe, expect, test } from 'bun:test';
 import { mkdir, rm, stat } from 'node:fs/promises';
@@ -50,7 +45,6 @@ async function claimed(label: string): Promise<Site> {
   return { name, host: `${name}.${ZONE}`, token: body.token };
 }
 
-/** A visitor, remembered by the cookie the server hands them. */
 interface Visitor {
   cookie?: string;
 }
@@ -110,7 +104,7 @@ describe('putting a file', () => {
     expect(served.headers.get('content-disposition')).toBe('inline');
     expect(new Uint8Array(await served.arrayBuffer())).toEqual(PNG);
 
-    // The bytes are on the volume beside the release directories, never in one.
+    // On the volume beside the release directories, never in one.
     const onDisk = join(kthx().sitesDir, site.name, 'files/art/cover.png');
     expect((await stat(onDisk)).isFile()).toBe(true);
 
@@ -146,12 +140,11 @@ describe('putting a file', () => {
     );
     expect(await Bun.file(object).text()).toBe('hello');
 
-    // The volume is a cache. Losing it costs a fetch, never the file.
+    // The volume is a cache: losing it costs a fetch, never the file.
     await rm(join(kthx().sitesDir, site.name, 'files/notes.txt'));
     const served = await get(site, '/files/notes.txt');
     expect(served.status).toBe(200);
     expect(await served.text()).toBe('hello');
-    // And it is back on disk for the next read.
     expect(
       await Bun.file(
         join(kthx().sitesDir, site.name, 'files/notes.txt'),
@@ -176,7 +169,6 @@ describe('putting a file', () => {
     expect(head.headers.get('content-length')).toBe('3');
     expect(await head.text()).toBe('');
 
-    // A new body is a new etag.
     await put(site, 'a.txt', 'two!', {
       type: 'text/plain',
       token: site.token,
@@ -216,7 +208,7 @@ describe('the content-type allowlist', () => {
       expect([type, refused.status]).toEqual([type, 400]);
       expect((await refused.json()).code).toBe('UNSUPPORTED_TYPE');
     }
-    // The header is the whole of it: nothing sniffs, so nothing may be absent.
+    // Nothing sniffs, so a missing type is refused.
     const bare = await put(site, 'x.bin', 'body');
     expect(bare.status).toBe(400);
     expect((await bare.json()).code).toBe('UNSUPPORTED_TYPE');
@@ -258,7 +250,6 @@ describe('the content-type allowlist', () => {
     await put(site, 'read.md', '# hi', { type: 'text/markdown' });
     const markdown = await get(site, '/files/read.md');
     expect(markdown.headers.get('content-disposition')).toBe('inline');
-    // Text carries its charset, so a browser does not guess one.
     expect(markdown.headers.get('content-type')).toBe(
       'text/markdown; charset=utf-8',
     );
@@ -281,7 +272,6 @@ describe('the ownership floor', () => {
     ).toBe(201);
     expect(alice.cookie).toContain(ME_COOKIE);
 
-    // Bob is a visitor of the same site and may make his own files.
     expect(
       (
         await put(site, 'bob.txt', 'bob', {
@@ -310,20 +300,18 @@ describe('the ownership floor', () => {
     );
     expect(deleted.status).toBe(403);
 
-    // Alice overwrites her own; the answer is 200 rather than 201.
     const again = await put(site, 'shared.txt', 'alice again', {
       type: 'text/plain',
       as: alice,
     });
     expect(again.status).toBe(200);
 
-    // The bearer opens everything on its own site.
     const byOwner = await put(site, 'shared.txt', 'the owner', {
       type: 'text/plain',
       token: site.token,
     });
     expect(byOwner.status).toBe(200);
-    // And the path keeps the visitor who made it, not whoever wrote last.
+    // The path keeps its creator, not whoever wrote last.
     const [row] = (await kthx().sql`
       select owner from files where site = ${site.name} and path = 'shared.txt'
     `) as { owner: string }[];
@@ -347,7 +335,6 @@ describe('the ownership floor', () => {
     );
     expect(removed.status).toBe(204);
     expect((await get(site, '/files/gone.txt')).status).toBe(404);
-    // The bytes go with the row, from the volume and from the depot.
     expect(await Bun.file(object).exists()).toBe(false);
     expect(
       await Bun.file(
@@ -382,7 +369,6 @@ describe('the paths a file may have', () => {
       expect([path, refused.status >= 400]).toEqual([path, true]);
       expect([path, refused.status]).not.toEqual([path, 201]);
     }
-    // Nothing landed anywhere near the site directory.
     const rows = (await kthx().sql`
       select count(*)::int as n from files where site = ${site.name}
     `) as { n: number }[];
@@ -391,8 +377,8 @@ describe('the paths a file may have', () => {
 
   test('cannot address a file outside the store', async () => {
     const site = await claimed('escape');
-    // Raw, the URL parser resolves the segments away before this process sees
-    // them; percent-encoded, they arrive and are refused here. Neither writes.
+    // Raw, the URL parser resolves the segments away; percent-encoded, they
+    // arrive and are refused.
     for (const path of ['../../etc/passwd', '%2e%2e%2f%2e%2e%2fpasswd']) {
       const escaped = await put(site, path, 'root', { type: 'text/plain' });
       expect([path, escaped.status]).not.toEqual([path, 201]);
@@ -428,8 +414,7 @@ describe('the budget', () => {
 
   test('refuses a file past the site ceiling and past the file count', async () => {
     const site = await claimed('full');
-    // The rows are the meter, so the ceiling is reached by rows rather than by
-    // uploading a quarter of a gigabyte through the handler.
+    // The rows are the meter, so a row reaches the ceiling without an upload.
     await kthx().sql`
       insert into files (site, path, owner, size, type, sha256)
       values (${site.name}, 'ballast.bin', 'someone', ${MAX_FILES_BYTES},
@@ -448,8 +433,7 @@ describe('the budget', () => {
     const counted = await put(site, 'one-more.png', PNG, { type: 'image/png' });
     expect(counted.status).toBe(507);
 
-    // An overwrite of a path that already exists is not a new file, so the
-    // count does not refuse it.
+    // An overwrite is not a new file, so the count does not refuse it.
     const overwrite = await put(site, 'f1', PNG, {
       type: 'image/png',
       token: site.token,
@@ -483,8 +467,8 @@ describe("a site's whole store", () => {
   test('is served while the site database is still being made', async () => {
     const site = await claimed('unprovisioned');
     await put(site, 'early.txt', 'bytes', { type: 'text/plain' });
-    // A claim that has not finished provisioning answers 503 on /api/db; files
-    // live in the control database and keep serving.
+    // Unprovisioned, `/api/db` answers 503, but files live in the control
+    // database and keep serving.
     await kthx().sql`
       update sites set provisioned_at = null where name = ${site.name}
     `;
@@ -516,7 +500,7 @@ describe('the reserved prefix', () => {
       }),
     );
     expect(uploaded.status).toBe(201);
-    // The bundle's own `files/` is never reachable: `/files/*` is the store.
+    // `/files/*` is the store, so the bundle's own `files/` is unreachable.
     const sneaky = await get(site, '/files/sneaky.html');
     expect(sneaky.status).toBe(404);
     expect(sneaky.headers.get('content-type')).toContain('application/json');
@@ -525,8 +509,8 @@ describe('the reserved prefix', () => {
 
 describe('the bounds a body meets', () => {
   test('refuses more than the cap without holding it, and gives up on a stall', async () => {
-    // A chunked body carries no `content-length`, so the reader is the only
-    // thing between an anonymous caller and the server-wide 32 MiB.
+    // A chunked body has no `content-length`, so only the reader stands
+    // between an anonymous caller and the server-wide 32 MiB.
     let cancelled = false;
     const trickle = new ReadableStream<Uint8Array>({
       pull(controller) {
@@ -580,7 +564,7 @@ describe('the bounds a body meets', () => {
         }),
       ),
     );
-    // Every slot is held only once each body is actually arriving.
+    // Wait until all eight bodies are arriving and holding their slots.
     for (let waited = 0; gates.length < 8 && waited < 2000; waited += 1) {
       await Bun.sleep(1);
     }
@@ -634,7 +618,7 @@ describe('a path already taken by something else on the volume', () => {
     expect(throughAFile.status).toBe(400);
     expect((await throughAFile.json()).code).toBe('INVALID_PATH');
 
-    // The row is written before the bytes, so a refusal has to take it back.
+    // The row is written before the bytes, so a refusal must take it back.
     const listed = await get(site, '/api/files').then((r) => r.json());
     expect(listed.items.map((item: { path: string }) => item.path)).toEqual([
       'a/b.txt',
@@ -649,8 +633,7 @@ describe('a path already taken by something else on the volume', () => {
     const first = await get(site, '/files/one.txt');
     const etag = first.headers.get('etag');
 
-    // The volume refuses the second write the way a full disk would: the path
-    // it renames onto is a directory now.
+    // A directory now sits at the rename's target, so the volume write fails.
     await rm(join(kthx().sitesDir, site.name, 'files/one.txt'));
     await mkdir(join(kthx().sitesDir, site.name, 'files/one.txt'));
     const failed = await put(site, 'one.txt', 'REPLACED', {
@@ -659,10 +642,8 @@ describe('a path already taken by something else on the volume', () => {
     });
     expect(failed.status).toBe(400);
 
-    // Not a strong etag over changed bytes: the row still says what the depot
-    // still holds, and that is what serves.
-    // With the placeholder gone the volume misses and the depot answers, which
-    // is the same path a lost volume takes.
+    // The row still describes the bytes the depot holds. With the directory
+    // gone, the depot answers as it does for a lost volume.
     await rm(join(kthx().sitesDir, site.name, 'files/one.txt'), {
       recursive: true,
     });

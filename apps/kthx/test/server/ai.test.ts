@@ -1,14 +1,6 @@
 /**
- * `/api/ai`: what reaches the upstream, what comes back, and what it costs.
- *
- * A real stub upstream rather than a mocked `fetch`, because half of what this
- * route promises is about the request it *sends*: that the client's
- * `Authorization` is gone, that the operator's is there, that the query string
- * did not survive, and that `stream_options.include_usage` was added to a
- * stream the caller did not ask to have metered.
- *
- * The budget is real Postgres for the same reason it is in Postgres at all: a
- * counter this process held would be a claim about a Map, not about money.
+ * `/api/ai` against a stub upstream, since much of what the route promises is
+ * about the request it sends: headers, query string and `include_usage`.
  */
 import { afterAll, beforeEach, describe, expect, test } from 'bun:test';
 import {
@@ -32,7 +24,7 @@ let seen: Seen | null = null;
 let reply: (request: Request) => Response | Promise<Response> = () =>
   Response.json({});
 
-/** The upstream, near enough: it records what it was sent and answers to order. */
+/** Records what it was sent and answers with `reply`. */
 const upstream = Bun.serve({
   port: 0,
   async fetch(request) {
@@ -69,8 +61,8 @@ beforeEach(() => {
     });
 });
 
-// Its own block: the claim cap is a module-level counter, so two test files
-// sharing an address range spend each other's day.
+// Its own address block: the claim caps are module-level, so test files that
+// share addresses spend each other's day.
 let nextAddress = 0;
 function address(): string {
   nextAddress += 1;
@@ -119,12 +111,11 @@ function sent(): Record<string, unknown> {
   return JSON.parse(seen?.body ?? '{}') as Record<string, unknown>;
 }
 
-/** The session id the upstream was handed, read fresh after each call. */
 function session(): string | undefined {
   return seen?.headers['x-opencode-session'];
 }
 
-/** The row as it settles: tokens are billed after the answer is on the wire. */
+/** Polls: tokens are billed after the answer is sent. */
 async function spent(
   site: Site,
 ): Promise<{ requests: number; tokens: number }> {
@@ -143,12 +134,7 @@ async function spent(
   throw new Error('no tokens were ever billed');
 }
 
-/**
- * The row once the day's request count settles on `want`.
- *
- * The refund, like the bill, is fired after the answer is on the wire: reading
- * the row straight back would be reading it before the statement ran.
- */
+/** Polls: the refund, like the bill, is written after the answer is sent. */
 async function counted(
   site: Site,
   want: number,
@@ -168,7 +154,7 @@ async function counted(
   throw new Error(`the day never settled at ${want} requests`);
 }
 
-/** `console.error` while `run` runs, one entry per line. */
+/** Captures `console.error` while `run` runs. */
 async function complaints(run: () => Promise<void>): Promise<string[]> {
   const lines: string[] = [];
   const complain = console.error;
@@ -245,12 +231,11 @@ describe('the passthrough', () => {
       { headers: { 'x-opencode-session': 'someone-elses-session' } },
     );
     const mine = session();
-    // Opaque and derived: the Go base 400s MissingSessionID without one, and a
-    // page that could choose it would file its calls under another site's.
+    // The Go base answers 400 MissingSessionID without one, and a page that
+    // chose it could file its calls under another site's.
     expect(mine).toMatch(/^kthx-[0-9a-f]{32}$/);
 
-    // Stable for a site, because routing metadata that changes every call
-    // groups nothing; different for the next site, for the same reason.
+    // Stable per site: routing metadata that changes every call groups nothing.
     await chat(site, { messages: [] });
     expect(session()).toBe(mine as string);
     const other = await claimed('ai-session-other');
@@ -283,8 +268,6 @@ describe('the passthrough', () => {
   test('clamps both token spellings, and bills the higher of the two', async () => {
     const site = await claimed('ai-both-keys');
     reply = () => Response.json({ choices: [{ message: { content: 'hi' } }] });
-    // One key clamped and the other forwarded verbatim is the whole ceiling
-    // gone, and the smaller of the two would then be the billing floor.
     const response = await chat(site, {
       messages: [],
       max_tokens: 999_999,
@@ -334,16 +317,9 @@ describe('the passthrough', () => {
     reply = () =>
       Response.json({ error: { message: 'no such model' } }, { status: 400 });
     const response = await chat(site, { messages: [] });
-    // The upstream's own message, because it says more about the body the
-    // caller composed than one fixed sentence of this server's could.
     expect(response.status).toBe(400);
     expect((await response.json()).error.message).toBe('no such model');
-    // And it costs a request. This is the whole ceiling on outbound calls: a
-    // body the upstream reliably refuses would otherwise be free to send, so
-    // one anonymous visitor on one public site could loop it forever on the
-    // operator's account.
-    // A relayed refusal bills no tokens — there was no completion — but the
-    // request it spent at dispatch stays spent.
+    // No completion, so no tokens; the request spent at dispatch stays spent.
     expect(await counted(site, 1)).toEqual({ requests: 1, tokens: 0 });
     await Bun.sleep(50);
     expect(await counted(site, 1)).toEqual({ requests: 1, tokens: 0 });
@@ -364,15 +340,13 @@ describe('the passthrough', () => {
     reply = () => Response.json({ error: 'boom' }, { status: 500 });
     const lines = await complaints(async () => {
       const response = await chat(site, { messages: [] });
-      // Not relayed: a 5xx is the upstream or this deployment falling over,
-      // and there is nothing in it for a page to act on.
+      // Not relayed: a 5xx gives a page nothing to act on.
       expect(response.status).toBe(502);
       expect((await response.json()).code).toBe('AI_UPSTREAM');
-      // Refunded: this one is the deployment's fault, not the body's.
+      // Refunded: the deployment's fault, not the body's.
       expect(await counted(site, 0)).toEqual({ requests: 0, tokens: 0 });
     });
-    // The failure this is here for — a header the upstream wants and did not
-    // get — is the one that would otherwise leave no signal at all.
+    // A header the upstream wanted and did not get leaves no other signal.
     expect(lines.some((line) => line.includes('upstream 500'))).toBe(true);
   });
 
@@ -380,8 +354,7 @@ describe('the passthrough', () => {
     const site = await claimed('ai-no-refund');
     await (await chat(site, { messages: [] })).json();
     expect(await spent(site)).toEqual({ requests: 1, tokens: 42 });
-    // The refund is fired after the answer is on the wire, so a success has to
-    // be watched for one that arrives late as well as for one that arrives.
+    // A refund would be written after the answer, so wait for a late one.
     await Bun.sleep(50);
     expect(await counted(site, 1)).toEqual({ requests: 1, tokens: 42 });
   });
@@ -399,8 +372,8 @@ describe('the allow-list of paths', () => {
       'test-model',
       'other-model',
     ]);
-    // A cross-origin `no-cors` GET carries no `Origin` for the guard to catch,
-    // so a metered model list is a foreign page spending a site's whole day.
+    // A `no-cors` GET carries no `Origin`, so a metered model list would let a
+    // foreign page spend a site's day.
     expect(seen).toBeNull();
     const rows = (await kthx().sql`
       select requests from ai_usage where site = ${site.name}
@@ -410,9 +383,8 @@ describe('the allow-list of paths', () => {
 
   test("embeddings are this server's own 404, and cost nothing", async () => {
     const site = await claimed('ai-embed');
-    // Neither upstream base has the endpoint — both answer `404 text/html` —
-    // so a forwarded call bought a site's never-zero billing floor a
-    // marketing page.
+    // Neither upstream base has the endpoint (both answer `404 text/html`), so
+    // forwarding would only spend the site's billing floor.
     for (const path of ['/api/ai/embeddings', '/api/ai/v1/embeddings']) {
       const response = await kthx().fetch(
         ask(path, {
@@ -575,8 +547,7 @@ describe('concurrency', () => {
     const waiting = Array.from({ length: MAX_AI_IN_FLIGHT_SITE }, () =>
       chat(site, { messages: [] }),
     );
-    // They hold their slots while the upstream sits on the answer, which is
-    // the only cost a concurrency cap is there to bound.
+    // They hold their slots while the upstream sits on the answer.
     await Bun.sleep(100);
     const refused = await chat(site, { messages: [] });
     expect(refused.status).toBe(429);
@@ -588,8 +559,7 @@ describe('concurrency', () => {
       expect(call.status).toBe(200);
       await call.text();
     }
-    // And the slot comes back with the answer, not with the last byte a client
-    // bothers to read: the next call is served immediately.
+    // The slot returns with the answer, before the client reads the body.
     const after = await chat(site, { messages: [] });
     expect(after.status).toBe(200);
     await after.text();
@@ -604,9 +574,8 @@ describe('the model configuration', () => {
   };
 
   test('a default model outside its own allow-list refuses to boot', () => {
-    // A body that names no model is given this one and only then checked
-    // against the list, so a typo here answers every keyless call 400
-    // INVALID_MODEL — as though the page had asked for something forbidden.
+    // A body with no model gets this one before the list check, so a typo
+    // would answer every such call 400 INVALID_MODEL.
     expect(() =>
       readConfig({
         ...env,
@@ -621,7 +590,7 @@ describe('the model configuration', () => {
         KTHX_AI_MODELS: 'mimo-v2.5-pro,kimi-k2.7-code',
       }).aiModel,
     ).toBe('mimo-v2.5-pro');
-    // An empty list is every model the upstream has: nothing to be outside of.
+    // An empty list allows every model the upstream has.
     expect(readConfig({ ...env, KTHX_AI_MODEL: 'anything' }).aiModels).toEqual(
       [],
     );
@@ -631,9 +600,8 @@ describe('the model configuration', () => {
     expect(
       readConfig({ ...env, KTHX_AI_MAX_TOKENS: '4096' }).aiBuildMaxTokens,
     ).toBe(4096);
-    // The point of the second number: a route that writes a whole document
-    // gets a bigger ceiling without moving what a visitor on a public site may
-    // spend, which is also the floor a silent answer is billed.
+    // A build writes a whole document; the public ceiling, which is also the
+    // floor a silent answer is billed, stays put.
     expect(
       readConfig({
         ...env,

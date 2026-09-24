@@ -1,17 +1,6 @@
 /**
- * The control database, and the numbered SQL that builds it.
- *
- * Bun's `SQL` rather than an ORM. Three reasons, in order of weight: the claim
- * path in ticket 03 is `CREATE DATABASE` / `CREATE ROLE`, which no ORM models
- * and which cannot run inside a transaction; drizzle-kit's `generate` is broken
- * in this repo, so the migrations are hand-written either way; and the schema
- * here is two tables that a tagged template says more plainly than a query
- * builder would.
- *
- * Migrations are files, applied in name order, each recorded once. They run at
- * boot rather than as a separate Job because there is one replica by
- * construction and the schema is two tables — a migration Job would be a second
- * deployment artifact to keep in step with the image for no ordering it buys.
+ * The control database and its migrations. Migrations run at boot in name
+ * order, each recorded once; the server always runs one replica.
  */
 import { readdir } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -20,12 +9,8 @@ import { SQL } from 'bun';
 const MIGRATIONS = join(import.meta.dir, 'migrations');
 
 /**
- * One site row, as every handler reads it.
- *
- * Both credentials are nullable and both are first class: a site claimed by an
- * agent has only a `token_hash`, one handed to a person on the tailnet has a
- * login as well, and either opens it. Typing `token_hash` as `string` is what
- * left a null flowing into a timing-safe compare.
+ * Either credential may be null, and either opens the site: an agent's claim
+ * has only `token_hash`, and a tailnet person's may have `owner_login` too.
  */
 export interface SiteRow {
   readonly name: string;
@@ -50,12 +35,8 @@ export function createClient(url: string): SQL {
 }
 
 /**
- * Apply every migration this build carries that the database has not recorded.
- *
- * Each file runs inside its own transaction with its bookkeeping row, so a
- * half-applied file is not a state this can be left in. Unqualified DDL, so the
- * session's `search_path` decides where it lands — which is what lets the test
- * harness give every test its own schema without rewriting the committed SQL.
+ * Each file runs in one transaction with its bookkeeping row. The DDL is
+ * unqualified, so `search_path` picks the schema; tests use one per test.
  */
 export async function migrate(sql: SQL): Promise<string[]> {
   await sql.unsafe(`create table if not exists schema_migrations (

@@ -1,17 +1,7 @@
 /**
- * `/api/db`: collections of JSON documents in the site's own database.
- *
- * Two rules shape everything here. **Every write is one statement** — the merge
- * a `PATCH` performs, the etag it recomputes and the size ceiling it is held to
- * all live in the `UPDATE`, so two tabs racing on a document cannot interleave
- * a read and a write. And **nothing a caller sends reaches SQL text**: field
- * paths become chained `->` operators over text parameters, values become
- * `jsonb` parameters, and the only strings this file composes are its own.
- *
- * Equality is written twice on purpose — `data @> {path: value}` engages the
- * GIN index and is loose about arrays, `data -> path = value` is exact and is
- * not indexed — because either alone is wrong: containment would match a `1`
- * stored inside `[1,2]`, and the exact half would scan.
+ * `/api/db`: collections of JSON documents in the site's own database. Every
+ * write is one statement, so racing tabs cannot interleave a read and a write.
+ * Caller input reaches SQL only as bound parameters.
  */
 import { randomUUID } from 'node:crypto';
 import { type Code, empty, isJson, logCause, ok, refuse } from './http.ts';
@@ -33,21 +23,21 @@ export const MAX_DOC_KEYS = 10_000;
 
 const COLLECTION = /^[a-z0-9_-]{1,64}$/;
 const ID = /^[A-Za-z0-9_-]{1,128}$/;
-/** A dotted path into `data`: eight segments at most, and no quoting to do. */
+/** At most eight segments, none needing quotes. */
 const DATA_PATH = /^[A-Za-z0-9_-]+(\.[A-Za-z0-9_-]+){0,7}$/;
 const ISO =
   /^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(:\d{2})?(\.\d+)?(Z|[+-]\d{2}:?\d{2})?$/;
 
-/** The four keys the server owns; a caller's copies are dropped before storing. */
+/** A caller's copies of these keys are dropped before storing. */
 const SERVER_KEYS = new Set(['id', 'created_at', 'updated_at', 'etag']);
 
 const COLUMNS = 'id, data, etag, created_at, updated_at';
 
-/** Postgres's canonical text of the value, hashed where it is written. */
+/** Hashes Postgres's canonical text of the value, inside the statement. */
 const etagOf = (expr: string) =>
   `encode(sha256(convert_to((${expr})::text,'UTF8')),'hex')`;
 
-/** The document ceiling, applied to what the statement is about to store. */
+/** Checked inside the statement, against what it is about to store. */
 const fits = (expr: string) =>
   `octet_length((${expr})::text) <= ${MAX_DOC_BYTES}`;
 
@@ -59,7 +49,6 @@ interface Row {
   readonly updated_at: Date | string;
 }
 
-/** `{id, created_at, updated_at, etag, ...data}` — the shape on the wire. */
 function wire(row: Row): Record<string, unknown> {
   return {
     id: row.id,
@@ -74,9 +63,6 @@ function iso(at: Date | string): string {
   return (at instanceof Date ? at : new Date(at)).toISOString();
 }
 
-// --- parameters -------------------------------------------------------------
-
-/** Collects the values a composed statement binds, in order. */
 class Params {
   readonly values: unknown[] = [];
   add(value: unknown): string {
@@ -84,37 +70,26 @@ class Params {
     return `$${this.values.length}`;
   }
 
-  /** A JSON value as a `jsonb` parameter. */
   jsonb(value: unknown): string {
     return json(this.add(JSON.stringify(value)));
   }
 }
 
-/**
- * A parameter carrying JSON text, as `jsonb`.
- *
- * The two-step cast is not decoration: bound straight to `$1::jsonb`, Bun
- * encodes a JS string as a JSON *string*, so `{"a":1}` arrives as the six
- * characters rather than as an object. Pinning the parameter to `text` first
- * makes Postgres do the parsing, which is the behaviour every statement here
- * is written against.
- */
+// Cast through `text`: bound straight to `::jsonb`, Bun sends a JS string as a
+// JSON string, so `{"a":1}` arrives as a string instead of an object.
 const json = (ref: string) => `(${ref}::text)::jsonb`;
 
 /**
- * A field of a document, as three ways of naming the same thing.
- *
- * `id`, `created_at` and `updated_at` are columns; everything else is a path
- * into `data`, reached by chaining `->` over one text parameter per segment,
- * which is what keeps a caller's path out of the SQL text.
+ * `id`, `created_at` and `updated_at` are columns. Any other path chains `->`
+ * over one text parameter per segment, which keeps it out of the SQL text.
  */
 interface Field {
-  /** The comparable expression: `jsonb` for a path, the column otherwise. */
+  /** `jsonb` for a path, the column otherwise. */
   readonly value: string;
-  /** The same field as text, for `$like`/`$ilike`. */
+  /** For `$like` and `$ilike`. */
   readonly text: string;
   readonly kind: 'jsonb' | 'text' | 'time';
-  /** Wraps a value into the object `data @> …` takes, for a path. */
+  /** Wraps a value into the object `data @> …` takes; `null` for a column. */
   readonly contain: ((value: unknown) => unknown) | null;
 }
 
@@ -163,7 +138,7 @@ function isScalar(value: unknown): boolean {
   );
 }
 
-/** One field's value, cast the way its kind compares. */
+/** Cast the way the field's kind compares. */
 function literal(field: Field, value: unknown, p: Params): string | null {
   if (field.kind === 'jsonb') return p.jsonb(value);
   if (field.kind === 'time') {
@@ -174,7 +149,7 @@ function literal(field: Field, value: unknown, p: Params): string | null {
   return `${p.add(String(value))}::text`;
 }
 
-/** The same, as an array, built from one jsonb parameter. */
+/** As an array, from one jsonb parameter. */
 function literals(field: Field, values: unknown[], p: Params): string | null {
   if (values.length > MAX_IN_VALUES || !values.every(isScalar)) return null;
   const list = p.jsonb(values);
@@ -188,14 +163,15 @@ function literals(field: Field, values: unknown[], p: Params): string | null {
   return `array(select e from jsonb_array_elements_text(${list}) e)`;
 }
 
-/** One `where` entry as SQL, or `null` when the grammar does not have it. */
+/** `null` when the grammar does not have it. */
 function condition(field: Field, raw: unknown, p: Params): string | null {
   const operator =
     typeof raw === 'object' && raw !== null && !Array.isArray(raw)
       ? Object.keys(raw).find((key) => key.startsWith('$'))
       : undefined;
   if (operator === undefined) {
-    // A plain value: exact equality, indexed by its containment half.
+    // Containment uses the GIN index but matches `1` inside `[1,2]`, so the
+    // exact comparison runs too.
     const value = literal(field, raw, p);
     if (value === null) return null;
     if (field.contain === null) return `${field.value} = ${value}`;
@@ -295,7 +271,7 @@ interface Query {
   readonly offset?: unknown;
 }
 
-/** The statement a query becomes, or `null` when the grammar rejects it. */
+/** `null` when the grammar rejects the query. */
 function compile(
   collection: string,
   query: Query,
@@ -314,9 +290,8 @@ function compile(
   }
   const order = orderOf(query.orderBy, p);
   if (order === null) return null;
-  // A limit past the ceiling is clamped, an offset past it is refused: asking
-  // for more rows than a page holds is a client that did not read the docs,
-  // asking for page 400 is a client that will paginate for ever.
+  // A deep offset means unbounded pagination, so it is refused; a large limit
+  // is only clamped.
   const limit = whole(query.limit, DEFAULT_LIST);
   const offset = whole(query.offset, 0);
   if (limit === null || offset === null || offset > MAX_OFFSET) return null;
@@ -327,18 +302,13 @@ function compile(
   };
 }
 
-// --- documents --------------------------------------------------------------
-
 export function isPlainObject(
   value: unknown,
 ): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-/**
- * Whether this is a document: an object, without NUL, not too deep, not too
- * wide, and without the three keys a prototype pollution gadget looks for.
- */
+/** Also refuses the keys a prototype-pollution gadget looks for. */
 export function validDocument(
   value: unknown,
 ): value is Record<string, unknown> {
@@ -363,7 +333,6 @@ export function validDocument(
   return walk(value, 1);
 }
 
-/** The document without the four keys the server writes. */
 function stored(data: Record<string, unknown>): Record<string, unknown> {
   const out: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(data)) {
@@ -376,9 +345,6 @@ function tooLarge(data: Record<string, unknown>): boolean {
   return Buffer.byteLength(JSON.stringify(data)) > MAX_DOC_BYTES;
 }
 
-// --- the API ----------------------------------------------------------------
-
-/** The three headers a write reads. */
 interface Preconditions {
   /** The bare etag, `*`, or `null` when no `If-Match` was sent. */
   readonly ifMatch: string | null;
@@ -404,13 +370,8 @@ function withEtag(
 }
 
 /**
- * The request's JSON, refusing anything past `limit` without holding it.
- *
- * `content-length` is the fast path; a chunked body has none, so the stream is
- * read a chunk at a time and cancelled the moment it goes over. The server-wide
- * ceiling is 32 MiB, so materialising first would let every anonymous write
- * pin sixteen times what this route allows. `/api/ai` passes its own, smaller
- * limit rather than owning a second copy of this.
+ * Refuses a body past `limit` while reading it: a chunked body has no
+ * `content-length`, and the server-wide ceiling is far above `limit`.
  */
 export async function bodyOf(
   request: Request,
@@ -440,10 +401,8 @@ export async function bodyOf(
 }
 
 /**
- * Dispatch under `/api/db`, given the split path.
- *
- * `segments` is `['', 'api', 'db', collection?, id?]`; `owner` says whether the
- * request carried this site's bearer, which is what `DELETE /api/db/:c` needs.
+ * `segments` is `['', 'api', 'db', collection?, id?]`. `owner` means the request
+ * carried the site's bearer, which `DELETE /api/db/:c` needs.
  */
 export async function dbApi(
   request: Request,
@@ -532,8 +491,6 @@ function decode(segment: string | undefined): string | null {
   }
 }
 
-// --- reads ------------------------------------------------------------------
-
 async function list(
   request: Request,
   ctx: Ctx,
@@ -613,9 +570,7 @@ async function one(
   return withEtag(wire(row), ctx, 200);
 }
 
-// --- writes -----------------------------------------------------------------
-
-/** What a growing write is allowed, given the site's ten-second snapshot. */
+/** Checked against a size snapshot up to 10 s old. */
 async function room(
   ctx: Ctx,
   site: string,
@@ -813,8 +768,7 @@ async function remove(
     async (sql) => (await sql.unsafe(text, values)) as { id: string }[],
   );
   if (rows.length === 0) {
-    // Deleting what is not there is a 204 — unless the caller said which
-    // version it meant, in which case it did not get it.
+    // A missing document is a 204, unless `If-Match` named a version.
     return ifMatch === null
       ? empty(ctx.id)
       : refuse('PRECONDITION_FAILED', ctx.id);
@@ -829,9 +783,8 @@ async function remove(
 }
 
 /**
- * Why a one-statement update wrote nothing: the document is not there, the
- * caller named a version that is not the current one, or the merge would have
- * been over the ceiling. Only ever run on the failure path.
+ * Why a one-statement update wrote nothing: a missing document, a stale
+ * `If-Match`, or a merge over the ceiling. Runs only on the failure path.
  */
 async function refused(
   ctx: Ctx,

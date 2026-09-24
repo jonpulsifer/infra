@@ -1,22 +1,6 @@
 /**
- * `kthx dev`: the directory on :4321, resolved the way a release is, with
- * `/api/*` and `/files/*` proxied to the site's own host.
- *
- * The backends are not simulated. A local copy of the documents plane would be
- * a second implementation of the contract to keep honest, and it would answer
- * differently from the site the moment either drifted — so this proxies, and
- * what a page sees here is what it sees in production, live database included.
- *
- * Two things have to be rewritten on the way through, both because the loop is
- * `http://localhost` and the site is `https://<name>.kthx.dev`: the `Origin`
- * header, which the server compares against its own host, and the visitor
- * cookie, whose `__Host-` prefix and `Secure` attribute a browser refuses over
- * plain HTTP. Only that one cookie goes up — `localhost` holds whatever every
- * other local server has ever set, and none of it belongs on the internet.
- *
- * One thing the loop cannot reproduce: Bun hands over the tab's socket before
- * the site has answered the upgrade, so a site that refuses one — a rate limit
- * — reaches the page as an open that closes, not as the status it sent.
+ * `kthx dev`: serves a directory on :4321 as a release would, and proxies
+ * `/api/*` and `/files/*` to the live site and its real database.
  */
 import { readdirSync, statSync } from 'node:fs';
 import { join, resolve } from 'node:path';
@@ -26,30 +10,23 @@ import { included } from './tar.ts';
 
 export const PORT = 4321;
 
-/** The cookie name a browser will keep over `http://localhost`. */
+/** A browser refuses a `__Host-` cookie over `http://localhost`. */
 const DEV_COOKIE = 'kthx_me';
 
 /** Paths a site never serves from its bundle; the site host answers them. */
 const RESERVED = ['api', 'files', '_'];
 
 export interface Site {
-  /** The claimed name. */
   readonly name: string;
-  /**
-   * The bearer, attached to owner-scoped calls and to nothing else. Absent on a
-   * machine that never claimed the name — the loop still serves the files and
-   * still proxies everything a visitor may call.
-   */
+  /** Sent on owner-scoped calls only; absent if this machine never claimed the name. */
   readonly token?: string | undefined;
-  /** `https://<name>.kthx.dev` — where `/api` and `/files` really are. */
+  /** `https://<name>.kthx.dev` */
   readonly site: string;
 }
 
 /**
- * Both ends of one proxied socket, and the frames waiting on the slower of
- * them. Neither end is ready when the other might already be talking: the site
- * can answer before Bun hands over the tab's socket, and the tab can send
- * before the site's connection is up.
+ * Either end can talk first: the site can answer before Bun hands over the
+ * tab's socket, and the tab can send before the upstream socket opens.
  */
 interface SocketData {
   readonly upstream: WebSocket;
@@ -70,11 +47,9 @@ export function dev(
 
   const server = Bun.serve<SocketData>({
     port,
-    // The loop carries the site's owner bearer. A wildcard bind would hand
-    // `POST /api/mcp` and `DELETE /api/db/:c` against the live site to anything
-    // that can reach this port.
+    // Loopback only: the loop sends the owner bearer to the live site.
     hostname: '127.0.0.1',
-    // A proxied upload or model call takes as long as the site takes.
+    // Seconds. A proxied upload or model call takes as long as the site takes.
     idleTimeout: 120,
     async fetch(request, server) {
       const path = decodePath(request.url);
@@ -93,17 +68,14 @@ export function dev(
           { status: 405, headers: { 'cache-control': 'no-store' } },
         );
       }
-      // What a release carries, not what the working directory holds: `.env`,
-      // `kthx.json` and `node_modules` are excluded from an upload, so they are
-      // not on the loop either.
+      // Files an upload excludes, such as `.env`, are hidden here too.
       if (!included(path.slice(1))) {
         return notHere('localhost', 'kthx.dev', 404, 'dev');
       }
       const answered = await staticResponse(request, root, 'dev', path);
       if (answered === null)
         return notHere('localhost', 'kthx.dev', 404, 'dev');
-      // A release is immutable and a working directory is not, so nothing here
-      // may be cached or revalidated against an etag that means yesterday.
+      // The working directory changes under the loop, so nothing is cached.
       answered.headers.delete('etag');
       answered.headers.set('cache-control', 'no-store');
       return answered;
@@ -134,9 +106,7 @@ export function dev(
 const reserved = (path: string): boolean =>
   RESERVED.some((head) => path === `/${head}` || path.startsWith(`/${head}/`));
 
-// --- the proxy --------------------------------------------------------------
-
-/** Headers a hop owns, plus the encoding this hop has already undone. */
+/** Hop-by-hop headers, and the content encoding `fetch` has already decoded. */
 const HOP = [
   'connection',
   'keep-alive',
@@ -148,11 +118,8 @@ const HOP = [
   'content-encoding',
 ];
 
-/**
- * The owner bearer opens exactly two things on a site host. Everywhere else a
- * page is a visitor, and sending the token would give the loop a quieter rate
- * limit than production — the one difference `kthx dev` must not have.
- */
+// Only these two carry the owner bearer; elsewhere the loop is a visitor, so
+// its rate limits match production.
 function ownerScoped(method: string, path: string): boolean {
   return (
     path === '/api/mcp' ||
@@ -172,6 +139,7 @@ async function proxy(
 
   const headers = new Headers(request.headers);
   for (const header of HOP) headers.delete(header);
+  // The server checks `Origin` against its own host.
   if (headers.has('origin')) headers.set('origin', site.site);
   const cookie = visitorCookie(headers.get('cookie'));
   if (cookie === null) headers.delete('cookie');
@@ -185,7 +153,7 @@ async function proxy(
     headers,
     body: request.body,
     redirect: 'manual',
-    // A streamed body needs the half-duplex opt-out; an upload is one.
+    // fetch requires `duplex: 'half'` for a streamed request body.
     duplex: 'half',
   } as RequestInit).catch((cause: Error) =>
     Response.json(
@@ -204,11 +172,8 @@ async function proxy(
   return new Response(answer.body, { status: answer.status, headers: out });
 }
 
-/**
- * The one cookie that goes up: `kthx_me`, under the name the server signs and
- * reads. Cookies ignore ports, so a browser sends this loop every cookie any
- * other `localhost` server has ever set — none of which the site asked for.
- */
+// Only the visitor cookie goes up. Cookies ignore ports, so `localhost` also
+// carries every other local server's cookies.
 function visitorCookie(header: string | null): string | null {
   const value = header
     ?.split(';')
@@ -218,16 +183,13 @@ function visitorCookie(header: string | null): string | null {
   return value === undefined || value === '' ? null : `${ME_COOKIE}=${value}`;
 }
 
-/**
- * `__Host-` and `Secure` on the way back: a browser silently drops both over
- * `http://localhost`, and a visitor id that never sticks is a visitor id that
- * changes on every request.
- */
+// A browser drops `__Host-` and `Secure` cookies over `http://localhost`, which
+// would mint a new visitor id on every request.
 const toLoop = (value: string): string =>
   value.replace(`${ME_COOKIE}=`, `${DEV_COOKIE}=`).replace(/;\s*Secure/gi, '');
 
-// --- the socket -------------------------------------------------------------
-
+// Bun hands over the tab's socket before the site answers, so a refused upgrade
+// (a rate limit) reaches the page as an open that closes.
 function upgrade(
   request: Request,
   server: Bun.Server<SocketData>,
@@ -243,9 +205,8 @@ function upgrade(
   if (cookie !== null) headers.cookie = cookie;
 
   const upstream = new WebSocket(target, { headers } as never);
-  // Attached now rather than in `open`: on the loop the site can answer before
-  // Bun hands this process the tab's socket, and a handler set after that has
-  // already missed the frame.
+  // Handlers attach before the upgrade, because the site can send a frame before
+  // Bun hands over the tab's socket.
   const data: SocketData = {
     upstream,
     pending: [],
@@ -279,16 +240,14 @@ function upgrade(
   );
 }
 
-/** Every frame the site sent while the tab was still being handed over. */
+/** Flushes frames the site sent while the tab's socket was being handed over. */
 function pipe(socket: Bun.ServerWebSocket<SocketData>): void {
   socket.data.tab = socket;
   for (const frame of socket.data.inbound.splice(0)) socket.send(frame);
   if (socket.data.closed) socket.close();
 }
 
-// --- files ------------------------------------------------------------------
-
-/** A lone top-level directory is the site, as a release's unpack reads one. */
+/** A lone top-level directory is the site root, as a release unpack reads it. */
 function unwrap(root: string): string {
   const entries = readdirSync(root).filter(included);
   const [only] = entries;

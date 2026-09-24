@@ -1,7 +1,4 @@
-/**
- * `kthx dev`: production's resolution rules over a directory, and everything
- * under `/api` and `/files` handed to the real site.
- */
+/** `kthx dev`: production's file rules locally, `/api` and `/files` proxied. */
 import { afterAll, describe, expect, test } from 'bun:test';
 import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -21,10 +18,9 @@ interface Seen {
 }
 
 const seen: Seen[] = [];
-/** The query string the last upgrade arrived with. */
 let wsSearch = '';
 
-/** The site host: it records what arrived and answers like the server does. */
+/** Stands in for the site host and records what arrived. */
 const upstream = Bun.serve<{ echo: true }>({
   port: 0,
   async fetch(request, server) {
@@ -104,7 +100,7 @@ describe('files', () => {
     const css = await fetch(url('/style.css'));
     expect(css.headers.get('content-type')).toStartWith('text/css');
     expect(css.headers.get('x-content-type-options')).toBe('nosniff');
-    // A working directory changes under the browser; nothing here is cacheable.
+    // The directory changes under the browser, so nothing is cacheable.
     expect(css.headers.get('cache-control')).toBe('no-store');
     expect(css.headers.get('etag')).toBeNull();
 
@@ -160,17 +156,15 @@ describe('the proxy', () => {
 
     const [call] = seen;
     expect(call!.host).toBe(new URL(upstream.url.origin).host);
-    // The server compares `Origin` to its own host, and rejects a foreign one.
+    // The server rejects an `Origin` that is not its own host.
     expect(call!.origin).toBe(upstream.url.origin);
-    // The cookie a browser will keep over http, under the name the server signs
-    // — and nothing else: `localhost` holds every other local server's cookies,
-    // and none of them belong on the internet.
+    // Only the visitor cookie: `localhost` holds every local server's cookies.
     expect(call!.cookie).toBe(`${ME_COOKIE}=abc.def`);
-    // A page is a visitor here exactly as it is in production.
+    // A page is a visitor, as in production.
     expect(call!.authorization).toBeNull();
 
-    // `__Host-` and `Secure` come back off: a browser drops both over http, and
-    // a visitor id that never sticks is a new visitor on every request.
+    // `__Host-` and `Secure` come off: a browser drops both over http, and the
+    // visitor id would never stick.
     const cookie = answer.headers.getSetCookie()[0]!;
     expect(cookie).toStartWith('kthx_me=abc.def;');
     expect(cookie).not.toContain('Secure');
@@ -206,8 +200,7 @@ describe('the proxy', () => {
     expect(file.headers.get('content-type')).toBe('image/png');
     expect(await file.text()).toBe('PNG');
 
-    // The bundle has `_/secret.txt`; a site never serves it, and the site host
-    // says why.
+    // The bundle has `_/secret.txt`, and the site host still refuses it.
     const retired = await fetch(url('/_/secret.txt'));
     expect(retired.status).toBe(410);
     expect(seen.map((call) => call.path)).toEqual([
@@ -245,7 +238,7 @@ describe('the proxy', () => {
     const deadline = Date.now() + 2000;
     while (frames.length === 0 && Date.now() < deadline) await Bun.sleep(5);
     expect(frames).toEqual(['echo:{"t":"ping"}']);
-    // Whatever the page put on the URL reaches the site, as it does on /api/*.
+    // The query string reaches the site, as on every `/api/*` route.
     expect(wsSearch).toBe('?room=a');
     socket.close();
   });

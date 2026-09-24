@@ -1,7 +1,4 @@
-/**
- * The control API over real rows and a real volume: claim, upload, roll back,
- * hold, delete — and what the upload leaves on disk.
- */
+/** The site control API against a real database and a real volume. */
 import { describe, expect, test } from 'bun:test';
 import { readdir, rm } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -25,7 +22,7 @@ import { ask, withServer, ZONE } from '../harness/server.ts';
 
 const kthx = withServer();
 
-/** A fresh address per test, so one test's burst is not another's 429. */
+/** A new address per call, so one test's burst is not another's 429. */
 let nextAddress = 0;
 function address(): string {
   nextAddress += 1;
@@ -56,12 +53,7 @@ async function claim(name: string, init: Parameters<typeof ask>[1] = {}) {
   return { status: response.status, body: await response.json() };
 }
 
-/**
- * A site of ours: claimed, with its token in hand.
- *
- * The label is prefixed, because a claim now creates a Postgres database and a
- * role of that name on the server this suite shares with everything else.
- */
+/** Prefixed: a claim creates a database and role on the shared Postgres. */
 async function mine(label = 'notes') {
   const name = kthx().name(label);
   const claimed = await claim(name);
@@ -150,11 +142,11 @@ describe('claiming', () => {
     expect(claimed.body.url).toBe(`https://${name}.kthx.test`);
     expect(claimed.body.token).toMatch(/^[A-Za-z0-9_-]{43}$/);
 
-    // The token is not stored: nothing but its hash is on the row.
     const [row] = await kthx()
       .sql`select token_hash, provisioned_at from sites where name = ${name}`;
-    // And the name is a database of its own before it is a website.
+    // The claim provisions the site's database before any upload.
     expect(row.provisioned_at).not.toBeNull();
+    // Only the token's hash is stored.
     expect(row.token_hash).toMatch(/^[0-9a-f]{64}$/);
     expect(row.token_hash).not.toBe(claimed.body.token);
   });
@@ -235,8 +227,8 @@ describe('claiming', () => {
       true,
     );
     expect(statuses.at(-1)).toBe(429);
-    // The day is what it waits for, not the minute — which at 23:59 UTC is
-    // fewer than sixty seconds, so the number itself is what is asserted.
+    // Retry-After counts to UTC midnight, which can be under a minute away, so
+    // compare the value itself.
     const wait = Number(last?.headers.get('retry-after'));
     expect(Math.abs(wait - secondsToMidnight())).toBeLessThanOrEqual(2);
   });
@@ -255,8 +247,7 @@ describe('ownership', () => {
         body: { code: 'FORBIDDEN' },
       },
     );
-    // A free name is 404 even unauthenticated: that pair is the landing page's
-    // taken-probe.
+    // The landing page's taken-probe reads 401 as taken and 404 as free.
     expect((await inspect('nobody')).status).toBe(404);
     expect((await inspect('%E0', owned.token)).status).toBe(404);
   });
@@ -274,7 +265,6 @@ describe('releases', () => {
     });
     expect(first.body.digest).toMatch(/^[0-9a-f]{64}$/);
 
-    // Unpacked, not held in memory: the files are on the volume.
     const root = join(kthx().sitesDir, owned.name, '1');
     expect(await Bun.file(join(root, 'index.html')).text()).toBe('<h1>v1</h1>');
     expect(await Bun.file(join(root, 'style.css')).exists()).toBe(true);
@@ -292,7 +282,7 @@ describe('releases', () => {
       serving: 2,
       held: false,
     });
-    // The site's own database is the meter, and an empty clone is not nothing.
+    // db_bytes is the size of the site's own database, above 0 even when empty.
     expect(shown.body.usage.db_bytes).toBeGreaterThan(0);
     expect(shown.body.releases.map((r: { n: number }) => r.n)).toEqual([2, 1]);
     expect(shown.body.releases[0].size).toBeGreaterThan(0);
@@ -318,7 +308,7 @@ describe('releases', () => {
       false,
     );
 
-    // `200.html` is an entry page too — a single-page app has no index.
+    // `200.html` is an entry page too, for a single-page app.
     expect(
       (await upload(owned.name, owned.token, site({ '200.html': 'spa' })))
         .status,
@@ -415,8 +405,7 @@ describe('releases', () => {
         status: 503,
         body: { code: 'BUSY' },
       });
-      // The same two slots cover a rehydrate, which is the 503 page rather
-      // than a code: a browser asked for bytes, not for JSON.
+      // A rehydrate needs a slot too, and a page request gets the HTML 503.
       const page = await kthx().fetch(
         ask('/', { host: `${owned.name}.${ZONE}` }),
       );
@@ -425,7 +414,6 @@ describe('releases', () => {
       for (const slot of held) slot?.();
     }
 
-    // The slots are given back, so both paths work again.
     expect((await upload(owned.name, owned.token)).status).toBe(201);
     expect(
       (await kthx().fetch(ask('/', { host: `${owned.name}.${ZONE}` }))).status,
@@ -451,8 +439,8 @@ describe('rolling back and holding', () => {
     await upload(owned.name, owned.token);
     await upload(owned.name, owned.token, site({ 'index.html': 'v2' }));
 
-    // Back to v1: the latch is on, which is what stops a deploy firing while
-    // somebody is looking at what broke from putting it back.
+    // Serving an older release holds the site: later uploads are stored but
+    // not served.
     expect(await serveRelease(owned.name, owned.token, 1)).toMatchObject({
       status: 200,
       body: { serving: 1, held: true },
@@ -473,9 +461,8 @@ describe('rolling back and holding', () => {
     );
     expect(await still.text()).toContain('v1');
 
-    // Choosing the newest is the ordinary state and holds nothing. Setting the
-    // latch here too made the first rollback of a site's life permanent: every
-    // later release stored, none of them ever serving.
+    // Serving the newest release clears the hold, or one rollback would pin
+    // the site for good.
     expect(await serveRelease(owned.name, owned.token, 3)).toMatchObject({
       status: 200,
       body: { serving: 3, held: false },
@@ -489,7 +476,6 @@ describe('rolling back and holding', () => {
     );
     expect(await published.text()).toBe('v3');
 
-    // And an upload onto an unheld site serves, as it always has.
     const fourth = await upload(
       owned.name,
       owned.token,
@@ -506,8 +492,6 @@ describe('rolling back and holding', () => {
     expect(await serveRelease(owned.name, owned.token, 1)).toMatchObject({
       body: { serving: 1, held: true },
     });
-    // Forward is the same act and is not a hold: the site is on its newest
-    // release, which is where an untouched site already is.
     expect((await serveRelease(owned.name, owned.token, 2)).body).toEqual({
       serving: 2,
       held: false,
@@ -539,8 +523,7 @@ describe('rolling back and holding', () => {
         ).status,
       ).toBe(201);
     }
-    // Only the serving release and the one before it stay on disk; v1 is a
-    // rehydrate from the depot away.
+    // Empty the volume, so serving v1 has to rehydrate it from the depot.
     await pruneSite(kthx().sitesDir, owned.name, new Set(), new Set());
     expect(await releaseDirs(owned.name)).toEqual([]);
 
@@ -570,8 +553,7 @@ describe('the volume', () => {
     }
     expect(await releaseDirs(owned.name)).toEqual([1, 2, 3]);
 
-    // The reading is the caller's, so the rule can be proven without filling a
-    // real disk.
+    // The last argument stands in for a full volume.
     await pruneSite(
       kthx().sitesDir,
       owned.name,
@@ -626,8 +608,6 @@ describe('deleting', () => {
     expect(gone.status).toBe(204);
     expect(await releaseDirs(owned.name)).toEqual([]);
 
-    // 410 on every control route, authenticated or not, and the name never
-    // comes free.
     expect(await inspect(owned.name, owned.token)).toMatchObject({
       status: 410,
       body: { code: 'GONE' },
@@ -660,14 +640,14 @@ describe('the directory', () => {
     };
   }
 
-  /** Distinct claim times, so the order under test is not the clock's guess. */
+  /** Pins the claim time, so the order under test does not depend on timing. */
   async function claimedAt(name: string, iso: string) {
     await kthx().sql`
       update sites set created_at = ${iso}::timestamptz where name = ${name}
     `;
   }
 
-  /** Only the names of this test: the zone is shared with everything else. */
+  /** This test's names only, since other tests' sites share the zone. */
   const names = (items: readonly Item[], mine: readonly string[]) =>
     items.map((item) => item.name).filter((name) => mine.includes(name));
 
@@ -687,7 +667,6 @@ describe('the directory', () => {
     const listed = await directory();
     expect(listed.status).toBe(200);
     expect(listed.cache).toBe('no-store');
-    // Newest claim first, and a deleted name is not in the list at all.
     expect(
       names(listed.body.items, [first.name, second.name, gone.name]),
     ).toEqual([second.name, first.name]);
@@ -697,18 +676,14 @@ describe('the directory', () => {
     expect(served).toEqual({
       name: second.name,
       url: `https://${second.name}.${ZONE}`,
-      // Claimed with no login, and read by a caller with none: nobody's
-      // address is in a list anyone may read.
+      // A login is an email address, so owner is shown only to that owner.
       owner: null,
       serving: 1,
       releases: 1,
       at: '2026-08-02T00:00:00.000Z',
-      // When it last changed, which is not when it was claimed: a list of
-      // somebody's own sites says the first and the claim time stops being it
-      // on the second publish.
+      // The newest release's time; `at` is the claim time.
       changed: expect.any(String),
     });
-    // A claimed name with no upload is in the list, serving nothing.
     expect(listed.body.items).toContainEqual(
       expect.objectContaining({
         name: first.name,
@@ -717,7 +692,6 @@ describe('the directory', () => {
         changed: null,
       }),
     );
-    // Owning a site is what the bearer is for: none of it is here.
     for (const item of listed.body.items) {
       expect(Object.keys(item).sort()).toEqual([
         'at',
@@ -752,7 +726,6 @@ describe('the directory', () => {
       after = listed.body.next;
       if (after === null) break;
     }
-    // Newest claim first, every name once, and the walk ends on its own.
     expect(seen).toEqual([...owned].reverse());
     expect(after).toBeNull();
   });
@@ -762,7 +735,7 @@ describe('the directory', () => {
     const second = await mine('clamp-two');
     expect((await directory('?limit=99999')).status).toBe(200);
     expect((await directory('?limit=nonsense')).status).toBe(200);
-    // The parameter left empty is the parameter left out: the default page.
+    // An empty limit means the default page size.
     expect(
       names((await directory('?limit=')).body.items, [first.name, second.name]),
     ).toHaveLength(2);
@@ -770,8 +743,7 @@ describe('the directory', () => {
       status: 400,
       body: { code: 'INVALID_QUERY' },
     });
-    // A cursor naming a site that never existed is the end of the walk, and a
-    // reserved name is a name — it matches no row, so it ends it the same way.
+    // A cursor that matches no row, a reserved name included, ends the walk.
     expect((await directory('?after=nobody-here-at-all')).body.items).toEqual(
       [],
     );
@@ -783,7 +755,7 @@ describe('the directory', () => {
 
   test('bounds how fast one address asks for a page', async () => {
     const from = address();
-    // Every page costs a query now, so every page spends a token.
+    // Every page is a fresh query, so every page spends a token.
     for (let asked = 0; asked < DIRECTORY_BUCKET.capacity; asked += 1) {
       const paged = await kthx().fetch(ask('/api/sites', { address: from }));
       expect(paged.status).toBe(200);
@@ -794,7 +766,6 @@ describe('the directory', () => {
     expect((await refused.json()).code).toBe('RATE_LIMITED');
     expect(Number(refused.headers.get('retry-after'))).toBeGreaterThan(0);
 
-    // The bucket is per address: nobody else is refused by this one's burst.
     const other = await kthx().fetch(ask('/api/sites', { address: address() }));
     expect(other.status).toBe(200);
     await other.json();
@@ -802,8 +773,6 @@ describe('the directory', () => {
 
   test('has no nuke when the deployment has no admin key', async () => {
     const owned = await mine('kept');
-    // Not 401, not 403: a deployment without the key does not have this route.
-    // The rest of the nuke is in `nuke.test.ts`, whose harness has one.
     const refused = await kthx().fetch(
       ask('/api/sites', { method: 'DELETE', token: 'anything' }),
     );
@@ -820,7 +789,6 @@ describe('the directory', () => {
       owned.name,
     ]);
 
-    // Straight into the table, so nothing but a fresh query can find it.
     const smuggled = kthx().name('smuggled');
     await kthx().sql`
       insert into sites (name, token_hash) values (${smuggled}, ${'0'.repeat(64)})

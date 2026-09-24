@@ -1,19 +1,8 @@
 #!/usr/bin/env bun
 /**
- * The CLI as `dist/kthx.tgz`, which the apex serves at `/cli/kthx.tgz`.
- *
- * Packing `apps/kthx` itself does not work and cannot be made to: its
- * dependencies are `workspace:*`, which `bun pm pack` rewrites to `0.0.0` and
- * `bun add` then looks for on the public registry, where `@repo/archive` and
- * `@repo/kthx` are not and will never be. So the CLI is bundled to one file
- * first — `bun build` inlines what it imports, which is `@repo/kthx`'s agent
- * reference and favicon — and the tarball carries that file and a package.json
- * with no dependencies at all. `bun add -g https://kthx.dev/cli/kthx.tgz` installs it on a machine that
- * has only Bun.
- *
- * `bun build --compile` was the alternative and is the bigger story: one ~60 MB
- * binary per platform, a matrix to build them, a chooser to serve them, and
- * `bun add -g` cannot install any of them.
+ * Packs the CLI as `dist/kthx.tgz`, served at `/cli/kthx.tgz`, bundled to one
+ * file with no dependencies: `bun pm pack` rewrites `workspace:*` to `0.0.0`,
+ * which no registry has.
  */
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -35,24 +24,16 @@ if (!built.success) {
   throw new Error('bundling the CLI failed');
 }
 
-/**
- * The build id: the first twelve hex of the bundle's own sha256.
- *
- * Not the git sha, which is the obvious answer and is not available where this
- * runs — the Dockerfile packs from a `turbo prune` tree, which has no `.git`.
- * The content hash is the better identity anyway: it differs exactly when the
- * command line differs, so a rebuild of unchanged source does not tell every
- * installed copy that an update is available.
- */
+// A content hash: the pruned build tree has no `.git`, and an unchanged bundle
+// keeps its id across rebuilds.
 const bundle = readFileSync(join(dist, 'kthx.js'));
 const build = new Bun.CryptoHasher('sha256')
   .update(bundle)
   .digest('hex')
   .slice(0, 12);
 
-// Beside the bundle in the tarball, and beside the tarball in the server's
-// image: the CLI reads it to know itself and the server serves it as
-// `x-kthx-build`, and there is one file so the two cannot disagree.
+// The CLI reads this file for its own build, and the server serves it as
+// `x-kthx-build`.
 writeFileSync(
   join(dist, 'version.json'),
   `${JSON.stringify(

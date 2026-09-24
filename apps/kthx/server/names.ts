@@ -1,21 +1,12 @@
 /**
- * What makes a name a name.
- *
- * Its own file because both ends check it: the claim route refuses a bad name,
- * and the CLI refuses to build a URL out of one before it ever asks. Importing
- * `sites.ts` for this would pull the whole control API — the depot, the pools,
- * the migrations — into a command line that needs a regex.
+ * Site name rules, shared by the claim route and the CLI. A separate file keeps
+ * the CLI from importing the control API.
  */
 export const NAME_PATTERN = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/;
 
 /**
- * Names nobody may claim.
- *
- * Three groups: the hostnames a zone owes itself, the path prefixes reserved on
- * every site host (a site called `files` would still be reachable, but the
- * confusion is not worth the label), and the Postgres identifiers a site name
- * becomes — a name is also a database and a role, so `postgres` and the
- * templates are taken before anyone asks.
+ * Common hostnames, the path prefixes reserved on site hosts, and Postgres
+ * names: a site name also becomes a database and a role.
  */
 export const RESERVED_NAMES: ReadonlySet<string> = new Set([
   'www',

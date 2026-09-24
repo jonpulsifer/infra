@@ -1,17 +1,7 @@
 /**
- * The bytes a site answers with, read off the volume.
- *
- * Resolution is the contract's list and nothing more: the exact file, an
- * `index.html` or `200.html` for a directory, the generic favicon, then the
- * SPA fallback at 200 and the site's own `404.html` at 404. Everything is
- * `lstat`ed and everything is checked to still be under the release root — the
- * archive reader has already refused a `..`, and this refuses one that arrives
- * in a URL.
- *
- * Freshness is `no-cache` plus the digest etag: the bytes are still cached
- * everywhere, and every read revalidates. A release that has not moved costs a
- * 304 and no body; the moment it moves the etag does too, so the next refresh
- * is the new release rather than whatever a `max-age` was still holding.
+ * A site's files, served off the volume and kept under the release root. Files
+ * are `no-cache` with an etag carrying the release digest, so every read
+ * revalidates and a new release shows on the next refresh.
  */
 import { lstat } from 'node:fs/promises';
 import { join, normalize } from 'node:path';
@@ -65,7 +55,6 @@ export function decodePath(url: string): string | null {
   return pathname;
 }
 
-/** The one regular file at this path under the root, or `null`. */
 export async function fileAt(
   root: string,
   path: string,
@@ -73,7 +62,7 @@ export async function fileAt(
   const resolved = normalize(join(root, path));
   if (resolved !== root && !resolved.startsWith(`${root}/`)) return null;
   try {
-    // `lstat`, so a symlink is a miss rather than a way out of the release.
+    // `lstat`: a symlink is a miss, never a way out of the release.
     if (!(await lstat(resolved)).isFile()) return null;
   } catch {
     return null;
@@ -82,11 +71,8 @@ export async function fileAt(
 }
 
 /**
- * A file from `<sitesDir>/<name>/<serving>/`, or `null` for the kthx 404 page.
- *
- * The contract's order, first hit wins. The generic favicon sits after the
- * release's own files and before the fallbacks: a bundle that ships an icon
- * wins, and a whole HTML error page is not an icon.
+ * `null` means the kthx 404 page. The generic favicon comes after the release's
+ * own files and before the HTML fallbacks, which are no icon.
  */
 export async function staticResponse(
   request: Request,
@@ -140,16 +126,11 @@ function fileResponse(
   found: Body,
   cacheControl = 'no-cache',
 ): Response {
-  // Percent-encoded so the header stays ASCII and carries no quote of its own;
-  // `/` is left alone because a path with slashes is still one token.
+  // Percent-encoded so the header stays ASCII with no quote of its own.
   const etag = `"${digest}:${encodeURIComponent(path).replaceAll('%2F', '/')}"`;
   const headers: Record<string, string> = {
     etag,
     'content-type': found.type,
-    // Release files revalidate every time and cache the bytes. The etag carries
-    // the release digest, so an unchanged file is a 304 and the moment
-    // `serving` moves the etag moves with it — which is what makes a new
-    // release show on the next refresh instead of up to a minute later.
     'cache-control': cacheControl,
     'x-content-type-options': 'nosniff',
   };
@@ -171,8 +152,7 @@ function fileResponse(
 }
 
 export function faviconResponse(request: Request): Response {
-  // Not a release file: this one is built into the process, so it cannot move
-  // between two requests of the same build. It caches like `/sdk.js`.
+  // Built into the process, so it cannot change within a build.
   return fileResponse(
     request,
     FAVICON_DIGEST,
@@ -187,20 +167,13 @@ export function faviconResponse(request: Request): Response {
   );
 }
 
-// --- the page for a name nothing answers ------------------------------------
-
 const SAID: Record<number, string> = {
   404: 'No site here yet.',
   410: 'This site is gone.',
   503: 'This site is not available right now.',
 };
 
-/**
- * One line, the palette of the landing page, and a way back to the apex.
- *
- * `no-store`, unlike a site's own `404.html`: this page describes a name's
- * state, and the state changes the moment somebody uploads.
- */
+/** `no-store`: a name's state changes the moment somebody uploads. */
 export function notHere(
   host: string,
   zone: string,

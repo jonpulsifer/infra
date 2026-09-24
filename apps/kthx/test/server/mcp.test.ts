@@ -1,18 +1,12 @@
 /**
- * `/api/mcp`: the framing, and that every tool is the `/api` handler behind it.
- *
- * The round trip is the whole client this transport needs — one JSON-RPC
- * message per POST, no session, no stream — so the test is the same fetch an
- * editor makes. What it is really asserting is that no tool has its own
- * implementation: a document created through `db_create` carries the server's
- * etag and timestamps, and `db_update` with a stale etag is refused, which only
- * the real `/api/db` statement does.
+ * `/api/mcp`: the framing, and that every tool is the `/api` handler behind it,
+ * so tool writes carry the server's etags and stale ones are refused.
  */
 import { describe, expect, test } from 'bun:test';
 import { writes } from '../../server/limits.ts';
 import { ask, withServer, ZONE } from '../harness/server.ts';
 
-/** The contract's tool table, written out so the server cannot define it. */
+/** Written out here, so the server cannot define what is expected. */
 const TOOLS = [
   'site_info',
   'db_collections',
@@ -52,7 +46,6 @@ async function claimed(label: string): Promise<Site> {
   return { name, host: `${name}.${ZONE}`, token: body.token };
 }
 
-/** One JSON-RPC message, as a client sends it. */
 function post(
   site: Site,
   message: Record<string, unknown>,
@@ -106,7 +99,7 @@ async function call(
   return { text: result.content[0]?.text ?? '', isError: result.isError };
 }
 
-/** A tool that succeeded, as the JSON it answered with. */
+/** A successful tool result, parsed. */
 async function json(
   site: Site,
   name: string,
@@ -265,8 +258,7 @@ describe('the tools', () => {
     expect(updated).toMatchObject({ title: 'first', done: true });
     expect(updated.etag).not.toBe(created.etag);
 
-    // The etag the write moved past: the shared statement is what refuses this,
-    // and a tool with its own SQL would not.
+    // Only the shared `/api/db` statement refuses a stale etag.
     const stale = await call(site, 'db_update', {
       collection: 'notes',
       id,
@@ -276,7 +268,6 @@ describe('the tools', () => {
     expect(stale.isError).toBe(true);
     expect(stale.text).toStartWith('PRECONDITION_FAILED:');
 
-    // `overwrite` drops the keys the patch does not carry.
     const replaced = await json(site, 'db_update', {
       collection: 'notes',
       id,
@@ -317,8 +308,7 @@ describe('the tools', () => {
 
   test('an argument never becomes path text', async () => {
     const site = await claimed('mcp-path');
-    // `new URL` collapses these before the router splits the path: `..` used to
-    // answer a db_get with the collection list, `.` with an empty query.
+    // `new URL` would collapse `..` and `.` before the router splits the path.
     for (const collection of ['..', '.', 'a/b', 'Notes']) {
       const answer = await call(site, 'db_get', { collection, id: 'zzz' });
       expect(answer.isError).toBe(true);
@@ -337,7 +327,7 @@ describe('the tools', () => {
       collection: 'notes',
       doc: { title: 'one' },
     });
-    // A control character used to throw out of `Headers` and land as a 500.
+    // A control character would throw out of `Headers` as a 500.
     for (const ifMatch of ['x\r\nX-Evil: 1', 'not-an-etag', 7]) {
       const answer = await call(site, 'db_update', {
         collection: 'notes',
@@ -348,11 +338,9 @@ describe('the tools', () => {
       expect(answer.isError).toBe(true);
       expect(answer.text).toStartWith('PRECONDITION_FAILED:');
     }
-    // And the write it guarded did not happen.
     expect(
       (await json(site, 'db_get', { collection: 'notes', id: doc.id })).title,
     ).toBe('one');
-    // A real etag still holds.
     expect(
       (
         await json(site, 'db_update', {

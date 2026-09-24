@@ -1,7 +1,4 @@
-/**
- * The writer, read back by the reader every release meets: spindrift's
- * `readBundle`, and the system `tar` for the long-name form.
- */
+/** The CLI's tar writer, read back by `readBundle` and by the system `tar`. */
 import { describe, expect, test } from 'bun:test';
 import { mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';

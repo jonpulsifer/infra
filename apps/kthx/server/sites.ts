@@ -1,20 +1,7 @@
 /**
  * The control API: claim a name, upload a release, choose which one serves.
- *
- * Answered on the apex — or, where `KTHX_CONTROL_HOST` or `KTHX_IDENTITY_HOST`
- * name a private host, there alone. Ownership is two credentials and a row may
- * carry either: the bearer minted at claim and shown once, of which the row
- * keeps only a SHA-256, and the tailnet login the identity door vouched for.
- * There is still no session and no reset — a visitor who lost the token has
- * lost the site unless its row also names a login, which is the deal the
- * landing page states.
- *
- * The upload boundary is `@repo/archive`: `normalizeArchive` turns a ZIP into
- * the gzipped tar everything downstream opens, the depot stores it under its
- * own digest, and the bundle is read once so an archive with no entry page is
- * refused before it is stored. What this file adds is the *order*: bytes land
- * in the depot, then on the volume, and only then does a row say a site serves
- * them.
+ * An upload is stored in the depot, then on the volume, and only then does a row
+ * say the site serves it. A lost token without an owner login loses the site.
  */
 import { createHash } from 'node:crypto';
 import { rm } from 'node:fs/promises';
@@ -69,34 +56,30 @@ import {
 
 export { NAME_PATTERN, nameProblem, RESERVED_NAMES } from './names.ts';
 
-/** How many live sites this process carries before it stops taking names. */
+/** Live sites before claims stop. */
 export const MAX_LIVE_SITES = 5000;
-/** Claims per address /64 per UTC day. */
+/** Claims per caller bucket per UTC day. */
 export const MAX_CLAIMS_PER_DAY = 20;
 /** Uploads per site per UTC day. */
 export const MAX_UPLOADS_PER_DAY = 60;
-/** How long a release body may take to arrive. */
 export const BODY_TIMEOUT_MS = 120_000;
-/** Far more than any legal `{name}` body, and far less than the server's cap. */
+/** Far above any legal `{name}` body, far below the server's cap. */
 const MAX_CLAIM_BYTES = 64 * 1024;
 
 const claims = new TokenBucket(CLAIM_BUCKET);
 const claimsPerDay = new DailyCap(MAX_CLAIMS_PER_DAY);
 const uploadsPerDay = new DailyCap(MAX_UPLOADS_PER_DAY);
 
-/** Everything a handler is given: the deployment, the stores, this request. */
 export interface Ctx {
   readonly config: Config;
   readonly sql: SQL;
-  /** The site databases: provisioning, pools, quotas. */
   readonly pg: Pg;
   readonly depot: Depot;
   readonly server: Bun.Server<unknown> | undefined;
   readonly id: string;
   readonly host: string;
-  /** The port the request named, so a local run answers with a reachable URL. */
+  /** The request's port, so a local run answers with a reachable URL. */
   readonly port: string;
-  /** Which door this arrived through, who it is, and what keys its buckets. */
   readonly caller: Caller;
 }
 
@@ -108,31 +91,15 @@ function retryAfter(seconds: number): Record<string, string> {
   return { 'retry-after': String(seconds) };
 }
 
-/** The two columns that decide who opens a site. */
 export interface Owned {
   readonly token_hash: string | null;
   readonly owner_login: string | null;
 }
 
 /**
- * Whether this caller opens this site.
- *
- * Two credentials, both permanent: the bearer minted at claim, and the tailnet
- * login the identity door vouched for. Neither supersedes the other — a tagged
- * node gets no identity header at all, so identity-only ownership would lock
- * every agent out of its own sites on the day it shipped.
- *
- * Reach is not one of them. Everyone on the tailnet can dial the identity host,
- * so arriving there says which door was used and nothing about who came
- * through it.
- *
- * A null `token_hash` opens nothing, and is checked before the compare rather
- * than inside it: the live column is nullable, and `timingSafeEquals` against
- * a null is a throw in the middle of a request that should have been a 403.
- *
- * On a site host a bearer that is not this site's is *ignored* rather than
- * refused — the OpenAI SDK puts one on every call to `/api/ai` — so this
- * answers a question, not a challenge.
+ * The bearer or the owner login opens a site; the bearer stays because a tagged
+ * node sends no identity header. A foreign bearer is ignored: OpenAI SDKs send
+ * one to `/api/ai`.
  */
 export function opensSite(caller: Caller, site: Owned): boolean {
   if (
@@ -145,12 +112,7 @@ export function opensSite(caller: Caller, site: Owned): boolean {
   return site.owner_login !== null && site.owner_login === caller.login;
 }
 
-/**
- * Dispatch under `/api/sites`, or `null` when the path is not one of ours.
- *
- * `segments` is the split pathname, so `/api/sites/notes/releases` arrives as
- * `['', 'api', 'sites', 'notes', 'releases']`.
- */
+/** `segments` is the split pathname; `null` for a path this route lacks. */
 export async function sitesApi(
   request: Request,
   ctx: Ctx,
@@ -186,18 +148,13 @@ export async function sitesApi(
               ? unhold
               : null;
   if (act === null) {
-    // A path we do not have is 404; one we have with the wrong verb is 405.
     return ['', 'releases', 'serve', 'hold'].includes(tail)
       ? refuse('METHOD_NOT_ALLOWED', ctx.id)
       : refuse('NOT_FOUND', ctx.id);
   }
 
-  // Every owner-scoped write under `:name`, in one place. An identity header is
-  // set by the proxy on whatever reaches it, so the credential is ambient the
-  // moment a browser is on that host: without this a foreign page publishes a
-  // release to somebody else's site with nothing but their address bar. `GET`
-  // is left alone — this server sends no CORS header, so a cross-origin read
-  // cannot be read.
+  // The proxy's identity header makes a login ambient, so a foreign page could
+  // write here. `GET` is exempt: without CORS headers its answer is unreadable.
   if (method !== 'GET' && !sameOrigin(request, ctx.host, ctx.port)) {
     return refuse('FORBIDDEN', ctx.id);
   }
@@ -207,14 +164,6 @@ export async function sitesApi(
   return act(request, ctx, site.row);
 }
 
-/**
- * The row this name names, once its bearer is the one presented.
- *
- * A deleted name is 410 before the bearer is even read — the site is gone for
- * its owner too. A name with no row is 404 whether or not a token came with it,
- * which is what makes an unauthenticated `GET` the landing page's taken-probe:
- * 401 means claimed, 404 means free.
- */
 async function siteFor(
   name: string,
   ctx: Ctx,
@@ -227,23 +176,18 @@ async function siteFor(
   if (row.deleted_at !== null) return { code: 'GONE' };
 
   if (opensSite(ctx.caller, row)) return { row };
-  // An unauthenticated read is still 401, which is what makes it the landing
-  // page's taken-probe. A verified login is not a credential *offered* for this
-  // site, so it does not turn that 401 into a 403 and break the probe on the
-  // identity host.
+  // The landing page reads 401 as taken and 404 as free. A verified login is
+  // no credential offered, so it must not turn that 401 into a 403.
   if (ctx.caller.authorization === null) return { code: 'UNAUTHENTICATED' };
   return { code: 'FORBIDDEN' };
 }
 
 type Act = (request: Request, ctx: Ctx, site: SiteRow) => Promise<Response>;
 
-// --- the directory ----------------------------------------------------------
-
-/** How many sites a page of the directory holds, and what it may be asked for. */
 const DIRECTORY_PAGE = 200;
 const MAX_DIRECTORY_PAGE = 500;
 
-/** One site as the directory shows it: no token hash, no usage, no hold. */
+/** Public fields only: no token hash, usage or hold. */
 interface Listed {
   readonly name: string;
   readonly owner_login: string | null;
@@ -259,35 +203,12 @@ interface Page {
   readonly next: string | null;
 }
 
-/** How fast one address may ask for a page. */
 const directoryReads = new TokenBucket(DIRECTORY_BUCKET);
 
 /**
- * Every live site, newest claim first — the public directory.
- *
- * Public by construction: a name answers on `<name>.<zone>` to anyone who
- * dials it, so listing the names gives away nothing a walk of the zone would
- * not. What stays behind the bearer is everything about *owning* a site: the
- * token hash, the usage, the hold, the release digests — and who owns it. A
- * row's `owner` is its login only when it is the caller's own, because an
- * owner is an email address and the directory is read by anyone.
- *
- * `?owner=me` is the same page filtered to the caller's own sites — "your
- * websites", which is the only list a person landing on the identity host
- * wants. `changed` is beside `at` for the same reader: a list of somebody's own
- * sites wants to say when each last changed, and the claim time stops being
- * that on the second publish. Any other `?owner=` is refused rather than answered: listing by
- * somebody else's address is the leak this route must not have.
- *
- * One statement, whatever the page: the cursor names the last site of the
- * previous one and the query finds its place itself, so a caller paging to the
- * end costs one indexed lookup a page rather than a growing `offset`.
- *
- * Nothing is kept and nothing is cached — `no-store`, one query per request.
- * A directory that is a few seconds behind is a demo where the site somebody
- * just claimed is not on the page, and a live zone is at most a few thousand
- * indexed rows. What bounds it is {@link directoryReads}, now on every request
- * rather than only the ones a cache could not answer.
+ * The public directory; any site already answers on `<name>.<zone>`. An owner
+ * login is an email address, so it is shown only to that owner, and listing by
+ * anyone else's login is refused.
  */
 async function directory(request: Request, ctx: Ctx): Promise<Response> {
   const query = new URL(request.url).searchParams;
@@ -297,12 +218,11 @@ async function directory(request: Request, ctx: Ctx): Promise<Response> {
     return refuse('UNAUTHENTICATED', ctx.id);
   }
   const after = query.get('after');
-  // A reserved name is a name: it matches no row, so it ends the walk rather
-  // than being refused. Only a string that is not a name at all is a bad query.
+  // A reserved name matches no row and ends the walk; a non-name is refused.
   if (after !== null && nameProblem(after) === 'INVALID_NAME') {
     return refuse('INVALID_QUERY', ctx.id);
   }
-  // `?limit=` is the parameter left empty, which is the default, not zero.
+  // An empty `?limit=` means the default, not zero.
   const raw = query.get('limit');
   const asked = raw ? Number(raw) : DIRECTORY_PAGE;
   const limit = Number.isFinite(asked)
@@ -338,13 +258,8 @@ async function directory(request: Request, ctx: Ctx): Promise<Response> {
 }
 
 /**
- * One page of live sites, and the cursor for the page after it.
- *
- * The keyset is `(at, name)` under the order the list is in, resolved from the
- * cursor's own name inside the same statement. A cursor naming a site that
- * never existed matches nothing and ends the walk; one naming a *deleted* site
- * still pages correctly, because that row keeps its claim time and only drops
- * out of the list itself.
+ * Keyset paging on `(at, name)` from the cursor's row. A deleted site's cursor
+ * still pages, since its row keeps its claim time.
  */
 async function listSites(
   ctx: Ctx,
@@ -379,50 +294,17 @@ async function listSites(
   };
 }
 
-// --- the name probe ---------------------------------------------------------
-
-/** What a name is to the caller asking about it. */
 export interface Standing {
-  /** Whether `POST /api/sites` would take it — never true for a name with a row. */
+  /** Never true for a name with a row, deleted or not. */
   readonly available: boolean;
   readonly why: 'INVALID_NAME' | 'RESERVED' | 'TAKEN' | null;
-  /**
-   * The caller's own address, and whether anything is published on it.
-   *
-   * `empty` is the claim itself: a name, a database and a role with no release,
-   * which is what a failed upload leaves behind and what a second press
-   * finishes.
-   */
+  /** `null` unless the caller opens the site; `empty` means no release yet. */
   readonly yours: 'empty' | 'live' | null;
 }
 
 /**
- * What a name is, to whoever is asking.
- *
- * This is the question the landing page used to ask by reading a 401 off
- * `GET /api/sites/:name` — a probe that only worked because an owner route
- * answers differently to a name that exists, and that says "taken" to anyone
- * who is simply not its owner. Asked plainly it is one indexed row.
- *
- * **A name its own owner holds is not taken to him.** Answered owner-blind,
- * this route and the builder's proposal both called the caller's own address
- * somebody else's — which sent a person off to rename a name he had already
- * paid a database and a role for, and made the stranded one unreachable, since
- * typing it back in was refused by the same sentence. So who is asking is part
- * of the answer: `yours` is the one field that changes with the caller, and it
- * is null for everybody who does not open the site, including anonymous callers
- * on the public apex.
- *
- * **No `deleted_at` filter.** A deleted name is taken forever: its row is what
- * makes the site host answer 410 rather than handing the name to the next
- * claimer, and a probe that called it free would offer a name the claim then
- * refuses. It is not `yours` either — nobody can have it again, its old owner
- * least of all, and offering it to him would be the same dead end.
- *
- * A fast no, never a promise of a yes: a claim also refuses a name already in
- * `pg_database` or `pg_roles`, and two callers racing for the last free name
- * still both see `available`. Those two catalogue lookups stay off a public
- * unauthenticated route; the claim is the authority.
+ * A fast no, never a promised yes: the claim also checks the Postgres catalogs
+ * and settles races. A deleted name stays taken and is nobody's.
  */
 export async function nameStanding(ctx: Ctx, name: string): Promise<Standing> {
   const why = nameProblem(name);
@@ -445,7 +327,6 @@ export async function nameStanding(ctx: Ctx, name: string): Promise<Standing> {
   };
 }
 
-/** {@link nameStanding} as a route: one indexed row, on the directory bucket. */
 export async function nameStatus(ctx: Ctx, segment: string): Promise<Response> {
   if (directoryReads.spend(ctx.caller.bucket)) {
     return refuse('RATE_LIMITED', ctx.id, retryAfter(60));
@@ -459,15 +340,9 @@ export async function nameStatus(ctx: Ctx, segment: string): Promise<Response> {
   return ok({ name, ...(await nameStanding(ctx, name)) }, ctx.id);
 }
 
-// --- the nuke ---------------------------------------------------------------
-
 /**
- * Whether this caller opens the whole zone.
- *
- * One predicate for two readers — the route, and the page that decides whether
- * to show a control at all — because a page that offers a button the route
- * refuses is worse than no button. A login is only ever set on the identity
- * host, so naming a door here would be saying the same thing twice.
+ * Shared by the nuke route and the page, so the page never offers a button the
+ * route refuses. Only the identity host sets a login.
  */
 export function opensZone(caller: Caller, config: Config): boolean {
   return (
@@ -478,23 +353,8 @@ export function opensZone(caller: Caller, config: Config): boolean {
 }
 
 /**
- * Every site gone — the clean slate a demo starts from.
- *
- * A hard delete, not the soft one `DELETE /api/sites/:name` does: the rows go
- * too, so the names come free again. Release archives stay in the depot. They
- * are keyed by content digest and may be shared between sites, and after a
- * hard delete no row references them — nothing collects them.
- *
- * Opened by a name in `KTHX_ADMIN_LOGINS` and nothing else, which means the
- * identity host and nothing else: a login is only ever vouched for there, by a
- * proxy this server trusts. With the list empty — the default — this answers
- * 404, the same as a path this server does not have, so a deployment without
- * an operator does not advertise that a nuke exists.
- *
- * There is no rate limit and it needs none. A key could be mistyped in front
- * of an audience, guessed at wire speed, or left in a tab's `sessionStorage`;
- * an address that a tailnet vouched for is none of those, and the caller who
- * fails this check is a real person the log can name.
+ * Hard-deletes every site so the names come free; release archives stay in the
+ * depot, uncollected. Without `KTHX_ADMIN_LOGINS` the route is a hidden 404.
  */
 async function nuke(request: Request, ctx: Ctx): Promise<Response> {
   if (ctx.config.adminLogins.length === 0) return refuse('NOT_FOUND', ctx.id);
@@ -503,8 +363,7 @@ async function nuke(request: Request, ctx: Ctx): Promise<Response> {
   }
   const login = ctx.caller.login;
   if (!opensZone(ctx.caller, ctx.config)) {
-    // Named in the log, because unlike a mistyped key this identifies a person
-    // and the only interesting case is the one nobody expected.
+    // No rate limit: a vouched login is a person the log can name.
     logCause(
       ctx.id,
       'the nuke',
@@ -513,21 +372,19 @@ async function nuke(request: Request, ctx: Ctx): Promise<Response> {
     return refuse(login === null ? 'UNAUTHENTICATED' : 'FORBIDDEN', ctx.id);
   }
 
-  // Deleted rows as well: taking those is what frees their names.
+  // Deleted rows too: removing them frees their names.
   const rows = (await ctx.sql`select name from sites order by name`) as {
     name: string;
   }[];
   let deleted = 0;
   let failed = 0;
-  // ponytail: serial, one `DROP DATABASE` at a time. Tens of sites is a couple
-  // of seconds and the zone has never held more; batch it the day a nuke has to
-  // clear thousands, because the edge gives a request 100 s.
+  // ponytail: one `DROP DATABASE` at a time. Batch it before a nuke must clear
+  // thousands: the edge gives a request 100 s.
   for (const { name } of rows) {
     try {
       await erase(ctx, name);
       deleted += 1;
     } catch (cause) {
-      // One database refusing to drop is not the other forty sites' problem.
       logCause(ctx.id, `nuking ${name}`, cause);
       failed += 1;
     }
@@ -536,17 +393,11 @@ async function nuke(request: Request, ctx: Ctx): Promise<Response> {
 }
 
 /**
- * One site, hard: its files, its rows, its database, its role, its bytes.
- *
- * The row delete is one statement, so `releases`, `files` and `ai_usage` go
- * with it through their foreign keys — a site is never left half-listed. It
- * also runs *before* the database is dropped, which is what makes everything
- * after it recoverable: `Pg.sweep` drops any database or role whose site row
- * is gone, so a failure past that line costs disk until the nightly run rather
- * than leaving a name nobody can claim.
+ * The row delete cascades to `releases`, `files` and `ai_usage`, and precedes
+ * the drop so `Pg.sweep` cleans up after any later failure.
  */
 async function erase(ctx: Ctx, name: string): Promise<void> {
-  // First, while the rows that name its objects are still there to read.
+  // Before the row delete cascades away the rows naming its objects.
   await dropFiles(ctx, name);
   await ctx.sql`delete from sites where name = ${name}`;
   await ctx.pg.drop(name);
@@ -556,15 +407,12 @@ async function erase(ctx: Ctx, name: string): Promise<void> {
   });
 }
 
-// --- claim ------------------------------------------------------------------
-
 async function claim(request: Request, ctx: Ctx): Promise<Response> {
   if (!sameOrigin(request, ctx.host, ctx.port)) {
     return refuse('FORBIDDEN', ctx.id);
   }
   if (!isJson(request)) return refuse('MALFORMED_REQUEST', ctx.id);
-  // A claim is `{"name":"notes"}`. Anything near this size is not one, and
-  // this route is anonymous, so it is refused before a byte is buffered.
+  // Anonymous, so an oversized claim is refused before a byte is buffered.
   if (Number(request.headers.get('content-length') ?? 0) > MAX_CLAIM_BYTES) {
     return refuse('TOO_LARGE', ctx.id);
   }
@@ -588,17 +436,13 @@ async function claim(request: Request, ctx: Ctx): Promise<Response> {
   `) as { live: number }[];
   if ((live?.live ?? 0) >= MAX_LIVE_SITES) return refuse('BUSY', ctx.id);
 
-  // A name that is already a database or a role is taken even with no row: it
-  // is the residue of a claim that failed after `CREATE DATABASE`, and handing
-  // it out again would hand its documents to someone else.
+  // A database or role without a row is a failed claim's residue; handing the
+  // name out again would hand over its documents.
   if (await ctx.pg.inUse(name)) return refuse('TAKEN', ctx.id);
 
   const token = base64urlEncode(crypto.getRandomValues(new Uint8Array(32)));
-  // A deleted name stays taken: the row is what makes it answer 410. A bearer
-  // is minted whatever the door, so a site claimed by a person on the tailnet
-  // carries both credentials — the login is only ever presented from a browser
-  // on one host, and the CLI, an agent and a phone off the tailnet all still
-  // need something to carry.
+  // A deleted row still conflicts, keeping its 410. A bearer is minted on every
+  // door: the CLI, agents and devices off the tailnet carry no login.
   const claimed = (await ctx.sql`
     insert into sites (name, token_hash, owner_login)
     values (${name}, ${hash(token)}, ${ctx.caller.login})
@@ -606,9 +450,8 @@ async function claim(request: Request, ctx: Ctx): Promise<Response> {
   `) as { name: string }[];
   if (claimed.length === 0) return refuse('TAKEN', ctx.id);
 
-  // The row holds the name while this runs. A failure takes the row with it,
-  // so the caller is told the name is *not* taken — which the check above then
-  // keeps honest about whatever was left behind.
+  // `CREATE DATABASE` cannot join a transaction, so a failure deletes the row;
+  // the `inUse` check above catches whatever was left behind.
   try {
     await ctx.pg.provision(name);
   } catch (cause) {
@@ -633,9 +476,7 @@ async function jsonBody(request: Request): Promise<Record<string, unknown>> {
   return isPlainObject(body) ? body : {};
 }
 
-// --- inspect ----------------------------------------------------------------
-
-/** The ceilings the contract fixes, reported so a client need not hard-code them. */
+/** Reported so a client need not hard-code them. */
 const QUOTAS = {
   doc_bytes: 1024 * 1024,
   db_bytes: 256 * 1024 * 1024,
@@ -664,8 +505,6 @@ const inspect: Act = async (_request, ctx, site) => {
         size: Number(row.size),
         at: row.at.toISOString(),
       })),
-      // The database reports its own size, the file rows carry theirs, and
-      // the AI budget is here already.
       usage: {
         db_bytes: await ctx.pg.bytes(site.name),
         files_bytes: await filesBytes(ctx.sql, site.name),
@@ -678,14 +517,9 @@ const inspect: Act = async (_request, ctx, site) => {
   );
 };
 
-// --- release ----------------------------------------------------------------
-
 const release: Act = async (request, ctx, site) => {
-  // Ahead of the rate limit, because a refusal this caller did not cause must
-  // not spend its allowance: a client that obeys "come back in a moment" would
-  // otherwise burn its burst on a neighbour's uploads and land on 429. Not 429
-  // itself either — the process is full, which clears on its own. A probe and
-  // not a slot: the slot is taken in `stage`, once the body is in hand.
+  // Before the rate limit: a full process is not this caller's doing and must
+  // not spend its allowance. Only a probe; `stage` takes the slot.
   if (slotsFull()) return refuse('BUSY', ctx.id);
   if (claims.spend(ctx.caller.bucket)) {
     return refuse('RATE_LIMITED', ctx.id, retryAfter(60));
@@ -694,14 +528,11 @@ const release: Act = async (request, ctx, site) => {
     return refuse('RATE_LIMITED', ctx.id, retryAfter(secondsToMidnight()));
   }
   const answer = await stage(request, ctx, site);
-  // The day is charged for a release that happened, not for an archive this
-  // boundary refused: sixty builds with no `index.html` must not lock a site
-  // out until UTC midnight.
+  // Only a release that happened counts toward the day.
   if (answer.status === 201) uploadsPerDay.count(site.name);
   return answer;
 };
 
-/** The number a release took, and what the site serves once it has it. */
 interface Numbered {
   readonly n: number;
   readonly serving: number | null;
@@ -712,7 +543,7 @@ async function stage(
   ctx: Ctx,
   site: SiteRow,
 ): Promise<Response> {
-  // Bun's connection idle timeout is 10 s, which no real upload fits inside.
+  // The server's 30 s idle timeout is too short for a real upload.
   ctx.server?.timeout(request, BODY_TIMEOUT_MS / 1000 + 10);
 
   const declared = Number(request.headers.get('content-length') ?? 0);
@@ -727,9 +558,7 @@ async function stage(
   }
   if (bytes === null) return refuse('TOO_LARGE', ctx.id);
 
-  // Only now: a slot is a share of the process's memory and its disk, and a
-  // caller that trickles a body for two minutes must not hold one of the two
-  // while sending nothing.
+  // Only once the body is in: a caller trickling a body must not hold a slot.
   const slot = takeSlot();
   if (slot === null) return refuse('BUSY', ctx.id);
   try {
@@ -739,7 +568,6 @@ async function stage(
   }
 }
 
-/** The archive in hand, from bytes to a numbered directory this site serves. */
 async function unpack(
   ctx: Ctx,
   site: SiteRow,
@@ -748,8 +576,7 @@ async function unpack(
 ): Promise<Response> {
   let read: ReturnType<typeof readRelease>;
   try {
-    // The filename is a caller's assertion used only to name the container in a
-    // log line; it is never echoed and never becomes a path.
+    // A caller's assertion, used only in log lines: never echoed, never a path.
     read = readRelease(filename?.trim() || 'site.zip', bytes);
   } catch (cause) {
     if (cause instanceof UploadRefused) {
@@ -778,8 +605,7 @@ async function unpack(
       site.name,
       read.files,
       async (temp): Promise<Numbered> => {
-        // One site's uploads are numbered under its own lock, so two arriving
-        // at once take two numbers rather than one losing the primary key.
+        // The site row lock gives concurrent uploads distinct numbers.
         return await ctx.sql.begin(async (tx: SQL) => {
           const [locked] = (await tx`
             select held, serving from sites where name = ${site.name} for update
@@ -792,17 +618,13 @@ async function unpack(
             insert into releases (site, n, digest, size, location)
             values (${site.name}, ${n}, ${read.digest}, ${size}, ${location})
           `;
-          // A hold is the owner saying "not yet": an upload onto a held site is
-          // stored and numbered and does not serve until the hold is released.
-          // That is the whole point of rolling back — a deploy that fires while
-          // you are looking at what broke must not put it back.
+          // A held site stores the upload without serving it, so a deploy
+          // during a rollback cannot undo the rollback.
           const serving = locked?.held ? locked.serving : n;
           if (!locked?.held) {
             await tx`update sites set serving = ${n} where name = ${site.name}`;
           }
-          // Inside the transaction, so a rename that cannot happen rolls the
-          // row back: a site must never say it serves a release whose directory
-          // never landed. `writeTree` sweeps the temp tree either way.
+          // Inside the transaction, so a failed rename rolls the row back.
           await placeTree(temp, releaseDir(ctx.config.sitesDir, site.name, n));
           return { n, serving };
         });
@@ -827,15 +649,8 @@ async function unpack(
 }
 
 /**
- * Drop the rows past {@link KEEP_RELEASES} and the directories nothing needs.
- *
- * The row a site serves is never one of them: a rollback that lands while this
- * upload commits would otherwise lose what names the release the site answers
- * with, so it keeps {@link KEEP_RELEASES} plus whatever the site row says it is
- * serving by the time the delete runs.
- *
- * The serving release and the one before it are what stays on disk; everything
- * else is a rehydrate away, and only goes when the volume is under pressure.
+ * Keeps whatever the site serves when the delete runs, so a concurrent rollback
+ * keeps its row. The serving and previous releases stay on disk.
  */
 async function prune(
   ctx: Ctx,
@@ -863,24 +678,14 @@ async function prune(
     );
     await pruneSite(ctx.config.sitesDir, name, known, guaranteed);
   } catch (cause) {
-    // A prune that fails costs disk, never correctness: the release is already
-    // stored, numbered and serving.
+    // A failed prune costs disk, never correctness.
     logCause(ctx.id, 'pruning releases', cause);
   }
 }
 
-// --- serve, hold, delete ----------------------------------------------------
-
 /**
- * Roll back — or forward — to a numbered release.
- *
- * The latch says where `serving` sits, not that this route was called. Holding
- * is what an older release means: uploads keep arriving and keep being stored,
- * and none of them serves until the hold is released, so a deploy that fires
- * while somebody is looking at what broke cannot put it back. Choosing the
- * newest release is the ordinary state and holds nothing — setting the latch
- * there too would make the first rollback of a site's life permanent, with
- * every later release stored and invisible.
+ * An older release holds the site: later uploads are stored but do not serve.
+ * The newest holds nothing, or the first rollback would stick forever.
  */
 const chooseRelease: Act = async (request, ctx, site) => {
   if (!isJson(request)) return refuse('MALFORMED_REQUEST', ctx.id);
@@ -914,13 +719,10 @@ const remove: Act = async (_request, ctx, site) => {
   await ctx.sql`
     update sites set deleted_at = now(), serving = null where name = ${site.name}
   `;
-  // Marked first, then dropped: the row is what makes every later request 410,
-  // and it has to say so before the pool closes under the requests in flight.
+  // Marked first, so requests answer 410 before the pool closes under them.
   await ctx.pg.drop(site.name);
-  // The release rows and their content-addressed objects stay — they may be
-  // shared, and the nightly dump is the undo path. A file's object is this
-  // site's alone and is nobody's undo path, so the rows and the objects both
-  // go; then the volume, which carries the bytes of both.
+  // Release rows and their objects stay: objects may be shared, and the
+  // database backup is the undo path. File objects are this site's alone.
   await dropFiles(ctx, site.name);
   await rm(siteDir(ctx.config.sitesDir, site.name), {
     recursive: true,
