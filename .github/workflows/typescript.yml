@@ -45,6 +45,7 @@ jobs:
             apps/mate/**
             apps/slingshot/**
             apps/spindrift/**
+            apps/switchboard/**
             packages/charts/**
             clusters/base/platform/spindrift-target/**
             clusters/offsite/apps/spindrift/**

@@ -16,7 +16,8 @@
     "smiirl",
     "spindrift",
     "spindrift-demo",
-    "spindrift-verifier"
+    "spindrift-verifier",
+    "switchboard"
   ],
   "deploy": {
     "actions-runner": [

@@ -18,7 +18,7 @@ sections:
       - group: Internal tools
         items: [apps/netbench.md]
       - group: Parked
-        items: [apps/bosun.md]
+        items: [apps/bosun.md, apps/switchboard.md]
   - title: Platform
     index: platform/index.md
     items:

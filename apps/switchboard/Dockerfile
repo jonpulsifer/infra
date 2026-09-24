@@ -1,0 +1,36 @@
+# syntax=docker/dockerfile:1
+#
+# switchboard: one Bun process that runs its source as committed, with no build step.
+FROM cgr.dev/chainguard/node:latest-dev@sha256:ea7d0133c47e062b7754da987c05d4d1206e0a9e357a49679271d071f48e65e2 AS base
+ARG BUN_VERSION=1.4.0
+ENV BUN_INSTALL=/usr/local \
+  TURBO_TELEMETRY_DISABLED=1
+USER root
+RUN apk add --no-cache bash curl unzip \
+  && curl -fsSL https://bun.sh/install | bash -s -- "bun-v${BUN_VERSION}"
+
+FROM base AS pruner
+WORKDIR /app
+COPY . .
+RUN bun x turbo@2.10.3 prune switchboard --docker
+
+FROM base AS deps
+WORKDIR /app
+COPY --from=pruner /app/out/json/ .
+COPY --from=pruner /app/out/bun.lock ./bun.lock
+RUN bun install --frozen-lockfile --production
+
+FROM cgr.dev/chainguard/node:latest@sha256:3d462c24088fa9189404fc19b837f6b39636671571491c9c5dd7b75e3e2df550 AS runner
+ENV NODE_ENV=production \
+  SWITCHBOARD_PORT=8080
+WORKDIR /app
+COPY --from=deps --chmod=755 /app ./
+COPY --from=pruner --chmod=755 /app/out/full/apps/switchboard/src ./apps/switchboard/src
+COPY --from=base /usr/local/bin/bun /usr/local/bin/bun
+RUN test -f /app/apps/switchboard/src/main.ts \
+  && test -d /app/apps/switchboard/node_modules/hono
+WORKDIR /app/apps/switchboard
+USER 65532:65532
+EXPOSE 8080
+ENTRYPOINT []
+CMD ["/usr/local/bin/bun", "run", "src/main.ts"]
