@@ -19,8 +19,9 @@ PROM_URL=http://127.0.0.1:9090 PROBES="wan=example.com:443" go run .
 ```
 
 Render the app against `sample_results.json`. The sample has a far-future
-`generated_at`, two hosts down and firing alerts, so a preview shows the alert
-page and no STALE banner.
+`generated_at`, a host down, firing alerts and a PBX trunk down, so a preview
+shows the alert page, the phone page and no STALE banner. Flip `pbx.on_air`
+to `true` in a copy of the sample to preview the ON AIR page.
 
 ```bash
 python3 -m http.server 8080 &
@@ -42,8 +43,13 @@ pixlet render -2 rackstat.star api_url=http://127.0.0.1:8080/sample_results.json
 Each source fails on its own, and the snapshot keeps the others. Prometheus
 supplies the nodes, alerts and CPU history, and its targets decide which hosts
 appear. The Kubernetes API supplies the Flux readiness, because Prometheus does
-not scrape Flux. `prom.go` puts Prometheus behind the `promSource` interface, so
-the tests in `fleet_test.go` use sample values.
+not scrape Flux. Prometheus also supplies the office phone: each SPA504G
+line's registration to the PBX, its voip.ms trunk, and whether a call is live,
+read in `pbx.go` from the same series as
+`clusters/folly/monitoring/pbx-rules.yaml` and the PBX Grafana dashboard. An
+absent PBX degrades to every line off, the same as an absent node. `prom.go`
+puts Prometheus behind the `promSource` interface, so the tests in
+`fleet_test.go` and `pbx_test.go` use sample values.
 
 ## Test
 

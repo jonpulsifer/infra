@@ -1,6 +1,6 @@
 // rackstat aggregates homelab health into a single JSON snapshot for the
 // rack-top Tidbyt/Tronbyt display (apps/rackstat/rackstat.star). It fans out
-// to three sources and degrades gracefully when any of them is unavailable:
+// to four sources and degrades gracefully when any of them is unavailable:
 //
 //   - Prometheus: node up/temp/cpu/mem (node-exporter, incl. bare hosts),
 //     firing alerts (minus the always-firing Watchdog/InfoInhibitor), k8s
@@ -9,6 +9,10 @@
 //   - Kubernetes API: Flux Kustomization/HelmRelease readiness and the last
 //     applied revision. Flux metrics aren't scraped into Prometheus, so we
 //     read the CRDs directly with a read-only ClusterRole (kube.go).
+//   - Prometheus, again: the office phone's four handset lines, their
+//     voip.ms trunks, and whether a call is live, all scraped from the folly
+//     PBX (pbx.go). An absent PBX degrades to every line off, same as the
+//     other Prometheus queries.
 //   - TCP probes: WAN, the offsite cluster over the Site Magic tunnel, and a
 //     local LB VIP. Probing the data path catches "BGP looks fine but the
 //     gateway isn't programming routes" failures that session-state metrics
@@ -39,6 +43,7 @@ type Snapshot struct {
 	Alerts      []Alert           `json:"alerts"`
 	AlertCounts AlertCounts       `json:"alert_counts"`
 	GitOps      *GitOps           `json:"gitops,omitempty"`
+	PBX         *PBX              `json:"pbx,omitempty"`
 	Probes      []ProbeResult     `json:"probes"`
 	CPUHistory  []float64         `json:"cpu_history,omitempty"`
 	Errors      map[string]string `json:"errors,omitempty"`
@@ -196,15 +201,22 @@ func (s *server) snapshot(ctx context.Context) *Snapshot {
 	}
 
 	var wg sync.WaitGroup
-	var promErr, fluxErr error
+	var promErr, fluxErr, pbxErr error
 	var f fleet
 	var gitops *GitOps
+	var pbx *PBX
 	probeResults := make([]ProbeResult, len(s.probes))
 
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
 		f, promErr = collectFleet(ctx, s.prom)
+	}()
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		pbx, pbxErr = collectPBX(ctx, s.prom)
 	}()
 
 	if s.kube != nil {
@@ -230,12 +242,16 @@ func (s *server) snapshot(ctx context.Context) *Snapshot {
 	snap.AlertCounts = f.AlertCounts
 	snap.CPUHistory = f.CPUHistory
 	snap.GitOps = gitops
+	snap.PBX = pbx
 	snap.Probes = probeResults
 	if promErr != nil {
 		snap.Errors["prometheus"] = promErr.Error()
 	}
 	if fluxErr != nil {
 		snap.Errors["flux"] = fluxErr.Error()
+	}
+	if pbxErr != nil {
+		snap.Errors["pbx"] = pbxErr.Error()
 	}
 	if len(snap.Errors) == 0 {
 		snap.Errors = nil

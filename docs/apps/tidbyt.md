@@ -10,7 +10,7 @@ The Tidbyt apps are four Pixlet apps, rackstat, tempest, wishin and callerid, th
 
 | App | Shows | Data |
 | --- | --- | --- |
-| `apps/rackstat/` | Lab health: firing alerts, nodes, Flux sync, network probes and 24 hours of cluster CPU. Problem screens show first. | The rackstat aggregator, a Go service in the same directory |
+| `apps/rackstat/` | Lab health: firing alerts, nodes, Flux sync, network probes, the office phone's lines and trunks, and 24 hours of cluster CPU. Problem screens show first, and an ON AIR page jumps the rotation while a call is live. | The rackstat aggregator, a Go service in the same directory |
 | `apps/tempest/` | One Tempest weather station: current conditions, a 3-day forecast and a 24-hour temperature graph | WeatherFlow's forecast API, with a station ID and token set in Tronbyt |
 | `apps/wishin/` | The gift, user and claimed counts of wishin.app | `https://www.wishin.app/api/stats` |
 | `apps/callerid/` | An incoming call: a name or number, a SPAM screen, or a troll screen | A `name`/`number`/`verdict` config passed in by whatever pushes to it |
@@ -39,7 +39,7 @@ Tronbyt keeps in its database which apps each display shows. Git does not record
 
 Tronbyt runs the `ghcr.io/tronbyt/server` image, with a CloudNativePG database and an NFS volume from spore.
 
-The rackstat aggregator runs in the `tronbyt` namespace. It merges Prometheus data, the Flux Kustomization and HelmRelease objects, and TCP probe results into one JSON snapshot. It caches the snapshot for 15 seconds. The `rackstat-flux-reader` ClusterRole gives it read access to the Flux objects. `PROBES` in `clusters/folly/apps/tronbyt/07-rackstat-deployment.yaml` names the probe targets. `rackstat.star` reads the snapshot from `http://rackstat:8080/api/rackstat` in the same namespace.
+The rackstat aggregator runs in the `tronbyt` namespace. It merges Prometheus data, the Flux Kustomization and HelmRelease objects, the folly PBX's line and trunk registration state, and TCP probe results into one JSON snapshot. It caches the snapshot for 15 seconds. The `rackstat-flux-reader` ClusterRole gives it read access to the Flux objects. `PROBES` in `clusters/folly/apps/tronbyt/07-rackstat-deployment.yaml` names the probe targets. `rackstat.star` reads the snapshot from `http://rackstat:8080/api/rackstat` in the same namespace.
 
 On a pull request, the `pixlet-preview` workflow posts a render of each changed app.
 

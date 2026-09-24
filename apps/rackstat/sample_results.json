@@ -123,5 +123,30 @@
   "hr_ready": 29,
   "hr_total": 29,
   "revision": "main@sha1:df4308d26285e47fa744d3a534afaf76d1b63568"
+ },
+ "pbx": {
+  "lines": [
+   {
+    "line": 1,
+    "handset": true,
+    "trunk": true
+   },
+   {
+    "line": 2,
+    "handset": true,
+    "trunk": true
+   },
+   {
+    "line": 3,
+    "handset": true,
+    "trunk": false
+   },
+   {
+    "line": 4,
+    "handset": true,
+    "trunk": true
+   }
+  ],
+  "on_air": false
  }
 }
