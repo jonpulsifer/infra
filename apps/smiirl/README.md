@@ -30,6 +30,7 @@ curl -H 'Host: api.smiirl.com' localhost:8080/v1.0/aabbccddeeff/00
 | `SMIIRL_DATA_DIR` | `/data` | Directory that holds `number.json`. It must exist. |
 | `TZ` | `Canada/Atlantic` | Time zone for the daily step (a fixed amount added to the number once a day) and every mode that reads a date or time |
 | `SMIIRL_DEVICE_HOST` | `api.smiirl.com` | Host name on which the app answers as the cloud |
+| `SMIIRL_VICTORIALOGS_URL` | `http://victoria-logs-server.monitoring.svc.cluster.local:9428` | VictoriaLogs endpoint the `robocalls` mode queries |
 
 ## Test
 
@@ -74,6 +75,7 @@ limits `clock`, `countdown` and `countup` to one change every N minutes. It is
 | `countdown` | Time left until the `countdown` moment as `HHbMM`, at most `99b59`. It stays at `00b00` after the moment. |
 | `countup` | Time since the `countup` moment as `HHbMM`. It stops at `99b59`, about four days after the moment. |
 | `github` | Public commits or pull requests of a GitHub login, from the unauthenticated search API, fetched at most every 5 minutes. Until the first count arrives, the drums show the stored number. A failed fetch keeps the last count and sets `github.error`. |
+| `robocalls` | Calls the PBX screened since midnight in `TZ`, from a LogsQL count over VictoriaLogs, fetched at most every minute. Until the first count arrives, the drums show the stored number. A failed fetch keeps the last count and sets `robocalls.error`. |
 | `cycle` | Each mode in `modes` in turn, `every` minutes each (1 to 1440, default 5). It skips a mode that has no settings, and it needs at least two modes it can show. |
 
 The stored number continues in every mode. `/api/number` edits it, and the
@@ -144,6 +146,7 @@ the firmware.
     "countdown": {"at": "", "left": null},
     "countup": {"at": "2026-09-20T08:00", "elapsed": 5825},
     "github": {"user": "", "what": "commits", "count": 0, "at": null, "error": null},
+    "robocalls": {"count": 0, "at": null, "error": null},
     "cycle": {"modes": [], "every": 5},
     "daily": {"step": 1, "at": "08:00", "next": "2026-09-25T08:00:00-03:00"},
     "device": {
@@ -162,8 +165,8 @@ the firmware.
     now. In `cycle` mode it differs from `mode`.
   - `countdown.left` and `countup.elapsed` are minutes.
   - `days.days` and `days.label` are `null` until a date is set, and
-    `github.at` is `null` until the first fetch. `daily.next` is `null` when
-    the daily step is off.
+    `github.at` and `robocalls.at` are `null` until the first fetch. `daily.next`
+    is `null` when the daily step is off.
   - `device.online` is `true` when the counter polled in the last 60 seconds.
     `device.lastSent` is the value the counter received last. It differs from
     `display` while a change waits for the 10-second gap.

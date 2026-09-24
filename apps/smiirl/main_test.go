@@ -888,6 +888,55 @@ func TestGitHubFailureKeepsTheNumber(t *testing.T) {
 	}
 }
 
+func TestRobocallsMode(t *testing.T) {
+	asked := stubVlogs(t, "3", http.StatusOK)
+	_, ts := newTest(t)
+	resp, out := do(t, ts, "PUT", "/api/mode", `{"mode":"robocalls"}`, nil)
+	if resp.StatusCode != 200 {
+		t.Fatalf("robocalls: status %d body %v", resp.StatusCode, out)
+	}
+	var state map[string]any
+	waitFor(t, "the first count", func() bool {
+		_, state = do(t, ts, "GET", "/api/state", "", nil)
+		return state["robocalls"].(map[string]any)["at"] != nil
+	})
+	r := state["robocalls"].(map[string]any)
+	if n := len(asked()); n != 1 {
+		t.Fatalf("asked %d times for one count: %v", n, asked())
+	}
+	if state["display"] != "aaaa3" {
+		t.Fatalf("display = %v", state["display"])
+	}
+	if r["count"] != float64(3) || r["error"] != nil {
+		t.Fatalf("robocalls view = %v", r)
+	}
+}
+
+func TestRobocallsFailureKeepsTheNumber(t *testing.T) {
+	stubVlogs(t, "", http.StatusInternalServerError)
+	_, ts := newTest(t)
+	do(t, ts, "PUT", "/api/number", `{"number":302}`, nil)
+	do(t, ts, "PUT", "/api/mode", `{"mode":"robocalls"}`, nil)
+
+	var state map[string]any
+	waitFor(t, "the failure to be reported", func() bool {
+		_, state = do(t, ts, "GET", "/api/state", "", nil)
+		return state["robocalls"].(map[string]any)["error"] != nil
+	})
+	if state["display"] != "aa302" {
+		t.Fatalf("a failed fetch should keep the stored number on the drums: %v", state)
+	}
+}
+
+func TestRobocallsIsAlwaysShowable(t *testing.T) {
+	_, ts := newTest(t)
+	// No stub server: the mode must accept with no settings, even before any
+	// count has ever loaded, like "date".
+	if resp, out := do(t, ts, "PUT", "/api/mode", `{"mode":"cycle","modes":["date","robocalls"],"every":5}`, nil); resp.StatusCode != 200 {
+		t.Fatalf("cycle with robocalls: status %d body %v", resp.StatusCode, out)
+	}
+}
+
 func TestPWAAssets(t *testing.T) {
 	_, ts := newTest(t)
 	for _, tc := range []struct{ path, ctype string }{

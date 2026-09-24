@@ -385,6 +385,7 @@
     <button type="button" class="mode" role="radio" aria-checked="false" tabindex="-1" data-mode="countdown">Timer</button>
     <button type="button" class="mode" role="radio" aria-checked="false" tabindex="-1" data-mode="countup">Since</button>
     <button type="button" class="mode" role="radio" aria-checked="false" tabindex="-1" data-mode="github">GitHub</button>
+    <button type="button" class="mode" role="radio" aria-checked="false" tabindex="-1" data-mode="robocalls">Robocalls</button>
     <button type="button" class="mode" role="radio" aria-checked="false" tabindex="-1" data-mode="cycle">Cycle</button>
   </div>
 
@@ -449,6 +450,10 @@
     <p class="line" id="github-line"></p>
   </form>
 
+  <section class="panel" id="robocalls-panel" hidden aria-label="Robocalls">
+    <p class="line" id="robocalls-line"></p>
+  </section>
+
   <form class="panel" id="cycle-panel" hidden autocomplete="off" aria-label="Cycle">
     <fieldset class="cycle-modes">
       <legend>Rotating through</legend>
@@ -460,6 +465,7 @@
         <label class="pick"><input type="checkbox" value="countdown">Timer</label>
         <label class="pick"><input type="checkbox" value="countup">Since</label>
         <label class="pick"><input type="checkbox" value="github">GitHub</label>
+        <label class="pick"><input type="checkbox" value="robocalls">Robocalls</label>
       </div>
     </fieldset>
     <div class="daily-row">
@@ -530,11 +536,11 @@
     : S.showing === "countup" ? hhmm(c) + " since"
     : S.showing === "date" ? "the date, " + mmdd(c)
     : spoken(c);
-  const MODES = ["number", "clock", "days", "date", "countdown", "countup", "github", "cycle"];
+  const MODES = ["number", "clock", "days", "date", "countdown", "countup", "github", "robocalls", "cycle"];
   const CYCLABLE = MODES.slice(0, -1);
   const NAMES = {
     number: "a number", clock: "the clock", days: "counting days", date: "the date",
-    countdown: "a countdown", countup: "time since", github: "GitHub", cycle: "a rotation",
+    countdown: "a countdown", countup: "time since", github: "GitHub", robocalls: "the robocalls count", cycle: "a rotation",
   };
   const HINTS = {
     number: "Pick a number or tap a flap, then hit Flip it. The counter checks in every 20 seconds or so.",
@@ -544,6 +550,7 @@
     countdown: "Hours and minutes left. The drums stop at 99:59 and rest at 00:00.",
     countup: "Hours and minutes since. This one only ever counts up, which is one flap a minute instead of most of a revolution.",
     github: "A public count from GitHub's search, checked every five minutes.",
+    robocalls: "Calls the office phone's PBX screened today, checked about once a minute.",
     cycle: "The counter takes each of these in turn.",
   };
   const LABELS = ["until", "since", "today"];
@@ -664,6 +671,7 @@
     countdown: null,   // { at, left }
     countup: null,     // { at, elapsed }
     github: null,      // { user, what, count, at, error }
+    robocalls: null,   // { count, at, error }
     cycle: null,       // { modes, every }
     switching: false,
     lastModeAt: 0,
@@ -678,6 +686,7 @@
         dateLine = $("date-line"), untilEl = $("until"), countdownLine = $("countdown-line"),
         fromEl = $("from"), countupLine = $("countup-line"),
         userEl = $("user"), whatEl = $("what"), githubLine = $("github-line"),
+        robocallsLine = $("robocalls-line"),
         everyEl = $("every"), cycleLine = $("cycle-line"),
         tickEl = $("tick"), tickLine = $("tick-line"),
         pickBoxes = Array.from(document.querySelectorAll("#picks input"));
@@ -873,7 +882,7 @@
   // Everything renderMode draws. Comparing it is how a poll decides to
   // re-render, so a new mode needs nothing added to applyState.
   const modeSig = () => JSON.stringify([S.mode, S.showing, S.display, S.clock12, S.clockCells,
-    S.date, S.days, S.countdown, S.countup, S.github, S.cycle, S.tick]);
+    S.date, S.days, S.countdown, S.countup, S.github, S.robocalls, S.cycle, S.tick]);
   const editing = (el) => document.activeElement === el;
   // A mode that needs a setting the counter does not have yet shows its panel
   // without taking the drums, so there is somewhere to type it.
@@ -897,6 +906,7 @@
     if (st.countdown && typeof st.countdown === "object") applyCountdown(st.countdown);
     if (st.countup && typeof st.countup === "object") applyCountup(st.countup);
     if (st.github && typeof st.github === "object") applyGitHub(st.github);
+    if (st.robocalls && typeof st.robocalls === "object") applyRobocalls(st.robocalls);
     if (st.cycle && typeof st.cycle === "object") applyCycle(st.cycle);
     if (isCells(st.display)) S.display = st.display;
   }
@@ -922,6 +932,13 @@
     };
     if (!editing(userEl) && S.github.user) userEl.value = S.github.user;
     if (!editing(whatEl)) whatEl.value = S.github.what;
+  }
+  function applyRobocalls(r) {
+    S.robocalls = {
+      count: Number.isInteger(r.count) ? r.count : 0,
+      at: typeof r.at === "string" && !isNaN(Date.parse(r.at)) ? r.at : null,
+      error: typeof r.error === "string" ? r.error : null,
+    };
   }
   function applyCycle(c) {
     S.cycle = {
@@ -955,6 +972,13 @@
     if (!g.at) return `Asking GitHub for ${g.user}'s ${what}…`;
     return `${g.count.toLocaleString()} public ${what} by ${g.user}, checked ${ago(g.at)} ago.`;
   }
+  function robocallsText() {
+    const r = S.robocalls;
+    if (!r) return "…";
+    if (r.error) return `Couldn't ask VictoriaLogs: ${r.error}`;
+    if (!r.at) return "Counting today's robocalls…";
+    return `${r.count.toLocaleString()} robocall${r.count === 1 ? "" : "s"} screened today, checked ${ago(r.at)} ago.`;
+  }
   function cycleText() {
     const c = S.cycle;
     if (!c || c.modes.length < 2) return "Tick at least two.";
@@ -985,7 +1009,7 @@
     tickLine.textContent = S.tick === 1
       ? "The drums turn once a minute. Every change costs a full revolution, however small."
       : `The drums turn every ${S.tick} minutes — ${Math.round(60 / S.tick)} revolutions an hour instead of 60.`;
-    for (const n of ["clock", "date", "days", "countdown", "countup", "github", "cycle"]) $(n + "-panel").hidden = n !== panel;
+    for (const n of ["clock", "date", "days", "countdown", "countup", "github", "robocalls", "cycle"]) $(n + "-panel").hidden = n !== panel;
     for (const d of digits) d.el.disabled = m !== "number";
     hint.textContent = HINTS[panel];
     clockLine.textContent = `Showing the time, ${hhmm(S.clockCells ?? "aaaaa")} in Atlantic.`;
@@ -995,6 +1019,7 @@
     countdownLine.textContent = countdownText();
     countupLine.textContent = countupText();
     githubLine.textContent = githubText();
+    robocallsLine.textContent = robocallsText();
     cycleLine.textContent = cycleText();
     daysLine.textContent = daysText();
     if (S.display !== null) showCells(m === "number" ? (S.draft ?? S.display) : S.display);
