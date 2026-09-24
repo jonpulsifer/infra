@@ -1,6 +1,6 @@
 # The managed GitHub App flow: the connection is created credential-less and
 # sits in PENDING_USER_OAUTH until a human follows installation_state.action_uri
-# once — see [[Runbooks/Developer Connect GitHub OAuth]]. Developer Connect then
+# once — see docs/runbooks/authorize-developer-connect.md. Developer Connect then
 # writes the OAuth token into a Secret Manager secret it creates in this
 # project, which is why its service agent holds secretmanager.admin.
 # app_installation_id and authorizer_credential are server-populated after the

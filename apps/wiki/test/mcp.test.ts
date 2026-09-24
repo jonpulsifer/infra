@@ -49,6 +49,18 @@ test("read_page accepts a path, a URL or a title, in any case", async () => {
   expect((await tool("read_page", { page: "/" })).text).toStartWith("# Home");
 });
 
+test("read_page follows the links a page's Markdown carries", async () => {
+  const cases = {
+    "../kthx.md#before-you-start": "# kthx",
+    "kthx/built-apps.md": "# Built apps",
+    "./mate.md": "# Rowbutt",
+    "../../runbooks/deploy-a-nixos-host.md": "# Deploy a NixOS host",
+    "https://wiki.lolwtf.ca/platform/network/#two-sites": "# Network",
+    "/apps/mate/?ref=x": "# Rowbutt",
+  };
+  for (const [page, title] of Object.entries(cases)) expect((await tool("read_page", { page })).text).toStartWith(title);
+});
+
 test("read_page returns the Markdown source, commands intact", async () => {
   const { text } = await tool("read_page", { page: "kthx" });
   expect(text).toContain("https://wiki.lolwtf.ca/apps/kthx/");

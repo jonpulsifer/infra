@@ -3,7 +3,7 @@ title: Built apps
 description: "kthx's deploy control plane, which builds repositories into signed artifacts and deploys them to clusters, Cloud Run, Vercel and Pages."
 ---
 
-kthx is the deploy control plane in `apps/spindrift/`. No installation is declared under `clusters/` today — the Terraform substrate an installation federates into is still declared under `terraform/`, and the cluster declarations come back by reverting the clusters-teardown PR. Standing an installation up from nothing — Terraform bootstrap through first enrolment — is [Install kthx](../../runbooks/install-kthx.md). Installed, it is a platform workload and never one of its own Apps.
+Built apps is kthx's deploy control plane in `apps/spindrift/`. No installation is declared under `clusters/` today — the Terraform substrate an installation federates into is still declared under `terraform/`, and the cluster declarations come back by reverting the clusters-teardown PR. Standing an installation up from nothing — Terraform bootstrap through first enrolment — is [Install kthx](../../runbooks/install-kthx.md). Installed, it is a platform workload and never one of its own Apps.
 
 ## Ownership boundary
 
@@ -119,9 +119,9 @@ A function carries an **environment** the handler reads as `env.NAME`. Values ar
 
 Schedules and history are not part of it. A function that needs either becomes a Component.
 
-## kthx
+## Quick sites
 
-[kthx](../kthx.md) is a neighbour, not a feature: its own process, its own namespace, its own database and bucket. What the two share is `packages/archive/` — one reader for an uploaded tar or zip, one parser for a `gs://` address — and the Apps Gateway that fronts both. Neither reads the other's rows.
+[Quick sites](../kthx.md) are a neighbour, not a feature: their own process, their own namespace, their own database and bucket. What the two share is `packages/archive/` — one reader for an uploaded tar or zip, one parser for a `gs://` address — and the Apps Gateway that fronts both. Neither reads the other's rows.
 
 ## Control-plane shape
 

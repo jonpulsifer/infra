@@ -11,9 +11,11 @@
 #   2. every backticked repo path named in the docs actually exists
 #   3. no past-tense archaeology ("formerly", "used to", "migrated from", …)
 #   4. every wiki URL and every docs/…md path named outside the site resolves
-#      to a page. The wiki serves no redirects, so a renamed page breaks every
-#      reference to it. Markdown, skills and alert rules fail the check; any
-#      other file only warns, because code comments are not rendered anywhere.
+#      to something the renderer serves, anchor included, and nothing uses the
+#      retired Logseq [[Page]] syntax. The wiki serves no redirects, so a
+#      renamed page breaks every reference to it. Markdown, skills and alert
+#      rules fail the check; any other file only warns, because code comments
+#      are not rendered anywhere.
 #
 # Usage: .github/scripts/docs-contract.sh [repo-root]
 set -uo pipefail
@@ -21,10 +23,13 @@ cd "${1:-$(git rev-parse --show-toplevel)}" || exit 2
 
 status=0
 note() { printf '%s\n' "$*"; }
+manifest="$(mktemp)"
+trap 'rm -f "$manifest"' EXIT
 
 # ── 1. the renderer validates ────────────────────────────────────────────────
+# It also lists every URL it serves, which section 4 resolves against.
 note "==> renderer"
-if bun run --cwd apps/wiki check; then note "    ok"; else status=1; fi
+if bun run --cwd apps/wiki check --manifest="$manifest"; then note "    ok"; else status=1; fi
 
 # ── 2. referenced repo paths exist ───────────────────────────────────────────
 # Only consider a backticked token a repo path when its first segment is a real
@@ -53,11 +58,9 @@ done < <(grep -rhoE '`[A-Za-z0-9_.-]+/[A-Za-z0-9_./ -]*`' \
 if ((missing)); then status=1; else note "    ok"; fi
 
 # ── 3. no archaeology ────────────────────────────────────────────────────────
-# AGENTS.md, docs/agents/ and the style guide state the rule, so they quote the
-# very words the rule forbids.
+# docs/agents/ states the rule, so it quotes the very words the rule forbids.
 note "==> archaeology"
-mapfile -t prose < <(find docs -name '*.md' -not -path 'docs/agents/*' \
-  -not -path 'docs/reference/style-guide.md' | sort)
+mapfile -t prose < <(find docs -name '*.md' -not -path 'docs/agents/*' | sort)
 if grep -niE '\b(formerly|used to be|previously|no longer|migrated from|kept for continuity|not yet migrated|superseded by)\b' \
   "${prose[@]}" README.md 2>/dev/null; then
   note "    ^ past tense in docs; describe what is true today instead"
@@ -67,41 +70,55 @@ else
 fi
 
 # ── 4. references into the wiki resolve ──────────────────────────────────────
-# A URL /x/y/ is docs/x/y.md or docs/x/y/index.md. /assets/… is docs/assets/…,
-# /<fn> is a Pages Function in apps/wiki/functions/, and the JSON indexes are
-# written by apps/wiki/build.ts.
+# The renderer's manifest is every URL the site serves: pages, their heading
+# anchors, assets and generated files. /<fn> is a Pages Function in
+# apps/wiki/functions/.
 note "==> references into the wiki"
 
-page_exists() { [[ -f "docs/$1.md" || -f "docs/$1/index.md" ]]; }
+declare -A served=()
+while IFS= read -r u; do [[ -n "$u" ]] && served[$u]=1; done <"$manifest"
+((${#served[@]})) || {
+  note "    the renderer listed no URLs; fix section 1 first"
+  status=1
+}
 
 url_resolves() {
-  local p="${1#*://wiki.lolwtf.ca}"
-  p="${p%%[#?]*}"
-  p="${p#/}"
-  p="${p%/}"
-  case "$p" in
-    "") [[ -f docs/index.md ]] ;;
-    assets/*) [[ -f "docs/$p" ]] ;;
-    pages.json | search.json) true ;;
-    *.*) false ;;
-    *) [[ -f "apps/wiki/functions/$p.ts" ]] || page_exists "$p" ;;
-  esac
+  local u="${1#*://wiki.lolwtf.ca}" frag="" fn
+  if [[ "$u" == *"#"* ]]; then frag="#${u#*#}" u="${u%%#*}"; fi
+  u="${u%%\?*}"
+  u="/${u#/}"
+  fn="${u#/}"
+  [[ -z "$frag" && -f "apps/wiki/functions/${fn%/}.ts" ]] && return 0
+  # Pages answers /x with /x/.
+  [[ "${u##*/}" == *.* || "$u" == */ ]] || u="$u/"
+  [[ -n "${served[$u$frag]:-}" ]]
 }
 
 # A docs/… path is repo-relative; ../docs/… is relative to the file naming it.
+# An anchor must name a heading on the rendered page.
 path_resolves() {
-  local file="$1" ref="${2%%#*}"
+  local file="$1" ref="${2%%#*}" frag="" target u
+  [[ "$2" == *"#"* ]] && frag="#${2#*#}"
   if [[ "$ref" == .* ]]; then
-    [[ -f "$(realpath -m --relative-to=. "$(dirname "$file")/$ref")" ]]
+    target="$(realpath -m --relative-to=. "$(dirname "$file")/$ref")"
   else
-    [[ -f "$ref" ]]
+    target="$ref"
   fi
+  [[ -f "$target" ]] || return 1
+  [[ -z "$frag" || "$target" != docs/* || "$target" == docs/agents/* ]] && return 0
+  u="${target#docs}"
+  u="${u%.md}"
+  [[ "$u" == */index ]] && u="${u%index}"
+  [[ "$u" == */ ]] || u="$u/"
+  [[ -n "${served[$u$frag]:-}" ]]
 }
 
 url_re='https?://wiki\.lolwtf\.ca(/[A-Za-z0-9._~/%#-]*)?'
 # The leading class keeps apps/x/docs/… out; strip_lead drops that character.
 path_re='(^|[^A-Za-z0-9_./-])(\.\.?/)*docs/[A-Za-z0-9_./-]*\.md(#[A-Za-z0-9_-]*)?'
 gone_re='(^|[^A-Za-z0-9_./-])(\.\.?/)*docs/(pages|journals|logseq)([^A-Za-z0-9_-]|$)'
+# Logseq page links: [[Runbooks/X]], or a bare Architecture/X page name.
+logseq_re='\[\[(Home|Architecture|Fleet|Runbooks)(/[^]]*)?\]\]|\b(Architecture|Fleet|Runbooks)/[A-Z][A-Za-z]*( [A-Z][A-Za-z]*)*'
 strip_lead() { sed -E 's#^[^.d]##; s#[^A-Za-z0-9_-]$##'; }
 
 strict=('*.md' '.agents/**' ':(glob)clusters/**/monitoring/*.yaml'
@@ -134,6 +151,9 @@ unresolved() {
     [[ -n "${seen[$key]:-}" ]] && continue
     printf '%s:%s\t%s (retired wiki layout)\n' "$file" "$line" "$(strip_lead <<<"$ref")"
   done < <(git grep --untracked -nIoE "$gone_re" -- "$@")
+  while IFS=: read -r file line ref; do
+    printf '%s:%s\t%s (Logseq link; name the page by its docs/… path)\n' "$file" "$line" "$ref"
+  done < <(git grep --untracked -nIoE "$logseq_re" -- "$@")
 }
 
 annotate() { # level, file:line, message

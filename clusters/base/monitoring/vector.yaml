@@ -73,8 +73,25 @@ spec:
           type: remap
           inputs:
             - kubernetes_logs
+          # The PBX logs every SIP message it sends and receives, decrypted —
+          # which is the point, and also means the two secrets SIP carries
+          # would be stored here verbatim: the SRTP master key in every SDP's
+          # `a=crypto ... inline:` attribute, and the digest response in every
+          # `Authorization` header. Storing the keys would undo the media
+          # encryption for anyone who can read this store. Both are cut here,
+          # before the sink, and the rest of the message — SDP, headers, the
+          # nonce a challenge carries — is kept for debugging.
+          #
+          # Scoped to the pbx namespace, so a regex never touches any other
+          # workload's lines. No `$` anywhere in the program: this file is
+          # substituted by Flux, and a `$` in a VRL replacement is exactly what
+          # its envsubst would eat.
           source: |
             ._msg = del(.message)
+            if .kubernetes.pod_namespace == "pbx" && is_string(._msg) {
+              ._msg = replace(string!(._msg), r'inline:\S+', "inline:<redacted>")
+              ._msg = replace(string!(._msg), r'^(Proxy-)?Authorization:.*', "Authorization: <redacted>")
+            }
         journald_message:
           type: remap
           inputs:
