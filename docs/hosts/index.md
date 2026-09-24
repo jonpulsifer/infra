@@ -64,8 +64,6 @@ Kubernetes nodes have Tailscale disabled — reach them over the LAN or through 
 
 Git is the source of truth for this fleet; these hosts differ from what the repo declares, and each difference is a bug to close.
 
-[cloudpi4](cloudpi4.md) runs Ubuntu. Its NixOS config exists and is unapplied.
-
 [radiopi0](radiopi0.md) runs Raspbian. Its NixOS config carries no radio service; the armv6l closure builds but the service is not ported.
 
 [blinkypi0](blinkypi0.md) is unplugged. Its NixOS config carries no device service and its device code is not in git.

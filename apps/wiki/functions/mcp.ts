@@ -37,7 +37,7 @@ const TOOLS = [
   {
     name: "read_page",
     description:
-      "Read one homelab wiki page as Markdown. Accepts its path ('platform/kubernetes'), its URL ('/platform/kubernetes/' or the full https URL) or its title ('Kubernetes'), case-insensitive. A unique ending also works ('kubernetes').",
+      "Read one homelab wiki page as Markdown. Accepts its path ('platform/kubernetes'), its URL ('/platform/kubernetes/' or the full https URL) or its title ('Kubernetes'), case-insensitive. A unique ending also works ('kubernetes'), so a relative link from a page's Markdown ('../platform/kubernetes.md#flux') can be passed as-is.",
     inputSchema: {
       type: "object",
       properties: { page: { type: "string", description: "page path, URL or title" } },
@@ -46,9 +46,12 @@ const TOOLS = [
   },
 ];
 
+/** A page's links are relative to its file, so `../bosun.md#x` names `bosun`. */
 const pathOf = (q: string) =>
   q
+    .replace(/[#?].*$/, "")
     .replace(/^https?:\/\/[^/]+/, "")
+    .replace(/^(?:\.\.?\/)+/, "")
     .replace(/^\/+|\/+$/g, "")
     .replace(/^docs\//, "")
     .replace(/\.md$/, "")

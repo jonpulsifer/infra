@@ -174,10 +174,12 @@ function readNav(raw: unknown, pages: Map<string, Page>, fail: Ctx["fail"]): Sec
   const sections = list((raw as { sections?: unknown })?.sections).map((s) => {
     const { title, index, items } = (s ?? {}) as Record<string, unknown>;
     if (typeof title !== "string") fail("nav.yaml", `section without a title: ${JSON.stringify(s)}`);
+    if (index != null && typeof index !== "string")
+      fail("nav.yaml", `${title} index must be a path; put children under an item instead`);
     return {
       id: String(title).toLowerCase(),
       title: String(title),
-      index: index == null ? undefined : entry(index)[0]?.file,
+      index: typeof index === "string" ? entry(index)[0]?.file : undefined,
       items: list(items).flatMap((i): (NavPage | NavGroup)[] => {
         const g = i as { group?: unknown; items?: unknown };
         return g && typeof g === "object" && "group" in g
@@ -186,8 +188,6 @@ function readNav(raw: unknown, pages: Map<string, Page>, fail: Ctx["fail"]): Sec
       }),
     };
   });
-  for (const f of pages.keys())
-    if (f !== "index.md" && !seen.has(f)) fail(f, "not in nav.yaml, so no reader can reach it");
   return sections;
 }
 
@@ -211,7 +211,11 @@ function navOrder(ctx: Ctx): Page[] {
 // ── rendering ───────────────────────────────────────────────────────────────
 
 function resolve(raw: string, p: Page, ctx: Ctx, image: boolean): string {
-  if (/^[a-z][a-z\d+.-]*:|^\/\//i.test(raw)) return raw;
+  if (/^[a-z][a-z\d+.-]*:|^\/\//i.test(raw)) {
+    if ((image ? /^https?:\/\//i : /^(?:https?:\/\/|mailto:)/i).test(raw)) return raw;
+    ctx.fail(p.file, `${raw}: ${image ? "images" : "links"} take ${image ? "http(s)" : "http(s) or mailto"} URLs or relative paths`);
+    return "#";
+  }
   const hash = raw.indexOf("#");
   const target = hash < 0 ? raw : raw.slice(0, hash);
   const anchor = hash < 0 ? "" : raw.slice(hash + 1);
@@ -339,7 +343,9 @@ function render(p: Page, ctx: Ctx): void {
         else if (c === esc(href) && /^[^\s/:]+@[^\s/:]+\.[a-z]+$/i.test(href)) href = `mailto:${href}`;
         const url = resolve(href, p, ctx, false);
         const ext = /^https?:/.test(url) ? ' rel="noopener"' : "";
-        return `<a href="${esc(url)}"${title ? ` title="${esc(title)}"` : ""}${ext}>${c}</a>`;
+        // A linked image goes where the link goes, not to itself: anchors cannot nest.
+        const inner = c.replace(/<a class="fig" href="[^"]*">(<img [^>]*>)<\/a>/g, "$1");
+        return `<a href="${esc(url)}"${title ? ` title="${esc(title)}"` : ""}${ext}>${inner}</a>`;
       },
       image: (c, { src, title }) => {
         const url = esc(resolve(src, p, ctx, true));
@@ -347,8 +353,12 @@ function render(p: Page, ctx: Ctx): void {
         return `<a class="fig" href="${url}"><img src="${url}" alt="${c.replace(/<[^>]*>/g, "")}"${title ? ` title="${esc(title)}"` : ""} loading="lazy"></a>`;
       },
     },
-    { noHtmlBlocks: true, noHtmlSpans: true, autolinks: true },
+    // With no html callback, raw HTML reaches `text` and is escaped. Spans stay
+    // on because <https://…> autolinks are parsed as HTML spans.
+    { noHtmlBlocks: true, autolinks: true },
   );
+  if (/\[\[[^\]\n]+\]\]/.test(body.replace(/<code>[\s\S]*?<\/code>/g, "")))
+    ctx.fail(p.file, "[[Page]] is Logseq syntax; link the page by its relative .md path");
   p.text = unesc(
     body
       .replace(/<a class="hash"[^>]*>#<\/a>/g, "")
@@ -519,8 +529,19 @@ async function emit(ctx: Ctx): Promise<void> {
   ]);
 }
 
+/** Every URL the site answers: pages, their heading anchors, assets and generated files. */
+function served(ctx: Ctx): string[] {
+  const urls = ["/404.html", "/graph/", "/graph.json", "/search.json", "/pages.json", "/style.css", "/client.js"];
+  for (const p of ctx.order)
+    for (const u of [p.url, ...p.headings.map((h) => `${p.url}#${h.id}`)]) urls.push(u, encodeURI(u));
+  for (const dir of ctx.o.assets)
+    if (existsSync(dir))
+      for (const f of new Bun.Glob("**/*").scanSync({ cwd: dir })) if (!f.endsWith(".d2")) urls.push(`/assets/${f}`);
+  return [...new Set(urls)].sort();
+}
+
 /** Loads, validates and (unless `check`) writes the site. Problems come back in `errors`; nothing is written when there are any. */
-export async function build(o: Options): Promise<{ pages: Page[]; errors: string[] }> {
+export async function build(o: Options): Promise<{ pages: Page[]; errors: string[]; urls: string[] }> {
   const errors: string[] = [];
   const fail = (file: string, msg: string) => errors.push(`${relative(o.repo, join(o.docs, file))}: ${msg}`);
   const pages = new Map<string, Page>();
@@ -541,17 +562,23 @@ export async function build(o: Options): Promise<{ pages: Page[]; errors: string
   }
   const ctx: Ctx = { o, pages, sections: readNav(nav, pages, fail), order: [], links: [], fail };
   ctx.order = navOrder(ctx);
+  // Only pages in the nav order are written, so any other page is unreachable.
+  for (const p of pages.values())
+    if (!ctx.order.includes(p)) fail(p.file, "not in nav.yaml, so no reader can reach it");
   for (const p of pages.values()) render(p, ctx);
   for (const l of ctx.links)
     if (l.anchor && !l.to.headings.some((h) => h.id === decode(l.anchor)))
       fail(l.from.file, `${l.href}: no heading #${l.anchor} in ${l.to.file}`);
   if (!errors.length && !o.check) await emit(ctx);
-  return { pages: ctx.order, errors };
+  return { pages: ctx.order, errors, urls: served(ctx) };
 }
 
 if (import.meta.main) {
   const o = { ...defaults(), check: process.argv.includes("--check") };
-  const { pages, errors } = await build(o);
+  const { pages, errors, urls } = await build(o);
+  // --manifest=FILE lists every served URL, one per line, for docs-contract.sh.
+  const manifest = process.argv.find((a) => a.startsWith("--manifest="))?.slice("--manifest=".length);
+  if (manifest) await Bun.write(manifest, `${urls.join("\n")}\n`);
   if (errors.length) {
     console.error(`wiki: ${errors.length} problem${errors.length === 1 ? "" : "s"}\n${errors.map((e) => `  ${e}`).join("\n")}`);
     process.exit(1);

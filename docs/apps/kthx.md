@@ -3,7 +3,7 @@ title: kthx
 description: Quick sites on kthx.dev, each with its own database, websocket, visitor identity and file store, served by one Bun process.
 ---
 
-kthx is quick sites: pick a name, drop a zip or an `index.html`, and it answers at `https://<name>.kthx.dev` — with a database, a socket, and a visitor identity of its own. The sites are public; claiming one is not. The control API answers on two private names and nothing else: `kthx.${SECRET_DOMAIN}`, a name on the gateway's private address that the lab, the offsite LAN and the tailnet reach and the tunnel never carries, and `kthx.pirate-musical.ts.net`, a tailscale Ingress where the caller is a person and the tailnet says who. One Bun process on the offsite cluster serves the whole zone and both names. It is a peer of [Built apps](kthx/built-apps.md), not a part of it: it shares the gateway that fronts it and nothing else.
+kthx is quick sites: pick a name, drop a zip or an `index.html`, and it answers at `https://<name>.kthx.dev` — with a database, a socket, and a visitor identity of its own. The sites are public; claiming one is not. The control API answers on two private names and nothing else: `kthx.${SECRET_DOMAIN}`, a name on the gateway's private address that the lab, the offsite LAN and the tailnet reach and the tunnel never carries, and `kthx.pirate-musical.ts.net`, a tailscale Ingress where the caller is a person and the tailnet says who. One Bun process on the offsite cluster serves the whole zone and both names. Quick sites are a peer of [built apps](kthx/built-apps.md), not a part of them: they share the gateway that fronts them and nothing else.
 
 ## Where it lives
 

@@ -13,7 +13,13 @@ Build the wiki:
 bun run --cwd apps/wiki build
 ```
 
-Check page links manually in the generated site when adding or renaming pages.
+Before pushing a docs change, run the docs contract:
+
+```bash
+mise run docs:check
+```
+
+It runs the renderer's validation (frontmatter, nav, links, anchors, images), so the build fails on any broken link inside `docs/`. It also resolves every wiki URL and `docs/` path the rest of the repo names (skills, READMEs and alert rules fail; code comments only warn) against the pages and anchors the site serves. The wiki keeps no redirects, so a page rename needs this check.
 
 ## Nix and NixOS
 

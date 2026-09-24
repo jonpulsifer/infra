@@ -112,7 +112,7 @@ its selected host addresses aligned with `clients.yaml` DHCP reservations.
 ## Where depth lives
 
 - [Platform](docs/platform/index.md) — the layers and how they fit together.
-- [Apps](docs/apps/index.md) — the first-party apps, one page each.
+- [Apps](docs/apps/index.md) — pages for the first-party apps that have one.
 - [Runbooks](docs/runbooks/index.md) — step-by-step operational procedures.
   Skills point here rather than restating them.
 - [Hosts](docs/hosts/index.md) — every host, its hardware, and its quirks.
@@ -161,7 +161,8 @@ Run `mise run docs:check` before pushing docs. It enforces what a script can:
 the renderer's own validation passes (frontmatter, nav, links, anchors,
 images), every referenced repo path exists, there is no past-tense archaeology,
 and every wiki URL or `docs/…md` path named in a Markdown file, a skill, or a
-monitoring rule resolves to a page. It runs in CI and gates the wiki deploy.
+monitoring rule resolves to something the site serves, anchor included, with
+no Logseq `[[Page]]` link left. It runs in CI and gates the wiki deploy.
 Rules 2 and 3 are on you — no script catches "this list was right when it was
 written".
 

@@ -1,6 +1,6 @@
 ---
 title: cloudpi4
-description: "A 4 GB Raspberry Pi 4 running Ubuntu as a utility box and CoreDNS canary; its NixOS config is unapplied."
+description: "A 4 GB Raspberry Pi 4 running NixOS as a utility box and CoreDNS canary."
 specs:
   vendor: Raspberry Pi
   model: Raspberry Pi 4 Model B Rev 1.1 (4 GB)
