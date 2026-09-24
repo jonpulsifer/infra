@@ -1,0 +1,7 @@
+---
+id: callerid
+name: Caller ID
+summary: Shows an incoming call
+desc: Shows the caller on an incoming call - a name or number while it rings, SPAM in red, or a playful troll screen - from name/number/verdict config pushed to the app.
+author: jonpulsifer
+supports2x: true
