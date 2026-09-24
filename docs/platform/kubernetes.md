@@ -1,86 +1,62 @@
 ---
 title: Kubernetes
-description: Two NixOS-built Kubernetes clusters, folly and offsite, each bootstrapped by OpenTofu and reconciled by Flux from main.
+description: The folly and offsite Kubernetes clusters, how Flux applies clusters/ from git, and the sandbox runtimes and storage the clusters offer.
 ---
 
-**Layer 2** of [Platform](index.md): two Kubernetes clusters under `clusters/`, reconciled by FluxCD on every merge to `main`. The Terraform bootstrap roots own CoreDNS and Flux itself; Flux owns post-bootstrap cluster state. ArgoCD is installed as a Flux HelmRelease and owns no applications; `terraform/argo/` wires the provider and declares no resources. Reconciliation mechanics and the apply model live on [How changes ship](how-changes-ship.md).
+The lab runs two Kubernetes clusters on NixOS hosts: `folly` at home and `offsite` at the remote site. Flux, the GitOps controller in each cluster, applies `clusters/` from `main`. [Workloads](workloads.md) lists what runs where.
 
-## Clusters
+## Parts
 
-- `clusters/folly/` — independent, fully capable on-site cluster. Nodes: `optiplex` (control-plane), `riptide`, `shale` (workers).
-- `clusters/offsite/` — independent, fully capable remote-site cluster. Nodes: `retrofit` (control-plane), `oldschool` (worker).
-- `clusters/base/` — resources shared by both clusters, referenced by relative path from each cluster's manifests.
+| Part | Job | Where it runs |
+| --- | --- | --- |
+| Control plane | Runs the API server, etcd and pods | [optiplex](../hosts/optiplex.md) on folly, [retrofit](../hosts/retrofit.md) on offsite |
+| Workers | Run pods | [riptide](../hosts/riptide.md) and [shale](../hosts/shale.md) on folly, [oldschool](../hosts/oldschool.md) on offsite |
+| Bootstrap root | The OpenTofu root module that labels the nodes and installs CoreDNS, `flux-operator` and the `FluxInstance`, the object that `flux-operator` installs Flux from | Atlantis |
+| Flux | Applies `clusters/` from the `infra` GitRepository | The `flux-system` namespace |
+| Shared controllers | CloudNativePG, External Secrets, Kyverno and others | Both clusters |
+| Storage | `local-path` volumes, and NFS volumes from [spore](../hosts/spore.md) | Both clusters, NFS on folly |
+| GPU plugin | Offers riptide's GPU to pods | folly |
 
-Hardware, serials, and per-host quirks for all five nodes: [Hosts](../hosts/index.md).
+## How state reaches a cluster
 
-The workloads each cluster reconciles: [Workloads](workloads.md).
+A Flux Kustomization is a Flux object that applies one directory.
 
-## The base/ sharing pattern
-
-A cluster's `flux-system/kustomization.yaml` lists `../../base/flux-system` as a resource alongside its own per-domain Kustomizations. That pulls in the shared platform layer — `arc-system`, `external-secrets-operator`, `onepassword-connect`, `sandbox` (agent-sandbox), `valkey-operator` — from `clusters/base/flux-system/`.
-
-Individual per-cluster manifests also reference specific `base/` subtrees directly wherever an app or component is identical across sites: `clusters/folly/apps/kustomization.yaml` lists `../../base/apps/iperf3` and `../../base/apps/reloader` next to its cluster-only app directories; `clusters/folly/storage/kustomization.yaml` lists `../../base/storage` next to `nfs-provisioner`; `clusters/folly/networking/cloudflare/kustomization.yaml` lists `../../../base/networking/cloudflare` next to its own tunnel credentials.
-
-Where a cluster has no local override at all, its Flux `Kustomization` custom resource points `spec.path` straight at the base directory — `clusters/offsite/flux-system/storage.yaml`'s `path` is `./clusters/base/storage`, since offsite carries no cluster-specific storage overlay.
-
-`clusters/base/kustomization.yaml` itself holds just `cluster-runtimeclass.yaml` and `cluster-settings.yaml` — the shared settings ConfigMap. Per-domain Flux Kustomizations substitute it alongside their site's topology resources and secrets.
-
-## Bootstrap
-
-`clusters/<site>/bootstrap/` is a standalone OpenTofu root (state `gs://homelab-ng/clusters/<site>/bootstrap`) that calls the shared `terraform/modules/flux-bootstrap` module. The module deploys CoreDNS before installing the `flux-operator` and `flux-instance` Helm releases (`oci://ghcr.io/controlplaneio-fluxcd/charts`) into the `flux-system` namespace. It also cuts an ECDSA deploy key, registers it read-only against the `infra` GitHub repository, and writes the key into the `flux-github-app-credentials` Secret that Flux uses to pull.
-
-`node-labels.tf` in the same root labels each node: `node-role.kubernetes.io/control-plane` or `/worker`, plus `bgp-enabled: "true"` on every node in both clusters.
-
-`flux-values.yaml` supplies the Helm values for `flux-instance`. Its `instance.sync` block is what makes the `FluxInstance` own the root git sync: `GitRepository` name `infra`, ref `refs/heads/main`, path `clusters/<site>/flux-system`, `pullSecret: flux-github-app-credentials`. The operator generates the root `GitRepository`/`Kustomization` from that block — there is no hand-applied root manifest.
-
-This root applies through Atlantis like any other Terraform module — see [How changes ship](how-changes-ship.md).
-
-## Nodes
-
-`clusters/folly/nodes/` adds the Intel device-plugin operator, the GPU device plugin, and node-feature-discovery (`intel-uhd-630.yaml`) for the folly nodes' integrated GPUs. offsite has no `nodes/` directory — no device-plugin layer runs there.
+1. `instance.sync` in the bootstrap root's `flux-values.yaml` points Flux at `clusters/<site>/flux-system` on `main`.
+2. That directory holds the Flux Kustomizations of the cluster, and includes `clusters/base/flux-system/` for the shared controllers.
+3. Each Flux Kustomization applies its directory in `dependsOn` order. It decrypts SOPS files only with `spec.decryption`, and substitutes `${VAR}` only from `postBuild.substituteFrom`.
 
 ## Sandbox runtimes
 
-Both clusters carry the `RuntimeClass` objects declared in `clusters/base/cluster-runtimeclass.yaml`: `gvisor` on handler `runsc`, plus `kata` and `kata-clh`. A workload opts in with `runtimeClassName`; a pod that names none of them runs on `runc`.
+A pod that names no RuntimeClass runs on `runc`. Every node also has these:
 
-The node half lives in `nix/services/k8s/gvisor.nix` and `nix/services/k8s/kata.nix`, both imported by `nix/services/k8s/default.nix`. Each puts its runtime package on containerd's PATH and registers a handler under `plugins."io.containerd.grpc.v1.cri".containerd.runtimes`. That containerd handler name is exactly what a `RuntimeClass` selects, so the two halves have to agree.
+| RuntimeClass | Isolation |
+| --- | --- |
+| `gvisor` | gVisor, a user-space kernel (`runsc`) |
+| `kata` | A QEMU microVM |
+| `kata-clh` | A Cloud Hypervisor microVM |
 
-`kata` and `kata-clh` are one kata stack over two VMMs on the same KVM: QEMU for `kata`, Cloud Hypervisor for `kata-clh`, sharing a guest kernel and rootfs image. Both are the same shim binary, which reads its hypervisor from the `ConfigPath` in its containerd runtime options rather than from the shim name, so `nix/services/k8s/kata.nix` names a config for each. Cloud Hypervisor is a far smaller VMM than QEMU and starts a sandbox faster, at the cost of narrower device support, which is why it sits alongside QEMU rather than replacing it. `nix/overlays/kata-runtime.nix` supplies the Cloud Hypervisor binary — nixpkgs installs the config for it but no VMM to match.
+[Rowbutt](../apps/mate.md) sandboxes run on `kata-clh`. The `packages/charts/app/` chart runs pods on `gvisor` unless its `sandbox` value is false.
 
-A kata pod needs KVM, plus the `vhost_net` driver for pod traffic and `vhost_vsock` for QEMU's guest-agent channel — Cloud Hypervisor carries its own vsock over a Unix socket and does not need that second one. All five nodes are bare-metal Intel machines and `nix/profiles/k8s-node.nix` already loads `kvm-intel`, so both runtimes are available on every node and neither `RuntimeClass` carries a scheduling constraint. `overhead.podFixed` is what charges a kata pod for the guest kernel and VMM process it costs the node.
+## Rules
 
-The kubelet rejects a pod whose `RuntimeClass` handler its containerd does not define, so the Nix side has to reach every node before a workload names the class. A node deployed from a branch reverts on its next auto-upgrade — see [NixOS](nixos.md).
+- Deploy a new containerd handler to every node from `main` before a workload names its RuntimeClass. The kubelet rejects a pod whose handler is missing.
+- Put a new CRD in its own Flux Kustomization, and add that to the `dependsOn` of each consumer. Flux dry-runs every object first, so one unknown kind stops the Flux Kustomization.
+- On folly, a kube-prometheus-stack bump leaves the Prometheus Operator CRDs behind the operator, because `upgrade.crds` defaults to `Skip`. [Adopt the folly Prometheus Operator CRDs](../runbooks/adopt-the-folly-prometheus-operator-crds.md) corrects this.
+- Do not delete the `prometheus-operator-crds` HelmRelease. Helm then deletes the Prometheus Operator CRDs and every object of those kinds.
+- A change to only `flux-values.yaml` in `clusters/<site>/bootstrap/` gets no autoplan. Plan and apply it as [OpenTofu and Atlantis](opentofu.md#rules) says.
 
-## Storage
+## Where it lives
 
-`clusters/base/storage/` provides `local-path-provisioner`, shared by both clusters.
+- `clusters/<site>/flux-system/` and `clusters/base/flux-system/`: the Flux Kustomizations
+- `clusters/<site>/bootstrap/` and `terraform/modules/flux-bootstrap/`: the bootstrap root, with its state in `gs://homelab-ng/clusters/<site>/bootstrap`
+- `clusters/base/platform/`, `clusters/*/storage/` and `clusters/folly/nodes/`: the shared controllers, storage and GPU plugin
+- `clusters/base/cluster-runtimeclass.yaml`: the RuntimeClasses. `nix/services/k8s/` registers the handlers.
+- `clusters/<site>/config/`: the settings, secrets and topology that Flux substitutes. See [Topology](../reference/topology.md).
 
-`clusters/folly/storage/` layers an NFS provisioner (`nfs-provisioner/`, backed by spore) and a static PV (`spore-pv.yaml`) on top. offsite uses `base/storage` unmodified.
+## Related
 
-## Monitoring
-
-`clusters/base/monitoring/` provides `metrics-server` and the whole log path, shared by both clusters: `vector` ships `kubernetes_logs` and `journald` into `victoria-logs`, which accepts the Loki push protocol at `/insert/loki/api/v1/push`. Grafana reads it through the `victoriametrics-logs-datasource` plugin.
-
-`clusters/folly/monitoring/` layers kube-prometheus-stack on top, plus Grafana dashboards and hand-written `ServiceMonitor`/`EndpointSlice` pairs that scrape node-exporter and CoreDNS metrics off hosts Prometheus can't discover via the Kubernetes API (`capsule`, `spore`, `cloudpi4`, `radiopi0`, `forge`). `clusters/offsite/monitoring/` runs its own kube-prometheus-stack and Tempo, keeping metric/log/trace traffic on the local network — only Grafana is exposed (`grafana-offsite.lolwtf.ca`); Prometheus and Alertmanager stay `ClusterIP`-only. `mise run k8s:render-apps` renders both clusters' monitoring trees, and `mise run k8s:check-rules` lints every `PrometheusRule` that render produces and runs the alert unit tests written beside them — a `*_test.yaml` in `clusters/base/monitoring/` runs against both renders, one beside a per-cluster rule runs against that cluster's.
-
-`clusters/base/monitoring-crds/` installs the Prometheus Operator CRDs as their own `HelmRelease`, ahead of `monitoring` rather than inside it — `base/monitoring` holds a raw `ServiceMonitor`, and Flux dry-runs every object in a `Kustomization` before applying any of them, so a cluster without the CRD already present refuses the whole `monitoring` `Kustomization`, including the chart that would supply the CRD. offsite's `monitoring` `Kustomization` `dependsOn: monitoring-crds` for that reason. folly has the same latent ordering problem but is not wired to `monitoring-crds` yet: its CRDs predate the split and carry no Helm ownership metadata for `prometheus-operator-crds` to adopt — see [Adopt the folly monitoring CRDs](../runbooks/adopt-the-folly-monitoring-crds.md).
-
-## Networking
-
-Cilium (CNI + BGP load balancing) and the Gateway API live under each cluster's `networking/`, built from shared Helm releases in `clusters/base/networking/{cert-manager,cloudflare,external-dns,tailscale}` plus per-cluster secrets and config. Full detail is on [Network](network.md), and the cross-site firewall gating is on [Routing and firewall](network/routing-and-firewall.md).
-
-## Network facts: the cluster-topology SSOT
-
-`clusters/<site>/config/cluster-topology.json` **is** the Flux `cluster-topology` ConfigMap (`namespace: flux-system`) — applied as-is, because JSON is valid YAML, with no generator step. It's a plain resource in `clusters/<site>/config/kustomization.yaml`.
-
-`data` is a flat `string → string` map: `CLUSTER_NAME`, `API_SERVER_IP`, `API_SERVER_HOSTNAME`, `API_SERVER_PORT`, `ROUTER_IP`, `K8S_NODE_CIDR`, `CILIUM_POD_CIDR`, `SERVICE_CIDR`, `CLUSTER_DNS`, `CILIUM_NATIVE_ROUTING_CIDR`, `LB_RANGE`, `BGP_GATEWAY_ASN`, `BGP_CILIUM_ASN`. It stays flat because Flux's `postBuild.substituteFrom` only accepts string values, so a list (`CLUSTER_DNS`) is comma-separated and numbers (`API_SERVER_PORT`, both ASNs) are stringified.
-
-Every other per-domain Flux `Kustomization` (`apps`, `networking`, `storage`, `monitoring`, `arc-runners`) `dependsOn: config` and substitutes `${VAR}` from this ConfigMap — plus `cluster-settings` and the `cluster-secrets` Secret — via `postBuild.substituteFrom`. Folly storage and monitoring also substitute `clusters/folly/config/lab-topology.json`, the flat-string ConfigMap that owns Lab/future CIDRs and host addresses.
-
-`.github/workflows/topology-contract.yml` runs `conftest` against both clusters' `cluster-topology.json` on every touching PR, enforcing the schema in `.github/policy/cluster-topology.rego`: every required key present and non-empty, IPs/CIDRs/ports/ASNs well-formed, `API_SERVER_IP` and `ROUTER_IP` inside `K8S_NODE_CIDR`, `LB_RANGE` disjoint from `K8S_NODE_CIDR`, and no CIDR overlap between the two clusters' files.
-
-Consumers beyond Flux: `nix/services/k8s/networks.nix` reads cluster topology with `builtins.fromJSON`; `nix/lib/lab.nix` projects lab topology. OpenTofu roots instantiate `terraform/modules/cluster-topology`, selecting the site and ConfigMap name. The rules for copies of these values are on [Network](network.md#rules).
-
-## Secrets
-
-SOPS-encrypted in-repo (`clusters/**/*.sops.yaml`), decrypted per-Kustomization via `decryption.provider: sops` — see [Secrets and PKI](secrets-and-pki.md).
+- [How changes ship](how-changes-ship.md)
+- [Apply a Kubernetes change](../runbooks/apply-a-kubernetes-change.md)
+- [Get cluster admin access](../runbooks/get-cluster-admin-access.md)
+- [Operate Postgres](../runbooks/operate-postgres.md)
+- [Add a Kubernetes node](../runbooks/add-a-kubernetes-node.md)

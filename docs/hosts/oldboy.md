@@ -1,21 +1,27 @@
 ---
 title: oldboy
-description: "A free-tier GCE e2-micro VM built from the repo's NixOS GCE image. It is not provisioned today."
+description: A free-tier Compute Engine VM in the homelab-ng project that exists to accumulate uptime, and whose boot is unverified.
+status: unverified
 specs:
   vendor: Google Cloud
   model: GCE e2-micro (free tier)
   serial: n/a (virtual)
   cpu: 2 shared vCPU
   ram: 1 GB
-  gpu: none
   storage: 16 GB pd-standard
-  os: NixOS
+  os: NixOS 26.05 (Yarara)
 ---
 
-Free-tier GCE VM in the `homelab-ng` project, built from the repo's NixOS GCE image (`terraform/gcp/projects/homelab-ng/compute.tf`).
+oldboy is a Compute Engine VM in the `homelab-ng` GCP project. Its job is to stay up for as long as it can. `terraform/gcp/projects/homelab-ng/compute.tf` declares the instance, its disk and its image with no condition, so Atlantis applies them. No check confirms that the VM boots.
 
-The VM is **not currently provisioned** — its Terraform and NixOS config exist but no live instance runs. Specs above are from Terraform, not a live login. Needs to be brought back.
+## What it runs
 
-When provisioned, its `shielded_instance_config` enables GCE secure boot, a vTPM, and integrity monitoring (`terraform/gcp/projects/homelab-ng/compute.tf`). vTPM state is unverified until the VM runs.
+`nix/hosts/oldboy.nix` adds `nix/images/gce.nix` to `nix/profiles/fleet.nix`, the modules every deployed host gets. The `nix-image-builder` workflow uploads the image to the `homelab-ng-free` bucket, and `compute.tf` makes the disk from the newest one.
 
-Config: `nix/hosts/oldboy.nix`, tagged `gcp`.
+## Reach
+
+No DNS record or tailnet device names oldboy.
+
+## Quirks
+
+- Secure Boot is off, because GCE's firmware rejects the unsigned NixOS bootloader. The vTPM and integrity monitoring are on.

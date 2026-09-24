@@ -1,25 +1,33 @@
 ---
 title: forge
-description: "A Raspberry Pi 5 on NVMe that is the lab's native arm64 build host and harmonia Nix binary cache."
+description: A Raspberry Pi 5 on NVMe that is the lab's native arm64 build host.
 specs:
   vendor: Raspberry Pi
   model: Raspberry Pi 5 Model B Rev 1.1 (8 GB)
-  year: "~2023"
   serial: aed421e548c12e74
   revision: d04171
   cpu: BCM2712, Cortex-A76 (4c)
   ram: 8 GB LPDDR4X-4267
   gpu: Broadcom VideoCore VII
-  storage: 256 GB Patriot P300 NVMe (root, sd-image flash)
-  os: NixOS 26.05 (Yarara), NVMe image
+  storage: 256 GB Patriot P300 NVMe
+  os: NixOS 26.05 (Yarara)
 ---
 
-The lab's native arm64 build host. Boots off its installed NVMe and runs `services.buildHost` (`nix/services/build-host.nix`) — Nix remote builder (`nix.distributedBuilds`), docker + buildx for native arm64 OCI image builds, and a harmonia binary cache fronted by nginx on `forge.lolwtf.ca:80`.
+forge is the lab's native arm64 build host, a Raspberry Pi 5 on [Lab Net](../platform/network.md#networks), folly's network for lab hosts. `nix/hosts/forge.nix` configures it.
 
-NVMe-rooted. Config: `nix/hosts/forge.nix`. Standard sd-image single-partition layout (`sdImage.expandOnBoot = true`); the NVMe is dedicated to root, unlike spore's `grow-root-and-partition-storage` service which reserves the disk tail for `/nfs/data`.
+## What it runs
 
-[spore](spore.md) publishes the signed RAM image used by forge's EEPROM HTTP fallback through `spore-native-boot-rackpi5.service`.
+- Nix builds for the [Raspberry Pi deploys](../runbooks/deploy-a-nixos-host.md), including the armv6l cross-builds
+- Docker with buildx for arm64 images
+- harmonia, a Nix binary cache behind nginx on port 80, which the firewall blocks. No host trusts its key.
 
-The EEPROM's own boot-order configuration lives outside the Nix closure and is applied by hand with `rpi-eeprom-config --edit` — a stock EEPROM firmware update erases the enrolled signing key for the legacy HTTP path, so it needs re-enrolling before the next reboot after any such update.
+See [Build host and cache](../platform/nixos/build-host-and-cache.md).
 
-harmonia's signing key is decrypted from `nix/secrets/forge.sops.yaml`; the public half is committed in the clear at `nix/secrets/forge-harmonia-cache.pub` and is what clients pin in `nix.settings.trusted-public-keys`. Cache URL: `http://forge.lolwtf.ca`.
+## Reach
+
+Reach it at `forge.lolwtf.ca` or [`forge.<tailnet>`](index.md#reach-a-host).
+
+## Quirks
+
+- The EEPROM boot settings are outside git. `BOOT_ORDER=0xf1276` tries the NVMe, then [rackpi5](rackpi5.md) from spore. The `0xf7` in `nix/hosts/rackpi5.nix` skips the NVMe. See [Netboot](../platform/nixos/netboot.md).
+- A stock EEPROM update erases the enrolled public key of spore's `/var/lib/pi-boot-sign/private.pem`. HTTP boot fails until the key is enrolled again.

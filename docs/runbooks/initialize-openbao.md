@@ -1,49 +1,78 @@
 ---
 title: Initialize OpenBao
-description: "The one-time bao operator init for folly's single-node OpenBao, and where its recovery keys and root token go."
+description: Initialize a new OpenBao instance on folly, store its recovery key and root token, and make sure it unseals itself.
 ---
 
-Use this once after the OpenBao HelmRelease has reconciled. The deployment uses integrated Raft storage and GCP KMS auto-unseal; it starts intentionally empty.
+OpenBao is a secrets server on folly, and no workload reads from it. It must be unsealed to read its encrypted storage, and it unseals itself with a GCP KMS key. Use this runbook when OpenBao starts with an empty storage volume, for example after the volume is lost. [Secrets](../platform/secrets.md#openbao) describes the instance.
 
-## Preconditions
+> [!WARNING]
+> This procedure changes live state by hand. It is an exception to the GitOps rule because `bao operator init` makes the recovery key and root token, and git cannot hold them.
 
-The Terraform change creating the `openbao` GCP KMS key has applied through Atlantis.
+## Before you start
 
-Flux reports the `vault` HelmRelease Ready in the `vault` namespace.
+- You need the `folly` context in `kubectl`.
+- The pod `vault-openbao-0` shows `Running` in `kubectl --context folly -n vault get pods`. It is not ready until it is unsealed.
+- You have a 1Password item in the `homelab` vault for the recovery key and the root token.
 
-A 1Password vault is ready to hold the recovery keys and initial root token. Never put them in Git, a terminal recording, or this wiki.
+## Initialize the instance
 
-## Initialize
+1. Show the status of the instance.
 
-Confirm the pod is running and uninitialized:
+   ```bash
+   kubectl --context folly -n vault exec vault-openbao-0 -- bao status
+   ```
 
-```bash
-kubectl --context folly -n vault get pods -l app.kubernetes.io/name=openbao
-kubectl --context folly -n vault exec vault-openbao-0 -- bao status
-```
+   Result: The `Initialized` row shows `false`.
 
-Initialize exactly once. Capture the output directly into the approved secret store without pasting it into a shell history or chat:
+> [!NOTE]
+> An initialized instance has data. This procedure is for an empty instance.
 
-```bash
-kubectl --context folly -n vault exec -it vault-openbao-0 -- bao operator init
-```
+2. If the `Initialized` row shows `true`, stop.
 
-Verify the instance is initialized and unsealed:
+> [!WARNING]
+> The next command shows the only copy of the recovery key and the root token. Do not run it through an agent, or in a terminal that logs its output.
 
-```bash
-kubectl --context folly -n vault exec vault-openbao-0 -- bao status
-```
+3. Initialize the instance.
 
-## Verify
+   ```bash
+   kubectl --context folly -n vault exec -it vault-openbao-0 -- bao operator init -recovery-shares=1 -recovery-threshold=1
+   ```
 
-Open `https://vault.lolwtf.ca/ui/` and authenticate with the initial root token only long enough to establish the intended administrator and policies.
+   Result: The command prints `Recovery Key 1` and `Initial Root Token`.
 
-Confirm a pod restart auto-unseals through GCP KMS before storing production material.
+4. Put the recovery key and the root token in the 1Password item.
+5. Clear the terminal and its scrollback.
+6. Make sure that the instance is unsealed. Do step 1 again.
 
-Create required auth methods, mounts, policies, audit devices, and the fresh PKI through a reviewed follow-up change.
+   Result: The `Initialized` row shows `true`, and the `Sealed` row shows `false`.
 
-## Rollback
+## Make sure a restart unseals the instance
 
-Before new production data is written, restore the previous HelmRelease chart and GCP KMS/storage configuration from Git, then reconcile Flux.
+1. Delete the pod. The StatefulSet starts a new pod.
 
-Do not remove the old Vault GCS bucket or KMS key until OpenBao has been verified for the agreed retention window.
+   ```bash
+   kubectl --context folly -n vault delete pod vault-openbao-0
+   ```
+
+   Result: The command prints `pod "vault-openbao-0" deleted`.
+
+2. Wait for the new pod to become ready.
+
+   ```bash
+   kubectl --context folly -n vault wait --for=condition=Ready pod/vault-openbao-0 --timeout=5m
+   ```
+
+   Result: The command prints `pod/vault-openbao-0 condition met`.
+
+## If something goes wrong
+
+| Symptom | Cause | Action |
+| --- | --- | --- |
+| `bao operator init` fails with `already initialized`. | The instance has data. | Stop. Do not initialize the instance. |
+| The pod does not become ready after a restart. | The pod cannot use the GCP KMS key `openbao`. | Read the pod log. Make sure that `curl -fsS https://oidc.lolwtf.ca/folly/.well-known/openid-configuration` prints JSON. |
+| The pod log shows a permission error from GCP. | The GCP service account `vault-id` has no grant on the key. | Apply `terraform/gcp/projects/homelab-ng/`, as [Apply an OpenTofu change](apply-an-opentofu-change.md) describes. |
+
+## Related
+
+- [Secrets](../platform/secrets.md#openbao): the instance and what it depends on.
+- [PKI](../platform/pki.md#workload-identity): how the pod gets a GCP credential.

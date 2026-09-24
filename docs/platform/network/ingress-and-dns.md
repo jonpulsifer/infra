@@ -19,7 +19,7 @@ Hosts resolve as `<host>.lolwtf.ca`, from `static_records` in `terraform/network
 | --- | --- | --- |
 | folly | folly | Nothing (HTTP 418) |
 | offsite | offsite | `tf.lolwtf.ca` for Atlantis |
-| kthx Apps | offsite | Public [kthx](../../apps/kthx.md) App names, quick sites at `<name>.kthx.dev`, and the kthx GitHub webhook and [bosun](../../apps/bosun.md) outbox paths |
+| kthx Apps | offsite | Public [kthx](../../apps/kthx.md) App names, quick sites at `<name>.kthx.dev`, the kthx GitHub webhook, and the [Bosun](../../apps/bosun.md) build queue at `/internal/bosun/` |
 
 Each cluster that serves kthx Apps has an Apps Gateway with its own VIP. An App with `reach: private` gets an A record at that VIP, and `reach: public` gets a proxied CNAME to the kthx Apps tunnel.
 

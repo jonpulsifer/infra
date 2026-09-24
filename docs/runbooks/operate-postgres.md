@@ -1,101 +1,123 @@
 ---
 title: Operate Postgres
-description: Reach, inspect, restart and fail over the CloudNativePG Postgres databases with kubectl cnpg, and check which have backups.
+description: Find, connect to, inspect and restart the CloudNativePG Postgres databases with the kubectl cnpg plugin, and check which ones have a backup.
 ---
 
-Every Postgres in the fleet is a CloudNativePG `Cluster`. Use the operator's own `kubectl cnpg` plugin rather than reconstructing what it does out of `kubectl exec`. The GitOps rules on [Apply a Kubernetes change](apply-a-kubernetes-change.md) apply here too: desired state is authored in git, and everything below is inspection.
+Use this runbook to find, connect to, inspect or restart a Postgres database, and to check its backup. To change the instances, storage or Postgres version of a database, change its manifest, as [Apply a Kubernetes change](apply-a-kubernetes-change.md) describes. Each database is a CloudNativePG `Cluster` object. CloudNativePG is the Kubernetes controller that runs Postgres, and `kubectl cnpg` is its kubectl plugin. The `cnpg` commands find the primary pod and container for you.
 
-## The rule
+> [!WARNING]
+> This runbook restarts databases and runs psql by hand. It is an exception to the GitOps rule because git cannot hold a restart or a query.
 
-**Reach a database through `kubectl cnpg`, never through a pod name.**
+## Before you start
 
-```bash
-kubectl --context folly cnpg psql tronbyt -n tronbyt
-```
+- Get `kubectl` access, as [Get cluster admin access](get-cluster-admin-access.md) describes.
+- Install `kubectl-cnpg`. `dotfiles/mise-global-config.toml` installs it with mise.
+- Put `--context <site>` after the `cnpg` command. `<site>` is `folly` or `offsite`.
 
-The plugin resolves the primary itself. A hand-written `exec <cluster>-1` names a pod that is only the primary *until the next failover*, so it is right until the moment it matters most. It also needs `-c postgres` to skip the bootstrap init container, which is the kind of detail the plugin exists to know.
+## Find a database
 
-Same rule for the rest of the verbs — prefer the native tool over an equivalent assembled by hand.
+| Declared in | Change it through |
+| --- | --- |
+| `clusters/folly/apps/tronbyt/04-database.yaml` | Git |
+| `packages/charts/*/templates/database.yaml`, in each chart that has one | Git, in the chart values of the HelmRelease |
+| The `spindrift-datastores` namespace | kthx. Each is the database that kthx makes for a [built app](../apps/kthx/built-apps.md). |
 
-## Where the databases are
+`clusters/base/platform/cloudnative-pg/` installs the controller on both clusters.
 
-The operator is declared once for both clusters under `clusters/base/platform/cloudnative-pg/`. The `Cluster` objects themselves live with the app that owns them, in `clusters/` or in a chart under `packages/charts/`.
+1. List the databases of a cluster.
 
-One set is not authored in git: a `Cluster` in `spindrift-datastores` is a Datastore kthx provisioned through the cluster API, and the row in its database is the desired state. It lives in a namespace of its own because a Datastore outlives every App attached to it. Inspect it like any other; change it through the product. See [Built apps](../apps/kthx/built-apps.md).
+   ```bash
+   kubectl get cluster.postgresql.cnpg.io -A --context <site>
+   ```
 
-```bash
-kubectl --context folly cnpg status tronbyt -n tronbyt
-kubectl --context folly get cluster.postgresql.cnpg.io -A
-```
+   Result: A line for each database, with its `INSTANCES`, `STATUS` and `PRIMARY`.
 
-## Inspect
+## Connect to a database
 
-Health, topology, replication lag, and recent operator activity in one screen:
+1. Open a psql session in the app database.
 
-```bash
-kubectl --context <cluster> cnpg status <name> -n <namespace>
-kubectl --context <cluster> cnpg status <name> -n <namespace> --verbose
-```
+   ```bash
+   kubectl cnpg psql <name> -n <namespace> --context <site> -- -d <database>
+   ```
 
-Logs for every instance, without picking a pod:
+   Result: The `<database>=#` prompt. Without `-d`, psql opens the `postgres` database.
 
-```bash
-kubectl --context <cluster> cnpg logs cluster <name> -n <namespace>
-```
+2. To run one statement, give psql its flags after `--`.
 
-## Open a psql session
+   ```bash
+   kubectl cnpg psql <name> -n <namespace> --context <site> -- -d <database> -At -c 'select 1'
+   ```
 
-```bash
-kubectl --context <cluster> cnpg psql <name> -n <namespace>
-```
+   Result: `1`.
 
-Add `--replica` to land on a standby instead — the right choice for a read-only look at a busy primary.
+## Inspect a database
 
-Non-interactive, for one statement:
+1. Show the health, primary and backup state.
 
-```bash
-kubectl --context <cluster> cnpg psql <name> -n <namespace> -- -At -c 'select 1'
-```
+   ```bash
+   kubectl cnpg status <name> -n <namespace> --context <site>
+   ```
 
-Everything after `--` goes to `psql`, so its own flags work unchanged.
+   Result: `Status: Cluster in healthy state` and the `Primary instance`.
 
-## Restart and failover
+2. Read the logs of all instances.
 
-Both are inspection-adjacent acts on a managed object, not edits to desired state:
+   ```bash
+   kubectl cnpg logs cluster <name> -n <namespace> --context <site> --tail 50
+   ```
 
-```bash
-kubectl --context <cluster> cnpg restart <name> -n <namespace>
-kubectl --context <cluster> cnpg promote <name> <name>-<n> -n <namespace>
-```
+   Result: JSON log lines from each instance.
 
-Changing instance count, storage, or Postgres version is a manifest change that ships through git — see [Apply a Kubernetes change](apply-a-kubernetes-change.md).
+## Restart a database
 
-## Backups are not universal
+> [!NOTE]
+> Each live `Cluster` has one instance and no standby instance.
 
-**Do not assume a database has a backup.** Each `Cluster` decides, and at least one chart deliberately declares none: the kthx control plane's database (`packages/charts/spindrift/templates/database.yaml`) states its loss story is reconcile-from-sources, with the desired-state rows, the attempt log, and the config version pins as the part no source holds. Its PVC therefore outlives the `Cluster` on purpose, so deleting the release does not discard them.
+> [!CAUTION]
+> A restart stops the database until its pod is ready again.
 
-Check what a given cluster actually has before relying on one:
+1. Restart the database.
 
-```bash
-kubectl --context <cluster> get cluster.postgresql.cnpg.io <name> -n <namespace> \
-  -o jsonpath='{.spec.backup}{"\n"}'
-kubectl --context <cluster> get backup.postgresql.cnpg.io -n <namespace>
-```
+   ```bash
+   kubectl cnpg restart <name> -n <namespace> --context <site>
+   ```
 
-Where a cluster does define one, take an on-demand backup with:
+   Result: `<name> restarted`.
 
-```bash
-kubectl --context <cluster> cnpg backup <name> -n <namespace>
-```
+2. Make sure that `kubectl cnpg status` shows `Cluster in healthy state`.
 
-## If psql cannot connect
+## Check the backups
 
-Confirm the cluster is healthy and has a primary at all — `cnpg status` names it. A `Cluster` with no primary is a cluster mid-failover or mid-bootstrap, and the answer is to wait and read `cnpg logs cluster`, not to exec into an instance.
+> [!WARNING]
+> Only the kthx database has a backup. If another database loses its volume, its data is lost.
 
-Confirm the plugin is present. It ships with the `kubectl` tooling in the dev shell:
+| Database | Backup |
+| --- | --- |
+| kthx (`kthx-db`) | The CronJob `kthx-db-backup` writes a `pg_dumpall` to `gs://bluenose-kthx/backups/pg/` each night. The bucket deletes a dump after 30 days. |
+| The built-apps database (`spindrift-db`) | None. `keepOnDelete` keeps the `Cluster` and its data if the release is deleted. |
 
-```bash
-kubectl cnpg version
-```
+1. Read the backup line in the `kubectl cnpg status` output of the database.
 
-Credentials live in a Secret the operator generates and rotates; read them from the `Cluster`'s app secret rather than from a chart's values. `cnpg psql` needs none of this, which is the main reason to prefer it.
+   Result: `Continuous Backup not configured`.
+
+2. Make sure that the last kthx dump is less than a day old.
+
+   ```bash
+   kubectl get cronjob kthx-db-backup -n kthx --context offsite -o jsonpath='{.status.lastSuccessfulTime}{"\n"}'
+   ```
+
+   Result: The time of the last successful dump, in UTC.
+
+## If something goes wrong
+
+| Symptom | Cause | Action |
+| --- | --- | --- |
+| `flags cannot be placed before plugin name: --context` | `--context` is before `cnpg`. | Put `--context` after the `cnpg` command. |
+| `unknown command "cnpg" for "kubectl"` | The plugin is not installed. | Run `mise install github:cloudnative-pg/cloudnative-pg`. |
+| `cnpg status` shows no primary. | The `Cluster` is in bootstrap or in a restart. | If no primary shows after 5 minutes, read `kubectl cnpg logs cluster`. |
+| `KthxBackupFailing` fires. | No kthx dump has succeeded for 36 hours. | Read the logs of the last `kthx-db-backup` Job. |
+
+## Related
+
+- [Kubernetes](../platform/kubernetes.md)
+- [kthx](../apps/kthx.md)

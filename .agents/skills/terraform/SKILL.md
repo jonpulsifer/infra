@@ -1,49 +1,51 @@
 ---
 name: terraform
 description: >-
-  Work with the OpenTofu root modules in this infra repo. All roots live under
-  terraform/ (network fabric under terraform/network/, cloud and identity
-  alongside it) plus clusters/<site>/bootstrap/. Use when changing, validating,
-  or planning infrastructure code, or when a change needs an Atlantis apply.
+  Change, validate or plan the OpenTofu root modules under terraform/ and
+  clusters/<site>/bootstrap/. Use when editing .tf files, reading a plan, or
+  when a change needs an Atlantis apply.
 metadata:
-  runbook: docs/runbooks/apply-a-terraform-change.md
-  wiki: https://wiki.lolwtf.ca/runbooks/apply-a-terraform-change/
+  runbook: docs/runbooks/apply-an-opentofu-change.md
+  wiki: https://wiki.lolwtf.ca/runbooks/apply-an-opentofu-change/
 ---
 
-# Terraform
+# OpenTofu
 
-Canonical human runbook: `docs/runbooks/apply-a-terraform-change.md`. Layer
-background: `docs/platform/opentofu.md`. This file holds only the
-agent-specific guidance.
+The procedure is `docs/runbooks/apply-an-opentofu-change.md`. The platform
+page is `docs/platform/opentofu.md`. These notes cover what an agent needs
+beyond them.
 
-## Agent notes
+## Notes
 
-- **The binary is `tofu` (OpenTofu), not `terraform`.** Both are installed; the
-  apply path is OpenTofu. The directory is still named `terraform/` — correct,
-  not a bug.
-- **Never apply locally against remote state.** Applies run through Atlantis on
-  the PR: autoplan on changed roots, comment `atlantis apply`, successful apply
-  automerges. A local apply races Atlantis for the state lock.
-- Prefer the mise tasks — they encode the right binary and flags:
-  ```bash
-  mise run tf:validate   # init -backend=false + validate, routed to changed roots
-  mise run tf:fmt        # tofu fmt -recursive
-  mise run tf:docs       # regenerate terraform-docs READMEs
-  TF_DIR=terraform/network/cloudflare mise run tf:plan
-  ```
-- Scoped fallback when you need one root only:
-  ```bash
-  tofu -chdir=<root> init -backend=false && tofu -chdir=<root> validate
-  ```
-- A root is any directory whose `.tf` has a `backend "` block. That is how CI
-  tells a root from a reusable module — `.github/scripts/validation-impact.sh`
-  greps for it.
-- `tofu test` runs in CI. `clusters/<site>/bootstrap/` carry `.tftest.hcl`
-  files; most roots have none, where the command is a no-op.
-- Network facts come from the topology SSOT via the
-  `terraform/modules/cluster-topology` module, instantiated in a root's
-  `topology.tf`. Never hardcode a CIDR, ASN, or API-server address.
-- `terraform/pki` requires OpenTofu specifically — it uses the `opentofu/tls`
-  provider fork for `max_path_length`, which is not published for Terraform.
-- If a change touches Kubernetes or ArgoCD auth behaviour, also use the
+- Run `tofu`. `terraform` is installed, but Atlantis and CI use OpenTofu.
+- Use the tasks:
+  - `mise run tf:validate` initializes and validates every root.
+  - `mise run tf:fmt` formats.
+  - `mise run tf:docs` regenerates the terraform-docs READMEs.
+  - `TF_DIR=<root> mise run tf:plan` plans one root.
+  - To validate one root:
+    `tofu -chdir=<root> init -backend=false && tofu -chdir=<root> validate`.
+- A root is a directory whose `.tf` files declare a `backend` block
+  (`.github/scripts/validation-impact.sh terraform-roots` lists them). Anything
+  else is a module.
+- Atlantis autoplans a root when a `*.tf*` file in it or in a module it uses
+  changes. A `.conf` or `.hujson` change under `terraform/` also triggers it
+  (`ATLANTIS_AUTOPLAN_FILE_LIST` in
+  `clusters/offsite/apps/atlantis/helm-release.yaml`).
+- A PR that changes only a file a root reads with `file()`, such as a topology
+  JSON file, `clients.yaml` or `flux-values.yaml`, gets no plan. Comment
+  `atlantis plan -d <root>` on the PR.
+- `plan-hook.sh` lets only the identities in `atlantis_users` in
+  `only-me.rego` plan. A comment of `atlantis apply` applies the plans and
+  merges the PR. Comment `atlantis apply` only when the owner asks.
+- Network facts come from the topology files through
+  `terraform/modules/cluster-topology`, which a root instantiates in its
+  `topology.tf`.
+- `terraform/pki` uses the `opentofu/tls` provider for `max_path_length`, and
+  the `terraform` binary cannot install that provider.
+- CI runs `tofu test` in each directory with a changed `.tf` file. After a
+  change to only a `.tftest.hcl` file, run `tofu test` in its root, because CI
+  runs no test for it. The `.tftest.hcl` files are in
+  `clusters/<site>/bootstrap/`.
+- For a change to Kubernetes or Argo CD authentication, also use the
   `kubernetes-gitops` skill.

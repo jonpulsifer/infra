@@ -29,7 +29,7 @@ OpenTofu stores the forge client's secret in 1Password. After the Atlantis apply
 | `tag:offsite` | folly's node subnet and VIPs |
 | `tag:ci` | `tag:pi4` devices on TCP port 22 |
 
-The Connectors carry `tag:k8s`, `tag:k8s-<site>`, and `tag:folly` or `tag:offsite`. `autoApprovers` accepts routes from `tag:k8s-folly` and `tag:k8s-offsite` without review. `devices.tf` also gives `tag:folly` to spore and nuc, and `tag:offsite` to desktop-g7i75ls.
+The Connectors carry `tag:k8s`, `tag:k8s-<site>`, and `tag:folly` or `tag:offsite`. `autoApprovers` accepts routes from `tag:k8s-folly` and `tag:k8s-offsite` without review. `devices.tf` also gives `tag:folly` to spore and nuc, and `tag:offsite` to desktop-g7i75ls. No host sheet covers nuc or desktop-g7i75ls. `offsite-bell` is an `ipset` in `policy.hujson`, and no UniFi root declares its subnet.
 
 ## Rules
 

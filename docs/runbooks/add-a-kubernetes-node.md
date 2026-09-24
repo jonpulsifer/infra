@@ -40,7 +40,7 @@ Use this runbook to add an x86_64 node to the `folly` (on-site) or `offsite` (re
 
 7. If the host has the `folly` tag, add it to `static_records` in `terraform/network/unifi/folly/k8s.tf`.
 8. Open a pull request.
-9. If the host has the `folly` tag, apply the Terraform change, as [Apply a Terraform change](apply-a-terraform-change.md) describes.
+9. If the host has the `folly` tag, apply the OpenTofu change, as [Apply an OpenTofu change](apply-an-opentofu-change.md) describes.
 
 ## Install the node
 

@@ -1,112 +1,148 @@
 ---
 title: Install a Windows desktop
-description: "Set up a Windows desktop with one bootstrap script: winget desired state, dotfiles, the PowerShell profile and optional NixOS-WSL."
+description: Install the owner's Windows configuration on a desktop with one PowerShell script, update it, add the NixOS WSL distro, and test a change to the Windows dotfiles.
 ---
 
-Use this when setting up the Windows side of a box, or when the PowerShell profile, terminal or apps there have drifted from what git says they should be. The Windows config is the outer ring: it installs WSL, and the distro keeps its own clone and its own bootstrap. Source is `dotfiles/windows/`.
+Use this runbook to install or update the owner's Windows configuration on a desktop, such as [tallboy](../hosts/tallboy.md) or [atomic](../hosts/atomic.md). It also adds the NixOS WSL distro and tests a change to the Windows dotfiles. One script, `dotfiles/windows/bootstrap.ps1`, clones the repository and installs the parts in this table.
 
-## The rule that shapes everything else
+| Part | What it installs |
+| --- | --- |
+| `dotfiles/windows/configuration.winget` | Applications and OS settings |
+| `mise run bootstrap` | CLI tools and the dotfile links |
+| Nerd Font | A terminal font with icons |
+| vibranceGUI | A tool that sets the GPU color saturation (digital vibrance) |
 
-**Nothing symlinks across the WSL boundary, in either direction.** Windows has its own clone; git is what keeps the two in sync.
+> [!NOTE]
+> Windows and the WSL distro each have their own checkout. No link crosses between the two, so the PowerShell profile works when WSL is not running.
 
-`$PROFILE` has to resolve before the WSL VM is awake, symlinks into `\\wsl.localhost` come back as UNC paths that break tools which round-trip a handle to a path, and a Windows box has to be able to bootstrap itself before any distro exists. Executing a Windows binary from inside WSL is fine and unaffected — that is how commit signing already reaches `op-ssh-sign-wsl.exe`.
+## Before you start
 
-Line endings are pinned to LF by `dotfiles/.gitattributes`, and the clone forces `core.autocrlf=false` on top. PowerShell 7 reads LF and BOM-less UTF-8 without complaint.
+- You need winget 1.11 or later, from App Installer.
+- You need an account that can approve administrator prompts.
+- To add the WSL distro, you need the operator age key. See [Manage SOPS secrets](manage-sops-secrets.md).
 
-## From nothing to a working desk
+The bootstrap script makes a sparse checkout of `dotfiles/` at `$HOME\src\github.com\jonpulsifer\infra`.
 
-One line, in any PowerShell. It re-execs itself under PowerShell 7 if it lands in 5.1:
+## Install the desktop
 
-```powershell
-irm https://raw.githubusercontent.com/jonpulsifer/infra/main/dotfiles/windows/bootstrap.ps1 | iex
-```
+1. Open PowerShell.
+2. Run the bootstrap script. Approve each administrator prompt.
 
-Add `-WithWsl` to install WSL and import a NixOS distro as well:
+   ```powershell
+   irm https://raw.githubusercontent.com/jonpulsifer/infra/main/dotfiles/windows/bootstrap.ps1 | iex
+   ```
 
-```powershell
-& ([scriptblock]::Create((irm https://raw.githubusercontent.com/jonpulsifer/infra/main/dotfiles/windows/bootstrap.ps1))) -WithWsl
-```
+   Result: The command prints `Done. Open a new PowerShell 7 tab to pick up the profile.` as its last line.
 
-The stages, each idempotent: PowerShell 7 → `winget configure` the desired state in `dotfiles/windows/configuration.winget` → sparse clone to `%USERPROFILE%\src\github.com\jonpulsifer\infra` → `mise run bootstrap` → terminal font → optionally WSL.
+3. Open a new PowerShell 7 tab.
+4. If the desktop must send metrics and logs to folly's Prometheus and VictoriaLogs, do [Install Windows monitoring](install-windows-monitoring.md).
 
-The clone is blobless and sparse to `dotfiles/` only. `git pull` there is how the desk takes an update.
+## Update the desktop
 
-## What owns what
+1. Open PowerShell 7.
+2. Go to the checkout.
 
-**winget** owns the things mise has no business owning: PowerShell 7, Windows Terminal, Git, WSL, 1Password, VS Code, and the OS settings. Declared as a DSC v3 configuration in `dotfiles/windows/configuration.winget`, applied with `winget configure`, previewable with `--what-if`. That one file is the bundle — `winget export`/`import` describes a strictly smaller thing (no OS settings, no dependency order, no elevation), so there is no second list to keep in step.
+   ```powershell
+   cd $HOME\src\github.com\jonpulsifer\infra
+   ```
 
-**Which source a package comes from** is per-package. `source: msstore` with a Store product id for Windows Terminal (`9N0DX20HK701`) and WSL (`9P9TQF7MRM4R`): both sources ship the same MSIX and the same package family, but a sideloaded MSIX carries no Store licence and so never auto-updates, and the community manifests lag. `source: winget` for everything else — PowerShell deliberately, because the Store build runs in a sandbox that virtualizes parts of the filesystem and registry and that is a poor fit for the shell everything else runs inside; 1Password because its community manifest is already the same MSIX the Store delivers; Git and mise because they are not on the Store at all.
+3. Pull `main`.
 
-**Two things are in neither catalogue** and get pinned, hash-verified, per-user installers of their own, run from `bootstrap.ps1`: the CaskaydiaCove Nerd Font (`Install-NerdFont.ps1`) and vibranceGUI (`Install-VibranceGui.ps1`). Both check the download against a pinned SHA256 before it goes anywhere.
+   ```powershell
+   git pull --ff-only
+   ```
 
-**mise** owns every CLI tool, from the same registry macOS and NixOS use. Windows has no Homebrew and no home-manager, so `mise-global-config.toml` carries an `os = ["windows"]` block for the shell tooling those two provide elsewhere. `btop` is absent there: it ships no Windows build.
+   Result: The command prints `Already up to date.` or the changed files.
 
-**`deploy-dotfiles.ps1`** owns the symlinks, all of them on the Windows side. The shared `dotfiles/.config/git` is reused rather than forked — git on Windows reads `~/.config/git/config` too, and `dotfiles/windows/gitconfig` lands at `~/.gitconfig` to include it and override only what differs.
+4. If `configuration.winget` changed, apply it. Accept each prompt. To see the changes first, add `--what-if`.
 
-## The shell
+   ```powershell
+   winget configure --file dotfiles\windows\configuration.winget
+   ```
 
-`dotfiles/windows/profile.ps1` is a loader; the content is in `dotfiles/windows/profile.d/`, loaded in filename order. The numeric prefixes are the order and they matter — mise has to be on PATH before anything looks for a tool.
+   Result: The command prints `Configuration successfully applied.`
 
-The prompt is hand-rolled, in the same two-line shape as pure on the other platforms. There is no prompt engine. PowerShell has no RPROMPT, so the right-aligned duration and kube context are drawn by the prompt function itself before it returns the `❯`.
+5. Run the dotfiles bootstrap.
 
-Set `DOTFILES_PROMPT_GIT=0` to turn off git information in the prompt entirely.
+   ```powershell
+   mise run --cd dotfiles bootstrap
+   ```
 
-## If a Store package will not install
+   Result: The command prints `Windows dotfiles deployed.` as its last line.
 
-`winget configure` runs with `--disable-interactivity`. A Store package that wants a licence acquired interactively fails there rather than prompting. Run the pass on its own to see the prompt:
+## Add the NixOS WSL distro
 
-```powershell
-winget configure --file dotfiles\windows\configuration.winget
-```
+1. Open PowerShell 7.
+2. Run the bootstrap script with `-WithWsl`.
 
-Check a Store product id against the catalogue before changing one — the ids are opaque, and installing the wrong one is silent:
+   ```powershell
+   & ([scriptblock]::Create((irm https://raw.githubusercontent.com/jonpulsifer/infra/main/dotfiles/windows/bootstrap.ps1))) -WithWsl
+   ```
 
-```bash
-curl -s "https://displaycatalog.mp.microsoft.com/v7.0/products/9N0DX20HK701?market=US&languages=en-us&fieldsTemplate=Details" | head -c 400
-```
+   Result: The command prints `Distro 'NixOS' is up. Finish inside it:` and the next commands.
 
-## If vibranceGUI stops matching its hash
+3. Open the distro.
 
-`Install-VibranceGui.ps1` pins upstream `juv/vibranceGUI` v2.5.0 by URL and SHA256, and refuses to install anything else. Upstream has published no newer release; a v3.0.0 exists on a fork with no established provenance, and this does not follow it. Moving deliberately means changing both `-Url` and `-Sha256`.
+   ```powershell
+   wsl -d NixOS
+   ```
 
-## If the deploy refuses with "Developer Mode is off"
+4. Clone the repository.
 
-Creating a symlink needs Developer Mode or an elevated shell. The configuration pass turns it on, so run that first:
+   ```bash
+   git clone https://github.com/jonpulsifer/infra ~/src/github.com/jonpulsifer/infra
+   ```
 
-```powershell
-winget configure --file dotfiles\windows\configuration.winget
-```
+   Result: The command prints `Cloning into` and the path of the checkout.
 
-Check what it would change without changing it by adding `--what-if`.
+5. Go to the checkout.
 
-## If Windows Terminal loses its settings
+   ```bash
+   cd ~/src/github.com/jonpulsifer/infra
+   ```
 
-Terminal writes through the symlink normally, but a Terminal update or a settings reset can replace the file outright, orphaning it from the repo. The deploy is idempotent, so the fix is to run it again:
+6. Put the operator age key in `~/.config/age/keys.txt`.
+7. Apply the `wsl` configuration.
 
-```powershell
-mise run --cd $HOME\src\github.com\jonpulsifer\infra\dotfiles bootstrap
-```
+   ```bash
+   sudo nixos-rebuild switch --flake .#wsl
+   ```
 
-The replaced file is moved aside as `settings.json.bak-<timestamp>` rather than deleted, in case it holds something worth keeping.
+   Result: The command prints `Done. The new configuration is` and a store path.
 
-## If a tool will not install
+## Test a Windows dotfiles change
 
-Every CLI tool resolves through aqua, which only has a Windows asset where upstream ships one. A tool that fails on Windows and nowhere else needs an `os` filter in `mise-global-config.toml` next to the others, not a workaround in the profile.
+1. On any machine, go to the root of a checkout.
+2. Lint the PowerShell files.
 
-## If the prompt feels slow
+   ```bash
+   mise run lint:ps
+   ```
 
-The branch name comes from reading `.git/HEAD` directly, with no subprocess. Only the dirty marker costs a `git status`, and the prompt times that call: a repo where it runs long is remembered and the dirty check is skipped there afterwards, showing `branch?` instead of `branch*`.
+   Result: The command prints `PSScriptAnalyzer: clean.`
 
-A whole shell that starts slowly is more likely the kubectl completion cache in `40-aliases.ps1` regenerating, which happens once per kubectl version.
+3. On the desktop, in the checkout, make sure every file that a dotfiles link points to exists.
 
-## Validation
+   ```powershell
+   mise run --cd dotfiles dotfiles:check
+   ```
 
-`mise run lint:ps` runs PSScriptAnalyzer. It runs in CI too, on the Linux runner — `pwsh` comes from mise, so the `.ps1` files get the same treatment the bash scripts get from shellcheck.
+   Result: The command prints no `source missing` warning, and prints `Windows dotfiles deployed.` as its last line.
 
-`mise run dotfiles:check` resolves every link source without touching the filesystem and fails on a missing one.
+## If something goes wrong
+
+| Symptom | Cause | Action |
+| --- | --- | --- |
+| `winget configure` fails on a Store package. | The package needs a license prompt, and the bootstrap script turns prompts off. | Do step 4 of [Update the desktop](#update-the-desktop). |
+| `mise run bootstrap` stops with `Developer Mode is off and this shell is not elevated`. | The winget configuration did not run. | Do step 4 of [Update the desktop](#update-the-desktop). |
+| Windows Terminal does not use the settings from the checkout. | A Terminal update replaced `settings.json`. | Do step 5 of [Update the desktop](#update-the-desktop). The old file stays as `settings.json.bak-<timestamp>`. |
+| `mise install` fails for a tool on Windows only. | The tool has no Windows build. | In `dotfiles/mise-global-config.toml`, give the tool an `os` filter without `windows`. |
+| vibranceGUI stops with `Hash mismatch`. | The download is not the pinned file. | Find why the upstream file changed. Change `-Url` and `-Sha256` in `Install-VibranceGui.ps1` together. |
+| The prompt shows the branch with `?`. | `git status` took more than 150 ms, so the prompt does not check for uncommitted changes in that repository. | Open a new shell to check again. To remove the git segment, set the user environment variable `DOTFILES_PROMPT_GIT` to `0`. |
+| Step 2 of [Add the NixOS WSL distro](#add-the-nixos-wsl-distro) prints `distro 'NixOS' already exists`. | The script does not replace a distro. | Use the existing distro. |
 
 ## Related
 
-- [Deploy a NixOS host](deploy-a-nixos-host.md) — what happens inside the distro once Windows has installed it
-- [Manage SOPS secrets](manage-sops-secrets.md) — the age key the distro needs before its first rebuild
-- [How changes ship](../platform/how-changes-ship.md) — how every other layer ships
+- [Install Windows monitoring](install-windows-monitoring.md)
+- [Deploy a NixOS host](deploy-a-nixos-host.md)
+- [tallboy](../hosts/tallboy.md) and [atomic](../hosts/atomic.md): the Windows desktops

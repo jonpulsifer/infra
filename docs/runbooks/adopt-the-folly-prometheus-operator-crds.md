@@ -1,151 +1,117 @@
 ---
 title: Adopt the folly Prometheus Operator CRDs
-description: "A one-time procedure that stamps and verifies Helm ownership on folly's monitoring CRDs, then mirrors offsite's monitoring-crds setup in git."
+description: Move folly's Prometheus Operator CRDs from the kube-prometheus-stack chart, which does not upgrade them, to a HelmRelease that owns and upgrades them.
 ---
 
-Use this to wire folly onto the `monitoring-crds` Kustomization the same way [Apply a Kubernetes change](apply-a-kubernetes-change.md)'s GitOps rule normally requires — except the first step is a live, by-hand mutation. That is deliberate: see "The one sanctioned exception" below before running anything here.
+folly's Prometheus Operator CRDs come from the kube-prometheus-stack chart, which does not upgrade them, so they fall behind the Prometheus Operator after each chart bump. Use this runbook once to give folly the `monitoring-crds` Flux Kustomization that offsite has. Its `prometheus-operator-crds` HelmRelease then owns and upgrades the ten `monitoring.coreos.com` CRDs, and folly's `monitoring` Flux Kustomization can depend on it. The merge adopts the existing CRDs, because helm-controller takes ownership of existing objects when it installs a release.
 
-## Why folly needs this
+## Before you start
 
-Offsite installs the Prometheus Operator CRDs from a dedicated `monitoring-crds` Kustomization that its `monitoring` Kustomization `dependsOn`, fixing a Flux bootstrap deadlock: `clusters/base/monitoring/` carries a raw `ServiceMonitor`, Flux server-side dry-runs every object in a Kustomization before applying any of them, and without the CRD already on the cluster the whole `monitoring` Kustomization was refused — including the `kube-prometheus-stack` HelmRelease that would have supplied the CRD (fixed for offsite in #1788). See `clusters/base/monitoring-crds/` and `clusters/offsite/flux-system/monitoring-crds.yaml`.
+- Get `kubectl` access to folly, as [Get cluster admin access](get-cluster-admin-access.md) describes.
+- Run `mise run devshell`.
 
-Folly is not wired to `monitoring-crds` yet, and has the same latent deadlock on a from-scratch rebuild. It is not wired because `kube-prometheus-stack` ships its CRDs in a Helm `crds/` directory, which Helm installs without ownership metadata and never upgrades. Folly's existing CRDs — installed years ago through that path — carry no `app.kubernetes.io/managed-by: Helm` label and no `meta.helm.sh/release-*` annotations. Pointing folly's `monitoring-crds` Kustomization at the templates-based `prometheus-operator-crds` chart without first labeling those CRDs makes the chart try to create resources that already exist, and Helm refuses with "invalid ownership metadata" — the install fails, and `monitoring` stays blocked behind a Kustomization that never reaches Ready. Same deadlock shape, different trigger.
+## Check folly
 
-Adopting the ten existing CRDs into the chart's ownership is what breaks that, permanently, without a delete-and-recreate that would drop every `ServiceMonitor`, `PrometheusRule`, and friend in the cluster along with the CRD.
+1. Make sure that folly has no `prometheus-operator-crds` HelmRelease.
 
-## The one sanctioned exception
+   ```bash
+   flux --context folly get helmrelease prometheus-operator-crds -n flux-system
+   ```
 
-The repo's hard rule is: never mutate live infrastructure by hand, author desired state in git and let the operators apply it. This procedure's first step breaks that rule on purpose, because Helm's adoption metadata — the label and two annotations below — has no git-side representation. Nothing in `clusters/` can set them; they only exist as live object state. Stamping them by hand is the only way to make an existing, unmanaged CRD adoptable by a chart.
+   Result: `✗ HelmRelease object 'prometheus-operator-crds' not found in "flux-system" namespace`.
 
-Run the stamp deliberately, by an operator, once. It is not a step Flux or any controller performs, and there is no automation for it in this repo.
+2. If the HelmRelease exists, stop. folly already has the `monitoring-crds` Flux Kustomization.
 
-## Stamp ownership metadata onto folly's CRDs (live, one-time)
+> [!NOTE]
+> folly's CRDs have no Helm ownership metadata. A helm-controller without the `disableTakeOwnership` field adopts only objects that have this metadata.
 
-The ten CRDs `kube-prometheus-stack` currently owns unmanaged on folly:
+3. Make sure that helm-controller takes ownership of existing objects.
 
-```text
-alertmanagerconfigs.monitoring.coreos.com
-alertmanagers.monitoring.coreos.com
-podmonitors.monitoring.coreos.com
-probes.monitoring.coreos.com
-prometheusagents.monitoring.coreos.com
-prometheuses.monitoring.coreos.com
-prometheusrules.monitoring.coreos.com
-scrapeconfigs.monitoring.coreos.com
-servicemonitors.monitoring.coreos.com
-thanosrulers.monitoring.coreos.com
-```
+   ```bash
+   kubectl --context folly explain helmrelease.spec.install.disableTakeOwnership
+   ```
 
-Confirm they are actually unmanaged before touching anything — this should print nothing for each:
+   Result: `FIELD: disableTakeOwnership <boolean>`, and a description that ends in `Defaults to false.`
 
-```bash
-for crd in alertmanagerconfigs.monitoring.coreos.com alertmanagers.monitoring.coreos.com \
-  podmonitors.monitoring.coreos.com probes.monitoring.coreos.com \
-  prometheusagents.monitoring.coreos.com prometheuses.monitoring.coreos.com \
-  prometheusrules.monitoring.coreos.com scrapeconfigs.monitoring.coreos.com \
-  servicemonitors.monitoring.coreos.com thanosrulers.monitoring.coreos.com; do
-  kubectl --context folly get crd "$crd" \
-    -o jsonpath='{.metadata.labels.app\.kubernetes\.io/managed-by}{"\n"}'
-done
-```
+4. If kubectl prints `field "disableTakeOwnership" does not exist`, stop.
 
-The three markers Helm's adoption check requires, applied to each CRD:
+## Give folly the monitoring-crds Flux Kustomization
 
-- label `app.kubernetes.io/managed-by=Helm`
-- annotation `meta.helm.sh/release-name=prometheus-operator-crds`
-- annotation `meta.helm.sh/release-namespace=flux-system` — `flux-system`, not `monitoring`, because what the chart installs is cluster-scoped and the `monitoring` namespace is created by the Kustomization that runs after this one. Offsite uses the same namespace for the same reason; see `clusters/base/monitoring-crds/prometheus-operator-crds.yaml`.
+1. Under `clusters/folly/`, make a `monitoring-crds` directory with this `kustomization.yaml`.
 
-Apply all three to all ten CRDs:
+   ```yaml
+   ---
+   apiVersion: kustomize.config.k8s.io/v1beta1
+   kind: Kustomization
+   resources:
+     - ../../base/monitoring-crds
+   ```
 
-```bash
-CRDS=(
-  alertmanagerconfigs.monitoring.coreos.com
-  alertmanagers.monitoring.coreos.com
-  podmonitors.monitoring.coreos.com
-  probes.monitoring.coreos.com
-  prometheusagents.monitoring.coreos.com
-  prometheuses.monitoring.coreos.com
-  prometheusrules.monitoring.coreos.com
-  scrapeconfigs.monitoring.coreos.com
-  servicemonitors.monitoring.coreos.com
-  thanosrulers.monitoring.coreos.com
-)
+2. Copy `clusters/offsite/flux-system/monitoring-crds.yaml` into `clusters/folly/flux-system/`.
+3. In the copy, set `spec.path` to `./clusters/folly/monitoring-crds`.
+4. Add `monitoring-crds.yaml` to `resources` in `clusters/folly/flux-system/kustomization.yaml`.
+5. In `clusters/folly/flux-system/monitoring.yaml`, add `- name: monitoring-crds` under `dependsOn`, after `storage`.
+6. In `clusters/folly/monitoring/kube-prometheus.yaml`, set `crds.enabled: false` under `values`, as offsite does.
+7. Render the change.
 
-for crd in "${CRDS[@]}"; do
-  kubectl --context folly label crd "$crd" app.kubernetes.io/managed-by=Helm --overwrite
-  kubectl --context folly annotate crd "$crd" \
-    meta.helm.sh/release-name=prometheus-operator-crds \
-    meta.helm.sh/release-namespace=flux-system --overwrite
-done
-```
+   ```bash
+   mise run k8s:render-apps
+   ```
 
-Verify every CRD carries all three markers:
+   Result: The output includes `rendered clusters/folly/monitoring-crds`.
 
-```bash
-for crd in "${CRDS[@]}"; do
-  kubectl --context folly get crd "$crd" -o jsonpath=\
-'{.metadata.name} managed-by={.metadata.labels.app\.kubernetes\.io/managed-by} release={.metadata.annotations.meta\.helm\.sh/release-name} ns={.metadata.annotations.meta\.helm\.sh/release-namespace}{"\n"}'
-done
-```
+> [!WARNING]
+> The merge adopts the CRDs. If the install fails after that, helm-controller uninstalls the release, because `install.remediation.retries` is set. Helm then deletes the CRDs and every ServiceMonitor, PrometheusRule and other object of those kinds on folly.
 
-Each line should read `managed-by=Helm release=prometheus-operator-crds ns=flux-system`. Do not continue to the git-side change until all ten do.
+8. Merge the change through a pull request.
+9. Fetch the merge commit into the `infra` GitRepository.
 
-## Wire folly into monitoring-crds (git, only after the stamp succeeds)
+   ```bash
+   flux --context folly reconcile source git infra -n flux-system
+   ```
 
-Mirror `clusters/offsite/` exactly. Five changes:
+   Result: `✔ fetched revision refs/heads/main@sha1:<sha>`.
 
-Add a new clusters/folly/monitoring-crds/ directory:
+10. Make sure that `<sha>` is the merge commit.
+11. Apply the `infra` Flux Kustomization, which applies `clusters/folly/flux-system/`.
 
-```text
-clusters/folly/monitoring-crds/kustomization.yaml
-```
+    ```bash
+    flux --context folly reconcile kustomization infra -n flux-system
+    ```
 
-```yaml
----
-apiVersion: kustomize.config.k8s.io/v1beta1
-kind: Kustomization
-resources:
-  - ../../base/monitoring-crds
-```
+    Result: `✔ applied revision refs/heads/main@sha1:<sha>`.
 
-Add a new Flux Kustomization at:
+12. Make sure that the three objects are ready.
 
-```text
-clusters/folly/flux-system/monitoring-crds.yaml
-```
+    ```bash
+    flux --context folly get kustomization monitoring-crds -n flux-system
+    flux --context folly get helmrelease prometheus-operator-crds -n flux-system
+    flux --context folly get kustomization monitoring -n flux-system
+    ```
 
-```yaml
----
-apiVersion: kustomize.toolkit.fluxcd.io/v1
-kind: Kustomization
-metadata:
-  name: monitoring-crds
-  namespace: flux-system
-spec:
-  interval: 1h0m0s
-  path: ./clusters/folly/monitoring-crds
-  prune: true
-  sourceRef:
-    kind: GitRepository
-    name: infra
-```
+    Result: `READY` is `True` on each.
 
-List it in `clusters/folly/flux-system/kustomization.yaml`'s `resources`, the way `clusters/offsite/flux-system/kustomization.yaml` lists `monitoring-crds.yaml`.
+13. Make sure that the HelmRelease owns the CRDs.
 
-Add `monitoring-crds` to the `dependsOn` in `clusters/folly/flux-system/monitoring.yaml`, alongside the existing `storage` entry — matching the `dependsOn` shape already in `clusters/offsite/flux-system/monitoring.yaml`.
+    ```bash
+    kubectl --context folly get crd -l helm.toolkit.fluxcd.io/name=prometheus-operator-crds \
+      -o custom-columns='NAME:.metadata.name,MANAGED-BY:.metadata.labels.app\.kubernetes\.io/managed-by,RELEASE:.metadata.annotations.meta\.helm\.sh/release-name,NAMESPACE:.metadata.annotations.meta\.helm\.sh/release-namespace'
+    ```
 
-Set `crds.enabled` to `false` under `values:` in `clusters/folly/monitoring/kube-prometheus.yaml`, matching `clusters/offsite/monitoring/kube-prometheus.yaml`. Leaving it `true` makes the chart try to install CRDs it now owns by adoption rather than by its own `crds/` directory, on every upgrade — harmless once adopted, but redundant with the `monitoring-crds` Kustomization this wiring adds.
+    Result: Ten rows. Each shows `Helm`, `prometheus-operator-crds` and `flux-system`.
 
-## Order matters
+14. In a new pull request, delete this runbook and the folly rule on [Kubernetes](../platform/kubernetes.md#rules).
 
-The stamp must land on the live cluster before the git-side change merges. If the Kustomization and `dependsOn` wiring merge first, Flux installs the `prometheus-operator-crds` HelmRelease against CRDs that still lack ownership metadata, the install fails with "invalid ownership metadata", and `monitoring` stays blocked behind a Kustomization that never reaches Ready — the exact deadlock this procedure exists to avoid, now self-inflicted by wiring ahead of the stamp.
+## If something goes wrong
 
-## Verify after merge
+> [!WARNING]
+> After the merge, do not delete or recreate the CRDs, and do not revert the change. A revert makes helm-controller uninstall the release. Each action deletes every ServiceMonitor, PrometheusRule and other object of those kinds on folly.
 
-```bash
-flux --context folly get kustomization monitoring-crds -n flux-system
-flux --context folly get helmrelease prometheus-operator-crds -n flux-system
-flux --context folly get kustomization monitoring -n flux-system
-```
+| Symptom | Cause | Action |
+| --- | --- | --- |
+| The HelmRelease shows `invalid ownership metadata`. | helm-controller did not take ownership, so Helm has adopted no CRD. | Revert the change. A revert deletes no CRD while Helm has adopted none. |
 
-All three should report `Ready`. If `monitoring-crds` is stuck, re-check the ten CRDs' ownership markers with the verify loop above before assuming a chart problem.
+## Related
+
+- [Kubernetes](../platform/kubernetes.md)
+- [Observability](../platform/observability.md)

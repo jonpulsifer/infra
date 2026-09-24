@@ -1,136 +1,59 @@
 ---
 title: Built apps
-description: "kthx's deploy control plane, which builds repositories into signed artifacts and deploys them to clusters, Cloud Run, Vercel and Pages."
+description: A kthx built app is a repository or archive that kthx builds into a signed artifact and deploys to Targets on the clusters, GCP, Vercel or Cloudflare.
+status: live
 ---
 
-Built apps is kthx's deploy control plane in `apps/spindrift/`. No installation is declared under `clusters/` today — the Terraform substrate an installation federates into is still declared under `terraform/`, and the cluster declarations come back by reverting the clusters-teardown PR. Standing an installation up from nothing — Terraform bootstrap through first enrolment — is [Install kthx](../../runbooks/install-kthx.md). Installed, it is a platform workload and never one of its own Apps.
+A built app is an App that [kthx](../kthx.md) builds from a GitHub repository or an uploaded archive, signs, and deploys. The owner and agents manage them in the console and over MCP.
 
-## Ownership boundary
+## Concepts
 
-Platform desired state remains GitOps-first. Flux owns the shared operators and the authentication proxy under `clusters/` today, and — for an installation — its control-plane namespace, admission policy, target namespace and RBAC, and edge workload.
+| Noun | Meaning |
+| --- | --- |
+| App | A source and the Components deployed from it |
+| Component | A `service`, `website` or `job` in an App |
+| Vessel | A cluster, GCP project, Vercel team or Cloudflare account, created by OpenTofu |
+| Target | One runtime on a Vessel, where a Component runs |
+| Build | One run of a build route. Its Artifact is an image digest or a file tree. |
+| Deploy | An Artifact and config applied to a Target |
+| Datastore | A Postgres or Valkey instance for Apps |
+| Function | A JavaScript `fetch` handler on Workers or Cloud Run, with no Build or Deploy |
 
-kthx talks directly to delegated APIs after those prerequisites exist. On Kubernetes it owns the delivery object for each of an App's Components, in that App's own namespace; in GCP it owns App resources inside the App's pre-provisioned vessel. It never creates a boundary: no cluster, project, VPC, tunnel, signing key, or policy engine.
+![Supply chain: Source, Build, Artifact, Deploy](../../assets/supply-chain.svg)
 
-Inside a vessel it was handed, an App's resources live in a namespace of the App's own. It is created by the Target's delivery mechanism where that mechanism can carry the vessel's admission labels, and by kthx where it cannot: Argo carries them in `managedNamespaceMetadata`, while Flux's `createNamespace` takes no metadata at all, so on a Flux Target kthx applies the `Namespace` itself and stamps it with the Pod Security labels it reads off the Target's declared namespace. Flux still owns what admission means on a cluster, and one edit there reaches every App. Deleting the App deletes its namespace, and nothing else does — unplacing a Component leaves it, because its siblings live there. The sweep refuses any namespace not carrying `app.kubernetes.io/managed-by: spindrift`, and skips a namespace a second App of the same name shares.
+## Targets
 
-Operators and agents still author platform changes in git. Direct API reconciliation is authority granted to the running kthx controller, not a second manual apply path.
+![Vessels and their Targets](../../assets/spindrift-vessels.svg)
 
-## Identity and targets
+| Target | Vessel | A Deploy creates |
+| --- | --- | --- |
+| `kubernetes` | folly or offsite | A `spindrift-app` HelmRelease or an Argo CD Application that installs into `app-<app>` |
+| `cloudrun` | bluenose | A Cloud Run service or job |
+| `static` | bluenose | A Firebase Hosting release |
+| `vercel` | Vercel team | A prebuilt deployment |
+| `cloudflare-pages` | Cloudflare account | A Pages deployment |
 
-The installer chart at `packages/charts/spindrift/` gives both processes the same audience-bound projected tokens. The web process holds them because it needs them: log tailing and the connect screen's cluster probe both cross the deploy-adapter seam. An offsite installation's Kubernetes token reaches the local API and federates to folly through the folly API server's OIDC claim validation in `nix/services/k8s/`, which accepts the installation's ServiceAccount subject.
+A Target's console page lists each missing prerequisite and the OpenTofu code that adds it, which kthx can open as a pull request. Disconnecting a Target stops deploys to it and leaves its workloads running.
 
-The reconciler's GCP token uses the offsite provider in the `fml-pool` workload identity pool. The chart renders an external-account credential file for Application Default Credentials; IAM grants name the exact offsite kthx ServiceAccount subject.
+Deleting an App deletes its namespace. Removing a `static` Component spends its Firebase Hosting site id, so a redeploy needs a new App or Component name.
 
-Each Target cluster declares a shared least-privilege target surface beside the installation: the namespace whose admission labels every App namespace is stamped from, the namespace Datastores are provisioned into, the App chart's `OCIRepository`, and RBAC limiting source inspection to the two named chart sources an installation can be configured with and discovery to the capabilities kthx reports. Delivery is a `ClusterRole` because an App's namespace is named for the App and there is no one namespace left to bind in; the datastore verbs stayed a namespaced `Role`, which is a smaller total grant than moving all of it up. There is still no `secrets` rule anywhere in it, which is what makes a cluster-wide binding something other than read every credential on the cluster.
+## Builds
 
-A Datastore's credential reaches an App across that namespace boundary through external-secrets, because a `secretKeyRef` cannot cross one. The mirror is not a copy kthx holds: the datastore operator still owns the value and its rotation, and ESO reconciling the mirror is what carries a rotation to the next pod with no Deploy.
+A Build uses the first route, in Settings rank order, whose SLSA (Supply-chain Levels for Software Artifacts) build level meets the Target's minimum, 2 by default. An App can pin one route.
 
-## Vessel and supply chain
+| Route | Level | Runs on |
+| --- | --- | --- |
+| `github-actions` | 2 | `.github/workflows/spindrift-build.yml` |
+| `cloud-build` | 3 | Cloud Build |
+| `in-cluster` | 1 | A Job in `spindrift-build` on offsite |
+| `bosun` | 2 | [Bosun](../bosun.md), which is parked |
 
-![Three vessels, four Targets, and the one store of record they all reach](../../assets/spindrift-vessels.svg)
+## Addresses and config
 
-Source is `docs/assets/spindrift-vessels.d2`. Terraform and Atlantis own every boundary in it and Flux owns each cluster's platform prerequisites; kthx creates neither, which is why no arrow in it originates there.
+A Component's `reach` is `none`, `private` or `public`. [Ingress and DNS](../../platform/network/ingress-and-dns.md) covers the records and zones. `auth: proxy` adds oauth2-proxy, which admits only the owner's GitHub login.
 
-A **vessel** is a tenancy boundary kthx deploys into: the thing that admits a call or refuses it, and that owns the federation the call is made with. A cluster is one, so `folly` and `offsite` are each a vessel. A cloud project is one, so `bluenose` is a vessel. A Vercel team is one, and a Cloudflare account is one. A **Target** is one runtime surface on a vessel — Kubernetes on a cluster, Cloud Run and static hosting on a project, Vercel on a team, Pages on a Cloudflare account — and a Target is what an App is placed on. `apps/spindrift/README.md` carries the model; `apps/spindrift/src/domain/vessel.ts` is where it is stated in code, and the surfaces each kind is probed for are the table there rather than a list here.
+`<app>.lolwtf.dev` shows a status page until a Component serves it. kthx writes the record of an App on a zone apex once, and cannot change or delete it.
 
-The two edge Targets are the boundaries reached with a stored bearer rather than with federation, because neither platform offers inbound OIDC to exchange a projected token for. Each is one installation-wide value in the installation Secret (`SPINDRIFT_VERCEL_TOKEN`, `SPINDRIFT_CLOUDFLARE_TOKEN`), never a column on a Target, and a Target whose token is missing or unscoped connects anyway and reads its checklist unmet. Both take a `files` artifact and are handed a finished tree: the build runs on whichever route the Target's minimum SLSA level selected, and the deployment names no framework and no build command, so a rollback re-deploys rather than rebuilding.
+kthx writes config values to Secret Manager in bluenose, and each Target reads them from there ([Secrets](../../platform/secrets.md)).
 
-kthx never creates a vessel. Terraform owns every boundary and its platform prerequisites, Atlantis applies them, and kthx reports an absent or unauthorized one as an unmet prerequisite with the sentence behind it.
-
-An unmet prerequisite also carries the Terraform that clears it and the root it belongs in, generated from what the probe observed. A vessel names its root in the installation manifest, and kthx opens the stanza as a pull request on this repository; Atlantis applies it and the standing check turns the row green. Nothing is enabled, granted, or created by kthx itself, and a prerequisite cleared outside Terraform says so rather than offering a change.
-
-`bluenose` is the home vessel: kthx's own project and the default shared one for Apps. The organization root adopts its project boundary; `terraform/gcp/projects/bluenose/` owns its platform prerequisites. Atlantis applies both roots.
-
-Build artifacts and signing stay in `trusted-builds`. kthx can invoke builds and sign the one artifact digest; vessel runtimes receive pull-only access. Cloud Run is restricted to the vessel's enforcing Binary Authorization policy.
-
-![A Source plus a Build is an Artifact, and an Artifact plus config is a Deploy](../../assets/supply-chain.svg)
-
-Source is `apps/spindrift/src/web/client/diagrams/supply-chain.d2`, which is also what the product's own Supply chain screen renders — it lives inside that package because the image build prunes to it.
-
-Kyverno is installed on both clusters from `clusters/base/platform/kyverno/`. An installation's image policy — a `ClusterPolicy` rejecting an unsigned digest at admission with background reporting enabled, pinning the public half of the `trusted-builds` signer — ships with its cluster declarations.
-
-## Repository identity
-
-kthx and [Bosun](../bosun.md) both speak to GitHub as installations of one shared GitHub App (`spindrift-bot`, App ID `4576122`, owned by the `jonpulsifer` user account). Atlantis and the Flux deploy-key App stay separate — a webhook is one-per-App, so folding either in would collide.
-
-That App is **private**, so it installs on `jonpulsifer` and nowhere else: GitHub offers no account picker for a private App, and `homelab-ng` cannot be reached from either GitHub's install page or the Repositories screen's install link. `github.accounts` in the offsite installation's manifest lists `homelab-ng` alongside `jonpulsifer`, and that filter grants nothing on its own — the App's visibility is the blocker, and making it public is what an `homelab-ng` repository needs before it can be connected.
-
-- Visibility is not on the App's General settings page, and after creation it is never labelled "Where can this GitHub App be installed?" — that wording exists only on the creation form. On an existing App the control is a **Make public** button under **Advanced → Danger zone** (`/settings/apps/<slug>/advanced`). The move is one-way in practice: a public App cannot be made private again while it is installed on any other account.
-
-An installation's own identity is resolved per mint, never captured at boot: either the installation Secret's `SPINDRIFT_GITHUB_APP_ID` + `SPINDRIFT_GITHUB_APP_PRIVATE_KEY` pair (adopting an App that already exists), or a `github_app` row sealed by GitHub's manifest flow at `/internal/github/setup` (creating one from the Repositories screen). `apps/spindrift/src/integrations/github/app-auth.ts` mints an App JWT and, per installation, an hour-lived installation token — the App's private key is the only long-lived credential, read fresh on every mint rather than cached at process start. There is no device flow.
-
-A repository connects by installing the App on its account and selecting it on GitHub; kthx re-enumerates through the App JWT rather than trusting anything GitHub's callback carries. `github.accounts` in the manifest filters which installations the Repositories screen treats as connectable, since a public App can also be installed by strangers.
-
-The App-level webhook delivers to `https://spindrift-control.lolwtf.dev/internal/github/webhook`, reached through a path-scoped rule on the `spindrift-control` Cloudflare tunnel (`terraform/network/cloudflare`) beside the bosun outbox rule. No `SPINDRIFT_GITHUB_WEBHOOK_SECRET` means every delivery is refused, the same posture as no App identity at all.
-
-bosun authenticates as the same App with the **same** private key — the operator's choice, not a code constraint: GitHub Apps support a distinct key per consumer, but this fleet rotates one PEM for both, so rotating means updating every home together (1Password, `nix/secrets/bosun.sops.yaml`, the installation Secret) and then deleting the old key on GitHub. See [Bosun](../bosun.md).
-
-## Build routes
-
-A Source becomes an Artifact on one of four adapter kinds — `github-actions`, `cloud-build`, `in-cluster`, `bosun` — each with its own contract and implementation under `apps/spindrift/src/adapters/build/`, and its own manifest shape in `apps/spindrift/src/config/build-route-schemas.ts`. An installation configures whichever routes it wants under `build.routes`, each with an operator-given name.
-
-Rank is the manifest's declared order, nothing else: the first configured route at or above a Target's minimum SLSA level wins. `apps/spindrift/src/domain/build-route.ts` is the whole of that rule, and it never re-sorts what the manifest declares.
-
-`bosun` is the route ranked last on purpose: every other adapter is dialed directly, so a broken one is visible the moment a Build runs, while bosun is polled in over [Bosun](../bosun.md)'s warm pool and keeps building while the Actions plane itself is down.
-
-On the `github-actions` route a connected repository's caller (the one `connectRepository`'s pull request writes) runs the reusable workflow at `main` on that repository's own minutes, and the platform repository's caller runs it for archives and for repositories whose caller is not merged yet. **The run's identity is the workflow it executes, not the repository it runs in**: the `homelab` pool admits any repository under the accounts the installation connects from while its `job_workflow_ref` is `spindrift-build.yml@refs/heads/main` (`terraform/gcp/projects/homelab-ng/workload-identity.tf`), and the trusted-builds signer, the Artifact Registry, and the seal key are granted to that same principal. The private half of the route's `sealPublicKey` lives in Secret Manager in `trusted-builds` (`terraform/gcp/projects/trusted-builds/seal-key.tf`); the platform repository's caller reads its own copy from a repository secret first, every other caller reads the store. A stored registry credential rides along sealed on every hosted build — the run may land in a repository whose own token cannot push to that registry — and the sealed login runs after the run's-own-token login, so it wins.
-
-## Config delivery
-
-kthx writes config values into the installation's secret store and keeps only pinned references. Every Target the value is delivered on fetches it back itself, so a Target that cannot reach that store cannot hold a Component with configuration — placement says so rather than deploying one that comes up with an empty environment.
-
-**One store of record, several access paths.** The store of record is Secret Manager in the `bluenose` vessel. The paths differ by Target and the value does not: a Cloud Run revision resolves a pinned reference out of that project natively and can be pointed nowhere else, and each cluster reaches the same project through the `gcpsm` `ClusterSecretStore` in `clusters/base/platform/gcp-secret-manager/`, federating as its own ServiceAccount through that cluster's `fml-pool` provider. One store every Target shares is what makes a Component's placement a free choice between them.
-
-`clusters/base/platform/onepassword-connect/` stays the platform's own store — oauth2-proxy's credentials, the tunnel, the operators. It is a second store both clusters reach, and a Target reporting two stores still writes App config to the one the installation names.
-
-A Target's `ClusterSecretStore` is operator-stated in that Target's chart-values. The chart refuses to render config without it rather than producing an ExternalSecret that never syncs.
-
-Config that cannot follow a Component to another Target is named and demanded before the move commits, because kthx reads no value back and so cannot copy one. Between the two clusters nothing has to follow: they are two paths to one store, so the reference moves and no value does.
-
-The store a running installation writes to is its stored row's. Nothing else declares one: moving it takes the same `configureInstallation` that carries every other manifest change.
-
-## Reach and auth
-
-A Component states two independent facts: `reach` is `none`, `private`, or `public`; `auth` is `none` or `proxy`. `auth: proxy` with `reach: none` is refused — there is no route to filter.
-
-The App chart at `packages/charts/spindrift-app/` renders an HTTPRoute when `reach` is not `none`, and the Gateway API `ExternalAuth` filter exactly when `auth` is `proxy`. The cross-namespace grant belongs to the shared proxy platform resources; the chart renders no Gateway and no certificate.
-
-The record type is the boundary. `reach: private` publishes an unproxied A record at the shared Gateway's load-balancer address, which is RFC1918 and so is unreachable from the internet whatever is attached to it. `reach: public` publishes a proxied CNAME at the Target's Cloudflare tunnel, whose ingress is a static wildcard rule per zone that Terraform owns.
-
-An App's shared name is its **vanity**: one label under the zone, or `@` for the zone itself (`setAppVanity`). It reaches every Target — on a cluster it rides the Component's own HTTPRoute and DNSEndpoint beside the canonical `<app>-<component>.<zone>`; on Vercel, Firebase Hosting and Pages the adapter attaches it as the project's domain — and it goes to an App's sole serving Component, because two claimants on one hostname is a collision the platform resolves arbitrarily. The address a release states — the App list's URL column, the workspace headline, a Deploy's own page — is that vanity wherever the deploy published one, with the canonical underneath it as the fallback. **kthx publishes every record it is responsible for, the apex included, and nothing it mints is written into Terraform.** A Target the platform names has no cluster of its own, so its vanity record is a DNSEndpoint kthx writes on the control-plane cluster (`apps/spindrift/src/adapters/dns/`), pointing where the adapter's verdict says the platform answers — `<project>.pages.dev`, `cname.vercel-dns.com` — and withdrawn when the name or the placement goes; Firebase Hosting reports no such target and so publishes nothing. **An apex record is the exception: it is published once and never re-pointed or withdrawn.** external-dns marks the records it owns by prefixing the record type onto the name's first label, and an apex's first label belongs to the zone — so the marker for a bare `example.com` lands outside every zone this installation holds and is dropped before it is written. Both the update path and the delete path filter on that marker, so a bare domain keeps pointing wherever it first went until somebody edits DNS by hand. The `--txt-prefix` shape that avoids this is documented upstream and changing it orphans the ownership of every record already published, so the limit is stated rather than moved: `isApexName` is what the Domain control and the deploy log read to say so. Terraform keeps zone-level routing only: cloudflared's `*.<zone>` never matches the apex, so a cluster-served apex is a `hostname = "<zone>"` ingress rule on the Apps tunnel with `publish_record = false`, and `www` is a redirect to the apex declared beside the zone, never a second name. Cloud Run serves no apex today: domain mappings are Preview and absent from `northamerica-northeast1`, and a proxied CNAME to `run.app` needs a Host override the zone's plan does not carry.
-
-Which zone a name is minted in is the App's, not the reach's. The installation manifest's `dns.zones` is a list, each entry naming a zone and the reaches it serves; an App pins one and unpinned Apps take the first entry serving their Component's reach. A pin a Component's reach outgrows falls through to a zone that serves it rather than publishing on a boundary the zone does not answer on.
-
-A zone in that list is a promise three other places keep: a wildcard listener and certificate on each serving cluster's Apps Gateway, a `domainFilters` entry on external-dns, and — for `public` — an ingress rule on the tunnel in `terraform/network/cloudflare/spindrift.tf`. A zone declared without them deploys green and resolves nowhere.
-
-An App's address answers from the moment the App exists, not from its first deploy. `clusters/offsite/apps/spindrift/status-route.yaml` holds a wildcard route over the dedicated zone onto the control plane, and `terraform/network/cloudflare/spindrift.tf` publishes the wildcard record that reaches it, so a name nothing serves yet lands on a page saying where that App is up to. It is lowest precedence by construction: a Component's own exact-hostname route outranks a wildcard at the gateway, as its record does in DNS. The zone is `SPINDRIFT_DOMAIN`, dedicated — a catch-all over a zone holding hand-managed names would answer for names Terraform owns. The route reaches the control plane's whole listener, so the process confines every other route to its own names (`apps/spindrift/src/web/host-scope.ts`) and any path on an App's name lands on that page.
-
-Each Target asserts which reaches it serves and which its authenticated edge can stand in front of. A Component asking for something a Target does not assert is a non-candidate at placement with a stated reason, rather than a green Deploy behind a route that answers nothing.
-
-`{reach: public, auth: proxy}` is expressible and unmet on offsite: `clusters/base/apps/oauth2-proxy/` admits a single GitHub user, which is an honest edge in front of a private address and a false one in front of a public one.
-
-## Functions
-
-A **Function** is one JavaScript `export default { fetch(request, env) }` handler deployed as one public endpoint, and it is not an App: no Build, no Deploy row, no Vessel admission. The editor at `/functions` holds the text, **Run** previews it in a Bun `Worker` with a timeout, and **Save** pushes it to the function's own target — Cloudflare Workers as script `fn-<name>` answering on `<name>.fn.<zone>` with the installation's Cloudflare bearer, or a Cloud Run function on the home vessel with its federated identity, public through the Service's `invokerIamDisabled` because the organization policy forbids `allUsers`. The row remembers the URL that came back and the last deploy error. A Workers hostname answers only once Cloudflare has issued its certificate — a few minutes after the first Save for a new name — and the editor polls the URL and says when it is live; live lines arrive over their own stream socket (`/internal/streams/function-log`), the same shape as the Deploy log tail on a separate connection. Source is `apps/spindrift/src/functions/`.
-
-The Cloudflare bearer is the Pages token widened by hand to Workers scopes — Account: Workers Scripts Edit, Workers Tail Read; zone: Workers Routes Edit, SSL and Certificates Edit, Zone Read — and still holds no DNS permission: the custom-domain record is Cloudflare's own side effect of the Workers API. `terraform/network/cloudflare/spindrift.tf` declares the ownership boundary and `terraform/gcp/projects/bluenose/` holds the Cloud Functions prerequisites.
-
-A function carries an **environment** the handler reads as `env.NAME`. Values are write-only — set once in the editor and never shown again by it, though a Run executes the editor's code against them — and rest as one envelope sealed with the installation keyring (`SPINDRIFT_CREDENTIAL_KEYRING`; without it the command refuses to keep values). Workers receive them as `secret_text` bindings; a Cloud Run function receives them as plain Service environment, visible to anyone who can read the project.
-
-Schedules and history are not part of it. A function that needs either becomes a Component.
-
-## Quick sites
-
-[Quick sites](../kthx.md) are a neighbour, not a feature: their own process, their own namespace, their own database and bucket. What the two share is `packages/archive/` — one reader for an uploaded tar or zip, one parser for a `gs://` address — and the Apps Gateway that fronts both. Neither reads the other's rows.
-
-## Control-plane shape
-
-![Pressing Deploy, as a timeline: the intent commits under one lock, the reconciler claims it under another](../../assets/deploy.svg)
-
-Source is `apps/spindrift/src/web/client/diagrams/deploy.d2`, shared with the product's Deploys screen the same way.
-
-A release runs the web process, the reconciler, and their CNPG store. The reconciler supervises the target, config, deploy, build, manifest, and — where a repository integration exists — repository loops, each with its own retry chain.
-
-Both charts under `packages/charts/` are published as OCI artifacts by `.github/workflows/spindrift-charts.yml`, tagged with the version each `Chart.yaml` carries. An installation pins each by that tag through `OCIRepository` consumers — the installer's beside its release, the App chart's on every Target cluster.
-
-A teardown is only ever what an act asked for by name. The deploy adapter's `destroy` verb is called by unplacing a Component, destroying a Datastore, and deleting an App — each one's whole subject is the removal, and the delete reviews what it will tear down before it is confirmed. Disconnecting a Target calls nothing and strands what is running, deliberately: its subject is the Target row, and tearing down a live service is not what it says. A stranded workload is the operator's to reap by hand.
+Function env values are write-only, but Cloud Run shows them to bluenose readers. Workers Functions need the Cloudflare token scopes in `terraform/network/cloudflare/spindrift.tf`.
