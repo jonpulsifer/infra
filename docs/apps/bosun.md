@@ -5,7 +5,7 @@ description: An experimental NixOS service keeping a warm pool of one-job GitHub
 
 **bosun is an experiment, and no host enables it.** It serves no production CI and never has — the benchmarks in `apps/bosun/README.md` are a race against GitHub's hosted runners, not a migration. The daemon, its module and both hulls stay in the tree, waiting for hardware worth running them on. Everything below describes what `apps/bosun` is, and what a host that enables it gets.
 
-GitHub Actions jobs that need a real machine boundary run in **skiffs** — ephemeral cloud-hypervisor microVMs, one job each, destroyed afterwards. `apps/bosun` keeps a pool of them warm. It is a peer of [Built apps](kthx/built-apps.md), not part of it.
+GitHub Actions jobs that need a real machine boundary run in **skiffs** — ephemeral cloud-hypervisor microVMs, one job each, destroyed afterwards. `apps/bosun` keeps a pool of them warm. It is a peer of kthx's [built-apps control plane](kthx/built-apps.md), not part of it.
 
 ## The four nouns
 

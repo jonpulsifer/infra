@@ -32,3 +32,9 @@ The second Install heading gets a -1 id.
 ### Ünïcode héading — with: punctuation! (yes)
 
 Inline `<host>.lolwtf.ca` and raw <b>tags</b> stay text & escaped.
+
+An autolink <https://example.com/docs> works, and <img src=x onerror=alert(1)> stays text.
+
+#### Deep detail
+
+An h4 gets an id but stays out of the rail.

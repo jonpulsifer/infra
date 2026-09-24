@@ -4,8 +4,6 @@ description: "A homelab managed as code: NixOS hosts, two Kubernetes clusters, O
 cards: [apps, platform]
 ---
 
-## jonpulsifer/infra
-
 Living documentation for a homelab managed entirely as code: NixOS bare metal, two Kubernetes clusters, an OpenTofu-managed cloud and network fabric, and GitOps-driven deployments. The source of truth is the [infra repository](https://github.com/jonpulsifer/infra); this wiki is its `docs/` directory, published on every merge to `main`.
 
 ## Start here
