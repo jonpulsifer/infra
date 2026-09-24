@@ -78,7 +78,7 @@ spec:
               msg = replace(msg, r'inline:\S+', "inline:<redacted>")
               msg = replace(msg, r'(Proxy-)?Authorization:.*', "Authorization: <redacted>")
               msg = replace(msg, r'(?i)Bearer\s+\S+', "Bearer <redacted>")
-              msg = replace(msg, r'(?i)xi-api-key:\s*\S+', "xi-api-key: <redacted>")
+              msg = replace(msg, r'(?i)[\x22\x27]?xi[-_]api[-_]key[\x22\x27]?\s*[:=]\s*[\x22\x27]?[^\s\x22\x27,}]+[\x22\x27]?', "xi-api-key: <redacted>")
               msg = replace(msg, r'"password"\s*:\s*"[^"]*"', "\"password\":\"<redacted>\"")
               msg = replace(msg, r'https://discord\.com/api/webhooks/\S+', "https://discord.com/api/webhooks/<redacted>")
               ._msg = msg
@@ -214,6 +214,36 @@ spec:
                     msg = string!(._msg)
                     assert!(!contains(msg, "sk_abcdef0123456789"))
                     assert!(contains(msg, "xi-api-key: <redacted>"))
+
+        - name: redacts an xi-api-key header serialized as a JSON field
+          input:
+            insert_at: kubernetes_message
+            type: log
+            log_fields:
+              message: '{"headers":{"xi-api-key":"sk_json_abcdef0123456789"}}'
+              kubernetes.pod_namespace: elevenlabs
+          outputs:
+            - extract_from: kubernetes_message
+              conditions:
+                - type: vrl
+                  source: |
+                    msg = string!(._msg)
+                    assert!(!contains(msg, "sk_json_abcdef0123456789"))
+
+        - name: redacts the xi_api_key underscore spelling
+          input:
+            insert_at: kubernetes_message
+            type: log
+            log_fields:
+              message: '{"xi_api_key":"sk_underscore_abcdef0123456789"}'
+              kubernetes.pod_namespace: elevenlabs
+          outputs:
+            - extract_from: kubernetes_message
+              conditions:
+                - type: vrl
+                  source: |
+                    msg = string!(._msg)
+                    assert!(!contains(msg, "sk_underscore_abcdef0123456789"))
 
         - name: redacts a JSON password field in a trunk PATCH body
           input:
