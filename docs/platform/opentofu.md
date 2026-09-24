@@ -19,9 +19,9 @@ OpenTofu is the open-source fork of Terraform. The lab uses it to declare the ne
 
 Atlantis plans each root with a changed file that matches `ATLANTIS_AUTOPLAN_FILE_LIST`, and each root that calls a changed module. Before a plan, the hook `plan-hook.sh` checks the GitHub identity that opened the PR or asked for the plan. `only-me.rego`, a Rego policy, lists the GitHub identities that pass.
 
-A comment of `atlantis apply` applies the plans, and Atlantis then merges the PR. Atlantis ignores the `atlantis.yaml` files in `clusters/<site>/bootstrap/`.
+A comment of `atlantis apply` applies the plans, and Atlantis then merges the PR. Before an apply or an `atlantis import`, the hook `apply-hook.sh` checks the commenter against `appliers.rego`, which admits only the owner. Both hooks run conftest from the policy mount, so a `conftest.toml` in a PR cannot change the result. Atlantis ignores the `atlantis.yaml` files in `clusters/<site>/bootstrap/`.
 
-`only-me.rego` also lists `clanky-bot[bot]`, the GitHub App of [Rowbutt](../apps/mate.md), so Rowbutt can plan its own PRs. The Atlantis ServiceAccount is `cluster-admin` on both clusters.
+`only-me.rego` also lists `clanky-bot[bot]`, the GitHub App of [Rowbutt](../apps/mate.md), so Rowbutt can plan its own PRs. A plan runs the PR's code with Atlantis's credentials, so every identity in `only-me.rego` is trusted. The Atlantis ServiceAccount is `cluster-admin` on both clusters.
 
 ## Rules
 
@@ -35,7 +35,8 @@ A comment of `atlantis apply` applies the plans, and Atlantis then merges the PR
 ## Where it lives
 
 - `clusters/offsite/apps/atlantis/helm-release.yaml`: the autoplan list and repo config
-- `clusters/offsite/apps/atlantis/policies/only-me.rego`: `atlantis_users`
+- `clusters/offsite/apps/atlantis/policies/only-me.rego`: `atlantis_users`, who can plan
+- `clusters/offsite/apps/atlantis/policies/appliers.rego`: `atlantis_appliers`, who can apply and import
 - `clusters/base/atlantis-bootstrap-rbac.yaml`: the `cluster-admin` binding
 - `mise.toml`: the `tf:*` tasks. No CI job checks the README tables that `tf:docs` writes.
 
