@@ -26,7 +26,6 @@ export const systemClock: Clock = {
     }),
 };
 
-/** A wait as a human reads it: `45s`, then `3m 05s`. */
 export function duration(ms: number): string {
   const seconds = Math.max(0, Math.floor(ms / 1000));
   if (seconds < 60) return `${seconds}s`;

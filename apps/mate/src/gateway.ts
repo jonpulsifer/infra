@@ -17,7 +17,7 @@ export const INTENTS =
   GatewayIntentBits.GuildMessages |
   GatewayIntentBits.MessageContent;
 
-/** Configuration errors: reconnecting cannot fix them, so the process stops. */
+/** Configuration errors that reconnecting cannot fix, so the process exits. */
 export const FATAL_CLOSE_CODES: ReadonlySet<number> = new Set([
   GatewayCloseCodes.AuthenticationFailed,
   GatewayCloseCodes.InvalidShard,
@@ -37,7 +37,7 @@ export interface GatewayDeps {
   health: Health;
   clock: Clock;
   onLimit?(limit: SessionStartLimit): void;
-  /** Every close, fatal or not, before anything is done about it. */
+  /** Called on every close, before a fatal one exits. */
   onClose?(code: number, fatal: boolean): void;
   exit(code: number): void;
 }
@@ -84,8 +84,7 @@ export function createGateway(deps: GatewayDeps): Gateway {
   manager.on(WebSocketShardEvents.Closed, (code) => {
     health.connected = false;
     const fatal = FATAL_CLOSE_CODES.has(code);
-    // Counted before the exit, because `exit` is what flushes it: a close
-    // code that never leaves the process cannot be alerted on.
+    // Before exit, which flushes metrics, so the close code gets exported.
     deps.onClose?.(code, fatal);
     if (fatal) {
       log.error('gateway closed with a non-recoverable code; exiting', {

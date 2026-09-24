@@ -1,12 +1,6 @@
 /**
- * Discord as a surface: the raw API calls the adapter makes, the canvas that
- * paints a turn into a thread as one card edited in place, and the
- * translation of a gateway message into the shape the state machine reads.
- *
- * Everything mate says that is not an answer is subtext, so the answer is the
- * only full-size text in a thread. A turn in flight is a Components V2 card:
- * the status line, the tool calls so far, the answer as it streams, and Stop.
- * The last frame drops the card and leaves the answer with a one-line footer.
+ * Discord as a surface. A turn in flight is one Components V2 card edited in
+ * place; the last frame leaves the answer with a one-line subtext footer.
  */
 import type { API } from '@discordjs/core';
 import {
@@ -39,12 +33,11 @@ import type {
 
 export type StopRow = APIActionRowComponent<APIButtonComponentWithCustomId>;
 
-/** A plain line, or a Components V2 message, which carries no `content`. */
+/** A Components V2 message carries no `content`. */
 export type OutMessage =
   | { content: string }
   | { components: APIMessageTopLevelComponent[] };
 
-/** What the Discord adapter asks of Discord; the fake in tests records it. */
 export interface Discord {
   createThread(
     channelId: string,
@@ -71,7 +64,7 @@ export interface Discord {
 export const STOP_PREFIX = 'stop:';
 /** Discord's cap on the text of one Components V2 message, all of it summed. */
 export const TEXT_CAP = 4000;
-/** Tool calls a live card lists; older ones fold into a count. */
+/** Timeline entries a live card lists; older ones fold into a count. */
 export const TOOLS_SHOWN = 6;
 export const TOOL_TITLE_MAX = 90;
 /** Room kept on a live card for the status line, the tool list and Stop. */
@@ -94,7 +87,7 @@ const MARK: Record<Mark, string> = {
   failed: '⚠️',
 };
 
-/** Small grey text: how mate says anything that is not an answer. */
+/** Discord's small grey text, for anything that is not an answer. */
 export function subtext(line: string): string {
   return `${SUBTEXT}${line}`;
 }
@@ -129,10 +122,8 @@ function texts(components: readonly APIMessageTopLevelComponent[]): string[] {
 }
 
 /**
- * What a message says as conversation, which is what the transcript replay
- * hands a fresh harness. A card is its answer and nothing around it — the
- * status, the tool list and the footer are all subtext — and a plain line is
- * its words without the subtext mark, so the notice filter still knows it.
+ * A card yields only its answer, since the rest is subtext. A plain line drops
+ * its subtext mark so the notice filter's prefixes still match it.
  */
 export function spoken(message: {
   content?: string;
@@ -221,13 +212,7 @@ interface Entry {
   state: ToolState | 'step';
 }
 
-/**
- * One turn in a Discord thread: a card edited in place as the turn moves,
- * sealed into a plain message at the cap. The card carries what the harness
- * is doing and has done — every tool call and every step between them — so
- * the answer under it is only the answer, and the last frame takes the card
- * away and leaves the answer with a footer saying what it took.
- */
+/** One card edited in place; each full chunk is sealed as its own message. */
 export class DiscordCanvas implements Canvas {
   private sealed = 0;
   private liveId: string | null = null;
@@ -275,11 +260,6 @@ export class DiscordCanvas implements Canvas {
     await this.send(components);
   }
 
-  /**
-   * The live frame. The status line is left off while a tool call is
-   * running, because the harness's status is then that call's title and the
-   * list below already shows it running.
-   */
   private card(
     tail: string,
     status: string | null,
@@ -287,6 +267,7 @@ export class DiscordCanvas implements Canvas {
     const entries = [...this.timeline.values()];
     const running = entries.some((entry) => entry.state === 'in_progress');
     const head: APITextDisplayComponent[] = [];
+    // While a tool runs, the status is its title, which the list already shows.
     if (status && !running)
       head.push(text(subtext(`${GLYPH.in_progress} ${oneLine(status)}`)));
     if (entries.length > 0) head.push(text(checklist(entries)));
@@ -335,7 +316,6 @@ export class DiscordCanvas implements Canvas {
       : `${GLYPH.complete} ${facts.join(' · ')}`;
   }
 
-  /** Seals every full chunk and returns what is still live. */
   private async seal(answer: string): Promise<string> {
     let live = answer.slice(this.sealed);
     while (live.length > CHUNK_BUDGET) {
@@ -357,7 +337,6 @@ export class DiscordCanvas implements Canvas {
   }
 }
 
-/** The tool calls and steps of a turn, newest last, as subtext lines. */
 function checklist(entries: readonly Entry[]): string {
   const shown = entries.slice(-TOOLS_SHOWN);
   const lines = shown.map((entry) =>
@@ -369,11 +348,8 @@ function checklist(entries: readonly Entry[]): string {
 }
 
 /**
- * One line in a Discord thread that mate keeps editing. It is a message
- * rather than the typing indicator because the indicator carries no words and
- * expires ten seconds after it is raised; it is deleted rather than edited
- * away at the end because Discord has no empty message, and a line saying
- * mate was starting a sandbox is worth nothing once the answer is under it.
+ * A message, since the typing indicator carries no words and expires after ten
+ * seconds. Deleted at the end, since Discord has no empty message.
  */
 export class DiscordNotice implements Notice {
   private id: string | null = null;
@@ -450,11 +426,7 @@ export function discordSurface(
   };
 }
 
-/**
- * A reaction on the human's own message: seen while mate works on it, and
- * how it went once it is done. The two calls are independent, so both are
- * tried and either failing is the caller's one warning.
- */
+// Both reaction calls are tried; either failing throws once.
 async function markMessage(
   api: Discord,
   message: MessageRef,
@@ -472,7 +444,6 @@ async function markMessage(
   if (failed) throw new Error(plain(failed.reason));
 }
 
-/** A Discord thread's key, which its id alone settles. */
 export function discordKey(threadId: string): string {
   return `discord:${threadId}`;
 }
@@ -492,11 +463,6 @@ export interface DiscordMessage {
   mentionsMe: boolean;
 }
 
-/**
- * The message as the state machine reads it, or null when it is not mate's to
- * read. A Discord thread is itself a channel, so a message in a thread names
- * the thread as its channel and nothing has to be resolved to find it.
- */
 export function discordInbound(
   message: DiscordMessage,
   guildId: string,
@@ -506,6 +472,7 @@ export function discordInbound(
     surface: 'discord',
     id: message.id,
     channelId: message.channelId,
+    // A Discord thread is itself a channel.
     threadId: message.channelId,
     authorId: message.authorId,
     authorIsBot: message.authorIsBot,

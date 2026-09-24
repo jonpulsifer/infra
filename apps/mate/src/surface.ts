@@ -1,44 +1,30 @@
 /**
- * The place mate is present, behind one interface. Discord and Slack are both
- * adapters over it, so the thread state machine and the renderer never name
- * either one and the whole contract runs against a fake.
- *
- * A surface is one workspace: its own bot identity, its own allowlists, its
- * own ids. Two surfaces in one process share the concurrency cap, the turn
- * budgets and the quiet timer, because those belong to mate rather than to a
- * place it answers in.
+ * The interface Discord and Slack adapt to. Surfaces in one process share the
+ * concurrency cap, the turn budgets and the quiet timer.
  */
 
 export type SurfaceName = 'discord' | 'slack';
 
-/** One thread, named the way its own surface names it. */
 export interface ThreadRef {
   readonly surface: SurfaceName;
   /** The channel the thread hangs under. */
   readonly channelId: string;
-  /** The thread itself, inside that channel. */
   readonly id: string;
 }
 
-/**
- * The name a thread is known by across both surfaces, and the only key the
- * state machine uses. A Discord thread is itself a channel, so its id is a
- * snowflake that stands alone and a message in a thread names nothing else; a
- * Slack thread is the timestamp of its parent message, which is only unique
- * inside its channel, so the channel is part of its name.
- */
+// A Slack thread's ts is unique only within its channel, so the key includes
+// the channel. A Discord thread id stands alone.
 export function threadKey(thread: ThreadRef): string {
   return thread.surface === 'discord'
     ? `discord:${thread.id}`
     : `${thread.surface}:${thread.channelId}:${thread.id}`;
 }
 
-/** A message the surface delivered, already stripped of its own wire shape. */
 export interface Inbound {
   readonly surface: SurfaceName;
   readonly id: string;
   readonly channelId: string;
-  /** The thread it landed in, or null when it is not in one. */
+  /** The thread it was posted in, or null when it is not in one. */
   readonly threadId: string | null;
   readonly authorId: string;
   readonly authorIsBot: boolean;
@@ -46,7 +32,6 @@ export interface Inbound {
   readonly mentionsMe: boolean;
 }
 
-/** One message already in a thread, as the transcript replay reads it. */
 export interface HistoryMessage {
   id: string;
   authorId: string;
@@ -63,14 +48,9 @@ export interface HistoryQuery {
 
 export type Outcome = 'done' | 'stopped' | 'failed';
 
-/**
- * How far one tool call has got. The three values are Slack's `task_card`
- * statuses, which is the only surface that renders them; ACP's `pending` is
- * `in_progress` here because a card cannot be pending.
- */
+/** Slack's `task_card` statuses. */
 export type ToolState = 'in_progress' | 'complete' | 'error';
 
-/** One tool call of a turn, as a surface that shows them one by one reads it. */
 export interface ToolCall {
   /** The harness's own id for it, stable across its updates. */
   readonly id: string;
@@ -78,12 +58,8 @@ export interface ToolCall {
   readonly state: ToolState;
 }
 
-/**
- * Where one turn's answer is painted. The renderer decides what the answer
- * says and when to repaint it; the canvas decides how that reaches the
- * surface — edited in place and chunked on Discord, streamed on Slack — and
- * is the only thing that remembers what has already been shown.
- */
+// The renderer decides what the answer says and when; the canvas decides how it
+// reaches the surface, and alone remembers what has been shown.
 export interface Canvas {
   /** The answer so far, and the line naming what the harness is doing. */
   live(text: string, status: string | null): Promise<void>;
@@ -91,90 +67,47 @@ export interface Canvas {
   final(text: string, outcome: Outcome): Promise<void>;
   /** The surface's "working" sign, shown until the first live frame. */
   working?(): Promise<void>;
-  /**
-   * One tool call, where the surface renders them itself. Slack has a card
-   * per call that mutates in place; Discord lists them on the turn's live
-   * card. A surface with neither is painted by the status line alone.
-   */
+  /** Without it, the status line alone shows tool calls. */
   tool?(call: ToolCall): Promise<void>;
-  /**
-   * One thing the harness said it was about to do before it did it — a run of
-   * text with a tool call behind it — for a surface that keeps a record of
-   * what a turn did. It goes beside the tool calls rather than into the
-   * answer, which is the whole point: the answer is what the turn concluded,
-   * and a thread that carries every sentence leading up to it is unreadable.
-   * Declared alongside `tool` and for the same reason: each surface keeps it
-   * wherever it keeps the tool calls, in the order they happened.
-   */
+  /** A run of text that a tool call followed, kept beside the tool calls. */
   step?(text: string): Promise<void>;
 }
 
-/**
- * One line mate keeps a hand on: rewritten in place as the news changes, and
- * taken back when there is nothing left to say. Both surfaces post a message
- * and edit it, because a thread has nowhere else to put words — Discord's
- * typing indicator and Slack's agent session each say that mate is working
- * and neither can say what it is working on.
- */
+// A posted message edited in place: a typing indicator or agent session says
+// that mate is working, and cannot say on what.
 export interface Notice {
-  /** Says the line, or rewrites what it already says. */
   say(text: string): Promise<void>;
   /** The last word: a sentence replaces the line, `null` takes it away. */
   done(text: string | null): Promise<void>;
 }
 
-/** One human message, where a surface can mark it. */
 export interface MessageRef {
   readonly channelId: string;
   readonly id: string;
 }
 
-/** How far mate has got with one message: picked up, or how its turn ended. */
 export type Mark = 'seen' | Outcome;
 
 export interface Surface {
   readonly name: SurfaceName;
   /** The bot's own user id here: what a mention looks like, and who "you" is. */
   readonly me: string;
-  /** Who may drive mate here. Anyone else is silence. */
+  /** Who may drive mate here; mate ignores everyone else. */
   readonly allowedUserIds: ReadonlySet<string>;
   /** Where a mention may open a thread. */
   readonly allowedChannelIds: ReadonlySet<string>;
-  /** The thread a mention opens. */
   openThread(message: Inbound, title: string): Promise<ThreadRef>;
-  /** One plain line in the thread: everything mate says that is not an answer. */
   post(thread: ThreadRef, text: string): Promise<void>;
-  /**
-   * A line mate will keep rewriting, for news that is only true until the
-   * next thing happens — which is the wait for a sandbox, and nothing else.
-   */
+  /** For the wait for a sandbox, which is news only until the next step. */
   notice(thread: ThreadRef): Notice;
   /** The thread's own messages, newest first. */
   history(thread: ThreadRef, query: HistoryQuery): Promise<HistoryMessage[]>;
-  /**
-   * A fresh canvas for one turn. `asker` is the human it answers: Slack
-   * requires a streamed message to name who it is for, Discord does not care.
-   */
+  /** Slack's streams require the `asker`; Discord ignores it. */
   canvas(thread: ThreadRef, asker: string): Canvas;
-  /**
-   * Seals the thread at teardown, where the surface has such a thing. Discord
-   * archives the thread; Slack closes the agent session on its parent, which
-   * is what stops the thread reading as live. A surface with neither declares
-   * no `archive` and the state machine has nothing to call.
-   */
+  /** Discord archives the thread; Slack closes its agent session. */
   archive?(thread: ThreadRef): Promise<void>;
-  /**
-   * The thread is not working on anything — for a surface whose working sign
-   * belongs to the thread rather than to one message, and so outlives the
-   * process that raised it. Slack's agent session sits on the thread's
-   * parent; Discord's only such sign is a message mid-edit, which ends with
-   * the process, so it declares no `settle`.
-   */
+  /** Clears a working sign that outlives the process, like Slack's session. */
   settle?(thread: ThreadRef): Promise<void>;
-  /**
-   * Marks the human's own message, for a surface where that is how a glance
-   * at the channel tells what mate did with it. Discord reacts on it; Slack's
-   * agent session already says it and declares no `mark`.
-   */
+  /** Discord reacts on the message; Slack's agent session already shows it. */
   mark?(message: MessageRef, mark: Mark): Promise<void>;
 }

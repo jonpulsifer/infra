@@ -1,27 +1,10 @@
 /**
- * Slack Socket Mode: the one inbound connection, on Bun's own WebSocket.
- * Everything inbound arrives here — the mentions mate answers and the stop
- * Slack draws on its own — so mate needs no HTTP surface, no public name and
- * no request-signature check.
- *
- * Two things this has to get right that an HTTP app never faces. Slack gives
- * an app up to ten connections and **splits** payloads across them — "each
- * payload may be sent to any of the connections" — so a second mate on the
- * same app token does not double-answer the way a second Discord gateway
- * session would: the two of them each receive a random half and mate looks
- * like it is ignoring people. The `hello` frame counts the connections, which
- * makes that free to detect, and it is the one thing this logs loudly.
- *
- * And every envelope must be acknowledged within three seconds or Slack
- * retries it, so the ack goes out on receipt, before anything is done with it.
+ * Slack Socket Mode on Bun's WebSocket. Everything inbound arrives here, so
+ * mate needs no public HTTP endpoint and no request-signature check.
  */
 import type { Clock } from './clock.ts';
 import { type Log, plain } from './log.ts';
 
-/**
- * The part of a WebSocket this uses. Bun's own satisfies it, and so does the
- * fake the tests drive it with.
- */
 export interface SocketLike {
   addEventListener(type: string, listener: (event: unknown) => void): void;
   send(data: string): void;
@@ -44,10 +27,7 @@ export interface SocketModeDeps {
   log: Log;
   /** One events_api payload, already acknowledged. */
   onEvent(payload: EventPayload): void;
-  /**
-   * Events older than this are Slack replaying what it buffered while mate
-   * was away; a turn that lost its process is not run again on the next one.
-   */
+  /** Epoch ms. Older events are Slack's replay buffer, and are dropped. */
   since: number;
   /** How many connections this app should have. More than one splits events. */
   expected?: number;
@@ -124,10 +104,8 @@ export class SocketMode {
       this.socket?.close(1000, 'reconnecting');
       return;
     }
-    // Before anything else is done with it: the deadline is three seconds and
-    // a missed ack is a redelivery. Every envelope is acknowledged, the ones
-    // mate has nothing to do with included — an interactive payload from an
-    // app feature mate does not use is still an envelope Slack would retry.
+    // First: Slack redelivers any envelope not acked within three seconds,
+    // including ones mate ignores.
     if (typeof frame.envelope_id === 'string') this.ack(frame.envelope_id);
     if (frame.type === 'events_api') this.event(frame.payload as EventPayload);
   }
@@ -140,6 +118,8 @@ export class SocketMode {
       connections,
       appId: info?.app_id ?? null,
     });
+    // Slack splits payloads across an app's connections, so each mate sharing
+    // the token sees only some of them.
     const expected = this.deps.expected ?? 1;
     if (connections !== expected) {
       this.deps.log.warn('slack is splitting events across connections', {

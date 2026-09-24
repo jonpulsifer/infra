@@ -1,23 +1,14 @@
 /**
- * The sandbox side, behind one interface: the in-process stub below or the
- * agent-sandbox client in `sandboxes.ts`, chosen by `MATE_SANDBOXES`. The
- * thread engine only ever sees this.
+ * The sandbox interface, served by the in-process stub below or by the cluster
+ * client in `sandboxes.ts`, as `MATE_SANDBOXES` chooses.
  */
 import { type Clock, systemClock } from './clock.ts';
 import type { ThreadRef, ToolCall } from './surface.ts';
 
 export type { ThreadRef };
 
-/**
- * Which of three waits a thread paid for its sandbox, and the `source` label
- * on `mate_mint_duration_milliseconds` and `mate_attach_duration_milliseconds`.
- * They are three series rather than two because they are three different
- * costs: a `fresh` mint pays a kata VM boot and a clone, which is the cold
- * start being chased; `reused` is this thread's own sandbox from an earlier
- * turn and pays neither; and `spare` is one the warm pool was already
- * holding, which pays a relabel and a shallow fetch instead. Folding the last
- * two together would hide exactly the difference the pool exists to make.
- */
+// The `source` label on the mint and attach histograms. Each value is a
+// different cost; the pool is measured by `spare` against `fresh`.
 export type SandboxSource = 'fresh' | 'reused' | 'spare';
 
 export interface SandboxRef {
@@ -26,26 +17,14 @@ export interface SandboxRef {
   readonly thread: ThreadRef;
   /** Set by `list()` when the object says a turn was running: mate died under it. */
   readonly turnInFlight?: boolean;
-  /**
-   * Absent on a ref `list()` rebuilt from an object that outlived a restart,
-   * because no thread waited for that one. Every mint sets it, which is what
-   * `MintedRef` says.
-   */
+  /** Absent on a ref `list()` rebuilt after a restart; every mint sets it. */
   readonly source?: SandboxSource;
 }
 
-/** What a mint hands back: the ref, and which wait the thread just paid. */
 export interface MintedRef extends SandboxRef {
   readonly source: SandboxSource;
 }
 
-/**
- * How far a mint has got, for the human watching a thread that has not
- * answered yet. They are steps rather than a percentage because they are the
- * only boundaries the mint genuinely knows it has crossed, and they are named
- * here rather than in the caller because only the path that took them knows
- * which ones it took — the words each one is said in are `notices.ts`'s.
- */
 export type MintStep =
   | 'reusing'
   | 'adopting'
@@ -53,7 +32,6 @@ export type MintStep =
   | 'creating'
   | 'booting';
 
-/** Called as a mint crosses each step, so the wait can be narrated as it runs. */
 export type OnMintStep = (step: MintStep) => void;
 
 export interface Session {
@@ -63,12 +41,8 @@ export interface Session {
   readonly resumed: boolean;
 }
 
-/**
- * What a turn tells the renderer as it runs. `status` and `tool` are the same
- * news said two ways — the line a surface paints itself, and the call a
- * surface that has cards of its own renders one by one — so a harness emits
- * both and each surface takes the one it can show.
- */
+// `status` and `tool` carry the same news two ways; each surface shows the
+// one it can.
 export type Update =
   | { kind: 'text'; delta: string }
   | { kind: 'status'; line: string | null }
@@ -92,20 +66,12 @@ export interface PromptResult {
 export interface Sandboxes {
   /** Every sandbox this mate owns, for rehydration after a restart. */
   list(): Promise<SandboxRef[]>;
-  /**
-   * Creates the thread's sandbox, claims the one it already has, or takes one
-   * the warm pool was holding; resolves once it is Ready.
-   */
+  /** Resolves once the sandbox is Ready. */
   mint(thread: ThreadRef, onStep?: OnMintStep): Promise<MintedRef>;
-  /**
-   * Tops the warm spare pool up to what is configured and renews what is
-   * already in it. Called on a cadence and after a thread takes a spare, and
-   * with no pool configured it does nothing at all.
-   */
+  /** Does nothing when no pool is configured. */
   ensureSpares(): Promise<void>;
   /** Opens the ACP session (`session/load`, else `session/new`). */
   attach(sandbox: SandboxRef): Promise<Session>;
-  /** One turn: streams updates into the sink, resolves when the turn ends. */
   prompt(
     session: Session,
     text: string,
@@ -138,19 +104,14 @@ export interface StubOptions {
   script?: Script;
   mintDelayMs?: number;
   attachDelayMs?: number;
-  /**
-   * What adopting a warm spare costs: the relabel and the shallow fetch the
-   * cluster client pays, rather than nothing. A stub that hands a spare over
-   * in no time at all would model the one thing the pool exists to be
-   * measured on as free.
-   */
+  /** Adoption's relabel and fetch, so a spare is not modelled as free. */
   spareDelayMs?: number;
   mintFails?: string;
   attachFails?: string;
   costUsd?: number;
   /** Models a harness that reloads its own session, as `session/load` does. */
   resumes?: boolean;
-  /** The stub's side of `MATE_SPARES`: how many sandboxes `ensureSpares()` keeps warm. */
+  /** Stands in for `MATE_SPARES`. */
   spares?: number;
 }
 
@@ -161,7 +122,6 @@ export class StubSandboxes implements Sandboxes {
   private readonly cancelled = new Set<string>();
   private readonly running = new Set<string>();
   private readonly sessions = new Map<string, string>();
-  /** Warm and unclaimed: named, but belonging to no thread until a mint takes one. */
   private readonly warm: string[] = [];
   /** Mutable so a test can fail an attach on a sandbox that already exists. */
   attachFails: string | null;
@@ -189,7 +149,7 @@ export class StubSandboxes implements Sandboxes {
     return this.warm.length;
   }
 
-  /** Threads only: a spare is not one, and rehydration must not take it for one. */
+  /** Threads only, so rehydration never takes a spare for one. */
   async list(): Promise<SandboxRef[]> {
     return [...this.live.values()].map((ref) => ({
       ...ref,
@@ -206,24 +166,20 @@ export class StubSandboxes implements Sandboxes {
 
   async mint(thread: ThreadRef, onStep?: OnMintStep): Promise<MintedRef> {
     this.mints += 1;
-    // Ahead of `mintFails`, and faithfully so: a thread that takes a spare
-    // never reaches the path that a broken mint breaks.
+    // Before `mintFails`, as on the cluster: a spare skips the mint path.
     const spare = this.warm.shift();
     if (spare) {
       onStep?.('adopting');
       await this.spareWait();
       onStep?.('refreshing');
       await this.spareWait();
-      // The whole of what a spare buys: the wait a fresh one pays is one
-      // somebody already paid, and the name it was born with stays its name.
       const taken = { name: spare, thread };
       this.live.set(spare, taken);
       void this.ensureSpares();
       return { ...taken, source: 'spare' };
     }
-    // Both steps before the wait, in the order the cluster client takes
-    // them: the delay below stands in for the boot, which is the step a
-    // human watching the line is actually watching.
+    // The delay below stands in for the boot, so both steps are announced
+    // first.
     onStep?.('creating');
     onStep?.('booting');
     if (this.opts.mintDelayMs) await this.clock.sleep(this.opts.mintDelayMs);

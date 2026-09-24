@@ -1,17 +1,11 @@
 /**
- * Sandboxes on the cluster: one bare `agents.x-k8s.io/v1beta1` Sandbox per
- * thread, the harness reached by exec-ing `opencode acp` in its pod,
- * and `spec.shutdownTime` slid forward at both ends of every turn so a mate
+ * One `agents.x-k8s.io/v1beta1` Sandbox per thread, reached by exec-ing
+ * `opencode acp` in its pod. Every turn slides `spec.shutdownTime`, so a mate
  * that dies mid-thread cannot leak one.
  */
 import { AcpClient } from './acp.ts';
 import type { SandboxConfig, VaultConfig } from './config.ts';
-/**
- * What a turn needs of a GitHub App, which is less than the App is: mint one
- * and hand it back. Narrow on purpose — the private key, the installation
- * lookup and the preflight all live on the other side of it, so nothing here
- * can reach them and a test can stand in without one.
- */
+// Mint and revoke only, so nothing here can reach the App's private key.
 export interface TokenSource {
   token(): Promise<{ token: string }>;
   revoke(token: string): Promise<void>;
@@ -48,39 +42,20 @@ export const MINTED_BY = 'mate';
 export const MINTED_BY_LABEL = 'lolwtf.ca/minted-by';
 export const THREAD_LABEL = 'lolwtf.ca/thread';
 export const CHANNEL_LABEL = 'lolwtf.ca/channel';
-/** Which surface the thread is on, so `list()` can hand it back to the right one. */
 export const SURFACE_LABEL = 'lolwtf.ca/surface';
-/**
- * This mate's own identity, so two mates sharing a namespace never list each
- * other's sandboxes. mate answers in exactly one Discord guild, so that id is
- * what says which mate a sandbox belongs to whichever surface minted it.
- */
+// Each mate serves one Discord guild, so its id names the owning mate for
+// Slack threads too, and two mates in one namespace never list each other's
+// sandboxes.
 export const GUILD_LABEL = 'lolwtf.ca/guild';
-/**
- * On a sandbox nobody has claimed, and on nothing else. Swapping this one
- * label for a thread's three is the whole of adoption, which is why a spare
- * carries no thread labels at all rather than placeholder ones.
- *
- * `condemned` is the same marker on a sandbox mate has given up on and is
- * deleting. It is not `true`, so the pool cannot hand it to anybody; it is
- * not absent, so `list()` skips it with the spares rather than warning about
- * a stray; and the thread labels come off in the same patch, so a delete that
- * does not land leaves nothing that answers to a thread.
- */
+// `true` on an unclaimed spare; adoption swaps it for the thread labels.
+// `condemned` marks one being deleted; neither the pool nor `list()` takes it.
 export const SPARE_LABEL = 'lolwtf.ca/spare';
 const SPARE = 'true';
 const CONDEMNED = 'condemned';
-/**
- * The harness's own session id, kept on the object rather than in a label:
- * mate stores whatever the harness minted, and a label value is restricted to
- * 63 characters of `[A-Za-z0-9._-]`.
- */
+// An annotation: a label value allows only 63 characters of `[A-Za-z0-9._-]`.
 export const SESSION_ANNOTATION = 'lolwtf.ca/acp-session';
-/**
- * Stamped when a turn starts and cleared when it ends, so a mate that died
- * under a running turn can say so in the thread instead of going quiet: this
- * annotation surviving on the object is the only evidence left.
- */
+// Set for the length of a turn, so a mate restarted mid-turn can say so in
+// the thread.
 export const TURN_ANNOTATION = 'lolwtf.ca/turn-started';
 
 export const HARNESS_CONTAINER = 'harness';
@@ -88,63 +63,26 @@ export const CHECKOUT_CONTAINER = 'checkout';
 export const WORKSPACE = '/workspace';
 export const AGENT_HOME = '/home/agent';
 export const AGENT_UID = 1337;
-/**
- * Who the agent commits as. The image's agent user is made with no GECOS and
- * the sandbox carries no git config of its own, so without an ident handed in
- * `git commit` dies on an empty ident name.
- */
+// The image's user has no GECOS and no git config, so without an ident
+// `git commit` fails.
 const GIT_USER = 'clanky-bot[bot]';
-/**
- * The id prefix is the bot user's own numeric id, and it is what makes GitHub
- * attribute a commit to the App's account and draw its avatar. The bare
- * `login@users.noreply.github.com` form commits fine and links to nobody.
- */
+// The numeric prefix is the bot user's id; without it GitHub links the commit
+// to no account.
 const GIT_EMAIL = '332275392+clanky-bot[bot]@users.noreply.github.com';
-/**
- * The username half of an installation token, which GitHub fixes and which is
- * not the ident above. They were one string while the credential was a user's
- * PAT and the same name answered for both; an App's token authenticates as
- * `x-access-token` whatever the commits say, so conflating them again would
- * break the push and not the commit.
- */
+// The HTTPS username for an installation token, separate from the commit ident.
 const GIT_HTTPS_USER = 'x-access-token';
-/**
- * How much history the checkout carries. One commit is enough to branch from
- * and enough to push from — both measured against a genuinely shallow clone —
- * so the depth is not what makes a pull request possible. It is what makes one
- * fit in: this repo's commit subjects are a house style, and an agent asked to
- * match them can only do that by reading them, which at depth 1 means reading
- * the single commit it is standing on. Thirty is the window a person gets from
- * `git log --oneline -30`; fifty leaves room above it, and measured 136 KiB
- * more than depth 1 on a 15 MB clone of this repo — inside the run-to-run
- * noise of the clone itself.
- */
+// Enough recent subjects for the agent to match the repo's commit style.
 const CHECKOUT_DEPTH = 50;
-/**
- * Where mate writes the turn's GitHub token, and the variable naming it. The
- * helper below and `images/mate-sandbox/gh` both spell this name, so it is
- * one constant rather than three strings that can drift — and the agent's own
- * commands can read the file, which is how a call to `api.github.com` gets a
- * token. That it is readable is not a slip: the sandbox auto-allows every
- * command, so reach was never the property being bought. What is bought is
- * what the readable thing is worth — an hour, one repository, two
- * permissions, and handed back within seconds of the turn ending.
- */
+// Read by the credential helper and `images/mate-sandbox/gh`. The agent can
+// read the token too, so it names one repository and is revoked after the turn.
 const TOKEN_FILE_ENV = 'MATE_GITHUB_TOKEN_FILE';
 const TOKEN_FILE = `${AGENT_HOME}/.github-token`;
 const KUBECONFIG_FILE = `${AGENT_HOME}/.kube/config`;
 const SSH_DIR = `${AGENT_HOME}/.ssh`;
 const SSH_KEY_FILE = `${SSH_DIR}/id_ed25519`;
 const SSH_CONFIG_FILE = `${SSH_DIR}/config`;
-/**
- * What `ssh` is told before the agent has to remember to tell it. `accept-new`
- * rather than `no`, which would accept a changed host key silently, and rather
- * than `yes`, which refuses every host the sandbox has never met — and a
- * sandbox has met none, because its home is an emptyDir that is new every
- * time. So `yes` would make host login impossible and `no` would make it
- * unsafe; `accept-new` trusts first contact and then notices a key that
- * changes under it, within the life of one sandbox.
- */
+// accept-new: home is a fresh emptyDir with no known hosts, so `yes` refuses
+// every host, and `no` would accept a changed key.
 const SSH_CLIENT_CONFIG = [
   'Host *',
   '  User rowbutt',
@@ -154,86 +92,41 @@ const SSH_CLIENT_CONFIG = [
   `  UserKnownHostsFile ${SSH_DIR}/known_hosts`,
   '',
 ].join('\n');
-/**
- * The audience a sandbox's kubeconfig token is minted for, and the address it
- * is spent at. Both are the in-cluster Service: a bound token is refused by
- * any audience it was not asked for, so these two are one fact written once.
- */
+// Both the token audience and the server address: a bound token is refused
+// by any audience it was not minted for.
 const CLUSTER_URL = 'https://kubernetes.default.svc:443';
-/**
- * How much longer than the turn a cluster token lives. The turn is what it is
- * for, and a token that expires under a running `kubectl` is a diagnosis that
- * stops halfway with an authentication error rather than an answer. The
- * apiserver's own floor is ten minutes, which a short turn cap would
- * otherwise fall under.
- */
+// Outlives the turn, so the token never expires under a running `kubectl`.
 const TOKEN_SLACK_SECONDS = 5 * 60;
+// The apiserver refuses a TokenRequest under ten minutes.
 const TOKEN_FLOOR_SECONDS = 600;
-/**
- * Scoped to the one URL rather than set as a bare `credential.helper`: git
- * tries every helper that matches, in the order the configs are read, and the
- * first answer wins. This one is the last read, so a generic helper — one the
- * agent sets itself, one a future base image ships — would answer for
- * github.com before it. Setting the key to an empty value first resets that
- * list for this URL only, which was measured both ways: with the reset the
- * helper below answers, without it the other one does, and a request for any
- * other host still reaches whatever else is configured.
- */
+// git asks every matching helper in config order and the first answer wins.
+// `gitEnv` sets it empty first, which clears earlier helpers for this URL.
 const CREDENTIAL_KEY = 'credential.https://github.com.helper';
-/**
- * What git runs when a push to github.com needs a password: a read of the
- * file mate stamped at the start of the turn, printed in git's credential
- * format and never stored. There is no timeout on it and none is needed — a
- * local read cannot hang, which is the whole of what the previous `op read`
- * needed bounding for.
- *
- * The snippet is a constant with nothing interpolated into it, and git passes
- * a `GIT_CONFIG_VALUE_n` through verbatim, so there is no quoting layer
- * between here and the shell. An empty file fails rather than answering with
- * a blank password, because a blank password is how a rotation in progress
- * looks and git would report it as a rejected credential rather than as a
- * missing one. Only `get` is answered because git calls the same helper to
- * store and to erase, and there is nothing here to write to.
- */
+// Answers `get` only; git also calls a helper to store and erase. An empty
+// file exits 1, since git would report a blank password as a rejected one.
 const CREDENTIAL_HELPER = `!f() { test "$1" = get || exit 0; t=$(cat "$${TOKEN_FILE_ENV}" 2>/dev/null) || exit 1; test -n "$t" || exit 1; printf "username=${GIT_HTTPS_USER}\\npassword=%s\\n" "$t"; }; f`;
 
 export const TTL_MS = 2 * 60 * 60_000;
-/**
- * A spare's own TTL, far under `TTL_MS` because the two are what is left when
- * different things go wrong. Every turn slides a thread's sandbox, so its two
- * hours only ever run down on a thread nobody came back to; a spare is slid
- * by `ensureSpares` and by nothing else, so this is what a mate that died
- * between sweeps leaves sitting on the node — half an hour of the room one
- * sandbox takes, rather than a quarter of a day of it. Six sweeps fit inside
- * it, so a sweep that fails a few times running does not reap a healthy spare.
- *
- * This is the whole of why mate stopping hands its spares back, and the other
- * two places that turn on it say so in a clause and point here.
- */
+// Only a sweep renews a spare, so this bounds what a dead mate leaves on the
+// node. Six sweeps fit, so a few failed sweeps cannot reap a healthy spare.
 export const SPARE_TTL_MS = 30 * 60_000;
 export const SPARE_SWEEP_MS = 5 * 60_000;
 const READY_TIMEOUT_MS = 300_000;
 const REFRESH_TIMEOUT_MS = 60_000;
-/**
- * One `printf` into a file on a pod that is already answering ACP. Short
- * because a stamp that is not quick is a stamp that has gone wrong, and the
- * human is waiting on the turn behind it.
- */
+// A few `printf`s on a live pod; a slow write has gone wrong and holds up
+// the turn.
 const STAMP_TIMEOUT_MS = 15_000;
 const GONE_TIMEOUT_MS = 180_000;
 const REAP_TIMEOUT_MS = 15_000;
 const WATCH_SECONDS = 60;
-/** A watch that ends without an event — an expired revision, a proxy dropping
- * the stream — would otherwise re-list as fast as the apiserver answers. */
+// Without a pause, a watch that ends with no event re-lists as fast as the
+// apiserver answers.
 const WATCH_IDLE_MS = 1_000;
 const STDERR_LIMIT = 500;
-/**
- * `OPENCODE_API_KEY` is in the harness's environment, so a provider error that
- * echoes it would otherwise land verbatim in the bot's logs.
- */
+// A provider error can echo `OPENCODE_API_KEY` from the harness environment.
 const SECRET_SHAPED =
   /(?:sk-[A-Za-z0-9._-]{8,}|[Bb]earer\s+[A-Za-z0-9._-]{8,}|[A-Za-z0-9_-]{32,})/g;
-/** CRDs carry no strategic-merge metadata, so a merge patch is the one that leaves sibling fields alone. */
+// CRDs reject strategic merge; a merge patch leaves sibling fields alone.
 const MERGE_PATCH = 'application/merge-patch+json';
 
 interface Condition {
@@ -245,7 +138,7 @@ interface Condition {
 
 export interface SandboxStatus {
   conditions?: Condition[];
-  /** The label selector the controller stamps on the backing pod. */
+  /** The label selector the controller sets on the backing pod. */
   selector?: string;
   podIPs?: string[];
   nodeName?: string;
@@ -259,29 +152,11 @@ export interface KubeSandboxesDeps {
   config: SandboxConfig;
   guildId: string;
   log: Log;
-  /**
-   * Where the sweep reports the pool. Optional because the smoke harness
-   * drives the same class with no SDK behind it; a mate serving threads is
-   * wired with instruments in `main.ts`, and what they carry is the only view
-   * of the pool from outside the pod.
-   */
+  /** Absent in the smoke harness, which runs with no metrics SDK. */
   metrics?: Instruments;
-  /**
-   * What mints the GitHub token a turn is stamped with, or absent where no
-   * App is configured — which is both the rollback and what the smoke
-   * harness runs with. It is a dependency rather than something built here
-   * because the private key belongs to the process, never to a sandbox's
-   * configuration.
-   */
+  /** Absent when no App is configured. */
   githubApp?: TokenSource | null;
-  /**
-   * The cluster CA, so a sandbox's kubeconfig verifies the apiserver rather
-   * than being told to skip it. It comes from mate's own `KubeConfig` — the
-   * same bundle the kubelet projected for mate — so there is no second source
-   * of truth for it and no second place it can be wrong.
-   */
   clusterCa?: string | null;
-  /** The SSH private key a turn is stamped with, read once at boot. */
   sshKey?: string | null;
   ttlMs?: number;
   readyTimeoutMs?: number;
@@ -291,7 +166,6 @@ export interface KubeSandboxesDeps {
 interface Attachment {
   client: AcpClient;
   sessionId: string;
-  /** Already resolved by `attach`, and what a turn's token is stamped into. */
   pod: string;
 }
 
@@ -299,14 +173,7 @@ const SNOWFLAKE = /^\d{15,22}$/;
 const SLACK_CHANNEL = /^[A-Z][A-Z0-9]{1,20}$/;
 const SLACK_TS = /^\d{10}\.\d{6}$/;
 
-/**
- * The Sandbox a thread gets, named after the thread. The name is a Kubernetes
- * object name and every part of it is also a label value, so each surface's
- * ids are checked rather than trusted: a Discord snowflake is already both, a
- * Slack channel is uppercase and a Slack thread is a timestamp whose dot is
- * legal in a label value but is spelled as a dash here so one name reads as
- * one name.
- */
+// Every part is also a label value, so each surface's ids are validated first.
 export function sandboxName(thread: ThreadRef): string {
   if (thread.surface === 'discord') {
     if (!SNOWFLAKE.test(thread.id)) {
@@ -322,33 +189,13 @@ export function sandboxName(thread: ThreadRef): string {
   return `mate-slack-${thread.channelId.toLowerCase()}-${thread.id.replace('.', '-')}`;
 }
 
-/**
- * What a spare is called. It is minted before any thread has asked for one so
- * it cannot be named after a thread, and it keeps this name once adopted,
- * because renaming a live object is a delete and a create. Nothing reads a
- * sandbox's name for meaning — `list()` rebuilds a thread from its labels and
- * `resolvePod` follows `status.selector` — so the only thing lost is that
- * `kubectl get sandbox` stops reading as one thread per row, which
- * `-L lolwtf.ca/thread,lolwtf.ca/surface` puts back. Getting from a thread to
- * its pod survives the rename by label, because adoption writes the thread's
- * labels to the pod template as well as to the object.
- */
+// An adopted spare keeps this name; threads find their sandbox by label.
 function spareName(): string {
   return `mate-spare-${crypto.randomUUID().slice(0, 8)}`;
 }
 
-/**
- * What an adopted spare's workspace is brought up to date with. A spare's
- * clone is as old as the spare, where a thread today always starts on one
- * made for it, and a shallow fetch of the same ref asks only for what the
- * checkout does not already have — the small half of the clone the init
- * container ran. The reset is what moves the worktree onto it: a pull would
- * try to merge into a shallow history.
- *
- * The ref is handed to the shell as an argument rather than written into the
- * script, so that a branch name is a branch name to `sh` as well as to git —
- * the same way the init container passes it, which is argv and no shell.
- */
+// Reset, since a pull would merge into a shallow history. The ref arrives as
+// "$1" so the shell never parses a branch name.
 function refreshScript(): string {
   return `set -e; cd ${WORKSPACE}; git fetch --depth 1 origin "$1"; git reset --hard FETCH_HEAD`;
 }
@@ -377,34 +224,19 @@ const CONTAINER_SECURITY = {
   seccompProfile: { type: 'RuntimeDefault' },
 };
 
-/** A digest is already the whole identity of an image, so a cached copy of one is never stale. */
+// A digest-pinned image cannot change, so a cached copy is never stale.
 function pullPolicy(image: string): string {
   return image.includes('@sha256:') ? 'IfNotPresent' : 'Always';
 }
 
-/**
- * What the harness reads instead of the checkout's own `.opencode/`.
- *
- * AGENTS.md has to be named here. opencode finds the repo's skills by walking
- * up from the cwd for `.agents/` and `.claude/` whatever the project config is
- * doing, so the agent already arrives holding every `SKILL.md` under
- * `.agents/skills/` — and none of the hard rules those skills are written on
- * top of, because instruction files come with the project config this harness
- * turns off.
- *
- * That walk is also why `dotfiles/skills/` has to be named: it is neither of
- * the two directory names, so the six skills in it are invisible to the agent
- * until something points at them. Measured in a clone with `opencode debug
- * skill`, the checkout offers 14 and the walk alone finds 8.
- *
- * Both paths are absolute because a relative one resolves against opencode's
- * own config directory, and neither that nor a file that is not there is
- * reported: a wrong path here fails open.
- */
+// Paths are absolute: opencode resolves a relative one against its own config
+// directory, and reports neither that nor a missing file.
 export function opencodeConfig(model: string): string {
   return JSON.stringify({
     model,
+    // Project config, which would load AGENTS.md, is turned off.
     instructions: [`${WORKSPACE}/AGENTS.md`],
+    // opencode's own skill walk looks only in `.agents/` and `.claude/`.
     skills: { paths: [`${WORKSPACE}/dotfiles/skills`] },
     permission: 'allow',
     autoupdate: false,
@@ -412,38 +244,8 @@ export function opencodeConfig(model: string): string {
   });
 }
 
-/**
- * The git configuration both containers are handed as environment.
- * `GIT_CONFIG_COUNT` and its numbered pairs are git's command scope, which is
- * protected configuration, so `safe.directory` is honoured there and nothing
- * has to be written into an image or a home directory to make it stick.
- *
- * It is what makes the checkout usable at all. kubelet's fsGroup chown sets an
- * emptyDir mount root's gid and leaves its uid as root, so the workspace root
- * is uid 0 whoever clones into it, and git checks the worktree root as well as
- * the git directory: the clone succeeds and every command after it dies
- * `detected dubious ownership`. opencode reads that as "not a repository" and
- * silently drops its snapshots, and the agent's own git commands fail the same
- * way.
- *
- * The credential helper rides in the same mechanism, for the containers that
- * are given one: it is configuration git already reads from here, so nothing
- * is written into the image or into the checkout's `.git/config`, where a
- * credential would outlive the push. The checkout is handed none — it clones a
- * public repository anonymously — and the count and the indices are derived
- * from the list so a setting cannot be added without both moving with it.
- */
-/**
- * The kubeconfig a turn is handed. It is generated rather than templated from
- * a file so that the only two things in it that can be wrong — the address
- * and the CA — come from the same `KubeConfig` mate itself is using.
- *
- * A cluster with no CA in that config is one mate reaches over a trusted
- * system store, and the sandbox gets the same arrangement: no
- * `certificate-authority-data` and no `insecure-skip-tls-verify` either,
- * because skipping verification is a different decision from inheriting a
- * trust store and must never be made silently on an agent's behalf.
- */
+// With no CA the sandbox trusts the system store, as mate does. It never gets
+// `insecure-skip-tls-verify`.
 export function kubeconfig(token: string, ca: string | null): string {
   const cluster = [
     `    server: ${CLUSTER_URL}`,
@@ -474,6 +276,8 @@ export function kubeconfig(token: string, ca: string | null): string {
   ].join('\n');
 }
 
+// Command-scope config, where git honours `safe.directory`: the emptyDir mount
+// root stays uid 0 under fsGroup, so git would fail on `dubious ownership`.
 export function gitEnv(github: boolean): { name: string; value: string }[] {
   const settings: [string, string][] = [
     ['safe.directory', WORKSPACE],
@@ -489,30 +293,19 @@ export function gitEnv(github: boolean): { name: string; value: string }[] {
       { name: `GIT_CONFIG_KEY_${index}`, value: key },
       { name: `GIT_CONFIG_VALUE_${index}`, value },
     ]),
-    // A helper that fails leaves git asking for a username, and whether that
-    // question blocks depends on whether the agent's tool gave the command a
-    // terminal. This makes it an error either way.
+    // Without this, a failed helper leaves git prompting for a username, which
+    // blocks whenever the agent's tool gave the command a terminal.
     ...(github
       ? [
           { name: 'GIT_TERMINAL_PROMPT', value: '0' },
-          // Named for the helper above and read again by the image's `gh`
-          // wrapper, which is why it is env rather than a path either of them
-          // hardcodes: one name, one place it is written.
           { name: TOKEN_FILE_ENV, value: TOKEN_FILE },
         ]
       : []),
   ];
 }
 
-/**
- * The 1Password Connect environment the credential helper runs under: an
- * address and a token, and the reference that says which secret to read.
- *
- * `OP_SERVICE_ACCOUNT_TOKEN` is absent and has to stay absent. With both it
- * and `OP_CONNECT_HOST` set, `op` takes the Connect path without saying so,
- * and a token belonging to the other path then fails as a hang rather than as
- * an error.
- */
+// Never add `OP_SERVICE_ACCOUNT_TOKEN`: with `OP_CONNECT_HOST` also set, `op`
+// silently takes the Connect path, and the other token hangs it.
 function connectEnv(vault: VaultConfig): Record<string, unknown>[] {
   return [
     { name: 'OP_CONNECT_HOST', value: vault.connectHost },
@@ -522,11 +315,8 @@ function connectEnv(vault: VaultConfig): Record<string, unknown>[] {
         secretKeyRef: {
           name: vault.connectSecret,
           key: 'OP_CONNECT_TOKEN',
-          // A missing Secret would otherwise hold every sandbox in
-          // CreateContainerConfigError until it arrives, and a thread that
-          // wanted an answer rather than a pull request would never get one.
-          // Unset instead fails at the push, where the credential is what is
-          // missing.
+          // A missing Secret would hold every sandbox in
+          // CreateContainerConfigError.
           optional: true,
         },
       },
@@ -537,19 +327,16 @@ function connectEnv(vault: VaultConfig): Record<string, unknown>[] {
 export interface SandboxDeclaration {
   name: string;
   namespace: string;
-  /** The object's labels, and the pod template's: one set, written once. */
+  /** Applied to both the object and its pod template. */
   labels: Record<string, string>;
   config: SandboxConfig;
   shutdownTime: string;
 }
 
-/**
- * What every sandbox mate mints carries whoever it is for. The first of these
- * is the one `sandbox-network-policy.yaml` selects on, which is why a spare —
- * which runs the same image with the same permissions — has to carry it too.
- */
 function baseLabels(guildId: string): Record<string, string> {
   return {
+    // `sandbox-network-policy.yaml` selects on this; a sandbox without it has
+    // unrestricted egress.
     'app.kubernetes.io/name': 'mate-sandbox',
     'app.kubernetes.io/part-of': 'mate',
     [MINTED_BY_LABEL]: MINTED_BY,
@@ -557,7 +344,6 @@ function baseLabels(guildId: string): Record<string, string> {
   };
 }
 
-/** The three that say whose sandbox this is; adoption is these arriving at once. */
 function threadLabels(thread: ThreadRef): Record<string, string> {
   return {
     [SURFACE_LABEL]: thread.surface,
@@ -577,12 +363,11 @@ function spareLabels(guildId: string): Record<string, string> {
   return { ...baseLabels(guildId), [SPARE_LABEL]: SPARE };
 }
 
-/** Adoption, as one merge patch reads it: the thread arrives, the marker goes. */
+// In a merge patch, null removes a label.
 function claimLabels(thread: ThreadRef): Record<string, string | null> {
   return { ...threadLabels(thread), [SPARE_LABEL]: null };
 }
 
-/** The reverse, and then some: a merge patch removes a label by nulling its key. */
 function condemnLabels(): Record<string, string | null> {
   return {
     [SURFACE_LABEL]: null,
@@ -599,17 +384,16 @@ export function sandboxManifest(declaration: SandboxDeclaration): Sandbox {
     kind: 'Sandbox',
     metadata: { name, namespace, labels },
     spec: {
-      // Controller-enforced rather than mate-enforced: this is the only thing
-      // that reaps the sandbox if mate stops running. Every turn slides it.
+      // The controller deletes the sandbox at this time, even with mate gone.
+      // Every turn slides it.
       shutdownTime,
       shutdownPolicy: 'Delete',
       podTemplate: {
         metadata: { labels },
         spec: {
           runtimeClassName: config.runtimeClass,
-          // A sandbox runs agent-authored commands with every permission
-          // allowed, and no node here is tainted, so this term is the only
-          // thing keeping one off a control-plane node.
+          // No node is tainted, so this term alone keeps agent commands off
+          // a control-plane node.
           affinity: {
             nodeAffinity: {
               requiredDuringSchedulingIgnoredDuringExecution: {
@@ -628,15 +412,14 @@ export function sandboxManifest(declaration: SandboxDeclaration): Sandbox {
           },
           restartPolicy: 'Always',
           automountServiceAccountToken: false,
-          // The agent runs arbitrary commands; it does not need the address of
-          // every Service in the namespace handed to it in its environment.
+          // The agent runs arbitrary commands and gets no Service addresses.
           enableServiceLinks: false,
           securityContext: {
             runAsNonRoot: true,
             runAsUser: AGENT_UID,
             runAsGroup: AGENT_UID,
-            // Makes the emptyDirs group-writable by the harness uid, which is
-            // what lets the checkout run as 1337 rather than as root.
+            // Makes the emptyDirs writable by the agent's group, so the
+            // checkout can clone as a non-root user.
             fsGroup: AGENT_UID,
             seccompProfile: { type: 'RuntimeDefault' },
           },
@@ -645,10 +428,6 @@ export function sandboxManifest(declaration: SandboxDeclaration): Sandbox {
               name: CHECKOUT_CONTAINER,
               image: config.image,
               imagePullPolicy: pullPolicy(config.image),
-              // Cloned by the uid the harness runs as, so every file in the
-              // checkout is the agent's to write. That settles the files and
-              // nothing else: the mount root itself stays uid 0, which is
-              // what `gitEnv()` is for.
               command: [
                 'git',
                 'clone',
@@ -687,21 +466,11 @@ export function sandboxManifest(declaration: SandboxDeclaration): Sandbox {
                   name: 'OPENCODE_CONFIG_CONTENT',
                   value: opencodeConfig(config.model),
                 },
-                // opencode npm-installs `@opencode-ai/plugin` into any
-                // `.opencode/` it honours, whether or not a plugin is declared
-                // there, and npm is not in the sandbox's egress allow-list.
-                // Nothing in the checkout's own config buys that back: it
-                // declares one MCP server, and its command is `nix`, which
-                // this image does not carry.
+                // opencode npm-installs a plugin into any `.opencode/` it
+                // loads, and npm is outside the sandbox's egress allow-list.
                 { name: 'OPENCODE_DISABLE_PROJECT_CONFIG', value: '1' },
                 ...(config.vault ? connectEnv(config.vault) : []),
                 ...gitEnv(config.github),
-                // Named rather than left to `kubectl`'s default, because the
-                // default is under `$HOME/.kube` and the agent's home is an
-                // emptyDir — so the two agree today and would stop agreeing
-                // the moment either moved. With no service account
-                // configured there is no file, and a `KUBECONFIG` pointing at
-                // one that will never exist is worse than none.
                 ...(config.kubeServiceAccount
                   ? [{ name: 'KUBECONFIG', value: KUBECONFIG_FILE }]
                   : []),
@@ -727,11 +496,8 @@ export function sandboxManifest(declaration: SandboxDeclaration): Sandbox {
   };
 }
 
-/**
- * The pod behind a Ready Sandbox, found through `status.selector` — the
- * `agents.x-k8s.io/pod-name` annotation the controller used to write is
- * deprecated and v1.0.x no longer sets it.
- */
+// Via `status.selector`: the controller does not set the
+// `agents.x-k8s.io/pod-name` annotation.
 export async function resolvePod(
   kube: Kube,
   namespace: string,
@@ -758,7 +524,6 @@ export async function resolvePod(
   return pod.metadata.name;
 }
 
-/** Lists, then watches from that revision, until the named object is gone or the deadline passes. */
 async function waitUntilGone(
   kube: Kube,
   path: string,
@@ -803,11 +568,8 @@ export function waitForPodGone(
 
 export class KubeSandboxes implements Sandboxes {
   private readonly attached = new Map<string, Attachment>();
-  /** The sweep in flight, so the cadence and a mint's replacement never run two. */
   private warming: Promise<void> | null = null;
-  /** Set by a call that arrived mid-pass: the pool changed after that pass counted it. */
   private again = false;
-  /** Cleared by the first pass, which keeps none of the spares it inherited. */
   private inherited = true;
 
   constructor(private readonly deps: KubeSandboxesDeps) {}
@@ -824,14 +586,11 @@ export class KubeSandboxes implements Sandboxes {
     for (const sandbox of list.items) {
       if (sandbox.metadata.deletionTimestamp) continue;
       const labels = sandbox.metadata.labels ?? {};
-      // A sandbox carrying the spare marker at either of its values belongs
-      // to no thread by design, so it is skipped before the warning below,
-      // which is about an object that should have had thread labels.
+      // Spares and condemned sandboxes carry no thread labels by design.
       if (labels[SPARE_LABEL]) continue;
       const id = labels[THREAD_LABEL];
       const channelId = labels[CHANNEL_LABEL];
-      // Discord is the default because its threads are the ones whose labels
-      // can predate the surface label; anything else names itself.
+      // Discord sandboxes can predate the surface label.
       const surface = (labels[SURFACE_LABEL] ?? 'discord') as SurfaceName;
       if (!id || !channelId) {
         this.deps.log.warn('sandbox has no thread labels; ignoring it', {
@@ -848,17 +607,12 @@ export class KubeSandboxes implements Sandboxes {
     return refs;
   }
 
-  /**
-   * The sandbox this thread talks to, in the order that costs it least: the
-   * one it already has, then a spare that is already warm, then a new one.
-   */
   async mint(thread: ThreadRef, onStep?: OnMintStep): Promise<MintedRef> {
     const existing = await this.find(thread);
     if (existing) return this.reuse(existing, thread, onStep);
     const taken = await this.adopt(thread, onStep);
     if (taken) {
-      // The pool is one short from here on, and the thread that just took the
-      // spare is the last one that should be made to wait for its successor.
+      // Refill in the background: this thread should not wait for it.
       void this.ensureSpares().catch((error) =>
         this.deps.log.warn('minting a replacement spare failed', {
           error: plain(error),
@@ -870,13 +624,8 @@ export class KubeSandboxes implements Sandboxes {
   }
 
   /**
-   * Tops the pool up and renews what is in it, which is the renewal
-   * `SPARE_TTL_MS` is written against.
-   *
-   * A pass already in flight counted the pool before whatever prompted this
-   * call, so joining it would answer about a pool that had not changed yet —
-   * the thread that just took the spare would get no replacement. It is
-   * waited out and another follows it instead.
+   * A call during a pass queues one more pass, because the running one counted
+   * the pool before this call's change.
    */
   async ensureSpares(): Promise<void> {
     if (this.warming) {
@@ -922,9 +671,8 @@ export class KubeSandboxes implements Sandboxes {
     });
     const client = new AcpClient(exec, log, { sandbox: ref.name, pod });
     let session: { id: string; resumed: boolean };
-    // Nothing is registered until the object carries the session and the
-    // slid TTL: a rejected attach must not leave a live harness behind a
-    // caller that believes it failed.
+    // Register only once the session and TTL are stored; a failed attach
+    // closes its harness.
     try {
       await client.initialize();
       session = await this.openSession(client, ref.name, stored);
@@ -975,14 +723,11 @@ export class KubeSandboxes implements Sandboxes {
         this.deps.config.turnTimeoutMs,
       );
     } finally {
-      // In a `finally` because every way a turn can end is a way the token
-      // stops being needed: an answer, a stop, a timeout, a stream that died
-      // under it. Leaving one behind is what would make the hour matter
-      // rather than the turn.
+      // Every way a turn ends, a throw included, clears the turn's credentials.
       await this.retireToken(name, attachment.pod, token);
     }
-    // The turn already happened; a failed slide is a shorter TTL and a stale
-    // turn mark, not a failed answer.
+    // The answer stands: a failed slide leaves only a shorter TTL and a
+    // stale turn mark.
     await this.slide(name).catch((error) =>
       this.deps.log.warn('shutdownTime slide failed', {
         sandbox: name,
@@ -997,33 +742,6 @@ export class KubeSandboxes implements Sandboxes {
     };
   }
 
-  /**
-   * Mints the turn's GitHub token and writes it into the sandbox, answering
-   * with what was written so the turn can hand it back.
-   *
-   * Neither half fails the turn. A thread that cannot push can still read,
-   * explain and answer, and taking the whole turn away because a credential
-   * is unavailable would turn a degraded feature into an outage. What says so
-   * instead is the metric, the alert, and — for the human waiting — the
-   * `gh` wrapper and the credential helper, which both report a token that is
-   * not there in words about the token.
-   *
-   * The token goes in argv rather than stdin because `ExecStream` has no
-   * half-close (`kube.ts`), so a `cat > file` would wait for an EOF that
-   * never comes. `refreshScript` passes a branch name the same way and for
-   * the same reason. That does put the token in the pod's own process table
-   * for the length of one `printf`, which is moot where every command is
-   * already the agent's, and in the apiserver audit log — which offsite does
-   * not run: its apiserver carries no `--audit-policy-file`, and without one
-   * Kubernetes writes no audit events at all. An estate that turns auditing
-   * on wants this served over a socket instead.
-   */
-  /**
-   * Whether a turn has any credential to be given at all. With none
-   * configured there is nothing to write and nothing to clear, so a turn
-   * costs no exec either side of it — which is what a mate running against
-   * the stub, or with every credential rolled back, should cost.
-   */
   private get credentialled(): boolean {
     return Boolean(
       this.deps.githubApp ||
@@ -1032,6 +750,8 @@ export class KubeSandboxes implements Sandboxes {
     );
   }
 
+  // Never fails the turn: a thread that cannot push can still answer, and the
+  // metric and the `gh` wrapper report the missing token.
   private async stampToken(name: string, pod: string): Promise<string | null> {
     const { githubApp, log, metrics } = this.deps;
     if (!this.credentialled) return null;
@@ -1048,15 +768,14 @@ export class KubeSandboxes implements Sandboxes {
         sandbox: name,
         error: plain(error),
       });
-      // Handed back at once: it reached nobody, so nothing is served by
-      // letting it live out its hour. The cluster token has no such call and
-      // simply expires; the SSH key is mate's own and outlives every turn.
+      // Revoke now, since it reached nobody. A cluster token cannot be
+      // revoked and expires on its own.
       if (github) await githubApp?.revoke(github).catch(() => {});
       return null;
     }
   }
 
-  /** The turn's GitHub token, or `null` with the reason already logged. */
+  /** `null` when minting failed; the reason is already logged. */
   private async mintGithub(name: string): Promise<string | null> {
     const { githubApp, log, metrics } = this.deps;
     try {
@@ -1074,13 +793,8 @@ export class KubeSandboxes implements Sandboxes {
   }
 
   /**
-   * A kubeconfig for the turn, or the empty string where the sandbox is to
-   * have no cluster access — which is the default and the rollback.
-   *
-   * The token is bound and expires on its own, and nothing revokes one. So
-   * unlike the GitHub token, all the end of a turn can do is truncate the
-   * sandbox's copy; what bounds a copy taken during the turn is the expiry
-   * asked for here.
+   * `''` means no cluster access. A bound token cannot be revoked, so its
+   * expiry bounds any copy taken during the turn.
    */
   private async mintCluster(name: string): Promise<string> {
     const { config, kube, log } = this.deps;
@@ -1115,7 +829,7 @@ export class KubeSandboxes implements Sandboxes {
     }
   }
 
-  /** Truncates every credential the turn held, and spends the GitHub token. */
+  /** Truncates every credential file, then revokes the GitHub token. */
   private async retireToken(
     name: string,
     pod: string,
@@ -1141,12 +855,7 @@ export class KubeSandboxes implements Sandboxes {
     );
   }
 
-  /**
-   * One exec for all of them, each written 0600 or truncated when its value
-   * is empty. One rather than three because a human is waiting on the turn
-   * behind it, and because three would make partial failure a state somebody
-   * has to reason about.
-   */
+  // One exec for every file, since a human is waiting on the turn.
   private async writeCredentials(
     pod: string,
     values: { github: string; kube: string; ssh: string },
@@ -1155,15 +864,12 @@ export class KubeSandboxes implements Sandboxes {
       namespace: this.namespace,
       pod,
       container: HARNESS_CONTAINER,
-      // `umask` before every mkdir and redirection, so no file and no
-      // directory is ever briefly world-readable — a `chmod` after the write
-      // would be exactly that race. The SSH client refuses a key it can read
-      // wider than its owner, so for that one the mode is not hygiene, it is
-      // whether the thing works at all.
       command: [
         '/bin/sh',
         '-c',
         [
+          // First, so no file is ever briefly readable by others; ssh refuses
+          // a key that is.
           'umask 077',
           `mkdir -p ${SSH_DIR} "$(dirname ${KUBECONFIG_FILE})"`,
           `printf %s "$1" > ${TOKEN_FILE}`,
@@ -1171,12 +877,13 @@ export class KubeSandboxes implements Sandboxes {
           `printf %s "$3" > ${SSH_KEY_FILE}`,
           `printf %s "$4" > ${SSH_CONFIG_FILE}`,
         ].join('; '),
+        // Values go in argv, since `ExecStream` cannot half-close stdin. That
+        // puts them in the apiserver audit log wherever auditing is on.
         'mate',
         values.github,
         values.kube,
         values.ssh,
-        // Written beside the key rather than with it, so a turn with no key
-        // still has no stale client config telling ssh to look for one.
+        // No key, no client config pointing ssh at one.
         values.ssh ? SSH_CLIENT_CONFIG : '',
       ],
       timeoutMs: STAMP_TIMEOUT_MS,
@@ -1189,9 +896,7 @@ export class KubeSandboxes implements Sandboxes {
     } finally {
       clearTimeout(timer);
     }
-    // Required rather than merely not-a-failure, for the reason `refresh`
-    // gives: a stream that ended carrying no status is a command whose exit
-    // nobody saw, and here that means a file that may hold nothing.
+    // No status means nobody saw the exit, and the files may be empty.
     if (close.status?.status !== 'Success') {
       throw new Error(
         `writing the token said ${close.status?.message || close.reason}`,
@@ -1200,8 +905,8 @@ export class KubeSandboxes implements Sandboxes {
   }
 
   async cancel(session: Session): Promise<void> {
-    // A re-attach whose `session/load` failed holds a different session id,
-    // and cancelling one the harness never minted stops nothing.
+    // After a failed `session/load` the attachment holds a new session id,
+    // and cancelling the old one stops nothing.
     const attachment = this.attached.get(session.sandbox.name);
     if (attachment?.sessionId !== session.id) return;
     await attachment.client.cancel(session.id);
@@ -1211,7 +916,6 @@ export class KubeSandboxes implements Sandboxes {
     await this.destroy(ref.name);
   }
 
-  /** The pod a live attachment is exec'd into, for the smoke's delete timing. */
   async podOf(ref: SandboxRef): Promise<string> {
     const sandbox = await this.deps.kube.json<Sandbox>(this.path(ref.name));
     return resolvePod(this.deps.kube, this.namespace, sandbox);
@@ -1239,18 +943,8 @@ export class KubeSandboxes implements Sandboxes {
   }
 
   /**
-   * This thread's own sandbox, found by its label rather than by its name: a
-   * sandbox adopted from the pool answers to a name no thread would derive,
-   * and the label is the only thing that says whose it is. It reaches further
-   * than `list()` does on purpose — an object carrying a thread label and no
-   * channel one is not a thread mate can rehydrate, but it is still this
-   * thread's sandbox, and minting a second one beside it would leak the first.
-   *
-   * What it will not reach is an object on its way out. The thread is asking
-   * for a sandbox to talk to and a terminating one is what it is waiting to
-   * be rid of, so handing it back would turn a mint that could have succeeded
-   * into the hard failure `reuse` raises — which is why it is filtered here
-   * the way `list()` and `spares()` filter it.
+   * By label, since an adopted spare's name derives from no thread. A
+   * terminating object is skipped, because `reuse` fails on it.
    */
   private async find(thread: ThreadRef): Promise<Sandbox | undefined> {
     const list = await this.deps.kube.json<KubeList<Sandbox>>(this.path(), {
@@ -1258,12 +952,8 @@ export class KubeSandboxes implements Sandboxes {
         labelSelector: `${this.selector()},${THREAD_LABEL}=${thread.id}`,
       },
     });
-    // Both are checked rather than selected on, and both default to what the
-    // thread says, because a Discord sandbox minted before either label
-    // existed carries the thread id and nothing else. Checking the channel is
-    // what keeps a Slack `thread_ts` — unique per channel, not per workspace —
-    // from reaching a second channel's thread of the same stamp, which the
-    // name this lookup replaces was immune to by construction.
+    // Checked, not selected on: older Discord sandboxes carry only the thread
+    // label. A Slack `thread_ts` is unique per channel only.
     return list.items
       .filter((found) => !found.metadata.deletionTimestamp)
       .find((found) => {
@@ -1290,7 +980,6 @@ export class KubeSandboxes implements Sandboxes {
     return { name, thread, source: 'reused' };
   }
 
-  /** Today's path, and the only one that names a sandbox after its thread. */
   private async mintFresh(
     thread: ThreadRef,
     onStep?: OnMintStep,
@@ -1310,8 +999,8 @@ export class KubeSandboxes implements Sandboxes {
     });
     if (!ok(response, 409)) throw await kubeError(response);
     await drain(response);
-    // `find` just looked and saw nothing, so a name that is taken is taken by
-    // an object no label can reach — the backstop, not the dedup.
+    // `find` saw nothing, so a 409 means an object without our labels holds
+    // the name.
     if (response.status === 409) {
       return this.reuse(
         await kube.json<Sandbox>(this.path(name)),
@@ -1319,9 +1008,6 @@ export class KubeSandboxes implements Sandboxes {
         onStep,
       );
     }
-    // The whole of the cold start is inside this one wait — scheduling, the
-    // image, the microVM boot and the clone — so it is the step a human
-    // watching the line spends almost all of the wait looking at.
     onStep?.('booting');
     await this.waitUsable(name);
     return { name, thread, source: 'fresh' };
@@ -1331,9 +1017,8 @@ export class KubeSandboxes implements Sandboxes {
     try {
       await this.waitReady(name);
     } catch (error) {
-      // `shutdownTime` is hours away, so an object left here outlives the
-      // thread that asked for it and can still be scheduled once whatever
-      // held it up clears — with nobody left to talk to it.
+      // `shutdownTime` is hours away, and an abandoned sandbox could still
+      // start later with nobody to talk to.
       await this.destroy(name).catch((failure) =>
         this.deps.log.warn('could not delete a sandbox that never came up', {
           sandbox: name,
@@ -1344,32 +1029,13 @@ export class KubeSandboxes implements Sandboxes {
     }
   }
 
-  /**
-   * Hands a warm spare to a thread: one merge patch that swaps the spare
-   * marker for the thread's labels and gives the object a thread's TTL.
-   *
-   * The `resourceVersion` listed at is what makes two mints at once safe. The
-   * apiserver reads a merge patch carrying one as an update from that
-   * revision, so the second of two threads reaching the same spare is refused
-   * with a 409 and goes looking for another.
-   *
-   * The same labels are written to the pod template in the same patch, and
-   * that is deliberate rather than tidiness. At v1.0.3 the controller never
-   * re-applies a pod's spec to a pod that already exists, but it does
-   * propagate `spec.podTemplate.metadata.labels` onto one — so writing them
-   * there moves the running pod onto the thread's labels and off the spare
-   * marker without recreating it, and `kubectl get pods -l lolwtf.ca/thread`
-   * keeps answering for a sandbox named after no thread. Leaving the template
-   * alone would have left the object disagreeing with itself.
-   */
   private async adopt(
     thread: ThreadRef,
     onStep?: OnMintStep,
   ): Promise<MintedRef | null> {
     const { config, log } = this.deps;
-    // Nothing to adopt and no question worth asking: with the pool off a mint
-    // is the two requests it has always been, and an apiserver hiccup on a
-    // list mate had no reason to make would cost a thread its answer.
+    // Pool off: skip the list, so an apiserver hiccup cannot cost a thread
+    // its answer.
     if (config.spares === 0) return null;
     const labels = claimLabels(thread);
     for (const spare of await this.spares()) {
@@ -1379,11 +1045,14 @@ export class KubeSandboxes implements Sandboxes {
       try {
         await this.patch(name, {
           metadata: {
+            // Conditional on the listed revision: of two threads racing for
+            // one spare, the second gets a 409.
             resourceVersion: spare.metadata.resourceVersion,
             labels,
           },
           spec: {
             shutdownTime: this.shutdownTime(),
+            // The controller copies template labels onto the running pod.
             podTemplate: { metadata: { labels } },
           },
         });
@@ -1400,14 +1069,8 @@ export class KubeSandboxes implements Sandboxes {
       try {
         await this.refresh(spare);
       } catch (error) {
-        // A thread that cannot be given a current checkout is better served
-        // by the slow path than by an agent reading a repository that has
-        // moved on. The labels come off before the delete is even asked for,
-        // because the caller is about to mint a second sandbox for this
-        // thread and a delete that does not land would otherwise leave two
-        // objects answering to it. If that patch is itself refused the mint
-        // fails here rather than duplicating the thread: what is left is one
-        // Ready sandbox wearing the thread, which the next message reuses.
+        // The caller mints a replacement, so `condemn` strips the thread
+        // labels first. If that patch fails, the mint fails too.
         log.warn('could not bring an adopted spare up to date; minting one', {
           sandbox: name,
           error: plain(error),
@@ -1426,16 +1089,8 @@ export class KubeSandboxes implements Sandboxes {
   }
 
   /**
-   * Takes a sandbox out of circulation and then deletes it. The patch is
-   * awaited because it is what makes the object unreachable — no thread's
-   * labels, and a spare marker the pool does not select on — and the delete
-   * is not, because by then nothing can be handed the object either way and
-   * `destroy` waits up to three minutes on a teardown nobody is blocked on.
-   *
-   * A caller condemning something it only saw in a list passes the revision
-   * it saw it at, and takes the 409 as its answer: what is being taken away
-   * here is deleted straight afterwards, so doing it to an object that has
-   * moved since would be doing it to whatever moved it.
+   * The patch is awaited because it makes the object unreachable; the delete
+   * is not. Pass a listed `resourceVersion` to leave a moved object alone.
    */
   private async condemn(name: string, resourceVersion?: string): Promise<void> {
     const labels = condemnLabels();
@@ -1451,12 +1106,8 @@ export class KubeSandboxes implements Sandboxes {
     );
   }
 
-  /**
-   * Brings an adopted spare's checkout up to date, in the harness container
-   * because that is where the git configuration and the one GitHub name the
-   * network policy allows already are, and before the ACP attach because
-   * opencode snapshots the workspace as it finds it.
-   */
+  // Before the ACP attach, because opencode snapshots the workspace as it
+  // finds it.
   private async refresh(spare: Sandbox): Promise<void> {
     const { kube, config, log } = this.deps;
     const name = spare.metadata.name;
@@ -1468,8 +1119,7 @@ export class KubeSandboxes implements Sandboxes {
       container: HARNESS_CONTAINER,
       command: ['/bin/sh', '-c', refreshScript(), 'mate', config.checkoutRef],
       onStderr: (text) => {
-        // Redacted as it arrives, because this is the one stderr that ends up
-        // inside a thrown Error rather than going straight to `log.warn`.
+        // Redacted as it arrives, because it ends up in a thrown Error.
         said = redactStderr(`${said}${text}`);
       },
       timeoutMs: REFRESH_TIMEOUT_MS,
@@ -1482,9 +1132,7 @@ export class KubeSandboxes implements Sandboxes {
     } finally {
       clearTimeout(timer);
     }
-    // Success is required rather than a failure refused: a stream that ended
-    // carrying no status at all is a command whose exit nobody saw, and a
-    // workspace that may not have moved.
+    // No status means nobody saw the exit; the workspace may not have moved.
     if (close.status?.status !== 'Success') {
       throw new Error(
         `git said ${said.trim() || close.status?.message || close.reason}`,
@@ -1503,28 +1151,20 @@ export class KubeSandboxes implements Sandboxes {
   private async sweep(): Promise<void> {
     const { config, log } = this.deps;
     const want = config.spares;
-    // With the pool off the pass costs nothing at all, not even the list: the
-    // default is off, and a mate nobody has configured a pool for should not
-    // be asking the apiserver about one every few minutes.
+    // Pool off, the default: no apiserver calls at all.
     if (want === 0) return;
     if (this.inherited) await this.discard();
     const ready: Sandbox[] = [];
-    // Ones that stopped being Ready and would not go. They count against the
-    // pool even though no thread can be handed them, because what a spare
-    // takes is room on the one node sandboxes land on, and minting beside a
-    // sandbox that is still standing there would put the pool over its size.
+    // Unready spares that could not be condemned still take room on the node,
+    // so they count against the pool.
     let stuck = 0;
     for (const spare of await this.spares()) {
       if (isReady(spare)) {
         ready.push(spare);
         continue;
       }
-      // `mintSpare` does not return until its spare is Ready and two passes
-      // never overlap, so one that is not Ready here was Ready and stopped
-      // being it — an evicted pod, a node that went away. `adopt` refuses
-      // such a thing, so leaving it in place holds the pool at nothing usable
-      // while it reads as full, and the renewal below is what would make that
-      // permanent: a spare's TTL is the only thing that ever takes one away.
+      // It was Ready once (`mintSpare` waits for that), so its pod was lost.
+      // Renewing it would keep an unusable spare in the pool indefinitely.
       const name = spare.metadata.name;
       try {
         await this.condemn(name, spare.metadata.resourceVersion);
@@ -1532,12 +1172,7 @@ export class KubeSandboxes implements Sandboxes {
           sandbox: name,
         });
       } catch (error) {
-        // The precondition is here for the reason it is on the renewal below,
-        // and losing to it is the wanted outcome: the only thing that moves a
-        // spare between the list and the patch is a thread claiming it or the
-        // controller reaping it, and neither of those wants a condemned
-        // sandbox's labels written over it. The pool is one short either way,
-        // and the mint below is what answers that.
+        // 409: a thread claimed it or the controller reaped it since the list.
         if (error instanceof KubeError && error.status === 409) continue;
         stuck += 1;
         log.warn('could not condemn a spare that stopped being ready', {
@@ -1546,9 +1181,7 @@ export class KubeSandboxes implements Sandboxes {
         });
       }
     }
-    // Only what is wanted is renewed. Past that nothing is slid and nothing
-    // is deleted, because a spare's short `shutdownTime` already removes one
-    // nobody renews, and turning the knob down needs no second mechanism.
+    // Renew only `want`; any excess expires on its own short `shutdownTime`.
     for (const spare of ready.slice(0, want)) {
       try {
         await this.patch(spare.metadata.name, {
@@ -1556,11 +1189,8 @@ export class KubeSandboxes implements Sandboxes {
           spec: { shutdownTime: this.spareShutdownTime() },
         });
       } catch (error) {
-        // The precondition is here for the same reason it is on adoption, and
-        // losing to it is the wanted outcome: a spare that moved between the
-        // list and the patch was taken by a thread or reaped, and neither of
-        // those wants a spare's half hour written back over it. Anything else
-        // costs one member of the pool rather than the pass.
+        // 409: taken or reaped since the list, and neither wants a spare's
+        // TTL back.
         if (error instanceof KubeError && error.status === 409) continue;
         log.warn('could not renew a spare', {
           sandbox: spare.metadata.name,
@@ -1574,28 +1204,19 @@ export class KubeSandboxes implements Sandboxes {
         await this.mintSpare();
         warm += 1;
       } catch (error) {
-        // The first failure ends the pass rather than asking for another
-        // sandbox the apiserver or the node just refused. Nothing is waiting
-        // on the pool, and the next tick is minutes away.
+        // Stop at the first refusal; the next sweep retries.
         log.warn('warming a spare failed', { error: plain(error) });
         break;
       }
     }
-    // What a thread could be handed if it asked now — a condemned or stuck
-    // spare is room on the node and nothing else, so neither is in this. A
-    // pool that has stopped refilling looks healthy from every other angle:
-    // threads still get their answers, at the cold-start price the pool was
-    // turned on to stop paying.
+    // Counts only spares a thread could adopt now; a pool that stopped
+    // refilling otherwise looks healthy, since threads still get answers.
     this.deps.metrics?.spares(warm, want);
   }
 
   /**
-   * Keeps none of the spares this mate did not warm. A spare outlives a roll
-   * — one replica, `Recreate`, seconds of downtime — and it was built from
-   * whatever the Deployment said at the time: its sandbox image, its model,
-   * its checkout. Nothing on the object records which, so the first pass
-   * spends one warming to know that every spare it hands out is running what
-   * this mate was told to run.
+   * Spares outlive a rollout, and nothing on one records the image, model or
+   * checkout it was built from, so the first pass discards them all.
    */
   private async discard(): Promise<void> {
     let all = true;
@@ -1614,8 +1235,7 @@ export class KubeSandboxes implements Sandboxes {
         });
       }
     }
-    // Stays set while any of them is still there, because the alternative is
-    // renewing an inherited spare's half hour for the rest of the day.
+    // Retry while any remain, or an inherited spare is renewed indefinitely.
     this.inherited = !all;
   }
 
@@ -1687,7 +1307,6 @@ export class KubeSandboxes implements Sandboxes {
     throw new Error(`sandbox ${name} was not ready in time: ${why}`);
   }
 
-  /** `session/load` first, a fresh session when the harness cannot replay it. */
   private async openSession(
     client: AcpClient,
     name: string,
@@ -1712,10 +1331,8 @@ export class KubeSandboxes implements Sandboxes {
     return { id: fresh, resumed: false };
   }
 
-  /**
-   * A mate that died mid-session left its harness running with no reader; two
-   * `opencode acp` processes would share one state directory.
-   */
+  // A dead mate's harness keeps running with no reader, and two `opencode acp`
+  // processes would share one state directory.
   private async reap(name: string, pod: string): Promise<void> {
     const { kube, log } = this.deps;
     try {
@@ -1723,8 +1340,8 @@ export class KubeSandboxes implements Sandboxes {
         namespace: this.namespace,
         pod,
         container: HARNESS_CONTAINER,
-        // Matched on the process name, not the command line: `-f` would match
-        // this shell's own arguments and kill the reaper instead.
+        // `-x` matches the process name; `-f` would match this shell's own
+        // arguments and kill the reaper.
         command: ['/bin/sh', '-c', 'pkill -x opencode; exit 0'],
         timeoutMs: REAP_TIMEOUT_MS,
       });
@@ -1752,7 +1369,6 @@ export class KubeSandboxes implements Sandboxes {
     attachment.client.close();
   }
 
-  /** Slides the TTL and ends the turn mark in one write: both happen together. */
   private async slide(name: string): Promise<void> {
     await this.patch(name, {
       spec: { shutdownTime: this.shutdownTime() },
@@ -1760,15 +1376,8 @@ export class KubeSandboxes implements Sandboxes {
     });
   }
 
-  /**
-   * Opens the turn mark, and slides the TTL with it. The controller deletes a
-   * sandbox the moment `shutdownTime` passes and does not care that a turn is
-   * streaming out of it. Sliding only at the ends of a turn left the next one
-   * whatever the quiet timer had not already spent, which made
-   * `MATE_QUIET_MINUTES` a silent bound on how long a turn could run; sliding
-   * here is what decouples them, so a turn's window is the TTL and nothing
-   * else.
-   */
+  // The controller deletes at `shutdownTime` even mid-turn, so the start of a
+  // turn slides it too and the turn gets a full TTL.
   private async mark(name: string): Promise<void> {
     await this.patch(name, {
       spec: { shutdownTime: this.shutdownTime() },
