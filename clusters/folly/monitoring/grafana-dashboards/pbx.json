@@ -27,26 +27,26 @@
       "title": "Line health",
       "collapsed": false,
       "gridPos": {
-        "h": 1,
-        "w": 24,
         "x": 0,
-        "y": 0
+        "y": 0,
+        "w": 24,
+        "h": 1
       },
       "panels": []
     },
     {
       "id": 2,
       "type": "stat",
-      "title": "Trunk",
+      "title": "Trunks",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
       },
       "gridPos": {
-        "h": 4,
-        "w": 6,
         "x": 0,
-        "y": 1
+        "y": 1,
+        "w": 9,
+        "h": 5
       },
       "targets": [
         {
@@ -54,7 +54,8 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "asterisk_pjsip_outbound_registration_status{namespace=\"pbx\"}",
+          "expr": "label_replace(asterisk_pjsip_outbound_registration_status{namespace=\"pbx\"}, \"account\", \"$1\", \"username\", \"sip:([^@]+)@.*\")",
+          "legendFormat": "{{account}}",
           "refId": "A",
           "instant": true
         }
@@ -69,7 +70,7 @@
         },
         "colorMode": "background",
         "graphMode": "none",
-        "textMode": "value",
+        "textMode": "value_and_name",
         "justifyMode": "center"
       },
       "fieldConfig": {
@@ -112,21 +113,21 @@
         },
         "overrides": []
       },
-      "description": "The PBX's registration to voip.ms. While this is not Registered, calls to the DID reach nothing. Rejected means the carrier refused the credentials."
+      "description": "Each voip.ms sub-account's registration. While one is not Registered, calls to that DID reach nothing. Rejected means the carrier refused the credentials."
     },
     {
       "id": 3,
       "type": "stat",
-      "title": "Handset (line 4)",
+      "title": "Handset lines",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
       },
       "gridPos": {
-        "h": 4,
-        "w": 6,
-        "x": 6,
-        "y": 1
+        "x": 9,
+        "y": 1,
+        "w": 9,
+        "h": 5
       },
       "targets": [
         {
@@ -134,7 +135,8 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "asterisk_endpoints_state{namespace=\"pbx\", resource=\"cathy\"}",
+          "expr": "asterisk_endpoints_state{namespace=\"pbx\", resource=~\"line[1-4]\"}",
+          "legendFormat": "{{resource}}",
           "refId": "A",
           "instant": true
         }
@@ -149,7 +151,7 @@
         },
         "colorMode": "background",
         "graphMode": "none",
-        "textMode": "value",
+        "textMode": "value_and_name",
         "justifyMode": "center"
       },
       "fieldConfig": {
@@ -192,7 +194,7 @@
         },
         "overrides": []
       },
-      "description": "Whether the office SPA504G's line 4 is registered to the PBX. A PBX rollout drops it for up to a minute."
+      "description": "Whether each line of the office SPA504G is registered to the PBX. A PBX rollout drops them for up to a minute."
     },
     {
       "id": 4,
@@ -203,10 +205,10 @@
         "uid": "prometheus"
       },
       "gridPos": {
-        "h": 4,
-        "w": 6,
-        "x": 12,
-        "y": 1
+        "x": 18,
+        "y": 1,
+        "w": 3,
+        "h": 5
       },
       "targets": [
         {
@@ -278,10 +280,10 @@
         "uid": "prometheus"
       },
       "gridPos": {
-        "h": 4,
-        "w": 6,
-        "x": 18,
-        "y": 1
+        "x": 21,
+        "y": 1,
+        "w": 3,
+        "h": 5
       },
       "targets": [
         {
@@ -335,10 +337,10 @@
       "title": "Calls",
       "collapsed": false,
       "gridPos": {
-        "h": 1,
-        "w": 24,
         "x": 0,
-        "y": 5
+        "y": 6,
+        "w": 24,
+        "h": 1
       },
       "panels": []
     },
@@ -351,10 +353,10 @@
         "uid": "prometheus"
       },
       "gridPos": {
-        "h": 4,
-        "w": 6,
         "x": 0,
-        "y": 6
+        "y": 7,
+        "w": 6,
+        "h": 4
       },
       "targets": [
         {
@@ -410,10 +412,10 @@
         "uid": "prometheus"
       },
       "gridPos": {
-        "h": 4,
-        "w": 6,
         "x": 6,
-        "y": 6
+        "y": 7,
+        "w": 6,
+        "h": 4
       },
       "targets": [
         {
@@ -468,10 +470,10 @@
         "uid": "prometheus"
       },
       "gridPos": {
-        "h": 8,
-        "w": 12,
         "x": 12,
-        "y": 6
+        "y": 7,
+        "w": 12,
+        "h": 8
       },
       "targets": [
         {
@@ -524,10 +526,10 @@
       },
       "description": "Green while registered. Each gap is a window in which that leg could not have carried a call.",
       "gridPos": {
-        "h": 4,
-        "w": 12,
         "x": 0,
-        "y": 10
+        "y": 11,
+        "w": 12,
+        "h": 8
       },
       "targets": [
         {
@@ -535,8 +537,8 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "asterisk_pjsip_outbound_registration_status{namespace=\"pbx\"} == bool 1",
-          "legendFormat": "trunk",
+          "expr": "label_replace(asterisk_pjsip_outbound_registration_status{namespace=\"pbx\"} == bool 1, \"account\", \"$1\", \"username\", \"sip:([^@]+)@.*\")",
+          "legendFormat": "{{account}}",
           "refId": "A"
         },
         {
@@ -544,8 +546,8 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "asterisk_endpoints_state{namespace=\"pbx\", resource=\"cathy\"} == bool 2",
-          "legendFormat": "handset",
+          "expr": "asterisk_endpoints_state{namespace=\"pbx\", resource=~\"line[1-4]\"} == bool 2",
+          "legendFormat": "{{resource}}",
           "refId": "B"
         }
       ],
@@ -598,10 +600,10 @@
       "title": "Logs (VictoriaLogs)",
       "collapsed": false,
       "gridPos": {
-        "h": 1,
-        "w": 24,
         "x": 0,
-        "y": 14
+        "y": 19,
+        "w": 24,
+        "h": 1
       },
       "panels": []
     },
@@ -615,10 +617,10 @@
         "uid": "victorialogs"
       },
       "gridPos": {
-        "h": 9,
-        "w": 24,
         "x": 0,
-        "y": 15
+        "y": 20,
+        "w": 24,
+        "h": 9
       },
       "targets": [
         {
@@ -649,10 +651,10 @@
         "uid": "victorialogs"
       },
       "gridPos": {
-        "h": 8,
-        "w": 24,
         "x": 0,
-        "y": 24
+        "y": 29,
+        "w": 24,
+        "h": 8
       },
       "targets": [
         {
@@ -683,10 +685,10 @@
         "uid": "victorialogs"
       },
       "gridPos": {
-        "h": 14,
-        "w": 24,
         "x": 0,
-        "y": 32
+        "y": 37,
+        "w": 24,
+        "h": 14
       },
       "targets": [
         {
@@ -717,10 +719,10 @@
         "uid": "victorialogs"
       },
       "gridPos": {
-        "h": 6,
-        "w": 24,
         "x": 0,
-        "y": 46
+        "y": 51,
+        "w": 24,
+        "h": 6
       },
       "targets": [
         {

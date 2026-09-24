@@ -49,16 +49,16 @@ spec:
     # The handset. She is a LAN host, not a cluster endpoint, so she is `world`
     # to Cilium even though the packets never leave the building.
     #
-    # 5063 rather than 5060: lines 1-3 share 5060 and line 4 has always had its
-    # own port. Sending to 5060 would reach the lines still registered straight
-    # to voip.ms.
+    # Lines 1-3 share SIP port 5060 on the handset and line 4 has its own,
+    # 5063; the PBX rings all four.
     #
-    # The second range is the phone's own RTP window, read off its running
-    # config (RTP_Port_Min/Max). Omit it and the call sets up and is silent in
-    # one direction.
+    # The range is the phone's own RTP window, read off its running config
+    # (RTP_Port_Min/Max). Omit it and the call sets up and is silent in one
+    # direction.
     - toCIDR: ["${CATHY_IP}/32"]
       toPorts:
         - ports:
+            - {port: "5060", protocol: UDP}
             - {port: "5063", protocol: UDP}
             - {port: "16384", endPort: 16538, protocol: UDP}
   # The base policy names ingress rules, which makes ingress default-deny for
