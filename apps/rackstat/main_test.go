@@ -40,6 +40,7 @@ func TestSnapshotCachesAndServes(t *testing.T) {
 				sample(1, "node", "optiplex"),
 				sample(0, "instance", "spore.lolwtf.ca:9100"),
 			},
+			queryPBXEndpoints: {sample(2, "resource", "line1")},
 		},
 	}
 	s := testServer(src)
@@ -68,6 +69,9 @@ func TestSnapshotCachesAndServes(t *testing.T) {
 	// probes is never null in the JSON: the pixlet app iterates it directly
 	if decoded.Probes == nil {
 		t.Error("probes should serialize as an empty array, not null")
+	}
+	if decoded.PBX == nil || len(decoded.PBX.Lines) != 4 || !decoded.PBX.Lines[0].Handset {
+		t.Errorf("pbx should be in the snapshot with line1 online, got %+v", decoded.PBX)
 	}
 }
 

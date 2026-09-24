@@ -75,23 +75,35 @@ def main(config):
         "stale": st["stale"],
     }
 
+    show_phone = config.bool("show_phone", True) and len(st["pbx"]["lines"]) > 0
+
     pages = []
     if st["trouble"]:
         # problems first: what is wrong, then where
         pages.append(page_alerts(st, ctx))
         pages.append(page_nodes(st, ctx))
+        if show_phone:
+            pages.append(page_phone(st, ctx))
         pages.append(page_net(st, ctx))
         if config.bool("show_gitops", True):
             pages.append(page_gitops(st, ctx))
     else:
         pages.append(page_summary(st, ctx))
         pages.append(page_nodes(st, ctx))
+        if show_phone:
+            pages.append(page_phone(st, ctx))
         if config.bool("show_gitops", True):
             pages.append(page_gitops(st, ctx))
         if config.bool("show_net", True):
             pages.append(page_net(st, ctx))
         if config.bool("show_cpu", True) and len(st["cpu_history"]) > 1:
             pages.append(page_cpu(st, ctx))
+
+    # A live call jumps the whole rotation: the display is a landline, and
+    # somebody picking up the handset is the most time-sensitive thing it
+    # can show.
+    if st["pbx"]["on_air"]:
+        pages.insert(0, page_on_air(st, ctx))
 
     return render.Root(
         delay = FRAME_MS // scale,
@@ -129,6 +141,7 @@ def display_state(snap):
     nodes = [node_state(n) for n in snap.get("nodes", [])]
     probes = [probe_state(p) for p in snap.get("probes", [])]
     counts = snap.get("alert_counts", {})
+    pbx = pbx_state(snap.get("pbx") or {})
 
     # In alert-page order: what is firing, then which machines, then which paths.
     problems = []
@@ -143,6 +156,11 @@ def display_state(snap):
     for probe in probes:
         if not probe["ok"]:
             problems.append("%s unreachable" % probe["name"])
+    for line in pbx["lines"]:
+        if not line["handset"]:
+            problems.append("line%d offline" % line["line"])
+        elif not line["trunk"]:
+            problems.append("line%d trunk down" % line["line"])
 
     critical = counts.get("critical", 0)
     warning = counts.get("warning", 0)
@@ -158,6 +176,7 @@ def display_state(snap):
         "nodes_up": len([n for n in nodes if n["up"]]),
         "any_node_down": len([n for n in nodes if n["status"] == "down"]) > 0,
         "gitops": gitops_state(gitops),
+        "pbx": pbx,
         "cpu_history": snap.get("cpu_history", []),
         "stale": is_stale(snap),
         "trouble": len(problems) > 0,
@@ -203,6 +222,21 @@ def gitops_state(gitops):
         "hr_ok": hr_ready == hr_total,
         "sha": revision.split(":")[-1][0:7] if ":" in revision else "unknown",
         "branch": revision.split("@")[0] if "@" in revision else "rev",
+    }
+
+def pbx_state(pbx):
+    """Resolve the office phone: four handset lines and their voip.ms
+    trunks, plus whether a call is live right now."""
+    return {
+        "lines": [line_state(l) for l in pbx.get("lines", [])],
+        "on_air": pbx.get("on_air", False),
+    }
+
+def line_state(line):
+    return {
+        "line": line.get("line", 0),
+        "handset": line.get("handset", False),
+        "trunk": line.get("trunk", False),
     }
 
 def is_stale(snap):
@@ -400,6 +434,61 @@ def page_gitops(st, ctx):
     all_ok = gitops["ks_ok"] and gitops["hr_ok"]
     return still(framed("GITOPS", COLOR_OK if all_ok else COLOR_WARN, ctx, body), ctx)
 
+def page_phone(st, ctx):
+    """The office phone: each handset line's own registration next to its
+    voip.ms trunk. Handset carries the line's dot and name; trunk is the
+    second dot alone, since a trunk problem is a carrier issue on a line
+    that otherwise still rings the desk."""
+    fonts = ctx["fonts"]
+    scale = ctx["scale"]
+    lines = st["pbx"]["lines"]
+    all_ok = all([l["handset"] and l["trunk"] for l in lines]) if len(lines) > 0 else False
+
+    def build(lit):
+        rows = []
+        for line in lines:
+            rows.append(render.Row(
+                expanded = True,
+                main_align = "space_between",
+                cross_align = "center",
+                children = [
+                    render.Row(cross_align = "center", children = [
+                        status_dot("ok" if line["handset"] else "down", lit, ctx),
+                        render.Box(width = 2 * scale, height = 1),
+                        render.Text("LINE%d" % line["line"], font = fonts["small"], color = "#ffffff" if line["handset"] else COLOR_DIM),
+                    ]),
+                    status_dot("ok" if line["trunk"] else "down", lit, ctx),
+                ],
+            ))
+        return framed("PHONE", COLOR_OK if all_ok else COLOR_BAD, ctx, render.Box(
+            padding = 2 * scale,
+            child = render.Column(expanded = True, main_align = "space_evenly", children = rows),
+        ))
+
+    return blink(build, ctx)
+
+def page_on_air(st, ctx):
+    """A full-bleed page that jumps the rotation while a call is up."""
+    fonts = ctx["fonts"]
+
+    def build(lit):
+        return render.Box(
+            width = canvas.width(),
+            height = canvas.height(),
+            color = COLOR_BAD if lit else "#2a0000",
+            child = render.Column(
+                expanded = True,
+                main_align = "center",
+                cross_align = "center",
+                children = [
+                    render.Text("ON AIR", font = fonts["big"], color = "#ffffff"),
+                    render.Text(ctx["clock"], font = fonts["small"], color = "#ffffff"),
+                ],
+            ),
+        )
+
+    return blink(build, ctx)
+
 def page_net(st, ctx):
     fonts = ctx["fonts"]
     probes = st["probes"]
@@ -467,6 +556,13 @@ def get_schema():
                 name = "GitOps page",
                 desc = "Show Flux kustomization/helmrelease status.",
                 icon = "codeBranch",
+                default = True,
+            ),
+            schema.Toggle(
+                id = "show_phone",
+                name = "Phone page",
+                desc = "Show the office phone's line and trunk registration, and an ON AIR page while a call is live.",
+                icon = "phone",
                 default = True,
             ),
             schema.Toggle(
