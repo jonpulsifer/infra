@@ -1,11 +1,3 @@
-/**
- * `configVersion`, and the three ways a hash over pinned references goes wrong
- * without anything noticing (Task 30, §10).
- *
- * Each test here is a property the deploy path depends on: the loop compares
- * versions to decide whether a Deploy is a change, so a hash that is unstable
- * deploys forever and a hash that is too stable never deploys at all.
- */
 import { describe, expect, test } from 'bun:test';
 import {
   keysThatWillNotFollow,
@@ -24,16 +16,14 @@ const DSN = { name: 'DSN', secret: { key: 'item/dsn', version: '1' } };
 
 describe('the hash is over references, in one order', () => {
   test('row order does not change the version', async () => {
-    // Two reads of the same config can come back in either order; a version
-    // that disagreed would make every pass of the loop look like a change.
+    // Reads return rows in any order, and an order-sensitive hash would make
+    // every pass of the loop look like a change.
     expect(await configVersionOf([TOKEN, DSN])).toBe(
       await configVersionOf([DSN, TOKEN]),
     );
   });
 
   test('a new pinned version is a new configVersion', async () => {
-    // The whole point (§10): a config change must produce a new Deploy rather
-    // than silently not applying.
     const repinned = { ...TOKEN, secret: { ...TOKEN.secret, version: '4' } };
     expect(await configVersionOf([repinned])).not.toBe(
       await configVersionOf([TOKEN]),
@@ -41,8 +31,7 @@ describe('the hash is over references, in one order', () => {
   });
 
   test('the empty document has a version', async () => {
-    // "No config" is a state a Deploy is pinned to, and a rollback to it has to
-    // be able to say so. A null here would be indistinguishable from unrecorded.
+    // A Deploy can pin no config, and null already means unrecorded.
     expect(await configVersionOf([])).toMatch(/^sha256:[0-9a-f]{64}$/);
   });
 
@@ -56,8 +45,7 @@ describe('the hash is over references, in one order', () => {
 
 describe('a half-written pin is dropped, never delivered', () => {
   test('a row with no version does not become an entry', () => {
-    // An entry naming an item with no version is the floating latest §10
-    // forbids; delivering it is how a workload ends up holding another
+    // No version means the floating latest, which can hand a workload another
     // release's secret.
     expect(
       documentOf([
@@ -91,7 +79,7 @@ describe('the store of record is a Target property', () => {
     expect(sharesStoreOfRecord('onepassword', 'gcp-secret-manager')).toBe(
       false,
     );
-    // No store of record is not the same as sharing one.
+    // Two Targets with no store of record share nothing.
     expect(sharesStoreOfRecord(null, null)).toBe(false);
   });
 });

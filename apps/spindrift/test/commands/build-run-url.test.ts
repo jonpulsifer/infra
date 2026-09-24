@@ -1,11 +1,5 @@
-/**
- * What dispatch does with a route's report of where its run can be watched.
- *
- * The event is not a log line and must not become one. §4's `LIVE_STATUS`
- * means the attempt log is empty for the whole of the run, so a link recorded
- * there would be invisible exactly when it is wanted; recorded on the Build it
- * is readable from the first poll onwards.
- */
+// The attempt log stays empty for a LIVE_STATUS run, so the run link is
+// recorded on the Build, never as a log line.
 import { beforeEach, describe, expect, test } from 'bun:test';
 import { eq } from 'drizzle-orm';
 import { dispatchBuild } from '../../src/commands/builds/dispatch.ts';
@@ -152,9 +146,6 @@ describe('the run link dispatch records', () => {
       .where(eq(builds.id, build.id));
     expect(stored?.runUrl).toBe(RUN_URL);
 
-    // The log is the operator-visible stream, and this is not a log line. If it
-    // leaked into one, the URL would also be the thing a reader has to scroll a
-    // finished transcript to find.
     const events = await ctx.db
       .select({ line: attemptEvents.line })
       .from(attemptEvents)
@@ -199,8 +190,8 @@ describe('the run link dispatch records', () => {
       }),
     );
     const build = await seedBuild();
-    // What an earlier attempt left on the row before its lease lapsed and a
-    // Deploy press re-armed it: a run that already concluded.
+    // An earlier attempt's concluded run, left on the row when its lease
+    // lapsed.
     await ctx.db
       .update(builds)
       .set({ runUrl: 'https://vcs.example/acme/widgets/actions/runs/8' })
@@ -208,8 +199,7 @@ describe('the run link dispatch records', () => {
 
     await dispatchBuild({ buildId: build.id, route: 'hosted' }, context);
 
-    // Not this attempt's run, so `cancelBuild` must not be handed it: the
-    // column names nothing until the route discovers the new one.
+    // Not this attempt's run, so cancelBuild must not get it.
     const [stored] = await ctx.db
       .select({ runUrl: builds.runUrl })
       .from(builds)

@@ -1,16 +1,3 @@
-/**
- * Detection is one algorithm over one named directory (§5).
- *
- * The public seam is `detectScope`: a caller supplies a {@link SourceTree} and
- * the zero-config builder's normalized plan, then receives either one Component
- * proposal or an honest unknown outcome. Tests stay above the tree and planner
- * boundaries; none reaches into the ladder's helpers.
- *
- * Every case below runs twice where it can — once over a real directory and
- * once over an in-memory tree — because "one algorithm over both sources" is
- * the claim the seam exists to make, and a claim tested against one source is
- * the claim that was already false.
- */
 import { describe, expect, test } from 'bun:test';
 import { join } from 'node:path';
 import { vercelFrameworkOf } from '../../src/domain/detection/declared.ts';
@@ -134,12 +121,7 @@ describe('the detection ladder', () => {
   });
 
   test('a subpath Dockerfile copying from beside itself names its own directory as the context', async () => {
-    // The failing arrangement: a standalone repository vendored under a
-    // subpath, its Dockerfile written against its own directory (`COPY
-    // go.mod ./` with go.mod beside it and not at the root). The sentence
-    // must say so, because the build routes probe the same rule and will
-    // build with the scope as the context — the sentence and the
-    // arrangement have to agree.
+    // The build routes use this same rule, so the sentence names the context.
     const result = await detectScope({
       tree: fixture('vendored-standalone'),
       source: { kind: 'repo', subpath: 'apps/ddns' },
@@ -165,10 +147,6 @@ describe('the detection ladder', () => {
   });
 
   test('a subpath Dockerfile written against the repository root keeps the root as the context', async () => {
-    // The monorepo convention: `COPY package.json ./` resolves at the root
-    // and not beside the Dockerfile, so nothing moves the context and the
-    // sentence names the root out loud instead of reading as if the
-    // directory were the context.
     const result = await detectScope({
       tree: fixture('monorepo-dockerfile'),
       source: { kind: 'repo', subpath: 'apps/web' },
@@ -347,16 +325,8 @@ describe('the detection ladder', () => {
   });
 });
 
-/**
- * The framework a project declares, in the edge platform's vocabulary.
- *
- * This mapping is load-bearing in a way most detection is not: `vercel build`
- * performs no detection of its own, so a wrong or missing slug does not fail
- * the build — it builds the project as "Other", which copies the tree into
- * `static/` and emits no functions at all. The failure is a green build
- * serving an SSR app's own sources, so the cases below are about the answers
- * being *exactly* right rather than merely present.
- */
+// vercel build does no detection of its own: a wrong or missing slug builds
+// the project as "Other", a green build that serves the app's own sources.
 describe('the Vercel framework a package.json implies', () => {
   const of = (dependencies: Record<string, string>) =>
     vercelFrameworkOf(JSON.stringify({ dependencies }));
@@ -368,16 +338,13 @@ describe('the Vercel framework a package.json implies', () => {
   });
 
   test('takes the current major’s slug where the platform kept the old one', () => {
-    // `sveltekit` and `docusaurus` are both still live slugs naming the
-    // *previous* major. Answering either would build the wrong way round, and
-    // would do it silently.
+    // The sveltekit and docusaurus slugs name the previous major.
     expect(of({ '@sveltejs/kit': '2.0.0' })).toBe('sveltekit-1');
     expect(of({ '@docusaurus/core': '3.0.0' })).toBe('docusaurus-2');
   });
 
   test('keeps the preset table’s order, so the specific framework wins', () => {
-    // A SvelteKit app depends on Vite too, and answering `vite` would drop
-    // every server route the app has.
+    // A SvelteKit app also depends on Vite; vite would drop its server routes.
     expect(of({ '@sveltejs/kit': '2.0.0', vite: '5.0.0' })).toBe('sveltekit-1');
   });
 
@@ -390,8 +357,6 @@ describe('the Vercel framework a package.json implies', () => {
   });
 
   test('refuses rather than defaulting when nothing is recognised', () => {
-    // The whole point: no fallback. A project with no recognised framework has
-    // to stop the dispatch, because the build that would run instead succeeds.
     expect(of({ express: '4.0.0' })).toBeNull();
     expect(vercelFrameworkOf('{}')).toBeNull();
     expect(vercelFrameworkOf('not json at all')).toBeNull();

@@ -1,21 +1,5 @@
-/**
- * Config, and the three claims §10 makes that would still "work" if they were
- * false (Task 30).
- *
- * - **Values are write-only.** The store contract has no verb that returns one,
- *   so the way this fails is not a bad call — it is a value that gets *kept* on
- *   its way past. So the assertion is over the database itself: after a set,
- *   every column of every table in this test's schema is searched for the
- *   plaintext. A future `plainValue` shortcut, a debug column, an audit row
- *   that "helpfully" recorded the old value: all of them fail here.
- * - **A rollback comes up with the configuration it originally had.** Asserted
- *   by configuring, deploying, reconfiguring, deploying, and rolling back — the
- *   only arrangement where re-reading current config and re-delivering the
- *   recorded document give different answers.
- * - **A cross-store re-placement is blocked until the named keys are supplied.**
- *   Asserted in both directions: the move refuses naming the keys, and the
- *   deploy that would skip the move refuses with the same sentence.
- */
+// Config values are write-only, a rollback comes up with the config it had, and
+// a cross-store move is blocked until the named keys are supplied.
 import { beforeEach, describe, expect, test } from 'bun:test';
 import { and, eq } from 'drizzle-orm';
 import type { DeployAdapter } from '../../src/adapters/deploy/contract.ts';
@@ -65,13 +49,12 @@ const manifest = await fixtureManifest();
 const FROZEN = new Date('2024-06-01T00:00:00.000Z');
 const clock: Clock = { now: () => FROZEN };
 
-/** A digest of the right shape, distinct per call. */
 function digest(seed: number): string {
   return `sha256:${seed.toString(16).padStart(64, '0')}`;
 }
 
 let store: FakeSecretStore;
-/** A second store of record, for the Targets that are in front of another vault. */
+/** A second store of record, for Targets in front of another vault. */
 let elsewhere: FakeSecretStore;
 
 beforeEach(() => {
@@ -82,15 +65,7 @@ beforeEach(() => {
   });
 });
 
-/**
- * A registry with one store per adapter name.
- *
- * Two, in the tests that need a store boundary to exist. §10 makes the store a
- * Target property — an admin-chosen one on a cluster, the vessel's own in the
- * cloud — so "these two Targets are in front of different vaults" is a
- * configuration an installation can have, and it is the only arrangement in
- * which a key can fail to follow a move.
- */
+/** One store per adapter name; two where a test needs a store boundary. */
 function registryOf(
   deployAdapter: DeployAdapter,
   stores: Partial<Record<StoreAdapter, SecretStore>> = {
@@ -102,23 +77,14 @@ function registryOf(
       adapter === deployAdapter.adapter ? deployAdapter : null,
     build: () => null,
     store: (adapter) => stores[adapter] ?? null,
-    // §15's repository host plays no part in config: a value reaches the store,
-    // never a repository.
     repository: () => null,
-    // Config commands never reach the supply chain; `createDeploy` admission
-    // does, for an image Build. The harness records every finalization, so a
-    // config pass that ever called `finalize` would leave an entry here.
+    // createDeploy admission reaches the supply chain for an image Build.
     supplyChain: () => new SupplyChainHarness(),
   };
 }
 
-/**
- * A context whose principal is a real `users` row.
- *
- * The audit trail names who acted (§10) and the column is a foreign key, so a
- * principal nobody enrolled is not a principal a config act can be attributed
- * to — which is the point.
- */
+// The audit trail's principal column is a foreign key, so the principal is a
+// real `users` row.
 async function context(adapters: AdapterRegistry): Promise<CommandContext> {
   const [user] = await database()
     .db.insert(users)
@@ -241,11 +207,9 @@ describe('setConfig writes a reference, never a value', () => {
     if (!result.ok) return;
     expect(result.value.written).toEqual(['TOKEN']);
 
-    // The one place it is: the store, which is the far side.
     expect(store.puts.map((put) => put.key)).toEqual(['TOKEN']);
 
-    // And nowhere else. Not in `config_items`, not in the audit trail, not in
-    // the Deploy's document, not in an attempt event.
+    // And nowhere in the database.
     const stored = await everythingStored();
     expect(stored.some((value) => value.includes(secret))).toBe(false);
 
@@ -303,26 +267,12 @@ describe('setConfig writes a reference, never a value', () => {
   });
 });
 
-/**
- * §10's "one store of record, several access paths", where a fleet has more
- * than one store of record in it.
- *
- * A Target that reaches a *different* real store is not the same case as one
- * that reaches nothing. The first would look fine at the seam above — there is
- * a store, and core has one — which is exactly the arrangement in which a
- * relaxed check writes the value into the store core happens to hold and hands
- * the workload a reference its own operator cannot resolve. Nothing fails; the
- * process comes up with an empty environment, and the deploy is green.
- *
- * So the assertion is over both halves: the refusal, **and** that nothing was
- * written. A refusal that had already put the value somewhere is the same
- * silent failure with an error message on top.
- */
+// A Target in front of a different real store would pass a looser check and
+// get a reference it cannot resolve, so it is refused before any write.
 describe('a store of record is per Target, and core writes to nobody else’s', () => {
   test('a Target in front of another vault is refused, and nothing is written', async () => {
     const { component } = await fixture();
-    // Reaches a store, and a real one — just not the one this installation has
-    // an access path to, which is the whole of what makes it undeliverable.
+    // A real store, but not one this installation has an access path to.
     const elsewhereOnly = await connectedTarget({
       reachableSecretStores: ['onepassword'],
     });
@@ -346,11 +296,7 @@ describe('a store of record is per Target, and core writes to nobody else’s', 
   });
 
   test('a Target that reaches both writes to the installation’s store', async () => {
-    // The shape every cluster in this fleet has: its own access path to the
-    // store of record, and a second store it also reaches. Config must not
-    // split across the two on the order a discovery happened to list them, or
-    // two Components on one cluster end up in different vaults and a
-    // re-placement between clusters stops being free.
+    // Config must not split across two reachable stores by discovery order.
     const { component } = await fixture();
     const both = await connectedTarget({
       reachableSecretStores: ['onepassword', manifest.secretStore.adapter],
@@ -408,8 +354,7 @@ describe('setConfig also removes, naming nothing but the key', () => {
     if (!result.ok) return;
     expect(result.value.removed).toEqual(['TOKEN']);
     expect(result.value.written).toEqual([]);
-    // DSN's value was never restated, so nothing was written to the store —
-    // a removal is not `replaceConfig`'s upload wearing a shorter name.
+    // DSN was not restated, so the store was not written.
     expect(store.puts.length).toBe(putsBefore);
 
     const rows = await database()
@@ -485,8 +430,7 @@ describe('a config change produces a new Deploy', () => {
     expect(changed.value.notDeployed).toBeNull();
     expect(changed.value.configVersion).not.toBe(first.value.configVersion);
 
-    // The same artifact: a config change redeploys what is running, never
-    // something else.
+    // A config change redeploys the running artifact.
     const [deploy] = await database()
       .db.select()
       .from(deploys)
@@ -495,7 +439,7 @@ describe('a config change produces a new Deploy', () => {
     const document = deploy?.desired.config ?? [];
     expect(document).toHaveLength(1);
     expect(document[0]?.name).toBe('TOKEN');
-    // Pinned, not floating: the entry names a version the store minted.
+    // Pinned to a version the store minted.
     expect(document[0]?.secret.version).toBeTruthy();
   });
 
@@ -529,7 +473,6 @@ describe('a rollback comes up with the configuration it originally had', () => {
     const older = await succeededBuild(component.id, 1);
     const newer = await succeededBuild(component.id, 2);
 
-    // Configure, then ship both Builds with that configuration.
     await setConfig(
       {
         componentId: component.id,
@@ -549,8 +492,8 @@ describe('a rollback comes up with the configuration it originally had', () => {
     expect(first.ok && second.ok).toBe(true);
     if (!first.ok || !second.ok) return;
 
-    // Reconfigure. This redeploys the *newer* Build — the one that is live —
-    // under a new version, and leaves the older release's document alone.
+    // This redeploys the live newer Build and leaves the older release's
+    // document alone.
     const changed = await setConfig(
       {
         componentId: component.id,
@@ -570,8 +513,7 @@ describe('a rollback comes up with the configuration it originally had', () => {
     expect(rolled.ok).toBe(true);
     if (!rolled.ok) return;
 
-    // The claim: the rollback comes up with the configuration that release
-    // had, not the configuration set since.
+    // The config that release had, not the config set since.
     expect(rolled.value.configVersion).toBe(first.value.configVersion);
     expect(rolled.value.configVersion).not.toBe(changed.value.configVersion);
 
@@ -613,10 +555,8 @@ describe('a rollback comes up with the configuration it originally had', () => {
       { componentId: component.id, targetId: target.id, buildId: newer.id },
       commands,
     );
-    // Reconfigured only once both are shipped: `setConfig` redeploys whatever
-    // is live, so changing it before the second deploy would re-stamp the
-    // older release with the new version and leave nothing pinned to the old
-    // one — which is the state this test needs to exist.
+    // setConfig redeploys whatever is live, so reconfiguring earlier would
+    // redeploy the older release.
     await setConfig(
       {
         componentId: component.id,
@@ -626,10 +566,7 @@ describe('a rollback comes up with the configuration it originally had', () => {
       commands,
     );
 
-    // The reference the older release is pinned to, read off the document it
-    // was deployed with rather than from the store — which is the same place
-    // the deploy path reads it, so reaping exactly this one is what the
-    // rollback will actually trip over.
+    // Read off the deployed document, where the deploy path reads it too.
     const [original] = await database()
       .db.select()
       .from(deploys)
@@ -637,8 +574,8 @@ describe('a rollback comes up with the configuration it originally had', () => {
     const pinned = original?.desired.config[0]?.secret;
     expect(pinned).toBeDefined();
 
-    // §10 keeps N versions and core reaps the rest on a loop. Reaping the one
-    // an older release is pinned to is the ordinary end of that, not damage.
+    // Core keeps N versions and reaps the rest, so this is ordinary, not
+    // damage.
     await store.destroy(pinned!);
 
     const rolled = await rollbackDeploy(
@@ -646,17 +583,15 @@ describe('a rollback comes up with the configuration it originally had', () => {
       commands,
     );
 
-    // The claim: refused, and refused *naming the key*. Deploying it would
-    // bring the Component up without TOKEN — green, and missing the one thing
-    // the release needed — which is the failure §10 sets a retention depth to
-    // prevent rather than to hide.
+    // Deploying it would bring the Component up without TOKEN, so it is refused
+    // by name.
     expect(rolled.ok).toBe(false);
     if (rolled.ok) return;
     expect(rolled.failure.code).toBe('NOT_DEPLOYABLE');
     expect(rolled.failure.message).toContain('TOKEN');
     expect(rolled.failure.message).toContain('no longer exist');
 
-    // And nothing was written: a refused intent is not a Deploy.
+    // A refused intent writes no Deploy.
     const rows = await database()
       .db.select()
       .from(deploys)
@@ -666,14 +601,8 @@ describe('a rollback comes up with the configuration it originally had', () => {
 });
 
 describe('a cross-store re-placement is blocked until the keys are supplied', () => {
-  /**
-   * One Component configured on a Target, and a second Target to move to.
-   *
-   * Both stores are writable by this installation, so a Target that reaches
-   * only the second is a Target with a real store of record — just not the one
-   * the configuration is in. That is the boundary §10 names, and the only
-   * arrangement where a key cannot follow.
-   */
+  // Both stores are writable, so the destination has a real store of record,
+  // just not the one holding the config.
   async function configuredElsewhere(destinationStores: readonly string[]) {
     const { component, target } = await fixture();
     const commands = await context(
@@ -757,7 +686,7 @@ describe('a cross-store re-placement is blocked until the keys are supplied', ()
     expect(moved.ok).toBe(true);
     if (!moved.ok) return;
     expect(moved.value.written).toEqual(['DSN', 'TOKEN']);
-    // Nothing was carried: there was no shared store to carry a reference over.
+    // No shared store, so nothing was carried.
     expect(moved.value.carried).toEqual([]);
 
     const rows = await database()
@@ -781,8 +710,7 @@ describe('a cross-store re-placement is blocked until the keys are supplied', ()
     expect(moved.ok).toBe(true);
     if (!moved.ok) return;
     expect([...moved.value.carried].sort()).toEqual(['DSN', 'TOKEN']);
-    // §10: "cluster-to-cluster re-placement is free." Free means the store was
-    // not written to at all.
+    // A move between Targets on one store writes nothing to it.
     expect(store.puts.length).toBe(putsBefore);
 
     const rows = await database()
@@ -923,8 +851,8 @@ describe('retention is core’s, at a depth a rollback can reach', () => {
     );
     expect(left).toHaveLength(2);
 
-    // The newest is still the one the current pin names, so what is deployed
-    // still resolves.
+    // The newest is the one the current pin names, so the deploy still
+    // resolves.
     const [row] = await database()
       .db.select()
       .from(configItems)

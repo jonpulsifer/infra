@@ -1,14 +1,6 @@
 /**
- * Sessions and sign-in (§"First run and identity" stories 3 and 5).
- *
- * Story 3 is the one with a number in it — "an opaque session that lasts a day,
- * so that a stolen browser artifact is not a permanent credential" — so the
- * expiry is asserted against an injected clock rather than by waiting, and
- * asserted at the boundary that reads a request rather than on a column.
- *
- * The other claim this file holds is that a session is **opaque**: the row
- * carries a hash and not the cookie's value, so a database somebody reads is
- * not a set of sessions somebody can present.
+ * Sessions and passkey sign-in. A session lasts a day and is opaque: its row
+ * holds a hash, so a leaked database holds no presentable session.
  */
 import { describe, expect, test } from 'bun:test';
 import {
@@ -43,7 +35,6 @@ const RELYING_PARTY = {
 
 const START = new Date('2026-01-01T00:00:00Z');
 
-/** A clock a test moves by hand, so "a day later" costs no wall time. */
 function movableClock(from = START) {
   let now = from;
   return {
@@ -63,7 +54,6 @@ function depsWith(clock: { now: () => Date }): EnrolmentDeps {
   };
 }
 
-/** An installation with one operator already enrolled, and their passkey. */
 async function enrolled(clock: { now: () => Date }): Promise<{
   deps: EnrolmentDeps;
   authenticator: Authenticator;
@@ -86,7 +76,7 @@ async function enrolled(clock: { now: () => Date }): Promise<{
   return { deps, authenticator, token: completed.value.token };
 }
 
-/** A request carrying a session cookie, as a browser would send one. */
+/** A request carrying `token` as the session cookie. */
 function requestWith(token: string | null): Request {
   return new Request(RELYING_PARTY.origin, {
     headers: token === null ? {} : { cookie: `${SESSION_COOKIE}=${token}` },
@@ -102,7 +92,6 @@ describe('a session lasts a day', () => {
     expect(fresh).not.toBeNull();
     expect(fresh?.displayName).toBeString();
 
-    // One second short of a day.
     clock.advance(SESSION_LIFETIME_MS - 1000);
     expect(await resolveSession(requestWith(token), deps)).not.toBeNull();
 
@@ -152,9 +141,6 @@ describe('a session is opaque', () => {
 
 describe('the cookie it travels in', () => {
   test('is not reachable from script and does not leave the site', () => {
-    // The three attributes that make a stolen artifact hard to steal in the
-    // first place. Asserted because they are one typo from being absent and
-    // nothing else would notice.
     const header = sessionCookie('a-token');
     expect(header).toContain('HttpOnly');
     expect(header).toContain('Secure');
@@ -164,8 +150,7 @@ describe('the cookie it travels in', () => {
   });
 
   test('and clearing it sends an expiry rather than a blank value', () => {
-    // A blank cookie is still a cookie; a browser only forgets one it is told
-    // has expired.
+    // A browser keeps a blank cookie and forgets only an expired one.
     expect(clearedSessionCookie()).toContain('Max-Age=0');
   });
 });
@@ -186,7 +171,7 @@ describe('signing out', () => {
     const clock = movableClock();
     const { deps } = await enrolled(clock);
     await closeSession(requestWith(null), deps);
-    // The one real session is untouched.
+    // The enrolment's session is untouched.
     expect(await deps.db.select().from(sessions)).toHaveLength(1);
   });
 });
@@ -241,8 +226,8 @@ describe('signing in with the enrolled passkey', () => {
 
     const forged = await impostor.assert(begun.value.challenge);
     const completed = await completeSignIn(deps, {
-      // The enrolled credential's id, somebody else's signature — the shape an
-      // attacker who read the database would produce.
+      // The enrolled credential's id with another key's signature, as an
+      // attacker who read the database would send.
       ...forged,
       credentialId: authenticator.credentialId,
     });
@@ -290,8 +275,6 @@ describe('signing in with the enrolled passkey', () => {
   });
 
   test('is refused before anyone has enrolled', async () => {
-    // An installation nobody has claimed has no passkey to check, and saying so
-    // is more useful than issuing a challenge that could never be answered.
     const deps = depsWith(movableClock());
     const begun = await beginSignIn(deps);
 
@@ -309,8 +292,7 @@ describe('expired challenges', () => {
     const begun = await beginSignIn(deps);
     if (!begun.ok) return;
 
-    // A ceremony left open overnight is not a ceremony this server issued a
-    // moment ago, which is the only thing a challenge attests to.
+    // An hour is past the challenge lifetime.
     clock.advance(60 * 60 * 1000);
     const completed = await completeSignIn(deps, {
       ...(await authenticator.assert(begun.value.challenge)),

@@ -1,28 +1,7 @@
 /**
- * A placed Component moved to another Target, as the workspace drives it
- * (ticket 121, §3, §10).
- *
- * The commands have been written and tested since #1813; what had never been
- * stated is the sequence a screen performs with them, and the two facts that
- * sequence depends on:
- *
- * - **The artifact travels.** A same-shape move followed by an ordinary press
- *   of Deploy reuses the Build that already succeeded
- *   (`src/commands/apps/deploy.ts:406-425`), so one digest ends up admitted on
- *   two Targets with no second Build anywhere. If that ever stopped being true
- *   the move would silently become a rebuild, which is the substitution
- *   `deployApp` exists to refuse.
- * - **The pair that was left keeps serving, and is nameable.** `placeComponent`
- *   leaves the old desired row alone on purpose, and `componentTargetDesired`
- *   had never been read anywhere in `src/` — so nothing could list the pairs an
- *   Unplace control has to hang off. The workspace reads them now, and this
- *   holds it to naming both before the retirement and one after.
- *
- * The cross-shape half of the move is already held to its refusal by
- * `test/commands/deploys.test.ts`'s "move, rebuild into files, deploy
- * admitted": the deploy at the new placement refuses with "this placement needs
- * a rebuild", and `deployApp({ rebuild: true })` stages a Build of the new
- * Target's shape. Restating it here would be a second copy of one claim.
+ * Moving a placed Component to another Target, as the workspace drives it. A
+ * same-shape move redeploys the same Build, and the old pair serves until
+ * retired.
  */
 import { beforeEach, describe, expect, test } from 'bun:test';
 import { and, eq } from 'drizzle-orm';
@@ -67,7 +46,6 @@ const manifest = await fixtureManifest();
 const FROZEN = new Date('2026-08-12T10:00:00.000Z');
 const clock: Clock = { now: () => FROZEN };
 
-/** A digest of the right shape, distinct per call. */
 function digest(seed: number): string {
   return `sha256:${seed.toString(16).padStart(64, '0')}`;
 }
@@ -171,7 +149,6 @@ describe('a same-shape move puts one digest on a second Target', () => {
     const { app, component, build, from, to } = await fixture();
     const ctx = await context();
 
-    // Where it lives today: one release, admitted on the first Target.
     const first = await createDeploy(
       {
         componentId: component.id,
@@ -188,27 +165,21 @@ describe('a same-shape move puts one digest on a second Target', () => {
     );
     expect(moved.ok).toBe(true);
     if (!moved.ok) return;
-    // Nothing crossed a store boundary, so nothing was demanded and no value
-    // moved — the whole of §10's free case.
+    // Both Targets reach the same store, so no config value moves.
     expect(moved.value.carried).toEqual([]);
 
-    // The press, exactly as the screen makes it after a move: no Target named,
-    // because the placement is the answer, and no rebuild, because §3's
-    // rebuild is a different act.
+    // The screen's press after a move names no Target and asks for no rebuild.
     const pressed = await deployApp({ name: app.name }, ctx);
     expect(pressed.ok).toBe(true);
     if (!pressed.ok) return;
     expect(pressed.value.buildId).toBe(build.id);
 
-    // No second Build. The move is not a rebuild, and a press that quietly
-    // made one would be the substitution `deployApp`'s header forbids.
     const built = await database()
       .db.select()
       .from(builds)
       .where(eq(builds.componentId, component.id));
     expect(built.length).toBe(1);
 
-    // One digest, two Targets, independently admitted on each.
     const released = await database()
       .db.select({ targetId: deploys.targetId, buildId: deploys.buildId })
       .from(deploys)
@@ -219,8 +190,7 @@ describe('a same-shape move puts one digest on a second Target', () => {
     );
     expect(released.every((row) => row.buildId === build.id)).toBe(true);
 
-    // And the pair it moved away from is still one: what is live there keeps
-    // serving until it is retired by name.
+    // The old pair keeps serving until Unplace retires it.
     expect(await servingPairs(component.id)).toEqual(
       [from.target.id, to.target.id].sort(),
     );
@@ -243,10 +213,8 @@ describe('the pairs that still serve are what the screen hangs Unplace off', () 
     expect(first.ok).toBe(true);
     if (!first.ok) return;
 
-    // The address the old release answers on. `createDeploy` writes the intent
-    // and the loop places it, so the ref is set here rather than waited for —
-    // what is under test is that `unplaceComponent` tears down whatever the
-    // pair is holding, not how it came to hold it.
+    // The deploy loop sets the ref after `createDeploy`; this test sets it
+    // directly.
     await database()
       .db.update(deploys)
       .set({ ref: 'apps/shop-web' })
@@ -265,13 +233,10 @@ describe('the pairs that still serve are what the screen hangs Unplace off', () 
     expect(web?.serving?.map((pair) => pair.targetId).sort()).toEqual(
       [from.target.id, to.target.id].sort(),
     );
-    // Labelled the way every other Target on this screen is, because the
-    // control is a sentence about a boundary and a surface.
     expect(web?.serving?.map((pair) => pair.label).sort()).toEqual(
       [`${from.vesselName}/kubernetes`, `${to.vesselName}/kubernetes`].sort(),
     );
 
-    // The act the control performs, on the pair it named.
     const retired = await unplaceComponent(
       { componentId: component.id, targetId: from.target.id },
       ctx,
@@ -281,8 +246,7 @@ describe('the pairs that still serve are what the screen hangs Unplace off', () 
     expect(retired.value.destroyed).toBe(true);
     expect(deployAdapter.destroyed).toEqual(['apps/shop-web']);
 
-    // The home the move wrote is not this command's to touch, and the screen
-    // now offers exactly one pair to retire.
+    // Unplace leaves the placement the move wrote.
     const [row] = await database()
       .db.select({ placedTargetId: components.placedTargetId })
       .from(components)
@@ -296,8 +260,6 @@ describe('the pairs that still serve are what the screen hangs Unplace off', () 
       after.value.workspace.components[0]?.serving?.map((pair) => pair.label),
     ).toEqual([`${to.vesselName}/kubernetes`]);
 
-    // Pressing it again has nothing left to answer: the row that named the
-    // placement is gone, which is the honest reading of "do it again".
     const again = await unplaceComponent(
       { componentId: component.id, targetId: from.target.id },
       ctx,
@@ -306,8 +268,7 @@ describe('the pairs that still serve are what the screen hangs Unplace off', () 
     if (again.ok) return;
     expect(again.failure.code).toBe('NOT_FOUND');
 
-    // And the release that was serving there is history rather than an intent
-    // the loops still chase.
+    // Orphaned, so the loops stop chasing it.
     const [orphaned] = await database()
       .db.select({ orphanedAt: deploys.orphanedAt })
       .from(deploys)

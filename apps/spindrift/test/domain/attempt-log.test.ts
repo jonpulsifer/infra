@@ -1,21 +1,3 @@
-/**
- * The attempt log acceptance test (Task 11, §6).
- *
- * Three things load-bearing here, proven against a real Postgres:
- *
- * 1. A Build's failure and the Deploy that followed it land on **one**
- *    ordered stream, in the order they actually happened — the shape of
- *    §6's own worked example: a build failure vs. `ARTIFACT_UNAVAILABLE`
- *    on a green build, told on one timeline.
- * 2. Every status event's `blame` is exactly what the deploy contract's
- *    `BLAME` table assigns its `reason` — never independently supplied.
- * 3. The resume cursor is gap-free and duplicate-free: reading, then
- *    resuming from the returned cursor, yields exactly the events written
- *    after it.
- *
- * Each test runs in its own migrated Postgres schema, handed out by the
- * harness (`test/harness/db.ts`).
- */
 import { describe, expect, test } from 'bun:test';
 import { eq, sql } from 'drizzle-orm';
 import {
@@ -45,7 +27,6 @@ import { aDesiredDocument } from '../harness/release.ts';
 
 const database = withIsolatedDatabase();
 
-/** Seed an App -> Component -> Target -> Build -> Deploy chain. */
 async function seedAttempt() {
   const [app] = await database()
     .db.insert(apps)
@@ -95,7 +76,6 @@ describe('attempt log: one stream across build and deploy', () => {
   test('a build failure and a deploy failure land on one ordered stream, in order', async () => {
     const { app, component, build, deploy } = await seedAttempt();
 
-    // Build leg: a log line, then the failing status.
     await recordBuildEvent(
       database().db,
       { appId: app.id, componentId: component.id, buildId: build.id },
@@ -107,7 +87,6 @@ describe('attempt log: one stream across build and deploy', () => {
       { type: 'status', phase: 'FAILED', reason: 'BUILD_FAILED' },
     );
 
-    // Deploy leg for the *same* attempt: a later status event.
     await recordDeployEvent(
       database().db,
       { appId: app.id, componentId: component.id, deployId: deploy.id },
@@ -131,8 +110,6 @@ describe('attempt log: one stream across build and deploy', () => {
     });
 
     expect(page.entries).toHaveLength(4);
-    // Ordered exactly as written: build log, build status, deploy status,
-    // deploy status — one stream, not two concatenated after the fact.
     expect(page.entries.map((e) => e.attemptKind)).toEqual([
       'build',
       'build',
@@ -156,7 +133,6 @@ describe('attempt log: one stream across build and deploy', () => {
       resource: 'helmrelease/web',
     });
 
-    // Cursors strictly increase — the total order the read side promises.
     const cursors = page.entries.map((e) => e.cursor);
     expect(cursors).toEqual([...cursors].sort((a, b) => a - b));
     expect(new Set(cursors).size).toBe(4);
@@ -219,9 +195,7 @@ describe('attempt log: blame is derived, never independently supplied', () => {
   });
 
   test('the write API never accepts a caller-supplied blame (closed at the type level)', () => {
-    // AttemptLogEvent's status arm has no `blame` field; this is a
-    // compile-time property, asserted here by construction rather than by
-    // reflection, since TypeScript has nothing to introspect at runtime.
+    // The status arm has no blame field, so adding one here fails to compile.
     const event: import('../../src/domain/attempt-log.ts').AttemptLogEvent = {
       type: 'status',
       phase: 'FAILED',
@@ -256,7 +230,6 @@ describe('attempt log: resume cursor', () => {
     ]);
     const cursor = first.cursor as AttemptLogCursor;
 
-    // Nothing new yet: resuming from the tip cursor is an empty, gap-free page.
     const empty = await readAttemptStream(
       database().db,
       { componentId: component.id, buildId: build.id },
@@ -286,8 +259,6 @@ describe('attempt log: resume cursor', () => {
       'line 4',
     ]);
 
-    // The union of the two resumed reads equals a from-scratch read: no gap
-    // (line 3/4 missing) and no duplicate (line 1/2 repeated).
     const fullReplay = await readAttemptStream(database().db, {
       componentId: component.id,
       buildId: build.id,
@@ -301,7 +272,7 @@ describe('attempt log: resume cursor', () => {
 describe('attempt log: line ceiling', () => {
   const MARKER = `output truncated after ${MAX_ATTEMPT_LOG_LINES} lines; the runner keeps the rest`;
 
-  /** Every page of the stream, read the way the pump reads it — 500 at a time. */
+  /** Pages through the stream, since one read returns at most 500 entries. */
   async function everything(ref: AttemptStreamRef): Promise<AttemptLogEntry[]> {
     const entries: AttemptLogEntry[] = [];
     let after: AttemptLogCursor | undefined;
@@ -317,7 +288,6 @@ describe('attempt log: line ceiling', () => {
     }
   }
 
-  /** A runner that has already printed exactly the ceiling's worth of lines. */
   async function fillToCeiling(
     scope: { appId: string; componentId: string },
     leg: { buildId: number } | { deployId: number },
@@ -338,8 +308,7 @@ describe('attempt log: line ceiling', () => {
     const { app, component, build } = await seedAttempt();
     const scope = { appId: app.id, componentId: component.id };
     const attempt = { ...scope, buildId: build.id };
-    // The route reported where the run is before the log reached the ceiling,
-    // the way a runner event lands ahead of the text on a hosted route.
+    // Set first: the marker reads runUrl when it is written.
     const runUrl = 'https://github.com/example/app/actions/runs/1234';
     await database()
       .db.update(builds)
@@ -356,9 +325,8 @@ describe('attempt log: line ceiling', () => {
       type: 'log',
       line: 'two past the ceiling',
     });
-    // A writer in another process — a re-dispatched build after a restart —
-    // starts from the rows this one left, so it drops rather than writing a
-    // second marker.
+    // A new connection has no cached count, so it counts the table and drops
+    // the line instead of writing a second marker.
     const resurrected = createDb(database().connect());
     await recordBuildEvent(resurrected, attempt, {
       type: 'log',
@@ -374,12 +342,10 @@ describe('attempt log: line ceiling', () => {
       componentId: component.id,
       buildId: build.id,
     });
-    // The ceiling's worth, the marker, the verdict — and nothing in between.
+    // The ceiling's lines, the marker and the verdict.
     expect(entries).toHaveLength(MAX_ATTEMPT_LOG_LINES + 2);
     const lines = entries.filter((entry) => entry.type === 'log');
     expect(lines).toHaveLength(MAX_ATTEMPT_LOG_LINES + 1);
-    // The exported text log carries no row facts, so the marker itself says
-    // where the rest is.
     expect(lines.at(-1)).toMatchObject({
       line: `${MARKER} at ${runUrl}`,
       resource: null,
@@ -434,7 +400,7 @@ describe('attempt log: line ceiling', () => {
       componentId: component.id,
       buildId: build.id,
     };
-    // Written by "another process": this one has never counted this attempt.
+    // Raw SQL, so this process has no cached count for the attempt.
     await database().db.execute(sql`
       insert into attempt_events (app_id, component_id, attempt_kind, build_id, event_type, line)
       values (${app.id}::uuid, ${component.id}::uuid, 'build', ${build.id}, 'log', 'already there')

@@ -51,8 +51,8 @@ const noAdapters: AdapterRegistry = {
   },
   repository: () => null,
   supplyChain: () => supplyChainHarness,
-  // A repo Component's first bundle is staged at Build creation now, so the
-  // deploy tests below need a depot; none of them asserts on its contents.
+  // Build creation stages a repo Component's first bundle, so deploys need a
+  // depot.
   source: () => ({
     stageRepository: async () => ({
       digest: `sha256:${'d'.repeat(64)}`,
@@ -72,10 +72,7 @@ function context(clock: Clock = frozenClock): CommandContext {
   };
 }
 
-/**
- * One App, one Component, one placed Target — the shape every screen below
- * reads. Written once because none of these tests is about authoring.
- */
+/** One App, one Component, one placed Target. */
 async function scaffold(
   ctx: CommandContext,
   options: {
@@ -143,8 +140,8 @@ async function scaffold(
     appId: app.value.appId,
     componentId: component.value.componentId,
     target: target!,
-    // `targetValues` leaves `vesselId` at the harness's shared per-kind
-    // fixture vessel, so this is the same label a screen reads off the row.
+    // `targetValues` puts the Target on the harness's shared vessel for its
+    // kind.
     label: targetLabel({
       vessel: defaultVesselName(fixtureVesselKind(adapter)),
       adapter,
@@ -154,9 +151,7 @@ async function scaffold(
 
 describe('getBuildDetail command', () => {
   test('projects a Build with no Deploy as an attempt with a null id', async () => {
-    // §4: pressing Deploy with nothing deployable "writes a PENDING Build for
-    // the build loop to dispatch, and that is the whole act". The press still
-    // has to land somewhere, and this is what it lands on.
+    // A Deploy press with nothing deployable writes a Build and no Deploy.
     const ctx = context();
     const { componentId, appName, label } = await scaffold(ctx, {
       prefix: 'queued',
@@ -183,8 +178,7 @@ describe('getBuildDetail command', () => {
     expect(deployId).toBeNull();
     expect(attempt.buildId).toBe(build!.id);
     expect(attempt.app).toBe(appName);
-    // The desired row is what says where a Component belongs before any intent
-    // has named a Target.
+    // Before any intent, the desired row names the Target.
     expect(attempt.target).toBe(label);
     expect(attempt.headline).toContain('Building on hosted runner');
     // No intent means nothing was placed and nothing can be rolled back to.
@@ -193,7 +187,6 @@ describe('getBuildDetail command', () => {
   });
 
   test('reports a related Deploy without changing the Build identity', async () => {
-    // Build and Deploy remain independently inspectable after placement.
     const ctx = context();
     const { componentId, target } = await scaffold(ctx, { prefix: 'handover' });
 
@@ -228,10 +221,8 @@ describe('getBuildDetail command', () => {
   });
 
   test('an uploaded artifact has a source and no build', async () => {
-    // §4: "An archive of *finished output* is a supplied artifact, digested
-    // over the uploaded bundle" — recorded, never built. `uploadArchive` writes
-    // that row with a null runner because "saying so is more useful than naming
-    // a runner that never ran", and the projection has to carry that through.
+    // `uploadArchive` records finished output with a null runner, since nothing
+    // built it.
     const ctx = context();
     const { componentId, target } = await scaffold(ctx, {
       prefix: 'extracted',
@@ -281,9 +272,8 @@ describe('getBuildDetail command', () => {
 
 describe('listDeploys command', () => {
   test('lists releases newest first and marks the current one', async () => {
-    // §2: "one Build → many Deploys — this is what makes rollback-without-
-    // rebuild possible." `current` is the desired row's answer, not the phase's:
-    // a LIVE Deploy a newer intent superseded is still LIVE.
+    // `current` comes from the desired row, since a superseded Deploy is still
+    // LIVE.
     const ctx = context();
     const { appName, componentId, target } = await scaffold(ctx, {
       prefix: 'releases',
@@ -317,8 +307,7 @@ describe('listDeploys command', () => {
       written.push({ build: build!, deploy: deploy! });
     }
 
-    // The middle release is what is desired — a rollback, which is exactly the
-    // state that makes `current` disagree with `phase` on the newest row.
+    // Desire the middle release, as a rollback would.
     const desired = written[1]!;
     await ctx.db
       .update(componentTargetDesired)
@@ -347,9 +336,8 @@ describe('listDeploys command', () => {
   });
 
   test('offers rollback only for a release older than what is desired', async () => {
-    // §6 refuses a "rollback" to a Build that is not older — a roll-forward
-    // somebody typed the wrong word for. The list makes the same comparison so
-    // the affordance appears only where the act would be accepted.
+    // Rollback refuses a Build that is not older, so the list offers it only
+    // on older releases.
     const ctx = context();
     const { appName, componentId, target } = await scaffold(ctx, {
       prefix: 'rollbackable',
@@ -468,8 +456,7 @@ describe('getAppWorkspace command', () => {
       buildId: build!.id,
       phase: 'LIVE',
     });
-    // The intent path that placed this deploy would have established the
-    // placement of record; seeding the row directly has to write the fact too.
+    // Seeding the Deploy directly skips the intent that writes the placement.
     await database()
       .db.update(components)
       .set({ placedTargetId: target!.id })
@@ -481,8 +468,7 @@ describe('getAppWorkspace command', () => {
 
     const { workspace } = result.value;
     expect(workspace.app).toBe(appName);
-    // The boundary comes from the placed Target, not from the App: this is the
-    // vessel the harness seeded that Target onto.
+    // The vessel comes from the placed Target.
     expect(workspace.vessel).toBe(defaultVesselName('cluster'));
     expect(workspace.components.length).toBe(1);
     expect(workspace.components[0]?.name).toBe('web');
@@ -537,8 +523,7 @@ describe('getAppWorkspace command', () => {
       buildId: build!.id,
       phase: 'LIVE',
     });
-    // The intent path that placed this deploy would have established the
-    // placement of record; seeding the row directly has to write the fact too.
+    // Seeding the Deploy directly skips the intent that writes the placement.
     await database()
       .db.update(components)
       .set({ placedTargetId: target!.id })
@@ -623,10 +608,8 @@ describe('getAppWorkspace command', () => {
 
 describe('the workspace as a way into the system', () => {
   test('carries ten checkpoints, which is what a whole sequence needs', async () => {
-    // Three was one attempt's worth of checkpoints, so the shape the timeline
-    // exists to show — built, deployed, went red — never fitted on it. The
-    // number is bounded here and nowhere else: the workspace view renders what
-    // it is handed, so this query is the only thing that can be wrong about it.
+    // Ten fits a build, deploy and failure sequence. The view renders what it
+    // is handed, so this query is the only bound.
     const ctx = context();
     const { appName, appId, componentId } = await scaffold(ctx, {
       prefix: 'decade',
@@ -644,7 +627,7 @@ describe('the workspace as a way into the system', () => {
       })
       .returning();
 
-    // Twelve, so the answer is a bound rather than "everything there is".
+    // Twelve, so ten is a bound.
     await ctx.db.insert(attemptEvents).values(
       Array.from({ length: 12 }, () => ({
         appId,
@@ -663,15 +646,8 @@ describe('the workspace as a way into the system', () => {
   });
 
   test('one build’s step transitions do not evict every other checkpoint', async () => {
-    // What the screen actually showed: ten rows, all reading "Build 23
-    // succeeded", each distinguished only by a grey subtitle naming an Actions
-    // step. The Actions poller writes one status event per (job, step, state),
-    // so a single build produced twenty of them and the limit spent itself on
-    // one attempt — the sequence this timeline exists to show was the thing it
-    // could no longer show. A status event carrying a `resource` is one step
-    // inside an attempt, not a state of the attempt; the Build and Deploy
-    // screens are where those belong, and they select on the same column from
-    // the other side.
+    // The Actions poller writes an event per job, step and state; one with a
+    // `resource` is a step, which belongs on the Build and Deploy screens.
     const ctx = context();
     const { appName, appId, componentId, target } = await scaffold(ctx, {
       prefix: 'stepstorm',
@@ -729,22 +705,19 @@ describe('the workspace as a way into the system', () => {
     if (!result.ok) return;
 
     const activity = result.value.workspace.activity;
-    // Two attempts, one row each — not twenty rows of one of them.
     expect(activity).toHaveLength(2);
     expect(activity.map((entry) => entry.title)).toEqual([
       `Deploy ${deploy!.id} live`,
       `Build ${build!.id} succeeded`,
     ]);
-    // And a finished Build reads as having gone right, which it did not when
-    // only a Deploy's LIVE earned the green marker.
+    // A succeeded Build is `ok`, like a LIVE Deploy.
     expect(activity.every((entry) => entry.status === 'ok')).toBe(true);
     expect(activity.some((entry) => entry.detail.includes('step'))).toBe(false);
   });
 
   test('carries status checkpoints only, each with an attempt to open', async () => {
-    // `attempt_events` constrains every row to exactly one attempt, so every
-    // entry has somewhere to go. An entry that led nowhere would be the one
-    // thing on the screen a reader could not act on.
+    // `attempt_events` ties every row to one attempt, so each entry links
+    // somewhere.
     const ctx = context();
     const { appName, appId, componentId, target } = await scaffold(ctx, {
       prefix: 'navigable',
@@ -821,15 +794,8 @@ describe('the workspace as a way into the system', () => {
     if (!result.ok) return;
 
     const { workspace } = result.value;
-    // Every status checkpoint and none of the log. Every log line an adapter
-    // emits lands in the same table, and reading it raw made the timeline the
-    // last twenty lines of whatever ran most recently — the transcript belongs
-    // on the attempt screen each entry links to, not here.
-    //
-    // Four of the five rows written, because the bound is ten: a timeline is
-    // there to show a build-deploy-fail sequence, and three entries could not
-    // hold one. The log line is the row that is missing, which is the whole
-    // claim.
+    // Status checkpoints only: log lines belong on the attempt screen each
+    // entry links to.
     expect(workspace.activity.length).toBe(4);
     expect(workspace.activity.map((entry) => entry.title)).toEqual([
       `Deploy ${deploy!.id} live`,
@@ -839,22 +805,15 @@ describe('the workspace as a way into the system', () => {
     ]);
     for (const entry of workspace.activity) {
       expect(entry.deployId ?? entry.buildId).not.toBeNull();
-      // The stage a checkpoint belongs to is on the entry: Build and Deploy are
-      // two stages, and a timeline that could not say which one a red row came
-      // from cannot say whether the image or its placement is the problem.
+      // The stage says whether a red row is the image or its placement.
       expect(entry.kind).toBe(entry.deployId === null ? 'build' : 'deploy');
-      // The clock is frozen at the same instant the rows were written, so the
-      // relative time is a real one rather than a "recently" placeholder.
       expect(entry.when).not.toBe('recently');
     }
   });
 
   test('states the first Build while it is still the whole attempt', async () => {
-    // A freshly created App: the create flow started a Build, no Deploy exists,
-    // and every status event a running build writes carries a `resource` — so
-    // the checkpoint filter has nothing to show and the deploy fallback has no
-    // row to fall back to. The timeline said "Nothing has happened yet" over
-    // the build that was running, with no way into it from this screen.
+    // A new App has a running Build and no Deploy or checkpoint, so the
+    // timeline falls back to the Build itself.
     const ctx = context();
     const { appName, componentId } = await scaffold(ctx, { prefix: 'fresh' });
 
@@ -923,8 +882,7 @@ describe('the workspace as a way into the system', () => {
     if (!result.ok) return;
 
     const { workspace } = result.value;
-    // The phase is still the platform's verdict on the rollout; what the
-    // hero hangs its pill, headline and link on is the fact beside it.
+    // `phase` stays the platform's verdict; `faulty` drives the hero.
     expect(workspace).toMatchObject({
       phase: 'LIVE',
       faulty: true,
@@ -944,9 +902,8 @@ describe('the workspace as a way into the system', () => {
 
 describe('getDeployDetail command', () => {
   test('carries the source, the pinned config, and whether it is current', async () => {
-    // A Deploy row is written once and never edited into a different release:
-    // its Build, its source, and the config document it pinned (§10) are what
-    // it delivered, which is what makes "roll back to this" reproducible.
+    // A Deploy row is never edited, so its Build, source and pinned config
+    // reproduce it on rollback.
     const ctx = context();
     const { componentId, target } = await scaffold(ctx, { prefix: 'atomic' });
 
@@ -989,7 +946,7 @@ describe('getDeployDetail command', () => {
       expect(view.source.commit).toBe('f7a9b2c');
       expect(view.source.repo).toContain('acme/thing');
     }
-    // A repo App builds, so there is a build to show — the other half of §4.
+    // A repo App builds, so there is a build to show.
     expect(view.build).not.toBeNull();
     expect(view.build?.runner).toBe('hosted runner');
     expect(view.configVersion).toBe(`sha256:${'7'.repeat(64)}`);
@@ -1217,9 +1174,8 @@ describe('getDeployDetail command', () => {
     expect(deploy.diagnosis?.reason).toBe('BUILD_FAILED');
     expect(deploy.diagnosis?.blame).toBe('developer');
     expect(deploy.diagnosis?.detail).toContain('Type error');
-    // The recorded payload is the evidence, and with no `log` event to show it
-    // is what the deploy-log card falls back to. That fallback is the reason
-    // the null case below matters: it only reads as evidence when there is any.
+    // With no `log` event, the deploy-log card falls back to the recorded
+    // payload.
     expect(deploy.diagnosis?.evidence).toBe('{"exitCode":1}');
     expect(deploy.deployLog).toEqual([
       { text: '{"exitCode":1}', tone: 'error' },
@@ -1227,12 +1183,8 @@ describe('getDeployDetail command', () => {
   });
 
   test('a failed deploy that recorded nothing shows nothing', async () => {
-    // The shape every failed Deploy on a real installation has. Core decides an
-    // `INTERNAL` failure by itself — it never reaches a platform that could
-    // hand back events to persist — so `debug` stays null. `?? {}` turned that
-    // absence into `"{}"`, which is truthy, which the deploy-log fallback then
-    // adopted as a log line. The result was one red line reading `{}` on every
-    // red screen, attributed to a runner that never emitted it.
+    // Core decides an INTERNAL failure without reaching a platform, so `debug`
+    // stays null and there is no evidence to show.
     const ctx = context();
     const { componentId, appId, target } = await scaffold(ctx, {
       prefix: 'silent',
@@ -1260,13 +1212,11 @@ describe('getDeployDetail command', () => {
         reason: 'INTERNAL',
         blame: 'platform',
         detail: 'the artifact carries no address to pull it by',
-        // `debug` is deliberately unset. Seeding a payload here is what let
-        // this reach production.
+        // `debug` stays unset, as on a real INTERNAL failure.
       })
       .returning();
 
-    // Status rows and nothing else, as the reconciler wrote them: no `log`
-    // event exists, so the deploy log is empty before the fallback runs.
+    // Status rows only, so the deploy log is empty before the fallback runs.
     await ctx.db.insert(attemptEvents).values([
       {
         appId,
@@ -1293,8 +1243,6 @@ describe('getDeployDetail command', () => {
     if (!result.ok) return;
 
     const { deploy } = result.value;
-    // The diagnosis is still made — the reason, the blame and the sentence are
-    // all there. It is only the evidence that is absent, and it says so.
     expect(deploy.diagnosis).not.toBeNull();
     expect(deploy.diagnosis?.reason).toBe('INTERNAL');
     expect(deploy.diagnosis?.blame).toBe('platform');
@@ -1303,17 +1251,13 @@ describe('getDeployDetail command', () => {
     );
     expect(deploy.diagnosis?.evidence).toBeNull();
 
-    // And nothing was manufactured from it: `null` is what the deploy-log card
-    // reads to render its own LIVE_STATUS notice.
+    // `null` makes the deploy-log card render its own notice.
     expect(deploy.deployLog).toBeNull();
   });
 
   test('blames the deploy, not the build, when the build produced an image', async () => {
-    // The pairing supply-chain admission produces: the runner pushed an image
-    // and the artifact was refused, so the Build row is FAILED while the Deploy
-    // over it went red for a reason of its own. Reading the Build first meant
-    // that reason lost, and the screen said "Build failed" about a build that
-    // had already done its job.
+    // Supply-chain admission can fail a Build that pushed an image, while the
+    // Deploy fails for its own reason.
     const ctx = context();
     const { componentId, target } = await scaffold(ctx, {
       prefix: 'misblamed',
@@ -1354,9 +1298,7 @@ describe('getDeployDetail command', () => {
   });
 
   test('still says Build failed when nothing after the build spoke', async () => {
-    // The other side of the same rule. A Deploy that recorded no reason of its
-    // own never got an answer from the platform, and the Build row is the only
-    // thing that knows anything.
+    // A Deploy with no reason of its own defers to the Build.
     const ctx = context();
     const { componentId, target } = await scaffold(ctx, { prefix: 'redbuild' });
 
@@ -1391,11 +1333,8 @@ describe('getDeployDetail command', () => {
   });
 
   test('folds a step’s events into one checkpoint with a duration', async () => {
-    // A route reports `RUNNING` and then a verdict for the same step name, with
-    // log lines under it in between. Projecting each row as its own checklist
-    // line marked everything done because it had been mentioned; folding by
-    // name is what makes the list say what each step is *doing*, and gives it
-    // the duration a reader scans the column for.
+    // A route reports RUNNING, then a verdict, under one step name. Folding by
+    // name gives each step one line and a duration.
     const ctx = context();
     const { componentId, appId, target } = await scaffold(ctx, {
       prefix: 'folded',
@@ -1453,14 +1392,8 @@ describe('getDeployDetail command', () => {
   });
 
   test('a finished build leaves no checkpoint in progress', async () => {
-    // Observed on a real build that had already succeeded: every step `done`,
-    // and one more entry at `running` forever. The name was `build / build` —
-    // the runner's *job*, two path segments where a step has three — and it
-    // only ever carried log lines. A name folded from log lines alone is born
-    // `running` and the log branch never revisits its status, so there was no
-    // path off it. That is true of every log-only name, not of the job: the
-    // same defect had `dispatch` and `provenance` showing the same permanent
-    // orange dot, which is why the fix is the fold's and not a special case.
+    // A name folded from log lines alone starts `running` and no log line
+    // changes it, so a finished run must resolve it.
     const ctx = context();
     const { componentId, appId, target } = await scaffold(ctx, {
       prefix: 'orphan',
@@ -1498,7 +1431,7 @@ describe('getDeployDetail command', () => {
     };
 
     await ctx.db.insert(attemptEvents).values([
-      // The one real step, reported the way a route reports one.
+      // The one real step, with status events.
       {
         ...attempt,
         resource: 'build / build / Complete job',
@@ -1513,8 +1446,8 @@ describe('getDeployDetail command', () => {
         phase: 'SUCCEEDED',
         createdAt: new Date(FROZEN.getTime() + 2000),
       },
-      // Three names that never get a status event at all. `build / build` is
-      // the runner's job — two path segments where the step above has three.
+      // Three names that never get a status event. `build / build` is the
+      // runner's job, with two path segments where the step above has three.
       {
         ...attempt,
         resource: 'dispatch',
@@ -1544,11 +1477,8 @@ describe('getDeployDetail command', () => {
 
     const steps = result.value.deploy.build?.steps ?? [];
     expect(steps.length).toBe(4);
-    // The criterion, stated as bluntly as it reads: the run is over, so nothing
-    // in the list claims to still be going.
     expect(steps.filter((step) => step.status === 'running')).toEqual([]);
-    // And a log-only name keeps its sentence, because that sentence is the one
-    // thing it has to say — resolving it must not cost the detail.
+    // A log-only name keeps its last line as detail.
     expect(steps).toContainEqual({
       name: 'build / build',
       status: 'done',
@@ -1562,13 +1492,9 @@ describe('getDeployDetail command', () => {
   });
 
   test('a step the runner never closed out takes the run’s verdict, and a log-only name does not', async () => {
-    // The other half of "nothing is in progress once the run is over", and the
-    // reason the two are not one rule. A step that was reported `RUNNING` and
-    // never closed — a killed job, a lost final event — *was* in flight when the
-    // build died, so the build's verdict is honestly its own. A log-only name
-    // was never a step and has no verdict to inherit: painting `dispatch` red
-    // because the build failed four steps later would assert something about
-    // dispatch that nothing recorded.
+    // A step left RUNNING was in flight when the build ended, so it takes the
+    // build's verdict. A log-only name was never a step and has none to
+    // inherit.
     const ctx = context();
     const { componentId, appId, target } = await scaffold(ctx, {
       prefix: 'killed',
@@ -1631,10 +1557,8 @@ describe('getDeployDetail command', () => {
   });
 
   test('names the platform behind the route a build ran on', async () => {
-    // "Building on hosted" names a route, and a route name is an installation's
-    // own word for it. Which *platform* ran the build is what says where to go
-    // look when it goes wrong, and it is only knowable from the manifest's route
-    // table — which the browser does not have, so it is resolved here.
+    // A route name is the installation's own word. The platform comes from the
+    // manifest's route table, which the browser does not have.
     const ctx = context();
     const { componentId, target } = await scaffold(ctx, { prefix: 'platform' });
 
@@ -1647,8 +1571,8 @@ describe('getDeployDetail command', () => {
         artifactType: 'image',
         status: 'SUCCEEDED',
         artifactDigest: `sha256:${'c'.repeat(64)}`,
-        // The fixture installation's `cloud-build` route, so this asserts a
-        // lookup rather than a constant that happens to say `github-actions`.
+        // The fixture's `cloud-build` route, which a hard-coded
+        // `github-actions` would miss.
         runner: 'managed',
       })
       .returning();
@@ -1673,9 +1597,7 @@ describe('getDeployDetail command', () => {
   });
 
   test('names no platform for a route this installation no longer has', async () => {
-    // A route can be retired while its Builds stay readable. Naming no platform
-    // is the honest answer there; guessing at one would put a mark on a build
-    // that says it ran somewhere nothing says it ran.
+    // A retired route's Builds stay readable, with no platform to name.
     const ctx = context();
     const { componentId, target } = await scaffold(ctx, { prefix: 'retired' });
 
@@ -1786,8 +1708,6 @@ describe('deployApp command', () => {
 
     expect(result.value.deployId).toBeGreaterThan(0);
     expect(result.value.phase).toBe('PENDING');
-    // The existing artifact is what gets deployed. A second Build here would
-    // mean the intent path refused and something built instead of saying so.
     expect(result.value.buildId).toBe(buildRow!.id);
     const buildRows = await ctx.db
       .select()
@@ -1797,8 +1717,8 @@ describe('deployApp command', () => {
   });
 
   test('surfaces the refusal and writes nothing when the Target is disconnected', async () => {
-    // The whole point of the button going through `createDeploy`: a refusal is
-    // a sentence the operator has to read, not a cue to build something else.
+    // The button goes through `createDeploy`, so a refusal is reported and
+    // never answered with a Build.
     const ctx = context();
     const appName = `refused-${crypto.randomUUID().slice(0, 8)}`;
     const createdApp = await createApp(
@@ -1871,7 +1791,6 @@ describe('deployApp command', () => {
     );
     expect(result.failure.message).toContain('disconnected');
 
-    // Nothing was written behind the refusal: no second Build, no intent.
     const buildRows = await ctx.db
       .select()
       .from(builds)
@@ -1887,8 +1806,7 @@ describe('deployApp command', () => {
   });
 
   test('refuses a name two Apps answer to rather than deploying an arbitrary one', async () => {
-    // `apps` has no unique constraint on `name`, so this is a live shape:
-    // offsite currently holds two Apps called `infra`.
+    // `apps` has no unique constraint on `name`.
     const ctx = context();
     const appName = `twinned-${crypto.randomUUID().slice(0, 8)}`;
     const first = await createApp(
@@ -1975,8 +1893,8 @@ describe('deployApp command', () => {
       targetShape: 'image',
       artifactType: 'image',
       status: 'FAILED',
-      // Durable, so the rerun inherits it: this test is about Build-vs-intent,
-      // and an app with no connected repository has nothing to stage from.
+      // Durable, so the rerun inherits it: this App has no repository to stage
+      // from.
       bundleDigest: `sha256:${'e'.repeat(64)}`,
       bundleLocation: `gs://depot.example.test/${'e'.repeat(64)}.tgz`,
     });
@@ -1985,8 +1903,8 @@ describe('deployApp command', () => {
     expect(result.ok).toBe(true);
     if (!result.ok) return;
 
-    // A Build, and only a Build. An intent naming a PENDING Build would name an
-    // artifact that does not exist, and could not pass `checkDeployable`.
+    // An intent naming a PENDING Build names no artifact and fails
+    // `checkDeployable`.
     expect(result.value.deployId).toBeNull();
     expect(result.value.phase).toBe('BUILDING');
     expect(result.value.buildId).toBeGreaterThan(0);

@@ -1,17 +1,6 @@
 /**
- * The conformance suite, run against every adapter that exists (Task 12).
- *
- * Every enrolment lives in this one file on purpose: `assertEveryAdapterEnrolled`
- * compares what the suite was run over against `ADAPTERS`, and that comparison
- * is only sound if every suite call has already happened when it runs. Splitting
- * the enrolments across files would make the check depend on the order the
- * runner happened to load them in.
- *
- * The two real stores are here alongside the fakes, each with a fake of its
- * far-side HTTP API behind the real client (§ Seam 2). They run the identical
- * assertions, which is what makes §10's claim — that nothing above the seam can
- * tell `NATIVE` from `IMMUTABLE_ITEM_PER_VERSION` — a tested claim rather than a
- * stated one.
+ * Runs the conformance suites against every adapter. All enrolments stay in
+ * this file so every suite call has run before `assertEveryAdapterEnrolled`.
  */
 import { BosunBuildRoute } from '../../src/adapters/build/bosun.ts';
 import { CloudBuildRoute } from '../../src/adapters/build/cloud-build.ts';
@@ -56,15 +45,6 @@ import {
   storeAdapterSuite,
 } from './adapter-suite.ts';
 
-/**
- * One key for every hosted-CI route the suite constructs.
- *
- * Generated once at module load rather than per construction: the suite builds
- * a fresh adapter for each assertion, and an RSA keypair per test is seconds of
- * wall clock spent proving nothing about the contract.
- */
-
-/** What the in-cluster Job prints, ending with the one line core reads. */
 function inClusterBuildLog(): string {
   const digest = `sha256:${'c'.repeat(64)}`;
   return [
@@ -79,9 +59,6 @@ function inClusterBuildLog(): string {
   ].join('\n');
 }
 
-// Each enrolment counts its backend's own placement noun — a deployment, a
-// site, a Service, a HelmRelease — for the suite's re-apply case; the suite
-// only asserts the number.
 deployAdapterSuite(
   'fake',
   () => {
@@ -98,14 +75,7 @@ deployAdapterSuite(
   'files',
 );
 
-/**
- * A clock that moves on every read, so two restarts stamp two times.
- *
- * The real adapters stamp `now()` and the platforms roll on a *change*, which
- * makes a wall clock the wrong instrument here: two presses inside one
- * millisecond would stamp one value and the suite would be asserting on how
- * fast the machine is.
- */
+/** Advances on every read, so two quick restarts record different times. */
 function ticking(): () => number {
   let clock = Date.UTC(2026, 0, 1);
   return () => {
@@ -136,8 +106,7 @@ deployAdapterSuite(
           kind: 'Namespace',
           metadata: {
             name: 'apps',
-            // What this vessel declares admission to mean. Every App namespace
-            // the adapter creates is stamped from these.
+            // Every App namespace the adapter creates copies these labels.
             labels: {
               'pod-security.kubernetes.io/enforce': 'restricted',
               'pod-security.kubernetes.io/audit': 'restricted',
@@ -170,8 +139,7 @@ deployAdapterSuite(
         now: ticking(),
       }),
       placements: () => cluster.all('helmreleases').length,
-      // The stamp the chart carries onto the pod template, read off the one
-      // release's inline values.
+      // The pod-template annotation, read from the release's inline values.
       restartMark: () => {
         const [release] = cluster.all('helmreleases');
         const spec = release?.spec as
@@ -199,8 +167,7 @@ deployAdapterSuite(
         now: ticking(),
       }),
       placements: () => api.serviceCount,
-      // The stamp on the revision template, which is what makes the runtime
-      // mint a new revision of the same image.
+      // The revision-template annotation makes the runtime mint a new revision.
       restartMark: () => {
         const template = api.service(workloadId(desiredState('image')))
           ?.template as { annotations?: Record<string, string> } | undefined;
@@ -215,8 +182,7 @@ deployAdapterSuite(
   'static',
   () => {
     const api = new FakeHosting({
-      // The one file every website has, so the release has something to carry
-      // and the upload step actually runs.
+      // The upload step runs only when the bundle holds a file.
       bundle: {
         origin: BUNDLE_DEPOT,
         bytes: tarball([
@@ -243,8 +209,6 @@ deployAdapterSuite(
         ]),
       },
     });
-    // The polling is real and the waiting is not, exactly as the cloud runtime
-    // route above is driven.
     return {
       adapter: new VercelDeployAdapter({
         token: api.token,
@@ -252,10 +216,8 @@ deployAdapterSuite(
         fetch: api.fetch,
         pollIntervalMs: 1,
         sleep: async () => {},
-        // A `vercel-output` artifact deploys through the platform's CLI, which
-        // has no far side to fake over HTTP — so the seam stands up the
-        // deployment the adapter then finds by its meta, the same shape the
-        // real CLI would leave for it.
+        // A `vercel-output` artifact deploys through the CLI, which has no HTTP
+        // API to fake, so this records the deployment the CLI would leave.
         deployPrebuilt: async (input) => {
           api.recordPrebuiltDeploy({
             project: input.project,
@@ -274,8 +236,7 @@ deployAdapterSuite(
   'cloudflare-pages',
   () => {
     const api = new FakeCloudflarePages({
-      // The one file every website has, so the deployment has something to
-      // carry and the upload step actually runs.
+      // The upload step runs only when the bundle holds a file.
       bundle: {
         origin: BUNDLE_DEPOT,
         bytes: tarball([
@@ -297,11 +258,6 @@ deployAdapterSuite(
 
 buildAdapterSuite('fake', () => new FakeBuildAdapter());
 
-// The three real routes, each with a fake of its far-side HTTP API behind the
-// real client. They run the identical assertions, which is what makes §4's
-// claim — that a Build is the same object whoever built it — a tested one.
-// Every one of them is driven with `sleep` stubbed and a one-millisecond
-// interval: the polling is real, the waiting is not.
 buildAdapterSuite('github-actions', () => {
   const host = new FakeGitHub();
   return new GitHubActionsBuildRoute({
@@ -352,8 +308,7 @@ buildAdapterSuite('in-cluster', () => {
           metadata: {
             name: 'build-pod',
             namespace: 'builds',
-            // The label the route selects the build's own pod by; the cluster
-            // filters on it, so a fixture without it is never found.
+            // The fake cluster filters pods on this label.
             labels: { [JOB_LABEL]: 'spindrift-build-conformance' },
           },
         },
@@ -379,10 +334,8 @@ buildAdapterSuite('in-cluster', () => {
   });
 });
 
-// Bosun's far side is polled, not dialed, so its fake scripts the outbox row
-// rather than an HTTP API — see `FakeBosunOutbox`. A single `DONE` state is
-// enough for the suite: none of its assertions poll, so nothing here needs
-// the pacing overrides the dialed routes give their fakes.
+// Bosun reads an outbox row, and a first read of `DONE` ends its poll, so this
+// fake needs no pacing overrides.
 buildAdapterSuite('bosun', () => {
   const conformanceDigest = `sha256:${'d'.repeat(64)}`;
   const outbox = new FakeBosunOutbox({
@@ -410,15 +363,7 @@ buildAdapterSuite('bosun', () => {
   });
 });
 
-// Both pinning strategies run the same suite, because §10's claim is that
-// nothing above the seam can tell them apart. One of them passing would not
-// establish that.
-//
-// Each fake stands for the real store that pins that way and names its
-// references as that store does — `NATIVE` for Secret Manager's `--`-joined id,
-// `IMMUTABLE_ITEM_PER_VERSION` for 1Password's `/`-joined title. The labels say
-// so, because a reference shape neither store can hold would make this suite
-// compare two impossibilities and call them the same.
+// Each fake names references as the real store it stands for does.
 storeAdapterSuite(
   'fake native, standing for gcp-secret-manager',
   () => new FakeSecretStore({ pinning: 'NATIVE' }),
@@ -427,19 +372,12 @@ storeAdapterSuite(
   'fake immutable item per version, standing for onepassword',
   () => new FakeSecretStore({ pinning: 'IMMUTABLE_ITEM_PER_VERSION' }),
 );
-// The third strategy, standing for the edge platform's own environment. It is
-// in the same suite as the other two rather than beside it: the only
-// assertions it answers differently are the two the suite branches on, and
-// every other term of §10 — write-only, a new reference per put, an idempotent
-// destroy — has to hold here exactly as it does for a vault.
 storeAdapterSuite(
   'fake current only, standing for vercel',
   () => new FakeSecretStore({ pinning: 'CURRENT_ONLY' }),
 );
 
-// The real edge-platform store, against the real fake API — so `put`'s
-// delete-then-create runs against the platform's actual refusal (a `403` for a
-// key that already exists) rather than against an assumption about it.
+// The fake API answers `403` to creating an existing key, as the platform does.
 storeAdapterSuite('vercel', () => {
   const api = new FakeVercel({ projects: [] });
   return new VercelSecretStore({

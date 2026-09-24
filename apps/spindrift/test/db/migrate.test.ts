@@ -40,7 +40,6 @@ async function cleanDatabase() {
   return client;
 }
 
-/** The journal's entries, in the order the migrator would apply them. */
 function journalEntries(): { tag: string }[] {
   return (
     JSON.parse(
@@ -49,7 +48,6 @@ function journalEntries(): { tag: string }[] {
   ).entries;
 }
 
-/** Every `.sql` beside the journal, by the tag an entry would name it with. */
 function committedMigrations(): string[] {
   return readdirSync(MIGRATIONS)
     .filter((name) => name.endsWith('.sql'))
@@ -79,15 +77,8 @@ describe('committed migrations', () => {
   });
 
   test('every committed migration is in the journal, and nothing else is', () => {
-    // The migrator reads `meta/_journal.json` and never the directory, so a
-    // `.sql` file committed without an entry is silently skipped — the migrate
-    // Job completes, reports success, and the pods that follow it crash on a
-    // column that was never added. Nothing failed when that happened, which is
-    // what this test is.
-    //
-    // The reverse direction matters too: an entry naming a file that is not
-    // there fails the migrator at run time, in the one place where the failure
-    // costs a rollout rather than a test.
+    // The migrator reads only `meta/_journal.json`, so it silently skips an
+    // unjournalled `.sql` file. An entry with no file fails at rollout.
     const journalled = journalEntries().map((entry) => entry.tag);
     expect(journalled).toEqual(committedMigrations());
   });

@@ -1,17 +1,7 @@
 /**
- * The zero-config arm's start-command guard, run as the workflow ships it.
- *
- * The failure it exists for was not a build error. railpack's Go provider emits
- * `go build -o out` with no package argument, so a module whose root package is
- * a library compiled to a 0644 *package archive* named `out` and exited 0 —
- * green build, real push, signed, attested, and a container that could only say
- * `./out: Permission denied`. A fixture cannot prove the shipped step turns
- * that into a red build; running the step's own `run:` script over a plan
- * railpack actually generates can (the same reasoning as
- * `dockerfile-context-arm.test.ts`).
- *
- * The last case closes the loop: the command the step appends is executed
- * against the artifact shape that shipped, and has to reject it.
+ * Runs the zero-config arm's start-command guard as the workflow ships it.
+ * railpack's Go provider runs `go build -o out` with no package, so a library
+ * at the module root compiles to a non-executable archive and still exits 0.
  */
 import { describe, expect, test } from 'bun:test';
 import { chmod, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
@@ -32,7 +22,6 @@ type WorkflowStep = {
   env?: Record<string, string>;
 };
 
-/** The named step, straight out of the shipped file. */
 async function step(name: string): Promise<WorkflowStep> {
   const document = Bun.YAML.parse(await Bun.file(WORKFLOW).text()) as {
     jobs: { build: { steps: WorkflowStep[] } };
@@ -47,7 +36,6 @@ type Plan = {
   steps: { name: string; commands?: { cmd: string; customName?: string }[] }[];
 };
 
-/** The `run:` script of the guard step, straight out of the shipped file. */
 async function guardScript(): Promise<string> {
   const run = (await step(GUARD_STEP)).run;
   if (run === undefined) {
@@ -56,7 +44,6 @@ async function guardScript(): Promise<string> {
   return run;
 }
 
-/** Run the shipped guard over one plan and hand back what it wrote. */
 async function guard(plan: Plan): Promise<Plan> {
   const workspace = await mkdtemp(join(tmpdir(), 'spindrift-plan-guard-'));
   try {
@@ -79,16 +66,14 @@ async function guard(plan: Plan): Promise<Plan> {
   }
 }
 
-/** The commands of a plan's build step, as bare strings. */
 function buildCommands(plan: Plan): string[] {
   const build = plan.steps.find((s) => s.name === 'build');
   return (build?.commands ?? []).map((c) => c.cmd);
 }
 
 /**
- * The plan `railpack prepare` v0.35.0 generates for `apps/view-counter`,
- * verbatim in the parts this step reads — a library at the module root, so
- * `go build` names no package and the start command is a bare `./out`.
+ * The parts of `railpack prepare` v0.35.0's plan for `apps/view-counter` that
+ * the step reads: a library at the module root and a bare `./out` start.
  */
 function viewCounterPlan(): Plan {
   return {
@@ -117,8 +102,7 @@ describe('“Make the plan check its own start command”', () => {
   });
 
   test('a start command carrying arguments names no file and is left alone', async () => {
-    // `node server.js` is not a path to test, and an interpreter that cannot
-    // find its script fails loudly at exec. Only the compiled shape is silent.
+    // An interpreter that cannot find its script already fails loudly at exec.
     const plan = viewCounterPlan();
     plan.deploy.startCommand = 'node server.js';
     expect(buildCommands(await guard(plan))).toEqual([
@@ -135,17 +119,13 @@ describe('“Make the plan check its own start command”', () => {
   });
 
   test('a plan with no build step survives the step intact', async () => {
-    // Not every provider emits one, and the guard is not a reason to fail a
-    // build it has nothing to say about.
     const plan = viewCounterPlan();
     plan.steps = plan.steps.filter((s) => s.name !== 'build');
     expect((await guard(plan)).steps.map((s) => s.name)).toEqual(['install']);
   });
 
   test('the failing layer names the defect rather than showing a bare test', async () => {
-    // BuildKit prints `customName` as the layer, and this one only ever appears
-    // when it has just failed. `test -x ./out: exit code 1` on its own leaves
-    // the operator to work out what `out` was supposed to be.
+    // BuildKit prints `customName` as the layer's name.
     const build = (await guard(viewCounterPlan())).steps.find(
       (s) => s.name === 'build',
     );
@@ -155,10 +135,8 @@ describe('“Make the plan check its own start command”', () => {
   });
 
   test('the guard runs on the arm that writes the plan it reads', async () => {
-    // A guard wired to an output nothing sets does not fail — it silently
-    // never runs, which is the same invisibility this whole step exists to
-    // remove. Only the zero-config arm writes `plan`; the other two hand the
-    // build a Dockerfile, which this step cannot read as JSON.
+    // A guard gated on an output nothing sets silently never runs. Only the
+    // zero-config arm writes `plan`.
     const guard = await step(GUARD_STEP);
     expect(guard.if).toBe("steps.frontend.outputs.plan != ''");
     expect(guard.env?.PLAN).toContain('steps.frontend.outputs.plan');
@@ -166,9 +144,8 @@ describe('“Make the plan check its own start command”', () => {
   });
 
   test('the appended check rejects the package archive that shipped', async () => {
-    // The artifact Build 25 pushed: `go build -o` against a non-main package
-    // writes an ar archive at mode 0644. Executable to nobody, root included —
-    // Linux grants exec only when at least one execute bit is set.
+    // `go build -o` on a non-main package writes an ar archive at 0644, and
+    // Linux runs nothing without an execute bit, even for root.
     const workspace = await mkdtemp(join(tmpdir(), 'spindrift-plan-guard-'));
     try {
       await writeFile(join(workspace, 'out'), '!<arch>\n__.PKGDEF', {
@@ -181,7 +158,6 @@ describe('“Make the plan check its own start command”', () => {
       const rejected = Bun.spawn(['sh', '-c', check], { cwd: workspace });
       expect(await rejected.exited).not.toBe(0);
 
-      // And accepts a real binary put where the start command points.
       await writeFile(join(workspace, 'out'), '#!/bin/sh\nexit 0\n');
       await chmod(join(workspace, 'out'), 0o755);
       const accepted = Bun.spawn(['sh', '-c', check], { cwd: workspace });

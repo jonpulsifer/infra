@@ -1,10 +1,4 @@
-/**
- * The Functions Framework shim.
- *
- * It is a string this app never runs, so the one thing worth checking here is
- * that it is a string somebody else *can* run: valid ESM, and a manifest that
- * names the file it points at.
- */
+// This app never runs the shim, so these check that another runtime can.
 import { describe, expect, test } from 'bun:test';
 import { packageJson, SHIM } from '../../src/functions/shim.ts';
 

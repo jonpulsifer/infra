@@ -1,11 +1,3 @@
-/**
- * An App names its own flat, shared name (§9, ticket 137).
- *
- * `setAppZone` has no dedicated command test of its own — see its module
- * comment — so this is not a mirror of one; it is the direct proof that
- * `setAppVanity` writes what it says and previews what a Deploy will now mint,
- * on every adapter rather than only where the platform names its own.
- */
 import { describe, expect, test } from 'bun:test';
 import { eq } from 'drizzle-orm';
 import { setAppVanity } from '../../src/commands/apps/vanity.ts';
@@ -97,8 +89,8 @@ describe('setAppVanity', () => {
 
   test("refuses a label that would take the installation's own or reserved names, in any zone", async () => {
     const { appId } = await seed();
-    // None mints a clash in this App's own zone today; a zone declared
-    // later, or a reach flipped to public, would.
+    // None clashes in this App's zone today; a later zone or a public reach
+    // would.
     for (const [label, taken] of [
       ['spindrift', manifest.controlPlane.hostname],
       ['spindrift-control', manifest.controlPlane.publicHostname],
@@ -160,8 +152,7 @@ describe('setAppVanity', () => {
     expect(result.ok).toBe(true);
     if (!result.ok) throw new Error('unreachable');
     expect(result.value.vanity).toBe('shop');
-    // The canonical is still minted, exactly as it was before this command —
-    // ticket 137 is the vanity riding beside it, not replacing it.
+    // The canonical name is still minted beside the vanity.
     expect(result.value.hostnames).toEqual([
       'shop-web.apps.example.test',
       'shop.apps.example.test',

@@ -1,16 +1,6 @@
 /**
- * The App workspace states the App's own address, and whether it is published
- * (§9).
- *
- * §9's vanity name lives on the App and the reconciler will not guess which
- * Component it means, so an App with two network-serving Components publishes
- * no vanity record at all (`deploy-loop.ts`, `soleServingComponent`). The
- * screen that offers the name is the one place that rule can be said before
- * somebody trips it — and until this read carried it, the workspace printed
- * the name as the App's address whatever the reconciler had decided.
- *
- * Both halves are asserted from the same rows, because the defect was exactly
- * that the two counted differently.
+ * The App's vanity address on the workspace. The deploy loop publishes it only
+ * when a single Component serves, and the workspace must agree.
  */
 import { describe, expect, test } from 'bun:test';
 import { eq } from 'drizzle-orm';
@@ -59,7 +49,7 @@ function context(): CommandContext {
   };
 }
 
-/** One App with `serving` exposed Components, each placed on its own Target. */
+/** One App with an exposed Component per name, each on its own Target. */
 async function appServing(
   ctx: CommandContext,
   names: readonly string[],
@@ -122,20 +112,15 @@ describe('the workspace read on the App’s own address', () => {
     expect(domain?.label).toBe('@');
     expect(domain?.ambiguous).toBe(false);
     expect(domain?.servedBy).toBe('web');
-    // The apex is the zone itself rather than a label under it, so the name
-    // published is a bare zone from the installation's list.
+    // `@` is the apex, so the published name is a bare zone.
     const zones = manifest.dns.zones.map((zone) => zone.name);
     const apex = domain?.hostnames.find((name) => zones.includes(name));
     expect(apex).toBeString();
-    // And it is the App's address as a *hostname*. `@` is a spelling of "the
-    // zone itself", not an address — the hero used to render it as one.
+    // The URL is the hostname, never the `@` label.
     expect(result.value.workspace.url).toBe(apex as string);
   });
 
   test('two serving Components publish nothing, and the screen stops claiming one', async () => {
-    // The defect this pins: `deploy-loop.ts` drops the vanity name when more
-    // than one Component serves, and the workspace printed it anyway — an
-    // address on the hero that nothing anywhere would ever resolve.
     const ctx = context();
     const app = await appServing(ctx, ['web', 'admin']);
     const named = await setAppVanity({ appId: app.appId, label: '@' }, ctx);
@@ -146,13 +131,11 @@ describe('the workspace read on the App’s own address', () => {
     if (!result.ok) return;
 
     const domain = result.value.workspace.domain;
-    // The choice is still the operator's — it is not cleared behind their back.
+    // The label stays set; only publishing stops.
     expect(domain?.label).toBe('@');
-    // But nothing is published under it, and both halves say so.
     expect(domain?.ambiguous).toBe(true);
     expect(domain?.servedBy).toBeNull();
-    // The canonical each Component still answers on is here; the shared name
-    // is not, because nothing will publish it.
+    // Each Component's canonical name remains, and the shared name does not.
     const zones = manifest.dns.zones.map((zone) => zone.name);
     expect(domain?.hostnames.some((name) => zones.includes(name))).toBe(false);
     expect(result.value.workspace.url).toBe('');
@@ -169,8 +152,8 @@ describe('the workspace read on the App’s own address', () => {
     const domain = result.value.workspace.domain;
     expect(domain?.label).toBeNull();
     expect(domain?.zones.length).toBeGreaterThan(0);
-    // Every zone states what it answers on, which is what makes one that
-    // cannot serve a placed Component's reach readable rather than absent.
+    // Each zone states its reaches, so one that cannot serve the Component
+    // still shows.
     for (const zone of domain?.zones ?? []) {
       expect(zone.reaches.length).toBeGreaterThan(0);
     }

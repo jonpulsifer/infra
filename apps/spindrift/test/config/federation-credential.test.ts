@@ -1,12 +1,6 @@
 /**
- * Federation is read from the deployment, not restated in the manifest.
- *
- * The claim under test is the one the ticket is named for: there is exactly one
- * copy of §13's federation facts, it is the `external_account` document the
- * installer chart renders, and no manifest key exists that could disagree with
- * it. So these tests read the *chart's own rendered output* wherever they can —
- * a test that asserted against a hand-written credential would be a second copy
- * of the thing being removed.
+ * Federation comes from the deployment's mounted `external_account` credential,
+ * and the manifest has no key that could restate it.
  */
 import { describe, expect, test } from 'bun:test';
 import { join } from 'node:path';
@@ -39,9 +33,6 @@ describe('the credential the deployment mounts', () => {
   });
 
   test('leaves an installation with no cloud Targets honestly null', async () => {
-    // The nullability `cloud.federation` had is preserved and is now
-    // structural: a deployment that mounts no credential has none, rather than
-    // an operator having remembered to write `null`.
     expect(await loadDeploymentFederation({})).toBeNull();
   });
 
@@ -59,8 +50,8 @@ describe('the credential the deployment mounts', () => {
   });
 
   test('a named credential that is not mounted is an error, not an absence', async () => {
-    // Silently becoming an installation with no cloud is how a deploy fails for
-    // a reason nobody can act on. A broken mount says so.
+    // A broken mount fails loudly, never reading as an installation with no
+    // cloud.
     await expect(
       loadDeploymentFederation({
         [GCP_CREDENTIALS_VAR]: '/var/run/secrets/spindrift/absent.json',
@@ -69,8 +60,7 @@ describe('the credential the deployment mounts', () => {
   });
 
   test('refuses a service account key file wearing the same shape', () => {
-    // §13 stores nothing. A key file would parse against every other field, so
-    // `type` is the check that keeps the one forbidden credential out.
+    // A key file matches every other field, so `type` is what refuses it.
     expect(() =>
       parseFederationCredential(
         JSON.stringify({
@@ -102,8 +92,7 @@ describe('the credential the deployment mounts', () => {
 
 describe('the manifest cannot restate it', () => {
   test('there is no key to write it into', () => {
-    // Not even a block to hang it off any more: the two keys that used to sit
-    // beside it are properties of the home vessel, so `cloud` is derived whole.
+    // `cloud` comes only from the deployment.
     expect(installationManifestSchema.shape).not.toHaveProperty('cloud');
     expect(Object.keys(installationManifestSchema.shape.charts.shape)).toEqual([
       'app',
@@ -111,9 +100,7 @@ describe('the manifest cannot restate it', () => {
   });
 
   test('a document that carries one anyway is refused', async () => {
-    // The schema is strict, so a document restating what the deployment owns
-    // fails to parse rather than being quietly corrected. The installer chart
-    // refuses the same two keys at render, which is where an operator meets it.
+    // The schema is strict, so a restated key fails to parse.
     const document = Bun.YAML.parse(await Bun.file(FIXTURE).text()) as Record<
       string,
       unknown
@@ -148,8 +135,8 @@ describe('the manifest cannot restate it', () => {
     expect(resolved.cloud.federation?.tokenPath).toBe(
       '/var/run/secrets/cloud/token',
     );
-    // And the authored document is untouched by the join, so a write path
-    // holding one cannot round-trip a derived value back into the row.
+    // The join leaves the authored document alone, so no write path stores a
+    // derived value.
     expect(authored).not.toHaveProperty('cloud');
   });
 });

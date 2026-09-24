@@ -1,23 +1,6 @@
 /**
- * A stored manifest written under an older schema is upgraded, never discarded.
- *
- * **This is the test that makes the next manifest schema change safe, not just
- * this one.** The row is the only copy of what an installation is, so a row
- * this build cannot parse is an installation that cannot boot — there is no
- * declaration left to fall back to, which makes every step in
- * `manifest-upgrade.ts` load-bearing rather than merely tidy.
- *
- * So the corpus in `test/fixtures/stored-manifests/` holds one frozen snapshot
- * per shape a stored document has ever had, and every one of them has to boot.
- * Two rules keep it honest:
- *
- * 1. **A file in that directory is never edited.** It is a document that really
- *    was written to a real installation; editing it forward proves only that a
- *    document written today parses today.
- * 2. **The newest file must need no upgrade at all.** That is the forcing
- *    function: a schema change that stops accepting it fails here, and the
- *    only way to go green is to add the next snapshot and teach
- *    `manifest-upgrade.ts` the step between them.
+ * Every stored manifest shape in `test/fixtures/stored-manifests/` must boot.
+ * A snapshot is never edited, and the newest one must need no upgrade.
  */
 import { describe, expect, test } from 'bun:test';
 import { readdirSync, readFileSync } from 'node:fs';
@@ -37,12 +20,7 @@ const SNAPSHOTS = readdirSync(CORPUS)
   .filter((name) => name.endsWith('.yaml'))
   .sort();
 
-/**
- * One snapshot, parsed fresh.
- *
- * Per call rather than once: these are handed to a write path, and a shared
- * parse would let one test's mutation reach the next.
- */
+/** Parsed per call, so one test's mutation never reaches the next. */
 function snapshot(name: string): Record<string, unknown> {
   return Bun.YAML.parse(readFileSync(join(CORPUS, name), 'utf8')) as Record<
     string,
@@ -59,8 +37,6 @@ describe('every stored manifest this project has ever written', () => {
       .db.insert(installation)
       .values({ manifest: document as unknown as AuthoredManifest });
 
-    // `bun:test`'s `spyOn` does not intercept `console.warn`, so this captures
-    // it the plain way — the same shape `manifest-store.test.ts` uses.
     const original = console.warn;
     const warnings: string[] = [];
     console.warn = (...args: unknown[]) => {
@@ -73,13 +49,7 @@ describe('every stored manifest this project has ever written', () => {
       console.warn = original;
     }
 
-    // The document that was stored is the document that was loaded. A schema
-    // change that made this row unreadable would take the installation down
-    // with everything an operator configured in it.
-    // The `installation` block on the row, whatever shape the snapshot wrote
-    // it in: a document from before the pointers existed carried the label
-    // bare, and the upgrade is what turns it into the block with the two
-    // vessels named beside it.
+    // Older snapshots store `installation` as a bare name string.
     expect(loaded.installation.name).toBe(
       typeof document.installation === 'string'
         ? document.installation
@@ -89,8 +59,7 @@ describe('every stored manifest this project has ever written', () => {
       [],
     );
 
-    // Rewritten in place, and fully: what is on the row afterwards is a current
-    // document, so the upgrade runs once rather than on every boot forever.
+    // The row is rewritten as a current document, so the upgrade runs once.
     const [row] = await database()
       .db.select({ manifest: installation.manifest })
       .from(installation);
@@ -105,19 +74,15 @@ describe('every stored manifest this project has ever written', () => {
     if (newest === undefined) throw new Error('the corpus is empty');
     const document = snapshot(newest);
 
-    // Read the failure, not just the assertion: if this fails, the manifest
-    // schema stopped accepting the document shape currently in production.
-    // Copy `${newest}` to the next number, edit the copy to the new shape, and
-    // add the step to `manifest-upgrade.ts`. Editing `${newest}` in place makes
-    // this green and leaves every real installation on the old shape one boot
-    // away from being silently re-seeded.
+    // On failure, copy the newest snapshot to the next number, edit the copy,
+    // and add the step to `manifest-upgrade.ts`. Never edit a snapshot in
+    // place.
     expect(upgradeManifestDocument(document)).toEqual(document);
     expect(() => validateManifest(document, newest)).not.toThrow();
   });
 
   test('the oldest snapshot is genuinely refused without the upgrade', () => {
-    // The premise. Without it the corpus proves nothing — a document nothing
-    // would have rejected is not evidence that an upgrade is load-bearing.
+    // Otherwise the corpus would prove no upgrade step is needed.
     const oldest = SNAPSHOTS.at(0);
     if (oldest === undefined) throw new Error('the corpus is empty');
     expect(upgradeManifestDocument(snapshot(oldest))).not.toEqual(
@@ -130,9 +95,8 @@ describe('the vessels a pre-declaration document is upgraded into', () => {
   const document = snapshot('01-suffix-paired-vessels.yaml');
 
   test('are the ones the seeding path used to derive on every boot', () => {
-    // The same names, the same locations, and the same union of what two
-    // surfaces of one boundary each claimed — so an installation upgraded here
-    // keeps the vessel rows it already has rather than growing a second set.
+    // The names and locations of the existing vessel rows, so no second set
+    // appears.
     const upgraded = upgradeManifestDocument(document) as {
       vessels: unknown[];
     };
@@ -148,14 +112,11 @@ describe('the vessels a pre-declaration document is upgraded into', () => {
         name: 'cloud',
         kind: 'gcp-project',
         location: { project: 'example-vessel' },
-        // The union, not a winner: the two surfaces stated different hosts and
-        // taking one would be the bug the vessel exists to prevent.
+        // The union of the hosts both surfaces stated.
         servedHosts: ['hosting.example.test', 'run.example.test'],
         reachableRegistries: ['mirror.example.test'],
-        // The four keys that described this boundary without saying so.
-        // `cloud.homeVesselProject` named `example-home`, which was never a
-        // declared vessel, so the first cloud boundary takes the role rather
-        // than a second one being minted out of the string.
+        // The snapshot's `cloud.homeVesselProject` names no declared vessel, so
+        // the first cloud vessel takes the home role.
         shared: {
           sourceBucket: 'example-source-bucket',
           artifactsProject: 'example-artifacts',
@@ -166,12 +127,7 @@ describe('the vessels a pre-declaration document is upgraded into', () => {
   });
 
   test('leave the Targets in order, carrying only their own surface', () => {
-    // Rank is read from this array's order, so a rewrite that reordered it
-    // would silently re-rank the installation. `01` predates the
-    // `dropTargetNames` step too, so the chained upgrade also takes the
-    // constructed `name` off every entry — asserted below as its own claim
-    // rather than folded into this array, since that is the newer step's
-    // whole job.
+    // Rank is array order. The chained upgrade also drops each entry's `name`.
     const upgraded = upgradeManifestDocument(document) as {
       targets: { vessel: string; adapter: string; connection?: object }[];
     };
@@ -194,11 +150,8 @@ describe('the vessels a pre-declaration document is upgraded into', () => {
   });
 
   test('take their kind from the address stated, not from the adapter', () => {
-    // The reverse lookup this step used to make assumed each surface belonged
-    // to exactly one kind of boundary. A project that runs a cluster breaks
-    // that assumption, and the old code would have called this vessel a
-    // `cluster` because its surface is `kubernetes`. What the document
-    // actually says is a project.
+    // A `kubernetes` surface can sit in a project, so the kind comes from the
+    // address.
     const upgraded = upgradeManifestDocument({
       targets: [
         {
@@ -218,11 +171,8 @@ describe('the vessels a pre-declaration document is upgraded into', () => {
   });
 
   test('and a boundary no address was stated for keeps the row it has', () => {
-    // A seed with no connection was a legal document — it is the half-ready
-    // state a manifest seeds and an operator finishes in-product — so there is
-    // nothing here to read a shape off. The kind is the one `0022_vessels.sql`
-    // wrote for the same row rather than a fresh guess, and the location is
-    // omitted rather than invented.
+    // With no address to read, the kind matches the row `0022_vessels.sql`
+    // created, and the location is omitted.
     const upgraded = upgradeManifestDocument({
       targets: [{ name: 'nowhere', adapter: 'kubernetes' }],
     }) as { vessels: unknown[] };
@@ -230,11 +180,8 @@ describe('the vessels a pre-declaration document is upgraded into', () => {
   });
 
   test('and one address-less seed does not take the whole document down', () => {
-    // The failure this guards is the module's own: `vessels` is required, so a
-    // document that came back without it fails validation, and
-    // `loadStoredManifest` reads that as an unseeded installation and re-seeds
-    // from the mounted declaration. Every boundary that *did* state an address
-    // would go with it.
+    // `vessels` is required, so an upgrade that dropped it would fail
+    // validation.
     const seeded = snapshot('01-suffix-paired-vessels.yaml') as {
       targets: Record<string, unknown>[];
     };
@@ -252,11 +199,8 @@ describe('the vessels a pre-declaration document is upgraded into', () => {
   });
 
   test('and a cluster keeps its whole name, suffix and all', () => {
-    // The suffix told two surfaces of one project apart, so a cluster never
-    // carried one and `<name>-kubernetes` is just a name. Stripping it renames
-    // the boundary away from the row `0022_vessels.sql` created — which
-    // `reconcileManifestVessels` looks up by name, so it would insert a second
-    // vessel and strand the Target already attached to the first.
+    // Only project surfaces carry a suffix. `reconcileManifestVessels` matches
+    // by name, so stripping one here would create a second vessel.
     const upgraded = upgradeManifestDocument({
       targets: [
         {
@@ -278,28 +222,20 @@ describe('the vessels a pre-declaration document is upgraded into', () => {
   });
 
   test('is a no-op on a document that already declares them', () => {
-    // `04` now upgrades too — it states `dns.zones` as the object naming one
-    // zone per reach, `09` still carries the Device Flow `github` pair, and
-    // `10` still authors `controlPlane`. `11` is the shape with none of the
-    // gaps, so this is where "already current" moved.
+    // `11` needs no upgrade.
     const current = snapshot('11-deployment-serves-the-control-plane.yaml');
     expect(upgradeManifestDocument(current)).toEqual(current);
   });
 });
 
 /**
- * The four loose strings, collapsed onto the boundary they were describing.
- *
- * The hazard the upgrade removes is not that the old document was unreadable —
- * it is that nothing said `cloud.homeVesselProject`, `cloud.artifactsProject`,
- * `sources.defaultBucket` and `secretStore.container` were four properties of
- * one place, so nothing noticed when they stopped being.
+ * `cloud.homeVesselProject`, `cloud.artifactsProject`, `sources.defaultBucket`
+ * and `secretStore.container` move onto the home vessel.
  */
 describe('the two vessels an installation is built on, recovered once', () => {
   test('the home vessel is the boundary the old project id named', () => {
     // `03` names `example-home`, which no vessel declares, so the first cloud
-    // boundary takes the role. Minting a vessel out of the string would be
-    // recovering a boundary from a name, which is what `vessels` exists to stop.
+    // vessel takes the role.
     const upgraded = upgradeManifestDocument(
       snapshot('03-target-is-vessel-and-surface.yaml'),
     ) as {
@@ -316,8 +252,7 @@ describe('the two vessels an installation is built on, recovered once', () => {
 
     expect(upgraded.installation).toEqual({
       name: 'stored-without-target-names',
-      // Rank 0: the control plane's own boundary is its in-cluster
-      // destination, and array position is rank.
+      // The rank-0 Target's vessel.
       controlPlaneVessel: 'cluster',
       homeVessel: 'cloud',
     });
@@ -328,22 +263,19 @@ describe('the two vessels an installation is built on, recovered once', () => {
       artifactsProject: 'example-artifacts',
       secretStoreContainer: 'example-secrets',
     });
-    // And exactly one vessel carries them, which is what the refinement needs.
+    // The schema lets only one vessel carry them.
     expect(
       upgraded.vessels.filter((vessel) => vessel.shared !== undefined),
     ).toHaveLength(1);
 
-    // The keys they came from are gone rather than duplicated: a value in two
-    // places is a value two readers can disagree about.
+    // The source keys are removed, so no value lives in two places.
     expect(upgraded.cloud).toBeUndefined();
     expect(upgraded.sources).not.toHaveProperty('defaultBucket');
     expect(upgraded.secretStore).not.toHaveProperty('container');
   });
 
   test('a document whose home project is a declared boundary keeps that one', () => {
-    // The live shape: `cloud.homeVesselProject` and the vessel's own
-    // `location.project` were the same value, which is the whole reason the
-    // collapse is expressible at all.
+    // `cloud.homeVesselProject` matches a declared vessel's `location.project`.
     const document = snapshot('03-target-is-vessel-and-surface.yaml') as Record<
       string,
       unknown
@@ -357,10 +289,8 @@ describe('the two vessels an installation is built on, recovered once', () => {
   });
 
   test('a document with no staging default takes the first declared bucket', () => {
-    // `sources.defaultBucket` was optional and `sources.buckets` has a minimum
-    // of one, so the fallback the old readers applied is the one carried
-    // forward — the alternative is a document that fails validation and takes
-    // the re-seed path this module exists to keep unreachable.
+    // `sources.defaultBucket` is optional in old documents, and
+    // `sources.buckets` always has at least one entry.
     const document = snapshot('03-target-is-vessel-and-surface.yaml') as Record<
       string,
       unknown
@@ -384,9 +314,7 @@ describe('the zones a reach-keyed document is upgraded into', () => {
       .zones;
 
   test('one zone at both reaches becomes one entry serving both', () => {
-    // The reading that keeps §9's "flipping a Component's reach is a record
-    // re-point and its hostname is stable" true across the upgrade. Two entries
-    // of one reach each would make the same flip a rename by accident.
+    // One entry keeps a reach flip a record re-point with a stable hostname.
     expect(
       zonesOf({
         dns: {
@@ -397,8 +325,7 @@ describe('the zones a reach-keyed document is upgraded into', () => {
   });
 
   test('two zones become two entries of one reach each', () => {
-    // The split-horizon reading: separate trust boundaries, and changing reach
-    // was always a rename here.
+    // Split horizon, where changing reach is a rename.
     expect(
       zonesOf({
         dns: {
@@ -412,9 +339,7 @@ describe('the zones a reach-keyed document is upgraded into', () => {
   });
 
   test('a document already holding the list is left exactly as it arrived', () => {
-    // The no-op that keeps this from running on every boot forever, and the one
-    // that matters most: a third zone an operator added through the UI must not
-    // be collapsed back into two by a step that thinks it knows better.
+    // A third zone an operator added in the UI must survive the upgrade.
     const current = {
       dns: {
         zones: [

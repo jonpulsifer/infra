@@ -1,27 +1,5 @@
-/**
- * The deploy lock on an App, and who asked for each Deploy (§6).
- *
- * Three columns and one veto, so the claims are about what the veto holds and
- * what it lets through:
- *
- * - **A locked App refuses every ordinary intent with the reason** — a press
- *   (`createDeploy`, `deployApp`), a push (`dispatchAutoDeploys`, which
- *   skips before anything is built) and a config change (`setConfig`, which
- *   stores the value and declines the deploy).
- * - **The lock is asked again under the intent's own lock**: a hold set
- *   between `checkDeployable` and `placeIntent` still holds.
- * - **A rollback goes through and sets the lock in the same transaction as
- *   its intent**, naming what it asked for and who asked: the lock exists so
- *   the next adopted push does not undo the rollback, and refusing the
- *   rollback itself would be the lock guarding against the operator.
- * - **Unlocking clears it and resumes the push the lock held back** — for an
- *   `autoDeploy` App behind its branch, and never for the commit a rollback
- *   just rolled away from.
- * - **Every intent records its principal** — the operator's id for a press,
- *   `AUTO_DEPLOY_PRINCIPAL` for a push — and the screens print a name.
- * - **The workspace says what is pushed but not live**, joining the adopted
- *   commit to the serving Build's, and whether a Build of it is on its way.
- */
+// The deploy lock on an App: ordinary intents are refused, a rollback sets the
+// lock with its intent, and unlocking resumes the push the lock held back.
 import { describe, expect, test } from 'bun:test';
 import { eq } from 'drizzle-orm';
 import { deployApp } from '../../src/commands/apps/deploy.ts';
@@ -87,11 +65,7 @@ function digest(seed: number): string {
   return `sha256:${seed.toString(16).padStart(64, '0')}`;
 }
 
-/**
- * A registry that can place an image and admit its signature, nothing else.
- * No build route: the workspace read asks for one to judge the route picker,
- * and answers `null` gracefully.
- */
+/** No build route: the workspace read asks for one and copes with `null`. */
 function registry(): AdapterRegistry {
   const adapter = new FakeDeployAdapter({ adapter: 'kubernetes' });
   const chain = new SupplyChainHarness();
@@ -116,10 +90,6 @@ function context(principal: Principal): CommandContext {
   };
 }
 
-/**
- * An operator, a repo App on a connected repository, one placed Component,
- * and a connected Target that takes images.
- */
 async function fixture(options: { readonly adopted?: string } = {}) {
   const db = database().db;
   const [operator] = await db
@@ -180,11 +150,8 @@ async function fixture(options: { readonly adopted?: string } = {}) {
   };
 }
 
-/**
- * `createdAt` is the database's clock unless said otherwise. A test that
- * writes a Build through the frozen command clock afterwards and needs it
- * to be the *newest* dates this one before `FROZEN`.
- */
+// `createdAt` defaults to the database clock. Pass one before `FROZEN` when a
+// Build written later through the command clock must be the newest.
 async function succeededBuild(
   componentId: string,
   seed: number,
@@ -298,7 +265,7 @@ describe('a locked App refuses ordinary deploys with the reason', () => {
     expect(result.failure.message).toContain(`'${app.name}' is locked`);
     expect(result.failure.message).toContain('change freeze until Monday');
 
-    // Refused before the intent: nothing was written.
+    // Refused before the intent is written.
     expect(
       await database()
         .db.select()
@@ -343,7 +310,6 @@ describe('a locked App refuses ordinary deploys with the reason', () => {
       ] as never,
     );
 
-    // Not attempted at all — no `deployApp` call, no refusal to carry.
     expect(attempts).toEqual([]);
     expect(await deploysOf(component.id)).toHaveLength(0);
   });
@@ -356,8 +322,8 @@ describe('a locked App refuses ordinary deploys with the reason', () => {
     );
     await setAppLock({ appId: app.id, reason: 'freeze' }, ctx);
 
-    // A Target that reaches a store, which the fixture's bare one does not:
-    // the value has to have somewhere to go before the deploy is the question.
+    // The fixture's Target reaches no store, and the value needs one before the
+    // deploy is judged.
     const store = new FakeSecretStore({
       adapter: manifest.secretStore.adapter,
     });
@@ -377,7 +343,6 @@ describe('a locked App refuses ordinary deploys with the reason', () => {
       { ...ctx, adapters: { ...ctx.adapters, store: () => store } },
     );
 
-    // Its own shape, not the press's: the value is kept, the deploy is not.
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.value.written).toEqual(['TOKEN']);
@@ -413,7 +378,7 @@ describe('rollback goes through the lock, and sets it', () => {
     if (!rolled.ok) return;
     expect(rolled.value.supersededBuildId).toBe(newer.id);
 
-    // Requested, not done: the sentence stays true if the Deploy then fails.
+    // "requested" stays true if the Deploy then fails.
     const lock = await lockOf(app.id);
     expect(lock.lockReason).toContain(
       `rollback to Build ${older.id} requested`,
@@ -437,7 +402,6 @@ describe('rollback goes through the lock, and sets it', () => {
     );
     expect((await lockOf(app.id)).lockReason).not.toBeNull();
 
-    // The very next forward deploy — what a push would do — is refused.
     const forward = await createDeploy({ ...pair, buildId: newer.id }, ctx);
     expect(forward.ok).toBe(false);
     if (forward.ok) return;
@@ -456,9 +420,6 @@ describe('rollback goes through the lock, and sets it', () => {
     if (!rolled.ok) throw new Error(rolled.failure.message);
     expect((await lockOf(app.id)).lockReason).toContain('rollback to Build');
 
-    // The wrong Build, noticed before anything claimed it. The pointer goes
-    // back to the release that was serving all along, and a banner asserting
-    // a rollback that never landed goes with it.
     const cancelled = await cancelDeploy({ id: rolled.value.deployId }, ctx);
     expect(cancelled).toMatchObject({ ok: true, value: { phase: 'FAILED' } });
     expect(await lockOf(app.id)).toEqual({
@@ -467,7 +428,6 @@ describe('rollback goes through the lock, and sets it', () => {
       lockedBy: null,
     });
 
-    // The next press is accepted, which is what the lock was refusing.
     const next = await succeededBuild(component.id, 17);
     const result = await createDeploy({ ...pair, buildId: next.id }, ctx);
     expect(result.ok).toBe(true);
@@ -495,7 +455,7 @@ describe('rollback goes through the lock, and sets it', () => {
     const only = await succeededBuild(component.id, 14);
     await createDeploy({ ...pair, buildId: only.id }, ctx);
 
-    // Not older than what is desired — the typo refusal.
+    // The desired Build is not older than itself, so this is refused.
     const rolled = await rollbackDeploy({ ...pair, buildId: only.id }, ctx);
     expect(rolled.ok).toBe(false);
     expect((await lockOf(app.id)).lockReason).toBeNull();
@@ -508,9 +468,8 @@ describe('rollback goes through the lock, and sets it', () => {
     await createDeploy({ ...pair, buildId: older.id }, ctx);
     await createDeploy({ ...pair, buildId: newer.id }, ctx);
 
-    // A push mid-flight: its checks passed while the App was unlocked, and
-    // its pinned-config round trips are still in progress when the rollback
-    // commits with its hold.
+    // A push whose checks passed while the App was unlocked, placed after the
+    // rollback commits its hold.
     const checked = await checkDeployable({ ...pair, buildId: newer.id }, ctx);
     expect(checked.ok).toBe(true);
     if (!checked.ok) return;
@@ -558,8 +517,8 @@ describe('rollback goes through the lock, and sets it', () => {
     expect(checked.ok).toBe(true);
     if (!checked.ok) return;
 
-    // The hold rides the intent's transaction, so a hold that fails takes
-    // the intent down with it rather than leaving a rollback nothing guards.
+    // The hold runs in the intent's transaction, so a failed hold takes the
+    // intent with it.
     await expect(
       placeIntent(ctx, checked.value, undefined, async () => {
         throw new Error('the App row could not be written');
@@ -642,8 +601,7 @@ describe('unlocking resumes the push the lock held back', () => {
       lockedBy: null,
     });
 
-    // The same act the push would have taken: a Build of that commit, set to
-    // deploy when it lands.
+    // What the push would have done: build the commit, then deploy it.
     expect(unlocked.value.resumed).toEqual({
       appId: app.id,
       commit: 'bbb2222',
@@ -689,7 +647,7 @@ describe('unlocking resumes the push the lock held back', () => {
     await setAppLock({ appId: app.id, reason: 'freeze' }, ctx);
     await pushLands(repository.id, 'ddd4444');
 
-    // No source depot: the dispatch this resumes has nothing to stage into.
+    // No source stager, so the resumed dispatch has nothing to stage into.
     const unlocked = await setAppLock({ appId: app.id, reason: null }, ctx);
     expect(unlocked.ok).toBe(true);
     if (!unlocked.ok) return;
@@ -700,7 +658,6 @@ describe('unlocking resumes the push the lock held back', () => {
     if (resumed === null || resumed.result.ok) return;
     expect(resumed.result.failure.code).toBe('NOT_BUILDABLE');
 
-    // Nothing is on its way, and the hero says which button ships it.
     const workspace = await getAppWorkspace({ name: app.id }, ctx);
     expect(workspace.ok).toBe(true);
     if (!workspace.ok) return;
@@ -726,8 +683,8 @@ describe('unlocking resumes the push the lock held back', () => {
   });
 
   test('after a rollback, the commit rolled away from is not redeployed', async () => {
-    // main is still at the commit the newer Build was made from: the lock
-    // held nothing back, and resuming would undo the rollback it protected.
+    // main is still at the newer Build's commit, so resuming would undo the
+    // rollback.
     const {
       app,
       repository,
@@ -834,12 +791,11 @@ describe('the workspace says what is pushed but not live', () => {
       true,
     );
 
-    // In step: the adopted commit is the one serving.
     const inStep = await getAppWorkspace({ name: app.id }, ctx);
     expect(inStep.ok).toBe(true);
     if (!inStep.ok) return;
-    // The origin the hero composes a commit link from — §20 keeps the host in
-    // the manifest, so the browser cannot know it and the read carries it.
+    // The manifest holds the GitHub host, so the read carries it for the commit
+    // link.
     expect(inStep.value.workspace.source).toEqual({
       branch: 'main',
       url: `${ctx.manifest.github.webBaseUrl}/${repository.fullName}`,
@@ -847,7 +803,7 @@ describe('the workspace says what is pushed but not live', () => {
     });
     expect(inStep.value.workspace.lock).toBeUndefined();
 
-    // A push lands and is adopted; nothing has built it yet.
+    // Adopted, and nothing has built it yet.
     await pushLands(repository.id, 'bbb2222');
     await setAppLock({ appId: app.id, reason: 'freeze' }, ctx);
 
@@ -879,8 +835,7 @@ describe('the workspace says what is pushed but not live', () => {
     await optIn(app.id);
     await pushLands(repository.id, 'bbb2222');
 
-    // `autoDeploy` is on and nothing is coming: the push's Build went red,
-    // and no Deploy follows a failed Build.
+    // A failed Build of the push is no evidence: no Deploy follows it.
     const [failed] = await ctx.db
       .insert(builds)
       .values({

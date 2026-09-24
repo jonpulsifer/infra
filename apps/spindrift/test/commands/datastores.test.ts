@@ -1,21 +1,5 @@
-/**
- * The Datastore lifecycle commands against a real Postgres (§11).
- *
- * Four verbs and one constraint. What is asserted here is the half a unit test
- * of each command could not see:
- *
- * - the **unique key** is what stops two Datastores of one name on one Target,
- *   and `createDatastore` is ordered so it fires before the adapter is ever
- *   called — the object is not created and then discovered to be somebody
- *   else's;
- * - a **refused provision leaves no row**, so a retry is an ordinary create
- *   rather than a collision with the wreckage of the last attempt;
- * - the **attach guards** refuse the states that would leave an App
- *   un-deployable, rather than letting a deploy discover them later;
- * - **`destroy` reaches the adapter for a managed row and never for an
- *   external one**, which is §13's "never destroy as a side effect" in the one
- *   place the side effect would be somebody else's database.
- */
+// The Datastore commands against a real Postgres: the unique key fires before
+// the adapter, and `destroy` never reaches the adapter for an external row.
 import { describe, expect, test } from 'bun:test';
 import { eq } from 'drizzle-orm';
 import { attachDatastore } from '../../src/commands/datastores/attach.ts';
@@ -53,7 +37,7 @@ const database = withIsolatedDatabase();
 const manifest = await fixtureManifest();
 const clock: Clock = { now: () => new Date('2024-06-01T00:00:00.000Z') };
 
-/** `contextWith`, with the clock overridden — what {@link listDatastores}'s ordering test needs two rows apart in time to prove. */
+/** `contextWith` at a given time. */
 function contextAt(
   datastore: FakeDatastoreAdapter | null,
   at: string,
@@ -82,12 +66,8 @@ function contextWith(datastore: FakeDatastoreAdapter | null): CommandContext {
   };
 }
 
-/**
- * A connected, capable cluster Target — the one every case below sits on.
- *
- * Its own vessel each time, because (vessel_id, adapter) is unique and the
- * cases that need two Targets need two boundaries to hang them on.
- */
+// A connected, capable cluster Target, on its own vessel since (vessel_id,
+// adapter) is unique.
 async function aTarget(overrides: Partial<NewTarget> = {}) {
   const vessel = await insertVessel(database().db, 'kubernetes');
   const [target] = await database()
@@ -136,8 +116,7 @@ describe('createDatastore', () => {
       .where(eq(datastores.name, 'orders'));
     expect(row?.ref).toBe('postgres/fixture/orders');
     expect(row?.provenance).toBe('managed');
-    // PENDING, not LIVE: the row records that an object was asked for, and the
-    // loop is what learns whether it came up.
+    // PENDING until the loop learns the object came up.
     expect(row?.phase).toBe('PENDING');
     expect(row?.connectionRef).toBeNull();
     expect(row?.appId).toBeNull();
@@ -158,8 +137,8 @@ describe('createDatastore', () => {
 
     expect(second.ok).toBe(false);
     expect(second.ok === false && second.failure.code).toBe('NOT_DEPLOYABLE');
-    // The whole reason the row is inserted first: the second call created
-    // nothing on the far side to have to reclaim.
+    // The row goes in first, so the second call created nothing on the far
+    // side.
     expect(backend.provisioned).toHaveLength(1);
   });
 
@@ -418,7 +397,7 @@ describe('attachDatastore', () => {
     );
 
     expect(result.ok).toBe(false);
-    // Placement's own words, so a developer meets one system rather than two.
+    // Placement's own words, so a developer meets one system.
     expect(result.ok === false && result.failure.message).toContain(
       'an attached datastore is cluster-local and lives elsewhere',
     );
@@ -647,17 +626,11 @@ describe('listDatastores', () => {
     );
     expect(row).toBeDefined();
     expect(row).not.toHaveProperty('connectionRef');
-    // Belt and braces: the credential-adjacent value itself must not appear
-    // anywhere in the payload, not just under its own field name.
+    // The value must not appear anywhere in the payload.
     expect(JSON.stringify(row)).not.toContain('secret://elsewhere/analytics');
   });
 
-  /*
-    The ledger's Create picker. Every case here is a Target `createDatastore`
-    would refuse, offered or not offered accordingly — the picker and the
-    command have to agree, because a Target on the list whose only answer is a
-    refusal is the bug this list exists to avoid.
-  */
+  // The Create picker offers only what createDatastore would accept.
   test('offers only the engines the Target serves', async () => {
     const both = await aTarget();
     const cacheOnly = await aTarget({
@@ -721,16 +694,8 @@ describe('listDatastores', () => {
   });
 });
 
-/**
- * The read path §11's top-level noun did not have: one Datastore, by id, with
- * the far side's own object beside its stored facts.
- *
- * What is asserted here is the half the row cannot answer — that the document
- * comes from the backend rather than from core, and that every way of not
- * having one is distinguishable by a reader. An unreachable Target is the case
- * worth protecting: the object is what fails, and the facts are exactly what an
- * operator diagnosing that failure is reading.
- */
+// One Datastore, with the far side's object beside its stored facts. An
+// unreachable Target still shows the facts.
 describe('getDatastore', () => {
   async function aDatastore(backend: FakeDatastoreAdapter) {
     const target = await aTarget();
@@ -770,8 +735,8 @@ describe('getDatastore', () => {
     expect(result.value.datastore.objectError).toBeUndefined();
     expect(result.value.datastore.name).toBe('orders');
     expect(result.value.datastore.provisioned).toBeTrue();
-    // Never, for the reason `listDatastores` never does: an `external` row's
-    // is whatever a human pasted into the column.
+    // An external row's value is whatever a human pasted in, so it is never
+    // shown.
     expect(result.value.datastore).not.toHaveProperty('connectionRef');
   });
 

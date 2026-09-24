@@ -1,14 +1,6 @@
 /**
- * A `jsonb` column holds a document, not a string (ticket 30).
- *
- * The defect this guards against is invisible from the application: Drizzle's
- * stock `jsonb` encoder stringified, Bun's SQL client stringified that string
- * again, and the decode was symmetric — so a JS round trip returned the object
- * every time while the column held a scalar and `->>` read nothing. A test that
- * writes a document and reads it back through Drizzle passes under both the bug
- * and the fix, which is exactly how this survived to production.
- *
- * So every assertion here is made **in SQL**, against the stored shape.
+ * `jsonb` columns hold documents. A double-encoded value still round-trips
+ * through Drizzle, so every assertion here reads the stored shape in SQL.
  */
 
 import { describe, expect, test } from 'bun:test';
@@ -27,12 +19,7 @@ const MIGRATION = join(
   '../../src/db/migrations/0016_jsonb_documents.sql',
 );
 
-/**
- * A draft with a repository named, so the nested read below has something to
- * find. Fresh drafts open with no source at all — that is the point of the
- * creation screen — and a `->>'repo'` over an empty string proves nothing about
- * whether jsonb nests.
- */
+/** Names a repository: a fresh draft has none for the nested read to find. */
 const draftValues = () => {
   const draft = initialCreationDraft({
     targetId: crypto.randomUUID(),
@@ -44,7 +31,6 @@ const draftValues = () => {
   } as typeof draft;
 };
 
-/** A draft needs an owner; `creation_drafts.user_id` is a cascading FK. */
 async function seedOperator() {
   const [user] = await database()
     .db.insert(users)
@@ -54,18 +40,8 @@ async function seedOperator() {
 }
 
 /**
- * The committed migration, exactly as it ships, as its own statements — minus
- * the ones whose column this schema no longer has.
- *
- * 0016 is one independent `UPDATE` per `jsonb` column, and this test replays it
- * against a **fully migrated** database rather than against the schema of its
- * own day. So a column dropped by any later migration makes one of these
- * statements refer to something that is not there: `deploys.config_document`
- * went that way when a Deploy started carrying its whole release document.
- *
- * Skipping is derived from `information_schema` rather than hard-coded, so this
- * keeps working as columns come and go, and it is narrower than catching the
- * error would be — an undefined column anywhere else still fails the test.
+ * Migration 0016's statements, minus updates to columns a later migration
+ * dropped. Any other undefined column still fails the test.
  */
 async function migrationStatements() {
   const sql = await readFile(MIGRATION, 'utf8');
@@ -138,8 +114,7 @@ describe('jsonb columns store documents', () => {
       SELECT discovery IS NULL AS sql_null, jsonb_typeof(discovery) AS shape
       FROM targets WHERE id = ${row!.id}`;
 
-    // A JSON null would make `IS NULL` false and `jsonb_typeof` 'null', which
-    // would silently break every `IS NULL` predicate over these columns.
+    // A JSON null would silently break every `IS NULL` predicate on the column.
     expect(stored.sql_null).toBe(true);
     expect(stored.shape).toBeNull();
     expect(row!.discovery).toBeNull();
@@ -152,8 +127,8 @@ describe('migration 0016 unwraps what the old encoder wrote', () => {
     const draft = draftValues();
     const id = crypto.randomUUID();
 
-    // Exactly what the stock Drizzle encoder produced: the document, stringified,
-    // handed to Bun as a string, which serialised it as a JSON string again.
+    // Drizzle's stock encoder stringified the document and Bun encoded that
+    // string as JSON again.
     await database().client`
       INSERT INTO creation_drafts (id, user_id, draft)
       VALUES (${id}, ${user.id}, ${JSON.stringify(draft)})`;
@@ -174,7 +149,6 @@ describe('migration 0016 unwraps what the old encoder wrote', () => {
     expect(after.shape).toBe('object');
     expect(after.app_name).toBe(draft.appName);
 
-    // The document itself is unchanged — this migrates the encoding, not the data.
     const [read] = await database()
       .db.select()
       .from(creationDrafts)
@@ -190,7 +164,6 @@ describe('migration 0016 unwraps what the old encoder wrote', () => {
       .values({ id: crypto.randomUUID(), userId: user.id, draft })
       .returning();
 
-    // Runs at startup on every boot, so it meets migrated rows every time.
     for (const pass of [1, 2]) {
       for (const statement of await migrationStatements()) {
         await database().client.unsafe(statement);

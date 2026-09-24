@@ -1,12 +1,3 @@
-/**
- * Source custody at the seam between repository integration and every builder
- * (Task 23).
- *
- * These tests fake the two far sides — the repository and the immutable bundle
- * depot — while exercising core's real digesting, receipt construction, and
- * signing. That makes "fetch once", "store no token", and the provenance join
- * observable without choosing GitHub or GCS clients ahead of their tickets.
- */
 import { describe, expect, test } from 'bun:test';
 import type { BuildProvenance } from '../../src/adapters/build/contract.ts';
 import {
@@ -155,8 +146,7 @@ describe('repository bundle staging', () => {
     });
     expect(farSide.storedReceipts).toEqual([result.receipt]);
 
-    // The fetch credential reaches only the fetcher. Neither the result nor the
-    // bytes handed to the signer retain it.
+    // The credential reaches only the fetcher.
     expect(JSON.stringify(result)).not.toContain(credential.token);
     expect(new TextDecoder().decode(farSide.signedPayloads[0])).not.toContain(
       credential.token,

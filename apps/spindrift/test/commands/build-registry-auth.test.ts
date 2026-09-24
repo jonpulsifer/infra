@@ -1,21 +1,5 @@
-/**
- * What dispatch does with a held registry credential (§13's exception, §16).
- *
- * Two behaviours, and the second is the one that would be expensive to get
- * wrong.
- *
- * **It opens the credential for the destinations being pushed to**, and only
- * those. Nothing is handed over for a registry the route's own identity already
- * reaches, which is every registry in an installation that stores nothing.
- *
- * **It refuses a route that cannot carry one, before the claim.** The hosted
- * route is dispatched through `workflow_dispatch`, whose inputs GitHub renders
- * in the run header — so a credential travelling in that spec would be
- * published to everyone who can see the run, in a repository §15 deliberately
- * does not require the installation to own. The refusal `waits` rather than
- * closing the Build out, because admitting a different route is a thing an
- * operator can do that makes the next tick work.
- */
+// The hosted route's workflow_dispatch inputs show in the run header, so a
+// route that cannot carry a held credential is refused before the claim.
 import { beforeEach, describe, expect, test } from 'bun:test';
 import { eq } from 'drizzle-orm';
 import { dispatchBuild } from '../../src/commands/builds/dispatch.ts';
@@ -60,7 +44,6 @@ const HELD: RegistryAuth = {
   secret: 'a-token',
 };
 
-/** A credential store holding whatever a test says it holds. */
 function credentialStore(held: readonly RegistryAuth[]): {
   store: RegistryCredentialStore;
   asked: string[][];
@@ -116,15 +99,8 @@ describe('a build whose destination needs a stored credential', () => {
     return build!;
   }
 
-  /**
-   * The context, with a credential store and a route of a given disposition.
-   *
-   * `selfAuthorized` omits `other` — the flavour of the fixture's registry —
-   * because that is what this whole block is about. A destination only *needs*
-   * a stored credential where the route's own identity cannot reach it, so a
-   * route that self-authorized this host would make every case below vacuous.
-   * The `selfAuthorized` block at the end is the other half of that statement.
-   */
+  // `selfAuthorized` omits `other`, the fixture registry's flavour, so the
+  // destination needs a stored credential.
   function withCredentials(
     held: readonly RegistryAuth[],
     carries = true,
@@ -206,16 +182,14 @@ describe('a build whose destination needs a stored credential', () => {
     );
 
     expect(result.ok).toBe(true);
-    // Asked about the destinations' hosts, deduplicated — not about every
-    // registry the installation has ever heard of.
+    // Asked about the destinations' hosts only, deduplicated.
     expect(asked).toEqual([[HELD.host]]);
     expect(route.built[0]?.spec.registryAuth).toEqual([HELD]);
   });
 
   test('hands over nothing when none is held', async () => {
-    // Self-authorized here, because with nothing held and nothing the route can
-    // reach on its own there is no publishable registry at all — that is a
-    // different refusal, tested elsewhere.
+    // With nothing held and nothing self-authorized there is no publishable
+    // registry, which is a different refusal.
     const { context } = withCredentials([], true, [
       'artifactRegistry',
       'dockerHub',
@@ -233,11 +207,6 @@ describe('a build whose destination needs a stored credential', () => {
     expect(route.built[0]?.spec.registryAuth).toEqual([]);
   });
 
-  /**
-   * The refusal that exists so a token is never published. It has to happen
-   * before the claim, so the Build is still dispatchable once the operator
-   * admits a route that can carry one.
-   */
   test('refuses a route that cannot carry one, and never dispatches', async () => {
     const { context } = withCredentials([HELD], false);
     const build = await seedBuild();
@@ -257,8 +226,8 @@ describe('a build whose destination needs a stored credential', () => {
       .select()
       .from(builds)
       .where(eq(builds.id, build.id));
-    // `waits`, not `closes`: the Build stays dispatchable, and what is being
-    // waited on is written down where the operator reads it.
+    // The Build waits, dispatchable once a route that can carry one is
+    // admitted.
     expect(row?.status).toBe('PENDING');
     expect(row?.dispatchWaitingOn).toContain(HELD.host);
   });
@@ -283,19 +252,8 @@ describe('a build whose destination needs a stored credential', () => {
     expect(JSON.stringify(row)).not.toContain(HELD.secret);
   });
 
-  /**
-   * The regression that stopped every build on the hosted route.
-   *
-   * GHCR's credential is *minted per dispatch* from the GitHub OAuth the
-   * installation already holds, so the store answers for `ghcr.io` whenever the
-   * connector is authorized — there is no row to delete and no way to "not hold
-   * one". Dispatch asked about every destination host, got that credential
-   * back, and refused, on the one route whose own workflow logs into GHCR with
-   * the run's token and needs nothing from here.
-   *
-   * The fix is that a host the route self-authorizes is never asked about, so
-   * the store's willingness to answer stops being what decides.
-   */
+  // The store always answers for `ghcr.io`, minting from the GitHub OAuth, so a
+  // host the route authorizes itself is never asked about.
   test('never asks about a host the route authorizes itself', async () => {
     const { context, asked } = withCredentials([HELD], false, [
       'artifactRegistry',
@@ -310,20 +268,15 @@ describe('a build whose destination needs a stored credential', () => {
       context,
     );
 
-    // Dispatched, on a route that cannot carry a credential, while the store
-    // holds one for exactly this host. Before the fix this was the refusal.
+    // Dispatched, though the route cannot carry one and the store holds one.
     expect(result.ok).toBe(true);
     expect(asked).toEqual([[]]);
     expect(route.built[0]?.spec.registryAuth).toEqual([]);
   });
 
-  /**
-   * A route that can carry a credential is asked about a self-authorized host
-   * too (ticket 136): the run may execute in a repository whose own token is
-   * not the identity that self-authorized this flavour, so the stored
-   * credential rides along wherever one exists rather than only where the
-   * route's own identity falls short.
-   */
+  // The run may execute in a repository whose token is not the identity that
+  // self-authorized this flavour, so a carrying route gets the stored
+  // credential.
   test('a self-authorized host still gets its stored credential when the route can carry one', async () => {
     const { context, asked } = withCredentials([HELD], true, [
       'artifactRegistry',
@@ -343,7 +296,7 @@ describe('a build whose destination needs a stored credential', () => {
     expect(route.built[0]?.spec.registryAuth).toEqual([HELD]);
   });
 
-  /** A route that self-authorizes *some* flavours still needs the others. */
+  /** A route that self-authorizes some flavours still needs the others. */
   test('asks only about the hosts it cannot reach on its own', async () => {
     const { context, asked } = withCredentials([HELD], true, [
       'artifactRegistry',

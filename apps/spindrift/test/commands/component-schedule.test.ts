@@ -1,23 +1,5 @@
-/**
- * Changing or removing a `kind: job` Component's cadence after creation (75,
- * §2, §6).
- *
- * `components.schedule` was write-once — `createComponent` was its only
- * writer — so the Cloud Run adapter's removal branch (an `apply` whose
- * `desired.schedule` is absent, `src/adapters/deploy/cloudrun/index.ts:287-311`)
- * could never be reached by any command: nothing could ever produce a
- * re-deploy whose schedule differed from the one set at creation. Three claims
- * here, and the last is the one that answers the ticket's own criterion:
- *
- * - **A non-job Component has nothing to schedule.** The refusal is a
- *   `NOT_FOUND`-shaped `INVALID_INPUT`, matching `runComponent`'s.
- * - **The edit writes the Component and leaves a Deploy to be pressed.**
- *   Nothing already running changes — `pendingRelease` names where it has not
- *   yet.
- * - **A re-deploy after removing the schedule reaches the adapter with
- *   `desired.schedule` absent.** This is the box: the removal branch that used
- *   to be unreachable through any command is now reachable through this one.
- */
+// A job's schedule can be changed or removed, and a re-deploy after removal
+// hands the adapter no `desired.schedule`.
 import { describe, expect, test } from 'bun:test';
 import { eq } from 'drizzle-orm';
 import { setComponentSchedule } from '../../src/commands/components/schedule.ts';
@@ -222,9 +204,7 @@ describe('the edit writes a Component and leaves a Deploy to be pressed', () => 
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.value.pendingRelease).toEqual([label]);
-    // Same rule as `setComponentReach`: writing the row asks the platform for
-    // nothing. A second `apply` here would be this command re-placing a live
-    // release nobody pressed Deploy for.
+    // Writing the row applies nothing until a Deploy is pressed.
     expect(adapter.applied).toHaveLength(1);
   });
 });
@@ -242,8 +222,6 @@ describe('a re-deploy is what reaches the adapter (75)', () => {
     expect(first.ok).toBe(true);
     await runDeployPass(loopContext(adapter));
     expect(adapter.applied).toHaveLength(1);
-    // The Component still declares its schedule at the first attempt: proves
-    // the fixture, not the fix.
     expect(adapter.applied[0]?.desired.schedule).toBe('0 3 * * *');
 
     const edited = await setComponentSchedule(
@@ -260,12 +238,6 @@ describe('a re-deploy is what reaches the adapter (75)', () => {
     await runDeployPass(loopContext(adapter));
 
     expect(adapter.applied).toHaveLength(2);
-    // The removal branch: no command could ever produce this before —
-    // `components.schedule` was write-once, so `desired.schedule` could never
-    // differ from what `createComponent` set. Revert this file's registration
-    // (drop `setComponentSchedule` from the registry, or make its input
-    // schema default `schedule` to the old value) and this assertion is what
-    // goes red, because nothing would ever have written `null` onto the row.
     expect(adapter.applied[1]?.desired.schedule).toBeUndefined();
   });
 

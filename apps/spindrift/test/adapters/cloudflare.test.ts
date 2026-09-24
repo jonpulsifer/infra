@@ -1,17 +1,7 @@
 /**
- * Reading a connected Cloudflare account.
- *
- * The reader is what makes the connection account-shaped rather than
- * Pages-shaped, so the claims worth stating are about the three listings and,
- * above all, about the difference between two answers that look alike:
- *
- * - **Three reads, one credential, one pass** — zones scoped to the account,
- *   the Workers subdomain, the Pages projects.
- * - **An empty listing and a refused one are not the same fact.** `[]` says the
- *   account has none; `null` plus a sentence says nobody could look. Flattening
- *   them is how a screen tells an operator to create a zone they already have.
- * - **One refusal does not sink the other two**, which is why the reads are
- *   folded into their own fields rather than wrapped in one `try`.
+ * Reading a connected Cloudflare account. An empty listing (`[]`) and a
+ * refused one (`null` plus the reason) stay distinct, and one refusal spares
+ * the others.
  */
 import { describe, expect, test } from 'bun:test';
 import { readCloudflareAccount } from '../../src/adapters/cloudflare.ts';
@@ -76,8 +66,6 @@ describe('readCloudflareAccount', () => {
       workersSubdomain: 'acme',
       pagesProjects: ['site', 'docs'],
     });
-    // Scoped to the account: a token holding two accounts must not list the
-    // other one's zones under this boundary.
     expect(far.calls).toContain('GET /client/v4/zones');
   });
 
@@ -92,7 +80,7 @@ describe('readCloudflareAccount', () => {
 
     expect(found.zones).toEqual([]);
     expect(found.pagesProjects).toEqual([]);
-    // Workers has no subdomain to report, which is an answer rather than a gap.
+    // Null here means the account has no subdomain, not a refused read.
     expect(found.workersSubdomain).toBeNull();
     expect(found.unreadable).toBeUndefined();
   });
@@ -114,14 +102,12 @@ describe('readCloudflareAccount', () => {
 
     expect(found.zones).toBeNull();
     expect(found.unreadable?.zones).toContain('403');
-    // The other two answered, and one refusal must not take them with it.
     expect(found.workersSubdomain).toBe('acme');
     expect(found.pagesProjects).toEqual(['site']);
   });
 
   test('a refused account read costs only the pretty name', async () => {
-    // A token scoped to zones alone cannot read the account object; the
-    // heading falls back to the vessel's name and nothing turns red.
+    // A token scoped to zones alone cannot read the account object.
     const far = api({
       'GET /client/v4/accounts/account-1': () =>
         Response.json(
@@ -140,9 +126,8 @@ describe('readCloudflareAccount', () => {
   });
 
   test('the Pages listing sends no pagination options', async () => {
-    // The live endpoint refuses `page`/`per_page` with error 8000024 even
-    // though it documents them; the read must not carry what the platform
-    // refuses.
+    // The live endpoint refuses `page` and `per_page` (error 8000024) though
+    // it documents them.
     let pagesQuery: string | null = null;
     const found = await read(async (request) => {
       const url = new URL(request.url);

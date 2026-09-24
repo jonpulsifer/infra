@@ -1,18 +1,6 @@
 /**
- * The command layer, driven end to end against a real Postgres (§ Testing,
- * Seam 1: "Tests drive commands against a real Postgres and fake adapters,
- * asserting rows, timeline events, and the `DesiredState` each adapter was
- * handed").
- *
- * What is asserted here is the row, not the return value: a command that
- * reported an id it never wrote would pass a test of its own output and fail
- * this one. The clock is fixed and the timestamps are checked against it,
- * which is the assertable proof that the handler took time from the context
- * rather than from the process.
- *
- * Each test runs in its own migrated Postgres schema, handed out by the
- * harness (`test/harness/db.ts`), so nothing here depends on what any other
- * test left behind.
+ * Commands against a real Postgres, asserting the rows they write. The clock is
+ * frozen, so a matching timestamp proves the handler read the context's clock.
  */
 import { describe, expect, test } from 'bun:test';
 import { eq } from 'drizzle-orm';
@@ -31,15 +19,9 @@ const manifest = await fixtureManifest();
 
 const database = withIsolatedDatabase();
 
-/** A clock that does not move: every timestamp is checkable against it. */
 const FROZEN = new Date('2024-03-05T11:22:33.000Z');
 const frozenClock: Clock = { now: () => FROZEN };
 
-/**
- * No command under test reaches an adapter yet, so every lookup refuses
- * rather than returning a hand-written stand-in — a fake nobody exercises is
- * a fake nobody has checked. Task 7 owns the recording fakes.
- */
 const noAdapters: AdapterRegistry = {
   deploy: () => null,
   build: () => null,
@@ -62,7 +44,6 @@ function context(clock: Clock = frozenClock): CommandContext {
   };
 }
 
-/** The App row as the database holds it, or `undefined`. */
 async function appRow(id: string) {
   const rows = await database().db.select().from(apps).where(eq(apps.id, id));
   return rows[0];
@@ -92,7 +73,7 @@ describe('createApp: an App sourced from a repository', () => {
       'https://git.example.test/acme/website.git',
     );
     expect(row?.sourceRepoSubpath).toBe('services/api');
-    // §2: an App has one source. The archive column stays empty.
+    // An App has one source.
     expect(row?.sourceArchiveDigest).toBeNull();
   });
 

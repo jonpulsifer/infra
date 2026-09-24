@@ -1,18 +1,6 @@
 /**
- * The schema acceptance test (Task 5). Two things are load-bearing here and
- * must be proven against a real Postgres, not merely trusted from the DDL:
- *
- * 1. The desired-state row (`component_target_desired`, §6/§12) actually
- *    carries a UNIQUE constraint on `(component_id, target_id)` — checked
- *    against the catalog, and then by trying to violate it.
- * 2. `SELECT ... FOR UPDATE` on that row genuinely blocks a second
- *    transaction. This is proven with two independent connections and a
- *    timeout race — a test that would pass even if the lock did nothing is
- *    not a test of the lock.
- *
- * Each test runs in its own migrated Postgres schema, handed out by the
- * harness (`test/harness/db.ts`), so this file can run beside any other
- * without either seeing the other's rows.
+ * Schema constraints and the desired-state row lock, checked against a real
+ * Postgres. Each test gets its own migrated schema from the harness.
  */
 import { describe, expect, test } from 'bun:test';
 import {
@@ -31,7 +19,6 @@ import { targetValues } from '../harness/installation.ts';
 
 const database = withIsolatedDatabase();
 
-/** Insert the App -> Component -> Target chain a desired-state row needs. */
 async function seedPlacement() {
   const [app] = await database()
     .db.insert(apps)
@@ -50,9 +37,7 @@ async function seedPlacement() {
 
 describe('component_target_desired: the unique key', () => {
   test('exists in the catalog as a UNIQUE constraint on (component_id, target_id)', async () => {
-    // One row per (constraint, column) — grouped in JS rather than with
-    // `array_agg`, whose Postgres array-literal result (`{a,b}`) is not a JS
-    // array and would make the shape assertion below lie.
+    // Grouped in JS: `array_agg` returns a Postgres array literal (`{a,b}`).
     const isolated = database();
     const rows = await isolated.client<
       { constraintName: string; columnName: string }[]
@@ -88,8 +73,8 @@ describe('component_target_desired: the unique key', () => {
       .db.insert(componentTargetDesired)
       .values({ componentId: component.id, targetId: target.id });
 
-    // Drizzle's query builder is thenable but not a real `Promise`
-    // instance; `expect(...).rejects` needs the latter.
+    // Drizzle's query builder is thenable but not a `Promise`, which `.rejects`
+    // needs.
     await expect(
       Promise.resolve(
         database()
@@ -108,8 +93,7 @@ describe('component_target_desired: the locking read', () => {
       .values({ componentId: component.id, targetId: target.id })
       .returning();
 
-    // Two independent connections, not two checkouts sharing a pool's
-    // notion of "the same" transaction — each one is its own real session.
+    // Two connections, so each transaction is its own session.
     const holder = database().connect();
     const contender = database().connect();
 
@@ -146,13 +130,10 @@ describe('component_target_desired: the locking read', () => {
       ),
     ]);
 
-    // The assertion that matters: the second transaction did NOT get the
-    // row inside the timeout window, because the first still holds it.
     expect(raceResult).toBe('timeout');
 
     releaseHold!();
     await holderTx;
-    // Now that the lock is released, the contender's own attempt resolves.
     await expect(contenderAttempt).resolves.toBe('acquired');
 
     await holder.close();

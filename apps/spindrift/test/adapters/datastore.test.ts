@@ -1,21 +1,6 @@
 /**
- * The datastore adapters (§11).
- *
- * The same shape every other adapter test takes (§ Seam 2): the real adapter
- * against a fake of the cluster's HTTP API, asserting what a cluster would have
- * been sent and what the adapter concluded from what it was told.
- *
- * The claims worth stating up front:
- *
- * - **The kind written is the kind discovered.** The deploy adapter's capability
- *   probe and this adapter's provisioning read one table, so a cluster cannot
- *   report the cache engine as served by an operator nothing then writes to.
- * - **A connection reference is confirmed, never assumed.** Both engines answer
- *   `null` until the object the reference names is actually there.
- * - **Phases come from the operator.** The adapter polls; it never decides a
- *   database is ready.
- * - The cloud adapter refuses, and **names what is missing** — the point of it
- *   is the sentence, not the stub.
+ * The datastore adapters against a fake cluster API. Phases come from the
+ * operator, and a connection stays `null` until the operator confirms it.
  */
 import { describe, expect, test } from 'bun:test';
 import {
@@ -41,8 +26,7 @@ function targetOn(fake: FakeKubernetes): DeployTarget {
       adapter: 'kubernetes',
       apiServer: fake.apiServer,
       namespace: 'spindrift-apps',
-      // Where this Target's Datastores go, which is no App's namespace: a
-      // Datastore outlives every App attached to it.
+      // A Datastore outlives its Apps, so it lives in no App's namespace.
       datastoreNamespace: 'spindrift-datastores',
       delivery: {
         flavour: 'flux-helmrelease',
@@ -88,8 +72,7 @@ describe('provision', () => {
       storage: { size: '4Gi' },
       bootstrap: { initdb: { database: 'orders', owner: 'orders' } },
     });
-    // A server-side apply, not a merge patch: re-provisioning has to converge on
-    // the object rather than create a second one.
+    // Server-side apply, so re-provisioning converges on one object.
     expect(fake.requests.at(-1)?.contentType).toBe(
       'application/apply-patch+yaml',
     );
@@ -107,8 +90,7 @@ describe('provision', () => {
     expect(ref).toBe('valkey/spindrift-datastores/sessions');
     const object = fake.get('valkeyclusters/spindrift-datastores/sessions');
     expect(object?.apiVersion).toBe('valkey.io/v1alpha1');
-    // Persistence is set rather than left to the operator's ephemeral default:
-    // a Datastore that empties on a reschedule is a cache with the wrong name.
+    // The operator's default storage is ephemeral.
     expect(object?.spec).toMatchObject({
       shards: 1,
       persistence: { size: '1Gi' },
@@ -124,27 +106,22 @@ describe('provision', () => {
       storageGiB: 1,
     });
 
-    // Every field `restricted` demands, asserted as the standard states them
-    // rather than as one blob: the operator supplies none of these, so a
-    // regression here is not a wrong value but an object admission refuses —
-    // and the refusal lands on a StatefulSet the adapter never reads.
+    // The operator sets none of these, and admission records its refusal on a
+    // StatefulSet the adapter never reads.
     const spec = fake.get('valkeyclusters/spindrift-datastores/sessions')
       ?.spec as Record<string, any>;
     expect(spec.podSecurityContext).toMatchObject({
       runAsNonRoot: true,
       seccompProfile: { type: 'RuntimeDefault' },
     });
-    // Not redundant beside `runAsNonRoot`: the valkey image has no `USER` and
-    // drops from root itself, so without an explicit non-root uid the kubelet
-    // refuses it as root-by-image.
+    // The valkey image has no `USER` and drops from root itself, so the kubelet
+    // refuses it as root unless a non-root uid is explicit.
     expect(spec.podSecurityContext.runAsUser).toBeGreaterThan(0);
     // The volume has to be writable by whatever that uid is.
     expect(spec.podSecurityContext.fsGroup).toBe(
       spec.podSecurityContext.runAsGroup,
     );
-    // Container-only fields, so they cannot be satisfied by the pod block
-    // above. The name is the operator's own container — a patch naming
-    // anything else is silently a second container.
+    // `server` is the operator's own container; any other name adds a second.
     const hardened = {
       allowPrivilegeEscalation: false,
       capabilities: { drop: ['ALL'] },
@@ -152,10 +129,8 @@ describe('provision', () => {
     expect(spec.containers).toEqual([
       { name: 'server', securityContext: hardened },
     ]);
-    // The sidecar the operator adds unasked is switched off, and the assertion
-    // is on the switch rather than on the absence of a container: admission
-    // fails the whole pod on whichever container lacks the fields above, so a
-    // sidecar that came back without them would take the datastore with it.
+    // The operator adds an exporter sidecar unasked, and admission would fail
+    // the whole pod on it.
     expect(spec.exporter).toEqual({ enabled: false });
   });
 
@@ -188,8 +163,6 @@ describe('provision', () => {
         storageGiB: 1,
       }),
     ).rejects.toBeInstanceOf(DatastoreRequestError);
-    // Nothing was written: a refusal that had already applied half an object
-    // would leave a cluster holding a datastore core does not know about.
     expect(fake.pathsOf('PATCH')).toEqual([]);
   });
 });
@@ -217,14 +190,11 @@ describe('observe', () => {
       'postgres/spindrift-datastores/orders',
     );
     expect(first?.phase).toBe('WAITING');
-    // No reference while it is coming up, even though the object exists.
     expect(first?.connection).toBeNull();
   });
 
-  // Nothing is placed at `secrets/spindrift-datastores/orders-app`, deliberately: a
-  // Ready CloudNativePG cluster is the statement that its `-app` Secret exists,
-  // so the reference is named without reading it and this adapter needs no
-  // grant on Secrets at all.
+  // A Ready CloudNativePG cluster implies its `-app` Secret exists, so the
+  // adapter needs no grant on Secrets.
   test('names the CloudNativePG credential without reading it', async () => {
     const { adapter, target } = adapterOn();
     await adapter.provision(target, {
@@ -238,7 +208,6 @@ describe('observe', () => {
       'postgres/spindrift-datastores/orders',
     );
     expect(state?.phase).toBe('LIVE');
-    // §11: a reference, never the credential.
     expect(state?.connection).toBe('secret://spindrift-datastores/orders-app');
   });
 
@@ -269,8 +238,7 @@ describe('observe', () => {
       engine: 'valkey',
       storageGiB: 1,
     });
-    // `valkey-`, the prefix the operator gives everything it creates. A
-    // Service placed under the bare name is the cluster as it is *not*.
+    // The operator prefixes everything it creates with `valkey-`.
     fake.place('services/spindrift-datastores/valkey-sessions', {
       apiVersion: 'v1',
       kind: 'Service',
@@ -281,10 +249,8 @@ describe('observe', () => {
       target,
       'valkey/spindrift-datastores/sessions',
     );
-    // No credential to reference: the operator authenticates nobody unless an
-    // ACL user is declared, so the address is the whole of it. `redis://`
-    // because this lands in `REDIS_URL` and no mainstream client parses a
-    // `valkey://` scheme.
+    // The operator authenticates nobody without an ACL user, and `redis://`
+    // because no mainstream client parses `valkey://`.
     expect(state?.connection).toBe(
       'redis://valkey-sessions.spindrift-datastores.svc:6379',
     );
@@ -318,17 +284,10 @@ describe('observe', () => {
 });
 
 /**
- * The read on red, for a datastore.
- *
- * The shape every test here is built to reproduce is the one that cost two
- * debugging sessions live: the custom resource says the operator is working,
- * and the sentence that matters is on an object the status read never touches.
- * A fake that only proved the plumbing would seed an event and assert it comes
- * back; what these assert instead is that the *operator's own cheerful line*
- * loses to it, and that nothing else changes.
+ * While the operator's status says it is still working, a refusal on an object
+ * the status read never touches is the sentence that matters.
  */
 describe('a refusal underneath a stuck datastore', () => {
-  /** What a StatefulSet reported while its pods were inadmissible. */
   const INADMISSIBLE =
     'create Pod valkey-sessions-0 in StatefulSet valkey-sessions failed error: pods "valkey-sessions-0" is forbidden: violates PodSecurity "restricted:latest": allowPrivilegeEscalation != false';
 
@@ -348,8 +307,7 @@ describe('a refusal underneath a stuck datastore', () => {
 
   test('outranks the operator saying it is still working', async () => {
     const { adapter, target } = adapterOn({
-      // The operator's verdict about its own reconcile: nothing is wrong, it is
-      // merely busy — which is what it will say forever.
+      // The operator reports this forever while its pods are refused.
       status: () => ({ state: 'Updating', message: 'Updating ValkeyNodes' }),
       lists: {
         events: [
@@ -374,9 +332,8 @@ describe('a refusal underneath a stuck datastore', () => {
       'valkey/spindrift-datastores/sessions',
     );
     expect(state?.detail).toBe(INADMISSIBLE);
-    // The whole point of the issue: `WAITING` is still correct. A pod refused
-    // admission comes up on the next apply once the manifest is fixed, so this
-    // adds a sentence and never a verdict.
+    // Still WAITING: a refused pod comes up once the manifest is fixed, so the
+    // event changes the sentence and never the verdict.
     expect(state?.phase).toBe('WAITING');
     expect(state?.reason).toBeUndefined();
   });
@@ -392,8 +349,7 @@ describe('a refusal underneath a stuck datastore', () => {
           },
         ],
       }),
-      // A cluster is never quiet. None of this is a refusal, and none of it is
-      // allowed to displace the operator's own account of why it is waiting.
+      // None of these events is a refusal, so the operator's line stands.
       lists: {
         events: [
           event({
@@ -471,9 +427,8 @@ describe('a refusal underneath a stuck datastore', () => {
             type: 'Warning',
             reason: 'ExceededQuota',
             message: 'the one that is still true',
-            // Written through `events.k8s.io`, which stamps `eventTime` and no
-            // `lastTimestamp` — both orderings have to work or the newest event
-            // loses to an older one carrying the other field.
+            // `events.k8s.io` sets `eventTime` and no `lastTimestamp`, so
+            // both orderings must work.
             eventTime: '2026-08-10T21:05:00Z',
             involvedObject: { name: 'valkey-sessions' },
           }),
@@ -496,9 +451,7 @@ describe('a refusal underneath a stuck datastore', () => {
   test('keeps the operator status line when events are refused', async () => {
     const { adapter, target } = adapterOn({
       status: () => ({ state: 'Updating', message: 'Updating ValkeyNodes' }),
-      // The Role was never bound, or was bound without this rule. A diagnosis
-      // that could not be loaded is not a reason to lose the operator's own
-      // account as well.
+      // Events are refused, as when the Role is unbound or lacks this rule.
       forbidden: ['events'],
     });
     await adapter.provision(target, {
@@ -547,19 +500,13 @@ describe('destroy', () => {
 
     await adapter.destroy(target, ref);
     expect(fake.get('clusters/spindrift-datastores/orders')).toBeUndefined();
-    // Idempotent (§6): the second call is not an error.
     await adapter.destroy(target, ref);
   });
 });
 
 /**
- * The ingress exception around one Datastore (§127).
- *
- * The floor under it is Flux's — a default-deny plus the platform allow, in
- * `clusters/base/platform/spindrift-target/networkpolicy.yaml` — and this is
- * the half only Spindrift can write, because which App is attached is a row in
- * its database. What the assertions here pin is the part a live cluster
- * decides: the two operators' pod labels, and the direction.
+ * The ingress exception around one Datastore. The default-deny floor under it
+ * is in `clusters/base/platform/spindrift-target/networkpolicy.yaml`.
  */
 describe('permit', () => {
   test('admits the App namespace and selects the datastore by its operator label', async () => {
@@ -577,16 +524,13 @@ describe('permit', () => {
     );
     expect(policy?.apiVersion).toBe('networking.k8s.io/v1');
     expect(policy?.spec).toEqual({
-      // CloudNativePG's own label on every instance pod, measured on a live
-      // cluster rather than read off an API guarantee it does not make.
+      // CloudNativePG labels every instance pod this way, though no API
+      // promises it.
       podSelector: { matchLabels: { 'cnpg.io/cluster': 'orders' } },
       policyTypes: ['Ingress'],
       ingress: [
         {
           from: [
-            // The siblings, scoped to *this* Datastore's pods rather than to
-            // the namespace — see the test below, which is the one that fails
-            // if anybody widens this back to `podSelector: {}`.
             { podSelector: { matchLabels: { 'cnpg.io/cluster': 'orders' } } },
             {
               namespaceSelector: {
@@ -599,12 +543,10 @@ describe('permit', () => {
         },
       ],
     });
-    // The one assertion that has to outlive whoever reads this next: an egress
-    // policy on a datastore pod takes away CloudNativePG's instance manager
-    // and both operators' DNS. Ingress is the only direction here, ever.
+    // An egress policy would cut off CloudNativePG's instance manager and both
+    // operators' DNS.
     expect(policy?.spec).not.toHaveProperty('egress');
-    // A vanilla policy, not a `CiliumNetworkPolicy`: the chart reaches for the
-    // Cilium kind only to name a gateway's identity, and no gateway fronts a
+    // The Cilium kind is only needed to name a gateway, and none fronts a
     // datastore.
     expect(fake.all('ciliumnetworkpolicies')).toEqual([]);
   });
@@ -625,8 +567,7 @@ describe('permit', () => {
     expect(policy?.spec).toMatchObject({
       podSelector: { matchLabels: { 'valkey.io/cluster': 'sessions' } },
     });
-    // The engine with no credential behind the boundary: the network is the
-    // authentication, so this is the case the whole story is about.
+    // Valkey authenticates nobody, so this policy is its only boundary.
     expect(policy?.spec).toMatchObject({ policyTypes: ['Ingress'] });
   });
 
@@ -645,12 +586,8 @@ describe('permit', () => {
 
     await adapter.permit(target, mine, ['app-storefront']);
 
-    // The claim, and the reason this rule is not on the floor Flux ships: a
-    // namespace-wide `podSelector: {}` there would admit every pod in
-    // `spindrift-datastores`, which is another App's Valkey — an engine the
-    // operator runs authenticating nobody — reading and writing this one's
-    // data from inside the boundary. Scoped to the cluster label, the grant
-    // reaches replication and the cluster bus and stops there.
+    // A namespace-wide `podSelector: {}` would admit another App's Valkey; the
+    // cluster label admits only replication and the cluster bus.
     const policy = fake.get(
       'networkpolicies/spindrift-datastores/spindrift-sessions',
     );
@@ -660,8 +597,7 @@ describe('permit', () => {
       podSelector: { matchLabels: { 'valkey.io/cluster': 'sessions' } },
     });
     expect(from).not.toContainEqual({ podSelector: {} });
-    // Nothing was written for the neighbour, which is the other half of the
-    // same claim: one object per Datastore, and no shared one to widen.
+    // One policy per Datastore, so there is no shared one to widen.
     expect(
       fake.get('networkpolicies/spindrift-datastores/spindrift-other'),
     ).toBeUndefined();
@@ -681,8 +617,7 @@ describe('permit', () => {
     expect(
       fake.get('networkpolicies/spindrift-datastores/spindrift-orders'),
     ).toBeUndefined();
-    // Idempotent, like every other write here: revoking what is already
-    // revoked is not an error, and the loop calls this on a schedule.
+    // The loop calls this on a schedule, so revoking twice is not an error.
     await adapter.permit(target, ref, []);
   });
 
@@ -697,8 +632,7 @@ describe('permit', () => {
 
     await adapter.destroy(target, ref);
 
-    // Nothing owns the policy — it selects the datastore's pods rather than
-    // being the custom resource's child — so nothing else would collect it.
+    // Nothing owns the policy, so nothing else would collect it.
     expect(
       fake.get('networkpolicies/spindrift-datastores/spindrift-orders'),
     ).toBeUndefined();
@@ -714,12 +648,10 @@ describe('permit', () => {
       ['app-storefront'],
     );
 
-    // `spindrift-apps` has no deny floor for an exception to sit on, and this
-    // identity's Role there is read-and-remove only. A policy written into it
-    // would protect nothing and could not be applied anyway.
+    // `spindrift-apps` has no deny floor, and this identity's Role there is
+    // read-and-remove only.
     expect(fake.requests.slice(before)).toEqual([]);
-    // And it says so, rather than letting the caller record a permitted
-    // namespace nothing on the far side has ever been told.
+    // False, so the caller records no permitted namespace.
     expect(written).toBe(false);
   });
 
@@ -736,10 +668,8 @@ describe('permit', () => {
 
     await adapter.destroy(target, 'postgres/spindrift-apps/orders');
 
-    // The Role in `spindrift-apps` grants no `networkpolicies` on purpose, and
-    // a `403` is the one status `delete` does not swallow. Deleting the CR and
-    // then asking anyway would leave the row undestroyable through the
-    // product — which is the failure the legacy Role exists to prevent.
+    // The Role there grants no `networkpolicies`, and `delete` does not
+    // swallow a `403`, so asking would leave the row undestroyable.
     expect(fake.get('clusters/spindrift-apps/orders')).toBeUndefined();
     expect(
       fake.requests.filter((request) =>
@@ -763,10 +693,6 @@ describe('the cloud adapter', () => {
       },
     };
 
-    // The sentence is the deliverable: an operator reading it learns that the
-    // gap is an unwritten provisioning path, not that "cloud datastores do
-    // not work" — the vessel's network fact exists, this adapter's verbs
-    // against Cloud SQL and Memorystore do not.
     await expect(
       adapter.provision(target, {
         name: 'orders',
@@ -774,7 +700,6 @@ describe('the cloud adapter', () => {
         storageGiB: 10,
       }),
     ).rejects.toThrow(UNIMPLEMENTED);
-    // Observing sweeps past rather than throwing: nothing was ever provisioned.
     expect(await adapter.observe(target, 'anything')).toBe(null);
   });
 });

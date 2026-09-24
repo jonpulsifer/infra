@@ -1,24 +1,7 @@
 /**
- * The settings surface's read/write pair round-trips (§20, ticket 32).
- *
- * `getInstallationManifest` and `configureInstallation` are halves of one act:
- * an editing surface reads the document it is about to replace, and
- * `configureInstallation` takes the whole document rather than a patch. So what
- * the read answers must be something the write accepts — and, before that,
- * something the *form* accepts, because the form validates client-side against
- * the same strict schema and refuses without ever dispatching.
- *
- * That is the bug this file pins. A reader is handed the resolved manifest —
- * the authored document plus the deployment facts joined around it — and the
- * schema is `.strict()`, so answering it unprojected made the form refuse its
- * own round trip with `cloud: Unrecognized key: "federation"` on a field it
- * never rendered. Live, the operator saw "This manifest is not valid, so
- * nothing was written" and the only way to correct a value was to edit Postgres
- * by hand, which is the exact act ticket 32 exists to abolish.
- *
- * The assertions go through `manifestIssues` rather than the schema directly:
- * that is the function the screen actually calls, so a fix that satisfied the
- * schema but not the form would still fail here.
+ * The settings read answers a document the form and `configureInstallation`
+ * accept, although the context manifest carries derived keys the schema
+ * refuses.
  */
 import { describe, expect, test } from 'bun:test';
 import { configureInstallation } from '../../src/commands/installation/configure.ts';
@@ -71,8 +54,7 @@ async function seed(): Promise<void> {
 
 describe('the installation settings round trip', () => {
   test('the context manifest carries the derived key this guards against', () => {
-    // If federation ever stops being joined onto a reader's manifest, this test
-    // would pass vacuously and guard nothing. Assert the precondition.
+    // Without this key, the tests below pass vacuously.
     expect(manifest.cloud.federation).not.toBeUndefined();
   });
 
@@ -91,11 +73,7 @@ describe('the installation settings round trip', () => {
   });
 
   test('a refusal of the document itself is named, not blank', () => {
-    // Strict mode refuses an unrecognized *top-level* key with an empty path,
-    // and both surfaces put these keys into a sentence — "was not written,
-    // because ${paths} are not valid". An empty key is a sentence with a hole
-    // in it, and this is the same word `validateManifest` already prints for
-    // the same issue.
+    // Strict mode reports an unrecognized top-level key with an empty path.
     const issues = manifestIssues({ ...manifest, unexpected: true });
 
     expect([...issues.keys()]).toContain('(root)');
@@ -129,8 +107,6 @@ describe('the installation settings round trip', () => {
     expect(read.ok).toBe(true);
     if (!read.ok) return;
 
-    // Exactly what the screen does: take the answered document, change one
-    // field, submit the whole thing.
     const edited = {
       ...read.value.manifest,
       build: {

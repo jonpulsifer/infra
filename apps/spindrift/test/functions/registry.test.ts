@@ -1,16 +1,5 @@
-/**
- * `functionsFor` — which of an installation's declared vessels a Function
- * deploys to.
- *
- * The fixture installation (`test/fixtures/installation.example.yaml`) seeds
- * identity and rank only — "no `location` on either" is the fixture's own
- * note — so the bare fixture answers both deployers `null`: neither the home
- * vessel nor any Cloudflare account vessel has been connected yet. The
- * positive paths augment it with the `location`/`connection` facts a real
- * `connectTarget` call would have written, the same way
- * `test/commands/installation-configure.test.ts` overrides the fixture rather
- * than hand-building a manifest from nothing.
- */
+// The fixture declares no vessel locations, so each connected case adds what
+// connectTarget would write.
 import { describe, expect, test } from 'bun:test';
 import type { InstallationManifest } from '../../src/config/manifest.ts';
 import { functionsFor } from '../../src/functions/index.ts';
@@ -58,8 +47,6 @@ describe('functionsFor', () => {
 
     expect(cloudRun).not.toBeNull();
     expect(cloudRun?.target).toBe('cloud-run-functions');
-    // No Cloudflare account vessel in this manifest — the other deployer
-    // stays null on its own missing prerequisite.
     expect(deployers['cloudflare-workers']).toBeNull();
   });
 

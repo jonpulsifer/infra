@@ -1,20 +1,6 @@
 /**
- * Reaching a cloud Target with no stored credential (§13).
- *
- * §13 settles one auth mode — "native OIDC federation, **nothing stored**" —
- * and a claim like that needs a test that can fail. The claims here:
- *
- * - **The projected token is read from disk on every exchange**, because the
- *   kubelet rewrites it and a value captured once stops working part way
- *   through the day.
- * - **The exchange is a real exchange.** What goes to a cloud API is the token
- *   STS handed back, never the projected one — sending that would be a `401` on
- *   every cloud call, blamed on the Target.
- * - **Impersonation is optional**, because direct resource access is a
- *   supported configuration rather than an omission.
- * - **A token is cached until shortly before it expires**, so a burst of calls
- *   is one round trip and an expiring token is dropped before it can fail a
- *   deploy mid-flight.
+ * Reaching a cloud Target with no stored credential: the projected token is
+ * exchanged through STS, and only the exchanged token reaches a cloud API.
  */
 import { describe, expect, test } from 'bun:test';
 import {
@@ -34,7 +20,6 @@ interface Recorded {
   authorization: string | null;
 }
 
-/** A far side that exchanges, and records exactly what it was asked. */
 function federation(
   options: {
     impersonate?: boolean;
@@ -97,9 +82,8 @@ describe('§13: nothing stored, so every token is minted', () => {
     const token = await provider();
 
     expect(token).toBe('federated-1');
-    // The projected token is the *subject* of an exchange. A provider that
-    // handed it straight to a cloud API would be sending a token minted for
-    // this cluster's own API server, which every cloud API refuses.
+    // Every cloud API refuses the projected token, which is minted for this
+    // cluster's own API server.
     const exchange = requests[0];
     expect(exchange?.url).toBe(TOKEN_URL);
     expect(exchange?.body.subjectToken).toContain('projected-for-');
@@ -108,9 +92,7 @@ describe('§13: nothing stored, so every token is minted', () => {
   });
 
   test('the projected token is re-read on every exchange, never captured', async () => {
-    // The kubelet rewrites the file, so a value read once at start-up stops
-    // working part way through the day — the classic failure this path exists
-    // to avoid.
+    // The kubelet rotates the projected token file.
     let at = 0;
     const { provider, projectedReads } = federation({
       expiresIn: 1,
@@ -130,16 +112,12 @@ describe('§13: nothing stored, so every token is minted', () => {
 
     const impersonation = requests[1];
     expect(impersonation?.url).toBe(IMPERSONATION_URL);
-    // Impersonation authorizes with the federated token, which is the whole
-    // point of the two-step: the projected token never leaves the exchange.
     expect(impersonation?.authorization).toBe('Bearer federated-1');
   });
 
   test('no impersonation url is a configuration, not an omission', async () => {
     const { provider, requests } = federation();
     expect(await provider()).toBe('federated-1');
-    // Direct resource access grants the federated identity roles of its own,
-    // which is one fewer identity to reason about where it is allowed.
     expect(requests).toHaveLength(1);
   });
 });
@@ -161,8 +139,6 @@ describe('caching, and giving up the last minute of a token', () => {
   });
 
   test('a token near expiry is dropped rather than served', async () => {
-    // A token that expires while a request is in flight fails a deploy for a
-    // reason nobody can act on, so the cache gives up its last minute.
     let now = 0;
     const { provider, requests } = federation({
       expiresIn: 90,
@@ -186,9 +162,7 @@ describe('failing loudly rather than deploying with nothing', () => {
 
   test('an empty projected token is a refusal, not an empty bearer', async () => {
     const { provider } = federation({ projected: async () => '   ' });
-    // An empty string would be sent as `Bearer `, and the failure would arrive
-    // as an authorization error against the Target rather than as the
-    // misconfiguration it is.
+    // An empty token would go out as `Bearer ` and fail as the Target's fault.
     expect(provider()).rejects.toThrow(FederationError);
   });
 });

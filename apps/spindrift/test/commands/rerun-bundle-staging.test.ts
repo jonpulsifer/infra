@@ -1,10 +1,7 @@
 /**
- * What bundle a rerun's Build is created with (ticket 24).
- *
- * §15 has Spindrift stage an immutable source bundle for either builder, and
- * the thing it is staged *for* is a Build. Copying the previous Build's
- * `bundleLocation` forward instead would carry an unfetchable `upload://`
- * handle into build 10 that dies at `curl` for build 9's reason.
+ * The source bundle a rerun's Build is created with. A stale `upload://` handle
+ * copied forward fails at fetch, so a rerun stages or inherits a durable
+ * bundle.
  */
 import { beforeEach, describe, expect, test } from 'bun:test';
 import { eq } from 'drizzle-orm';
@@ -38,7 +35,7 @@ const database = withIsolatedDatabase();
 const manifest = await fixtureManifest();
 
 const COMMIT = 'be796d65be796d65be796d65be796d65be796d65';
-/** Where the default branch got to after the Build above was created. */
+/** The default branch's head after the seeded Build. */
 const MOVED = 'c0ffee11c0ffee11c0ffee11c0ffee11c0ffee11';
 const STALE_HANDLE =
   'upload://3f5cbbc2ced964573220535fc887677dcb768b9d56b4931c415db44402440b03';
@@ -80,12 +77,8 @@ describe('the bundle a rerun stages', () => {
   }
 
   /**
-   * An App whose only Build failed carrying `location`, placed on a Target —
-   * the shape the deploy button acts on, and offsite's shape today.
-   *
-   * `status` and `artifactDigest` default to that shape. Ticket 36 is the one
-   * caller that overrides them, because the act it asks for is only reachable
-   * on the Build the defaults exclude.
+   * An App whose only Build failed carrying `location`, placed on a Target.
+   * `status` and `artifactDigest` override the failed Build's defaults.
    */
   async function seedFailedBuild(options: {
     location: string | null;
@@ -209,14 +202,11 @@ describe('the bundle a rerun stages', () => {
       .select()
       .from(builds)
       .where(eq(builds.id, result.value.buildId));
-    // The whole ticket in two assertions: the new Build carries the bundle that
-    // was staged for it, and the handle that predates the depot is not in it.
     expect(rerun!.bundleLocation).toBe(FRESH_LOCATION);
     expect(rerun!.bundleDigest).toBe(FRESH_DIGEST);
     expect(rerun!.id).not.toBe(seeded.build!.id);
 
-    // The exact commit, once — the rerun suffix is a uniqueness device on the
-    // row and never travels into staging.
+    // The row's rerun suffix keeps it unique and never reaches staging.
     expect(stager.staged).toEqual([
       { repository: `jonpulsifer/${seeded.app.name}`, commit: COMMIT },
     ]);
@@ -238,19 +228,13 @@ describe('the bundle a rerun stages', () => {
       .from(builds)
       .where(eq(builds.id, result.value.buildId));
     expect(rerun!.bundleLocation).toBe(DURABLE_LOCATION);
-    // The depot object is immutable and content-addressed, so the same commit
-    // wants the same object. Re-fetching it would cost a tarball to arrive back
-    // where it started.
+    // The depot object is immutable and content-addressed.
     expect(stager.staged).toHaveLength(0);
   });
 
   test('an ephemeral bundle is staged again rather than inherited', async () => {
-    // The depot is allowed to expire anything under `ephemeral/`, so a Build
-    // created weeks later cannot safely carry that address — it would die at
-    // `curl`, which is this file's founding defect wearing a new scheme.
-    // Staging again is cheap and self-deduplicating: canonical bytes mean the
-    // same commit digests to the same object, and the overwrite resets the
-    // object's lifecycle clock.
+    // The depot may expire anything under `ephemeral/`. Restaging a commit
+    // writes the same object and resets its lifecycle clock.
     const seeded = await seedFailedBuild({
       location:
         'gs://bluenose-spindrift-source/ephemeral/3f5cbbc2ced964573220535fc887677dcb768b9d56b4931c415db44402440b03.tgz',
@@ -272,9 +256,8 @@ describe('the bundle a rerun stages', () => {
   });
 
   test('a durable bundle is left behind once the repository has moved past it', async () => {
-    // The hole this closes: `authoritative_commit` moves on every default-branch
-    // push, and a rerun that inherited any still-fetchable bundle rebuilt the
-    // commit the App was created at — forever, reporting success each time.
+    // `authoritative_commit` moves on every default-branch push, and a rerun
+    // builds that commit.
     const seeded = await seedFailedBuild({
       location: DURABLE_LOCATION,
       connectRepository: true,
@@ -314,7 +297,6 @@ describe('the bundle a rerun stages', () => {
     expect(result.failure.message).toContain('upload it again');
     expect(stager.staged).toHaveLength(0);
 
-    // Nothing was written behind the refusal.
     const rows = await ctx.db
       .select()
       .from(builds)
@@ -323,14 +305,8 @@ describe('the bundle a rerun stages', () => {
   });
 
   test('an archive Component with no bundle of its own is refused at the press', async () => {
-    // The hole the Components card opens (ticket 118). An archive App's bytes
-    // are held per Component — `uploadArchive` and `completeCreationDraft` are
-    // what put them on a Build row — so a Component added beside a sibling has
-    // none, and this used to answer with `ok` and a null location: a PENDING
-    // Build `dispatchBuild` closes on sight
-    // (`src/commands/builds/dispatch.ts:524`). A dead Build is the wrong answer
-    // to a button press, so the refusal names the two acts that would give this
-    // Component an artifact.
+    // Archive bytes live per Component, so one added beside a sibling has none.
+    // The refusal names the two acts that would give it an artifact.
     const seeded = await seedFailedBuild({
       location: null,
       sourceKind: 'archive',
@@ -347,7 +323,6 @@ describe('the bundle a rerun stages', () => {
     expect(result.failure.message).toContain('adopt the artifact');
     expect(stager.staged).toHaveLength(0);
 
-    // Nothing was written behind the refusal — no Build, and no placement.
     const rows = await ctx.db
       .select()
       .from(builds)
@@ -397,9 +372,6 @@ describe('the bundle a rerun stages', () => {
   });
 
   test('a repo Build with no bundle stages one instead of starting dead', async () => {
-    // A repo Component whose previous Build never had a bundle used to get
-    // another Build with none — a row dispatch then refused, forever. The
-    // repository is right there; staging it is what a first bundle is.
     const seeded = await seedFailedBuild({
       location: null,
       connectRepository: true,
@@ -418,17 +390,12 @@ describe('the bundle a rerun stages', () => {
       .from(builds)
       .where(eq(builds.id, result.value.buildId));
     expect(row?.bundleLocation).toBe(FRESH_LOCATION);
-    // The predecessor was created before its Component could stage, so its
-    // recorded subpath is the placeholder — the App's declared subpath wins,
-    // observed live as build 52 building a monorepo root.
+    // The App's declared subpath wins over the predecessor's placeholder.
     expect(row?.bundleSubpath).toBe('apps/spindrift');
   });
 
   test("a Component's first Build stages the App's source and subpath", async () => {
-    // The live shape this pins: a freshly created second Component has no
-    // Build history at all. Its first Build stages the repository at the
-    // authoritative commit and carries the App's own subpath — '.' would
-    // build the monorepo root instead of the App.
+    // A subpath of '.' would build the monorepo root instead of the App.
     const seeded = await seedFailedBuild({
       location: null,
       connectRepository: true,
@@ -451,11 +418,6 @@ describe('the bundle a rerun stages', () => {
     expect(row?.bundleSubpath).toBe('apps/spindrift');
   });
 
-  /**
-   * Ticket 36 — an App whose newest Build succeeded had no path to a new one.
-   * The branch above is the only caller of `sourceForRerun`, and reaching it
-   * meant writing `status = 'FAILED'` onto a Build that genuinely succeeded.
-   */
   describe('a rebuild asked for against a succeeded Build', () => {
     const seedSucceeded = () =>
       seedFailedBuild({
@@ -475,8 +437,7 @@ describe('the bundle a rerun stages', () => {
       expect(result.ok).toBe(true);
       if (!result.ok) return;
 
-      // The act says which of the two it did: a Build was started, so there is
-      // no intent to navigate to.
+      // A Build started, so there is no Deploy to navigate to.
       expect(result.value.phase).toBe('BUILDING');
       expect(result.value.deployId).toBeNull();
       expect(result.value.buildId).not.toBe(seeded.build!.id);
@@ -489,14 +450,10 @@ describe('the bundle a rerun stages', () => {
 
       const rerun = rows.find((row) => row.id === result.value.buildId);
       expect(rerun?.status).toBe('PENDING');
-      // Staged for it, not carried from the Build being rerun — the same rule
-      // the failed-Build path follows, and the reason a durable bundle is
-      // inherited rather than fetched twice.
+      // A durable bundle is inherited, as on the failed-Build path.
       expect(rerun?.bundleLocation).toBe(DURABLE_LOCATION);
       expect(stager.staged).toHaveLength(0);
 
-      // The row edit this ticket exists to end: the succeeded Build still says
-      // it succeeded, and still names what it produced.
       const succeeded = rows.find((row) => row.id === seeded.build!.id);
       expect(succeeded?.status).toBe('SUCCEEDED');
       expect(succeeded?.artifactDigest).toBe(`sha256:${'b'.repeat(64)}`);
@@ -505,9 +462,8 @@ describe('the bundle a rerun stages', () => {
     test('is the only thing that reaches it — the button still deploys', async () => {
       const seeded = await seedSucceeded();
 
-      // Same App, same Build, no `rebuild`. The Target is not connected, so
-      // `createDeploy` refuses — which is the point: the deploy branch was
-      // taken, and it refused with its own sentence rather than building.
+      // Without `rebuild` the deploy branch runs, and refuses because the
+      // Target is not connected.
       const result = await deployApp({ name: seeded.app.name }, ctx);
       expect(result.ok).toBe(false);
 

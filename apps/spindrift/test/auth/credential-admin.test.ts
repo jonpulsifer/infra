@@ -1,9 +1,6 @@
 /**
- * Credential administration (§"credential administration and recovery").
- *
- * Every mutation begins with a fresh assertion from an enrolled passkey. The
- * tests keep the existing session/principal separate from that assertion so a
- * linked Gateway session cannot accidentally become an account root.
+ * Credential administration. Every mutation needs a fresh assertion from an
+ * enrolled passkey, so a linked Gateway session alone cannot act as a root.
  */
 import { describe, expect, test } from 'bun:test';
 import { base64urlDecode, base64urlEncode } from '@repo/archive/bytes';
@@ -80,18 +77,9 @@ async function fresh(principal: Principal, root: Authenticator) {
 }
 
 /**
- * Flip a byte inside the DER-encoded signature payload so the assertion
- * decodes to different bytes and fails cryptographic verification.
- *
- * The signature is `base64urlEncode(derEncode(r || s))`
- * (`test/harness/authenticator.ts`), and a DER-encoded ECDSA signature is
- * usually not a multiple of three bytes — so editing the *encoded string*
- * (e.g. overwriting its last character) can land in slack bits that decode
- * back to the original bytes about one run in eight. Decoding, XOR-ing the
- * final byte of the DER blob — which is always the low byte of the `s`
- * integer, never the tag/length framing `derToRawEcdsa` reads structurally —
- * and re-encoding guarantees both a different decoded value on every run and
- * a signature that genuinely fails `crypto.subtle.verify`.
+ * Flips the DER signature's last byte, the low byte of `s`. Editing the
+ * base64url text instead can change only slack bits that decode to the same
+ * bytes.
  */
 function forgeSignature(signature: string): string {
   const bytes = base64urlDecode(signature);

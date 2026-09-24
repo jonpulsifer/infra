@@ -1,19 +1,3 @@
-/**
- * `listFunctions`, `getFunction`, `saveFunction`, `runFunction`,
- * `deleteFunction` (`functions/contract.ts`).
- *
- * `saveFunction` is the interesting one: it always saves, and only refuses
- * when the installation has no deployer at all for the requested target — a
- * deploy that reaches the far side and fails still lands as `ok`, with the
- * failure written onto the row's `error` column, because a Save that could
- * not go live still saved. The one refusal that comes *before* the write is an
- * environment with nowhere to be sealed: values are never stored in clear.
- *
- * The environment tests read the row's own `env` column, because "write-only"
- * is a claim about storage as much as about the wire — a plaintext value in
- * Postgres would satisfy every command-level assertion here.
- */
-
 import { describe, expect, test } from 'bun:test';
 import { base64urlEncode } from '@repo/archive/bytes';
 import { eq } from 'drizzle-orm';
@@ -56,7 +40,6 @@ interface RecordedDeployer extends FunctionDeployer {
   readonly removeCalls: string[];
 }
 
-/** A keyring, the way an installation Secret supplies one. */
 function keyring(): CredentialKeyring {
   const parsed = CredentialKeyring.fromEnvironment({
     [CREDENTIAL_KEYRING_VAR]: JSON.stringify({
@@ -95,10 +78,7 @@ function fakeDeployer(
   };
 }
 
-/**
- * An installation with a keyring, or — with `sealed` false — one without,
- * which is what a Save carrying values has to be refused by.
- */
+/** With `sealed` false, the installation has no keyring to seal env with. */
 function context(
   deployers: FunctionDeployers | null = null,
   sealed = true,
@@ -279,6 +259,7 @@ describe('saveFunction environment', () => {
       (result.value as { function: { envKeys: string[] } }).function.envKeys,
     ).toEqual(['API_TOKEN']);
 
+    // A plaintext value in Postgres would pass every command-level assertion.
     const stored = await row('hello');
     expect(stored?.env).toBeString();
     expect(stored?.env).not.toContain('sekrit');
@@ -563,7 +544,7 @@ describe('probeFunction', () => {
       { name: 'hello', target: 'cloud-run-functions', source: 'v1' },
       context({ 'cloudflare-workers': null, 'cloud-run-functions': null }),
     );
-    expect(result.ok).toBe(false); // no deployer — the row saves with no url
+    expect(result.ok).toBe(false); // no deployer, so the row saves with no url
 
     const probed = await dispatch(
       'probeFunction',

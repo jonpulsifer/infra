@@ -1,28 +1,5 @@
-/**
- * Cancelling a Build (`cancelBuild`).
- *
- * The dispatch loop's `waits` arm has no exit of its own — that is the point of
- * it — so the claim under test is that an operator has one, and that what it
- * reaches past a queued row it reaches the honest way:
- *
- * - **A queued Build ends, and says who ended it.** The row is terminal and its
- *   `dispatchWaitingOn` sentence is gone with it, so nothing reads as still
- *   waiting; the attempt log is where the act survives.
- * - **A running Build is stopped through its route and settled by it.** §4
- *   makes the route's own terminal write what ends an attempt, so the command
- *   kills the far side and writes no verdict: the row stays `RUNNING` under
- *   its live lease, the route's fenced write is what will end it, and the log
- *   says who asked — as a request, because what was stopped is the route's to
- *   say.
- * - **A running Build nothing here can reach is refused.** A route this
- *   installation no longer configures, or one whose far side would not stop,
- *   is a cancel that did not happen — and the row is left as it was. So is one
- *   whose far side finished while the cancel was in flight: the verdict it
- *   landed is the route's, and no line contradicts it.
- * - **A running Build whose lease has expired is settled here, and its far
- *   side is told anyway.** A live attempt renews its lease, so an expired one
- *   is a process that died — and the Job it started did not die with it.
- */
+// A queued Build ends here. A running Build is stopped through its route,
+// which writes the verdict, unless its lease expired and its process is gone.
 import { describe, expect, test } from 'bun:test';
 import { eq } from 'drizzle-orm';
 import { cancelBuild } from '../../src/commands/builds/cancel.ts';
@@ -48,11 +25,6 @@ const manifest = await fixtureManifest();
 const FROZEN = new Date('2026-08-22T00:00:00.000Z');
 const clock: Clock = { now: () => FROZEN };
 
-/**
- * The one route a running Build can be cancelled through, or none. Nothing
- * else here reaches an adapter: cancelling a queued row is a row and two log
- * lines.
- */
 function registryOf(route: FakeBuildAdapter | null): AdapterRegistry {
   return {
     deploy: () => null,
@@ -77,7 +49,6 @@ function context(route: FakeBuildAdapter | null = null): CommandContext {
   };
 }
 
-/** One Build in the state the caller names, and nothing else. */
 async function aBuild(row: {
   status: 'PENDING' | 'RUNNING';
   leasedAt?: Date | null;
@@ -147,8 +118,7 @@ describe('cancelling a queued Build', () => {
     expect(log.map((event) => event.line ?? '').join('\n')).toContain(
       'cancelled by Jordan',
     );
-    // No reason: §6's set indicts a developer or the platform, and this is
-    // neither — so nothing derives a blame from it either.
+    // No reason: a cancel is neither the developer's fault nor the platform's.
     const verdict = log.find((event) => event.phase === 'FAILED')!;
     expect(verdict.reason).toBeNull();
     expect(verdict.blame).toBeNull();
@@ -181,14 +151,12 @@ describe('cancelling a running Build', () => {
     expect(result.ok).toBe(true);
     if (result.ok) expect(result.value.status).toBe('RUNNING');
 
-    // The route was handed what the row keeps about the far side — and no
-    // more, because that is all another process could ever have.
+    // The route gets only what the row keeps about the far side.
     expect(route.cancelled).toEqual([
       { dispatchId: build.dispatchId!, runUrl: build.runUrl },
     ]);
 
-    // Not settled here: the fenced write belongs to the attempt streaming
-    // into this row, and it still holds its claim.
+    // The fenced write belongs to the attempt that still holds its claim.
     const row = await rowOf(build.id);
     expect(row.status).toBe('RUNNING');
     expect(row.dispatchId).toBe(build.dispatchId!);
@@ -208,8 +176,7 @@ describe('cancelling a running Build', () => {
       leasedAt: FROZEN,
       runner: 'hosted',
     });
-    // The route reports a green verdict in the window between the command's
-    // read and its cancel — which the route treats as nothing to stop.
+    // The Build succeeds between the command's read and its cancel.
     route.cancel = async () => {
       await database()
         .db.update(builds)
@@ -272,11 +239,10 @@ describe('cancelling a running Build', () => {
 
     const row = await rowOf(build.id);
     expect(row.status).toBe('FAILED');
-    // Fenced out: the abandoned attempt's terminal write names a dispatch id
-    // this row no longer carries, so it cannot overwrite the verdict.
+    // The abandoned attempt's write names a dispatch id the row no longer
+    // carries.
     expect(row.dispatchId).toBeNull();
-    // The process that held the lease is gone; the Job it started may not be,
-    // so the route is handed what the row kept about it.
+    // The Job may outlive the process that held the lease.
     expect(route.cancelled).toEqual([
       { dispatchId: build.dispatchId!, runUrl: null },
     ]);

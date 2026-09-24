@@ -1,12 +1,5 @@
-/**
- * The App list and a faulty release (§6).
- *
- * The soak leaves a faulty release `LIVE` — the rollout landed — and stamps
- * `faulty_at` beside it. A list that read the phase alone printed that App
- * green and counted nothing failing, which is the one state a triage scan
- * exists to not miss. So the row ranks a faulty Component with a red one,
- * says so, and does not call its address live.
- */
+// The soak leaves a faulty release LIVE with `faulty_at` set, so the list must
+// rank it with a failed one.
 import { describe, expect, test } from 'bun:test';
 import { listApps } from '../../src/commands/apps/list.ts';
 import { createComponent } from '../../src/commands/components/create.ts';
@@ -58,7 +51,7 @@ function context(): CommandContext {
   };
 }
 
-/** One App with two placed services; `web` is live, `worker` is as asked. */
+/** One App with two LIVE services; only `worker` takes the given `faultyAt`. */
 async function seedApp(
   ctx: CommandContext,
   worker: { readonly faultyAt: Date | null },
@@ -139,7 +132,7 @@ describe('the App list and a faulty release', () => {
       failing: 1,
       componentCount: 2,
     });
-    // The row is about the faulty Component, not whichever came back first.
+    // The row shows the faulty Component, not whichever came back first.
     expect(row?.url).toContain('-worker.');
   });
 

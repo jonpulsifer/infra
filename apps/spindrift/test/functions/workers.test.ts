@@ -1,19 +1,3 @@
-/**
- * The Cloudflare Workers function deployer.
- *
- * Every test drives the real class against a fake of the platform's HTTP API
- * (§ Seam 2) and asserts what would have been sent. The claims worth stating:
- *
- * - **A deploy reads the zone, uploads the module, then claims the hostname**,
- *   in that order — the custom domain call cannot be made without the zone id
- *   and must not be made before there is a script to point it at.
- * - **The platform's own words come back**, so an operator reads the refusal
- *   rather than a status code.
- * - **`remove` tolerates absence**, because §6's idempotence applies to a
- *   function that is already gone.
- * - **`tail` deletes its session on abort**, so closing a log view does not
- *   leave a trace session running against the account.
- */
 import { describe, expect, test } from 'bun:test';
 import { FunctionDeployError } from '../../src/functions/contract.ts';
 import { WorkersFunctions } from '../../src/functions/workers.ts';
@@ -85,14 +69,14 @@ describe('WorkersFunctions.deploy', () => {
     );
 
     expect(result.url).toBe('https://hello.fn.example.test');
+    // The domain call needs the zone id and a script to point at.
     expect(far.calls.map((call) => `${call.method} ${call.path}`)).toEqual([
       'GET /client/v4/zones',
       'PUT /client/v4/accounts/account-1/workers/scripts/fn-hello',
       'PUT /client/v4/accounts/account-1/workers/domains',
       'GET /client/v4/accounts/account-1/workers/scripts/fn-hello/secrets',
     ]);
-    // Scoped to the account, not to a name: the account's own listing is what
-    // decides which declared zone is here, and `other.test` is not.
+    // Listed by account, so the account decides which declared zone it holds.
     expect(
       new URL(far.calls[0]!.request.url).searchParams.get('account.id'),
     ).toBe('account-1');
@@ -100,9 +84,7 @@ describe('WorkersFunctions.deploy', () => {
       'Bearer edge-token',
     );
 
-    // Asserted on the wire rather than through `formData()`: the parser
-    // re-infers a part's type from its filename, so a round trip cannot show
-    // what was actually sent.
+    // Read off the wire: formData() re-infers a part's type from its filename.
     const wire = await far.calls[1]!.request.clone().text();
     expect(wire).toContain('Content-Type: application/javascript+module');
     const form = await far.calls[1]!.request.formData();
@@ -113,8 +95,7 @@ describe('WorkersFunctions.deploy', () => {
       logs: { enabled: true, invocation_logs: true },
     });
     expect(typeof metadata.compatibility_date).toBe('string');
-    // A function with no environment still sends the list — empty — so a
-    // redeploy clears whatever the script held before.
+    // Old secrets survive even an empty list; the deploy deletes them by name.
     expect(metadata.bindings).toEqual([]);
     expect(await (form.get('index.mjs') as File).text()).toContain(
       'export default',
@@ -211,8 +192,7 @@ describe('WorkersFunctions.remove', () => {
     });
     await deployer(far.fetch).remove('hello');
     expect(far.calls.map((call) => `${call.method} ${call.path}`)).toEqual([
-      // The zone first: the domain is looked up by the hostname it carries,
-      // and the hostname is not known until the zone is.
+      // The domain is looked up by hostname, which needs the zone first.
       'GET /client/v4/zones',
       'GET /client/v4/accounts/account-1/workers/domains',
       'DELETE /client/v4/accounts/account-1/workers/domains/domain-1',
@@ -236,7 +216,6 @@ describe('WorkersFunctions.remove', () => {
   });
 });
 
-/** A socket a test drives: it delivers frames and reports when it was closed. */
 function fakeSocket(): {
   socket: WebSocket;
   deliver(frame: unknown): void;

@@ -1,23 +1,6 @@
 /**
- * The adapter conformance suite (Task 12, § Seam 2).
- *
- * One suite, run against **every** implementation of each contract, so the
- * deploy adapters, the build routes, and the stores cannot drift apart in what
- * they mean. It asserts contract behaviour and nothing else: no backend's own
- * semantics appear here, because a suite that knew one backend's rendering
- * would be the coupling §6's seam exists to break.
- *
- * What it asserts, per the task:
- *
- * - `apply` reaches a terminal verdict
- * - `observe` reports what `apply` placed
- * - `destroy` is idempotent
- * - declared artifact types are honoured, and a foreign one is refused
- * - a store round-trips a pinned version reference
- *
- * **Enrolment is the other half.** A suite you can forget to run is not a
- * contract, so {@link assertEveryAdapterEnrolled} compares what the suite was
- * run over against the registry of adapters that exist, and names the gap.
+ * Contract suites run against every deploy adapter, build route and store.
+ * They assert contract behaviour only, with no backend's own semantics.
  */
 import { describe, expect, test } from 'bun:test';
 import type { BuildAdapter } from '../../src/adapters/build/contract.ts';
@@ -36,17 +19,14 @@ import type {
 } from '../../src/domain/desired-state.ts';
 import { deployTargetFor } from '../harness/installation.ts';
 
-/** Names the suite has been run over, collected as the suites declare them. */
 const enrolled = {
   deploy: new Set<string>(),
   build: new Set<string>(),
   store: new Set<string>(),
 };
 
-/** Where a `files` artifact is fetched from, as a depot addresses one. */
 export const BUNDLE_DEPOT = 'https://artifacts.example.test';
 
-/** A `DesiredState` of the given artifact type — the neutral one, not a mock. */
 export function desiredState(
   artifactType: ArtifactType,
   digest = 'sha256:conformance',
@@ -56,18 +36,9 @@ export function desiredState(
     app: 'conformance',
     component: 'web',
     target: 'target',
-    // Every shape that is not an image is a bundle a static backend serves,
-    // and the platform's own build output is one of those — so the branch is
-    // "is this an image", which is the distinction the addresses below and the
-    // reach further down are both really about. Asking `=== 'files'` made a
-    // third shape silently take the image arm and get refused for a reach its
-    // backend does not serve.
+    // Every artifact type but an image is a bundle a static backend serves.
     kind: artifactType === 'image' ? 'service' : 'website',
-    // A real address, because an adapter that has to pull one cannot place
-    // anything without it — and "the artifact carries no address" is a core
-    // bug, not a shape the contract's own suite should exercise. The two shapes
-    // are addressed differently because they are: an image is pulled from a
-    // registry, and a bundle of files is fetched from the depot that staged it.
+    // An adapter that pulls the artifact cannot place it without an address.
     artifact: {
       type: artifactType,
       digest,
@@ -77,11 +48,7 @@ export function desiredState(
           : `${BUNDLE_DEPOT}/bundles/${digest}`,
       ],
     },
-    // Reach follows the shape rather than being fixed, because §9 ties the
-    // two: a `files` artifact only ever lands on static hosting, which serves
-    // `Public` only — so a private one is a state no Target accepts, and a
-    // suite that asked for one would be asserting against a placement core
-    // would never make.
+    // Bundles deploy only to backends that serve public reach alone.
     reach: artifactType === 'image' ? 'private' : 'public',
     auth: artifactType === 'image' ? 'proxy' : 'none',
     config: [],
@@ -93,7 +60,6 @@ export function desiredState(
   };
 }
 
-/** Drive a generator to its return value, collecting what it yielded. */
 async function drain<Event, Verdict>(
   stream: AsyncGenerator<Event, Verdict, void>,
 ): Promise<{ events: Event[]; verdict: Verdict }> {
@@ -106,40 +72,21 @@ async function drain<Event, Verdict>(
   return { events, verdict: step.value };
 }
 
-/** What one enrolment stands up: the adapter, and its far side made countable. */
 export interface EnrolledDeployAdapter {
   readonly adapter: DeployAdapter;
   /**
-   * How many placements the fake far side holds right now.
-   *
-   * What a placement *is* belongs to the backend — a Vercel deployment, a
-   * Pages deployment, a hosting site, a Cloud Run Service, a HelmRelease —
-   * so each enrolment counts its own noun and the suite only asserts the
-   * number. Revisions of one placement (a hosting version, a release) are not
-   * placements and must not be counted.
+   * Placements the fake far side holds now. Revisions of one placement, such
+   * as a hosting version or a release, do not count.
    */
   readonly placements: () => number;
   /**
-   * The far side's evidence of the latest restart, or `null` while nothing
-   * has been asked to restart.
-   *
-   * What the evidence *is* belongs to the backend — a pod-template stamp on a
-   * HelmRelease's values, a revision template's annotation, a count on the
-   * fake — so each enrolment reads its own and the suite asserts only that it
-   * appears and then moves. Absent for a backend whose `restart` refuses: a
-   * file tree has no process, and the suite holds that backend to the
-   * refusal instead.
+   * The far side's evidence of the latest restart, or `null` before any.
+   * Absent for a backend whose `restart` refuses.
    */
   readonly restartMark?: () => string | null;
 }
 
-/**
- * Run the deploy contract's suite against one adapter.
- *
- * The artifact type it does not accept is required rather than guessed: a
- * `static` adapter's foreign type is an image, a `kubernetes` adapter's is
- * files, and the suite must not decide that for a backend it does not know.
- */
+/** `foreign` is an artifact type the adapter must refuse. */
 export function deployAdapterSuite(
   label: string,
   make: () => EnrolledDeployAdapter,
@@ -188,12 +135,8 @@ export function deployAdapterSuite(
     });
 
     test('a second apply of one DesiredState leaves one placement', async () => {
-      // The contract's convergence clause, asserted rather than claimed:
-      // every mechanism that re-runs an attempt — a lease reclaim, a crashed
-      // reconciler, a rollout — re-applies from the top, so a backend that
-      // minted a sibling per apply would turn each of those into another
-      // production deployment. This shipped on two backends before anything
-      // here would have caught it.
+      // Lease reclaims, crashed reconcilers and rollouts all re-apply from the
+      // top, so a sibling per apply would be another production deployment.
       const { adapter, placements } = make();
       const desired = desiredState(adapter.artifactTypes[0] as ArtifactType);
       const first = await drain(adapter.apply(target, desired));
@@ -218,8 +161,7 @@ export function deployAdapterSuite(
       );
       const ref = verdict.phase === 'LIVE' ? verdict.ref : 'absent';
       await adapter.destroy(target, ref);
-      // The second destroy is the assertion: destroying what is already gone
-      // succeeds (§6), so this must not throw and must leave nothing behind.
+      // Destroying what is already gone succeeds.
       await adapter.destroy(target, ref);
       expect(await adapter.observe(target, ref)).toBeNull();
     });
@@ -227,25 +169,11 @@ export function deployAdapterSuite(
     test('inspect answers the whole checklist, exactly once each', async () => {
       const made = make().adapter;
       const inspection = await made.inspect(target);
-      // §13 merges health and capability refresh into one loop, which only
-      // works if one pass answers every item — a partial checklist would leave
-      // core deciding what an absent item means, and `deriveHealth` treats an
-      // unanswered row as unmet.
-      //
-      // The checklist compared against is this adapter type's, not the whole
-      // vocabulary: a Cloud Run Target has no delivery operator to assess, and
-      // a suite that demanded one would force every cloud adapter to report a
-      // row that can only ever be a lie in one direction or the other.
+      // `deriveHealth` reads an unanswered item as unmet.
       expect(inspection.prerequisites.map((item) => item.name).sort()).toEqual(
         [...prerequisitesFor(made.adapter)].sort(),
       );
-      // Comparing against the adapter's own list is a weaker pin than comparing
-      // against one global list, so the teeth it gives up are put back here:
-      // an adapter cannot shrink its checklist to nothing and be trivially
-      // healthy, and every row it does answer has to be from the one
-      // vocabulary. `test/domain/capabilities.test.ts` holds the other half —
-      // that no cloud Target is asked a chart question, and that a checklist
-      // answered against the wrong adapter's list reads unhealthy.
+      // An empty checklist would be trivially healthy.
       expect(inspection.prerequisites.length).toBeGreaterThan(0);
       for (const item of inspection.prerequisites) {
         expect(PREREQUISITES).toContain(item.name);
@@ -253,20 +181,14 @@ export function deployAdapterSuite(
     });
 
     test('inspect says whether the boundary carries this surface', async () => {
-      // The question `connectTarget` acts on: a surface the probe establishes
-      // is not there gets no Target at all. Every adapter answers it, because
-      // core holds a `DeployAdapter` without knowing which backend is behind
-      // it — and it answers `carried` here, since the far side these suites
-      // stand up is one that answers.
+      // The far side these suites stand up always answers the probe.
       const { surface } = await make().adapter.inspect(target);
       expect(surface).toEqual({ kind: 'carried' });
     });
 
     test('inspect reports observations, not judgements', async () => {
       const { discovery } = await make().adapter.inspect(target);
-      // `verifiedDeploy` and `offlineDeploy` are core's conclusions (§32, §33).
-      // An adapter reporting either directly would let two adapters disagree
-      // about how the conclusion is drawn.
+      // Core draws `verifiedDeploy` and `offlineDeploy`; an adapter must not.
       expect(discovery).not.toHaveProperty('verifiedDeploy');
       expect(discovery).not.toHaveProperty('offlineDeploy');
       expect(typeof discovery.logHistorySeconds).toBe('number');
@@ -274,17 +196,11 @@ export function deployAdapterSuite(
     });
 
     test('answers both run verbs about a ref it never placed', async () => {
-      // §17's run verbs are part of what every adapter answers, and "throws" is
-      // not an answer this contract accepts: core holds a `DeployAdapter`
-      // without knowing which backend is behind it, so a caller that reached
-      // for a run on a website would crash rather than read a sentence. Every
-      // backend has this case — the ref names nothing, or names something that
-      // is not a job — and every backend has to have words for it.
+      // Core does not know the backend behind a `DeployAdapter`, so an unknown
+      // ref must get a reason, never a throw.
       const { adapter } = make();
       const answers = [
         await adapter.run(target, 'never-placed'),
-        // With parameters too: a backend that runs nothing has nothing to put
-        // them on, and the answer is the same sentence rather than a crash.
         await adapter.run(target, 'never-placed', { env: { SNAPSHOT: 'x' } }),
         await adapter.executions(target, 'never-placed'),
       ];
@@ -296,9 +212,6 @@ export function deployAdapterSuite(
     });
 
     test('answers restart about a ref it never placed', async () => {
-      // The same rule the run verbs are held to: a ref naming nothing is an
-      // answer in a sentence, never a throw, because core holds a
-      // `DeployAdapter` without knowing which backend is behind it.
       const answer = await make().adapter.restart(target, 'never-placed');
       expect(answer.kind).toBe('none');
       if (answer.kind === 'none') {
@@ -306,9 +219,6 @@ export function deployAdapterSuite(
       }
     });
 
-    // Whether a backend has a process to bounce is the one thing the
-    // enrolments genuinely differ on, so it is asserted per backend rather
-    // than skipped for the ones that cannot. Both arms are positive claims.
     if (make().restartMark !== undefined) {
       test('a restart marks the far side and leaves the placement as it was', async () => {
         const { adapter, placements, restartMark } = make();
@@ -331,16 +241,11 @@ export function deployAdapterSuite(
         const mark = restartMark();
         expect(mark).not.toBeNull();
 
-        // A second press is a second rollout. Every platform here rolls on a
-        // template *change*, so a mark that stayed equal would be a press
-        // that did nothing while reporting that it did.
+        // Every platform here rolls only when the template changes.
         const second = await adapter.restart(target, verdict.ref);
         expect(second.kind).toBe('restarted');
         expect(restartMark()).not.toBe(mark);
 
-        // What is placed is what was placed: the same ref, the same digest,
-        // one placement. A restart that minted a sibling or moved the digest
-        // would be a deploy wearing the wrong name.
         const observed = await adapter.observe(target, verdict.ref);
         expect(observed?.artifactDigest).toBe(digest);
         expect(placements()).toBe(1);
@@ -371,15 +276,13 @@ export function deployAdapterSuite(
       const { verdict } = await drain(
         adapter.apply(target, desiredState(foreign)),
       );
-      // Refusal is a verdict, not an exception: a thrown error has no reason
-      // and therefore no blame (§6).
+      // Refuse with a verdict: a thrown error carries no reason to blame.
       expect(verdict.phase).toBe('FAILED');
       if (verdict.phase === 'FAILED') expect(verdict.reason).toBe('INTERNAL');
     });
   });
 }
 
-/** Run the build contract's suite against one route. */
 export function buildAdapterSuite(
   label: string,
   make: () => BuildAdapter,
@@ -426,8 +329,7 @@ export function buildAdapterSuite(
       if (verdict.status !== 'SUCCEEDED') {
         throw new Error('adapter did not produce a green build');
       }
-      // §16's join: a route that cannot report the digest it was given cannot
-      // produce a provenance anything can be correlated against.
+      // Provenance is correlated with its source through this digest.
       expect(verdict.provenance.bundleDigest).toBe(source.bundleDigest);
       expect(verdict.artifact.type).toBe(spec.artifactType);
     });
@@ -441,7 +343,6 @@ export function buildAdapterSuite(
   });
 }
 
-/** Run the store contract's suite against one store. */
 export function storeAdapterSuite(
   label: string,
   make: () => SecretStore,
@@ -464,26 +365,18 @@ export function storeAdapterSuite(
       const store = make();
       const first = await store.put(scope, 'TOKEN', 'one');
       const second = await store.put(scope, 'TOKEN', 'two');
-      // True of every strategy, and the whole of what §10 means by pinned: a
-      // reference that stayed equal across two values would be a floating
-      // latest, and a Deploy carrying it would silently change what it
+      // An unchanged reference would silently change what a pinned Deploy
       // delivers.
       expect(second).not.toEqual(first);
     });
 
-    // What happens to the version that was superseded is the one thing the
-    // strategies genuinely disagree about, so it is asserted per strategy
-    // rather than skipped for the one that cannot. Both arms are positive
-    // claims: a store that quietly changed its mind fails whichever it
-    // declared.
     if (make().pinning === 'CURRENT_ONLY') {
       test('the superseded version stops resolving, and says so', async () => {
         const store = make();
         const first = await store.put(scope, 'TOKEN', 'one');
         await store.put(scope, 'TOKEN', 'two');
-        // The name is the runtime's own, so there is nowhere for the old value
-        // to live. `placeIntent` is what turns this into a refusal instead of
-        // a Component that comes up without its config.
+        // The runtime owns the name, so the old value has nowhere to live.
+        // `placeIntent` refuses a Deploy pinned to it.
         expect(await store.describe(first)).toBeNull();
       });
 
@@ -499,7 +392,7 @@ export function storeAdapterSuite(
         const store = make();
         const first = await store.put(scope, 'TOKEN', 'one');
         await store.put(scope, 'TOKEN', 'two');
-        // That is what makes a Deploy pinned to it still deployable (§10).
+        // A Deploy pinned to it stays deployable.
         expect(await store.describe(first)).not.toBeNull();
       });
 
@@ -530,11 +423,8 @@ export function storeAdapterSuite(
 }
 
 /**
- * Every adapter that exists, by contract. **This is the enrolment registry**:
- * an implementation added here without a suite call above fails the check
- * below, and an implementation added *nowhere* is the case a human review has
- * to catch — which is why this list lives next to the suite rather than being
- * inferred from a directory listing that would silently agree with itself.
+ * Every adapter that exists, by contract. An entry that never ran a suite
+ * fails {@link assertEveryAdapterEnrolled}.
  */
 export const ADAPTERS = {
   deploy: [
@@ -546,9 +436,7 @@ export const ADAPTERS = {
     'cloudflare-pages',
   ],
   build: ['fake', 'github-actions', 'cloud-build', 'in-cluster', 'bosun'],
-  // The two fakes name the real store whose reference shape each one produces,
-  // because a suite comparing two shapes no store can hold would prove §10's
-  // "nothing above the seam can tell which strategy produced it" of nothing.
+  // Each fake names the real store whose reference shape it produces.
   store: [
     'fake native, standing for gcp-secret-manager',
     'fake immutable item per version, standing for onepassword',
@@ -557,13 +445,7 @@ export const ADAPTERS = {
   ],
 } as const;
 
-/**
- * Fail if any registered adapter was never run through the suite.
- *
- * Called from the file that runs the suites, after they are declared. The
- * failure names the gap rather than only counting it, so the fix is obvious
- * from the output alone.
- */
+/** Call after every suite is declared. */
 export function assertEveryAdapterEnrolled(): void {
   describe('every adapter is enrolled in the conformance suite', () => {
     for (const contract of ['deploy', 'build', 'store'] as const) {

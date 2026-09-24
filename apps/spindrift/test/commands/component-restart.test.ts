@@ -1,16 +1,5 @@
-/**
- * Restarting a placed service (§6).
- *
- * Seam 1: the command layer over a fake deploy backend. What is asserted here
- * is the half the adapter tests cannot see — that a press reaches the far
- * side with the ref core stored, that nothing but a LIVE placement is bounced,
- * and that the release which placed what was bounced is where the timeline
- * says so.
- *
- * The claim worth stating up front: **a restart writes no Deploy row.** The
- * desired row is untouched and redeploying it is `UNCHANGED`; what a reader
- * finds afterwards is a checkpoint on the current release, not a new one.
- */
+// A restart bounces the LIVE placement through its stored ref and writes no
+// Deploy row, only a checkpoint on the current release.
 import { describe, expect, test } from 'bun:test';
 import { getAppWorkspace } from '../../src/commands/apps/workspace.ts';
 import { createComponent } from '../../src/commands/components/create.ts';
@@ -63,13 +52,8 @@ function context(deploy: FakeDeployAdapter | null): CommandContext {
 
 type Phase = 'PENDING' | 'APPLYING' | 'WAITING' | 'LIVE' | 'FAILED';
 
-/**
- * One App with one Component, placed on a fresh Target with one Deploy row.
- *
- * The workload is put on the fake far side too, because that is what a
- * deploy did: a ref on a row with nothing behind it is a workload that has
- * been deleted, and the adapter refuses that on purpose.
- */
+// One App with one Component, placed on a fresh Target. The workload is on the
+// fake far side too, since the adapter refuses a ref with nothing behind it.
 async function scaffold(
   ctx: CommandContext,
   backend: FakeDeployAdapter,
@@ -126,8 +110,7 @@ async function place(
   componentId: string,
   options: { phase?: Phase } = {},
 ) {
-  // A boundary of its own per placement: a Vessel carries one Target per
-  // adapter, so a second cluster placement is a second cluster.
+  // A Vessel carries one Target per adapter, so each placement gets its own.
   const vessel = await insertVessel(ctx.db, 'kubernetes');
   const [target] = await ctx.db
     .insert(targets)
@@ -165,8 +148,7 @@ async function buildFor(
     .insert(builds)
     .values({
       componentId,
-      // One Build per commit and shape, so a second placement gets a commit
-      // of its own rather than the constraint.
+      // One Build per commit and shape, so each placement gets its own commit.
       commit: crypto.randomUUID().slice(0, 7),
       targetShape: 'image',
       artifactType: 'image',
@@ -195,26 +177,22 @@ describe('restartComponent', () => {
       backend,
     );
 
-    // No `targetId`: one placement is the ordinary case, and the screen that
-    // shows it should not have to restate it.
+    // No `targetId`: with one placement there is nothing to choose.
     const restarted = await restartComponent({ componentId }, ctx);
 
     expect(restarted.ok).toBe(true);
     if (!restarted.ok) return;
     expect(restarted.value.deployId).toBe(deployId);
     expect(restarted.value.detail).toContain('restart 1 of');
-    // §6's opaque handle, handed straight back — never a description assembled
-    // from rows that may have moved since.
+    // The stored ref, handed back as is.
     expect(backend.restarted).toEqual([ref]);
 
-    // No new Deploy: the desired row did not change, so there is no intent.
+    // No new Deploy: the desired row did not change.
     const rows = await ctx.db.query.deploys.findMany({
       where: (d, { eq }) => eq(d.componentId, componentId),
     });
     expect(rows).toHaveLength(1);
 
-    // The current release's leg of the attempt log carries the sentence and
-    // the checkpoint, in that order.
     const events = await eventsOf(ctx, deployId);
     expect(events.map((event) => event.eventType)).toEqual(['log', 'status']);
     expect(events[0]?.line).toContain('restart asked for by Operator');
@@ -222,7 +200,6 @@ describe('restartComponent', () => {
     expect(events[1]?.phase).toBe('RESTARTED');
     expect(events[1]?.resource).toBeNull();
 
-    // And the workspace lists it as a checkpoint on that release.
     const workspace = await getAppWorkspace({ name: appName }, ctx);
     expect(workspace.ok).toBe(true);
     if (!workspace.ok) return;
@@ -262,9 +239,8 @@ describe('restartComponent', () => {
   });
 
   test('refuses when the newest release on the Target is not LIVE', async () => {
-    // A FAILED release never converged: a restart cannot fix that and a
-    // deploy can. The same refusal covers an intent still in flight, which a
-    // restart would only race.
+    // A FAILED release needs a deploy, not a restart, and a restart would only
+    // race an intent in flight.
     const backend = new FakeDeployAdapter();
     const ctx = context(backend);
     const { componentId, targetId, deployId } = await scaffold(ctx, backend, {
@@ -282,8 +258,7 @@ describe('restartComponent', () => {
   });
 
   test('two placements need a name', async () => {
-    // A Component mid-move serves on two Targets, and "restart it" names
-    // neither. Saying so beats bouncing whichever row sorted first.
+    // Mid-move a Component serves on two Targets, so a restart must name one.
     const backend = new FakeDeployAdapter();
     const ctx = context(backend);
     const { componentId } = await scaffold(ctx, backend);
@@ -318,7 +293,7 @@ describe('restartComponent', () => {
     if (refused.ok) return;
     expect(refused.failure.code).toBe('NOT_RESTARTABLE');
     expect(refused.failure.message).toBe(because);
-    // A refusal is not a checkpoint: nothing happened to the release.
+    // A refusal is not a checkpoint.
     expect(await eventsOf(ctx, deployId)).toEqual([]);
   });
 

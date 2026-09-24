@@ -1,15 +1,6 @@
 /**
- * Where a route can actually publish (§13, §16).
- *
- * §16 pushes every artifact to every registry, and §13 authorizes each push by
- * the route that makes it. Those two sentences only agree when the route's own
- * identity reaches every registry — and it does not. The hosted run logs into
- * GHCR and federates to the artifact registry; the cloud builder's metadata
- * token is good for one vendor and nothing else.
- *
- * The cost of getting this wrong is not a skipped destination. `buildctl`
- * exports every reference in one operation, so an unauthorized host is a `401`
- * that fails the whole export with the image already built.
+ * Where a route can publish. `buildctl` exports every reference in one
+ * operation, so a registry the route cannot authorize fails the whole export.
  */
 import { describe, expect, test } from 'bun:test';
 import { CloudBuildRoute } from '../../src/adapters/build/cloud-build.ts';
@@ -21,7 +12,6 @@ const AR = 'northamerica-northeast1-docker.pkg.dev/trusted-builds/i';
 const REGISTRIES = [GHCR, AR];
 
 describe('the registries a route can publish to', () => {
-  /** The default this whole change exists to produce. */
   test('the cloud builder publishes to the artifact registry alone', () => {
     const route = new CloudBuildRoute({
       name: 'managed',
@@ -44,10 +34,7 @@ describe('the registries a route can publish to', () => {
     ).toEqual([AR]);
   });
 
-  /**
-   * The hosted route is unchanged by any of this, and that is the point: its
-   * run holds both identities, so narrowing takes nothing away from it.
-   */
+  /** Its run logs into GHCR and federates to the artifact registry. */
   test('the hosted route publishes to both, as it always did', () => {
     const route = new GitHubActionsBuildRoute({
       name: 'hosted',
@@ -66,7 +53,6 @@ describe('the registries a route can publish to', () => {
     ).toEqual(REGISTRIES);
   });
 
-  /** §16's stored exception, doing exactly what it exists for. */
   test('a stored credential widens a route back out', () => {
     expect(
       publishableRegistries({

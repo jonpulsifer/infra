@@ -1,11 +1,5 @@
-/**
- * `expectedDuration` on the deploy screen: a history sentence, never a guess.
- *
- * The estimate is read from the attempt log at read time, so what these tests
- * pin is which rows get to vote — releases of this Component@Target that
- * reached LIVE before this one, and nothing else — and that the answer is
- * withheld under three samples rather than computed anyway.
- */
+// The estimate counts only earlier releases of this Component@Target that
+// reached LIVE, and is withheld under three samples.
 import { describe, expect, test } from 'bun:test';
 import { getDeployDetail } from '../../src/commands/deploys/get-detail.ts';
 import type {
@@ -98,10 +92,8 @@ async function scaffold() {
 
 type Scaffold = Awaited<ReturnType<typeof scaffold>>;
 
-/**
- * One Deploy written at `startedAt`, and — unless it never got there — the
- * LIVE status event the deploy loop records `seconds` later.
- */
+// One Deploy at `startedAt` and, given `seconds`, the LIVE event that many
+// seconds later.
 async function release(
   seeded: Scaffold,
   options: {
@@ -158,8 +150,7 @@ describe('expected duration', () => {
 
   test('is the p90 of what reached LIVE here before this one, and nothing else', async () => {
     const seeded = await scaffold();
-    // The four that vote: 60s, 120s, 180s, 300s — the p90 by nearest rank is
-    // the fourth of four.
+    // Four vote: 60s, 120s, 180s, 300s. The p90 by nearest rank is the fourth.
     await release(seeded, { startedAt: at(1), seconds: 60 });
     await release(seeded, { startedAt: at(2), seconds: 120 });
     await release(seeded, { startedAt: at(3), seconds: 180 });
@@ -172,8 +163,7 @@ describe('expected duration', () => {
       seconds: 9_000,
       targetId: seeded.elsewhere.id,
     });
-    // The subject, read back after it went LIVE: its own event is not evidence
-    // about itself.
+    // The subject's own event is not evidence about itself.
     const subject = await release(seeded, { startedAt: at(7), seconds: 9_000 });
     // Newer than the subject: what came after is not what came before.
     await release(seeded, { startedAt: at(8), seconds: 9_000 });

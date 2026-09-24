@@ -1,21 +1,6 @@
 /**
- * Holding a registry push credential (§13's named exception, §16).
- *
- * Three properties, and each one is a way this could go quietly wrong.
- *
- * **The token is proved before it is kept.** Unlike the bucket and the bare
- * registry check, this one can be strong — a credential in hand can complete
- * the registry's own challenge — so a wrong token is a sentence on the form
- * rather than an `unauthorized` at the last step of a green build.
- *
- * **The token is never readable.** Nothing above `RegistryCredentialStore` has
- * a verb that returns one, and the row holds an envelope. The plaintext grep
- * here is the same discipline `config.test.ts` applies to config values, for
- * the same reason: a future shortcut that kept one has somewhere to fail.
- *
- * **The hosted route cannot carry one.** Its dispatch inputs are rendered in
- * the GitHub run header, so a credential in the spec would be published to
- * anyone who can see the run. `dispatchBuild` refuses before the claim.
+ * Registry push credentials: proved against the registry's own challenge
+ * before they are kept, sealed in the database, and never returned by a read.
  */
 import { describe, expect, test } from 'bun:test';
 import { forgetRegistryCredential } from '../../src/commands/storage/forget-registry-credential.ts';
@@ -38,7 +23,6 @@ const TOKEN = 'a-token-nobody-should-be-able-to-read-back';
 const HOST = 'registry.example.test';
 const DECLARED = `${HOST}/artifacts`;
 
-/** A keyring, the way an installation Secret supplies one. */
 function keyring(): CredentialKeyring {
   const key = Buffer.from(new Uint8Array(32).fill(7)).toString('base64url');
   const parsed = CredentialKeyring.fromEnvironment({
@@ -52,12 +36,8 @@ function keyring(): CredentialKeyring {
 }
 
 /**
- * A registry that speaks the distribution token flow.
- *
- * Three hops, because that is what a real one does and a fake that collapsed
- * them would pass an implementation that only ever tries Basic: `/v2/` answers
- * `401` with a Bearer challenge, the realm mints a token for the right
- * password, and `/v2/` accepts that token.
+ * A registry speaking the distribution token flow: `/v2/` answers 401 with a
+ * Bearer challenge, and the realm mints a token for the right password.
  */
 function tokenRegistry(accepts: string) {
   const asked: string[] = [];
@@ -125,8 +105,8 @@ describe('setting a registry credential', () => {
     if (!result.ok) return;
     expect(result.value.host).toBe(HOST);
     expect(result.value.probe.authenticated).toBe(true);
-    // The token endpoint was actually visited: a Basic-only implementation
-    // would have skipped it and reported a correct Docker Hub token as wrong.
+    // A Basic-only client would skip the token endpoint and reject a correct
+    // token.
     expect(asked.some((url) => url.includes('/token'))).toBe(true);
   });
 
@@ -192,11 +172,6 @@ describe('what a listing may know about it', () => {
     expect(JSON.stringify(listed.value)).not.toContain(TOKEN);
   });
 
-  /**
-   * The same search `config.test.ts` runs over every column after a set. A
-   * credential is sealed or it is not, and the database is where that is
-   * proved rather than asserted.
-   */
   test('and no column of any table holds the plaintext', async () => {
     const { ctx } = await context();
     await setRegistryCredential(
@@ -218,7 +193,6 @@ describe('what a listing may know about it', () => {
         expect(JSON.stringify(row)).not.toContain(TOKEN);
       }
     }
-    // A grep that searched nothing proves nothing.
     expect(searched).toBeGreaterThan(0);
   });
 });
@@ -258,7 +232,7 @@ describe('forgetting one', () => {
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.value.forgotten).toBe(true);
-    // Forgetting is not revoking, and the sentence has to say so.
+    // Forgetting does not revoke the token at the registry.
     expect(result.value.detail).toContain('revoke');
 
     const listed = await listArtifactRegistries({}, ctx);

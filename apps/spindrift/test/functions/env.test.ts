@@ -1,13 +1,3 @@
-/**
- * A Function's environment at rest: one sealed envelope, and the merge that
- * decides what goes into it.
- *
- * The claims worth stating are the write-only ones — an envelope holds no
- * readable value, and a map that survives a round trip is the same map — plus
- * the merge's three moves: a string sets, `null` deletes, an absent name is
- * left alone. Sorting is asserted because it is what makes the same map seal
- * to the same plaintext whatever order the browser sent its edits in.
- */
 import { describe, expect, test } from 'bun:test';
 import { base64urlEncode } from '@repo/archive/bytes';
 import {
@@ -76,6 +66,7 @@ describe('mergeEnv', () => {
   });
 
   test('the result is sorted, whatever order the edits arrived in', () => {
+    // So the same map seals to the same plaintext.
     expect(Object.keys(mergeEnv({ M: 'm' }, { Z: 'z', A: 'a' }))).toEqual([
       'A',
       'M',

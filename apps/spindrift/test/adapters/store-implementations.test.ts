@@ -1,17 +1,6 @@
 /**
- * The two store implementations, against a fake of each far-side HTTP API
- * (Task 10, § Seam 2).
- *
- * The conformance suite already asserts that both satisfy the contract. What is
- * asserted here is what the contract cannot see: **the requests that were
- * made**, which is the half of § Seam 2's pattern that catches an adapter
- * satisfying the contract by doing the wrong thing on the wire.
- *
- * The load-bearing one is `never reads a value back`. §10 makes values
- * write-only, and an adapter that quietly called `accessSecretVersion` — or read
- * a concealed value out of an item and threw it away — would pass every
- * contract assertion while having broken the one rule the contract exists to
- * keep. The only way to see that is to look at the wire.
+ * The 1Password and Secret Manager stores against fakes of their HTTP APIs.
+ * The conformance suite covers the contract; these assert the requests made.
  */
 import { describe, expect, test } from 'bun:test';
 import {
@@ -57,9 +46,8 @@ describe('1Password over Connect', () => {
     await store.put(scope, 'DATABASE_URL', 'one');
     await store.put(scope, 'DATABASE_URL', 'two');
 
-    // The whole reason this store is IMMUTABLE_ITEM_PER_VERSION: Connect gives
-    // no way to address a past version of an item, so a second put that edited
-    // the first would make every earlier pin a floating latest (§10).
+    // Connect cannot address a past version of an item, so editing one would
+    // turn every earlier pin into a floating latest.
     expect(connect.itemCount).toBe(2);
     expect(
       connect.requests.filter((request) => request.method === 'POST'),
@@ -79,7 +67,7 @@ describe('1Password over Connect', () => {
       (request) => request.method === 'POST',
     );
     expect(created?.body).toMatchObject({
-      // Connect has no default for either, and refuses a create without them.
+      // Connect refuses a create without a vault or a category.
       vault: { id: connect.vault },
       category: 'API_CREDENTIAL',
       title: 'invoices/web/metal/DATABASE_URL',
@@ -100,11 +88,8 @@ describe('1Password over Connect', () => {
     const { connect, store } = onepassword();
     const reference = await store.put(scope, 'DATABASE_URL', 'postgres://x');
 
-    // Connect populates an API_CREDENTIAL with `username`, `credential` and
-    // `notesPlain` of its own. They come back in front of the caller's field
-    // and two of them are labelled, so an adapter reading "the first labelled
-    // field" reads `username` — a variable name that was never written, on a
-    // §10 read-back whose whole job is to prove a pin still resolves.
+    // Connect puts an API_CREDENTIAL's own labelled fields (username,
+    // credential, notesPlain) ahead of the caller's field.
     const item = (await connect
       .fetch(
         new Request(
@@ -139,8 +124,7 @@ describe('1Password over Connect', () => {
       )
       .then((response) => response.json())) as { id: string };
 
-    // Titled exactly as Spindrift titles one, and carrying nothing Spindrift
-    // wrote. Absent beats guessing the variable out of the title.
+    // The title matches, but the variable is never guessed from a title.
     expect(
       await store.describe({
         key: 'invoices/web/metal/DATABASE_URL',
@@ -155,9 +139,8 @@ describe('1Password over Connect', () => {
     await store.describe(reference);
     await store.versions(scope, 'DATABASE_URL');
 
-    // Connect returns the concealed value on a single-item GET, so "does not
-    // read" cannot be asserted on the wire here — what can be asserted is that
-    // nothing the value could travel out through exists on the contract.
+    // Connect returns the concealed value on a single-item GET, so this checks
+    // what `describe` returns, not the wire.
     const described = await store.describe(reference);
     expect(described).not.toBeNull();
     expect(JSON.stringify(described)).not.toContain('secret');
@@ -171,8 +154,8 @@ describe('1Password over Connect', () => {
     const metal = await store.put(scope, 'DATABASE_URL', 'one');
     const cloud = await store.put(other, 'DATABASE_URL', 'two');
 
-    // §10 scopes config to (Component, Target). Two Targets colliding on one
-    // item is what would make a re-placement silently deliver the wrong value.
+    // Config is scoped to (Component, Target); a shared item would deliver the
+    // wrong value after a re-placement.
     expect(metal.key).not.toBe(cloud.key);
     expect(await store.versions(scope, 'DATABASE_URL')).toHaveLength(1);
   });
@@ -182,7 +165,7 @@ describe('1Password over Connect', () => {
     const reference = await store.put(scope, 'DATABASE_URL', 'one');
     const moved = { ...reference, key: 'invoices/web/metal/OTHER' };
 
-    // A rename must not silently re-point a pinned Deploy at another variable.
+    // A rename must not re-point a pinned Deploy at another variable.
     expect(await store.describe(moved)).toBeNull();
   });
 
@@ -218,8 +201,7 @@ describe('Secret Manager', () => {
     expect(api.payloadOf(reference.key, reference.version)).toBe(
       'postgres://x',
     );
-    // §10's read-back is metadata. `accessSecretVersion` is the verb that would
-    // return a payload, and it is called nowhere.
+    // `describe` and `versions` read metadata; only `open` calls `:access`.
     await store.describe(reference);
     await store.versions(scope, 'DATABASE_URL');
     expect(
@@ -231,9 +213,7 @@ describe('Secret Manager', () => {
     const { api, store } = secretManager();
     await store.put(scope, 'DATABASE_URL', 'one');
 
-    // The Secret resource has no default for it and the API refuses a create
-    // without one, so dropping this line would break every write this
-    // installation makes and nothing else would say so.
+    // The API refuses a create with no replication policy.
     const created = api.requests.find((request) =>
       /\/secrets\?secretId=/.test(request.path),
     );
@@ -249,9 +229,8 @@ describe('Secret Manager', () => {
     };
     const key = `K${'E'.repeat(120)}Y`;
 
-    // Three DNS labels at their own ceiling plus a long variable name clears
-    // 255 without anything unreasonable happening, and the API refuses the
-    // create rather than truncating for us.
+    // Three 63-character labels and a long key pass the 255-character id limit,
+    // and the API refuses an id that long instead of truncating it.
     const id = secretIdFor(long, key);
     expect(id.length).toBeLessThanOrEqual(255);
     expect(id).toMatch(/^[A-Za-z0-9_-]{1,255}$/);
@@ -263,18 +242,14 @@ describe('Secret Manager', () => {
   });
 
   test('truncated ids keep two long scopes apart', async () => {
-    // Long enough that every id below is truncated, and identical far past the
-    // cut — so the head alone cannot tell any of them apart.
+    // Every id below is truncated and identical past the cut, so only the
+    // digest of the exact scope tells them apart.
     const long = { app: 'a'.repeat(240), component: 'web', target: 'metal' };
 
-    // Truncation on its own would widen the collision the sanitizer already
-    // opens. The digest of the exact scope is what keeps two scopes sharing a
-    // head apart…
     expect(secretIdFor(long, 'TOKEN')).not.toBe(
       secretIdFor({ ...long, component: 'worker' }, 'TOKEN'),
     );
-    // …and what separates two that sanitizing flattens onto one name, which
-    // the untruncated form never could.
+    // Sanitizing maps `.` and `/` to one character; the digest still differs.
     expect(secretIdFor({ ...long, app: `${long.app}.` }, 'TOKEN')).not.toBe(
       secretIdFor({ ...long, app: `${long.app}/` }, 'TOKEN'),
     );
@@ -284,8 +259,8 @@ describe('Secret Manager', () => {
     const { api, store } = secretManager();
     const reference = await store.put(scope, 'DATABASE_URL', 'one');
 
-    // The id is a legible name; the annotations are the authority on what the
-    // secret is for, which is what `describe` reads the variable back from.
+    // The id is only a legible name; `describe` reads the variable back from
+    // the annotations.
     expect(api.annotationsOf(reference.key)).toEqual({
       'spindrift-app': 'invoices',
       'spindrift-component': 'web',
@@ -303,9 +278,8 @@ describe('Secret Manager', () => {
       'spindrift-key': 'DATABASE_URL',
     });
 
-    // Sanitizing a name into the id alphabet is lossy, so two scopes can land
-    // on one id. Writing anyway would put one Component's value where another
-    // Component reads it — the worst outcome available here.
+    // Sanitizing is lossy, so two scopes can share an id. Writing anyway would
+    // hand one Component's value to another.
     expect(store.put(scope, 'DATABASE_URL', 'one')).rejects.toThrow(
       /belongs to/,
     );
@@ -317,8 +291,7 @@ describe('Secret Manager', () => {
       await store.put(scope, 'DATABASE_URL', value);
     }
 
-    // The fake pages at two, so five versions is three pages. Core reaps config
-    // from this list at N = 10 (§10) — a single-page read would under-report it.
+    // The fake pages at two, so five versions span three pages.
     const versions = await store.versions(scope, 'DATABASE_URL');
     expect(versions.map((version) => version.reference.version)).toEqual([
       '5',
@@ -365,14 +338,8 @@ describe('Secret Manager', () => {
   });
 });
 
-/**
- * The far side, driven directly.
- *
- * Everything above goes through an adapter that is correct today, so it proves
- * the adapter and not the fake. These go straight at the fake, because a fake
- * more permissive than the real API is how a production bug becomes a green
- * test — and the fake is the half of that pair no adapter test can reach.
- */
+// These drive the fakes directly: a fake more permissive than the real API
+// turns a production bug into a green test.
 describe('the store fakes refuse what the real APIs refuse', () => {
   test('Secret Manager refuses an id outside its alphabet or ceiling', async () => {
     const api = new FakeSecretManager();

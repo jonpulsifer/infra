@@ -1,11 +1,6 @@
 /**
- * Who a red hosted run indicts (ticket 23, item 5).
- *
- * §6's blame column is the point: `blame` is "the most useful thing the UI
- * knows", and a developer sent to debug a Dockerfile that was never compiled is
- * the exact harm it exists to prevent. Build 9 recorded `blame = developer` for
- * a run that died in Spindrift's own fetch step, because every non-green
- * conclusion mapped to `BUILD_FAILED`.
+ * Who a red hosted run blames. A failed step other than the App's own build
+ * step is the platform's.
  */
 import { describe, expect, test } from 'bun:test';
 import type {
@@ -49,13 +44,6 @@ const spec: BuildSpec = {
   buildSecrets: [],
 };
 
-/**
- * A host whose run always fails, with the steps a test names.
- *
- * Faked at {@link ActionsHost}, which is the contract this route declares for
- * exactly this reason: what a verdict depends on here is the *shape of the
- * steps*, and nothing else about GitHub needs to be real to vary that.
- */
 function hostWithSteps(steps: NonNullable<ActionsJob['steps']>): ActionsHost {
   return {
     installationFor: async () => ({ installationId: '1' }),
@@ -117,9 +105,6 @@ const broke = { status: 'completed', conclusion: 'failure' } as const;
 
 describe('blame on a red hosted run', () => {
   test('a failure in the platform’s own fetch step is the platform’s', async () => {
-    // Build 9, verbatim: the runner was handed `upload://<hex>`, `curl` refused
-    // the scheme, and `tar` fell over on the empty stream. Nothing the
-    // developer wrote had run yet.
     const result = await verdict(
       hostWithSteps([
         { name: 'Read the build request', ...ok },
@@ -135,9 +120,6 @@ describe('blame on a red hosted run', () => {
   });
 
   test('a failure in the App’s own build step is still the developer’s', async () => {
-    // The fix must not launder real build failures into platform blame — a
-    // compile error is precisely what §6 gives `BUILD_FAILED` to the developer
-    // for.
     const result = await verdict(
       hostWithSteps([
         { name: 'Fetch the staged bundle', ...ok },
@@ -152,9 +134,7 @@ describe('blame on a red hosted run', () => {
   });
 
   test('a run reporting no steps keeps the developer verdict', async () => {
-    // The conservative direction. Claiming platform blame with no evidence
-    // would put a "not your fault" chip on every genuine build failure whose
-    // steps this route could not read.
+    // With no steps to read there is no evidence against the platform.
     const result = await verdict(hostWithSteps([]));
 
     expect(result.status).toBe('FAILED');
@@ -163,8 +143,7 @@ describe('blame on a red hosted run', () => {
   });
 
   test('a skipped step is not a failed one', async () => {
-    // Every step after a failure is `skipped`, so counting those as failures
-    // would blame the platform for the step that merely came after the App's.
+    // GitHub marks every step after a failure `skipped`.
     const result = await verdict(
       hostWithSteps([
         { name: DEVELOPER_BUILD_STEP, ...broke },

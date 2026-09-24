@@ -1,12 +1,5 @@
-/**
- * What a Build keeps of its commit beyond the sha (§15's one fetch, kept on
- * the row), and where that reaches.
- *
- * Every Build, Deploy and Source row used to be a bare sha. Staging now hands
- * the headline, author and authored instant to the row it stages for; the
- * ledgers read them back; a rerun that inherits a bundle inherits them; an
- * adopted artifact carries its source Build's.
- */
+// Staging writes the commit's headline, author and time onto the Build, and a
+// rerun or an adoption inherits them.
 import { beforeEach, describe, expect, test } from 'bun:test';
 import { eq } from 'drizzle-orm';
 import { deployApp } from '../../src/commands/apps/deploy.ts';
@@ -234,8 +227,7 @@ describe('the commit headline on a Build', () => {
     const result = await deployApp({ name: seeded.app.name }, ctx);
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    // Nothing was staged, so nothing could have told the new row — the
-    // inherited row did.
+    // Nothing was staged, so the headline came from the inherited row.
     expect(stager.staged).toEqual([]);
 
     const [row] = await ctx.db

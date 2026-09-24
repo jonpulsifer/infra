@@ -1,17 +1,6 @@
 /**
- * Agent tokens, and the one property they exist for.
- *
- * A `sessions` row is now two credentials wearing one shape, and the whole
- * argument for that is that neither is accepted where the other belongs: the
- * cookie that opens the UI loses `HttpOnly`, `Secure` and `SameSite=Lax` the
- * moment somebody copies it into an agent's config file, so if pasting it there
- * *worked*, every operator would eventually do exactly that.
- *
- * So the assertions that matter are the crossed ones. A browser session
- * presented as a bearer token is nobody; an agent token presented as a cookie
- * is nobody. Everything else in this file — lifetime, listing, revocation — is
- * ordinary and is here because a credential you cannot enumerate is a
- * credential you cannot revoke.
+ * Agent tokens. They share the `sessions` table with browser sessions, and
+ * neither kind is accepted where the other belongs.
  */
 import { describe, expect, test } from 'bun:test';
 import { eq } from 'drizzle-orm';
@@ -58,7 +47,6 @@ function movableClock(from = START) {
   };
 }
 
-/** An installation with one operator enrolled, and their browser session. */
 async function enrolled(clock: { now: () => Date }): Promise<{
   deps: EnrolmentDeps;
   principal: { id: string; displayName: string };
@@ -90,7 +78,6 @@ async function enrolled(clock: { now: () => Date }): Promise<{
   };
 }
 
-/** A request as an MCP client sends one. */
 function bearer(
   token: string | null,
   trace: { ip?: string; agent?: string } = {},
@@ -104,7 +91,6 @@ function bearer(
   });
 }
 
-/** A request as a browser sends one. */
 function cookie(token: string | null): Request {
   return new Request(RELYING_PARTY.origin, {
     headers: token === null ? {} : { cookie: `${SESSION_COOKIE}=${token}` },
@@ -116,8 +102,7 @@ describe('neither key turns the other lock', () => {
     const clock = movableClock();
     const { deps, sessionToken } = await enrolled(clock);
 
-    // It is a live session — the negative below is about the surface, not
-    // about the row having expired.
+    // The session is live, so the refusal below is about the surface.
     expect(await resolveSession(cookie(sessionToken), deps)).not.toBeNull();
     expect(await resolveAgentToken(bearer(sessionToken), deps)).toBeNull();
   });
@@ -136,8 +121,7 @@ describe('neither key turns the other lock', () => {
     const { deps, principal } = await enrolled(clock);
     const { token } = await openAgentToken(deps, principal);
 
-    // The kind is in the `where`, so the header a value arrives in cannot
-    // launder it into the other kind.
+    // The kind is in the query's `where`, so the header cannot change it.
     expect(await resolveSession(cookie(token), deps)).toBeNull();
   });
 });
@@ -197,7 +181,6 @@ describe('a token you cannot list is a token you cannot revoke', () => {
 
     const rows = await listAgentTokens(deps, principal.id);
     expect(rows).toHaveLength(2);
-    // Newest first, so the one just minted leads.
     expect(rows[0]!.createdAt.getTime()).toBeGreaterThan(
       rows[1]!.createdAt.getTime(),
     );
@@ -208,7 +191,7 @@ describe('a token you cannot list is a token you cannot revoke', () => {
     const clock = movableClock();
     const { deps, principal } = await enrolled(clock);
 
-    // Enrolment already opened a browser session for this user.
+    // Enrolment has already opened a browser session for this user.
     expect(await listAgentTokens(deps, principal.id)).toHaveLength(0);
   });
 
@@ -236,9 +219,7 @@ describe('a token you cannot list is a token you cannot revoke', () => {
 
   describe('what a row remembers about being used', () => {
     test('a token nobody has presented has no last use at all', async () => {
-      // Three nulls rather than a zero date: "never" is a state, and a row
-      // that claimed to have been used at the epoch would sort as the oldest
-      // thing in the list rather than as the thing to revoke.
+      // Null means never used. An epoch date would sort as the oldest use.
       const clock = movableClock();
       const { deps, principal } = await enrolled(clock);
       await openAgentToken(deps, principal);
@@ -270,8 +251,7 @@ describe('a token you cannot list is a token you cannot revoke', () => {
     });
 
     test('the newest use replaces the last, because this is not a log', async () => {
-      // The column answers "is this token still in use, and from where" — the
-      // history behind it is the audit trail's job, not this row's.
+      // The row keeps only the latest use; history belongs to the audit trail.
       const clock = movableClock();
       const { deps, principal } = await enrolled(clock);
       const { token } = await openAgentToken(deps, principal);
@@ -287,9 +267,8 @@ describe('a token you cannot list is a token you cannot revoke', () => {
     });
 
     test('the caller cannot spend the column on an unbounded header', async () => {
-      // Both values are attacker-chosen: whoever holds the token writes them.
-      // A header has no length a client is obliged to respect, so the bound is
-      // here rather than in a hope about well-behaved clients.
+      // Whoever holds the token chooses both headers, so the server bounds
+      // them: 45 is the longest IPv6 text form.
       const clock = movableClock();
       const { deps, principal } = await enrolled(clock);
       const { token } = await openAgentToken(deps, principal);
@@ -319,9 +298,8 @@ describe('a token you cannot list is a token you cannot revoke', () => {
     });
 
     test('a token that does not resolve stamps nothing', async () => {
-      // The update is by the primary key the select just matched, so a
-      // credential that authenticated nothing cannot touch a row — including
-      // an expired one, which is still a row waiting to be cleaned up.
+      // lastUsedAt is updated by the id the lookup matched, so an expired
+      // token, whose row still exists, updates nothing.
       const clock = movableClock();
       const { deps, principal } = await enrolled(clock);
       const { token } = await openAgentToken(deps, principal);
@@ -336,8 +314,8 @@ describe('a token you cannot list is a token you cannot revoke', () => {
     });
 
     test('a browser session is never stamped, because nothing lists one', async () => {
-      // A cookie is resolved on every request the UI makes. Stamping it would
-      // be a write per page view for a row no screen can show.
+      // A cookie is resolved on every UI request, so recording its use would
+      // cost a write per page view for a row no screen shows.
       const clock = movableClock();
       const { deps, sessionToken } = await enrolled(clock);
       await resolveSession(cookie(sessionToken), deps);

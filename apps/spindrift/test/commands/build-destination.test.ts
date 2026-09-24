@@ -1,12 +1,5 @@
-/**
- * What dispatch tells a route to push, and where.
- *
- * These assert on the spec the route is handed, which is the seam an
- * adapter-level fixture cannot cover: a fixture supplies an already-correct
- * value, so it tests the shape a route expects and not whether `dispatch.ts`
- * produces it. The installation's registry is a namespace, and no registry
- * accepts a namespace as a repository.
- */
+// The installation's registry is a namespace, and no registry accepts a
+// namespace as a repository.
 import { beforeEach, describe, expect, test } from 'bun:test';
 import { eq } from 'drizzle-orm';
 import { dispatchBuild } from '../../src/commands/builds/dispatch.ts';
@@ -37,7 +30,7 @@ import {
 const database = withIsolatedDatabase();
 const baseManifest = await fixtureManifest();
 
-/** The fixture installation's §16 registry — a namespace, as §16 says. */
+/** A namespace, not a repository. */
 const REGISTRY = baseManifest.supplyChain.registry;
 const BUNDLE_DIGEST =
   'sha256:3f5cbbc2a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c';
@@ -138,9 +131,7 @@ describe('the destination dispatch hands a route', () => {
     );
     expect(result.ok).toBe(true);
 
-    // The bug, stated as an assertion: `ghcr.io/jonpulsifer` reached a runner
-    // verbatim and GHCR answered `NAME_INVALID` before authentication was
-    // relevant, so `Build and push` could not succeed whatever the App built.
+    // A registry refuses a bare namespace as NAME_INVALID, before auth matters.
     expect(route.built[0]?.spec.destinations[0]).not.toBe(REGISTRY);
     expect(route.built[0]?.spec.destinations[0]).toBe(
       `${REGISTRY}/infra/spindrift-demo`,
@@ -188,8 +179,8 @@ describe('the destination dispatch hands a route', () => {
 
     await dispatchBuild({ buildId: build.id, route: 'hosted' }, routing(route));
 
-    // Retention is "retain by tagging ... N = 10 doubles as rollback depth".
-    // Pushed under `latest` alone, every build overwrites the one tag.
+    // Retention counts immutable tags, so pushing only `latest` would leave one
+    // tag that every build overwrites.
     expect(route.built[0]?.spec.tags).toEqual(artifactTags(BUNDLE_DIGEST));
     expect(route.built[0]?.spec.tags).toContain(
       `sha256-${BUNDLE_DIGEST.slice('sha256:'.length)}`,
@@ -206,13 +197,11 @@ describe('the destination dispatch hands a route', () => {
     );
 
     expect(result.ok).toBe(false);
-    // Nothing was dispatched: a `NAME_INVALID` discovered at the last step of
-    // the build costs a whole run to learn.
+    // A NAME_INVALID at the push step would surface only after the build ran.
     expect(route.built).toHaveLength(0);
 
-    // A name is a column on these rows and no later tick makes it legal, so the
-    // Build is closed out rather than left to be refused again every second —
-    // which is the silent-`PENDING` shape ticket 25 was filed for.
+    // No later tick makes the name legal, so the Build is closed out, not left
+    // PENDING.
     const [stored] = await ctx.db
       .select({ status: builds.status })
       .from(builds)

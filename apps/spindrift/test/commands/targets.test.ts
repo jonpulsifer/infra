@@ -1,20 +1,7 @@
 /**
- * The connect and disconnect acts (Task 13, §13).
- *
- * Every test here is an assertion about a promise §13 makes that a normal
- * connect flow would break:
- *
- * - **Connect always succeeds.** Unreachable, no adapter at all — a Target still
- *   exists afterwards, unhealthy, with the reason stated. There is no input that
- *   makes this command return a failure.
- * - **Disconnect always works, and strands rather than stops.** No `destroy` is
- *   ever called, the workloads stay where they are, and the confirmation names
- *   them.
- * - **Reconnect re-adopts via `observe`** — the adapter is the authority on what
- *   is still running, not core's memory of what it last placed.
- *
- * Rows are what is asserted, not return values: a command that reported a Target
- * it never wrote would pass a test of its own output.
+ * Connecting and disconnecting Targets. Connect always leaves a Target, healthy
+ * or not; disconnect orphans live Deploys and destroys nothing; reconnect
+ * re-adopts what the adapter's `observe` still sees.
  */
 import { describe, expect, test } from 'bun:test';
 import { and, eq } from 'drizzle-orm';
@@ -83,8 +70,7 @@ function fakes(
   const made = new Map<TargetAdapter, FakeDeployAdapter>();
   const registry: AdapterRegistry = {
     deploy(adapter) {
-      // `null` is a configuration fact, not an error: an installation is
-      // allowed not to ship an adapter, and connect has to survive that.
+      // `null` means the installation ships no such adapter.
       if (options[adapter] === null) return null;
       let fake = made.get(adapter);
       if (!fake) {
@@ -126,7 +112,6 @@ function context(registry: AdapterRegistry): CommandContext {
   };
 }
 
-/** The Target row as the database holds it, addressed by `(vessel, adapter)`. */
 async function targetRow(
   vessel: string,
   adapter: TargetAdapter = 'kubernetes',
@@ -174,7 +159,7 @@ async function seedLiveDeploy(targetId: string, ref: string) {
   return { app: app!, component: component!, deploy: deploy! };
 }
 
-/** The row a fresh installation is seeded with, then booted from. */
+/** Writes the stored manifest, then loads it the way boot does. */
 async function seedStoredManifest(
   document: AuthoredManifest,
 ): Promise<InstallationManifest> {
@@ -209,8 +194,6 @@ describe('connect always succeeds', () => {
       context(registry),
     );
 
-    // §13: an unmet item makes the Target a non-candidate with a stated
-    // reason. A connect that failed would leave nothing to state it about.
     expect(result.ok).toBe(true);
     const row = await targetRow('cluster');
     expect(row?.health).toBe('unhealthy');
@@ -241,8 +224,6 @@ describe('the act is credential-shaped though the noun is flat', () => {
       context(registry),
     );
 
-    // §13: "one 'connect a cloud project' registers both project-specific
-    // Targets, so a `Provider` noun earns nothing."
     if (!result.ok) throw new Error('connect refused');
     expect(result.value.targets.map((t) => t.adapter)).toEqual([
       'cloudrun',
@@ -250,9 +231,8 @@ describe('the act is credential-shaped though the noun is flat', () => {
     ]);
     expect(result.value.targets.map((t) => t.rank)).toEqual([0, 1]);
 
-    // Each Target keeps only the endpoint its own adapter drives: one connect
-    // act asked for both, and neither Target carries the other's. The runtime
-    // identity splits the same way — only this surface runs anything.
+    // Each Target keeps only its own adapter's endpoint, and only Cloud Run
+    // carries the runtime identity.
     expect((await targetRow('vessel', 'cloudrun'))?.connection).toEqual({
       adapter: 'cloudrun',
       region: 'here',
@@ -278,8 +258,7 @@ describe('the act is credential-shaped though the noun is flat', () => {
 
     if (!first.ok || !again.ok) throw new Error('connect refused');
     expect(again.value.targets[0]?.id).toBe(first.value.targets[0]!.id);
-    // Rank is one global ordered list (§13). Reconnecting must not reorder
-    // what an operator already arranged.
+    // Rank is one global list, and a reconnect keeps the Target's place in it.
     expect(again.value.targets[0]?.rank).toBe(2);
     const rows = await database().db.select().from(targets);
     expect(rows).toHaveLength(3);
@@ -290,13 +269,8 @@ describe('the act is credential-shaped though the noun is flat', () => {
     await connectTarget(clusterInput({ vessel: 'cluster' }), context(registry));
     expect((await targetRow('cluster'))?.reaches).toBeNull();
 
-    // The connect screen derives both of these — `reaches` from the gateway's
-    // private address and the tunnel hostname, `authReaches` from the
-    // ExternalAuth backend — and posts them with every submission. The update
-    // branch used to set connection, health, prerequisites, discovery,
-    // inspectedAt, status and updatedAt and nothing else, so an operator
-    // correcting a Target that already existed had their assertion silently
-    // discarded and no way to see why.
+    // The connect screen derives `reaches` and `authReaches` and posts them
+    // with every submission, so a reconnect must store them.
     await connectTarget(
       clusterInput({
         vessel: 'cluster',
@@ -312,10 +286,8 @@ describe('the act is credential-shaped though the noun is flat', () => {
   });
 
   test('a reconnect keeps the network the manifest seeded', async () => {
-    // `network` is a §20 boundary fact the connect screen never asks for: it
-    // arrives on the vessel from the installation manifest. A reconnect that
-    // rebuilt the location from its own input alone would null it silently —
-    // and with it the postgres/valkey capability the fact carries.
+    // `network` comes from the manifest, never the connect screen, and carries
+    // the postgres and valkey capabilities.
     const { registry } = fakes();
     const input = cloudInput({ vessel: 'vessel', project: 'p', region: 'r' });
     await connectTarget(input, context(registry));
@@ -352,8 +324,7 @@ describe('the act is credential-shaped though the noun is flat', () => {
 
   test('connect fills a manifest-seeded Target without changing its rank', async () => {
     const { registry } = fakes();
-    // The vessel a manifest seed already declared, by name — connect must
-    // re-adopt it rather than mint a second one under the same name.
+    // A manifest-seeded vessel, which connect must reuse by name.
     const vessel = await insertVessel(database().db, 'kubernetes', {
       name: 'cluster',
     });
@@ -384,10 +355,6 @@ describe('the act is credential-shaped though the noun is flat', () => {
   });
 
   test('and registers only the surfaces the probe found', async () => {
-    // The forcing case, from the other side: a project with no Cloud Run gets
-    // no `cloudrun` Target. Connect still succeeds — the vessel is there, the
-    // surface that answered is there, and the one that is not gets the
-    // checklist that says so.
     const { registry } = fakes({
       cloudrun: { surfaceAbsent: 'the Cloud Run API is not enabled on p' },
     });
@@ -405,18 +372,12 @@ describe('the act is credential-shaped though the noun is flat', () => {
     expect(missing?.adapter).toBe('cloudrun');
     expect(missing?.vessel).toBe('vessel');
     expect(missing?.detail).toContain('not enabled');
-    // A checklist row saying so, in the same grammar an unmet item on a
-    // registered Target has: §13's stated reason, about a surface rather than
-    // about a Target's health.
     expect(missing?.prerequisites.every((item) => !item.met)).toBe(true);
   });
 
   test('but a surface it could not settle is registered, unhealthy', async () => {
-    // "Found nothing" and "could not tell" are different answers. A refused
-    // read establishes no absence, so withholding the Target would put a
-    // confident "this project has no Cloud Run" on screen off a `403` — and
-    // there would then be no row for the loop to re-check when the grant
-    // lands.
+    // A refused read proves no absence, and the row lets the loop re-check
+    // once the grant exists.
     const { registry } = fakes({
       cloudrun: { unreachable: 'the federated identity may not act here' },
     });
@@ -437,9 +398,8 @@ describe('the act is credential-shaped though the noun is flat', () => {
   });
 
   test('the surfaces on a vessel are its rows, not its kind', async () => {
-    // Which runtimes a boundary carries is a query over `targets`, and there
-    // is no second copy of it to disagree: the probe list still asks a cloud
-    // project about both surfaces, and this project answered for one.
+    // The probe list names both surfaces; the rows say which this project
+    // carries.
     const { registry } = fakes({
       cloudrun: { surfaceAbsent: 'the Cloud Run API is not enabled on p' },
     });
@@ -458,9 +418,6 @@ describe('the act is credential-shaped though the noun is flat', () => {
   });
 
   test('a surface found later joins the vessel, changing no Target that was there', async () => {
-    // The whole point of a Target being `(vessel, adapter)`: the surface that
-    // was already registered is not renamed, re-ranked or rewritten to make
-    // room for the one that turned up.
     const off = fakes({
       cloudrun: { surfaceAbsent: 'the Cloud Run API is not enabled on p' },
     });
@@ -470,7 +427,7 @@ describe('the act is credential-shaped though the noun is flat', () => {
     );
     const before = await targetRow('vessel', 'static');
 
-    // Someone enables the API, and the connect is run again.
+    // The API is enabled and connect runs again.
     const on = fakes();
     const result = await connectTarget(
       cloudInput({ vessel: 'vessel', project: 'p' }),
@@ -481,17 +438,14 @@ describe('the act is credential-shaped though the noun is flat', () => {
     expect(await targetRow('vessel', 'static')).toEqual(before);
     const added = await targetRow('vessel', 'cloudrun');
     expect(added?.health).toBe('healthy');
-    // It joins the end of the one global rank list rather than displacing the
-    // surface that was connected first.
+    // It joins the end of the global rank list.
     expect(added?.rank).toBe(1);
     expect(before?.rank).toBe(0);
   });
 
   test('a surface that stops answering keeps its Target rather than losing it', async () => {
-    // The asymmetry is deliberate. A row that exists has been placed on, and a
-    // probe is not a mandate to delete what an operator connected — so the
-    // absence lands as an unhealthy checklist, which is a thing to act on
-    // rather than a Target that vanished.
+    // An existing Target may carry placements, so a probe never deletes it; the
+    // absence shows as an unmet checklist.
     await connectTarget(
       cloudInput({ vessel: 'vessel', project: 'p' }),
       context(fakes().registry),
@@ -513,12 +467,8 @@ describe('the act is credential-shaped though the noun is flat', () => {
   });
 
   test('and the screen keeps the act that asks again once it is switched on', async () => {
-    // The absence is deliberately not stored: what a boundary carries is a fact
-    // about the boundary, and a copy of it here would be a copy that goes stale
-    // the moment somebody enables the API. What stands in for remembering the
-    // answer is being able to ask again — which needs a control on a vessel
-    // whose remaining surfaces are already connected, or the only route left is
-    // declaring the surface in Git.
+    // The absence is not stored, so the connected surface keeps an edit that
+    // asks the vessel again.
     await connectTarget(
       cloudInput({ vessel: 'elsewhere', project: 'other' }),
       context(fakes().registry),
@@ -543,19 +493,16 @@ describe('the act is credential-shaped though the noun is flat', () => {
     if (edit?.kind !== 'gcp-project') {
       throw new Error('the surface that answered offers no edit');
     }
-    // This boundary's own id, which a fresh connect refuses to propose and an
-    // edit must not make the operator retype. The region is installation-wide,
-    // so the project that does run Cloud Run supplies it — the two endpoints are
-    // not proposed at all any more, because `cloudrun`/`static` each apply their
-    // own default rather than an operator (or this screen) stating one.
+    // The edit carries the project id, which a fresh connect never proposes,
+    // and the installation-wide region.
     expect(edit.project).toBe('p');
     expect(edit.proposal.region).toBe(cloudInput().region);
-    // And what one act writes that the form has no field to ask for again:
-    // sending the form back without these is the edit deleting them.
+    // Values the form has no field for travel in `carried`, or the edit would
+    // delete them.
     expect(edit.carried.servedHosts).toEqual(['hosting.example.test']);
 
-    // The same act, from exactly what the screen is holding. Neither endpoint
-    // is sent — the adapter default applies, same as a fresh connect.
+    // Resubmit what the screen holds; each adapter applies its default
+    // endpoint.
     const on = fakes();
     const again = await connectTarget(
       {
@@ -621,28 +568,17 @@ describe('the act is credential-shaped though the noun is flat', () => {
 });
 
 /**
- * 52: the correction an operator makes through the product, and the restart.
- *
- * `connectTarget` has always written the row. What made it useless on a
- * manifest-declared Target is that `loadStoredManifest` writes the stored
- * document back on every boot, and reconciliation used to re-assert the
- * document's copy of the connection over the row — so an operator who fixed a
- * gateway here got it reverted by the next rollout, silently, with the screen
- * that accepted the edit then showing the old values and no reason why.
- *
- * The precedence is now the one this module already applies to a mounted
- * declaration, one noun down: **the row wins and the divergence is reported.**
+ * `loadStoredManifest` runs on every boot, and an operator's correction to a
+ * declared Target survives it: the row wins and the divergence is reported.
  */
 describe('an operator’s Target correction outlives the next boot', () => {
-  /** The manifest as Git declares it, naming whichever gateway it still names. */
+  /** The declared manifest, with this gateway on its one Target. */
   function declaredWithGateway(gateway: { name: string; namespace: string }) {
     const input = clusterInput({ vessel: 'cluster' });
     const platform = input.chartValues?.platform as Record<string, unknown>;
     return {
       ...toAuthoredManifest(manifest),
-      // One declared boundary, so it is both of the two the installation is
-      // built on. `shared` follows the pointer rather than the kind: only the
-      // vessel `homeVessel` names may carry it, and it must.
+      // One vessel is both control plane and home, so it must carry `shared`.
       installation: {
         ...manifest.installation,
         controlPlaneVessel: 'cluster',
@@ -685,27 +621,24 @@ describe('an operator’s Target correction outlives the next boot', () => {
       },
     });
 
-    // The correction, through the only act there is for it.
     const connected = await connectTarget(
       clusterInput({ vessel: 'cluster' }),
       context(registry),
     );
     expect(connected.ok).toBe(true);
 
-    // The restart. Both pods do this; the reconciler and the web process each
-    // call `loadStoredManifest` once at startup.
+    // A restart: the reconciler and web process each load the manifest at
+    // startup.
     const booted = await loadStoredManifest(database().db, {});
 
     const row = await targetRow('cluster');
     expect(row?.connection).toEqual(connectionFor('kubernetes'));
-    // Not reset to awaiting-inspection either: nothing was declared, so there
-    // is nothing about this Target's assessment for a boot to invalidate.
+    // A boot declares nothing, so it keeps the Target's assessment.
     expect(row?.health).toBe('healthy');
     expect(row?.inspectedAt).not.toBeNull();
 
-    // And the disagreement is on the Target rather than in a pod log: Settings
-    // still writes the whole document, so the operator has to be able to see
-    // which paths saving it would take back — paths, never values.
+    // Saving Settings writes the full document back, so the Target lists the
+    // paths that would revert, never their values.
     const listed = await listTargets(
       {},
       { ...context(registry), manifest: booted },
@@ -720,9 +653,7 @@ describe('an operator’s Target correction outlives the next boot', () => {
       'gateway-that-moved',
     );
 
-    // The screen that made the correction possible: the edit opens on this
-    // Target's own address, which is the one field a fresh connect refuses to
-    // propose and the one field an edit must not make the operator retype.
+    // The edit carries the API server, which a fresh connect never proposes.
     expect(cluster?.edit).toMatchObject({
       kind: 'cluster',
       apiServer: clusterInput().apiServer,
@@ -732,7 +663,7 @@ describe('an operator’s Target correction outlives the next boot', () => {
 
   test('a Target whose row matches its manifest entry reports no divergence', async () => {
     const { registry } = fakes();
-    // Exactly what `clusterInput` connects, so the two agree.
+    // What `clusterInput` connects, so the two agree.
     const declared = declaredWithGateway({
       name: 'cluster-gateway',
       namespace: 'gateway',
@@ -810,8 +741,8 @@ describe('disconnect strands rather than stops', () => {
       .from(deploys)
       .where(eq(deploys.targetId, target.id));
     expect(row?.orphanedAt).toEqual(FROZEN);
-    // The phase is untouched: the workload is still whatever the platform last
-    // said it was. What changed is that Spindrift can no longer see it.
+    // The phase keeps the platform's last report; the workload is only out of
+    // sight.
     expect(row?.phase).toBe('LIVE');
     expect(
       deployState({
@@ -822,8 +753,6 @@ describe('disconnect strands rather than stops', () => {
     ).toBe('orphaned');
     expect((await targetRow('app-cluster'))?.status).toBe('disconnected');
 
-    // A cluster being removed from the platform is exactly when tearing down
-    // what runs on it would be the most destructive reading of the request.
     expect(of('kubernetes').destroyed).toEqual([]);
   });
 
@@ -842,11 +771,8 @@ describe('disconnect strands rather than stops', () => {
   });
 
   test('a vessel the installation is built on cannot be disconnected', async () => {
-    // Neither pointer is a foreign key, so nothing else would stop this the way
-    // `targets_vessel_id_vessels_id_fk`'s `restrict` stops a vessel with
-    // surfaces from being dropped. The bootstrap paradox is what makes it worth
-    // an explicit guard: disconnecting the boundary this control plane runs on
-    // leaves a process that keeps serving until the next thing it tries to do.
+    // Neither installation pointer is a foreign key, so only this guard stops
+    // the control plane disconnecting the vessel it runs on.
     const { registry } = fakes();
     await connectTarget(clusterInput({ vessel: 'cluster' }), context(registry));
 
@@ -864,8 +790,7 @@ describe('disconnect strands rather than stops', () => {
       expect(result.failure.message).toContain('built on');
     }
 
-    // And refused before the review, so the impact screen never offers a
-    // button that cannot be pressed.
+    // Refused at review too, so the impact screen offers no dead button.
     const review = await disconnectTarget(
       { vessel: 'cluster', adapter: 'kubernetes', confirm: false },
       context(registry),
@@ -899,8 +824,7 @@ describe('reconnect re-adopts via observe', () => {
       context(registry),
     );
 
-    // The adapter is the authority on what is still running. Teach the fake
-    // that the workload survived the disconnect.
+    // The adapter still sees the workload after the disconnect.
     const adapter: DeployAdapter = of('kubernetes');
     (adapter as FakeDeployAdapter).place('ref-1', {
       ref: 'ref-1',
@@ -938,8 +862,7 @@ describe('reconnect re-adopts via observe', () => {
       context(registry),
     );
 
-    // The fake was never told about `ref-1`, so `observe` reports nothing —
-    // which is the honest state, and core must not overwrite it with memory.
+    // The fake never placed `ref-1`, so `observe` reports nothing.
     const result = await connectTarget(input, context(registry));
     if (!result.ok) throw new Error('connect refused');
     expect(result.value.readopted).toEqual([]);
@@ -1058,9 +981,8 @@ describe('listTargets', () => {
       context(registry),
     );
 
-    // The static Target serves `website` and nothing else, so it is a candidate
-    // for one of these two calls and a non-candidate for the other. Resolving
-    // both against the same hardcoded workload is the defect this pins.
+    // The static Target serves only `website`, so one call makes it a
+    // candidate.
     const asWebsite = await listTargets(
       { kind: 'website', reach: 'public', auth: 'none' },
       context(registry),
@@ -1088,9 +1010,8 @@ describe('listTargets', () => {
       context(registry),
     );
 
-    // A partial triple is not a partial answer: placement needs all three, and
-    // filling the gaps with plausible values is what made this command answer
-    // for a workload the caller was not creating.
+    // Placement needs kind, reach and auth, so a partial triple resolves
+    // nothing.
     const result = await listTargets({ kind: 'website' }, context(registry));
     expect(result.ok).toBe(true);
     if (result.ok) {
@@ -1114,19 +1035,15 @@ describe('listTargets', () => {
     expect(result.ok).toBe(true);
     if (!result.ok) return;
 
-    // §9: core mints only where the platform will not, and `kubernetes` is
-    // the one Target here that mints. The boundary is the fixture's real
-    // zones — never `*.<target>.apps.internal`, a domain that appeared
-    // nowhere in the repo, which is the defect this pins.
+    // Core mints names only on `kubernetes`, under the fixture's real zones.
     const k8s = result.value.targets.find((t) => t.adapter === 'kubernetes');
     expect(k8s?.canonical).toBe(
       `*.${zoneFor('private', manifest.dns.zones)} (private) · *.${zoneFor('public', manifest.dns.zones)} (public)`,
     );
     expect(k8s?.canonical).not.toContain('apps.internal');
 
-    // `cloudrun` and `static` name their own workloads (`coreMintsCanonical`
-    // is false for both) — core mints nothing, so the screen must say that
-    // rather than show a suffix no Deploy on either Target will ever use.
+    // `cloudrun` and `static` name their own workloads (`coreMintsCanonical` is
+    // false).
     const cloudrun = result.value.targets.find((t) => t.adapter === 'cloudrun');
     const staticTarget = result.value.targets.find(
       (t) => t.adapter === 'static',
@@ -1134,8 +1051,6 @@ describe('listTargets', () => {
     expect(cloudrun?.canonical).toBeNull();
     expect(staticTarget?.canonical).toBeNull();
 
-    // The same fact carries onto the Place step's options: a caller placing a
-    // Component is told the same boundary about the same Target.
     const cloudrunOption = result.value.options.find(
       (o) => o.adapter === 'cloudrun',
     );
@@ -1143,9 +1058,7 @@ describe('listTargets', () => {
   });
 
   test('collapses the boundary to one zone when private and public agree', async () => {
-    // The common, and live, shape (§9's `DnsZones`): an installation may
-    // point both reaches at the same zone. Two identical clauses joined by
-    // " · " would be true but unreadable, so this pins the collapse.
+    // An installation may point both reaches at one zone.
     const { registry } = fakes();
     await connectTarget(
       clusterInput({ vessel: 'folly-k8s' }),
@@ -1174,9 +1087,6 @@ describe('listTargets', () => {
   });
 
   test('answers the boundaries themselves, with the role each carries', async () => {
-    // The seam between the vessel catalogue and the screen. Both ends are well
-    // covered on their own; without this the payload the Targets surface reads
-    // its checklist section out of is asserted by nothing.
     const { registry } = fakes();
     await connectTarget(cloudInput({ vessel: 'cloud' }), context(registry));
 
@@ -1190,9 +1100,8 @@ describe('listTargets', () => {
   });
 
   test('a vessel’s health is derived from its rows, not read off one', async () => {
-    // Health is not a column, for the reason `target-loop.ts` gives about a
-    // stored derivation going stale. Asserted through the catalogue rather than
-    // by mirroring it: an unmet row is unhealthy, and every row met is healthy.
+    // Health is derived, never stored: any unmet row makes the vessel
+    // unhealthy.
     const { registry } = fakes();
     await connectTarget(cloudInput({ vessel: 'cloud' }), context(registry));
 
@@ -1253,15 +1162,13 @@ describe('a Cloudflare account is a connection, not a Pages connection', () => {
       .from(vessels)
       .where(eq(vessels.name, input.vessel));
 
-    // The inventory is the boundary's, so it is on the boundary's row — not
-    // repeated onto every surface, where two of them could disagree.
+    // The account inventory lives once, on the vessel row.
     expect(vessel?.discovery).toEqual({
       kind: 'cloudflare-account',
       zones: [{ name: 'example.test', id: 'zone-1', status: 'active' }],
       workersSubdomain: 'example-account',
       pagesProjects: ['site'],
     });
-    // And the API root is stated once, on the boundary every surface reaches.
     expect(vessel?.location).toEqual({
       kind: 'cloudflare-account',
       account: 'example-account',
@@ -1270,9 +1177,8 @@ describe('a Cloudflare account is a connection, not a Pages connection', () => {
   });
 
   test('an installation with no Cloudflare credential records that nobody looked', async () => {
-    // The registry has no reader at all, which is an ordinary installation.
-    // The honest row is a document saying so — never an account whose zones
-    // are empty, which is what would send an operator to create one.
+    // With no reader, zones stay null, so the row never claims an empty
+    // account.
     const { registry } = fakes();
     await connectTarget(
       cloudflareInput({ vessel: 'unread' }),

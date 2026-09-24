@@ -1,22 +1,5 @@
-/**
- * Build and Deploy, and the three claims §6 makes about them (Task 19).
- *
- * Every test here targets a sentence that would still "work" if it were false,
- * which is what makes them worth writing:
- *
- * - **Two concurrent deploys of the same Component@Target serialize.** Against a
- *   fake database this passes by accident, because a fake has no concurrency to
- *   get wrong. It is asserted here with **two real Postgres sessions contending
- *   for one row**, which is the only arrangement that can fail.
- * - **A late-finishing older build moves nothing** (§4: "a build records an
- *   artifact rather than deploying one... there is no `SUPERSEDED` verdict to
- *   explain"). Asserted by finishing an older Build *after* a newer one is live
- *   and reading the desired row back.
- * - **Rollback dispatches no build** (§6: "rollback is an ordinary deploy"). The
- *   context's build registry throws if it is so much as consulted, so this is a
- *   claim about what the code path does not contain rather than about what it
- *   returned.
- */
+// Two concurrent deploys of one Component@Target serialize under real Postgres
+// sessions, a late older build moves nothing, and rollback dispatches no build.
 import { describe, expect, test } from 'bun:test';
 import { and, eq } from 'drizzle-orm';
 import type { DeployAdapter } from '../../src/adapters/deploy/contract.ts';
@@ -71,18 +54,11 @@ const manifest = await fixtureManifest();
 const FROZEN = new Date('2024-06-01T00:00:00.000Z');
 const clock: Clock = { now: () => FROZEN };
 
-/** A digest of the right shape, distinct per call. */
 function digest(seed: number): string {
   return `sha256:${seed.toString(16).padStart(64, '0')}`;
 }
 
-/**
- * A registry whose build side is a tripwire.
- *
- * "Rollback dispatches no build" and "creating a Deploy dispatches no build" are
- * negative claims, and a negative claim needs something that fails when it is
- * violated. A `build()` that throws is that something.
- */
+/** `build()` throws unless a route is given, so a path that builds fails. */
 function registryOf(
   deployAdapter: DeployAdapter,
   buildAdapter?: FakeBuildAdapter,
@@ -123,15 +99,7 @@ async function fixture(
   options: {
     kind?: 'service' | 'website';
     adapter?: TargetAdapter;
-    /**
-     * The Component's §9 pair, which the deploy path now filters on.
-     *
-     * Defaulted by the column rather than here — `private` behind the Target's
-     * authenticated edge — because that is what the cluster fixture serves. A
-     * test on a `static` Target has to state `public`: static hosting asserts
-     * `public` and nothing else, so a private Component there is a placement
-     * that was never offered and is now refused where it is released too.
-     */
+    /** The column defaults to `private`; a `static` Target states `public`. */
     reach?: 'none' | 'private' | 'public';
     auth?: 'none' | 'proxy';
   } = {},
@@ -170,8 +138,7 @@ async function fixture(
     app: app!,
     component: component!,
     target: target!,
-    // `<vessel>/<adapter>` — the same label `targetRowLabel` renders into a
-    // refusal message, precomputed here because the row alone cannot say it.
+    // Precomputed, since the row alone cannot render `<vessel>/<adapter>`.
     label: targetLabel({ vessel: vessel.name, adapter }),
   };
 }
@@ -192,21 +159,17 @@ async function succeededBuild(
       artifactType: shape,
       artifactDigest: digest(seed),
       bundleDigest: digest(seed),
-      // Where the bundle was staged. A Build without one cannot be dispatched
-      // at all — a route would have nothing to fetch.
+      // A Build with no staged bundle cannot be dispatched.
       bundleLocation: `https://depot.lolwtf.ca/bundles/${seed}.zip`,
       status: 'SUCCEEDED',
       verifiedBuildLevel,
-      // A signature the pinned verifier will actually admit: §16's gate is
-      // real now, so a placeholder bundle would be refused here exactly as it
-      // would in production.
+      // A signature the pinned verifier admits; a placeholder would be refused.
       signature: testSignature(digest(seed), FROZEN.toISOString()),
     })
     .returning();
   return build!;
 }
 
-/** A Target whose discovery makes it capable, so `artifactTypeFor` agrees. */
 function capableAdapter(): FakeDeployAdapter {
   return new FakeDeployAdapter({ adapter: 'kubernetes' });
 }
@@ -245,8 +208,8 @@ describe('createDeploy writes an intent, and only an intent', () => {
       .from(deploys)
       .where(eq(deploys.id, result.value.deployId));
     expect(row?.phase).toBe('PENDING');
-    // §6: the loop owns every phase after PENDING, so an intent has placed
-    // nothing and carries no adapter handle yet.
+    // The loop owns every phase after PENDING, so an intent has no adapter
+    // handle.
     expect(row?.ref).toBeNull();
     expect(row?.url).toBeNull();
 
@@ -281,9 +244,8 @@ describe('createDeploy writes an intent, and only an intent', () => {
   });
 
   test('a shape the Target does not take needs a rebuild, and says so', async () => {
-    // §3: "changing placement across shapes forces a rebuild." A `files`
-    // artifact against a cluster is that case, caught here rather than as a
-    // deploy that fails on the far side.
+    // A `files` artifact on a cluster needs a rebuild, caught before the far
+    // side.
     const { component, target } = await fixture();
     const build = await succeededBuild(component.id, 2, 'files');
 
@@ -299,10 +261,8 @@ describe('createDeploy writes an intent, and only an intent', () => {
   });
 
   test('an accepted non-preferred shape is admitted — files lands on Vercel', async () => {
-    // The gate is membership in the adapter's accept list, not equality with
-    // the shape a fresh build here would take: Vercel prefers `vercel-output`
-    // for a website and still serves plain `files`, so a static site moving in
-    // from Pages or Firebase ships the artifact it already has.
+    // The gate is membership in the adapter's accept list: Vercel prefers
+    // `vercel-output` and still serves `files`.
     const { component, target } = await fixture({
       kind: 'website',
       adapter: 'vercel',
@@ -329,8 +289,8 @@ describe('createDeploy writes an intent, and only an intent', () => {
   });
 
   test('the inverse still needs the rebuild — vercel-output on a files host', async () => {
-    // A `vercel-output` tar is the Build Output API tree, not the site's own
-    // files; a host that serves bare files has no rendering of it.
+    // A `vercel-output` tar is the Build Output API tree, which a bare files
+    // host cannot serve.
     const { component, target } = await fixture({
       kind: 'website',
       adapter: 'static',
@@ -358,14 +318,9 @@ describe('createDeploy writes an intent, and only an intent', () => {
   });
 
   test('a Component is refused at a reach its Target does not assert', async () => {
-    // §3's filter, asked where the release actually happens. Placement excluded
-    // this Target when the developer was offered it; nothing re-asked when the
-    // Deploy was created, so "the Target says it cannot and it happened anyway"
-    // was the whole of the defect — a declared boundary that was advisory.
+    // Placement filtered this Target out, and the release asks again.
     const { component, target, label } = await fixture();
-    // `auth: 'none'` so this is a claim about reach alone — the authenticated
-    // edge is the test below, and a Component carrying both would be refused
-    // twice and prove neither.
+    // `auth: 'none'` so only reach is refused.
     await database()
       .db.update(components)
       .set({ reach: 'public', auth: 'none' })
@@ -390,10 +345,7 @@ describe('createDeploy writes an intent, and only an intent', () => {
     );
     expect(await desiredRow(component.id, target.id)).toBeUndefined();
 
-    // Rollback shares this gate, and has to: a Component released at a reach
-    // its Target does not serve is the same defect whichever intent wrote it,
-    // and a guard that lived in `createDeploy` alone would leave rollback and
-    // `setConfig` open.
+    // Rollback shares the gate, so no intent can release at that reach.
     const rolled = await rollbackDeploy(
       intent,
       context(registryOf(capableAdapter())),
@@ -404,9 +356,8 @@ describe('createDeploy writes an intent, and only an intent', () => {
       'no way to serve a public address',
     );
 
-    // And it reads the asserted column rather than refusing `public`
-    // categorically: the operator states the tunnel, because §3 says nothing
-    // reports one, and the same call goes through.
+    // The gate reads the asserted column, so once the operator states the
+    // tunnel the call goes through.
     await database()
       .db.update(targets)
       .set({ reaches: ['none', 'private', 'public'] })
@@ -424,9 +375,8 @@ describe('createDeploy writes an intent, and only an intent', () => {
   });
 
   test('a Target with no authenticated edge for a reach refuses a proxied Component', async () => {
-    // §9's half, which no live Component exercises today: the fixture Target
-    // asserts an edge for `private` and serves `public` once the tunnel is
-    // stated, so it can carry a public address and still not authenticate one.
+    // The Target serves `public` once the tunnel is stated, but authenticates
+    // only `private`.
     const { component, target } = await fixture();
     await database()
       .db.update(components)
@@ -471,8 +421,7 @@ describe('createDeploy writes an intent, and only an intent', () => {
     const { component, target } = await fixture({
       kind: 'website',
       adapter: 'static',
-      // What a site on static hosting is: a public address with no runtime to
-      // authenticate anything, which is the only placement that Target offers.
+      // Static hosting offers only a public address with no auth.
       reach: 'public',
       auth: 'none',
     });
@@ -611,8 +560,7 @@ describe('createDeploy writes an intent, and only an intent', () => {
     const { component, target } = await fixture({
       kind: 'website',
       adapter: 'static',
-      // What a site on static hosting is: a public address with no runtime to
-      // authenticate anything, which is the only placement that Target offers.
+      // Static hosting offers only a public address with no auth.
       reach: 'public',
       auth: 'none',
     });
@@ -645,8 +593,7 @@ describe('createDeploy writes an intent, and only an intent', () => {
       ctx,
     );
     expect(placed.ok).toBe(true);
-    // A files artifact has no image signature, so admission never consulted the
-    // signature verifier.
+    // A files artifact has no image signature to verify.
     expect(supplyChain.signatureChecks.admissions).toHaveLength(0);
   });
 
@@ -694,13 +641,8 @@ describe('createDeploy writes an intent, and only an intent', () => {
 });
 
 describe('deployApp selects which Component it acts on', () => {
-  /**
-   * A second Component on the fixture's App — a `job` alongside the fixture's
-   * `service`, the shape that had no path to a Build at all before `deployApp`
-   * could be told which Component it meant. Placed on the fixture's own Target
-   * so `desiredTargets` — not a Deploy history that does not exist yet — is
-   * what resolves `targetId`.
-   */
+  // A `job` beside the fixture's `service`, placed on the fixture's Target so
+  // desiredTargets resolves `targetId`.
   async function secondComponent(appId: string, targetId: string) {
     const db = database().db;
     const [component] = await db
@@ -720,17 +662,8 @@ describe('deployApp selects which Component it acts on', () => {
     return component!;
   }
 
-  /**
-   * The upload a second Component of an **archive** App has to have of its own.
-   *
-   * §15 holds an archive's bytes per Component — `uploadArchive` writes them
-   * onto a Build row — so a sibling that never had one has nothing any route
-   * could fetch, and `deployApp` refuses that rather than writing a Build
-   * `dispatchBuild` closes on sight. These tests are about *which* Component
-   * the press acts on, so the sibling carries the upload that refusal asks for.
-   * `FAILED`, so the press below is still the Build-starting act rather than
-   * the deploy one.
-   */
+  // An archive's bytes are held per Component, so the sibling needs its own
+  // upload. FAILED, so the press still starts a Build.
   async function uploadedBundle(componentId: string, seed: number) {
     const [row] = await database()
       .db.insert(builds)
@@ -760,8 +693,7 @@ describe('deployApp selects which Component it acts on', () => {
 
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    // Nothing was deployable yet for `worker`, so this is the Build-starting
-    // act, not the deploy one.
+    // Nothing was deployable yet, so this starts a Build.
     expect(result.value.phase).toBe('BUILDING');
     expect(result.value.deployId).toBeNull();
 
@@ -770,12 +702,10 @@ describe('deployApp selects which Component it acts on', () => {
       .from(builds)
       .where(eq(builds.id, result.value.buildId));
     expect(started?.componentId).toBe(worker.id);
-    // Its own row, not the one its bundle came off: a rerun writes a new Build
-    // keyed by when it was asked for.
+    // A rerun writes a new Build row.
     expect(started?.id).not.toBe(workerUpload.id);
 
-    // The primary's own Build is untouched — a different Component's deploy
-    // wrote nothing onto it.
+    // The primary's own Build is untouched.
     const primaryRows = await database()
       .db.select()
       .from(builds)
@@ -832,11 +762,8 @@ describe('deployApp selects which Component it acts on', () => {
     expect(result.failure.message).toContain(component.name);
   });
 
-  /**
-   * Placement is a fact `placeComponent` or a first deploy writes, so a
-   * Component that has done neither has none to read back. Naming a Target is
-   * how the first deploy writes it.
-   */
+  // Only placeComponent or a first deploy writes placement, so this one names
+  // the Target.
   test('a first deploy names the Target that placement will remember', async () => {
     const { app, target } = await fixture();
     const db = database().db;
@@ -948,23 +875,15 @@ describe('deployApp selects which Component it acts on', () => {
 });
 
 describe('a move across shapes reaches the Build the refusal asks for (§3)', () => {
-  /**
-   * The remediation loop, end to end: a website with an image-shaped history
-   * moves to static hosting, the deploy at the new placement refuses with
-   * "this placement needs a rebuild", the rebuild stages a *files* Build —
-   * the moved-to Target's shape, not the predecessor's — and deploying it is
-   * admitted. Before the rerun arm derived shape from the placed Target it
-   * inherited the predecessor's, so the Build this refusal prescribes was
-   * unreachable from the Component it refused.
-   */
+  // A website moves from an image Target to static hosting, the refusal asks
+  // for a rebuild, and the rebuild stages the new Target's `files` shape.
   test('move, rebuild into files, deploy admitted', async () => {
     const { app, component, target } = await fixture({
       kind: 'website',
       reach: 'public',
       auth: 'none',
     });
-    // Image-shaped history on a runtime Target, placed and built long enough
-    // ago that the move below is unambiguously the newest placement.
+    // Built earlier, so the move below is the newest placement.
     const before = new Date(FROZEN.getTime() - 60_000);
     await database().db.insert(componentTargetDesired).values({
       componentId: component.id,
@@ -1004,15 +923,14 @@ describe('a move across shapes reaches the Build the refusal asks for (§3)', ()
     expect(moved.ok).toBe(true);
     expect(await desiredRow(component.id, staticTarget!.id)).toBeDefined();
 
-    // The button now acts on the new placement, and refuses with the exact
-    // remediation the rest of this test follows.
+    // The button acts on the new placement and refuses with the remediation.
     const refused = await deployApp({ name: app.name }, ctx);
     expect(refused.ok).toBe(false);
     if (refused.ok) return;
     expect(refused.failure.code).toBe('NOT_DEPLOYABLE');
     expect(refused.failure.message).toContain('needs a rebuild');
 
-    // Following it: the rebuild stages a Build of the *new* Target's shape.
+    // The rebuild stages a Build of the new Target's shape.
     const rebuilt = await deployApp({ name: app.name, rebuild: true }, ctx);
     expect(rebuilt.ok).toBe(true);
     if (!rebuilt.ok) return;
@@ -1045,41 +963,11 @@ describe('a move across shapes reaches the Build the refusal asks for (§3)', ()
   });
 });
 
-/**
- * The reset arm, and the one Build it is not allowed to touch.
- *
- * Pressing the button on a Component whose newest Build is still in flight
- * lands in `deployApp`'s `else` branch, which re-arms that row for the build
- * loop by writing `status: 'PENDING'`, `dispatchId: null`, `leasedAt: null`.
- * Against a `RUNNING` row whose lease is live that revokes a generator's claim
- * without stopping the generator — nothing in this process can — so the build
- * loop dispatches a second one into the same attempt log on its next 500ms
- * tick and whichever finishes last lands the verdict.
- *
- * The claims below are that the fence is a fence and not a wedge: a live lease
- * is refused, an expired one is still reclaimable, and a queued Build — which
- * has no lease to revoke — is re-armed exactly as it always was.
- *
- * §15's dispatcher lands in the same arm through a different door — it names a
- * `commit`, which gives this command an "already in flight, nothing to do here"
- * answer the button has no way to reach — so the same lease question is asked
- * again from that side, where getting it wrong strands a commit rather than
- * doubling a generator. And the fence itself is a check-and-set: the last test
- * lands a claim in the window between the read at the top of the command and
- * the write at the bottom of it, which is the interleaving an in-memory guard
- * cannot see.
- */
+// Re-arming a RUNNING Build with a live lease would revoke its claim without
+// stopping the generator, so a live lease is refused and an expired one is not.
 describe('deployApp will not re-arm a Build a runner still holds', () => {
-  /**
-   * A Build in flight, with its lease stated rather than defaulted.
-   *
-   * `builds.created_at` defaults to the *database's* `now()`, which in a test
-   * is wall clock and therefore newer than every row written at the frozen
-   * clock — so it is set explicitly, relative to `FROZEN`, for the same reason
-   * `leasedAt` is: the refusal compares the lease against `context.clock.now()`
-   * minus `DISPATCH_LEASE_TIMEOUT_MS`, and a lease pinned to wall time would
-   * read as ten minutes in the future of a clock that says 2024.
-   */
+  // `createdAt` and `leasedAt` are relative to `FROZEN`: the lease check reads
+  // the command clock, and the database defaults to wall time.
   async function inFlightBuild(
     componentId: string,
     seed: number,
@@ -1096,9 +984,8 @@ describe('deployApp will not re-arm a Build a runner still holds', () => {
         bundleDigest: digest(seed),
         bundleLocation: `https://depot.lolwtf.ca/bundles/${seed}.zip`,
         status,
-        // The claim `dispatchBuild` writes in one go with `RUNNING` — a
-        // `PENDING` row never carries one, which is exactly what makes it
-        // safe to re-arm.
+        // dispatchBuild writes the claim with RUNNING; a PENDING row never has
+        // one.
         dispatchId: leasedAt === null ? null : `dispatch-${seed}`,
         leasedAt,
         runner: leasedAt === null ? null : 'hosted',
@@ -1127,18 +1014,8 @@ describe('deployApp will not re-arm a Build a runner still holds', () => {
     return row;
   }
 
-  /**
-   * The same fixture as a **repo** App sitting at `commit`.
-   *
-   * A push is the only caller that names a commit, and only a repo App can
-   * have one — an archive's bytes are what a developer uploaded, so there is
-   * no ref for §15's dispatcher to be about. The repository row states the
-   * same commit the press below carries because that is what a pass leaves
-   * behind when it adopts one: `sourceForRerun` reads
-   * `authoritative_commit` on any press that reaches the rerun arm, so a row
-   * disagreeing with the caller would quietly turn these tests into tests
-   * about staging.
-   */
+  // The same fixture as a repo App at `commit`. The repository row names that
+  // commit too, since sourceForRerun reads `authoritative_commit`.
   async function pushedFixture(commit: string) {
     const seeded = await placedFixture();
     const [repository] = await database()
@@ -1162,22 +1039,8 @@ describe('deployApp will not re-arm a Build a runner still holds', () => {
     return { ...seeded, repository: repository! };
   }
 
-  /**
-   * A `db` that lands `claim` inside the command, between its read and its
-   * write.
-   *
-   * The window is real and it is wide: `deployApp` reads the newest Build in
-   * its opening query and writes the reset hundreds of lines later, with a
-   * Target lookup and a network staging possible in between, while
-   * `dispatchBuild` claims `PENDING` rows concurrently by design. Nothing in a
-   * test can make that interleaving happen by luck, so it is made to happen —
-   * the first `UPDATE` the command issues is the reset itself, and this proxy
-   * runs `claim` to completion immediately before that statement executes.
-   *
-   * Every other call passes through untouched, so what runs is the real
-   * command against the real database; the only thing added is *when* the
-   * competing claim commits.
-   */
+  // Runs `claim` to completion just before the command's first UPDATE, the
+  // reset, so a competing claim commits between its read and its write.
   function claimingBeforeItsFirstWrite(
     db: CommandContext['db'],
     claim: () => Promise<unknown>,
@@ -1188,9 +1051,7 @@ describe('deployApp will not re-arm a Build a runner still holds', () => {
       armed = false;
       await claim();
     };
-    // Drizzle's builders are lazy: `.set()`, `.where()` and `.returning()` only
-    // assemble the statement, and awaiting is what runs it. So the wrap follows
-    // the chain and hooks `then`, which is the one moment that matters.
+    // Drizzle builders are lazy and run when awaited, so the wrap hooks `then`.
     const deferring = <T extends object>(builder: T): T =>
       new Proxy(builder, {
         get(target, property) {
@@ -1234,22 +1095,17 @@ describe('deployApp will not re-arm a Build a runner still holds', () => {
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.failure.code).toBe('NOT_BUILDABLE');
-    // The operator has to be able to tell *which* Build is holding the press
-    // off, because the remedy — wait for it, or wait out its lease — is about
-    // that row.
+    // The remedy is about the Build holding the press off, so it is named.
     expect(result.failure.message).toContain(`Build ${running.id}`);
 
-    // The assertion that matters. A refusal that returned the right sentence
-    // and still nulled the claim would pass every message-only check above
-    // while leaving the build loop free to dispatch a second generator into
-    // this attempt's log — which is the whole defect the refusal exists for.
+    // The claim must survive the refusal, or the loop dispatches a second
+    // generator.
     const row = await buildRow(running.id);
     expect(row?.status).toBe('RUNNING');
     expect(row?.dispatchId).toBe('dispatch-80');
     expect(row?.leasedAt?.getTime()).toBe(FROZEN.getTime());
 
-    // And it refused before writing anything else: no second Build was staged,
-    // and the desired row this command would otherwise insert does not exist.
+    // Refused before any write: no second Build and no desired row.
     const rows = await database()
       .db.select()
       .from(builds)
@@ -1260,8 +1116,7 @@ describe('deployApp will not re-arm a Build a runner still holds', () => {
 
   test('a RUNNING Build whose lease has expired is reclaimed, not refused', async () => {
     const { app, component, target } = await placedFixture();
-    // Past the cutoff by a second, so this is unambiguously the expired side
-    // of `DISPATCH_LEASE_TIMEOUT_MS` rather than a boundary coin flip.
+    // A second past the cutoff, clear of the boundary.
     const expired = new Date(
       FROZEN.getTime() - DISPATCH_LEASE_TIMEOUT_MS - 1_000,
     );
@@ -1276,13 +1131,11 @@ describe('deployApp will not re-arm a Build a runner still holds', () => {
     if (!result.ok) return;
     expect(result.value.phase).toBe('BUILDING');
     expect(result.value.deployId).toBeNull();
-    // The same row, re-armed — not a new Build. A rerun would have needed a
-    // freshly staged bundle, which is a different act with different refusals.
+    // The same row, re-armed, not a new Build.
     expect(result.value.buildId).toBe(stale.id);
 
-    // This is what makes the test above a fence rather than a wedge: a runner
-    // that died mid-build leaves a `RUNNING` row nobody holds, and the press is
-    // still the way out of it.
+    // A runner that died leaves a RUNNING row nobody holds, and the press frees
+    // it.
     const row = await buildRow(stale.id);
     expect(row?.status).toBe('PENDING');
     expect(row?.dispatchId).toBeNull();
@@ -1302,10 +1155,8 @@ describe('deployApp will not re-arm a Build a runner still holds', () => {
       context(registryOf(capableAdapter())),
     );
 
-    // The fence keys on `RUNNING` under a live lease, not on "in flight" — a
-    // queued Build has no generator streaming into it, so refusing here would
-    // have turned a press on a Build the loop had not reached yet into a dead
-    // end.
+    // The fence keys on RUNNING under a live lease. A queued Build has no
+    // generator streaming into it.
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.value.phase).toBe('BUILDING');
@@ -1316,7 +1167,7 @@ describe('deployApp will not re-arm a Build a runner still holds', () => {
     expect(row?.dispatchId).toBeNull();
     expect(row?.leasedAt).toBeNull();
 
-    // Re-armed rather than re-staged: the press wrote no second Build row.
+    // Re-armed, not re-staged: the press wrote no second Build row.
     const rows = await database()
       .db.select()
       .from(builds)
@@ -1326,18 +1177,15 @@ describe('deployApp will not re-arm a Build a runner still holds', () => {
   });
 
   test('a push whose runner died reclaims the Build rather than reporting it as building', async () => {
-    // The commit the push is about, and the commit the dead Build was started
-    // for: one row, so the dispatcher's question is about this Build and no
-    // other. `inFlightBuild` names its row `digest(seed)`, which is what makes
-    // the two the same commit.
+    // `inFlightBuild` sets the commit to `digest(seed)`, so the push and the
+    // dead Build share one.
     const commit = digest(83);
     const { app, component, target } = await pushedFixture(commit);
     const dead = await inFlightBuild(
       component.id,
       83,
       'RUNNING',
-      // A lease nobody renewed, past the cutoff by a second — a runner that
-      // died mid-build, which is the only way this state is reachable.
+      // A lease nobody renewed, a second past the cutoff: a runner that died.
       new Date(FROZEN.getTime() - DISPATCH_LEASE_TIMEOUT_MS - 1_000),
     );
 
@@ -1348,15 +1196,11 @@ describe('deployApp will not re-arm a Build a runner still holds', () => {
 
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    // The same row goes back in the queue rather than a second one being
-    // staged: its bundle was already staged for this very commit.
+    // Requeued, not re-staged: its bundle was staged for this commit.
     expect(result.value.buildId).toBe(dead.id);
 
-    // The assertion that matters, and the reason `phase` alone proves nothing
-    // here — a push that reported "still building" answered `BUILDING` too.
-    // `runBuildPass` selects only PENDING rows, so nothing else sweeps a dead
-    // RUNNING row: the reset arm is the only reclaimer, and treating an expired
-    // lease as in-flight wedged this commit for good.
+    // runBuildPass selects only PENDING rows, so the reset arm is the only
+    // reclaimer of a dead RUNNING row.
     const row = await buildRow(dead.id);
     expect(row?.status).toBe('PENDING');
     expect(row?.dispatchId).toBeNull();
@@ -1369,8 +1213,7 @@ describe('deployApp will not re-arm a Build a runner still holds', () => {
       .from(builds)
       .where(eq(builds.componentId, component.id));
     expect(rows).toHaveLength(1);
-    // And the row the loop needs to dispatch against exists, so the reclaim is
-    // a Build that will actually run rather than a status nobody reads.
+    // The loop needs the desired row to dispatch the reclaimed Build.
     expect(await desiredRow(component.id, target.id)).toBeDefined();
   });
 
@@ -1390,10 +1233,7 @@ describe('deployApp will not re-arm a Build a runner still holds', () => {
     expect(result.value.deployId).toBeNull();
     expect(result.value.buildId).toBe(live.id);
 
-    // This is what makes the reclaim above a *lease* check rather than a
-    // deleted guard. A generator is streaming into this attempt's log right
-    // now, so the push has already caused everything it is going to cause, and
-    // the row it would have reset is untouched — claim, runner and all.
+    // A generator is streaming into this attempt, so the row is untouched.
     const row = await buildRow(live.id);
     expect(row?.status).toBe('RUNNING');
     expect(row?.dispatchId).toBe('dispatch-84');
@@ -1401,8 +1241,7 @@ describe('deployApp will not re-arm a Build a runner still holds', () => {
     expect(row?.runner).toBe('hosted');
     expect(row?.logFidelity).toBe('LIVE_TEXT');
 
-    // Nothing at all was written: no second Build of the same commit, and not
-    // even the desired row, because this push had nothing to cause.
+    // Nothing was written, not even the desired row.
     const rows = await database()
       .db.select()
       .from(builds)
@@ -1413,13 +1252,11 @@ describe('deployApp will not re-arm a Build a runner still holds', () => {
 
   test('a claim that lands after the command read the row is not clobbered', async () => {
     const { app, component, target } = await placedFixture();
-    // Queued, so the command's opening read sees a Build with no lease at all
-    // and every in-memory guard it could ask is satisfied.
+    // Queued, so the command's opening read sees no lease.
     const queued = await inFlightBuild(component.id, 85, 'PENDING', null);
 
-    // The interleaving, pinned: `dispatchBuild` claims this row after the
-    // command read it and before the command writes to it. Committed by the
-    // time the reset statement runs, which is the whole of the window.
+    // dispatchBuild claims the row after the command reads it and before it
+    // writes.
     const racing = claimingBeforeItsFirstWrite(database().db, () =>
       database()
         .db.update(builds)
@@ -1438,19 +1275,14 @@ describe('deployApp will not re-arm a Build a runner still holds', () => {
       { ...context(registryOf(capableAdapter())), db: racing },
     );
 
-    // The refusal is itself the proof the claim landed *first*: had it landed
-    // after the reset, the `WHERE` would have matched the PENDING row and this
-    // press would have succeeded.
+    // Had the claim committed after the reset, the press would have succeeded.
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.failure.code).toBe('NOT_BUILDABLE');
     expect(result.failure.message).toContain(`Build ${queued.id}`);
 
-    // The assertion that matters. The condition lives in the `UPDATE`'s own
-    // `WHERE`, so zero rows matched *is* the refusal — a guard read against the
-    // snapshot taken at the top of the command would have passed here and then
-    // clobbered a claim a runner is holding, which is the fence failing in the
-    // one case it exists for.
+    // The condition lives in the UPDATE's WHERE, so zero rows matched is the
+    // refusal.
     const row = await buildRow(queued.id);
     expect(row?.status).toBe('RUNNING');
     expect(row?.dispatchId).toBe('dispatch-85');
@@ -1463,18 +1295,8 @@ describe('deployApp will not re-arm a Build a runner still holds', () => {
 });
 
 describe('concurrency: the locking read (§6)', () => {
-  /**
-   * The load-bearing test, and the reason the harness hands out a second
-   * session.
-   *
-   * §6 rests correctness on "a **locking read** on the desired row", and the
-   * honest way to assert a lock is to **hold it from another session and watch
-   * the command stop**. Firing two commands with `Promise.all` does not do that:
-   * it passes whether or not the `FOR UPDATE` is there, because nothing forces
-   * the two transactions to overlap. This test forces it — the row is locked
-   * before `createDeploy` is called and released only after we have observed it
-   * blocked — so deleting the `FOR UPDATE` makes it fail.
-   */
+  // The row is locked from another session before createDeploy runs, so
+  // dropping FOR UPDATE fails this; a Promise.all race would pass either way.
   test('an intent waits for whoever holds the desired row', async () => {
     const { component, target } = await fixture();
     const first = await succeededBuild(component.id, 60);
@@ -1501,7 +1323,7 @@ describe('concurrency: the locking read (§6)', () => {
       await held;
     });
 
-    // Give the holder time to actually take the lock before contending.
+    // Give the holder time to take the lock before contending.
     await Bun.sleep(100);
 
     let settled = false;
@@ -1514,8 +1336,7 @@ describe('concurrency: the locking read (§6)', () => {
     });
 
     await Bun.sleep(400);
-    // The claim: it is *stopped*, not merely slow-and-lucky. Without the
-    // locking read this command would have committed by now.
+    // Stopped, not slow: without the locking read it would have committed.
     expect(settled).toBe(false);
 
     release();
@@ -1524,7 +1345,7 @@ describe('concurrency: the locking read (§6)', () => {
     const result = await contending;
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    // Having waited, it read the committed state rather than the stale one.
+    // Having waited, it read the committed state, not the stale one.
     expect(result.value.supersededBuildId).toBe(first.id);
 
     const desired = await desiredRow(component.id, target.id);
@@ -1532,21 +1353,8 @@ describe('concurrency: the locking read (§6)', () => {
     expect(desired?.desiredDeployId).toBe(result.value.deployId);
   });
 
-  /**
-   * The check-and-set itself, with the interleaving pinned.
-   *
-   * The previous test proves a contending intent *waits*; it does not prove the
-   * `FOR UPDATE` is what makes it wait, because the closing `UPDATE` takes a row
-   * lock too and would block a second transaction anyway. What only the locking
-   * read gives is **what the second transaction reads**: without it, both read
-   * the desired row before either commits, both see the same stale value, and
-   * the second one's answer about what it superseded is a lie that the row it
-   * finally writes does not contradict.
-   *
-   * So this test holds the first transaction open *past its read* — using the
-   * guard, which runs under the lock — starts the second, and asserts the second
-   * saw the first's write. Deleting `.for('update')` fails it.
-   */
+  // The closing UPDATE's row lock would block a second transaction anyway. Only
+  // the locking read makes the second read what the first wrote.
   test('the second intent reads what the first wrote, not what preceded it', async () => {
     const { component, target } = await fixture();
     const existing = await succeededBuild(component.id, 69);
@@ -1554,10 +1362,8 @@ describe('concurrency: the locking read (§6)', () => {
     const second = await succeededBuild(component.id, 71);
     const registry = registryOf(capableAdapter());
 
-    // The desired row must already exist and be committed. If the two intents
-    // below were both its first writer they would serialize on its unique index
-    // instead — which is correct behaviour, but it is not the locking read, and
-    // a test that cannot tell them apart proves nothing about `FOR UPDATE`.
+    // Committed first, so the intents below serialize on the lock, not on the
+    // unique index.
     await createDeploy(
       { componentId: component.id, targetId: target.id, buildId: existing.id },
       context(registry),
@@ -1566,8 +1372,7 @@ describe('concurrency: the locking read (§6)', () => {
     const preconditions = {
       componentId: component.id,
       targetId: target.id,
-      // Nothing is configured here, and the empty document still has a version
-      // (§10) — "no config" is a state a Deploy is pinned to like any other.
+      // An empty config document still has a version.
       configVersion: await configVersionOf([]),
       desired: aDesiredDocument({ reach: 'private', auth: 'proxy' }),
     };
@@ -1581,8 +1386,7 @@ describe('concurrency: the locking read (§6)', () => {
       release = resolve;
     });
 
-    // First intent: enters the transaction, takes the lock, reads — and then
-    // stops inside the guard, still holding everything.
+    // Takes the lock, reads, then stops inside the guard.
     const holding = placeIntent(
       context(registry),
       { ...preconditions, buildId: first.id },
@@ -1609,10 +1413,7 @@ describe('concurrency: the locking read (§6)', () => {
     expect(a.ok && b.ok).toBe(true);
     if (!a.ok || !b.ok) return;
 
-    // The first superseded what was already there; the second superseded the
-    // first. That pair is only reachable if the second's read happened after the
-    // first's commit — without the locking read, both read `existing` and the
-    // second's answer is stale.
+    // Only reachable if the second read after the first committed.
     expect(a.value.supersededBuildId).toBe(existing.id);
     expect(b.value.supersededBuildId).toBe(first.id);
 
@@ -1622,11 +1423,8 @@ describe('concurrency: the locking read (§6)', () => {
   });
 
   test('two concurrent deploys of one Component@Target serialize', async () => {
-    // The claim under test is that the desired row ends up describing *one* of
-    // the two intents completely — same Build, same Deploy — rather than a torn
-    // pair where one command's Build is left beside the other's Deploy. Only
-    // two real sessions contending on one row can produce the torn state, which
-    // is why this test is worth its Postgres.
+    // The desired row must describe one intent whole, never one command's Build
+    // beside the other's Deploy.
     const { component, target } = await fixture();
     const first = await succeededBuild(component.id, 10);
     const second = await succeededBuild(component.id, 11);
@@ -1658,13 +1456,11 @@ describe('concurrency: the locking read (§6)', () => {
     const winner = [a.value, b.value].find(
       (value) => value.deployId === desired?.desiredDeployId,
     );
-    // The pair is consistent: the desired Build is the one that winning intent
-    // named. A lost update would leave the other command's Build here.
+    // The desired Build is the one the winning intent named.
     expect(winner).toBeDefined();
     expect(desired?.desiredBuildId).toBe(winner!.buildId);
 
-    // Exactly one of them saw the other's write, which is what serialization
-    // means: the loser ran second and read the winner's row under the lock.
+    // Exactly one saw the other's write, having read it under the lock.
     const superseded = [a.value, b.value].map((v) => v.supersededBuildId);
     expect(superseded.filter((value) => value === null)).toHaveLength(1);
     expect(superseded.filter((value) => value !== null)).toHaveLength(1);
@@ -1686,8 +1482,7 @@ describe('§4: a late-finishing older build moves nothing', () => {
 
     const before = await desiredRow(component.id, target.id);
 
-    // Now the older build finishes — late, as §4 allows. It records an artifact
-    // and that is the whole of its effect.
+    // The older build finishes late, and records an artifact only.
     await database()
       .db.update(builds)
       .set({ status: 'PENDING', artifactDigest: null })
@@ -1743,7 +1538,7 @@ describe('§6: rollback is an ordinary deploy', () => {
 
     expect(rolled.ok).toBe(true);
     if (!rolled.ok) return;
-    // A newer intent row pointing at an older Build — §6's definition, verbatim.
+    // A newer intent pointing at an older Build.
     expect(rolled.value.buildId).toBe(older.id);
     expect(rolled.value.supersededBuildId).toBe(newer.id);
     expect(rolled.value.phase).toBe('PENDING');
@@ -1834,8 +1629,8 @@ describe('§4: an uploaded artifact is recorded, never built', () => {
   test('a finished bundle becomes a SUCCEEDED Build with no builder invoked', async () => {
     const { component, target } = await fixture({ kind: 'website' });
 
-    // The registry's `build()` throws. If uploading finished output so much as
-    // looked for a route, this test fails rather than passing quietly.
+    // The registry's `build()` throws, so an upload that looked for a route
+    // fails.
     const result = await uploadArchive(
       {
         componentId: component.id,
@@ -1858,12 +1653,10 @@ describe('§4: an uploaded artifact is recorded, never built', () => {
       .from(builds)
       .where(eq(builds.id, result.value.buildId));
     expect(row?.status).toBe('SUCCEEDED');
-    // §16: the digest is over the uploaded bundle, and it is what names the
-    // artifact — one digest, so the receipt and the provenance have a join.
+    // One digest names both the artifact and the uploaded bundle.
     expect(row?.artifactDigest).toBe(digest(60));
     expect(row?.bundleDigest).toBe(digest(60));
-    // §4: the backend and its fidelity are visible on the Build. There was no
-    // backend, and saying so beats naming a runner that never ran.
+    // No backend ran, so none is named.
     expect(row?.runner).toBeNull();
     expect(row?.logFidelity).toBeNull();
   });
@@ -1891,15 +1684,13 @@ describe('§4: an uploaded artifact is recorded, never built', () => {
       .db.select()
       .from(builds)
       .where(eq(builds.id, result.value.buildId));
-    // Staged, digested, and not yet an artifact — §4's other arm.
+    // Staged and digested, not yet an artifact.
     expect(row?.bundleDigest).toBe(digest(61));
     expect(row?.artifactDigest).toBeNull();
   });
 
   test('a source bundle reaches its builder with the location it was staged at', async () => {
-    // The bug this pins: the staged location was only kept on the supplied arm,
-    // so every source upload handed its route an empty location — a build that
-    // cannot fetch what it is building, with nothing saying so.
+    // The route needs the staged location to fetch the source.
     const { component, target } = await fixture();
     const builder = new FakeBuildAdapter();
     const registry = registryOf(capableAdapter(), builder);
@@ -1931,9 +1722,9 @@ describe('§4: an uploaded artifact is recorded, never built', () => {
     expect(origin.location).toBe(
       'https://depot.lolwtf.ca/bundles/shop-web/63.zip',
     );
-    // §5's scope, per Build: the unwrap is a fact about the uploaded bytes.
+    // The unwrap subpath is a fact about the uploaded bytes.
     expect(origin.subpath).toBe('apps/web');
-    // §16's join reaches the route on every path.
+    // The bundle digest reaches the route on every path.
     expect(builder.built[0]!.source.bundleDigest).toBe(digest(63));
   });
 
@@ -1964,9 +1755,8 @@ describe('§4: an uploaded artifact is recorded, never built', () => {
   });
 
   test('re-uploading identical bytes lands on the same Build', async () => {
-    // §2 keys a Build on (component, commit, target-shape), and for an upload
-    // the bundle digest is the commit. Identical bytes are the same input, so
-    // they are the same row rather than two rows meaning one thing.
+    // For an upload the bundle digest is the commit, so identical bytes are one
+    // Build.
     const { component, target } = await fixture({ kind: 'website' });
     const input = {
       componentId: component.id,
@@ -1985,9 +1775,7 @@ describe('§4: an uploaded artifact is recorded, never built', () => {
     if (!first.ok || !second.ok) return;
     expect(second.value.buildId).toBe(first.value.buildId);
 
-    // And the second upload changed nothing. The bug this pins: an upsert that
-    // wrote on conflict blanked the artifact refs of a Build that had already
-    // succeeded — a finished artifact quietly losing the address it is pulled by.
+    // The second upload must not blank a succeeded Build's artifact refs.
     const [row] = await database()
       .db.select()
       .from(builds)
@@ -2017,8 +1805,7 @@ describe('§4: an uploaded artifact is recorded, never built', () => {
     expect(supplied.ok).toBe(true);
     if (!supplied.ok) return;
 
-    // Same bytes, now claimed to be source. The key is identical, so it lands on
-    // the same row — which must not be demoted out from under a live Deploy.
+    // Same key, so the same row, which must not be demoted under a live Deploy.
     await uploadArchive(
       { ...common, contents: 'source' as const },
       context(registry),
@@ -2088,8 +1875,7 @@ describe('§16: verify → sign → record is fail-closed', () => {
     const builder = new FakeBuildAdapter({
       script: [{ result: { status: 'SUCCEEDED', digest: digest(71) } }],
     });
-    // Provenance verifies, but the signer throws. Core must not record a
-    // successful posture or a signature it never produced.
+    // The signer throws, so no signature or successful posture may be recorded.
     const supplyChain = new SupplyChainHarness();
     supplyChain.signing.failure = new Error('KMS denied the signature');
     const registry = registryOf(capableAdapter(), builder, supplyChain);
@@ -2148,10 +1934,8 @@ describe('§11: an attached Datastore is pinned into the intent', () => {
   }
 
   test('a Datastore with no connection yet refuses the release', async () => {
-    // The operator has not generated the credential, so there is no reference
-    // to render. Released anyway, the App comes up green with the variable it
-    // was configured with missing — which is the state §10's config demand rule
-    // exists to prevent, read for datastores.
+    // With no credential there is no reference to render, and the App would
+    // come up without the variable.
     const { app, component, target } = await fixture();
     await attach(app.id, target.vesselId, 'postgres', null);
     const build = await succeededBuild(component.id, 80);
@@ -2171,9 +1955,8 @@ describe('§11: an attached Datastore is pinned into the intent', () => {
   });
 
   test('a Datastore in another Vessel refuses the release, and says which', async () => {
-    // A `secretKeyRef` cannot leave the namespace it renders in, let alone the
-    // cluster. Released anyway, the pod sits in CreateContainerConfigError and
-    // the Deploy reports a timeout rather than the cause.
+    // A `secretKeyRef` cannot leave its namespace, so the pod would sit in
+    // CreateContainerConfigError.
     const { app, component, target, label } = await fixture();
     const other = await insertVessel(database().db, 'kubernetes', {
       name: `cluster-${crypto.randomUUID()}`,
@@ -2209,20 +1992,15 @@ describe('§11: an attached Datastore is pinned into the intent', () => {
   });
 
   test('a Datastore is reachable from every surface of its vessel', async () => {
-    // The comparison above is boundary to boundary, and this is the case that
-    // proves it: a gcp-project vessel with two surfaces holds its Datastore
-    // once, and a release onto the *other* surface can still reach it. Keyed
-    // on a Target instead, this same release refuses — the drift §11's
-    // boundary reading exists to prevent.
+    // A vessel with two surfaces holds its Datastore once, so a release onto
+    // either surface reaches it.
     const { app, component, target } = await fixture({
       kind: 'website',
       adapter: 'static',
       reach: 'public',
       auth: 'none',
     });
-    // The vessel's second surface, where the engine actually runs. The
-    // Datastore lives on the vessel either way, so this row is scenery — but
-    // it is the scenery a surface-keyed comparison trips over.
+    // The vessel's second surface, where the engine runs.
     await database()
       .db.insert(targets)
       .values(
@@ -2269,10 +2047,8 @@ describe('§11: an attached Datastore is pinned into the intent', () => {
   });
 
   test('the variable each engine is read through is fixed, and pinned resolved', async () => {
-    // This is the assertion that fails if anyone renames the variables, makes
-    // them settable, or routes a datastore back through `ConfigEntry` — which
-    // would put a pinned version on a credential whose rotation the engine's
-    // operator owns.
+    // The engine's operator owns credential rotation, so these variables are
+    // fixed and never config entries.
     const { app, component, target } = await fixture();
     await attach(
       app.id,
@@ -2317,9 +2093,8 @@ describe('§11: an attached Datastore is pinned into the intent', () => {
   });
 
   test('an App with nothing attached pins the document it always pinned', async () => {
-    // Absent, not an empty array: the field is optional so that a `desired`
-    // written before §11's delivery existed reads back identically to one
-    // written now, and nothing has to migrate.
+    // Absent, not empty, so a `desired` written before datastores reads back
+    // the same.
     const { component, target } = await fixture();
     const build = await succeededBuild(component.id, 83);
 

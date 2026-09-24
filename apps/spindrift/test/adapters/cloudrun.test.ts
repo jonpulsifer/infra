@@ -1,24 +1,7 @@
 /**
- * The Cloud Run deploy adapter (Task 28, §6, §8, §9, §16).
- *
- * Every test drives the real adapter against a fake of the runtime's HTTP API
- * (§ Seam 2) and asserts what the project would have been sent, or what the
- * adapter concluded from what it was told. Nothing here reaches core.
- *
- * The claims worth stating up front, because each is a rule §4, §6, §8 or §9
- * makes that a plausible implementation would break:
- *
- * - **The document carries an image and nothing that could cause a build.** The
- *   runtime offers a source-to-image path and taking it would give this
- *   installation a second build engine reachable from one backend only (§4).
- * - **Reach is written before the Service when it tightens** and after it
- *   when it opens, because §9's transitions fail closed.
- * - **Phases come from the revision.** The adapter polls; it never decides that
- *   something is ready.
- * - **`ARTIFACT_UNAVAILABLE` blames the platform**, which is §6's whole reason
- *   for having blame at all: the build is green and the instinct is wrong.
- * - **No egress filtering is advertised** (§8), and `verifiedDeploy` needs an
- *   *enforcing* policy rather than a configured one (§32).
+ * The Cloud Run deploy adapter against a fake runtime API. The document carries
+ * an image and nothing that could build, phases come from the revision, and a
+ * tightening reach writes the policy before the Service.
  */
 import { describe, expect, test } from 'bun:test';
 import { CloudRunDeployAdapter } from '../../src/adapters/deploy/cloudrun/index.ts';
@@ -88,7 +71,6 @@ function desired(overrides: Partial<DesiredState> = {}): DesiredState {
   };
 }
 
-/** The adapter, with the waiting stubbed: the polling is real, the sleep is not. */
 function adapterFor(options: FakeCloudRunOptions = {}): {
   api: FakeCloudRun;
   adapter: CloudRunDeployAdapter;
@@ -130,8 +112,7 @@ describe('§4: never the build-from-source path', () => {
     expect(template.containers[0]?.image).toBe(
       'registry.example.test/shop@sha256:abc',
     );
-    // The runtime would happily accept either of these and build the result,
-    // which is the second engine §4 forbids.
+    // The runtime would build from either of these.
     expect(service).not.toHaveProperty('buildConfig');
     expect(template).not.toHaveProperty('source');
     expect(JSON.stringify(service)).not.toContain('sourceArchive');
@@ -163,12 +144,8 @@ describe('§9: reach and auth reach the runtime as two mechanisms', () => {
   });
 
   test('only a public reach with no auth disables the invoker check', async () => {
-    // The open cell travels as the Service's own `invokerIamDisabled`, never
-    // as an IAM binding: `allUsers` is a principal the org's
-    // domain-restricted sharing refuses (the fake refuses it the same way),
-    // so a public Component that reached for the binding would be red in a
-    // vessel. Every cell still asserts the closed policy — the empty write is
-    // what strips a binding an earlier version of this adapter minted.
+    // The open cell uses `invokerIamDisabled`, since org policy refuses an
+    // `allUsers` binding. The empty policy write strips any existing binding.
     for (const [reach, auth] of [
       ['none', 'none'],
       ['private', 'proxy'],
@@ -192,9 +169,7 @@ describe('§9: reach and auth reach the runtime as two mechanisms', () => {
   });
 
   test('tightening writes the policy before the Service, opening after it', async () => {
-    // §9: "tightening drops public reach first and stays red if the stricter
-    // boundary does not come up." Ordering is the whole of that promise, so it
-    // is asserted on the request log rather than on the end state.
+    // Asserted on the request log, since the end state cannot show the order.
     const tightening = adapterFor();
     await drain(
       tightening.adapter.apply(
@@ -228,9 +203,7 @@ describe('§9: reach and auth reach the runtime as two mechanisms', () => {
   });
 
   test('a deploy whose policy assert fails is red, not quietly open', async () => {
-    // The empty policy is still load-bearing on the public cell: it is what
-    // strips an `allUsers` binding an earlier adapter minted, so a refusal to
-    // write it cannot be shrugged off as cosmetic.
+    // On the public cell the empty policy strips any stale `allUsers` binding.
     const { adapter } = adapterFor({ refuseIam: permissionDenied() });
     const { verdict } = await drain(
       adapter.apply(target(), desired({ reach: 'public', auth: 'none' })),
@@ -242,11 +215,8 @@ describe('§9: reach and auth reach the runtime as two mechanisms', () => {
   });
 
   test('a 404 excuses a policy that grants nothing, and only that one', async () => {
-    // The adapter forgives `404` on a policy write, because a resource that is
-    // not there yet cannot have one and an empty policy is a statement already
-    // true of it. A Service's policy never grants — public reach is the
-    // document's own field — so a `404` on either direction of a Service
-    // deploy is the ordinary case and the deploy proceeds.
+    // A resource not there yet has no policy, and a Service's policy never
+    // grants, so a `404` on either direction proceeds.
     for (const exposure of [
       { reach: 'public', auth: 'none' },
       { reach: 'private', auth: 'none' },
@@ -260,9 +230,8 @@ describe('§9: reach and auth reach the runtime as two mechanisms', () => {
       expect(verdict.phase).toBe('LIVE');
     }
 
-    // The *granting* policy that must not be excused is a scheduled Job's:
-    // its binding is what admits the scheduler's identity, and going green
-    // without it would report a cadence nothing can ever fire.
+    // A scheduled Job's policy grants the scheduler's identity; without it the
+    // cadence could never fire.
     const granting = adapterFor({
       refuseIam: { status: 404, body: { error: { status: 'NOT_FOUND' } } },
     });
@@ -284,8 +253,7 @@ describe('§6: phases come from the revision', () => {
     const { events, verdict } = await drain(adapter.apply(target(), desired()));
 
     expect(verdict.phase).toBe('LIVE');
-    // The default fake reports reconciling first, so an adapter that trusted
-    // its own write would never have seen WAITING.
+    // The default fake reports reconciling before ready.
     const phases = events
       .filter((event) => event.type === 'status')
       .map((event) => (event.type === 'status' ? event.phase : ''));
@@ -296,8 +264,7 @@ describe('§6: phases come from the revision', () => {
   test('the platform names its own, and the name comes back on the verdict', async () => {
     const { adapter } = adapterFor();
     const { verdict } = await drain(adapter.apply(target(), desired()));
-    // §9: core mints nothing here, so a canonical address that core never
-    // supplied must arrive across this seam or the App has no address at all.
+    // Core mints no address for this Target, so the verdict must carry one.
     expect(verdict.phase).toBe('LIVE');
     if (verdict.phase === 'LIVE') {
       expect(verdict.url).toBe('https://shop-web.run.example.test');
@@ -305,8 +272,6 @@ describe('§6: phases come from the revision', () => {
   });
 
   test('a pull failure blames the platform, not the developer', () => {
-    // §6 singles this case out: the build is green and every instinct says
-    // "look at my app".
     const status = cloudRunStatus({
       terminalCondition: {
         type: 'Ready',
@@ -342,8 +307,6 @@ describe('§6: phases come from the revision', () => {
     const { verdict } = await drain(adapter.apply(target(), desired()));
     expect(verdict.phase).toBe('FAILED');
     if (verdict.phase === 'FAILED') {
-      // §12: the diagnosis is persisted because the platform's own retention
-      // will outlive nothing.
       expect(verdict.reason).toBe('UNHEALTHY');
       expect(verdict.debug).toBeDefined();
     }
@@ -370,16 +333,13 @@ describe('§6: phases come from the revision', () => {
 
 describe('the write is asynchronous, and the document is checked', () => {
   test('apply survives the window in which the Service is not there yet', async () => {
-    // The `PATCH` answers with an Operation and the Service is created behind
-    // it, so a `GET` straight afterwards can come back `404`. That is the one
-    // window a *first* deploy is guaranteed to hit, so it is driven here
-    // rather than left to never happen.
+    // The `PATCH` answers with an Operation and creates the Service behind it,
+    // so a `GET` right after a first deploy can come back `404`.
     const { api, adapter } = adapterFor({ createLatencyReads: 3 });
     const { events, verdict } = await drain(adapter.apply(target(), desired()));
 
     expect(verdict.phase).toBe('LIVE');
-    // An absent Service is "still applying", not a failure — so no second
-    // APPLYING lands on the timeline and nothing goes red while it is created.
+    // An absent Service reads as still applying, not a failure.
     const phases = events
       .filter((event) => event.type === 'status')
       .map((event) => (event.type === 'status' ? event.phase : ''));
@@ -394,19 +354,15 @@ describe('the write is asynchronous, and the document is checked', () => {
 
     const write = api.requests.find((request) => request.method === 'PATCH');
     expect(write?.url).toContain('allowMissing=true');
-    // The adapter discards the body today. The `name` is the handle an
-    // operation is polled by, so a fake without one could not tell the moment
-    // anything wanted to.
+    // An operation is polled by its `name`.
     const operation = api.operations[0];
     expect(operation?.name).toMatch(/\/operations\//);
     expect(operation?.done).toBe(false);
   });
 
   test('a Service naming a field the schema does not define is refused', async () => {
-    // Google's protobuf-JSON parsers refuse an unknown member outright. The
-    // rendered document is the single thing standing between this product and
-    // a Cloud Run deploy, and every other test in this file asserts the real
-    // one is *accepted*; this asserts the check is real.
+    // Google's protobuf-JSON parsers refuse an unknown member, and so does the
+    // fake.
     const api = new FakeCloudRun();
     const refused = await api.fetch(
       new Request(
@@ -468,9 +424,7 @@ describe('observe and destroy', () => {
   test('a ref from another project is not read against this one', async () => {
     const { adapter } = adapterFor();
     await drain(adapter.apply(target(), desired()));
-    // An operator may reconnect a Target against a different project; a ref
-    // that did not say which would report somebody else's workload as this
-    // Deploy's.
+    // A Target can be reconnected to a different project.
     const elsewhere = 'projects/other/locations/somewhere/services/shop-web';
     expect(await adapter.observe(target(), elsewhere)).toBeNull();
   });
@@ -496,9 +450,6 @@ describe('§13: one probe, three answers', () => {
   });
 
   test('a disabled service is not a permission problem', async () => {
-    // The remediation is entirely different, and sending an operator to fix a
-    // permission that is already correct is the failure this distinction
-    // exists to prevent.
     const { adapter } = adapterFor({ refuseList: serviceDisabled() });
     const { prerequisites } = await adapter.inspect(target());
     const platform = prerequisites.find((item) => item.name === 'PLATFORM_API');
@@ -534,8 +485,7 @@ describe('§13: one probe, three answers', () => {
       kind: 'carried',
     });
 
-    // The service being off in this project *is* the surface not being there:
-    // no revision can ever be placed, and §14 forbids the one remediation.
+    // With the service off in this project, no revision can be placed.
     const off = adapterFor({ refuseList: serviceDisabled() });
     const disabled = (await off.adapter.inspect(target())).surface;
     expect(disabled.kind).toBe('absent');
@@ -545,11 +495,8 @@ describe('§13: one probe, three answers', () => {
   });
 
   test('a switch off in the billing project is named, and settles nothing here', async () => {
-    // GCP refuses a call whose *consumer* — the project the federated token
-    // bills — has the service off, whatever project the URL names, and its
-    // ErrorInfo names that consumer. The checklist row has to send the
-    // operator there, and the surface stays undetermined: the refusal said
-    // nothing about what example-vessel carries.
+    // GCP refuses a call whose consumer project, the one the token bills, has
+    // the service off, and its ErrorInfo names that project.
     const { adapter } = adapterFor({
       refuseList: serviceDisabled('example-billing'),
     });
@@ -569,11 +516,8 @@ describe('§13: one probe, three answers', () => {
   });
 
   test('but a refusal establishes nothing about what is here', async () => {
-    // The distinction `cloud-discovery.ts` draws between found-empty and
-    // unavailable, applied to a surface: neither of these says the runtime is
-    // absent, and reading them that way would delete a Target over an IAM
-    // grant. A cloud API answers `404` for a project this identity may not see
-    // as readily as for one that is not there, which is why it is here too.
+    // Neither refusal says the runtime is absent, and a cloud API answers `404`
+    // for a project this identity cannot see as readily as for a missing one.
     for (const refuseList of [
       permissionDenied(),
       { status: 404, body: { error: { message: 'no project' } } },
@@ -590,10 +534,7 @@ describe('§8 and §32: what this Target is honest about', () => {
   test('no egress filtering is advertised', async () => {
     const { adapter } = adapterFor();
     const { discovery } = await adapter.inspect(target());
-    // §8's egress control is a by-name allowlist. This backend has network
-    // controls and not that one, and a capability reported on the strength of
-    // something adjacent is a workload placed where its egress was never
-    // constrained.
+    // Egress filtering means a by-name allowlist, which this backend lacks.
     expect(discovery.egressFiltering).toBe(false);
   });
 
@@ -640,17 +581,13 @@ describe('§8 and §32: what this Target is honest about', () => {
     const { discovery } = await adapter.inspect(
       target({ policyEndpoint: undefined }),
     );
-    // Nobody said where to look, so nothing was verified. This is the
-    // direction a claim about verification has to fail in.
     expect(discovery.policyEngine).toEqual({ installed: false, mode: null });
   });
 });
 
 describe('§20: the Datastore capability follows the vessel network', () => {
-  // Derived from one boundary fact rather than probed: both engines sit
-  // behind PSC endpoints in the same vessel network, so its presence gates
-  // both, and its absence is the honest answer for a project serving only
-  // Cloud Run and Firebase Hosting.
+  // Not probed: both engines sit behind PSC endpoints in the vessel network,
+  // so the network's presence gates both.
   test('a vessel with no network cannot host a Datastore', async () => {
     const { adapter } = adapterFor();
     const { discovery } = await adapter.inspect(target());
@@ -694,7 +631,6 @@ describe('§10: config crosses as a pinned reference and never as a value', () =
         version: '3',
       },
     });
-    // There is nothing here that could be a value: core never read one.
     expect(JSON.stringify(document)).not.toContain('"value"');
   });
 });
@@ -714,11 +650,8 @@ describe('the identity a revision runs as', () => {
   });
 
   test('is absent rather than invented where the Target names none', () => {
-    // Not a default composed here: an adapter that picked an identity would be
-    // choosing what the workload may reach. The runtime substitutes the
-    // project's default compute account, and refuses the apply for missing
-    // `iam.serviceAccounts.actAs` on an account nobody named — which is the
-    // failure this field exists to turn into a deliberate choice.
+    // Left out, the runtime falls back to the project's default compute
+    // account and refuses the apply without `iam.serviceAccounts.actAs` on it.
     const document = cloudRunService(desired({}), {
       project: 'example-vessel',
       image: 'registry.example.test/shop@sha256:abc',
@@ -734,10 +667,8 @@ describe('§16: the Service submits to the project’s own admission policy', ()
     const { api, adapter } = adapterFor();
     await drain(adapter.apply(target(), desired()));
 
-    // Cloud Run treats Binary Authorization as a property of the Service: one
-    // that names no policy has none, which is what
-    // `run.allowedBinaryAuthorizationPolicies` refuses. Declaring it is how a
-    // Deploy submits to the check rather than how it escapes one.
+    // Cloud Run treats a Service naming no policy as having none, which
+    // `run.allowedBinaryAuthorizationPolicies` refuses.
     expect(api.service('shop-web')).toHaveProperty('binaryAuthorization', {
       useDefault: true,
     });
@@ -774,7 +705,6 @@ describe('the reach a Target rejects is a state, not a crash', () => {
 });
 
 describe('§3: a job is a Job with no cadence of its own', () => {
-  /** A job, with the only reach nothing routing to it can honestly claim. */
   const job = (overrides: Partial<DesiredState> = {}) =>
     desired({
       component: 'nightly',
@@ -792,9 +722,7 @@ describe('§3: a job is a Job with no cadence of its own', () => {
   };
 
   test('the whole document is the doubled template and nothing else', () => {
-    // Asserted whole rather than field by field, the way the Service document
-    // is: what makes this document right is as much what is absent from it as
-    // what is in it, and only an exact comparison sees an absence.
+    // Asserted whole, since only an exact comparison sees an absence.
     expect(
       cloudRunJob(
         job({
@@ -825,9 +753,8 @@ describe('§3: a job is a Job with no cadence of its own', () => {
           'spindrift-component': 'nightly',
           'spindrift-deploy': 'deploy-1',
         },
-        // `Job.template` is an ExecutionTemplate; its own `template` is the
-        // TaskTemplate. A Service nests once, and rendering that shape here
-        // produces an error that reads like a field-name problem.
+        // `Job.template` is an ExecutionTemplate whose own `template` is the
+        // TaskTemplate; a Service nests once.
         template: {
           serviceAccount: 'runtime@example-vessel.iam.gserviceaccount.com',
           containers: [
@@ -848,9 +775,8 @@ describe('§3: a job is a Job with no cadence of its own', () => {
               resources: { limits: { cpu: '1', memory: '512Mi' } },
             },
           ],
-          // The chart's `backoffLimit: 0` on the same Component's CronJob. The
-          // runtime's own default is 3, so leaving it out would mean one App
-          // retrying on one backend and not on the other.
+          // Matches the chart CronJob's `backoffLimit: 0`; the runtime's
+          // default is 3.
           maxRetries: 0,
         },
       },
@@ -858,9 +784,7 @@ describe('§3: a job is a Job with no cadence of its own', () => {
   });
 
   test('nothing that answers "who may route to this" is rendered', async () => {
-    // `ingress` and a container port are Service concepts: the Job resource has
-    // no `ingress` member and nothing routes to a Job. The fake's closed Job
-    // schema is what refuses them if a renderer reaches for one anyway.
+    // The Job resource has no `ingress` member, and nothing routes to a Job.
     const document = cloudRunJob(job(), RENDER);
     expect(document).not.toHaveProperty('ingress');
     expect(JSON.stringify(document)).not.toContain('containerPort');
@@ -877,17 +801,13 @@ describe('§3: a job is a Job with no cadence of its own', () => {
     expect(api.job('shop-nightly')).toBeDefined();
     expect(api.service('shop-nightly')).toBeUndefined();
     expect(verdict.phase).toBe('LIVE');
-    // §9: core mints nothing. A Job has no `uri` member at all, so the absence
-    // here is the platform saying there is no address rather than core
-    // declining to invent one.
+    // A Job has no `uri` member.
     if (verdict.phase === 'LIVE') expect(verdict.url).toBeUndefined();
   });
 
   test('the Service nesting would be refused by the API, not silently taken', async () => {
-    // The negative half of the first test. Google's protobuf-JSON parsers
-    // reject an unknown member, so a renderer that nested once would fail at
-    // apply with a message about a *name* rather than about a shape — which is
-    // why the fake carries a closed Job schema rather than a `Map.set`.
+    // Google's protobuf-JSON parsers reject an unknown member, so a Job nested
+    // like a Service fails with a message about a field name.
     const { api } = adapterFor();
     const response = await api.fetch(
       new Request(
@@ -911,9 +831,7 @@ describe('§3: a job is a Job with no cadence of its own', () => {
     const { verdict } = await drain(adapter.apply(target(), job()));
     expect(verdict.phase).toBe('LIVE');
 
-    // Nothing stands in front of it, and the closed state is *asserted* rather
-    // than inherited: an empty policy is what makes "removing a schedule
-    // removes the grant" true on the next deploy as well as this one.
+    // The empty policy is written, so removing a schedule removes the grant.
     expect(api.scheduled()).toEqual([]);
     expect(api.jobPolicy('shop-nightly')).toEqual({ policy: { bindings: [] } });
     expect(await api.tick()).toEqual([]);
@@ -923,7 +841,6 @@ describe('§3: a job is a Job with no cadence of its own', () => {
 describe('§7: a schedule on this backend is a second service in front of the Job', () => {
   const RUNTIME = 'runtime@example-vessel.iam.gserviceaccount.com';
 
-  /** A Target that names the identity a fire can authenticate as. */
   const scheduling = () => target({ serviceAccount: RUNTIME });
 
   const nightly = (overrides: Partial<DesiredState> = {}) =>
@@ -941,10 +858,7 @@ describe('§7: a schedule on this backend is a second service in front of the Jo
     const { verdict } = await drain(adapter.apply(scheduling(), nightly()));
     expect(verdict.phase).toBe('LIVE');
 
-    // Asserted whole, the way the two rendered documents are: what makes this
-    // right is as much what is absent — no OIDC token aimed at an audience
-    // nothing verifies, no Pub/Sub target, no body overriding the Job that was
-    // just rendered — as what is present.
+    // Asserted whole, since only an exact comparison sees an absence.
     expect(api.schedule('shop-nightly')).toEqual({
       name: 'projects/example-vessel/locations/somewhere/jobs/shop-nightly',
       schedule: '0 3 * * *',
@@ -961,10 +875,8 @@ describe('§7: a schedule on this backend is a second service in front of the Jo
   });
 
   test('an execution appears that nobody asked for', async () => {
-    // The criterion, as close as a fake gets to it: the fire goes through the
-    // same transport as every other call, carrying the scheduler's identity
-    // rather than the controller's, and it is admitted only because the Job's
-    // own policy admits that account.
+    // The fire authenticates as the runtime account and is admitted only by
+    // the Job's own policy.
     const { api, adapter } = adapterFor();
     const { verdict } = await drain(adapter.apply(scheduling(), nightly()));
 
@@ -993,9 +905,8 @@ describe('§7: a schedule on this backend is a second service in front of the Jo
   });
 
   test('the grant is on the Job, so it cannot run another Component', async () => {
-    // "on the Job and on nothing wider". The runtime account is one identity
-    // shared by every workload in the vessel, so a project-level grant would
-    // let one App's schedule fire another App's job.
+    // Every workload in the vessel shares the runtime account, so a
+    // project-level grant would let one App's schedule fire another's job.
     const { api, adapter } = adapterFor();
     await drain(adapter.apply(scheduling(), nightly()));
     await drain(
@@ -1016,10 +927,8 @@ describe('§7: a schedule on this backend is a second service in front of the Jo
   });
 
   test('dropping the schedule stops the firing, and clears the grant', async () => {
-    // The failure this whole path is shaped against, mirrored: a thing that
-    // keeps acting after nobody declares it. The scheduler job is deleted
-    // *before* the new template lands, so there is no window in which the old
-    // cadence fires the new revision.
+    // The scheduler job is deleted before the new template is applied, so the
+    // old cadence never fires the new revision.
     const { api, adapter } = adapterFor();
     await drain(adapter.apply(scheduling(), nightly()));
     expect(api.scheduled()).toHaveLength(1);
@@ -1046,8 +955,7 @@ describe('§7: a schedule on this backend is a second service in front of the Jo
   });
 
   test('destroy takes the schedule with the Job', async () => {
-    // A scheduler job left behind would keep calling `jobs.run` on something
-    // that is not there — an orphan wearing a second service's uniform.
+    // A scheduler job left behind would keep calling `jobs.run`.
     const { api, adapter } = adapterFor();
     const { verdict } = await drain(adapter.apply(scheduling(), nightly()));
 
@@ -1058,9 +966,7 @@ describe('§7: a schedule on this backend is a second service in front of the Jo
 
   test('re-deploying patches the schedule rather than replacing it', async () => {
     // Cloud Scheduler has no create-or-update: `jobs.create` answers `409` for
-    // a name that exists and `jobs.patch` answers `404` for one that does not.
-    // An adapter that only ever created would go green on the first deploy and
-    // fail on every one after it.
+    // an existing name and `jobs.patch` answers `404` for a missing one.
     const { api, adapter } = adapterFor();
     await drain(adapter.apply(scheduling(), nightly()));
 
@@ -1072,11 +978,8 @@ describe('§7: a schedule on this backend is a second service in front of the Jo
     expect(verdict.phase).toBe('LIVE');
     expect(api.scheduled()).toHaveLength(1);
     expect(api.schedule('shop-nightly')?.schedule).toBe('30 4 * * 1');
-    // And in **one** call, with no DELETE among them. That is the property, not
-    // the call count: deleting first would mean every re-deploy of an unchanged
-    // Component has a window with nothing scheduled, and a create that then
-    // failed would have destroyed a working cadence while core kept the earlier
-    // deploy LIVE — a schedule that silently stopped.
+    // One PATCH and no DELETE first, which would leave a window with nothing
+    // scheduled and let a failed create stop the cadence silently.
     expect(
       api.requests
         .filter((request) => request.path.startsWith('/v1/'))
@@ -1085,9 +988,7 @@ describe('§7: a schedule on this backend is a second service in front of the Jo
   });
 
   test('a Target naming no identity is refused before anything is written', async () => {
-    // A scheduler job with no account is created happily and refused on every
-    // tick — a Component reporting LIVE on a cadence that lands nowhere, which
-    // is the silent drop one indirection further out.
+    // Cloud Scheduler accepts a job with no account and refuses every tick.
     const { api, adapter } = adapterFor();
     const { verdict } = await drain(adapter.apply(target(), nightly()));
 
@@ -1103,10 +1004,8 @@ describe('§7: a schedule on this backend is a second service in front of the Jo
   });
 
   test('a schedule the far side refuses fails the deploy and takes the grant back', async () => {
-    // A cron expression Cloud Scheduler cannot parse is `400 INVALID_ARGUMENT`,
-    // which §6 puts under REJECTED and blames the developer. The Job is up by
-    // then — this is deliberately the last thing `apply` does — so what the
-    // verdict has to say is that the *schedule* did not land.
+    // Cloud Scheduler answers an unparseable cron with `400 INVALID_ARGUMENT`.
+    // The Job is already up, since the schedule is the last thing `apply` does.
     const { api, adapter } = adapterFor();
     const { verdict } = await drain(
       adapter.apply(scheduling(), nightly({ schedule: 'every tuesday' })),
@@ -1118,10 +1017,8 @@ describe('§7: a schedule on this backend is a second service in front of the Jo
       expect(verdict.detail).toContain('every tuesday');
     }
     expect(api.scheduled()).toEqual([]);
-    // And the binding written a moment earlier does not outlive the schedule
-    // that justified it. The runtime account is shared by every workload in the
-    // vessel, so leaving it would leave a Job anything in the vessel may run,
-    // put there by a deploy that visibly failed.
+    // The runtime account is shared by every workload in the vessel, so the
+    // grant must not outlive the failed schedule.
     expect(api.jobPolicy('shop-nightly')).toEqual({ policy: { bindings: [] } });
     const ran = await api.fetch(
       new Request(
@@ -1133,16 +1030,10 @@ describe('§7: a schedule on this backend is a second service in front of the Jo
   });
 
   test('a job that declares no schedule does not depend on Cloud Scheduler', async () => {
-    // The regression this must not become: before schedules existed, deploying
-    // a Cloud Run job made no scheduler call at all. Asserting the removal on
-    // every unscheduled job is right — the adapter holds no memory of the last
-    // deploy — but *failing* on it would make every plain job depend on Cloud
-    // Scheduler being enabled, permitted and reachable. Both are real: Cloud
-    // Scheduler serves a strict subset of Cloud Run's regions, and the project
-    // IAM that grants the role is eventually consistent after its apply.
+    // Clearing an old schedule must not fail a plain job: Cloud Scheduler
+    // serves fewer regions than Cloud Run, and project IAM lags its apply.
     const refusals = [
-      // The service being off is proof there was no scheduler job to remove,
-      // so there is no residue and nothing to say about one.
+      // With the service off there was never a scheduler job to remove.
       { refuseScheduler: serviceDisabled(), residue: false },
       { refuseScheduler: permissionDenied(), residue: true },
       {
@@ -1161,14 +1052,11 @@ describe('§7: a schedule on this backend is a second service in front of the Jo
 
       expect(verdict.phase).toBe('LIVE');
       expect(api.job('shop-nightly')).toBeDefined();
-      // And the grant is gone whatever the scheduler said, which is what makes
-      // the firing stop even where the scheduler job survived: a tick lands on
-      // a Job that no longer admits it.
+      // The grant goes regardless, so a surviving scheduler job cannot fire.
       expect(api.jobPolicy('shop-nightly')).toEqual({
         policy: { bindings: [] },
       });
-      // Tolerated is not the same as unsaid: a residue this deploy could not
-      // clear is on the timeline, which is where an operator finds out.
+      // A residue this deploy could not clear is logged.
       expect(
         events.some(
           (event) =>
@@ -1179,10 +1067,8 @@ describe('§7: a schedule on this backend is a second service in front of the Jo
   });
 
   test('destroy raises what apply tolerates', async () => {
-    // The other side of the same call, and the reason it is one function with
-    // two callers rather than two: `destroy` is the act that has to leave
-    // nothing behind, so a refusal there is a scheduler job that will keep
-    // calling `jobs.run` at a Job that is gone.
+    // A refusal during destroy would leave a scheduler job calling `jobs.run`
+    // at a Job that is gone.
     const { adapter } = adapterFor({ refuseScheduler: permissionDenied() });
     const { verdict } = await drain(adapter.apply(scheduling(), nightly()));
     expect(verdict.phase).toBe('FAILED');
@@ -1194,9 +1080,7 @@ describe('§7: a schedule on this backend is a second service in front of the Jo
   });
 
   test('a project with Cloud Scheduler switched off destroys a plain job', async () => {
-    // The service being off is proof there is no scheduler job in the project:
-    // an API that was never enabled has nothing under it that could have
-    // created one.
+    // An API never enabled holds no scheduler job.
     const { api, adapter } = adapterFor({ refuseScheduler: serviceDisabled() });
     const { verdict } = await drain(
       adapter.apply(scheduling(), nightly({ schedule: undefined })),
@@ -1208,11 +1092,8 @@ describe('§7: a schedule on this backend is a second service in front of the Jo
   });
 
   test('and a refusal that only mentions the words does not count', async () => {
-    // That tolerance is read off the ErrorInfo `reason` and nowhere else.
-    // Google says "this service is off" machine-readably; a refusal whose
-    // reason is `IAM_PERMISSION_DENIED` is a real one however its human message
-    // reads, and swallowing it here would leave the scheduler job firing at a
-    // Job `destroy` went on to delete.
+    // The tolerance reads the ErrorInfo `reason` only, never the human
+    // message.
     const denied = permissionDenied();
     const { adapter } = adapterFor({
       refuseScheduler: {
@@ -1242,8 +1123,6 @@ describe('§7: a schedule on this backend is a second service in front of the Jo
     ).rejects.toThrow('could not be removed');
   });
 
-  // --- §6: what `observe` can say about the half in front of the Job --------
-
   test('observe reports the cadence the platform is actually holding', async () => {
     const { adapter } = adapterFor();
     const { verdict } = await drain(adapter.apply(scheduling(), nightly()));
@@ -1253,9 +1132,7 @@ describe('§7: a schedule on this backend is a second service in front of the Jo
   });
 
   test('a scheduler job deleted out of band reads back as no cadence', async () => {
-    // The whole ticket, in three lines. The Job is untouched — right digest,
-    // `LIVE`, nothing to see — and nothing will ever fire it again. A pass
-    // that read only the Cloud Run resource calls this converged.
+    // The Job looks untouched, but nothing will ever fire it again.
     const { api, adapter } = adapterFor();
     const { verdict } = await drain(adapter.apply(scheduling(), nightly()));
     expect(await api.tick()).toHaveLength(1);
@@ -1270,10 +1147,8 @@ describe('§7: a schedule on this backend is a second service in front of the Jo
   });
 
   test('a job that declares no schedule reads back the same way', async () => {
-    // Deliberately indistinguishable from the test above: the API answers one
-    // `404` for both, and an adapter that guessed which was which would have to
-    // guess from state it does not hold. §6 puts the judgement in core, which
-    // has the declaration to compare against.
+    // The API answers one `404` for both, so core, which holds the
+    // declaration, tells them apart.
     const { adapter } = adapterFor();
     const { verdict } = await drain(
       adapter.apply(scheduling(), nightly({ schedule: undefined })),
@@ -1284,9 +1159,7 @@ describe('§7: a schedule on this backend is a second service in front of the Jo
   });
 
   test('a service reports no cadence at all, rather than an absent one', async () => {
-    // Absent, not `null`. A Service has no firing half, so `null` would say
-    // "something that should be firing this is gone" about every website in
-    // the installation, forever.
+    // `null` would mean a cadence is gone, and a Service never had one.
     const { adapter } = adapterFor();
     const { verdict } = await drain(adapter.apply(target(), desired()));
 
@@ -1296,11 +1169,8 @@ describe('§7: a schedule on this backend is a second service in front of the Jo
   });
 
   test('a refusal that does not prove absence is not reported as absence', async () => {
-    // `null` is what makes core announce that a cadence stopped, so only the
-    // two answers that *prove* nothing is there may produce it. A `403`, an
-    // expired token, an unreachable API: every one of those is "I could not
-    // tell", and reporting it as absence would turn a blip into a false alarm
-    // about a schedule that is still firing perfectly well.
+    // `null` makes core announce a stopped cadence, so only an answer that
+    // proves absence may produce it.
     const api = new FakeCloudRun();
     const denied = permissionDenied();
     const adapter = new CloudRunDeployAdapter({
@@ -1331,7 +1201,6 @@ describe('the ref an adapter hands back names its own collection', () => {
   const job = () =>
     desired({ component: 'nightly', kind: 'job', reach: 'none', auth: 'none' });
 
-  /** The shape of every ref written before jobs existed. */
   const LEGACY_SERVICE_REF =
     'projects/example-vessel/locations/somewhere/services/shop-web';
 
@@ -1351,10 +1220,8 @@ describe('the ref an adapter hands back names its own collection', () => {
   });
 
   test('a Service ref written before jobs existed still round-trips', async () => {
-    // Every ref in the database today says `services`. `observe` and `destroy`
-    // are handed one with no kind beside it, so a parser that had learned only
-    // `/jobs/` would orphan every running Service — nothing would read it and
-    // nothing would delete it.
+    // Stored Service refs carry no kind beside them, so the parser must still
+    // read `/services/`.
     const { api, adapter } = adapterFor();
     const { verdict } = await drain(adapter.apply(target(), desired()));
     expect(verdict.ref).toBe(LEGACY_SERVICE_REF);
@@ -1456,14 +1323,8 @@ describe('runtime log tail', () => {
 });
 
 /**
- * A job's runs (§17).
- *
- * A Job here is triggered by nothing, so an execution exists exactly when
- * something asked for one — `jobs.run` is that asking, and its `Operation`
- * carries the Execution the runtime named. The reading half is the sub-
- * collection, and the log half is the filter that a Service's would never
- * match: a run's entries are `cloud_run_job`, keyed on `job_name` and labelled
- * with the execution, none of which a `cloud_run_revision` filter selects.
+ * A Job runs only when `jobs.run` asks, and a run's log entries are
+ * `cloud_run_job`, which a `cloud_run_revision` filter never selects.
  */
 describe('a job is run, and its runs are read', () => {
   const JOB_REF =
@@ -1471,7 +1332,6 @@ describe('a job is run, and its runs are read', () => {
   const job = () =>
     desired({ component: 'nightly', kind: 'job', reach: 'none', auth: 'none' });
 
-  /** One `Execution` as the API returns it. */
   function execution(
     name: string,
     fields: Record<string, unknown>,
@@ -1490,8 +1350,8 @@ describe('a job is run, and its runs are read', () => {
 
     expect(started.kind).toBe('started');
     if (started.kind !== 'started') return;
-    // The short name, which is the only form the log filter's own
-    // `execution_name` label carries.
+    // The short name, the only form the log filter's `execution_name` label
+    // carries.
     expect(started.execution.name).toBe('shop-nightly-1');
     expect(started.execution.outcome).toBe('running');
     expect(api.pathsOf('POST')).toContain(
@@ -1500,9 +1360,8 @@ describe('a job is run, and its runs are read', () => {
   });
 
   test("sends this run's parameters as the execution's container override", async () => {
-    // `jobs.run` takes `overrides.containerOverrides[].env` — the runtime's
-    // own per-execution knob, so the Job's template is untouched and the next
-    // scheduled fire does not inherit a parameter this run was given.
+    // A per-execution override leaves the Job's template untouched, so the
+    // next scheduled fire does not inherit this run's parameters.
     const { api, adapter } = adapterFor();
     await drain(adapter.apply(target(), job()));
 
@@ -1543,9 +1402,8 @@ describe('a job is run, and its runs are read', () => {
   });
 
   test('reads the names a run was started with back into its line, never the values', async () => {
-    // The execution's template is the Job's with the override folded in, and
-    // a plain `value` on it can only be a parameter: `workloadContainer`
-    // delivers every variable as a pinned reference (§10).
+    // Config variables arrive as pinned references, so a plain `value` on the
+    // execution's template can only be a run parameter.
     const { adapter } = adapterFor({
       executions: {
         'shop-nightly': [
@@ -1648,12 +1506,8 @@ describe('a job is run, and its runs are read', () => {
   });
 
   test('reads past the page it wants, because the API orders nothing', async () => {
-    // `projects.locations.jobs.executions.list` documents no ordering and takes
-    // no `orderBy`, so a page of `limit` is `limit` arbitrary runs. Asking for
-    // exactly what the screen shows and sorting the reply is correct only if
-    // the API happens to answer newest-first: seeded oldest-first, that reads
-    // the same ten stale runs forever and a run started by the button is never
-    // on the list. The page asked for is a ceiling, `limit` is what to report.
+    // `executions.list` documents no ordering and takes no `orderBy`, so the
+    // adapter reads past `limit`, sorts, and reports `limit`.
     const oldestFirst = Array.from({ length: 14 }, (_, index) =>
       execution(`shop-nightly-${index + 1}`, {
         startTime: `2026-08-${String(index + 1).padStart(2, '0')}T00:00:00Z`,
@@ -1708,8 +1562,7 @@ describe('a job is run, and its runs are read', () => {
     expect(page.kind).toBe('stream');
     if (page.kind !== 'stream') return;
     expect(page.entries.map((entry) => entry.line)).toEqual(['backing up']);
-    // A run has tasks rather than revisions, and a column reading `unknown` for
-    // every line a job ever writes is what a revision-shaped read produces.
+    // A run has tasks, not revisions.
     expect(page.entries[0]?.replica).toBe('task 0');
     expect(filters[0]).toContain('resource.type="cloud_run_job"');
     expect(filters[0]).toContain('resource.labels.job_name="shop-nightly"');
@@ -1766,9 +1619,8 @@ describe('restart', () => {
     expect(service.template.containers[0]?.image).toBe(
       'registry.example.test/shop@sha256:abc',
     );
-    // One masked write carrying the annotations and nothing else: the
-    // runtime copies the rest of the template forward, so nothing here is a
-    // second render of the revision that could disagree with the first.
+    // The runtime copies the rest of the template forward, so the masked write
+    // carries annotations only.
     const masked = api.requests.filter(
       (request) =>
         request.method === 'PATCH' && request.url.includes('updateMask'),

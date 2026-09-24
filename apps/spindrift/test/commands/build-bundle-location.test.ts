@@ -1,12 +1,5 @@
-/**
- * What a build route is handed as its bundle location (ticket 23).
- *
- * §15 stages one immutable bundle "for either builder", and the durable address
- * of that bundle is a `gs://` object nothing without a Google credential can
- * resolve. Turning it into something the builder can fetch is `dispatchBuild`'s
- * job; getting it wrong is a build that dies at `curl` and blames the developer
- * for it.
- */
+// A `gs://` bundle needs a Google credential to fetch, so dispatch hands the
+// route a signed URL instead.
 import { beforeEach, describe, expect, test } from 'bun:test';
 import { eq } from 'drizzle-orm';
 import { dispatchBuild } from '../../src/commands/builds/dispatch.ts';
@@ -154,9 +147,6 @@ describe('the bundle location a route is dispatched with', () => {
   });
 
   test('a depot address reaches the route as a URL curl can follow', async () => {
-    // Handing the route the stored location verbatim is what this rules out: it
-    // is not always a URL, and `curl` answers "Protocol upload not supported or
-    // disabled in libcurl" before the build reads a line of the App's code.
     const context = withFederation(signable);
     const build = await seedBuild(DEPOT_LOCATION);
 
@@ -176,9 +166,7 @@ describe('the bundle location a route is dispatched with', () => {
   });
 
   test('an archive source is resolved the same way a repository one is', async () => {
-    // Build 9 was `origin.type = repo` and still carried an `upload://`
-    // location, because §15 stages one bundle for either builder. Both arms
-    // read the same column, so both arms have to be resolved here.
+    // Both source kinds stage one bundle and read the same column.
     const context = withFederation(signable);
     const build = await seedBuild(DEPOT_LOCATION, 'archive');
 
@@ -194,8 +182,8 @@ describe('the bundle location a route is dispatched with', () => {
   });
 
   test('the signed URL never lands on the operator-visible attempt log', async () => {
-    // It is a bearer capability with a short TTL. The log records the object,
-    // which is the thing an operator actually wants to look up anyway.
+    // The signed URL is a short-lived bearer capability; the log records the
+    // object.
     const context = withFederation(signable);
     const build = await seedBuild(DEPOT_LOCATION);
     await dispatchBuild({ buildId: build.id, route: 'hosted' }, context);
@@ -221,11 +209,7 @@ describe('the bundle location a route is dispatched with', () => {
   });
 
   test('refuses a pre-depot handle instead of handing it to curl', async () => {
-    // Build 10, verbatim. `upload://` names the web pod's own disk and is
-    // deliberately not a URL, which makes it precisely what this function exists
-    // to catch — and it was the one scheme it let through, so the refusal
-    // arrived as `curl: (1) Protocol "upload" not supported or disabled in
-    // libcurl` on a hosted runner instead of as a sentence before dispatch.
+    // `upload://` names the web pod's own disk and is not a URL curl can fetch.
     const context = withFederation(signable);
     const build = await seedBuild(`upload://${BUNDLE_DIGEST.slice(7)}`);
 
@@ -245,11 +229,8 @@ describe('the bundle location a route is dispatched with', () => {
   });
 
   test('the refusal lands where the operator is already looking', async () => {
-    // `runBuildPass` keeps the successes and drops everything else, so a
-    // refusal that is only returned is a Build stuck PENDING with nobody told
-    // why, retried every second. This one is written to the attempt log and
-    // closes the Build out, because the location is a column on the row and no
-    // later tick will make it fetchable.
+    // runBuildPass drops refusals and the location never becomes fetchable, so
+    // the refusal is logged and the Build closed out.
     const context = withFederation(signable);
     const build = await seedBuild('upload://3f5cbbc2ced9');
 
@@ -264,7 +245,7 @@ describe('the bundle location a route is dispatched with', () => {
     );
     const terminal = events.find((event) => event.eventType === 'status');
     expect(terminal?.phase).toBe('FAILED');
-    // §6: nothing the developer wrote caused this. Spindrift held the location.
+    // The platform held the location, so the developer is not to blame.
     expect(terminal?.reason).toBe('ARTIFACT_UNAVAILABLE');
     expect(terminal?.blame).toBe('platform');
 
@@ -276,9 +257,8 @@ describe('the bundle location a route is dispatched with', () => {
   });
 
   test('a federation gap leaves the Build for the next tick', async () => {
-    // The mirror of the case above: nothing is wrong with this row, so the
-    // Build stays PENDING and an operator who configures federation gets it
-    // dispatched rather than having to press anything again.
+    // Nothing is wrong with the row, so once federation is configured a later
+    // tick dispatches it.
     const context = withFederation(null);
     const build = await seedBuild(DEPOT_LOCATION);
 
@@ -292,9 +272,8 @@ describe('the bundle location a route is dispatched with', () => {
   });
 
   test('tells an archive App to upload again rather than to redeploy', async () => {
-    // §15: "repo bundles are ephemeral, archives durable." Only one of the two
-    // can be produced a second time from something Spindrift holds, so only one
-    // of them is told to deploy again.
+    // Only a repo bundle can be staged again from the repository; an archive
+    // has to be uploaded again.
     const context = withFederation(signable);
     const build = await seedBuild('upload://3f5cbbc2', 'archive');
 
@@ -312,9 +291,8 @@ describe('the bundle location a route is dispatched with', () => {
   });
 
   test('refuses a location wearing no scheme at all', async () => {
-    // Nothing stages one — a bundle is a `gs://` object or an `upload://`
-    // handle — so this only ever arrives from a row somebody wrote by hand, and
-    // `curl bundles/site.zip` is not a fetch either.
+    // Nothing stages a bundle without a scheme; only a hand-written row has
+    // one.
     const context = withFederation(signable);
     const build = await seedBuild('bundles/site.zip');
 
@@ -328,8 +306,8 @@ describe('the bundle location a route is dispatched with', () => {
   });
 
   test('refuses rather than dispatching a location no route could resolve', async () => {
-    // Dispatching anyway is exactly what produced build 9: a green runner, a
-    // dead `curl`, and a developer sent to debug a Dockerfile that never ran.
+    // Dispatching anyway would end at curl on the runner, blamed on the
+    // developer.
     const context = withFederation(null);
     const build = await seedBuild(DEPOT_LOCATION);
 

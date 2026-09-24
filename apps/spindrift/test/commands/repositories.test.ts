@@ -1,12 +1,6 @@
 /**
- * `connectRepository` (Task 24, §15).
- *
- * The command is the whole of user stories 18 and 19: connecting a repository
- * is "**a thing I review and merge rather than a thing that happens to my
- * repo**", and "**only the default-branch merge of that PR becomes
- * authoritative**". Both are asserted here as facts about the row the command
- * wrote — `authoritativeCommit` is null when it returns, and stays null however
- * many times it is called.
+ * `connectRepository` opens a configuration pull request and adopts nothing:
+ * `authoritativeCommit` stays null however many times it runs.
  */
 import { describe, expect, test } from 'bun:test';
 import { eq } from 'drizzle-orm';
@@ -88,13 +82,7 @@ async function context(
   };
 }
 
-/**
- * The escape hatch, as an input: an operator asserting the proposal.
- *
- * Most tests here are about the transaction rather than about detection, and
- * an override is the way to hold detection still while asserting on what the
- * pull request wrote. The detection path has its own tests below.
- */
+/** An operator override, so detection holds still in pull request tests. */
 const input = (fake: FakeGitHub) => ({
   fullName: fake.fullName,
   overrides: [
@@ -120,7 +108,6 @@ describe('connecting a repository', () => {
       fullName: fake.fullName,
       defaultBranch: 'main',
       pullRequest: 1,
-      // Stated rather than omitted: opening the pull request adopted nothing.
       authoritativeCommit: null,
     });
 
@@ -137,7 +124,6 @@ describe('connecting a repository', () => {
       configPullRequest: 1,
     });
 
-    // The default branch is untouched; the transaction is on its own branch.
     expect(fake.head('main')).toBe(base);
     const written = fake.filesAt(fake.head(CONFIG_BRANCH) ?? '');
     expect(Object.keys(written).sort()).toEqual(
@@ -159,12 +145,8 @@ describe('connecting a repository', () => {
   });
 
   test('keys the row on the name the host answers with, not the one typed', async () => {
-    // The host answers any spelling — and a renamed repository's old name —
-    // with the canonical `full_name` in the body. The row's unique key is
-    // neither case-insensitive nor rename-aware, and the repo loop rewrites it
-    // to the host's spelling on its next pass; a row keyed on the typed one
-    // would be a second row for the same repository, and the one that pass
-    // then cannot rename onto.
+    // GitHub answers any spelling or old name with the canonical `full_name`;
+    // the row's unique key is case-sensitive and rename-blind.
     const fake = new FakeGitHub({ fullName: 'Example/App' });
     fake.commitFiles('main', { 'README.md': 'unconnected' });
     fake.rename('example/app');
@@ -191,19 +173,14 @@ describe('connecting a repository', () => {
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.failure.code).toBe('NOT_FOUND');
-    // GitHub answers a repository that does not exist and one the installation
-    // does not select identically, so the sentence names both rather than
-    // asserting an existence nothing established.
+    // GitHub answers a missing repository and an unselected one identically.
     expect(result.failure.message).toContain('does not exist');
     expect(result.failure.message).toContain('repository selection');
-    // Nothing was written on the way to refusing.
     expect(await database().db.select().from(repositories)).toEqual([]);
   });
 
-  // The creation wizard connects on Deploy, against a repository it has
-  // already read successfully on this screen. A quota window answering
-  // `NOT_FOUND` there contradicts the list the operator picked from, and a raw
-  // HTTP body is not a sentence anybody can act on.
+  // The wizard connects a repository it just listed, so NOT_FOUND would be
+  // wrong.
   test('a quota refusal is not a missing repository', async () => {
     const fake = new FakeGitHub();
     fake.rateLimited = true;
@@ -252,9 +229,7 @@ describe('connecting a repository', () => {
       },
     });
 
-    // The schema's word ("null means repositories cannot be connected") is the
-    // command's word too: a repository connected without a build route is
-    // connected to nothing, so nothing is written at all.
+    // A null `buildWorkflow` means repositories cannot be connected.
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.failure.code).toBe('NOT_DEPLOYABLE');
@@ -281,8 +256,7 @@ describe('connecting a repository', () => {
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.value.pullRequest).toBeNull();
-    // Fail open, but never silently: the result names the failure, so a null
-    // pull request is distinguishable from one that was never needed.
+    // The error tells a failed pull request from one that was never needed.
     expect(result.value.pullRequestError).toContain('pull request error');
 
     const [row] = await database()
@@ -322,8 +296,7 @@ describe('connecting a repository', () => {
     fake.commitFiles('main', { 'README.md': 'unconnected' });
     const loop = await context(fake);
 
-    // The registry validates and the handler trusts — the same split every
-    // other command takes, which is why the handler holds no schema of its own.
+    // The registry validates input; the handler holds no schema of its own.
     const refused = await dispatch(
       'connectRepository',
       { fullName: 'not-a-full-name', scopes: [] },
@@ -334,7 +307,6 @@ describe('connecting a repository', () => {
       expect(refused.failure.code).toBe('INVALID_INPUT');
       expect(refused.failure.issues?.length).toBeGreaterThan(0);
     }
-    // Refused before the far side was reached at all.
     expect(fake.requests).toEqual([]);
 
     const accepted = await dispatch('connectRepository', input(fake), loop);
@@ -343,13 +315,8 @@ describe('connecting a repository', () => {
 });
 
 /**
- * Connecting with nothing but a name (§5, story 25).
- *
- * The point of these is that the *command* detects. A browser that sent back
- * what a screen showed it would be authoring domain state and would write
- * whatever was on screen when the tab was opened; the connect resolves the
- * default branch again and reads the repository at that commit, so the file it
- * writes is a statement about the code that is there now.
+ * The command detects at the default branch's current head, so the file it
+ * writes describes the code there now.
  */
 describe('connecting a repository without being told what is in it', () => {
   test('detects the root and writes the Spindrift file it implies', async () => {
@@ -370,8 +337,7 @@ describe('connecting a repository without being told what is in it', () => {
       ['README.md', 'go.mod', WORKFLOW_PATH, SPINDRIFT_FILE].sort(),
     );
     expect(written[SPINDRIFT_FILE]).toContain('kind: service');
-    // The pull request names the detector, not a person, so a reviewer can tell
-    // which of the two proposed it.
+    // The body says whether detection or an operator proposed the file.
     expect(fake.pulls[0]?.body).toContain('detection');
   });
 
@@ -397,13 +363,8 @@ describe('connecting a repository without being told what is in it', () => {
 
     expect(result.ok).toBe(true);
     const written = fake.filesAt(fake.head(CONFIG_BRANCH) ?? '');
-    // `apps/lib` is a library. It is passed over rather than connected, and
-    // passing over seven of nine directories is the ordinary monorepo case —
-    // refusing the whole connect over them would make discovery useless.
-    //
-    // `apps/api` is a Go service and the workspace declaration says nothing
-    // about it, which is exactly why discovery does not stop at that
-    // declaration: a repository is not one ecosystem's package list.
+    // `apps/lib` is a library and is skipped. `apps/api` has no package.json,
+    // so discovery reads past the workspace list.
     expect(
       Object.keys(written)
         .filter((path) => path.endsWith(SPINDRIFT_FILE))
@@ -433,8 +394,7 @@ describe('connecting a repository without being told what is in it', () => {
     await connectRepository({ fullName: fake.fullName }, await context(fake));
 
     const written = fake.filesAt(fake.head(CONFIG_BRANCH) ?? '');
-    // Detection would have said `service`. The file says `job` and the file
-    // wins (§5) — including here, where Spindrift is writing the file back.
+    // Detection would say `service`; the authored file wins.
     expect(written[SPINDRIFT_FILE]).toContain('kind: job');
   });
 
@@ -451,8 +411,8 @@ describe('connecting a repository without being told what is in it', () => {
     if (result.ok) return;
     expect(result.failure.code).toBe('NOT_DEPLOYABLE');
     expect(result.failure.message).toContain('nothing it knows how to build');
-    // A row with no scope is a connection to nothing: the repo loop would
-    // reconcile it forever and never find an App.
+    // The repo loop would reconcile a scopeless row forever and never find an
+    // App.
     expect(await database().db.select().from(repositories)).toEqual([]);
     expect(fake.pulls).toEqual([]);
   });
@@ -508,22 +468,20 @@ describe('inspecting a repository before connecting it', () => {
         reason: 'Go — go.mod is in this directory',
         frontend: 'railpack',
         dockerfile: null,
-        // Both halves of a zero-config build travel with the proposal, so the
-        // creation screen can render the `spindrift.yaml` this scope will get
-        // rather than compose one from a subset of it.
+        // Both zero-config build fields travel, so the screen can render the
+        // full file.
         buildCommand: null,
         outputDirectory: null,
         watchPaths: ['.', 'go.mod'],
         configured: false,
-        // The kinds detection ruled out travel with the proposal, so the
-        // creation flow can render them disabled wearing their reason (§3).
+        // Ruled-out kinds carry a reason, so the creation flow can show them
+        // disabled.
         unavailable: {
           website: 'Go projects build a program, not a directory of files',
           job: 'jobs are asserted, never inferred',
         },
       },
     ]);
-    // Read-only: no branch was cut, no pull request opened, no row written.
     expect(fake.head(CONFIG_BRANCH)).toBeUndefined();
     expect(fake.pulls).toEqual([]);
     expect(await database().db.select().from(repositories)).toEqual([]);
@@ -548,8 +506,7 @@ describe('inspecting a repository before connecting it', () => {
     if (!result.ok) return;
     expect(result.value.scopes[0]).toMatchObject({
       outcome: 'detected',
-      // Still a website. An nginx-plus-files image that lost its static
-      // rendering is the exact failure §5 names.
+      // A Dockerfile sets the frontend, never the kind.
       kind: 'website',
       frontend: 'dockerfile',
       dockerfile: 'Dockerfile',
@@ -610,17 +567,14 @@ describe('inspecting a repository before connecting it', () => {
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.failure.code).toBe('NOT_FOUND');
-    // GitHub answers a repository that does not exist and one the installation
-    // does not select identically, so the sentence names both rather than
-    // asserting an existence nothing established.
+    // GitHub answers a missing repository and an unselected one identically.
     expect(result.failure.message).toContain('does not exist');
     expect(result.failure.message).toContain('repository selection');
   });
 
   test('a quota refusal is not a missing repository', async () => {
-    // §15 splits `RATE_LIMITED` from `ACCESS_LOST` precisely so that an hour's
-    // quota is never read as a repository that is gone. Collapsing them here
-    // sends an operator to check an installation that is fine.
+    // `RATE_LIMITED` and `ACCESS_LOST` stay apart, so a spent quota never reads
+    // as a lost repository.
     const fake = new FakeGitHub();
     fake.rateLimited = true;
 
@@ -633,8 +587,6 @@ describe('inspecting a repository before connecting it', () => {
     if (result.ok) return;
     expect(result.failure.code).not.toBe('NOT_FOUND');
     expect(result.failure.message).toContain('rate-limiting');
-    // And no response body: the far side answers a refusal with JSON or with
-    // somebody's error page, and neither is a sentence.
     expect(result.failure.message).not.toContain('rate limit exceeded');
     expect(result.failure.message).not.toContain('failed with');
   });
@@ -669,8 +621,6 @@ describe('inspecting a repository before connecting it', () => {
 
     await inspectRepository({ fullName: fake.fullName }, await context(fake));
 
-    // One recursive listing for the whole scan, not one per scope: this is
-    // what makes inspection something a screen can do while somebody watches.
     expect(
       fake.requests.filter((request) => request.path.includes('/git/trees/')),
     ).toHaveLength(1);
@@ -706,9 +656,8 @@ describe('listRepositories', () => {
   });
 
   test('a repository the host would not answer about is listed, and says so', async () => {
-    // Listing refreshes every connected repository from the host. One that
-    // fails must not empty the screen — and must not pass for current either,
-    // because the commit beside it is then older than it looks.
+    // Listing refreshes each repository from the host, so a failure marks it
+    // stale.
     const fake = new FakeGitHub();
     fake.commitFiles('main', { 'README.md': 'unconnected' });
     await connectRepository(input(fake), await context(fake));
@@ -735,8 +684,8 @@ describe('listRepositories', () => {
       .set({ authoritativeCommit: adopted })
       .where(eq(repositories.id, connected.value.repositoryId));
 
-    // Somebody pushes, and then somebody opens this screen before the loop's
-    // next tick. Refreshing the row must not consume that push.
+    // A push the loop has not adopted yet. Refreshing the row must not adopt
+    // it.
     const pushed = fake.commitFiles('main', { 'README.md': 'pushed' });
 
     const result = await listRepositories({}, await context(fake));
@@ -749,9 +698,6 @@ describe('listRepositories', () => {
       .where(eq(repositories.id, connected.value.repositoryId));
     expect(row?.authoritativeCommit).toBe(adopted);
     expect(row?.authoritativeCommit).not.toBe(pushed);
-    // The field says "last reconciled", and the screen must not claim a commit
-    // nothing has dispatched: `pushed` has had no build and no deploy, and the
-    // only thing that will give it one is a pass that adopts it.
     expect(result.value.repos[0]?.lastReconciledSha).toBe(adopted);
   });
 
@@ -796,8 +742,8 @@ describe('listRepositories', () => {
         repositoryId: '99',
         fullName: 'example/available',
         defaultBranch: 'trunk',
-        // The manifest's repository host, not the public one: an enterprise
-        // installation clones from its own, and the browser reads no manifest.
+        // From the manifest's repository host, which an enterprise installation
+        // sets.
         cloneUrl: 'https://git.example.test/example/available.git',
         rowExists: false,
       },

@@ -1,16 +1,7 @@
 /**
- * The App workspace states which routes it can build on (§4, §16).
- *
- * `getAppWorkspace` used to say nothing about `apps.buildRoute` at all — the
- * picker had no read to draw from. This pins the two facts the read has to
- * get right: every configured route comes back judged against the placed
- * Target's minimum level alone, and choosing one narrows what `routeForTarget`
- * picks at dispatch without narrowing what this list still offers to switch
- * to — the read calls `buildRouteFor` with no App id, deliberately, for
- * exactly that reason (`commands/apps/workspace.ts`).
- *
- * The fixture installation ranks `hosted` (github-actions, L2) first, then
- * `managed` (cloud-build, L3), then `local` (in-cluster, L1).
+ * The build routes the App workspace offers, each judged against the placed
+ * Target's minimum level. The fixture ranks `hosted` (L2), `managed` (L3),
+ * `local` (L1).
  */
 import { describe, expect, test } from 'bun:test';
 import { eq } from 'drizzle-orm';
@@ -105,7 +96,7 @@ async function placedApp(
 describe('the workspace read on build routes', () => {
   test('offers every configured route, judged against the placed Target’s minimum level', async () => {
     const ctx = context();
-    const app = await placedApp(ctx, null); // unset, so §16's default L2 applies
+    const app = await placedApp(ctx, null); // unset, so the default L2 applies
 
     const result = await getAppWorkspace({ name: app.appName }, ctx);
 
@@ -153,11 +144,8 @@ describe('the workspace read on build routes', () => {
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.value.workspace.buildRoute).toBe('managed');
-    // Every route is still offered on its own merits — an App that has chosen
-    // `managed` can still see `hosted` as an eligible route to switch to,
-    // which `buildRouteFor` would instead refuse as "not-admitted" had this
-    // read passed the App's id and let its own choice narrow the candidates
-    // the way dispatch does.
+    // The read passes no App id to `buildRouteFor`, so the App's choice does
+    // not narrow what it can switch to.
     expect(
       result.value.workspace.buildRouteOptions.map((option) => option.name),
     ).toEqual(['hosted', 'managed', 'local']);

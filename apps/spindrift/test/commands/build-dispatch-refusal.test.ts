@@ -1,20 +1,5 @@
-/**
- * What a refused dispatch tells the operator (ticket 25).
- *
- * `runBuildPass` is `if (result.ok) dispatched += 1`: it keeps the successes and
- * drops everything else. So a refusal made before the claim reaches nobody
- * unless dispatch writes it down first, and the Build sits PENDING being refused
- * again once a second in silence.
- *
- * That is not hypothetical. Build 13 sat PENDING for two hours over a missing
- * `roles/iam.serviceAccountTokenCreator` binding while the true sentence was
- * composed once a second and thrown away every time; it was named in the end by
- * reading Terraform, not by anything Spindrift said.
- *
- * Two dispositions, separated by whether a later tick can clear the refusal —
- * and a suppression rule, because the honest fix to a silent 1Hz loop is a
- * chatty one.
- */
+// runBuildPass drops every refusal, so dispatch writes each one to the attempt
+// log itself, once per distinct sentence.
 import { beforeEach, describe, expect, test } from 'bun:test';
 import { asc, desc, eq } from 'drizzle-orm';
 import { dispatchBuild } from '../../src/commands/builds/dispatch.ts';
@@ -49,7 +34,7 @@ const BUNDLE_DIGEST =
   'sha256:3f5cbbc2ced964573220535fc887677dcb768b9d56b4931c415db44402440b03';
 const DEPOT_LOCATION = `gs://bluenose-spindrift-source/${BUNDLE_DIGEST.slice(7)}.tgz`;
 
-/** Federation that impersonates but cannot sign — build 13's 403, verbatim in shape. */
+/** Federation that impersonates, then gets a 403 from signBlob. */
 function cloudThatCannotSign() {
   return async (request: Request): Promise<Response> => {
     if (request.url.includes(':signBlob')) {
@@ -209,9 +194,8 @@ describe('a dispatch refusal the operator can see', () => {
 
   describe('a refusal no later tick can clear', () => {
     test('closes the Build out rather than retrying it forever', async () => {
-      // A Build with no staged bundle location. Nothing about a later tick
-      // stages one — staging happens where the Build is created — so leaving it
-      // PENDING would be a row refused once a second until the table is dropped.
+      // Staging happens where the Build is created, so no later tick supplies a
+      // location.
       const context = withFederation(FEDERATION);
       const build = await seedBuild({ location: null });
 
@@ -243,7 +227,7 @@ describe('a dispatch refusal the operator can see', () => {
         .limit(1);
       expect(status?.eventType).toBe('status');
       expect(status?.phase).toBe('FAILED');
-      // Spindrift held the bundle. Nothing the developer wrote caused this.
+      // The platform held the bundle, so the developer is not to blame.
       expect(status?.reason).toBe('ARTIFACT_UNAVAILABLE');
       expect(status?.blame).toBe('platform');
     });
@@ -251,9 +235,8 @@ describe('a dispatch refusal the operator can see', () => {
 
   describe('a refusal a later tick can clear', () => {
     test('leaves the Build PENDING and records what it is waiting on', async () => {
-      // The mirror of the case above, and the one that cost the hours: nothing
-      // is wrong with this row, so an operator who configures federation gets
-      // it dispatched without pressing anything again.
+      // Nothing is wrong with the row, so once federation is configured a later
+      // tick dispatches it.
       const context = withFederation(null);
       const build = await seedBuild();
 
@@ -285,10 +268,8 @@ describe('a dispatch refusal the operator can see', () => {
     });
 
     test('records the signing failure build 13 sat two hours in', async () => {
-      // Federation is configured and impersonation works; `signBlob` is the one
-      // call that is refused, because `workloadIdentityUser` carries
-      // `getAccessToken` and not `iam.serviceAccounts.signBlob`. The location is
-      // a good one, so this is a fact about the installation and not the row.
+      // Impersonation works but signBlob is refused, as with only
+      // workloadIdentityUser granted.
       const context = withFederation({
         ...FEDERATION,
         fetch: cloudThatCannotSign(),
@@ -301,7 +282,7 @@ describe('a dispatch refusal the operator can see', () => {
       expect(row.status).toBe('PENDING');
       const [line] = await linesFor(context, build.id);
       expect(line).toContain('could not mint a signed URL');
-      // The object, so an operator can go look it up. Never the signed URL.
+      // The object, never the signed URL.
       expect(line).toContain(DEPOT_LOCATION);
       expect(line).not.toContain('X-Goog-Signature');
     });
@@ -325,8 +306,7 @@ describe('a dispatch refusal the operator can see', () => {
     });
 
     test('a Target threshold no route meets names the Target and the route', async () => {
-      // §16: "the level is a threshold, then admin rank wins." Both halves are
-      // configuration, so this waits rather than closing out.
+      // The threshold and the routes are both configuration, so this waits.
       await ctx.db
         .update(targets)
         .set({ minBuildLevel: 3 })
@@ -346,9 +326,8 @@ describe('a dispatch refusal the operator can see', () => {
     });
 
     test('a Target no configured route can serve is recorded by the loop itself', async () => {
-      // `runBuildPass` selects the route and skips the Build when there is
-      // none, so this refusal never reaches `dispatchBuild` at all. Skipping
-      // silently is the same disease with a different call site.
+      // runBuildPass skips a Build with no route before dispatchBuild runs, so
+      // the loop records the refusal.
       const context = {
         ...withFederation(FEDERATION),
         adapters: { ...ctx.adapters, build: () => null },
@@ -367,9 +346,7 @@ describe('a dispatch refusal the operator can see', () => {
 
   describe('repeat suppression', () => {
     test('a Build refused every tick is written down once', async () => {
-      // The loop runs at 1Hz and the refusal is durable, so the naive fix is a
-      // log line a second. An operator wants to know a Build is waiting and
-      // what on — not to read it several thousand times.
+      // The loop runs at 1Hz and the refusal is durable, so it is written once.
       const context = withFederation(null);
       const build = await seedBuild();
 
@@ -392,9 +369,7 @@ describe('a dispatch refusal the operator can see', () => {
     });
 
     test('a refusal that changes is news, and is written again', async () => {
-      // Suppression is per sentence, not per Build: an operator who configures
-      // federation and then hits the signing gap has been told two different
-      // true things, and the second one is the one they need.
+      // Suppression is per sentence, not per Build.
       const build = await seedBuild();
       const unconfigured = withFederation(null);
       const unsigned = withFederation({
@@ -414,9 +389,8 @@ describe('a dispatch refusal the operator can see', () => {
     });
 
     test('a Build that dispatches stops waiting, so a later refusal reports again', async () => {
-      // The claim clears the sentence. Without that, a Build whose lease expires
-      // and is refused a second time would be suppressed against a sentence from
-      // an attempt that is over.
+      // The claim clears the sentence, so a later refusal is not suppressed
+      // against an attempt that is over.
       const build = await seedBuild();
       const unconfigured = withFederation(null);
       const configured = withFederation({

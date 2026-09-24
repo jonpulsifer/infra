@@ -1,17 +1,6 @@
 /**
- * `ClusterDnsPublisher` (§9).
- *
- * The same shape every other adapter test takes (§ Seam 2): the real
- * publisher against a fake of the cluster's HTTP API, asserting what a
- * cluster would have been sent.
- *
- * - **Shaped like the chart's own `DNSEndpoint`.** The `externaldns.k8s.io`
- *   `crd` source reads both the same way, so a divergence here is a
- *   divergence a cluster would actually see.
- * - **`publish` converges, never mints a sibling.** A second `publish` under
- *   the same handle is a server-side apply of the same object.
- * - **`withdraw` is idempotent**, over both a name that was published and one
- *   that never was.
+ * `ClusterDnsPublisher` against a fake cluster API. Its `DNSEndpoint` matches
+ * the chart template's, since external-dns's `crd` source reads both.
  */
 import { describe, expect, test } from 'bun:test';
 import { KubernetesApi } from '../../src/adapters/deploy/kubernetes/api.ts';
@@ -78,8 +67,6 @@ describe('publish', () => {
         },
       ],
     });
-    // A server-side apply, not a merge patch — the same idempotence proof
-    // every other Kubernetes write in this codebase carries.
     expect(fake.requests.at(-1)?.contentType).toBe(
       'application/apply-patch+yaml',
     );

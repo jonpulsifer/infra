@@ -1,20 +1,5 @@
-/**
- * Changing a Component's reach (54, §9).
- *
- * Three claims, and the middle one is the reason this file exists rather than a
- * pair of assertions on a row:
- *
- * - **The grid rule holds on the edit.** `reach: none` with `auth: proxy` was
- *   unsayable at creation and sayable nowhere else, because nowhere else could
- *   say it. It has to stay unsayable now that an edit can.
- * - **A Component edited between an intent and its attempt does not
- *   retroactively change what that attempt places.** `deploys.reach` and
- *   `deploys.auth` were written for this and have never had an edit path to
- *   defend against; a pin nobody has watched hold is not one.
- * - **The next release renders the new answer.** Asserted through `appValues` —
- *   the App chart's own values — because "the edit changed something" is only
- *   true if the thing it changed is what the chart is applied with.
- */
+// A reach edit keeps the grid rule, never changes an attempt already pinned,
+// and renders on the next release.
 import { describe, expect, test } from 'bun:test';
 import { eq } from 'drizzle-orm';
 import { appValues } from '../../src/adapters/deploy/kubernetes/values.ts';
@@ -164,9 +149,8 @@ describe('the grid an edit may express is the grid a creation may (§9)', () => 
   test('a Component with no route has nothing to authenticate in front of', async () => {
     const { component } = await fixture();
 
-    // Through `dispatch`, because the refusal is the schema's rather than the
-    // handler's: it has to be reachable from the surface a browser calls, and
-    // it has to name the field an operator would go and change.
+    // Through `dispatch`, because the schema refuses it and must name the
+    // field.
     const refused = await dispatch(
       'setComponentReach',
       { componentId: component.id, reach: 'none', auth: 'proxy' },
@@ -180,7 +164,6 @@ describe('the grid an edit may express is the grid a creation may (§9)', () => 
       path: 'auth',
       message: AUTH_NEEDS_A_ROUTE,
     });
-    // Nothing was written on the way to being refused.
     const row = await componentRow(component.id);
     expect(row?.reach).toBe('private');
     expect(row?.auth).toBe('proxy');
@@ -237,10 +220,8 @@ describe('the edit writes a Component and leaves a Deploy to be pressed', () => 
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.value.pendingRelease).toEqual([label]);
-    // §9 keeps exposure out of the mutable-in-place category: the act wrote a
-    // row and asked the platform for nothing. A second `apply` here would be
-    // this command deciding to re-place a live release nobody pressed Deploy
-    // for — which is the whole difference between a settings toggle and this.
+    // Exposure is not mutable in place: the act writes a row and applies
+    // nothing.
     expect(adapter.applied).toHaveLength(1);
     const written = await database()
       .db.select()
@@ -255,17 +236,14 @@ describe('a Component edited mid-attempt does not change what is being placed', 
     const { component, target, build } = await fixture('private', 'proxy');
     const adapter = new FakeDeployAdapter({ adapter: 'kubernetes' });
     const adapters = registryOf(adapter);
-    // The tunnel an operator states, because §3 says nothing reports one. This
-    // test moves the Component to `public` and presses Deploy, and the deploy
-    // path now filters on the asserted reach — so a Target that claims no
-    // public address would refuse the second release rather than render it.
+    // Nothing reports a tunnel, so the operator asserts one. Without a public
+    // reach, the second release would be refused.
     await database()
       .db.update(targets)
       .set({ reaches: ['none', 'private', 'public'] })
       .where(eq(targets.id, target.id));
 
-    // The intent, pinned at `private` + `proxy` — and then the edit, before
-    // the loop has claimed it. This is the window `deploys.reach` exists for.
+    // Pinned at private + proxy, then edited before the loop claims it.
     const first = await createDeploy(
       { componentId: component.id, targetId: target.id, buildId: build.id },
       context(adapters),
@@ -286,16 +264,11 @@ describe('a Component edited mid-attempt does not change what is being placed', 
     );
     expect(placing.reach).toBe('private');
     expect(placing.auth).toBe('proxy');
-    // The name too, not only the two fields: §9 mints the canonical name into
-    // the zone chosen *per reach*, so an attempt whose reach moved under it
-    // would place a route for a hostname in the wrong zone.
+    // The canonical name is minted into the zone for its reach, so it pins too.
     expect(placing.hostnames).toContain(
       `shop-web.${zoneFor('private', manifest.dns.zones)}`,
     );
 
-    // Now press Deploy. The same Build, the same Target, and a release that
-    // renders something else — which is the whole of what "a reach change is a
-    // deploy" means.
     const second = await createDeploy(
       { componentId: component.id, targetId: target.id, buildId: build.id },
       context(adapters),
@@ -315,15 +288,8 @@ describe('a Component edited mid-attempt does not change what is being placed', 
       `shop-web.${zoneFor('public', manifest.dns.zones)}`,
     );
 
-    // And the pin is on the row: each Deploy records the reach it was placed
-    // with, so the history says what was published when.
-    //
-    // It does **not** mean a rollback republishes it. `DesiredDocument` states
-    // the rule — a rollback restores how the artifact ran, never where it
-    // answered — so `reach` and `auth` come from the Component as it is today.
-    // Restoring an older reach would be a rollback quietly re-exposing a
-    // Component somebody made private, during an incident. What this asserts is
-    // the record, not a replay.
+    // Each Deploy records the reach it was placed with. A rollback still takes
+    // reach and auth from the Component as it is today.
     const rows = await database()
       .db.select()
       .from(deploys)

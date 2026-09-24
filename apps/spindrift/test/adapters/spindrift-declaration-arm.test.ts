@@ -1,17 +1,6 @@
 /**
- * The zero-config arm reading `spindrift.yaml`, run as the workflow ships it.
- *
- * §5's authority is only real if it reaches the builder, and the builder is
- * reached by a `docker run` inside a shell script — so the assertion has to be
- * about the argv that invocation receives and the file it points at, not about
- * a TypeScript function standing in for either. The step's own `run:` is
- * executed here against real trees with a recording `docker` on PATH (the same
- * reasoning as `dockerfile-context-arm.test.ts`, which cannot reach this arm
- * because it stops where docker starts).
- *
- * Two readers, one document: this shell reader and `parseSpindriftFile`. Every
- * case below asserts they agree, so the runner cannot come to honour a command
- * core never adopted, or drop one it did.
+ * Runs the shipped zero-config arm over real trees with a recording `docker`,
+ * and checks the shell reader agrees with `parseSpindriftFile`.
  */
 import { describe, expect, test } from 'bun:test';
 import {
@@ -32,13 +21,11 @@ const WORKFLOW = join(
 );
 const FRONTEND_STEP = 'Choose the frontend';
 const SUBPATH = 'apps/view-counter';
-/** The demo's own declaration, so this test fails if that file stops fixing it. */
 const VIEW_COUNTER = join(
   import.meta.dir,
   '../../../../apps/view-counter/spindrift.yaml',
 );
 
-/** The `run:` script of the named step, straight out of the shipped file. */
 async function frontendScript(): Promise<string> {
   const document = Bun.YAML.parse(await Bun.file(WORKFLOW).text()) as {
     jobs: { build: { steps: { name?: string; run?: string }[] } };
@@ -51,20 +38,14 @@ async function frontendScript(): Promise<string> {
 }
 
 type ArmRun = {
-  /** Exit status of the shipped step. */
   code: number;
-  /** Everything the step said, on either stream. */
+  /** stdout followed by stderr. */
   output: string;
-  /** Every argument the step handed `docker`, one per element. */
   dockerArgv: string[];
-  /** The generated railpack config, or null when the step wrote none. */
+  /** Null when the step wrote no railpack config. */
   config: unknown;
 };
 
-/**
- * Run the shipped arm over one tree with a `docker` that records rather than
- * runs, and hand back what the builder would have been given.
- */
 async function runArm(
   files: Readonly<Record<string, string>>,
 ): Promise<ArmRun> {
@@ -126,7 +107,6 @@ async function runArm(
   }
 }
 
-/** What the shell reader made of a declaration, and what the parser did. */
 async function declared(document: string): Promise<{
   run: ArmRun;
   parsed: string | null;
@@ -142,7 +122,6 @@ async function declared(document: string): Promise<{
   };
 }
 
-/** The command the generated config would give railpack, or null for none. */
 function configuredCommand(run: ArmRun): string | null {
   if (run.config === null) return null;
   const config = run.config as {
@@ -171,20 +150,18 @@ describe('the zero-config arm of “Choose the frontend”', () => {
   test('a declared command reaches railpack as a config file, in string form', async () => {
     const { run, parsed } = await declared(RAILPACK('go build -o out ./cmd'));
     expect(run.code).toBe(0);
-    // Relative on purpose: railpack joins the path under the app source, so
-    // `/out/...` would resolve to `/scope/out/...` and not be found.
+    // railpack joins the path under the app source, so it must be relative.
     expect(run.dockerArgv).toContain('--config-file');
     expect(run.dockerArgv.at(-1)).toBe('../out/railpack-config.json');
-    // String, not `{cmd: …}`: BuildKit argv-splits the object form, so `a && b`
-    // would reach the builder as a literal argument to `a`.
+    // A string, since BuildKit argv-splits the `{cmd: …}` form and `a && b`
+    // would pass `&&` to `a` as an argument.
     expect(configuredCommand(run)).toBe('go build -o out ./cmd');
     expect(configuredCommand(run)).toBe(parsed);
   });
 
   test('the demo App’s own declaration is the one that names its package', async () => {
-    // Not a fixture. If `apps/view-counter/spindrift.yaml` stops carrying the
-    // command, the zero-config build goes back to compiling a package archive
-    // and calling it a success — the defect this whole arm exists to refuse.
+    // The real file. Without its command, railpack compiles a package archive
+    // and calls it a success.
     const { run, parsed } = await declared(
       await readFile(VIEW_COUNTER, 'utf8'),
     );
@@ -203,9 +180,7 @@ describe('the zero-config arm of “Choose the frontend”', () => {
   });
 
   test('no `spindrift.yaml` at all builds exactly as it did before', async () => {
-    // The path every App that has never been adopted takes. `--config-file`
-    // hard-fails when its file is absent, so passing it here would turn every
-    // one of those builds red.
+    // `--config-file` fails when its file is absent.
     const run = await runArm({});
     expect(run.code).toBe(0);
     expect(run.dockerArgv).not.toContain('--config-file');
@@ -213,10 +188,6 @@ describe('the zero-config arm of “Choose the frontend”', () => {
   });
 
   test('a dockerfile declaration states no railpack command and is not read for one', async () => {
-    // This scope reaches railpack only because it has no Dockerfile to build
-    // — the arm above already took every scope that does. Reading `.command`
-    // without checking the frontend would honour a field this document does
-    // not have.
     const document = [
       'version: 1',
       'component:',
@@ -235,10 +206,8 @@ describe('the zero-config arm of “Choose the frontend”', () => {
   });
 
   test('a malformed declaration fails the build rather than guessing', async () => {
-    // Core refuses to advance an App's authoritative commit past a file it
-    // could not parse, so this should be unreachable — which is exactly why it
-    // must be loud if it ever happens rather than silently building the shape
-    // the operator wrote the file to correct.
+    // Core never advances an App's commit past an unparseable file, so this
+    // is reachable only when something is already wrong.
     const run = await runArm({
       [`${SUBPATH}/spindrift.yaml`]:
         'build:\n  frontend: railpack\n   nope: [\n',
@@ -248,9 +217,7 @@ describe('the zero-config arm of “Choose the frontend”', () => {
   });
 
   test('quotes, newlines and command substitution survive as data', async () => {
-    // `jq --arg` is what makes the operator's string a JSON value rather than
-    // syntax. `$(…)` has to arrive at the builder unexpanded and unevaluated:
-    // this step runs on the runner, and nothing the declaration says may run
+    // This step runs on the runner, so nothing in the declaration may execute
     // here.
     const hostile = 'go build -o out ./cmd # "x" $(id) `id` $HOME';
     // A YAML double-quoted scalar, which is what JSON.stringify produces.
@@ -261,9 +228,7 @@ describe('the zero-config arm of “Choose the frontend”', () => {
   });
 
   test('a multi-line command stays one command and forges no output line', async () => {
-    // The workflow's own outputs are `key=value` lines in a file this step
-    // appends to. A declaration that reached `$GITHUB_OUTPUT` could write any
-    // of them; this one never goes near it.
+    // A newline reaching `$GITHUB_OUTPUT` could forge any `key=value` output.
     const document = [
       'version: 1',
       'component:',
@@ -285,9 +250,7 @@ describe('the zero-config arm of “Choose the frontend”', () => {
   });
 
   test('a single quote is refused rather than silently re-split', async () => {
-    // railpack wraps a string command as `"sh -c '" + cmd + "'"` with no
-    // escaping, so `echo it's fine` becomes a command that runs something
-    // else. Red build, named reason.
+    // railpack wraps a string command as `sh -c '<cmd>'` with no escaping.
     const { run } = await declared(RAILPACK("echo it's fine"));
     expect(run.code).not.toBe(0);
     // An `::error::` annotation, on stdout, which is where Actions reads them.

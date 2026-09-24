@@ -1,16 +1,3 @@
-/**
- * `configureInstallation` (§20, ticket 32).
- *
- * The act this command exists for is the one nothing could do before it: change
- * a value in the installation manifest without destroying the database. So the
- * assertions here are about the row and the Target table, not the return value —
- * a command that reported a manifest it never stored would pass a test of its
- * own output.
- *
- * The refusals matter as much as the writes. A manifest is valid or it is not,
- * and an installation that accepted a half-valid one could reach the point
- * where it places a workload with a key missing.
- */
 import { describe, expect, test } from 'bun:test';
 import { configureInstallation } from '../../src/commands/installation/configure.ts';
 import type { Clock, CommandContext } from '../../src/commands/types.ts';
@@ -82,8 +69,6 @@ describe('configuring an installation', () => {
 
   test('reconciles the Targets the written manifest declares', async () => {
     await seed();
-    // The act that can create a Target without anyone naming one. A write that
-    // skipped reconciliation would leave it declared and absent.
     const rows = await database().db.query.targets.findMany({
       with: { vessel: true },
       orderBy: (targets, { asc }) => [asc(targets.rank)],
@@ -124,10 +109,8 @@ describe('configuring an installation', () => {
 
   test('refuses header authentication this deployment cannot enforce', async () => {
     await seed();
-    // The process cannot see a NetworkPolicy from inside its own pod, so
-    // `auth.gateway` is refused at boot without the deployment's attestation.
-    // Taking it here would store a document that wedges the web process at its
-    // next restart — hours later, with nothing connecting the two.
+    // Boot refuses `auth.gateway` without the deployment's attestation, so
+    // storing it here would fail the web process at its next restart.
     const result = await configureInstallation(
       {
         manifest: {
@@ -177,8 +160,7 @@ describe('configuring an installation', () => {
   test('refuses every principal that did not arrive as a human', async () => {
     await seed();
     const before = await storedManifest();
-    // What the write would buy an agent: a Gateway reading a header it can
-    // send itself, honoured as a human from the next boot on.
+    // An agent could name a header it sends itself and be treated as a human.
     const gateway = {
       adapterKey: 'front-door',
       issuer: 'https://issuer.example.test',
@@ -206,10 +188,8 @@ describe('configuring an installation', () => {
 
   test('refuses a store whose adapter has no address to assume', async () => {
     await seed();
-    // `onepassword` Connect is self-hosted, so there is no default endpoint.
-    // The store constructor already throws on this pair — but it throws on the
-    // *next* command, after the write has landed, so the schema is where the
-    // operator has to meet it.
+    // Connect is self-hosted, so there is no default endpoint. The store
+    // constructor throws only on the next command, after the write.
     const result = await configureInstallation(
       { manifest: { ...manifest, secretStore: { adapter: 'onepassword' } } },
       context(),
@@ -224,9 +204,7 @@ describe('configuring an installation', () => {
 
   test('restores a document handed over as text', async () => {
     await seed();
-    // The other half of the export: a file this installation wrote, read back
-    // through the same parser every other document goes through. YAML, and
-    // therefore the JSON the download emits.
+    // The export downloads JSON, which the YAML parser reads.
     const restored = {
       ...manifest,
       installation: { ...manifest.installation, name: 'restored' },

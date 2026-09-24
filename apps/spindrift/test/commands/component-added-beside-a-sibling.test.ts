@@ -1,21 +1,5 @@
-/**
- * An App gaining a second Component, from the screen that already lists them
- * (ticket 118, §2).
- *
- * §2's "one App to many Components" had exactly one door — the create flow —
- * so every claim below was reachable only by posting to the command endpoint by
- * hand. The Components card can now do it, and what that press has to be true
- * of is three facts nothing else in this suite states together:
- *
- * - the new Component is a row **beside** the sibling, not a replacement of it,
- *   and its `job` half carries the schedule a `service` cannot;
- * - it is created **unplaced**, because `deployApp` is what writes a placement
- *   (`src/commands/apps/deploy.ts:529-534`) and a form that placed as well
- *   would be a second answer to which Target this Component lives on;
- * - its first Deploy therefore has to be told a Target, which is the one
- *   conditional the screen adds (`src/web/views/apps/workspace.tsx`'s `handleDeploy`), and the
- *   Build that press starts is the new Component's own.
- */
+// A second Component is created beside its sibling and unplaced. Its first
+// Deploy names a Target and starts its own Build.
 import { describe, expect, test } from 'bun:test';
 import { eq } from 'drizzle-orm';
 import { deployApp } from '../../src/commands/apps/deploy.ts';
@@ -65,7 +49,7 @@ const BUNDLE_DIGEST = `sha256:${'1'.repeat(64)}`;
 const BUNDLE_LOCATION = `gs://depot/${'1'.repeat(64)}.tgz`;
 const ARTIFACT_DIGEST = `sha256:${'2'.repeat(64)}`;
 
-/** Stages whatever it is handed; the depot itself is not what is under test. */
+/** Stages whatever it is handed. */
 const stager: RepositorySourceStager = {
   async stageRepository(): Promise<StagedSourceBundle> {
     return {
@@ -97,11 +81,7 @@ function context(): CommandContext {
   } as unknown as CommandContext;
 }
 
-/**
- * A repo App with one placed `service`, which is the state the Components card
- * is looked at in: something is already running, and the second Component is
- * being added beside it.
- */
+/** A repo App with one placed `service`. */
 async function appWithOneComponent(ctx: CommandContext) {
   const name = `sibling-${crypto.randomUUID().slice(0, 8)}`;
   const [repository] = await ctx.db
@@ -122,19 +102,16 @@ async function appWithOneComponent(ctx: CommandContext) {
     ctx,
   );
   if (!app.ok) throw new Error(app.failure.message);
-  // `createApp` records the URL; the connection is a separate fact, and
-  // `sourceForRerun` stages from the connected repository rather than from the
-  // string — so a fixture that skipped this would be testing the refusal.
+  // sourceForRerun stages from the connected repository, not from the URL
+  // createApp records.
   await ctx.db
     .update(apps)
     .set({ repositoryId: repository!.id })
     .where(eq(apps.id, app.value.appId));
 
   const web = await createComponent(
-    // Through the schema, the way the dispatcher hands input to a command: the
-    // claim under test is that a caller saying nothing about `reach`, `auth` or
-    // `expose` gets the command's own defaults, and a call that names them to
-    // satisfy the output type could not state it.
+    // Parsed through the schema, so unstated `reach`, `auth` and `expose` take
+    // the command's defaults.
     createComponentInput.parse({
       appId: app.value.appId,
       name: 'web',
@@ -171,9 +148,7 @@ describe('a Component added to an App that already has one', () => {
     const ctx = context();
     const app = await appWithOneComponent(ctx);
 
-    // Exactly what the form posts for a scheduled job: no `reach`, no `auth`,
-    // and no `expose` — the three the command defaults (`create.ts:64-65`,
-    // `:154-163`) rather than the form restating them.
+    // What the form posts for a scheduled job: no `reach`, `auth` or `expose`.
     const added = await createComponent(
       createComponentInput.parse({
         appId: app.appId,
@@ -197,13 +172,11 @@ describe('a Component added to an App that already has one', () => {
     expect(nightly?.schedule).toBe('0 3 * * *');
     expect(nightly?.reach).toBe('private');
     expect(nightly?.auth).toBe('proxy');
-    // A job does not serve, so it has no answer to `expose` (§2, §7).
+    // A job does not serve, so it has no `expose`.
     expect(nightly?.expose).toBeNull();
-    // The whole of the "do not place from the form" rule: the first Deploy
-    // writes this, and nothing else does.
+    // Only the first Deploy writes the placement.
     expect(nightly?.placedTargetId).toBeNull();
 
-    // The sibling is untouched — added, not replaced.
     const web = rows.find((row) => row.id === app.webId);
     expect(web?.kind).toBe('service');
     expect(web?.placedTargetId).toBe(app.target.id);
@@ -213,11 +186,8 @@ describe('a Component added to an App that already has one', () => {
     const ctx = context();
     const app = await appWithOneComponent(ctx);
 
-    // An App is one scope (`apps.sourceRepoSubpath`), so this Component builds
-    // the same tree its sibling does and the entrypoint is the whole of what
-    // makes it a different workload. Said at creation rather than by a second
-    // `setComponentCommand` afterwards: between the two acts the row would be a
-    // duplicate of its sibling, and a Deploy pressed in that window places one.
+    // The Component builds its sibling's tree, so its entrypoint sets it apart.
+    // Set at creation, it is never a duplicate row.
     const added = await createComponent(
       createComponentInput.parse({
         appId: app.appId,
@@ -237,12 +207,11 @@ describe('a Component added to an App that already has one', () => {
 
     const nightly = rows.find((row) => row.id === added.value.componentId);
     expect(nightly?.command).toEqual(['node', 'job.js']);
-    // Absent means the image's own, and `args` was never mentioned — the two
-    // are independent here, unlike the edit, which takes both or neither.
+    // Null means the image's own. At creation `command` and `args` are
+    // independent; the edit takes both or neither.
     expect(nightly?.args).toBeNull();
 
-    // And the sibling that said nothing still says nothing: an entrypoint on
-    // one Component is not an entrypoint on the App.
+    // An entrypoint on one Component is not one on the App.
     expect(rows.find((row) => row.id === app.webId)?.command).toBeNull();
   });
 
@@ -259,9 +228,8 @@ describe('a Component added to an App that already has one', () => {
     );
     if (!added.ok) throw new Error(added.failure.message);
 
-    // The press the workspace makes for an unplaced Component: the Target
-    // spelled the way a Component's row states it, which is what `deployApp`
-    // resolves at `src/commands/apps/deploy.ts:352-362`.
+    // The Target spelled as a Component's row states it, which deployApp
+    // resolves.
     const pressed = await deployApp(
       {
         name: app.appId,
@@ -272,8 +240,7 @@ describe('a Component added to an App that already has one', () => {
     );
     expect(pressed.ok).toBe(true);
     if (!pressed.ok) return;
-    // A Component with no artifact yet is the Build-starting act, not the
-    // deploy one — §4 keeps those two apart and so does the screen.
+    // A Component with no artifact yet starts a Build and deploys nothing.
     expect(pressed.value.phase).toBe('BUILDING');
     expect(pressed.value.deployId).toBeNull();
 
@@ -281,21 +248,19 @@ describe('a Component added to an App that already has one', () => {
       .select()
       .from(builds)
       .where(eq(builds.id, pressed.value.buildId));
-    // Its own row, keyed on its own Component, staged from the App's source.
+    // Its own row, staged from the App's source.
     expect(started?.componentId).toBe(added.value.componentId);
     expect(started?.bundleLocation).toBe(BUNDLE_LOCATION);
     expect(started?.status).toBe('PENDING');
 
-    // The sibling produced nothing: a press on one Component is one Component's
-    // Build, which is the fact a shared `components[0]` used to hide.
+    // A press on one Component builds that Component only.
     const siblingBuilds = await ctx.db
       .select()
       .from(builds)
       .where(eq(builds.componentId, app.webId));
     expect(siblingBuilds).toHaveLength(0);
 
-    // First deploy is what writes the placement (`deploy.ts:529-534`), and the
-    // desired row it names is this Component's.
+    // The first Deploy writes the placement and this Component's desired row.
     const [placed] = await ctx.db
       .select()
       .from(components)
@@ -307,9 +272,8 @@ describe('a Component added to an App that already has one', () => {
       .where(eq(componentTargetDesired.componentId, added.value.componentId));
     expect(desired?.targetId).toBe(app.target.id);
 
-    // That Build succeeding is what the Component is then released from: the
-    // artifact it produced itself, deployed to the placement its first press
-    // wrote — no Target named this time, because there is one to read back now.
+    // Once the Build succeeds, the next press reads the placement back and
+    // names no Target.
     await ctx.db
       .update(builds)
       .set({

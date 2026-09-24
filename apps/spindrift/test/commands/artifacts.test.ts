@@ -1,16 +1,5 @@
-/**
- * The Artifacts a Build left behind (§2, §4, §16).
- *
- * What this listing has to keep true is the cardinality §2 rests on: **one
- * Build → one Artifact → many Deploys**, which is what makes rollback without
- * rebuilding possible. A count that came out per Deploy row would make the
- * Artifact look like it existed once per placement, which is the exact
- * conflation splitting the noun out of the Build ledger exists to undo.
- *
- * The other two are the ones an operator acts on: an Artifact nothing has ever
- * placed, and §4's supplied artifact — uploaded finished output that no builder
- * ran over, which is an Artifact with no Build behind it.
- */
+// One Build is one Artifact behind many Deploys, so a count comes out per
+// Artifact, never per Deploy row.
 import { beforeEach, describe, expect, test } from 'bun:test';
 import { listArtifacts } from '../../src/commands/artifacts/list.ts';
 import type {
@@ -89,8 +78,7 @@ async function seed(
       artifactDigest: input.artifactDigest,
       artifactRefs: input.artifactRefs ?? null,
       bundleDigest: digest('b'),
-      // `??` would swallow an explicit null, which is the whole of what a
-      // supplied artifact looks like.
+      // `??` would swallow an explicit null, which marks a supplied artifact.
       runner: input.runner === undefined ? 'hosted' : input.runner,
       verifiedBuildLevel: input.verifiedBuildLevel ?? null,
     })

@@ -1,9 +1,6 @@
 /**
- * Production adapter wiring that is not an adapter behavior of its own.
- *
- * The installer deliberately projects a token outside Kubernetes' default
- * service-account path. The registry must follow that declared path while still
- * reading the rotating file at request time.
+ * Adapter registry wiring. The installer projects the identity token outside
+ * the default service-account path, and the file rotates.
  */
 import { expect, test } from 'bun:test';
 import { join } from 'node:path';
@@ -69,16 +66,8 @@ test('source adapter returns explicitly passed source stager when provided', asy
 });
 
 /**
- * Discovery is a fourth consumer of the one federated provider, not a fourth
- * credential.
- *
- * The property worth asserting is not that the lookup answers something — it is
- * *which* token the request carries. `src/storage/cloud.ts` shows the other
- * shape: a second `workloadIdentityToken` constructed per call, which re-runs
- * the STS and impersonation exchange every time and defeats the cache in
- * `@repo/archive/federation`. A discovery client wired that way would pass
- * every fold assertion in `test/commands/installation-discover.test.ts` and
- * still be the wrong wiring.
+ * Discovery must reuse the registry's federated provider: a provider built per
+ * call re-runs the STS exchange and bypasses the token cache.
  */
 test('discovery reaches the cloud with the registry-wide token', async () => {
   const yaml = await Bun.file(
@@ -110,19 +99,8 @@ test('discovery reaches the cloud with the registry-wide token', async () => {
 });
 
 /**
- * The cloud store's access path is the federation, not a stored bearer.
- *
- * `SPINDRIFT_STORE_TOKEN` is a long-lived token an operator issues for
- * 1Password Connect. A Google access token expires in an hour and is minted
- * from the token this pod already projects, so an installation on Secret
- * Manager reading its credential out of the installation Secret would write
- * with a value that is stale before the second write — and the symptom is a
- * `401` on config, a verb nothing else exercises, long after the deploy that
- * introduced it.
- *
- * Asserted as *which* token the request carries, for the reason discovery is
- * above: a store wired to the wrong provider still constructs, and every
- * assertion that does not look at the wire passes.
+ * Google access tokens expire in an hour, so the Secret Manager store uses the
+ * federated token and never `SPINDRIFT_STORE_TOKEN`.
  */
 test('the cloud store writes with the federated token, not a stored one', async () => {
   const yaml = await Bun.file(
@@ -134,8 +112,6 @@ test('the cloud store writes with the federated token, not a stored one', async 
   const authorizations: (string | null)[] = [];
   const registry = createAdapterRegistry({
     manifest,
-    // Empty: an installation on Secret Manager needs no store token at all, and
-    // a store that fell back to one would refuse here rather than federate.
     env: {},
     cloudToken: () => 'the-federated-token',
     fetch: async (request) => {
@@ -151,17 +127,12 @@ test('the cloud store writes with the federated token, not a stored one', async 
   expect(authorizations).toEqual(['Bearer the-federated-token']);
 });
 
-/**
- * §9's one `DnsPublisher`, resolved from the manifest's own seed for the
- * control-plane vessel's Kubernetes Target — never a database read.
- */
+/** From the manifest's control-plane Kubernetes Target, never the database. */
 test('dns is null when the manifest states no control-plane cluster connection', async () => {
   const yaml = await Bun.file(
     join(import.meta.dir, '../fixtures/installation.example.yaml'),
   ).text();
-  // The fixture deliberately seeds no `location`/`connection` at all — "leaves
-  // how to reach them to the connect act" — which is exactly the half-ready
-  // state this lookup has to answer `null` for rather than throw over.
+  // The fixture seeds no `location` on any vessel and no Target `connection`.
   const manifest = await resolveManifest(parseManifest(yaml, 'test'), {});
 
   const registry = createAdapterRegistry({ manifest, env: {} });
@@ -218,7 +189,5 @@ test('dns publishes against the control-plane vessel’s own apiServer and deliv
     proxied: true,
   });
 
-  // The delivery namespace — where this cluster's own HelmReleases and
-  // Applications already land — not the Target's legacy catch-all namespace.
   expect(fake.get('dnsendpoints/spindrift-platform/shop-web')).toBeDefined();
 });

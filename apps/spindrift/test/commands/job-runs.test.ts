@@ -1,15 +1,6 @@
 /**
- * Running a job, and reading what it did (§7, §17).
- *
- * Seam 1: the command layer over a fake deploy backend. What is asserted here
- * is the half the adapter tests cannot see — that a press reaches the far side
- * with the ref core stored, and that the App screen's list of runs is the far
- * side's rather than a shape core made up.
- *
- * The claim worth stating up front, because it is what the placeholder it
- * replaces made easy to get wrong: **the workspace reads runs from the
- * platform**, so the list is the runs that happened, including the ones the
- * schedule started and nothing here asked for.
+ * Starting a job run, and the App workspace listing runs read from the deploy
+ * backend, including runs the schedule started.
  */
 import { describe, expect, test } from 'bun:test';
 import { getAppWorkspace } from '../../src/commands/apps/workspace.ts';
@@ -57,11 +48,9 @@ function context(deploy: FakeDeployAdapter | null): CommandContext {
 }
 
 /**
- * One App with one job Component, placed and deployed.
- *
- * The workload is put on the fake far side too, because that is what a deploy
- * did: a ref on a row with nothing behind it is a Component whose workload has
- * been deleted, and every run verb refuses that on purpose.
+ * One App with one job Component, placed and deployed. The fake backend holds
+ * the workload too, since it refuses a run against a ref with nothing behind
+ * it.
  */
 async function scaffold(
   ctx: CommandContext,
@@ -69,7 +58,7 @@ async function scaffold(
   options: {
     kind?: 'job' | 'service';
     ref?: string | null;
-    /** Variable names the placed release already delivers (§10). */
+    /** Variable names the placed release already delivers as config. */
     delivering?: readonly string[];
   } = {},
 ) {
@@ -98,8 +87,7 @@ async function scaffold(
           appId: app.value.appId,
           name: 'nightly',
           kind: 'job',
-          // A job is reached by nobody: nothing routes to it, so §9's grid
-          // leaves it the one pair that means "no route at all".
+          // Nothing routes to a job, so it takes the no-route pair.
           reach: 'none',
           auth: 'none',
         },
@@ -186,8 +174,6 @@ describe('runComponent', () => {
     expect(started.ok).toBe(true);
     if (!started.ok) return;
     expect(started.value.execution.outcome).toBe('running');
-    // §6's opaque handle, handed straight back: a run assembled from the rows
-    // instead could start a workload the Component is no longer serving.
     expect(backend.runsStarted).toEqual(['fake-deploy-1']);
   });
 
@@ -223,9 +209,6 @@ describe('runComponent', () => {
   });
 
   test("carries this run's parameters to the backend, and nowhere else", async () => {
-    // The one-off script with an argument (§17): the names and values reach
-    // the adapter as the run's own env, and core writes none of it — a run is
-    // not an attempt, and the timeline is the platform's.
     const backend = new FakeDeployAdapter();
     const ctx = context(backend);
     const { componentId, targetId } = await scaffold(ctx, backend);
@@ -256,9 +239,7 @@ describe('runComponent', () => {
   });
 
   test('a parameter that is not a variable name is refused in a sentence, and never reaches the backend', async () => {
-    // The same rule config keys answer to, because the same process reads
-    // both: a name the environment cannot carry is refused where the person
-    // who typed it is still looking.
+    // Config keys follow the same rule, since both end up in one environment.
     const backend = new FakeDeployAdapter();
     const ctx = context(backend);
     const { componentId, targetId } = await scaffold(ctx, backend);
@@ -278,10 +259,8 @@ describe('runComponent', () => {
   });
 
   test('a parameter that would shadow delivered config is refused, and never reaches the backend', async () => {
-    // §10: every config variable is a sealed reference. A run that set
-    // `DATABASE_URL` inline would put a value where the reference was — in a
-    // Job spec, readable by anyone who can read Jobs — so the parameters are
-    // additions to what the release delivers, never overrides of it.
+    // Config is a sealed reference. An inline override would put the value in
+    // a Job spec that anyone who can read Jobs can read.
     const backend = new FakeDeployAdapter();
     const ctx = context(backend);
     const { componentId, targetId } = await scaffold(ctx, backend, {
@@ -325,8 +304,7 @@ describe('runComponent', () => {
 describe('the App screen lists the runs that happened', () => {
   test('reads them from the platform, newest first, with when and outcome', async () => {
     const backend = new FakeDeployAdapter();
-    // A run nothing here started — the schedule's. §17 keeps a job's history on
-    // the backend precisely so this one appears without core knowing about it.
+    // A run the schedule started, which core never recorded.
     backend.ran('fake-deploy-1', {
       name: 'nightly-scheduled',
       outcome: 'failed',
@@ -351,8 +329,7 @@ describe('the App screen lists the runs that happened', () => {
         when: '1h ago',
       },
     ]);
-    // The two ids a run is acted on by. Without them the card can offer no
-    // button and open no log, which is the state the empty placeholder left.
+    // Without these ids the card can offer no Run button and open no log.
     expect(runtime.componentId).toBe(componentId);
     expect(runtime.targetId).toBe(targetId);
     expect(runtime.retained).toBe(10);
@@ -382,9 +359,6 @@ describe('the App screen lists the runs that happened', () => {
   });
 
   test('a run started with parameters says which, and never their values', async () => {
-    // What the timeline reads back is the platform's record of the run, and
-    // a value on it is a value in every log of the screen. The names are what
-    // make "last night's restore" legible; the values are the run's alone.
     const backend = new FakeDeployAdapter();
     const ctx = context(backend);
     const { appName, componentId, targetId } = await scaffold(ctx, backend);
@@ -410,9 +384,7 @@ describe('the App screen lists the runs that happened', () => {
   });
 
   test('a backend that will not answer is one empty card, not a failed screen', async () => {
-    // The workspace is the screen an operator opens *because* something is
-    // wrong. Taking it down over a Target that is momentarily unreachable would
-    // hide the phase, the URL and the timeline they came to read.
+    // The runs card must not take down the phase, URL and timeline beside it.
     const backend = new FakeDeployAdapter({
       noRuns: 'this backend keeps no runs',
     });
@@ -430,13 +402,8 @@ describe('the App screen lists the runs that happened', () => {
   });
 
   test('a read that failed still says the job can be run', async () => {
-    // The state this feature's first day is in: the Role granting `list` on
-    // batch jobs has not reconciled on the cluster yet, so the read `403`s
-    // while starting a run would have worked. Collapsing that to `kind: 'none'`
-    // takes the ids off the runtime, and the screen renders no Run now button —
-    // the feature hiding itself in exactly the state where pressing it is the
-    // diagnosis. Whether a job is runnable is a fact about the Deploy that
-    // placed it, not about whether listing worked.
+    // A Role without `list` on jobs makes the read 403 while runs still start.
+    // The placing Deploy makes it runnable, so the ids keep the Run now button.
     const backend = new FakeDeployAdapter({
       executionsThrows: 'jobs.batch is forbidden: User cannot list jobs',
     });

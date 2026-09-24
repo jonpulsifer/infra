@@ -1,17 +1,3 @@
-/**
- * What a repository turns out to be, read without checking it out (§5).
- *
- * Two claims are under test and they are different claims:
- *
- * 1. **The planner answers from what a project declares.** A `package.json`
- *    with `next` in it is a website; a `go.mod` is a service; a library that
- *    declares neither a framework nor a start script is the honest unknown §5
- *    insists on, never a silent fallback to `service`.
- * 2. **The ladder does not care where the bytes came from.** Every case here
- *    runs over an in-memory tree — no disk, no clone — and `detection.test.ts`
- *    runs the same ladder over real directories. One algorithm, two sources,
- *    which is the whole reason `SourceTree` exists.
- */
 import { describe, expect, test } from 'bun:test';
 import { declaredPlanner } from '../../src/domain/detection/declared.ts';
 import {
@@ -20,7 +6,6 @@ import {
 } from '../../src/domain/detection/discover.ts';
 import type { SourceTree } from '../../src/domain/detection/tree.ts';
 
-/** A tree that is a literal, so a test states the repository it means. */
 function memoryTree(files: Record<string, string>): SourceTree {
   const paths = Object.keys(files).sort();
   return {
@@ -106,9 +91,7 @@ describe('planning from what a project declares', () => {
       }),
     });
 
-    // Railpack reads the same package.json at build time and is better at this
-    // than a table here would be. Proposing a command would be proposing the
-    // answer that then wins over the builder's.
+    // Railpack reads package.json itself; a command here would override it.
     expect(result).toMatchObject({ buildCommand: null });
   });
 
@@ -121,9 +104,8 @@ describe('planning from what a project declares', () => {
   });
 
   test('a directory of pages is a website with nothing to build', async () => {
-    // `outputDirectory: null` is the claim: a `files` build lifts nothing and
-    // ships the scope, which is the site. Naming a directory here would send
-    // this through the zero-config builder, which has nothing to build.
+    // A null outputDirectory ships the scope as the site; naming one would send
+    // it through the zero-config builder.
     expect(
       await plan({ 'index.html': '<h1>hi</h1>', 'style.css': 'body{}' }),
     ).toMatchObject({
@@ -213,9 +195,6 @@ describe('discovering what is in a repository', () => {
       declaredPlanner(),
     );
 
-    // The root stays on the list wearing its reason (§3): "why not here" is as
-    // much an answer as "here", and a screen that dropped it would be a screen
-    // that silently decided.
     expect(
       found.map((result) => [
         result.scope,
@@ -231,11 +210,7 @@ describe('discovering what is in a repository', () => {
   });
 
   test('a declared workspace does not hide what is beside it', async () => {
-    // The defect: a repository that declares JS workspaces answered with its
-    // JS packages and nothing else, so a Go service in the same `apps/`
-    // directory was not a candidate — not even an unsupported one. A
-    // declaration says where one ecosystem's packages are; it says nothing
-    // about the repository.
+    // A workspace declaration covers one ecosystem, not the whole repository.
     const found = await discoverScopes(
       memoryTree({
         'package.json': PACKAGE({ workspaces: ['apps/*'] }),
@@ -248,8 +223,7 @@ describe('discovering what is in a repository', () => {
       }),
     );
 
-    // Declared packages keep their priority, and what the walk found beyond
-    // them follows.
+    // Declared packages first, then what the walk found.
     expect(found).toEqual(['apps/web', 'apps/ddnsd', 'apps/rackstat']);
   });
 
@@ -275,9 +249,8 @@ describe('discovering what is in a repository', () => {
       }),
     );
 
-    // `services/api` is two deep and kept. The vendored module and the
-    // `node_modules` entry are somebody else's code; `deep/one/two/three` is
-    // past the depth ceiling and is reachable by naming it.
+    // The walk goes two levels deep and skips vendor and node_modules; a deeper
+    // scope is reachable by naming it.
     expect(found).toEqual(['services/api']);
   });
 

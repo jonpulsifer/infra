@@ -1,35 +1,7 @@
 /**
- * `reach` decides the record a Component's name answers to (§9).
- *
- * **Why this is not a chart golden.** The chart's goldens assert what a release
- * *asks* for, and they were green throughout the whole life of the defect they
- * now describe: a route asked for a proxied name at the Target's tunnel, the
- * controller published an unproxied address at the shared gateway instead, and
- * every manifest in the cluster was exactly what it should have been. The
- * decision is only observable one step further down, where the objects become
- * records — so that step is modelled (`test/harness/fakes/external-dns.ts`) and
- * the record is what gets asserted.
- *
- * **The whole chain runs, and nothing in it is stubbed on our side.** A
- * `DesiredState` at one reach goes through the real Kubernetes adapter, which
- * writes a real values blob onto a delivery object in the fake cluster; that
- * blob — not a baseline, not a fixture — is what the real chart is rendered
- * with; the rendered objects are what the modelled controller reads. So this
- * fails whether `reach` stops reaching the values, stops deciding the record,
- * or stops being the only thing that does.
- *
- * The last one is the sharp edge, and it is why the gateway's own address is
- * pinned *apart* from the Target's private address here. Live they are equal —
- * the Target publishes the address of the gateway its routes attach to — which
- * is precisely what made a record derived from the gateway indistinguishable
- * from a record the chart stated. They are independent inputs, so the fixture
- * separates them and the assertion names which one the record came from.
- *
- * **The controller is not our side either, and it is half the mechanism.** A
- * `DNSEndpoint` nobody reads and a route held out of a source nobody runs is a
- * Component whose name goes dark, with every object in the cluster still
- * rendered exactly right. So the controller's configuration is read out of
- * `clusters/` rather than assumed, once per cluster Spindrift deploys through.
+ * `reach` decides the DNS record a Component's name answers to. The real
+ * adapter writes values, the real chart renders them, and a model of each
+ * cluster's declared external-dns controller turns the objects into records.
  */
 import { describe, expect, test } from 'bun:test';
 import type {
@@ -52,26 +24,21 @@ import {
 } from '../harness/fakes/external-dns.ts';
 import { FakeKubernetes } from '../harness/fakes/kubernetes-api.ts';
 
-/** Every cluster's controller, as that cluster declares it. */
 const CONTROLLERS = await installedControllers();
 
-/** The Apps gateway every route in the namespace attaches to. */
 const GATEWAY: GatewayStatus = {
   name: 'spindrift-apps',
   namespace: 'spindrift-apps',
-  // Its own load-balancer address, which is the only thing the route source can
-  // ever publish, and deliberately not the address below.
+  // Differs from PRIVATE_ADDRESS so a record shows which input it came from.
   addresses: ['10.89.0.68'],
 };
 
-/** The two addresses `reach` chooses between, per Target. */
 const PRIVATE_ADDRESS = '10.89.0.69';
 const TUNNEL_HOSTNAME = 'tunnel.example.test';
 
 const CANONICAL = 'blog-web.apps.example.test';
 const VANITY = 'blog.vanity.example.test';
 
-/** The operator's class, as a connected Target carries it. */
 const CHART_VALUES = {
   platform: {
     gateway: { name: GATEWAY.name, namespace: GATEWAY.namespace },
@@ -129,13 +96,7 @@ function desiredState(overrides: Partial<DesiredState> = {}): DesiredState {
   };
 }
 
-/**
- * What a cluster would hold for this Component, through the real adapter.
- *
- * The values are read back off the applied delivery object rather than composed
- * here, because "what the adapter wrote" and "what the chart is rendered with"
- * being the same document is half of what this suite is asserting.
- */
+/** Renders the chart with the values the adapter wrote onto the HelmRelease. */
 async function renderRelease(
   overrides: Partial<DesiredState> = {},
 ): Promise<RenderedObject[]> {
@@ -160,7 +121,6 @@ async function renderRelease(
   return renderAppChart(release.values, GATEWAY.namespace);
 }
 
-/** Drive a deploy stream to its verdict. */
 async function drain(
   stream: AsyncGenerator<DeployEvent, DeployVerdict, void>,
 ): Promise<DeployVerdict> {
@@ -169,7 +129,6 @@ async function drain(
   return step.value;
 }
 
-/** One run per cluster, because each runs its own controller. */
 const PER_CLUSTER = CONTROLLERS.map(
   (controller) => [controller.cluster, controller] as const,
 );
@@ -184,10 +143,7 @@ describe.each(PER_CLUSTER)(
         controller,
       );
 
-      // The address is the Target's, not the gateway's — `10.89.0.68` is what a
-      // record derived from the parent would have carried, and it appears
-      // nowhere. Unproxied because the value is RFC1918: the record type is the
-      // boundary, so nothing has to be attached to it to keep it one.
+      // An RFC1918 address is unreachable from the internet and needs no proxy.
       expect(publication.records).toEqual([
         {
           dnsName: CANONICAL,
@@ -207,10 +163,7 @@ describe.each(PER_CLUSTER)(
         controller,
       );
 
-      // A hostname can only ever be a CNAME, which is the half the route source
-      // structurally could not express: it publishes an address, and asking the
-      // zone provider to proxy one is the refusal that soft-errored a whole-zone
-      // sync every five minutes.
+      // The route source publishes only addresses, never this CNAME.
       expect(publication.records).toEqual([
         {
           dnsName: CANONICAL,
@@ -224,8 +177,7 @@ describe.each(PER_CLUSTER)(
     });
 
     test('none publishes nothing at all', async () => {
-      // A Component with no reach has no route, so there is no name to answer
-      // for. A record here would be an alternate origin it asked not to have.
+      // A record here would be an origin the Component asked not to have.
       const publication = publish(
         await renderRelease({ reach: 'none' }),
         [GATEWAY],
@@ -235,10 +187,7 @@ describe.each(PER_CLUSTER)(
     });
 
     test('every name the route serves is published at the one reach', async () => {
-      // The canonical name and the vanity name are the same Component at the same
-      // reach. A record covering only the first leaves the second answered by
-      // whatever wildcard the zone still has, which is the failure retiring one
-      // was supposed to end.
+      // An unpublished vanity name would fall to any wildcard in the zone.
       const publication = publish(
         await renderRelease({
           reach: 'public',
@@ -261,13 +210,7 @@ describe.each(PER_CLUSTER)(
   },
 );
 
-/**
- * A guard nobody has seen fail is not a guard.
- *
- * Each mutation below is applied to what the chart actually rendered, so it
- * stands in for the publication mechanism regressing rather than for a fixture
- * someone typed. The assertions are the ones above, run against the damage.
- */
+/** Each mutation damages the rendered objects, standing in for a regression. */
 describe.each(PER_CLUSTER)(
   'publication on %s that stops honouring reach fails here',
   (_cluster, controller) => {
@@ -275,9 +218,7 @@ describe.each(PER_CLUSTER)(
     function unheldOut(objects: readonly RenderedObject[]): RenderedObject[] {
       return objects.map((object) => {
         if (object.kind !== 'HTTPRoute') return object;
-        // Every spelling of it. Removing one and leaving the other is not the
-        // damage this stands in for — it is the migration's own halfway state,
-        // which is supposed to keep working.
+        // All spellings: removing only one is a supported migration state.
         const annotations = { ...object.metadata.annotations };
         for (const key of CONTROLLER_KEYS) delete annotations[key];
         return { ...object, metadata: { ...object.metadata, annotations } };
@@ -293,10 +234,8 @@ describe.each(PER_CLUSTER)(
       const rendered = await renderRelease({ reach: 'public' });
       const publication = publish(unheldOut(rendered), [GATEWAY], controller);
 
-      // Two sources, one name, two record types — the state that fails a
-      // whole-zone sync rather than one record. It is also what says the hold-out
-      // is load-bearing on this cluster: a controller not running the route
-      // source could not contend, and this would fail.
+      // Two sources claiming one name with two record types fail a whole-zone
+      // sync. Only a controller running the route source can contend.
       expect(publication.contended).toEqual([CANONICAL]);
       expect(publication.records).toHaveLength(2);
     });
@@ -309,10 +248,7 @@ describe.each(PER_CLUSTER)(
         controller,
       );
 
-      // Nothing is contended and nothing errors: one source, one record, and a
-      // `public` Component answering an RFC1918 address on the public internet.
-      // Reach was ignored and the zone is perfectly healthy about it, which is
-      // the shape of failure this suite exists for.
+      // No error anywhere, and a `public` Component answers an RFC1918 address.
       expect(publication.contended).toEqual([]);
       expect(publication.records).toEqual([
         {
@@ -326,8 +262,7 @@ describe.each(PER_CLUSTER)(
     });
 
     test('a record nothing states and nothing derives is no record', async () => {
-      // The hold-out on its own is not a fix: with the DNSEndpoint gone it is
-      // just a name that resolves nowhere. Both halves are the mechanism.
+      // Without the DNSEndpoint, the held-out name resolves nowhere.
       const rendered = await renderRelease({ reach: 'public' });
       expect(
         publish(unstated(rendered), [GATEWAY], controller).records,
@@ -335,11 +270,8 @@ describe.each(PER_CLUSTER)(
     });
 
     test('a controller that stops reading stated records publishes nothing', async () => {
-      // The half of the mechanism that is not Spindrift's code, mutated where it
-      // is declared: drop `crd` from this cluster's sources and the DNSEndpoint
-      // is read by nobody while the route is still held out, so no source claims
-      // the name — and `--policy=sync` then deletes the record already there.
-      // Every object the chart renders is untouched and still correct.
+      // Without `crd`, no source claims the held-out name, and `--policy=sync`
+      // deletes the existing record.
       const rendered = await renderRelease({ reach: 'public' });
       const deaf = {
         ...controller,
@@ -350,19 +282,10 @@ describe.each(PER_CLUSTER)(
   },
 );
 
-/**
- * The controller these tests model is the one the clusters declare.
- *
- * Which clusters a Component can land on is the row's, not this repository's,
- * so what is asserted here is the other half: an installation the model does
- * not actually cover fails rather than being quietly approximated.
- */
 describe('the modelled controller is the declared one', () => {
   test('an argument the model does not account for is refused, not ignored', () => {
     // `--annotation-prefix` renames every annotation key, including the one the
-    // route holds itself out with. A model that shrugged at an unfamiliar
-    // argument would keep holding the route out of a source that had stopped
-    // seeing the hold-out — one name, two record types, whole-zone sync down.
+    // route holds itself out with.
     const overlay = {
       resources: ['../../../base/networking/external-dns'],
       patches: [
@@ -385,22 +308,10 @@ describe('the modelled controller is the declared one', () => {
   });
 
   test('every controller is pinned to a prefix Spindrift actually writes', async () => {
-    // The two ends of one key, held together. external-dns reads
-    // `cloudflare-proxied` under `DefaultAnnotationPrefix`, and v0.22.0 changed
-    // that default with no fallback for the old spelling — so an unpinned
-    // controller stops finding the flag and falls back to `proxiedByDefault`,
-    // which publishes every record unproxied. For an apex CNAME in front of
-    // Cloudflare Pages that is no zone cache, no WAF, and the origin exposed,
-    // and nothing anywhere would have said so: the record still exists and the
-    // deploy still goes green.
-    //
-    // A cluster that leaves it defaulted fails here, which is the point — the
-    // safe state is the pin, not the absence of an argument. Membership rather
-    // than one value, because every object carries every spelling; which member
-    // is pinned is settled by the test below, not by this one.
+    // external-dns v0.22.0 changed its default prefix with no fallback, so an
+    // unpinned controller misses `cloudflare-proxied` and publishes unproxied.
     for (const controller of CONTROLLERS) {
-      // Cast, not a narrowing: a cluster that leaves the flag defaulted carries
-      // `null` here, and `null` failing this membership is the assertion.
+      // A defaulted flag is `null`, which must fail this membership.
       expect(ANNOTATION_PREFIXES).toContain(
         controller.annotationPrefix as string,
       );
@@ -410,16 +321,8 @@ describe('the modelled controller is the declared one', () => {
   test.each(ANNOTATION_PREFIXES)(
     'the same records publish with the pin moved to %s',
     async (annotationPrefix: string) => {
-      // What makes moving `--annotation-prefix` an edit to one flag rather than
-      // a flag day across two clusters and every live object. external-dns
-      // reads exactly one prefix and is blind to the others, so the only way a
-      // pin can move safely is if every object already carries the key the new
-      // pin will look for — and the only way to know that is to run the whole
-      // publication under each one and get the same zone back.
-      //
-      // This fails the moment a writer carries fewer prefixes than a cluster
-      // may be pinned to, which is the halfway state that would otherwise
-      // publish every record unproxied and let the route claim its own name.
+      // external-dns reads one prefix, so a pin moves safely only while every
+      // object carries the key under each prefix.
       for (const controller of CONTROLLERS) {
         const rendered = await renderRelease({
           reach: 'public',

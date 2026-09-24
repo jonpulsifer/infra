@@ -1,11 +1,6 @@
 /**
- * The optional authenticated-Gateway adapter (Task 37, identity story 5).
- *
- * These tests stand at the adapter's public request boundary. The Gateway is the
- * far side: normalized headers are its verdict, while the database binding and
- * stable `User` are Spindrift's side. No provider token appears here because the
- * adapter deliberately trusts the non-bypassable Gateway rather than
- * re-implementing its provider flow.
+ * The optional authenticated-Gateway adapter, from its request boundary. The
+ * Gateway's normalized headers are its verdict; no provider token is involved.
  */
 import { beforeEach, describe, expect, test } from 'bun:test';
 import {
