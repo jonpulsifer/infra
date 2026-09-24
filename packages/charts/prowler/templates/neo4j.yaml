@@ -1,14 +1,6 @@
 {{/*
-The Attack Paths graph store. Cartography ingests each scan into a temporary
-database and syncs the result into a per-tenant one, so the server has to
-implement `CREATE DATABASE` — which Neo4j Community Edition does not. DozerDB is
-the CE fork that adds multi-database; upstream's own chart pins
-`edition: community` and cannot run the feature it ships.
-
-There is no way to switch Attack Paths off: the four NEO4J_* variables are read
-at Django settings import with no defaults, and the API's gunicorn `post_fork`
-hook builds a driver on every worker. Absent, the process fails to import; empty,
-it crash-loops.
+The Attack Paths graph store. The API reads its `NEO4J_*` settings at import with no
+defaults and connects from every gunicorn worker, so it cannot run without one.
 */}}
 {{- if .Values.neo4j.enabled }}
 apiVersion: v1
@@ -58,9 +50,7 @@ spec:
           image: {{ .Values.image.neo4j }}
           imagePullPolicy: IfNotPresent
           env:
-            # `neo4j/<password>`, the same password the API reads as
-            # NEO4J_PASSWORD. The two names exist because the server and the
-            # client disagree on what to call it.
+            # `neo4j/<password>`, with the same password the API reads as NEO4J_PASSWORD.
             - name: NEO4J_AUTH
               valueFrom:
                 secretKeyRef:

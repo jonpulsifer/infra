@@ -1,18 +1,12 @@
-# Windows Event Log into the folly cluster's VictoriaLogs.
-#
-# Deployed to C:\Program Files\Vector\config\vector.yaml by
-# Install-Monitoring.ps1. The source and sink are deliberately the same shape
-# the in-cluster agent uses (clusters/base/monitoring/vector.yaml), so these
-# lines land in the same store, under the same stream labels, and the Grafana
-# datasource that already reads cluster logs reads these too.
+# Ships the Windows Event Log to the folly cluster's VictoriaLogs through the loki
+# sink that clusters/base/monitoring/vector.yaml uses. Install-Monitoring.ps1 installs it.
 data_dir: C:\ProgramData\vector
 
 sources:
   windows_events:
     type: windows_event_log
     channels: [System, Application]
-    # Start from now. Flip to true once, deliberately, to pull in the backlog;
-    # leaving it on replays the whole log every time the checkpoint is lost.
+    # true replays the whole log every time the checkpoint is lost.
     read_existing_events: false
 
 transforms:
@@ -31,9 +25,7 @@ sinks:
   victoria_logs:
     type: loki
     inputs: [identify]
-    # Stops at /insert on purpose. The loki sink appends /loki/api/v1/push
-    # itself; spelling the full path here posts it twice and VictoriaLogs
-    # answers 400 unsupported path.
+    # The loki sink appends /loki/api/v1/push itself.
     endpoint: https://logs.lolwtf.ca/insert
     tenant_id: "1"
     encoding:

@@ -1,10 +1,6 @@
 {{/*
-A job **always** renders a CronJob, suspended when unscheduled.
-
-A Job's template is immutable, so a chart rendering one cannot be upgraded, and
-Helm prunes the old Job on the next upgrade — cutting an N-deep execution
-history to one. A CronJob owns its executions, so a scheduled run and a manual
-run are the same object with a field flipped.
+A job renders a CronJob, suspended when unscheduled. A Job's template is immutable,
+and a CronJob keeps its run history across upgrades.
 */}}
 {{- if eq .Values.app.kind "job" }}
 apiVersion: batch/v1
@@ -17,11 +13,9 @@ metadata:
   annotations:
     {{- include "spindrift-app.contractAnnotations" . | nindent 4 }}
 spec:
-  # An unscheduled job is a suspended CronJob, not an absent one — the object
-  # has to exist for a manual run to have something to trigger.
+  # The CronJob exists even unscheduled, so a manual run has something to trigger.
   suspend: {{ not .Values.app.schedule }}
-  # A date that never occurs, so an unscheduled job cannot fire even if
-  # something un-suspends it. Suspension is the mechanism; this is the belt.
+  # 31 February never occurs, so an unscheduled job cannot fire even if un-suspended.
   schedule: {{ default "0 0 31 2 *" .Values.app.schedule | quote }}
   concurrencyPolicy: Forbid
   successfulJobsHistoryLimit: 10

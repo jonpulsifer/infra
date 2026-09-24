@@ -1,10 +1,6 @@
-# Aliases, carried over from .config/zsh/.zshrc.
-#
-# PowerShell resolves aliases before functions, so shadowing a built-in alias
-# means removing it first. Only the ones worth the surprise are shadowed:
-# `rm`, `cat`, `cp` and `mv` keep their PowerShell meanings, because
-# Remove-Item and rm do not behave the same way and finding that out during a
-# delete is a bad afternoon.
+# Aliases from .config/zsh/.zshrc. PowerShell resolves aliases before functions, so
+# a function that shadows a built-in alias removes the alias first.
+# rm, cat, cp and mv keep their PowerShell meanings.
 
 function script:Remove-BuiltinAlias {
     param([string] $Name)
@@ -33,9 +29,8 @@ if (Get-Command kubectl -ErrorAction SilentlyContinue) {
     function kube { kubectl @args }
     function k { kubectl @args }
 
-    # `kubectl completion powershell` is a subprocess that costs more than the
-    # rest of this profile put together, so it is cached and only regenerated
-    # when the kubectl binary changes.
+    # Generating completion is the slowest step in the profile, so the output is
+    # cached until the kubectl binary changes.
     $cacheDir = Join-Path $HOME '.cache/powershell'
     $completion = Join-Path $cacheDir 'kubectl-completion.ps1'
     $binary = (Get-Command kubectl).Source

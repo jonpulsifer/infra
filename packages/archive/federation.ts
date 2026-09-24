@@ -1,111 +1,65 @@
 /**
- * Reaching a cloud Target with no stored credential (§13).
- *
- * §13 settles one auth mode — "**native OIDC federation, nothing stored**" —
- * and this is it. The pod projects a token, the token is exchanged for a
- * federated one, and the federated one is optionally used to impersonate a
- * service account. Nothing is held: the projected token is re-read from disk on
- * every exchange because the kubelet rewrites it, and the access token that
- * comes back is cached only until shortly before it expires.
- *
- * **The projected token is not the cluster's own service account token.** That
- * one is minted for this cluster's API server, and a cloud API refuses it — so
- * the path here is a *separately* projected volume whose audience is the
- * workload-identity pool. Sending the default token would produce a `401` on
- * every cloud call, blamed on the Target, and it is exactly the mistake this
- * file exists to make impossible: `tokenPath` is required configuration with no
- * default that could be the wrong one.
- *
- * The shape mirrors an `external_account` credential document field for field —
- * audience, token url, credential source, impersonation url — because an
- * operator configuring this has one of those already and copying it should be
- * the whole of the work.
+ * Cloud access tokens by workload identity federation, with no stored
+ * credential: a projected token becomes a federated token, which may then
+ * impersonate a service account.
  */
-/** The transport, in the shape `fetch` already has. */
+
 export type Fetcher = (request: Request) => Promise<Response>;
 
-/** Mints a bearer token per request. Never a stored credential (§13). */
 export type TokenProvider = () => string | Promise<string>;
 
-/** What every exchange asks for. Cloud APIs are gated on this one scope. */
+/** Covers every Google Cloud API. */
 const SCOPE = 'https://www.googleapis.com/auth/cloud-platform';
 
-/** The token-exchange grant, as the standard names it. */
 const GRANT = 'urn:ietf:params:oauth:grant-type:token-exchange';
 const ACCESS_TOKEN = 'urn:ietf:params:oauth:token-type:access_token';
 const JWT = 'urn:ietf:params:oauth:token-type:jwt';
 
-/**
- * How long before expiry a cached token is thrown away.
- *
- * A token that expires while a request is in flight fails a deploy for a reason
- * nobody can act on, so the cache gives up its last minute rather than spending
- * it. One extra exchange an hour is not a cost worth optimising.
- */
+/** Drops a cached token a minute early so it does not expire mid-request. */
 const EXPIRY_SKEW_MS = 60_000;
 
 export interface FederationConfig {
-  /**
-   * The workload-identity pool provider this cluster's tokens are trusted by.
-   *
-   * Installation-specific, and therefore a manifest value (§20): it names one
-   * installation's cloud, one pool, and one provider.
-   */
+  /** The workload identity pool provider that trusts this cluster's tokens. */
   readonly audience: string;
   /** Where a projected token is exchanged for a federated one. */
   readonly tokenUrl: string;
   /**
-   * Where the projected token is read from.
-   *
-   * A path with no default. The one that would be convenient — the default
-   * service account token — is precisely the wrong one, so requiring the
-   * operator to say which volume they projected is what keeps the mistake from
-   * being the easy option.
+   * The projected token whose audience is the pool. No default: the obvious
+   * one, the default service account token, is refused by cloud APIs.
    */
   readonly tokenPath: string;
   /**
-   * The service account to impersonate, as a `generateAccessToken` url, or
-   * `null` to use the federated token directly.
-   *
-   * Null is a supported configuration rather than an omission: direct resource
-   * access grants the federated identity roles on its own, which is one fewer
-   * identity to reason about where the cloud resources allow it.
+   * A `generateAccessToken` URL, or `null` to use the federated token directly
+   * when the federated identity holds the roles itself.
    */
   readonly impersonationUrl: string | null;
 }
 
 export interface FederationOptions extends FederationConfig {
-  /** Injected so a test can stand a fake far side behind the real client. */
   readonly fetch?: Fetcher;
-  /** Injected so a test does not need a file at an absolute path. */
   readonly readToken?: (path: string) => Promise<string>;
   readonly now?: () => number;
 }
 
-/** Raised when federation cannot produce a token to call a cloud API with. */
 export class FederationError extends Error {
   override readonly name = 'FederationError';
 }
 
-/** One cached access token and the moment it stops being usable. */
 interface CachedToken {
   readonly value: string;
+  /** Epoch milliseconds. */
   readonly expiresAt: number;
 }
 
 /**
- * A token provider that federates, caching what it mints.
- *
- * One provider serves every cloud Target because the exchange is per
- * *installation* rather than per Target: the pool trusts this cluster, and
- * which project a call lands in is decided by the call, not by the identity
- * making it.
+ * One provider serves every cloud Target: the pool trusts the cluster, and each
+ * call picks its own project.
  */
 export function workloadIdentityToken(
   options: FederationOptions,
 ): TokenProvider {
   let cached: CachedToken | null = null;
-  /** The exchange in flight, so a burst of calls makes one round trip. */
+  /** Shared so a burst of calls makes one exchange. */
   let inflight: Promise<CachedToken> | null = null;
 
   const clock = () => options.now?.() ?? Date.now();
@@ -125,7 +79,7 @@ export function workloadIdentityToken(
   };
 }
 
-/** Projected token → federated token → (optionally) an impersonated one. */
+/** Projected token, then federated token, then optionally impersonation. */
 async function exchange(
   options: FederationOptions,
   clock: () => number,
@@ -172,14 +126,13 @@ async function exchange(
       : Date.parse(impersonated.expireTime);
   return {
     value: token,
-    // A far side that answered with an unparseable expiry gets the federated
-    // token's, which is never longer — a cache that guessed long would serve a
-    // dead token, and one that guessed short only costs an exchange.
+    // An unparseable expiry falls back to the federated one, which is never
+    // later: a short guess costs an exchange, a long one serves a dead token.
     expiresAt: Number.isFinite(expiry) ? expiry : expiresAt,
   };
 }
 
-/** Read the projected token, freshly, because the kubelet rewrites the file. */
+/** Read on every exchange because the kubelet rewrites the file. */
 async function readProjectedToken(options: FederationOptions): Promise<string> {
   if (options.readToken !== undefined) {
     return options.readToken(options.tokenPath);
@@ -194,7 +147,6 @@ async function readProjectedToken(options: FederationOptions): Promise<string> {
   return file.text();
 }
 
-/** One JSON POST, with whatever the far side said on a refusal. */
 async function post<Result>(
   options: FederationOptions,
   url: string,

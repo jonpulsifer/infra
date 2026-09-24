@@ -1,7 +1,4 @@
-# Work-machine identity overrides. Loaded automatically over mise.toml's [vars] when
-# MISE_ENV=work is set (e.g. `export MISE_ENV=work` in the work laptop's shell profile,
-# or `mise dotfiles apply -E work`) — an explicit, auditable per-machine opt-in rather
-# than OS-username inference.
+# Work identity. Overrides the [vars] in mise.toml when MISE_ENV=work.
 [vars]
 git_email = "jonathan@moonpay.com"
 git_signingkey = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIG4dHeSXomLf4FxyBJHrHihldnQXpJ3xcE57u2sOfaay"

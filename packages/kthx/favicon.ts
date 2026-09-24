@@ -1,11 +1,6 @@
 /**
- * The kthx dot, 32x32, `--hot` on `--paper`: what a kthx host answers at
- * `/favicon.ico` when it has none of its own.
- *
- * Base64 in the source rather than a file in the tree — 230 bytes of binary
- * is not worth a blob in a text repo, and every host serves the same bytes.
- * Its own module so that `kthx dev` can answer with the same bytes without
- * importing the serving half and the database behind it.
+ * The kthx dot, 32x32, for a host with no `/favicon.ico` of its own. Its own module so
+ * `kthx dev` can serve it without importing the server and its database.
  */
 export const FAVICON_PATH = '/favicon.ico';
 

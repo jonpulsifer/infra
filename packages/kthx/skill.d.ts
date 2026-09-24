@@ -1,3 +1,3 @@
-/** `skill.md` is imported as text; the declaration is what lets tsc see that. */
+/** `skill.md`, imported as text. */
 declare const skill: string;
 export default skill;

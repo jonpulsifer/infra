@@ -1,18 +1,9 @@
-/**
- * `helm template` over the App chart, parsed.
- *
- * Chart correctness is asserted **where the chart lives**, as a rendering
- * assertion — never through Spindrift's command layer (Spindrift spec, § Not a
- * seam). So this helper knows about Helm and YAML and nothing else: no adapter,
- * no `DesiredState`, no database. What it renders is what a cluster would get.
- */
+/** `helm template` over the App chart, parsed. Nothing here imports the control plane. */
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 
-/** The chart under test — this file's own parent, not a configured path. */
 const CHART = dirname(import.meta.dir);
 
-/** One rendered Kubernetes object, as loosely typed as YAML actually is. */
 export interface RenderedObject {
   apiVersion: string;
   kind: string;
@@ -26,13 +17,9 @@ export interface RenderedObject {
   [key: string]: unknown;
 }
 
-/** The values a test sets. Everything else comes from `values.yaml`. */
 export type Values = Record<string, unknown>;
 
-/**
- * The minimum a Deploy always carries: Spindrift never renders a release
- * without an App, a Component, and a digest-pinned image.
- */
+/** A Deploy's App, Component and digest-pinned image, and a Target's platform values. */
 const BASELINE: Values = {
   app: {
     name: 'blog',
@@ -57,7 +44,7 @@ const BASELINE: Values = {
   },
 };
 
-/** Merge one level deeper than `{...a, ...b}`, which is all these values nest. */
+/** Merges records recursively; arrays and scalars in `overrides` replace. */
 function merge(base: Values, overrides: Values): Values {
   const merged: Values = { ...base };
   for (const [key, value] of Object.entries(overrides)) {
@@ -74,13 +61,7 @@ function isRecord(value: unknown): value is Values {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-/**
- * Render the chart with `overrides` on top of a realistic baseline.
- *
- * Values go through a file rather than `--set` because `--set` has its own
- * escaping grammar, and a test that fails on a comma inside a hostname would be
- * testing Helm's argument parser instead of the chart.
- */
+/** Values go through a file because `--set` has its own escaping grammar. */
 export async function render(
   overrides: Values = {},
 ): Promise<RenderedObject[]> {
@@ -126,7 +107,6 @@ export async function render(
   }
 }
 
-/** The one object of a kind, or a failure naming what was rendered instead. */
 export function one(objects: RenderedObject[], kind: string): RenderedObject {
   const matches = objects.filter((object) => object.kind === kind);
   if (matches.length !== 1) {
@@ -138,12 +118,11 @@ export function one(objects: RenderedObject[], kind: string): RenderedObject {
   return matches[0] as RenderedObject;
 }
 
-/** Every kind rendered, for the assertions about what is *absent*. */
 export function kinds(objects: RenderedObject[]): string[] {
   return objects.map((object) => object.kind);
 }
 
-/** The chart's own metadata, as `helm show chart` reads it at pin time. */
+/** `Chart.yaml`, as `helm show chart` reads it when a Target is pinned. */
 export async function chartMetadata(): Promise<{
   name: string;
   version: string;

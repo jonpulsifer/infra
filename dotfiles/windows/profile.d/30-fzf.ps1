@@ -1,6 +1,4 @@
-# fzf and zoxide. The FZF_* environment block is copied from
-# .config/zsh/.zshrc unchanged -- environment variables port across shells with
-# no translation, so the picker looks identical here.
+# fzf and zoxide, with the FZF_* settings from .config/zsh/.zshrc.
 
 $env:FZF_DEFAULT_OPTS = @(
     "--prompt='❯ ' --pointer='❯ ' --marker='❯ ' --layout=reverse"
@@ -12,8 +10,7 @@ $env:FZF_DEFAULT_OPTS = @(
 ) -join ' '
 
 $env:FZF_CTRL_R_OPTS = '--layout=default --height=~40%'
-# No `|| find .` fallback here: fd comes from mise, so if it is missing the
-# right answer is to fix mise rather than to silently degrade.
+# No find fallback: mise installs fd.
 $env:FZF_DEFAULT_COMMAND = 'fd --type f'
 $env:FZF_CTRL_T_OPTS = "--preview 'bat --style=numbers --color=always --line-range=:200 {}' --bind 'ctrl-/:toggle-preview'"
 $env:FZF_ALT_C_COMMAND = 'fd --type d --exclude .git'
@@ -22,9 +19,8 @@ $env:FZF_ALT_C_OPTS = "--preview 'eza --tree --level=2 --color=always {}' --bind
 if ((Get-Command fzf -ErrorAction SilentlyContinue) -and (Get-Module -ListAvailable -Name PSFzf)) {
     Import-Module PSFzf
 
-    # fzf-tab. This rebinds Tab, taking it back from the MenuComplete binding in
-    # 10-psreadline.ps1 -- deliberate, that binding is the fallback for when
-    # PSFzf is not installed.
+    # fzf-tab. Replaces the MenuComplete Tab binding from 10-psreadline.ps1, which
+    # stays as the fallback without PSFzf.
     Set-PsFzfOption -TabExpansion
 
     Set-PsFzfOption -PSReadlineChordProvider 'Ctrl+t'

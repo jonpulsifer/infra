@@ -52,9 +52,7 @@ function Test-Elevated {
         [Security.Principal.WindowsBuiltInRole]::Administrator)
 }
 
-# -DryRun is this script's ShouldProcess: it covers the whole run rather than
-# each link, because the useful question is "does every source still resolve",
-# and the answer has to be an exit code CI can read.
+# -DryRun stands in for ShouldProcess across the whole run and sets the exit code.
 function New-Link {
     [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseShouldProcessForStateChangingFunctions', '')]
     param(
@@ -69,8 +67,7 @@ function New-Link {
 
     $existing = Get-Item -LiteralPath $Target -Force -ErrorAction SilentlyContinue
     if ($existing -and $existing.LinkType -eq 'SymbolicLink') {
-        # ResolveLinkTarget follows the chain; compare the real paths so a link
-        # that already points at this repo is left untouched.
+        # $true follows the link chain to its final target.
         $current = $existing.ResolveLinkTarget($true)
         if ($current -and $current.FullName -eq (Resolve-Path -LiteralPath $Source).Path) {
             Write-Step "ok       $Target"
@@ -88,10 +85,8 @@ function New-Link {
         New-Item -ItemType Directory -Path $parent -Force | Out-Null
     }
 
-    # A real file or directory in the way is somebody's hand-made config. Move
-    # it aside rather than deleting it -- Windows Terminal in particular can
-    # replace its own settings.json on update, and that content is worth
-    # keeping around until it has been looked at.
+    # Back up a real file in the way. Windows Terminal can rewrite its own
+    # settings.json on update.
     if ($existing) {
         if ($existing.LinkType -eq 'SymbolicLink') {
             $existing.Delete()
@@ -108,9 +103,7 @@ function New-Link {
 }
 
 function Get-WindowsTerminalSettingsPath {
-    # The package family name carries a publisher hash, so it has to be
-    # discovered rather than hardcoded. Preview and stable install side by side;
-    # prefer stable.
+    # The package name ends in a publisher hash. The pattern skips WindowsTerminalPreview.
     $packages = Get-ChildItem -Path "$env:LOCALAPPDATA\Packages" -Directory -ErrorAction SilentlyContinue |
         Where-Object { $_.Name -like 'Microsoft.WindowsTerminal_*' } |
         Sort-Object Name
@@ -130,37 +123,20 @@ DeveloperMode resource is there precisely so this deploy does not need admin.
     }
 }
 
-# --- Shell ------------------------------------------------------------------
-
 New-Link -Source (Join-Path $WindowsDir 'profile.ps1') -Target $PROFILE.CurrentUserAllHosts
 New-Link -Source (Join-Path $WindowsDir 'profile.d') -Target "$HOME\.config\powershell\profile.d"
 
-# --- Git --------------------------------------------------------------------
-
-# The shared config is reused, not forked: git on Windows reads
-# ~/.config/git/config just as it does on Unix. windows/gitconfig lands at
-# ~/.gitconfig, includes that file, and overrides the handful of things that
-# differ (autocrlf, Win32-OpenSSH, the native op-ssh-sign.exe and the public
-# key literal it signs with).
+# windows/gitconfig includes the shared ~/.config/git/config and overrides the
+# Windows differences.
 New-Link -Source (Join-Path $DotfilesDir '.config\git') -Target "$HOME\.config\git"
 New-Link -Source (Join-Path $WindowsDir 'gitconfig') -Target "$HOME\.gitconfig"
 
-# --- mise -------------------------------------------------------------------
-
 New-Link -Source (Join-Path $DotfilesDir 'mise-global-config.toml') -Target "$HOME\.config\mise\config.toml"
 
-# --- Editor -----------------------------------------------------------------
-
-# The nvim config is pure Lua with no Unix path assumptions, so it crosses
-# unchanged. Neovim reads %LOCALAPPDATA%\nvim on Windows.
 New-Link -Source (Join-Path $DotfilesDir '.config\nvim') -Target "$env:LOCALAPPDATA\nvim"
 
-# Deliberately not linked: .ssh/config. It carries ControlMaster and a
-# `Match exec "test $(uname -s) = Darwin"` block that Win32-OpenSSH does not
-# understand, and git -- the only thing here that ssh's -- needs nothing from
-# it. The 1Password Windows agent serves keys over its named pipe.
-
-# --- Terminal ---------------------------------------------------------------
+# .ssh/config is not linked: Win32-OpenSSH does not understand its ControlMaster
+# and Match exec settings.
 
 $terminalSettings = Get-WindowsTerminalSettingsPath
 if ($terminalSettings) {
@@ -169,8 +145,6 @@ if ($terminalSettings) {
 else {
     Write-Step 'Windows Terminal not installed, skipping its settings'
 }
-
-# --- Agents -----------------------------------------------------------------
 
 $agentInstructions = Join-Path $DotfilesDir '.agents\AGENTS.md'
 foreach ($target in @(
@@ -188,8 +162,6 @@ foreach ($target in @("$HOME\.agents\skills", "$HOME\.claude\skills")) {
 }
 
 New-Link -Source (Join-Path $DotfilesDir '.claude\settings.json') -Target "$HOME\.claude\settings.json"
-
-# --- PowerShell modules -----------------------------------------------------
 
 if (-not $SkipModules -and -not $DryRun) {
     & (Join-Path $WindowsDir 'Install-Modules.ps1')

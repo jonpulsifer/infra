@@ -1,10 +1,4 @@
-/**
- * `helm template` over the installer chart, parsed.
- *
- * The installer is infrastructure, so its contract is the rendered Kubernetes
- * objects themselves: one identity, two processes, and credentials only where
- * the process needs them.
- */
+/** `helm template` over the installer chart, parsed. */
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 

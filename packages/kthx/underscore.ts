@@ -1,35 +1,15 @@
 /**
- * kthx: the `/_/` surface every site has, without the database. `db` is JSON
- * by key over a `KthxStore` the caller supplies — Postgres in production,
- * a Map under `kthx dev` — `me` is a cookie that says which browser this is,
- * and `ws` is the one socket a tab opens for store watches and rooms.
- *
- * There is no login. Anyone on a site's origin reads and writes its keys,
- * artifacts-style; `me` is an anonymous id a poll can remember a vote by.
- * A write is one statement the store decides — `if-match` on the stored
- * etag, `if-none-match: *` on there being no row — so two tabs racing on a
- * key cannot both win, and the SDK's `update` is a loop over that.
- *
- * Fan-out is Bun's own pub/sub. Every store write on a site is published to
- * the site's one `db` topic and the SDK keeps the key-or-prefix filter, which
- * is the smallest thing that is right for both kinds of watch at once; a room
- * is a topic of its own that `send` publishes to, sender excluded.
+ * The `/_/` surface every kthx site has: `db` (JSON by key over a caller's `KthxStore`),
+ * `me` (an anonymous per-browser cookie) and `ws` (one socket for store watches and rooms).
+ * There is no login: anyone on a site's origin reads and writes its keys.
  */
 import { createHash } from 'node:crypto';
 
 export const MAX_KEY_CHARS = 256;
 export const MAX_VALUE_BYTES = 64 * 1024;
 export const MAX_LIST = 500;
-/**
- * Keys one site may hold. Nobody signs in to write, so this is what stands
- * between a visitor's `for` loop and the control plane's disk: at most
- * `MAX_KEYS * MAX_VALUE_BYTES` — 64 MiB — per claimed name. Only a write that
- * adds a row is refused; overwriting and deleting keep working at the ceiling.
- *
- * ponytail: rows, not bytes, and per site rather than over the whole store.
- * A running byte total per site is the upgrade path when a legitimate site
- * gets near it, or when the count of sites is what needs bounding.
- */
+// ponytail: counts rows per site; track bytes when a legitimate site nears the cap.
+/** Bounds a site's storage at `MAX_KEYS * MAX_VALUE_BYTES`; at the cap only a new key is refused. */
 export const MAX_KEYS = 1000;
 const MAX_ROOM_CHARS = 128;
 // ponytail: flat per-socket ceilings; per-site quotas when a site outgrows them.
@@ -41,11 +21,9 @@ export interface KthxStore {
   list(prefix: string): Promise<readonly { key: string; text: string }[]>;
   get(key: string): Promise<{ text: string; etag: string } | undefined>;
   /**
-   * Writes when the precondition holds — `ifMatch` against the stored etag
-   * (`*` against there being any row), `ifNoneMatch` against there being no
-   * row — and says what happened: `stale` is a precondition the store
-   * refused, `full` is a new key the site has no room for. The two are
-   * different answers, so they cannot share one `false`.
+   * Writes when `ifMatch` equals the stored etag (`*`: any row) or `ifNoneMatch` finds no row.
+   * The check and the write must be one atomic step, so two racing writers cannot both win.
+   * `stale` is a refused precondition; `full` is a new key the site has no room for.
    */
   put(
     key: string,
@@ -68,9 +46,8 @@ function refuse(status: number, code: string, message: string): Response {
 }
 
 /**
- * What a site answers under `/_/` (`/_/sdk.js` aside), given the decoded
- * path: `undefined` once the socket is Bun's, `null` for a path that is
- * nothing of kthx's.
+ * Answers a decoded `/_/` path other than `/_/sdk.js`. `undefined` means Bun took the
+ * socket; `null` means the path is not kthx's.
  */
 export function underscoreResponse(
   request: Request,
@@ -96,13 +73,11 @@ export function underscoreResponse(
   return null;
 }
 
-// --- me ---------------------------------------------------------------------
-
 const ME_COOKIE = 'kthx_me';
 const ME_LIFETIME_S = 365 * 24 * 60 * 60;
 const UUID = /^[0-9a-f-]{36}$/;
 
-/** Who this browser is on this site, and the header that makes it so if it was not yet. */
+/** This browser's id on this site, with the `set-cookie` header when the id is new. */
 function meOf(
   request: Request,
   secure: boolean,
@@ -125,8 +100,6 @@ function meOf(
   };
 }
 
-// --- db ---------------------------------------------------------------------
-
 /** JSON with object keys sorted, so equal values hash equal. */
 export function canonical(value: unknown): string {
   return JSON.stringify(value, (_key, item: unknown) =>
@@ -140,6 +113,7 @@ export function canonical(value: unknown): string {
   );
 }
 
+// Every write on a site goes to one topic; the SDK filters by key or prefix.
 const dbTopic = (site: string) => `kthx:${site}:db`;
 
 async function list(request: Request, store: KthxStore): Promise<Response> {
@@ -253,8 +227,6 @@ async function kv(
   }
 }
 
-// --- ws ---------------------------------------------------------------------
-
 export interface KthxSocketData {
   readonly kind: 'kthx';
   readonly site: string;
@@ -287,15 +259,13 @@ function upgrade(
 
 const roomTopic = (site: string, room: string) => `kthx:${site}:room:${room}`;
 
-// ponytail: one web replica, so presence is a Map in this process and fan-out
-// is Bun's pub/sub. The upgrade path when `web.replicas > 1` is Postgres
-// LISTEN/NOTIFY carrying store writes and room frames between replicas.
+// ponytail: presence and fan-out are in-process, which holds for one replica; more
+// need Postgres LISTEN/NOTIFY between them.
 /** Room topic → peer id → how many of that peer's sockets are in the room. */
 const presence = new Map<string, Map<string, number>>();
 
 type Socket = Bun.ServerWebSocket<unknown>;
 
-/** The socket handlers a `kthx` socket is handed to. */
 export const kthxSocket = {
   message(socket: Socket, data: KthxSocketData, raw: string | Buffer): void {
     if (raw.length > MAX_FRAME_BYTES) return;

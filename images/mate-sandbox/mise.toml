@@ -1,40 +1,15 @@
-# Baked into the sandbox image at /etc/mise/config.toml.
-#
-# mise is in the image for `mise run <task>` and nothing else: AGENTS.md makes
-# the task list the command source of truth, and the tasks encode the binary
-# and the flags an agent would otherwise have to guess at. Every tool those
-# tasks reach for is already a plain binary in /usr/local/bin, so mise has no
-# tool to manage here.
-#
-# `trusted_config_paths` is what makes that task list readable at all. mise
-# refuses to load a config it has not been told to trust, and a sandbox has
-# nowhere to remember having trusted one: /home/agent is an emptyDir and
-# /workspace is a fresh clone, so the checkout's mise.toml is untrusted on
-# every thread. Untrusted, `mise tasks ls` and `mise ls` exit 1 — and
-# `mise tasks ls` is where AGENTS.md tells an agent to start. Trusting the path
-# concedes nothing: it is the directory the agent already writes to and already
-# runs commands in.
-#
-# `disable_tools` is what keeps a task starting in milliseconds. Left alone
-# mise installs every tool the checkout declares before it runs anything: 29
-# tools, 177 s and 4.2 GB, measured from a clean HOME on a machine whose
-# network answers. Here that is an emptyDir filling over egress the sandbox
-# denies, so it never gets that far. Every name the repo's own mise.toml
-# declares is listed, whether or not the image carries that tool, because the
-# cost is the resolution attempt rather than the install. It is spelled out
-# because mise reads `*` as a tool named `*` and resolves the rest anyway;
-# `apps/mate/test/sandboxes.test.ts` fails if the two lists drift apart.
-#
-# `offline` buys no speed on top of that — both settings together and
-# `disable_tools` alone each start a task in the same ~30 ms — and it is not an
-# egress guarantee, because mise still clones plugins over HTTPS under it. It
-# is here for the failure mode when the list below does drift: offline, the
-# tool that escaped fails to resolve in 0 ms and the run stops loudly, where
-# without it mise starts a download and waits on a network that will not
-# answer.
+# Baked into the sandbox image at /etc/mise/config.toml. Tools are plain
+# binaries in the image, so mise only runs tasks.
 [settings]
+# Each thread's checkout is a fresh clone, and mise exits 1 on an untrusted
+# config. Trust grants nothing: the agent already runs commands there.
 trusted_config_paths = ["/workspace"]
+# A tool missing from disable_tools then fails at once instead of hanging on
+# denied egress. mise still clones plugins over HTTPS with this set.
 offline = true
+# Stops mise resolving the root mise.toml's tools before each task. "*" is read
+# as a tool name, so each is listed; apps/mate/test/sandboxes.test.ts keeps the
+# lists in sync.
 disable_tools = [
   "1password-cli",
   "age",

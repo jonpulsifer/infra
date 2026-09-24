@@ -11,7 +11,6 @@ helix = "latest"
 herdr = "latest"
 worktrunk = "latest"
 
-# cloud & k8s tooling
 kubectl = "latest"
 helm = "latest"
 k9s = "latest"
@@ -24,12 +23,8 @@ opencode = "latest"
 gh = "latest"
 node = "latest"
 
-# Windows has no Homebrew and no home-manager, so the shell tooling those two
-# provide on macOS and NixOS has to come from mise instead. The os filter keeps
-# them from being installed twice everywhere else.
-#
-# btop is absent on purpose: it ships no Windows build. The zshrc's htop nag
-# alias is dropped there too.
+# Homebrew and home-manager supply these on macOS and NixOS, so mise installs them
+# on Windows only. btop has no Windows build.
 bat = { version = "latest", os = ["windows"] }
 delta = { version = "latest", os = ["windows"] }
 eza = { version = "latest", os = ["windows"] }

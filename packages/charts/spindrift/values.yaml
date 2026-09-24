@@ -9,29 +9,16 @@ serviceAccount:
   name: ""
   token:
     audience: api
-    # GCP workload identity provider audience. When set, both processes receive
-    # a second projected token and an ADC-compatible external-account
-    # credential file, and the process reads its federation out of that file.
+    # The GCP workload identity provider audience. Set, both processes get a second
+    # projected token and an ADC `external_account` credential file.
     gcpAudience: ""
     # The service account the federated identity impersonates, as a
     # `generateAccessToken` url. Empty uses the federated identity's own grants.
     gcpImpersonationUrl: ""
     expirationSeconds: 3600
     mountPath: /var/run/secrets/spindrift
-    # The ConfigMap projected at `ca.crt` — the one file `NODE_EXTRA_CA_CERTS`
-    # names. Defaults to the cluster's own published root, `kube-root-ca.crt`,
-    # because it is the only trust material every cluster publishes with zero
-    # operator input — a template cannot introspect certificate content to
-    # refuse a bad default at install time. That default is sufficient only
-    # when the published root is self-signed. A cluster whose CA is issued by
-    # an intermediate must name a ConfigMap carrying the full chain (the
-    # leaf-issuing CA, every intermediate, and the self-signed root); Node
-    # does no partial-chain verification through `NODE_EXTRA_CA_CERTS`, so a
-    # bare intermediate-issued root fails every verification with
-    # `unable to get issuer certificate`. An installation holding a Target on
-    # another cluster names a ConfigMap carrying that cluster's chain as well,
-    # because the variable takes exactly one file and a projected volume
-    # cannot merge two sources onto one path.
+    # The one file `NODE_EXTRA_CA_CERTS` reads. Node does no partial-chain verification, so it
+    # needs full chains to self-signed roots, including any other cluster holding a Target.
     caConfigMap: kube-root-ca.crt
 
 # Where the control plane's own UI is served. Empty renders no Gateway and no
@@ -48,8 +35,7 @@ web:
       memory: 512Mi
       cpu: 500m
 
-# The second process off the same image. Opt-in, so it can be rolled out
-# independently of the web Deployment.
+# The second process off the same image, opt-in so it rolls out apart from `web`.
 reconciler:
   enabled: false
   replicas: 1
@@ -69,11 +55,8 @@ sandbox: false
 # Secret carrying `SPINDRIFT_ENROLMENT_TOKEN` and repository credentials.
 envFromSecret: ""
 
-# Header authentication, safe only behind a Gateway that strips and replaces
-# identity headers and is the sole network path to the web pod. Enabling this
-# renders a default-deny ingress NetworkPolicy admitting exactly `from`, and
-# attests that boundary to the process. `from` is a list of NetworkPolicyPeer
-# and must be non-empty when enabled.
+# Header authentication, safe only behind a Gateway that replaces identity headers. Enabling
+# it admits only `from`, a non-empty NetworkPolicyPeer list, to the web pod.
 gatewayAuth:
   enabled: false
   from: []
@@ -86,10 +69,7 @@ database:
   size: 2Gi
   name: spindrift
   storageClass: local-path
-  # CNPG owns the data PVC through the Cluster, so keeping the Cluster is what
-  # keeps the desired-state rows, the attempt log, and the config version pins.
-  # Turn it off to make an uninstall a real teardown, which is the loop for
-  # working on seeding and the onboarding wizard.
+  # Keeps the Cluster, and with it the data PVC, on uninstall. Off makes an uninstall a teardown.
   keepOnDelete: true
   # Apply the image's committed migrations with a Job, and hold both processes
   # below Ready until its journal is present.

@@ -1,10 +1,6 @@
 {{/*
-Two Deployments off one image — `web` (UI, webhooks, log WebSockets) and
-`reconciler` — rendered from one template so they cannot drift apart in the
-image, the database credential, or the security context.
-
-The reconciler serves nothing, so it gets no port and no probe: a loop that
-claims work with `SELECT … FOR UPDATE SKIP LOCKED` has no readiness to report.
+The `web` process and the optional `reconciler`, from one image and one template. The
+reconciler serves nothing, so it has no port and no probe.
 */}}
 {{- $top := . -}}
 {{- $processes := list (dict "name" "web" "command" "src/web/server.ts" "replicas" .Values.web.replicas "resources" .Values.web.resources "serves" true "federates" true) -}}
@@ -25,38 +21,20 @@ metadata:
     {{- if $top.Values.database.enabled }}
     app.kubernetes.io/database: {{ include "spindrift.databaseName" $top }}
     {{- end }}
-    # `NODE_EXTRA_CA_CERTS` is read once, at process start. A kubelet refresh of
-    # the projected bundle changes the file and nothing else, so a corrected
-    # trust store reaches the mount and never reaches the process holding the
-    # old one — and it misfires during a CA rotation, when every symptom already
-    # reads as a wrong bundle rather than an old process. Reloader turns the
-    # ConfigMap change into the restart that makes the correction take.
-    #
-    # The ConfigMap is named rather than left to `reloader.stakater.com/auto`
-    # because this is the one the pod reaches through a projected volume, and
-    # because the name is often a bundle this release does not own — including
-    # the `kube-root-ca.crt` default, which a cluster CA rotation rewrites in
-    # place with nothing else to roll these pods.
+    # `NODE_EXTRA_CA_CERTS` is read once at start, so a changed bundle needs a restart, even one
+    # this release does not own, such as `kube-root-ca.crt` after a cluster CA rotation.
     configmap.reloader.stakater.com/reload: {{ $top.Values.serviceAccount.token.caConfigMap | quote }}
     {{- with $top.Values.envFromSecret }}
-    # A rotated token is a Secret change; Reloader turns it into the restart the
-    # process needs to read the new value.
+    # The process reads this Secret only at start.
     secret.reloader.stakater.com/reload: {{ . | quote }}
     {{- end }}
 spec:
   replicas: {{ $process.replicas }}
-  # Both processes are singletons, and each one's correctness says so: `web`
-  # keeps its rate-limit buckets and its bundle cache in its own memory, and
-  # `reconciler` claims intents. The default `maxSurge`
-  # rounds up to 1, so a rollout ran a second one alongside the old for as long
-  # as it took the old to exit. Take the old one down first instead: a rollout
-  # is then a short gap rather than a window with two.
-  #
-  # Stays `RollingUpdate` rather than becoming `Recreate` on purpose — swapping
-  # the strategy on a live Deployment cannot prune the defaulted `rollingUpdate`
-  # fields through server-side apply, and the HelmRelease wedges on it.
+  # Switching a live Deployment to Recreate fails: server-side apply cannot prune the
+  # defaulted `rollingUpdate` fields, and the HelmRelease stalls.
   strategy:
     type: RollingUpdate
+    # Both processes are singletons, and `web` keeps rate limits in memory, so the old pod stops first.
     rollingUpdate:
       maxSurge: 0
       maxUnavailable: 1
@@ -119,8 +97,7 @@ spec:
               protocol: TCP
           {{- end }}
           env:
-            # readOnlyRootFilesystem below leaves /tmp as the only writable
-            # path, and `Bun.serve` bundles the client at boot.
+            # /tmp is the only writable path, and `Bun.serve` bundles the client at boot.
             - name: TMPDIR
               value: /tmp
             - name: HOME
@@ -128,19 +105,15 @@ spec:
             - name: PORT
               value: {{ $top.Values.port | quote }}
             {{- if $process.serves }}
-            # The Service in front of this pod: the machine routes answer on
-            # its in-cluster names as well as on the public ones.
+            # The machine routes also answer on this Service's in-cluster names.
             - name: SPINDRIFT_SERVICE_NAME
               value: {{ include "spindrift.fullname" $top | quote }}
             - name: SPINDRIFT_SERVICE_NAMESPACE
               value: {{ include "spindrift.namespace" $top | quote }}
             {{- end }}
             {{- if contains "@" $top.Values.image }}
-            # What the footer says is running: the digest CD pinned, shortened
-            # the way the product already prints digests — `sha256:` and the
-            # twelve hex characters its `Ref` and `shortDigest` keep. A
-            # tag-only image states no version, so the footer stays hidden
-            # rather than lying.
+            # The footer's version: `sha256:` and 12 hex characters, as `shortDigest` prints it. A
+            # tag-only image sets none, which hides the footer.
             - name: SPINDRIFT_VERSION
               value: {{ $top.Values.image | splitList "@" | last | trunc 19 | quote }}
             {{- end }}
@@ -155,12 +128,8 @@ spec:
             {{- end }}
             {{- end }}
             {{- if $top.Values.hostname }}
-            # The passkey relying party, and the name the status page tells its
-            # own address by. The same value that renders the Gateway listener
-            # and the HTTPRoute, so the origin a ceremony is scoped to is the
-            # origin the release actually answers on, with no second copy to
-            # keep in step. A release serving no origin sets nothing and cannot
-            # enrol anybody, which is what having no origin means.
+            # The passkey relying party, from the value that renders the Gateway listener and
+            # HTTPRoute. A release with no hostname enrols nobody.
             - name: SPINDRIFT_HOSTNAME
               value: {{ $top.Values.hostname | quote }}
             {{- end }}
@@ -186,13 +155,8 @@ spec:
                 name: {{ . }}
           {{- end }}
           {{- if $process.serves }}
-          # Readiness only, and on purpose: a liveness probe on a process
-          # whose slow path is a database query would restart it exactly when
-          # it is least able to recover. `/readyz` does a real `select 1`
-          # through the app's pool, so a Postgres outage takes the pod out of
-          # the Service without killing the one process that will notice
-          # Postgres come back. `/healthz` stays a bare constant for exactly
-          # that liveness case, should one ever be added here.
+          # No liveness probe: it would restart the process during a Postgres outage. `/readyz`
+          # runs `select 1` through the app's pool.
           readinessProbe:
             httpGet:
               path: /readyz

@@ -36,9 +36,8 @@ spec:
       {{- end }}
       automountServiceAccountToken: false
       securityContext:
-        # The image's own `nextjs` user. Named in the Dockerfile rather than
-        # numeric, so the uid has to be repeated here — `runAsNonRoot` alone
-        # cannot verify a name and the kubelet refuses the pod.
+        # The image's `nextjs` user, by uid: its Dockerfile names it, and `runAsNonRoot`
+        # cannot verify a name.
         runAsNonRoot: true
         runAsUser: 1001
         runAsGroup: 1001
@@ -50,19 +49,11 @@ spec:
           image: {{ .Values.image.ui }}
           imagePullPolicy: IfNotPresent
           env:
-            {{/*
-            Every API call the UI makes is server-side, so the in-cluster
-            Service name is the right base URL — the browser never resolves it.
-            The path suffix is not optional.
-            */}}
+            # The UI calls the API server-side only, so the in-cluster name works. The path is required.
             - name: UI_API_BASE_URL
               value: http://{{ include "prowler.fullname" . }}-api:{{ .Values.api.port }}/api/v1
-            {{/*
-            NextAuth builds its callback URLs from this, so it must be the
-            public origin including the scheme — a bare host silently breaks
-            sign-in. `AUTH_TRUST_HOST` is what makes it honour the forwarded
-            headers from the gateway.
-            */}}
+            # NextAuth builds callback URLs from this public origin, scheme included. `AUTH_TRUST_HOST`
+            # makes it honour the gateway's forwarded headers.
             - name: AUTH_URL
               value: https://{{ required "hostname is required: it is the origin NextAuth builds callback URLs from" .Values.hostname }}
             - name: AUTH_TRUST_HOST
@@ -89,8 +80,7 @@ spec:
           volumeMounts:
             - name: tmp
               mountPath: /tmp
-            # Next's standalone server writes its fetch cache here, under a
-            # WORKDIR the image otherwise owns read-only.
+            # Next's standalone server writes its fetch cache here; the root filesystem is read-only.
             - name: cache
               mountPath: /app/.next/cache
       volumes:

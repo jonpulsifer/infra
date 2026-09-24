@@ -1,6 +1,5 @@
 {{/*
-The one process, the volume it serves from, and the identity it reaches Google
-with. Everything a request touches is in this file.
+The kthx server process, its sites volume and its GCP identity.
 */}}
 apiVersion: v1
 kind: ServiceAccount
@@ -9,16 +8,12 @@ metadata:
   namespace: {{ .Release.Namespace }}
   labels:
     {{- include "kthx.labels" . | nindent 4 }}
-# The pod projects the tokens it needs with the audiences it needs. An
-# automounted API token is neither, and this process never calls Kubernetes.
+# The pod projects its own GCP token, and the process never calls the Kubernetes API.
 automountServiceAccountToken: false
 ---
 {{/*
-The whole of the process's GCP federation, in one ordinary ADC
-`external_account` document — the audience, the token url, the impersonation
-url, and the path the projected token is written to. Any Google client in any
-process that mounts this finds the same credential; no service-account key
-exists anywhere in the path, which is what the organization policy requires.
+Keyless GCP federation as an ADC `external_account` document. The organization
+policy forbids service-account keys.
 */}}
 apiVersion: v1
 kind: ConfigMap
@@ -46,9 +41,8 @@ data:
     }
 ---
 {{/*
-Unpacked release directories. `keep`, because Helm deleting this claim would
-delete every site's bytes — recoverable from the depot, but only lazily and one
-404 at a time.
+Unpacked release directories. `keep`: the depot refills a lost claim only lazily,
+one request at a time.
 */}}
 apiVersion: v1
 kind: PersistentVolumeClaim
@@ -79,11 +73,8 @@ metadata:
 spec:
   replicas: 1
   {{/*
-  One replica by construction, not by configuration: the abuse buckets and the
-  realtime rooms are in-process, and the release directories are a ReadWriteOnce
-  volume. `Recreate` because a rolling update would ask for a second pod holding
-  the same volume, which never schedules — the rollout would hang rather than
-  fail, with the old pod still serving and the new digest nowhere.
+  One pod at a time: the abuse buckets and realtime rooms are in-process, and the
+  sites volume is ReadWriteOnce.
   */}}
   strategy:
     type: Recreate
@@ -98,7 +89,7 @@ spec:
       serviceAccountName: {{ include "kthx.fullname" . }}
       automountServiceAccountToken: false
       {{- with .Values.node }}
-      # Both volumes are a directory on this node's disk.
+      # The sites PVC is a local-path directory on this node.
       nodeSelector:
         kubernetes.io/hostname: {{ . | quote }}
       {{- end }}
@@ -126,30 +117,19 @@ spec:
               value: {{ . | quote }}
             {{- end }}
             - name: KTHX_BUCKET
-              # `required`, because an empty bucket is not a degraded mode: the
-              # process reads it as "no depot" and silently keeps every release
-              # archive on the local volume only, with nothing durable anywhere
-              # and no error to notice.
+              # Empty means no depot: every release archive stays on the local volume, with no error.
               value: {{ required "bucket is required: it is the depot every release archive is durable in" .Values.bucket | quote }}
             - name: KTHX_SITES_DIR
               value: {{ .Values.sites.mountPath | quote }}
             - name: KTHX_TRUSTED_PROXIES
               value: {{ .Values.trustedProxies | quote }}
-            # The AI passthrough. `KTHX_AI_KEY` is not here — it comes with the
-            # HMAC keys through `envFrom` below. Without it `/api/ai` answers
-            # 502 and nothing else in the process changes.
             {{- with .Values.identity.host }}
-            # The tailnet door. The header is believed on this host alone, and
-            # only from a peer in KTHX_TAILNET_PROXIES — unset means nobody,
-            # which is a deployment that renders an Ingress and then tells
-            # every caller through it that nobody is signed in.
+            # The identity header is believed on this host only, from a peer in KTHX_TAILNET_PROXIES.
             - name: KTHX_IDENTITY_HOST
               value: {{ . | quote }}
             {{- end }}
             {{- with .Values.identity.admins }}
-            # Who opens `DELETE /api/sites`. Not a secret: it is a list of
-            # people, and it is only ever consulted for a login the tailnet
-            # already vouched for on the identity host.
+            # Who may call `DELETE /api/sites`. Only checked against a login the tailnet vouched for.
             - name: KTHX_ADMIN_LOGINS
               value: {{ . | quote }}
             {{- end }}
@@ -158,13 +138,11 @@ spec:
               value: {{ . | quote }}
             {{- end }}
             {{- with .Values.identity.host }}
-            # Required beside the host, not optional under it: the server
-            # refuses to boot with an identity host and nobody to believe, and
-            # failing at render is a chart that does not install rather than a
-            # Deployment that crash-loops with the reason four layers down.
+            # The server refuses to boot with an identity host and no proxies, so fail at render.
             - name: KTHX_TAILNET_PROXIES
               value: {{ required "identity.proxies names the hop whose identity header is believed" $.Values.identity.proxies | quote }}
             {{- end }}
+            # `KTHX_AI_KEY` arrives through `envFrom`; without it `/api/ai` answers 502.
             - name: KTHX_AI_URL
               value: {{ .Values.ai.url | quote }}
             - name: KTHX_AI_MODEL
@@ -173,10 +151,7 @@ spec:
               value: {{ .Values.ai.models | quote }}
             - name: KTHX_AI_MAX_TOKENS
               value: {{ .Values.ai.maxTokens | quote }}
-            # The builder's own model, fallback and ceiling. Both models are
-            # checked against `models` at boot for the reason the default is:
-            # one that is not on the allow-list is the whole builder answering
-            # 400 for every person on the tailnet.
+            # The server refuses to boot when a build model is outside `KTHX_AI_MODELS`.
             - name: KTHX_AI_BUILD_MODEL
               value: {{ .Values.ai.buildModel | quote }}
             {{- with .Values.ai.buildFallbackModel }}
@@ -187,26 +162,19 @@ spec:
               value: {{ .Values.ai.buildMaxTokens | quote }}
             - name: GOOGLE_APPLICATION_CREDENTIALS
               value: {{ printf "%s/gcp-credentials.json" .Values.gcp.tokenMountPath | quote }}
-            # The control database. The role is `initdb`'s owner, given
-            # `CREATEDB CREATEROLE` once — see database.yaml.
+            # The control role, granted `CREATEDB CREATEROLE` in database.yaml.
             - name: DATABASE_URL
               valueFrom:
                 secretKeyRef:
                   name: {{ include "kthx.databaseName" . }}-app
                   key: uri
-          # `required` rather than `with`: an omitted name would drop `envFrom`
-          # entirely and render a Deployment that boots and dies on ConfigError,
-          # which is a template error deferred to a crash loop.
+          # `required`: without these keys the process dies on ConfigError at boot.
           envFrom:
             - secretRef:
                 name: {{ required "envFromSecret is required: it carries KTHX_ME_KEY, KTHX_PG_KEY and KTHX_AI_KEY" .Values.envFromSecret }}
           {{/*
-          Readiness only. The slow path here is Postgres, and a liveness probe
-          would restart the process exactly when it is least able to recover.
-
-          The `Host` header is the whole probe: this process dispatches on it and
-          answers 404 to any name outside the zone, so a probe sending the pod IP
-          — which no configuration can predict — would never see `/healthz`.
+          No liveness probe: it would restart the process while Postgres is slow. The
+          process answers 404 to any `Host` outside the zone, so the probe sends one.
           */}}
           readinessProbe:
             httpGet:

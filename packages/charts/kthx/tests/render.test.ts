@@ -1,11 +1,6 @@
 /**
- * `helm template` over the kthx chart, parsed.
- *
- * `render-cluster-apps.sh` in CI proves this chart renders. It cannot prove
- * what it renders, and the facts below are exactly the ones a reader
- * checks by eye and gets wrong: a Service selector that also matches the
- * nightly dump pod renders perfectly and takes half the zone down while the Job
- * lives.
+ * Assertions on the kthx chart's rendered objects. CI's cluster render only
+ * proves the chart renders.
  */
 import { describe, expect, test } from 'bun:test';
 import { tmpdir } from 'node:os';
@@ -24,7 +19,7 @@ interface Rendered {
   spec?: any;
 }
 
-/** The installation's own values, minus anything a test asserts on. */
+/** The installation's values minus identity and control, which tests add themselves. */
 const VALUES = {
   image: 'ghcr.io/jonpulsifer/kthx@sha256:feed',
   bucket: 'bluenose-kthx',
@@ -92,14 +87,12 @@ describe('the Service selector', () => {
       .jobTemplate.spec.template.metadata.labels;
 
     expect(Object.keys(selector).length).toBeGreaterThan(0);
-    // A dump pod that satisfies every selector key joins the Service as a
-    // second endpoint — Ready as soon as it starts, listening on nothing.
+    // A dump pod matching every selector key would join the Service as an endpoint serving nothing.
     const matched = Object.entries(selector).every(
       ([key, value]) => dumpPod[key] === value,
     );
     expect(matched).toBe(false);
 
-    // ...and the pod the Service exists for still does match it.
     const serverPod: Record<string, string> = one(objects, 'Deployment').spec
       .template.metadata.labels;
     for (const [key, value] of Object.entries(selector)) {
@@ -120,9 +113,7 @@ describe('the GCP credential', () => {
     expect(document.type).toBe('external_account');
     expect(document.audience).toBe(VALUES.gcp.audience);
 
-    // The document names a path; the pod has to project the token there or
-    // every depot call fails at the first token read, with a valid-looking
-    // credential on disk.
+    // The pod must project the token at the path the document names.
     const pod = one(objects, 'Deployment').spec.template.spec;
     const projected = pod.volumes.find((v: any) => v.name === 'gcp-federation');
     const mount = pod.containers[0].volumeMounts.find(
@@ -145,9 +136,6 @@ describe('who opens the zone', () => {
     ).env;
 
   test('is nobody unless the installation names somebody', async () => {
-    // No env entry rather than an empty one: the route answers 404 either way,
-    // and a rendered `KTHX_ADMIN_LOGINS: ""` reads like a setting somebody
-    // cleared rather than one nobody made.
     expect((await env()).map((e) => e.name)).not.toContain('KTHX_ADMIN_LOGINS');
   });
 
@@ -171,7 +159,7 @@ describe('who opens the zone', () => {
       .containers[0].envFrom;
     expect(envFrom).toHaveLength(1);
     expect(envFrom[0].secretRef.name).toBe('kthx-env');
-    // The keys the process cannot boot without are not optional.
+    // The process cannot boot without these keys.
     expect(envFrom[0].secretRef.optional).toBeUndefined();
   });
 });
@@ -210,9 +198,9 @@ describe('the private host', () => {
     ) as Rendered;
     expect(control.spec.hostnames).toEqual([CONTROL.host]);
     expect(control.spec.parentRefs[0].sectionName).toBe(CONTROL.listener);
-    // No hold-out: this name's record is meant to be the gateway's address.
+    // No controller annotation: external-dns publishes this name at the gateway's address.
     expect((control.metadata as any).annotations).toBeUndefined();
-    // ...and the public route keeps its own, or external-dns claims the zone.
+    // The public route keeps its annotations, or external-dns claims the zone.
     const zone = routes.find((r) => r.metadata.name === 'kthx') as Rendered;
     expect(Object.keys((zone.metadata as any).annotations)).not.toHaveLength(0);
 
@@ -241,8 +229,7 @@ describe('the nightly dump', () => {
 
   test('hands the child pg_dump processes a password', async () => {
     const env = (await dumpPodSpec()).initContainers[0].env;
-    // `pg_dumpall` omits the password from the connection string it hands each
-    // child `pg_dump`; without this every child prompts and the Job dies.
+    // `pg_dumpall` does not pass the URI's password to its child `pg_dump` processes.
     const password = env.find((e: any) => e.name === 'PGPASSWORD');
     expect(password.valueFrom.secretKeyRef).toEqual({
       name: 'kthx-db-app',
@@ -253,9 +240,8 @@ describe('the nightly dump', () => {
   test('dumps every database, naming no subset', async () => {
     const command = (await dumpPodSpec()).initContainers[0].command.at(-1);
     expect(command).toContain('pg_dumpall');
-    // `-l` picks the database global objects are read from, it does not narrow
-    // what is dumped — paired with exclusions it renders a green Job whose
-    // archive holds no site at all.
+    // `-l` only picks where globals are read from; with exclusions the Job succeeds
+    // and dumps no site.
     expect(command).not.toMatch(/(^|\s)(-l|--database)/);
     expect(command).not.toContain('--exclude-database');
   });
@@ -278,20 +264,11 @@ describe('the AI passthrough values', () => {
       .map((entry) => entry.trim())
       .filter((entry) => entry !== '');
 
-    // The server writes the default into a body that names no model and only
-    // then checks it against this list, so a default missing from it answers
-    // every keyless call 400 — and the process refuses to boot rather than
-    // serve that. A chart that renders it is a pod that crash-loops.
+    // The server refuses to boot when the default or a build model is outside the list.
     expect(models.length).toBeGreaterThan(0);
     expect(models).toContain(value('KTHX_AI_MODEL'));
-    // The two build models are refused at boot on the same rule, and they are
-    // the ones a reader is most likely to set from a bake-off table without
-    // adding them here.
     expect(models).toContain(value('KTHX_AI_BUILD_MODEL'));
-    // The second of them is optional — values.yaml offers an empty one as "no
-    // second attempt" — and an absent entry is nothing to check against the
-    // list. Read off the entry itself rather than through `value`, which cannot
-    // tell an empty setting from a missing one.
+    // The fallback is optional. `value` cannot tell an unset entry from an empty one.
     const fallback = env.find(
       (entry) => entry.name === 'KTHX_AI_BUILD_FALLBACK_MODEL',
     )?.value;
@@ -302,14 +279,10 @@ describe('the AI passthrough values', () => {
     const objects = await render({ ...VALUES, ai: { buildFallbackModel: '' } });
     const env: { name: string; value?: string }[] = one(objects, 'Deployment')
       .spec.template.spec.containers[0].env;
-    // An empty entry is not the same as none: the server reads that variable as
-    // a model name and refuses to boot on one the allow-list does not carry, so
-    // the setting values.yaml invites has to render as an absence.
     expect(
       env.find((entry) => entry.name === 'KTHX_AI_BUILD_FALLBACK_MODEL'),
     ).toBeUndefined();
-    // And the first attempt is still configured, so the absence above is the
-    // template obeying the value and not an env list that failed to render.
+    // Proves the env list rendered, so the absence above comes from the value.
     expect(
       env.find((entry) => entry.name === 'KTHX_AI_BUILD_MODEL')?.value,
     ).toBeString();
@@ -322,9 +295,7 @@ describe('the AI passthrough values', () => {
     const value = (name: string): number =>
       Number(env.find((entry) => entry.name === name)?.value ?? '');
 
-    // One global would make raising what a whole-page generation may spend also
-    // raise what every anonymous visitor on every public site may spend. A
-    // document is 3 000 to 14 000 completion tokens; the public ceiling is 4096.
+    // Raising the builder's ceiling must not raise what anonymous visitors may spend.
     expect(value('KTHX_AI_BUILD_MAX_TOKENS')).toBeGreaterThan(
       value('KTHX_AI_MAX_TOKENS'),
     );
@@ -336,9 +307,7 @@ describe('the AI passthrough values', () => {
       .spec.template.spec.containers[0].env;
     const url = env.find((entry) => entry.name === 'KTHX_AI_URL')?.value ?? '';
 
-    // The two bases of this vendor are different catalogues, and a model from
-    // one is a 4xx on the other. Nothing renderable can ask the upstream, so
-    // this asserts only the pairing the values were measured against.
+    // The vendor's two bases have different catalogues; a model from one is a 4xx on the other.
     expect(url).toBe('https://opencode.ai/zen/go/v1');
   });
 });
@@ -354,8 +323,7 @@ describe('the tailnet identity host', () => {
     expect(names).not.toContain('KTHX_IDENTITY_HOST');
     expect(names).not.toContain('KTHX_TAILNET_PROXIES');
 
-    // And the policy is back to same-namespace only: a clause naming a proxy
-    // that was never created is a rule admitting a pod label anyone may wear.
+    // A clause for a proxy that does not exist would admit a pod label anyone may set.
     const from = one(objects, 'NetworkPolicy').spec.ingress[0].from;
     expect(from).toHaveLength(1);
   });
@@ -368,15 +336,12 @@ describe('the tailnet identity host', () => {
     });
     const ingress = one(objects, 'Ingress');
 
-    // The operator appends the tailnet domain to what it finds here. Passing
-    // the fqdn produces `kthx.example-tailnet.ts.net.example-tailnet.ts.net`,
-    // which resolves for nobody and reports itself as healthy.
+    // The operator appends the tailnet domain, so an fqdn here would double it.
     expect(ingress.spec.tls[0].hosts).toEqual(['kthx']);
     expect(ingress.spec.ingressClassName).toBe('tailscale');
     const annotations = ingress.metadata.annotations ?? {};
     expect(annotations['tailscale.com/tags']).toBe('tag:kthx-ingress');
-    // Funnel would publish this to the internet, and a funnel request carries
-    // no identity headers at all — an anonymous publishing surface.
+    // Funnel would publish this to the internet with no identity headers.
     expect(Object.keys(annotations)).not.toContain('tailscale.com/funnel');
 
     const backend = ingress.spec.defaultBackend.service;
@@ -390,9 +355,7 @@ describe('the tailnet identity host', () => {
   });
 
   test('refuses to render a host with no hop to believe', async () => {
-    // The server refuses to boot in this state, so rendering it produces a
-    // Deployment that crash-loops with the reason four layers down. Failing
-    // here is a chart that does not install.
+    // The server refuses to boot in this state, so the chart refuses to render it.
     await expect(
       render({
         ...VALUES,
@@ -417,9 +380,8 @@ describe('the tailnet identity host', () => {
     const from = one(objects, 'NetworkPolicy').spec.ingress[0].from;
     const proxy = from.find((entry: any) => entry.namespaceSelector);
 
-    // Namespace and pod in ONE entry. Two entries are an OR, and the namespace
-    // alone admits every proxy the operator runs in this cluster — egress
-    // proxies for unrelated Services included.
+    // Namespace and pod in one entry: two entries are an OR, and the namespace alone
+    // admits every proxy the operator runs.
     expect(
       proxy.namespaceSelector.matchLabels['kubernetes.io/metadata.name'],
     ).toBe('tailscale');

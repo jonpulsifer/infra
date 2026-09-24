@@ -1,10 +1,6 @@
 {{/*
-The Celery worker and the beat scheduler: the same image and the same env as the
-API, with a different entrypoint argument and no HTTP surface to probe.
-
-The worker is the process that actually runs a scan, so it — not just the API —
-carries the GCP federation mount. The API needs it too, for the connection test
-the UI runs when a provider is onboarded.
+The Celery worker and beat scheduler: the API's image and env with another entrypoint
+argument. The worker runs the scans, so it mounts the GCP federation too.
 */}}
 {{- range $component, $spec := dict "worker" $.Values.worker "beat" $.Values.beat }}
 ---
@@ -17,7 +13,7 @@ metadata:
     {{- include "prowler.labels" $ | nindent 4 }}
 spec:
   {{- if eq $component "beat" }}
-  # A scheduler, so exactly one: a second replica double-fires every periodic task.
+  # A second scheduler would fire every periodic task twice.
   replicas: 1
   {{- else }}
   replicas: {{ $spec.replicas }}

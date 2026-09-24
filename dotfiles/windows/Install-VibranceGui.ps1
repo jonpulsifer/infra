@@ -47,8 +47,7 @@ function Test-Installed {
 }
 
 function New-Shortcut {
-    # Writes one .lnk to a known path. -WhatIf on a helper this small buys
-    # nothing the caller's own idempotency does not already give.
+    # Overwrites one known .lnk, so ShouldProcess adds nothing.
     [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseShouldProcessForStateChangingFunctions', '')]
     param([string] $Path, [string] $TargetPath)
 

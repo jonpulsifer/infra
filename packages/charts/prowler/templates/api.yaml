@@ -1,7 +1,6 @@
 {{/*
-The ServiceAccount exists for its token, not for any Kubernetes API access —
-`offsite:system:serviceaccount:<namespace>:<name>` is the subject the workload
-identity pool maps, so the name here is the name bound in IAM.
+The ServiceAccount exists for its projected token. The workload identity pool maps
+`offsite:system:serviceaccount:<namespace>:<name>`, so this name is bound in IAM.
 */}}
 apiVersion: v1
 kind: ServiceAccount
@@ -60,8 +59,7 @@ spec:
           args: ["prod"]
           env:
             {{- include "prowler.apiEnv" . | nindent 12 }}
-            # Only the gunicorn process reads this, so it sits here rather than
-            # in the env the worker and beat share.
+            # Only gunicorn reads this, so it stays out of the env the worker and beat share.
             - name: DJANGO_WORKERS
               value: {{ .Values.api.workers | quote }}
           envFrom:
@@ -71,17 +69,7 @@ spec:
             - name: http
               containerPort: {{ .Values.api.port }}
               protocol: TCP
-          {{/*
-          `prod` runs the migrations in-band before gunicorn binds, so the first
-          start after a schema change is minutes, not seconds. The startup probe
-          is what buys that time; liveness would restart the pod mid-migration.
-
-          Liveness deliberately consults no dependency — /health/ready checks
-          Postgres, Valkey and the graph store and answers 503 when any is
-          unreachable, which is a restart the container must not take. Readiness
-          is throttled 60/min per client IP, and the probe's client is the
-          node's kubelet, so 20s is the floor rather than a preference.
-          */}}
+          # `prod` migrates before gunicorn binds, so a start after a schema change takes minutes.
           startupProbe:
             httpGet:
               path: /health/live
@@ -89,6 +77,7 @@ spec:
               httpHeaders: [{name: Host, value: {{ include "prowler.fullname" . }}-api}]
             periodSeconds: 10
             failureThreshold: 60
+          # Checks no dependency, so an outage of Postgres, Valkey or the graph never restarts the pod.
           livenessProbe:
             httpGet:
               path: /health/live
@@ -100,10 +89,10 @@ spec:
             httpGet:
               path: /health/ready
               port: http
-              # Without this the probe's Host is the pod IP, which
-              # DJANGO_ALLOWED_HOSTS rejects with a 400 the kubelet reads as
-              # unready — forever, since the address changes every restart.
+              # The default Host is the pod IP, which DJANGO_ALLOWED_HOSTS rejects with a 400.
               httpHeaders: [{name: Host, value: {{ include "prowler.fullname" . }}-api}]
+            # /health/ready is throttled 60/min per client IP and the kubelet is one client, so
+            # 20s is the floor.
             periodSeconds: 20
             failureThreshold: 10
           resources:

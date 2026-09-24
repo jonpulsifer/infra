@@ -1,8 +1,6 @@
 {{/*
-The control plane's own database. There are no backups: the loss story is
-reconcile-from-sources, and the desired-state rows, the attempt log, and the
-config version pins are the part of it no source holds. So the PVC outlives the
-Cluster — deleting the release must not be what discards them.
+The control plane's database, with no backups. Its desired-state rows, attempt log and
+config version pins exist nowhere else, so an uninstall keeps the Cluster by default.
 */}}
 {{- if .Values.database.enabled }}
 apiVersion: postgresql.cnpg.io/v1
@@ -14,9 +12,7 @@ metadata:
     {{- include "spindrift.labels" . | nindent 4 }}
   {{- if .Values.database.keepOnDelete }}
   annotations:
-    # CNPG owns the data PVC through the Cluster, so an uninstall that removes
-    # the Cluster collects the volume with it whatever the storage class
-    # reclaims. Keeping the Cluster is what keeps the data.
+    # CNPG deletes the data PVC with the Cluster, whatever the storage class reclaims.
     helm.sh/resource-policy: keep
   {{- end }}
 spec:

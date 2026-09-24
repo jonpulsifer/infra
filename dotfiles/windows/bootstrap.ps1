@@ -64,20 +64,16 @@ function Test-Command {
     return $null -ne $command
 }
 
-# Changes nothing outside this process: it re-reads PATH from the registry into
-# the running shell, which is the opposite of a state change.
+# Only reloads this process's PATH, so ShouldProcess does not apply.
 function Update-SessionPath {
     [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseShouldProcessForStateChangingFunctions', '')]
     param()
 
-    # winget installs land in the registry, not in this process. Without this,
-    # the git and mise it just installed are invisible for the rest of the run.
+    # winget writes PATH to the registry only, so tools it just installed need this.
     $machine = [Environment]::GetEnvironmentVariable('Path', 'Machine')
     $user = [Environment]::GetEnvironmentVariable('Path', 'User')
     $env:PATH = "$machine;$user"
 }
-
-# --- Stage 0: get onto PowerShell 7 -----------------------------------------
 
 if ($PSVersionTable.PSVersion.Major -lt 7) {
     Write-Stage 'Windows PowerShell 5.1 detected, moving to PowerShell 7'
@@ -96,8 +92,7 @@ if ($PSVersionTable.PSVersion.Major -lt 7) {
         throw 'PowerShell 7 still is not on PATH. Open a new terminal and run this again.'
     }
 
-    # Re-run the one-liner rather than this file: when invoked through
-    # `irm | iex` there is no file on disk to hand to pwsh.
+    # Under `irm | iex` there is no file on disk to hand to pwsh.
     $arguments = @('-NoProfile', '-Command', "irm $BootstrapUrl | iex")
     if ($WithWsl) {
         $arguments = @('-NoProfile', '-Command', "& ([scriptblock]::Create((irm $BootstrapUrl))) -WithWsl")
@@ -107,13 +102,9 @@ if ($PSVersionTable.PSVersion.Major -lt 7) {
     return
 }
 
-# --- Stage 1: winget --------------------------------------------------------
-
 if (-not (Test-Command 'winget')) {
     throw 'winget (App Installer) is missing. Install it from the Microsoft Store, then run this again.'
 }
-
-# --- Stage 2: desired state -------------------------------------------------
 
 if (-not $SkipConfiguration) {
     Write-Stage 'Applying the winget configuration (applications and OS settings)'
@@ -125,8 +116,7 @@ if (-not $SkipConfiguration) {
         $configuration = $localConfiguration
     }
     else {
-        # First run: the repo is not cloned yet, and git is one of the things
-        # this configuration installs. Fetch it on its own for this pass.
+        # First run: there is no checkout yet, and this configuration installs git.
         $temporaryConfiguration = Join-Path ([IO.Path]::GetTempPath()) 'configuration.winget'
         Invoke-WebRequest -Uri "$RawBase/configuration.winget" -OutFile $temporaryConfiguration -UseBasicParsing
         $configuration = $temporaryConfiguration
@@ -142,8 +132,6 @@ if (-not $SkipConfiguration) {
     Update-SessionPath
 }
 
-# --- Stage 3: the checkout --------------------------------------------------
-
 Write-Stage "Checking out $RepoSlug to $CheckoutPath"
 
 if (-not (Test-Command 'git')) {
@@ -156,16 +144,12 @@ if (Test-Path -LiteralPath (Join-Path $CheckoutPath '.git')) {
 else {
     New-Item -ItemType Directory -Path (Split-Path -Parent $CheckoutPath) -Force | Out-Null
 
-    # Blobless and sparse: dotfiles/ is 624K, and nothing on this side of the
-    # boundary needs the clusters, terraform or nix trees. autocrlf is forced
-    # off here as well as pinned in .gitattributes -- the installer default is
-    # true and it would rewrite the checkout.
+    # Only dotfiles/ is needed. Git for Windows defaults core.autocrlf to true,
+    # which rewrites the checkout.
     git clone --filter=blob:none --sparse -c core.autocrlf=false `
         "https://github.com/$RepoSlug.git" $CheckoutPath
     git -C $CheckoutPath sparse-checkout set dotfiles
 }
-
-# --- Stage 4: deploy --------------------------------------------------------
 
 Write-Stage 'Running the dotfiles bootstrap'
 
@@ -180,20 +164,11 @@ mise run --cd $dotfiles bootstrap
 Write-Stage 'Installing the terminal font'
 & (Join-Path $dotfiles 'windows\Install-NerdFont.ps1')
 
-# Neither the winget catalogue nor the Store carries vibranceGUI, so it gets
-# the same treatment as the font: pinned, hash-verified, per-user. -AutoStart
-# is passed here rather than exposed as a flag -- a tray utility you install
-# and do not launch is not a desired state anyone wants. Drop it from this line
-# to keep the install without the login entry.
+# -AutoStart adds the login entry. The tray app does nothing until it runs.
 Write-Stage 'Installing vibranceGUI'
 & (Join-Path $dotfiles 'windows\Install-VibranceGui.ps1') -AutoStart
 
-# --- Stage 5: monitoring ----------------------------------------------------
-
-# The only stage that installs machine-wide services, so the only one that
-# needs elevation. It is asked for rather than assumed, and re-launched with a
-# prompt rather than failing, because the rest of this bootstrap deliberately
-# runs unelevated.
+# The only stage that needs elevation. The rest of the bootstrap runs unelevated.
 if ($WithMonitoring) {
     Write-Stage 'Installing the monitoring agents'
     $installMonitoring = Join-Path $dotfiles 'windows\Install-Monitoring.ps1'
@@ -212,8 +187,6 @@ if ($WithMonitoring) {
         }
     }
 }
-
-# --- Stage 6: WSL -----------------------------------------------------------
 
 if ($WithWsl) {
     Write-Stage 'Installing WSL and handing off to the Linux bootstrap'

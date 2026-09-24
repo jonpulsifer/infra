@@ -46,11 +46,8 @@ param(
     [string] $ExporterUrl = 'https://github.com/prometheus-community/windows_exporter/releases/download/v0.31.8/windows_exporter-0.31.8-amd64.msi',
     [string] $ExporterSha256 = '0AADCE6AFB20182B678BFCA9E8F2E8464EF48C469B28B4CF02E99D82158F5D40',
 
-    # [defaults] is cpu, logical_disk, memory, net, os, physical_disk, service
-    # and system. gpu adds engine utilisation and VRAM, cpu_info the model,
-    # diskdrive per-drive health. thermalzone is deliberately absent: on a
-    # desktop board it is one ACPI number that tracks nothing, and the real
-    # sensors come from OhmGraphite.
+    # No thermalzone: on a desktop board it is one ACPI value that tracks nothing.
+    # OhmGraphite reads the real sensors.
     [string] $EnabledCollectors = '[defaults],gpu,cpu_info,diskdrive',
 
     [string] $OhmVersion = '0.38.0',
@@ -75,10 +72,7 @@ $here = Split-Path -Parent $PSCommandPath
 $configSource = Join-Path $here 'monitoring'
 
 function Get-PinnedFile {
-    <#
-        Downloads to a temp path, checks the hash, and returns the path. The
-        caller deletes it. Nothing is executed before the hash matches.
-    #>
+    # The caller deletes the returned file.
     param(
         [Parameter(Mandatory)] [string] $Url,
         [Parameter(Mandatory)] [string] $Sha256,
@@ -104,8 +98,7 @@ function Get-InstalledVersion {
 }
 
 function Install-Msi {
-    # Runs one msiexec and checks its exit code. The callers above decide
-    # whether an install is needed; a -WhatIf here would only duplicate that.
+    # Callers decide whether to install, so ShouldProcess would only repeat that.
     [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseShouldProcessForStateChangingFunctions', '')]
     param(
         [Parameter(Mandatory)] [string] $Path,
@@ -114,15 +107,14 @@ function Install-Msi {
 
     $msiArgs = @('/i', "`"$Path`"", '/qn', '/norestart') + $Properties
     $proc = Start-Process -FilePath 'msiexec.exe' -ArgumentList $msiArgs -Wait -PassThru -NoNewWindow
-    # 3010 is "success, reboot queued"; nothing here needs the reboot.
+    # 3010 is success with a reboot pending.
     if ($proc.ExitCode -notin 0, 3010) {
         throw "msiexec exited $($proc.ExitCode) for $Path"
     }
 }
 
 function Set-FirewallRule {
-    # Creates one inbound rule if it is missing. Idempotent by the name check,
-    # which is what -WhatIf would buy on a helper this small.
+    # The name check makes it idempotent, so ShouldProcess adds nothing.
     [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseShouldProcessForStateChangingFunctions', '')]
     param(
         [Parameter(Mandatory)] [string] $DisplayName,
@@ -138,18 +130,14 @@ function Set-FirewallRule {
     Write-Host "  opened   inbound TCP $Port"
 }
 
-# --- windows_exporter -------------------------------------------------------
-
 Write-Host ''
 Write-Host "==> windows_exporter $ExporterVersion" -ForegroundColor Cyan
 
 $exporterExe = Join-Path $env:ProgramFiles 'windows_exporter\windows_exporter.exe'
 $exporterService = Get-CimInstance Win32_Service -Filter "Name='windows_exporter'" -ErrorAction SilentlyContinue
 
-# Reinstall when the version is behind OR when the service is running a
-# collector list that is not the one declared here. The second half is what
-# catches a host installed with no properties at all, which pins [defaults]
-# onto the command line where config.yaml cannot reach it.
+# Also reinstall when the service runs other collectors. The MSI puts them on the
+# service command line, where config.yaml cannot override them.
 $exporterCurrent = (Get-InstalledVersion -Path $exporterExe) -eq $ExporterVersion
 $collectorsCurrent = $exporterService -and $exporterService.PathName -match [regex]::Escape($EnabledCollectors)
 
@@ -172,8 +160,6 @@ else {
         Remove-Item -LiteralPath $msi -Force -ErrorAction SilentlyContinue
     }
 }
-
-# --- OhmGraphite ------------------------------------------------------------
 
 Write-Host ''
 Write-Host "==> OhmGraphite $OhmVersion" -ForegroundColor Cyan
@@ -199,22 +185,17 @@ else {
     }
 }
 
-# Written every run: this is the file that puts it in Prometheus mode, and the
-# unpack above overwrites it with the upstream Graphite default.
+# Copied every run: it sets Prometheus mode, and an unpack restores the Graphite default.
 $ohmConfig = Join-Path $ohmDir 'OhmGraphite.exe.config'
 Copy-Item -LiteralPath (Join-Path $configSource 'OhmGraphite.exe.config') -Destination $ohmConfig -Force
 
 if (-not (Get-Service -Name 'OhmGraphite' -ErrorAction SilentlyContinue)) {
-    # Registers itself as LocalSystem, which is what lets LibreHardwareMonitor
-    # load its kernel driver. Anything less reads every sensor as zero or not
-    # at all.
+    # Installs as LocalSystem, which LibreHardwareMonitor needs to load its kernel driver.
     & $ohmExe install
 }
 Restart-Service -Name 'OhmGraphite' -Force
 Set-FirewallRule -DisplayName 'OhmGraphite' -Port $SensorPort
 Write-Host "  running  sensors on $SensorPort"
-
-# --- Vector -----------------------------------------------------------------
 
 if ($SkipVector) {
     Write-Host ''
@@ -250,10 +231,8 @@ if ($LogEndpoint) {
 Set-Content -LiteralPath $vectorConfig -Value $config -Encoding utf8NoBOM
 New-Item -ItemType Directory -Path 'C:\ProgramData\vector' -Force | Out-Null
 
-# The MSI installs a console binary and no service. vector.exe never calls
-# StartServiceCtrlDispatcher, so sc.exe create produces a service the SCM
-# kills with error 1053 -- a scheduled task at startup is the honest way to
-# keep a console process running as SYSTEM, and it needs no wrapper binary.
+# vector.exe is a console binary: as an sc.exe service the SCM kills it with error
+# 1053. A SYSTEM task at startup keeps it running.
 $taskName = 'Vector'
 $action = New-ScheduledTaskAction -Execute $vectorExe -Argument "--config `"$vectorConfig`""
 $trigger = New-ScheduledTaskTrigger -AtStartup

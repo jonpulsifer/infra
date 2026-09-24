@@ -1,16 +1,6 @@
-# A pure-alike prompt, hand-rolled. No starship, no oh-my-posh.
-#
-#   ~/src/github.com/jonpulsifer/infra main*            1.4s  ⎈ folly
-#   ❯
-#
-# pure's two-line shape is load-bearing rather than cosmetic: PowerShell has no
-# RPROMPT, so the only place a right-aligned segment can live is a line we draw
-# ourselves before returning the prompt string.
-#
-# Budget is 50ms. A `git status` per prompt is the classic way to make a shell
-# feel bad, so the branch comes from reading .git/HEAD directly (no subprocess)
-# and the dirty check times itself out of a job in any repo where it is slow.
-# Set DOTFILES_PROMPT_GIT=0 to turn the whole thing off.
+# A two-line prompt in the style of pure. PowerShell has no RPROMPT, so the right-aligned
+# segments go on a line written before the prompt string.
+# DOTFILES_PROMPT_GIT=0 turns off the git segment.
 
 $script:Esc = [char]27
 $script:ColourPath = "$script:Esc[38;5;33;1m"
@@ -21,8 +11,7 @@ $script:ColourOk = "$script:Esc[36m"
 $script:ColourErr = "$script:Esc[31m"
 $script:Reset = "$script:Esc[0m"
 
-# Repos where the dirty check blew the budget. Branch still shows; dirty state
-# is reported as unknown rather than paid for again.
+# Git dirs whose status took over DirtyBudgetMs. They skip the dirty check and show "branch?".
 $script:SlowRepos = @{}
 $script:DirtyBudgetMs = 150
 $script:KubeCache = @{}
@@ -78,8 +67,8 @@ function script:Get-PromptGit {
     }
 
     $stopwatch = [Diagnostics.Stopwatch]::StartNew()
-    # --no-optional-locks keeps this from fighting a concurrent git for the
-    # index lock; -uno drops the untracked scan, which is most of the cost.
+    # --no-optional-locks avoids the index lock a concurrent git may hold. Skipping
+    # untracked files removes most of the cost.
     $changes = & git status --porcelain --untracked-files=no --no-optional-locks 2>$null
     $stopwatch.Stop()
 
@@ -95,8 +84,7 @@ function script:Get-PromptKube {
     $config = if ($env:KUBECONFIG) { $env:KUBECONFIG } else { Join-Path $HOME '.kube/config' }
     if (-not (Test-Path -LiteralPath $config)) { return $null }
 
-    # Spawning kubectl per prompt costs more than everything else combined, so
-    # the context is read out of the file and cached against its mtime.
+    # A kubectl call per prompt is too slow, so read the file and cache by mtime.
     $stamp = (Get-Item -LiteralPath $config).LastWriteTimeUtc.Ticks
     if ($script:KubeCache.ContainsKey($config) -and $script:KubeCache[$config].Stamp -eq $stamp) {
         return $script:KubeCache[$config].Context
@@ -150,8 +138,7 @@ function prompt {
         $right += "$script:ColourKube⎈ $context$script:Reset"
     }
 
-    # Width can be unavailable in a redirected or non-console host; fall back to
-    # two spaces rather than throwing inside the prompt.
+    # WindowSize throws in a redirected or non-console host.
     $width = 0
     try { $width = $Host.UI.RawUI.WindowSize.Width } catch { $width = 0 }
 
@@ -167,8 +154,7 @@ function prompt {
     $failed = (-not $succeeded) -or ($null -ne $exitCode -and $exitCode -ne 0)
     $colour = if ($failed) { $script:ColourErr } else { $script:ColourOk }
 
-    # Restore $LASTEXITCODE: reading it above is harmless, but the calls this
-    # function makes would otherwise clobber it for the next prompt.
+    # The git call in Get-PromptGit overwrites $LASTEXITCODE.
     $global:LASTEXITCODE = $exitCode
 
     return "$colour❯$script:Reset "

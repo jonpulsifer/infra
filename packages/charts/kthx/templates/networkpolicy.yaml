@@ -1,19 +1,7 @@
 {{/*
-Ingress to the server is default-deny with two exceptions.
-
-This process is a public, anonymous-write surface reached through Cloudflare and
-the gateway; without a policy any pod in any namespace could reach it directly
-and skip the edge — the rate limiting, the cache rules and the `Origin` guard
-all assume the request came the long way round.
-
-Same-namespace siblings are the first exception, because the nightly dump and
-anything else this release grows cannot be named ahead of time.
-
-The Postgres instance is deliberately NOT selected here. It needs the CNPG
-operator, the Prometheus scrape and its own probes, none of which a portable
-selector can name, and getting that list wrong is a database that reads healthy
-while the operator cannot reach it. Its exposure is a password on a ClusterIP,
-same as every other CNPG cluster in this repo.
+Default-deny ingress to the server except from this namespace and the tailnet proxy, so
+no other pod can skip the edge's rate limits, cache rules and `Origin` guard. Postgres is
+not selected: the CNPG operator, the scrape and its probes all need to reach it.
 */}}
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
@@ -33,17 +21,8 @@ spec:
         - podSelector: {}
       {{- with .Values.identity.host }}
       {{/*
-      The tailscale operator runs the identity proxy as its own StatefulSet in
-      its own namespace, so the same-namespace exception above does not reach
-      it and the Ingress would be a name that resolves to a connection this
-      policy drops.
-
-      The namespace and the pod are one `from` entry and not two: two entries
-      are an OR, and the namespace alone admits every proxy the operator runs
-      in this cluster — including egress proxies for unrelated Services, which
-      are reachable by whatever those Services are for. The three
-      `parent-resource` labels are what narrow it to the proxy created for this
-      Ingress and no other.
+      The tailnet Ingress proxy runs in the tailscale namespace. Namespace and pod are
+      one entry: two entries are an OR, admitting every proxy the operator runs.
       */}}
         - namespaceSelector:
             matchLabels:
@@ -60,19 +39,9 @@ spec:
           protocol: TCP
 ---
 {{/*
-The gateway's own admission, which the policy above cannot express.
-
-Cilium terminates a Gateway listener in the host-networked `cilium-envoy`
-DaemonSet, so the connection to a routed workload arrives carrying the `ingress`
-identity rather than from any namespace or pod a selector can name. No
-`namespaceSelector` matches an identity, so the one caller this route exists for
-is the one a NetworkPolicy alone denies — and the symptom is the listener
-answering 503 while the route reads `Accepted`, the endpoint reads `ready` and
-the pod reads healthy.
-
-ponytail: `fromEntities` is Cilium vocabulary and this is the only
-implementation-specific object in the chart. Offsite is Cilium; a cluster that
-is not fails on an unresolvable CRD, which is louder than serving 503.
+Cilium's host-networked gateway Envoy reaches the pod as the `ingress` identity, which
+no NetworkPolicy selector matches; without this the listener answers 503.
+ponytail: `fromEntities` is Cilium-only; a non-Cilium cluster fails on the missing CRD.
 */}}
 apiVersion: cilium.io/v2
 kind: CiliumNetworkPolicy
@@ -88,10 +57,8 @@ spec:
   ingress:
     - fromEntities:
         - ingress
-        # The kubelet's readiness probe, which arrives from the node and matches
-        # no selector either. Cilium's default `allow-localhost=auto` already
-        # permits it; naming it means a cluster running `allow-localhost=policy`
-        # does not silently keep this pod out of its own Service.
+        # The kubelet's readiness probe. Cilium's default `allow-localhost=auto` admits it;
+        # `allow-localhost=policy` does not.
         - host
       toPorts:
         - ports:

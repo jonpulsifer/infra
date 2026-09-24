@@ -1,6 +1,6 @@
 [vars]
-# Personal identity (default). Work overrides live in mise.work.toml, loaded when
-# MISE_ENV=work. Flat keys only — mise's [vars] doesn't support nested tables.
+# mise.work.toml overrides these when MISE_ENV=work. Keys stay flat because mise
+# [vars] has no nested tables.
 git_name = "Jonathan Pulsifer"
 git_github_user = "jonpulsifer"
 git_email = "jonathan@pulsifer.ca"
@@ -8,7 +8,7 @@ git_signingkey = "~/.ssh/id_ed25519"
 git_signingkey_wsl = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIJewr6lJtffl+uZpnWXTIE5Sd3VeytQRGXKMBv1s5R/v"
 gpg_darwin_program = "/Applications/1Password.app/Contents/MacOS/op-ssh-sign"
 gpg_wsl_program = "/mnt/c/Users/jonat/AppData/Local/Microsoft/WindowsApps/op-ssh-sign-wsl.exe"
-# Only meaningful when MISE_ENV=work overrides moonpay_ssh_prefix; harmless default.
+# Empty unless mise.work.toml sets them.
 moonpay_ssh_prefix = ""
 moonpay_instead_of = ""
 
@@ -21,8 +21,7 @@ else
   mise run bootstrap:linux
 fi
 '''
-# mise picks run_windows on Windows and ignores it everywhere else, so the
-# uname split above stays untouched.
+# mise runs run_windows in place of run on Windows.
 run_windows = "mise run bootstrap:windows"
 
 [tasks."bootstrap:macos"]
@@ -43,8 +42,7 @@ description = "Windows bootstrap: install tools, symlink dotfiles, install Power
 # The default inline shell on Windows is cmd /c.
 shell = "pwsh -c"
 run = [
-  # Homebrew and home-manager install the shell tooling on the other two
-  # platforms. Here mise is the only thing that will, so it has to be asked.
+  # On Windows only mise installs the shell tooling.
   "mise install",
   "& '{{config_root}}/windows/deploy-dotfiles.ps1'",
 ]

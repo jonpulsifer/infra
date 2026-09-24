@@ -1,35 +1,15 @@
 /**
- * The App chart's rendering goldens (§7).
- *
- * § Not a seam: "Chart correctness is asserted where the chart lives, as
- * `helm template` goldens over representative value sets... This is a rendering
- * assertion, not a Spindrift test, and it must not be reached through the
- * command layer." Nothing in this file imports Spindrift.
- *
- * Each `describe` below is one of the claims §7 makes about the chart, and each
- * is a claim a wrong rendering would silently satisfy in a cluster — a missing
- * NetworkPolicy, a Job that cannot be upgraded, a per-deploy label in an
- * immutable selector — which is why they are asserted here rather than trusted.
+ * Rendering assertions for the App chart. Nothing here imports the control plane.
  */
 import { describe, expect, test } from 'bun:test';
 import { chartMetadata, kinds, one, render } from './render.ts';
 
-/**
- * Both spellings external-dns may read a key under, and the reason every object
- * this chart renders carries all of them.
- *
- * The key is `AnnotationKeyPrefix + suffix`, and v0.22.0 moved that default
- * from the `alpha` spelling with no fallback — a controller reads one prefix
- * and is blind to the other. Asserting the pair rather than one member is what
- * makes this suite fail on the halfway state, where a record still renders but
- * loses its proxy the moment the controller's pin moves.
- */
+/** external-dns v0.22.0 moved the default annotation prefix, and a controller reads only one. */
 const PREFIXES = [
   'external-dns.alpha.kubernetes.io/',
   'external-dns.kubernetes.io/',
 ];
 
-/** `cloudflare-proxied` under every prefix, as the chart states it. */
 function proxiedSpec(value: string) {
   return PREFIXES.map((prefix) => ({
     name: `${prefix}cloudflare-proxied`,
@@ -55,8 +35,6 @@ describe('kind branches', () => {
   });
 
   test('an unexposed service is a queue worker: no Service, no route', async () => {
-    // §2: "`expose` is a field on a service; an unexposed service is a queue
-    // worker." Nothing routes to it and nothing needs to.
     const objects = await render({ app: { expose: false } });
     expect(kinds(objects).sort()).toEqual(['Deployment', 'NetworkPolicy']);
   });
@@ -97,8 +75,7 @@ describe('the suspended CronJob', () => {
   test('an unscheduled job is suspended, on a date that never occurs', async () => {
     const cronJob = one(await render({ app: { kind: 'job' } }), 'CronJob');
     expect(cronJob.spec.suspend).toBe(true);
-    // 31 February: the schedule field is required, so the belt is a date the
-    // clock cannot reach even if something un-suspends the object.
+    // 31 February: `schedule` is required, so it names a date that never occurs.
     expect(cronJob.spec.schedule).toBe('0 0 31 2 *');
   });
 
@@ -112,8 +89,7 @@ describe('the suspended CronJob', () => {
   });
 
   test('it keeps an execution history a Job could not', async () => {
-    // The reason a job is a CronJob at all: Helm prunes the old Job on upgrade,
-    // which would cut an N-deep history to one, silently (§7).
+    // Helm would prune a plain Job on upgrade, leaving one run of history.
     const cronJob = one(await render({ app: { kind: 'job' } }), 'CronJob');
     expect(cronJob.spec.successfulJobsHistoryLimit).toBeGreaterThan(1);
     expect(cronJob.spec.failedJobsHistoryLimit).toBeGreaterThan(1);
@@ -124,9 +100,8 @@ describe('the three exclusions', () => {
   const excluded = ['Cluster', 'Gateway', 'Certificate', 'Namespace'];
 
   test('no Datastore, no Gateway or certificate, no Namespace', async () => {
-    // All three are vessel (§7). A release-scoped datastore would be destroyed
-    // by `destroy()`; a release-scoped gateway would take every other App's
-    // routes with it.
+    // These belong to the vessel: a release-scoped datastore dies with the release, and a
+    // release-scoped gateway takes every other App's routes with it.
     for (const values of [
       {},
       { app: { kind: 'job' } },
@@ -155,8 +130,7 @@ describe('the deploy label', () => {
   });
 
   test('it is never in a selector', async () => {
-    // §7: the selector is immutable, so a per-deploy value in one would brick
-    // every upgrade after the first.
+    // Selectors are immutable, so a per-deploy value would break every later upgrade.
     const objects = await render();
     const deployment = one(objects, 'Deployment');
     const service = one(objects, 'Service');
@@ -199,12 +173,9 @@ describe('the deploy label', () => {
 });
 
 describe('the value contract', () => {
-  // What the declared version *is* is asserted in Spindrift's own suite, where
-  // the number has something to be checked against. A literal here was a hand-
-  // maintained copy of a constant in another package, and it went stale.
+  // The number itself is checked in `apps/spindrift`'s suite.
   test('every rendered object carries the version it was rendered under', async () => {
-    // Helm ignores unknown values silently (§7), so a cluster object has to be
-    // traceable to the contract that produced it without holding the chart.
+    // Helm ignores unknown values, so each object records the contract it was rendered under.
     const chart = await chartMetadata();
     const declared = chart.annotations?.['spindrift.dev/values-contract'];
     for (const values of [{}, { app: { kind: 'job' } }]) {
@@ -226,11 +197,7 @@ describe('fixed defaults', () => {
   });
 
   test('the port it probes is the port it tells the process about', async () => {
-    // A zero-config build listens on `PORT`. The cloud runtime sets it, which
-    // is why the same image serves there and why nothing here noticed; on a
-    // cluster nobody does, so the image falls back to its own default and the
-    // probe knocks on 8080 until the release times out — with a container that
-    // started perfectly well.
+    // A zero-config image listens on `PORT`, which nothing else sets on a cluster.
     const container = one(await render(), 'Deployment').spec.template.spec
       .containers[0];
     const port = container.env.find(
@@ -240,9 +207,7 @@ describe('fixed defaults', () => {
   });
 
   test('hardening has no per-App opt-out', async () => {
-    // §7 fixes these, which is what constrains the zero-config base image to a
-    // non-root, read-only-rootfs shape. A value that could relax one would make
-    // the constraint advisory.
+    // The zero-config base image must run non-root on a read-only root filesystem.
     const pod = one(
       await render({ app: { securityContext: { runAsUser: 0 } } }),
       'Deployment',
@@ -268,8 +233,7 @@ describe('fixed defaults', () => {
   });
 
   test('NetworkPolicy is on and PodDisruptionBudget is off', async () => {
-    // §7: `minAvailable: 1` at one replica blocks node drain forever on hosts
-    // that reboot to auto-upgrade, so there is no PDB to render.
+    // `minAvailable: 1` at one replica would block the node drain of every auto-upgrade reboot.
     for (const values of [{}, { app: { kind: 'job' } }]) {
       const rendered = kinds(await render(values));
       expect(rendered).toContain('NetworkPolicy');
@@ -278,7 +242,6 @@ describe('fixed defaults', () => {
   });
 
   test('ingress is default-deny with the operator’s named exceptions', async () => {
-    // §8: "the shape is fixed while the names are Target configuration".
     const policy = one(await render(), 'NetworkPolicy');
     expect(policy.spec.policyTypes).toEqual(['Ingress']);
     const from = policy.spec.ingress[0].from;
@@ -298,12 +261,8 @@ describe('fixed defaults', () => {
   });
 
   test('a routed Component admits the gateway’s identity, not its namespace', async () => {
-    // The regression this exists for: a gateway's data plane is host-networked
-    // and reaches the pod carrying Cilium's `ingress` identity, which no
-    // `namespaceSelector` matches — so naming the gateway's namespace in
-    // `allowedNamespaces` never admitted a route, and the listener answered 503
-    // with the backend healthy. Asserted here because every other signal in the
-    // cluster reads correct while this one is wrong.
+    // Cilium's host-networked gateway Envoy carries the `ingress` identity, which no
+    // `namespaceSelector` matches; without this the listener answers 503.
     const objects = await render();
     const admission = one(objects, 'CiliumNetworkPolicy');
     expect(admission.apiVersion).toBe('cilium.io/v2');
@@ -320,8 +279,7 @@ describe('fixed defaults', () => {
   });
 
   test('it renders for either routed reach, and never without a route', async () => {
-    // Same condition as the route itself: `reach: none` has no gateway in front
-    // of it, so admitting one would widen a boundary nothing asked to cross.
+    // Same condition as the route: `reach: none` has no gateway to admit.
     for (const reach of ['private', 'public'] as const) {
       expect(kinds(await render({ app: { reach } }))).toContain(
         'CiliumNetworkPolicy',
@@ -344,8 +302,7 @@ describe('the route', () => {
       { name: 'cluster-gateway', namespace: 'gateway' },
     ]);
     expect(route.spec.hostnames).toEqual(['blog-web.apps.example.test']);
-    // The blanket exclude is gone: publishing the address is the mechanism now
-    // rather than a leak, and the bypass concern moved to the NetworkPolicy.
+    // Routes publish their address; the NetworkPolicy blocks the bypass.
     for (const prefix of PREFIXES) {
       expect(route.metadata.annotations?.[`${prefix}exclude`]).toBeUndefined();
     }
@@ -364,8 +321,6 @@ describe('the route', () => {
   });
 
   test('a Component with no reach has no route at all', async () => {
-    // Nothing routes to it, so there is no name to publish and no filter to
-    // hang. The Service is still there — a workload boundary is not an absence.
     const objects = await render({ app: { reach: 'none', auth: 'none' } });
     expect(kinds(objects)).not.toContain('HTTPRoute');
     expect(kinds(objects)).toContain('Service');
@@ -387,23 +342,8 @@ describe('the route', () => {
             port: 80,
           },
           http: {
-            // Exactly one, and the exactness is the point. `allowedHeaders`
-            // permits a header through to oauth2-proxy; it does not create one.
-            // `cookie` carries the session, which is all the check reads.
-            //
-            // No `x-forwarded-*` is listed, and this list is the only thing
-            // that keeps the family out of the check — it applies whichever
-            // backend `platform.externalAuth` names. oauth2-proxy's own gate
-            // (`CanTrustForwardedHeaders`, false while `reverse-proxy` is
-            // unset) lives in `clusters/base/apps/oauth2-proxy/helm-release.yaml`
-            // and is one flag from opening. Past it, `x-forwarded-host` naming
-            // a sibling host flips `IsForwardedRequest`, `x-forwarded-uri`
-            // picks the path on it through `GetRequestURI` with no such
-            // comparison, and `x-forwarded-proto` is what makes the pair a
-            // valid absolute URL rather than a rejected `://host/path`.
-            // `authorization` is read by no provider this deployment
-            // configures. The template comment carries the measurement, this
-            // carries the assertion.
+            // Only `cookie`, which carries the session. This list alone keeps a client's
+            // `x-forwarded-*` headers, which can redirect a sign-in, out of the check.
             allowedHeaders: ['cookie'],
             allowedResponseHeaders: [
               'set-cookie',
@@ -417,14 +357,8 @@ describe('the route', () => {
   });
 
   test('the filter never forwards the header that names the return target', async () => {
-    // `getXAuthRequestRedirect` (oauth2-proxy `pkg/app/redirect/getters.go`)
-    // reads `X-Auth-Request-Redirect` with no trusted-proxy gate at all, so
-    // whoever puts that header on the check request decides where a sign-in
-    // returns to. The value the flow uses is composed inside the auth pod, by
-    // the shim `platform.externalAuth` points at; the only thing keeping a
-    // *browser* from composing one instead is that Envoy is never told to
-    // forward it. That absence is the guard, so it is asserted rather than
-    // left to the list above happening not to mention it.
+    // oauth2-proxy trusts `X-Auth-Request-Redirect` from any caller, so forwarding a
+    // browser's copy would let it choose where a sign-in returns.
     const route = one(
       await render({ app: { reach: 'private', auth: 'proxy' } }),
       'HTTPRoute',
@@ -446,9 +380,7 @@ describe('the route', () => {
   });
 
   test('the filter renders on a public route too, unmet audience aside', async () => {
-    // Whether a Target *may* serve this cell is placement's question, not the
-    // chart's. The chart's job is that the cell is renderable at all — which is
-    // what makes `{public, proxy}` expressible-and-unmet rather than absent.
+    // Placement decides whether a Target may serve `{public, proxy}`; the chart renders it.
     const route = one(
       await render({ app: { reach: 'public', auth: 'proxy' } }),
       'HTTPRoute',
@@ -457,14 +389,10 @@ describe('the route', () => {
   });
 
   test('the route is held out of DNS, so only one source publishes', async () => {
-    // Without this the `gateway-httproute` source emits its own endpoint for
-    // these hostnames, targeting the parent Gateway's status address: the same
-    // name claimed twice, at two record types, by two sources. The value only
-    // has to differ from `dns-controller` for the source to skip the object.
+    // Otherwise external-dns's `gateway-httproute` source also publishes these names. Any
+    // value other than `dns-controller` makes it skip the route.
     for (const reach of ['private', 'public'] as const) {
       const route = one(await render({ app: { reach } }), 'HTTPRoute');
-      // Under every prefix: a hold-out written only under the one the
-      // controller is not pinned to is no hold-out at all.
       for (const prefix of PREFIXES) {
         const controller = route.metadata.annotations?.[`${prefix}controller`];
         expect(controller).toBeDefined();
@@ -474,9 +402,7 @@ describe('the route', () => {
   });
 
   test('a route with no gateway to attach to fails to render', async () => {
-    // The Deploy that goes green with `parentRefs` naming the empty string is
-    // the failure this refuses: a route attached to nothing, and a URL that
-    // answers nothing. Placement refuses it first; this is the backstop.
+    // Placement refuses this first; the chart is the backstop.
     expect(
       render({ platform: { gateway: { name: '', namespace: '' } } }),
     ).rejects.toThrow(/gateway/);
@@ -485,9 +411,7 @@ describe('the route', () => {
 
 describe('the published record', () => {
   test('reach decides the record, and the chart states it', async () => {
-    // The record type is the boundary. An RFC1918 address is not reachable from
-    // the internet whatever policy is or is not attached to it, which is what
-    // lets the proxied wildcard be retired without weakening anything.
+    // A private A record points at an RFC1918 address, which the internet cannot reach.
     const asPrivate = one(
       await render({ app: { reach: 'private', auth: 'proxy' } }),
       'DNSEndpoint',
@@ -516,11 +440,7 @@ describe('the published record', () => {
   });
 
   test("the target is the Target's value, not the gateway it routes onto", async () => {
-    // The defect this chart shipped with was invisible for exactly one reason:
-    // `platform.dns.privateAddress` happened to equal the parent Gateway's own
-    // status address, so a record derived from the gateway and a record derived
-    // from the chart agreed. They are independent inputs and this pins them
-    // apart — a private address that is nothing else in the render.
+    // An address that appears nowhere else in the render, so the record cannot come from the gateway.
     const endpoint = one(
       await render({
         platform: {
@@ -534,9 +454,7 @@ describe('the published record', () => {
   });
 
   test('every hostname on the route is published', async () => {
-    // The canonical name and the vanity name are the same Component at the same
-    // reach, so a record that covered only the first would leave the second
-    // resolving to whatever wildcard still answers for the zone.
+    // A vanity name with no record would resolve to whatever wildcard still answers.
     const endpoint = one(
       await render({
         app: {
@@ -556,10 +474,7 @@ describe('the published record', () => {
   });
 
   test('an apex hostname publishes exactly like any other name (ticket 137)', async () => {
-    // §9's vanity name is a label or the bare zone — `example.test` with no
-    // subdomain at all — and the chart never inspects a hostname's shape, so an
-    // apex among `app.hostnames` needs no template branch of its own: it is
-    // still a CNAME to the tunnel, proxied, alongside the route's own name.
+    // The chart never inspects a hostname's shape, so an apex is a proxied CNAME like any name.
     const objects = await render({
       app: {
         reach: 'public',
@@ -582,8 +497,7 @@ describe('the published record', () => {
   });
 
   test("it renders on the route's condition, and never without one", async () => {
-    // A record for a name nothing routes is the failure the wildcard already
-    // was: it resolves, it authenticates, and it 404s.
+    // A record for a name nothing routes resolves and then 404s.
     for (const reach of ['private', 'public'] as const) {
       expect(kinds(await render({ app: { reach } }))).toContain('DNSEndpoint');
     }
@@ -599,9 +513,7 @@ describe('the published record', () => {
   });
 
   test('a reach with nowhere to point fails to render', async () => {
-    // Rendering a record with an empty target publishes a name that resolves to
-    // nothing, which is worse than a Deploy that refuses: it is indistinguishable
-    // from a working App until someone fetches it.
+    // An empty target would publish a name that resolves to nothing.
     await expect(
       render({
         app: { reach: 'private' },
@@ -619,7 +531,7 @@ describe('the published record', () => {
 });
 
 describe('config delivery', () => {
-  /** Two variables, as Spindrift renders them from a pinned document (§10). */
+  /** Two variables, as the control plane renders them from a pinned document. */
   const CONFIGURED = {
     app: {
       secretEnv: [
@@ -639,7 +551,7 @@ describe('config delivery', () => {
   };
 
   test('one secret per variable, never a blob', async () => {
-    // §10: per-key, not per-blob. An `envFrom` here would be the blob.
+    // An `envFrom` would deliver the config as one blob.
     const container = one(await render(CONFIGURED), 'Deployment').spec.template
       .spec.containers[0];
 
@@ -650,8 +562,7 @@ describe('config delivery', () => {
     const token = container.env.find(
       (entry: { name: string }) => entry.name === 'TOKEN',
     );
-    // The variable's own name is the Secret key: a store's name for an item is
-    // not a legal Secret key everywhere, so it is never used as one.
+    // The variable name is the Secret key, because a store's item name is not always a legal key.
     expect(token.valueFrom.secretKeyRef).toEqual({
       name: 'blog-web',
       key: 'TOKEN',
@@ -675,8 +586,7 @@ describe('config delivery', () => {
         remoteRef: { key: 'blog--web--metal--DSN', version: '2' },
       },
     ]);
-    // Pinned means there is nothing to poll for: a change arrives as a new
-    // Deploy that re-renders this object (§10).
+    // Pinned references leave nothing to poll for.
     expect(external.spec.refreshInterval).toBe('0');
   });
 
@@ -686,31 +596,21 @@ describe('config delivery', () => {
   });
 
   test('config with no store named on the Target refuses to render', async () => {
-    // The alternative is an ExternalSecret that never syncs and a workload
-    // waiting forever for a Secret nobody is creating.
+    // Otherwise the ExternalSecret never syncs and the workload waits forever.
     await expect(render({ app: CONFIGURED.app })).rejects.toThrow(
       /platform.secretStore.name/,
     );
   });
 
   test('no Component-declared volumes beyond the writable /tmp', async () => {
-    // §7 deletes PVC lifecycle, orphan tracking, and the silent recreate
-    // strategy by having no volume a Component can declare.
+    // A Component cannot declare volumes, so there is no PVC lifecycle to manage.
     const pod = one(await render(), 'Deployment').spec.template.spec;
     expect(pod.volumes).toEqual([{ name: 'tmp', emptyDir: {} }]);
   });
 });
 
 describe('datastore delivery', () => {
-  /**
-   * One Datastore of each engine, as Spindrift renders them (§11).
-   *
-   * The two shapes are what the engines actually are, not a chart preference:
-   * CloudNativePG generates a credential and puts it in a Secret it owns, and
-   * Valkey as this platform runs it authenticates nobody, so its connection is
-   * an address. The chart tells them apart by which key is present — it is
-   * never told which engine either one is.
-   */
+  /** A CloudNativePG credential in its Secret, and a Valkey address with no credential. */
   const ATTACHED = {
     app: {
       datastores: [
@@ -738,9 +638,7 @@ describe('datastore delivery', () => {
   test('a generated credential is read straight from the operator-owned Secret', async () => {
     const variables = env(one(await render(ATTACHED), 'Deployment'));
 
-    // The operator's key, not the variable's — the whole connection string is
-    // under `uri` in CloudNativePG's `<cluster>-app` Secret, and that Secret is
-    // not one this chart materializes.
+    // CloudNativePG's `<cluster>-app` Secret holds the connection string under `uri`.
     expect(variables.DATABASE_URL?.valueFrom.secretKeyRef).toEqual({
       name: 'orders-app',
       key: 'uri',
@@ -758,21 +656,12 @@ describe('datastore delivery', () => {
   });
 
   test('the credential never travels the pinned-store path', async () => {
-    // The assertion that pins the design: an attached Datastore renders no
-    // ExternalSecret, so it demands no `platform.secretStore.name` — which the
-    // baseline leaves empty, and which config delivery refuses to render
-    // without. If this ever starts failing, the credential has been routed
-    // through Spindrift's own store seam and is being copied rather than
-    // referenced.
+    // A same-namespace credential is referenced, never copied through the config store.
     const objects = await render(ATTACHED);
     expect(kinds(objects)).not.toContain('ExternalSecret');
   });
 
-  /**
-   * The ordinary case since Apps got namespaces of their own: the Datastore is
-   * in `spindrift-datastores` and the release is in `app-<name>`, which a
-   * `secretKeyRef` cannot cross.
-   */
+  /** A Datastore in `spindrift-datastores` and a release in `app-<name>`, which a `secretKeyRef` cannot cross. */
   const ACROSS = {
     app: {
       datastores: [
@@ -795,8 +684,7 @@ describe('datastore delivery', () => {
   test('a credential in another namespace is mirrored in, not reached across', async () => {
     const objects = await render(ACROSS);
 
-    // The mirror, against the store scoped to the datastore namespace — a
-    // different store from the config one, which this fixture leaves unset.
+    // The datastore store; this fixture leaves the config store unset.
     const mirror = objects.find(
       (object: any) =>
         object.kind === 'ExternalSecret' &&
@@ -804,12 +692,10 @@ describe('datastore delivery', () => {
     ) as any;
     expect(mirror.spec.secretStoreRef.name).toBe('spindrift-datastores');
     expect(mirror.spec.dataFrom).toEqual([{ extract: { key: 'orders-app' } }]);
-    // Not "0", unlike the pinned-config path: this tracks a credential the
-    // datastore operator rotates with no Deploy to re-render on, so it polls.
+    // Polls, because the datastore operator rotates the credential without a Deploy.
     expect(mirror.spec.refreshInterval).toBe('1h');
 
-    // And the container reads the mirror under the operator's own key. What
-    // crossed the boundary is the Secret, not the layout of it.
+    // The container reads the mirror under the operator's own key.
     const variables = env(one(objects, 'Deployment'));
     expect(variables.DATABASE_URL?.valueFrom.secretKeyRef).toEqual({
       name: `${mirror.metadata.name}`,
@@ -818,16 +704,12 @@ describe('datastore delivery', () => {
   });
 
   test('a same-namespace credential still grows no mirror', async () => {
-    // The direct reference is kept where the two namespaces coincide, which is
-    // every Datastore provisioned before per-App namespaces. Rendering an
-    // ExternalSecret for those would add a hop they do not need.
+    // Where the namespaces coincide, the direct reference needs no mirror.
     expect(kinds(await render(ATTACHED))).not.toContain('ExternalSecret');
   });
 
   test('a job gets its connections too', async () => {
-    // Both workloads reach the container through `spindrift-app.podSpec`, so
-    // this is a claim that nothing branched on kind on the way — a scheduled
-    // task that needs a database is the ordinary case, not an exception.
+    // Both workloads build the container through `spindrift-app.podSpec`.
     const variables = env(
       one(
         await render({ ...ATTACHED, app: { ...ATTACHED.app, kind: 'job' } }),
@@ -845,9 +727,7 @@ describe('datastore delivery', () => {
 });
 
 describe('shared pod annotations reach the pod template', () => {
-  // The path a restart rides: `shared.podAnnotations` lands verbatim on the
-  // pod template of both workload objects, so a changed value there is a
-  // rollout and nothing else in the release moves.
+  // A restart changes `shared.podAnnotations`, which rolls the pods and nothing else.
   const STAMP = { 'spindrift.dev/restarted-at': '2026-08-23T12:00:00.000Z' };
 
   test('on a Deployment, beside the contract annotation', async () => {
@@ -858,8 +738,7 @@ describe('shared pod annotations reach the pod template', () => {
     const annotations = deployment.spec.template.metadata.annotations;
     expect(annotations).toMatchObject(STAMP);
     expect(annotations['spindrift.dev/values-contract']).toBeDefined();
-    // The object's own annotations are not the pod's: a stamp there would
-    // change nothing that reschedules.
+    // On the Deployment's own metadata it would roll nothing.
     expect(deployment.metadata.annotations).not.toHaveProperty(
       'spindrift.dev/restarted-at',
     );

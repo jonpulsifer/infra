@@ -1,56 +1,21 @@
 /**
- * §13's federation, read from the credential this deployment mounts.
- *
- * The installer chart writes an `external_account` credential document from the
- * workload-identity audience and mount path a release names, and points
- * `GOOGLE_APPLICATION_CREDENTIALS` at it. Every fact federation needs is
- * already in that document: the pool provider this cluster's tokens are trusted
- * by, where a projected token is exchanged, where that token is read from, and
- * which service account is impersonated with the result.
- *
- * **So the manifest does not ask for them a second time.** §20's rule is
- * "everything naming this installation is a value in the installation manifest;
- * a literal outside it is a bug", and the rule is enforced as a grep — which a
- * value living in *both* the chart and the manifest satisfies while still being
- * able to disagree with itself. When it disagreed, the failure surfaced as an
- * `iam.serviceAccounts.signBlob` refusal that read as a code defect for a whole
- * session. There is one copy now, and it is the one the pod is holding.
- *
- * `null` — no credential mounted — stays a supported installation, for exactly
- * the reason `cloud.federation` was nullable when it was authored: an
- * installation with no cloud Targets has no honest value here, and a
- * placeholder would be a configuration that looks complete and fails on the
- * first deploy. Null means cloud Targets cannot be reached, and nothing else
- * changes.
- *
- * Read on every resolution rather than captured once, for the same reason
- * `federation.ts` re-reads the projected token: the file is a projected volume
- * the kubelet owns, and a value captured at boot is a value that stops being
- * true the moment the credential is re-rendered.
+ * Federation settings, read from the `external_account` credential the chart
+ * mounts so that no manifest repeats them.
  */
 import { z } from 'zod';
 import type { FederationConfig } from './federation.ts';
 
-/**
- * Where the credential document is. The name is Google's own ADC variable, not
- * this software's: it names no installation, and the chart sets it beside the
- * mount so that any client in the process — this one included — finds the same
- * credential.
- */
+/** Google's ADC variable, so every client in the process finds this file. */
 export const GCP_CREDENTIALS_VAR = 'GOOGLE_APPLICATION_CREDENTIALS';
 
-/** Raised when a mounted credential is present and unusable. */
+/** The named credential file is missing or unusable. */
 export class FederationCredentialError extends Error {
   override readonly name = 'FederationCredentialError';
 }
 
 /**
- * An `external_account` credential document, as far as federation reads it.
- *
- * Not `.strict()`: this is a third party's format and a document carrying a
- * field this code does not read is a valid credential, not a broken one.
- * `type` is checked because a *service account key* file would parse against
- * everything else and is the one thing §13 forbids being here at all.
+ * Not strict: a third-party format may add fields. `type` is checked because a
+ * service account key file, which is never allowed here, would otherwise parse.
  */
 const externalAccountSchema = z.object({
   type: z.literal('external_account'),
@@ -68,12 +33,8 @@ const externalAccountSchema = z.object({
 type Env = Record<string, string | undefined>;
 
 /**
- * The federation this deployment declares, or `null` when it declares none.
- *
- * A credential named and absent is an error rather than a `null`: a broken
- * mount is not the same state as no cloud at all, and silently becoming an
- * installation with no cloud Targets is how a deploy fails for a reason nobody
- * can act on.
+ * `null` when no credential is named, which means no cloud access. A named file
+ * that is missing throws: a broken mount is not the same as no cloud.
  */
 export async function loadDeploymentFederation(
   env: Env = Bun.env,
@@ -91,7 +52,7 @@ export async function loadDeploymentFederation(
   return parseFederationCredential(await file.text(), path);
 }
 
-/** Parse one credential document. Exported so a test needs no file on disk. */
+/** Exported so a test needs no file on disk. */
 export function parseFederationCredential(
   document: string,
   source: string,
@@ -122,14 +83,9 @@ export function parseFederationCredential(
   return {
     audience: credential.audience,
     tokenUrl: credential.token_url,
-    // The document's `credential_source.file` is the separately projected
-    // volume whose audience is the pool — never the default service account
-    // token, which is minted for this cluster's own API server and which a
-    // cloud API refuses. The chart projects both and names this one here.
+    // The pool-audience projected token, not the default service account
+    // token, which a cloud API refuses.
     tokenPath: credential.credential_source.file,
-    // Absent is a supported configuration rather than an omission: direct
-    // resource access grants the federated identity roles on its own, which is
-    // one fewer identity to reason about where the cloud resources allow it.
     impersonationUrl: credential.service_account_impersonation_url ?? null,
   };
 }

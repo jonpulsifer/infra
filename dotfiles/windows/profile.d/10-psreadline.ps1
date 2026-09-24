@@ -1,7 +1,6 @@
-# The zsh-isms. Each block names the zsh plugin or setopt it replaces.
+# PSReadLine settings that stand in for the zsh plugins and options.
 
-# zsh-autosuggestions. HistoryAndPlugin pulls in CompletionPredictor as well as
-# history, which is the part that beats plain history search.
+# zsh-autosuggestions. HistoryAndPlugin adds CompletionPredictor to history.
 Set-PSReadLineOption -PredictionSource HistoryAndPlugin
 Set-PSReadLineOption -PredictionViewStyle ListView
 if (Get-Module -ListAvailable -Name CompletionPredictor) {
@@ -19,9 +18,7 @@ Set-PSReadLineOption -AddToHistoryHandler {
     return -not $line.StartsWith(' ')
 }
 
-# zsh-syntax-highlighting, carrying over the ZSH_HIGHLIGHT_STYLES palette from
-# .config/zsh/.zshrc: commands white, strings and globs purple, options blue,
-# paths underlined, anything unrecognised red.
+# zsh-syntax-highlighting, with the ZSH_HIGHLIGHT_STYLES palette from .config/zsh/.zshrc.
 Set-PSReadLineOption -Colors @{
     Command                = "$([char]27)[97;1m"
     Parameter              = "$([char]27)[38;5;33m"
@@ -38,17 +35,14 @@ Set-PSReadLineOption -Colors @{
     ListPredictionSelected = "$([char]27)[48;5;238m"
 }
 
-# fzf-tab's menu behaviour. PSFzf's tab expansion layers on top in 30-fzf.ps1.
+# 30-fzf.ps1 rebinds Tab to PSFzf when it is installed.
 Set-PSReadLineKeyHandler -Key Tab -Function MenuComplete
 Set-PSReadLineKeyHandler -Key Shift+Tab -Function TabCompletePrevious
 
-# Up/Down search history by what is already typed. This is what the zshrc's
-# `bindkey "${key[Up]}" fzf-history-widget` is actually reaching for most of
-# the time; Ctrl-R still gets the full fzf picker.
+# Up/Down search history by prefix. Ctrl-R opens the fzf picker (30-fzf.ps1).
 Set-PSReadLineKeyHandler -Key UpArrow -Function HistorySearchBackward
 Set-PSReadLineKeyHandler -Key DownArrow -Function HistorySearchForward
 
-# Ctrl-Left / Ctrl-Right word motion, matching the zshrc's "^[[1;5C" bindings.
 Set-PSReadLineKeyHandler -Key Ctrl+LeftArrow -Function BackwardWord
 Set-PSReadLineKeyHandler -Key Ctrl+RightArrow -Function ForwardWord
 
@@ -57,6 +51,5 @@ Set-PSReadLineKeyHandler -Key End -Function EndOfLine
 Set-PSReadLineKeyHandler -Key PageUp -Function BeginningOfHistory
 Set-PSReadLineKeyHandler -Key PageDown -Function EndOfHistory
 
-# Accept the inline suggestion a word at a time, the way zsh-autosuggestions
-# does with a right arrow.
+# At the end of the line, ForwardWord accepts the next word of the inline suggestion.
 Set-PSReadLineKeyHandler -Key Ctrl+f -Function ForwardWord
