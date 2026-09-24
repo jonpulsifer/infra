@@ -1,5 +1,6 @@
 // Mock weather for dev builds. use-weather.ts guards every use behind
 // `import.meta.env.DEV`, so production bundles drop it.
+import type { BurnRestriction } from '~/lib/burnsafe';
 import { WEATHERFLOW_CONFIG } from './config';
 import type {
   HistoryField,
@@ -19,6 +20,12 @@ const MOCK_NAMES = [
   'Cape Breton',
   'Sunset Point',
   'Riverbend',
+];
+
+const MOCK_BURN: BurnRestriction[] = [
+  { county: 'Colchester', level: 'restricted', label: 'Burn 7 pm – 8 am' },
+  { county: 'Halifax', level: 'burn', label: 'Burn 2 pm – 8 am' },
+  { county: 'Hants', level: 'no-burn', label: 'No burning' },
 ];
 
 // A slow 0..1 wave per (seed, phase). It follows the clock, so values drift
@@ -119,6 +126,7 @@ export function mockStation(seed: number, now: number): StationSnapshot {
     observation: mockObservation(seed, now),
     history: mockHistory(seed, now),
     updatedAt: now,
+    burn: MOCK_BURN[seed % MOCK_BURN.length],
   };
 }
 

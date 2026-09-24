@@ -11,12 +11,14 @@ import {
   X,
   Zap,
 } from 'lucide-react';
+import type { BurnRestriction } from '~/lib/burnsafe';
 import { clockTimeFromEpochSeconds } from '~/lib/format-time';
 import type { LeaderMap } from '~/lib/weatherflow/leader';
 import type {
   StationHistory,
   StationObservation,
 } from '~/lib/weatherflow/types';
+import { BurnBadge } from './burn-badge';
 import { MetricCell } from './metric-cell';
 import { RangeBar } from './range-bar';
 import { Sparkline } from './sparkline';
@@ -25,6 +27,7 @@ interface StationDisplayProps {
   label: string;
   observation: StationObservation | null;
   history?: StationHistory;
+  burn?: BurnRestriction;
   now: number; // ms epoch, from the dashboard clock
   index: number; // this station's position in the compared group
   accent: string; // this station's identity colour
@@ -100,6 +103,7 @@ export function StationDisplay({
   label,
   observation,
   history,
+  burn,
   now,
   index,
   accent,
@@ -203,6 +207,8 @@ export function StationDisplay({
           )}
         </div>
       </div>
+
+      {burn && <BurnBadge burn={burn} />}
 
       {range?.temperature ? (
         <RangeBar

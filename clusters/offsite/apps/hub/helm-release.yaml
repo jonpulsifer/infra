@@ -24,6 +24,8 @@ spec:
     env:
       - name: TEMPESTWX_IGNORE_STATIONS
         value: "85191"
+      - name: BURNSAFE_COUNTIES
+        value: "201806=Colchester,176295=Halifax"
     envFromSecret: hub-env
     ingress:
       enabled: true

@@ -1,0 +1,7 @@
+---
+id: burnsafe
+name: BurnSafe
+summary: Nova Scotia fire restrictions
+desc: This application shows today's Nova Scotia BurnSafe fire restriction for up to two counties.
+author: jonpulsifer
+supports2x: true
