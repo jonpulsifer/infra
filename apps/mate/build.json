@@ -8,6 +8,7 @@
     "no-cache-filters": "runner",
     "watch": [
       "apps/mate",
+      "packages/mate-hands",
       "packages/typescript-config",
       "package.json",
       "bun.lock",

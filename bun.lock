@@ -80,6 +80,7 @@
         "@opentelemetry/resources": "^2.10.0",
         "@opentelemetry/sdk-metrics": "^2.10.0",
         "@opentelemetry/semantic-conventions": "^1.30.0",
+        "@repo/mate-hands": "workspace:*",
         "discord-api-types": "0.38.55",
         "zod": "4.6.5",
       },
@@ -270,6 +271,15 @@
     "packages/kthx": {
       "name": "@repo/kthx",
       "version": "0.0.0",
+      "devDependencies": {
+        "@repo/typescript-config": "workspace:*",
+        "@types/bun": "1.4.2",
+        "typescript": "5.9.3",
+      },
+    },
+    "packages/mate-hands": {
+      "name": "@repo/mate-hands",
+      "version": "0.1.0",
       "devDependencies": {
         "@repo/typescript-config": "workspace:*",
         "@types/bun": "1.4.2",
@@ -933,6 +943,8 @@
     "@repo/charts": ["@repo/charts@workspace:packages/charts"],
 
     "@repo/kthx": ["@repo/kthx@workspace:packages/kthx"],
+
+    "@repo/mate-hands": ["@repo/mate-hands@workspace:packages/mate-hands"],
 
     "@repo/typescript-config": ["@repo/typescript-config@workspace:packages/typescript-config"],
 

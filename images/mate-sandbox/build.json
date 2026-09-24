@@ -1,0 +1,9 @@
+[
+  {
+    "_comment": "The context is the repo root so the image can compile packages/mate-hands; the watch list is every path the Dockerfile copies, and the root .dockerignore that lets them in.",
+    "image": "mate-sandbox",
+    "context": ".",
+    "file": "images/mate-sandbox/Dockerfile",
+    "watch": ["images/mate-sandbox", "packages/mate-hands", ".dockerignore"]
+  }
+]

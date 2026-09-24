@@ -1,12 +1,16 @@
-# Root build context is used only by apps/agent-web (context = repo root so the
-# Dockerfile can pull source from packages/agent-web-ui). Ship just those trees;
-# everything else (k8s, terraform, nix, .git, build output) stays out of context.
+# The context of every image built from the repo root: the apps that prune the
+# Bun workspace, and images/mate-sandbox, which compiles packages/mate-hands.
+# Ship just those trees; everything else (k8s, terraform, nix, .git, build
+# output) stays out of context.
 *
 !apps
 !packages
 !package.json
 !bun.lock
 !turbo.json
+!images/mate-sandbox/gh
+!images/mate-sandbox/kthx
+!images/mate-sandbox/mise.toml
 
 # Even within the whitelisted trees, never send dependency/build artifacts.
 **/node_modules

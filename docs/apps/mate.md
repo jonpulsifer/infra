@@ -56,6 +56,6 @@ To disable the agent, set `MATE_SANDBOXES` to `stub` in `clusters/offsite/apps/m
 
 ## Reference
 
-- Source: `apps/mate/` and `images/mate-sandbox/`
+- Source: `apps/mate/`, `images/mate-sandbox/` and `packages/mate-hands/`
 - Manifests: `clusters/offsite/apps/mate/`
 - Images: `ghcr.io/jonpulsifer/mate`, `ghcr.io/jonpulsifer/mate-sandbox`

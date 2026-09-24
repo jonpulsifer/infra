@@ -20,6 +20,7 @@
     "@opentelemetry/resources": "^2.10.0",
     "@opentelemetry/sdk-metrics": "^2.10.0",
     "@opentelemetry/semantic-conventions": "^1.30.0",
+    "@repo/mate-hands": "workspace:*",
     "discord-api-types": "0.38.55",
     "zod": "4.6.5"
   },

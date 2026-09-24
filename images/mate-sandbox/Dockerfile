@@ -1,7 +1,9 @@
 # syntax=docker/dockerfile:1
 #
 # The per-thread sandbox mate execs `opencode acp` in. Its tools are baked in
-# because the sandbox's egress policy blocks their downloads.
+# because the sandbox's egress policy blocks their downloads. The build context
+# is the repo root, so the image can compile packages/mate-hands; the root
+# .dockerignore lets in the files copied from this directory.
 FROM debian:bookworm-slim@sha256:3783cc01769c7b2b1b83a5c5ad96c815348e28ed7da68e2e3687004faa906251 AS base
 
 FROM base AS toolset
@@ -115,6 +117,18 @@ RUN set -eux; \
     tar -xzf archive --no-same-owner -C /out/bin tofu; \
     chmod 0755 /out/bin/* /out/libexec/*
 
+# mate-hands, the tool daemon mate can exec over one pods/exec stream to run
+# the agent's file and shell calls; mate does not use it yet. It imports only
+# Bun's built-ins, so the toolset's bun compiles it with no install. It has
+# its own stage and layer, so a daemon change leaves the tool layers cached.
+# It starts in HOME, which the agent writes, so it must not load a .env or a
+# bunfig.toml from its working directory.
+FROM toolset AS hands
+COPY packages/mate-hands/src /src/mate-hands
+RUN /out/bin/bun build --compile --minify \
+      --no-compile-autoload-dotenv --no-compile-autoload-bunfig \
+      /src/mate-hands/main.ts --outfile /out/mate-hands
+
 FROM base
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -131,7 +145,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY --from=toolset /out/bin/ /usr/local/bin/
 COPY --from=toolset /out/libexec/ /usr/local/libexec/
 
-COPY gh /usr/local/bin/gh
+COPY images/mate-sandbox/gh /usr/local/bin/gh
 
 # The CLI comes from the image that serves it, so the sandbox runs the build
 # the apex serves. It is a Bun bundle: `kthx` on PATH is the shim copied in
@@ -144,9 +158,9 @@ RUN set -eux; \
     chmod 0644 /usr/local/lib/kthx/kthx.js /usr/local/lib/kthx/version.json; \
     rm /tmp/kthx.tgz
 
-COPY kthx /usr/local/bin/kthx
+COPY images/mate-sandbox/kthx /usr/local/bin/kthx
 
-COPY mise.toml /etc/mise/config.toml
+COPY images/mate-sandbox/mise.toml /etc/mise/config.toml
 
 # The platform package opencode-ai installs on linux/amd64. It needs AVX2;
 # opencode-linux-x64-baseline is the build for nodes without it.
@@ -155,6 +169,8 @@ ARG OPENCODE_VERSION=1.18.31
 RUN curl -fsSL "https://registry.npmjs.org/opencode-linux-x64/-/opencode-linux-x64-${OPENCODE_VERSION}.tgz" \
       | tar -xz --no-same-owner -C /usr/local/bin --strip-components=2 package/bin/opencode \
     && chmod 0755 /usr/local/bin/opencode
+
+COPY --from=hands --chmod=0755 /out/mate-hands /usr/local/bin/mate-hands
 
 RUN groupadd -g 1337 agent \
     && useradd -m -u 1337 -g agent -s /bin/bash agent
@@ -180,8 +196,8 @@ ENV HOME=/home/agent \
 # helm, kubectl, kustomize and pixlet reject `--version`.
 RUN set -eux; \
     for tool in age age-keygen bat bun conftest d2 delta eza flux fzf gh jq kthx \
-                mise op opencode promtool shellcheck shfmt sops terraform-docs tofu \
-                yq; do \
+                mate-hands mise op opencode promtool shellcheck shfmt sops \
+                terraform-docs tofu yq; do \
       "$tool" --version >/dev/null; \
     done; \
     helm version >/dev/null; \
@@ -201,6 +217,14 @@ RUN set -eux; \
     : >"$d/token"; \
     ! GH_CONFIG_DIR="$d/gh" MATE_GITHUB_TOKEN_FILE="$d/token" \
       gh auth token >/dev/null 2>&1; \
+    rm -rf "$d"
+
+# mate-hands answers a hello over a pipe as the sandbox uid, and exits at EOF.
+RUN set -eux; \
+    d="$(mktemp -d)"; \
+    printf '%s\n' '{"id":1,"method":"hello","params":{}}' \
+      | mate-hands --epoch 1 --cwd "$d" --state-dir "$d/state" >"$d/out"; \
+    grep -q '"protocol":1' "$d/out"; \
     rm -rf "$d"
 
 # sleep is a keepalive: mate execs each session. tini reaps what those sessions
