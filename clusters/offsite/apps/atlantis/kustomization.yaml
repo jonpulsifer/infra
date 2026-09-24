@@ -12,9 +12,13 @@ configMapGenerator:
     files:
       - policies/only-me.rego
       - policies/only-me.json
+      - policies/appliers.rego
   - name: plan-hook
     files:
       - plan-hook.sh
+  - name: apply-hook
+    files:
+      - apply-hook.sh
   - name: kubeconfig-hook
     files:
       - kubeconfig-hook.sh
