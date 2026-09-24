@@ -22,10 +22,24 @@ folly's Prometheus Operator CRDs come from the kube-prometheus-stack chart, whic
 
 2. If the HelmRelease exists, stop. folly already has the `monitoring-crds` Flux Kustomization.
 
+> [!WARNING]
+> Without the `keep` resource policy, a failed install makes helm-controller uninstall the release. Helm then deletes the CRDs and every ServiceMonitor, PrometheusRule and other object of those kinds on folly.
+
+3. Make sure that `main` gives the CRDs the `keep` resource policy.
+
+   ```bash
+   git fetch origin main
+   git show origin/main:clusters/base/monitoring-crds/prometheus-operator-crds.yaml | grep resource-policy
+   ```
+
+   Result: `helm.sh/resource-policy: keep`.
+
+4. If `grep` prints nothing, stop. Merge the `keep` value into `main` before the adoption.
+
 > [!NOTE]
 > folly's CRDs have no Helm ownership metadata. A helm-controller without the `disableTakeOwnership` field adopts only objects that have this metadata.
 
-3. Make sure that helm-controller takes ownership of existing objects.
+5. Make sure that helm-controller takes ownership of existing objects.
 
    ```bash
    kubectl --context folly explain helmrelease.spec.install.disableTakeOwnership
@@ -33,7 +47,7 @@ folly's Prometheus Operator CRDs come from the kube-prometheus-stack chart, whic
 
    Result: `FIELD: disableTakeOwnership <boolean>`, and a description that ends in `Defaults to false.`
 
-4. If kubectl prints `field "disableTakeOwnership" does not exist`, stop.
+6. If kubectl prints `field "disableTakeOwnership" does not exist`, stop.
 
 ## Give folly the monitoring-crds Flux Kustomization
 
@@ -59,9 +73,6 @@ folly's Prometheus Operator CRDs come from the kube-prometheus-stack chart, whic
    ```
 
    Result: The output includes `rendered clusters/folly/monitoring-crds`.
-
-> [!WARNING]
-> The merge adopts the CRDs. If the install fails after that, helm-controller uninstalls the release, because `install.remediation.retries` is set. Helm then deletes the CRDs and every ServiceMonitor, PrometheusRule and other object of those kinds on folly.
 
 8. Merge the change through a pull request.
 9. Fetch the merge commit into the `infra` GitRepository.
@@ -91,21 +102,21 @@ folly's Prometheus Operator CRDs come from the kube-prometheus-stack chart, whic
 
     Result: `READY` is `True` on each.
 
-13. Make sure that the HelmRelease owns the CRDs.
+13. Make sure that the HelmRelease owns the CRDs, and that Helm keeps them.
 
     ```bash
     kubectl --context folly get crd -l helm.toolkit.fluxcd.io/name=prometheus-operator-crds \
-      -o custom-columns='NAME:.metadata.name,MANAGED-BY:.metadata.labels.app\.kubernetes\.io/managed-by,RELEASE:.metadata.annotations.meta\.helm\.sh/release-name,NAMESPACE:.metadata.annotations.meta\.helm\.sh/release-namespace'
+      -o custom-columns='NAME:.metadata.name,MANAGED-BY:.metadata.labels.app\.kubernetes\.io/managed-by,RELEASE:.metadata.annotations.meta\.helm\.sh/release-name,NAMESPACE:.metadata.annotations.meta\.helm\.sh/release-namespace,POLICY:.metadata.annotations.helm\.sh/resource-policy'
     ```
 
-    Result: Ten rows. Each shows `Helm`, `prometheus-operator-crds` and `flux-system`.
+    Result: Ten rows. Each shows `Helm`, `prometheus-operator-crds`, `flux-system` and `keep`.
 
 14. In a new pull request, delete this runbook and the folly rule on [Kubernetes](../platform/kubernetes.md#rules).
 
 ## If something goes wrong
 
 > [!WARNING]
-> After the merge, do not delete or recreate the CRDs, and do not revert the change. A revert makes helm-controller uninstall the release. Each action deletes every ServiceMonitor, PrometheusRule and other object of those kinds on folly.
+> After the merge, do not delete or recreate the CRDs. Each action deletes every ServiceMonitor, PrometheusRule and other object of those kinds on folly.
 
 | Symptom | Cause | Action |
 | --- | --- | --- |

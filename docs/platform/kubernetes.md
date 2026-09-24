@@ -42,7 +42,7 @@ A pod that names no RuntimeClass runs on `runc`. Every node also has these:
 - Deploy a new containerd handler to every node from `main` before a workload names its RuntimeClass. The kubelet rejects a pod whose handler is missing.
 - Put a new CRD in its own Flux Kustomization, and add that to the `dependsOn` of each consumer. Flux dry-runs every object first, so one unknown kind stops the Flux Kustomization.
 - On folly, a kube-prometheus-stack bump leaves the Prometheus Operator CRDs behind the operator, because `upgrade.crds` defaults to `Skip`. [Adopt the folly Prometheus Operator CRDs](../runbooks/adopt-the-folly-prometheus-operator-crds.md) corrects this.
-- Do not delete the `prometheus-operator-crds` HelmRelease. Helm then deletes the Prometheus Operator CRDs and every object of those kinds.
+- Keep `helm.sh/resource-policy: keep` in the `prometheus-operator-crds` HelmRelease values. Without it, an uninstall deletes the Prometheus Operator CRDs and every object of those kinds.
 - A change to only `flux-values.yaml` in `clusters/<site>/bootstrap/` gets no autoplan. Plan and apply it as [OpenTofu and Atlantis](opentofu.md#rules) says.
 
 ## Where it lives
