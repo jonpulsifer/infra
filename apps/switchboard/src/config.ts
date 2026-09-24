@@ -47,7 +47,7 @@ function readToNumber(env: Env): string {
   const value = required(env, 'SWITCHBOARD_TO_NUMBER');
   if (!E164.test(value)) {
     throw new ConfigError(
-      `SWITCHBOARD_TO_NUMBER must be E.164, e.g. +19025551234, got ${value}`,
+      'SWITCHBOARD_TO_NUMBER must be E.164: a + then 8-15 digits',
     );
   }
   return value;

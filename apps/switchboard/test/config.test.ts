@@ -39,6 +39,16 @@ describe('config from the environment', () => {
     ).toThrow('E.164');
   });
 
+  test('never puts the bad destination number in the thrown message', () => {
+    const bad = '902-555-0142';
+    try {
+      readConfig({ ...minimal, SWITCHBOARD_TO_NUMBER: bad });
+      throw new Error('expected readConfig to throw');
+    } catch (error) {
+      expect((error as Error).message).not.toContain(bad);
+    }
+  });
+
   test('refuses a non-integer or too-low cap and cooldown', () => {
     expect(() =>
       readConfig({ ...minimal, SWITCHBOARD_RING_DAILY_CAP: '0' }),
