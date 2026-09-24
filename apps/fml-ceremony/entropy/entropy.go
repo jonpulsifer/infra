@@ -15,51 +15,39 @@ import (
 	"fmt"
 )
 
-// SeedLen is the master seed length. SPEC.md section 2: exactly 32 octets.
+// SeedLen is the master seed length in octets.
 const SeedLen = 32
 
-// MinSources is two because a mix of one has nothing to degrade to. The whole
-// argument for this construction is that a compromised source is survivable,
-// and with a single source it is not.
+// With one source, a compromised source is not survivable.
 const MinSources = 2
 
 // DiceRolls is the first roll count whose min-entropy clears 256 bits:
 // 100 * log2(6) = 258.49. See TestDice.
 const DiceRolls = 100
 
-// WitnessFloorBits is the min-entropy below which publishing a source's digest
-// hands an attacker a brute-force target instead of proving participation.
-// 128 bits is the usual infeasibility line. Every v1 source clears 256, which
-// is not luck: the source set was chosen so that every member is safe to
-// publish a digest of. A source below this floor is recorded as present with
-// no digest, and is a reason to ask why it is a source at all.
+// Below this min-entropy, a published source digest is a brute-force target.
+// 128 bits is the usual infeasibility line.
 const WitnessFloorBits = 128
 
 const (
-	// mixSalt is HKDF-Extract's salt. Fixed and public: RFC 5869 salts are not
-	// secret, and a per-ceremony salt would have to be recorded somewhere to be
-	// meaningful, which is one more thing to get wrong for no gain.
+	// Fixed and public: RFC 5869 salts are not secret.
 	mixSalt = "fml-entropy-mix-v1"
-	// mixInfo separates this expansion from every other HKDF in the estate and
-	// carries the mixing version. Changing the framing below obliges a bump.
+	// Carries the mixing version; a change to the framing needs a bump.
 	mixInfo = "fml/master/v1"
-	// witnessTag keeps the transcript digest a different computation from the
-	// mixing input. Without it, a transcript that publishes every source's
-	// digest publishes the extractor's input, and therefore the master seed.
+	// Domain-separates the witness from the mixing input, so publishing every
+	// witness never reveals the extractor's input.
 	witnessTag = "fml-entropy-witness-v1"
 )
 
-// Source is one contribution: Label is the name the transcript uses, Bytes is
-// the material exactly as collected. Nothing normalises, pads or re-encodes it.
+// Source is one contribution. Label is its transcript name; Bytes are kept as
+// collected, never normalised or re-encoded.
 type Source struct {
 	Label string
 	Bytes []byte
 }
 
-// appendFrame length-prefixes a contribution so that concatenating sources is
-// injective. Appending raw bytes is not: {"xy", "z"} and {"x", "yz"} produce
-// the same input, so the transcript's statement of which source supplied what
-// would not be a statement about what was actually extracted.
+// Length prefixes make the concatenation injective: unframed, {"xy", "z"} and
+// {"x", "yz"} would be one input.
 func appendFrame(dst []byte, s Source) []byte {
 	dst = binary.BigEndian.AppendUint32(dst, uint32(len(s.Label)))
 	dst = append(dst, s.Label...)
@@ -67,15 +55,8 @@ func appendFrame(dst []byte, s Source) []byte {
 	return append(dst, s.Bytes...)
 }
 
-// Mix returns the master seed. Every declared source must deliver bytes: a
-// source that fails on ceremony day is dropped from the declared set out loud,
-// never skipped quietly, or the transcript claims three sources fed a seed that
-// two did.
-//
-// Extract over the framed concatenation, not XOR of the contributions. XOR
-// lets whoever contributes last choose the output, and lets a source that
-// echoes another source cancel it to zero; see the tests, which demonstrate
-// both against this construction and find neither.
+// Mix extracts the master seed from the framed sources. XOR would let the last
+// contributor choose the output and an echoing source cancel another.
 func Mix(sources []Source) ([]byte, error) {
 	if len(sources) < MinSources {
 		return nil, fmt.Errorf("entropy: %d sources, need at least %d", len(sources), MinSources)
@@ -98,11 +79,8 @@ func Mix(sources []Source) ([]byte, error) {
 	return hkdf.Key(sha256.New, ikm, []byte(mixSalt), mixInfo, SeedLen)
 }
 
-// check refuses the two ways a source fails without saying so: a short read
-// that would let the ceremony continue on fewer sources than it declared, and a
-// dead peripheral returning a constant. Neither is an entropy test -- a weak
-// source passes both. They catch a broken wire, and the constant test costs
-// about 2^-255 bits.
+// check catches a broken wire: an empty read, or a dead peripheral returning a
+// constant. A weak source passes both.
 func check(s Source) error {
 	if len(s.Bytes) == 0 {
 		return fmt.Errorf("entropy: source %q contributed nothing", s.Label)
@@ -122,25 +100,15 @@ func constant(b []byte, v byte) bool {
 	return true
 }
 
-// Witness is what the transcript publishes for a source: evidence it took part,
-// without the contribution. Safe only above WitnessFloorBits of min-entropy.
+// Witness is the transcript's evidence that a source took part, without its
+// bytes. Safe only above WitnessFloorBits of min-entropy.
 func Witness(s Source) []byte {
 	sum := sha256.Sum256(appendFrame([]byte(witnessTag), s))
 	return sum[:]
 }
 
-// Dice validates a d6 sequence and returns it alongside the face tally the
-// operator compares against the marks they made on paper while rolling. That
-// comparison is the entry check: six small numbers, computed independently on
-// both sides, catching an omitted line, a duplicated line or a substitution.
-// It does not catch a transposition, and does not need to -- a reordered
-// sequence is a different but equally good seed, and the seed is kept by
-// sharding it, never by re-deriving it from the rolls.
-//
-// The rolls are mixed as the ASCII digits that were typed. There is no base-6
-// to binary conversion: the extractor consumes bytes and is indifferent to how
-// densely they are encoded, and hand-rolled bignum base conversion is a bug
-// generator that buys nothing here.
+// Dice validates a d6 sequence and returns the face tally the operator checks
+// against the paper marks. The rolls are mixed as the typed ASCII digits.
 func Dice(rolls string) (Source, [6]int, error) {
 	var tally [6]int
 	if len(rolls) != DiceRolls {
@@ -153,9 +121,8 @@ func Dice(rolls string) (Source, [6]int, error) {
 		}
 		tally[c-'1']++
 	}
-	// A face that never came up in 100 fair rolls has probability about 7e-8;
-	// a worksheet line entered short happens far more often than that.
-	// Conditioning the seed on this test costs roughly 1e-7 bits.
+	// A face missing from 100 fair rolls has probability about 7e-8, far below
+	// that of a worksheet line entered short.
 	for face, n := range tally {
 		if n == 0 {
 			return Source{}, tally, fmt.Errorf("entropy: face %d never appeared in %d rolls, re-check the entry", face+1, DiceRolls)

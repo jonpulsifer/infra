@@ -1,6 +1,5 @@
-// Development-only mock weather. Every reference is guarded behind
-// `import.meta.env.DEV` in use-weather.ts, so this module is tree-shaken out of
-// production bundles — it never ships to a real display.
+// Mock weather for dev builds. use-weather.ts guards every use behind
+// `import.meta.env.DEV`, so production bundles drop it.
 import { WEATHERFLOW_CONFIG } from './config';
 import type {
   HistoryField,
@@ -22,9 +21,8 @@ const MOCK_NAMES = [
   'Riverbend',
 ];
 
-// A slowly-varying 0..1 wave, distinct per (seed, phase). Time-based rather than
-// random so values drift smoothly between polls (no flicker) and the highlighted
-// leaders shift over a few minutes — enough to see the UI react while iterating.
+// A slow 0..1 wave per (seed, phase). It follows the clock, so values drift
+// between polls without flicker.
 function wave(seed: number, phase: number, now: number): number {
   return (Math.sin(now / 120_000 + seed * 2.3 + phase) + 1) / 2;
 }
@@ -57,8 +55,7 @@ export function mockObservation(seed: number, now: number): StationObservation {
   };
 }
 
-// Each mock range is deliberately a little wider than what mockObservation can
-// produce, so the current reading always sits inside its own 24h window and the
+// Each range is a little wider than mockObservation can produce, so the
 // range-bar marker never pins to an end.
 function mockExtremes(
   min: number,
@@ -76,11 +73,7 @@ function mockExtremes(
   };
 }
 
-/**
- * A plausible 24h window: one diurnal temperature curve plus a low and a high
- * per metric. Enough to exercise the range bars and the sparkline without a
- * live token.
- */
+/** A diurnal temperature curve plus a low and a high per metric. */
 export function mockHistory(seed: number, now: number): StationHistory {
   const base = 3 + seed * 1.5;
   const peak = 17 + seed * 1.5;

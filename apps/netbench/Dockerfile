@@ -7,7 +7,7 @@ COPY main.go index.html ./
 RUN CGO_ENABLED=0 go build -o netbench .
 
 FROM alpine:latest
-# iperf3 is the workhorse; netbench shells out to it.
+# netbench shells out to iperf3.
 RUN apk add --no-cache iperf3
 COPY --from=builder /app/netbench /usr/local/bin/netbench
 USER 65532:65532

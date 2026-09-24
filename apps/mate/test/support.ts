@@ -109,7 +109,7 @@ export class FakeClock implements Clock {
   }
 }
 
-/** Lets every queued promise continuation run. */
+/** Yields to the event loop `rounds` times so queued continuations run. */
 export async function settle(rounds = 8): Promise<void> {
   for (let i = 0; i < rounds; i += 1) {
     await new Promise((resolve) => setImmediate(resolve));
@@ -119,13 +119,13 @@ export async function settle(rounds = 8): Promise<void> {
 export interface Sent {
   channelId: string;
   id: string;
-  /** What the message says as conversation: the answer, or a notice's words. */
+  /** The answer, or a notice's words. */
   content: string;
-  /** Every subtext line on it — status, tool list, footer — mark included. */
+  /** Every `-# ` line: status, tool list, footer and mark. */
   subtext: string[];
   hasStop: boolean;
   edits: number;
-  /** The body as last sent, for what only its wire shape shows. */
+  /** The body as last sent, for assertions on its wire shape. */
   body: OutMessage;
 }
 
@@ -141,7 +141,6 @@ function flat(
   );
 }
 
-/** A body as the fake records it: what it says, what is small, whether it can Stop. */
 function read(
   body: OutMessage,
 ): Pick<Sent, 'content' | 'subtext' | 'hasStop' | 'body'> {
@@ -223,11 +222,11 @@ export class RecordingInstruments implements Instruments {
 
 export class FakeDiscord implements Discord {
   readonly messages: Sent[] = [];
-  /** Every message in a channel, mate's own included, oldest first. */
+  /** Every message in every channel, mate's own included, oldest first. */
   readonly posted: Posted[] = [];
   historyCalls = 0;
   failHistory: Error | null = null;
-  /** Holds a history read open, for what lands while the transcript is being read. */
+  /** While set, history reads wait on it. */
   gateHistory: Promise<void> | null = null;
   readonly threads: {
     channelId: string;
@@ -248,7 +247,7 @@ export class FakeDiscord implements Discord {
 
   constructor(private readonly me = 'bot') {}
 
-  /** A human message landing in a thread, which is what Discord's log holds. */
+  /** A human's message landing in a channel. */
   post(channelId: string, content: string, authorId: string, name = 'jawn') {
     this.posted.push({
       channelId,
@@ -371,7 +370,7 @@ export class FakeDiscord implements Discord {
     return this.inThread(threadId).map((m) => m.content);
   }
 
-  /** The canvas a turn in this thread paints on, as the real surface builds it. */
+  /** Built the way the real surface builds it. */
   canvas(threadId: string, clock: Clock = new FakeClock()): Canvas {
     return new DiscordCanvas(this, threadId, `discord:${threadId}`, clock);
   }
@@ -386,7 +385,6 @@ export class FakeDiscord implements Discord {
   }
 }
 
-/** A Discord thread as the state machine names it. */
 export function discordRef(id: string, channelId: string): ThreadRef {
   return { surface: 'discord', channelId, id };
 }

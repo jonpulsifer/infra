@@ -1,4 +1,3 @@
-// Minimal base URL helper for client-only use.
 export const BASE_URL =
   typeof window !== 'undefined'
     ? window.location.origin

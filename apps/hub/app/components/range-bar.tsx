@@ -11,10 +11,8 @@ interface RangeBarProps {
 }
 
 /**
- * Where the current temperature sits inside the last 24 hours: a cold-to-warm
- * track running from the window's low to its high, with the reading marked on
- * it. The gradient is a temperature scale, not a station colour - it means the
- * same thing in every panel.
+ * The current temperature within its 24 h range, on a cold-to-warm gradient that
+ * means the same in every panel.
  */
 export function RangeBar({
   extremes,
@@ -23,8 +21,8 @@ export function RangeBar({
   ringColor = '#10151d',
 }: RangeBarProps) {
   const span = extremes.max - extremes.min || 1;
-  // A reading fractionally outside its own window (the latest observation is
-  // newer than the last history refresh) pins to the end rather than escaping.
+  // The latest reading can be newer than the last history refresh, so one outside
+  // the window pins to the end.
   const position =
     value == null
       ? null

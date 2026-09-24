@@ -8,11 +8,8 @@ import { sanitizeHeaders } from './sanitize-headers';
 import { slugSchema } from './slug';
 import type { Webhook } from './types';
 
-/**
- * The server seam. Each action is a callable POST endpoint, so each one
- * validates its own input and then hands off to the project store or the
- * SSRF-safe sender. No business rules live here.
- */
+// Each export is a POST endpoint anyone can call, so its arguments are
+// untrusted input.
 
 function revalidateProjectLists() {
   revalidatePath('/');
@@ -80,13 +77,7 @@ export async function clearHistoryAction(slug: string) {
   return { success: true };
 }
 
-/**
- * Send a request to a user-supplied URL and record it against the project.
- *
- * The only path that records an outgoing webhook. It goes through
- * `sendOutgoingWebhook`, which enforces the domain allowlist and resolved-IP
- * checks on the initial request and on every redirect hop.
- */
+// The only path that records an outgoing webhook.
 export async function sendOutgoingWebhookAction(
   slug: string,
   request: {
@@ -132,10 +123,8 @@ export async function sendOutgoingWebhookAction(
   };
 }
 
-/**
- * Fire a demo request at the project's own endpoint. Callable, so the URL is
- * untrusted and goes through the same SSRF-safe sender.
- */
+// Meant for the project's own endpoint, but callers choose the URL, so it goes
+// through the same SSRF-safe sender.
 export async function sendTestWebhookAction(
   webhookUrl: string,
   method = 'POST',

@@ -40,15 +40,13 @@ import (
 const (
 	schema  = "fml-ceremony/transcript/v1"
 	genesis = "0000000000000000000000000000000000000000000000000000000000000000"
-	// witnessFloorBits mirrors the entropy package's rule: a digest of a
-	// contribution below this is a brute-force target, not a witness.
-	// Enforced here rather than assumed.
+	// Matches the entropy package: publishing a digest of a weaker source hands
+	// out a brute-force target.
 	witnessFloorBits = 128
 )
 
-// reservedBranches mint nothing, so nothing may be derived under them. A
-// transcript showing a key under one describes material with no share set,
-// which is the exact failure the two-tier quorum exists to prevent.
+// Reserved branches mint nothing and have no share set, so nothing may be
+// derived under them.
 var reservedBranches = []string{"fml/kms", "fml/ssh"}
 
 func main() {
@@ -82,9 +80,8 @@ type entry struct {
 	Body json.RawMessage `json:"body"`
 }
 
-// The body types are declared here rather than imported from the writer on
-// purpose. An independent reader is the point: sharing one struct would mean a
-// field the writer stopped emitting kept passing.
+// Declared here, not imported from the writer: a shared struct would let a
+// field the writer stopped emitting keep passing.
 type openBody struct {
 	Notes                string `json:"notes"`
 	SpecSHA256           string `json:"spec_sha256"`
@@ -152,9 +149,7 @@ type closeBody struct {
 	Attestations []string `json:"attestations"`
 }
 
-// ceremony is the whole transcript, decoded once. Every check below reads this
-// rather than the JSON, so each entry is parsed exactly one time and no check
-// can disagree with another about what the document says.
+// Every check reads this one decoding, so no two checks disagree.
 type ceremony struct {
 	open     openBody
 	closing  closeBody
@@ -167,10 +162,8 @@ type ceremony struct {
 	steps    []string
 }
 
-// strict decodes with unknown fields refused. That refusal is the schema's
-// "public by design" claim made mechanical: a transcript cannot smuggle a field
-// past this tool, so anything a reader finds in one is a field declared here
-// and reviewed as publishable.
+// strict refuses unknown fields, so a transcript holds only fields declared
+// here, each reviewed as publishable.
 func strict(b []byte, v any) error {
 	dec := json.NewDecoder(bytes.NewReader(b))
 	dec.DisallowUnknownFields()
@@ -197,12 +190,8 @@ func verify(w io.Writer, name string, raw []byte) error {
 	fmt.Fprintf(w, "sha256      %x  (canonical bytes; what a signature covers)\n\nCHECKED\n", sum)
 
 	r := &report{w: w}
-	// The canonical form is the load-bearing check. Duplicate keys and trailing
-	// bytes never get this far -- jcs.Canonical refuses them above -- and a
-	// document that equals its own canonical form additionally cannot carry
-	// alternate escapes, reordered members or stray whitespace. So a reader who
-	// re-serialises it recovers the bytes the signature was made over, and
-	// cannot be shown one value while a parser sees another.
+	// A document equal to its canonical form has no alternate escapes, reordered
+	// members or stray whitespace, so every parser reads the signed bytes alike.
 	r.check("canonical form, RFC 8785", canonicalErr(raw, canonical))
 	r.check("schema", expect(doc.Schema, schema))
 
@@ -252,9 +241,7 @@ func verify(w io.Writer, name string, raw []byte) error {
 	return nil
 }
 
-// report accumulates pass/fail lines. A failed check never stops the run: an
-// operator holding a broken transcript wants every finding at once, not the
-// first one.
+// A failed check never stops the run, so one pass reports every finding.
 type report struct {
 	w      io.Writer
 	failed int
@@ -286,10 +273,8 @@ func canonicalErr(raw, canonical []byte) error {
 	return errors.New("the published file must be the canonical bytes exactly")
 }
 
-// parse replays the hash chain and decodes every body. Each entry's bytes
-// inside the canonical document hash to the next entry's prev, so a reordered,
-// inserted, removed or edited entry breaks the link -- and a truncated ceremony
-// ends up short rather than looking whole.
+// parse replays the hash chain: each entry's bytes hash to the next entry's
+// prev, so a reordered, inserted, removed or edited entry breaks a link.
 func parse(raws []json.RawMessage) (*ceremony, error) {
 	if len(raws) == 0 {
 		return nil, errors.New("no entries")
@@ -316,8 +301,7 @@ func parse(raws []json.RawMessage) (*ceremony, error) {
 	return c, nil
 }
 
-// add refuses an unknown step, so an entry this tool cannot account for is a
-// failure rather than something it skips past.
+// add refuses an unknown step, so no entry goes unchecked.
 func (c *ceremony) add(e entry) error {
 	c.steps = append(c.steps, e.Step)
 	switch e.Step {
@@ -404,9 +388,6 @@ func (c *ceremony) checkEntropy() error {
 		if s.Bytes <= 0 {
 			return fmt.Errorf("source %q contributed %d bytes", s.Label, s.Bytes)
 		}
-		// A digest of a contribution below the floor is a brute-force target
-		// rather than a witness: publishing it would hand an attacker the
-		// search the source failed to make expensive.
 		if s.WitnessSHA256 != "" && s.MinEntropyBits < witnessFloorBits {
 			return fmt.Errorf("source %q publishes a digest at %d bits, below the %d-bit floor",
 				s.Label, s.MinEntropyBits, witnessFloorBits)
@@ -424,8 +405,7 @@ func (c *ceremony) checkEntropy() error {
 			}
 		}
 	}
-	// One source cannot degrade: the mixing construction's whole claim is that
-	// a compromised contributor is survivable, which needs someone to survive.
+	// The mix survives a compromised source only if another source exists.
 	if len(c.sources) < 2 {
 		return fmt.Errorf("%d entropy sources, want at least 2", len(c.sources))
 	}
@@ -447,12 +427,12 @@ func (c *ceremony) checkShards() error {
 		if err := expect(s.Encoding, "slip39"); err != nil {
 			return fmt.Errorf("%s: encoding %w", s.Secret, err)
 		}
-		// A threshold of 1 is not a quorum, and a threshold equal to the share
-		// count means losing any single share loses the secret.
+		// A threshold of 1 is no quorum, and a threshold equal to the share count
+		// loses the secret with any one share.
 		if s.Threshold < 2 || s.Threshold >= s.Shares || s.Shares > 16 {
 			return fmt.Errorf("%s: %d-of-%d is not a survivable quorum", s.Secret, s.Threshold, s.Shares)
 		}
-		// SLIP-39 rationale 10: newly created share sets must be extendable.
+		// SLIP-39 requires newly created share sets to be extendable.
 		if !s.Extendable {
 			return fmt.Errorf("%s: share set is not extendable", s.Secret)
 		}
@@ -471,10 +451,8 @@ func (c *ceremony) checkShards() error {
 }
 
 func (c *ceremony) checkPaths() error {
-	// Every branch that actually has a share set. A leaf under anything else is
-	// material that dies with the master, which is the precise failure the
-	// two-tier quorum exists to prevent -- and the reserved-name list below only
-	// covers the two branches someone thought of in advance.
+	// A leaf under a branch with no share set dies with the master. This also
+	// covers branches the reserved-name list does not name.
 	sharded := make(map[string]bool, len(c.shards))
 	for _, s := range c.shards {
 		sharded[s.Secret] = true
@@ -510,16 +488,13 @@ func (c *ceremony) checkLeaves() error {
 				return fmt.Errorf("%s: an ed25519 leaf carries a 32-byte hex public key and nothing else", path)
 			}
 		case "x25519-age":
-			// Not bech32-decoded: that is forty lines of checksum arithmetic in
-			// the artifact whose value is being small, to catch a typo in a
-			// string no human ever types. Prefix and length catch a truncation.
-			// ponytail: decode properly if a recipient is ever hand-entered.
+			// Prefix and length catch a truncation; no human types a recipient.
+			// ponytail: decode bech32 if a recipient is ever hand-entered.
 			if !strings.HasPrefix(l.Recipient, "age1") || len(l.Recipient) != 62 || l.Public != "" || l.Words != 0 {
 				return fmt.Errorf("%s: an age leaf carries an age1 recipient and nothing else", path)
 			}
 		case "bip39":
-			// A mnemonic has no public half, and nothing derived from it is
-			// published: a digest would only let the holder of a candidate
+			// No digest of the mnemonic: it would let whoever holds a candidate
 			// wallet confirm it belongs to this estate.
 			if l.Words != 24 || l.Public != "" || l.Recipient != "" {
 				return fmt.Errorf("%s: a bip39 leaf records 24 words and no key material", path)
@@ -531,10 +506,8 @@ func (c *ceremony) checkLeaves() error {
 	return nil
 }
 
-// checkCerts is the one place a stranger gets cryptographic evidence rather
-// than an assertion: the certificates travel inside the transcript, so their
-// signatures verify here, and each one's public key must be a key the
-// transcript already declared as derived.
+// checkCerts verifies signatures carried in the transcript, and each
+// certificate's key must be a declared leaf.
 func (c *ceremony) checkCerts() error {
 	if len(c.certs) == 0 {
 		return nil
@@ -559,8 +532,7 @@ func (c *ceremony) checkCerts() error {
 		if !cert.IsCA {
 			return fmt.Errorf("%s: not a CA certificate", b.Role)
 		}
-		// notBefore comes from the pinned instant, not the clock, which is what
-		// makes minting reproducible. A drifting value means it did not.
+		// Minting takes notBefore from the pinned instant so it is reproducible.
 		if !cert.NotBefore.Equal(notBefore) {
 			return fmt.Errorf("%s: notBefore %s, but the ceremony pinned %s",
 				b.Role, cert.NotBefore.UTC().Format(time.RFC3339), c.open.PinnedTime)
@@ -596,9 +568,8 @@ func (c *ceremony) checkCerts() error {
 	return nil
 }
 
-// Path syntax, SPEC.md section 3.1. Reimplemented here rather than imported: a
-// verifier sharing its path parser with the thing it verifies cannot catch a
-// bug in that parser.
+// The path syntax in apps/fml-ceremony/SPEC.md, reimplemented so a bug in the
+// ceremony's parser cannot hide from its verifier.
 
 func splitPath(path string) ([]string, error) {
 	if len(path) == 0 || len(path) > 128 {

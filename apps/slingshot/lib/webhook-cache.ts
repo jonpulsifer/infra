@@ -1,25 +1,20 @@
-/**
- * Optimized local-first cache for webhook data
- * Uses stale-while-revalidate pattern for instant UI with background refresh
- */
+// Each project's webhook list in localStorage, shown before the first fetch
+// returns.
 
 import type { Webhook } from './types';
 
 const CACHE_PREFIX = 'slingshot_webhooks_';
-const CACHE_MAX_AGE = 30 * 60 * 1000; // 30 minutes (increased from 5)
-const CACHE_STALE_AGE = 5 * 60 * 1000; // 5 minutes - data is stale but usable
+const CACHE_MAX_AGE = 30 * 60 * 1000;
+const CACHE_STALE_AGE = 5 * 60 * 1000; // older entries show while refetching
 
 interface CachedWebhooks {
   webhooks: Webhook[];
   etag?: string;
   maxSize?: number;
-  timestamp: number; // Single timestamp, no redundant storage
+  timestamp: number;
 }
 
-/**
- * Get cached webhooks entry (single key lookup)
- * Returns null if cache doesn't exist or is invalid
- */
+// null on the server, or when the entry is missing, expired or unreadable.
 export function getCachedWebhooksEntry(
   projectSlug: string,
 ): (CachedWebhooks & { stale: boolean }) | null {
@@ -39,7 +34,6 @@ export function getCachedWebhooksEntry(
     const age = Date.now() - data.timestamp;
     const stale = age > CACHE_STALE_AGE;
 
-    // If cache is too old, return null to force refresh
     if (age > CACHE_MAX_AGE) {
       localStorage.removeItem(cacheKey);
       return null;
@@ -48,20 +42,14 @@ export function getCachedWebhooksEntry(
     return { ...data, stale };
   } catch (error) {
     console.error('Failed to read webhook cache:', error);
-    // Clean up corrupted cache
     try {
       const cacheKey = `${CACHE_PREFIX}${projectSlug}`;
       localStorage.removeItem(cacheKey);
-    } catch {
-      // Ignore cleanup errors
-    }
+    } catch {}
     return null;
   }
 }
 
-/**
- * Set cached webhooks (single key write)
- */
 export function setCachedWebhooks(
   projectSlug: string,
   webhooks: Webhook[],
@@ -83,11 +71,9 @@ export function setCachedWebhooks(
 
     localStorage.setItem(cacheKey, JSON.stringify(data));
   } catch (error) {
-    // Handle quota exceeded errors gracefully
     if (error instanceof DOMException && error.name === 'QuotaExceededError') {
       console.warn('localStorage quota exceeded, clearing old cache entries');
       clearOldCacheEntries();
-      // Try once more
       try {
         const cacheKey = `${CACHE_PREFIX}${projectSlug}`;
         const data: CachedWebhooks = {
@@ -106,9 +92,6 @@ export function setCachedWebhooks(
   }
 }
 
-/**
- * Clear cached webhooks for a project
- */
 export function clearCachedWebhooks(projectSlug: string): void {
   if (typeof window === 'undefined') {
     return;
@@ -122,9 +105,6 @@ export function clearCachedWebhooks(projectSlug: string): void {
   }
 }
 
-/**
- * Clear old cache entries to free up space
- */
 function clearOldCacheEntries(): void {
   if (typeof window === 'undefined') {
     return;
@@ -134,7 +114,6 @@ function clearOldCacheEntries(): void {
     const now = Date.now();
     const keysToRemove: string[] = [];
 
-    // Find all cache keys
     for (let i = 0; i < localStorage.length; i++) {
       const key = localStorage.key(i);
       if (key?.startsWith(CACHE_PREFIX)) {
@@ -147,13 +126,11 @@ function clearOldCacheEntries(): void {
             }
           }
         } catch {
-          // Corrupted entry, remove it
           keysToRemove.push(key);
         }
       }
     }
 
-    // Remove expired entries
     keysToRemove.forEach((key) => {
       localStorage.removeItem(key);
     });
@@ -162,9 +139,6 @@ function clearOldCacheEntries(): void {
   }
 }
 
-/**
- * Get all cache entries with details (for admin/debugging purposes)
- */
 export function getAllCacheEntries(): {
   slug: string;
   timestamp: number;
@@ -185,7 +159,6 @@ export function getAllCacheEntries(): {
       stale: boolean;
     }[] = [];
 
-    // Find all cache keys
     for (let i = 0; i < localStorage.length; i++) {
       const key = localStorage.key(i);
       if (key?.startsWith(CACHE_PREFIX)) {
@@ -203,9 +176,7 @@ export function getAllCacheEntries(): {
               stale: age > CACHE_STALE_AGE,
             });
           }
-        } catch {
-          // Skip corrupted entries
-        }
+        } catch {}
       }
     }
 
@@ -216,9 +187,6 @@ export function getAllCacheEntries(): {
   }
 }
 
-/**
- * Clear all cached webhooks for all projects
- */
 export function clearAllCachedWebhooks(): void {
   if (typeof window === 'undefined') {
     return;
@@ -227,7 +195,6 @@ export function clearAllCachedWebhooks(): void {
   try {
     const keysToRemove: string[] = [];
 
-    // Find all cache-related keys
     for (let i = 0; i < localStorage.length; i++) {
       const key = localStorage.key(i);
       if (key?.startsWith(CACHE_PREFIX)) {
@@ -235,7 +202,6 @@ export function clearAllCachedWebhooks(): void {
       }
     }
 
-    // Remove all cache entries
     keysToRemove.forEach((key) => {
       localStorage.removeItem(key);
     });

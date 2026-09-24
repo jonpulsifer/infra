@@ -1,18 +1,8 @@
 package derive
 
-// Differential check of this package against apps/fml-derive-rs, an independent
-// Rust implementation of SPEC.md written from the spec text alone by an agent
-// forbidden from reading this code. A disagreement is therefore signal: one of
-// the two is wrong, or SPEC.md is ambiguous, and the ambiguous case is the one
-// worth finding.
-//
-// The Rust side is a CLI printing one derived value per invocation, so this
-// file mirrors that command-line contract onto this package's functions and
-// compares stdout byte for byte. The mirror routes into Branch, Leaf and the
-// key mappings; it reimplements none of them.
-//
-// Skipped unless FML_DERIVE_RS names the built binary. `mise run pki:crosscheck`
-// builds it and sets the variable.
+// Differential check against apps/fml-derive-rs, an independent Rust
+// implementation of SPEC.md. Skipped unless FML_DERIVE_RS names its binary,
+// which `mise run pki:crosscheck` builds and sets.
 
 import (
 	"crypto/ed25519"
@@ -27,10 +17,8 @@ import (
 	"testing"
 )
 
-// crossCase is one invocation of the Rust CLI and its mirror here. A nil
-// length means "omit --len", which the CLI defaults to 32. It is a pointer and
-// not a zero sentinel because --len 0 is itself a case worth putting: it is
-// where the two implementations first disagreed.
+// A nil length omits --len, which the CLI defaults to 32. It is a pointer
+// because --len 0 is a case of its own.
 type crossCase struct {
 	master string // hex
 	path   string
@@ -55,11 +43,8 @@ func (c crossCase) String() string {
 	return strings.Join(c.args(), " ")
 }
 
-// goAnswer is the Rust CLI's contract expressed over this package: decode the
-// master, classify the path by component count, derive, then map by form. It
-// deliberately adds no validation of its own — every rejection below comes out
-// of SplitPath, Branch, Leaf or a key mapping, so what is compared is the two
-// implementations rather than two argument parsers.
+// goAnswer mirrors the Rust CLI over this package. It adds no validation, so
+// every rejection comes from the package under test.
 func goAnswer(c crossCase) (string, error) {
 	master, err := hex.DecodeString(c.master)
 	if err != nil {
@@ -69,8 +54,8 @@ func goAnswer(c crossCase) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	// The master-length check lives inside derive_branch and prk_master on the
-	// Rust side; every reachable form below passes through one of them.
+	// The Rust side checks this in derive_branch and prk_master, which every
+	// form below reaches.
 	if len(master) != SeedLen {
 		return "", fmt.Errorf("master seed is %d octets, want %d", len(master), SeedLen)
 	}
@@ -156,17 +141,12 @@ func rustAnswer(t *testing.T, bin string, c crossCase) (string, error) {
 	return strings.TrimSuffix(string(out), "\n"), nil
 }
 
-// crossMaster is a reproducible generated master: the case list must be
-// identical on every machine and in CI, so nothing here is random.
+// Deterministic, so the case list is identical on every machine.
 func crossMaster(i int) string {
 	sum := sha256.Sum256([]byte("fml-crosscheck/" + strconv.Itoa(i)))
 	return hex.EncodeToString(sum[:])
 }
 
-// crossCases is the case list: every SPEC.md section 11 master, ten generated
-// ones, every branch, every declared leaf, every key type, both PRK levels,
-// undeclared-but-well-formed paths a verifier may derive, and the lengths of
-// section 4.3.
 func crossCases() []crossCase {
 	masters := []string{
 		strings.Repeat("00", 32), // vector A
@@ -201,10 +181,8 @@ func crossCases() []crossCase {
 				cases = append(cases, crossCase{master: m, path: d.Path, form: "age-identity"})
 			}
 		}
-		// Paths outside the minted tree. Neither implementation is the
-		// ceremony, and SPEC.md section 9 lets a verifier derive anything
-		// well-formed, so these must agree too — including under the reserved
-		// names, where the refusal lives above the derivation library.
+		// A verifier may derive any well-formed path, reserved names included,
+		// so paths outside the minted tree must agree too.
 		cases = append(cases,
 			crossCase{master: m, path: "fml/infra/v2"},
 			crossCase{master: m, path: "fml/kms/v1"},
@@ -217,30 +195,26 @@ func crossCases() []crossCase {
 			crossCase{master: m, path: "fml/kms/v1/root/v1"},
 			crossCase{master: m, path: "fml/a-b/v17/c-d/e9/v2"},
 			crossCase{master: m, path: "fml/infra/v11/pki/root/v1"},
-			// Section 4.3: L is not bound into the expansion input.
+			// L is not bound into the expansion input.
 			crossCase{master: m, path: "fml/infra/v1/pki/root/v1", length: ln(16)},
 			crossCase{master: m, path: "fml/infra/v1/pki/root/v1", length: ln(48)},
 			crossCase{master: m, path: "fml/infra/v1/pki/root/v1", length: ln(64)},
-			// 8160 = 255 x HashLen, RFC 5869's ceiling; 16 and 20 octets are the
-			// other BIP-39 entropy sizes, so the mnemonic mapping is exercised at
-			// three word counts rather than only at 24.
+			// 8160 = 255 x HashLen, RFC 5869's ceiling. 16 and 20 octets are
+			// the other BIP-39 entropy sizes.
 			crossCase{master: m, path: "fml/infra/v1/pki/root/v1", length: ln(8160)},
 			crossCase{master: m, path: "fml/wallet/v1/cold/v1", length: ln(16), form: "bip39"},
 			crossCase{master: m, path: "fml/wallet/v1/cold/v1", length: ln(20), form: "bip39"},
-			// Section 3.1's bounds from the accepting side: exactly 128 octets
-			// and exactly 16 components are legal.
+			// The path bounds from the accepting side: 128 octets, 16 components.
 			crossCase{master: m, path: "fml/" + strings.Repeat("a", 121) + "/v1"},
 			crossCase{master: m, path: "fml/a/v1/b/c/d/e/f/g/h/i/j/k/l/m/v2"},
-			// Hex is case-insensitive at the input boundary but the master it
-			// decodes to is the same, so the derived value must be identical.
+			// Hex input is case-insensitive.
 			crossCase{master: strings.ToUpper(m), path: "fml/infra/v1"},
 		)
 	}
 	return cases
 }
 
-// crossRejects are inputs SPEC.md section 9 requires an implementation to
-// abort on. Error text is not compared — only that both refuse.
+// Error text is not compared, only that both refuse.
 func crossRejects() []crossCase {
 	const good = "2d85dabefa504eefea7740977b1f9110daf404cc24422896a209b41eca970218"
 	var cases []crossCase
@@ -260,7 +234,7 @@ func crossRejects() []crossCase {
 	} {
 		cases = append(cases, crossCase{master: good, path: p})
 	}
-	// Malformed masters, and lengths section 2 forbids.
+	// Malformed masters and wrong lengths.
 	for _, m := range []string{
 		"", "abc", "0x" + good[2:], "zz" + good[2:],
 		strings.Repeat("00", 31), strings.Repeat("00", 33), strings.Repeat("00", 64),
@@ -268,11 +242,8 @@ func crossRejects() []crossCase {
 		cases = append(cases, crossCase{master: m, path: "fml/infra/v1"})
 		cases = append(cases, crossCase{master: m, path: "fml/infra/v1/pki/root/v1"})
 	}
-	// Section 3.4: the branch prefix must land on a component boundary. The CLI
-	// takes the branch from the leaf's own first three components, so the only
-	// way to reach the mismatch through it is a leaf whose declared branch is
-	// not its prefix — covered by the Go-side unit tests. What the CLI can show
-	// is that a mapping refuses an OKM of the wrong length.
+	// The CLI cannot express a branch-prefix mismatch; unit tests cover it.
+	// These check that each mapping refuses an OKM of the wrong length.
 	cases = append(cases,
 		crossCase{master: good, path: "fml/infra/v1/pki/root/v1", length: ln(31), form: "ed25519-pub"},
 		crossCase{master: good, path: "fml/infra/v1/age/operator/v1", length: ln(33), form: "age-recipient"},
@@ -280,9 +251,8 @@ func crossRejects() []crossCase {
 		crossCase{master: good, path: "fml/infra/v1", length: ln(32)},
 		crossCase{master: good, path: "fml/infra/v1", form: "ed25519-pub"},
 		crossCase{master: good, path: "fml/infra/v1/pki/root/v1", form: "nonsense"},
-		// L outside 1..255 x HashLen. RFC 5869 caps expansion at 255 blocks, and
-		// an L of zero is not key material -- SPEC.md section 5.2 states the
-		// range because this is exactly where two implementations drifted.
+		// L outside 1..255 x HashLen: RFC 5869 caps expansion at 255 blocks, and
+		// zero octets are not key material.
 		crossCase{master: good, path: "fml/infra/v1/pki/root/v1", length: ln(0)},
 		crossCase{master: good, path: "fml/infra/v1/pki/root/v1", length: ln(-1)},
 		crossCase{master: good, path: "fml/infra/v1/pki/root/v1", length: ln(8161)},
@@ -333,11 +303,8 @@ func TestDifferentialAgainstRust(t *testing.T) {
 	t.Logf("%d cases agree byte for byte", agreed)
 }
 
-// TestDifferentialRoutesInCI is the guard on the guard. Routing in this repo is
-// an allow-list, and the differential is the one check that needs *two* trees to
-// route to it: go.yml runs `go test ./...` here, where the test above skips
-// itself for want of a Rust binary, so a Go-side change reaching only go.yml
-// would report green having compared nothing.
+// go.yml runs this package without the Rust binary, so the differential skips
+// there. rust.yml must route both trees or a change compares nothing and passes.
 func TestDifferentialRoutesInCI(t *testing.T) {
 	raw, err := os.ReadFile("../../../.github/workflows/rust.yml")
 	if err != nil {

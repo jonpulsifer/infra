@@ -5,13 +5,8 @@ import (
 	"strings"
 )
 
-// Bech32 as BIP-173, not Bech32m: age encodes identities and recipients with
-// checksum constant 1. It is not in the Go standard library, and the ceremony
-// takes no dependencies, so it is here — forty lines, pinned in the tests
-// against the age specification's own published example pair.
-//
-// The age spec removes BIP-173's 90-character limit. Nothing here reaches it
-// regardless: the longest string this file produces is 62 characters.
+// BIP-173 Bech32 with checksum constant 1, not Bech32m: age encodes identities
+// and recipients with it.
 
 const charset = "qpzry9x8gf2tvdw0s3jn54khce6mua7l"
 
@@ -30,8 +25,6 @@ func bech32Polymod(values []byte) uint32 {
 	return chk
 }
 
-// hrpExpand is BIP-173's checksum framing of the human-readable part: high bits
-// of every character, a separator zero, then low bits.
 func hrpExpand(hrp string) []byte {
 	out := make([]byte, 0, len(hrp)*2+1)
 	for i := 0; i < len(hrp); i++ {
@@ -44,19 +37,14 @@ func hrpExpand(hrp string) []byte {
 	return out
 }
 
-// convertBits regroups a byte string between bit widths. pad is true when
-// encoding 8 to 5 (a trailing partial group is zero-filled) and false when
-// decoding 5 to 8, where leftover bits must be zero or the input carried
-// information the 8-bit form cannot represent.
+// With pad, a trailing partial group is zero-filled (encoding 8 to 5). Without
+// it, leftover bits must be zero (decoding 5 to 8).
 func convertBits(data []byte, from, to uint, pad bool) ([]byte, error) {
 	var acc uint32
 	var bits uint
 	maxv := uint32(1)<<to - 1
 	out := make([]byte, 0, len(data)*int(from)/int(to)+1)
 	for _, b := range data {
-		// Live in the decode direction, where a 5-bit group above 31 would
-		// carry information this regrouping silently drops. In the encode
-		// direction every byte is in range and the test is free.
 		if b>>from != 0 {
 			return nil, fmt.Errorf("bech32: value %d does not fit in %d bits", b, from)
 		}
@@ -82,16 +70,9 @@ func convertBits(data []byte, from, to uint, pad bool) ([]byte, error) {
 	return out, nil
 }
 
-// bech32Encode returns the lowercase encoding of data under hrp. Callers that
-// want the uppercase form uppercase the whole result: the checksum is always
-// computed over the lowercase string, so uppercasing afterwards is the only
-// order that produces a string other implementations accept.
+// bech32Encode returns the lowercase encoding. The checksum covers the lowercase
+// HRP, so a caller that wants age's uppercase form uppercases the result.
 func bech32Encode(hrp string, data []byte) (string, error) {
-	// BIP-173 computes the checksum over the lowercase human-readable part.
-	// age's identity HRP is written "AGE-SECRET-KEY-", so encoding must fold it
-	// here and the caller uppercases the finished string; checksumming the
-	// uppercase HRP instead yields six wrong trailing characters and nothing
-	// else, which is a hard failure to spot by eye.
 	hrp = strings.ToLower(hrp)
 	conv, err := convertBits(data, 8, 5, true)
 	if err != nil {
@@ -111,16 +92,13 @@ func bech32Encode(hrp string, data []byte) (string, error) {
 	return sb.String(), nil
 }
 
-// bech32Decode is the rejection half of SPEC.md section 9: mixed case, a bad
-// checksum, a character outside the charset, and non-zero padding bits in the
-// 5-to-8 conversion all abort.
 func bech32Decode(s string) (hrp string, data []byte, err error) {
 	if strings.ToLower(s) != s && strings.ToUpper(s) != s {
 		return "", nil, fmt.Errorf("bech32: mixed case")
 	}
 	lower := strings.ToLower(s)
-	// The age HRP "AGE-SECRET-KEY-" itself ends in "-", and bech32's separator
-	// is "1", so the split must be at the last "1", not the first.
+	// BIP-173: the separator is the last "1", because the human-readable part
+	// may contain one.
 	sep := strings.LastIndexByte(lower, '1')
 	if sep < 1 || sep+7 > len(lower) {
 		return "", nil, fmt.Errorf("bech32: no separator")

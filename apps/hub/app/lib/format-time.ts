@@ -1,9 +1,5 @@
-// One clock for the whole display.
-//
-// `hourCycle: 'h23'` rather than `hour12: false`: the display is an instrument,
-// and "09:43:44 PM" is four more glyphs to read than "21:43" for the same fact.
-// The two options are not interchangeable - `hour12: false` selects h24, which
-// writes midnight as 24:00.
+// `hourCycle: 'h23'`, because `hour12: false` can select h24, which writes
+// midnight as 24:00.
 const HOUR_MINUTE = new Intl.DateTimeFormat(undefined, {
   hour: '2-digit',
   minute: '2-digit',

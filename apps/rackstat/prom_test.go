@@ -10,7 +10,8 @@ import (
 	"time"
 )
 
-// promVec builds a query API response with one sample per (metric, value).
+// promVec builds a query API response with one sample per map; the `_value`
+// key holds the sample value and every other key is a label.
 func promVec(samples ...map[string]any) string {
 	results := []map[string]any{}
 	for _, s := range samples {
@@ -32,8 +33,7 @@ func promVec(samples ...map[string]any) string {
 	return string(b)
 }
 
-// fakeProm is the prod-shaped adapter's counterpart: a real HTTP server, so
-// the transport and its parsing are exercised end to end.
+// fakeProm is a real HTTP server, so httpProm's transport and parsing run end to end.
 func fakeProm(t *testing.T) *httptest.Server {
 	t.Helper()
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -126,8 +126,6 @@ func TestHTTPPromStatusError(t *testing.T) {
 	}
 }
 
-// The adapter and the fleet module compose: this is the one test that runs
-// the whole Prometheus half over real HTTP.
 func TestCollectFleetOverHTTP(t *testing.T) {
 	p, _ := newTestProm(t)
 

@@ -1,11 +1,5 @@
-// Turning raw device observations into the rolling 24h window the display
-// shows. Pure: the fetching lives in weather.server.ts.
-//
-// `/observations/device/{id}` returns positional arrays rather than objects,
-// and the field order depends on which device reported. A Tempest (ST) covers
-// every metric on its own; the older two-piece stations split them across an
-// AIR (temperature, humidity, pressure) and a SKY (wind, sun, rain), so a
-// station can need both and the samples below are merged from both devices.
+// Builds the rolling 24 h window from raw device observations. A two-piece
+// station splits its metrics across an AIR and a SKY, so samples merge both.
 import { WEATHERFLOW_CONFIG } from './config';
 import type {
   DeviceObsResponse,
@@ -23,10 +17,8 @@ export type HistorySample = { timestamp: number } & Partial<
 
 type Layout = Partial<Record<HistoryField | 'rainAccum', number>>;
 
-// Index maps from the API's observation record format. `rainAccum` is the
-// accumulation *for that reporting interval*, so summing it across the window
-// gives rain over the last 24h - which is what the display wants, and not the
-// same thing as the local-day total the latest observation reports.
+// `rainAccum` covers one reporting interval, so the window's sum is 24 h rain,
+// which differs from the local-day total the latest observation reports.
 const OBS_LAYOUTS: Record<string, Layout> = {
   obs_st: {
     windSpeed: 2,
@@ -55,9 +47,8 @@ const OBS_LAYOUTS: Record<string, Layout> = {
 };
 
 /**
- * Decode one device-observation response. An unrecognised `type` yields no
- * samples rather than throwing: a device the API grows a new record format for
- * should leave the window thinner, not break the whole poll.
+ * An unknown `type` yields no samples, so a new record format thins the window
+ * and leaves the poll intact.
  */
 export function decodeDeviceObs(res: DeviceObsResponse): HistorySample[] {
   const layout = res.type ? OBS_LAYOUTS[res.type] : undefined;
@@ -109,11 +100,8 @@ function extremesFor(
 }
 
 /**
- * Reduce the temperature series to `count` evenly-spaced buckets, averaging
- * within each. The buckets holding the window's true low and high are then
- * pinned to those values: the sparkline is drawn with the same low/high the
- * panel labels, and a curve that visibly stopped short of its own stated high
- * reads as a bug.
+ * Averages into `count` even buckets, then pins the buckets holding the true low
+ * and high, so the curve reaches the extremes the panel labels.
  */
 function downsample(
   points: Array<[number, number]>,
@@ -153,9 +141,8 @@ function downsample(
 }
 
 /**
- * Build the window from every device's samples. Returns undefined when nothing
- * falls inside it, which keeps the caller's previous (still valid) window in
- * place rather than replacing it with an empty one.
+ * Returns undefined when no sample falls inside the window, so the caller keeps
+ * its previous window.
  */
 export function buildHistory(
   samples: HistorySample[],

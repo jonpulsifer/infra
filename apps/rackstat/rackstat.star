@@ -119,12 +119,6 @@ def get_snapshot(api_url):
     cache.set(cache_key, json.encode(snap), ttl_seconds = CACHE_TTL_SECONDS)
     return snap, None
 
-# ---------------------------------------------------------------------------
-# display state
-#
-# The one place that reads the wire format and decides what "wrong" means.
-# ---------------------------------------------------------------------------
-
 def display_state(snap):
     """Resolve a raw snapshot into everything the pages need to render.
 
@@ -136,8 +130,7 @@ def display_state(snap):
     probes = [probe_state(p) for p in snap.get("probes", [])]
     counts = snap.get("alert_counts", {})
 
-    # Problems are collected once, in the order the alert page reads them:
-    # what is firing, then which machines, then which paths.
+    # In alert-page order: what is firing, then which machines, then which paths.
     problems = []
     for alert in snap.get("alerts", []):
         if alert.get("severity") in ["critical", "warning"]:
@@ -221,10 +214,6 @@ def is_stale(snap):
     ts = time.parse_time(generated)
     return (time.now() - ts).seconds > STALE_AFTER_SECONDS
 
-# ---------------------------------------------------------------------------
-# page chrome
-# ---------------------------------------------------------------------------
-
 def blink(builder, ctx):
     """Animate a page builder(lit) for a page hold, toggling every BLINK_FRAMES."""
     scale = ctx["scale"]
@@ -283,10 +272,6 @@ def splash(message, scale):
             ),
         ],
     )
-
-# ---------------------------------------------------------------------------
-# pages
-# ---------------------------------------------------------------------------
 
 def page_summary(st, ctx):
     fonts = ctx["fonts"]
@@ -458,10 +443,6 @@ def page_cpu(st, ctx):
         y_lim = (0, None),
     )
     return still(framed("CPU 24H  %d%%" % int(now), COLOR_INFO, ctx, plot), ctx)
-
-# ---------------------------------------------------------------------------
-# schema
-# ---------------------------------------------------------------------------
 
 def get_schema():
     return schema.Schema(

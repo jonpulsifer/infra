@@ -21,7 +21,7 @@ export type PayerStats = {
 export type Stats = { count: number; total: string; payers: number };
 export type Pass = { payer: string; expires_at: string };
 
-/** Sum atomic-unit amounts per payer with BigInt; top `n` by total. */
+/** Amounts are atomic units, summed with BigInt. */
 export function leaderboard(entries: Entry[], n = 10): Leader[] {
   const totals = new Map<string, { total: bigint; count: number }>();
   for (const e of entries) {
@@ -103,8 +103,7 @@ export function openLedger(databaseUrl?: string) {
     };
   }
   const sql = new SQL(databaseUrl);
-  // Re-created on failure: a memoized rejection would wedge the ledger for
-  // the process lifetime after one connection blip.
+  // Reset on failure, or one connection error fails every later call.
   let ready: Promise<unknown> | null = null;
   const ensure = () =>
     (ready ??= tables().catch((err) => {

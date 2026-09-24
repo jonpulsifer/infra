@@ -15,8 +15,6 @@ describe('isReservedSlug', () => {
   });
 
   test('reserves healthz, not just health', () => {
-    // The ingest route used to guard "health" while the route is /api/healthz,
-    // so /api/healthz was reachable as a project slug.
     expect(isReservedSlug('healthz')).toBe(true);
     expect(isReservedSlug('health')).toBe(true);
   });

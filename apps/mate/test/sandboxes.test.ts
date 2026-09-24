@@ -1,7 +1,4 @@
-/**
- * The sandbox side against a fake apiserver: what mate stamps, how it waits,
- * how it attaches and prompts, what it patches, and what it deletes.
- */
+/** KubeSandboxes against a fake apiserver. */
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -111,9 +108,8 @@ function envOf(container: Record<string, any>): Record<string, any> {
 }
 
 /**
- * A stand-in for the file mate stamps at the start of a turn, and the path to
- * it. `null` leaves the file absent, which is what a sandbox looks like
- * before its first turn and after its last one.
+ * A stand-in for the token file mate stamps each turn. `null` leaves it
+ * absent, as in a sandbox before its first turn or after its last.
  */
 function tokenFile(contents: string | null): string {
   const dir = mkdtempSync(join(tmpdir(), 'mate-token-'));
@@ -123,11 +119,8 @@ function tokenFile(contents: string | null): string {
 }
 
 /**
- * `git credential <operation>` under the harness container's own environment,
- * with `bin` first on PATH. No user or system config is in reach, which is the
- * sandbox's shape rather than a convenience: the image writes no
- * `/etc/gitconfig` and the pod backs HOME with an empty emptyDir, so the
- * environment below is every helper git can find.
+ * `git credential <operation>` under the harness container's env. System and
+ * global config are empty, as in the sandbox: no `/etc/gitconfig`, empty HOME.
  */
 function credential(
   token: string,
@@ -146,12 +139,9 @@ function credential(
   }[]) {
     if (entry.value !== undefined) env[entry.name] = entry.value;
   }
-  // The one value the pod's own environment cannot supply here: the file lives
-  // at an absolute path inside the sandbox, and this test is not in one.
+  // The pod's value is a path inside the sandbox.
   env.MATE_GITHUB_TOKEN_FILE = token;
-  // `approve` and `reject` are given a credential to act on, the way git hands
-  // back what a fill returned. A fill is given none, or git answers it from
-  // stdin without asking a helper at all.
+  // A fill gets no credential on stdin, or git answers it without asking a helper.
   const answer =
     operation === 'fill' ? '' : 'username=x-access-token\npassword=a-pat\n';
   return Bun.spawnSync(['git', 'credential', operation], {
@@ -166,7 +156,7 @@ async function attach(): Promise<SandboxRef> {
   return ref;
 }
 
-/** The same mate, with a pool of one behind it and its instruments recorded. */
+/** With `spares` warm sandboxes and recorded instruments. */
 function withSpares(spares: number): KubeSandboxes {
   return new KubeSandboxes({
     kube: new Kube(fake.config()),
@@ -179,14 +169,13 @@ function withSpares(spares: number): KubeSandboxes {
   });
 }
 
-/** Unclaimed: the marker, not the name, is what still makes one a spare. */
+/** A claimed spare keeps its `mate-spare-` name, so only the label counts. */
 function spareNames(): string[] {
   return [...fake.sandboxes.entries()]
     .filter(([, object]) => (object.metadata as any).labels['lolwtf.ca/spare'])
     .map(([name]) => name);
 }
 
-/** What a fire-and-forget replacement needs: a wait with a reason to stop. */
 async function until(what: () => boolean, ms = 2000): Promise<void> {
   const deadline = Date.now() + ms;
   while (!what()) {
@@ -247,8 +236,8 @@ describe('mint', () => {
       'https://github.com/jonpulsifer/infra',
       WORKSPACE,
     ]);
-    // The clone runs as the harness uid so every file it writes is the
-    // agent's; the mount root above them is settled by the git env instead.
+    // The clone runs as the harness uid so the agent owns every file;
+    // safe.directory covers the mount root.
     expect(pod.initContainers[0].securityContext.runAsUser).toBe(1337);
     expect(pod.initContainers[0].imagePullPolicy).toBe('IfNotPresent');
 
@@ -277,27 +266,21 @@ describe('mint', () => {
     });
   });
 
-  // Nothing else in the repo names AGENTS.md, so a rename would strand every
-  // sandbox on a path that no longer exists.
+  // A rename would point every sandbox at a missing instruction file.
   test('names an instruction file the checkout really has', async () => {
     const root = new URL('../../../AGENTS.md', import.meta.url);
     expect(await Bun.file(root).exists()).toBe(true);
   });
 
-  // The same trap one directory over, and quieter: opencode reports neither a
-  // skills path that is missing nor one that holds no skill, so a move would
-  // take the agent back to the eight under `.agents/skills/` in silence.
+  // opencode is silent about a skills path that is missing or empty.
   test('names a skills directory that really holds skills', async () => {
     const dir = new URL('../../../dotfiles/skills/', import.meta.url);
     const skills = [...new Bun.Glob('*/SKILL.md').scanSync(dir.pathname)];
     expect(skills.length).toBeGreaterThan(0);
   });
 
-  // The sandbox image's mise config turns off tool management by naming every
-  // tool, because mise has no wildcard for it. That list is a copy, and a tool
-  // added to the repo's mise.toml without being added here is a tool mise
-  // tries to resolve on every `mise run` — offline, that fails the run
-  // outright, and the agent loses the task list AGENTS.md sends it to.
+  // mise has no wildcard for disable_tools, so the image lists every repo tool.
+  // An unlisted tool makes mise resolve it on every `mise run`, which fails offline.
   test('disables every tool the repo declares in the sandbox image', async () => {
     const toml = async <T>(path: string) =>
       Bun.TOML.parse(
@@ -319,11 +302,8 @@ describe('mint', () => {
     await sandboxes.mint(THREAD);
     const pod = podTemplate();
 
-    // fsGroup leaves the emptyDir root uid 0 and git checks the worktree root,
-    // so without safe.directory the clone lands and every command after it
-    // dies of dubious ownership: opencode stops seeing a repository and the
-    // agent's own git calls fail. The ident is the other half — the image's
-    // agent user has none, so `git commit` would refuse to write one.
+    // fsGroup leaves the emptyDir root uid 0, so git needs safe.directory to
+    // trust the repo. The image's agent user has no ident for `git commit`.
     for (const container of [pod.initContainers[0], pod.containers[0]]) {
       const env = envOf(container);
       expect(env.GIT_CONFIG_KEY_0.value).toBe('safe.directory');
@@ -334,12 +314,10 @@ describe('mint', () => {
       expect(env.GIT_CONFIG_VALUE_2.value).toBe(
         '332275392+clanky-bot[bot]@users.noreply.github.com',
       );
-      // Who a commit is from, which is not who the push authenticates as: an
-      // installation token's username is fixed by GitHub and appears only in
-      // the credential helper.
+      // The push username GitHub fixes for installation tokens is not the author.
       expect(env.GIT_CONFIG_VALUE_1.value).not.toBe('x-access-token');
     }
-    // The checkout gets the ident and nothing else.
+    // The checkout gets no credential helper and no secrets.
     const checkout = envOf(pod.initContainers[0]);
     expect(checkout.GIT_CONFIG_COUNT.value).toBe('3');
     expect(checkout.OP_CONNECT_TOKEN).toBeUndefined();
@@ -358,24 +336,18 @@ describe('mint', () => {
       optional: true,
     });
     expect(env.MATE_GITHUB_TOKEN_FILE.value).toBe('/home/agent/.github-token');
-    // Never both authentication paths.
+    // Never both 1Password authentication paths.
     expect(env.OP_SERVICE_ACCOUNT_TOKEN).toBeUndefined();
-    // Whether an unanswered credential blocks otherwise depends on whether the
-    // agent's tool gave the command a terminal.
+    // Otherwise a missing credential blocks when the agent's tool gives git a terminal.
     expect(env.GIT_TERMINAL_PROMPT.value).toBe('0');
   });
 
-  // The helper is a shell snippet git runs, so the only proof it is the right
-  // shape is git running it. Everything but the token's path is what
-  // `sandboxManifest` stamped, handed to git as the kubelet would hand it to
-  // the container.
+  // The helper is a shell snippet, so only running git proves its shape.
   test('git fills a github.com credential from the file mate stamped', async () => {
     await sandboxes.mint(THREAD);
     const token = tokenFile('ghs-a-token');
 
     const filled = credential(token, 'fill', 'github.com');
-    // The username GitHub fixes for an installation token, which is not the
-    // name the same sandbox commits under.
     expect(filled.stdout.toString()).toContain('username=x-access-token');
     expect(filled.stdout.toString()).toContain('password=ghs-a-token');
 
@@ -384,7 +356,7 @@ describe('mint', () => {
     expect(other.exitCode).not.toBe(0);
     expect(other.stdout.toString()).not.toContain('password=');
 
-    // The reset earns its line, proven by a decoy that wins without it.
+    // Without the helper reset, this decoy global helper would answer first.
     const decoy = join(dirname(token), 'decoy.gitconfig');
     writeFileSync(
       decoy,
@@ -394,10 +366,7 @@ describe('mint', () => {
     expect(contested.stdout.toString()).toContain('username=x-access-token');
   });
 
-  // Both are a token that is not there, and the difference between them is
-  // the whole reason the emptiness is checked: a blank password is reported
-  // by GitHub as a rejected credential, which sends whoever reads it looking
-  // for a revoked token rather than a missing one.
+  // GitHub reports a blank password as a rejected credential, which reads as revoked.
   test('a token that is absent or blank fails the fill rather than answering', async () => {
     await sandboxes.mint(THREAD);
 
@@ -408,9 +377,7 @@ describe('mint', () => {
     }
   });
 
-  // `approve` and `reject` are git's names for the store and erase paths.
-  // Pointed at a file that is not there, so a helper which read before
-  // checking the operation would fail instead of returning quietly.
+  // No token file: a helper that read it before checking the operation would fail.
   test('storing and erasing a credential never read the token', async () => {
     await sandboxes.mint(THREAD);
 
@@ -421,13 +388,8 @@ describe('mint', () => {
     }
   });
 
-  // Only git consults a git credential helper, so the sandbox image puts a
-  // wrapper on PATH in front of gh that resolves the same reference. That
-  // wrapper spells the variable's name in a shell script two directories away,
-  // and this is the only thing joining the two: renaming the constant here
-  // leaves it reading something unset, exec'ing gh with no token, and meeting
-  // `gh pr create` with gh's own login instructions one step short of the
-  // pull request.
+  // gh ignores git's credential helper, so images/mate-sandbox/gh wraps it and
+  // reads these variables by name. This test keeps the two in step.
   test('names the environment the image gh wrapper reads', async () => {
     await sandboxes.mint(THREAD);
     const env = envOf(podTemplate().containers[0]);
@@ -442,9 +404,7 @@ describe('mint', () => {
     expect(read.size).toBeGreaterThan(0);
     for (const name of read) expect(env[name]).toBeDefined();
 
-    // That wrapper is the whole of how gh gets a token, which is the point:
-    // what the pod holds is a path, and what is at that path is a credential
-    // that outlives no turn.
+    // gh gets its token only through the wrapper: the pod holds a path, never a token.
     expect(env.GH_TOKEN).toBeUndefined();
     expect(env.GITHUB_TOKEN).toBeUndefined();
   });
@@ -593,9 +553,7 @@ describe('attach', () => {
     ).rejects.toThrow(/not attached/);
   });
 
-  // Everything about the turn's credential, driven through the same fake
-  // apiserver the harness runs on: a stamp is a one-shot exec beside the ACP
-  // stream, so what it sent and whether it ran are both readable here.
+  // A credential stamp is a one-shot exec beside the ACP stream.
   describe('the turn credential', () => {
     class FakeApp implements TokenSource {
       minted = 0;
@@ -613,7 +571,6 @@ describe('attach', () => {
 
     let app: FakeApp;
 
-    /** The same mate with a token source behind it, attached and ready to run. */
     async function turning() {
       app = new FakeApp();
       sandboxes = new KubeSandboxes({
@@ -672,8 +629,7 @@ describe('attach', () => {
       expect(fake.tokenRequests).toHaveLength(1);
       const [asked] = fake.tokenRequests;
       expect(asked?.account).toBe('mate-sandbox-debug');
-      // A token that expires under a running kubectl is a diagnosis that
-      // stops halfway with an authentication error rather than an answer.
+      // The token must outlive the longest turn.
       expect(asked?.expirationSeconds).toBeGreaterThan(
         config.turnTimeoutMs / 1000,
       );
@@ -684,8 +640,7 @@ describe('attach', () => {
       expect(kubeconfig).toContain(
         'server: https://kubernetes.default.svc:443',
       );
-      // Never skip-verify: inheriting a trust store is a different decision
-      // from turning verification off, and is not made on an agent's behalf.
+      // Never skip-verify on an agent's behalf.
       expect(kubeconfig).not.toContain('insecure-skip-tls-verify');
     });
 
@@ -709,9 +664,7 @@ describe('attach', () => {
       app.failMint = new Error('422 from GitHub');
       fake.tokenRequestFails = 'no RBAC for serviceaccounts/token';
 
-      // The thread still gets its answer: a sandbox that cannot push or reach
-      // the cluster can still read and explain, and taking the turn away
-      // would make a degraded feature an outage.
+      // Without credentials the agent can still read and explain.
       const result = await sandboxes.prompt(session, 'hi', new Collect());
       expect(result.stopReason).toBe('end_turn');
       expect(wrote(0)).toEqual({
@@ -736,7 +689,7 @@ describe('attach', () => {
 
       const result = await sandboxes.prompt(session, 'hi', new Collect());
       expect(result.stopReason).toBe('end_turn');
-      // It reached nobody, so nothing is served by letting it live its hour.
+      // It never reached the sandbox, so it is revoked at once.
       expect(app.revoked).toEqual(['ghs-token-1']);
       expect(metrics.tokenStamps).toEqual(['stamp-failed']);
     });
@@ -762,10 +715,9 @@ describe('attach', () => {
       expect(first.sshConfig).toContain(
         'IdentityFile /home/agent/.ssh/id_ed25519',
       );
-      // `accept-new` and not `yes`: the agent's home is a fresh emptyDir, so
-      // it has met no host and `yes` would refuse every one of them.
+      // The agent's home is a fresh emptyDir with no known hosts, so `yes` would refuse all.
       expect(first.sshConfig).toContain('StrictHostKeyChecking accept-new');
-      // 0700 on the directory, because ssh refuses a key it can read wider.
+      // umask 077, because ssh refuses a private key others can read.
       expect(stamps()[0]?.command[2]).toContain('umask 077');
       expect(stamps()[0]?.command[2]).toContain('mkdir -p /home/agent/.ssh');
     });
@@ -773,8 +725,7 @@ describe('attach', () => {
     test('writes no key and no client config when mate holds none', async () => {
       const session = await turning();
       await sandboxes.prompt(session, 'hi', new Collect());
-      // An ssh config naming an IdentityFile that will never exist is worse
-      // than none: it makes every failure look like a rejected key.
+      // A config naming a missing IdentityFile makes every failure look like a rejected key.
       expect(wrote(0).ssh).toBe('');
       expect(wrote(0).sshConfig).toBe('');
     });
@@ -790,9 +741,7 @@ describe('attach', () => {
       const session = await sandboxes.attach(ref);
       await sandboxes.prompt(session, 'hi', new Collect());
       expect(fake.tokenRequests).toEqual([]);
-      // Not even an exec writing empty strings: with nothing configured there
-      // is nothing to write and nothing to clear, and a turn should cost no
-      // round trip for credentials it was never going to be given.
+      // Not even a clearing exec: there is nothing to write or clear.
       expect(stamps()).toEqual([]);
     });
   });
@@ -846,15 +795,12 @@ describe('prompt', () => {
     expect(sink.text).toBe('AGENTS.md:24');
     expect(sink.status).toContain('read AGENTS.md…');
     expect(sink.status.at(-1)).toBeNull();
-    // The same news the status line carries, said again as the call itself:
-    // a surface with cards of its own keeps the harness's id and follows it
-    // to its end, and an update naming only a status keeps the title.
+    // Cards keep the harness's call id, and a status-only update keeps the title.
     expect(sink.cards).toEqual([
       { id: 'call-1', title: 'read AGENTS.md', state: 'in_progress' },
       { id: 'call-1', title: 'read AGENTS.md', state: 'complete' },
     ]);
 
-    // opencode is the harness that reports USD, and the turn summary carries it.
     expect(log.of('turn ended')[0]?.fields?.cost).toEqual({
       amount: 0.0024,
       currency: 'USD',
@@ -1015,8 +961,8 @@ describe('the warm pool', () => {
       'lolwtf.ca/guild': GUILD,
       'lolwtf.ca/spare': 'true',
     });
-    // The label the network policy selects on is the first one above; without
-    // it a spare would run the same image with the LAN in reach.
+    // The pod needs `app.kubernetes.io/name`, which the network policy selects on;
+    // without it a spare can reach the LAN.
     expect(spare.spec.podTemplate.metadata.labels).toEqual(
       spare.metadata.labels,
     );
@@ -1025,8 +971,7 @@ describe('the warm pool', () => {
     expect(ttl).toBeGreaterThan(25 * 60_000);
     expect(ttl).toBeLessThanOrEqual(30 * 60_000);
 
-    // Nobody's thread, so rehydration must not take it for one — and it is
-    // not the stray the warning is about either.
+    // Rehydration skips it, without the stray-sandbox warning.
     expect(await pool.list()).toEqual([]);
     expect(log.of('sandbox has no thread labels; ignoring it')).toHaveLength(0);
 
@@ -1047,16 +992,13 @@ describe('the warm pool', () => {
     expect(adopted.metadata.labels['lolwtf.ca/channel']).toBe(THREAD.channelId);
     expect(adopted.metadata.labels['lolwtf.ca/surface']).toBe('discord');
     expect(adopted.metadata.labels['lolwtf.ca/spare']).toBeUndefined();
-    // A thread's TTL from the same patch that claimed it, rather than the
-    // half hour it was warming on.
+    // The claiming patch also sets a thread's TTL.
     expect(Date.parse(adopted.spec.shutdownTime) - Date.now()).toBeGreaterThan(
       110 * 60_000,
     );
-    // The clone it came up with is as old as the spare, so the workspace is
-    // brought forward before anything attaches to it.
+    // The spare's clone is as old as the spare, so it is fetched forward first.
     expect(fake.lastExec?.container).toBe(HARNESS_CONTAINER);
-    // The ref is an argument to the shell rather than part of the script, so
-    // a branch name is a branch name and not something `sh` gets a vote on.
+    // The ref is passed as `$1`, never spliced into the script.
     expect(fake.lastExec?.command).toEqual([
       '/bin/sh',
       '-c',
@@ -1064,13 +1006,11 @@ describe('the warm pool', () => {
       'mate',
       'main',
     ]);
-    // The pod template takes the same labels in the same patch: v1.0.3
-    // propagates those onto a running pod, so a thread can still be found
-    // from its pod and the object does not disagree with itself.
+    // agent-sandbox copies template labels onto the running pod, so the pod names its thread too.
     expect(adopted.spec.podTemplate.metadata.labels).toEqual(
       adopted.metadata.labels,
     );
-    // From here it is an ordinary thread, whatever it is called.
+    // Listed as a thread despite its `mate-spare-` name.
     expect(await pool.list()).toEqual([
       { name: ref.name, thread: THREAD, turnInFlight: false },
     ]);
@@ -1088,7 +1028,6 @@ describe('the warm pool', () => {
     ]);
     expect(first.name).not.toBe(second.name);
     expect([first, second].filter((ref) => ref.name === spare)).toHaveLength(1);
-    // Whichever lost built its own, named after its thread as ever.
     const loser = first.name === spare ? second : first;
     expect(loser.name).toBe(sandboxName(loser.thread));
     expect(loser.source).toBe('fresh');
@@ -1101,8 +1040,6 @@ describe('the warm pool', () => {
 
     const again = await pool.mint(THREAD);
     expect(again.name).toBe(first.name);
-    // And it says which of the two standing sandboxes it got: the pool is
-    // still holding one, and this is not that.
     expect(again.source).toBe('reused');
     expect(log.of('sandbox already existed')).toHaveLength(1);
     expect(fake.sandboxes.has(sandboxName(THREAD))).toBe(false);
@@ -1110,15 +1047,12 @@ describe('the warm pool', () => {
 
   test('with no pool configured a mint is exactly what it was', async () => {
     await sandboxes.ensureSpares();
-    // Not one request: a mate nobody configured a pool for should not be
-    // asking the apiserver about one, on a timer or on a mint.
     expect(fake.requests).toEqual([]);
 
     const ref = await sandboxes.mint(THREAD);
     expect(ref).toEqual({ name: NAME, thread: THREAD, source: 'fresh' });
     expect([...fake.sandboxes.keys()]).toEqual([NAME]);
-    // Objects are the easy half. The request shape is the claim: a mint that
-    // asks one question more than it did is a mint with one more way to fail.
+    // Each extra request is one more way for a mint to fail.
     expect(
       fake.requests.map((r) => `${r.method} ${r.query || r.path}`),
     ).toEqual([
@@ -1137,12 +1071,8 @@ describe('the warm pool', () => {
 
     await Bun.sleep(10);
     await pool.ensureSpares();
-    // Nothing else slides a spare, so a pass that stopped renewing would hand
-    // every spare back to the controller half an hour later in silence.
     expect(Date.parse(spare.spec.shutdownTime)).toBeGreaterThan(first);
-    // Carried for the same reason adoption carries one: a sweep that listed a
-    // spare microseconds before a thread took it must not write a spare's
-    // half hour back over the thread's two hours.
+    // The resourceVersion stops a stale renewal overwriting a claimed spare's TTL.
     const slide = fake.patches.filter((p) => p.name === name).at(-1);
     const meta = (slide?.body.metadata ?? {}) as Record<string, unknown>;
     expect(meta.resourceVersion).toBeDefined();
@@ -1154,14 +1084,12 @@ describe('the warm pool', () => {
     const first = pool.ensureSpares();
     await until(() => spareNames().length === 1);
 
-    // Joining the pass in flight would answer about the pool as it was
-    // counted before this call — which is exactly the state a thread that
-    // just took the last spare is asking about.
+    // Joining the pass in flight would report the pool as counted before this call.
     const second = pool.ensureSpares();
     fake.markReady(spareNames()[0] ?? '');
     await Promise.all([first, second]);
 
-    // The pass that followed had a spare to renew where the first found none.
+    // Only the second pass had a spare to renew.
     expect(
       fake.patches.filter((p) => p.name.startsWith('mate-spare-')),
     ).toHaveLength(1);
@@ -1172,8 +1100,7 @@ describe('the warm pool', () => {
     await before.ensureSpares();
     const [inherited] = spareNames();
 
-    // A roll is how the sandbox image, the model and the ref change, and
-    // nothing on a spare records which of them it was built from.
+    // Nothing on a spare records the image, model or ref it was built from.
     const after = withSpares(1);
     await after.ensureSpares();
     await until(() => !fake.sandboxes.has(inherited ?? ''));
@@ -1187,7 +1114,6 @@ describe('the warm pool', () => {
     const [name] = spareNames();
     fake.markNotReady(name ?? '');
 
-    // There is a spare, and it is no use: the thread builds its own.
     const ref = await pool.mint(THREAD);
     expect(ref.name).toBe(NAME);
     expect(ref.source).toBe('fresh');
@@ -1202,17 +1128,13 @@ describe('the warm pool', () => {
     fake.markNotReady(broken ?? '');
 
     await pool.ensureSpares();
-    // A pass that counted it would be a pool of nothing reading as full, and
-    // sliding its half hour every five minutes is what would have made that
-    // permanent: the TTL is the only thing that takes an unusable spare away.
+    // Not renewed: the TTL is the only thing that removes an unusable spare.
     expect(Date.parse(object.spec.shutdownTime)).toBe(held);
     await until(() => !fake.sandboxes.has(broken ?? ''));
     expect(log.of('condemned a spare that stopped being ready')).toHaveLength(
       1,
     );
-    // Carried for the reason the renewal carries one: the only thing that
-    // moves a spare between the list and this patch is a thread claiming it,
-    // and a condemned sandbox's labels must not land on the thread that won.
+    // The resourceVersion stops a condemn landing on a spare a thread just claimed.
     const took = fake.patches.filter((patch) => patch.name === broken).at(0);
     const meta = (took?.body.metadata ?? {}) as Record<string, unknown>;
     expect(meta.resourceVersion).toBeDefined();
@@ -1220,7 +1142,6 @@ describe('the warm pool', () => {
     const standing = spareNames();
     expect(standing).toHaveLength(1);
     expect(standing[0]).not.toBe(broken);
-    // Warm again rather than merely repopulated: the next thread is handed it.
     expect((await pool.mint(THREAD)).source).toBe('spare');
   });
 
@@ -1233,10 +1154,7 @@ describe('the warm pool', () => {
     fake.markNotReady(broken ?? '');
     fake.patchFails = true;
     await pool.ensureSpares();
-    // A pool holding one sandbox and nothing a thread could be handed. It is
-    // the only reading that separates a pool doing its job from one that has
-    // quietly stopped: every thread still gets an answer either way, at the
-    // cold start the pool was turned on to remove.
+    // One sandbox held, none usable: only this gauge shows a pool that stopped working.
     expect(metrics.pool).toEqual({ ready: 0, wanted: 1 });
   });
 
@@ -1248,10 +1166,7 @@ describe('the warm pool', () => {
     fake.patchFails = true;
 
     await pool.ensureSpares();
-    // What a spare takes is room on the one node sandboxes land on, so one
-    // mate could not take away is still holding a place in the pool. Minting
-    // beside it would put the pool over its size on the node least able to
-    // carry it, which is the failure the size is written against.
+    // It still holds node room, so a replacement would push the pool past its size.
     expect(spareNames()).toEqual([broken ?? '']);
     expect(
       log.of('could not condemn a spare that stopped being ready'),
@@ -1265,8 +1180,7 @@ describe('the warm pool', () => {
     fake.commandFails = 'fatal: could not read from remote repository';
 
     const ref = await pool.mint(THREAD);
-    // The slow path, because a current checkout is the thing a spare is only
-    // worth having if it can be given.
+    // A spare is only worth handing out with a current checkout.
     expect(ref).toEqual({ name: NAME, thread: THREAD, source: 'fresh' });
     expect(
       log.of('could not bring an adopted spare up to date; minting one'),
@@ -1282,9 +1196,7 @@ describe('the warm pool', () => {
     fake.deleteFails = true;
 
     await pool.mint(THREAD);
-    // The delete is what is wanted and the labels are what is load-bearing:
-    // a teardown that does not land must not leave a second object the next
-    // message could be handed instead of the one that was just built for it.
+    // A failed delete must not leave a second object carrying the thread's labels.
     const wearing = [...fake.sandboxes.entries()]
       .filter(([, o]: any) => o.metadata.labels['lolwtf.ca/thread'])
       .map(([name]) => name);
@@ -1303,9 +1215,7 @@ describe('the warm pool', () => {
     await until(() => spareNames().length === 1);
     fake.terminating(adopted.name);
 
-    // The object still carries the thread's labels, and it is on its way out:
-    // what the thread wants is a sandbox, not the one it is waiting to lose,
-    // which is the hard failure `reuse` would raise on being handed it.
+    // Still labelled for the thread but terminating; `reuse` would fail on it.
     const again = await pool.mint(THREAD);
     expect(again.name).not.toBe(adopted.name);
     expect(again.source).toBe('spare');
@@ -1337,8 +1247,7 @@ describe('the turn mark', () => {
     const started = Date.now();
     const turn = sandboxes.prompt(session, 'go', new Collect());
     await Bun.sleep(30);
-    // A whole TTL measured from the turn's own start, which the deadline the
-    // attach slide left behind — five milliseconds older — cannot satisfy.
+    // A full TTL from the turn's start, which the attach-time deadline, 5 ms older, cannot meet.
     expect(shutdownTime()).toBeGreaterThanOrEqual(started + TTL_MS);
     await turn;
   });

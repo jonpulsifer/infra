@@ -9,8 +9,7 @@ import (
 	"sync"
 )
 
-// metrics is bosun's counters. Gauges are not kept here -- they are read off
-// the live pool at write time, since the running skiffs are the state.
+// Counters only; gauges are read off the live pool at render time.
 type metrics struct {
 	mu           sync.Mutex
 	boots        map[string]int            // class -> skiffs booted
@@ -23,30 +22,21 @@ type metrics struct {
 	sdErrors     int
 }
 
-// Exit reasons. "completed" is the one that means a job ran: the guest reached
-// the end of its single job and powered itself off.
+// Exit reasons. "completed" means the guest finished its job and powered off.
 const (
 	exitCompleted  = "completed"
 	exitWedged     = "wedged"
 	exitLifetime   = "lifetime"
 	exitJITExpired = "jit_expired"
 	exitBootFailed = "boot_failed"
-	// exitKilled is a VMM that died without bosun asking. The cgroup OOM
-	// killer is the one that happens: every skiff is a child of bosun's unit,
-	// so a MemoryMax there reaps the biggest guest rather than letting the
-	// host pick a victim. Distinct from "completed" because counting an
-	// OOM-killed job as a finished one hides exactly the thing worth alerting
-	// on.
+	// A VMM that died unasked, in practice the cgroup OOM killer: MemoryMax on
+	// bosun's unit reaps the biggest guest.
 	exitKilled = "killed"
-	// exitDrained is a skiff scuttled by the stop path: idle ones after their
-	// registration was deleted (so no job was lost), busy ones only at the
-	// drain deadline (so a job was — which is why the reason is visible in
-	// the exit counter rather than folded into "killed").
+	// Stopped by drain: idle skiffs after deregistration, busy ones only at the
+	// drain deadline, which loses their job.
 	exitDrained = "drained"
-	// exitCancelled is a build skiff killed because Spindrift stopped
-	// answering its heartbeat: the request was cancelled, or its lease was
-	// reclaimed by another host. Nothing wants what the guest was making, and
-	// left alone it would push a cancelled build's image.
+	// A build skiff whose heartbeat was refused (cancelled, or the lease moved),
+	// killed so it never pushes an unwanted image.
 	exitCancelled = "cancelled"
 )
 
@@ -75,10 +65,7 @@ func (m *metrics) exit(class, reason string) {
 	m.exits[class][reason]++
 }
 
-// online records how long a skiff took from JIT mint to GitHub first reporting
-// its runner online -- boot, registration and connect together. The five
-// hand-run benches all measured this edge by stopwatch; recording it makes a
-// hull or network regression visible without one.
+// Seconds from JIT mint to GitHub first reporting the runner online.
 func (m *metrics) online(class string, seconds float64) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -98,9 +85,7 @@ func (m *metrics) buildClaimed() {
 	m.buildClaims++
 }
 
-// buildResult records one finished build by outcome. status is always
-// buildSucceeded or buildFailed, so lower-casing it is the whole mapping to
-// the metric's label.
+// status is buildSucceeded or buildFailed; its lower case is the label.
 func (m *metrics) buildResult(status string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -113,10 +98,8 @@ func (m *metrics) spindriftError() {
 	m.sdErrors++
 }
 
-// render writes the Prometheus text exposition format. It is a handful of
-// series, so it is built by hand rather than by pulling in a client library.
-//
-// live counts idle/busy skiffs per class; desired is each class's warm count.
+// render writes the Prometheus text format by hand. live counts idle and busy
+// skiffs per class; desired is each class's warm count.
 func (m *metrics) render(live map[string]poolState, desired map[string]int) string {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -176,18 +159,10 @@ func (m *metrics) render(live map[string]poolState, desired map[string]int) stri
 	return b.String()
 }
 
-// poolState is one class's live skiff count split by whether GitHub has
-// reported the runner busy.
 type poolState struct{ idle, busy int }
 
-// writeTextfile publishes the metrics for node-exporter's textfile collector.
-// A file, not an HTTP listener: bosun's unit carries the IPAddressDeny that
-// every skiff inherits, so a socket that in-cluster Prometheus could reach
-// would mean opening the pod CIDR to untrusted job code as well.
-//
-// The write is atomic, and its mtime is the heartbeat -- node-exporter exports
-// it as node_textfile_mtime_seconds, so a stale file is how a dead or wedged
-// bosun is detected without bosun reporting anything about itself.
+// A textfile: skiffs inherit bosun's IPAddressDeny, so a port Prometheus could
+// reach would open the pod CIDR to job code. The mtime is the heartbeat.
 func writeTextfile(path, body string) error {
 	tmp := path + ".tmp"
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {

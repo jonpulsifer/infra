@@ -10,7 +10,6 @@
     return e;
   };
 
-  // ── theme ──
   const isDark = () =>
     root.dataset.theme ? root.dataset.theme === "dark" : matchMedia("(prefers-color-scheme: dark)").matches;
   $("[data-theme-toggle]")?.addEventListener("click", () => {
@@ -22,7 +21,6 @@
     dispatchEvent(new Event("themechange"));
   });
 
-  // ── mobile nav ──
   const side = $("#side");
   const menu = $("[data-menu]");
   const setMenu = (open) => {
@@ -31,7 +29,6 @@
   };
   menu?.addEventListener("click", () => setMenu(!side.hasAttribute("data-open")));
 
-  // ── search ──
   const dialog = $("dialog.search");
   const input = $("input", dialog);
   const results = $("#search-results");
@@ -135,7 +132,6 @@
     }
   });
 
-  // ── copy buttons ──
   for (const block of $$(".code")) {
     const b = el("button", "copy", "Copy");
     b.type = "button";
@@ -152,7 +148,6 @@
     block.append(b);
   }
 
-  // ── on this page: mark the last heading above the top third ──
   const toc = new Map($$(".toc a").map((a) => [decodeURIComponent(a.hash.slice(1)), a]));
   const heads = [...toc.keys()].map((id) => document.getElementById(id)).filter(Boolean);
   const spy = () => {
@@ -168,7 +163,6 @@
     spy();
   }
 
-  // ── graph ──
   const canvas = $("#graph");
   if (canvas) fetch("/graph.json").then((r) => r.json()).then((g) => graph(canvas, g));
 

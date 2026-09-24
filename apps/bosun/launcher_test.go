@@ -10,10 +10,8 @@ import (
 
 var errFakeKilled = errors.New("fake: killed")
 
-// fakeProc simulates a running child process without ever exec'ing one.
-// exit (test-driven) and Kill (pool-driven) race to resolve the same exit
-// channel exactly once, mirroring how a real process can exit on its own or
-// be killed from under bosun.
+// exit (test-driven) and Kill (pool-driven) resolve the same exit channel
+// once, as a real process can exit on its own or be killed.
 type fakeProc struct {
 	exitCh chan error
 	once   sync.Once
@@ -36,14 +34,13 @@ func (p *fakeProc) Kill() error {
 	return nil
 }
 
-// exit simulates the process finishing on its own, e.g. the guest's
-// "poweroff -f".
+// exit simulates the guest's own "poweroff -f".
 func (p *fakeProc) exit(err error) {
 	p.once.Do(func() { p.exitCh <- err })
 }
 
-// fakeLaunch records every launch (binary name and argv) instead of
-// exec'ing anything, so the boot sequence is testable without KVM.
+// fakeLaunch records every launch, so the boot sequence is testable without
+// KVM.
 type fakeLaunch struct {
 	mu    sync.Mutex
 	calls []fakeCall

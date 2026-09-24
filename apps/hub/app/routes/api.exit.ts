@@ -1,10 +1,8 @@
-// API route to exit the Node.js process, forcing container restart
+// Exits the process so the container runtime restarts it.
 export async function loader() {
-  // Exit the process with code 0 (clean exit)
-  // The container orchestrator will restart it
   setTimeout(() => {
     process.exit(0);
-  }, 100); // Small delay to allow response to be sent
+  }, 100); // lets the response go out first
 
   return new Response(
     JSON.stringify({ message: 'Process will exit shortly' }),

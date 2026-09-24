@@ -14,8 +14,7 @@ import (
 	"time"
 )
 
-// fakeSpindrift is an in-memory stand-in for the three bosun-facing
-// endpoints Spindrift exposes.
+// fakeSpindrift fakes the claim, heartbeat and result endpoints.
 type fakeSpindrift struct {
 	mu sync.Mutex
 
@@ -72,8 +71,7 @@ func (f *fakeSpindrift) postedResults() []postedResult {
 	return append([]postedResult(nil), f.results...)
 }
 
-// poolBuildSource is the production wiring: a buildSource whose spawns land in
-// a real warm pool, for the tests that assert on what the pool did with them.
+// poolBuildSource wires builds into a real warm pool, as production does.
 func poolBuildSource(p *pool, sd spindriftClient) *buildSource {
 	return &buildSource{
 		sd: sd,
@@ -85,9 +83,7 @@ func poolBuildSource(p *pool, sd spindriftClient) *buildSource {
 	}
 }
 
-// The claim/result choreography with no warm pool behind it at all: the port
-// hands back a skiff, the build waits for it to be gone, and the result comes
-// from the diag share the guest wrote.
+// No warm pool: the result comes from the diag share of a stub skiff.
 func TestBuildSourcePostsTheResultTheGuestLeftBehind(t *testing.T) {
 	diagDir := t.TempDir()
 	resultDir := filepath.Join(diagDir, "result")
@@ -220,8 +216,6 @@ func TestSDClientPostResultSendsBodyAndAuth(t *testing.T) {
 	}
 }
 
-// A 404 on the heartbeat is Spindrift saying the row is no longer this
-// host's -- the one answer runBuild has to act on rather than log.
 func TestSDClientHeartbeatReportsALostClaim(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /internal/bosun/requests/build-1/heartbeat", func(w http.ResponseWriter, r *http.Request) {
@@ -237,9 +231,7 @@ func TestSDClientHeartbeatReportsALostClaim(t *testing.T) {
 	}
 }
 
-// Spindrift never dials in, so a cancel on its side reaches the skiff only
-// as a refused heartbeat. The skiff is killed rather than left to finish and
-// push, and nothing is posted for a row nobody would accept a result on.
+// Nothing is posted: the server would refuse a result for a lost claim.
 func TestRunBuildKillsTheSkiffWhenTheClaimIsLost(t *testing.T) {
 	ch := newFakeProc()
 	s := &skiff{build: true, paths: skiffPaths{diagDir: t.TempDir()}, ch: ch, done: make(chan struct{})}
@@ -258,8 +250,7 @@ func TestRunBuildKillsTheSkiffWhenTheClaimIsLost(t *testing.T) {
 		close(done)
 	}()
 
-	// awaitExit's half of the choreography: the VMM exits under the kill, and
-	// retire closes done once the skiff is gone.
+	// awaitExit's part: the VMM exits under the kill, then retire closes done.
 	waited := make(chan error, 1)
 	go func() { waited <- ch.Wait() }()
 	select {
@@ -304,10 +295,7 @@ func TestSDClientHeartbeatPostsToTheRequestID(t *testing.T) {
 	}
 }
 
-// The fence's Go half: the claim's token rides on every later call, and an
-// empty one -- what a Spindrift too old to mint claimants decodes to -- sends
-// no parameter at all rather than an empty one the far side would have to
-// special-case.
+// An empty claimant sends no parameter at all.
 func TestSDClientCarriesTheClaimantWhenThereIsOne(t *testing.T) {
 	var heartbeatQuery, resultQuery string
 	mux := http.NewServeMux()

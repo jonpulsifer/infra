@@ -12,20 +12,16 @@ import (
 	"time"
 )
 
-// noExpiry is RFC 5280's "no well-defined expiration date". These anchors are
-// distributed out of band and pinned on every node, so a date on them buys a
-// fleet-wide outage nobody is watching for rather than any security. Rotation
-// is exercised on the short-lived cluster CAs beneath them.
+// RFC 5280's "no well-defined expiration date". The anchors are pinned on every
+// node out of band, so an expiry adds an outage and no security.
 var noExpiry = time.Date(9999, 12, 31, 23, 59, 59, 0, time.UTC)
 
 func serial() (*big.Int, error) {
 	return rand.Int(rand.Reader, new(big.Int).Lsh(big.NewInt(1), 128))
 }
 
-// caTemplate builds a CA certificate that keeps the previous subject verbatim.
-// RawSubject rather than Subject: round-tripping through pkix.Name can reorder
-// or drop attributes, and these certificates have to stay interchangeable with
-// the ones already distributed.
+// RawSubject, because round-tripping through pkix.Name can reorder or drop
+// attributes and the reissue must match the certificates already distributed.
 func caTemplate(prev *x509.Certificate, maxPathLen int, notAfter time.Time) (*x509.Certificate, error) {
 	sn, err := serial()
 	if err != nil {
@@ -34,12 +30,8 @@ func caTemplate(prev *x509.Certificate, maxPathLen int, notAfter time.Time) (*x5
 	return &x509.Certificate{
 		SerialNumber: sn,
 		RawSubject:   prev.RawSubject,
-		// Carry the previous subject key identifier rather than letting Go
-		// derive one. Every certificate already issued beneath these anchors
-		// names its issuer by that value in its authorityKeyIdentifier, and
-		// OpenSSL builds chains by matching the two. Go's derivation differs
-		// from the one that minted the originals, so deriving here would leave
-		// the existing cluster CAs unable to find their own issuer.
+		// Issued certificates name their issuer by this value, and Go's
+		// derivation differs from the one that minted the originals.
 		SubjectKeyId:          prev.SubjectKeyId,
 		NotBefore:             time.Now().UTC().Add(-time.Minute),
 		NotAfter:              notAfter,
@@ -47,9 +39,7 @@ func caTemplate(prev *x509.Certificate, maxPathLen int, notAfter time.Time) (*x5
 		BasicConstraintsValid: true,
 		IsCA:                  true,
 		MaxPathLen:            maxPathLen,
-		// Only meaningful for maxPathLen 0, where it is the difference between
-		// pathLen:0 and no constraint at all. Terraform's provider has no such
-		// flag, which is why its `max_path_length = 0` emits nothing.
+		// Without it, MaxPathLen 0 means no path length constraint.
 		MaxPathLenZero: maxPathLen == 0,
 	}, nil
 }
@@ -87,8 +77,7 @@ func runReissue(o reissueOpts, out io.Writer) error {
 	fmt.Fprintf(out, "==> intermediate subject: %s\n", prevInt.Subject)
 	fmt.Fprintf(out, "==> root key algorithm:   %s\n", keyAlgorithm(rootKey.Public()))
 
-	// A key that does not match the certificate it is replacing would mint an
-	// anchor nothing beneath it chains to.
+	// A mismatched key mints an anchor nothing beneath it chains to.
 	for _, pair := range []struct {
 		name string
 		cert *x509.Certificate
@@ -138,9 +127,8 @@ func runReissue(o reissueOpts, out io.Writer) error {
 		return err
 	}
 
-	// The anchors are only useful if the cluster CAs already in the tree still
-	// chain through them. Go enforces pathLenConstraint while building, so this
-	// catches the defect these anchors exist to fix.
+	// The cluster CAs in the tree must chain through the new anchors. Go enforces
+	// pathLenConstraint while building the path.
 	roots := x509.NewCertPool()
 	roots.AddCert(newRoot)
 	inter := x509.NewCertPool()

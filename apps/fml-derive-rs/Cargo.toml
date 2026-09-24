@@ -10,9 +10,7 @@ publish = false
 name = "fml-derive"
 path = "src/main.rs"
 
-# Rust's std ships no crypto, so these are load-bearing where the Go side uses
-# its standard library. Pinned exactly: a differential check that silently
-# floats its own primitives is not a check.
+# std has no crypto. Exact pins keep the differential check's primitives fixed.
 [dependencies]
 hkdf = "=0.13.0"
 sha2 = "=0.11.0"

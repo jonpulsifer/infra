@@ -14,45 +14,34 @@ import (
 	"time"
 )
 
-// errDraining marks a claim spawn refused because a stop is in
-// progress; runBuild posts nothing for it so the lease can recover the work.
+// errDraining is a spawn refused mid-stop. runBuild posts nothing, so the lease
+// expires and another host can take the request.
 var errDraining = errors.New("draining")
 
-// errClaimLost is a heartbeat Spindrift refused because the request is no
-// longer this host's -- cancelled, or reclaimed after the lease lapsed. From
-// that moment the guest's work is unwanted: no result of it will be accepted,
-// and a push it makes lands a cancelled build's image under the moving tag.
+// errClaimLost is a refused heartbeat: the request was cancelled or reclaimed
+// after its lease lapsed, so the guest's work is unwanted.
 var errClaimLost = errors.New("build request no longer claimed by this host")
 
-// spindriftClient is the port bosun talks to a Spindrift outbox through.
-// Spindrift never dials in -- bosun is always the poller, the same shape as
-// githubClient -- so there is one claim call and two calls scoped to the
-// build it returned. sdClient is the real adapter; tests substitute a fake.
+// spindriftClient is the build outbox API. bosun always polls; the server never
+// dials in.
 type spindriftClient interface {
-	// ClaimBuild long-polls Spindrift for a build request in one of classes.
-	// nil, nil means none arrived within the poll window; that is not an
-	// error.
+	// ClaimBuild long-polls for a request in one of classes; nil, nil means none
+	// arrived in the poll window.
 	ClaimBuild(ctx context.Context, classes []string) (*buildClaim, error)
 	Heartbeat(ctx context.Context, id, claimant string) error
 	PostResult(ctx context.Context, id, claimant string, res buildResult) error
 }
 
-// buildClaim is one build request handed to this bosun host. Request is
-// opaque -- bosun never parses it, only writes it into the claimed skiff's
-// share for the guest to read.
+// Request is opaque to bosun, which writes it to the skiff's share for the guest.
 type buildClaim struct {
 	ID    string `json:"id"`
 	Class string `json:"class"`
-	// Claimant is this claim's fencing token, handed back on every later call
-	// so Spindrift can tell this host from one whose lease it already
-	// reclaimed. Empty against a Spindrift that does not mint one yet -- bosun
-	// ships on this host's own auto-upgrade and can arrive first -- in which
-	// case nothing is sent and the far side serves the call unfenced.
+	// Claimant is the claim's fencing token, sent on every later call. A server
+	// that mints none leaves it empty, and then nothing is sent.
 	Claimant string          `json:"claimant"`
 	Request  json.RawMessage `json:"request"`
 }
 
-// buildResult is what bosun posts back once a build skiff halts.
 type buildResult struct {
 	Status string `json:"status"`
 	Log    string `json:"log"`
@@ -63,21 +52,17 @@ const (
 	buildSucceeded = "SUCCEEDED"
 	buildFailed    = "FAILED"
 
-	// claimTimeout allows for Spindrift holding the request open server-side
-	// for up to ~55s of long-polling, plus round-trip slack.
+	// The server holds a claim open for up to ~55s, plus round-trip slack.
 	claimTimeout = 70 * time.Second
 	callTimeout  = 30 * time.Second
 
 	buildHeartbeatInterval = 60 * time.Second
 
-	// buildResultMaxLog caps the log bosun posts back. The tail is kept, not
-	// the head, because a build's report marker line is written last.
+	// Keeps the tail, since a build's report marker line is written last.
 	buildResultMaxLog = 1 << 20 // 1 MiB
 )
 
-// sdClient is the real spindriftClient, talking to a Spindrift instance's
-// internal bosun API. base is overridable so tests can point it at an
-// httptest server.
+// sdClient calls the internal bosun API over HTTP.
 type sdClient struct {
 	httpClient *http.Client
 	token      string
@@ -111,8 +96,8 @@ func (c *sdClient) Heartbeat(ctx context.Context, id, claimant string) error {
 	defer cancel()
 	status, err := c.do(ctx, http.MethodPost, c.base+"/internal/bosun/requests/"+id+"/heartbeat"+claimantQuery(claimant), nil, nil)
 	if status == http.StatusNotFound {
-		// The one answer the far side gives for a row it no longer holds
-		// claimed by this claimant; every other failure is the network's.
+		// 404 is the one answer for a request this claimant does not hold; every
+		// other failure is the network's.
 		return fmt.Errorf("%w: %v", errClaimLost, err)
 	}
 	return err
@@ -125,11 +110,8 @@ func (c *sdClient) PostResult(ctx context.Context, id, claimant string, res buil
 	return err
 }
 
-// claimantQuery is the fencing token as a query string, or nothing at all. A
-// query parameter because the result body's schema is strict and a heartbeat
-// posts no body -- there is nowhere else for it to ride. Empty sends nothing,
-// which is what makes this binary safe against a Spindrift old enough not to
-// mint claimants.
+// A query parameter, since the result body's schema is strict and a heartbeat
+// has no body. Empty sends nothing, for a server that mints no claimant.
 func claimantQuery(claimant string) string {
 	if claimant == "" {
 		return ""
@@ -137,9 +119,7 @@ func claimantQuery(claimant string) string {
 	return "?claimant=" + url.QueryEscape(claimant)
 }
 
-// do sends one request and, for a body-bearing response, decodes it into
-// out. The status code is always returned so ClaimBuild can tell a 204
-// "nothing to claim" apart from a 200 without out ever being touched.
+// do returns the status even with no body, so ClaimBuild can tell 204 from 200.
 func (c *sdClient) do(ctx context.Context, method, url string, body, out any) (status int, err error) {
 	var reqBody io.Reader
 	if body != nil {
@@ -174,36 +154,19 @@ func (c *sdClient) do(ctx context.Context, method, url string, body, out any) (s
 	return resp.StatusCode, nil
 }
 
-// buildSource is this bosun host serving a Spindrift outbox: it claims build
-// requests, runs each on a skiff, and posts back what the guest left behind.
-//
-// spawn is the one thing a build needs from the warm pool: boot a skiff at a
-// build berth for this claim and hand it back to wait on -- its done channel
-// closes once the skiff is gone and its diag share is safe to read. Nothing
-// else the pool keeps -- the slot table, the drain flag, the skiff map, GitHub
-// polling -- is a build's business. A field rather than an interface because
-// there is one production answer and it is p.spawn with a build berth; the
-// errDraining contract runBuild depends on is spawn's, so anything substituted
-// here owes it too.
+// buildSource claims build requests, runs each on a skiff and posts back what
+// the guest left. spawn must keep p.spawn's errDraining contract.
 type buildSource struct {
 	sd     spindriftClient
 	spawn  func(ctx context.Context, claim *buildClaim) (*skiff, error)
 	logger *slog.Logger
 	stats  *metrics
-	// heartbeatEvery overrides buildHeartbeatInterval; zero means the default.
+	// Zero means buildHeartbeatInterval.
 	heartbeatEvery time.Duration
 }
 
-// buildLoop claims and runs one Spindrift build at a time until ctx is
-// cancelled.
-//
-// ponytail: one build in flight per bosun host, not one per available warm
-// slot. Pool capacity -- the same warm/persist machinery every other class
-// already has -- is the real limiter on how many builds a host could serve
-// at once, so this leaves spare capacity on the table on a host with more
-// than one build class. It also keeps a bosun restart from ever stranding
-// more than one build mid-heartbeat. A second lane is a second goroutine on a
-// buildSource, if the capacity ever matters more than that.
+// buildLoop runs one claimed build at a time until ctx is cancelled.
+// ponytail: one build per host; a second lane is another goroutine.
 func (b *buildSource) buildLoop(ctx context.Context, classes []string, pollInterval time.Duration) {
 	for ctx.Err() == nil {
 		claim, err := b.sd.ClaimBuild(ctx, classes)
@@ -217,7 +180,7 @@ func (b *buildSource) buildLoop(ctx context.Context, classes []string, pollInter
 			continue
 		}
 		if claim == nil {
-			time.Sleep(time.Second) // guard a tight 204 loop; the long-poll IS the wait
+			time.Sleep(time.Second) // guards a tight 204 loop; the long-poll is the wait
 			continue
 		}
 		b.stats.buildClaimed()
@@ -225,27 +188,17 @@ func (b *buildSource) buildLoop(ctx context.Context, classes []string, pollInter
 	}
 }
 
-// runBuild boots a skiff for claim, waits for it to halt while heartbeating
-// Spindrift so the claim's lease does not expire mid-build, and posts the
-// result composed from whatever the guest left in the skiff's diag share.
-// It blocks until the skiff is gone regardless of ctx, so a build in
-// progress at shutdown gets the same drain-then-kill treatment as a busy
-// GitHub runner rather than being abandoned mid-heartbeat.
-//
-// The heartbeat is also the only way Spindrift can reach a running build:
-// it never dials in, so a cancel on its side is a row it stops answering
-// for. A refused heartbeat therefore kills the skiff the way the reaper
-// kills an over-budget one, and posts nothing -- the row is closed or held
-// by another host, and a result would only be refused.
+// runBuild spawns a skiff, heartbeats to hold the lease until it halts, then
+// posts its result. It waits for the skiff regardless of ctx, so a build
+// drains like a busy runner.
 func (b *buildSource) runBuild(ctx context.Context, claim *buildClaim) {
 	logger := b.logger.With("build_id", claim.ID, "class", claim.Class)
 
 	s, err := b.spawn(ctx, claim)
 	if err != nil {
 		if errors.Is(err, errDraining) {
-			// Never attempted: stay silent so the claim's lease expires and
-			// another host picks the request up. A FAILED post here would
-			// close the Spindrift build permanently for work nobody ran.
+			// Never attempted: a FAILED post would close the request for good,
+			// so leave it for lease expiry and another host.
 			logger.Info("claim refused mid-drain; leaving it for lease expiry")
 			return
 		}
@@ -277,6 +230,8 @@ func (b *buildSource) runBuild(ctx context.Context, claim *buildClaim) {
 			err := b.sd.Heartbeat(ctx, claim.ID, claim.Claimant)
 			switch {
 			case err == nil:
+			// The server cancels a build by refusing its heartbeat. Kill the skiff
+			// and post nothing, since a result would be refused too.
 			case errors.Is(err, errClaimLost):
 				if !lost {
 					lost = true
@@ -291,8 +246,6 @@ func (b *buildSource) runBuild(ctx context.Context, claim *buildClaim) {
 	}
 }
 
-// tailString caps b at max bytes, keeping the end: a build's report marker
-// line is written last, so a truncation must drop the head instead.
 func tailString(b []byte, max int) string {
 	if len(b) <= max {
 		return string(b)
@@ -300,11 +253,8 @@ func tailString(b []byte, max int) string {
 	return string(b[len(b)-max:])
 }
 
-// postBuildResult posts a build's outcome with a few retries on a context
-// that outlives ctx -- the same posture retire's own DeleteRunner takes, and
-// for the same reason: a lost result strands a Spindrift build row until its
-// lease expires, which is worth a little extra time after bosun has
-// otherwise decided to move on.
+// postBuildResult retries on a context that outlives ctx: a lost result strands
+// the request until its lease expires.
 func (b *buildSource) postBuildResult(ctx context.Context, claim *buildClaim, res buildResult, logger *slog.Logger) {
 	pctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Minute)
 	defer cancel()

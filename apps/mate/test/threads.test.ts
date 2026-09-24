@@ -1,8 +1,4 @@
-/**
- * The thread contract, end to end against a fake Discord and the stub
- * sandbox: what starts a thread, who is heard, how a reply streams, how it
- * stops, what an error and a quiet thread say.
- */
+/** The thread contract end to end, against a fake Discord and the stub sandbox. */
 import { beforeEach, describe, expect, test } from 'bun:test';
 import { CHUNK_BUDGET } from '../src/discord.ts';
 import { silentLog } from '../src/log.ts';
@@ -56,7 +52,6 @@ let log: RecordingLog;
 let metrics: RecordingInstruments;
 let serial = 0;
 
-/** A Discord thread as the state machine names it. */
 const ref = (threadId: string) => discordRef(threadId, CHANNEL);
 const key = (threadId: string) => threadKey(ref(threadId));
 
@@ -79,8 +74,7 @@ function inThread(
   content: string,
   authorId = OWNER,
 ): Inbound {
-  // The message is in Discord's log the moment it is sent, which is where the
-  // transcript replay reads it back from.
+  // Logged in the fake Discord, where the transcript replay reads it.
   discord.post(threadId, content, authorId);
   return {
     surface: 'discord',
@@ -125,16 +119,14 @@ function build(
     log,
     config: { ...config, ...opts.config },
     editCadenceMs: 1_000,
-    // Scaled to the scripts below, which write a turn in a few hundred
-    // milliseconds: a run of text is the answer after one of its steps
-    // rather than after three seconds of them.
+    // Scaled to the scripts below, which write a turn in a few hundred ms.
     runGraceMs: 100,
     metrics,
   });
   return { threads, sandboxes };
 }
 
-/** A script that streams the given text word by word with a status line up front. */
+/** Streams `text` word by word after a status line. */
 const streaming =
   (text: string, status = 'running `mise run docs:check`…'): Script =>
   () => {
@@ -253,9 +245,8 @@ describe('streaming a reply', () => {
     expect(reply!.content).toBe('');
     expect(reply!.subtext).toEqual(['-# ⟳ running `mise run docs:check`…']);
     expect(reply!.hasStop).toBe(true);
-    // Far enough for the second delta at 1100ms — which is what shows the
-    // run the first one opened to be the answer rather than a step — and
-    // for the repaint after it, without reaching the end of the turn.
+    // Past the second delta at 1100 ms, which makes the run the answer, and
+    // its repaint, short of the turn's end.
     await clock.advance(1_900);
     expect(reply!.content).toStartWith('alpha ');
     expect(reply!.subtext).toEqual(['-# ⟳ running `mise run docs:check`…']);
@@ -806,7 +797,7 @@ describe('rehydrating', () => {
   });
 });
 
-/** A second mate over the same sandboxes: what a Deployment roll leaves behind. */
+/** A second mate over the same sandboxes, as after a Deployment roll. */
 function rebuild(sandboxes: StubSandboxes): Threads {
   return new Threads({
     surfaces: [surface],
@@ -848,7 +839,7 @@ describe('replaying the transcript', () => {
       prompt.lastIndexOf('you: alpha'),
     );
     expect(prompt.endsWith('third question')).toBe(true);
-    // The teardown line and the message being answered are not conversation.
+    // Replay skips the teardown notice and the message being answered.
     expect(prompt).not.toContain(SANDBOX_CLOSED);
     expect(prompt.match(/third question/g)).toHaveLength(1);
   });
@@ -1060,8 +1051,7 @@ describe('metrics', () => {
     const minting = build({ mintFails: 'ImagePullBackOff' });
     await minting.threads.onMessage(mention('go'));
     await settle();
-    // The teardown that follows a failed mint has no sandbox to tear down and
-    // records nothing, so this counter is the only thing that sees it.
+    // A failed mint leaves no sandbox, so only this counter records it.
     expect(metrics.mints).toEqual(['mint-failed']);
     expect(metrics.teardowns).toEqual([]);
     expect(metrics.mintSamples).toEqual([]);
@@ -1074,8 +1064,7 @@ describe('metrics', () => {
     await clock.advance(9_000);
     await settle();
     expect(metrics.mints.at(-1)).toBe('attach-failed');
-    // The mint behind a failed attach is a finished mint, so it is still one
-    // of the readings this histogram is for.
+    // The mint before a failed attach finished, so it is still sampled.
     expect(metrics.mintSamples.at(-1)).toEqual({
       source: 'fresh',
       mintMs: 9_000,
@@ -1138,15 +1127,14 @@ describe('the warm pool', () => {
     await clock.advance(5_000);
     const threadId = discord.threads[0]?.id ?? '';
     expect(discord.contentsIn(threadId).at(-1)).toBe('alpha ');
-    // The forty seconds a mint costs, paid before the question was asked.
+    // The 40 s mint was paid before the question arrived.
     expect(metrics.mintSamples.at(-1)).toEqual({
       source: 'spare',
       mintMs: 0,
       attachMs: 0,
     });
 
-    // And the pool fills again behind it, on its own time rather than the
-    // thread's.
+    // The pool refills in the background.
     expect(sandboxes.spareCount).toBe(0);
     await clock.advance(40_000);
     expect(sandboxes.spareCount).toBe(1);

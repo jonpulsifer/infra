@@ -16,14 +16,8 @@ import {
 } from './project-store';
 import type { Webhook } from './types';
 
-/**
- * In-memory adapter for {@link ProjectStore}. This is the second adapter that
- * makes the seam real: the tests exercise the same interface the ingest route
- * and the server actions use, without a Firestore emulator.
- *
- * It mirrors the Firestore adapter's observable behaviour - cap enforcement,
- * counter arithmetic, etag stamping - and nothing else.
- */
+// A ProjectStore for tests, matching the Firestore adapter's cap, counters and
+// etags.
 
 interface MemoryProject {
   slug: string;
@@ -37,7 +31,6 @@ interface MemoryProject {
 export interface InMemoryProjectStoreOptions {
   /** Seed slugs, created at t=0. */
   projects?: string[];
-  /** Injectable clock so tests can make etags move deterministically. */
   now?: () => number;
 }
 

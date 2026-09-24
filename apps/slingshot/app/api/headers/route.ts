@@ -12,13 +12,10 @@ export async function GET(): Promise<NextResponse> {
     rawHeaders[key] = value;
   }
 
-  // Sanitize headers to remove sensitive tokens
   const res = sanitizeHeaders(rawHeaders);
 
-  // do stuff with file to get data
   const { data } = myJson;
 
-  // use data
   res.fromFile = data;
   return NextResponse.json({ ...res });
 }

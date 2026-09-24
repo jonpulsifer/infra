@@ -32,9 +32,8 @@ export function Layout({ children }: { children: React.ReactNode }) {
     <html lang="en" className="dark">
       <head>
         <meta charSet="utf-8" />
-        {/* `viewport-fit=cover` lets the installed app paint under the notch
-            and the home indicator; the dashboard pads itself back out with
-            env(safe-area-inset-*). */}
+        {/* `viewport-fit=cover` paints under the notch; the dashboard pads
+            back out with env(safe-area-inset-*). */}
         <meta
           name="viewport"
           content="width=device-width, initial-scale=1, user-scalable=no, viewport-fit=cover"
@@ -61,14 +60,8 @@ export function Layout({ children }: { children: React.ReactNode }) {
 }
 
 /**
- * Registers the offline shell. Inlined rather than done from an effect so it
- * runs on the very first paint, and skipped in development where a cached
- * shell would shadow Vite's module graph.
- *
- * The kiosk Pis still pick up deployments the way they always have - the
- * snapshot's build ID no longer matching theirs - because the worker serves
- * documents and /api/weather network-first. The cache is what they fall back
- * to when the wifi drops, not what they normally read.
+ * Registers the offline shell inline, so it runs on first paint. Dev skips it,
+ * because a cached shell would shadow Vite's module graph.
  */
 function ServiceWorker() {
   if (import.meta.env.DEV) return null;

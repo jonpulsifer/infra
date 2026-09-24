@@ -6,10 +6,10 @@ import { getFirestore } from '@/lib/firestore-client';
 import FirestoreCollections from './_components/firestore-collections';
 
 async function CollectionsContent() {
-  // Start Firestore initialization early
   const firestorePromise = getFirestore();
 
-  // Touch request data before Firestore (satisfies random-bytes guard)
+  // Cache Components rejects random bytes read before request data, and
+  // Firestore queries read them.
   await headers();
 
   let results:
@@ -30,11 +30,9 @@ async function CollectionsContent() {
   try {
     const firestore = await firestorePromise;
 
-    // Get the main 'slingshot' collection
     const slingshotCollection = firestore.collection('slingshot');
     const snapshot = await slingshotCollection.limit(100).get();
 
-    // Group documents by type if they have one
     const documentsByType: Record<
       string,
       Array<{ id: string; updatedAt?: number }>
@@ -51,7 +49,6 @@ async function CollectionsContent() {
       });
     });
 
-    // Create collection info
     const collections = [
       {
         name: 'slingshot',

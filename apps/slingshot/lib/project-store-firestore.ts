@@ -28,17 +28,9 @@ import {
 } from './project-store';
 import type { Webhook } from './types';
 
-/**
- * Firestore adapter for {@link ProjectStore}.
- *
- * Document model:
- *   slingshot/{slug}            - the project, its counters, and its version markers
- *   slingshot/{slug}/webhooks/* - the circular buffer
- *   slingshot/_meta             - global counters
- *
- * `webhooksUpdatedAt` is the feed etag; `_meta.updatedAt` is the stats etag.
- * Both are plain millisecond timestamps stamped on every write.
- */
+// slingshot/{slug} holds a project and its counters, its webhooks subcollection
+// the buffer, and slingshot/_meta the global counters. The feed etag is
+// webhooksUpdatedAt and the stats etag _meta.updatedAt, both in ms.
 
 const META_DOC_ID = '_meta';
 
@@ -150,8 +142,8 @@ export class FirestoreProjectStore implements ProjectStore {
 
     const removedCount = asNumber((snap.data() as ProjectDoc).webhookCount, 0);
 
-    // Webhooks live in a subcollection, so they have to go first - deleting a
-    // document does not delete what is under it.
+    // Deleting a document leaves its subcollection behind, so the batch deletes
+    // each webhook too.
     const webhooks = await this.webhooksRef(slug).get();
     const batch = this.db.batch();
     for (const doc of webhooks.docs) {
@@ -166,24 +158,16 @@ export class FirestoreProjectStore implements ProjectStore {
     });
   }
 
-  /**
-   * Append, evict, and count in one transaction.
-   *
-   * All reads precede all writes because Firestore transactions require it.
-   * `webhookCount` is capped at MAX_WEBHOOKS so it keeps matching the number of
-   * documents actually retained, which in turn keeps `_meta.totalWebhooks`
-   * equal to the sum of the per-project counts.
-   */
   async recordWebhook(slug: string, webhook: Webhook): Promise<void> {
     const projectRef = this.projectRef(slug);
     const webhooksRef = this.webhooksRef(slug);
     const metaRef = this.metaRef();
 
     await this.db.runTransaction(async (tx) => {
+      // Firestore transactions require every read before any write.
       const projectSnap = await tx.get(projectRef);
       const metaSnap = await tx.get(metaRef);
-      // Everything older than the newest (MAX - 1) makes room for the one
-      // being appended, so the buffer lands at exactly MAX.
+      // Older than the newest MAX - 1, so the buffer holds MAX after the append.
       const overflow = await tx.get(
         webhooksRef
           .orderBy('timestamp', 'desc')
@@ -194,6 +178,8 @@ export class FirestoreProjectStore implements ProjectStore {
       const now = Date.now();
       const projectData = (projectSnap.data() || {}) as ProjectDoc;
       const currentCount = asNumber(projectData.webhookCount, 0);
+      // Capped to match the retained documents, so _meta.totalWebhooks stays
+      // the sum of the project counts.
       const nextCount = Math.min(currentCount + 1, MAX_WEBHOOKS);
       const countDelta = nextCount - currentCount;
 
@@ -388,10 +374,8 @@ export class FirestoreProjectStore implements ProjectStore {
       : null;
   }
 
-  /**
-   * Counter maintenance is best-effort: the stats pages are informational, and
-   * a permissions failure here must not fail an ingest or a delete.
-   */
+  // Best effort: a credentials failure here must not fail the delete or clear
+  // that called it.
   private async adjustGlobalTotals({
     webhookDelta = 0,
     projectDelta = 0,
@@ -452,7 +436,6 @@ export class FirestoreProjectStore implements ProjectStore {
 
 let cachedStore: FirestoreProjectStore | null = null;
 
-/** The store the server actions and the ingest route use. */
 export async function getProjectStore(): Promise<ProjectStore> {
   if (!cachedStore) {
     cachedStore = new FirestoreProjectStore(await getFirestore());

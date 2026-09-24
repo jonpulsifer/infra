@@ -1,14 +1,7 @@
 import type { Webhook } from './types';
 
-/**
- * The outgoing request a user is composing, and the conversions between the
- * two ways they can edit it: key/value fields, or raw JSON.
- *
- * This is pure - no React, no network. It exists because the conversion rules
- * have real edge cases (per-value JSON parsing, empty-key filtering,
- * content-type inference, non-object bodies) that were previously unreachable
- * from a test inside a 727-line form.
- */
+// The outgoing request a user composes, the conversions between its key/value
+// fields and raw JSON, and the one place that decides what goes on the wire.
 
 export type FieldMode = 'pairs' | 'raw';
 
@@ -54,14 +47,13 @@ export const METHODS_WITH_BODY = new Set(['POST', 'PUT', 'PATCH']);
 
 const JSON_CONTENT_TYPE = 'application/json';
 
-/** Headers a resend must not carry over - they describe the captured request. */
+// A resend recomputes these, since they describe the captured request.
 const RESEND_STRIPPED_HEADERS = new Set(['content-type', 'content-length']);
 
 export function emptyPair(prefix: string, index = 0): FieldPair {
   return { id: `${prefix}-${index}`, key: '', value: '' };
 }
 
-/** Pairs always keep one editable row, so an empty list is never rendered. */
 function withFallbackRow(pairs: FieldPair[], prefix: string): FieldPair[] {
   return pairs.length > 0 ? pairs : [emptyPair(prefix)];
 }
@@ -96,11 +88,8 @@ export function pairsToJson(pairs: FieldPair[]): string {
   return JSON.stringify(record, null, 2);
 }
 
-/**
- * Body fields hold JSON fragments: a value that parses becomes the parsed
- * value, and one that does not stays a string. `{"a": 1}` and `hello` both do
- * the expected thing.
- */
+// A value that parses as JSON is kept parsed, and any other stays a string.
+// null when no field has a key.
 export function bodyPairsToObject(
   pairs: FieldPair[],
 ): Record<string, unknown> | null {
@@ -161,10 +150,6 @@ export function bodyFromJson(raw: string): DraftResult<FieldPair[]> {
   return { ok: true, value: recordToPairs(parsed, 'body') };
 }
 
-/**
- * Seed a draft from a captured webhook so it can be replayed. Content headers
- * are dropped - they get recomputed for the outgoing request.
- */
 export function draftFromWebhook(webhook: Webhook): RequestDraft {
   const replayHeaders = Object.fromEntries(
     Object.entries(webhook.headers).filter(
@@ -210,10 +195,6 @@ export function emptyDraft(): RequestDraft {
   };
 }
 
-/**
- * Resolve a draft into the request that will actually be sent, or explain why
- * it cannot be. The only place that decides what goes on the wire.
- */
 export function buildRequest(
   draft: RequestDraft,
 ): DraftResult<OutgoingRequest> {

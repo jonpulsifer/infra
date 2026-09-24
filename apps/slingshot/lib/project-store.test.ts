@@ -10,10 +10,7 @@ import {
 import { InMemoryProjectStore } from './project-store-memory';
 import type { Webhook } from './types';
 
-/**
- * These run against the in-memory adapter, but every assertion is about the
- * ProjectStore interface - so they hold for the Firestore adapter too.
- */
+// ProjectStore contract tests, run against the in-memory adapter.
 
 function webhook(overrides: Partial<Webhook> = {}): Webhook {
   return {
@@ -130,9 +127,6 @@ describe('recordWebhook', () => {
   });
 
   test('the reported count never exceeds the cap', async () => {
-    // The regression: the counter used to increment on every ingest while the
-    // buffer was trimmed, so webhookCount drifted above the retained count and
-    // never came back down.
     const store = newStore();
     for (let i = 0; i < MAX_WEBHOOKS + 25; i++) {
       await store.recordWebhook(

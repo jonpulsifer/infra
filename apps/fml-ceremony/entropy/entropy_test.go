@@ -15,9 +15,7 @@ func value(n int) []byte {
 	return sum[:]
 }
 
-// xorMix and naiveConcat are the two constructions this package rejects. They
-// are here so the tests can show the failures actually happening rather than
-// asserting an absence against nothing.
+// The two constructions Mix avoids, so the tests can show their failures.
 func xorMix(sources []Source) [SeedLen]byte {
 	var out [SeedLen]byte
 	for _, s := range sources {
@@ -45,24 +43,15 @@ func mustMix(t *testing.T, sources []Source) [SeedLen]byte {
 	return [SeedLen]byte(out)
 }
 
-// TestAdversarialPeerCannotReduceEntropy is the claim the source set rests on:
-// one honest source is enough, whatever the others do. For each adversarial
-// strategy the honest source ranges over `trials` values and every one must
-// still produce a distinct seed -- no strategy collapses two honest inputs onto
-// one output, which is min-entropy preservation stated on a finite domain.
-//
-// The copycat row also runs XOR, where the same attack destroys everything.
+// One honest source is enough: under every strategy, distinct honest inputs
+// still give distinct seeds. XOR fails the same attacks below.
 func TestAdversarialPeerCannotReduceEntropy(t *testing.T) {
 	const trials = 4096
 
 	strategies := map[string]func(honest []byte) []byte{
-		// A stuck or hostile peripheral emitting a constant.
-		"constant": func([]byte) []byte { return bytes.Repeat([]byte{0x01}, SeedLen) },
-		// A contribution chosen in advance, before seeing anything.
+		"constant":     func([]byte) []byte { return bytes.Repeat([]byte{0x01}, SeedLen) },
 		"precommitted": func([]byte) []byte { return value(0x7777) },
-		// The interesting one: a source that observes its peer and echoes it.
-		"copycat": func(honest []byte) []byte { return bytes.Clone(honest) },
-		// The same, aimed at a specific seed the adversary wants.
+		"copycat":      func(honest []byte) []byte { return bytes.Clone(honest) },
 		"targeting": func(honest []byte) []byte {
 			target, out := value(0xdead), make([]byte, SeedLen)
 			for i := range out {
@@ -86,8 +75,7 @@ func TestAdversarialPeerCannotReduceEntropy(t *testing.T) {
 		})
 	}
 
-	// XOR under the copycat: every honest input cancels to the same seed, so
-	// the master would carry zero entropy no matter how good the kernel is.
+	// XOR under the copycat: every honest input cancels to the same seed.
 	xorSeeds := make(map[[SeedLen]byte]bool)
 	for i := range trials {
 		honest := Source{Label: "kernel", Bytes: value(i)}
@@ -97,7 +85,7 @@ func TestAdversarialPeerCannotReduceEntropy(t *testing.T) {
 		t.Fatalf("xor baseline: %d distinct seeds, expected the copycat to collapse all %d", len(xorSeeds), trials)
 	}
 
-	// XOR under targeting: the last contributor picks the seed outright.
+	// XOR under targeting: the last contributor picks the seed.
 	honest := Source{Label: "kernel", Bytes: value(1)}
 	target := value(0xdead)
 	forged := xorMix([]Source{honest, {Label: "flipper", Bytes: strategies["targeting"](honest.Bytes)}})
@@ -106,9 +94,6 @@ func TestAdversarialPeerCannotReduceEntropy(t *testing.T) {
 	}
 }
 
-// TestFramingIsInjective pins the length prefixes. Appending contributions raw
-// lets two different source tuples mix to one seed, which would make the
-// transcript's per-source claims unfalsifiable.
 func TestFramingIsInjective(t *testing.T) {
 	split1 := []Source{{Label: "kernel", Bytes: []byte("xy")}, {Label: "dice-d6", Bytes: []byte("z")}}
 	split2 := []Source{{Label: "kernel", Bytes: []byte("x")}, {Label: "dice-d6", Bytes: []byte("yz")}}
@@ -127,8 +112,6 @@ func TestFramingIsInjective(t *testing.T) {
 	}
 }
 
-// TestMixRejectsSilentFailures covers the failure modes that would otherwise
-// leave a seed resting on fewer sources than the transcript names.
 func TestMixRejectsSilentFailures(t *testing.T) {
 	ok := Source{Label: "kernel", Bytes: value(1)}
 	cases := map[string][]Source{
@@ -147,11 +130,7 @@ func TestMixRejectsSilentFailures(t *testing.T) {
 	}
 }
 
-// TestWitnessIsNotTheMixInput is the transcript's safety property. The digests
-// the transcript publishes must be a different computation from the bytes the
-// extractor consumed -- otherwise publishing every source's witness publishes
-// the master seed. This fails if someone "simplifies" Mix to hash each source
-// first and extract over the hashes.
+// Publishing every source's witness must not reveal the extractor's input.
 func TestWitnessIsNotTheMixInput(t *testing.T) {
 	sources := []Source{
 		{Label: "kernel", Bytes: value(1)},

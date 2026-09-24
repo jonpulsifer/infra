@@ -1,34 +1,28 @@
 /**
- * The thread's own history, handed to a harness that starts empty. The thread
- * is the only durable log mate keeps, so when `session/load` cannot replay the
- * harness's state the conversation is replayed from the thread instead.
+ * Replays a thread's history into a harness session that `session/load` could
+ * not restore. The thread is mate's only durable log.
  */
 import { isNotice } from './notices.ts';
 import type { HistoryMessage, Surface, ThreadRef } from './surface.ts';
 
-/**
- * The cap, counting every character the preamble sends. A thread is capped at
- * 30 turns, so 40 messages covers a thread's whole life short of its budget,
- * and 8000 characters keeps the preamble a small fraction of the harness's
- * context whatever those messages hold. Two pages of 100 bound the read at two
- * requests per session, keeping the newest messages when a chatty thread runs
- * past either cap.
- */
+/** Sized against the thread cap of 30 turns (MATE_MAX_TURNS_PER_THREAD). */
 export const REPLAY_MESSAGES = 40;
+/** Counts the preamble with its header and footer; 8000 keeps it a small share of the harness context. */
 export const REPLAY_CHARS = 8_000;
+/** Bounds the read to two requests; past either cap the newest messages win. */
 export const REPLAY_PAGES = 2;
 const PAGE = 100;
 
 const HEADER = 'Earlier messages in this thread, before this session started:';
 const FOOTER =
   'Those messages are context only. Answer the message that follows.';
-/** The blank lines the preamble spends on its header and footer. */
+/** The newlines around the header and footer. */
 const SEPARATORS = 6;
 
 export interface ReplayOptions {
-  /** The bot's own user id: its messages are the assistant's earlier turns. */
+  /** mate's own user id: its messages render as `you`. */
   me: string;
-  /** Messages already queued as prompts, which must not be replayed as history. */
+  /** Texts already queued as prompts, never replayed as history. */
   skip: readonly string[];
 }
 
@@ -53,10 +47,7 @@ function eligible(
   return !skip.includes(text);
 }
 
-/**
- * The preamble for the first prompt of a fresh session, or null when the
- * thread holds nothing worth replaying.
- */
+/** Null when the thread holds nothing worth replaying. */
 export async function replayPreamble(
   surface: Surface,
   thread: ThreadRef,

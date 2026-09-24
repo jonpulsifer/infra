@@ -147,7 +147,7 @@ describe('config from the environment', () => {
       owner: 'jonpulsifer',
       repo: 'infra',
     });
-    // The flag the pod spec reads, and the key it must never be able to reach.
+    // The sandbox gets the flag and never the App key.
     expect(
       readSandboxConfig({ ...kube, MATE_GITHUB_APP_ID: '334190' }).github,
     ).toBe(true);
@@ -157,7 +157,7 @@ describe('config from the environment', () => {
       ).some((key) => /key|app/i.test(key)),
     ).toBe(false);
 
-    // A turn that could outlive its own hour-long token is refused at boot.
+    // A turn could outlive its hour-long installation token.
     expect(() =>
       readConfig({
         ...kube,
@@ -167,8 +167,7 @@ describe('config from the environment', () => {
     ).toThrow('while a GitHub App is configured');
   });
 
-  // The pool ships off, and a spare holds a whole sandbox's memory: switching
-  // it on is a Deployment change somebody makes on purpose.
+  // A spare holds a whole sandbox's memory.
   test('keeps no warm spares unless a number is given', () => {
     const kube = {
       ...minimal,

@@ -18,14 +18,12 @@ import (
 	"time"
 )
 
-// errFailed marks an assertion failure rather than an operational one, so the
-// caller can exit non-zero without printing a redundant error line.
+// errFailed marks a failed check, so the caller exits non-zero without a
+// redundant error line.
 var errFailed = errors.New("checks failed")
 
-// repoCertsDir walks up from the working directory looking for the certificate
-// tree. Callers reach this binary through `go -C apps/fml-pki run .`, which
-// leaves the process in the module directory rather than the repository root,
-// so a plain relative path resolves to nothing.
+// `go -C apps/fml-pki run .` starts in the module directory, so the certificate
+// tree is found by walking up.
 func repoCertsDir() string {
 	if v := os.Getenv("FML_PKI_CERTS_DIR"); v != "" {
 		return v
@@ -154,9 +152,8 @@ func cmdFingerprint(args []string) error {
 	return nil
 }
 
-// cmdSPKI accepts a certificate or a private key so a caller can compare the
-// two without knowing which it holds. The bytes are buffered because stdin
-// cannot be read twice.
+// cmdSPKI accepts a certificate or a private key. The bytes are buffered because
+// stdin cannot be read twice.
 func cmdSPKI(args []string) error {
 	if len(args) != 1 {
 		usage()
@@ -201,8 +198,7 @@ func cmdInspect(args []string) error {
 	if len(args) == 0 {
 		usage()
 	}
-	// Every certificate, because the files worth inspecting most are the
-	// bundle and the chain, and readCert refuses anything but a lone cert.
+	// readCerts, because bundles and chains hold several certificates.
 	for _, p := range args {
 		certs, err := readCerts(p)
 		if err != nil {

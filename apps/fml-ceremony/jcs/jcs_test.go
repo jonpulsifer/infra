@@ -10,11 +10,8 @@ import (
 	"testing"
 )
 
-// TestPublishedVectors runs the JCS reference test data from
-// cyberphone/json-canonicalization, vendored under testdata/jcs. Between them
-// they cover the four things that actually go wrong: number formatting, string
-// escaping, recursive property sorting, and sorting by UTF-16 code units rather
-// than by UTF-8 bytes.
+// The JCS reference test data from cyberphone/json-canonicalization, vendored
+// under testdata/jcs.
 func TestPublishedVectors(t *testing.T) {
 	names, err := filepath.Glob("../testdata/jcs/input/*.json")
 	if err != nil {
@@ -41,8 +38,7 @@ func TestPublishedVectors(t *testing.T) {
 			if string(got) != string(want) {
 				t.Errorf("\n got %s\nwant %s", got, want)
 			}
-			// Canonicalising a canonical document must be a no-op, or the
-			// output is not a fixed point and re-signing changes the bytes.
+			// Must be a no-op, or re-signing changes the bytes.
 			again, err := Canonical(got)
 			if err != nil {
 				t.Fatal(err)
@@ -54,9 +50,8 @@ func TestPublishedVectors(t *testing.T) {
 	}
 }
 
-// TestRFC8785Bytes is the exact octet sequence RFC 8785 section 3.2.4 prints
-// for its running example, checked as bytes rather than as a string so a UTF-8
-// mistake cannot hide behind a terminal.
+// The octets RFC 8785 prints for its running example, compared as bytes so a
+// UTF-8 mistake cannot hide behind a terminal.
 func TestRFC8785Bytes(t *testing.T) {
 	raw, err := os.ReadFile("../testdata/jcs/input/values.json")
 	if err != nil {
@@ -81,9 +76,8 @@ func TestRFC8785Bytes(t *testing.T) {
 	}
 }
 
-// TestAppendixB is RFC 8785's number serialization table, addressed by the IEEE
-// 754 bit pattern so the test does not depend on Go's own parsing of a decimal
-// literal.
+// RFC 8785's number table, addressed by IEEE 754 bit pattern so Go's decimal
+// parsing is not under test.
 func TestAppendixB(t *testing.T) {
 	for _, tc := range []struct{ ieee, want string }{
 		{"0000000000000000", "0"},
@@ -124,8 +118,7 @@ func TestAppendixB(t *testing.T) {
 			t.Errorf("%s: got %s, want %s", tc.ieee, got, tc.want)
 		}
 	}
-	// NaN and Infinity are not permitted in JSON and must terminate the
-	// canonicalisation rather than emit something a parser will not read back.
+	// JSON has no NaN or Infinity.
 	for _, f := range []float64{math.NaN(), math.Inf(1), math.Inf(-1)} {
 		if _, err := formatNumber(f); err == nil {
 			t.Errorf("%v was serialised", f)
@@ -149,9 +142,6 @@ func TestRejection(t *testing.T) {
 	}
 }
 
-// TestMarshalTranscriptShape is the shape a transcript actually has — nested
-// objects, arrays of objects, small integers, hex strings — canonicalised and
-// then canonicalised again to confirm the signed bytes are a fixed point.
 func TestMarshalTranscriptShape(t *testing.T) {
 	type leaf struct {
 		Path   string `json:"path"`
