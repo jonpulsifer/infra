@@ -1,5 +1,5 @@
 /**
- * `listSourceBuckets` — list first-party GCS buckets for archive sources and artifacts.
+ * `listSourceBuckets` lists the manifest's source buckets and the default one.
  */
 import { z } from 'zod';
 import { sharedServicesOf } from '../../config/manifest.schema.ts';
@@ -11,16 +11,9 @@ export type ListSourceBucketsInput = z.infer<typeof listSourceBucketsInput>;
 
 export interface ListSourceBucketsResult {
   readonly buckets: readonly string[];
-  /** The home vessel's `shared.sourceBucket` — what a staging picks. */
+  /** The home vessel's `shared.sourceBucket`, which staging uses. */
   readonly defaultBucket: string;
-  /**
-   * Whether this installation can reach a bucket to check one at all (§13).
-   *
-   * Stated rather than discovered by a failed check: without Workload Identity
-   * Federation there is no identity to ask Cloud Storage about, so a Verify
-   * button would be a button that can only ever report the same configuration
-   * fact. The screen says it once, up front, instead.
-   */
+  /** False without workload identity federation, which a bucket check needs. */
   readonly canVerify: boolean;
 }
 

@@ -1,32 +1,7 @@
 /**
- * `setRegistryCredential` — hold a push credential for one registry (§16).
- *
- * §13's rule is "native OIDC federation, nothing stored", and this is its named
- * exception. It exists because the rule has a gap the rule cannot close: a push
- * authorizes as the route that makes it, and Docker Hub trusts no federated
- * identity — it takes a username and a token or it takes nothing. An
- * installation pushing there has no credential-free path, so the choice is a
- * stored token or no Docker Hub, and pretending otherwise would leave every
- * such build failing at the last step with `unauthorized`.
- *
- * **It proves the credential before it keeps it.** The same order
- * `useSourceBucket` and `useArtifactRegistry` use, and here the check is finally
- * a strong one: with a credential in hand the probe completes the registry's own
- * challenge — the distribution token flow for a `Bearer` realm, a direct retry
- * for `Basic` — so a wrong token is refused at the form instead of surfacing as
- * a failed push twenty minutes into a build. A registry that answers anonymously
- * exercises nothing, and the act says so rather than reporting a success the
- * token did not earn.
- *
- * **The secret goes in and never comes back.** `RegistryCredentialStore` has no
- * verb that returns one, so this command could not leak a token if it tried; the
- * value is sealed under the installation keyring and opened only by
- * `dispatchBuild`, for the length of one build request.
- *
- * **Keyed on the host, not the namespace** — see the table's own note. An
- * operator setting a credential on `ghcr.io/a` sets it for `ghcr.io`, and the
- * result says so, because the alternative is a per-namespace promise the Docker
- * config a builder reads cannot keep.
+ * `setRegistryCredential` stores a push credential for one registry host, for
+ * registries such as Docker Hub that trust no federated identity. It is probed
+ * first, then sealed under the installation keyring.
  */
 import { z } from 'zod';
 import { registryHostOf } from '../../domain/artifact-name.ts';
@@ -35,21 +10,11 @@ import { type Command, failed, ok } from '../types.ts';
 
 export const setRegistryCredentialInput = z
   .object({
-    /**
-     * A declared namespace or a bare host. Either is accepted because the
-     * operator is looking at a namespace row when they press the button, and
-     * the credential is the host's — so taking only a host would make the UI
-     * strip a suffix the command is about to derive anyway.
-     */
+    /** A declared namespace or a bare host; the credential is the host's. */
     registry: z.string().trim().min(1).max(255),
-    /**
-     * The account name. Not a secret, and stored in clear on purpose: it is the
-     * half an operator has to see to know which account is configured, and both
-     * Docker Hub and Artifact Registry take fixed ones a typo in is otherwise
-     * undiagnosable.
-     */
+    /** Stored in clear, so an operator can see which account is configured. */
     username: z.string().trim().min(1).max(255),
-    /** The token. Never returned, never logged, never in a row unsealed. */
+    /** Never returned, never logged, never stored unsealed. */
     secret: z.string().min(1).max(4096),
   })
   .strict();
@@ -61,7 +26,6 @@ export type SetRegistryCredentialInput = z.infer<
 export interface SetRegistryCredentialResult {
   readonly host: string;
   readonly username: string;
-  /** What the challenge proved, so the caller need not ask a second time. */
   readonly probe: RegistryProbe;
 }
 
@@ -85,10 +49,11 @@ export const setRegistryCredential: Command<
     );
   }
 
+  // Keyed on the host: a builder's Docker config cannot scope a credential to a
+  // namespace.
   const host = registryHostOf(input.registry);
-  // The probe wants a namespace and the operator may have typed a bare host.
-  // A synthetic segment is enough: nothing about `GET /v2/` is scoped to a
-  // repository, and the segment never leaves this line.
+  // GET /v2/ is not scoped to a repository, so a bare host takes a placeholder
+  // segment.
   const namespace = input.registry.includes('/')
     ? input.registry
     : `${host}/${PROBE_SEGMENT}`;
@@ -117,10 +82,4 @@ export const setRegistryCredential: Command<
   return ok({ host, username: input.username, probe });
 };
 
-/**
- * The repository segment a bare host is probed under.
- *
- * `GET /v2/` is not scoped to a repository, so this is only ever making the
- * string a namespace — it names nothing and reaches nothing.
- */
 const PROBE_SEGMENT = 'spindrift-probe';

@@ -1,14 +1,6 @@
 /**
- * `listBuildRoutes` — every configured build route, for Settings→Connections.
- *
- * `buildRouteFor` (`builds/route.ts`) answers "which route for this Target",
- * scoped to a placement. This answers a smaller, installation-wide question a
- * picker never asks: what routes exist at all, and — for the one route this
- * process cannot reach out to — is anything on the other end. `bosun.ts`'s
- * adapter only ever writes an outbox row and polls it back; nothing before
- * this command ever read `build_requests` for depth or read
- * `storage/bosun-poll.ts` for a pulse, so an operator had no way to tell a
- * `pool` route that is declared-but-unserved from one that is merely quiet.
+ * Lists every configured build route for Settings. A `bosun` route adds its
+ * outbox depth and last claim poll, to tell an unserved pool from a quiet one.
  */
 import { z } from 'zod';
 import type { BuildLevel } from '../../adapters/build/contract.ts';
@@ -21,22 +13,20 @@ import { type Command, ok } from '../types.ts';
 export const listBuildRoutesInput = z.object({}).strict();
 export type ListBuildRoutesInput = z.infer<typeof listBuildRoutesInput>;
 
-/** What the outbox says about a bosun route's pool, in the words a screen uses. */
 export interface BosunPoolHealthView {
-  /** `null` where this process has answered no authenticated claim poll yet. */
+  /** `null` until this process answers an authenticated claim poll. */
   readonly lastClaimPollAgo: string | null;
   readonly pending: number;
   readonly claimed: number;
-  /** `null` where nothing is `PENDING`. */
+  /** `null` when nothing is `PENDING`. */
   readonly oldestPendingAgo: string | null;
 }
 
-/** One configured route, as the manifest declares it. */
 export interface BuildRouteView {
   readonly name: string;
   readonly adapter: string;
   readonly level: BuildLevel;
-  /** Present only for a `bosun`-adapter route — every other route is dialed, not polled. */
+  /** Null except on a `bosun` route: every other route is dialed, not polled. */
   readonly bosun: BosunPoolHealthView | null;
 }
 

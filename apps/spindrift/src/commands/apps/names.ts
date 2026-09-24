@@ -1,11 +1,6 @@
 /**
- * What one App has placed, and what each placement will answer to (§9).
- *
- * `setAppZone` and `setAppVanity` both preview the same fact — the names an
- * App's Deploys will publish once the write lands — over the same rows, one
- * pinning the zone and the other the vanity label. This is the query and the
- * naming rule they share, so the two commands cannot drift into previewing it
- * two different ways.
+ * The placement query and naming rule shared by the `setAppZone` and
+ * `setAppVanity` previews.
  */
 import { eq } from 'drizzle-orm';
 import type { TargetAdapter } from '../../config/manifest.schema.ts';
@@ -25,7 +20,7 @@ import {
   zoneFor,
 } from '../../domain/naming.ts';
 
-/** One Component this App has placed, and what its name is minted from. */
+/** One placed Component, with what its name is minted from. */
 export interface Placement {
   readonly component: string;
   readonly reach: Reach;
@@ -34,11 +29,6 @@ export interface Placement {
   readonly id: string;
 }
 
-/**
- * Every placement this App has, with the reach the Component asks for. A
- * preview has to check all of them — an App whose web is public and whose
- * admin is private is one App with two boundaries under it.
- */
 export async function placementsFor(
   db: Database,
   appId: string,
@@ -62,12 +52,8 @@ export async function placementsFor(
 }
 
 /**
- * What one placement will answer on, so a result states the outcome rather
- * than the setting. Empty where the platform names its own workload — the
- * adapter reports that name back across the deploy seam and core has none to
- * predict — and empty for a Component nothing routes to. `vanityLabel` rides
- * every adapter when given, because the vanity name is the App's own choice
- * and not a substitute for a canonical core could not mint.
+ * The hostnames one placement will answer on. Empty where nothing routes to the
+ * Component; no canonical where the platform names its own workload.
  */
 export function namesUnder(
   app: string,

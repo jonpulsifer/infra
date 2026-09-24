@@ -1,15 +1,6 @@
 /**
- * `forgetRegistryCredential` — stop holding one registry's push credential.
- *
- * **Forgetting is not revoking**, and the result says so rather than implying
- * otherwise. Spindrift holds a copy of a token somebody else issued; deleting
- * the row means no future build is handed it, and it means nothing at all about
- * the token's validity at the registry. An operator who is rotating because a
- * token leaked has a second thing to do, and the sentence names it.
- *
- * The same shape `disconnectTarget` uses for the same honesty reason: an act
- * that removes Spindrift's record of something does not reach out and tear the
- * thing down.
+ * `forgetRegistryCredential` deletes one registry host's held push credential.
+ * It does not revoke the token at the registry, and the result says so.
  */
 import { z } from 'zod';
 import { registryHostOf } from '../../domain/artifact-name.ts';
@@ -30,7 +21,6 @@ export interface ForgetRegistryCredentialResult {
   readonly host: string;
   /** `false` when there was nothing held for that host. */
   readonly forgotten: boolean;
-  /** The sentence the operator reads, including what this did not do. */
   readonly detail: string;
 }
 

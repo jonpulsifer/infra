@@ -1,5 +1,6 @@
 /**
- * `testBucketPermissions` — verify credential-less WIF permissions to a Cloud Storage bucket (§13).
+ * `testBucketPermissions` checks the federated identity's permissions on one
+ * Cloud Storage bucket, with no stored credential.
  */
 import { z } from 'zod';
 import { testGcsBucketPermissions } from '../../storage/cloud.ts';

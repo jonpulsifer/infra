@@ -1,30 +1,7 @@
 /**
- * `destroyDatastore` — tear a Datastore down and forget it (§11, §13).
- *
- * The same deliberate exception `unplaceComponent` argues for, in the same
- * words: §13's rule is "never destroy as a side effect of something else", and
- * this command's *entire subject* is the destruction. An operator who calls it
- * is not tidying bookkeeping and getting a surprise teardown — the teardown is
- * what they asked for by name. `deleteApp` and `detachDatastore` both decline
- * to call the adapter for exactly that reason, and neither of their subjects is
- * the database.
- *
- * **Refuses while attached.** A Datastore under a live App is storage
- * something is still reading; detaching first is one extra act and is the act
- * that states the intent. It is also the only refusal here that a caller can
- * do something about without leaving the screen.
- *
- * **Two rows never reach the adapter.** An `external` Datastore was never
- * provisioned — §11 gives the two provenances as "differing only in who
- * authors the URL", and destroying somebody else's database because they
- * pasted its URL here would be the most destructive possible reading of
- * "remove this record". A row with no `ref` was never successfully
- * provisioned, so there is no handle to hand `destroy` and nothing on the far
- * side that answers to it. Both delete the row and call nothing.
- *
- * **A refused teardown leaves everything as it was.** The adapter call happens
- * before the row is touched, so a thrown error returns a failure with nothing
- * to unwind and pressing the button again is the retry.
+ * `destroyDatastore` tears a Datastore down and deletes its row. It refuses
+ * while attached, and the adapter call comes first, so a refused teardown
+ * changes nothing.
  */
 import { eq } from 'drizzle-orm';
 import { z } from 'zod';
@@ -49,12 +26,7 @@ export type DestroyDatastoreInput = z.infer<typeof destroyDatastoreInput>;
 export interface DestroyDatastoreResult {
   readonly datastoreId: string;
   readonly name: string;
-  /**
-   * Whether a ref was found and handed to `destroy`.
-   *
-   * `false` means the record was removed with no adapter call — an `external`
-   * Datastore, or a `managed` one whose provision never returned a handle.
-   */
+  /** False when only the row was removed: external, or never provisioned. */
   readonly destroyed: boolean;
 }
 
@@ -80,12 +52,10 @@ export const destroyDatastore: Command<
     );
   }
 
+  // An external Datastore is someone else's database, and one with no ref was
+  // never provisioned: both lose only the row.
   const ref = datastore.provenance === 'external' ? null : datastore.ref;
   if (ref !== null) {
-    // The vessel's hosting surface, because a teardown is an adapter call and
-    // the adapter addresses a Target's connection. A vessel with no such
-    // surface has nothing to tear down *through* — the same refusal a missing
-    // connection earns, because both mean the far side is unreachable.
     const target = await datastoreSurfaceTargetOf(context.db, datastore.vessel);
     if (target === undefined) {
       return failed(

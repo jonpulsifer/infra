@@ -1,31 +1,7 @@
 /**
- * `setBuildSecrets` — declare the secrets one Component@Target's *builds* may
- * read (story 112).
- *
- * A build secret is a credential genuinely needed during a build and genuinely
- * absent from its output — a private package token being the ordinary case. It
- * reaches the builder as a BuildKit secret mount: on the filesystem for one
- * `RUN`, in no layer, no build log, and no baked value. §4's
- * `buildArgs` rule ("whatever a website bakes becomes public anyway") is an
- * argument about values that get baked, and a `--mount=type=secret` is defined
- * by not being one — so this is the gap that rule does not cover, closed the
- * way its second half demands: the value is written to §10's store here and
- * resolved by core at dispatch, so no builder ever holds a credential *to the
- * store*.
- *
- * **A separate list, not a flag on runtime config.** Four things differ and
- * the fourth is decisive: a different actor resolves it (core at dispatch, not
- * the platform's operator at apply), a different clock (a rotation reaches the
- * next build, never a running pod), a different failure (a dispatch refusal,
- * not a pod that will not start) — and the sets are *meant* to differ, because
- * the whole point is a credential the runtime must not hold. That is also why
- * one key cannot be both: the row is unique per (Component, Target, key), and
- * a call that would silently convert one kind into the other is refused with
- * the sentence instead.
- *
- * **No Deploy follows.** Rotating a build secret changes nothing until the
- * next build, and saying so is the honest answer — the mirror of what `set`
- * says for a website's baked value.
+ * Declares the secrets a Component@Target's builds may read, as BuildKit secret
+ * mounts in no layer or log. Core resolves them at dispatch, so no builder holds
+ * a store credential. A change reaches the next build; no Deploy follows.
  */
 import { and, eq, inArray } from 'drizzle-orm';
 import { z } from 'zod';
@@ -61,7 +37,6 @@ export const setBuildSecretsInput = z
   .object({
     componentId: z.uuid(),
     targetId: z.uuid(),
-    /** Absent or empty on a call that only removes. */
     entries: z.array(buildSecretEntry).optional(),
     removals: z
       .array(
@@ -73,7 +48,7 @@ export const setBuildSecretsInput = z
 
 export type SetBuildSecretsInput = z.infer<typeof setBuildSecretsInput>;
 
-/** Names only, the same posture every config result takes. */
+/** Names only, never values. */
 export interface BuildSecretsResult {
   readonly componentId: string;
   readonly targetId: string;
@@ -116,8 +91,7 @@ export const setBuildSecrets: Command<
   if ('failure' in subject) return { ok: false, failure: subject.failure };
   const { store } = subject;
 
-  // One key, one kind. A runtime variable of the same name is not updated —
-  // it is the mistake this list exists to prevent, said out loud.
+  // One key, one kind: a config entry of the same name is refused, never converted.
   const keys = [...entries.map((entry) => entry.key), ...removals];
   const existing = await context.db
     .select({ key: configItems.key, kind: configItems.kind })
@@ -210,11 +184,8 @@ export const setBuildSecrets: Command<
 };
 
 /**
- * Like `configSubject`, with the two differences a build secret carries: the
- * store is required whatever the Component's kind — a website's *runtime*
- * config is baked and needs no store, but its build can still need a private
- * token — and the store must be one dispatch can read back, because a value
- * nothing can resolve is a build that will be refused every tick.
+ * Like `configSubject`, but every kind needs a store, a website included, and
+ * the store must have a read path for dispatch.
  */
 async function buildSecretSubject(
   context: CommandContext,
@@ -228,8 +199,7 @@ async function buildSecretSubject(
 
   let store = subject.store;
   if (store === null) {
-    // A website: `configSubject` skipped the store on purpose. Resolve it the
-    // way it would have for anything else, and refuse where there is none.
+    // A website: `configSubject` skipped the store, so resolve it here.
     const target = await context.db.query.targets.findFirst({
       where: (targets, { eq }) => eq(targets.id, input.targetId),
       with: { vessel: true },
@@ -258,21 +228,14 @@ async function buildSecretSubject(
   return { ...subject, store };
 }
 
-/**
- * What dispatch learns about one pair's build secrets: the resolved values, or
- * the sentence to refuse with.
- */
+/** The resolved values, or the sentence dispatch refuses with. */
 export type ResolvedBuildSecrets =
   | { readonly secrets: readonly { name: string; value: string }[] }
   | { readonly refusal: string };
 
 /**
- * Resolve one pair's declared build secrets against §10's store — the one
- * caller `SecretStore.open` exists for.
- *
- * Every failure is a sentence rather than a throw, because each is a state an
- * operator can fix — re-set the secret, connect the store — and dispatch's
- * refusal-that-waits is the shape that makes the next tick work.
+ * Every failure is a refusal sentence, never a throw, because an operator can
+ * fix each one before a later dispatch tick.
  */
 export async function resolveBuildSecrets(
   context: Pick<CommandContext, 'db' | 'manifest' | 'adapters'>,
@@ -335,7 +298,6 @@ export async function resolveBuildSecrets(
   return { secrets };
 }
 
-/** Every build secret declared for one pair, names only, sorted. */
 export async function declaredBuildSecrets(
   context: Pick<CommandContext, 'db'>,
   componentId: string,

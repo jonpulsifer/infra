@@ -1,12 +1,6 @@
 /**
- * A principal's id as a screen prints it.
- *
- * `deploys.requestedBy` and `apps.lockedBy` record the id, which is the one
- * value that survives a rename — and the one value no reader can act on. The
- * dispatcher's principal is not a `users` row at all, so it is named here
- * rather than joined; a user is looked up once per read, for every id the read
- * is about, and an id that names nobody is printed as itself rather than
- * dropped, because "somebody deleted" is still an answer.
+ * Labels principal ids for screens. The auto-deploy principal has no `users`
+ * row, and an id that names nobody prints as itself.
  */
 import { inArray } from 'drizzle-orm';
 import type { Database } from '../db/client.ts';

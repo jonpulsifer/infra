@@ -1,32 +1,13 @@
 /**
- * Agent tokens: the credential an MCP client presents at `/mcp`.
- *
- * These are commands rather than auth routes, which is the opposite of where
- * `src/auth/` puts everything else, and the reason is the one distinction that
- * matters here: the acts in `src/auth/` are *pre-session* — they exist to
- * produce a principal, so they cannot ride a surface that requires one. These
- * three are the other way round. Minting an agent token is something an
- * already-signed-in operator does, so {@link mintAgentToken} refuses every
- * principal that is not human — `/mcp` dispatches this same registry — and
- * that refusal is what guarantees a passkey assertion sits upstream of every
- * token that exists.
- *
- * The token is returned exactly once, by {@link mintAgentToken}, and never
- * again by anything: `sessions.token_hash` is a SHA-256 and there is nothing to
- * read back. {@link listAgentTokens} answers with ids, dates and last use,
- * which is what {@link revokeAgentToken} needs an operator to be able to
- * decide on: a mint date alone cannot tell the machine in front of you from
- * the one you set up months ago and forgot.
- *
- * The session-layer functions are imported under different local names: a
- * command's exported identifier must equal the name it is registered under
- * (`test/commands/registry.test.ts`), so the command owns the plain name here
- * and the row-level helper is aliased.
+ * Agent tokens: the credential an MCP client presents at `/mcp`. Only a human
+ * principal may mint one, so a passkey sign-in precedes every token. The token
+ * is shown once; the session row stores only its SHA-256.
  *
  * ponytail: no label column, so tokens are told apart by their mint date. Add
  * one when an operator has enough of them to care which machine is which.
  */
 import { z } from 'zod';
+// Aliased: a command's export name must equal its registry name.
 import {
   listAgentTokens as agentTokenRows,
   openAgentToken,
@@ -37,9 +18,8 @@ import { type Command, failed, ok } from './types.ts';
 export const mintAgentTokenInput = z.object({});
 export type MintAgentTokenInput = z.infer<typeof mintAgentTokenInput>;
 
-/** What a mint answers with: the value, once. */
 export interface MintedAgentToken {
-  /** The bearer value. Shown to the operator now or never. */
+  /** The bearer value, returned only by this call. */
   readonly token: string;
   readonly expiresAt: string;
 }
@@ -64,23 +44,15 @@ export const mintAgentToken: Command<
 export const listAgentTokensInput = z.object({});
 export type ListAgentTokensInput = z.infer<typeof listAgentTokensInput>;
 
-/** One token as a list prints it. No token material, because none is stored. */
+/** No token material, because none is stored. */
 export interface AgentTokenListItem {
   readonly id: string;
   readonly createdAt: string;
   readonly expiresAt: string;
-  /** Whether it is past its expiry — a dead row is still a row to clean up. */
   readonly expired: boolean;
   /**
-   * When this token was last presented at `/mcp`, and what presented it.
-   *
-   * `null` throughout for a token nobody has used, which is one answer and not
-   * three: a row with no last use has no address and no agent either, and
-   * spelling that as three separate absences would ask the screen to
-   * distinguish them.
-   *
-   * The address and the agent are the caller's own headers — they say which
-   * machine, and they are not evidence. The screen renders them as such.
+   * The last use at `/mcp`; all three are `null` for an unused token. The IP
+   * and agent come from the caller's own headers, so they are unverified.
    */
   readonly lastUsedAt: string | null;
   readonly lastUsedIp: string | null;

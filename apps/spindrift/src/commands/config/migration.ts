@@ -1,24 +1,7 @@
 /**
- * What a move to another Target does to config (§10).
- *
- * §10 states the consequence before the mechanism: "**Core never retrieves,
- * therefore core cannot migrate config between stores.** Re-placement across a
- * store boundary is allowed, but **Place names the keys that will not follow and
- * demands them before the move commits.** Relaxing write-only for migration was
- * rejected because the carve-out *is* the boundary."
- *
- * So there are exactly two outcomes here and no third:
- *
- * - **Same store of record on both sides.** The item is the same item — "both
- *   clusters run their own connect service in front of the same vault, which is
- *   why cluster-to-cluster re-placement is free" — so the *reference* is copied
- *   and no value moves. Core still never reads one.
- * - **A different store of record.** Nothing can be copied: core holds no value
- *   and the reference names an item the destination cannot reach. Those keys are
- *   named and demanded.
- *
- * Both are computed from rows and capabilities only. There is no verb in this
- * file that could read a value even if the rule changed.
+ * What moving a Component to another Target does to its config. A shared store
+ * of record carries the references; any other store demands the keys again,
+ * because core never reads a value back.
  */
 import { and, eq, ne } from 'drizzle-orm';
 import type {
@@ -34,41 +17,29 @@ import {
 import type { AdapterRegistry } from '../types.ts';
 import { storeOfRecordOf } from './set.ts';
 
-/** What deciding a move needs: the manifest, and the far side it can reach. */
 export interface MigrationContext {
   readonly manifest: InstallationManifest;
   readonly adapters: Pick<AdapterRegistry, 'deploy' | 'store'>;
 }
 
-/** One key configured somewhere else, with the pin that may or may not follow. */
 export interface CarriedItem {
   readonly key: string;
   readonly storeRef: string | null;
   readonly storeVersion: string | null;
 }
 
-/** Where a Component's configuration already lives, and whether it can move. */
 export interface Migration {
-  /** The Target the configuration is being carried from, if there is one. */
+  /** Null when nothing is configured on another Target. */
   readonly fromTargetId: string | null;
   /** Items whose references the destination can use as they are. */
   readonly follows: readonly CarriedItem[];
-  /** Keys that will not follow, sorted. Place demands these (§10). */
+  /** Sorted. Place demands these before the move commits. */
   readonly demanded: readonly string[];
 }
 
-/** Nothing configured elsewhere: the first placement of a Component. */
 const NOTHING: Migration = { fromTargetId: null, follows: [], demanded: [] };
 
-/**
- * What moving this Component to this Target does to its configuration.
- *
- * The source is the *other* Target this Component is configured on. Where there
- * is more than one, the most recently configured wins: a Component that has
- * lived on three Targets is being moved from wherever it was last set up, and
- * asking a developer to choose a source would be asking them to answer a
- * question about a store they cannot see into.
- */
+/** The source is the other Target this Component was most recently configured on. */
 export async function migrationFor(
   db: Database,
   context: MigrationContext,
@@ -129,7 +100,6 @@ export async function migrationFor(
   };
 }
 
-/** One Target's store of record, or `null` where it has none (§10). */
 async function storeOf(
   db: Database,
   context: MigrationContext,
@@ -139,7 +109,6 @@ async function storeOf(
   return row === undefined ? null : storeOfRecordOf(context, row);
 }
 
-/** The sentence a developer reads when a move is blocked (§10). */
 export function demandSentence(
   keys: readonly string[],
   targetName: string,

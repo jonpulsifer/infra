@@ -1,9 +1,6 @@
 /**
- * `listFunctions` — every Function this installation holds, by name.
- *
- * No pagination, for `listDatastores`' reason: a Function is authored by
- * hand, one at a time, in an editor — there will be tens of them, not the
- * thousands a Build or a Deploy accumulates.
+ * `listFunctions` lists every Function by name. No pagination: Functions are
+ * written by hand, tens per installation.
  */
 import { z } from 'zod';
 import { type Command, ok } from '../types.ts';

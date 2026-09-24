@@ -86,12 +86,8 @@ export interface CompletedCreation extends CreateAppResult {
   readonly buildId: number;
   readonly buildStatus: 'PENDING' | 'RUNNING' | 'SUCCEEDED' | 'FAILED';
   /**
-   * The configuration pull request creating this App opened, if it opened one.
-   *
-   * Read back off the repository row rather than only forwarded from the
-   * connect, so a reload of a completed draft still names the pull request
-   * somebody has to merge — the number is the whole of what makes §15's
-   * "merging it is what connects this repository" actionable.
+   * The configuration pull request this creation opened. Read from the
+   * repository row, so a reload of a completed draft still names it.
    */
   readonly configPullRequest: number | null;
   /** Why no pull request was opened. Null whenever one was, or none was due. */
@@ -125,9 +121,7 @@ export const startCreationDraft: Command<
       userId: context.principal.id,
       draft: initialCreationDraft({
         targetId: target?.id ?? null,
-        // The vessel by name rather than by project id: the draft states which
-        // boundary this installation's home is, and a project is one shape a
-        // boundary's address happens to have.
+        // By name: a project is only one shape of a vessel's address.
         vessel: context.manifest.installation.homeVessel,
       }),
       createdAt: now,
@@ -207,9 +201,8 @@ export const completeCreationDraft: Command<
     const beforeView = await viewOf(before, context);
     if (!beforeView.ready) return ok({ draft: beforeView, app: null });
 
-    // External staging happens before durable product intent. Immutable storage
-    // makes a retry harmless, while a failure here leaves the resumable draft
-    // and no half-created App.
+    // Staged first: immutable storage makes a retry harmless, and a failure
+    // leaves the draft resumable with no half-created App.
     prepared = await prepareOnce(before.id, before.revision, () =>
       prepareCreation(before.draft, context),
     );
@@ -270,9 +263,7 @@ export const completeCreationDraft: Command<
               ? row.draft.source.digest
               : null,
           repositoryId: prepared.value.repositoryId,
-          // The draft's vessel is a preflight gate, not a field: an
-          // unprovisioned home is a reason to refuse creation, and never a
-          // value the App carries afterwards.
+          // No vessel column: the draft's vessel only gates creation.
           createdAt: now,
           updatedAt: now,
         })
@@ -291,8 +282,7 @@ export const completeCreationDraft: Command<
           expose: row.draft.kind === 'job' ? null : true,
           reach: row.draft.reach,
           auth: row.draft.auth,
-          // The draft's chosen Target is this Component's first placement of
-          // record, written at birth rather than inferred later.
+          // The draft's Target is this Component's first placement of record.
           placedTargetId: row.draft.targetId,
           createdAt: now,
           updatedAt: now,
@@ -364,13 +354,8 @@ interface PreparedCreation {
   /** What staging knew of the commit beyond its sha; null for an archive. */
   readonly headline: CommitHeadline | null;
   /**
-   * The configuration pull request this creation opened, if it opened one.
-   *
-   * Carried rather than discarded because Deploy is the *only* place a
-   * grant-only repository gets connected, and §15 makes merging that pull
-   * request the act that connects it. An App created without its number on
-   * screen is an App whose repository has a branch on it nobody was told about
-   * and a `spindrift.yaml` that will never reach the default branch.
+   * The configuration pull request this creation opened. Merging it is what
+   * connects the repository, so its number must reach the screen.
    */
   readonly configPullRequest: number | null;
   /** Why there is no number, when there is none. Null on every other path. */
@@ -398,7 +383,6 @@ async function prepareCreation(
   draft: typeof creationDraftSchema._output,
   context: CommandContext,
 ) {
-  // With the boundary, because half of what names a Target lives there.
   const target = await context.db.query.targets.findFirst({
     where: (targets, { eq }) => eq(targets.id, draft.targetId),
     with: { vessel: true },
@@ -450,8 +434,6 @@ async function prepareCreation(
       subpath: draft.source.subpath ?? '.',
       supplied,
       headline: null,
-      // An archive has no repository, so there is nothing to connect and no
-      // pull request to merge.
       configPullRequest: null,
       configPullRequestError: null,
     });
@@ -478,15 +460,8 @@ async function prepareCreation(
     repository.access === 'active' &&
     repository.authoritativeCommit === null
   ) {
-    // Connected, readable, and nothing adopted from it yet — so there is no
-    // commit to stage and the guard below would refuse a repository that is
-    // perfectly fine. Reached whenever the row was written by `connect` and no
-    // repo-loop tick has run since: the wizard classifies it as connected and
-    // therefore sends `connect: false`, so the arm above does not fire.
-    //
-    // Adopting here rather than waiting five minutes for the loop, and
-    // dispatching what it adopts, which is what makes this a legal writer of
-    // `authoritative_commit` at all (see `repo-loop.ts`'s header).
+    // A connected row no repo-loop tick has adopted has no commit to stage.
+    // Adopt now, and dispatch what that adopts, as any adopting writer must.
     const host = context.adapters.repository?.() ?? null;
     if (host !== null) {
       const pass = await reconcileRepository(
@@ -553,16 +528,8 @@ function noBuildRoute(target: string) {
 }
 
 /**
- * Hand an adopted pass to the dispatcher, without letting it fail the creation.
- *
- * Adopting outside the loop obliges this command to dispatch (`repo-loop.ts`:
- * only a writer of `authoritative_commit` that also dispatches keeps a push
- * self-healing). But the Apps dispatched here belong to *other* people — every
- * opted-in App already on this repository — and `deployApp` is not, unlike
- * `reconcileRepository`, documented never to throw. Somebody else's staging
- * failure is not a reason to 500 this operator's App creation, and the poll
- * loop reconciles the same commit on its next tick, so the worst case of
- * swallowing is the latency the loop was always allowed to take.
+ * Dispatches an adopted pass, as any adopting writer must. A failure is logged,
+ * not thrown: those Apps belong to others, and the loop retries the commit.
  */
 async function dispatchAdopted(
   pass: RepositoryReconciliation,
@@ -596,28 +563,8 @@ async function repositoryRow(context: CommandContext, fullName: string) {
 }
 
 /**
- * Connect the repository this draft deploys from, as part of creating the App.
- *
- * The wizard lets an operator read any repository the GitHub grant offers, and
- * reading writes nothing — so a repository Spindrift holds no row for arrives
- * here, at the one committing act, and is connected through §15's own command
- * rather than through a second way of connecting. The scope is the directory
- * the draft names, so the configuration pull request covers what is about to be
- * deployed and nothing else.
- *
- * The reconcile that follows is what makes the new row stageable: `connect`
- * adopts nothing by design (§15), and a row with no authoritative commit has no
- * source to build. Reading the default branch here is the same pass the repo
- * loop makes on its own schedule, taken now so that creation does not wait a
- * tick for a commit that is already there.
- *
- * **And therefore dispatched here too.** That pass adopts, and adopting is what
- * an opted-in App's push *is* — so dropping the pass on the floor would cancel
- * it for every other App already watching this repository, exactly as the
- * Repositories screen used to. This is the second of the two ways a caller may
- * stop disagreeing with the loop: `listRepositories` refreshes without
- * claiming, and this one claims and dispatches. The App being created is not
- * among them — it does not exist yet, and its own first Build is staged below.
+ * Connects the draft's repository, scoped to its directory, then adopts and
+ * dispatches the default branch so creation need not wait for a repo-loop tick.
  */
 async function connectAndAdopt(
   fullName: string,
@@ -626,7 +573,6 @@ async function connectAndAdopt(
 ): Promise<
   CommandResult<{
     readonly repository: Repository;
-    /** The pull request the connect opened, forwarded rather than dropped. */
     readonly pullRequest: number | null;
     readonly pullRequestError: string | null;
   }>
@@ -698,9 +644,7 @@ async function completedCreation(
   if (!completed || !component || !build || !placement) {
     throw new Error('creation draft points at an incomplete App intent');
   }
-  // The receipt has to survive a reload, and the connect that opened the pull
-  // request happened once, on a response nobody kept. The row is where the
-  // number lives, which is the only reason the column is written at all.
+  // From the row: the connect's response is gone after a reload.
   const repository =
     completed.repositoryId === null
       ? undefined
@@ -771,9 +715,8 @@ async function viewOf(
   row: typeof creationDrafts.$inferSelect,
   context: CommandContext,
 ): Promise<CreationDraftView> {
-  // Read through `storedDraft`, so a row written before a key was retired
-  // hands the browser only keys the save schema still names — the browser
-  // returns whatever it was given, and a strict schema would refuse it.
+  // Through storedDraft, so a row holding a retired key hands the browser only
+  // keys the strict save schema accepts.
   const draft = storedDraft(row.draft);
   const blockers = await revalidate(draft, context);
   return {
@@ -828,11 +771,8 @@ async function revalidate(
       .from(repositories)
       .where(eq(repositories.fullName, draft.source.repo))
       .limit(1);
-    // A repository the GitHub grant offers and this installation holds no row
-    // for is connected by completion itself (§15), so its absence is not a
-    // prerequisite to clear beforehand: `connectRepository`'s own refusal is
-    // what says it could not be. `blockersFor` still refuses a draft that names
-    // no repository at all.
+    // A granted repository with no row is connected by completion itself, so
+    // its absence is no blocker.
     const connectsOnDeploy =
       repository === undefined && draft.source.connect === true;
     if (!connectsOnDeploy) {
@@ -883,10 +823,7 @@ async function revalidate(
     blockers.push({
       code: 'BUILD_ROUTE_UNAVAILABLE',
       title: `No eligible build route can build for ${targetRowLabel(selectedTarget)}.`,
-      // Names where, because build routes are not on this screen and the
-      // banner carrying this sentence has nothing to press. The draft is a
-      // durable row reachable by URL, which is the other half of the
-      // instruction: leaving to fix it loses nothing.
+      // Build routes are not on this screen, so this names where they are.
       remediation:
         'Configure a route that clears this Target’s minimum Build Level under Settings → Build routes, then come back to this draft — it is kept.',
     });

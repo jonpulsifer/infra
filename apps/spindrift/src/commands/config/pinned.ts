@@ -1,17 +1,6 @@
 /**
- * Reading config the way everything above it needs it: as a pinned document
- * and its version, never as values (§10).
- *
- * Four callers share this — `set`, `replace`, `place`, and the two deploy
- * commands — and they share it because the alternative is five places that each
- * decide what "the config of a Component@Target" means. The one that matters is
- * the deploy path: a Deploy records the document it was given, and if this
- * function returned rows in a different shape than the one the hash is defined
- * over, `configVersion` would change without the configuration changing.
- *
- * **There is no `value` anywhere below.** The columns selected are the key and
- * the two halves of the pin; `plain_value` is the narrow website exception (§10)
- * and belongs to build arguments, not to delivery.
+ * Reads a Component@Target's config as a pinned document and its version. It
+ * selects keys and pins only, never values; deploys record this version.
  */
 import { and, eq } from 'drizzle-orm';
 import type { ConfigScope } from '../../adapters/store/contract.ts';
@@ -31,14 +20,12 @@ import {
   documentOf,
 } from '../../domain/config-version.ts';
 
-/** One (Component, Target) pair's config, as core is allowed to know it. */
 export interface PinnedConfig {
   readonly document: ConfigDocument;
-  /** §10's hash. Defined for an empty document too — "no config" is a state. */
+  /** Defined for an empty document too. */
   readonly version: string;
 }
 
-/** Every pinned reference for one (Component, Target), as a hashed document. */
 export async function readPinnedConfig(
   db: Database,
   componentId: string,
@@ -64,12 +51,7 @@ export async function readPinnedConfig(
   return { document, version: await configVersionOf(document) };
 }
 
-/**
- * The names a store scopes an item by, resolved from ids (§10).
- *
- * The scope is Spindrift's, not the store's: how it becomes an item name is the
- * adapter's business, which is what lets one vault back several Targets.
- */
+/** Null when the Component or Target does not exist. */
 export async function configScopeFor(
   db: Database,
   componentId: string,

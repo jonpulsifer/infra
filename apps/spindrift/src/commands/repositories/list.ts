@@ -29,10 +29,7 @@ export const listRepositories: Command<
   ListRepositoriesResult
 > = async (_input, context) => {
   const host = context.adapters.repository?.() ?? null;
-  // Refreshed together rather than one after another. This read is on the
-  // creation screen's critical path and every active repository was a serial
-  // round trip to the host, so the screen waited for the sum of them — and a
-  // slow one made the wizard look broken rather than busy.
+  // In parallel: this read is on the creation screen's critical path.
   const staleReasons = new Map<string, string>();
   if (host !== null) {
     const existing = await context.db.query.repositories.findMany();
@@ -40,18 +37,8 @@ export const listRepositories: Command<
       existing
         .filter((repo) => repo.access === 'active')
         .map(async (repo) => {
-          // One repository the host would not answer about does not empty the
-          // list — but the row it happened to says so, because the alternative
-          // is a commit from an hour ago rendered as current. `unavailable` is
-          // the loop's own word for that, and a throw is the same fact
-          // arriving as an exception.
-          //
-          // `adopt: false` because rendering a screen is not a deploy. This
-          // pass used to advance `authoritative_commit` and then keep only the
-          // stale banner, which meant an operator who opened this page between
-          // a push and the next loop tick consumed that push's transition: the
-          // dispatcher never saw an `adopted` pass, and every later tick read
-          // the commit as already adopted. A read refreshes; it does not claim.
+          // A repository the host will not answer about is marked stale.
+          // adopt: false, so a render never consumes a push meant for dispatch.
           try {
             const pass = await reconcileRepository(
               { db: context.db, clock: context.clock, host },
@@ -146,9 +133,7 @@ export const listRepositories: Command<
       try {
         available = await authorization.repositories();
       } catch (cause) {
-        // The identity vanished between the status read and the enumeration —
-        // the row was discarded mid-request. Rendered as the create-one state,
-        // which is what the next load would say anyway.
+        // The identity vanished mid-request; show what the next load would.
         if (cause instanceof RepositoryAuthorizationRequiredError) {
           connector = {
             state: 'unauthorized',

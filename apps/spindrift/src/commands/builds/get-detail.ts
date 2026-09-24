@@ -1,17 +1,4 @@
-/**
- * `getBuildDetail` — one artifact-production attempt, whether placed or not.
- *
- * §4: "a build records an artifact rather than deploying one", so pressing
- * Deploy on an App with nothing deployable starts a Build and writes no intent
- * (`deployApp` returns `deployId: null`). This is where that press lands. A
- * Build is an attempt with a durable id and a live event stream, which is
- * everything an attempt screen needs — the only thing it lacks is the intent
- * row, and that absence is what {@link DeployView.id} being `null` says.
- *
- * The result also carries {@link GetBuildDetailResult.deployId}. Placement does
- * not supersede the Build: the client keeps this artifact evidence inspectable
- * and offers the related Deploy as a separate destination.
- */
+/** One Build shown as an attempt, whether placed or not. */
 import { z } from 'zod';
 import { elapsedSince } from '../../domain/elapsed.ts';
 import { targetRowLabel } from '../../domain/target.ts';
@@ -25,14 +12,9 @@ export const getBuildDetailInput = z.object({
 export type GetBuildDetailInput = z.infer<typeof getBuildDetailInput>;
 
 export interface GetBuildDetailResult {
-  /** The Build as an attempt, with `id: null` because it is not a Deploy. */
+  /** `id` is `null` because a Build is not a Deploy. */
   readonly attempt: DeployView;
-  /**
-   * The newest Deploy naming this Build, once one exists.
-   *
-   * Not folded into `attempt.id`: that field says what *this* view is, and this
-   * view is a Build. A caller that wants the release goes and reads it.
-   */
+  /** The newest Deploy that used this Build, or `null`. */
   readonly deployId: number | null;
 }
 
@@ -53,8 +35,7 @@ export const getBuildDetail: Command<
       component: {
         with: {
           app: true,
-          // The placement of record — the stored fact, exactly what
-          // `deployApp` acts on.
+          // The placement of record, which `deployApp` acts on.
           placedTarget: { with: { vessel: true } },
         },
       },
@@ -72,9 +53,7 @@ export const getBuildDetail: Command<
   const { view: buildView } = await buildViewOf(context, build);
   const target = build.component.placedTarget;
 
-  // Where this Build is headed, resolved the same way `deployApp` resolves it:
-  // the placement of record is what says which Target a Component belongs on
-  // before any intent has named one.
+  // Where this Build is headed: the placement of record, as `deployApp` resolves it.
   const previousLive = target
     ? await context.db.query.deploys.findFirst({
         where: (deploys, { eq, and }) =>
@@ -104,22 +83,15 @@ export const getBuildDetail: Command<
       buildView?.runner ?? null,
       target === null ? null : targetRowLabel(target),
     ),
-    // A Build has no address at all: the App's `vanityDomain` is a label it
-    // may answer on once something deploys, not a name this Build serves.
+    // A Build serves nothing, so it has no address.
     url: '',
-    // A Build never serves anything: §6's exposure is only ever changed by an
-    // intent, and there is no intent here.
     urlLive: false,
     previousReleaseServing: previousLive !== null,
-    // §6 persists a diagnosis on a Deploy going red. A Build that failed says
-    // so in its own log, and inventing a `Diagnosis` here would put a reason
-    // from the closed deploy-failure set on something that never deployed.
+    // A failed Build says why in its own log. A Diagnosis belongs to a Deploy.
     diagnosis: null,
-    // Drift is a `LIVE` release the platform stopped agreeing with. A Build has
-    // placed nothing, so there is nothing for a platform to disagree with.
+    // Drift needs a LIVE release, and a Build has placed nothing.
     drift: null,
-    // Nothing has been placed, so there is nothing to check off. An empty list
-    // renders no section at all, which is the honest shape.
+    // An empty list renders no section.
     resources: [],
     source: sourceViewOf(build.component.app, build),
     build: buildView,
@@ -130,8 +102,7 @@ export const getBuildDetail: Command<
     configVersion: null,
     artifactDigest: build.artifactDigest,
     previousDeployId: previousLive?.id ?? null,
-    // There is no intent to roll back to. Rollback names a Deploy's Build, and
-    // this attempt has no Deploy.
+    // Rollback names a Deploy's Build, and this attempt has no Deploy.
     rollbackable: false,
   };
 
@@ -139,11 +110,8 @@ export const getBuildDetail: Command<
 };
 
 /**
- * A Build's status in the phase vocabulary the screen renders.
- *
- * The mapping is a projection, not a claim that the two are the same thing:
- * `WAITING` for a succeeded Build says exactly what is true — the artifact
- * exists and nothing has placed it yet.
+ * A Build's status in the phase words the screen renders. A succeeded Build is
+ * `WAITING`: the artifact exists and nothing has placed it.
  */
 const PHASE = {
   PENDING: 'PENDING',
@@ -159,12 +127,7 @@ const PHASE_WORD = {
   FAILED: 'Build failed',
 } as const;
 
-/**
- * The sentence under the phase.
- *
- * A `null` runner is §4's supplied artifact: nothing ran, so "built" is the
- * wrong verb for it and the headline says what did happen instead.
- */
+/** A `null` runner is a supplied artifact: nothing ran, so nothing was built. */
 function headlineFor(
   status: keyof typeof PHASE,
   runner: string | null,

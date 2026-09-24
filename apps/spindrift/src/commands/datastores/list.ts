@@ -1,29 +1,7 @@
 /**
- * `listDatastores` — every Datastore this installation holds, newest first.
- *
- * §11 makes a Datastore "top-level and attached, not a field", and this is the
- * read that says so: "what storage exists, and what is it doing" has nothing
- * to do with which App a reader happened to open first, so it is scoped to the
- * installation and to no App.
- *
- * **Every field is named on the way out, never spread.** `datastores` carries
- * `connection_ref` — the pointer to a Secret, per `commands/views.ts`'s note on
- * `DatastoreDetailView` — and a `select()` or a spread would ship it to the
- * browser the moment this file forgot to think about it. The command layer's one rule
- * for a credential-adjacent column is that nothing reaches across it by
- * accident, so the row is read in full and only named fields leave.
- *
- * No pagination. Datastores are created by hand, one at a time, through a
- * form with a name field — there will be tens of them for the lifetime of an
- * installation, not the thousands a Build or a Deploy accumulates.
- *
- * **The pickable Vessels ride along.** `createDatastore` takes a Vessel and no
- * App, so the ledger can create — and the one thing its form needs that the
- * rows do not carry is where a new one could go. It is answered here rather
- * than by a second call to `listTargets` because that command answers a
- * different question (placement candidacy for a Component being created) and
- * carries none of §3's storage capabilities; a screen that asked it would be
- * offering placements on a fact it never read.
+ * `listDatastores` lists every Datastore in the installation, newest first,
+ * with the vessels a new one could be created in. No pagination: Datastores are
+ * made by hand, tens per installation.
  */
 import { z } from 'zod';
 import { capabilitiesOfRow } from '../../domain/capabilities.ts';
@@ -43,7 +21,7 @@ export type ListDatastoresInput = z.infer<typeof listDatastoresInput>;
 
 export interface ListDatastoresResult {
   readonly datastores: readonly DatastoreListItem[];
-  /** Where a new managed Datastore could be created — see the file note. */
+  /** Where a new managed Datastore could be created. */
   readonly vessels: readonly DatastoreVesselOption[];
 }
 
@@ -57,18 +35,14 @@ export const listDatastores: Command<
     orderBy: (row, { desc }) => [desc(row.createdAt)],
   });
 
-  // By name because a vessel carries no rank — rank is a placement fact and
-  // lives on the surfaces.
+  // By name: rank lives on surfaces, not vessels.
   const vesselRows = await context.db.query.vessels.findMany({
     orderBy: (row, { asc }) => [asc(row.name)],
   });
   const vessels: DatastoreVesselOption[] = [];
   for (const vessel of vesselRows) {
-    // Every check `createDatastore` makes before it inserts, in its order: the
-    // hosting surface resolved from the vessel's kind, then that surface's
-    // connection, adapter and capabilities. A vessel that fails any of them is
-    // one whose only answer is that command's refusal, and an option whose
-    // sole outcome is a refusal is worth less than not offering it.
+    // The checks createDatastore makes, in its order; a vessel it would refuse
+    // is not offered.
     const target = await datastoreSurfaceTargetOf(context.db, vessel);
     if (target === undefined) continue;
     if (!hasTargetConnection(target) || !hasVesselLocation(vessel)) {
@@ -95,6 +69,7 @@ export const listDatastores: Command<
 
   return ok({
     vessels,
+    // Named fields only: a spread would ship connection_ref to the browser.
     datastores: rows.map((row) => ({
       id: row.id,
       name: row.name,
@@ -105,9 +80,7 @@ export const listDatastores: Command<
       vesselId: row.vesselId,
       appId: row.appId,
       phase: row.phase,
-      // §11's `ref` is the adapter's own handle, opaque here — this only ever
-      // asks whether one was returned, the same test `destroyDatastore`
-      // makes to decide whether it owes the adapter a call.
+      // `ref` is the adapter's opaque handle; only its presence is read.
       provisioned: row.ref !== null,
       ...(row.detail === null ? {} : { detail: row.detail }),
       when: elapsedSince(row.createdAt, now),

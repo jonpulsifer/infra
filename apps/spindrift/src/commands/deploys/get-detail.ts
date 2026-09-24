@@ -23,23 +23,13 @@ export const getDeployDetailInput = z.object({
 export type GetDeployDetailInput = z.infer<typeof getDeployDetailInput>;
 
 /**
- * §6's raw `debug` payload as a screen can read it, or `null` where core
- * recorded nothing.
- *
- * `debug` is nullable and usually null: a Deploy that goes red on something
- * core decided for itself — an artifact with no address to pull it by — never
- * reaches a platform that could hand back events to persist. Serialising that
- * absence yields `"{}"`, which is not evidence, is not what any runner emitted,
- * and is truthy enough to be mistaken for both by everything downstream. So
- * nothing is reported as nothing, and the views that already know how to say
- * "there is nothing here" get to say it.
+ * The raw `debug` payload as text, or `null` when core recorded nothing. An
+ * empty document is absence too, not evidence.
  */
 function evidenceOf(debug: unknown): string | null {
   if (debug === null || debug === undefined) return null;
   if (typeof debug === 'string') return debug.trim() === '' ? null : debug;
   const serialised = JSON.stringify(debug);
-  // An empty document is the same absence wearing braces — a red Deploy whose
-  // adapter opened a payload and put nothing in it saw nothing either.
   if (serialised === undefined || serialised === '{}' || serialised === '[]') {
     return null;
   }
@@ -48,18 +38,12 @@ function evidenceOf(debug: unknown): string | null {
 
 /** How many prior releases the estimate reads. */
 const HISTORY = 100;
-/** Below this a percentile is a guess wearing a number. */
+/** Below this, a percentile is a guess. */
 const MIN_SAMPLES = 3;
 
 /**
- * How long a release here usually takes, from the ones before it.
- *
- * Derived at read time and never stored: created-to-LIVE over the last
- * {@link HISTORY} releases of this Component@Target, where LIVE is the status
- * event the deploy loop records on the attempt log — the one instant the
- * platform's verdict was written down, which no column on `deploys` keeps.
- * Only releases older than this one vote, so a LIVE release read back later
- * does not estimate itself.
+ * The p90 of created-to-LIVE over earlier releases of this Component@Target.
+ * LIVE is the status event on the attempt log; no `deploys` column records it.
  */
 async function expectedDurationOf(
   context: CommandContext,
@@ -143,10 +127,7 @@ export const getDeployDetail: Command<
     previousLiveDeploy && deploy.phase !== 'LIVE',
   );
 
-  // The release before this one here, whatever it did. `previousLiveDeploy`
-  // above answers a different question — "is anything still serving" — and a
-  // reader stepping back through the history wants the row that came before,
-  // including the one that failed.
+  // The release just before this one, failed or not.
   const previousDeploy = await context.db.query.deploys.findFirst({
     where: (deploys, { eq, and, lt }) =>
       and(
@@ -157,8 +138,8 @@ export const getDeployDetail: Command<
     orderBy: (deploys, { desc }) => [desc(deploys.id)],
   });
 
-  // §6's desired row is the only thing that knows which release *should* be
-  // running: a LIVE Deploy that a newer intent superseded is still LIVE.
+  // Only the desired row knows which release should run: a superseded LIVE
+  // Deploy is still LIVE.
   const desired = await context.db.query.componentTargetDesired.findFirst({
     where: (rows, { eq, and }) =>
       and(
@@ -167,8 +148,7 @@ export const getDeployDetail: Command<
       ),
   });
 
-  // A faulty release carries the same four columns a red attempt does — the
-  // soak writes them the same way — so it reads through the same panel.
+  // The soak writes a faulty release's diagnosis like a red attempt's.
   let diagnosis: Diagnosis | null = null;
   if (
     (deploy.phase === 'FAILED' || deploy.faultyAt !== null) &&
@@ -229,10 +209,8 @@ export const getDeployDetail: Command<
       text: event.line!,
       tone: event.reason ? ('error' as const) : undefined,
     }));
-  // Evidence stands in for a deploy log only when there is evidence. Where
-  // there is none, `deployLog` stays null and the card renders its own
-  // `LIVE_STATUS` notice — the true sentence about a controller that reports
-  // status without text.
+  // No log and no evidence leaves deployLog null; the card shows its own
+  // notice.
   if (deployLogs.length === 0 && diagnosis?.evidence) {
     deployLogs.push(
       ...diagnosis.evidence.split('\n').map((text) => ({
@@ -242,23 +220,14 @@ export const getDeployDetail: Command<
     );
   }
 
-  // "Building" is only honest while something is building. A release whose
-  // artifact was uploaded rather than built (§4) is releasing, not building,
-  // and a screen that said otherwise would name a step that never ran.
+  // An uploaded artifact was never built, so its release is not "Building".
   let phaseWord = build === null ? 'Releasing' : 'Building';
-  // Faulty is neither word: the rollout landed and the platform has since
-  // reported it failed, and "Live" over that is the sentence the soak exists
-  // to stop the screen saying.
+  // Faulty: the rollout landed and the platform has since reported it failed.
   if (deploy.phase === 'LIVE') {
     phaseWord = deploy.faultyAt === null ? 'Live' : 'Faulty';
   } else if (deploy.phase === 'FAILED') {
-    // The deploy's own verdict outranks the Build row, and the order is the
-    // fix. A Deploy that recorded a reason failed *here* — it was applied, the
-    // platform answered, and §6 persisted what it said. Reading the Build
-    // first meant that reason lost to a FAILED Build row, which is exactly the
-    // pairing supply-chain admission produces: the runner pushed an image, the
-    // artifact was refused, and the screen blamed a build that had already
-    // done its job. A build is only the failure when nothing after it spoke.
+    // A recorded reason means the Deploy itself failed, even beside a FAILED
+    // Build: admission can refuse an artifact the runner pushed.
     phaseWord =
       deploy.reason === null && deploy.build.status === 'FAILED'
         ? 'Build failed'
@@ -294,9 +263,7 @@ export const getDeployDetail: Command<
     phase: deploy.phase as DeployPhase,
     phaseWord,
     headline,
-    // Only what this Deploy published. The App's `vanityDomain` is the label
-    // it names — `@` for the zone itself — not an address, and a Deploy that
-    // has not landed has none.
+    // Only what this Deploy published: vanityDomain is a label, not an address.
     url: deploy.url ?? '',
     urlLive: deploy.phase === 'LIVE',
     previousReleaseServing,
@@ -313,8 +280,7 @@ export const getDeployDetail: Command<
     ...(deploy.faultyAt === null
       ? {}
       : { faultyAt: deploy.faultyAt.toISOString() }),
-    // Only while the attempt has yet to honour it: once the row settles, the
-    // detail says who cancelled it and the button has nothing left to offer.
+    // Only while in flight; a settled row's detail names who cancelled it.
     ...(deploy.cancelRequestedBy === null || !isInFlight(deploy.phase)
       ? {}
       : { cancelRequestedBy: deploy.cancelRequestedBy }),
@@ -329,10 +295,8 @@ export const getDeployDetail: Command<
     artifactDigest: deploy.build.artifactDigest,
     ...(requestedBy === undefined ? {} : { requestedBy }),
     previousDeployId: previousDeploy?.id ?? null,
-    // The same comparison `rollbackDeploy` makes under the lock. It can still
-    // refuse for a reason this projection cannot see — a disconnected Target, a
-    // signature that stopped verifying — and that refusal is a sentence the
-    // operator reads rather than something to pre-empt by hiding the button.
+    // The comparison rollbackDeploy makes under the lock. Its other refusals,
+    // such as a disconnected Target, reach the operator as its sentence.
     rollbackable:
       desired?.desiredDeployId !== deploy.id &&
       desired?.desiredBuildId != null &&

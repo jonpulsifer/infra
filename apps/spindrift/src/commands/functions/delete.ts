@@ -1,9 +1,6 @@
 /**
- * `deleteFunction` — remove a Function from its deploy target, then the row.
- *
- * The adapter call happens before the row is touched, following
- * `destroyDatastore`'s rule: a refused teardown leaves everything as it was,
- * and pressing the button again is the retry.
+ * `deleteFunction` removes a Function from its target, then deletes the row, so
+ * a refused removal changes nothing.
  */
 import { eq } from 'drizzle-orm';
 import { z } from 'zod';

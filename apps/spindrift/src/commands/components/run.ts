@@ -1,30 +1,7 @@
 /**
- * `runComponent` — start one run of a job, now (§17).
- *
- * §7 makes a job's `apply` two acts: the chart renders a CronJob that exists
- * and is triggered by nothing, and something has to trigger it. This is that
- * something, and it is a command rather than a mode on `deployApp` for the
- * reason `DeployAdapter.run` is a verb rather than a mode on `apply` — a deploy
- * is convergent and happens whenever desired state moves, while a run is an act
- * an operator asked for once.
- *
- * **It writes nothing.** No Deploy row, no attempt, no event. A run is not an
- * attempt: §6's phases describe placing a workload, and a job that exits 1 is
- * not a release that went red — the CronJob is still exactly as live as it was.
- * The runs themselves live on the platform (§17: "configure the platform, don't
- * build it"), which is where `getAppWorkspace` reads them back from, so a row
- * here would be a second history that could only disagree with the first.
- *
- * **The ref decides what runs.** It is the handle `apply` returned and core
- * stored (§6), so what starts is the workload that is actually placed — never a
- * description assembled a second time from rows that may have moved since.
- *
- * **Parameters are additions, never overrides.** The one-off scripts the Jobs
- * story promises — restore from snapshot X, reindex since a date — take their
- * argument as `env`, appended to the run's container after the template's
- * own. A name the placed workload already delivers is refused: every config
- * variable is a sealed reference (§10), and letting a run shadow one would put
- * the value inline in a Job spec, which is the asymmetry §10 exists to avoid.
+ * Starts one run of a placed job from the ref its newest Deploy stored, and
+ * writes nothing: runs live on the platform. Parameters add env vars and never
+ * override delivered config, which would put a sealed value inline.
  */
 import { and, desc, eq } from 'drizzle-orm';
 import { z } from 'zod';
@@ -39,10 +16,7 @@ import {
 } from '../../domain/target.ts';
 import { type Command, failed, ok } from '../types.ts';
 
-/**
- * The longest value one parameter may carry. A parameter is a snapshot name
- * or a date, and a Job spec is not the place for a document.
- */
+/** A parameter is a snapshot name or a date, never a document. */
 export const RUN_PARAMETER_LIMIT = 4_096;
 
 export const runComponentInput = z
@@ -50,9 +24,8 @@ export const runComponentInput = z
     componentId: z.uuid(),
     targetId: z.uuid(),
     /**
-     * Plain variables for this run only. The names are checked in the handler
-     * rather than here: a record's key issue surfaces as "Invalid key in
-     * record", and the person who typed it deserves the sentence config gives.
+     * Names are checked in the handler, so a bad one gets config's sentence
+     * instead of zod's record-key error.
      */
     env: z.record(z.string(), z.string().max(RUN_PARAMETER_LIMIT)).optional(),
   })
@@ -61,7 +34,6 @@ export const runComponentInput = z
 export type RunComponentInput = z.infer<typeof runComponentInput>;
 
 export interface RunComponentResult {
-  /** The run the backend started, in its own name for it. */
   readonly execution: JobExecution;
 }
 
@@ -76,9 +48,8 @@ export const runComponent: Command<
   if (!component) {
     return failed('NOT_FOUND', 'that Component does not exist');
   }
-  // The kind is checked here as well as by the adapter, because the two
-  // refusals are different sentences: this one is about the Component a person
-  // is looking at, and the adapter's is about the object a ref names.
+  // Checked here as well as by the adapter, so the refusal names the Component
+  // instead of the object a ref names.
   if (component.kind !== 'job') {
     return failed(
       'NOT_RUNNABLE',
@@ -102,9 +73,8 @@ export const runComponent: Command<
         eq(deploys.targetId, input.targetId),
       ),
     )
-    // The newest Deploy that placed something. An older ref may name a
-    // workload a re-place has since moved, and running the one that is serving
-    // is the only reading of "run it now" that matches what the screen shows.
+    // The newest Deploy only: an older ref may name a workload a re-place has
+    // since moved.
     .orderBy(desc(deploys.id))
     .limit(1);
 
@@ -139,9 +109,7 @@ export const runComponent: Command<
       `${misnamed.join(', ')} must be an environment variable name`,
     );
   }
-  // What the placed release already delivers, read off the document it was
-  // placed from rather than the config rows: the rows may have moved since,
-  // and the workload the run is made from is the one this document describes.
+  // Read off the placed document, not the config rows, which may have moved since.
   const delivered = new Set([
     ...placed.desired.config.map((entry) => entry.name),
     ...(placed.desired.datastores ?? []).map((entry) => entry.name),
@@ -154,9 +122,6 @@ export const runComponent: Command<
     );
   }
 
-  // §17: the adapter refuses in a sentence and throws on a fault, so the two
-  // are reported as two things. A refusal is the operator's to act on — the
-  // wrong backend, a workload that is gone — and a fault is the far side's.
   let started: Awaited<ReturnType<typeof adapter.run>>;
   try {
     started = await adapter.run(

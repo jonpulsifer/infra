@@ -1,10 +1,6 @@
 /**
- * `listBuilds` — the global artifact-production ledger, newest first.
- *
- * A Build is not a Deploy with an unfinished final step. It records one attempt
- * to turn source into an artifact, so this projection deliberately stops at the
- * newest Deploy id that later consumed it. Placement state stays on the Deploy
- * ledger and detail screen.
+ * Lists Builds newest first, each with the newest Deploy that consumed it.
+ * Placement state stays on the Deploy ledger.
  */
 import { z } from 'zod';
 import { elapsedSince } from '../../domain/elapsed.ts';
@@ -16,7 +12,7 @@ export const BUILD_LEDGER_PAGE = 50;
 export const listBuildsInput = z
   .object({
     limit: z.number().int().positive().max(BUILD_LEDGER_PAGE).optional(),
-    /** Return Builds older than this id. */
+    /** Builds older than this id. */
     before: z.number().int().positive().optional(),
   })
   .strict();
@@ -25,7 +21,7 @@ export type ListBuildsInput = z.infer<typeof listBuildsInput>;
 
 export interface ListBuildsResult {
   readonly builds: readonly BuildListItem[];
-  /** Cursor for the next older page, or null once the ledger is exhausted. */
+  /** Null once the ledger is exhausted. */
   readonly nextBefore: number | null;
 }
 

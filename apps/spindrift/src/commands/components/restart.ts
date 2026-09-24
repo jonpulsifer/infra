@@ -1,31 +1,6 @@
 /**
- * `restartComponent` — replace a placed service's running process (§6).
- *
- * Redeploying what is already desired is refused as `UNCHANGED`, and rightly:
- * a deploy is an intent to change the desired row, and a wedged process
- * changed nothing about it. This is the act for the case that refusal leaves
- * nobody with — a service that needs bouncing, on a platform where `kubectl`
- * is not an authoring path — and it is a command beside `runComponent` for
- * the reason `DeployAdapter.restart` is a verb beside `run`: something an
- * operator asks for once, against what is placed.
- *
- * **It writes no Deploy row.** §6's one timeline is a timeline of attempts,
- * and a restart is not an attempt: the desired row is untouched, the artifact
- * is untouched, and the platform rolls what it already holds. A second Deploy
- * row would be an intent that intends nothing, refused by the very rule this
- * exists beside. What it writes instead is two events on the *current*
- * Deploy's leg of the attempt log — the adapter's sentence, which the release
- * page shows, and a `RESTARTED` checkpoint, which the workspace lists —
- * because the release that placed what was bounced is where a reader looks
- * for what happened to it.
- *
- * **Only a LIVE newest release is bounced.** A Deploy still applying is a
- * rollout this would race; a FAILED one never converged, which a restart
- * cannot fix and a deploy can. A job is refused outright: it has runs rather
- * than a process, and `Run now` is its act.
- *
- * **The ref decides what is bounced**, as for `run`: the handle `apply`
- * returned and core stored, so what rolls is what is placed.
+ * Restarts a placed service's process without writing a Deploy row. Only a LIVE
+ * newest release is bounced, and the restart is logged on that Deploy.
  */
 import { and, desc, eq } from 'drizzle-orm';
 import { z } from 'zod';
@@ -42,12 +17,7 @@ import { type Command, failed, ok } from '../types.ts';
 export const restartComponentInput = z
   .object({
     componentId: z.uuid(),
-    /**
-     * Which placement to bounce. Optional because the ordinary Component is
-     * placed once, and a screen showing that one pair should not have to say
-     * so; required in effect the moment there are two, since a restart aimed
-     * at "wherever" is a restart of something the operator did not name.
-     */
+    /** Optional while the Component is placed once; required once there are two. */
     targetId: z.uuid().optional(),
   })
   .strict();
@@ -55,11 +25,11 @@ export const restartComponentInput = z
 export type RestartComponentInput = z.infer<typeof restartComponentInput>;
 
 export interface RestartComponentResult {
-  /** The release whose process was bounced, and whose log now says so. */
+  /** The release whose log records the restart. */
   readonly deployId: number;
-  /** Where, as `<vessel>/<adapter>`. */
+  /** As `<vessel>/<adapter>`. */
   readonly target: string;
-  /** The adapter's own sentence about what it stamped and what rolls. */
+  /** The adapter's sentence about what rolls. */
   readonly detail: string;
 }
 
@@ -102,9 +72,8 @@ export const restartComponent: Command<
     )
     .orderBy(desc(deploys.id));
 
-  // The newest Deploy on each Target is the one whose phase says what is
-  // there now: an older LIVE row behind a newer intent is a release about to
-  // be replaced, not one to bounce.
+  // The newest Deploy on each Target says what is there now. An older LIVE row
+  // behind a newer intent is about to be replaced.
   const newest = new Map<string, (typeof rows)[number]>();
   for (const row of rows) {
     if (!newest.has(row.target.id)) newest.set(row.target.id, row);
@@ -149,9 +118,6 @@ export const restartComponent: Command<
     );
   }
 
-  // The adapter refuses in a sentence and throws on a fault, and the two are
-  // reported as two things for the reason `runComponent` gives: a refusal is
-  // the operator's to act on and a fault is the far side's.
   let restarted: Awaited<ReturnType<typeof adapter.restart>>;
   try {
     restarted = await adapter.restart(

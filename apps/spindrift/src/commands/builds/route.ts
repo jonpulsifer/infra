@@ -9,19 +9,8 @@ import {
 import type { BuildDispatchContext } from './dispatch.ts';
 
 /**
- * Select the route one Target will take a build from, narrowed by the App's own
- * choice where it has made one.
- *
- * §16's sentence is unchanged and the order of its clauses is why this composes
- * rather than conflicts: **the level is a threshold, then admin rank wins.**
- * The App's choice enters as `demand.routes` — the admitted set — which
- * `buildRouteCandidates` applies *alongside* the threshold and never instead of
- * it. So an App that names a route below its Target's minimum gets `null` and
- * the refusal sentence, exactly as if an operator had ranked that route first.
- *
- * `appId` is optional because the creation flow asks this question before an
- * App row exists: a draft is being reviewed, and what it wants to know is
- * whether *anything* could build for the Target it picked.
+ * The level is a threshold, then admin rank wins; an App's chosen route only
+ * narrows the admitted set. `appId` is optional: creation asks before an App exists.
  */
 export async function routeForTarget(
   targetId: string,
@@ -31,14 +20,7 @@ export async function routeForTarget(
   return (await buildRouteFor(targetId, context, appId)).route;
 }
 
-/**
- * The same selection, with every route considered and the sentence behind each.
- *
- * §3's shape rather than a boolean, and it is what makes an App's choice
- * legible: "this Target does not admit this route" is what a developer sees
- * when they picked one, and it is the difference between a Build that is
- * PENDING for a reason and one that is PENDING.
- */
+/** The same selection, with every candidate and the reason behind each. */
 export async function buildRouteFor(
   targetId: string,
   context: BuildDispatchContext,
@@ -63,15 +45,13 @@ export async function buildRouteFor(
       minimumLevel:
         (target.minimumLevel as 1 | 2 | 3 | null) ??
         DEFAULT_MINIMUM_BUILD_LEVEL,
-      // Null narrows nothing, which is the no-opinion case and every App until
-      // one says otherwise.
+      // Null narrows nothing: the App has no opinion.
       ...(chosen === null ? {} : { routes: [chosen] }),
     },
     (routeName) => context.adapters.build(routeName) !== null,
   );
 }
 
-/** The route this App asked for, or null where it has no opinion. */
 async function appBuildRoute(
   context: Pick<BuildDispatchContext, 'db'>,
   appId: string,
@@ -85,12 +65,8 @@ async function appBuildRoute(
 }
 
 /**
- * Whether one Target would take a build from one named route, and why not.
- *
- * The edit-time half of the same question `buildRouteFor` answers at dispatch,
- * so that choosing a route an installation cannot honour is refused where the
- * developer is standing rather than discovered by a Build that never runs.
- * Returns the sentence to say, or `null` when the route is fine.
+ * Refuses a route the Target will not take when it is chosen, instead of at
+ * dispatch. `null` when the route is fine.
  */
 export function refusalForChosenRoute(
   candidates: readonly BuildRouteCandidate[],

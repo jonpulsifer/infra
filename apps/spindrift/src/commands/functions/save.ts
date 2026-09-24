@@ -1,27 +1,7 @@
 /**
- * `saveFunction` — upsert the row, then deploy inline to its target.
- *
- * **A deploy failure is data on the row, not a command failure.** Save is one
- * act with two halves — write the source, then try to make it live — and the
- * first always succeeds once the input validates. So the deploy's outcome
- * lands on `url`/`deployedAt`/`error` and the command still answers `ok`; only
- * a target this installation cannot reach at all (`context.adapters.functions`
- * has no deployer for it) is a refusal, because that is a fact about the
- * request rather than the deploy attempt.
- *
- * **The environment is merged, not replaced.** `env` carries one Save's
- * changes — a string sets a name, `null` deletes it, an absent name is left
- * alone — because the browser never holds the saved values and so cannot send
- * the whole map back. The merged map is sealed onto the row and handed to the
- * deploy; an installation with no keyring is refused before anything is
- * written rather than keeping values in the clear.
- *
- * **A target switch tears the old surface down first.** Two live deploys of
- * one name — the old target still answering while the new one comes up — is
- * a name the operator no longer controls from this row, so the old deployer's
- * `remove` runs before the new `deploy` does. Best effort: its failure joins
- * the new attempt's `error` rather than blocking the save the operator asked
- * for.
+ * `saveFunction` upserts a Function and deploys it inline. A failed deploy is
+ * recorded on the row and still answers `ok`; only a target with no deployer
+ * refuses. Switching target removes the old deployment first, best effort.
  */
 import { eq } from 'drizzle-orm';
 import { z } from 'zod';
@@ -74,11 +54,8 @@ export const saveFunction: Command<
     where: (rows, { eq }) => eq(rows.name, input.name),
   });
 
-  // Without a keyring there is nothing to open an existing envelope with, and
-  // a merge seeded from `{}` would write `null` over it and redeploy with no
-  // environment — a silent loss on both the row and the live function. So an
-  // envelope this process cannot open is refused before anything is written,
-  // whatever the request asked to change.
+  // Without a keyring the saved envelope cannot be opened, and merging from {}
+  // would erase it on the row and the live function, so any change is refused.
   const sealer = context.adapters.functionEnv?.() ?? null;
   if (sealer === null && existing?.env != null) {
     return failed(

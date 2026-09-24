@@ -1,31 +1,7 @@
 /**
- * `setConfig` — write configuration for one Component@Target (§10).
- *
- * §10 in one line: **plain key-value, one mechanism, no classification, values
- * write-only, one secret per variable, pinned, and a change produces a new
- * Deploy.** Each of those is a line of code here rather than a convention:
- *
- * - **No classification.** There is no `secret: boolean` in the input and no
- *   place to put one. The asymmetry of error decides it — over-classifying
- *   costs pennies, under-classifying puts a credential inline in a delivery CR
- *   — so every variable goes to the store.
- * - **Write-only.** The value crosses one seam, in one direction, and is not
- *   returned, logged, or stored: what lands in `config_items` is the pinned
- *   reference the store minted. The result carries key names and a hash.
- * - **One secret per variable.** One `put` per key, never a blob — the blob is
- *   elegant on Kubernetes and has no cloud-runtime equivalent.
- * - **A change produces a new Deploy.** Not bookkeeping: on Kubernetes a
- *   changed reference that nothing re-applies is a workload still running the
- *   old value, so the act ends by writing an intent. Where nothing is deployed
- *   here yet, there is nothing to re-apply and the act says so rather than
- *   inventing a Deploy with no Build.
- * - **The reach rule.** The store must be reachable by *this* Target (§10), and
- *   config written for a Target that cannot reach it would be delivered by
- *   nobody.
- *
- * The audit trail is written here too, and it is metadata: who changed which
- * key when. There is no value column in `config_audit_events` to fill even if
- * this file wanted to.
+ * Writes config for one Component@Target. Values go to the store write-only and
+ * rows hold the pinned reference; a website's values are plain rows. A change
+ * redeploys the Build already desired there.
  */
 import { and, eq, inArray } from 'drizzle-orm';
 import { z } from 'zod';
@@ -73,17 +49,12 @@ import {
   readPinnedConfig,
 } from './pinned.ts';
 
-/** One variable and the value nothing will ever read back (§10). */
 const configEntry = z
   .object({
     key: z
       .string()
       .regex(VARIABLE_NAME, 'must be an environment variable name'),
-    /**
-     * Empty is a legal value — "set but blank" is a state a workload can
-     * distinguish from unset, and refusing it here would make the only way to
-     * express it a variable that is absent, which means something else.
-     */
+    /** Empty is legal: set but blank is a different state from unset. */
     value: z.string(),
   })
   .strict();
@@ -92,18 +63,7 @@ export const setConfigInput = z
   .object({
     componentId: z.uuid(),
     targetId: z.uuid(),
-    /** Absent or empty on a call that only removes (below). */
     entries: z.array(configEntry).optional(),
-    /**
-     * Keys to remove, named and nothing more.
-     *
-     * `applyConfigChange` already takes removals as their own list — this is
-     * the one place that list is exposed past this file. It is deliberately
-     * not `replaceConfig`'s diff: that upload is a stand-in for values core
-     * cannot read back, so it has to restate every key an operator means to
-     * keep. A removal does not, because deleting one key was never a claim
-     * about any other key's value.
-     */
     removals: z
       .array(
         z.string().regex(VARIABLE_NAME, 'must be an environment variable name'),
@@ -114,30 +74,18 @@ export const setConfigInput = z
 
 export type SetConfigInput = z.infer<typeof setConfigInput>;
 
-/**
- * What a config act returns.
- *
- * Keys and a hash, never values — the same posture the store contract takes, so
- * a UI built on this cannot render a secret it was handed by accident.
- */
+/** Keys and a hash, never values. */
 export interface ConfigChangeResult {
   readonly componentId: string;
   readonly targetId: string;
-  /** The keys this act wrote, sorted. */
+  /** Sorted. */
   readonly written: readonly string[];
-  /** The keys this act removed, sorted. */
+  /** Sorted. */
   readonly removed: readonly string[];
-  /** §10's hash over the document now pinned for this pair. */
   readonly configVersion: string;
-  /** The Deploy the change produced, or `null` with the reason below. */
+  /** Null when no Deploy followed. */
   readonly deployId: number | null;
-  /**
-   * Why no Deploy followed.
-   *
-   * A sentence rather than silence: "the config saved and nothing is running it
-   * yet" and "the config saved and the Target is disconnected" are different
-   * situations, and a `null` deploy id alone cannot tell them apart.
-   */
+  /** Why no Deploy followed, as a sentence. */
   readonly notDeployed: string | null;
 }
 
@@ -175,33 +123,19 @@ export const setConfig: Command<SetConfigInput, ConfigChangeResult> = async (
   return applyConfigChange(context, subject, entries, removals);
 };
 
-/** Everything a config act needs about what it is acting on. */
 export interface ConfigSubject {
   readonly componentId: string;
   readonly targetId: string;
-  /** §10's exception is derived from this and from nothing else. */
+  /** The website exception is derived from this alone. */
   readonly kind: ComponentKind;
   readonly scope: ConfigScope;
-  /**
-   * `null` exactly when this Component's configuration is baked at build time
-   * (§10's narrow website exception).
-   *
-   * A website reaches no store because it needs none: its configuration is
-   * ordinary rows a builder receives as build arguments, which is what keeps
-   * §4's "no builder ever holds a store credential" structural rather than a
-   * rule somebody has to remember.
-   */
+  /** Null exactly when the config is baked at build time, as a website's is. */
   readonly store: SecretStore | null;
 }
 
 /**
- * Resolve and check what is being configured, once.
- *
- * The reach rule is the interesting half. §10 binds the store to "the Target
- * the Component is placed on — not every Target", so it is checked against this
- * Target's discovered capabilities. Refusing here is what stops config from
- * being written into a store the workload's Target has no path to, which would
- * otherwise surface as a Deploy that comes up green with no environment.
+ * Refuses a Target that reaches no writable store: config written there would
+ * deploy green with no environment.
  */
 export async function configSubject(
   context: CommandContext,
@@ -220,7 +154,7 @@ export async function configSubject(
     };
   }
 
-  // With the boundary, because half of what names a Target lives there.
+  // With its vessel, because part of a Target's label lives there.
   const target = await context.db.query.targets.findFirst({
     where: (targets, { eq }) => eq(targets.id, input.targetId),
     with: { vessel: true },
@@ -234,9 +168,8 @@ export async function configSubject(
     };
   }
 
-  // The reach rule is about delivery, and a website's configuration is not
-  // delivered — it is baked (§10). Checking a store a website will never touch
-  // would refuse a perfectly good act on a Target that reaches no vault.
+  // A website's config is baked into the build, never delivered, so it needs no
+  // store this Target reaches.
   const buildTime = isBuildTimeConfig(component.kind);
   const adapter = buildTime ? null : storeOfRecordOf(context, target);
   if (!buildTime && adapter === null) {
@@ -263,18 +196,15 @@ export async function configSubject(
     targetId: target.id,
     kind: component.kind,
     scope,
-    // Non-null unless this is a website: `storeOfRecordOf` only ever chooses an
-    // adapter the registry answered for.
+    // Non-null unless this is a website: `storeOfRecordOf` only picks an adapter
+    // the registry answered for.
     store: adapter === null ? null : context.adapters.store(adapter),
   };
 }
 
 /**
- * The store of record for one Target (§10), or `null` if it has none.
- *
- * The two halves it folds together are §3's capabilities — what this Target can
- * reach — and the registry — what this installation has an access path to. A
- * store that satisfies only one of them is a store no value can travel through.
+ * A store this Target can reach and this installation has an adapter for, or
+ * `null`.
  */
 export function storeOfRecordOf(
   context: {
@@ -296,14 +226,8 @@ export function storeOfRecordOf(
 }
 
 /**
- * Write the values, drop the removals, and deploy what changed.
- *
- * The order matters within each key: the `put` precedes the row, so a store
- * that refuses half way through leaves every pin written so far naming a
- * version that exists, and the keys after it untouched. There is no transaction
- * that could cover both sides — the store is not in the database — so the
- * partial state is chosen rather than hoped away, and the choice is the one
- * where no reference points at nothing.
+ * Each key's `put` precedes its row, so a store that fails partway leaves every
+ * pin written so far naming a version that exists.
  */
 export async function applyConfigChange(
   context: CommandContext,
@@ -311,9 +235,8 @@ export async function applyConfigChange(
   entries: readonly { key: string; value: string }[],
   removals: readonly string[],
 ): Promise<CommandResult<ConfigChangeResult>> {
-  // One key, one kind (story 112): a key declared as a build secret is not
-  // updated or removed from here — silently converting it would hand the
-  // runtime the credential the separate list exists to keep away from it.
+  // A build secret changes only through setBuildSecrets. Converting it here would
+  // hand the runtime the credential that list keeps away from it.
   const touched = [...entries.map((entry) => entry.key), ...removals];
   if (touched.length > 0) {
     const [held] = await context.db
@@ -340,15 +263,11 @@ export async function applyConfigChange(
 
   const now = context.clock.now();
   const written: string[] = [];
-  // Narrowed once, here, so nothing below asserts a store it cannot see: the
-  // store is present exactly when the configuration is delivered rather than
-  // baked, and `configSubject` is what established that.
   const { store } = subject;
 
   for (const entry of entries) {
-    // §10's narrow exception, and the one place it is applied: a website's
-    // value never crosses the store seam, because it is going to be public the
-    // moment the site is served. Everything else goes to the store, unread.
+    // A website's value becomes public once the site is served, so it is a plain
+    // row and never crosses the store seam.
     const row =
       store === null
         ? {
@@ -397,14 +316,8 @@ export async function applyConfigChange(
     await auditConfigChange(context, subject, key, 'removed', now);
   }
 
-  // Retention applies to what was just written and to what was just removed,
-  // and for the same reason: core owns config lifecycle (§10), and a key that
-  // is gone from the document still has versions in the store that nothing else
-  // will ever come back for. The newest N survive either way, so a rollback
-  // inside the retention window still resolves.
-  //
-  // A website has nothing to reap: its rows *are* the values, so there are no
-  // versions in a store to fall past a depth.
+  // Removed keys are reaped too, because their store versions outlive the
+  // document. The newest versions survive, so a rollback inside the window resolves.
   if (store !== null) {
     for (const key of [...written, ...removals]) {
       await reapKey(subject, key);
@@ -429,13 +342,7 @@ export async function applyConfigChange(
   });
 }
 
-/**
- * Write one value to the store and return the row that pins it (§10).
- *
- * The value is an argument and never a return: what comes back is the reference
- * the store minted, which is the only thing above this line that a database
- * column will ever hold.
- */
+/** The value goes in; only the store's reference comes back. */
 async function pinnedRow(
   store: SecretStore,
   scope: ConfigScope,
@@ -455,7 +362,7 @@ async function pinnedRow(
   };
 }
 
-/** Destroy every version of one key past the retention depth (§10). */
+/** Destroys every version past the retention depth and returns how many. */
 export async function reapKey(
   subject: ConfigSubject,
   key: string,
@@ -471,23 +378,16 @@ export async function reapKey(
 }
 
 /**
- * Turn a config change into a Deploy, or say why it did not (§10).
- *
- * The Build is whatever is desired at this pair right now — a config change
- * redeploys what is running, never something else — so this is an ordinary
- * deploy of the artifact that is already live, with a new `configVersion`. A
- * pair with nothing desired has nothing to redeploy, and the first deploy will
- * pick the config up when it captures its own document.
+ * Redeploys the Build already desired here with the new config. With nothing
+ * desired, the first deploy picks the config up.
  */
 async function deployChange(
   context: CommandContext,
   subject: ConfigSubject,
   pinned: PinnedConfig,
 ): Promise<{ deployId: number | null; notDeployed: string | null }> {
-  // A website's value was baked into the artifact that is already serving, so
-  // re-applying that artifact would deliver the old value with a new
-  // `configVersion` beside it — green, and wrong. The new value reaches the
-  // site the next time one is built, and saying so is the honest answer.
+  // A website's value is baked into the serving artifact. Re-applying it would
+  // deliver the old value under a new `configVersion`.
   if (isBuildTimeConfig(subject.kind)) {
     return {
       deployId: null,
@@ -536,7 +436,7 @@ async function deployChange(
     : { deployId: null, notDeployed: placed.failure.message };
 }
 
-/** One metadata-only audit row: who changed which key when (§10). */
+/** Metadata only: who changed which key, and when. */
 export async function auditConfigChange(
   context: CommandContext,
   subject: ConfigSubject,
@@ -555,7 +455,6 @@ export async function auditConfigChange(
   });
 }
 
-/** The first key given twice, or `null`. */
 function firstDuplicate(keys: readonly string[]): string | null {
   const seen = new Set<string>();
   for (const key of keys) {
@@ -566,13 +465,8 @@ function firstDuplicate(keys: readonly string[]): string | null {
 }
 
 /**
- * Every key currently configured for one pair, sorted.
- *
- * Configured, not declared: a `build_secret` row is a separate list (story
- * 112) that no runtime document contains, so it is not in this answer — a
- * `replaceConfig` diffed against it would try to remove what it never
- * restated, and the workspace would render a build credential as if it were
- * environment.
+ * Secret references and plain rows, sorted. Build secrets are a separate list
+ * that no runtime document contains.
  */
 export async function configuredKeys(
   db: Database,

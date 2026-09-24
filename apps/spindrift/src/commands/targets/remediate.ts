@@ -1,21 +1,6 @@
 /**
- * `openPrerequisiteRemediation` — one unmet row, opened as a pull request.
- *
- * The act §13's checklist was missing. A red row said what was wrong and left
- * the operator to work out the change; this composes that change and opens it
- * where the boundary is declared.
- *
- * **It writes nothing here.** No row is marked met, no Target is touched, and
- * no vessel is. That is the same rule `connectRepository` keeps for its own
- * configuration pull request, and it is the honest one: an unmerged pull
- * request has changed nothing about the boundary, so a checklist that moved
- * would be stating a fact nobody had established. The row goes green when the
- * standing loop next probes a boundary the change has been applied to.
- *
- * **And it composes the stanza again rather than accepting one.** The browser
- * sends a vessel, a surface and a row name — never Terraform. A command that
- * took a stanza from a client would be a way to open a pull request containing
- * anything at all against the repository that owns every boundary here.
+ * `openPrerequisiteRemediation`: open a pull request with the Terraform that
+ * clears one unmet checklist row. Nothing is marked met until a probe sees it.
  */
 import { z } from 'zod';
 import { targetAdapterSchema } from '../../config/manifest.schema.ts';
@@ -33,16 +18,8 @@ import { remediationSubject } from './remediation.ts';
 
 export const openPrerequisiteRemediationInput = z
   .object({
-    /** The boundary the row belongs to. */
     vessel: z.string().trim().min(1),
-    /**
-     * The surface the row is on, omitted for a row that belongs to the
-     * boundary itself.
-     *
-     * The two checklists are different questions about the same place, so this
-     * is what says which one is being asked — never a default, because a
-     * default would answer a vessel's row with a runtime's.
-     */
+    /** Omitted for a row on the vessel's own checklist. */
     adapter: targetAdapterSchema.optional(),
     prerequisite: z.enum([...PREREQUISITES, ...VESSEL_PREREQUISITES]),
   })
@@ -55,14 +32,9 @@ export type OpenPrerequisiteRemediationInput = z.infer<
 export interface OpenPrerequisiteRemediationResult {
   readonly pullRequest: number;
   readonly branch: string;
-  /** Where the stanza landed, so the answer names the change's home. */
+  /** The file the stanza was written to. */
   readonly path: string;
-  /** True where the destination file did not exist and this created it. */
   readonly createdFile: boolean;
-  /**
-   * Always false: nothing about the boundary changed, and the row that sent
-   * this stays unmet until the loop observes otherwise (§13).
-   */
   readonly prerequisiteMet: false;
 }
 
@@ -109,9 +81,8 @@ export const openPrerequisiteRemediation: Command<
   }
 
   const remediation = remediationFor(
-    // The stored row, not the name off the request: whether the probe reached a
-    // verdict is what decides there is anything to generate at all, and a
-    // browser has no business asserting it.
+    // Composed from the stored row and never from client Terraform, so a
+    // browser cannot open a pull request with arbitrary content.
     row,
     remediationSubject(
       context.manifest,
@@ -130,9 +101,7 @@ export const openPrerequisiteRemediation: Command<
     );
   }
   if (remediation.destination.kind !== 'root') {
-    // The destination's own vessel, not the one asked about: a refusal names
-    // the project it billed, so the boundary with no root can be a different
-    // one from the surface this row is on.
+    // The destination's vessel can differ from the vessel the row is on.
     return failed(
       'NOT_DEPLOYABLE',
       `${remediation.destination.vessel} declares no Terraform root, so there is nowhere to open this change — the stanza names what a root would contain, and creating one is not something Spindrift does`,
@@ -176,16 +145,10 @@ export const openPrerequisiteRemediation: Command<
       prerequisiteMet: false,
     });
   } catch (cause) {
-    // The destination owning this already is a fact about the repository rather
-    // than a failure to reach it, so it says so in its own words instead of
-    // arriving as "could not open a pull request".
     if (cause instanceof AlreadyDeclaredError) {
       return failed('NOT_DEPLOYABLE', cause.message);
     }
-    // A repository this installation cannot reach is a fact about the world,
-    // reported as a refusal the operator can act on — never an exception the
-    // dispatch surface turns into a 500. The same rule §15 keeps for the
-    // configuration pull request.
+    // An unreachable repository is a refusal, never a thrown 500.
     const detail =
       cause instanceof GitHubAccessError
         ? 'check that the App installation still selects it'
