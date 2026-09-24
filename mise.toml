@@ -81,6 +81,14 @@ run = "bash .github/scripts/render-cluster-apps.sh"
 description = "Lint every rendered PrometheusRule and run the alert unit tests"
 run = "bash .github/scripts/check-prometheus-rules.sh"
 
+[tasks."pbx:check"]
+description = "Boot the PBX image's Asterisk against each site's rendered config with no route off the machine; check PJSIP, 911 routing and what a caller can reach (sites: folly offsite, default both)"
+run = "bash .github/scripts/pbx-check.sh"
+
+[tasks."pbx:test"]
+description = "Test the PBX check's inbound dialplan walker against fixtures"
+run = "bash .github/scripts/pbx-inbound-walk_test.sh"
+
 [tasks."tf:init"]
 description = "Initialize Terraform modules without backends"
 run = [
