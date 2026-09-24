@@ -14,10 +14,12 @@
 #      run and are not noloaded, nothing logs an error against a shipped
 #      config file, and the dialplan reloads clean;
 #   4. every handset line still sends 911, 933, ten and eleven digits, *97 and
-#      0 through the `_[*0-9]!` pattern to its own voip.ms trunk, and nothing
-#      else rings a line HANDSET does not name;
+#      0 through the `_[*0-9]!` pattern to its own voip.ms trunk, nothing
+#      else rings a line HANDSET does not name, and on folly a 911 sets
+#      GLOBAL(LAST911);
 #   5. nothing reachable from a context an inbound call starts in dials a
-#      trunk, runs a shell, spies, or grants a transfer (pbx-inbound-walk.awk).
+#      trunk, runs a shell, spies, or grants a transfer (pbx-inbound-walk.awk);
+#   6. a site with [pbx-event] logs the line Grafana and the smiirl parse.
 #
 # Usage: pbx-check.sh [site...]. The sites default to every
 # clusters/<site>/apps/pbx. PBX_CHECK_KEEP=1 keeps the work directory.
@@ -625,6 +627,13 @@ check_reload_and_handsets() {
     printf '[pbx-check-%s]\nexten => %s,1,Set(TRUNK=%s)\n same => n,Goto(%s,${EXTEN},1)\n\n' \
       "${lines[i]}" "$HANDSET_PATTERN" "${trunks[i]}" "$HANDSET_CONTEXT" >>"$ETC/pbx-check.conf"
   done
+  if has_context pbx-event; then
+    printf '%s\n' '[pbx-check-event]' \
+      'exten => s,1,Set(HANDSET=line4)' \
+      ' same => n,Set(CALLERID(num)=+1 (613) 555-0123)' \
+      " same => n,Gosub(pbx-event,s,1($EVENT_PROBE_ARGS))" \
+      ' same => n,Hangup()' '' >>"$ETC/pbx-check.conf"
+  fi
 
   local log="$SITE_DIR/asterisk.log" offset reply errors
   offset=$(wc -c <"$log")
@@ -685,6 +694,34 @@ check_reload_and_handsets() {
   else
     say "    ${#lines[@]} handset line(s) x ${#GOLDEN_NUMBERS[@]} numbers reach Dial(PJSIP/<number>@<trunk>,60)"
   fi
+
+  if [[ $site == folly ]] && ! ast 'dialplan show globals' | grep -E '^[[:space:]]*LAST911=[0-9]+[[:space:]]*$' >/dev/null; then
+    fail "a 911 from the handset did not set GLOBAL(LAST911), so a callback from 911 would be screened"
+  fi
+}
+
+# --- the pbx-event log contract ----------------------------------------------
+
+has_context() { grep -qxF "[$1]" "$ETC"/*.conf; }
+
+# Grafana and the smiirl parse this line out of VictoriaLogs.
+EVENT_PROBE_ARGS='screened,secs=3,sink=queue'
+EVENT_PROBE_WANT='pbx-event kind=screened line=line4 caller=16135550123 secs=3 sink=queue'
+
+check_events() {
+  has_context pbx-event || return 0
+  local log="$SITE_DIR/asterisk.log" got="" i
+  ast 'channel originate Local/s@pbx-check-event/n application Wait 1' >/dev/null
+  for ((i = 0; i < 50; i++)); do
+    got=$(grep -F '] NOTICE[' "$log" | grep -oE 'pbx-event kind=.*$' | tail -n 1 || true)
+    [[ -n $got ]] && break
+    sleep 0.1
+  done
+  if [[ $got == "$EVENT_PROBE_WANT" ]]; then
+    say "    the pbx-event helper logs the contract line"
+  else
+    fail "the pbx-event helper broke the log contract" "want: $EVENT_PROBE_WANT" "got:  ${got:-nothing}"
+  fi
 }
 
 # --- inbound ---------------------------------------------------------------
@@ -739,6 +776,7 @@ run_checks() {
   check_boot_log
   check_pjsip_objects
   check_reload_and_handsets "$site"
+  check_events
   check_inbound
 }
 
