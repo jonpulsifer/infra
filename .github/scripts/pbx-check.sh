@@ -50,6 +50,8 @@ REQUIRED_MODULES=(
   pbx_config.so app_dial.so app_stack.so res_prometheus.so
   codec_g722.so codec_ulaw.so
 )
+# A second dial tone and a shell; modules.conf refuses them on every site.
+FORBIDDEN_MODULES=(app_disa.so app_system.so func_shell.so)
 
 WORK=""
 ASTERISK_PID=""
@@ -488,6 +490,12 @@ check_boot_log() {
     ast "module show like $mod" | grep -E "^${mod}[[:space:]].*[[:space:]]Running[[:space:]]" >/dev/null || missing+=("$mod")
   done
   if ((${#missing[@]})); then fail "required modules are not running" "${missing[@]}"; fi
+
+  local loaded=()
+  for mod in "${FORBIDDEN_MODULES[@]}"; do
+    if ast "module show like $mod" | grep -E "^${mod}[[:space:]]" >/dev/null; then loaded+=("$mod"); fi
+  done
+  if ((${#loaded[@]})); then fail "modules.conf must refuse these, and they loaded" "${loaded[@]}"; fi
 }
 
 # --- PJSIP: declared vs loaded --------------------------------------------

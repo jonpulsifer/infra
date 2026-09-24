@@ -33,10 +33,18 @@ configMapGenerator:
       # the DID's POP has to name this server too.
       - PBX_VOIPMS_SERVER=montreal10.voip.ms
 
+  # render.sh renders every *.conf here into /etc/asterisk, where
+  # extensions.conf includes the rest by name.
   - name: pbx-site
     files:
       - config/pjsip.conf
       - config/extensions.conf
+      - config/events.conf
+      - config/inbound.conf
+      - config/spam.conf
+      - config/agent.conf
+      - config/toybox.conf
+      - config/handset-codes.conf
     # Asterisk's dialplan and this render script are written in ${...}, which
     # is also Flux's postBuild substitution syntax. Flux does not merely blank
     # what it cannot resolve here — `${PBX_*}` and `${$name}` are not valid
