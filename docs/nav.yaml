@@ -58,6 +58,7 @@ sections:
         items:
           - runbooks/install-kthx.md
           - runbooks/connect-an-agent-to-kthx.md
+          - runbooks/operate-the-office-phone.md
           - runbooks/connect-an-agent-to-the-wiki.md
           - runbooks/repair-the-rowbutt-github-credential.md
       - group: Every change

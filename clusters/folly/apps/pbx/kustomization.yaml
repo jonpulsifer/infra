@@ -27,11 +27,6 @@ configMapGenerator:
   - name: pbx-env
     literals:
       - PBX_CATHY_IP=${CATHY_IP}
-      # The sub-account whose DID this site answers. It has to be line 4's own
-      # account: the handset stops registering it the moment the provisioning
-      # profile lands, and if the PBX does not hold it instead, calls to that
-      # DID reach nobody.
-      - PBX_VOIPMS_USER=168847_1994
       # A numbered server: voip.ms requires one for encrypted calls, and
       # ca.voip.ms is an alias. montreal10 is where lines 1-3 already
       # register. voip.ms delivers each DID from the POP set on that DID, so

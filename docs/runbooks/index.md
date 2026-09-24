@@ -27,6 +27,7 @@ Operational procedures for when things misbehave. These pages are served from Cl
 - [Install a Windows desktop](install-a-windows-desktop.md) — the Windows side of the desk: one-liner installer, winget desired state, the riced PowerShell profile, and why nothing symlinks across the WSL boundary
 - [Install Windows monitoring](install-windows-monitoring.md) — the Windows desktops: windows_exporter, the sensor exporter that supplies the temperatures it cannot, and Event Log into VictoriaLogs
 - [Flame Boss exporter](../apps/flameboss.md) — the barbecue as a monitoring target: how a cook reaches Prometheus from Flame Boss's cloud, why the dashboard is empty between cooks, and what each alert means
+- [Operate the office phone](operate-the-office-phone.md) — the SPA504G's four lines through the folly PBX to voip.ms: health, provisioning the handset from git, reading the SIP, and the failure signatures that each call taught
 - [Smiirl counter](../apps/smiirl.md) — the split-flap counter that thinks the lab is Smiirl's cloud: checks, the byte-exact internet check, out-of-sync flaps and the firmware's calibration wizard
 - [Repair the Rowbutt GitHub credential](repair-the-rowbutt-github-credential.md) — the GitHub App mate mints sandbox tokens from: the boot line, the readiness gauge, forcing a resync, rotating the private key, reinstalling the App, and why a sandbox cannot push
 

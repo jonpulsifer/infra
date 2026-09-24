@@ -1,8 +1,9 @@
 ---
-# The office phone line runs through the folly PBX (clusters/folly/apps/pbx),
-# and every way it breaks is silent from the desk: the handset shows nothing
-# until someone calls and it does not ring. These three watch it from the
-# outside in — the PBX itself, its trunk to the carrier, the handset on it.
+# Every line of the office phone runs through the folly PBX
+# (clusters/folly/apps/pbx), and every way it breaks is silent from the desk:
+# the handset shows nothing until someone calls and it does not ring. These
+# three watch it from the outside in — the PBX itself, each of its four trunks
+# to the carrier, each of the four lines on the handset.
 #
 # PBXDown is the one the other two lean on. Asterisk exports its own series,
 # so when the pod is gone there is nothing left for a `!= 1` or `!= 2` to
@@ -10,8 +11,8 @@
 # `absent()` half is what catches that.
 #
 # Five minutes on every alert. A PBX rollout drops the handset's registration
-# until its next REGISTER, which is at most a minute now that line 4
-# re-registers every 60s; the trunk re-registers within seconds of boot.
+# until its next REGISTER, which is at most a minute with every line
+# re-registering every 60s; the trunks re-register within seconds of boot.
 # Neither should page.
 apiVersion: monitoring.coreos.com/v1
 kind: PrometheusRule
@@ -32,21 +33,21 @@ spec:
           labels:
             severity: critical
           annotations:
-            message: The folly PBX is down
-            description: "Prometheus has had no metrics from the PBX for five minutes. The trunk and handset alerts cannot fire while this does — their series come from the PBX itself — so the office line should be assumed dead. Check the pbx Deployment in the pbx namespace; the asterisk container logs say why it stopped."
+            message: The folly PBX is down — the office phone has no lines
+            description: "Prometheus has had no metrics from the PBX for five minutes. The trunk and handset alerts cannot fire while this does — their series come from the PBX itself — so all four office lines, 911 included, should be assumed dead. Check the pbx Deployment in the pbx namespace; the asterisk container logs say why it stopped. https://wiki.lolwtf.ca/runbooks/operate-the-office-phone/"
         - alert: PBXTrunkNotRegistered
           expr: asterisk_pjsip_outbound_registration_status{namespace="pbx"} != 1
           for: 5m
           labels:
             severity: critical
           annotations:
-            message: "The PBX is not registered to {{ $labels.domain }}"
-            description: "Registration status is {{ $value }} (0 unregistered, 2 rejected by the carrier) and has been for five minutes, so calls to this trunk's DID reach nothing. 2 means the carrier refused the credentials — check the sub-account password in 1Password item \"voip.ms sub accounts\". 0 is usually the network. `asterisk -C /etc/asterisk/asterisk.conf -rx 'pjsip show registrations'` in the pod shows the live state."
+            message: "Trunk {{ $labels.username }} is not registered"
+            description: "Registration status is {{ $value }} (0 unregistered, 2 rejected by the carrier) and has been for five minutes, so calls to this sub-account's DID reach nothing. 2 means the carrier refused the credentials — check the password in 1Password item \"voip.ms sub accounts\". 0 is usually the network. https://wiki.lolwtf.ca/runbooks/operate-the-office-phone/"
         - alert: PBXHandsetOffline
-          expr: asterisk_endpoints_state{namespace="pbx", resource="cathy"} != 2
+          expr: asterisk_endpoints_state{namespace="pbx", resource=~"line[1-4]"} != 2
           for: 5m
           labels:
             severity: warning
           annotations:
-            message: The office handset is not registered to the PBX
-            description: "Line 4 of the office SPA504G has not been registered for five minutes. Inbound calls reach the PBX and ring nobody. Lines 1-3 go straight to voip.ms and are unaffected. Check the phone has power and network, then whether it can still fetch http://10.3.0.100/cathy.xml — its profile is what points line 4 here."
+            message: "Office handset {{ $labels.resource }} is not registered to the PBX"
+            description: "That line of the office SPA504G has not been registered for five minutes, so its DID rings nobody. Every line down at once is the phone itself — power, network, or its profile, which is what points it at the PBX. https://wiki.lolwtf.ca/runbooks/operate-the-office-phone/"
