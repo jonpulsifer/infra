@@ -1,6 +1,4 @@
-# Cloud Run uses the project-singleton Binary Authorization policy. Every
-# container deployment must carry an attestation verified by the shared
-# trusted-builds authority.
+# Cloud Run enforces the project's single Binary Authorization policy.
 resource "google_binary_authorization_policy" "vessel" {
   project     = var.project
   description = "Require the trusted-builds provenance attestor for Spindrift runtimes"
@@ -16,8 +14,7 @@ resource "google_binary_authorization_policy" "vessel" {
   depends_on = [google_project_service.service]
 }
 
-# Restrict Cloud Run to the enforcing project policy so a deployer cannot
-# opt a service out of verification.
+# Pins Cloud Run to the project policy so a deployer cannot opt a service out of verification.
 resource "google_org_policy_policy" "require_binary_authorization" {
   name   = "projects/${var.project}/policies/run.allowedBinaryAuthorizationPolicies"
   parent = "projects/${var.project}"

@@ -1,7 +1,5 @@
-# The bring-your-own posture: an existing key and attestor come in as ids,
-# the module creates neither, and only the grants that can attach to what was
-# provided are wired. The README states what this caller arranges where the
-# key and attestor live.
+# Bring-your-own posture: the module creates neither key nor attestor and attaches only the
+# grants that fit them. The README lists what the caller arranges where they live.
 
 module "supply_chain" {
   source = "../.."

@@ -15,19 +15,8 @@ resource "cloudflare_zero_trust_tunnel_cloudflared_config" "this" {
   config     = var.config
 }
 
-# Routing a hostname and publishing a record for it are two decisions, and a
-# wildcard is where they come apart. A wildcard ingress rule is a routing
-# catch-all — it is how the tunnel accepts a name some other controller
-# published. A wildcard proxied CNAME is a claim over every name in the zone,
-# which answers for names nothing serves: the caller authenticates and then
-# meets a 404 at the gateway, and a deleted App keeps resolving. Apps publish
-# their own records now, so the record half of the wildcard has no work left
-# here. A caller whose zone holds nothing hand-managed, and something that
-# answers for a name no App has claimed, can declare one beside its module
-# block — `spindrift.tf` is the zone that does.
-# Several path-scoped ingress rules can share a hostname (Cloudflare routes on
-# path within it), so key on the hostname itself and de-dupe with toset rather
-# than one record per ingress entry.
+# No record for a wildcard rule: a wildcard CNAME answers for names nothing serves.
+# Path-scoped rules can share a hostname, so toset keeps one record per name.
 resource "cloudflare_dns_record" "cf" {
   for_each = toset([for ingress in var.config.ingress : ingress.hostname if ingress.hostname != null && !startswith(ingress.hostname, "*.") && ingress.publish_record])
   zone_id  = var.zone_id

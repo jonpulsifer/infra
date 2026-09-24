@@ -18,15 +18,10 @@ variable "config" {
   type = object({
     ingress = list(object({
       hostname = optional(string)
-      # Regex over the request path. A rule with one matches only that slice
-      # of its hostname, which is what lets a single path prefix go public
-      # without the rest of the origin coming with it.
+      # Regex over the request path; the rule matches only those paths on its hostname.
       path    = optional(string)
       service = string
-      # Whether this module publishes the proxied CNAME for the rule's
-      # hostname. `false` for a name some other controller publishes — an
-      # App's apex, whose record its own DNSEndpoint carries — so the rule is
-      # routing only and the zone holds one owner per name.
+      # false when another controller publishes the record, such as an App's DNSEndpoint.
       publish_record = optional(bool, true)
     }))
   })

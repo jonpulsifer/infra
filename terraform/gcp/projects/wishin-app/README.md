@@ -1,3 +1,21 @@
+# wishin-app
+
+OpenTofu root for the `wishin-app` GCP project: its Firebase project, the project org policy overrides from `terraform/modules/firebase-project-policies`, and service accounts for Firebase and its client emulators. See [Cloud](https://wiki.lolwtf.ca/platform/cloud/) on the wiki.
+
+## Develop
+
+```bash
+tofu -chdir=terraform/gcp/projects/wishin-app init -backend=false
+tofu -chdir=terraform/gcp/projects/wishin-app validate
+TF_DIR=terraform/gcp/projects/wishin-app mise run tf:plan
+```
+
+A local plan impersonates `terraform@homelab-ng.iam.gserviceaccount.com`, so your Google account needs Service Account Token Creator on it. `mise run tf:docs` regenerates the tables below.
+
+## Deploy
+
+Atlantis plans this root on a pull request that changes it. Comment `atlantis apply` to apply the plan, and a successful apply merges the pull request. State is in `gs://homelab-ng/terraform/wishin-app`.
+
 <!-- BEGIN_TF_DOCS -->
 ## Requirements
 

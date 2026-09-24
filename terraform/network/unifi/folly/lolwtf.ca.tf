@@ -47,7 +47,6 @@ resource "cloudflare_dns_record" "lab_remote_dns" {
   ttl     = 1
   comment = "terraform managed"
   proxied = false
-  # tags    = ["terraform-managed"]
 }
 
 moved {
@@ -88,9 +87,7 @@ resource "unifi_network" "lab" {
     }
   }
 
-  # lab-topology.json carries full Lab-net host IPs for Flux, Nix, and this
-  # root. Fail the plan if its selected host IPs disagree with clients.yaml's
-  # DHCP-reservation octets.
+  # lab-topology.json and clients.yaml both hold these host addresses; keep them equal.
   lifecycle {
     precondition {
       condition = alltrue([

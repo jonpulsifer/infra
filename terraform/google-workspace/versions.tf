@@ -36,7 +36,7 @@ provider "googleworkspace" {
   service_account = local.use_direct_credentials ? null : local.terraform_service_account
   access_token    = local.use_direct_credentials ? null : ephemeral.google_service_account_access_token.terraform[0].access_token
 
-  # Impersonate an admin account for DWD operations (managing POSIX account settings)
+  # Domain-wide delegation acts as this admin, which POSIX account changes need.
   impersonated_user_email = "terraform@pulsifer.ca"
   oauth_scopes            = local.admin_scopes
 }

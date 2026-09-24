@@ -1,9 +1,22 @@
-# folly bootstrap (Flux + node labels)
+# folly bootstrap
 
-Terraform root module that bootstraps FluxCD on the **folly** cluster and labels
-folly nodes. Was previously `terraform/k8s/`.
+The OpenTofu root that installs CoreDNS and Flux on the folly cluster and labels its nodes. [Kubernetes](https://wiki.lolwtf.ca/platform/kubernetes/) describes what it creates.
 
-State: `gs://homelab-ng/clusters/folly/bootstrap`
+It calls `terraform/modules/flux-bootstrap` with `flux-values.yaml`, which points Flux at `clusters/folly/flux-system`. `node-labels.tf` sets each node's role and `bgp-enabled` labels. State is in `gs://homelab-ng/clusters/folly/bootstrap`.
+
+## Develop
+
+```bash
+tofu -chdir=clusters/folly/bootstrap init -backend=false
+tofu -chdir=clusters/folly/bootstrap validate
+tofu -chdir=clusters/folly/bootstrap test
+```
+
+`bootstrap.tftest.hcl` runs against mock providers and needs no cluster access. CI runs the same three commands.
+
+## Deploy
+
+Atlantis applies this root from the PR, as [Apply an OpenTofu change](https://wiki.lolwtf.ca/runbooks/apply-an-opentofu-change/) describes. A change to `flux-values.yaml` alone does not autoplan, so comment `atlantis plan -d clusters/folly/bootstrap` on the PR. Comment `atlantis apply` before you merge. A merge without an apply does not change the cluster.
 
 <!-- BEGIN_TF_DOCS -->
 ## Requirements

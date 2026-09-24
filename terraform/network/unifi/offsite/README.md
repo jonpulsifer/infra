@@ -1,33 +1,22 @@
-# Offsite UniFi network
+# offsite UniFi
 
-Terraform root for the offsite UniFi console at `https://10.89.0.1`.
+OpenTofu root for the offsite UniFi gateway: networks, WANs, WLANs and the gateway's BGP config. See [Network](https://wiki.lolwtf.ca/platform/network/) on the wiki, and [Routing and firewall](https://wiki.lolwtf.ca/platform/network/routing-and-firewall/) for the BGP routes and zone policies.
 
-State: `gs://homelab-ng/terraform/unifi/offsite`
+`topology.tf` reads `clusters/offsite/config/cluster-topology.json`. `bgp.conf` is the FRR config for the gateway. This root declares no firewall policies, because the offsite Kubernetes network is in the built-in `Internal` zone. If that network moves to a custom zone, copy folly's cross-site policies from `terraform/network/unifi/folly/firewall.tf`.
 
-This root owns the offsite gateway networks, WANs, WLANs, and BGP/FRR config.
-Applies run through Atlantis on PRs; do not run `terraform apply` locally.
+## Develop
 
-## Cross-site BGP + firewall
+```bash
+tofu -chdir=terraform/network/unifi/offsite init -backend=false
+tofu -chdir=terraform/network/unifi/offsite validate
+TF_DIR=terraform/network/unifi/offsite mise run tf:plan
+```
 
-The offsite UCG peers **iBGP** (ASN 64512) with the folly UDM (`10.3.0.1`) over
-the Site Magic WireGuard tunnel — see `bgp.conf` and the folly side's
-`network/unifi/folly/README.md` for the full topology. That iBGP session is the
-only thing that carries the LB VIP `/32`s and pod CIDRs between the sites;
-OSPF/Site Magic carries only the subnets each gateway's Site Magic config lists
-(from this side, `10.89.0.0/28` and `192.168.1.0/24`).
+A local plan needs Google credentials for the state bucket and `OP_SERVICE_ACCOUNT_TOKEN`; `versions.tf` names the 1Password item. `mise run tf:docs` regenerates the tables below.
 
-Unlike folly, the offsite console has **no Terraform-managed firewall** and **no
-custom firewall policies** — the Kubernetes network (VLAN 2, `10.89.0.1/28`)
-lives in the default **`Internal`** zone, whose predefined `Internal ⇄ Vpn`
-rules already permit cross-site k8s traffic (pods included). So
-offsite-pod → folly works without extra rules. (Folly needs explicit policies
-only because it isolates its k8s network in a custom `Lab` zone; see
-`network/unifi/folly/firewall.tf`.) If the offsite k8s network is ever moved into
-a custom/isolated zone, mirror folly's cross-site allow policies here — matching
-the **pod CIDRs + VIP pools**, not just the node subnets. Note that a UniFi zone
-holds only the subnets of declared networks, so those two prefixes bite as
-policy *sources* and not as destinations; `network/unifi/folly/firewall.tf`
-explains the split.
+## Deploy
+
+Atlantis plans this root on a pull request that changes it. Comment `atlantis apply` to apply the plan, and a successful apply merges the pull request. State is in `gs://homelab-ng/terraform/unifi/offsite`.
 
 <!-- BEGIN_TF_DOCS -->
 ## Requirements

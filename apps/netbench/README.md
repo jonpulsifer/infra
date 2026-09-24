@@ -1,53 +1,39 @@
 # netbench
 
-A small web UI for running [`iperf3`](https://iperf.fr/) throughput/latency
-tests across the homelab and rendering the results. It exists to answer "how
-fast / how lossy is *this* network path" along three axes:
+netbench is a Go web page that runs [`iperf3`](https://iperf.fr/) tests from the
+folly cluster to named targets and shows the results. See
+[netbench](https://wiki.lolwtf.ca/apps/netbench/).
 
-| category        | path under test                                   | where the server runs                          |
-| --------------- | ------------------------------------------------- | ---------------------------------------------- |
-| `node`          | pod → in-cluster node (inter-node fabric / wire)  | `iperf3` DaemonSet (`clusters/base/apps/iperf3`) |
-| `lan`           | pod → bare host on another VLAN (inter-LAN)       | NixOS `services.iperf3` (`nix/services/iperf3.nix`) |
-| `cross-cluster` | pod → remote cluster over the Site Magic tunnel   | the same DaemonSet, running on offsite nodes   |
-
-> `iperf3` measures the **transport layer** (bandwidth, jitter, loss,
-> retransmits). For **application-layer** load testing (req/s, p95 latency)
-> use the k6-operator already deployed in `clusters/folly/apps/k6`.
-
-## How it works
-
-- `netbench` serves a web UI and a tiny JSON API. The browser sends only a
-  target **name**; the server maps that to a host/port from its config and
-  shells out to `iperf3 -c <host> -J`, so a client can never aim iperf3 at an
-  arbitrary host.
-- Targets are loaded from a JSON file (`NETBENCH_TARGETS_FILE`, default
-  `/etc/netbench/targets.json`) — in-cluster this is a ConfigMap. See
-  [`targets.example.json`](./targets.example.json).
-
-### Configuration
-
-| env var                 | default                       | meaning                          |
-| ----------------------- | ----------------------------- | -------------------------------- |
-| `NETBENCH_ADDR`         | `:8080`                       | listen address                   |
-| `NETBENCH_TARGETS_FILE` | `/etc/netbench/targets.json`  | path to the targets JSON file    |
-
-### API
-
-- `GET /api/targets` — configured targets
-- `POST /api/run` — body `{"target","duration","protocol":"tcp|udp","reverse","parallel"}` → result summary
-- `GET /healthz`
-
-## Local development
+## Run
 
 ```bash
 go build -o netbench .
 NETBENCH_TARGETS_FILE=./targets.example.json ./netbench
-# open http://localhost:8080  (needs iperf3 on PATH and reachable servers)
 ```
+
+Open http://localhost:8080. A test needs `iperf3` on `PATH` and a target that
+answers.
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `NETBENCH_ADDR` | `:8080` | Listen address |
+| `NETBENCH_TARGETS_FILE` | `/etc/netbench/targets.json` | The targets file. `targets.example.json` shows its format. |
+
+The browser sends only a target name. The server finds the host and port in
+the targets file and runs `iperf3 -c <host> -J`, so a client cannot aim
+`iperf3` at another host.
+
+| Route | Does |
+| --- | --- |
+| `GET /api/targets` | Lists the targets |
+| `POST /api/run` | Runs a test. The body is `{"target","duration","protocol":"tcp\|udp","reverse","parallel"}`. |
+| `GET /healthz` | Health check |
+
+The package has no tests.
 
 ## Deploy
 
-GitOps via Flux. The web UI is `clusters/folly/apps/netbench`; the per-node
-iperf3 servers are the shared `clusters/base/apps/iperf3` DaemonSet referenced
-from both clusters. The image is published by `.github/workflows/containers.yml`
-(registered in `.github/containers.json`).
+`.github/workflows/containers.yml` publishes `ghcr.io/jonpulsifer/netbench`.
+Flux applies `clusters/folly/apps/netbench/`, where `02-targets.yaml` holds the
+targets. The `iperf3` servers are the DaemonSet in `clusters/base/apps/iperf3/`,
+which uses the same image, and `nix/services/iperf3.nix` on the hosts.

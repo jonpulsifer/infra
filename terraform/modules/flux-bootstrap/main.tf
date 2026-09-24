@@ -10,14 +10,8 @@ resource "github_repository_deploy_key" "this" {
   read_only  = "true"
 }
 
-# CoreDNS is part of the bootstrap boundary: Flux requires cluster DNS before it
-# can fetch and reconcile its own desired state.
-#
-# The boundary has a shipping quirk: both clusters' bootstrap roots consume
-# this module and never automerge, so a change here is applied only when
-# someone comments `atlantis apply` on the PR *before* merging it. A change
-# merged without that sits in git unapplied — invisibly, because every other
-# root in this repository applies on merge.
+# Flux needs cluster DNS before it can reconcile, so CoreDNS is bootstrap. The bootstrap
+# roots never automerge: comment `atlantis apply` on the PR before merging a change here.
 
 resource "kubernetes_service_account_v1" "coredns" {
   metadata {
@@ -175,21 +169,15 @@ resource "kubernetes_deployment_v1" "coredns" {
       "k8s-app"            = "kube-dns"
       "kubernetes.io/name" = "CoreDNS"
     }
-    # CoreDNS builds its API-server root pool once, at process start. A CA
-    # rotation rewrites kube-root-ca.crt in place and nothing else restarts
-    # CoreDNS, so it keeps trusting the old CA and silently wedges. Reloader
-    # turns that ConfigMap change into the restart that makes the rotation take.
+    # CoreDNS reads the API-server CA only at start, so it must restart when
+    # kube-root-ca.crt rotates or it keeps trusting the old CA.
     annotations = {
       "configmap.reloader.stakater.com/reload" = "kube-root-ca.crt"
     }
   }
   spec {
-    # Two, spread across nodes where there are two to spread across: a CoreDNS
-    # that loses its API-server watches keeps serving its last snapshot and
-    # still answers /ready, so a single replica is a single copy of a cache
-    # nothing refreshes. A second replica does not prevent the wedge — a CA
-    # rotation breaks both — but it is the floor for cluster DNS surviving one
-    # pod or one node.
+    # A CoreDNS that loses its API-server watches serves a stale snapshot and still
+    # passes /ready; two replicas keep cluster DNS through the loss of one pod or node.
     replicas = 2
     strategy {
       type = "RollingUpdate"
@@ -212,8 +200,7 @@ resource "kubernetes_deployment_v1" "coredns" {
         priority_class_name = "system-cluster-critical"
         affinity {
           pod_anti_affinity {
-            # Preferred, not required: a site down to one schedulable node
-            # still gets both replicas rather than one Pending forever.
+            # Preferred, so a site down to one schedulable node still runs both replicas.
             preferred_during_scheduling_ignored_during_execution {
               weight = 100
               pod_affinity_term {

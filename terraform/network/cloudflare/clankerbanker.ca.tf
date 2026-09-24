@@ -1,9 +1,5 @@
-# A zone Spindrift mints in with `reaches: [public]`, serving a single App at
-# the apex (`apps/clankerbanker`). The zone already exists in the account —
-# this adopts it rather than creating it, via the `import` block below. The
-# registrar is Porkbun; the two steps this root cannot do are at the
-# registrar, by hand: point the NS records at `name_servers` below, then
-# publish the `ds_record` output so DNSSEC leaves pending.
+# At the registrar (Porkbun), by hand: set NS to the name_servers output, then
+# publish the ds_record output so DNSSEC leaves pending.
 locals {
   clankerbanker_ca_zone_settings = {
     always_online            = "on"
@@ -46,12 +42,7 @@ resource "cloudflare_zone_setting" "clankerbanker_ca" {
   value      = each.value
 }
 
-# The apex record is the App's vanity `@`, published by Spindrift's own
-# DNSEndpoint and never written here — see `embarrassing.ca.tf` for why. The
-# Apps tunnel carries a `hostname = "clankerbanker.ca"` ingress rule with
-# `publish_record = false` (`spindrift.tf`) because cloudflared's `*.<zone>`
-# never matches the apex. `www` is a redirect to the apex, not a second name
-# the App answers on.
+# The App's DNSEndpoint publishes the apex record. www only redirects to the apex.
 resource "cloudflare_dns_record" "www_clankerbanker_ca" {
   zone_id = cloudflare_zone.clankerbanker_ca.id
   comment = "terraform managed"

@@ -4,11 +4,8 @@ resource "google_logging_organization_sink" "audit_logs" {
   destination      = "pubsub.googleapis.com/projects/lolcorp/topics/audit-log-ingest"
   include_children = true
 
-  # Off. Every exported event costs a Gemini call in lolcorp's audit-pipeline,
-  # and a Spindrift dispatch retry loop turned that into ~85k calls/day
-  # (2026-08-14/15) — straight through the billing budgets. Re-enable only
-  # with the pipeline capped (pre-LLM filter or daily budget), and keep the
-  # token-plumbing exclusion below when you do.
+  # Each exported event costs a Gemini call in lolcorp's audit-pipeline. Enable only
+  # with that pipeline capped, and keep the token-plumbing exclusion.
   disabled = true
 
   filter = <<-EOT
@@ -33,11 +30,7 @@ resource "google_logging_organization_sink" "audit_logs" {
     filter = "LOG_ID(\"cloudaudit.googleapis.com/data_access\") AND protoPayload.methodName=~\"Get|List|Watch\""
   }
 
-  # Workload-identity token plumbing. Every federated call from the homelab
-  # mints STS exchanges, impersonations, and signed-URL SignBlobs — none of
-  # which match the read exclusion above, so a single busy loop can export
-  # tens of thousands of events a day that describe nothing but our own
-  # machinery authenticating to itself.
+  # Workload-identity token calls; the read exclusion above does not match them.
   exclusions {
     name   = "token-plumbing"
     filter = "LOG_ID(\"cloudaudit.googleapis.com/data_access\") AND protoPayload.methodName=~\"SignBlob|SignJwt|GenerateAccessToken|GenerateIdToken|ExchangeToken\""

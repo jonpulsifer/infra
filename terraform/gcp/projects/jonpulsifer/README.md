@@ -1,3 +1,23 @@
+# jonpulsifer
+
+OpenTofu root for the `jonpulsifer` GCP project: its APIs, its IAM policy, a storage bucket and the `dotfiles` source repository. See [Cloud](https://wiki.lolwtf.ca/platform/cloud/) on the wiki.
+
+`google_project_iam_policy.explicit` in `iam.tf` is authoritative. A project binding that this root does not declare is removed on the next apply.
+
+## Develop
+
+```bash
+tofu -chdir=terraform/gcp/projects/jonpulsifer init -backend=false
+tofu -chdir=terraform/gcp/projects/jonpulsifer validate
+TF_DIR=terraform/gcp/projects/jonpulsifer mise run tf:plan
+```
+
+A local plan impersonates `terraform@homelab-ng.iam.gserviceaccount.com`, so your Google account needs Service Account Token Creator on it. `mise run tf:docs` regenerates the tables below.
+
+## Deploy
+
+Atlantis plans this root on a pull request that changes it. Comment `atlantis apply` to apply the plan, and a successful apply merges the pull request. State is in `gs://homelab-ng/terraform/jonpulsifer`.
+
 <!-- BEGIN_TF_DOCS -->
 ## Requirements
 

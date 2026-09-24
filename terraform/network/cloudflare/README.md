@@ -1,3 +1,23 @@
+# cloudflare
+
+OpenTofu root for the lab's Cloudflare account. See [Ingress and DNS](https://wiki.lolwtf.ca/platform/network/ingress-and-dns/) on the wiki.
+
+Each zone has its own file with its DNS records, settings and rules. The root also declares the Cloudflare Tunnels through `modules/tunnel/`, the Pages projects that serve the wiki and the OIDC issuer, and account lists. `topology.tf` reads each cluster's `cluster-topology.json`.
+
+## Develop
+
+```bash
+tofu -chdir=terraform/network/cloudflare init -backend=false
+tofu -chdir=terraform/network/cloudflare validate
+TF_DIR=terraform/network/cloudflare mise run tf:plan
+```
+
+A local plan needs Google credentials for the state bucket and `OP_SERVICE_ACCOUNT_TOKEN`, which the providers use to read their tokens from 1Password. `mise run tf:docs` regenerates the tables below.
+
+## Deploy
+
+Atlantis plans this root on a pull request that changes it. Comment `atlantis apply` to apply the plan, and a successful apply merges the pull request. State is in `gs://homelab-ng/terraform/cloudflare`.
+
 <!-- BEGIN_TF_DOCS -->
 ## Requirements
 

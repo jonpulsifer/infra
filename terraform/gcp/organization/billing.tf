@@ -3,9 +3,7 @@ data "google_billing_account" "cloudlab" {
   open         = true
 }
 
-# Monthly budget alarms on the Cloudlab billing account. Each budget emails
-# the billing-account admins (the API default when no notifications rule is
-# set) at 50/90/100% of actual spend and at 100% of forecasted spend.
+# With no notifications rule, the API emails the billing-account admins.
 locals {
   budgets = {
     "5-bones"  = { display_name = "5 bones", units = "5" }
@@ -46,8 +44,6 @@ resource "google_billing_budget" "bones" {
   }
 }
 
-# Adopt the budgets that already exist on the account so the first apply
-# updates them in place instead of creating duplicates.
 import {
   to = google_billing_budget.bones["5-bones"]
   id = "billingAccounts/009BE0-2F835F-F20651/budgets/eb4071bd-13b5-4c7e-96d6-668e69625576"

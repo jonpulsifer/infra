@@ -1,6 +1,5 @@
 locals {
-  # node_cidr keeps the gateway-host (.1) form the UniFi network subnet expects;
-  # cidrhost() masks host bits so the static_records/dhcp ranges below are unchanged.
+  # UniFi subnets take the gateway-host (.1) form; cidrhost() ignores host bits.
   node_cidr = "${cidrhost(local.topology.K8S_NODE_CIDR, 1)}/${split("/", local.topology.K8S_NODE_CIDR)[1]}"
   lb_cidr   = local.topology.LB_RANGE
   static_records = {
@@ -51,5 +50,4 @@ resource "cloudflare_dns_record" "k8s_remote_dns" {
   ttl     = 1
   comment = "terraform managed"
   proxied = false
-  # tags    = ["terraform-managed"]
 }

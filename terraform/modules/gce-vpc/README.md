@@ -1,3 +1,16 @@
+# gce-vpc
+
+Module for a Compute Engine VPC: the network, one subnet, and an SSH firewall rule that allows the Identity-Aware Proxy range, or any source when `external_ssh` is true. `terraform/gcp/projects/homelab-ng/compute.tf` calls it for `oldboy`. See [Cloud](https://wiki.lolwtf.ca/platform/cloud/) on the wiki.
+
+## Develop
+
+```bash
+tofu -chdir=terraform/modules/gce-vpc init -backend=false
+tofu -chdir=terraform/modules/gce-vpc validate
+```
+
+`mise run tf:docs` regenerates the tables below. Atlantis plans `terraform/gcp/projects/homelab-ng` when this module changes.
+
 <!-- BEGIN_TF_DOCS -->
 ## Requirements
 

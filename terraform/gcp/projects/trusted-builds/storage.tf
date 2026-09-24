@@ -1,7 +1,5 @@
-# Nothing in this root writes here: no build step, no workflow, no schedule. The
-# bucket is declared because its objects still exist and `force_destroy = false`
-# means a removal fails on them rather than deleting them. Remove it with its
-# policy once the objects are accounted for.
+# Nothing writes here. With force_destroy off, the remaining objects block removal;
+# remove the bucket and its policy once they are accounted for.
 resource "google_storage_bucket" "trusted_artifacts" {
   name                        = "trusted-artifacts"
   location                    = local.region

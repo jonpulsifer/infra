@@ -24,10 +24,8 @@ resource "cloudflare_zone" "pulsifer_ca" {
   name = "pulsifer.ca"
 }
 
-# status is optional and NOT computed, so leaving it unset plans
-# "disabled" -> null on every run and never converges. Declare the desired
-# state; the parent .ca delegation needs the DS record from this resource's
-# `ds` output before any resolver actually validates the zone.
+# status is optional and not computed: unset, it plans "disabled" -> null forever.
+# Resolvers validate only after the `ds` value is published at the .ca registrar.
 resource "cloudflare_zone_dnssec" "pulsifer_ca_dnssec" {
   zone_id = cloudflare_zone.pulsifer_ca.id
   status  = "active"
@@ -49,7 +47,6 @@ resource "cloudflare_dns_record" "www_pulsifer_ca" {
   ttl     = 1
 }
 
-# pulsifer.ca gmail mx records
 resource "cloudflare_dns_record" "mx_pulsifer_ca" {
   zone_id  = cloudflare_zone.pulsifer_ca.id
   name     = "pulsifer.ca"

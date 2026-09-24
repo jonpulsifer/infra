@@ -1,18 +1,20 @@
 # spindrift-vessel
 
-One project made a Spindrift vessel: enabled APIs, the runtime identity and
-the controller's grants, and the Binary Authorization admission policy. The
-home-vessel-only pieces (controller service account, federation bindings,
-source bucket, cluster Secret Manager readers) stay in the home vessel's root.
+Module that makes one GCP project a kthx vessel, a boundary that kthx deploys into: its APIs, the runtime identity, the controller's grants, and the Binary Authorization admission policy. `terraform/gcp/projects/bluenose/vessel.tf` calls it. See [kthx built apps](https://wiki.lolwtf.ca/apps/kthx/built-apps/) on the wiki.
 
-Pass `services` and `controller_roles` as locals declared in the calling
-root's `services.tf` and `iam.tf`: Spindrift's generated remediation stanzas
-append flat resources to those files and dedupe by grepping them for the
-quoted service/role strings, so the lists must live where the generator looks.
+- Declare `services` and `controller_roles` as locals in the calling root's `services.tf` and `iam.tf`. kthx proposes Terraform for unmet prerequisites into those files and reads them to skip what they already declare.
+- Pass `attestor` from the `spindrift-supply-chain` module's `attestor` output, or an existing `projects/*/attestors/*` ID.
 
-`attestor` is explicit wiring, not a default: pass the
-`terraform/modules/spindrift-supply-chain` module's `attestor` output (or the
-same `projects/*/attestors/*` id a bring-your-own installation carries).
+The controller service account, federation bindings, source bucket and cluster Secret Manager readers stay in the home vessel's root.
+
+## Develop
+
+```bash
+tofu -chdir=terraform/modules/spindrift-vessel init -backend=false
+tofu -chdir=terraform/modules/spindrift-vessel validate
+```
+
+`mise run tf:docs` regenerates the tables below. Atlantis plans `terraform/gcp/projects/bluenose` when this module changes.
 
 <!-- BEGIN_TF_DOCS -->
 ## Requirements

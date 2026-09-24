@@ -1,18 +1,18 @@
 # @repo/kthx
 
-The half of [kthx](../../docs/apps/kthx.md) that has no runtime
-behind it: the files a host serves as bytes, and the `/_/` contract `kthx dev`
-answers.
+The static files a [kthx](https://wiki.lolwtf.ca/apps/kthx/sites/) host serves: the landing page on the zone apex, the browser SDK (`window.kthx`), the agent reference, and the default favicon.
 
-| File | What it is |
-| --- | --- |
-| `landing.html` | the apex page, served at `https://kthx.dev/` |
-| `sdk.js` | `window.kthx`, served at `/sdk.js` and every site's `/api/sdk.js` |
-| `skill.md` | the agent reference, served at `/skill.md` and written by `kthx init` |
-| `favicon.ts` | the generic icon a kthx host answers with when a bundle ships none |
-| `assets.ts` | where the three files above are on disk, for a server that reads them |
-| `underscore.ts` | the `/_/` key→JSON contract |
+The `apps/kthx` server reads `landing.html`, `sdk.js` and `skill.md` from disk at run time through `assets.ts`. `kthx init` writes `skill.md` into a new site as `SKILL.md`. The subpath exports in `package.json` are the public modules.
 
-`apps/kthx` serves the assets from its own process, and answers `/_/` with 410
-on every site host. `kthx dev` answers `/_/` over a `Map`, which is all a
-`KthxStore` takes.
+## Develop
+
+```bash
+bun run --cwd packages/kthx typecheck
+bun run --cwd packages/kthx lint
+```
+
+The package has no tests of its own. The tests in `apps/kthx/test/server/` cover how the server serves these files.
+
+## Deploy
+
+The package has no manifests of its own. The `apps/kthx` image copies it in, and the CLI bundle from `apps/kthx/pack.ts` inlines the agent reference and the favicon.

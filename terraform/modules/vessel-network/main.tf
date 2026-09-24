@@ -1,9 +1,5 @@
-# A vessel's private network boundary, for vessels that hold Cloud SQL or
-# Memorystore. Private Service Connect via service connectivity automation:
-# one service connection policy per service class authorizes the producer to
-# create its endpoint in the vessel subnet, so nothing here is per-instance.
-# Optional per vessel — a vessel serving only Cloud Run and Firebase Hosting
-# needs none of this.
+# A vessel's private network for Cloud SQL and Memorystore over Private Service Connect.
+# One service connection policy per service class lets its producer create endpoints in the subnet.
 
 resource "google_compute_network" "vessel" {
   project                 = var.project
@@ -20,11 +16,7 @@ resource "google_compute_subnetwork" "vessel" {
   private_ip_google_access = true
 }
 
-# Two policies rather than one because a policy is scoped to a single
-# (project, network, region, service class) combination, and the two engines
-# use different classes. Both draw endpoints from the vessel subnet — a
-# regular subnet is the right kind of object here, no special-purpose range.
-
+# A policy covers one project, network, region and service class.
 resource "google_network_connectivity_service_connection_policy" "cloudsql" {
   project       = var.project
   name          = "${var.name}-cloudsql"
@@ -37,9 +29,8 @@ resource "google_network_connectivity_service_connection_policy" "cloudsql" {
   }
 }
 
-# Memorystore for Valkey — `gcp-memorystore`, not `gcp-memorystore-redis`,
-# which is Redis Cluster's class. Valkey does not support custom service
-# instance scopes, so the policy carries the defaults and nothing else.
+# gcp-memorystore is Valkey's class; gcp-memorystore-redis is Redis Cluster's.
+# Valkey supports no custom service instance scopes.
 resource "google_network_connectivity_service_connection_policy" "memorystore" {
   project       = var.project
   name          = "${var.name}-memorystore"

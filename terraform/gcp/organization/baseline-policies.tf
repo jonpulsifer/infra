@@ -1,13 +1,5 @@
-# Cloud Security Baseline — Organization-level policies
-# https://cloud.google.com/resource-manager/docs/manage-baseline-constraints
-#
-# Managed constraints (.managed.) are enforced as booleans.
-# Google defines and updates the specific behavior.
-#
-# WARNING: Managed constraints cannot be overridden at folder/project level.
-# Review project-level policy overrides before applying.
-
-# --- Managed Constraints ---
+# Cloud Security Baseline org policies: https://cloud.google.com/resource-manager/docs/manage-baseline-constraints
+# Google defines and updates what each managed (.managed.) constraint enforces.
 
 resource "google_org_policy_policy" "managed_disableServiceAccountKeyCreation" {
   name   = "${data.google_organization.org.name}/policies/iam.managed.disableServiceAccountKeyCreation"
@@ -75,8 +67,6 @@ resource "google_org_policy_policy" "managed_restrictProtocolForwardingCreationF
   }
 }
 
-# --- Standard Boolean Constraints ---
-
 resource "google_org_policy_policy" "iam_automaticIamGrantsForDefaultServiceAccounts" {
   name   = "${data.google_organization.org.name}/policies/iam.automaticIamGrantsForDefaultServiceAccounts"
   parent = data.google_organization.org.name
@@ -106,8 +96,6 @@ resource "google_org_policy_policy" "compute_setNewProjectDefaultToZonalDNSOnly"
     }
   }
 }
-
-# --- Standard List Constraints ---
 
 resource "google_org_policy_policy" "iam_allowedPolicyMemberDomains" {
   name   = "${data.google_organization.org.name}/policies/iam.allowedPolicyMemberDomains"

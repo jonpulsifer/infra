@@ -33,35 +33,13 @@ resource "unifi_firewall_group" "teleport_cidr" {
   members = ["192.168.2.0/24"]
 }
 
-# Cross-site (Site Magic) k8s reachability CIDRs.
-#
-# Read the SOURCE and DESTINATION halves of the cross-site policies differently,
-# because the gateway picks a forward chain from each half differently.
-#
-# SOURCE is load-bearing for every CIDR listed. Zone entry is by ingress
-# interface, so a pod-sourced or VIP-sourced packet leaving br8 is in the Lab
-# zone regardless of its address, and the Lab->Vpn chain closes with a DROP.
-# Omit 10.100.0.0/20 here and pod-sourced traffic to an offsite node is dropped.
-#
-# DESTINATION only dispatches for the node CIDR. A UniFi zone holds the subnets
-# of *declared* networks and nothing else, and the Cilium LB pool and pod CIDR
-# are BGP-learned, so they are in no zone: a packet addressed to one misses the
-# zone match and takes the source zone's -> WAN fall-through, which accepts. The
-# other destination entries are therefore declared intent the zone dispatch
-# never consults. Keep them — they document the boundary, they cost nothing in a
-# hash:net ipset, and they become live the day the prefixes are ever zoned.
-#
-# The one cross-site policy whose destination genuinely dispatches is
-# folly_lb_to_nest_lan below: the offsite subnets are declared networks on the
-# far console, so Site Magic carries them into the Vpn zone.
+# Source zone comes from the ingress interface and Lab -> Vpn ends in a DROP, so every source CIDR matters.
+# As destinations, LB and pod CIDRs are in no zone and fall through to -> WAN, which accepts.
 locals {
-  # Cross-site k8s CIDRs derived from the network SSOT (topology.tf).
-  # folly_k8s_cidrs covers the folly cluster's node subnet, Cilium LB VIP pool,
-  # and pod CIDR.  nest_k8s_cidrs covers the offsite cluster's equivalent.
   folly_k8s_cidrs = [
-    local.topology.K8S_NODE_CIDR,   # nodes (Kubernetes network, VLAN 8)
-    local.lb_range,                 # Cilium LB VIP pool
-    local.topology.CILIUM_POD_CIDR, # pod CIDR
+    local.topology.K8S_NODE_CIDR,
+    local.lb_range,
+    local.topology.CILIUM_POD_CIDR,
   ]
   nest_k8s_cidrs = [
     local.offsite_topology.K8S_NODE_CIDR,
@@ -313,8 +291,7 @@ resource "unifi_firewall_policy" "prometheus_windows_exporters" {
   }
 }
 
-# The sensor half of the same scrape. OhmGraphite listens on its own port
-# rather than inside windows_exporter, so the policy above does not cover it.
+# OhmGraphite sensors listen on their own port, outside windows_exporter's.
 resource "unifi_firewall_policy" "prometheus_windows_sensors" {
   name                 = "Allow Prometheus Windows Sensors"
   action               = "ALLOW"
@@ -456,14 +433,8 @@ resource "unifi_firewall_policy" "teleport_cidr_to_lab" {
   }
 }
 
-# The offsite client LAN reaches folly's Cilium LB VIPs.
-#
-# Clients on the offsite Default network (nest.pulsifer.ca) resolve folly-hosted
-# hostnames to addresses in folly's LB pool and route to them over Site Magic.
-# The reply is sourced from the VIP, which sits in the Lab zone, so without this
-# the SYN is accepted but the SYN-ACK is dropped on the Lab->Vpn forward and the
-# connection blackholes. Scoped to the LB range rather than local.folly_k8s_cidrs
-# so folly pods and nodes still cannot initiate into the offsite LAN.
+# Replies from folly LB VIPs to the offsite LAN are Lab-zone traffic, dropped on Lab -> Vpn
+# without this. Only the LB range, so folly pods and nodes cannot initiate into that LAN.
 resource "unifi_firewall_policy" "folly_lb_to_nest_lan" {
   name                 = "Allow Folly LB VIPs to Nest LAN"
   action               = "ALLOW"
@@ -488,25 +459,8 @@ resource "unifi_firewall_policy" "folly_lb_to_nest_lan" {
   }
 }
 
-# The PBX and the handset it rings are in different zones, and nothing else
-# opens that direction. Management is a declared network, so unlike the
-# cross-site policies above this destination genuinely dispatches — the Lab ->
-# Internal chain is the one consulted, and it has no general allow.
-#
-# Both halves of a call need it, for different reasons:
-#
-#   - cathy REGISTERs to the LB VIP. The VIP is BGP-learned and in no zone, so
-#     her SYN takes Internal's -> WAN fall-through and is accepted; the reply is
-#     sourced from the VIP, which *is* in the Lab zone, and dies on Lab ->
-#     Internal. Same shape as folly_lb_to_nest_lan.
-#   - Ringing her is an INVITE the pod originates, SNAT'd to its node. That is
-#     the node CIDR, also Lab.
-#
-# So the source is folly_k8s_cidrs rather than just the LB range: drop the pod
-# and node prefixes and inbound calls reach Asterisk and never reach the phone.
-# The destination is one host — this is a desk phone, not a subnet — and the
-# ports are ANY because SIP signalling on 5060 and the RTP range travel
-# together and a port list here would be a second place to keep them in sync.
+# Lab -> Internal has no general allow. REGISTER replies come from the LB VIP and INVITEs
+# are SNAT'd to a node, so the source is folly_k8s_cidrs; ANY ports cover SIP and RTP.
 resource "unifi_firewall_policy" "folly_pbx_to_handset" {
   name                 = "Allow Folly PBX to Office Handset"
   action               = "ALLOW"
