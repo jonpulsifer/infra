@@ -30,7 +30,6 @@
     extraModulePackages = [ ];
 
     loader = {
-      # Use the systemd-boot EFI boot loader.
       systemd-boot.enable = lib.mkDefault true;
       efi.canTouchEfiVariables = lib.mkDefault true;
       timeout = lib.mkDefault 0;
@@ -41,9 +40,7 @@
     ];
   };
 
-  # Disk layout and fileSystems are declared by disko (see ../../disko) for
-  # k8s nodes. The install ISO imports this hardware module too but gets its
-  # root filesystem from installation-cd-minimal.nix, so nothing is declared here.
+  # fileSystems come from disko on k8s nodes and from the installer modules on the ISO and netboot images.
 
   swapDevices = [ ];
 }

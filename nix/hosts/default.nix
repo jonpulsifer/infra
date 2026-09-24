@@ -1,25 +1,10 @@
-# The fleet registry: one entry per NixOS closure this repo builds.
-#
-# This is the only list. `flake.nix` maps it into `nixosConfigurations`,
-# `packages`, `checks`, and the deploy-host list for the `nix run` apps — none
-# of those are maintained by hand, so none of them can drift from each other.
-#
-# Fields, all optional:
-#   system        build platform (default "x86_64-linux")
-#   tags          Tailscale ACL tags. For a k8s node, the cluster tag ("folly"
-#                 or "offsite") is also what selects its cluster — see
-#                 ../profiles/k8s-node.nix.
-#   kind          "host" (deployable, gets the fleet baseline), "image"
-#                 (built and flashed/imported, gets only ../profiles/base.nix),
-#                 or "package" (a plain derivation, no NixOS closure at all:
-#                 `module` is callPackage'd and `artifact` does not apply)
-#   baseline      override the baseline implied by `kind`
-#   module        the configuration (default ./<name>.nix)
-#   artifact      attribute under config.system.build to expose as a package
-#   packageSystem which packages.<system> the artifact is published under
-#                 (default "x86_64-linux"; see the note in flake.nix)
+# The fleet registry. flake.nix derives every output from it through ../lib/registry.nix.
+# Optional fields: system (build platform, default x86_64-linux); tags (Tailscale tags; "folly" or
+# "offsite" sets a k8s node's cluster); kind (host, image or package, default host); baseline
+# (overrides kind's default); module (default ./<name>.nix, callPackage'd for a package); artifact
+# (the config.system.build attribute published as a package, unused for a package); packageSystem
+# (the packages.<system> the result publishes under, default x86_64-linux).
 {
-  # ── folly: on-site Kubernetes ──────────────────────────────────────────────
   optiplex = {
     tags = [ "folly" ];
   };
@@ -30,7 +15,6 @@
     tags = [ "folly" ];
   };
 
-  # ── offsite: remote-site Kubernetes ────────────────────────────────────────
   oldschool = {
     tags = [ "offsite" ];
   };
@@ -38,7 +22,6 @@
     tags = [ "offsite" ];
   };
 
-  # ── lab Raspberry Pis ──────────────────────────────────────────────────────
   cloudpi4 = {
     system = "aarch64-linux";
     artifact = "sdImage";
@@ -65,10 +48,8 @@
     artifact = "sdImage";
   };
 
-  # armv6l Pi Zero W: no native builder or cache exists for this arch, so these
-  # are cross-compiled (../hardware/pi0.nix sets nixpkgs.crossSystem) on forge,
-  # hence the aarch64-linux build platform matching forge's native architecture
-  # — and hence the aarch64 package alias, unlike every other Pi below.
+  # armv6l Pi Zero W, cross-compiled from aarch64-linux (../hardware/pi0.nix), so the
+  # image publishes under aarch64-linux too.
   radiopi0 = {
     system = "aarch64-linux";
     artifact = "sdImage";
@@ -80,16 +61,12 @@
     packageSystem = "aarch64-linux";
   };
 
-  # ── cloud ──────────────────────────────────────────────────────────────────
   oldboy = {
     tags = [ "gcp" ];
     artifact = "googleComputeImage";
   };
 
-  # ── images ─────────────────────────────────────────────────────────────────
-  # rackpi5 is the image-only source for spore's native-boot publisher. Forge's
-  # EEPROM keeps this signed HTTP/RAM artifact as its fallback path, so the full
-  # toplevel is still built even though nothing deploys to it.
+  # Nothing deploys rackpi5: spore signs and serves it as forge's EEPROM HTTP boot fallback.
   rackpi5 = {
     system = "aarch64-linux";
     kind = "image";
@@ -124,31 +101,27 @@
     artifact = "googleComputeImage";
   };
 
-  # A skiff's kernel and initrd, plus the manifest that says how to boot them.
-  # Built and launched on the same box; nothing deploys it.
+  # A skiff's kernel, initrd and boot manifest, built and launched on the same box.
   hull-nixos = {
     kind = "image";
     module = ../images/hull-nixos.nix;
     artifact = "hull";
   };
 
-  # The FHS skiff: kernel, initrd, and a flattened runner-image rootfs disk.
-  # Not a NixOS closure — the guest carries no Nix at all.
+  # The FHS skiff: kernel, initrd and a flattened runner-image rootfs disk; the guest has no Nix.
   hull-ubuntu = {
     kind = "package";
     module = ../images/hull-ubuntu.nix;
   };
 
-  # The Ubuntu hull's build variant: same rootfs and boot plumbing, a
-  # Spindrift build script in place of the ARC runner.
+  # hull-ubuntu with a build script in place of the ARC runner.
   hull-build-ubuntu = {
     kind = "package";
     module = ../images/hull-build-ubuntu.nix;
   };
 
-  # The PBX image both clusters run. A streamed OCI layer set, not a NixOS
-  # closure — `nix build .#asterisk-image` writes a script that pipes the
-  # image into `docker load`.
+  # The PBX image both clusters run. `nix build .#asterisk-image` writes a script that streams
+  # the image into `docker load`.
   asterisk-image = {
     kind = "package";
     module = ../images/asterisk.nix;

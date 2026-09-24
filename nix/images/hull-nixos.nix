@@ -1,18 +1,6 @@
-# The NixOS hull: what a skiff boots.
-#
-# A hull is a directory holding a kernel, an initrd, and a `hull.json` beside
-# them declaring how to boot and what host resources to share in. The launcher
-# reads the manifest and translates it to cloud-hypervisor arguments; it never
-# learns what any of it means.
-#
-# This family carries no rootfs. It shares the host's /nix/store read-only over
-# virtiofs and layers a tmpfs overlay on top, so everything the guest runs is
-# already on the host and `nix build` still works in the guest. That store
-# arrives without a Nix database, so the closure's registration is loaded at
-# boot from a path the cmdline names — the mechanism nixpkgs' own VM tests use.
-#
-# The guest is a single-use machine running one job as root: the VM boundary is
-# the isolation, not the user boundary inside it.
+# The NixOS hull a skiff boots: a kernel, an initrd and hull.json, no rootfs.
+# The guest mounts the host's /nix/store read-only over virtiofs under a tmpfs
+# overlay and runs one job as root; the VM is the isolation boundary.
 {
   config,
   lib,
@@ -22,16 +10,10 @@
 let
   inherit (config.system.build) toplevel;
 
-  # The store share carries no /nix/var/nix/db — the host's is 0600 root:root
-  # and unreadable by an unprivileged virtiofsd. The guest builds its own from
-  # this instead, which bounds the warm-store benefit to the declared closure:
-  # paths outside it are visible but unregistered, so nix substitutes them.
+  # The host's Nix db is unreadable by an unprivileged virtiofsd, so the guest
+  # registers this closure at boot; nix substitutes any path outside it.
   regInfo = pkgs.closureInfo { rootPaths = [ toplevel ]; };
 
-  # The virtiofs tag the manifest declares for the store, matched by
-  # fileSystems."/nix/.ro-store" below. The credential share arrives as tag
-  # `bosun` whether a hull asks for it or not — that one is fixed by the
-  # contract, and where it lands in the guest is this hull's choice.
   storeTag = "ro-store";
 
   runnerRoot = "/var/lib/skiff";
@@ -61,20 +43,19 @@ in
   boot = {
     kernelParams = [ "console=ttyS0" ];
 
-    # Nothing installs a bootloader: the launcher boots the kernel directly.
+    # The launcher boots the kernel directly.
     loader.grub.enable = false;
 
-    # Everything the root store mount needs, before there is a store to load
-    # modules from. Forced rather than available: nothing probes a virtiofs tag
-    # into existence.
+    # The store mount needs these in stage 1, and nothing probes a virtiofs tag
+    # into existence, so they are loaded unconditionally.
     initrd.kernelModules = [
       "virtio_pci"
       "virtiofs"
       "overlay"
     ];
 
-    # The NIC otherwise appears only once stage-2 udev gets to it, and
-    # everything that wants the network queues behind that.
+    # Without it the NIC waits for stage-2 udev, and so does everything that
+    # wants the network.
     initrd.availableKernelModules = [ "virtio_net" ];
   };
 
@@ -104,6 +85,8 @@ in
       workdir = "/nix/.rw-store/work";
     };
 
+    # The launcher always shares credentials as tag `bosun`; the manifest does
+    # not declare it.
     "/run/bosun" = {
       device = "bosun";
       fsType = "virtiofs";
@@ -117,8 +100,7 @@ in
     hostName = "skiff";
     useNetworkd = true;
     useDHCP = false;
-    # The launcher denies RFC1918 for every skiff, so there is no LAN to
-    # discover and nothing resolvable on it.
+    # bosun's passt forwards no ports into the guest, so nothing inbound reaches it.
     firewall.enable = false;
   };
 
@@ -128,9 +110,8 @@ in
     linkConfig.RequiredForOnline = "routable";
   };
 
-  # The guest's Nix database, written straight to SQLite before anything can
-  # ask Nix a question. Lifted from nixpkgs' qemu-vm.nix, which cannot be
-  # imported here without its QEMU launcher.
+  # Loads the guest's Nix database before nix-daemon starts. From nixpkgs'
+  # qemu-vm.nix, which cannot be imported without its QEMU launcher.
   systemd.services.register-nix-paths = {
     unitConfig.DefaultDependencies = false;
     wantedBy = [ "sysinit.target" ];
@@ -154,9 +135,8 @@ in
     '';
   };
 
-  # Clause three of the hull's promise. The runner deregisters itself after one
-  # job and exits; poweroff-force then exits the VMM with status 0, which is
-  # how the launcher learns the skiff is finished.
+  # The runner exits after one job; poweroff-force then exits the VMM with
+  # status 0, the launcher's completion signal.
   systemd.services.skiff-runner = {
     description = "the one job this skiff was booted for";
     wantedBy = [ "multi-user.target" ];
@@ -166,9 +146,7 @@ in
       "run-bosun.mount"
     ];
     wants = [ "network-online.target" ];
-    # A job gets what a login shell on this machine would get. Without the
-    # system profile a hull built around a warm /nix/store hands jobs no `nix`
-    # to use it with.
+    # The system profile, so jobs get `nix` and a login shell's PATH.
     path = [ "/run/current-system/sw" ];
     environment = {
       RUNNER_ROOT = runnerRoot;
@@ -183,8 +161,8 @@ in
       Type = "simple";
       StateDirectory = "skiff";
       WorkingDirectory = runnerRoot;
-      # Read rather than passed as an argument: --jitconfig would put the
-      # credential in every process listing inside the guest.
+      # --jitconfig would show the credential in every guest process listing, so the runner reads it from
+      # the environment.
       ExecStart = pkgs.writeShellScript "skiff-runner" ''
         export ACTIONS_RUNNER_INPUT_JITCONFIG="$(< /run/bosun/jitconfig)"
         exec ${lib.getExe' pkgs.github-runner "Runner.Listener"} run
@@ -197,20 +175,15 @@ in
 
   virtualisation.docker.enable = true;
 
-  # A skiff exists to run one job and halt, so nothing here should cost boot
-  # time it will never earn back.
   documentation.enable = false;
-  # The KVM clock is already correct and the LAN is unreachable anyway.
+  # The KVM clock is already correct.
   services.timesyncd.enable = false;
   # Nothing lives long enough to rotate, and its config check fails at boot.
   services.logrotate.enable = false;
-  # docker.socket still starts dockerd on first use; a job that never touches
-  # Docker never pays for it, and one that does pays while it is already
-  # running rather than before the runner can register.
+  # docker.socket starts dockerd on first use, so it never delays runner
+  # registration.
   systemd.services.docker.wantedBy = lib.mkForce [ ];
 
-  # A hull is content-addressed by the launcher over this directory, so it
-  # carries no identity of its own.
   system.build.hull = pkgs.runCommand "hull-nixos" { preferLocalBuild = true; } ''
     mkdir -p $out
     # The `dev` output, not `out`: cloud-hypervisor boots the unstripped ELF

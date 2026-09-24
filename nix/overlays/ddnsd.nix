@@ -1,7 +1,5 @@
-# codeberg.org/miekg/dns declares `go 1.27.0`, and the toolchain reads the
-# 1.27rc3 that nixos-26.05 ships as older than that requirement. The compiler
-# comes from unstable, which carries the release; everything else about the
-# build stays on the pinned channel.
+# codeberg.org/miekg/dns requires go 1.27.0, and nixos-26.05's 1.27rc3 sorts older, so only
+# the compiler comes from unstable.
 unstable: final: prev: {
   ddnsd = final.callPackage ../../apps/ddnsd/package.nix {
     inherit (unstable.legacyPackages.${final.stdenv.hostPlatform.system}) go_1_27;

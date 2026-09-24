@@ -1,7 +1,5 @@
-# NFS server for the folly k8s cluster's shared storage. The backing mount,
-# exports, and post-mount directory ownership are all Nix-owned. Hosts with a
-# dedicated GPT data disk use the partlabel default; spore overrides it with
-# the filesystem label created by its restart-safe first-boot partitioner.
+# NFS server for the folly cluster's shared storage. dataDevice defaults to a GPT partlabel;
+# spore overrides it with the filesystem label its first-boot partitioner writes.
 {
   config,
   lib,
@@ -34,14 +32,8 @@ in
       "d /nfs/data 0755 root root -"
     ];
 
-    # tmpfiles can run before /nfs/data is mounted and create these paths on
-    # root, where the data mount then hides them. Create them only after the
-    # real filesystem is present, and make NFS depend on that post-mount setup.
-    #
-    # /nfs/data is nofail, so on boot without the NVMe attached nfsd would
-    # otherwise export an empty directory on the root disk. RequiresMountsFor
-    # here plus requiredBy on the upstream static NFS units turns a missing data
-    # mount into a hard failure instead of a silent wrong-export.
+    # Create the export dirs after /nfs/data mounts, or tmpfiles creates them on root, hidden by the mount. The
+    # mount is nofail, so requiredBy makes a missing data disk fail NFS instead of exporting an empty root dir.
     systemd.services.nfs-data-directories = {
       description = "Create NFS export directories on the mounted data filesystem";
       unitConfig.RequiresMountsFor = [ "/nfs/data" ];
@@ -58,10 +50,8 @@ in
         RemainAfterExit = true;
       };
       path = [ pkgs.coreutils ];
-      # Numeric ids, not names: the nobody *group* is not in /etc/group, it is
-      # synthesized by nss-systemd, and that userdb does not answer while a
-      # switch restarts systemd. A name lookup here failed the unit mid-upgrade
-      # and took nfs-server down with it.
+      # Numeric ids: the nobody group exists only in nss-systemd, which does not answer while a
+      # switch restarts systemd.
       script = ''
         install -d -m 0777 -o 65534 -g 65534 \
           /nfs/data/k8s \
@@ -75,8 +65,6 @@ in
       lockdPort = 4001;
       mountdPort = 4002;
       statdPort = 4000;
-      # Cluster ranges come from cluster-topology; the client LAN comes from
-      # the lab-topology ConfigMap shared with Flux and OpenTofu.
       exports = ''
         /nfs/data/                 ${lab.futureCidr}(rw,sync,nohide,no_subtree_check,insecure,all_squash,anonuid=1000,anongid=1000)
         /nfs/data/k8s/              ${folly.nodeCidr}(rw,sync,nohide,no_subtree_check,insecure,no_root_squash) ${folly.podCidr}(rw,sync,nohide,no_subtree_check,insecure,no_root_squash) ${folly.lbRange}(rw,sync,nohide,no_subtree_check,insecure,no_root_squash)

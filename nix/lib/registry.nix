@@ -1,7 +1,4 @@
-# Turns the fleet registry (../hosts/default.nix) into flake outputs.
-#
-# This is the only place that knows how a registry entry becomes a system, a
-# package, or a deploy target. flake.nix just asks for the three results.
+# Turns the fleet registry (../hosts/default.nix) into systems, packages and deploy targets.
 {
   lib,
   mkHost,
@@ -10,20 +7,14 @@
 }:
 let
   isHost = entry: (entry.kind or "host") == "host";
-  # A plain derivation, not a NixOS closure: callPackage'd straight from its
-  # module. The Ubuntu hull is the first — a guest with no NixOS in it has no
-  # nixosConfiguration to hang an artifact off.
   isPackage = entry: (entry.kind or "host") == "package";
 
   defaultSystem = "x86_64-linux";
 in
 rec {
-  # Cross-host wiring: edges that belong to neither host alone because they
-  # need a derivation from the other. Kept here, where both configurations are
-  # in scope, rather than split across two host files.
+  # Modules that need another host's derivation live here, where every configuration is in scope.
   crossHostModules = {
-    # Spore signs and serves rackpi5's RAM-boot image for forge's EEPROM
-    # fallback path. See ../hosts/spore.nix and ../hosts/rackpi5.nix.
+    # spore signs and serves rackpi5's RAM-boot image for forge's EEPROM fallback.
     spore = [
       {
         services.spore.nativeBootTargets.rackpi5 = {
@@ -51,13 +42,8 @@ rec {
   # Hosts you can ssh to: what `nix run .` fans out over.
   deployHosts = lib.attrNames (lib.filterAttrs (_: isHost) registry);
 
-  # An entry's artifact is published under its `packageSystem`, which for most
-  # of the aarch64 Pis is deliberately x86_64-linux: those sdImage derivations
-  # are pinned to aarch64 internally (each Pi's nixosSystem is called with
-  # system = "aarch64-linux"), and the x86_64 aliases are the image-builder
-  # workflow's interface. radiopi0/blinkypi0 are the exception — they are
-  # cross-compiled, so their build platform genuinely has to be the machine
-  # running `nix build`.
+  # Most aarch64 Pis publish under x86_64-linux: their images pin aarch64 internally and the image-builder
+  # workflow asks for x86_64 names. The cross-compiled Pi Zeros must build on aarch64, so they publish there.
   packagesFor =
     system:
     lib.mapAttrs

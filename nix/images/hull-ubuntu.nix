@@ -1,47 +1,23 @@
-# The Ubuntu hull: an FHS guest with no Nix in it.
-#
-# This is the `ubuntu-latest`-fidelity family and the shape the cloud path
-# boots. The rootfs is the repo's own ARC runner image — the exact filesystem
-# every `runs-on: offsite` job already passes on — flattened into a read-only
-# squashfs handed to the guest as a virtio-blk disk. Writes land in a tmpfs
-# overlay upper, so a skiff still leaves nothing behind. Where the class sizes
-# a scratch disk, the workspace and docker's data root move onto it instead, so
-# a build's bytes stop being charged against the class's memory.
-#
-# Nix builds all of it, but none of it reaches the guest: no /nix/store, no
-# store share, no Nix database. "No Nix in the cloud" is about the guest, not
-# the builder.
-#
-# There is no systemd in here. PID 1 is busybox init running three inittab
-# lines: bring the machine up, run one job, halt. The guest is a single-use
-# machine running one job as root — the VM boundary is the isolation, not the
-# user boundary inside it (same stance as hull-nixos).
+# The Ubuntu hull: an FHS guest with no Nix in it. Its rootfs is the ARC runner
+# image, flattened into a read-only squashfs under a tmpfs overlay. busybox init
+# runs one job as root and halts; the VM is the isolation boundary.
 {
   lib,
   pkgs,
-  # "runner" boots the ARC runner (`Runner.Listener run`, the default and the
-  # only thing this file built before this parameter existed). "build" swaps
-  # in a script that runs a Spindrift build instead — same kernel, same
-  # initrd, same setup, same squashfs assembly; only the run script and one
-  # extra rootfs binary (buildx) differ, so that plumbing stays one source of
-  # truth for both.
+  # "runner" runs the ARC runner; "build" runs one image build and adds buildx.
   variant ? "runner",
 }:
 let
   isBuild = variant == "build";
-  # Same kernel derivation the NixOS hull boots, so riptide's store already
-  # has it: the `dev` output's vmlinux carries the PVH entry note
-  # cloud-hypervisor needs, and /lib/modules below comes from the same build.
+  # The NixOS hull's kernel. Its `dev` output keeps the unstripped vmlinux with
+  # the PVH entry note cloud-hypervisor needs.
   kernel = pkgs.linuxPackages.kernel;
-  # depmod'd module tree from the kernel's split `modules` output: the raw
-  # output carries no modules.dep, which both makeModulesClosure and the
-  # guest's busybox modprobe need.
+  # The raw `modules` output has no modules.dep, which makeModulesClosure and
+  # busybox modprobe both need.
   modulesTree = pkgs.aggregateModules [ kernel.modules ];
 
-  # The rootfs source of record: clusters/base/apps/arc/infra.yaml pins this
-  # same image for the ARC runners, so "what does a job need installed?" is
-  # already field-answered. Bump the digest when the cluster pin moves; a
-  # stale pin still pulls, it is just older.
+  # The ARC runners' image from clusters/base/apps/arc/infra.yaml; bump this digest when that pin moves.
+  # A stale digest still pulls an older image.
   runnerImage = pkgs.dockerTools.pullImage {
     imageName = "ghcr.io/jonpulsifer/actions-runner";
     imageDigest = "sha256:fcc546f5fb6e4fe048e3b28f0c20f4df2077ce0e51be5e55bf89262c6aa1fecf";
@@ -50,10 +26,7 @@ let
     arch = "amd64";
   };
 
-  # dockerd inside the guest, version-matched to the NixOS hull's docker so
-  # the two families never diverge on build behaviour. Static binaries: the
-  # guest has Ubuntu's glibc, not nixpkgs', so nothing dynamic from nixpkgs
-  # can run there.
+  # Static: nothing linked against nixpkgs' glibc runs in the Ubuntu guest.
   dockerStatic = pkgs.fetchurl {
     url = "https://download.docker.com/linux/static/stable/x86_64/docker-29.6.2.tgz";
     hash = "sha256-1iBK6pIjjiRT1URciFudLl64+CkVVo7FDt+dvhKjrHQ=";
@@ -63,19 +36,15 @@ let
   # dockerd shells out to iptables; the container-image rootfs has none.
   iptables = pkgs.pkgsStatic.iptables;
 
-  # The build variant's one extra binary: a static buildx plugin, since the
-  # runner image carries the docker CLI but not buildx. Upstream's release
-  # binary, not pkgs.docker-buildx — that one is glibc-dynamic against
-  # nixpkgs' glibc, which does not exist in this Ubuntu guest (see the
-  # dockerStatic comment above).
+  # The runner image lacks buildx, and pkgs.docker-buildx links nixpkgs' glibc,
+  # so the build variant installs upstream's static release.
   buildxPlugin = pkgs.fetchurl {
     url = "https://github.com/docker/buildx/releases/download/v0.30.1/buildx-v0.30.1.linux-amd64";
     hash = "sha256-w3EU/NA0Al7GjiJGV8ilqFDfRy3tPdy8p1rTp+u5cQ0=";
   };
 
-  # Everything stage-1 needs before there is a rootfs to load modules from.
-  # The full module tree rides inside the rootfs for everything later (docker
-  # pulls netfilter modules in on demand).
+  # What stage 1 loads (see its modprobe loop); the rootfs carries the full
+  # module tree for later loads.
   modulesClosure = pkgs.makeModulesClosure {
     kernel = modulesTree;
     firmware = pkgs.emptyDirectory;
@@ -92,8 +61,6 @@ let
     allowMissing = false;
   };
 
-  # Stage 1: mount the read-only rootfs, put a tmpfs overlay on top, attach
-  # the credential share, and hand PID 1 to busybox init inside the overlay.
   stage1 = pkgs.writeScript "stage1" ''
     #!/bin/busybox sh
     bb=/bin/busybox
@@ -129,8 +96,8 @@ let
     ];
   };
 
-  # Stage 2, line 1: the machine. Mounts, hostname, DHCP from passt, dockerd
-  # in the background — nothing here may block the runner longer than it must.
+  # inittab's sysinit entry. The job waits for it, so dockerd starts in the
+  # background.
   setup = pkgs.writeScript "skiff-setup" ''
     #!/opt/bosun/busybox sh
     bb=/opt/bosun/busybox
@@ -328,9 +295,8 @@ let
     esac
   '';
 
-  # Stage 2, line 2: the one job this skiff was booted for. The runner
-  # deregisters itself after one job and exits; this script then powers off,
-  # which exits the VMM with 0 — the launcher's completion signal.
+  # inittab's wait entry. Powering off after the runner exits ends the VMM with
+  # status 0, the launcher's completion signal.
   runnerRun = pkgs.writeScript "skiff-run" ''
     #!/opt/bosun/busybox sh
     export HOME=/home/runner
@@ -354,16 +320,6 @@ let
     /opt/bosun/busybox poweroff -f
   '';
 
-  # The build variant's stage 2, line 2: a Spindrift build instead of a job.
-  # Real bash, not busybox sh — this needs curl/tar/jq/docker from the
-  # Ubuntu rootfs, none of which busybox's ash can call into meaningfully
-  # more than by exec'ing them anyway. Every line printed is captured to
-  # $diag/result/build.log (see the setup script's bosun-diag mount), and
-  # the EXIT trap is what keeps the two invariants this hull's wait entry
-  # depends on: /home/runner/_diag/result/status always gets written, and
-  # the VM always powers off, on every exit path — not just the ones this
-  # script anticipated (same reasoning as the runner variant's poweroff
-  # placement above).
   buildRun = pkgs.writeScript "skiff-build" ''
     #!/bin/bash
     # Stage 2, line 2 for the build variant: fetch the bundle §5 staged, run it
@@ -620,7 +576,6 @@ let
     echo "spindrift-result $(printf '%s' "$report" | base64 | tr -d '\n')"
   '';
 
-  # The one job this skiff was booted for, whichever job that is.
   run = if isBuild then buildRun else runnerRun;
 
   inittab = pkgs.writeText "inittab" ''
@@ -729,8 +684,8 @@ let
   manifest = {
     kernel = "vmlinux";
     initrd = "initrd";
-    # loglevel=4: full dmesg to the serial file costs ~0.3 s of the ~1 s
-    # boot; warnings still land. Raise it when debugging a boot.
+    # Full dmesg on the serial console costs ~0.3 s of a ~1 s boot; raise
+    # loglevel to debug a boot.
     cmdline = "console=ttyS0 panic=-1 loglevel=4";
     devices = [
       {
@@ -742,8 +697,6 @@ let
     ];
   };
 in
-# A hull is content-addressed by the launcher over this directory, so it
-# carries no identity of its own.
 pkgs.runCommand "hull-ubuntu" { preferLocalBuild = true; } ''
   mkdir -p $out
   ln -s ${kernel.dev}/vmlinux $out/vmlinux

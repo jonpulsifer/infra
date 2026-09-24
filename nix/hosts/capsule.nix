@@ -8,9 +8,8 @@
     ../services/ntp-server.nix
   ];
 
-  # Keep the labels already installed on the NVMe. The Pi 5 hardware module
-  # normally derives these from `name`, but changing them during a hostname
-  # migration would make the existing root and firmware filesystems disappear.
+  # The NVMe carries these labels; the per-name default (NIXOS_CAPSULE) would not find
+  # the root or firmware filesystem.
   sdImage = {
     rootVolumeLabel = lib.mkForce "NIXOS_DNS";
     firmwarePartitionName = lib.mkForce "FW_DNS";

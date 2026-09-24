@@ -1,15 +1,6 @@
-# Signed Raspberry Pi native-boot publishing, served as plain static files.
-#
-# Nix builds each target's boot.img + nix-store.squashfs (see
-# nix/hosts/rackpi5.nix). A per-target oneshot signs and atomically publishes
-# the current boot.img/boot.sig pair while retaining every squashfs under its
-# content digest. The Pi 5 EEPROM fetches the stable boot paths, and the signed
-# initrd fetches the digest-addressed squashfs pinned in its command line.
-#
-# There is no application, database, or dynamic boot decision: the image is the
-# policy, and the EEPROM/initrd verify integrity (secure-boot signature +
-# cmdline-pinned squashfs sha256) themselves. The static x86 iPXE tree stays in
-# nix/services/pxe-netboot.nix; this module only adds the native-boot targets.
+# Signed Raspberry Pi native boot as static files. A oneshot per target signs boot.img and publishes
+# it atomically, keeping each squashfs under its digest. The EEPROM checks the signature and the
+# initrd checks the squashfs digest pinned in its command line. x86 PXE stays in ./pxe-netboot.nix.
 {
   config,
   lib,
@@ -69,8 +60,7 @@ let
           name = "= ${target.httpPath}boot.sig";
           value = readOnlyLocation "${stateDir}/${id}/boot.sig";
         }
-        # Compatibility for a signed image fetched before this module moved to
-        # digest-addressed squashfs URLs.
+        # The fixed squashfs path, for signed images that do not pin a digest URL.
         {
           name = "= ${target.httpPath}nix-store.squashfs";
           value = readOnlyLocation "${stateDir}/${id}/nix-store.squashfs";
@@ -124,8 +114,7 @@ in
           wantedBy = [ "multi-user.target" ];
           before = [ "nginx.service" ];
           restartTriggers = [ target.package ];
-          # rpi-eeprom-digest shells out to openssl and xxd (and greps/awks its
-          # output); coreutils covers sha256sum/mktemp/install/mv.
+          # rpi-eeprom-digest runs openssl, xxd, grep and awk.
           path = with pkgs; [
             coreutils
             gawk

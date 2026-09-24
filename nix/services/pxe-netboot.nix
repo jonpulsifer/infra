@@ -1,16 +1,6 @@
-# Boot-critical TFTP + static HTTP PXE serving, migrated from Alpine.
-# dnsmasq (TFTP-only, port=0) + nginx setup. terraform/network/unifi/folly/k8s.tf
-# points bare-metal k8s node netboot at this host's TFTP (boot/ipxe.efi) and
-# the ipxe menu chains to per-target bzImage/initrd served over HTTP (TFTP is
-# far too slow for ~900MB initrds).
-#
-# This module remains the sole owner of dnsmasq, TFTP, and the static nginx
-# root used by x86 PXE. nix/services/spore-native-boot.nix adds the signed Pi
-# native-boot locations to this vhost without taking ownership of this tree.
-# The actual content under
-# /var/lib/tftpboot (ipxe.efi, menu.ipxe, per-target netboot images) is
-# build/backup artifacts, not something Nix generates -- restore it from
-# backup or `nix build .#netboot` after this is deployed.
+# x86 PXE: dnsmasq serves TFTP only (port=0), and terraform/network/unifi/folly/k8s.tf points netboot at
+# boot/ipxe.efi. iPXE fetches kernels and initrds over HTTP, since TFTP is too slow for them.
+# Nix does not generate /var/lib/tftpboot; restore it from backup or `nix build .#netboot`.
 { ... }:
 {
   systemd.tmpfiles.rules = [
@@ -25,9 +15,8 @@
       enable-tftp = true;
       tftp-root = "/var/lib/tftpboot";
       tftp-max = 100;
-      # TFTP transfers leave UDP/69 and use a server-selected transfer ID.
-      # Bound that data channel so the firewall can admit it explicitly without
-      # relying on a conntrack helper.
+      # TFTP data leaves UDP/69 on a server-chosen port; bound it so the firewall admits it
+      # without a conntrack helper.
       tftp-port-range = "30000,30099";
     };
   };
@@ -50,9 +39,8 @@
     };
   };
 
-  # Metrics for the PXE HTTP endpoint: the stub_status page stays
-  # localhost-only, the exporter republishes it on :9113 for Prometheus
-  # (scraped via clusters/folly/monitoring/spore.yaml).
+  # stub_status stays on localhost; the exporter republishes it on :9113 for
+  # clusters/folly/monitoring/spore.yaml.
   services.nginx.statusPage = true;
   services.prometheus.exporters.nginx = {
     enable = true;

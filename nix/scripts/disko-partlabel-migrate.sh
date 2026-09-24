@@ -7,7 +7,7 @@ set -euo pipefail
 #
 # NON-DESTRUCTIVE: this only rewrites the GPT partition NAME field via `sgdisk`.
 # It does not touch any filesystem, its data, or its filesystem LABEL — so the
-# rolled-back (by-label) generations stay bootable too. You can't brick yourself.
+# rolled-back (by-label) generations stay bootable too.
 #
 # Run it while booted on a known-good generation. Dry-run by default:
 #   sudo bash disko-partlabel-migrate.sh            # show the plan, change nothing
@@ -37,8 +37,7 @@ declare -A EXPECT=(
 )
 declare -A OPTIONAL=( ["/mnt/disks"]=1 )
 
-# Helpers must never fail under `set -e` — an absent/empty mount is a normal,
-# handled case, not a script-aborting error.
+# Under set -e, an absent mount must not abort the script.
 source_of()    { findmnt -no SOURCE "$1" 2>/dev/null | head -n1 || true; }
 partlabel_of() { lsblk -no PARTLABEL "$1" 2>/dev/null | head -n1 || true; }
 parent_of()    { lsblk -no PKNAME "$1" 2>/dev/null | head -n1 || true; }
@@ -53,7 +52,6 @@ sgdisk_run() {
 host="$(hostname)"
 echo ">> Host: ${host}  (mode: $([[ $apply -eq 1 ]] && echo APPLY || echo dry-run))"
 
-# Build the rename plan from live mounts.
 declare -a plan_num plan_label plan_dev
 disk=""
 for mnt in /boot / /mnt/disks; do
@@ -88,7 +86,6 @@ if [[ ${#plan_num[@]} -eq 0 ]]; then
   exit 0
 fi
 
-# Assemble: sgdisk -c N:label -c N:label ... /dev/<disk>
 sgargs=()
 for i in "${!plan_num[@]}"; do sgargs+=(-c "${plan_num[$i]}:${plan_label[$i]}"); done
 

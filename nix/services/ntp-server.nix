@@ -1,8 +1,5 @@
-# Redundant LAN time service shared by capsule and spore. Both hosts synchronise
-# from authenticated Internet sources and poll one another. Chrony's orphan
-# mode elects one local reference if every upstream is unavailable, keeping
-# the lab internally consistent while honestly reporting low-quality stratum
-# 10 time.
+# LAN time service on capsule and spore. Each syncs from NTS sources and polls the other, and
+# orphan mode keeps a common stratum 10 timebase if every upstream fails.
 { lib, name, ... }:
 let
   lab = import ../lib/lab.nix;
@@ -18,11 +15,8 @@ in
   services.chrony = {
     enable = true;
     enableNTS = true;
-    # Every entry must answer NTS-KE on tcp/4460, because enableNTS makes that
-    # the only way chrony will accept a source. A server that does not speak it
-    # is not a fallback — it is silently unselectable, and when the remaining
-    # source blips the host drops to orphan mode and reports the kernel clock
-    # unsynchronised.
+    # With enableNTS, chrony selects only sources that answer NTS-KE on tcp/4460. A server
+    # without NTS is silently unselectable.
     servers = [
       "time.nrc.ca"
       "time.cloudflare.com"

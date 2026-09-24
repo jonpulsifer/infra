@@ -1,8 +1,4 @@
-# An x86 Kubernetes node in one of the two clusters.
-#
-# Cluster membership is read from the host's tailnet tags: a node tagged
-# "folly" or "offsite" joins that cluster. The tag is the same one Tailscale
-# advertises for ACL purposes, so there is one fact, not two to keep in sync.
+# An x86 Kubernetes node. Its "folly" or "offsite" Tailscale tag selects the cluster it joins.
 {
   lib,
   pkgs,
@@ -45,10 +41,8 @@ in
     inherit network;
   };
 
-  # The in-cluster node-exporter DaemonSet scrapes this drop box on every
-  # node (clusters/folly/monitoring/kube-prometheus.yaml); a node without
-  # the directory trips NodeTextFileCollectorScrapeError. Ownership is left
-  # unmanaged ("-") so bosun's StateDirectory keeps the dir on riptide.
+  # The node-exporter DaemonSet reads this textfile directory on every node; without it,
+  # NodeTextFileCollectorScrapeError fires.
   systemd.tmpfiles.rules = [
     "d /var/lib/prometheus-node-exporter-text-files 0755 - - -"
   ];

@@ -80,9 +80,6 @@ in
     settings.gitProtocol = "ssh";
   };
 
-  # git-delta has no home-manager programs.<x> module in release-26.05; ship
-  # the binary here. The mise-deployed ~/.config/git/config template wires it
-  # as the pager.
   programs.neovim = {
     enable = true;
     vimAlias = true;
@@ -246,7 +243,6 @@ in
     '';
   };
 
-  # Tools with no home-manager programs.<x> module ship as plain packages.
   home.packages = with pkgs; [
     fd
     ripgrep

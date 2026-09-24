@@ -1,8 +1,6 @@
 final: prev: {
   runc =
     (prev.runc.override {
-      # buildGoModule = prev.buildGo119Module;
-      # components = [ "cmd/kubelet" ];
     }).overrideAttrs
       (_: rec {
         version = "1.3.0";
