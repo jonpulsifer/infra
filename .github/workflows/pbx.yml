@@ -1,0 +1,60 @@
+name: pbx
+
+# Boots each site's rendered Asterisk config with no route off the runner and
+# checks PJSIP, 911 routing and what a caller can reach (mise run pbx:check).
+# CI routing is an allow-list, so a PBX path missing from the filter below
+# merges unchecked.
+
+on:
+  push:
+    branches: [main]
+    paths: &paths
+      - 'clusters/base/apps/pbx/**'
+      - 'clusters/folly/apps/pbx/**'
+      - 'clusters/offsite/apps/pbx/**'
+      - 'nix/images/asterisk.nix'
+      - 'nix/hosts/default.nix'
+      - 'flake.lock'
+      - '.github/scripts/pbx-*'
+      - '.github/workflows/pbx.yml'
+  pull_request:
+    paths: *paths
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pbx-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: NixOS/nix-installer-action@62c1943b776c509394b550f3f983adc14e9212d6 # main
+        with:
+          extra-conf: |
+            experimental-features = nix-command flakes
+            accept-flake-config = true
+      - uses: cachix/cachix-action@38b082610b782e7e93e209c35fd730d399dee866 # v17
+        with:
+          name: jonpulsifer
+          authToken: "${{ secrets.CACHIX_AUTH_TOKEN }}"
+          skipPush: true
+      - uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4.3.0
+        with:
+          install_args: kubectl yq
+      # Ubuntu's AppArmor profile denies unprivileged user namespaces, and the
+      # check boots Asterisk inside one so that nothing it sends leaves the
+      # runner. Without this it refuses to boot.
+      - name: Allow unprivileged user namespaces
+        run: |
+          if [ -e /proc/sys/kernel/apparmor_restrict_unprivileged_userns ]; then
+            sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          fi
+      - name: Test the inbound walker
+        run: bash .github/scripts/pbx-inbound-walk_test.sh
+      - name: Boot both sites
+        run: bash .github/scripts/pbx-check.sh

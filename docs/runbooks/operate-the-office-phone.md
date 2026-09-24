@@ -115,4 +115,8 @@ filter that drops those lines.
 - **Validate what the cluster runs, not what you wrote.** `flux build` piped
   into `kubectl apply --server-side --dry-run=server` catches both Flux's
   variable substitution and schema typing, which `kubectl kustomize` never
-  sees. Booting Asterisk against the rendered config catches the rest.
+  sees. `mise run pbx:check` boots the image's Asterisk against each site's
+  rendered config with no route off the machine. It fails when a PJSIP object
+  does not load, when 911 stops reaching a line's trunk, or when an inbound
+  call can reach a trunk. `.github/workflows/pbx.yml` runs it on every PBX
+  change.
