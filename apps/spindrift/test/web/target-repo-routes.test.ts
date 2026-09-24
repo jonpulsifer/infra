@@ -44,7 +44,7 @@ async function makeContext(
   };
 
   return {
-    principal: { id: 'user-1', displayName: 'Operator' },
+    principal: { id: 'user-1', displayName: 'Operator', kind: 'human' },
     clock: { now: () => NOW },
     db: database().db,
     adapters,

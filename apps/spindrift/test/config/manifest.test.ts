@@ -102,6 +102,21 @@ describe('the authenticated Gateway trust boundary', () => {
       (await resolveManifest(manifest, {})).controlPlane.publicHostname,
     ).toBeNull();
   });
+
+  test('reserved hostnames are a comma-separated deployment fact, and unset is none', async () => {
+    const manifest = parseManifest(fixtureText, FIXTURE);
+    expect(
+      (
+        await resolveManifest(manifest, {
+          SPINDRIFT_RESERVED_HOSTNAMES:
+            ' Kthx.Example.Test, ,other.example.test',
+        })
+      ).controlPlane.reservedHostnames,
+    ).toEqual(['kthx.example.test', 'other.example.test']);
+    expect(
+      (await resolveManifest(manifest, {})).controlPlane.reservedHostnames,
+    ).toEqual([]);
+  });
 });
 
 describe('boot fails loudly', () => {

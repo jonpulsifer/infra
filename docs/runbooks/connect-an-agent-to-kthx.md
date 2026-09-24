@@ -28,7 +28,7 @@ Use this runbook to give an MCP client the commands of the kthx built-apps conso
 ## Connect a client
 
 > [!WARNING]
-> An agent token can run every command, including the commands that delete Apps and Datastores. No token is read-only. Use a client that asks you to approve each call.
+> An agent token can run every command except the ones [Ownership and security](../apps/kthx/security.md#identities) lists, including the commands that delete Apps and Datastores. No token is read-only. Use a client that asks you to approve each call.
 
 1. Store the token in the `TOKEN` variable.
 

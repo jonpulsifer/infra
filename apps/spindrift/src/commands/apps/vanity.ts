@@ -84,7 +84,7 @@ export const setAppVanity: Command<
           installationHostnames(context.manifest.controlPlane),
         );
   if (taken !== null) {
-    const rule = `would take ${taken}, which this installation serves itself on`;
+    const rule = `would take ${taken}, which this installation reserves`;
     return failed('INVALID_INPUT', `'${input.label}' ${rule}`, [
       { path: 'label', message: rule },
     ]);

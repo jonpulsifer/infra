@@ -35,6 +35,12 @@ export const HOSTNAME_VAR = 'SPINDRIFT_HOSTNAME';
 export const PUBLIC_HOSTNAME_VAR = 'SPINDRIFT_PUBLIC_HOSTNAME';
 
 /**
+ * Other names served on the Apps gateway that no App may take,
+ * comma-separated.
+ */
+export const RESERVED_HOSTNAMES_VAR = 'SPINDRIFT_RESERVED_HOSTNAMES';
+
+/**
  * What this deployment is running. The same variable `telemetry/index.ts`
  * reports as `service.version`, read here so the UI and the traces name one
  * thing; unset is `null` rather than telemetry's placeholder.
@@ -325,6 +331,9 @@ export async function resolveManifest(
     controlPlane: {
       hostname: env[HOSTNAME_VAR]?.trim() || UNSERVED_HOSTNAME,
       publicHostname: env[PUBLIC_HOSTNAME_VAR]?.trim().toLowerCase() || null,
+      reservedHostnames: (env[RESERVED_HOSTNAMES_VAR] ?? '')
+        .split(',')
+        .flatMap((host) => host.trim().toLowerCase() || []),
       version: env[VERSION_VAR]?.trim() || null,
     },
   };

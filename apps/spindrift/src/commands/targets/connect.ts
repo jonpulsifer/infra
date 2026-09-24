@@ -423,6 +423,15 @@ export const connectTarget: Command<
   ConnectTargetInput,
   ConnectTargetResult
 > = async (input, context) => {
+  // The probe below authenticates to the endpoints in the input with the
+  // installation's own credentials, so a bearer credential must not pick them.
+  if (context.principal.kind !== 'human') {
+    return failed(
+      'FORBIDDEN',
+      'an agent token cannot connect a Target — sign in and connect it from Targets',
+    );
+  }
+
   // §7: the boundary between the value classes is "enforced at save time".
   // This is that time — the operator who typed these is still here to be told
   // which key was not theirs, which is not true of the deploy that would

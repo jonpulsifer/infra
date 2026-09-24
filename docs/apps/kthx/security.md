@@ -21,7 +21,7 @@ The engine deletes only namespaces labelled `app.kubernetes.io/managed-by: spind
 | Caller | Credential | Can |
 | --- | --- | --- |
 | The owner | A console passkey, enrolled once with `SPINDRIFT_ENROLMENT_TOKEN` | Every console and MCP action |
-| An agent on `/mcp` | An agent token, valid 90 days | Every action except minting tokens |
+| An agent on `/mcp` | An agent token, valid 90 days | Every action except minting tokens, replacing the engine settings, and connecting or probing a Target |
 | kthx on GitHub | The private GitHub App `spindrift-bot` (ID `4576122`), installed on `jonpulsifer` only | Push branches, open pull requests and run workflows in connected repositories |
 | A quick-site owner | Its bearer token or tailnet login | Upload, roll back and delete that site |
 

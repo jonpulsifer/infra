@@ -16,7 +16,7 @@
  * No database: every path under test refuses or answers before a handler runs,
  * and `unreachableContext` throws if one does not.
  */
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, spyOn, test } from 'bun:test';
 import { commandNames } from '../../src/commands/registry.ts';
 import type { Principal } from '../../src/commands/types.ts';
 import { MACHINE_NAME } from '../../src/web/brand.ts';
@@ -26,6 +26,12 @@ import {
   mcpRoutes,
 } from '../../src/web/mcp-route.ts';
 import { unreachableContext } from '../harness/context.ts';
+import {
+  cloudflareInput,
+  cloudInput,
+  clusterInput,
+  vercelInput,
+} from '../harness/installation.ts';
 
 const context = await unreachableContext();
 
@@ -152,6 +158,42 @@ describe('an agent token cannot widen its own standing', () => {
     const { result } = await response.json();
     expect(result.isError).toBe(true);
     expect(JSON.parse(result.content[0].text).code).toBe('FORBIDDEN');
+  });
+
+  describe('an endpoint the installation authenticates to is not the agent’s to name', () => {
+    // A connect or probe presents the installation's own credentials to these.
+    const collector = 'https://collector.example.test';
+    const calls = [
+      ['connectTarget', clusterInput({ apiServer: collector })],
+      [
+        'connectTarget',
+        cloudInput({
+          runEndpoint: collector,
+          hostingEndpoint: collector,
+          policyEndpoint: collector,
+        }),
+      ],
+      ['connectTarget', vercelInput({ endpoint: collector })],
+      ['connectTarget', cloudflareInput({ endpoint: collector })],
+      ['probeCluster', { apiServer: collector }],
+    ] as const;
+
+    for (const [name, args] of calls) {
+      test(`${'kind' in args ? `${name} for a ${args.kind}` : name} is refused before any request leaves`, async () => {
+        const outbound = spyOn(globalThis, 'fetch');
+        try {
+          const response = await handler(agent)(
+            rpc('tools/call', { name, arguments: args }),
+          );
+          const { result } = await response.json();
+          expect(result.isError).toBe(true);
+          expect(JSON.parse(result.content[0].text).code).toBe('FORBIDDEN');
+          expect(outbound).not.toHaveBeenCalled();
+        } finally {
+          outbound.mockRestore();
+        }
+      });
+    }
   });
 });
 
