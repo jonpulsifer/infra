@@ -1,6 +1,4 @@
-# Roots do not share state with the installation manifest; like
-# supply_chain_manifest_block in trusted-builds, this block is what an
-# operator copies into the manifest by hand after an apply.
+# The installation manifest shares no state with this root; copy this block into it by hand.
 output "vessel_network_block" {
   description = "The installation manifest's bluenose vessel location.network block."
   value = {

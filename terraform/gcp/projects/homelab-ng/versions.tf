@@ -47,7 +47,6 @@ ephemeral "onepassword_item" "cloudflare_api_token" {
   uuid  = "3x5gu5niywi6iza3jxxny7ifsy"
 }
 provider "cloudflare" {
-  # export CLOUDFLARE_API_TOKEN=$(op item get 'Cloudflare' --fields='api token [terraform]' --account=pulsifer --reveal)
   api_token = ephemeral.onepassword_item.cloudflare_api_token.password
 }
 

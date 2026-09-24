@@ -27,7 +27,7 @@ ephemeral "onepassword_item" "unifi" {
 }
 
 provider "onepassword" {
-  # export OP_SERVICE_ACCOUNT_TOKEN=$(op item get 'Service Account Auth Token: Nixos' --fields=token --account=pulsifer --vault=ib23znjeikv74p37f6mbfk7uya --reveal)
+  # Reads OP_SERVICE_ACCOUNT_TOKEN from the environment.
 }
 
 provider "unifi" {

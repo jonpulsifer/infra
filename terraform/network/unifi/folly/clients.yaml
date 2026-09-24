@@ -143,8 +143,7 @@ desktops:
   tinytower:
     mac: 78:24:af:3c:a4:67
     dev-id: 2663
-  # On `future` (VLAN 1337), not Management, so its `ip` is an octet of
-  # FUTURE_CIDR. windows-hosts.tf resolves each host against its own network.
+  # On `future`, so `ip` is an octet of FUTURE_CIDR.
   tallboy:
     mac: cc:28:aa:b2:50:a9
     network: future
@@ -255,15 +254,12 @@ iot:
     dev-id: 294
   Switch House:
     mac: 98:41:5c:aa:d1:59
-  # Switch Office:
-  #   mac: 98:41:5c:aa:d1:5a
   Tidbyt House:
     mac: b4:8a:0a:27:07:f4
   Tidbyt Office:
     mac: cc:db:a7:1e:14:88
 
-# SIP handsets. `ip` is an octet of FML_CIDR (Management), and voip.tf turns
-# the reservation into a unifi_client so the address outlives a DHCP lease.
+# `ip` is an octet of local.fml_cidr (Management); voip.tf reserves it.
 voip:
   cathy:
     mac: ec:e1:a9:cc:ee:fc

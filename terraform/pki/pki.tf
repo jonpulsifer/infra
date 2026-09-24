@@ -1,32 +1,11 @@
-# FML PKI: per-cluster Kubernetes CAs and ServiceAccount token signers.
-#
-#   FML Root CA (offline; 1P ujhf4f5cwerdwtpn27fn52kvwq, ca.crt only) pathLen:2
-#   └─ FML Intermediate CA (1P ofl5zkj2rcjnexv3f45wc5i7aq, ca.crt + ca.key) pathLen:1
-#      └─ FML K8s <cluster> CA (issued here; CA:TRUE)
-#         └─ <cluster> SA token signer (issued here; leaf, RSA-4096, 1y)
-#
-# Two CAs follow the root and one follows the intermediate, so those are the
-# pathLen values the chain requires, and the anchors in 1Password carry them.
-# An anchor holding less forbids the chain it signs: OpenSSL reports "path
-# length constraint exceeded", while Go treats every certificate in a trust
-# store as an anchor and stops there, so it never walks past the published
-# cluster CA and a Go-only fleet sees nothing wrong.
-# scripts/pki/reissue-trust-anchors.sh mints replacements that keep the keys,
-# the subjects and the subject key identifiers, so they are drop-in;
-# `mise run pki:verify` reports where the committed certificates stand.
-#
-# The intermediate's private key is read from 1Password at plan/apply time and
-# therefore transits Terraform state, as do the generated private keys. This is
-# a deliberate tradeoff (state lives in the IAM-gated homelab-ng bucket); the
-# root CA key never touches Terraform. Cluster CA keys are escrowed to
-# 1Password and delivered to NixOS through SOPS; signer keys use SOPS only.
-# scripts/pki/post-rotate.sh performs that delivery without committing keys.
+# Per-cluster Kubernetes CAs and SA token signers under the FML intermediate.
+# The chain needs root pathLen:2 and intermediate pathLen:1; OpenSSL rejects less, Go does not.
+# The intermediate and generated keys pass through the IAM-gated homelab-ng state; the root key never does.
 
 locals {
   clusters = toset(["folly", "offsite"])
 
-  # Item fields land in provider sections; standalone fields surface in an
-  # unnamed section. Flatten them all into one label->value map per item.
+  # Standalone 1Password fields land in an unnamed section; flatten every section.
   fml_intermediate_fields = merge([
     for s in data.onepassword_item.fml_intermediate.section : {
       for f in s.field : f.label => f.value
@@ -43,8 +22,7 @@ locals {
   fml_root_cert         = local.fml_root_fields["ca.crt"]
 }
 
-# 1Password "homelab" vault; the Atlantis op service account must be able to
-# read these items.
+# The Atlantis 1Password service account must be able to read these items.
 locals {
   op_vault_homelab = "ib23znjeikv74p37f6mbfk7uya"
 }
@@ -59,8 +37,6 @@ data "onepassword_item" "fml_root" {
   uuid  = "ujhf4f5cwerdwtpn27fn52kvwq"
 }
 
-# --- Per-cluster K8s CA (intermediate) ------------------------------------
-
 resource "tls_private_key" "cluster_ca" {
   for_each = local.clusters
 
@@ -68,9 +44,7 @@ resource "tls_private_key" "cluster_ca" {
   rsa_bits  = 4096
 }
 
-# Escrow the long-lived cluster CA keys outside Terraform state. The
-# write-only field keeps the 1Password resource from duplicating key material
-# in its own state.
+# Escrows each cluster CA key; write-only keeps a second copy out of this state.
 resource "onepassword_item" "cluster_ca" {
   for_each = local.clusters
 
@@ -82,8 +56,8 @@ resource "onepassword_item" "cluster_ca" {
   password_wo_version = 1
 
   lifecycle {
-    # Rotation must first preserve this item under a versioned resource/title.
-    # Do not make rollback depend on 1Password trash or item history.
+    # Before rotating, keep this item under a versioned resource and title;
+    # rollback must not depend on 1Password trash or item history.
     prevent_destroy      = true
     replace_triggered_by = [tls_private_key.cluster_ca[each.key]]
   }
@@ -114,16 +88,8 @@ resource "tls_locally_signed_cert" "cluster_ca" {
   ca_cert_pem        = local.fml_intermediate_cert
 
   is_ca_certificate = true
-  # Intended guardrail: this CA may only issue end-entity certs, never another
-  # CA. It does not take effect. The provider does set the template field, but
-  # x509.CreateCertificate omits pathLenConstraint unless MaxPathLenZero is
-  # also set, which the provider has no way to express — so the issued
-  # certificates carry no constraint at all. Setting 1 emits pathLen:1, which
-  # places the fault in the zero value rather than the fork. The attribute
-  # stays so the intent is recorded and starts working if the provider gains
-  # the distinction; `mise run pki:verify` asserts the depth that actually
-  # holds, which the intermediate's pathLen:1 enforces from above for anything
-  # that validates a full path.
+  # No effect: Go emits pathLen 0 only with MaxPathLenZero, which the provider cannot set.
+  # The intermediate's pathLen:1 enforces the depth; `mise run pki:verify` checks it.
   max_path_length = 0
 
   validity_period_hours = 2 * 8766 # ~2 years
@@ -135,8 +101,6 @@ resource "tls_locally_signed_cert" "cluster_ca" {
     "digital_signature",
   ]
 }
-
-# --- Per-cluster ServiceAccount token signer (leaf) -----------------------
 
 resource "tls_private_key" "sa_signer" {
   for_each = local.clusters
@@ -165,7 +129,7 @@ resource "tls_locally_signed_cert" "sa_signer" {
 
   is_ca_certificate = false
 
-  validity_period_hours = 8766 # 1 year: hard cryptographic-lifecycle bound
+  validity_period_hours = 8766 # 1 year
   early_renewal_hours   = 720  # plans flag rotation ~30 days out
 
   allowed_uses = [

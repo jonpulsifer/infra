@@ -1,11 +1,5 @@
-# ---------------------------------------------------------------------------
-# Tailscale tailnet-wide resources
-# ---------------------------------------------------------------------------
-
-# The whole tailnet policy is one file and one resource. Atlantis autoplans it
-# because ATLANTIS_AUTOPLAN_FILE_LIST names "terraform/**/*.hujson"; a policy
-# change with no .tf beside it plans nothing otherwise, and a green PR that
-# planned 0/0 projects looks exactly like a green PR that applied.
+# A policy-only change autoplans because ATLANTIS_AUTOPLAN_FILE_LIST includes
+# terraform/**/*.hujson. Without it the PR plans nothing and still goes green.
 resource "tailscale_acl" "this" {
   acl = file("${path.module}/policy.hujson")
 }

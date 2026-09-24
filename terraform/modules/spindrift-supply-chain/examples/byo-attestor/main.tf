@@ -1,7 +1,5 @@
-# Mixed posture two: the module creates the key, admission checks against an
-# attestor that lives elsewhere. The registration the caller performs on that
-# attestor takes exactly these three outputs — the version URI as the public
-# key id, the PEM, and the algorithm.
+# The module creates the key; the attestor lives elsewhere. Registering the key on it takes
+# these outputs: the version URI as the public key id, the PEM and the algorithm.
 
 module "supply_chain" {
   source = "../.."

@@ -1,16 +1,6 @@
 locals {
-  # Who may mint tokens from the shared "homelab" GitHub OIDC provider. This
-  # only gates who can authenticate at all; what each identity can then do is
-  # scoped separately by per-resource IAM bindings (see iam.tf, datastore.tf,
-  # and terraform/gcp/projects/trusted-builds).
-  #
-  # Two doors. A repository in the id list federates from any of its workflows
-  # — that is this repository's own CI. Every other repository under one of the
-  # owners federates only while running Spindrift's reusable build workflow at
-  # `main`: `job_workflow_ref` names the *called* workflow, so a connected
-  # repository's thin caller (`apps/spindrift/src/integrations/github/config-pr.ts`)
-  # is admitted and nothing else it runs is. The owners are the accounts the
-  # installation connects repositories from (`github.accounts` in its manifest).
+  # Listed repositories federate from any workflow. Other repositories of these owners federate
+  # only inside the build workflow at main: job_workflow_ref names the called workflow.
   github_actions_allowed_repository_ids = [
     "952814997", # jonpulsifer/infra
   ]
@@ -20,8 +10,7 @@ locals {
   ]
   spindrift_build_workflow_ref = "jonpulsifer/infra/.github/workflows/spindrift-build.yml@refs/heads/main"
 
-  # IAM grants use the immutable repository ID mapping so a repository rename
-  # does not interrupt direct GitHub Actions federation.
+  # A repository ID survives a rename.
   infra_github_actions_principal = "principalSet://iam.googleapis.com/${google_iam_workload_identity_pool.homelab.name}/attribute.repository_id/952814997"
 }
 
@@ -29,11 +18,8 @@ resource "google_iam_workload_identity_pool" "homelab" {
   workload_identity_pool_id = "homelab"
 }
 
-# Org policy changes to iam.workloadIdentityPoolProviders are eventually
-# consistent — GCP can reject a provider create/update against the *old*
-# allowed_values for a minute or two even after the policy update has been
-# applied. Force a delay here, and re-trigger it whenever allowed_values
-# changes, so provider resources don't race the policy's propagation.
+# For a minute or two after an allowed_values change, GCP checks provider writes
+# against the old iam.workloadIdentityPoolProviders values.
 resource "time_sleep" "workload_identity_org_policy_propagation" {
   depends_on      = [google_org_policy_policy.allowed_workload_identity_providers]
   create_duration = "120s"
@@ -74,9 +60,8 @@ resource "google_iam_workload_identity_pool_provider" "vercel" {
   }
 
   attribute_condition = "assertion.sub.startsWith('owner:jonpulsifer:project:')"
-  # No allowed_audiences: the Vercel project mints its OIDC token with this
-  # provider's full resource name as `aud`, which is exactly what GCP accepts
-  # by default. Setting allowed_audiences replaces that default and rejects it.
+  # Vercel sets aud to this provider's full resource name, the GCP default audience.
+  # Setting allowed_audiences replaces that default and rejects the token.
   oidc {
     issuer_uri = "https://oidc.vercel.com/jonpulsifer"
   }
@@ -84,13 +69,8 @@ resource "google_iam_workload_identity_pool_provider" "vercel" {
   depends_on = [time_sleep.workload_identity_org_policy_propagation]
 }
 
-# Cluster workload identities: each cluster's kube-apiserver is an OIDC issuer
-# (SA token signer issued by terraform/pki; discovery docs + JWKS served at
-# oidc.lolwtf.ca via Cloudflare Pages). Separate pool from "homelab" so cluster
-# workloads and CI identities never share a principalSet namespace. One provider
-# per cluster — the clusters have distinct issuers/keys because their SA
-# subjects (system:serviceaccount:ns:name) would otherwise be indistinguishable.
-# ("fml-pool" because GCP requires pool IDs of 4+ chars — bare "fml" is too short.)
+# Each cluster's kube-apiserver is an OIDC issuer. A pool apart from "homelab" keeps
+# cluster and CI principalSets apart. Pool IDs need at least 4 characters, hence fml-pool.
 locals {
   fml_clusters    = toset(["folly", "offsite"])
   fml_issuer_base = "https://oidc.lolwtf.ca"
@@ -114,8 +94,8 @@ resource "google_iam_workload_identity_pool_provider" "fml_k8s" {
     "attribute.serviceaccount" = "assertion['kubernetes.io']['serviceaccount']['name']"
   }
 
-  # Only bound (projected) ServiceAccount tokens federate; IAM grants must add
-  # their own namespace/serviceaccount conditions — never grant pool-wide.
+  # Admits any ServiceAccount token, so each grant must name the cluster-prefixed subject;
+  # never grant pool-wide or on namespace/serviceaccount attributes alone.
   attribute_condition = "assertion.sub.startsWith('system:serviceaccount:')"
 
   oidc {

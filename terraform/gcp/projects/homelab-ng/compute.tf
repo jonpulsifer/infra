@@ -22,8 +22,7 @@ data "google_storage_bucket_objects" "files" {
 }
 
 locals {
-  # GCS lists objects lexicographically, so element zero is the oldest name
-  # the moment the prefix holds more than one build; the newest is last.
+  # Build names sort oldest first, so the newest image is the last name.
   nixos_image_object = reverse(sort([
     for o in data.google_storage_bucket_objects.files.bucket_objects : o.name
   ]))[0]
@@ -71,16 +70,8 @@ resource "google_compute_instance" "oldboy" {
     scopes = ["cloud-platform"]
   }
 
-  # Secure Boot off. images/gce.nix builds an EFI image and nothing signs the
-  # NixOS bootloader with a key GCE's UEFI db trusts, so the firmware rejects
-  # the boot entry and loops on it:
-  #
-  #   BdsDxe: failed to load Boot0001 "UEFI Google PersistentDisk ":
-  #   Security Violation
-  #
-  # Which is to say the uptime this host exists to accumulate was the
-  # hypervisor's, not its own -- it has been RUNNING and unbooted since it was
-  # created. vTPM and integrity monitoring stay on.
+  # The NixOS bootloader is not signed with a key in GCE's UEFI db. With Secure Boot on,
+  # the firmware loops on "BdsDxe: failed to load Boot0001 ... Security Violation".
   shielded_instance_config {
     enable_secure_boot          = false
     enable_vtpm                 = true

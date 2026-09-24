@@ -1,4 +1,4 @@
 data "google_organization" "org" {
-  # domain = "pulsifer.ca"
+  # pulsifer.ca
   organization = "5046617773"
 }

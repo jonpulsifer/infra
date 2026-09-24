@@ -1,9 +1,4 @@
-# GCP never deletes a KMS ring or a key, so the ring and key this chain signs
-# with are live in the project and in no state file. The module adopts them at
-# its own addresses rather than colliding with them on create. Their single
-# version is enabled, so the public half reads on the first apply and the
-# module README's PENDING_GENERATION retry does not arise — and the public key
-# the cluster admission policy pins is the one it already pins.
+# GCP never deletes a KMS key ring or key, so this root imports the existing signer into the module.
 import {
   to = module.supply_chain.google_kms_key_ring.keys[0]
   id = "projects/trusted-builds/locations/northamerica-northeast1/keyRings/keys"
@@ -26,9 +21,7 @@ module "supply_chain" {
   attester_principals = local.attester_principals
   attestor_viewers    = local.attestor_viewers
 
-  # Vessel agents only. This project's own Binary Authorization agent reads
-  # occurrences on the note because the module composes that grant from the
-  # project number; it verifies nothing, so it does not belong here.
+  # Vessel agents only; the module grants this project's own agent from its project number.
   verifier_agents = [local.bluenose_binary_authorization_service_agent]
 
   registry_readers = [

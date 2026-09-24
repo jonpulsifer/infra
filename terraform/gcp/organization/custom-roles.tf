@@ -11,9 +11,7 @@ data "google_iam_role" "storage_object_creator" {
   name = "roles/storage.objectCreator"
 }
 
-# The one permission Prowler needs that `roles/viewer` does not carry. Reading a
-# bucket's IAM policy is how the public-access checks tell a private bucket from
-# one granted to allUsers, and Viewer stops short of it.
+# Prowler's public-access checks read bucket IAM policy to find allUsers grants.
 resource "google_organization_iam_custom_role" "prowler_scanner" {
   role_id     = "prowlerScanner"
   org_id      = data.google_organization.org.org_id

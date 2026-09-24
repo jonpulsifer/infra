@@ -1,14 +1,4 @@
-# ---------------------------------------------------------------------------
-# Device map — single source of truth for all tailnet devices.
-#
-# Each key is the MagicDNS hostname (without the tailnet domain).
-# Adding or removing a device only requires editing this map.
-#
-# Fields:
-#   key_expiry_disabled  - set true for infra/servers, false for personal devices
-#   tags                 - ACL tags to apply; empty list = no tailscale_device_tags resource
-# ---------------------------------------------------------------------------
-
+# Keys are MagicDNS hostnames without the tailnet domain.
 locals {
   tailnet_domain = local.fleet.tailnet
 
@@ -80,18 +70,10 @@ locals {
   }
 }
 
-# ---------------------------------------------------------------------------
-# Data sources — one lookup per device, keyed by MagicDNS hostname.
-# ---------------------------------------------------------------------------
-
 data "tailscale_device" "devices" {
   for_each = local.devices
   name     = "${each.key}.${local.tailnet_domain}"
 }
-
-# ---------------------------------------------------------------------------
-# Authorize all devices.
-# ---------------------------------------------------------------------------
 
 resource "tailscale_device_authorization" "devices" {
   for_each   = local.devices
@@ -99,27 +81,18 @@ resource "tailscale_device_authorization" "devices" {
   authorized = true
 }
 
-# ---------------------------------------------------------------------------
-# Key expiry — controlled per device via the map.
-# ---------------------------------------------------------------------------
-
 resource "tailscale_device_key" "devices" {
   for_each            = local.devices
   device_id           = data.tailscale_device.devices[each.key].node_id
   key_expiry_disabled = each.value.key_expiry_disabled
 }
 
-# ---------------------------------------------------------------------------
-# Tags — only applied to devices that have a non-empty tags list.
-# ---------------------------------------------------------------------------
-
 resource "tailscale_device_tags" "devices" {
   for_each  = { for k, v in local.devices : k => v if length(v.tags) > 0 }
   device_id = data.tailscale_device.devices[each.key].node_id
   tags      = each.value.tags
 
-  # Tags must exist in the ACL's tagOwners before the API will let a device
-  # claim them; nothing here references tailscale_acl.this, so without this
-  # Terraform is free to apply tag assignment before the ACL update lands.
+  # The API rejects a tag until the ACL's tagOwners lists it, and no reference
+  # orders this after tailscale_acl.this.
   depends_on = [tailscale_acl.this]
 }

@@ -1,6 +1,4 @@
-# Network single sources of truth: the topology module reads Flux ConfigMaps
-# from clusters/<site>/config. Edit those JSON resources, not the projections
-# below.
+# Reads the Flux ConfigMaps in clusters/<site>/config; edit the JSON, not this root.
 module "topology" {
   source = "../../../modules/cluster-topology"
   site   = "folly"
@@ -22,8 +20,7 @@ locals {
   offsite_topology = module.offsite_topology.data
   lab_topology     = module.lab_topology.data
 
-  # Preserve the attribute shape used throughout this root while sourcing every
-  # value from the flat Flux ConfigMap.
+  # The nested shape this root uses, projected from the flat ConfigMap.
   lab = {
     cidr = local.lab_topology.LAB_CIDR
     hosts = {
