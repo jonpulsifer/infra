@@ -1,74 +1,7 @@
 /**
- * The repository loop (§15).
- *
- * §15 gives Spindrift "a signed repository webhook **plus** periodic
- * default-branch reconciliation", and says why: "so that a missed delivery
- * self-heals". This file is the second half, and it is the correctness path —
- * the webhook only shortens a wait. Everything here is correct with every
- * delivery dropped, exactly as the deploy loop is correct with every
- * `NOTIFY` dropped, and for the same reason: an endpoint on the public
- * internet is not a delivery guarantee.
- *
- * Three rules run through it.
- *
- * **Only the default branch is authoritative.** Configuration is adopted from
- * one commit on one branch, and `repositories.authoritative_commit` is where
- * that lands. A pull request — including the configuration PR Spindrift itself
- * opened — is on a branch, so nothing this loop does can be affected by one
- * until it merges. That is not a code path to be careful about; it is that
- * there is no code path reading any other ref.
- *
- * **The repository's configuration is one transaction.** §15 makes the whole
- * PR the unit, so a default-branch commit carrying an unparseable Spindrift
- * file is a commit that is **not adopted at all** — the good scopes in it do
- * not land while a bad one is ignored. The loop reports why and tries again on
- * the next pass, which is what turns a typo into a visible, self-clearing state
- * rather than a partial adoption nobody can see.
- *
- * **Lost access freezes and never destroys.** §15: "Lost access **freezes
- * source-driven changes and never destroys a Deploy**." Mechanically: the only
- * write this file makes on lost access is an `UPDATE` of one `repositories`
- * row. There is no `delete` anywhere in it, no write to `components`,
- * `builds`, or `deploys` at all, and the one write to `apps` is the rename
- * follow rewriting `source_repo_url` — a display string, on the path that has
- * just proved access. So what is running keeps running, and what stops is the
- * one thing that genuinely cannot continue, which is reading new source.
- *
- * What this file's own functions do **not** do is dispatch a build or a
- * Deploy. `reconcileRepository`, `reconcileAllRepositories`, and
- * `applyWebhookDelivery` end at adopting a commit and saying which scopes it
- * changed — `./auto-deploy.ts`'s `dispatchAutoDeploys` is the dispatcher that
- * fact was always for. It reads the `RepositoryReconciliation[]` these
- * functions return and, for every App on the repository that opted in
- * (`apps.autoDeploy`), calls `deployApp`. Both the poll loop's periodic pass
- * and the webhook route call it over the same passes, which is what keeps a
- * missed delivery self-healing rather than silently skipping a deploy: the
- * loop's next tick reconciles the same commit and dispatches exactly as the
- * webhook would have.
- *
- * **Which is why advancing `authoritative_commit` is a claim, not a refresh.**
- * The self-healing argument above holds only while every writer of that column
- * is a path that also dispatches. A third writer that moves the cursor and
- * drops the pass on the floor cancels that push for good — the next tick reads
- * `head === authoritativeCommit`, reports `unchanged`, and the dispatcher has
- * nothing to fire on. Two things enforce it here:
- *
- * - **{@link ReconcileOptions.adopt}.** A caller that only wants the row fresh
- *   — a screen rendering repository health — passes `false` and gets `behind`
- *   rather than a transition it is not going to dispatch.
- * - **The advance is a compare-and-swap.** It names the commit it read, so the
- *   webhook pass and the poll pass cannot both observe the same predecessor and
- *   both report `adopted`. The loser reports `unchanged` and dispatches
- *   nothing, because the winner already did.
- *
- * **What that does not buy is atomicity with the dispatch.** The advance
- * commits here and the dispatch happens in the caller, so a process that dies
- * between the two leaves a commit adopted and never deployed — and the next
- * tick, reading `head === authoritativeCommit`, will call it `unchanged`
- * forever. `reconcileAllRepositories` widens that window to a whole fleet walk,
- * because `runRepoLoop` dispatches once at the end rather than per repository.
- * Nothing here closes it; the honest statement is that every *writer* is a
- * dispatching path, not that every adoption is dispatched.
+ * Reconciles each repository's default branch into `authoritative_commit`: the
+ * correctness path behind the webhook. Lost access freezes the repository row
+ * and never touches a Deploy.
  */
 import { and, eq, isNull, sql } from 'drizzle-orm';
 import type { Clock } from '../commands/types.ts';
@@ -90,48 +23,31 @@ import {
   reconcilerLoopDuration,
 } from '../telemetry/index.ts';
 
-/** What the loop needs. No principal: nobody asked for it to run. */
 export interface RepoLoopContext {
   readonly db: Database;
   readonly clock: Clock;
-  /**
-   * The far side, as the domain names it — never a GitHub client. The loop
-   * reads facts about the repository and writes none, which is what
-   * `RepositoryReader` is.
-   */
   readonly host: RepositoryReader;
-  /**
-   * How `applyWebhookDelivery` waits out a push the API has not caught up to.
-   * Injected so a test does not sit through {@link PUSH_LAG_RETRY_MS}; unset
-   * is a real timer.
-   */
+  /** Injected for tests of the push-lag wait; unset is a real timer. */
   readonly sleep?: (ms: number) => Promise<void>;
 }
 
-/**
- * How long a push delivery waits before its one re-read.
- *
- * A delivery can arrive before the ref it announces is readable, and the first
- * pass then reads the previous head. One bounded wait and one more pass is the
- * whole remedy: the delivery is a shortcut, and a second miss costs exactly
- * what a dropped delivery costs — the next poll.
- */
+// A delivery can arrive before its ref is readable. One wait and one re-read;
+// a second miss costs what a dropped delivery does, the next poll.
 export const PUSH_LAG_RETRY_MS = 1500;
 
-/** What one scope's Spindrift file said, or why it said nothing. */
 export type ScopeOutcome =
   | {
       readonly scope: string;
       readonly appId: string;
       readonly outcome: 'adopted';
       readonly proposal: DetectionProposal;
-      /** Whether this differs from what the previously adopted commit held. */
+      /** Whether the file differs from the previously adopted commit's. */
       readonly changed: boolean;
     }
   | {
       readonly scope: string;
       readonly appId: string;
-      /** No Spindrift file at this scope. Not an error: detection still applies. */
+      /** No `SPINDRIFT_FILE` at this scope; detection still applies. */
       readonly outcome: 'absent';
     }
   | {
@@ -141,33 +57,22 @@ export type ScopeOutcome =
       readonly detail: string;
     };
 
-/** What one pass over one repository did. */
 export type RepositoryReconciliation =
   | {
       readonly repositoryId: string;
       readonly fullName: string;
-      /**
-       * Nothing for this pass to adopt: either the default branch had not moved
-       * since the adopted commit, or a concurrent pass claimed the same
-       * transition first and dispatched it. Both mean the same thing to a
-       * caller — this pass carries no new commit.
-       */
+      /** The branch has not moved, or another pass adopted the commit first. */
       readonly outcome: 'unchanged';
       readonly commit: string;
     }
   | {
       readonly repositoryId: string;
       readonly fullName: string;
-      /**
-       * The default branch has moved and this pass deliberately did not claim
-       * it (`adopt: false`). Distinct from `unchanged` because the difference
-       * is visible — there is a commit waiting that this pass declined to
-       * adopt, and some later pass will.
-       */
+      /** The branch moved and this pass did not claim it (`adopt: false`). */
       readonly outcome: 'behind';
-      /** The head this pass observed, which is not what governs yet. */
+      /** The observed head, which does not govern yet. */
       readonly commit: string;
-      /** What still governs, and what the screen should still render. */
+      /** The commit that still governs. */
       readonly adopted: string | null;
     }
   | {
@@ -176,13 +81,12 @@ export type RepositoryReconciliation =
       readonly outcome: 'adopted';
       readonly commit: string;
       readonly scopes: readonly ScopeOutcome[];
-      /** Set when this pass also cleared a freeze. */
       readonly thawed?: true;
     }
   | {
       readonly repositoryId: string;
       readonly fullName: string;
-      /** A commit was reached but not adopted: a scope's file did not parse. */
+      /** Reached but not adopted: a scope's file did not parse. */
       readonly outcome: 'rejected';
       readonly commit: string;
       readonly scopes: readonly ScopeOutcome[];
@@ -196,29 +100,18 @@ export type RepositoryReconciliation =
   | {
       readonly repositoryId: string;
       readonly fullName: string;
-      /**
-       * The host could not be reached, or refused for a reason that is not
-       * about access. Explicitly **not** a freeze: a rate limit or a bad hour
-       * at the far side is a delay, and turning it into an operator-visible
-       * frozen state would cry wolf until nobody read the state at all.
-       */
+      /** Unreachable, or refused for a reason other than access. */
       readonly outcome: 'unavailable';
       readonly detail: string;
     };
 
-/** Where a scope's Spindrift file lives. `.` is the repository root (§5). */
+/** A `null` or `.` subpath is the repository root. */
 function spindriftPath(subpath: string | null): string {
   const scope = subpath ?? '.';
   return scope === '.' ? SPINDRIFT_FILE : `${scope}/${SPINDRIFT_FILE}`;
 }
 
-/**
- * Freeze one repository (§15).
- *
- * One `UPDATE`, and the row it touches is the only row in the database that
- * describes source access. Nothing about what is deployed is reachable from
- * here, which is the mechanical form of "never destroys a Deploy".
- */
+/** Writes only the repository row: a freeze never reaches what is deployed. */
 async function freeze(
   context: RepoLoopContext,
   repository: Pick<Repository, 'id' | 'fullName'>,
@@ -243,7 +136,6 @@ async function freeze(
   };
 }
 
-/** Clear a freeze. Source-driven changes resume; nothing else changes. */
 async function thaw(
   context: RepoLoopContext,
   repositoryId: string,
@@ -260,34 +152,15 @@ async function thaw(
     .where(eq(repositories.id, repositoryId));
 }
 
-/** How much of a pass a caller is asking for. */
 export interface ReconcileOptions {
   /**
-   * Whether this pass may claim the transition to a new commit.
-   *
-   * `true` — the default, and what the loop, the webhook and the creation flow
-   * ask for — is the whole pass: read the scopes, advance
-   * `authoritative_commit`, report `adopted`. The caller is then obliged to
-   * hand the pass to `dispatchAutoDeploys`, because adopting is what an opted-in
-   * App's push *is*.
-   *
-   * `false` is for a caller that wants the row fresh and is not going to
-   * dispatch — a screen. It refreshes `default_branch` and `reconciled_at`,
-   * skips the per-scope file reads (which is also most of the latency), leaves
-   * `authoritative_commit` alone, and reports `behind`. A read that claimed the
-   * transition would permanently cancel that push: nothing dispatches it, and
-   * the next pass sees `head === authoritativeCommit` and calls it `unchanged`.
+   * `false` for a caller that will not dispatch: it reports `behind` and leaves
+   * `authoritative_commit` alone, since an undispatched claim cancels that push.
    */
   readonly adopt?: boolean;
 }
 
-/**
- * One pass over one repository.
- *
- * Never throws for anything the far side did. A loop over a fleet has to
- * survive one bad repository, and an access error is the input to a decision
- * here rather than an exception somebody above has to interpret.
- */
+/** Never throws for a far-side fault, so one repository cannot stop a pass. */
 export async function reconcileRepository(
   context: RepoLoopContext,
   stored: Repository,
@@ -300,14 +173,8 @@ export async function reconcileRepository(
   let fullName: string;
   let defaultBranch: string;
   let head: string;
-  // Whether the configuration PR this row still names has been closed since
-  // the last pass — merged or not. A merge is caught below, where the head it
-  // landed moves the branch; this is the other way `configPullRequest` goes
-  // stale, and nothing else in this function ever asks again once the number
-  // is written (ticket 136). Read alongside the facts above rather than only
-  // when something else changes, because a closed-unmerged PR is precisely
-  // the case where the branch never moves and every other read in this
-  // function reports `unchanged`.
+  // Asked every pass: a config PR closed unmerged never moves the branch, so
+  // nothing else here would notice it.
   let configPullRequestClosed = false;
   try {
     const facts = await context.host.repository(ref, stored.fullName);
@@ -337,21 +204,15 @@ export async function reconcileRepository(
     };
   }
 
-  // A rename is silent from here: the host keeps answering the old name, so
-  // this poll keeps working, while every push delivery now arrives under the
-  // new one and `applyWebhookDelivery`'s lookup misses it. The name the host
-  // just answered with is the fact; the row follows it.
+  // The host still answers the old name, but deliveries arrive under the new
+  // one, so the row follows the name the host answered with.
   let repository = stored;
   if (fullName !== stored.fullName) {
     try {
       repository = await followRename(context, stored, fullName);
     } catch (cause) {
-      // Another row already holds that name — the new name was connected
-      // before this poll looked, or the same repository was connected twice
-      // under a spelling the host does not answer with. `full_name` is unique
-      // and the two rows are somebody's to merge, not this pass's: it keeps
-      // working under the stored name, as it did before the rename, rather
-      // than taking every other repository's pass down with the throw.
+      // Another row already holds the new name (`full_name` is unique). Keep
+      // working under the stored name; merging the rows is an operator's call.
       logWarn('repository renamed; not followed', {
         'spindrift.repository': stored.fullName,
         'spindrift.repository.renamed': fullName,
@@ -361,10 +222,8 @@ export async function reconcileRepository(
     }
   }
 
-  // Reaching the repository is what proves access came back. A freeze is
-  // cleared here rather than only on a webhook, because §15's periodic
-  // reconciliation is the path that has to work when a delivery was missed —
-  // including the delivery that would have said access was restored.
+  // Reaching the repository proves access came back, even when the delivery
+  // saying so was missed.
   const thawed = repository.access === 'frozen';
   if (thawed) await thaw(context, repository.id);
 
@@ -387,10 +246,6 @@ export async function reconcileRepository(
   }
 
   if (!adopt) {
-    // Everything above this line is a refresh of facts the row is allowed to be
-    // wrong about between passes — the branch's name, when it was last looked
-    // at, whether access came back. Everything below it is the transition, and
-    // a caller that is not going to dispatch does not get to consume one.
     await context.db
       .update(repositories)
       .set({
@@ -466,9 +321,8 @@ export async function reconcileRepository(
 
     let changed = true;
     if (previous !== null) {
-      // "Changed" is a comparison against the previously adopted commit, not a
-      // guess from the push payload's file list: a force-push, a revert, and a
-      // merge all move the branch without saying what a scope's file now says.
+      // Compared with the adopted commit's file: a force-push, revert or merge
+      // moves the branch without saying what a scope's file now says.
       const before = await readScopeFile(
         context,
         ref,
@@ -489,9 +343,8 @@ export async function reconcileRepository(
   }
 
   if (outcomes.some((outcome) => outcome.outcome === 'invalid')) {
-    // Not adopted, and `authoritative_commit` deliberately left where it was:
-    // the previous commit's configuration is still what governs, and the next
-    // pass will try this one again.
+    // One bad scope rejects the whole commit. The previous commit still
+    // governs, and the next pass retries this one.
     await context.db
       .update(repositories)
       .set({
@@ -510,22 +363,6 @@ export async function reconcileRepository(
     };
   }
 
-  // Adopting a Spindrift file from the default branch is what the merge of the
-  // configuration pull request looks like from in here — no `pull_request`
-  // delivery is subscribed to, and none is needed, because the merge is only
-  // interesting for having put the file where this loop reads it. Clearing the
-  // number is what stops "merge your configuration PR" standing on a screen
-  // over a pull request that landed weeks ago — or, since ticket 136, over one
-  // that never will, having been closed unmerged instead (`configPullRequestClosed`,
-  // read alongside `head` above).
-  //
-  // **Conditional on the commit this pass read.** The webhook and the poll loop
-  // reconcile the same repository concurrently by design, and an unconditional
-  // advance lets both observe the same predecessor, both write `head`, and both
-  // report `adopted` — two dispatches for one commit. Since ticket 131 those are
-  // two Builds keyed `commit#<millis>`, which `builds_component_commit_shape_unique`
-  // is explicitly unable to collapse (see `deployApp`'s rerun key). Naming the
-  // predecessor makes exactly one of them the adopter.
   const adopted = outcomes.some((outcome) => outcome.outcome === 'adopted');
   const [claimed] = await context.db
     .update(repositories)
@@ -534,10 +371,13 @@ export async function reconcileRepository(
       authoritativeCommit: head,
       reconciledAt: now,
       updatedAt: now,
+      // Adopting a file is how the config PR's merge shows up here.
       ...(adopted || configPullRequestClosed
         ? { configPullRequest: null }
         : {}),
     })
+    // Compare-and-swap on the commit read, so the webhook and the poll loop
+    // cannot both adopt it and dispatch it twice.
     .where(
       and(
         eq(repositories.id, repository.id),
@@ -549,9 +389,7 @@ export async function reconcileRepository(
     .returning({ id: repositories.id });
 
   if (claimed === undefined) {
-    // Another pass moved the cursor between this one's read and its write. It
-    // adopted, and it is dispatching — so this pass reports that it carries no
-    // new commit rather than a second `adopted` nobody should act on twice.
+    // Another pass adopted this commit first and is dispatching it.
     return {
       repositoryId: repository.id,
       fullName: repository.fullName,
@@ -560,6 +398,8 @@ export async function reconcileRepository(
     };
   }
 
+  // The caller must dispatch this pass. A crash before it leaves the commit
+  // adopted and never deployed.
   return {
     repositoryId: repository.id,
     fullName: repository.fullName,
@@ -571,13 +411,8 @@ export async function reconcileRepository(
 }
 
 /**
- * Follow a repository rename (§15).
- *
- * The row's `full_name` is the webhook path's only lookup key, so it is
- * rewritten first; `apps.source_repo_url` names the same repository for the
- * screens that render an App's source, and is rewritten by substitution so an
- * App whose URL was typed some other way is left alone rather than guessed at.
- * Nothing that decides what runs is touched.
+ * `apps.source_repo_url` is rewritten by substitution, so a URL typed some
+ * other way is left alone.
  *
  * ponytail: no far-side repository id is stored, so a new repository created
  * under a vacated name is indistinguishable from the renamed one; storing
@@ -607,7 +442,6 @@ async function followRename(
   return { ...stored, fullName };
 }
 
-/** A scope's file at an older commit, or `null` if it was not there either. */
 async function readScopeFile(
   context: RepoLoopContext,
   ref: RepositoryRef,
@@ -618,21 +452,13 @@ async function readScopeFile(
   try {
     return await context.host.readFile(ref, repository.fullName, commit, path);
   } catch {
-    // A commit that has been garbage-collected, or a history rewrite. Not
-    // knowing what a scope looked like before is a reason to treat it as
-    // changed, never a reason to fail the pass.
+    // A collected commit or rewritten history reads as changed, never as a
+    // failed pass.
     return null;
   }
 }
 
-/**
- * One pass over every connected repository.
- *
- * Frozen repositories are **included**, not skipped. A freeze is a state to
- * recover from, and the only thing that can observe recovery is an attempt to
- * read — so skipping them would make a freeze permanent until somebody noticed
- * by hand.
- */
+/** Includes frozen repositories: only a read can observe recovery. */
 export async function reconcileAllRepositories(
   context: RepoLoopContext,
 ): Promise<readonly RepositoryReconciliation[]> {
@@ -640,20 +466,15 @@ export async function reconcileAllRepositories(
 
   const passes: RepositoryReconciliation[] = [];
   for (const repository of connected) {
-    // Sequential: the far side is somebody else's API with a shared rate limit,
-    // and a fleet of repositories reconciling in lockstep is the fastest way to
-    // spend an hour's quota in a second.
+    // Sequential: the host's rate limit is shared across the fleet.
     passes.push(await reconcileRepository(context, repository));
   }
   return passes;
 }
 
 /**
- * Apply one **already verified** webhook delivery.
- *
- * A shortcut, never a source of truth. Every branch here either does what the
- * periodic pass would have done anyway, or does nothing — so a delivery that
- * never arrives costs latency and nothing else.
+ * Takes an already verified delivery. Every branch does what the periodic pass
+ * would, or nothing, so a lost delivery costs only latency.
  */
 export async function applyWebhookDelivery(
   context: RepoLoopContext,
@@ -662,10 +483,7 @@ export async function applyWebhookDelivery(
   if (delivery.kind === 'ignored') return [];
 
   if (delivery.kind === 'push') {
-    // §15: only the default branch is authoritative. A push to any other ref is
-    // discarded here rather than reconciled-and-discarded, because reconciling
-    // would read the default branch and find nothing new — the same answer, one
-    // round trip later.
+    // Only the default branch is authoritative.
     if (delivery.ref !== `refs/heads/${delivery.defaultBranch}`) return [];
     const [repository] = await context.db
       .select()
@@ -675,11 +493,8 @@ export async function applyWebhookDelivery(
     const first = await reconcileRepository(context, repository);
     if (!lagging(first, delivery.head)) return [first];
 
-    // The delivery named a head the read did not reach: the API lags its own
-    // push notifications by a moment, and without this the pushed commit
-    // costs the full poll interval on the one path that exists to shorten it.
-    // Once, not a loop — and both passes are returned, because the first may
-    // have adopted a commit of its own that the dispatcher still has to see.
+    // The API lags its own push notifications. Retry once, and return both
+    // passes: the first may have adopted a commit the dispatcher must see.
     await (context.sleep ?? sleep)(PUSH_LAG_RETRY_MS);
     const [fresh] = await context.db
       .select()
@@ -703,9 +518,8 @@ export async function applyWebhookDelivery(
     return frozen;
   }
 
-  // Restored access is not taken at the delivery's word: the freeze is cleared
-  // by a pass that actually read the repository, which is the same evidence the
-  // periodic path uses.
+  // Restored access is not taken on the delivery's word: only a pass that
+  // reads the repository clears the freeze.
   const passes: RepositoryReconciliation[] = [];
   for (const repository of affected) {
     passes.push(await reconcileRepository(context, repository));
@@ -713,13 +527,8 @@ export async function applyWebhookDelivery(
   return passes;
 }
 
-/**
- * Whether a push delivery's pass read a head other than the one delivered.
- *
- * Only a pass that reached a commit can lag. `frozen` and `unavailable` did
- * not read one, and `rejected` reached one whose file did not parse — a fact
- * about the commit, not about the API's timing.
- */
+// Only a pass that read a head can lag. A `rejected` commit failed to parse,
+// which is not lag.
 function lagging(pass: RepositoryReconciliation, head: string): boolean {
   return (
     (pass.outcome === 'unchanged' ||
@@ -729,12 +538,7 @@ function lagging(pass: RepositoryReconciliation, head: string): boolean {
   );
 }
 
-/**
- * The rows one installation-scoped delivery names.
- *
- * An empty name list means the whole installation — a deletion or a suspension
- * names no repository because it applies to all of them.
- */
+/** Empty `names` means every repository in the installation. */
 async function repositoriesOf(
   context: RepoLoopContext,
   installationId: string,
@@ -750,29 +554,15 @@ async function repositoriesOf(
   return all.filter((repository) => named.has(repository.fullName));
 }
 
-/** How often the loop runs, and how to stop it. */
 export interface RepoLoopOptions {
   readonly intervalMs: number;
   readonly signal?: AbortSignal;
-  /**
-   * Called after each pass — where an installation wires logging, metrics, or
-   * `./auto-deploy.ts`'s `dispatchAutoDeploys`. May return a `Promise`, which
-   * the loop awaits before sleeping: dispatch is a database write and the
-   * loop's shutdown signal must not race ahead of it.
-   */
+  /** Awaited before sleeping, so shutdown never races the dispatch write. */
   readonly onPass?: (
     passes: readonly RepositoryReconciliation[],
   ) => void | Promise<void>;
 }
 
-/**
- * Run the loop until aborted.
- *
- * The interval is fixed rather than adaptive, unlike the deploy loop's. There
- * is no in-flight window here to be fast for: a repository is either at its
- * adopted commit or it is not, and the webhook is what covers the latency the
- * interval would otherwise be shortened for.
- */
 export async function runRepoLoop(
   context: RepoLoopContext,
   options: RepoLoopOptions,
@@ -789,7 +579,6 @@ export async function runRepoLoop(
   }
 }
 
-/** A sleep that wakes early on abort rather than holding the loop open. */
 function sleep(ms: number, signal?: AbortSignal): Promise<void> {
   return new Promise((resolve) => {
     const timer = setTimeout(resolve, ms);

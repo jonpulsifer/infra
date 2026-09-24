@@ -1,18 +1,9 @@
-/**
- * The `reconciler` process (§19) — production entrypoint.
- *
- * The deployment declaration reconciles into Postgres before this process
- * constructs exactly that installation's adapters. It then gives all four
- * polling loops one lifecycle without giving any loop the power to stop its
- * siblings.
- */
+/** Production entrypoint for the reconciler process. */
 import type { ReconcilerProcessEvent } from './process.ts';
 import { startReconciler } from './start.ts';
 
 const shutdown = new AbortController();
 const stop = (): void => {
-  // The counterpart of the `running` line below: an operator reading the pod
-  // log sees the exit was asked for, not suffered.
   console.log('spindrift reconciler → stopping');
   shutdown.abort();
 };

@@ -1,25 +1,8 @@
 /**
- * The commit → bundle index, and the one rule that makes it safe (§15).
- *
- * **The index is a hint; the depot is the truth.** Every hit is verified
- * against Cloud Storage before it is returned, and a miss — a row that was
- * never written, an object the bucket's `ephemeral/` lifecycle rule expired, a
- * depot that has since moved to another bucket, a far side having a bad
- * minute — falls through to the fetch that used to happen unconditionally.
- * That is the whole safety argument: the worst this can do is behave exactly
- * like the code it replaces.
- *
- * Which is why nothing here throws. A cache that can fail a deploy is a
- * liability, not an optimization, so the read swallows what it cannot answer
- * and the write is best-effort. `stageSourceBundle` is still the only thing
- * allowed to refuse a source.
- *
- * **No re-touch, deliberately.** A GCS `age` condition counts from the
- * generation's creation time, so keeping a hot bundle alive past 30 days would
- * mean rewriting the object on every hit — paying the write this exists to
- * avoid, to defer a re-fetch that costs exactly what today costs. The bundle
- * expires, the next stage writes it again, and the cache is cold for one
- * deploy. That is the retention policy working rather than a race against it.
+ * The commit to bundle index. A hit counts only once the depot confirms the
+ * object, and nothing here throws: any miss falls through to a fresh fetch.
+ * GCS `age` counts from object creation, so only a rewrite would extend a hot
+ * bundle's life, and a hit does not rewrite.
  */
 
 import { gcsObjectExists, parseGcsLocation } from '@repo/archive/gcs';
@@ -29,14 +12,6 @@ import { sourceBundles } from '../db/schema.ts';
 import type { StagedSourceBundle } from '../domain/source-bundle.ts';
 import type { SourceDepot } from './archives.ts';
 
-/**
- * The bundle already staged for this commit, if the depot still holds it.
- *
- * The bucket on the row must be the depot's own. An installation that moved
- * `sources.buckets` has rows pointing at objects this process may not even be
- * able to read, and confirming one would hand a builder a location outside the
- * bucket the manifest says it stages to — §20's whole point.
- */
 export async function cachedBundle(
   db: Database,
   depot: SourceDepot,
@@ -63,6 +38,7 @@ export async function cachedBundle(
     if (row === undefined) return null;
 
     const object = parseGcsLocation(row.location);
+    // A row from a previous bucket is a miss: builders get the depot's own.
     if (object === null || object.bucket !== depot.bucket) return null;
 
     const present = await gcsObjectExists({
@@ -72,9 +48,7 @@ export async function cachedBundle(
     });
     if (!present) return null;
 
-    // A row written before the headline columns existed says nothing about
-    // the commit, and a hit from it should look like one — not like a commit
-    // whose message was blank.
+    // All three null means the row never recorded a headline, not a blank one.
     const headline =
       row.commitMessage === null &&
       row.commitAuthor === null &&
@@ -90,9 +64,7 @@ export async function cachedBundle(
     return {
       digest: row.digest,
       location: row.location,
-      // §15: a repository bundle is ephemeral whether it was fetched a second
-      // ago or read back from here. The retention is a property of the object,
-      // not of how this call found it.
+      // Every repository bundle is ephemeral, cached or freshly fetched.
       retention: 'ephemeral',
       ...headline,
     };
@@ -101,7 +73,6 @@ export async function cachedBundle(
   }
 }
 
-/** Record what was staged, so the next commit that wants it can find it. */
 export async function rememberBundle(
   db: Database,
   repository: string,
@@ -122,9 +93,7 @@ export async function rememberBundle(
         commitAuthor: bundle.commit?.author ?? null,
         commitAuthoredAt: bundle.commit?.authoredAt ?? null,
       })
-      // The same commit re-staged writes the same content-addressed object, so
-      // the conflicting row is not stale — but `staged_at` is, and it is the
-      // only thing here an operator reads to judge how fresh the copy is.
+      // Re-staging refreshes `staged_at`, which operators read as freshness.
       .onConflictDoUpdate({
         target: [sourceBundles.repository, sourceBundles.commit],
         set: {
@@ -137,7 +106,6 @@ export async function rememberBundle(
         },
       });
   } catch {
-    // A bundle that staged but did not index is a slow next deploy, not a
-    // failed one. Losing the Build over a bookkeeping write would invert that.
+    // Best-effort: an unindexed bundle only costs the next deploy a fetch.
   }
 }

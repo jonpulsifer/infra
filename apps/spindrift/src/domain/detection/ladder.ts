@@ -1,16 +1,7 @@
 /**
- * One Component proposal from one explicitly named directory (§5).
- *
- * The zero-config builder owns language/framework detection. Core consumes a
- * normalized plan instead of duplicating those heuristics, then selects the
- * build frontend independently: a Dockerfile changes how code is built, never
- * what kind of Component it is.
- *
- * The ladder reads through a {@link SourceTree}, not a path. That is what lets
- * the same algorithm answer for an unpacked archive on a disk and for a
- * repository that has never been checked out — §5 says detection is one
- * algorithm, and one algorithm that only ran against one of its two sources
- * was one algorithm in name only.
+ * One Component proposal from one named directory, read through a
+ * {@link SourceTree} so an archive and an unchecked-out repository share it. A
+ * Dockerfile changes how code is built, never what kind of Component it is.
  */
 import type { ComponentKind } from '../desired-state.ts';
 import {
@@ -55,10 +46,6 @@ export type ZeroConfigPlan =
       readonly detail: string;
     };
 
-/**
- * The planner seam. A concrete implementation belongs beside the thing that
- * plans; the ladder depends only on the stable facts it needs.
- */
 export interface ZeroConfigPlanner {
   plan(tree: SourceTree, scope: string): Promise<ZeroConfigPlan>;
 }
@@ -67,15 +54,7 @@ export interface DetectionProposal {
   readonly source: 'detection' | 'spindrift-file' | 'operator';
   readonly kind: ComponentKind;
   readonly kinds: readonly KindOption[];
-  /**
-   * Why this proposal says what it says.
-   *
-   * Not serialized into `spindrift.yaml`, for the same reason `kinds` is not
-   * (see `serializeSpindriftFile`): it is a statement about how the answer was
-   * reached, not about what this scope is, and writing it into the repository
-   * would turn a sentence somebody read once into a value the next run has to
-   * honour.
-   */
+  /** Never written to `spindrift.yaml`: it says how the answer was reached, not what the scope is. */
   readonly reason: string;
   readonly build:
     | { readonly frontend: 'dockerfile'; readonly dockerfile: string }
@@ -107,19 +86,13 @@ export interface DetectScopeInput {
   readonly planner: ZeroConfigPlanner;
 }
 
-/** The Spindrift file's name inside each scope (§5). */
 const SPINDRIFT_FILE = 'spindrift.yaml';
 
 function joinPath(scope: string, file: string): string {
   return scope === '.' ? file : `${scope}/${file}`;
 }
 
-/**
- * The sentence and the arrangement must agree (§5): the build routes probe the
- * same rule this proposal's context came from, so what this says is what the
- * build then does. A subpath scope names its context out loud, because the two
- * conventions only coincide at the root.
- */
+/** Names the build context for a subpath scope, where the two conventions differ. */
 function dockerfileSentence(
   scope: string,
   context: DockerfileBuildContext,
@@ -167,8 +140,7 @@ export async function detectScope(
   }
 
   const dockerfile = await exists(tree, joinPath(prefix, 'Dockerfile'));
-  // Only a repo subpath has a root above it for the two conventions to
-  // disagree about: an archive's prefix *is* its root.
+  // An archive's prefix is its root, so only a repo subpath can differ.
   const context: DockerfileBuildContext =
     dockerfile && source.kind === 'repo'
       ? await dockerfileBuildContext(tree, prefix)

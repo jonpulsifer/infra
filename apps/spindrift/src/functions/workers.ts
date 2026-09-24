@@ -1,27 +1,10 @@
 /**
- * Deploying a function to Cloudflare Workers.
+ * Deploys a function to Cloudflare Workers on a custom domain, not a route: the
+ * platform then owns the hostname's record and certificate, so nothing here
+ * writes DNS.
  *
- * The script is uploaded as an ES module and given a **custom domain** rather
- * than a route: a custom domain makes the platform own the hostname's record
- * and its certificate, so nothing here writes DNS and §9's "Spindrift holds no
- * zone credential" survives a feature that hands out hostnames. Which zone that
- * is, is the account's answer rather than the manifest's first entry: the
- * account's own zone listing is read once per instance and the first declared
- * zone it carries is the one hostnames are minted in.
- *
- * `tail` opens the platform's own trace websocket. A tail session expires on
- * its own schedule, so the generator reopens one whenever the socket closes
- * without the caller having aborted — a viewer left open overnight keeps
- * receiving lines instead of going quiet at the hour mark.
- *
- * The function's environment travels as `secret_text` bindings on the metadata
- * part. Measured, not assumed: the platform keeps a secret across uploads even
- * when the new metadata lists none, so a variable the operator removed is
- * removed by name through the secrets API after the upload — the same Save
- * that took it off the row takes it off the script.
- *
- * ponytail: no per-function compatibility flags. That is a field on the
- * metadata part when a function needs one.
+ * ponytail: no per-function compatibility flags; add them to the metadata part
+ * when a function needs one.
  */
 import { CLOUDFLARE_API_ROOT } from '../adapters/cloudflare.ts';
 import type { Fetcher, TokenProvider } from '../adapters/deploy/cloud/http.ts';
@@ -36,25 +19,19 @@ import {
 } from './contract.ts';
 
 /**
- * What the runtime is compiled against.
- *
- * Pinned rather than "today": a compatibility date is the platform's own
- * versioning, and one that moved with the wall clock would change a deployed
- * function's behaviour on a redeploy nobody asked for.
+ * Pinned: a date that moved with the clock would change a deployed function's
+ * behaviour on a redeploy nobody asked for.
  */
 const COMPATIBILITY_DATE = '2026-08-01';
 
 /** The label between the function's name and the zone: `<name>.fn.<zone>`. */
 const DEFAULT_SUBDOMAIN = 'fn';
 
-/** The protocol the trace socket speaks. */
 const TAIL_PROTOCOL = 'trace-v1';
 
 /**
- * How long a closed tail waits before a new session is minted — doubling up
- * to the ceiling while the far side keeps closing, back to the floor once a
- * frame arrives. A session that dies on arrival would otherwise re-mint
- * itself as fast as the platform answers, for as long as a viewer is open.
+ * Doubles while the far side keeps closing and resets once a line arrives, so
+ * a session that dies on arrival is not re-minted in a hot loop.
  */
 const RECONNECT_MIN_MS = 1_000;
 const RECONNECT_MAX_MS = 30_000;
@@ -63,31 +40,24 @@ export interface WorkersFunctionsOptions {
   readonly token: TokenProvider;
   readonly accountId: string;
   /**
-   * The zones this installation declares, in the order it declares them.
-   *
-   * A list rather than one name, because `dns.zones` is the installation's
-   * naming policy (§9) and says nothing about which provider answers for each
-   * entry — an installation with a private zone on a resolver of its own and a
-   * public one here declares both. Which of them this account actually carries
-   * is the account's answer, read once by {@link WorkersFunctions.resolveZone}.
+   * In declaration order. `dns.zones` names no provider, so the account's own
+   * zone listing picks which one hostnames are minted in.
    */
   readonly zoneNames: readonly string[];
   readonly subdomain?: string;
   readonly endpoint?: string;
-  /** Injected so a test can stand a fake far side behind the real client. */
   readonly fetch?: Fetcher;
   readonly webSocket?: (url: string, protocols: string[]) => WebSocket;
   readonly sleep?: (ms: number) => Promise<void>;
 }
 
-/** The envelope every response from this API carries. */
 interface Envelope<Result> {
   readonly success?: boolean;
   readonly errors?: readonly { readonly message?: string }[];
   readonly result?: Result;
 }
 
-/** One tail frame, read defensively — every field is the platform's option. */
+/** Every field is optional: the platform may omit any of them. */
 interface TailFrame {
   readonly event?: {
     readonly request?: { readonly method?: string; readonly url?: string };
@@ -117,7 +87,6 @@ export class WorkersFunctions implements FunctionDeployer {
 
   constructor(private readonly options: WorkersFunctionsOptions) {}
 
-  /** `<name>.<subdomain>.<zone>` — the address the function answers on. */
   async hostname(name: string): Promise<string> {
     const subdomain = this.options.subdomain ?? DEFAULT_SUBDOMAIN;
     const zone = await this.resolveZone();
@@ -133,8 +102,7 @@ export class WorkersFunctions implements FunctionDeployer {
     const zone = await this.resolveZone();
     const hostname = await this.hostname(name);
 
-    // Multipart, because a module Worker is uploaded as the files it is made
-    // of plus a metadata part naming which one is the entry.
+    // A module Worker is its files plus a metadata part naming the entry.
     const body = new FormData();
     body.set(
       'metadata',
@@ -147,9 +115,6 @@ export class WorkersFunctions implements FunctionDeployer {
               enabled: true,
               logs: { enabled: true, invocation_logs: true },
             },
-            // Always sent, empty included: the list is the whole environment,
-            // so a variable the operator removed is removed from the script by
-            // the same upload — an omitted key would leave the old one live.
             bindings: Object.entries(env).map(([name, text]) => ({
               type: 'secret_text',
               name,
@@ -173,8 +138,7 @@ export class WorkersFunctions implements FunctionDeployer {
       { body },
     );
 
-    // Idempotent on the platform's side: the same hostname pointed at the same
-    // script is the same domain, so a redeploy is not a second one.
+    // Idempotent: the same hostname on the same script is the same domain.
     await this.call(
       'PUT',
       `/accounts/${this.options.accountId}/workers/domains`,
@@ -188,9 +152,8 @@ export class WorkersFunctions implements FunctionDeployer {
       },
     );
 
-    // Secrets outlive an upload that does not name them, so the ones the
-    // environment no longer holds are deleted by name. Listed after the upload
-    // so a secret the upload just set is never in the to-delete set.
+    // Secrets outlive an upload that omits them, so removed ones are deleted by
+    // name. Listed after the upload, so a secret it just set is never deleted.
     const secrets = await this.call<readonly { readonly name?: string }[]>(
       'GET',
       `/accounts/${this.options.accountId}/workers/scripts/${script}/secrets`,
@@ -209,8 +172,7 @@ export class WorkersFunctions implements FunctionDeployer {
   async remove(name: string): Promise<void> {
     const script = workloadName(name);
     const account = this.options.accountId;
-    // The custom domain goes first: a domain outliving its script is a
-    // hostname that resolves to a 404 the platform will keep serving.
+    // Domain first: one that outlives its script keeps serving a 404.
     const domains = await this.attempt<readonly { readonly id?: string }[]>(
       'GET',
       `/accounts/${account}/workers/domains`,
@@ -234,6 +196,7 @@ export class WorkersFunctions implements FunctionDeployer {
     );
   }
 
+  /** Tail sessions expire, so a new one opens whenever the socket closes. */
   async *tail(
     name: string,
     signal: AbortSignal,
@@ -265,8 +228,7 @@ export class WorkersFunctions implements FunctionDeployer {
       } finally {
         socket.close();
         if (session.id !== undefined) {
-          // Best effort: a session left behind expires on its own, and a
-          // failure here must not be what the viewer sees.
+          // Best effort: a session left behind expires on its own.
           await this.attempt(
             'DELETE',
             `/accounts/${account}/workers/scripts/${script}/tails/${session.id}`,
@@ -279,19 +241,7 @@ export class WorkersFunctions implements FunctionDeployer {
     }
   }
 
-  /**
-   * The declared zone this account actually carries, read once.
-   *
-   * The account's own listing rather than a lookup of one name, because the
-   * question is which of the declared zones is *here*. Taking the head of the
-   * declared list and asking for it by name gave the platform a zone it had
-   * never heard of whenever the installation's first zone was somebody else's,
-   * and the refusal named that zone rather than the mismatch.
-   *
-   * Read once: a zone is not renamed mid-process, and a zone added to the
-   * account during one is picked up by the next restart — the same staleness
-   * every other cached far-side fact here carries.
-   */
+  /** Read once: a zone added to the account is picked up on restart. */
   private async resolveZone(): Promise<{
     readonly name: string;
     readonly id: string;
@@ -333,7 +283,7 @@ export class WorkersFunctions implements FunctionDeployer {
     return attempt.result;
   }
 
-  /** As {@link call}, but a `404` is an answer rather than a refusal. */
+  /** As `call`, but a `404` means already gone. */
   private async gone(
     method: string,
     path: string,
@@ -360,9 +310,8 @@ export class WorkersFunctions implements FunctionDeployer {
       Accept: 'application/json',
       Authorization: `Bearer ${await this.options.token()}`,
     };
-    // `Request` derives the multipart boundary from the `FormData` and writes
-    // the header itself; a `Content-Type` set here would make the body
-    // unparseable on the far side.
+    // JSON only: for FormData, `Request` writes the header with its multipart
+    // boundary, and one set here would make the body unparseable.
     if (options.json !== undefined) {
       headers['Content-Type'] = 'application/json';
     }
@@ -410,18 +359,13 @@ export class WorkersFunctions implements FunctionDeployer {
 
 interface RequestOptions {
   readonly query?: Readonly<Record<string, string>>;
-  /** A multipart body, sent as-is. */
   readonly body?: FormData;
-  /** A JSON body, serialized with the header the API needs. */
   readonly json?: unknown;
 }
 
 /**
- * The socket's frames as lines, in arrival order.
- *
- * A queue rather than an event-per-yield, because the socket keeps delivering
- * while the consumer is awaiting the previous line and dropping those is how a
- * busy function's logs come out with holes in them.
+ * A queue, because the socket keeps delivering while the consumer awaits the
+ * previous line, and dropping those leaves holes in a busy function's logs.
  */
 async function* frames(
   socket: WebSocket,
@@ -467,7 +411,6 @@ async function* frames(
   }
 }
 
-/** One frame as the lines a reader sees: logs, then throws, then the verdict. */
 function entriesOf(frame: TailFrame): FunctionLogEntry[] {
   const at = (timestamp: number | undefined): string =>
     new Date(timestamp ?? frame.eventTimestamp ?? Date.now()).toISOString();

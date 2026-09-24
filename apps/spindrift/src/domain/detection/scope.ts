@@ -1,16 +1,7 @@
 /**
- * Resolve the one directory detection is allowed to inspect (§5).
- *
- * Repo scopes are caller-named and may not escape the root. Archives have no
- * named scope and unwrap exactly one lone directory — the shape every `zip -r`
- * and every `git archive` produces, which a developer dropping output from a
- * coding agent (story 28) should not have to know about.
- *
- * This is pure string work over a {@link SourceTree}'s listing. It used to
- * resolve real paths and follow symlinks, and that job did not disappear — it
- * moved into `diskTree`, which is the only implementation that has symlinks to
- * be lied to by. A git tree has none, and putting the check where the risk is
- * means scope resolution is now testable without a filesystem.
+ * Resolves the one directory detection may inspect. A repo scope may not escape
+ * the root, and an archive unwraps one lone top-level directory. This is string
+ * work only; `diskTree` guards against symlinks.
  */
 import type { SourceTree } from './tree.ts';
 import { within } from './tree.ts';
@@ -20,24 +11,12 @@ export type DetectionSource =
   | { readonly kind: 'archive' };
 
 export interface ResolvedDetectionScope {
-  /**
-   * What this scope is *called* — repo-relative, `.` for the root.
-   *
-   * This is the value that reaches `spindrift.yaml`'s path and the App's
-   * `sourceRepoSubpath`, so it is always relative to the repository, never to
-   * whatever wrapper directory an archive happened to arrive in.
-   */
+  /** Repo-relative, `.` for the root, never relative to an archive's wrapper. */
   readonly scope: string;
-  /**
-   * Where to *read* from, as a prefix on tree paths.
-   *
-   * The same as `scope` for a repository. For an archive it is the unwrapped
-   * lone directory, which is exactly the difference between the two.
-   */
+  /** The tree path prefix to read from: the scope, or an archive's lone directory. */
   readonly prefix: string;
 }
 
-/** Normalize a caller-named repo scope, or refuse it. */
 function repoScope(subpath: string): ResolvedDetectionScope {
   const requested = subpath.replaceAll('\\', '/').replace(/\/+$/, '');
   if (requested === '' || requested === '.') {
@@ -50,13 +29,7 @@ function repoScope(subpath: string): ResolvedDetectionScope {
   return { scope, prefix: scope };
 }
 
-/**
- * Unwrap a lone top-level directory, if that is what the archive is.
- *
- * "Lone" means every entry shares one first segment *and* that segment is a
- * directory rather than a single file at the root — an archive of one file is
- * not a wrapper to unwrap.
- */
+/** An archive holding one file at its root has no wrapper to unwrap. */
 async function archiveScope(tree: SourceTree): Promise<ResolvedDetectionScope> {
   const paths = await tree.paths();
   if (paths.length === 0) return { scope: '.', prefix: '.' };

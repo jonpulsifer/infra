@@ -1,14 +1,7 @@
 /**
- * Which of an installation's already-declared vessels a Function deploys to.
- *
- * A Function reaches no vessel-picker of its own (`contract.ts`'s ponytail
- * note) — it deploys to whichever surface the manifest already names for that
- * purpose: the first Cloudflare account vessel for Workers, the home vessel's
- * Cloud Run surface for Cloud Run functions. The Cloudflare vessel supplies the
- * account **and** the API root every surface on it reaches, so a mirror in
- * front of the platform is stated once on the boundary. Either answers `null` where the
- * manifest has not connected that surface yet, which `saveFunction` reports as
- * `NOT_DEPLOYABLE` rather than constructing a deployer that cannot be reached.
+ * The Function deployers a manifest supports: Workers on the first Cloudflare
+ * account vessel, Cloud Run functions on the home vessel. Either is `null`
+ * until the manifest connects that surface.
  */
 import type { Fetcher, TokenProvider } from '../adapters/deploy/cloud/http.ts';
 import {
@@ -22,7 +15,6 @@ import { CloudRunFunctions } from './cloud-functions.ts';
 import type { FunctionDeployers } from './contract.ts';
 import { WorkersFunctions } from './workers.ts';
 
-/** Everything {@link functionsFor} needs to build whichever deployers apply. */
 export interface FunctionsForInput {
   readonly manifest: InstallationManifest;
   readonly cloudflareToken: TokenProvider;
@@ -37,8 +29,8 @@ export function functionsFor(input: FunctionsForInput): FunctionDeployers {
     (vessel): vessel is Extract<VesselSeed, { kind: 'cloudflare-account' }> =>
       vessel.kind === 'cloudflare-account' && vessel.location !== undefined,
   );
-  // Every declared zone, in order, rather than the head: which of them this
-  // account carries is the account's answer, and `WorkersFunctions` asks it.
+  // Every declared zone, in order: `WorkersFunctions` asks the account which
+  // one it carries.
   const zoneNames = manifest.dns.zones.map((zone) => zone.name);
   const workers =
     cloudflareVessel === undefined ||
@@ -55,9 +47,7 @@ export function functionsFor(input: FunctionsForInput): FunctionDeployers {
           ...(fetch ? { fetch } : {}),
         });
 
-  // `homeVesselProjectOf` is `null` unless the home vessel is `gcp-project`
-  // *and* has declared its `location` — the same "not yet connected" gap
-  // `cloudflareVessel.location` checks above.
+  // `null` until the home vessel declares a cloud project location.
   const project = homeVesselProjectOf(manifest);
   const home = homeVesselOf(manifest);
   const cloudrunTarget = manifest.targets.find(

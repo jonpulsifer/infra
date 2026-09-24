@@ -1,25 +1,6 @@
 /**
- * What a red Deploy remembers (§6, §12).
- *
- * §6: "**Spindrift diagnoses on red**: on failure or stall it reads pods and
- * events (or the cloud log) **once** and fills in the detail."
- *
- * The adapter does that read — it is the only thing that knows what a pod is —
- * and this module is what makes the answer outlive it. §12 states the reason
- * plainly: **the platform will not keep it.** Cluster events expire in about an
- * hour, a Cloud Run revision's logs roll, and a developer who opens the deploy
- * screen the next morning would otherwise find a red Deploy with no explanation
- * and no way to get one back. So the diagnosis is denormalized onto the Deploy
- * row at the moment it is drawn, and every read after that is a read of core's
- * own storage rather than a second trip to a backend that has forgotten.
- *
- * That is also the reason `debug` is stored verbatim. The closed `reason` is
- * what the UI keys on and what a test asserts; the raw payload is for the
- * operator who needs to know which admission webhook, and it is precisely the
- * thing that no longer exists an hour later.
- *
- * **Blame is derived, never taken.** §6: an adapter "reports a reason and never
- * a blame... so two adapters cannot disagree about who a failure indicts."
+ * What a red Deploy remembers. Cluster events and cloud logs expire, so the
+ * diagnosis, with its raw `debug` payload, is stored on the Deploy row.
  */
 import {
   type Blame,
@@ -29,24 +10,15 @@ import {
   type FailureReason,
 } from '../adapters/deploy/contract.ts';
 
-/** The columns a red Deploy carries, as one value. */
 export interface Diagnosis {
   readonly reason: FailureReason;
-  /** Derived from the reason via §6's table. `null` only for `TIMEOUT`. */
+  /** Derived from the reason. `null` only for `TIMEOUT`. */
   readonly blame: Blame | null;
-  /** The sentence the developer reads, in the platform's own words. */
   readonly detail: string | null;
-  /** The raw platform payload, kept for the operator (§6, §12). */
+  /** The raw platform payload, verbatim. */
   readonly debug: unknown;
 }
 
-/**
- * Draw the diagnosis from a terminal verdict.
- *
- * `null` for a green verdict, which is not the same as an empty diagnosis: a
- * Deploy that succeeded has nothing to explain, and writing a row of nulls would
- * make "was this ever diagnosed" unanswerable.
- */
 export function diagnosisOf(verdict: DeployVerdict): Diagnosis | null {
   if (verdict.phase === 'LIVE') return null;
   return {
@@ -58,14 +30,8 @@ export function diagnosisOf(verdict: DeployVerdict): Diagnosis | null {
 }
 
 /**
- * The columns a failed attempt writes, and **nothing else**.
- *
- * Named as its own function because of what it must not contain. §9: "**exposure
- * never mutates on red**" — a failed deploy leaves the App exactly as reachable
- * as it was, because the previous release is still serving and quietly making it
- * unreachable would turn one failed deploy into an outage. There is no `exposure`
- * key here, and there is no code path that adds one: a red Deploy updates its own
- * verdict columns and stops.
+ * Never includes `exposure`: the previous release is still serving, so a failed
+ * deploy leaves the App exactly as reachable as it was.
  */
 export function failureColumns(diagnosis: Diagnosis): {
   phase: 'FAILED';
@@ -84,39 +50,20 @@ export function failureColumns(diagnosis: Diagnosis): {
 }
 
 /**
- * Whether what is running is what was asked for (§6).
- *
- * "**Drift is detected and surfaced, never silently corrected** — a visible state
- * with a one-click re-converge." So this returns an answer and takes no action,
- * and nothing downstream of it applies anything: the re-converge is an ordinary
- * Deploy that a person presses, which is the same path every other change takes.
- *
- * Drift is only meaningful for a Deploy that reached `LIVE`. A Deploy still
- * converging has not drifted; it has not arrived.
- *
- * **The digest is not the only way to disagree.** A delivery object the platform
- * is refusing to apply has drifted even while it still serves the digest that
- * was asked for: the previous release is what is answering, and every reconcile
- * is failing behind it. Comparing digests alone reads that as converged, which
- * is how a release whose chart contract moved sat wedged for a day with a green
- * row in front of it.
+ * Only a `LIVE` Deploy can drift. A delivery object the platform refuses to
+ * apply has drifted even when the observed digest matches.
  */
 export function hasDrifted(args: {
   readonly phase: DeployPhase;
   /** The digest the Deploy's Build named. */
   readonly desiredDigest: string;
-  /** The digest `observe` says is actually serving, or `null` when nothing is. */
+  /** What `observe` says is serving, or `null` when nothing is. */
   readonly observedDigest: string | null;
-  /**
-   * The phase the delivery object itself reports, when the adapter read one.
-   *
-   * Distinct from `phase` above, which is what this Deploy's own attempt ended
-   * on. They agreed when the attempt finished and are free to diverge after.
-   */
+  /** What the delivery object reports now; `phase` is where this attempt ended. */
   readonly observedPhase?: DeployPhase;
-  /** The cadence the Component declares, or `null` when it declares none. */
+  /** `null` when the Component declares no schedule. */
   readonly desiredSchedule?: string | null;
-  /** `ObservedState.schedule`, forwarded unjudged. */
+  /** `ObservedState.schedule`, forwarded as is. */
   readonly observedSchedule?: string | null;
 }): boolean {
   if (args.phase !== 'LIVE') return false;
@@ -127,17 +74,8 @@ export function hasDrifted(args: {
 }
 
 /**
- * What the cadence disagrees about, in a sentence, or `null` when it does not.
- *
- * **The third way a placement can diverge**, after the digest and the delivery
- * object's own phase. A Cloud Run Job whose Cloud Scheduler job was deleted
- * reads back perfectly: right digest, `LIVE`, no cadence, and nothing fires it
- * again. §6 wants that surfaced, so it is drift like any other and is corrected
- * by the same re-converge a person presses.
- *
- * Absent `observedSchedule` is the backend saying it has no separate firing
- * half — see `ObservedState.schedule` — so it never disagrees, which is what
- * keeps every service and every Kubernetes placement out of this.
+ * What the schedule disagrees about, in a sentence, or `null` when it agrees.
+ * An absent `observedSchedule` means the backend has no separate firing half.
  */
 export function scheduleDrift(args: {
   readonly desiredSchedule?: string | null;

@@ -1,16 +1,6 @@
 /**
- * The other side of {@link runPreview}: a worker that imports one module and
- * calls its handler once.
- *
- * A worker rather than a `vm` or a subprocess because the isolation that
- * matters here is *time*, not privilege — the author is an enrolled operator,
- * so what has to be survivable is `while (true) {}`, and a worker is the one
- * primitive whose thread the parent can terminate outright. Everything the
- * handler can reach, this process can reach.
- *
- * Console is hooked rather than piped: the parent shows the author their own
- * `console.log` next to the response, and a hook keeps each line's timestamp
- * and level instead of reassembling them out of interleaved stdout.
+ * The worker side of `runPreview`: import one module and call its handler once.
+ * A worker isolates time, not privilege: the parent can terminate its thread.
  */
 import {
   FUNCTION_CONTRACT,
@@ -20,7 +10,6 @@ import {
   type PreviewRequest,
 } from './contract.ts';
 
-/** What the parent sends, and what it hears back. */
 interface PreviewJob {
   readonly file: string;
   readonly request: PreviewRequest;
@@ -40,9 +29,8 @@ export type PreviewWorkerMessage =
   | { readonly kind: 'error'; readonly message: string };
 
 /**
- * The worker globals, named rather than inferred: this file is typed against
- * the DOM lib the rest of the app uses, where `postMessage` is the window's
- * three-argument one.
+ * Named, not inferred: this file is typed against the DOM lib, where
+ * `postMessage` is the window's three-argument one.
  */
 const worker = globalThis as unknown as {
   postMessage: (message: PreviewWorkerMessage) => void;
@@ -51,7 +39,6 @@ const worker = globalThis as unknown as {
 
 const LEVELS = ['log', 'info', 'warn', 'error', 'debug'] as const;
 
-/** One console argument as a line fragment. Objects go through JSON. */
 function render(value: unknown): string {
   if (typeof value === 'string') return value;
   if (value instanceof Error) return value.stack ?? value.message;
@@ -62,6 +49,7 @@ function render(value: unknown): string {
   }
 }
 
+// Hooked, not piped, so each line keeps its own timestamp and level.
 for (const level of LEVELS) {
   console[level] = (...args: unknown[]) => {
     worker.postMessage({
@@ -75,12 +63,10 @@ for (const level of LEVELS) {
   };
 }
 
-/** `https://preview.local/...` — one origin, so a handler reading `request.url` sees a real one. */
+/** So a handler reading `request.url` sees an absolute URL. */
 const PREVIEW_ORIGIN = 'https://preview.local';
 
 async function run(job: PreviewJob): Promise<void> {
-  // The cache key has to change per run or a second Run after an edit would
-  // re-execute the first version of the module.
   const module: unknown = await import(
     `${Bun.pathToFileURL(job.file).href}?t=${Date.now()}`
   );

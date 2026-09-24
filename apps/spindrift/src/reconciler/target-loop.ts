@@ -1,24 +1,6 @@
 /**
- * The Target loop (§13, §3).
- *
- * **One loop, not two.** §13: "health is a standing prerequisite checklist...
- * which merges capability refresh and health into one loop." §3 wants the same
- * thing from the other side: "discovered by default, asserted only where
- * discovery is impossible, **refreshed on a schedule** — a connect-time snapshot
- * rots, and the symptom is a Target disabled long after it stopped being
- * incapable." Both are answered by one pass that asks each Target's adapter one
- * question and writes back what it said.
- *
- * The loop **never draws a conclusion**. It stores the checklist and the raw
- * discovery; `verifiedDeploy` and `offlineDeploy` are derived at read time by
- * `capabilities.ts`, so a manifest change that moves the chart off-Target
- * changes `offlineDeploy` without waiting for a refresh, and a stored derivation
- * can never be stale in a way nothing notices.
- *
- * `inspectTarget` is exported because the connect act runs exactly one pass of
- * it (§13: connect always succeeds, and what it succeeds *at* is this). Two code
- * paths that both decided what "healthy" means would be the two loops §13 says
- * this is not.
+ * Refreshes each connected Target's prerequisite checklist and discovery.
+ * `capabilities.ts` derives `verifiedDeploy` and `offlineDeploy` at read time.
  */
 import { and, eq, isNotNull } from 'drizzle-orm';
 import type { AdapterRegistry, Clock } from '../commands/types.ts';
@@ -49,69 +31,40 @@ import {
 import type { SurfaceProbe } from '../domain/vessel.ts';
 import { reconcilerLoopDuration } from '../telemetry/index.ts';
 
-/**
- * What the loop needs. Narrower than a `CommandContext` on purpose — the loop
- * has no principal, because nobody asked for it to run.
- */
 export interface TargetLoopContext {
   readonly db: Database;
   readonly adapters: Pick<AdapterRegistry, 'deploy'>;
   readonly clock: Clock;
 }
 
-/** One pass's answer for one Target. */
 export interface TargetInspectionResult {
   readonly prerequisites: readonly PrerequisiteResult[];
-  /** `null` when nothing could be discovered — unreachable, or no adapter. */
+  /** `null` when the Target is unreachable or has no adapter. */
   readonly discovery: TargetDiscovery | null;
-  /**
-   * What the pass established about the surface itself being there.
-   *
-   * Only `connectTarget` acts on it, and only to withhold a row it was about
-   * to create. **The standing loop never creates or removes a Target from
-   * this**: a row that exists has been placed on, and a probe that failed a
-   * different way on one tick is not a mandate to delete what an operator
-   * connected. A surface a vessel gained since is registered by re-running the
-   * connect, which is an act somebody performed.
-   */
+  /** Only connect acts on this; the loop never adds or removes a Target. */
   readonly surface: SurfaceProbe;
 }
 
-/**
- * Ask one Target's adapter for the checklist and the discovery.
- *
- * Never throws. §13's "connect always succeeds" and the loop's own need to
- * survive one bad Target are the same requirement: an adapter that is allowed to
- * throw meets core in exactly one place, and this is it.
- */
+/** Never throws, so one bad Target cannot fail connect or a pass. */
 export async function inspectTarget(
   context: TargetLoopContext,
   target: DeployTargetRef,
 ): Promise<TargetInspectionResult> {
   const deployAdapter = context.adapters.deploy(target.adapter);
   if (deployAdapter === null) {
-    // Not a fault: an installation is allowed to have a Target whose adapter it
-    // does not ship. It is simply a Target nothing can be placed on, and saying
-    // so is more useful than refusing to record it.
+    // Not a fault: an installation may hold a Target whose adapter it lacks.
     const detail = `this installation has no ${target.adapter} adapter`;
     return {
       prerequisites: unreachablePrerequisites(detail, target.adapter),
       discovery: null,
-      // Undetermined rather than absent, and the distinction is the whole
-      // point: nobody asked the boundary anything, so nothing is known about
-      // what it carries. Reading it as an absence would let an installation
-      // that ships one adapter conclude that no vessel anywhere has the others.
+      // Undetermined, not absent: nobody asked the boundary anything.
       surface: { kind: 'undetermined', detail },
     };
   }
   const unstated = unstatedAddress(target);
   if (unstated !== null) {
-    // The vessel's location is of the other kind's shape, so the flat view
-    // this was handed has a hole where the surface's address goes. Asking the
-    // adapter anyway is a request against `projects/undefined` and a sentence
-    // naming `undefined` back to the operator; the checklist says which
-    // address is missing instead. Undetermined for the same reason as above —
-    // nobody asked the boundary anything.
+    // The vessel's location lacks this surface's address, so the checklist
+    // names the missing address instead of asking about `undefined`.
     return {
       prerequisites: unreachablePrerequisites(unstated, target.adapter),
       discovery: null,
@@ -136,12 +89,8 @@ export async function inspectTarget(
 }
 
 /**
- * Restore connections owned by installation desired state before loops start.
- *
- * A disconnected row is deliberately left disconnected while the manifest is
- * stored: adapters do not exist at that point, so reconnecting there would
- * strand orphaned Deploys permanently. Once adapters exist, this performs the
- * same inspect-and-readopt transition as an in-product reconnect.
+ * Reconnects disconnected Targets the manifest declares, before the loops
+ * start. Storing the manifest cannot: without adapters nothing re-adopts.
  */
 export async function restoreDeclaredTargetConnections(
   context: TargetLoopContext,
@@ -195,12 +144,7 @@ export async function restoreDeclaredTargetConnections(
   return readopted;
 }
 
-/**
- * Re-adopt what a disconnect stranded (§13).
- *
- * The adapter's `observe` is authoritative. A workload still present is
- * adopted; one that disappeared or cannot be observed stays orphaned.
- */
+/** Re-adopts orphaned Deploys `observe` still finds; the rest stay orphaned. */
 export async function readoptTargetDeploys(
   context: TargetLoopContext,
   targetId: string,
@@ -240,33 +184,22 @@ export async function readoptTargetDeploys(
   return adopted;
 }
 
-/** What one Target's refresh did. */
 export interface TargetRefresh {
   readonly targetId: string;
-  /** `<vessel>/<adapter>`, for the log line this pass writes. */
+  /** `<vessel>/<adapter>` */
   readonly target: string;
   readonly health: TargetHealth;
-  /** Set when this pass changed the Target's health. */
+  /** Set only when this pass changed the Target's health. */
   readonly healthChangedFrom?: TargetHealth;
 }
 
 /**
- * Refresh one Target row from one inspection.
- *
- * Writes the checklist, the discovery, and the derived health — and nothing
- * else. In particular it does not touch `status`: connected and disconnected are
- * the operator's statement about a Target, and a loop that could flip them would
- * make a disconnect undo itself the moment the cluster came back.
- *
- * It ignores the pass's {@link TargetInspectionResult.surface} for the same
- * reason. Which surfaces a vessel carries is settled by an act — connect — and
- * a loop that added or removed rows on a probe would make the set of Targets a
- * thing that changes while nobody is looking.
+ * Never writes `status` or acts on `surface`: both are operator acts, and a
+ * disconnect must not undo itself when the cluster returns.
  */
 export async function refreshTarget(
   context: TargetLoopContext,
   target: Pick<Target, 'id' | 'adapter' | 'health' | 'connection'>,
-  /** The boundary half of what the adapter is handed, and of what names it. */
   vessel: Pick<
     Vessel,
     'name' | 'location' | 'servedHosts' | 'reachableRegistries'
@@ -305,14 +238,6 @@ export async function refreshTarget(
   };
 }
 
-/**
- * One pass over every connected Target.
- *
- * Disconnected Targets are skipped: §13 says a disconnect strands workloads
- * without stopping them, and continuing to poll a Target the operator removed
- * would keep a cluster's API server in the loop's hot path for as long as the
- * row survives.
- */
 export async function refreshAllTargets(
   context: TargetLoopContext,
 ): Promise<readonly TargetRefresh[]> {
@@ -324,33 +249,21 @@ export async function refreshAllTargets(
 
   const refreshed: TargetRefresh[] = [];
   for (const { target, vessel } of connected) {
-    // A manifest seed is disconnected, so this is defensive against a
-    // malformed row rather than part of the ordinary bootstrap path.
+    // Defensive: a manifest seed starts disconnected, so only a bad row fails.
     if (!hasTargetConnection(target) || !hasVesselLocation(vessel)) continue;
-    // Sequential rather than concurrent: the far sides are other people's
-    // control planes, and a fleet of Targets refreshing in lockstep is a
-    // thundering herd against every one of them at once.
+    // Sequential, so a fleet refresh never herds every control plane at once.
     refreshed.push(await refreshTarget(context, target, vessel));
   }
   return refreshed;
 }
 
-/** How often the loop runs, and how to stop it. */
 export interface TargetLoopOptions {
   readonly intervalMs: number;
   readonly signal?: AbortSignal;
-  /** Called after each pass — where an installation wires logging or metrics. */
   readonly onPass?: (refreshed: readonly TargetRefresh[]) => void;
 }
 
-/**
- * Run the loop until aborted.
- *
- * Poll, not watch. Only one of the three backends has a watch to subscribe to,
- * and a watch held across a WAN tunnel dies quietly and stops delivering
- * without saying so — which is exactly the failure mode a capability refresh
- * must not have.
- */
+// Polls: a watch across a WAN tunnel can stop delivering without an error.
 export async function runTargetLoop(
   context: TargetLoopContext,
   options: TargetLoopOptions,
@@ -367,7 +280,6 @@ export async function runTargetLoop(
   }
 }
 
-/** A sleep that wakes early on abort rather than holding the loop open. */
 function sleep(ms: number, signal?: AbortSignal): Promise<void> {
   return new Promise((resolve) => {
     const timer = setTimeout(resolve, ms);

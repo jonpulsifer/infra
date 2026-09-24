@@ -1,16 +1,7 @@
 /**
- * Derive rebuild triggers for one repo scope (§5).
- *
- * Package workspaces contribute their internal dependency graph transitively.
- * Other ecosystems degrade honestly to the named scope plus the root manifests
- * and lockfiles that exist, which is still conservative: it can overbuild but
- * cannot silently miss a root toolchain change.
- *
- * Reads through a {@link SourceTree} rather than the filesystem, so the same
- * derivation answers for a repository nobody has checked out. The workspace
- * walk that used to `scan()` the disk now matches glob patterns against the
- * tree's listing — the same `Bun.Glob`, asked whether a string matches instead
- * of asked what is on a disk.
+ * Rebuild triggers for one repo scope: the scope, the workspace packages it
+ * depends on transitively, and the root manifests and lockfiles that exist.
+ * It can overbuild, but never misses a root toolchain change.
  */
 import { dirname } from 'node:path';
 import type { SourceTree } from './tree.ts';
@@ -131,15 +122,6 @@ async function workspacePackages(
   return packages;
 }
 
-/**
- * Every directory the root manifest declares as a workspace package.
- *
- * Exported for discovery (§5's "discover" branch), which needs the same answer
- * for a different reason: watch paths ask *which packages does this one depend
- * on*, discovery asks *which packages are there at all*. Both are the workspace
- * glob walk, and running two of them would be two ways to disagree about what a
- * monorepo contains.
- */
 export async function workspaceDirectories(
   tree: SourceTree,
 ): Promise<readonly string[]> {

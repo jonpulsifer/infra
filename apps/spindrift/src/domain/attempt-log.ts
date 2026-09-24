@@ -1,38 +1,7 @@
 /**
- * The attempt event log (§6, Task 11).
- *
- * "One attempt-scoped event log keyed by (App, Component, attempt), carrying
- * log lines and status events `{phase, resource?, reason?, blame?}`. Build
- * and Deploy both write to it; the UI subscribes once." (§6)
- *
- * `src/db/schema.ts` already carries the `attemptEvents` table this module
- * writes and reads — one row is either a build-attempt event or a
- * deploy-attempt event (a CHECK enforces exactly one of `buildId`/`deployId`),
- * reusing `deployReason`/`blame` so a reason means the same thing on either
- * side (§6: "one shared vocabulary"). This module is the domain code over
- * that table; it adds no column, because the table already carries
- * everything this task needs.
- *
- * **A running app's stdout never reaches this log** (§6: "it is unbounded and
- * would mean the attempt never ends"; §17 is the second pipe that carries
- * it). That is structural here, not a convention: every write goes through
- * {@link recordBuildEvent} or {@link recordDeployEvent}, and both require an
- * attempt reference — a `buildId` or a `deployId` that already exists as a
- * row. A live app has neither; it is placed on a Target, not attempted. There
- * is no third write function and no variant that accepts a bare
- * component/target pair, so there is no call shape a runtime-log tailer could
- * use to reach this table even by mistake.
- *
- * **Ordering.** `attemptEvents.id` is a `bigserial` — one sequence, one
- * table, so every row gets a distinct, strictly increasing value. Reads order
- * on `id`, never on `createdAt`: two events can legitimately share a
- * millisecond (a status event and the log line that explains it, written back
- * to back), and a timestamp column cannot break that tie in insertion order.
- * `id` can. Each write here is one `INSERT ... RETURNING`, never batched
- * inside a longer-lived transaction, so a row's sequence value is assigned
- * and committed together — there is no open transaction holding a low `id`
- * back while a later write with a higher `id` commits first. That is what
- * lets `ORDER BY id` stand in for "the order they happened" for this table.
+ * The attempt event log: log lines and status events for one Build or Deploy
+ * attempt. Every write names an existing attempt row, so a running app's stdout
+ * cannot reach it.
  */
 import { and, asc, count, eq, gt, or, type SQL } from 'drizzle-orm';
 import {
@@ -45,38 +14,14 @@ import { notifyAttemptEvent } from '../db/notify.ts';
 import { attemptEvents, builds } from '../db/schema.ts';
 
 /**
- * How many log lines one attempt keeps.
- *
- * §12 keeps every row and every build line is a row, so a verbose `npm` or
- * `buildctl` run is tens of thousands of them on the one Postgres the estate
- * runs on — and `buildViewOf` reads all of an attempt's rows to draw its
- * checklist. Past this many, a log line is not written; exactly one final line
- * says so and points at the runner — by the `runUrl` the Build row carries
- * where the route reported one, so the exported text log needs no screen to
- * follow it. Status events are never dropped: the verdict, and the terminal
- * phase the stream pump ends a page on, land after the ceiling as before.
+ * Every line is a row, so past this many one final line points at the runner
+ * and the rest are dropped. Status events are always written.
  */
 export const MAX_ATTEMPT_LOG_LINES = 20_000;
 
 /**
- * Log lines written per attempt, as this process has counted them.
- *
- * Seeded from the table the first time an attempt is written to here, then
- * kept in memory so the ceiling costs one count per attempt rather than one
- * per line. Keyed by connection because the test harness pins each test's
- * `Database` to its own schema, where a build id repeats; production has one.
- * A writer resurrected in another process seeds from the rows the first one
- * left, so the ceiling holds across a restart and a marker already on the leg
- * is counted — none is written after it.
- *
- * The count is per process, and the build fence does not keep it honest: the
- * fence (`mine` in `dispatch.ts`) covers the Build row's verdict, not the
- * lines streamed before it. Exactly one marker rests on one reconciler
- * dispatching a Build — the installer chart's `reconciler.replicas: 1` — since
- * two dispatchers on one attempt would each count and each write one. A line
- * another process appends under the ceiling, such as a cancel from the web
- * process, is outside this count, so the kept lines can run a line or two
- * past it.
+ * Exact only while one reconciler dispatches, since each process counts alone.
+ * Keyed by Database because each test schema reuses build ids.
  */
 const lineCounts = new WeakMap<Database, Map<string, number>>();
 // ponytail: bounded by dropping the oldest attempt; a dropped one re-seeds
@@ -119,26 +64,14 @@ function rememberLines(db: Database, key: string, lines: number): void {
   }
 }
 
-/** The cursor a resumed read starts after — an `attemptEvents.id` value. */
+/** An `attemptEvents.id`; a resumed read starts after it. */
 export type AttemptLogCursor = number;
 
-/**
- * What a caller writes. Deliberately narrower than either adapter's own event
- * union — `DeployEvent` carries a `DeployPhase`, `BuildEvent` carries a
- * `step`/`state` pair — because the table's `phase` column is free text on
- * purpose (schema.ts: "Build and Deploy phases differ"). Both adapters'
- * events reduce to this shape at the write call site.
- *
- * `blame` is never a field here: §6 says an adapter "reports a reason and
- * never a blame... blame is derived... so two adapters cannot disagree about
- * who a failure indicts." This type makes that the only option, not merely
- * the documented one.
- */
+/** Carries no `blame`: it is derived from `reason`, so adapters cannot disagree on it. */
 export type AttemptLogEvent =
   | {
       readonly type: 'log';
       readonly line: string;
-      /** Which resource produced the line, where the backend says (§6). */
       readonly resource?: string;
     }
   | {
@@ -146,41 +79,32 @@ export type AttemptLogEvent =
       /** Free text: a Build step name or a `DeployPhase` value. */
       readonly phase: string;
       readonly resource?: string;
-      /** Present only on a failure; `blame` is derived from this, not taken. */
+      /** Set only on a failure. */
       readonly reason?: FailureReason;
     };
 
-/** Identifies the App/Component a write belongs to (denormalized on the row). */
 interface AttemptScope {
   readonly appId: string;
   readonly componentId: string;
 }
 
-/** A build attempt to write to: the Build row must already exist. */
+/** The Build row must already exist. */
 export interface BuildAttemptRef extends AttemptScope {
   readonly buildId: number;
 }
 
-/** A deploy attempt to write to: the Deploy row must already exist. */
+/** The Deploy row must already exist. */
 export interface DeployAttemptRef extends AttemptScope {
   readonly deployId: number;
 }
 
-/**
- * Identifies one attempt's *read* stream: the Build that fed it and, once a
- * Deploy exists for it, the Deploy too. §6's acceptance shape — "a build
- * failure and a deploy failure land on one ordered stream for the same
- * attempt" — is exactly this union: a Deploy is an intent over a Build
- * (schema.ts, `deploys.buildId`), and the attempt a developer watches spans
- * both. `deployId` is omitted while only the build leg has happened yet.
- */
+/** One attempt's read stream: its Build, and its Deploy once one exists. */
 export interface AttemptStreamRef {
   readonly componentId: string;
   readonly buildId: number;
   readonly deployId?: number;
 }
 
-/** One row of the merged stream, as the UI would render it. */
 export type AttemptLogEntry = {
   readonly cursor: AttemptLogCursor;
   readonly at: Date;
@@ -200,28 +124,19 @@ export type AttemptLogEntry = {
     }
 );
 
-/** Options for {@link readAttemptStream}. */
 export interface ReadAttemptStreamOptions {
-  /** Resume after this cursor rather than reading from the start (§17). */
   readonly after?: AttemptLogCursor;
-  /** Caps how many rows come back in one read. */
   readonly limit?: number;
 }
 
-/** What {@link readAttemptStream} returns. */
 export interface AttemptStreamPage {
   readonly entries: readonly AttemptLogEntry[];
-  /**
-   * Where the next read should resume from. Unchanged from `after` when this
-   * page is empty, so a caller can always pass `cursor` straight back in
-   * without special-casing "nothing new yet".
-   */
+  /** Equals `after` on an empty page, so a caller can always pass it back. */
   readonly cursor: AttemptLogCursor | null;
 }
 
 const DEFAULT_LIMIT = 500;
 
-/** Append one event to a build attempt's leg of the log. */
 export async function recordBuildEvent(
   db: Database,
   ref: BuildAttemptRef,
@@ -237,7 +152,6 @@ export async function recordBuildEvent(
   });
 }
 
-/** Append one event to a deploy attempt's leg of the log. */
 export async function recordDeployEvent(
   db: Database,
   ref: DeployAttemptRef,
@@ -279,12 +193,9 @@ async function insertEvent(
         ? eq(attemptEvents.buildId, attemptId)
         : eq(attemptEvents.deployId, attemptId),
     );
-    // Over the ceiling: the marker is already the last line, and nothing after
-    // it is written. Only a status event reaches the table from here on.
+    // Past the ceiling the marker is written; only status events follow it.
     if (lines > MAX_ATTEMPT_LOG_LINES) return;
     if (lines === MAX_ATTEMPT_LOG_LINES) {
-      // Read off the row here rather than carried on every write: the URL is
-      // needed once per attempt, and only a build leg can have one.
       const runUrl =
         args.buildId === null ? null : await runUrlOf(db, args.buildId);
       event = {
@@ -293,9 +204,9 @@ async function insertEvent(
       };
     }
   }
-  // §6: blame is derived here, from the shared BLAME table — never accepted
-  // as a caller-supplied field (see AttemptLogEvent's doc comment).
   const reason = event.type === 'status' ? (event.reason ?? null) : null;
+  // One insert per event, never inside a longer transaction, so id order is
+  // commit order for readers.
   await db.insert(attemptEvents).values({
     appId: args.appId,
     componentId: args.componentId,
@@ -312,16 +223,10 @@ async function insertEvent(
   // Counted after the row is in: a failed insert is not a line written.
   if (lines !== null) rememberLines(db, key, lines + 1);
 
-  // Wake any WebSocket pump loops watching this component (Transport shape).
   // Fire-and-forget: a lost notification only delays the next poll.
   notifyAttemptEvent(args.componentId);
 }
 
-/**
- * Read one attempt's merged stream, ordered from the beginning or resumed
- * after a prior cursor (§17: "a resume cursor and bounded buffering" is what
- * the browser stream needs from whatever it reads).
- */
 export async function readAttemptStream(
   db: Database,
   ref: AttemptStreamRef,
@@ -352,6 +257,7 @@ export async function readAttemptStream(
           : gt(attemptEvents.id, options.after),
       ),
     )
+    // Never createdAt: two events can share a millisecond.
     .orderBy(asc(attemptEvents.id))
     .limit(options.limit ?? DEFAULT_LIMIT);
 

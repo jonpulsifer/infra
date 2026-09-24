@@ -1,15 +1,7 @@
 /**
- * Stage one immutable source bundle before any build route sees it (§15).
- *
- * Repository and archive sources converge here. Core fetches an exact commit
- * once or accepts uploaded bytes, digests those bytes, stores them through a
- * content-addressed immutable depot, and signs the same source-receipt
- * predicate for both. The only deliberate storage difference is retention:
- * repository bundles are ephemeral and uploaded archives are durable.
- *
- * The Git credential is scoped to {@link ExactCommitFetcher.fetchExactCommit}.
- * It appears in no staged or signed type, which makes "store no token" a
- * structural property instead of a cleanup step.
+ * Stages one immutable source bundle, from a repository commit or an upload,
+ * and signs its source receipt. The Git credential stays inside
+ * {@link ExactCommitFetcher.fetchExactCommit}; no staged or signed type holds it.
  */
 
 import type { Principal } from '../commands/types.ts';
@@ -26,9 +18,8 @@ import type { RepositoryRef } from './repository.ts';
 export type BundleRetention = 'ephemeral' | 'durable';
 
 /**
- * What the far side said about a commit beyond its sha — the part of §15's
- * one fetch a Build keeps so its row is readable without a second lookup.
- * `message` is the headline only (see {@link commitHeadlineOf}).
+ * What the host said about a commit beyond its sha, kept so a Build row reads
+ * without a second lookup. `message` is the headline only.
  */
 export interface CommitHeadline {
   readonly message: string | null;
@@ -37,7 +28,6 @@ export interface CommitHeadline {
   readonly authoredAt: Date | null;
 }
 
-/** A content-addressed bundle that every builder can fetch. */
 export interface StagedSourceBundle {
   readonly digest: string;
   readonly location: string;
@@ -46,19 +36,16 @@ export interface StagedSourceBundle {
   readonly commit?: CommitHeadline;
 }
 
-/** The longest headline a Build keeps; see `0052_build_commit_headline.sql`. */
+/** Keeps any real headline whole and cuts a pasted stack trace. */
 export const COMMIT_HEADLINE_LIMIT = 200;
 
-/**
- * The first line of a commit message, trimmed and capped — what a ledger
- * column can carry. Empty in, `null` out, so a blank message reads as none.
- */
+/** The first line, trimmed and capped. A blank message reads as `null`. */
 export function commitHeadlineOf(message: string | null): string | null {
   const line = message?.split('\n', 1)[0]?.trim() ?? '';
   return line.length === 0 ? null : line.slice(0, COMMIT_HEADLINE_LIMIT);
 }
 
-/** The only result this seam exposes; credentials cannot fit in it. */
+/** The only result this interface exposes; credentials cannot fit in it. */
 export interface StagedSource {
   readonly bundle: StagedSourceBundle;
   readonly receipt: SignedSourceReceipt;
@@ -67,9 +54,8 @@ export interface StagedSource {
 }
 
 /**
- * Fetch, store, and attest one exact repository commit as a single far-side
- * capability. The command receives only the immutable bundle; credentials and
- * receipt mechanics cannot leak into its transaction.
+ * Fetches, stores and attests one exact commit as one far-side capability; the
+ * command receives only the immutable bundle.
  */
 export interface RepositorySourceStager {
   stageRepository(input: {
@@ -81,29 +67,19 @@ export interface RepositorySourceStager {
 }
 
 /**
- * What the Git integration returns from one exact-revision fetch.
- *
- * Feature flags are facts learned while producing the archive. Core refuses
- * them before storage because v1 cannot reproduce a submodule or LFS checkout
- * from the single immutable bundle it promises builders.
+ * Submodules and LFS are refused before storage: one immutable bundle cannot
+ * reproduce either checkout for a builder.
  */
 export interface FetchedCommit {
   readonly bytes: Uint8Array;
   readonly resolvedCommit: string;
   readonly hasSubmodules: boolean;
   readonly hasGitLfs: boolean;
-  /**
-   * The commit message as the host holds it; core keeps only its headline.
-   * `null` where the host reported none, never a fabricated one.
-   */
+  /** `null` where the host reported none. Core keeps only the headline. */
   readonly message: string | null;
   readonly author: string | null;
   readonly authoredAt: Date | null;
-  /**
-   * Identity authenticated by the repository client that performed the fetch.
-   * It comes back from the trusted integration instead of being asserted by the
-   * caller asking core to stage a commit.
-   */
+  /** Authenticated by the fetching client, never asserted by the caller. */
   readonly principal: Extract<SourcePrincipal, { kind: 'githubApp' }>;
 }
 
@@ -117,11 +93,8 @@ export interface ExactCommitFetcher<Credential> {
 }
 
 /**
- * Immutable object storage behind source staging.
- *
- * The digest is computed by core and handed to the depot with the bytes. A
- * production depot may reuse an object already present at that digest, but it
- * must never replace its bytes.
+ * Core computes the digest. A depot may reuse an object already at that digest
+ * but must never replace its bytes.
  */
 export interface BundleDepot {
   putImmutable(input: {
@@ -142,10 +115,7 @@ export type SourceBundleInput<Credential> =
       readonly kind: 'upload';
       readonly bytes: Uint8Array;
       readonly name: string;
-      /**
-       * The application principal established by the session boundary, not a
-       * receipt-shaped identity a caller may fill with an arbitrary subject.
-       */
+      /** From the session, never a subject the caller chose. */
       readonly principal: Principal;
     };
 
@@ -173,11 +143,8 @@ export interface SourceBundleDeps<Credential> {
 }
 
 /**
- * Fetch/upload → digest → immutable store → signed receipt.
- *
- * The sequence matters. Unsupported or incorrectly resolved Git input is
- * refused before storage, and a receipt is signed only after the depot accepted
- * the exact bytes its digest names.
+ * Bad Git input is refused before storage, and a receipt is signed only after
+ * the depot accepts the bytes its digest names.
  */
 export async function stageSourceBundle<Credential>(
   input: SourceBundleInput<Credential>,
@@ -198,9 +165,8 @@ export async function stageSourceBundle<Credential>(
           commit: undefined,
         };
 
-  // One owned snapshot feeds both digest and storage. Without it, an upload
-  // buffer mutated while WebCrypto was running could be stored under the
-  // digest of the bytes that existed a moment earlier.
+  // One owned copy feeds both digest and storage, so a buffer mutated during
+  // hashing cannot be stored under another digest.
   const bytes = Uint8Array.from(prepared.bytes);
   const digest = await sha256(bytes);
   const stored = await deps.depot.putImmutable({
@@ -233,8 +199,7 @@ async function prepareGitBundle<Credential>(
   input: Extract<SourceBundleInput<Credential>, { kind: 'git' }>,
   fetcher: ExactCommitFetcher<Credential>,
 ) {
-  // Exactly one fetch. The returned revision is checked rather than assuming a
-  // client did not resolve a branch or tag after core asked for a commit.
+  // A client may resolve a branch or tag, so the returned revision is checked.
   const fetched = await fetcher.fetchExactCommit({
     repository: input.repository,
     commit: input.commit,

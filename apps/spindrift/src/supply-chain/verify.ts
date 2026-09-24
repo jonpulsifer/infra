@@ -1,9 +1,6 @@
 /**
- * Verification of a build backend's SLSA provenance (§16).
- *
- * The build adapter reports evidence; it does not assess itself. This module is
- * the process boundary around the pinned `slsa-verifier` binary and returns the
- * normalized facts core may persist after that binary accepts the envelope.
+ * Verifies a build backend's SLSA provenance by running the pinned verifier
+ * binary. A build adapter reports evidence and never assesses its own.
  */
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -21,21 +18,13 @@ export interface ProcessResult {
   readonly stderr: string;
 }
 
-/** The native process seam; tests replace the far side, never this module. */
 export interface ProcessExecutor {
   run(command: readonly string[]): Promise<ProcessResult>;
 }
 
 /**
- * The reference that pins an artifact to its digest, whatever it is made of.
- *
- * `immutableImageRef` is the deploy side's version of this and gates on
- * `type === 'image'`, which is right there — a workload needs an image. It is
- * wrong here. §16 says core "signs that digest", and the digest of a `files`
- * artifact is as signable as an image's; the property this module needs is only
- * that the reference names the digest rather than a tag, which is what closes
- * the check/use race the verifier's own contract warns about. Gating on image
- * meant every static-site build was refused before the verifier was spawned.
+ * The ref naming the artifact's digest, for any artifact type. A digest, never
+ * a tag, closes the check/use race.
  */
 export function digestPinnedRef(artifact: Artifact): string | null {
   return (
@@ -60,7 +49,6 @@ export const bunProcessExecutor: ProcessExecutor = {
   },
 };
 
-/** Facts copied out of evidence core successfully assessed. */
 export interface BackendProvenanceAssessment {
   readonly artifactDigest: string;
   readonly bundleDigest: string;
@@ -104,30 +92,6 @@ export interface SlsaVerifierOptions {
   readonly now?: () => Date;
 }
 
-/**
- * The production verifier.
- *
- * It verifies an immutable reference and a copied envelope. No tag reaches the
- * tool, closing the check/use race the verifier's own contract warns about.
- *
- * **Two limitations of the `verify-image` path, recorded rather than hidden.**
- * `apps/spindrift-verifier/main.go` builds that path's request with
- * `ClaimedLevel: 2`, `MinimumLevel: 1`, `MaximumLevel: 2` and
- * `Backend: "hosted"` hardcoded, and nothing on the command line conveys any of
- * them:
- *
- * 1. *The level is decided here, not there.* Those constants make the binary's
- *    own level arithmetic inert on this path — `min(2, 2) = 2 >= 1` always
- *    passes — so the achieved level is entirely {@link lowerLevel} below,
- *    against the route profile's ceiling. That matches §16 ("guarantees belong
- *    to code-defined backend/runner profiles"), but it does mean an L3 claim
- *    rests on {@link CloudBuildRoute}'s constant and on nothing the envelope
- *    says. Passing the level through would need a flag on both sides and a new
- *    verifier image; it would not change any verdict today.
- * 2. *`--source-uri` is accepted and ignored.* `Expectations.SourceURI` is
- *    declared in `pkg/verifier/types.go` and never read by `Verify`, so the
- *    only source binding anything checks is {@link bundleDigestOf} below.
- */
 export class SlsaVerifier implements ProvenanceVerifier {
   private readonly executable: string;
   private readonly processes: ProcessExecutor;
@@ -170,6 +134,8 @@ export class SlsaVerifier implements ProvenanceVerifier {
         immutableRef,
         '--provenance-path',
         provenancePath,
+        // Accepted and ignored by the verifier; the bundle digest check below
+        // is the only source binding.
         '--source-uri',
         sourceUriOf(input.source),
         '--print-provenance',
@@ -213,6 +179,8 @@ export class SlsaVerifier implements ProvenanceVerifier {
           backend: input.backend,
           builderId: builderIdOf(envelope) ?? input.expectedBuilderId,
           slsaVersion: slsaVersionOf(envelope),
+          // The verifier hardcodes its levels on this path, so only the route
+          // profile's ceiling caps the claim.
           achievedLevel: lowerLevel(
             input.provenance.claimedLevel,
             input.maximumLevel,

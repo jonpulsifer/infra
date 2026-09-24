@@ -81,13 +81,8 @@ export function initTelemetry(component = 'web'): NodeSDK | null {
     console.error('[Telemetry] Failed to initialize OpenTelemetry SDK:', error);
   }
 
-  // Registering a listener replaces SIGTERM's default disposition, so nothing
-  // ends the process once this returns: `Bun.serve` holds the loop open and
-  // the pod sits until the kubelet's grace period runs out and SIGKILLs it.
-  // Flushing the exporter is the only reason to delay, so exit as soon as it
-  // is flushed. Without this the process outlives every rollout by the full
-  // 30s default, which is what put two of a single-replica process side by
-  // side — see the deployment's `maxSurge`.
+  // A SIGTERM listener replaces the default exit and `Bun.serve` holds the loop
+  // open, so exit once flushed or the pod waits out its whole grace period.
   process.on('SIGTERM', async () => {
     if (sdkInstance) {
       try {
@@ -106,18 +101,8 @@ export function initTelemetry(component = 'web'): NodeSDK | null {
 export const tracer: Tracer = trace.getTracer('spindrift');
 
 /**
- * The instruments below are created when this module is imported, which is
- * always before `initTelemetry` registers the SDK's MeterProvider: both
- * entrypoints import that function from here, so this module body runs first.
- *
- * Traces and logs survive that order because their APIs each keep a proxy
- * provider that re-binds on registration. The metrics API keeps none —
- * `metrics.getMeter` falls straight through to the no-op provider, and a no-op
- * instrument stays one for the life of the process without ever saying so.
- *
- * So an instrument holds the provider it was minted from and re-mints when the
- * global one changes. Registration order stops mattering, in either direction,
- * without a call site knowing.
+ * The metrics API has no proxy provider, so an instrument minted before the SDK
+ * starts stays a no-op. Each one re-mints when the global provider changes.
  */
 function lazily<T>(mint: (meter: Meter) => T): () => T {
   let mintedFrom: MeterProvider | undefined;
@@ -187,13 +172,7 @@ export const reconcilerErrorCounter: Counter = counter(
   },
 );
 
-/**
- * How long one build or deploy attempt took, from dispatch to a terminal
- * outcome — recorded around the same adapter call the build and deploy loops
- * already block on, so this is real wall time and not the loop's own poll
- * interval. `kind` distinguishes 'build' from 'deploy'; `outcome` carries
- * whatever each loop already knows the attempt ended as.
- */
+/** Wall time of one build or deploy attempt, labelled `kind` and `outcome`. */
 export const reconcilerAttemptDuration: Histogram = histogram(
   'reconciler_attempt_duration_seconds',
   {
@@ -202,10 +181,6 @@ export const reconcilerAttemptDuration: Histogram = histogram(
   },
 );
 
-/**
- * How long a build or deploy row sat before the reconciler first claimed it —
- * the wait a developer who just pressed the button actually feels.
- */
 export const reconcilerPickupLatency: Histogram = histogram(
   'reconciler_pickup_latency_seconds',
   {
@@ -215,23 +190,13 @@ export const reconcilerPickupLatency: Histogram = histogram(
   },
 );
 
-/**
- * How many build or deploy rows were still unclaimed at the end of one pass.
- * A gauge, not a counter: the loop reports the level, not an increment.
- */
 export const reconcilerQueueDepth: Gauge = gauge('reconciler_queue_depth', {
   description: 'Rows still awaiting reconciliation at the end of one pass',
 });
 
 /**
- * Every dispatch attempt a Build row consumes, labelled by what it ended as —
- * `dispatched`, `waiting` (refused, will retry), or `lost` (another replica
- * won the claim).
- *
- * The invoice alarm. A wedged row retried at loop cadence spent 84k signed-URL
- * mints in a day and was first noticed on a billing alert; a rising `waiting`
- * rate is the same loop, visible in telemetry instead. The per-row count lives
- * on `builds.dispatch_attempts`, so this stays free of per-row attributes.
+ * Labelled `outcome`: `dispatched`, `waiting` (refused, retried on backoff),
+ * `closed` (refused for good) or `lost` (another replica won the claim).
  */
 export const reconcilerDispatchAttempts: Counter = counter(
   'reconciler_dispatch_attempts_total',
@@ -241,16 +206,8 @@ export const reconcilerDispatchAttempts: Counter = counter(
 );
 
 /**
- * Bosun calls that named no claim, labelled by `call` (`heartbeat`/`result`).
- *
- * The instrument that says when the tolerant window can close (ticket 129).
- * Bosun ships on each host's NixOS auto-upgrade while Spindrift ships as a
- * pinned image digest, so for some stretch after this lands there are hosts
- * still posting without a claimant and `src/storage/build-outbox.ts` serves
- * them unfenced. This counter reading zero — across every host, for long enough
- * to be sure — is the evidence that requiring a claimant would refuse nobody.
- * Guessing at that from a calendar date would be guessing at when somebody
- * else's auto-upgrade ran.
+ * Labelled `call`. Once it stays at zero across every host, the outbox can
+ * require a claimant without refusing anyone.
  */
 export const bosunUnfencedCalls: Counter = counter(
   'bosun_unfenced_calls_total',
@@ -259,10 +216,7 @@ export const bosunUnfencedCalls: Counter = counter(
   },
 );
 
-/**
- * How many live deploys are currently drifted from their desired artifact, as
- * of the deploy loop's last drift-observing pass (§6's "visible state").
- */
+/** As of the deploy loop's last pass that observed drift. */
 export const reconcilerDriftedDeploys: Gauge = gauge(
   'reconciler_drifted_deploys',
   {
@@ -274,12 +228,8 @@ export const reconcilerDriftedDeploys: Gauge = gauge(
 const logger = logs.getLogger('spindrift');
 
 /**
- * Emit a log record without letting a broken exporter take the caller down.
- *
- * `console.*` already ran before this is reached, so the log line itself is
- * never lost to an OTLP outage — this only guards the second, best-effort
- * copy. Reported to stderr directly rather than through `logger.emit` again,
- * which would risk looping back into the same failure.
+ * The OTLP copy is best-effort: `console` already has the line. A failure goes
+ * to stderr, never back through `logger`, which could loop.
  */
 function emitSafely(record: Parameters<typeof logger.emit>[0]): void {
   try {

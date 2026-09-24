@@ -1,30 +1,7 @@
 /**
- * The one configuration pull request (§15).
- *
- * §15: "**One human-editable configuration PR per repository is the
- * transaction**, carrying each App subpath's Spindrift file and one thin CI
- * caller. Only its default-branch merge push becomes authoritative."
- *
- * Every word of that is load-bearing here:
- *
- * - **One PR, not one per scope.** Connecting a monorepo with four Apps is one
- *   thing an operator reviews and merges, not four. That is why this module
- *   composes a file *set* and writes it as a single commit rather than
- *   exposing a per-scope call somebody would loop over.
- * - **Human-editable**, which is why the Spindrift file is emitted by
- *   {@link serializeSpindriftFile} rather than by a general YAML writer. A
- *   general writer produces valid flow-style YAML — `{version: 1, component:
- *   {kind: service}}` — and nobody edits that. The shape is closed and small,
- *   so writing it out block-style costs a few lines and buys a file a person
- *   will actually change.
- * - **Exactly the Spindrift files plus one CI caller.** Nothing else goes in
- *   the tree. A configuration PR that also touched a lockfile, a README, or a
- *   second workflow would be a PR whose review is about something other than
- *   the connection.
- * - **Nothing here is authoritative.** This module opens a PR and returns its
- *   number. It writes no App, no Component, and no Build; the repo loop adopts
- *   configuration only from the default branch, so an unmerged PR — including
- *   one this module just opened — changes nothing.
+ * The configuration pull request: one per repository, one commit holding each
+ * scope's `spindrift.yaml` and one CI caller. Nothing takes effect until it is
+ * merged to the default branch.
  */
 import type { DetectionProposal } from '../../domain/detection/ladder.ts';
 import type {
@@ -32,51 +9,35 @@ import type {
   RepositoryWriter,
 } from '../../domain/repository.ts';
 
-/** The Spindrift file's name inside each scope (§5). */
 export const SPINDRIFT_FILE = 'spindrift.yaml';
 
-/** The one CI caller the transaction carries. */
 export const WORKFLOW_PATH = '.github/workflows/spindrift.yml';
 
 /**
- * The caller's file name, which is what a dispatch addresses.
- *
- * The same in every repository — including the platform's own, which commits a
- * caller by hand for the archive builds that have no repository of their own —
- * so the build route addresses one name rather than branching on which kind of
- * repository it is dispatching into.
+ * What a dispatch addresses. The same in every repository, including the
+ * platform's own, which commits its caller by hand.
  */
 export const CALLER_WORKFLOW_FILE = WORKFLOW_PATH.slice(
   WORKFLOW_PATH.lastIndexOf('/') + 1,
 );
 
-/**
- * The prefix a correlated run's name carries, so a human can read it too.
- *
- * Declared beside the caller that stamps it rather than beside the route that
- * matches on it: the two have to agree exactly, and the file that *writes* the
- * `run-name` is the one that decides what it says.
- */
+/** The caller stamps it into the run name, and the build route matches on it. */
 export const RUN_NAME_PREFIX = 'spindrift';
 
-/** The branch the configuration PR is opened from. */
 export const CONFIG_BRANCH = 'spindrift/configure';
 
-/** One scope's proposal, as detection produced it. */
 export interface ConfigurationScope {
-  /** Repo-relative directory, `.` for the repository root (§5's named scope). */
+  /** Repo-relative directory; `.` is the root. */
   readonly scope: string;
   readonly proposal: DetectionProposal;
 }
 
-/** One file the pull request writes. */
 export interface ConfigurationFile {
-  /** Repo-relative path. */
+  /** Repo-relative. */
   readonly path: string;
   readonly contents: string;
 }
 
-/** The composed transaction, before anything has been sent anywhere. */
 export interface ConfigurationTransaction {
   readonly branch: string;
   readonly title: string;
@@ -89,19 +50,12 @@ export interface ConfigurationTransaction {
 const PLAIN = /^[A-Za-z0-9][\w./-]*$/;
 
 /**
- * What YAML resolves to a boolean, a null or a number rather than to a string.
- *
- * Plain by the shape test above and still not a string once parsed, which is
- * the whole failure: a `buildCommand` of `true` is emitted bare, comes back
- * from `parseSpindriftFile` as a boolean, and `buildSchema` refuses the
- * document. One refused scope makes the repo loop reject the entire commit, so
- * the repository stops advancing for every App on it until a human edits a file
- * Spindrift wrote.
+ * Plain scalars YAML reads as a boolean, null or number. Left bare, a
+ * `buildCommand` of `true` parses back as a boolean and the file is refused.
  */
 const TYPED =
   /^(?:true|false|null|~|[+-]?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?)$/i;
 
-/** Quote a scalar only where YAML would otherwise read it as something else. */
 function scalar(value: string): string {
   return PLAIN.test(value) && !TYPED.test(value)
     ? value
@@ -109,24 +63,11 @@ function scalar(value: string): string {
 }
 
 /**
- * Serialize one scope's detection proposal as its in-repo Spindrift file.
- *
- * §15 calls this "a **lossless** serialization of Spindrift's config for one
- * git-integrated scope". Lossless is checkable rather than asserted: what comes
- * out of here parses back through `parseSpindriftFile` to the same proposal,
- * and the test that says so is the only thing keeping the two in step as the
- * schema grows.
- *
- * `kinds` is deliberately *not* emitted. It is the disabled-with-reasons
- * grammar the UI renders (§5) — a statement about what detection considered,
- * not about what this scope is. Writing it into the repository would make a
- * reason somebody read once into a value the next detection run has to honour.
+ * Parses back through `parseSpindriftFile` to the same proposal. `kinds` is
+ * left out because it records what detection considered.
  */
 export function serializeSpindriftFile(
-  // Narrowed to the three fields it reads, so the creation screen can render
-  // the file a scope is about to get from what `inspectRepository` answered,
-  // rather than reimplementing this emitter in the browser. A preview composed
-  // by a second copy of the writer is a preview that drifts from it.
+  // Narrowed so the creation screen can preview the file from an inspection.
   proposal: Pick<DetectionProposal, 'kind' | 'build' | 'watchPaths'>,
 ): string {
   const lines = [
@@ -160,36 +101,8 @@ export function serializeSpindriftFile(
 }
 
 /**
- * The thin CI caller (§4, §15).
- *
- * Thin is the requirement, and it has two halves. **The run happens in the
- * connected repository** — §15 gives that repository the Actions minutes and
- * the billing — while **the machinery lives in the manifest's reusable
- * workflow**,
- * so what lands in somebody's repo is a dispatch trigger and a `uses:`.
- *
- * The single opaque `spec` input is what keeps it thin over time. A caller with
- * one input per build parameter would have to be regenerated — and re-reviewed,
- * in every connected repository — each time a build gained a parameter. The
- * reusable workflow is named by the manifest and versioned by the platform, so
- * it is the right place for that shape to live.
- *
- * **`correlation` is the one exception, and it is not a build parameter.** The
- * dispatch API answers `204` and names no run, so a dispatched build has to be
- * found again; stamping the value into `run-name` is what makes finding it
- * exact rather than a race against whoever else pushed. It stays out of `spec`
- * because nothing about the build depends on it — the reusable workflow never
- * reads it.
- *
- * `id-token: write` is the workflow-ref-scoped cloud identity §15 names: the
- * job federates as itself rather than holding a credential this file would
- * have to carry. `packages: write` is this repository's own GHCR push —
- * a called workflow can only narrow the caller's token, never widen it, so
- * the reusable workflow needs the permission granted here even though every
- * push it makes happens two files away. It is not always enough on its own
- * (ticket 136): an org-owned repository's token can never write another
- * owner's namespace, which is what the sealed credential in `registryAuth`
- * is for.
+ * One opaque `spec` input, so a new build parameter never touches the caller.
+ * A called workflow can only narrow the token, so permissions are granted here.
  */
 export function buildWorkflowCaller(buildWorkflow: string): string {
   return `# Managed by Spindrift.
@@ -222,7 +135,6 @@ jobs:
 `;
 }
 
-/** What the pull request body says, in the order an operator reads it. */
 function pullRequestBody(scopes: readonly ConfigurationScope[]): string {
   const rows = scopes
     .map(
@@ -243,10 +155,7 @@ Each \`${SPINDRIFT_FILE}\` is yours to edit, here or later. Once it is on the de
 `;
 }
 
-/**
- * Compose the transaction. Pure: nothing is sent, so a test can read exactly
- * what would be written before deciding whether a far side is involved.
- */
+/** Pure: nothing is sent. */
 export function configurationTransaction(input: {
   readonly scopes: readonly ConfigurationScope[];
   readonly buildWorkflow: string;
@@ -279,14 +188,6 @@ export function configurationTransaction(input: {
   };
 }
 
-/**
- * What opening the transaction needs: the writer, plus the one read that finds
- * the base commit.
- *
- * Declared as an intersection of the domain's interfaces rather than restated,
- * so `GitHubApp` satisfying `RepositoryHost` is the same fact as it satisfying
- * this.
- */
 export type ConfigurationHost = RepositoryWriter & {
   branchHead(
     ref: RepositoryRef,
@@ -295,20 +196,12 @@ export type ConfigurationHost = RepositoryWriter & {
   ): Promise<string>;
 };
 
-/** Where the opened pull request can be found. */
 export interface OpenedConfigurationPullRequest {
   readonly number: number;
   readonly branch: string;
   readonly commit: string;
 }
 
-/**
- * Write the transaction to a branch and open the pull request for it.
- *
- * The base is the default branch, and it is read here rather than taken as a
- * parameter so the branch cannot be cut from a ref that is not the one whose
- * merge will be authoritative.
- */
 export async function openConfigurationPullRequest(
   host: ConfigurationHost,
   ref: RepositoryRef,

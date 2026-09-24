@@ -1,9 +1,6 @@
 /**
- * The reconciler process (§19).
- *
- * Individual loops own one kind of reconciliation. This module owns their
- * shared lifecycle: start them together, isolate failures, retry a failed loop
- * with bounded backoff, and stop every loop from one signal.
+ * Runs every reconciler loop under one supervisor: each loop retries its own
+ * failures with bounded backoff, and one signal stops them all.
  */
 import type { SecretStore } from '../adapters/store/contract.ts';
 import type { AdapterRegistry, Clock } from '../commands/types.ts';
@@ -32,13 +29,11 @@ export type ReconcilerLoopName =
   | 'deploy'
   | 'manifest';
 
-/** One independently supervised process loop. */
 interface SupervisedLoop {
   readonly name: ReconcilerLoopName;
   run(signal: AbortSignal): Promise<void>;
 }
 
-/** Bounded exponential retry after a loop-level failure. */
 export interface RetryBackoff {
   readonly initialMs: number;
   readonly maximumMs: number;
@@ -64,45 +59,24 @@ interface SupervisorOptions {
 }
 
 /**
- * Everything the long-running process needs after production bootstraps it.
- *
- * `manifest` and `adapters` are **read per pass, never captured**. Production
- * supplies them as getters over a value {@link ReconcilerContext.refresh}
- * replaces, so a loop that holds this context for the life of the process still
- * acts on the configuration as it is now. Every loop below already passes this
- * object into its per-pass function rather than destructuring it at startup,
- * which is what makes that work without touching any of them.
+ * Loops read `manifest` and `adapters` per pass and never capture them:
+ * production supplies getters over the value `refresh` replaces.
  */
 export interface ReconcilerContext {
   readonly db: Database;
   readonly adapters: AdapterRegistry;
   readonly clock: Clock;
   readonly manifest: InstallationManifest;
-  /**
-   * Re-read the stored manifest and rebuild whatever was assembled from it.
-   *
-   * Absent leaves the context frozen, which is what a test that supplies its
-   * own manifest wants. Production supplies it, because `configureInstallation`
-   * writes the row this process would otherwise never re-read — the
-   * declared-change-that-does-nothing failure §20's authoring path exists to
-   * remove. The web process solves the same problem per request; this process
-   * has no request to hang a read on, so it hangs it on a loop.
-   */
+  /** Absent, the context never changes after startup. */
   readonly refresh?: () => Promise<void>;
 }
 
 const DEFAULT_TARGET_INTERVAL_MS = 5 * 60_000;
 const DEFAULT_REPOSITORY_INTERVAL_MS = 5 * 60_000;
-/**
- * How soon a saved manifest reaches the loops.
- *
- * Far below the loops it feeds, because the operator who just pressed save is
- * watching. One `select` against a row this process already reads at startup,
- * and no adapter is rebuilt unless the document actually changed.
- */
+// Far below the other loops, because the operator who just saved the manifest
+// is watching. A tick costs one select when nothing changed.
 const DEFAULT_MANIFEST_INTERVAL_MS = 30_000;
 
-/** Observable process events for production logging and lifecycle tests. */
 export type ReconcilerProcessEvent =
   | {
       readonly type: 'pass';
@@ -118,21 +92,12 @@ export type ReconcilerProcessEvent =
 export interface ReconcilerOptions {
   readonly signal: AbortSignal;
   readonly retry?: RetryBackoff;
-  /**
-   * How often {@link ReconcilerContext.refresh} runs, for a test that cannot
-   * wait {@link DEFAULT_MANIFEST_INTERVAL_MS} to watch a change arrive.
-   */
   readonly manifestIntervalMs?: number;
   readonly onEvent?: (event: ReconcilerProcessEvent) => void;
 }
 
-/**
- * Supervise every loop until shutdown.
- *
- * Each loop gets its own retry chain. `Promise.all` is safe here because those
- * chains absorb and report their own failures; one failed loop therefore
- * cannot reject the aggregate and silently stop its siblings.
- */
+// `Promise.all` cannot reject here: each loop's retry chain absorbs its own
+// failures, so one failed loop never stops its siblings.
 async function superviseLoops(
   loops: readonly SupervisedLoop[],
   options: SupervisorOptions,
@@ -141,22 +106,13 @@ async function superviseLoops(
   await Promise.all(loops.map((loop) => superviseLoop(loop, options)));
 }
 
-/**
- * Compose and run this installation's reconciliation loops.
- *
- * Repository reconciliation is the only optional loop: uploaded archives need
- * no repository integration. Target refresh, config retention, and Deploy
- * convergence are standing responsibilities of every installation.
- */
 export async function runReconciler(
   context: ReconcilerContext,
   options: ReconcilerOptions,
 ): Promise<void> {
   if (options.signal.aborted) return;
 
-  // Once here so an installation that cannot retain config says so at startup
-  // rather than on the config loop's first pass, and again per pass below so
-  // the store is the one the current manifest names.
+  // Fails at startup when the installation has no store for config retention.
   storeFor(context);
 
   const passed = (loop: ReconcilerLoopName): void =>
@@ -173,10 +129,6 @@ export async function runReconciler(
         }),
     },
     {
-      // The boundary's own checklist, at the Target loop's cadence and for the
-      // same reason: a connect-time snapshot rots, and a bucket that stopped
-      // being writable is a fact that has to be re-established rather than
-      // remembered.
       name: 'vessel',
       run: (signal) =>
         runVesselLoop(context, {
@@ -191,9 +143,7 @@ export async function runReconciler(
         runConfigLoop(
           {
             db: context.db,
-            // A getter, not the value resolved above: `runConfigPass` reads
-            // this per pass, and a store captured at startup would be the one
-            // the process booted with even after the manifest named another.
+            // A getter, so each pass uses the store the current manifest names.
             get store() {
               return storeFor(context);
             },
@@ -206,9 +156,6 @@ export async function runReconciler(
         ),
     },
     {
-      // Unconditional like its siblings, and cheap when idle: the pass selects
-      // only unsettled managed Datastores, so an installation whose databases
-      // have all come up runs one query and makes no adapter call.
       name: 'datastore',
       run: (signal) =>
         runDatastoreLoop(context, {
@@ -239,9 +186,7 @@ export async function runReconciler(
 
   const refresh = context.refresh;
   if (refresh !== undefined) {
-    // Supervised like any other loop rather than raced alongside them: a
-    // database blip while re-reading the row is a transient this process
-    // already knows how to back off from, not a reason to stop reconciling.
+    // Supervised, so a database error while re-reading backs off and retries.
     loops.push({
       name: 'manifest',
       run: async (signal) => {
@@ -277,9 +222,8 @@ export async function runReconciler(
           {
             intervalMs: DEFAULT_REPOSITORY_INTERVAL_MS,
             signal,
-            // The poll loop's fallback half of §15's pairing: the webhook route
-            // calls the same `dispatchAutoDeploys` over the same passes, so a
-            // missed delivery still deploys on this loop's next tick.
+            // The webhook route calls `dispatchAutoDeploys` too, so a missed
+            // delivery still deploys on the next tick.
             onPass: async (passes) => {
               passed('repository');
               await dispatchAutoDeploys(context, passes);
@@ -296,7 +240,6 @@ export async function runReconciler(
   });
 }
 
-/** §10's store of record, as the manifest names it *now*. */
 function storeFor(context: ReconcilerContext): SecretStore {
   const store = context.adapters.store(context.manifest.secretStore.adapter);
   if (store === null) {

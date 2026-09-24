@@ -1,9 +1,6 @@
 /**
- * Core's one artifact signature (§16).
- *
- * Verification and signing are deliberately separate dependencies. Their only
- * composition is {@link CoreSupplyChain}, whose control flow makes it
- * impossible to call the signer before verification succeeds.
+ * Core's artifact signature. {@link CoreSupplyChain} calls the signer only
+ * after provenance verifies and meets the Target's minimum level.
  */
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -62,14 +59,7 @@ export type ArtifactFinalization =
       readonly message: string;
     };
 
-/**
- * The outcome of re-checking a recorded {@link CoreSignature} at admission.
- *
- * "Cryptographically real" means the signature core recorded is verified again
- * before a Deploy is written — fail-closed, on both the Kubernetes and Cloud
- * Run image paths, which share this one admission gate. A `false` here refuses
- * the deploy with the sentence the operator reads.
- */
+/** `ok: false` refuses the deploy, and `reason` is what the operator reads. */
 export interface SignatureVerification {
   readonly ok: boolean;
   readonly reason: string | null;
@@ -80,11 +70,6 @@ export interface VerifySignatureInput {
   readonly signature: CoreSignature;
 }
 
-/**
- * The far side behind signature re-verification: the pinned
- * `spindrift-verifier` binary's `verify-signature` subcommand. Faked at this
- * seam in tests; never mocked inside core.
- */
 export interface SignatureVerifier {
   verify(input: VerifySignatureInput): Promise<SignatureVerification>;
 }
@@ -92,12 +77,8 @@ export interface SignatureVerifier {
 export interface SupplyChain {
   finalize(input: FinalizeArtifactInput): Promise<ArtifactFinalization>;
   /**
-   * Re-verify a recorded artifact signature at admission (§16).
-   *
-   * Consumed by the deploy intent path before any row is written: a Build that
-   * passed finalization can still be refused here if its stored signature does
-   * not verify against its stored digest, which is what "deployment policy
-   * consumes the real signature format" means at core's admission gate.
+   * Re-checked at image deploy admission before any row is written, so a
+   * finalized Build can still be refused here.
    */
   verifySignature(input: VerifySignatureInput): Promise<SignatureVerification>;
 }
@@ -157,7 +138,6 @@ export interface CosignSignerOptions {
   readonly now?: () => Date;
 }
 
-/** Sign admitted images as registry referrers. */
 export class CosignSigner implements ArtifactSigner {
   private readonly executable: string;
   private readonly processes: ProcessExecutor;
@@ -198,8 +178,7 @@ export class CosignSigner implements ArtifactSigner {
     artifact: Artifact,
     bundlePath: string,
   ): readonly string[] {
-    // Any artifact type, so long as the reference names the digest: §16 signs
-    // the digest, and a `files` artifact has one.
+    // Any artifact type: the signature covers the digest, and `files` has one.
     const immutableRef = digestPinnedRef(artifact);
     if (immutableRef === null) {
       throw new Error(`artifact ${artifact.digest} has no immutable reference`);

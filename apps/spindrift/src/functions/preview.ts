@@ -1,15 +1,6 @@
 /**
- * Run — execute a function's source once, here, without deploying it.
- *
- * The source is written to a temp `.mjs` and imported by a worker, rather than
- * evaluated in this thread: an author's `while (true) {}` has to be survivable,
- * and terminating a worker is the only way to take a spinning thread back.
- * The file is unlinked and the worker terminated on every path, including the
- * timeout.
- *
- * This is a preview, not a sandbox. The handler runs with this process's
- * privileges — see `contract.ts` on why trusted-author admission is what makes
- * that acceptable.
+ * Run: execute a function's source once in a worker, without deploying it. A
+ * preview, not a sandbox: the handler has this process's privileges.
  */
 import { unlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -28,7 +19,6 @@ export async function runPreview(
   request: PreviewRequest,
   options: {
     readonly timeoutMs?: number;
-    /** What the handler reads as `env`. Empty for a function with none. */
     readonly env?: FunctionEnv;
   } = {},
 ): Promise<PreviewResult> {
@@ -92,8 +82,7 @@ export async function runPreview(
         });
       };
 
-      // A worker that dies before answering — an unparseable module, a crash in
-      // the runtime itself — would otherwise sit here until the timeout.
+      // A worker that dies before answering would otherwise wait for the timer.
       worker.onerror = (event: ErrorEvent) => {
         settle({
           ok: false,

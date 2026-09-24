@@ -1,12 +1,6 @@
 /**
  * The production {@link SignatureVerifier}: the pinned `spindrift-verifier`
- * binary's `verify-signature` subcommand (§16, §19).
- *
- * Verification and signing are the same binary, so the two paths differ by a
- * process boundary, not by correctness — Go's `crypto/ed25519` would call the
- * same reference implementation anyway. This module is the process boundary
- * around the verifier half: it writes the recorded bundle to a temp file and
- * asks the binary whether it verifies against the recorded digest.
+ * binary's `verify-signature` subcommand, fed the recorded bundle as a file.
  */
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -22,10 +16,8 @@ export interface SpindriftSignatureVerifierOptions {
   readonly executable?: string;
   readonly processes?: ProcessExecutor;
   /**
-   * The trusted Spindrift signer reference — the same one `Sign` used. The
-   * pinned verifier derives the expected public key from this and refuses a
-   * bundle whose embedded key does not match, so admission proves
-   * *Spindrift's* key signed the digest, not *some* key.
+   * The key `CosignSigner` signs with. The verifier refuses a bundle whose
+   * embedded key does not match it, so any other key fails admission.
    */
   readonly signerKey: string;
 }
@@ -55,9 +47,6 @@ export class SpindriftSignatureVerifier implements SignatureVerifier {
         input.artifactDigest,
         '--bundle-path',
         bundlePath,
-        // Pins admission to Spindrift's own signer: the verifier derives the
-        // expected public key from this file and refuses any bundle whose
-        // embedded key does not match.
         '--signer-key',
         this.signerKey,
       ]);
@@ -76,5 +65,4 @@ export class SpindriftSignatureVerifier implements SignatureVerifier {
   }
 }
 
-/** Re-exported so `CoreSignature` stays a single import for callers. */
 export type { CoreSignature } from './sign.ts';

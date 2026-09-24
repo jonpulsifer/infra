@@ -1,54 +1,26 @@
 /**
- * Config as a lifecycle, not a table (§10).
- *
- * The table is `config_items`; this is everything about it that is a rule rather
- * than a column, kept out of the commands so the three that touch config —
- * set, replace, and place — cannot disagree about any of it.
- *
- * The two rules with teeth:
- *
- * - **Core never retrieves, therefore core cannot migrate.** §10 accepts that
- *   consequence rather than relaxing write-only for migration, "because the
- *   carve-out *is* the boundary". What replaces migration is
- *   {@link keysThatWillNotFollow}: Place names the keys that will not follow a
- *   move and demands them before it commits, so a re-placement never comes up
- *   green and unconfigured.
- * - **Retention is core's responsibility, at N = 10.** "No store offers a
- *   delegate-to-the-registry escape... the same depth as artifacts: a
- *   constraint, not a coincidence, since shallower config makes a rollback come
- *   up green and unconfigured." {@link reapable} is what a loop hands to
- *   `destroy`.
+ * Config rules shared by the commands that set, replace and place config. Core
+ * never reads a value back, so a move between stores demands the keys again.
  */
 import type { ConfigScope, SecretVersion } from '../adapters/store/contract.ts';
 import type { StoreAdapter, TargetAdapter } from '../config/manifest.schema.ts';
 import { targetLabel } from './target.ts';
 
 /**
- * §10: "Retention N = 10, the same depth as artifacts."
- *
- * It is the depth a rollback can reach, not a storage budget: a Deploy pins the
- * versions it delivered, so the tenth-newest version is the oldest one a
- * rollback can still come up configured from.
+ * The rollback depth: a Deploy pins the versions it delivered, so the
+ * tenth-newest is the oldest a rollback can still come up configured from.
  */
 export const CONFIG_RETENTION = 10;
 
 /**
- * What a variable may be called.
- *
- * The intersection of what a process environment accepts and what a Kubernetes
- * Secret key accepts, which is what every delivery path here goes through. A
- * name outside it is refused at the command rather than at apply, where the
- * developer who typed it is gone.
+ * Valid both as a process environment name and as a Kubernetes Secret key.
+ * Checked at the command, so a bad name never reaches apply.
  */
 export const VARIABLE_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
 /**
- * The store scope a (App, Component, Target) triple names (§10).
- *
- * The Target arrives as the two facts that identify it and is spelled
- * `<vessel>/<adapter>` here, in the one place that spelling is decided — the
- * store's item name is derived from this, so a second construction of it
- * elsewhere would be a second set of items for one scope.
+ * The one place a Target is spelled for a store scope. The store's item name
+ * derives from it, so a second spelling would split one scope's items.
  */
 export function configScopeOf(names: {
   app: string;
@@ -64,18 +36,8 @@ export function configScopeOf(names: {
 }
 
 /**
- * Which store one Target's config lives in (§10).
- *
- * §10 makes the store a Target property — "Kubernetes Targets carry an
- * admin-chosen store; the cloud Targets take the cloud store in the App's
- * vessel, not a choice" — so it is chosen from what *this* Target reaches,
- * narrowed to what the installation has an access path to. A Target that
- * reaches only stores core cannot write to has no store of record, and cannot
- * hold config at all.
- *
- * The installation's own store wins where a Target reaches it, so that the
- * common case — every Target in front of one vault — puts every Component's
- * config in the same place and makes re-placement free.
+ * The installation's preferred store wins where the Target reaches and can write
+ * it. Null means the Target cannot hold config.
  */
 export function storeOfRecordFor(
   reachable: readonly StoreAdapter[],
@@ -86,18 +48,7 @@ export function storeOfRecordFor(
   return reachable.find((adapter) => writable(adapter)) ?? null;
 }
 
-/**
- * Whether config written for one Target can be delivered on another.
- *
- * §10: "**a store is its store of record plus one or more access paths.** Both
- * clusters run their own connect service in front of the same vault, which is
- * why cluster-to-cluster re-placement is free." Free means exactly this: the
- * item is the same item, so the *reference* moves and no value has to.
- *
- * When the two Targets do not share a store of record, nothing moves — core
- * holds no value it could carry across, and the reference names an item the
- * destination cannot reach.
- */
+/** With a shared store only the reference moves. Otherwise nothing can, since core holds no value. */
 export function sharesStoreOfRecord(
   from: StoreAdapter | null,
   to: StoreAdapter | null,
@@ -106,13 +57,8 @@ export function sharesStoreOfRecord(
 }
 
 /**
- * The keys a move to another Target will not carry with it (§10).
- *
- * Sorted, because this list is a sentence a developer reads and a set a command
- * compares what they supplied against — both want a stable order.
- *
- * Already-configured keys at the destination are not demanded: a key that has a
- * value there is a key that follows nothing because it does not need to.
+ * Sorted, because a developer reads the list and a command compares against it.
+ * Keys already configured at the destination are not demanded.
  */
 export function keysThatWillNotFollow(input: {
   readonly configured: readonly string[];
@@ -127,13 +73,8 @@ export function keysThatWillNotFollow(input: {
 }
 
 /**
- * The versions of one key that are past the retention depth (§10).
- *
- * Takes the store's own list — newest first, as the contract's `versions`
- * promises — and returns the tail beyond {@link CONFIG_RETENTION}. Order is not
- * re-derived here: a store that pins by minting an immutable item per version
- * has no version *number* to sort by, and the adapter is the only thing that
- * knows which of its items is newer.
+ * The versions past the retention depth. The store lists newest first and only
+ * the adapter knows the order, so nothing is re-sorted here.
  */
 export function reapable(
   versions: readonly SecretVersion[],
