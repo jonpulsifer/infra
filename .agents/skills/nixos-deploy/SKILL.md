@@ -1,53 +1,39 @@
 ---
 name: nixos-deploy
 description: >-
-  Build, validate, and deploy NixOS host configurations in this infra repo. Use
-  when rebuilding a host, adding a new one, building an image, or rolling back.
+  Build, deploy or roll back the NixOS configuration of a host in this repo.
+  Use when rebuilding a host, adding one, or building a host image.
 metadata:
   runbook: docs/runbooks/deploy-a-nixos-host.md
   wiki: https://wiki.lolwtf.ca/runbooks/deploy-a-nixos-host/
 ---
 
-# NixOS Deploy
+# NixOS deploy
 
-Canonical human runbook: `docs/runbooks/deploy-a-nixos-host.md`. New x86
-Kubernetes node: `docs/runbooks/add-a-kubernetes-node.md`. Layer
-background: `docs/platform/nixos.md`. Host inventory:
-`docs/hosts/index.md`. This file holds only the agent-specific guidance.
+The procedure is `docs/runbooks/deploy-a-nixos-host.md`. To add an x86
+Kubernetes node, follow `docs/runbooks/add-a-kubernetes-node.md`. The platform
+page is `docs/platform/nixos.md`, and each host has a sheet under
+`docs/hosts/`. These notes cover what an agent needs beyond them.
 
-## Agent notes
+## Notes
 
-- Deploying touches live hardware. Say what you are about to do before you do
-  it, and prefer `boot` over `switch` on remote or headless hosts.
-- Validate and build without side effects first:
-  ```bash
-  nix flake check
-  nix build .#nixosConfigurations.<host>.config.system.build.toplevel --no-link
-  ```
-- Deploy:
-  ```bash
-  nixos-rebuild boot   --sudo --target-host <host> --flake .#<host>   # next reboot
-  nixos-rebuild switch --sudo --target-host <host> --flake .#<host>   # immediately
-  ```
-- **A branch deploy is temporary.** Hosts auto-upgrade from `main` daily at
-  03:37, so an unmerged config silently reverts. Merge promptly or treat the
-  deploy as a test.
-- Every host, k8s nodes included, has a `nix/hosts/<name>.nix` and an entry
-  in `nix/hosts/default.nix`.
-- `radiopi0` and `blinkypi0` are armv6l with no binary cache and
-  `system.autoUpgrade` disabled — they cross-build on `forge` (aarch64) and are
-  pushed with `--target-host`. Never try to build them on-device.
-- `forge` boots off its installed NVMe. The `rackpi5` HTTP/RAM chain on spore
-  supplies forge's EEPROM fallback. `BOOT_ORDER=0xf1276` tries the
-  spore-published signed image when NVMe boot fails. Boot-order digits are
-  tried right-to-left: NVMe, HTTP, network, SD, then restart the sequence.
-  That prepends NVMe to the stock `0xf127`, so every existing fallback
-  survives — check the live value with `rpi-eeprom-config` before writing,
-  and never drop the HTTP entry while the box is headless. The
-  EEPROM config (boot order, HTTP host/path) lives outside the Nix closure
-  and is applied by hand with `rpi-eeprom-config --edit`; a stock EEPROM
-  firmware update erases the enrolled signing key for the legacy path, so
-  re-enrol it before rebooting forge after any such update.
-- `nix run .#<host> -- <cmd>` reaches hosts over the tailnet only; it fails from
-  a plain LAN/WSL shell. Use `<host>.lolwtf.ca` over SSH there instead.
-- Roll back on a reachable host: `nixos-rebuild switch --rollback`.
+- A deploy changes a live host. Tell the owner the host, the mode and the
+  commit before you run it. Use `boot` on a remote or headless host.
+- Build before you deploy, on the build host for the target's site:
+  `NIX_REMOTE=ssh-ng://<build-host> HOST=<host> mise run nix:build`. The
+  runbook's table names `<build-host>`.
+- Every host has `nix/hosts/<name>.nix` and an entry in
+  `nix/hosts/default.nix`. `flake.nix` derives every output from that entry.
+- `nixos-rebuild` copies the closure from the build host to the machine you
+  run it on, then to the target. For an offsite host, set `--build-host` and
+  `--target-host` to the same host, or the closure crosses the WAN twice.
+- The Pi 4 and Pi Zero hosts have no auto-upgrade. The `nixos-deploy`
+  workflow builds and deploys them.
+- `radiopi0` and `blinkypi0` are armv6l with no binary cache. Cross-build
+  them on forge or with the workflow, never on the device.
+- forge's EEPROM holds its boot order and HTTP fallback, outside the Nix
+  closure. Read the live values with `rpi-eeprom-config` first, change only the
+  value you mean to, and keep the HTTP entry while forge is headless.
+  `docs/platform/nixos/netboot.md` has the rules.
+- `nix run .#<host> -- <cmd>` works only for a host on the tailnet. The
+  Kubernetes nodes run no Tailscale, so use `ssh <node>.lolwtf.ca` for them.

@@ -1,178 +1,149 @@
 # AGENTS.md
 
-Multi-layer homelab managed as code: NixOS bare metal, two Kubernetes clusters,
-Terraform-managed cloud and network fabric, first-party apps and images.
+This repository is a homelab managed as code. It holds the NixOS hosts, two
+Kubernetes clusters, OpenTofu for the cloud and the network, and first-party
+apps and images. `folly` is the cluster at home, and `offsite` is the cluster at
+a remote site. The wiki at [wiki.lolwtf.ca](https://wiki.lolwtf.ca) is built
+from `docs/`.
 
-This file is a **router**, not a manual. It holds the rules you must know before
-you touch anything, and pointers to where the depth lives. Depth lives in
-`docs/` (published at [wiki.lolwtf.ca](https://wiki.lolwtf.ca)) and in
-`.agents/skills/`.
+This file holds the rules to know before your first edit and points to the
+detail in `docs/` and `.agents/skills/`.
+
+The owner is the human who runs this lab. A controller is named for what it
+is, such as Flux or Atlantis. kthx is the lab's hosting product. Its engine,
+`apps/spindrift`, is a controller that builds and deploys each built app.
 
 ## Hard rules
 
-Read these before your first edit. They are prohibitions — routing you to them
-after the fact is too late.
-
-- **Never mutate live infrastructure by hand.** Author platform desired state
-  in git and let the operators apply it. Spindrift is itself a declared
-  controller: Flux owns its platform namespace and prerequisites; Spindrift
-  owns resources in the `spindrift-apps` namespaces and inside pre-provisioned
-  vessel projects through their APIs. That ownership boundary is declared in
-  [Built apps](docs/apps/kthx/built-apps.md); it is not
-  permission for an agent or operator to make the same changes out of band.
-- **Never `kubectl apply`** to author state. `kubectl`, `flux get`, and
-  `flux reconcile` are for inspection or forcing a sync — nothing else.
-- **Never run `tofu apply` against remote state.** Applies go through Atlantis
-  on the PR. Local apply races Atlantis and causes lock contention and drift.
-  `plan` and `init -backend=false && validate` are inspection only.
-- **Never hardcode network facts.** Reference the SSOT files below.
-- **Never put decrypted secrets in `docs/`.** The wiki is public. If `sops -d`
-  touched it, it does not go in `docs/`.
-- **Never commit to `main`.** Branch, PR, let CI and the operators do their job.
-- A host config deployed from a branch **reverts on the next auto-upgrade** —
-  hosts rebuild from `main`. Merge promptly or the change silently disappears.
+- Change live infrastructure only through git. Author the desired state here,
+  and Flux, Atlantis and the host rebuilds apply it. Change live state by hand
+  only when the owner asks, even when a runbook has the steps.
+- Flux owns the kthx engine's namespace and prerequisites. The engine owns each
+  built app's `app-<name>` namespace and DNS records. It also owns the app's
+  releases in `spindrift-apps`, its Argo `Application` objects in `argo` on
+  folly, and its Datastores in `spindrift-datastores`. In the cloud projects
+  and accounts the engine is given, it owns the app's resources.
+  [Ownership and security](docs/apps/kthx/security.md) declares this boundary.
+  Nobody makes these changes by hand.
+- Never `kubectl apply` to author state. Use `kubectl`, `flux get` and
+  `flux reconcile` to inspect or to force a sync.
+- Never run `tofu apply` against remote state. Atlantis applies on the PR, and
+  a local apply races it for the state lock. `plan`, and
+  `init -backend=false` with `validate`, are inspection only.
+- Never copy a network fact such as an address, a subnet or an ASN. Read it from
+  a [single source of truth](#single-sources-of-truth).
+- Never put a decrypted secret in `docs/`, a commit, a PR or a log. The repo and
+  the wiki are public. If `sops -d` produced it, it stays out.
+- Never commit to `main`. Open a branch and a PR, and let CI, Atlantis and Flux
+  apply it.
+- A host configuration deployed from a branch reverts at the host's next
+  auto-upgrade, which rebuilds from `main` every day. Merge the change promptly.
+  The Pi 4 hosts have no auto-upgrade and change only when deployed. No Pi Zero
+  runs its NixOS config.
 
 ## How changes ship
 
-| Layer | Path | Applies when |
+| Layer | Applies through | When |
 | --- | --- | --- |
-| Terraform | Atlantis on the PR | autoplan on changed roots; comment `atlantis apply`; a successful apply automerges |
-| Kubernetes | Flux | on merge to `main` |
-| NixOS | `nixos-rebuild` | on deploy, and on each host's auto-upgrade from `main` |
-| Wiki | `wiki.yml` → Cloudflare Pages | on merge to `main` |
+| OpenTofu | Atlantis on the PR | Atlantis plans the changed roots. A comment of `atlantis apply` applies them and merges the PR. |
+| Kubernetes | Flux | After a merge to `main` |
+| NixOS | `nixos-rebuild` | On a deploy, and at the daily auto-upgrade from `main` on hosts that have one |
+| Wiki | `.github/workflows/wiki.yml` to Cloudflare Pages | After a merge to `main` |
 
-See [How changes ship](docs/platform/how-changes-ship.md) for the full
-picture of each path.
+[How changes ship](docs/platform/how-changes-ship.md) has each path and its
+exceptions.
 
 ## Commands
 
-**`mise` is the command source of truth.** Run `mise tasks ls` to see what
-exists, then `mise run <task>`. Do not invent raw invocations when a task
-exists — the task encodes the correct binary and flags.
+`mise` is the command source of truth. Run `mise tasks ls`, then
+`mise run <task>`. A task encodes the correct binary and flags, so use it when
+one exists.
 
-Two things the tasks settle that are easy to get wrong:
-
-- The Terraform binary is **`tofu` (OpenTofu)**, not `terraform`. Both are
-  installed; OpenTofu is the apply path. The directory is still named
-  `terraform/` — that is correct.
-- Nix-specific workflows (`nixos-rebuild`, host builds, `nix flake check`) run
-  through the Nix flake: `nix develop`.
-
-For anything mise does not own — deploying to a live host, `sops`,
-`flux reconcile` — the runbooks carry the exact invocation.
-
-`mise` does not own the SOPS / age-key workflow. Start at
-[Manage SOPS secrets](docs/runbooks/manage-sops-secrets.md); the matching skill
-(`.agents/skills/sops-secrets/`) holds only the agent-side notes — the
-runbook is the canonical procedure. The two facts that bite first-timers
-hardest: the operator age key is at `~/.config/age/keys.txt` (NOT the
-sops binary's default of `~/.config/sops/age/keys.txt`), and a fresh
-sops file is two-stage — operator key as the only recipient at first,
-host's own `ssh-to-age` recipient added after the first successful boot.
+- The OpenTofu binary is `tofu`. The directory is named `terraform/`.
+- Nix work (`nixos-rebuild`, host builds, `nix flake check`) runs in the dev
+  shell: `mise run devshell`.
+- Host deploys, `sops` and `flux reconcile` have no task. The runbooks carry
+  the commands.
+- The operator key, the owner's age key, is at `~/.config/age/keys.txt`, so set
+  `SOPS_AGE_KEY_FILE` to that path. The `sops-secrets` skill and
+  [Manage SOPS secrets](docs/runbooks/manage-sops-secrets.md) cover the rest.
 
 ## Repo map
 
-One line per top-level directory. Look in the tree for what is inside; this
-file does not list contents.
-
-| Path | What lives here |
+| Path | What is there |
 | --- | --- |
-| `nix/` | NixOS configuration for every host, plus image builds. Hosts are declared in `flake.nix`. |
-| `clusters/` | Kubernetes manifests for the fully capable `folly` (on-site) and `offsite` (remote-site) clusters, with `base/` shared between them. |
-| `terraform/` | All Terraform root modules — network fabric under `network/`, cloud and identity alongside it, reusable modules in `modules/`. |
-| `apps/` | Deployable first-party services. |
-| `packages/` | Reusable building blocks, including the Helm charts Flux consumes. |
+| `nix/` | NixOS configuration for every host, and the image builds. Hosts are declared in `nix/hosts/default.nix`. |
+| `clusters/` | Kubernetes manifests for `folly` and `offsite`. `clusters/base/` is shared by both. |
+| `terraform/` | OpenTofu root modules, with the network under `network/` and reusable modules under `modules/`. Each `clusters/<site>/bootstrap/` is a root too. |
+| `apps/` | First-party services and tools. |
+| `packages/` | Shared libraries and the Helm charts Flux installs. |
 | `images/` | Base and tool OCI images. |
-| `dotfiles/` | mise-managed dotfiles, carried onto NixOS hosts by the system closure. |
-| `docs/` | The Markdown pages published as the wiki; `docs/nav.yaml` orders the sidebar. |
-| `.agents/skills/` | Repo-local agent skills. Tool-agnostic source; `.claude/skills` is a symlink to it. |
+| `dotfiles/` | mise-managed dotfiles. NixOS hosts carry them in the system closure. It has its own `AGENTS.md`. |
+| `docs/` | The wiki pages. `docs/nav.yaml` orders the sidebar. |
+| `.agents/skills/` | Repo agent skills. `.claude/skills` is a symlink to it. |
 
 ## Single sources of truth
 
-Do not restate these values anywhere — read them.
+Read these values from their file. Do not copy them.
 
 | Facts | Source |
 | --- | --- |
-| Cluster IPs/CIDRs, API-server endpoints, BGP ASNs | `clusters/<site>/config/cluster-topology.json` |
-| Lab/future CIDRs and lab host IPs | `clusters/folly/config/lab-topology.json` |
+| Cluster addresses and CIDRs, API server endpoints, BGP ASNs | `clusters/<site>/config/cluster-topology.json` |
+| Lab CIDR, the CIDR of folly's `future` network, and lab host addresses | `clusters/folly/config/lab-topology.json` |
 
-Each cluster topology JSON **is** the Flux ConfigMap, applied as-is — JSON is
-valid YAML. Its `data` is flat `string→string` because Flux `substituteFrom`
-requires it, so lists and numbers are encoded as strings. Flux substitutes
-`${VAR}` from it; Nix reads it with `builtins.fromJSON`; Terraform roots consume
-it through the `terraform/modules/cluster-topology` module. A conftest contract
-(`.github/workflows/topology-contract.yml`) enforces the schema.
+Each file is a Flux ConfigMap whose `data` values are all strings, so a list or
+a number is written as a string. [Topology](docs/reference/topology.md) says
+what reads each file.
 
-`clusters/folly/config/lab-topology.json` is also a flat-string Flux ConfigMap.
-Flux substitutes its host addresses into folly storage and monitoring; Nix
-projects it through `nix/lib/lab.nix`; the folly UniFi root reads it through the
-same topology helper used for cluster ConfigMaps. Terraform preconditions keep
-its selected host addresses aligned with `clients.yaml` DHCP reservations.
+## Where to read more
 
-## Where depth lives
+- [Platform](docs/platform/index.md): the shared systems.
+- [Apps](docs/apps/index.md): one page for each first-party service.
+- [Hosts](docs/hosts/index.md): one sheet for each machine.
+- [Runbooks](docs/runbooks/index.md): the canonical procedures.
+- [Reference](docs/reference/index.md): the style guide, the glossary and the
+  topology keys.
+- `.agents/skills/`: agent notes for one task. A skill that has a runbook
+  names it in `metadata.runbook` and holds only what an agent needs beyond it.
 
-- [Platform](docs/platform/index.md) — the layers and how they fit together.
-- [Apps](docs/apps/index.md) — pages for the first-party apps that have one.
-- [Runbooks](docs/runbooks/index.md) — step-by-step operational procedures.
-  Skills point here rather than restating them.
-- [Hosts](docs/hosts/index.md) — every host, its hardware, and its quirks.
-- `.agents/skills/` — task-scoped agent guidance. A skill carries a `runbook:`
-  pointer in its frontmatter and holds only agent-specific notes; the runbook
-  stays the canonical procedure.
-
-Inside `docs/`, pages link each other with relative `.md` paths. This file is
-not part of the site, so it uses repo-root paths.
+Pages in `docs/` link each other with relative `.md` paths.
 
 ## Agent skills
 
-### sops-secrets
-
-Working with `nix/secrets/*.sops.yaml` (operator and host decryption, harmonia keypair generation, two-stage recipient setup): see `.agents/skills/sops-secrets/SKILL.md` and [Manage SOPS secrets](docs/runbooks/manage-sops-secrets.md). The dev-machine operator key lives at `~/.config/age/keys.txt` and in 1Password (homelab vault, "sops homelab age key"); per-host recipients are derived from each host's ed25519 host key via `ssh-to-age`, which only works after the host has booted once.
-
 ### Issue tracker
 
-Issues and PRDs live as **private** local markdown under `.agent/plans/` (gitignored) — the planning surface stays off the public repo; code and PRs stay public. See `docs/agents/issue-tracker.md`.
+Specs and tickets are private Markdown files under `.agent/plans/`, which are
+never committed. See `docs/agents/issue-tracker.md`.
 
 ### Triage labels
 
-Five canonical roles, written as `Status:` values on each ticket file (local tracker, not GitHub labels). See `docs/agents/triage-labels.md`.
+A ticket's triage label is the value on its `Status:` line. See
+`docs/agents/triage-labels.md`.
 
 ### Domain docs
 
-Single-context: `AGENTS.md` router + the `docs/` wiki pages (no `CONTEXT.md`/ADR). See `docs/agents/domain.md`.
+The domain documentation is this file and the wiki in `docs/`. The repo has no
+`CONTEXT.md` and no ADRs. See `docs/agents/domain.md`.
 
 ## Writing rule for these docs
 
-The previous docs rotted because they restated what the tree already says. When
-you edit documentation:
+[The style guide](docs/reference/style-guide.md) sets the voice, the page
+templates and the word budgets. Four rules keep the docs true:
 
-1. **Present tense, today only.** Describe what is. No "formerly", "used to",
-   "previously", "migrated from", "no longer". If a thing is gone, it does not
-   appear — git history is the archaeology record. Honest current-state
-   divergence with its blocker is fine and is not history.
-2. **Point, don't restate.** Never enumerate what the tree enumerates. Name the
-   directory. A list of modules or apps in prose is a list that will be wrong.
-3. **Git is the truth; drift is a bug.** Document what the repo declares. Where
-   reality diverges, say so in present tense with the blocker.
-4. **Verify before you write.** Every path must exist, every command must match
-   what the repo runs.
+1. Write in the present tense about today. Git history records what changed.
+2. Point at the tree. Name the directory, file or key; never copy a list the
+   tree holds.
+3. Git is the truth and drift is a bug. Document what the repo declares. Where
+   live state differs, say so in the present tense and name the blocker.
+4. Verify before you write. Every path exists and every command matches what
+   the repo runs.
 
-Run `mise run docs:check` before pushing docs. It enforces what a script can:
-the renderer's own validation passes (frontmatter, nav, links, anchors,
-images), every referenced repo path exists, there is no past-tense archaeology,
-and every wiki URL or `docs/…md` path named in a Markdown file, a skill, or a
-monitoring rule resolves to something the site serves, anchor included, with
-no Logseq `[[Page]]` link left. It runs in CI and gates the wiki deploy.
-Rules 2 and 3 are on you — no script catches "this list was right when it was
-written".
+Run `mise run docs:check` before you push a docs change. It runs the
+renderer's checks, rejects past-tense words, and resolves each path and wiki
+URL that the docs, a skill or an alert rule names. CI runs it before the wiki
+deploys. No script checks rules 2 and 3.
 
-`docs/` is plain GitHub Markdown in a folder tree that mirrors the URLs:
-`docs/<section>/<page>.md` is `/<section>/<page>/`, an `index.md` is its
-folder's URL, and file names are lowercase kebab-case. Every page opens with
-YAML frontmatter carrying a `title` and a one-sentence `description`. The title
-is the page's H1, so the body has no H1 and its sections start at `##`. Pages
-link each other with relative `.md` paths (optionally with an `#anchor`) and
-reference images in `docs/assets/`. `docs/nav.yaml` orders the sidebar, and a
-page it does not list fails the build. `docs/agents/` is agent-facing and is
-not rendered. The renderer (`apps/wiki/build.ts`) handles GitHub-flavoured
-Markdown and `> [!NOTE]`-style alerts; extend it before using anything else.
+`docs/<section>/<page>.md` is served at `/<section>/<page>/`. The renderer,
+`apps/wiki/build.ts`, handles GitHub-flavoured Markdown and `> [!NOTE]` alerts;
+extend it before you use other syntax. `docs/agents/` is for agents and is not
+rendered.

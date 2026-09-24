@@ -1,50 +1,39 @@
 ---
 name: validate-build
 description: >-
-  Verify this repo validates cleanly before committing — Nix flake check, host
-  builds, kustomize renders, OpenTofu validate, and the wiki build. Use after
-  editing nix/, clusters/, terraform/, or docs/, and before opening a PR.
+  Check that a change validates before you commit: Nix evaluation and host
+  builds, Kubernetes renders, OpenTofu validation, TypeScript, shell, and the
+  wiki. Use after editing nix/, clusters/, terraform/, apps/, packages/ or
+  docs/, and before opening a PR.
 metadata:
   runbook: docs/runbooks/test-a-change.md
   wiki: https://wiki.lolwtf.ca/runbooks/test-a-change/
 ---
 
-# Validate Build
+# Validate a build
 
-Canonical human runbook: `docs/runbooks/test-a-change.md`.
-This file holds only the agent-specific guidance.
+The procedure is `docs/runbooks/test-a-change.md`. Its table maps each kind of
+change to the local command and the CI workflow that runs it. These notes cover
+what an agent needs beyond it.
 
-## Agent notes
+## Notes
 
-Validate by change area — running everything is slow and usually unnecessary.
-
-| Changed | Run |
-| --- | --- |
-| `terraform/**`, `clusters/*/bootstrap/**` | `mise run tf:validate`, `mise run tf:fmt` |
-| `clusters/**`, `packages/charts/**` | `mise run k8s:render-apps` (what CI runs), or `kubectl kustomize clusters/<site>/<category>` |
-| `nix/**`, `flake.nix` | `mise run nix:check`; `HOST=<host> mise run nix:build` for one closure |
-| `docs/**`, `apps/wiki/**` | `mise run docs:build`, then `mise run docs:check` |
-| TypeScript under `apps/`, `packages/` | `mise run ts:check` |
-| `dotfiles/` shell scripts | `mise run check` (scoped to `dotfiles/`, not repo-wide) |
-
-- **`mise` is the command source of truth** — `mise tasks ls` lists everything.
-  Prefer a task over a raw invocation; the task encodes the right binary. In
-  particular the OpenTofu binary is `tofu`, never `terraform`.
-- For `clusters/base/` changes, render **both** clusters — they are not
-  symmetric and a base change can render on folly and fail on offsite.
-- `k8s:render-apps` also runs `helm template` over every in-repo chart a
-  rendered HelmRelease names, with that release's `.spec.values`. A chart guard
-  or template error is a failed task here rather than a failed Flux reconcile,
-  so run it for a chart edit as well as a manifest edit. Charts from a
-  HelmRepository or OCIRepository are named and skipped, not silently passed.
-- `nix flake check` evaluates every host and is slow. When iterating on one
-  host, build just that closure.
-- `mise run docs:check` enforces the docs contract: the renderer's own
-  validation passes (frontmatter, nav, links, anchors, images), every
-  referenced repo path exists, no past-tense archaeology, and every wiki URL or
-  `docs/…md` path named in a Markdown file, a skill, or a monitoring rule
-  resolves to a page. It runs in CI, so run it locally before pushing docs or
-  renaming a page.
-- Report what actually ran and what remains unverified. Do not claim a
-  validation passed if you skipped it, and do not pad the output with unrelated
-  follow-up suggestions.
+- Run only the rows your change touches. `mise tasks ls` lists every task, and
+  a task encodes the right binary: `tofu`, never `terraform`.
+- A PR whose checks are all green can have run nothing. Each workflow starts
+  only for the paths in its filter. Read which jobs ran before you call a
+  change tested.
+- `nix flake check` evaluates every host and builds nothing. `nix-ci.yaml`
+  builds the hosts only after a merge to `main`, so build each changed host
+  on its build host, as the runbook's `nix:build` row shows.
+- `mise run k8s:render-apps` renders both clusters. It also runs
+  `helm template` on each in-repo chart that a rendered HelmRelease names, with
+  that release's values. Run it for a chart change too. It names and skips a
+  chart from a `HelmRepository` or an `OCIRepository`.
+- No `mise` render task runs Flux's `postBuild` substitution. The
+  `kubernetes-gitops` skill names the command that does.
+- `mise run docs:check` also resolves every `docs/…md` path and wiki URL named
+  in a skill or an alert rule. Run it after you rename a page.
+- A rerun of a TypeScript job can replay Turbo's cached output, so a green
+  rerun proves nothing new.
+- Report the checks that ran and the checks you skipped.

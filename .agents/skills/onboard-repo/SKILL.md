@@ -1,26 +1,24 @@
 ---
 name: onboard-repo
 description: >-
-  Vendor an external jonpulsifer GitHub repo into this monorepo preserving git
-  history, then rewire its in-repo consumers. Use when asked to "onboard",
-  "merge in", "vendor", or "absorb" a standalone repo into apps/, packages/, or
-  images/.
+  Vendor an external jonpulsifer GitHub repo into this monorepo with its git
+  history, then rewire what consumes it. Use when asked to onboard, merge in,
+  vendor or absorb a standalone repo into apps/, packages/ or images/.
 ---
 
-# Onboard Repo
+# Onboard a repo
 
-Vendoring a standalone repo into this monorepo with its history intact. This is
-a development procedure, not an outage runbook — the whole thing lives here.
-
-Rewiring the consumers is usually more work than moving the code. Budget for it.
+This skill moves a standalone repo into the monorepo with its history, then
+rewires its consumers. No runbook covers it, so the procedure is here. The
+rewiring usually takes longer than the move.
 
 ## 1. Pick the destination
 
-- `apps/<name>/` — deployable first-party service
-- `packages/<name>/` — reusable library or Helm chart
-- `images/<name>/` — base or tool OCI image
+- `apps/<name>/`: a deployable service or tool.
+- `packages/<name>/`: a shared library or Helm chart.
+- `images/<name>/`: a base or tool OCI image.
 
-## 2. Find existing consumers first
+## 2. Find the consumers
 
 ```bash
 rg -n "<name>|github:jonpulsifer/<name>|jonpulsifer/<name>"
@@ -28,7 +26,7 @@ rg -n "<name>|github:jonpulsifer/<name>|jonpulsifer/<name>"
 
 ## 3. Merge with history
 
-Work on a branch, never `main`.
+Work on a branch.
 
 ```bash
 repo=<name>
@@ -44,47 +42,47 @@ git remote remove "temp-$repo"
 rm -rf "/tmp/$repo"
 ```
 
-**Merge the PR as a merge commit, not a squash**, or the preserved subtree
-history is flattened away and the whole exercise is wasted.
+Merge the PR with a merge commit. A squash merge discards the vendored
+history.
 
-## 4. Remove dead vendored config
+## 4. Remove vendored config that does nothing here
 
-Workflows and Renovate config inside the vendored directory are inert here.
+The vendored repo's workflows and Renovate config do not run in the monorepo.
 
 ```bash
 git rm -r apps/<name>/.github
 git rm apps/<name>/renovate.json
 ```
 
-For Go apps now built by the monorepo flake, remove the nested `flake.nix` and
-`flake.lock` once their behaviour is replaced at the root.
+## 5. Rewire the consumers
 
-## 5. Rewire consumers
-
-- **Container images**: add the image name to `.github/containers.json`'s
-  `build` list (or `ignore` if it has a Dockerfile that should not publish). An
-  unclassified Dockerfile fails CI. Add a `build.json` beside the Dockerfile for
-  a custom image name, context, build-args, or watch paths.
-- **Deploy workflows**: recreate them as root workflows under
-  `.github/workflows/<name>.yml` with paths and working directories pointed at
-  the vendored location.
-- **Nix-consumed Go programs**: drop the old flake input, add
-  `apps/<name>/package.nix`, add an overlay under `nix/overlays/`, update the
-  host modules to import the vendored module or package, and build once to get
-  the correct `vendorHash`.
+- Container image: add the image to the `build` or `ignore` list in
+  `.github/containers.json`. CI fails on a Dockerfile in neither list. Add it
+  to `deploy` too if a manifest pins its digest. A `build.json` beside the
+  Dockerfile sets a custom image name, context, build arguments or watch paths.
+- Workflows: write each one as `.github/workflows/<name>.yml` at the root,
+  with paths and working directories under the new location.
+- Go program that Nix consumes: remove the old flake input, add
+  `apps/<name>/package.nix` and an overlay under `nix/overlays/`, and point the
+  host modules at them. `apps/ddnsd/` is an example. Build once to get the
+  `vendorHash`. Then remove the app's nested `flake.nix` and `flake.lock`.
 
 ## 6. Validate
 
 ```bash
-nix flake check
+mise run nix:check
 CGO_ENABLED=0 go -C apps/<name> build ./...
-rg -n "inputs\.<name>|github:jonpulsifer/<name>"   # should return nothing
+rg -n "inputs\.<name>|github:jonpulsifer/<name>"
 ```
 
-## 7. After merge
+Result: the last command prints nothing.
 
-- Offer to archive the now-vendored source repo.
-- Call out any deploy-time behaviour changes in the PR, especially URL or
-  runtime generation changes.
-- Update the vendored README: badges and clone URLs pointing at the old
-  standalone repo are now dead links.
+## 7. Before the PR merges
+
+- List any change in deploy behaviour in the PR, such as a new URL or a
+  different build.
+- Update the vendored README. Its badges and clone URLs point at the old repo.
+
+## 8. After the PR merges
+
+Offer to archive the source repo.

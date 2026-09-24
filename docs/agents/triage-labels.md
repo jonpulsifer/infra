@@ -1,17 +1,15 @@
-# Triage Labels
+# Triage labels
 
-The skills speak in terms of five canonical triage roles. This file maps those roles to the actual strings used in this repo's issue tracker.
+A triage label in this repo is the value on a ticket's `**Status:** <value>`
+line (see `issue-tracker.md`). GitHub labels are not used. When a skill names a
+triage label, write that label.
 
-This repo tracks issues as local markdown under `.agent/plans/` (see `issue-tracker.md`), so these are the values written on the `Status:` line of a ticket file — **not** GitHub labels.
-
-| Label in mattpocock/skills | Status: value in our tracker | Meaning                                  |
-| -------------------------- | -------------------- | ---------------------------------------- |
-| `needs-triage`             | `needs-triage`       | Maintainer needs to evaluate this issue  |
-| `needs-info`               | `needs-info`         | Waiting on reporter for more information |
-| `ready-for-agent`          | `ready-for-agent`    | Fully specified, ready for an AFK agent  |
-| `ready-for-human`          | `ready-for-human`    | Requires human implementation            |
-| `wontfix`                  | `wontfix`            | Will not be actioned                     |
-
-When a skill mentions a role (e.g. "apply the AFK-ready triage label"), use the corresponding label string from this table.
-
-Edit the right-hand column to match whatever vocabulary you actually use.
+| Label | Meaning |
+| --- | --- |
+| `needs-triage` | The owner has not evaluated it. |
+| `needs-info` | It waits for more information from the reporter. |
+| `ready-for-agent` | Its spec is complete, and an agent can do it without a human. |
+| `ready-for-human` | A human must do it. |
+| `wontfix` | Nobody will do it. |
+| `in-progress` | Someone is working on it. |
+| `done` | It is finished. |

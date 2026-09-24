@@ -1,42 +1,41 @@
 ---
 name: multi-cluster
 description: >-
-  Add or modify resources shared between the folly and offsite Kubernetes
-  clusters using the clusters/base/ pattern. Use when a change should apply to
-  both clusters rather than one.
+  Add or change a Kubernetes resource that both the folly and offsite clusters
+  run, through clusters/base/. Use when a change should apply to both
+  clusters.
 metadata:
-  runbook: docs/runbooks/add-a-shared-kubernetes-resource.md
-  wiki: https://wiki.lolwtf.ca/runbooks/add-a-shared-kubernetes-resource/
+  runbook: docs/runbooks/apply-a-kubernetes-change.md
+  wiki: https://wiki.lolwtf.ca/runbooks/apply-a-kubernetes-change/
 ---
 
-# Multi-Cluster
+# Multi-cluster
 
-Canonical human runbook: `docs/runbooks/add-a-shared-kubernetes-resource.md`.
-Layer background: `docs/platform/kubernetes.md`. This file holds only the
-agent-specific guidance.
+The procedure is `docs/runbooks/apply-a-kubernetes-change.md`. These notes
+cover what an agent needs beyond it. The `kubernetes-gitops` skill applies too.
 
-## Agent notes
+## Notes
 
-- Shared resources live under `clusters/base/`. Each component is a directory
-  with its own `kustomization.yaml`.
-- Cluster overlays reference shared **directories**, not individual files
-  outside the kustomization root.
-- There are two ways a cluster picks up a shared component. Match the one
-  already in use nearby rather than inventing a third:
-  - the cluster's `kustomization.yaml` lists a relative path
-    (`../../base/apps/<name>`), or
-  - the cluster's Flux `Kustomization` CR points `spec.path` straight at the
-    base directory, used where a cluster has no local override at all.
-- Templatize cluster-specific values with Flux substitutions (`${CLUSTER_NAME}`,
-  `${SECRET_DOMAIN}`, and the `cluster-topology` keys) rather than branching per
-  cluster. Confirm the parent Flux Kustomization actually provides the variable.
-- The clusters are not symmetric — folly carries monitoring, storage overlays,
-  and a `nodes/` device-plugin layer that offsite does not. Do not assume a
-  change that works on folly renders on offsite.
-- **Always validate both clusters**, not just the one you were thinking about:
-  ```bash
-  kubectl kustomize clusters/folly/<category>
-  kubectl kustomize clusters/offsite/<category>
-  ```
-- Keep genuinely cluster-specific resources in the cluster overlay. Shared means
-  identical, not similar.
+- Each shared component is a directory under `clusters/base/` with its own
+  `kustomization.yaml`. A cluster references the directory, never a file in
+  it.
+- A cluster picks up a shared component in one of three ways. Match the one
+  its neighbours use:
+  - Its `kustomization.yaml` lists a relative path such as
+    `../../base/apps/<name>`.
+  - One of its Flux `Kustomization` objects points `spec.path` at the base
+    directory, as `clusters/offsite/flux-system/storage.yaml` does.
+  - `clusters/base/flux-system/` holds a Flux `Kustomization` for each shared
+    platform component, and both clusters include that directory.
+- Put the values that differ between clusters in Flux substitutions:
+  `cluster-settings`, `cluster-topology` and `cluster-secrets`. Make sure the
+  Flux `Kustomization` that applies the file lists the source; most
+  `clusters/base/flux-system/` objects substitute nothing.
+- A resource that differs in more than its substitutions goes in each
+  cluster's directory.
+- folly has `nodes/` and its own storage overlay, and offsite has
+  `monitoring-crds/`. A change that renders on one cluster can fail on the
+  other.
+- Render both clusters with `mise run k8s:render-apps`. For one directory,
+  such as `apps` or `monitoring`, run `kubectl kustomize clusters/<site>/<dir>`
+  for each site.
