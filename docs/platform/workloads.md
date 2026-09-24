@@ -1,65 +1,48 @@
 ---
 title: Workloads
-description: What runs on each Kubernetes cluster and where its manifests live, directory by directory.
+description: What runs on the folly and offsite Kubernetes clusters, the files that list it, and the workloads that have their own page.
 ---
 
-What actually runs on the two Kubernetes clusters, and where its manifests live. Cluster mechanics are on [Kubernetes](kubernetes.md); first-party source and image builds are on [Build and release](build-and-release.md).
+A workload is an app or controller that Flux runs on one of the two [Kubernetes](kubernetes.md) clusters. Git holds the full list for each cluster.
 
-The tree is the source of truth: each row names a directory under `clusters/`. If a row and the directory disagree, the directory wins.
+offsite runs the public and upload-heavy workloads, because folly's internet link has little upload capacity. folly runs the household, media and lab workloads, and the ones that need riptide's GPU.
 
-## Shared — `clusters/base/apps/`
+## Where it lives
 
-Referenced by relative path from each cluster's apps kustomization (e.g. `clusters/folly/apps/kustomization.yaml`), or wrapped by a thin per-cluster overlay that adds site secrets.
-
-| Directory | What it is |
+| File or directory | What it lists |
 | --- | --- |
-| `arc` | GitHub Actions runner scale sets (`gha-runner-scale-set`) running `ghcr.io/jonpulsifer/actions-runner`. Each cluster wraps it in `clusters/<site>/apps/arc/` with its own SOPS secret, driven by a dedicated `arc-runners` Flux Kustomization. |
-| `descheduler` | Evicts pods that violate scheduling constraints after the fact. |
-| `iperf3` | Throughput probe, built from `ghcr.io/jonpulsifer/netbench`. |
-| `oauth2-proxy` | SSO gate in front of unauthenticated services. Each cluster wraps it in `clusters/<site>/apps/oauth2-proxy/` and gives it its own Flux Kustomization. |
-| `reloader` | Restarts workloads when a mounted ConfigMap or Secret changes. |
+| `clusters/<site>/apps/kustomization.yaml` | The apps in the `apps` Flux Kustomization. A commented-out line does not run. |
+| `clusters/<site>/flux-system/` | The other Flux Kustomizations of the cluster, such as `networking`, `monitoring`, `arc-runners` and `oauth2-proxy` |
+| `clusters/base/flux-system/` | The shared controllers in `clusters/base/platform/`, which both clusters run |
+| `clusters/base/apps/` | Apps that both clusters include by path |
 
-Platform components that other apps depend on — CloudNativePG, external-secrets, Kyverno, the Valkey operator, the kthx target and policy sets — live in `clusters/base/platform/`, not `base/apps/`.
+A `.yaml` file in `clusters/folly/apps/` next to a directory of the same name is a Flux Kustomization that applies that directory.
 
-## folly — `clusters/folly/apps/`
+To see what is live, run `flux --context <site> get kustomizations -A` and `flux --context <site> get helmreleases -A`. To see the objects that a directory makes, run `kubectl kustomize <path>`. `mise run k8s:render-apps` makes sure that each directory renders, and shows no objects.
 
-The on-site cluster: media, lab, and household services alongside the AI and load-testing surfaces.
+## Workloads with a page
 
-| Directory | What it is |
-| --- | --- |
-| `argo` | ArgoCD, installed as a HelmRelease. Owns no applications — Flux does the reconciling. |
-| `default` | The `default` namespace odds and ends: `hajimari` (the homelab dashboard) and `podinfo`. |
-| `descheduler` | Cluster-local descheduler release. |
-| `dump.yaml` | Scratch nginx pod for poking at cluster networking. |
-| `falco` | Runtime security monitoring. |
-| `jellyfin.yaml` | Media server. |
-| `k6` | The k6 operator, plus the TestRun scaffolding for lab load tests. |
-| `netbench` | First-party network benchmark image. |
-| `open-webui` | Chat frontend for local models. |
-| `pbx` | Asterisk PBX. |
-| `postgres` | CloudNativePG cluster for folly workloads. |
-| `redis` | Redis for folly workloads. |
-| `satisfactory` | Game server. Commented out of `clusters/folly/apps/kustomization.yaml`, so nothing is reconciled today. |
-| `spindrift-target` | The Gateway and RBAC that let kthx place workloads on folly. |
-| `tronbyt` | `tronbyt-server` plus the `rackstat` aggregator that feeds the Tidbyt display. |
-| `vault` | OpenBao. |
+| Workload | Cluster | Page |
+| --- | --- | --- |
+| kthx quick-site server | offsite | [Quick sites](../apps/kthx/sites.md) |
+| kthx built-app engine | offsite. It deploys built apps to both clusters. | [Built apps](../apps/kthx/built-apps.md) |
+| clankerbanker | offsite, as a kthx built app | [clankerbanker](../apps/clankerbanker.md) |
+| Rowbutt | offsite | [Rowbutt](../apps/mate.md) |
+| Weather Hub | offsite | [Weather Hub](../apps/hub.md) |
+| PBX | both | [PBX](../apps/pbx.md) |
+| Smiirl counter | folly | [Smiirl counter](../apps/smiirl.md) |
+| Tidbyt apps | folly | [Tidbyt apps](../apps/tidbyt.md) |
+| Flame Boss exporter | folly | [Flame Boss exporter](../apps/flameboss.md) |
+| netbench | folly, with iperf3 on both | [netbench](../apps/netbench.md) |
+| Monitoring | both | [Observability](observability.md) |
+| Atlantis | offsite | [OpenTofu and Atlantis](opentofu.md) |
+| GitHub Actions runners | both | [Build and release](build-and-release.md) |
+| OpenBao | folly | [Secrets](secrets.md) |
+| Postgres databases | both | [Operate Postgres](../runbooks/operate-postgres.md) |
 
-## offsite — `clusters/offsite/apps/`
+Argo CD runs on folly from `clusters/folly/apps/argo/`. Git declares no Argo `Application`. The kthx engine creates Applications in `argo` for a folly `kubernetes` Target that delivers through Argo ([Built apps](../apps/kthx/built-apps.md#targets)).
 
-The remote-site cluster: everything public-facing or upload-heavy, because folly's WAN is asymmetric.
+## Related
 
-| Directory | What it is |
-| --- | --- |
-| `atlantis` | The Terraform apply path for every PR — see [How changes ship](how-changes-ship.md). |
-| `descheduler` | Cluster-local descheduler release. |
-| `hub` | `apps/hub`, deployed through the first-party `packages/charts/app` chart. |
-| `mate` | `apps/mate`, the bot Rowbutt connects through on Discord and Slack, answering each thread from a sandbox of its own — [Rowbutt](../apps/mate.md). Raw manifests, not a chart. |
-| `prowler` | Cloud security posture scanning, via `packages/charts/prowler`. |
-| `spindrift` | The kthx control plane itself — [Built apps](../apps/kthx/built-apps.md). |
-| `spindrift-target` | Pulled straight from `clusters/base/platform/spindrift-target`: namespace, RBAC, and network policy for kthx-owned workloads. |
-
-## Reading this yourself
-
-The `kustomization.yaml` in each cluster's `apps/` directory (`clusters/folly/apps/`, `clusters/offsite/apps/`) is the authoritative list of what a cluster reconciles — a directory present on disk but absent from that file (or commented out) is not running.
-
-`mise run k8s:render-apps` renders both clusters' trees locally if you want the resolved objects rather than the sources.
+- [Kubernetes](kubernetes.md)
+- [Apply a Kubernetes change](../runbooks/apply-a-kubernetes-change.md)

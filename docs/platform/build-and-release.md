@@ -1,70 +1,51 @@
 ---
 title: Build and release
-description: "How first-party code in apps/, packages/ and images/ builds and ships: Bun workspace, container images, Nix packages, Helm charts."
+description: How first-party code builds, how its images and charts publish and deploy, how Renovate updates dependencies, and which CI checks run on a pull request.
 ---
 
-**Layer 4.** First-party code and image builds, separate from the infra layers (`nix/`, `clusters/`, `terraform/`).
+First-party code lives in `apps/` (services), `packages/` (shared code and charts) and `images/` (base and tool images). GitHub Actions tests it, publishes its images and charts, and opens the pull requests (PRs) that deploy them.
 
-## The three directories
+## Parts
 
-- `apps/` — deployable services: things with a runtime, a deploy target, and a lifecycle. Browse the directory for the current set.
-- `packages/` — reusable building blocks other apps import or reference: shared frontend code, TypeScript config, Helm charts. Not deployed on their own.
-- `images/` — base and tool OCI images: build environments and CI runners, not application services.
+| Part | Job | Where it lives |
+| --- | --- | --- |
+| Bun workspace | Runs `lint`, `typecheck`, `build` and `test` in each workspace through Turborepo | `package.json`, `turbo.json` |
+| Image list | Lists each Dockerfile's image under `build` or `ignore`, and under `deploy` the manifests that pin it | `.github/containers.json` |
+| Image build | Builds each `build` image and pushes `ghcr.io/jonpulsifer/<image>` from `main` | `.github/workflows/containers.yml` |
+| Charts | Helm charts that Flux installs | `packages/charts/` |
+| Renovate | The dependency-update bot. Its `packageRules` set which updates merge unreviewed and how long each waits. | `.github/renovate.json5` |
+| Runners | GitHub-hosted, and the ARC (Actions Runner Controller) pools `infra-folly` and `infra-offsite` for manual dispatches | `clusters/base/apps/arc/` |
 
-The line isn't Dockerfile-presence — several `apps/` entries have no Dockerfile (Starlark apps, the Hugo site, `apps/ddnsd`'s Nix-only deploy path) and one `packages/` entry (`charts/`) has none either. The line is deploy target: an app ships somewhere (a cluster, a Cloud Function, a static host, a NixOS closure); a package is consumed by an app's build.
+## Continuous delivery
 
-## The root Bun/Turborepo workspace
+On a push to `main`, `containers.yml` builds each image whose watch paths changed. For an image with `deploy` targets, it cuts `cd/update-<image>-digest` from `main` and rewrites the digest in each target. It opens a PR that merges when its checks pass.
 
-`package.json` declares `workspaces: ["apps/*", "packages/*"]`, so **every** directory under `apps/` and `packages/` is nominally a Bun workspace member — but only the ones with their own `package.json` actually participate in `bun install`/`turbo build`. Check for a `package.json` in the app's directory to know which regime it's in.
+It writes no digest older than the one on `main` or in the open PR. A daily run rebuilds each image whose pin is behind `main`.
 
-TypeScript/Bun members today: `apps/hub`, `apps/slingshot`, `apps/wiki`, `packages/agent-web-ui`, `packages/k6`, `packages/typescript-config`. These get `bun run {lint,typecheck,build,test}` via `turbo.json`, Biome formatting/linting (`biome.json`), and CI in `.github/workflows/typescript.yml`.
+`.github/workflows/spindrift-charts.yml` publishes `packages/charts/spindrift/` and `packages/charts/spindrift-app/` to GHCR, and their OCIRepository objects pin a version tag. Flux loads the other charts in `packages/charts/` from the `infra` GitRepository with `reconcileStrategy: Revision`, so it re-renders them on each commit to `main`. Under `clusters/`, Renovate skips first-party images and charts.
 
-Everything else is standalone and brings its own toolchain, invoked directly (not through `turbo`):
+## CI checks
 
-- Go apps carry their own `go.mod` and are built/tested with `go build`/`go test`, not the Bun workspace.
-- Starlark/Pixlet Tidbyt apps have no build step in this repo at all — see below.
-- `apps/pulsifer.ca` is a Hugo + Tailwind site with its own `mise.toml` (pinned `hugo`/`tailwindcss`), deployed by `.github/workflows/pulsifer-ca.yml`.
-- `apps/agent-web` and `apps/hermes` are pure Dockerfiles (no `package.json`, no `go.mod`) — the image build IS the app.
+A path that no workflow lists runs no checks, and its PR still passes. `.github/scripts/validation-impact.sh` routes paths to [OpenTofu roots](opentofu.md) and `nix flake check`.
 
-## How something becomes a published container
+| Workflow | Checks |
+| --- | --- |
+| `nix-ci.yaml` | `nix flake check` on PRs, and host and image builds on `main` |
+| `typescript.yml` | The Bun workspace, when a path on its list changes |
+| `kustomize.yml` | Renders each Flux Kustomization path, and templates in-repo charts with their HelmRelease values. It skips charts from a HelmRepository or OCIRepository. |
+| `go.yml`, `rust.yml` | The Go and Rust modules on their lists |
 
-`containers.yml` triggers on changes under `apps/**`, `packages/**`, or `images/**` and runs `.github/scripts/detect-containers.sh`, which:
+## Rules
 
-- finds every `Dockerfile` under `apps/` and `images/` (not `packages/`)
-- reads an optional `build.json` next to it for custom image name/context/build-args/watch-paths (default: image name = directory name, context = directory)
-- requires every discovered image name to appear in exactly one of `.github/containers.json`'s `build` (published to `ghcr.io/jonpulsifer/<image>`) or `ignore` (has a Dockerfile, deliberately not published here) lists — an unclassified image **fails CI**, so a new Dockerfile can't be silently published or silently dropped
-- only rebuilds images whose watch paths actually changed (or all of them, if the workflow/script/manifest itself changed)
+- Put each new image on the `build` or `ignore` list, or `containers.yml` fails.
+- Give a deployed image `deploy` targets, or nothing deploys it.
+- Keep the `CD_APP_ID` variable and `CD_APP_PRIVATE_KEY` secret set, or `GITHUB_TOKEN` opens the digest PR, which runs no checks and never merges.
+- Keep the CD App's `<slug>[bot]` login in [`only-me.rego`](opentofu.md#rules), or Atlantis blocks every digest PR.
+- Test each new Go module in `go.yml` or its own workflow, or no CI runs its tests. `apps/netbench`, `apps/orgpolicyauditor` and `terraform/gcp/projects/lolcorp/audit-pipeline` have none.
+- Bump an OCI chart's `version` and its OCIRepository `ref.tag` together, or the tests in `apps/spindrift/test/conformance/` fail.
+- Make a new OCI chart public on GHCR after its first push, or its OCIRepository fails to pull.
 
-To add a published image: add a `Dockerfile` (plus optional `build.json` for a custom image name or multi-image directory — `apps/agent-web/build.json` produces the single `ai-agents` image from `--build-arg AGENT_SET=full`), then add its image name to `containers.json`'s `build` list. To add an unpublished-but-present Dockerfile (a base layer another image `FROM`s, a local-only build), add it to `ignore` instead.
+## Related
 
-## The Nix carve-out
-
-`apps/ddnsd` is Go source vendored in-repo; `nix/overlays/ddnsd.nix` builds it as a Nix package (`callPackage ../../apps/ddnsd/package.nix`) and `nix/system/ddnsd.nix` imports `apps/ddnsd/module.nix` to run it as a `systemd` service, configured per-host (zone, token file) with `services.ddnsd.enable`. This is how homelab hosts actually run `ddnsd` — through the NixOS closure, not a container.
-
-`apps/ddnsd` also has a `Dockerfile` and IS in `containers.json`'s `build` list, so `ghcr.io/jonpulsifer/ddnsd` exists — the README documents it as a general-purpose Cloudflare DDNS client for anyone, container included. The two facts coexist: the image is published for external/portable use; this repo's own deployment path for it is Nix, not that image.
-
-## Helm charts: how Flux consumes `packages/charts/`
-
-`packages/charts/` holds first-party charts with no Dockerfile of their own. A `HelmRelease` references one by relative path against the `infra` `GitRepository`, e.g. `clusters/offsite/apps/hub/helm-release.yaml`:
-
-```yaml
-chart:
-  spec:
-    chart: packages/charts/app
-    reconcileStrategy: Revision
-    sourceRef:
-      kind: GitRepository
-      name: infra
-      namespace: flux-system
-```
-
-`reconcileStrategy: Revision` means Flux re-renders the chart whenever the `infra` `GitRepository` advances — no chart version bump or separate chart repo needed. The `HelmRelease` supplies the built container image (e.g. `ghcr.io/jonpulsifer/hub:latest@sha256:...`) as a value.
-
-## Apps consumed by an external server's discovery convention
-
-Some `apps/` directories aren't structured for this repo's own tooling — they're shaped to satisfy a convention an *external* server expects. The Tidbyt/Pixlet apps (`apps/wishin`, `apps/tempest`, and `apps/rackstat`'s display half) are Starlark `.star` files at the app directory root, because `tronbyt-server`'s git-repo app discovery expects exactly that layout (`apps/<name>/<name>.star`) when pointed at this repo. There's no build step for them in this repo; `tronbyt-server` renders the `.star` directly.
-
-- Pixlet resolves `load()` against the app directory and rejects any path that climbs out of it — `load("../../packages/…")` fails with `invalid module`. Shared Starlark under `packages/` is therefore not reachable, and each Pixlet app carries its own copy of the fetch-cache-degrade helpers. The convergence the apps do share is behavioural, not a common module: every app returns `(data, error)` from its fetch and renders a splash on failure, because a blank display is indistinguishable from a dead device.
-- A sibling `.star` inside one app directory does load. Nothing uses that today — `tronbyt-server` is only known to fetch `apps/<name>/<name>.star`, so a second file is a live-deployment risk that buys nothing while each app fits in one file.
-
-`apps/rackstat` is the hybrid case: a Go aggregator (`main.go`, containerized, deployed by Flux from `clusters/folly/apps/tronbyt/`) that serves a JSON snapshot, plus `rackstat.star` — a Pixlet app in the same directory that renders that snapshot for the display. One directory, two consumers (Kubernetes runs the Go binary; `tronbyt-server` discovers the `.star`).
+- [How changes ship](how-changes-ship.md)
+- [Test a change](../runbooks/test-a-change.md)

@@ -33,7 +33,7 @@ The network connects two sites, folly (home) and offsite (remote). Each site has
 - Read addresses, subnets and ASNs from `cluster-topology.json` and `lab-topology.json`. Do not copy them.
 - Change a subnet and every copy of it in one PR, or routes and DNS break. Find the copies with `git grep -nF '<old prefix>'`. They include the FRR files, `policy.hujson`, the Tailscale Connectors and VIPs pinned in app manifests.
 - After a change to a node subnet, `future` or offsite's Default network, edit the Site Magic subnet list in both consoles, or the other site has no route to the subnet.
-- Change a lab host address in `lab-topology.json` and `clients.yaml` in one PR, or a precondition fails the Atlantis plan.
+- Change a lab host address as the [Topology rules](../reference/topology.md#rules) say.
 
 ## Where it lives
 

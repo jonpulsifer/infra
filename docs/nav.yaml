@@ -3,16 +3,28 @@ sections:
     index: apps/index.md
     items:
       - path: apps/kthx.md
-        children: [apps/kthx/built-apps.md]
-      - apps/mate.md
-      - apps/smiirl.md
+        children: [apps/kthx/sites.md, apps/kthx/built-apps.md, apps/kthx/security.md]
+      - path: apps/mate.md
+        children: [apps/mate/how-it-works.md]
+      - apps/clankerbanker.md
       - apps/flameboss.md
-      - apps/bosun.md
+      - apps/pbx.md
+      - apps/pulsifer-ca.md
+      - apps/slingshot.md
+      - apps/smiirl.md
+      - apps/tidbyt.md
+      - apps/hub.md
+      - apps/wiki.md
+      - group: Internal tools
+        items: [apps/netbench.md]
+      - group: Parked
+        items: [apps/bosun.md]
   - title: Platform
     index: platform/index.md
     items:
       - platform/how-changes-ship.md
-      - platform/nixos.md
+      - path: platform/nixos.md
+        children: [platform/nixos/netboot.md, platform/nixos/build-host-and-cache.md]
       - platform/kubernetes.md
       - platform/workloads.md
       - path: platform/network.md
@@ -20,18 +32,32 @@ sections:
           - platform/network/routing-and-firewall.md
           - platform/network/ingress-and-dns.md
           - platform/network/remote-access.md
-      - platform/secrets-and-pki.md
+      - platform/secrets.md
+      - platform/pki.md
       - platform/opentofu.md
       - platform/build-and-release.md
+      - platform/cloud.md
+      - platform/observability.md
   - title: Hosts
     index: hosts/index.md
     items:
       - group: Kubernetes nodes
         items: [hosts/optiplex.md, hosts/riptide.md, hosts/shale.md, hosts/retrofit.md, hosts/oldschool.md]
       - group: Raspberry Pis
-        items: [hosts/spore.md, hosts/capsule.md, hosts/forge.md, hosts/homepi4.md, hosts/weatherpi4.md, hosts/cloudpi4.md, hosts/radiopi0.md, hosts/blinkypi0.md]
-      - group: Other
-        items: [hosts/oldboy.md, hosts/eviropico.md]
+        items:
+          - hosts/spore.md
+          - hosts/capsule.md
+          - path: hosts/forge.md
+            children: [hosts/rackpi5.md]
+          - hosts/cloudpi4.md
+          - hosts/homepi4.md
+          - hosts/weatherpi4.md
+          - hosts/radiopi0.md
+          - hosts/blinkypi0.md
+      - group: Windows desktops
+        items: [hosts/tallboy.md, hosts/atomic.md]
+      - group: Cloud
+        items: [hosts/oldboy.md]
   - title: Runbooks
     index: runbooks/index.md
     items:
@@ -39,22 +65,20 @@ sections:
         items:
           - runbooks/deploy-a-nixos-host.md
           - runbooks/add-a-kubernetes-node.md
-          - runbooks/repair-a-kiosk.md
+          - runbooks/change-the-forge-eeprom.md
           - runbooks/install-a-windows-desktop.md
           - runbooks/install-windows-monitoring.md
       - group: Kubernetes
         items:
           - runbooks/apply-a-kubernetes-change.md
-          - runbooks/add-a-shared-kubernetes-resource.md
-          - runbooks/operate-postgres.md
           - runbooks/get-cluster-admin-access.md
-          - runbooks/adopt-the-folly-monitoring-crds.md
+          - runbooks/operate-postgres.md
           - runbooks/adopt-the-folly-prometheus-operator-crds.md
       - group: Cloud and network
         items:
-          - runbooks/apply-a-terraform-change.md
-          - runbooks/inspect-the-unifi-network.md
+          - runbooks/apply-an-opentofu-change.md
           - runbooks/authorize-developer-connect.md
+          - runbooks/inspect-the-unifi-network.md
       - group: Secrets
         items:
           - runbooks/manage-sops-secrets.md
@@ -63,14 +87,18 @@ sections:
         items:
           - runbooks/install-kthx.md
           - runbooks/connect-an-agent-to-kthx.md
-          - runbooks/operate-the-office-phone.md
-          - runbooks/connect-an-agent-to-the-wiki.md
           - runbooks/repair-the-rowbutt-github-credential.md
           - runbooks/operate-the-smiirl-counter.md
+          - runbooks/operate-the-flame-boss-exporter.md
+          - runbooks/repair-a-kiosk.md
+          - runbooks/connect-an-agent-to-the-wiki.md
+          - runbooks/operate-the-office-phone.md
       - group: Every change
         items:
           - runbooks/test-a-change.md
   - title: Reference
     index: reference/index.md
     items:
+      - reference/glossary.md
+      - reference/topology.md
       - reference/style-guide.md

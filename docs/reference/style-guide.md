@@ -11,7 +11,7 @@ Open every page with what the thing is and who uses it. Define each lab-specific
 
 | Directory | What goes there |
 | --- | --- |
-| `docs/apps/` | One page per running first-party service |
+| `docs/apps/` | One page per running first-party service, and one per parked app |
 | `docs/platform/` | Shared systems that apps and hosts depend on |
 | `docs/hosts/` | One sheet per machine |
 | `docs/runbooks/` | Step-by-step procedures |
@@ -21,7 +21,7 @@ File names are lowercase kebab-case. List every page in `docs/nav.yaml`, or the 
 
 | Page | File name | Title |
 | --- | --- | --- |
-| App | Its directory under `apps/` | The name people see (`mate.md` is Rowbutt) |
+| App | Its main directory under `apps/`, or its product name | The name people see (`mate.md` is Rowbutt) |
 | Host | The host name | The host name |
 | Runbook | The title in kebab-case | An imperative verb first, as in Deploy a NixOS host |
 
@@ -52,7 +52,7 @@ Reviewers reject the patterns below. Only this page may quote them.
 | Point at the tree and the source-of-truth key | A list of the `apps/` directories, or an IP, CIDR or ASN copied from `clusters/<site>/config/cluster-topology.json` |
 | Literal words, such as boundary and applies | "door", "seam", "hold latch", "desk", "outer ring", "stamp", "lands", "wedge" |
 | No intensifiers or stock frames | "whole", "exactly", "actually", "simply", "deliberately", "on purpose", "honest", "load-bearing", "fully capable", "self-healing", "entirely", "is what makes", "never … only …" |
-| "Operator" is the human | "The operator applies it" for a controller |
+| "Owner" is the human, and each controller has its own name | "The operator applies it" for Flux |
 
 ## Page templates
 

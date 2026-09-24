@@ -1,7 +1,7 @@
 ---
 title: Reference
-description: Pages you look up while you write or review, such as the style guide.
+description: "Pages to look up while you read or write this wiki: the glossary, the topology files and the style guide."
 cards: reference
 ---
 
-Reference pages hold the rules that writers and reviewers look up while they work on this wiki and this repository.
+Reference pages are for lookup. They define the lab's terms, name the files that hold its network facts, and set the rules for writing these pages.
