@@ -1,38 +1,6 @@
 /**
- * Asking the cloud what this installation already is (§13, §20).
- *
- * §20 puts every value naming an installation in the manifest, and until now
- * every one of them was typed there by hand — including the ones the pod's own
- * federated identity could simply be asked for. A mistyped project or bucket is
- * invisible until a build stages a source archive and fails on a signed URL, so
- * the value of asking is not convenience: it is that a confirmed answer cannot
- * be a typo.
- *
- * **The two arms are the whole point.** A read either produced an answer or it
- * did not, and those are different types rather than the same list at different
- * lengths. `{ kind: 'found', candidates: [] }` says *this project has no
- * buckets* — a fact an operator can act on. A `403`, a disabled API, a DNS
- * failure or an absent federation say *nothing was established*, and collapsing
- * them into an empty array would put an empty value on a confirmation screen
- * that reads exactly like an answer. This is `cloudChecklist`'s rule in
- * `deploy/cloud/checklist.ts` — "an item that could not be assessed is reported
- * unmet, with a detail saying so rather than asserting a fault it did not
- * observe" — with `unavailable` in place of `unmet`.
- *
- * **No credential here, and no second one anywhere.** The token is a provider
- * called per request, exactly as the two cloud deploy adapters and the cloud
- * build route take it, and `registry.ts` hands all four the same one — so the
- * hourly STS-and-impersonation exchange in `@repo/archive/federation` is made
- * once for the process rather than once per discovery call.
- *
- * **A concrete class, not an interface.** § Seam 2's pattern is "a fake of the
- * far-side HTTP API behind the real client, with the test asserting the requests
- * that were made", which {@link CloudHttp}'s injected transport already gives.
- * An interface over one implementation would only move the seam somewhere it is
- * not needed. For the same reason the three API hosts are constants rather than
- * options: a test stands its fake behind `fetch` and answers these hostnames,
- * and an installation behind a service perimeter would need an override here —
- * which is a change to make when one exists, not before.
+ * Asks the cloud what this installation already has (projects, buckets and KMS
+ * signing keys), so an operator confirms manifest values instead of typing them.
  */
 import {
   CloudHttp,
@@ -41,50 +9,26 @@ import {
   type TokenProvider,
 } from './deploy/cloud/http.ts';
 
-/** Where the three APIs discovery reads live. Named by the software, always. */
 const RESOURCE_MANAGER = 'https://cloudresourcemanager.googleapis.com';
 const STORAGE = 'https://storage.googleapis.com';
 const KEY_MANAGEMENT = 'https://cloudkms.googleapis.com';
 
-/**
- * The reason code a cloud API uses for "this service is not turned on here".
- *
- * Matched as a substring as well as a parsed reason, for the reason
- * `checklist.ts` gives: the same fact arrives as a `reason` detail on some calls
- * and only inside the message on others, and an operator whose project has the
- * API switched off must not be told they lack a permission that is correct.
- */
+/** The reason code for a disabled API. Some calls carry it only in the message. */
 const SERVICE_DISABLED = 'SERVICE_DISABLED';
 
-/**
- * The purpose a key must have to sign anything.
- *
- * Filtered rather than offered, because a symmetric encryption key produces a
- * `supplyChain.signer` that validates, saves, reconciles, and then fails at the
- * first cosign call — the invisible-until-a-build-fails shape discovery exists
- * to remove.
- */
+/** A symmetric key validates as a signer, then fails at the first cosign call. */
 const SIGNING_PURPOSE = 'ASYMMETRIC_SIGN';
 
 /**
- * How many pages a listing will walk, and how many key rings it will open.
- *
- * ponytail: fixed caps rather than a budget, because the far side is a paging
- * API answering a confirmation screen. Hitting either is reported as
- * `unavailable` rather than silently truncated — a short list that looks
- * complete is the same defect as an empty one that looks like an answer. Raise
- * them if a real installation ever reaches one.
+ * ponytail: fixed caps on pages and key rings. Reaching one reports
+ * `unavailable`, so a truncated list never looks complete.
  */
 const MAX_PAGES = 20;
 const MAX_KEY_RINGS = 20;
 
 /**
- * What one read produced.
- *
- * `suggested` is the one candidate most likely right, and the rule for it here
- * is the only one this layer can honestly apply: where exactly one thing exists,
- * that is the answer. Anything richer — a heuristic drawn from the credential,
- * say — belongs to the caller that holds the fact it is drawn from.
+ * A failed read is `unavailable`, never an empty `found`. `suggested` is set
+ * only when there is one candidate.
  */
 export type Discovered<Value> =
   | {
@@ -102,29 +46,20 @@ interface Subject {
   readonly scope: string;
 }
 
-/** A listing that either completed or has a sentence saying why it did not. */
 type Listing<Item> =
   | { readonly ok: true; readonly items: readonly Item[] }
   | { readonly ok: false; readonly reason: string };
 
-/**
- * A page of any of these APIs.
- *
- * Read structurally rather than typed per call: the three APIs name their array
- * differently — `projects`, `items`, `locations`, `keyRings`, `cryptoKeys` — and
- * every one of them carries `nextPageToken`, which is the only key the paging
- * loop itself has to understand.
- */
+/** Each API names its array differently, and every one carries `nextPageToken`. */
 type Page = Record<string, unknown>;
 
 export interface GcpDiscoveryOptions {
-  /** Mints a bearer token per request. Never a stored credential (§13). */
+  /** Mints a bearer token per request, never a stored credential. */
   readonly token: TokenProvider;
-  /** Injected so a test can stand a fake far side behind the real client. */
   readonly fetch?: Fetcher;
 }
 
-/** The reads discovery makes, each answering both arms and never throwing. */
+/** Each read answers `found` or `unavailable` and never throws. */
 export class GcpDiscovery {
   private readonly resourceManager: CloudHttp;
   private readonly storage: CloudHttp;
@@ -160,9 +95,7 @@ export class GcpDiscovery {
           | undefined) ?? [],
     );
     if (!listed.ok) return unavailable(listed.reason);
-    // A project pending deletion is still listed and cannot be deployed to;
-    // offering one would put a name on a confirmation screen that stops
-    // resolving part way through the month.
+    // A project pending deletion is still listed and cannot be deployed to.
     return found(
       listed.items
         .filter((project) => (project.lifecycleState ?? 'ACTIVE') === 'ACTIVE')
@@ -172,7 +105,6 @@ export class GcpDiscovery {
     );
   }
 
-  /** Every storage bucket in one project. */
   async buckets(project: string): Promise<Discovered<string>> {
     const listed = await this.collect<{ name?: string }>(
       this.storage,
@@ -190,12 +122,8 @@ export class GcpDiscovery {
   }
 
   /**
-   * The key locations one project offers.
-   *
-   * Not a manifest value itself — it is what makes {@link signingKeys}
-   * answerable. Key rings are listed per concrete location, so a caller with no
-   * location either names one or reads this list to pick from; fanning out over
-   * every location would be forty calls behind one confirm button.
+   * Key rings are listed per location, so a caller picks a location here instead
+   * of fanning out over every one.
    */
   async keyLocations(project: string): Promise<Discovered<string>> {
     const listed = await this.collect<{ locationId?: string }>(
@@ -213,18 +141,8 @@ export class GcpDiscovery {
   }
 
   /**
-   * Every key in one project and location that can sign, as a signer reference.
-   *
-   * The reference is `gcpkms://` prefixed to the key's own resource name,
-   * verbatim, because that is the exact form the placeholder manifest and every
-   * real one already carry — assembling the six segments by hand is where a typo
-   * becomes a signing failure nothing catches until a build.
-   *
-   * ponytail: one call per key ring, sequentially. Key rings in a single
-   * project and location are one permission and there are rarely more than a
-   * handful; a ring that refuses stops the read rather than being skipped,
-   * because a partial key list offered as complete is the defect this file is
-   * about.
+   * Signing keys as `gcpkms://` plus the key's resource name, the signer form.
+   * ponytail: one call per key ring, in sequence; a refused ring fails the read.
    */
   async signingKeys(
     project: string,
@@ -272,16 +190,7 @@ export class GcpDiscovery {
     return found(keys);
   }
 
-  /**
-   * Walk one paginated listing to the end.
-   *
-   * Paginated because these APIs are: a single-page read of a project's buckets
-   * answers a short list that looks complete, which on a confirmation screen is
-   * indistinguishable from the truth. The loop is the one
-   * `store/gcp-secret-manager.ts` already runs, with a cap on it — a hostile or
-   * broken far side that keeps handing out continuation tokens gets a stated
-   * refusal rather than an unbounded loop.
-   */
+  /** Walks a paginated listing to the end, up to {@link MAX_PAGES} pages. */
   private async collect<Item>(
     http: CloudHttp,
     subject: Subject,
@@ -318,15 +227,7 @@ export class GcpDiscovery {
   }
 }
 
-/**
- * Fold a refused read into the sentence an operator reads.
- *
- * The table is `cloudChecklist`'s, for the same reason: the shape of the refusal
- * is the one thing a cloud API is reliably precise about, and each shape sends
- * an operator somewhere different. A disabled service is a switch in a console;
- * a `403` is an IAM grant; a `404` is a project that is not there. Telling them
- * apart is the whole difference between a fact and a shrug.
- */
+/** A refused read as the sentence an operator acts on. */
 function reasonFor(
   failure: Extract<CloudResponse<unknown>, { ok: false }>,
   subject: Subject,
@@ -338,8 +239,8 @@ function reasonFor(
     failure.reason === SERVICE_DISABLED ||
     failure.body.includes(SERVICE_DISABLED)
   ) {
-    // The refusal's ErrorInfo names the project whose switch is off — the
-    // federated token's own, routinely not the one the call was aimed at.
+    // ErrorInfo names the project whose API is off, which is often the token's
+    // own project.
     return failure.consumer === null
       ? `the ${subject.service} API is not enabled, so ${subject.scope} could not be listed`
       : `the ${subject.service} API is not enabled in ${failure.consumer} — the project this installation's calls bill to — so ${subject.scope} could not be listed`;
@@ -353,7 +254,6 @@ function reasonFor(
   return `${subject.service} answered ${failure.status}: ${failure.message}`;
 }
 
-/** An answer, with the only suggestion this layer can honestly make. */
 function found(candidates: readonly string[]): Discovered<string> {
   return {
     kind: 'found',
@@ -362,7 +262,6 @@ function found(candidates: readonly string[]): Discovered<string> {
   };
 }
 
-/** No answer, and the reason there is none. Never an empty list. */
 function unavailable(reason: string): Discovered<string> {
   return { kind: 'unavailable', reason };
 }

@@ -1,24 +1,6 @@
 /**
- * Datastores on a Kubernetes Target (§11).
- *
- * Two engines, two operators, one adapter — because §13 gives a Target exactly
- * one adapter type and both operators are reached through the same API server
- * with the same projected token. Splitting them would mean two registry keys for
- * one Target, and the registry has no way to choose between them.
- *
- * **Spindrift writes a custom resource and stops.** §19's rule for the delivery
- * path holds here for the same reason: "no CRD, no informer, no controller-
- * runtime." The operator on the far side is the controller. What this adapter
- * does is a server-side apply and a poll, which is what {@link KubernetesApi}
- * already is.
- *
- * **{@link ENGINE_KINDS} is why this file is also read by the deploy adapter.**
- * §3's `postgres`/`valkey` capability is discovered by asking the cluster whether
- * it serves these kinds, and provisioning writes those same kinds. Two tables
- * would be two chances to name a different operator than the fleet runs — which
- * is exactly what had happened: discovery probed an operator no cluster here
- * installs, so the cache engine discovered `false` forever and every placement
- * asking for it was a non-candidate with a reason that pointed nowhere.
+ * Datastores on a Kubernetes Target: a server-side apply of an operator's
+ * custom resource, then a poll. The operator on the far side is the controller.
  */
 import type { TargetAdapter } from '../../config/manifest.schema.ts';
 import { isLabel } from '../../domain/naming.ts';
@@ -49,21 +31,9 @@ import type {
 } from './contract.ts';
 
 /**
- * The operator each engine is served by, on the clusters this fleet runs.
- *
- * `postgres` is CloudNativePG, `valkey` is the Valkey project's own operator.
- * Each engine is named for the software this platform runs rather than for a
- * protocol family, so an engine value can never name a product no Target in the
- * fleet is able to provision.
- *
- * `podLabel` is how a policy names one datastore's pods, and it is an
- * *operator convention* rather than an API this file can hold either operator
- * to — the same class of fact {@link VALKEY_RESOURCE_PREFIX} carries, measured
- * the same way, on a live cluster. Both stamp it with the custom resource's own
- * name as the value. An operator that renames one fails closed: the policy
- * selects no pods, the namespace's default-deny still isolates them, and the
- * attached App loses its own datastore loudly rather than the namespace being
- * silently opened.
+ * The operator serving each engine; capability discovery probes these same
+ * kinds. `podLabel` is an operator convention whose value is the resource's
+ * name. If an operator renames it, policies select nothing and deny holds.
  */
 export const ENGINE_KINDS = {
   postgres: {
@@ -83,12 +53,6 @@ export const ENGINE_KINDS = {
   { apiVersion: string; kind: string; plural: string; podLabel: string }
 >;
 
-/**
- * The API path for a NetworkPolicy, which is not a kind this adapter provisions.
- *
- * Kept out of {@link ENGINE_KINDS} deliberately: that table is one row per
- * engine and this is one object for both.
- */
 const NETWORK_POLICY = {
   apiVersion: 'networking.k8s.io/v1',
   kind: 'NetworkPolicy',
@@ -96,34 +60,17 @@ const NETWORK_POLICY = {
 } as const;
 
 /**
- * How long a name may be before its backend starts colliding.
- *
- * Both operators derive child object names by suffixing this one — CNPG's
- * `-rw`/`-app` services and secrets, the Valkey operator's per-node objects —
- * and a Kubernetes object name caps at 253 with far tighter limits on the
- * StatefulSet pods underneath. 50 leaves room for every suffix either operator
- * appends.
- *
- * **Refused rather than truncated.** `workload-name.ts` shortens a name core
- * derived from two others, which is a name no human chose; a Datastore's name
- * *is* what a human typed (§11: top-level), so silently renaming it would leave
- * an operator looking in the cluster for something that is not there.
+ * Both operators suffix this name for child objects and pods; 50 leaves room
+ * for every suffix. Refused, never truncated, because a human typed it.
  */
 const NAME_LIMIT = 50;
 
-/**
- * What the Valkey operator prefixes everything it creates with.
- *
- * `resourcePrefix` in the operator's own `internal/controller/utils.go`. Named
- * here because two places need it and neither is allowed to guess: the address
- * a Datastore hands out, and the Service that address is confirmed against.
- */
+/** The Valkey operator's `resourcePrefix` on everything it creates. */
 const VALKEY_RESOURCE_PREFIX = 'valkey-';
 
 export interface KubernetesDatastoreOptions {
-  /** Minted per request. Never a stored credential (§13). */
+  /** Minted per request, never stored. */
   readonly token: TokenProvider;
-  /** Injected so a test can stand a fake far side behind the real client. */
   readonly fetch?: Fetcher;
 }
 
@@ -154,18 +101,12 @@ export class KubernetesDatastoreAdapter implements DatastoreAdapter {
       );
     }
 
-    // Never an App's namespace (§11). A Datastore outlives every App attached
-    // to it, which is the whole reason it is a top-level noun, so it cannot
-    // live in a namespace named for one of them. A Datastore provisioned
-    // before this carries its old namespace in its own ref and is still
-    // observed and destroyed there — nothing moves, because there is no move
-    // verb and CloudNativePG will not relocate a PVC.
+    // Never an App's namespace: a Datastore outlives its Apps. A ref naming
+    // another namespace stays there, since CloudNativePG cannot move a PVC.
     const namespace = datastoreNamespaceFor(connection);
     const object = this.object(namespace, request);
-    // Server-side apply, so re-provisioning an existing datastore converges on
-    // the same object rather than creating a second one — the idempotence the
-    // contract promises, kept by the API server rather than by a read-first
-    // check that would race the operator.
+    // Server-side apply keeps this idempotent without a read-first check that
+    // would race the operator.
     await this.api(connection).apply(
       object,
       ENGINE_KINDS[request.engine].plural,
@@ -195,25 +136,12 @@ export class KubernetesDatastoreAdapter implements DatastoreAdapter {
       parsed.engine === 'postgres'
         ? postgresStatus(object)
         : valkeyStatus(object);
-    // Reported only once the datastore can actually serve. Mid-provision both
-    // operators have written *some* of the objects a reference would name, and
-    // handing core a reference to a half-built credential would let an App be
-    // configured against one.
+    // Only once LIVE, so no App is configured against a half-built credential.
     const connectionRef =
       status.phase === 'LIVE' ? await this.connectionFor(api, parsed) : null;
 
-    // The read on red, for a datastore (§6). Both operators report their own
-    // reconcile, and an operator whose StatefulSet is being refused by
-    // admission does not consider that its own failure — it says it is still
-    // working, forever, while the only useful sentence in the cluster sits on
-    // an object neither status read looks at. So a warning refusing one of this
-    // datastore's own objects outranks the operator's status line.
-    //
-    // Read only when the phase is not `LIVE`, so a healthy installation pays
-    // nothing; the loop already selects unsettled rows only. And it changes
-    // nothing but the sentence: a pod refused admission is not terminal — fix
-    // the manifest and the next apply admits it — so `WAITING` stays `WAITING`
-    // and no new verdict is invented here.
+    // An operator whose pods admission refuses still reports itself working, so
+    // a refusal event outranks its status line. The phase stays as it is.
     const detail =
       status.phase === 'LIVE'
         ? status.detail
@@ -229,13 +157,8 @@ export class KubernetesDatastoreAdapter implements DatastoreAdapter {
   }
 
   /**
-   * The CR as the API server holds it — spec, status and all.
-   *
-   * Unfiltered on purpose. The operator's `status` is where the answer to
-   * "why is this WAITING" actually lives, and the spec beside it is what
-   * `provision` wrote plus every default the operator filled in. Neither
-   * carries a credential: CloudNativePG puts the password in a Secret and
-   * names it here, which is the reference §11 already says core may hold.
+   * Unfiltered: the operator's status says why it is not LIVE, and no field
+   * holds a credential, since CloudNativePG only names its Secret.
    */
   async describe(
     target: DeployTarget,
@@ -260,26 +183,16 @@ export class KubernetesDatastoreAdapter implements DatastoreAdapter {
     if (connection === null || parsed === null) return;
 
     const kind = ENGINE_KINDS[parsed.engine];
-    // `KubernetesApi.delete` swallows the `404`, so destroying what is already
-    // gone succeeds. The operator garbage-collects the children it owns.
+    // `KubernetesApi.delete` tolerates a 404. The operator garbage-collects the
+    // children it owns.
     await this.api(connection).delete({
       apiVersion: kind.apiVersion,
       plural: kind.plural,
       namespace: parsed.namespace,
       name: parsed.name,
     });
-    // The policy is nobody's child — it selects the datastore's pods rather
-    // than being owned by the custom resource — so nothing garbage-collects it.
-    // Deleted here rather than given an `ownerReference`, which would need the
-    // CR's UID read back before every write for a policy that denies rather
-    // than admits when it is left behind.
-    //
-    // Guarded exactly as `permit` is, and for a harder reason than symmetry: a
-    // Datastore placed before `spindrift-datastores` existed has no policy —
-    // `permit` never wrote one — and the legacy Role in `spindrift-apps`
-    // deliberately grants no `networkpolicies`. Deleting unconditionally would
-    // take the CR and then be refused `403`, which `delete` does not swallow,
-    // and the row could no longer be destroyed through the product at all.
+    // Nothing garbage-collects the policy. Outside the datastore namespace the
+    // Role grants no networkpolicies, and a 403 would make the row undeletable.
     if (parsed.namespace !== datastoreNamespaceFor(connection)) return;
     await this.api(connection).delete({
       ...NETWORK_POLICY,
@@ -289,39 +202,9 @@ export class KubernetesDatastoreAdapter implements DatastoreAdapter {
   }
 
   /**
-   * Admit exactly these namespaces to this datastore's pods.
-   *
-   * The exception on top of the deny floor the installation ships in the
-   * datastore namespace (`clusters/base/platform/spindrift-target/`). One
-   * object per Datastore, named after it, selecting its own pods by the
-   * operator's cluster label — so a policy widened for one Datastore cannot
-   * widen its neighbour, and a Datastore with no App attached has no object at
-   * all rather than one admitting an empty list.
-   *
-   * **A vanilla `NetworkPolicy`, not a `CiliumNetworkPolicy`.** The chart
-   * reaches for the Cilium kind for one reason — a gateway's data plane is an
-   * identity no selector can name — and no gateway fronts a datastore. Every
-   * selector here is a namespace name and a pod label, which the portable kind
-   * expresses, and every Target's CNI enforces.
-   *
-   * **Ingress only, and no `ports`.** Egress here would be the policy taking
-   * away CloudNativePG's instance manager and both operators' DNS, and the
-   * pods listen on their engine's port and nothing else — pinning ports would
-   * add a second per-engine table that must stay in step with the first, to
-   * refuse traffic no pod would answer anyway.
-   *
-   * **The sibling grant is here and not on the floor**, because on the floor
-   * it can only be `podSelector: {}` — every pod in the namespace, which is
-   * one App's Valkey reaching another App's, authenticating nobody, inside the
-   * partition this whole story exists to draw. Written per Datastore it is the
-   * same label the policy selects on, so replication and the cluster bus reach
-   * as far as one Datastore's pods and no further.
-   *
-   * A Datastore whose ref names a namespace this Target does not provision
-   * into is one placed before `spindrift-datastores` existed. Nothing is
-   * written for it and it answers `false`: there is no floor in
-   * `spindrift-apps` for an exception to sit on, and the identity's Role there
-   * is read-and-remove only by design.
+   * An ingress-only NetworkPolicy per Datastore, over the deny floor the
+   * installation ships in the datastore namespace. `false` for a ref in any
+   * other namespace: it has no floor, and the Role there cannot write policies.
    */
   async permit(
     target: DeployTarget,
@@ -333,21 +216,16 @@ export class KubernetesDatastoreAdapter implements DatastoreAdapter {
     if (connection === null || parsed === null) return false;
     if (parsed.namespace !== datastoreNamespaceFor(connection)) return false;
 
-    // The datastore's own pods, which is both what the policy selects and one
-    // of the things it admits.
     const ownPods = {
       matchLabels: { [ENGINE_KINDS[parsed.engine].podLabel]: parsed.name },
     };
 
     const api = this.api(connection);
     if (namespaces.length === 0) {
-      // Detached: the object goes away rather than being applied with an empty
-      // `from`, which reads identically to a policy somebody truncated.
+      // Deleted, because an empty `from` reads like a truncated policy.
       //
-      // ponytail: this takes the sibling grant away with it, so a *detached*
-      // multi-pod datastore loses replication. Every Datastore provisioned
-      // today is a single instance; the day one is not, apply the policy with
-      // the sibling rule alone instead of deleting it.
+      // ponytail: this also drops the sibling grant, so a detached multi-pod
+      // datastore would lose replication. Every Datastore is one instance.
       await api.delete({
         ...NETWORK_POLICY,
         namespace: parsed.namespace,
@@ -370,18 +248,15 @@ export class KubernetesDatastoreAdapter implements DatastoreAdapter {
         },
         spec: {
           podSelector: ownPods,
+          // Ingress only: an egress rule would cut off CloudNativePG's instance
+          // manager and the operators' DNS.
           policyTypes: ['Ingress'],
           ingress: [
             {
               from: [
-                // This datastore's own pods, and only its own: a bare
-                // `podSelector: {}` here — or on the floor beside it — admits
-                // every pod in the namespace, which is App A's Valkey reaching
-                // App B's, authenticating nobody, inside the boundary this
-                // object exists to draw. Same label as the selector above, so
-                // the grant is exactly "the pods of this Datastore": what
-                // CloudNativePG's streaming replication and the Valkey cluster
-                // bus need, and nothing wider.
+                // Its own pods only, for replication and the cluster bus.
+                // A bare `podSelector: {}` would open every App's Valkey to
+                // the others.
                 { podSelector: ownPods },
                 ...namespaces.map((namespace) => ({
                   namespaceSelector: {
@@ -399,24 +274,8 @@ export class KubernetesDatastoreAdapter implements DatastoreAdapter {
   }
 
   /**
-   * The most recent warning refusing one of this datastore's own objects.
-   *
-   * **Events rather than the child workload's status**, which was the other
-   * candidate. Events are one mechanism for both engines and for the failure
-   * modes neither operator models — a quota, a policy engine, a scheduler with
-   * nowhere to put the pod — and they are what a human runs `kubectl describe`
-   * for. Reading each operator's child workload instead would need a table of
-   * child kinds and names per operator, which is wrong the first time an
-   * operator renames one. `events: list` in this namespace is already granted
-   * for the delivery path's own read on red.
-   *
-   * The words are the cluster's. Nothing here maps a reason onto a sentence
-   * Spindrift wrote: {@link REJECTION_EVENTS} decides *which* event is a
-   * refusal, and the event's own `message` is what an operator reads.
-   *
-   * **Never throws.** This runs on a datastore that is already not `LIVE`, and
-   * a diagnosis that could not be loaded is not a reason to lose the operator's
-   * status line as well.
+   * The newest warning event refusing one of this datastore's objects, in the
+   * cluster's words. Never throws: a failed read leaves the operator's status.
    */
   private async refusal(
     api: KubernetesApi,
@@ -427,12 +286,8 @@ export class KubernetesDatastoreAdapter implements DatastoreAdapter {
       .catch(() => null);
     if (events === null) return undefined;
 
-    // Both operators name what they create after the custom resource — CNPG
-    // suffixes the cluster's own name, the Valkey operator prefixes it first
-    // (`VALKEY_RESOURCE_PREFIX`). Matching on that is what keeps a neighbour's
-    // refusal in a shared namespace out of this datastore's `detail`; it is a
-    // narrower claim than knowing each operator's child *kinds*, because it
-    // survives an operator adding one.
+    // Both operators name children after the resource, Valkey behind a prefix,
+    // which keeps a neighbour's refusal out of this `detail`.
     const stems = [parsed.name, `${VALKEY_RESOURCE_PREFIX}${parsed.name}`];
     const refusals = (events as readonly RefusalEvent[]).filter((event) => {
       const involved = event.involvedObject?.name;
@@ -448,18 +303,14 @@ export class KubernetesDatastoreAdapter implements DatastoreAdapter {
     });
     if (refusals.length === 0) return undefined;
 
-    // Most recent wins. A refusal that repeats — the fourteen `FailedCreate`s a
-    // StatefulSet reported while its pods were inadmissible — is the same
-    // sentence every time, and where two differ the newest is the one still
-    // true. Both timestamp fields are RFC 3339 in UTC, so they order as strings.
+    // Newest wins. Both timestamp fields are RFC 3339 in UTC, so they order as
+    // strings.
     let latest = refusals[0]!;
     for (const event of refusals) {
       if (timeOf(event) > timeOf(latest)) latest = event;
     }
     return latest.message ?? latest.reason;
   }
-
-  // --- plumbing ------------------------------------------------------------
 
   private api(connection: KubernetesAdapterConnection): KubernetesApi {
     return new KubernetesApi({
@@ -486,18 +337,15 @@ export class KubernetesDatastoreAdapter implements DatastoreAdapter {
     };
     const size = `${request.storageGiB}Gi`;
 
-    // No `storageClass` in either spec: the cluster's default is the operator's
-    // own answer to where a volume lives, and naming one here would be an
-    // installation fact (§20) in the software rather than in the manifest.
+    // No `storageClass`: the cluster default decides, and naming one would put
+    // an installation fact in the software.
     if (request.engine === 'postgres') {
       return {
         apiVersion: kind.apiVersion,
         kind: kind.kind,
         metadata,
-        // ponytail: one instance, no scheduled backup — a datastore that
-        // survives a node reboot, not one that survives losing the node. Raise
-        // `instances` and add `backup.barmanObjectStore` once a Datastore is
-        // worth an object store, and put both on the request rather than here.
+        // ponytail: one instance, no scheduled backup. Raise `instances` and
+        // add `backup.barmanObjectStore`, on the request, once one needs it.
         spec: {
           instances: 1,
           bootstrap: {
@@ -514,29 +362,17 @@ export class KubernetesDatastoreAdapter implements DatastoreAdapter {
       apiVersion: kind.apiVersion,
       kind: kind.kind,
       metadata,
-      // One shard, no replicas: a single primary, which is what `instances: 1`
-      // is on the other engine. `persistence` is set rather than omitted so a
-      // restarted node comes back with its data — the operator's default is
-      // ephemeral, and a Datastore that empties on a reschedule is a cache
-      // wearing a Datastore's name.
+      // A single primary, like `instances: 1`. `persistence` is set because the
+      // operator's default is ephemeral.
       spec: {
         shards: 1,
         replicas: 0,
         persistence: { size },
-        // Restricted Pod Security, stated here because nothing else states it.
-        // `spindrift-apps` enforces the `restricted` standard, and the Valkey
-        // operator sets no security context of its own — it copies
-        // `podSecurityContext` through and leaves the container's empty — so a
-        // ValkeyCluster written without this creates its StatefulSet, has every
-        // pod refused by admission, and sits in `WAITING` with the only useful
-        // sentence on an object the adapter never reads. CloudNativePG needs no
-        // equivalent: it sets a compliant context itself.
+        // The namespace enforces restricted Pod Security and the operator
+        // sets no security context, so without this every pod is refused.
         //
-        // `runAsUser` is not redundant beside `runAsNonRoot`. The valkey image
-        // has no `USER` and drops from root in its entrypoint, so the kubelet
-        // would refuse it as root-by-image with nothing but the flag. 999/1000
-        // is the `valkey` user that image creates, so the data directory it
-        // wants and the identity it runs as agree.
+        // `runAsUser` because the valkey image has no `USER` and would be
+        // refused as root. 999/1000 is the valkey user that image creates.
         podSecurityContext: {
           runAsNonRoot: true,
           runAsUser: 999,
@@ -545,13 +381,8 @@ export class KubernetesDatastoreAdapter implements DatastoreAdapter {
           fsGroup: 1000,
           seccompProfile: { type: 'RuntimeDefault' },
         },
-        // The two fields `restricted` demands that exist only on a container,
-        // so the pod block above cannot supply them. Every container in the pod
-        // needs them, and this operator builds **two**: `server`, patched here,
-        // and the metrics exporter sidecar it adds unasked — which has its own
-        // spec field rather than living in `containers`, and so is set below.
-        // Admission fails the whole pod on the one that is missing them, which
-        // is why hardening only the obvious container hardens nothing.
+        // Container-only fields `restricted` demands. The operator builds two
+        // containers; the exporter sidecar has its own field, below.
         containers: [
           {
             name: 'server',
@@ -561,61 +392,24 @@ export class KubernetesDatastoreAdapter implements DatastoreAdapter {
             },
           },
         ],
-        // The metrics sidecar, off — stated rather than left to the absence of
-        // a field, because that absence is what turned it off by accident.
-        // `enabled` has no default in the CRD, so naming `exporter` at all to
-        // carry a security context was already switching it off; a reader
-        // deserves to see the decision rather than infer it from a missing key.
-        //
-        // Off rather than hardened because hardening it is not one line: the
-        // pod block above runs every container as uid 999, which is the valkey
-        // user, and the exporter is a different image with no reason to accept
-        // it — the operator's own hardened sample gives the two distinct uids.
-        // Nothing scrapes a datastore sidecar in this fleet yet, so switching
-        // it on is a change worth making when something wants the metrics, with
-        // the uid question answered against a running pod rather than guessed.
+        // Off: the pod block runs every container as the valkey uid, which the
+        // exporter image has no reason to accept. `enabled` has no CRD default.
         exporter: { enabled: false },
       },
     };
   }
 
-  /**
-   * §11's connection reference, in whichever shape this engine has one.
-   *
-   * The two differ because the backends do, not because the contract is loose:
-   * CloudNativePG generates a credential and puts it in a Secret, and the Valkey
-   * operator authenticates nobody unless an ACL user is declared. A `secret://`
-   * reference to a Secret holding only a hostname would be a lie about what is
-   * protected.
-   */
   private async connectionFor(
     api: KubernetesApi,
     parsed: ParsedRef,
   ): Promise<DatastoreConnection | null> {
     if (parsed.engine === 'postgres') {
-      // CloudNativePG names the application credential `<cluster>-app` and puts
-      // `uri`, `host`, `port`, `dbname`, `username` and `password` in it.
-      //
-      // Asserted rather than read back, and the caller is why: this is only
-      // reached at `phase === 'LIVE'`, which for this engine *is* CNPG's
-      // `Ready=True` condition — written downstream of the bootstrap that
-      // creates the Secret. A `get` here could only ever confirm what the
-      // condition already stated, and it would cost the one grant this whole
-      // design exists to avoid: RBAC matches `resourceNames` literally, so
-      // reading `<cluster>-app` means reading every Secret in the namespace.
+      // CNPG's app Secret, asserted unread: LIVE is Ready, written after
+      // bootstrap, and a read grant would cover every Secret.
       return `secret://${parsed.namespace}/${parsed.name}-app`;
     }
-    // The Valkey operator fronts a cluster with a Service named for it, under
-    // the prefix it gives everything it creates (`resourcePrefix = "valkey-"`
-    // in the operator's `internal/controller/utils.go`, and its own e2e suite
-    // reads back `service valkey-<cluster>`).
-    //
-    // Confirmed against the cluster rather than asserted, because this is the
-    // one fact here that is a naming convention rather than a documented API
-    // field — and `services: get` is a grant that names an ordinary object.
-    // The confirmation is what makes a wrong guess here a Datastore that never
-    // reports a connection rather than one that hands out an address nothing
-    // answers on.
+    // The operator's Service name is a convention, so it is confirmed: a
+    // wrong guess reports no connection, never a dead address.
     const service = `${VALKEY_RESOURCE_PREFIX}${parsed.name}`;
     const found = await api.get({
       apiVersion: 'v1',
@@ -623,40 +417,29 @@ export class KubernetesDatastoreAdapter implements DatastoreAdapter {
       namespace: parsed.namespace,
       name: service,
     });
-    // `redis://`, not `valkey://`. This fills `REDIS_URL` (the variable is fixed
-    // by engine), and every client that reads it — node-redis, ioredis,
-    // redis-py — parses `redis://` and rejects a scheme it does not know. A
-    // scheme naming the server would be honest and unusable.
+    // `redis://`: this fills `REDIS_URL`, and its clients reject `valkey://`.
     return found === null
       ? null
       : `redis://${service}.${parsed.namespace}.svc:6379`;
   }
 }
 
-/** The fields a refusal is recognised and ordered by, off a core v1 `Event`. */
 interface RefusalEvent {
   type?: string;
   reason?: string;
   message?: string;
-  /** Set by controllers writing core v1 events, which is both operators. */
+  /** Core v1 events, which both operators write. */
   lastTimestamp?: string;
-  /** Set instead by anything writing through `events.k8s.io`. */
+  /** Set instead by writers through `events.k8s.io`. */
   eventTime?: string;
   involvedObject?: { name?: string };
 }
 
-/**
- * When an event last happened.
- *
- * Empty for an event carrying neither stamp, which sorts below every event that
- * carries one — the honest order, since an event with no time cannot be shown
- * to be the newest.
- */
+/** Empty when neither stamp is set, which sorts below every stamped event. */
 function timeOf(event: RefusalEvent): string {
   return event.lastTimestamp ?? event.eventTime ?? '';
 }
 
-/** What a status read concluded, in §6's shared vocabulary. */
 interface EngineStatus {
   phase: DeployPhase;
   reason?: FailureReason;
@@ -664,12 +447,8 @@ interface EngineStatus {
 }
 
 /**
- * CloudNativePG's verdict.
- *
- * The `Ready` condition rather than `status.phase`, because the phase is a
- * human sentence ("Cluster in healthy state") that the operator is free to
- * reword; the condition is the API. A cluster that has not written one yet is
- * still coming up, which is `WAITING` and not a failure.
+ * The `Ready` condition, because `status.phase` is prose the operator may
+ * reword. No condition yet means still coming up.
  */
 function postgresStatus(object: KubernetesObject): EngineStatus {
   const status = object.status as
@@ -692,12 +471,8 @@ function postgresStatus(object: KubernetesObject): EngineStatus {
 }
 
 /**
- * The Valkey operator's verdict, off `status.state`.
- *
- * `Degraded` is the one terminal answer here: the operator uses it for a cluster
- * it cannot finish forming, and unlike a deploy there is no timeout above this
- * seam to eventually call it. `UNHEALTHY` is §6's reason for readiness that
- * never passed, which is exactly what this is.
+ * `Degraded` is terminal: the operator cannot form the cluster, and nothing in
+ * core times a datastore out.
  */
 function valkeyStatus(object: KubernetesObject): EngineStatus {
   const status = object.status as
@@ -724,7 +499,7 @@ interface ParsedRef {
   name: string;
 }
 
-/** `<engine>/<namespace>/<name>` — opaque to core, parsed only here. */
+/** `<engine>/<namespace>/<name>`, parsed only in this file. */
 function refOf(
   engine: DatastoreEngine,
   namespace: string,
@@ -734,13 +509,8 @@ function refOf(
 }
 
 /**
- * The policy object's name, which is the Datastore's with a prefix.
- *
- * Unambiguous without the engine in it: `datastores_vessel_name_unique` makes
- * two Datastores of one name in one vessel impossible, so no two datastore
- * policies in a namespace can collide. Prefixed so that an operator reading
- * `kubectl get netpol` can tell the per-Datastore exceptions from the floor
- * Flux ships beside them.
+ * Datastore names are unique per vessel, so these cannot collide. The prefix
+ * sets them apart from the floor beside them.
  */
 function policyName(name: string): string {
   return `spindrift-${name}`;
@@ -762,12 +532,8 @@ function connectionOf(
 }
 
 /**
- * The name as a bare SQL identifier.
- *
- * A Datastore name is a DNS label, so it may hold hyphens; an unquoted Postgres
- * identifier may not. Substituting rather than quoting keeps the database name
- * something a developer can type into `psql` without remembering it was created
- * with quotes.
+ * A DNS label may hold hyphens and a bare Postgres identifier may not.
+ * Substituted so nobody has to quote the name in `psql`.
  */
 function identifier(name: string): string {
   return name.replace(/-/g, '_');

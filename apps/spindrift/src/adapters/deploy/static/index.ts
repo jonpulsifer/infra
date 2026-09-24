@@ -1,39 +1,6 @@
 /**
- * The static-hosting deploy adapter (§6, §9).
- *
- * Accepts `files`, talks to the hosting product's API directly, and reads status
- * from the release the API returns. There is no rollout to watch: a release is
- * atomic and synchronous, so §6's `WAITING` phase is a state this backend never
- * occupies — which is the honest reason this adapter does not poll, rather than
- * a corner cut.
- *
- * **`Public` only** (§9). "No non-public mode may have a bypassable origin. A
- * rendering that leaves an unauthenticated alternate origin is **disqualified
- * rather than shipped with a caveat** — which is why the static hosting product
- * serves `Public` only, and why a Private website takes the server-image
- * rendering." The origin here is the site's own address, which the product will
- * always answer on; no authenticated edge can be put in front of it that the
- * origin does not bypass. So a non-public exposure reaching `apply` is refused,
- * and refused as `INTERNAL` rather than `REJECTED`: this adapter asserts
- * `['public']` and nothing else (`ASSERTED_REACHES_BY_ADAPTER` in
- * `domain/capabilities.ts`), so placement excludes it for a non-public
- * Component by the ordinary reach join — `REACH_UNSUPPORTED`, not a special
- * case. One arriving here is therefore core's bug and not a developer's.
- *
- * **The site names itself** (§9). The product mints the address, so the
- * canonical name comes back across this seam on the verdict rather than being
- * handed in — and the vanity name is added to the same site as a domain, which
- * is what makes "moving an App between backends is one record re-point" true
- * for this backend.
- *
- * **A site id is spent once and never returned.** "Deleting a site is a
- * permanent action. If you delete a site, Firebase doesn't maintain records of
- * deployed files or deployment history, and the `SITE_ID` cannot be reactivated
- * by you or anyone else." The id is `siteId(desired)` — derived from the App
- * and Component names — so a destroyed site burns that pair's address globally,
- * and a later deploy of the same pair collides with a reservation nothing in
- * the project can see. Both halves of that are said out loud: `destroy` below,
- * and `ensureSite`'s reading of a 409 it cannot reconcile.
+ * The static hosting deploy adapter. A release is atomic, so nothing is polled.
+ * Public reach only: no authenticated edge can front the site's own address.
  */
 
 import { type BundleFile, readBundle } from '@repo/archive/bundle';
@@ -88,91 +55,54 @@ import { ArtifactUnavailable, bundleFailure } from './bundle.ts';
 import { googleRegistryRef, OciPullError, pullFilesLayer } from './oci.ts';
 
 export interface StaticAdapterOptions {
-  /** Mints a bearer token per request. Never a stored credential (§13). */
+  /** Mints a bearer token per request. Never a stored credential. */
   readonly token: TokenProvider;
   /**
-   * How this installation signs for an object in its source depot, or `null`
-   * where it configured none.
-   *
-   * A supplied upload's bytes are a `gs://` object, which no HTTP client
-   * resolves — so this adapter mints the same short-TTL V4 signed URL a hosted
-   * build route is handed, rather than holding a second credential (§13). It is
-   * the federation itself and not a token provider because signing is `signBlob`
-   * under the *federated* identity, before impersonation; `storage/signed-url.ts`
-   * is where that distinction is written down.
+   * Signs a short-lived URL for a supplied upload's `gs://` object, or `null`
+   * where none is configured. Signing needs the federated identity itself.
    */
   readonly federation?: FederationOptions | null;
-  /** Injected so a test can stand a fake far side behind the real client. */
   readonly fetch?: Fetcher;
   readonly now?: () => number;
 }
 
-/** How the operator would name the product in the sentence about enabling it. */
+/** The product's name in the sentence about enabling it. */
 const SERVICE_NAME = 'static hosting';
 
-/**
- * Firebase Hosting's own API root — one hostname for every project, because
- * the product runs a single control plane rather than one per customer.
- * `StaticConnection.endpoint` used to be required on the theory that it was
- * connection material the way a cluster's `apiServer` is; it never varied
- * between installations, so this is now the default applied wherever
- * `connection.endpoint` is read, with the Target's own value kept only as an
- * override for a perimeter or a mirror in front of the real API.
- */
+/** One API host serves every project; a Target's `endpoint` overrides it. */
 export const DEFAULT_ENDPOINT = 'https://firebasehosting.googleapis.com';
 
-/** The API version every call below hangs off. */
 const API_VERSION = '/v1beta1';
 
 /** The label a version carries so `observe` can report what is serving. */
 const DIGEST_LABEL = 'spindrift-digest';
 const DEPLOY_LABEL = 'spindrift-deploy';
 
-/** A site id is capped well below a DNS label. See `domain/workload-name.ts`. */
+/** The product caps a site id well below a DNS label. */
 const SITE_ID_LIMIT = 30;
 
-/**
- * The one sentence every runtime question here is answered with (§17).
- *
- * Three questions — what is it saying, run it, what has it run — and one fact
- * behind all three: files are served, never executed. Written once so the three
- * refusals cannot drift into three different explanations of the same thing.
- */
 const NOTHING_RUNS = 'Static files are served by the Target.';
 
-/**
- * The most file hashes one `populateFiles` call may carry.
- *
- * The API's own ceiling, not a tuning knob: "You can send a maximum of 1000
- * file hashes in each API request. To list all the files for the version, you
- * can call this endpoint multiple times; the files in each call will be added
- * to the version." A built site clears that without trying — one hashed asset
- * directory is enough — so the offer is made in chunks and every chunk's
- * answer is kept. Anything less deploys a version whose bytes are not all
- * there, which finalizes happily and serves a broken site.
- */
+/** The API's ceiling on file hashes per `populateFiles` call. */
 const POPULATE_LIMIT = 1000;
 
-/** What a version looks like coming back, as much as this adapter reads. */
 interface HostingVersion {
   readonly name?: string;
   readonly status?: string;
   readonly labels?: Readonly<Record<string, string>>;
 }
 
-/** What `populateFiles` answers: which of the offered hashes it wants. */
+/** Which of the offered hashes `populateFiles` wants uploaded, and where. */
 interface PopulateResult {
   readonly uploadRequiredHashes?: readonly string[];
   readonly uploadUrl?: string;
 }
 
-/** One release, as much of it as this adapter reads. */
 interface HostingRelease {
   readonly name?: string;
   readonly version?: HostingVersion;
 }
 
-/** One site, as much of it as this adapter reads. */
 interface HostingSite {
   readonly name?: string;
   readonly defaultUrl?: string;
@@ -180,7 +110,6 @@ interface HostingSite {
 
 export class StaticDeployAdapter implements DeployAdapter {
   readonly adapter: TargetAdapter = 'static';
-  /** §6's table: `static` takes files. */
   readonly artifactTypes: readonly ArtifactType[] = ['files'];
 
   private readonly events: DeployEvents;
@@ -204,30 +133,22 @@ export class StaticDeployAdapter implements DeployAdapter {
       );
     }
     if (desired.reach !== 'public') {
-      // §9, and see the file header: this backend has no non-bypassable origin
-      // to put a boundary in front of, so the rendering is disqualified rather
-      // than shipped with a caveat.
+      // Placement already excludes this Target for a non-public Component, so
+      // arriving here is core's bug.
       yield this.events.status('FAILED', { reason: 'INTERNAL' });
       return internalFailure(
         `static hosting serves a public reach only, and this Component asks for ${desired.reach} (§9)`,
       );
     }
     if (desired.auth === 'proxy') {
-      // Same shape, other axis: there is no edge here to authenticate at, so
-      // claiming one would be the caveat this backend refuses to ship with.
+      // There is no edge here to authenticate at.
       yield this.events.status('FAILED', { reason: 'INTERNAL' });
       return internalFailure(
         'static hosting has no authenticated edge to put in front of a Component (§9)',
       );
     }
-    // No registry filter: a static Target serves `files`, and the reachability
-    // §3 models over registries is about a *runtime* pulling an image. This
-    // adapter is the one that pulls for itself, so the choice here is by what
-    // its own identity can read: a staged address is a supplied upload's and is
-    // fetched as such, and among registry references only a Google-family one
-    // is readable with the federated token this adapter already holds —
-    // `ghcr.io` would take a credential the manifest deliberately does not
-    // model (§13).
+    // This adapter pulls the bytes itself, so it takes a supplied upload's
+    // address or a registry its federated token can read.
     const staged = artifactAddress(desired.artifact);
     const location =
       fetchableStagedAddress(staged) ??
@@ -281,9 +202,6 @@ export class StaticDeployAdapter implements DeployAdapter {
     }
     yield this.events.log(`released ${released.value}`, site);
 
-    // §9's one record re-point, made real for this backend: the vanity name is
-    // a domain on the site that is already serving, so moving an App here from
-    // another backend moves one name rather than rebuilding a leg.
     if (desired.hostname.vanity !== undefined) {
       const attached = await this.attachDomain(
         http,
@@ -309,22 +227,16 @@ export class StaticDeployAdapter implements DeployAdapter {
     return {
       phase: 'LIVE',
       ref,
-      // §9: the platform names its own. A site with no reported address is the
-      // one case core cannot fill in, and saying nothing beats assembling a
-      // name the product did not give.
+      // No reported address means no url, not one assembled here.
       ...(address === undefined ? {} : { url: address }),
-      // No `address`: Firebase Hosting's custom domains take an A record plus
-      // TXT ownership verification, not a CNAME this port can express.
+      // No `address`: custom domains here take an A record and TXT
+      // verification, which a CNAME cannot express.
     };
   }
 
   /**
-   * What is serving, read from the release rather than from what was written.
-   *
-   * The digest comes off the released version's labels, which is the only place
-   * it can come from: the product stores files and has no notion of an artifact.
-   * A version released by something other than Spindrift therefore reports an
-   * empty digest and shows as drift — which is right, because it is.
+   * What the latest release serves. The digest is a version label, so a version
+   * released by anything else reports an empty digest and shows as drift.
    */
   async observe(
     target: DeployTarget,
@@ -355,14 +267,8 @@ export class StaticDeployAdapter implements DeployAdapter {
   }
 
   /**
-   * Remove the site — and with it, permanently, the right to its name.
-   *
-   * There is no soft form of this on this backend and no undo: the site id is
-   * global and the product never releases one, so a caller that tears a static
-   * placement down has spent that App/Component pair's address for every
-   * project, forever. `deleteApp` never reaches here (§13) and says the same
-   * thing about the site it strands, because the operator finishing that
-   * clean-up by hand spends the name just as thoroughly.
+   * Removes the site and spends its id: the product never releases a site id,
+   * so that App and Component pair cannot have a site again.
    */
   async destroy(target: DeployTarget, ref: DeployRef): Promise<void> {
     const connection = this.connectionOf(target);
@@ -376,15 +282,8 @@ export class StaticDeployAdapter implements DeployAdapter {
       path: `${API_VERSION}/projects/${encodeURIComponent(connection.project)}/sites/${encodeURIComponent(site)}`,
     });
 
-    // The DELETE's own status is not trusted either way: a 404 means both
-    // "already gone" and "this call hit a path the API does not serve". Read
-    // the site back instead — absent is destroyed, present is a destroy that
-    // did not happen and must not be reported as one.
-    //
-    // The read is project-scoped for the same reason the DELETE above is. A
-    // read of the flat `sites/{site}` answers 404 unconditionally, which
-    // makes this check pass unconditionally — the exact blindness it exists
-    // to end, reintroduced one line below the comment describing it.
+    // DELETE's 404 also means a path the API does not serve, so read the site
+    // back. Only the project-scoped path answers; the flat one always 404s.
     const read = await http.json<HostingSite>({
       method: 'GET',
       path: this.sitePath(connection, site),
@@ -420,31 +319,22 @@ export class StaticDeployAdapter implements DeployAdapter {
   }
 
   /**
-   * There is nothing here to run, and saying so is the answer (§17).
-   *
-   * `KINDS_BY_ADAPTER.static` is `['website']`, so a job never reaches this
-   * backend and this refusal is unreachable through placement. It is written
-   * anyway, and written as a refusal rather than left unimplemented, for the
-   * same reason `tail` returns its `none` arm rather than an empty page: a
-   * contract every adapter answers is a contract core can call without asking
-   * which one it is holding, and a method that threw would make the one caller
-   * that forgot to check the kind fail as a crash instead of as a sentence.
+   * A static Target runs no jobs, so placement never sends one here. It still
+   * refuses in a sentence, for a caller that skips the kind check.
    */
   async run(_target: DeployTarget, _ref: DeployRef): Promise<StartedRun> {
     return { kind: 'none', because: NOTHING_RUNS };
   }
 
-  /** Nothing runs here, so there is nothing to restart either. */
   async restart(_target: DeployTarget, _ref: DeployRef): Promise<Restarted> {
     return { kind: 'none', because: NOTHING_RUNS };
   }
 
-  /** The same fact from the reading side: no run ever happened here. */
   async executions(_target: DeployTarget, _ref: DeployRef): Promise<JobRuns> {
     return { kind: 'none', because: NOTHING_RUNS };
   }
 
-  /** One pass of §13's checklist and §3's discovery, in one call. */
+  /** The checklist, discovery and surface, from one probe. */
   async inspect(target: DeployTarget): Promise<TargetInspection> {
     const connection = this.connectionOf(target);
     if (connection === null) {
@@ -472,21 +362,13 @@ export class StaticDeployAdapter implements DeployAdapter {
     };
   }
 
-  // --- apply's steps -------------------------------------------------------
-
   /** Fetch the bundle and read it into files. Throws; `apply` catches. */
   private async fetchBundle(
     http: CloudHttp,
     location: string,
   ): Promise<readonly BundleFile[]> {
-    // A staged address is a supplied upload's, and is fetched over HTTP — a
-    // depot object after being signed for, an `https://` one as it stands.
-    // Anything else is a registry reference — the shape every built artifact's
-    // ref has — and the bytes are the artifact's one layer.
-    //
-    // What is fetched and what is *named* part company here on purpose: a
-    // signed URL is a bearer capability, so every sentence below names the
-    // address the artifact carries and never the one that was minted from it.
+    // Staged addresses fetch over HTTP (depot objects signed first), others are
+    // registry refs. Errors name `location`, never the signed bearer URL.
     let url: string;
     try {
       url = await fetchableBundleUrl(
@@ -495,9 +377,7 @@ export class StaticDeployAdapter implements DeployAdapter {
         this.options.fetch,
       );
     } catch (cause) {
-      // Failing to mint a signed URL is `ARTIFACT_UNAVAILABLE` like every other
-      // way the bytes do not arrive: the build is green, and §6 blames the
-      // platform for that.
+      // Failing to sign is the platform's fault, like any other missing bytes.
       throw new ArtifactUnavailable(
         `the artifact at ${location} could not be signed for: ${
           cause instanceof Error ? cause.message : String(cause)
@@ -507,10 +387,6 @@ export class StaticDeployAdapter implements DeployAdapter {
     if (/^https?:\/\//.test(url)) {
       const fetched = await http.bytes(url);
       if (!fetched.ok) {
-        // §6 blames the **platform** for an artifact that cannot be fetched,
-        // and this is exactly that case: the build is green and the bytes are
-        // not there. Raised as a typed error so `apply` maps it to the right
-        // reason rather than to whichever one this branch happened to be near.
         throw new ArtifactUnavailable(
           `the artifact at ${location} could not be fetched: ${fetched.message}`,
         );
@@ -528,8 +404,6 @@ export class StaticDeployAdapter implements DeployAdapter {
       });
     } catch (cause) {
       if (!(cause instanceof OciPullError)) throw cause;
-      // Same blame as the URL arm: the build is green and the bytes are not
-      // fetchable in the form this Target serves.
       throw new ArtifactUnavailable(
         `the artifact at ${location} could not be fetched: ${cause.message}`,
       );
@@ -538,18 +412,8 @@ export class StaticDeployAdapter implements DeployAdapter {
   }
 
   /**
-   * The site, ensured rather than created.
-   *
-   * A site is a durable place and a deploy is a revision of what it serves —
-   * the five steps below are the revision. So the only question here is
-   * whether the place exists, and "it already does" is this function
-   * succeeding, not failing.
-   *
-   * The read is `projects/{project}/sites/{id}`, which is the only form of it
-   * the API serves. The flat `sites/{id}` this used to GET is not a route:
-   * it 404s whether or not the site exists, so every deploy concluded the
-   * site was missing, tried to create it, and collided with the one the
-   * previous deploy made. A static App could be deployed exactly once.
+   * The site, created only if absent. Only the project-scoped path answers;
+   * the flat `sites/{id}` 404s whether or not the site exists.
    */
   private async ensureSite(
     http: CloudHttp,
@@ -573,17 +437,8 @@ export class StaticDeployAdapter implements DeployAdapter {
       query: { siteId: site },
       body: {},
     });
-    // Losing a create race is the desired state arriving from somewhere else.
-    // Read it back rather than trusting the 409's body, so what returns is a
-    // site this function actually saw.
-    //
-    // The read-back is also what tells that case apart from the other thing a
-    // 409 means, and they are opposites: a site id is global and permanent —
-    // "Deleting a site is a permanent action. If you delete a site, ... the
-    // `SITE_ID` cannot be reactivated by you or anyone else" — so a name this
-    // project once used and deleted collides forever, with nothing to read
-    // back. Reported as what it is rather than as the API's "already exists",
-    // which sends an operator looking for a site that is not there.
+    // A 409 is a lost create race, which the read-back finds, or an id this
+    // project once used and deleted, which is spent forever.
     if (!created.ok && created.kind === 'status' && created.status === 409) {
       const after = await http.json<HostingSite>({
         method: 'GET',
@@ -592,13 +447,8 @@ export class StaticDeployAdapter implements DeployAdapter {
       if (after.ok && after.value !== undefined) {
         return { ok: true, value: after.value };
       }
-      // Only a read-back that came back and said *not here* is evidence of
-      // that, and `CloudHttp` exists precisely so this call can tell the three
-      // apart: "this project is not there" is a `404`, "this project refuses
-      // me" and "the service is off" are not, and neither of the latter two
-      // knows anything about the name. Telling an operator to rename the App
-      // because a socket died would spend a second id to route around a blip,
-      // so a read-back that did not answer keeps the API's own report.
+      // Only a 404 read-back proves the id is spent; any other failure keeps
+      // the API's own report.
       if (!after.ok && after.kind === 'status' && after.status === 404) {
         return {
           ok: false,
@@ -620,14 +470,8 @@ export class StaticDeployAdapter implements DeployAdapter {
   }
 
   /**
-   * Version → populate → upload → finalize → release.
-   *
-   * Five calls and no shortcut, because the product's contract is that a
-   * version is immutable once finalized and a release is what makes one serve.
-   * The upload step asks *which* files it does not already hold, which is what
-   * makes a redeploy of an unchanged site cheap — and is also why the hash
-   * offered is over the **gzipped** bytes rather than the file's own: that is
-   * what the product stores and therefore what it deduplicates on.
+   * Version, populate, upload, finalize, release. Hashes are over the gzipped
+   * bytes, which is what the product stores and deduplicates on.
    */
   private async release(
     http: CloudHttp,
@@ -657,9 +501,7 @@ export class StaticDeployAdapter implements DeployAdapter {
       return { ok: false, failure: missing('the API created no version') };
     }
 
-    // Every chunk answers with the hashes *it* named that are missing, and
-    // with somewhere to put them, so both are accumulated across the whole
-    // offer rather than read off the last call.
+    // Each chunk names only its own missing hashes, so they accumulate.
     const wanted = new Set<string>();
     let uploadUrl: string | undefined;
     for (const chunk of chunksOf([...compressed], POPULATE_LIMIT)) {
@@ -714,7 +556,7 @@ export class StaticDeployAdapter implements DeployAdapter {
     return { ok: true, value: released.value?.name ?? name };
   }
 
-  /** Put the vanity name on this site (§9). An existing one is not an error. */
+  /** Put the vanity name on this site. An existing one is not an error. */
   private async attachDomain(
     http: CloudHttp,
     site: string,
@@ -726,20 +568,15 @@ export class StaticDeployAdapter implements DeployAdapter {
       body: { site, domainName: domain },
     });
     if (attached.ok) return { ok: true, value: undefined };
-    // The name is already on this site, which is the state being asked for.
     if (attached.kind === 'status' && attached.status === 409) {
       return { ok: true, value: undefined };
     }
     return { ok: false, failure: attached };
   }
 
-  // --- inspect's second half -----------------------------------------------
-
   private discover(connection: StaticAdapterConnection): TargetDiscovery {
     return {
-      // Files are served, not run. An empty `arch` excludes no Target on
-      // architecture, which is right: there is nothing here for an
-      // architecture to be wrong about.
+      // An empty `arch` excludes no Target on architecture.
       arch: [],
       gpu: false,
       resourceCeiling: {},
@@ -747,27 +584,18 @@ export class StaticDeployAdapter implements DeployAdapter {
       postgres: false,
       valkey: false,
       egressFiltering: false,
-      // §16's verifiers check images at admission. Nothing is admitted here —
-      // there is no image and no runtime — so there is nothing to enforce, and
-      // reporting an engine would make `verifiedDeploy` true of a Target that
-      // verifies nothing.
+      // No image is admitted here, and an engine would make `verifiedDeploy`
+      // true of a Target that verifies nothing.
       policyEngine: { installed: false, mode: null },
-      // §17: static hosting gets an **honest empty state** rather than a
-      // duration. Zero is that: a tail can reach back no distance at all,
-      // because no process ever wrote a line.
+      // No process ever writes a line here.
       logHistorySeconds: 0,
       servedHosts: connection.servedHosts ?? [],
       // Nothing is pulled: the files were uploaded, and the site holds them.
       reachableRegistries: [],
-      // §10's reach rule, from the other side. A site has no runtime to resolve
-      // a reference with, so it reaches no store — which is exactly why §10's
-      // website exception exists, and why placement does not apply the reach
-      // rule to the one kind this Target runs.
+      // A site has no runtime to resolve a secret reference with.
       reachableSecretStores: [] as readonly StoreAdapter[],
     };
   }
-
-  // --- plumbing ------------------------------------------------------------
 
   private http(connection: StaticAdapterConnection): CloudHttp {
     return new CloudHttp({
@@ -784,29 +612,12 @@ export class StaticDeployAdapter implements DeployAdapter {
   }
 }
 
-/**
- * A staged bundle's address wears a scheme; a registry reference never does.
- *
- * Exported because every `files` backend makes the same three-way distinction
- * and words its last case differently — see {@link fetchableStagedAddress}.
- */
+/** A staged bundle's address has a scheme; a registry reference never does. */
 export const STAGED_SCHEME = /^[a-z][a-z0-9+.-]*:\/\//i;
 
 /**
- * A supplied upload's address, where a `files` backend can end up holding the
- * bytes.
- *
- * Two schemes qualify, for one reason each: `https://` is already fetchable,
- * and `gs://` is the depot's own address — not a URL, but one a signature turns
- * into one. `null` for anything else, and above all for the `upload://` handle
- * an installation with no depot stages onto its own pod's disk: those bytes are
- * not reachable from here at all, and falling through to the registry branch
- * answers that with a sentence about registry access instead.
- *
- * Shared with the other `files` backends rather than written once each: they
- * fetch the same bundle for the same reason, and three of them disagreeing
- * about which addresses are fetchable is the bug this function exists to have
- * exactly one answer to.
+ * A supplied upload's fetchable address: `https://` as is, or `gs://` once
+ * signed. `null` otherwise, such as for an `upload://` handle on a pod's disk.
  */
 export function fetchableStagedAddress(staged: string | null): string | null {
   if (staged === null) return null;
@@ -816,13 +627,8 @@ export function fetchableStagedAddress(staged: string | null): string | null {
 }
 
 /**
- * Why nothing here can be fetched, said about the address that failed.
- *
- * Three cases, and telling them apart is the point: no address at all, a bundle
- * staged somewhere nothing outside one process reaches, and a built artifact
- * homed only on a registry this identity cannot read. The middle one used to
- * take the last one's sentence, which sends an operator to IAM over a bundle
- * sitting on a disk.
+ * Why nothing can be fetched: no address, a bundle on one installation's own
+ * disk, or only registries this identity cannot read.
  */
 function unfetchableArtifact(
   artifact: Artifact,
@@ -843,12 +649,10 @@ export function siteId(desired: DesiredState): string {
   return workloadName(desired, SITE_ID_LIMIT);
 }
 
-/** The adapter's own handle on what `apply` placed — opaque to core (§6). */
 function refOf(connection: StaticAdapterConnection, site: string): DeployRef {
   return scopedRef(connection.project, 'sites', site);
 }
 
-/** The site this ref names on this connection, or `null` if it names another. */
 function parseRef(
   connection: StaticAdapterConnection,
   ref: DeployRef,
@@ -857,12 +661,8 @@ function parseRef(
 }
 
 /**
- * One list as chunks of at most `size`, always at least one chunk.
- *
- * The empty case yields one empty chunk rather than none, because a version
- * with no files is still a version that has to be *told* it has no files —
- * skipping the call entirely would leave a site whose emptiness the API never
- * heard about, which is a different thing from an empty site.
+ * Chunks of at most `size`. An empty list yields one empty chunk, because a
+ * version with no files must still be told so.
  */
 function chunksOf<Item>(items: readonly Item[], size: number): Item[][] {
   const chunks: Item[][] = [];
@@ -872,7 +672,7 @@ function chunksOf<Item>(items: readonly Item[], size: number): Item[][] {
   return chunks.length === 0 ? [[]] : chunks;
 }
 
-/** The sha256 of some bytes, hex — what the product deduplicates files on. */
+/** Hex sha256, the hash the product deduplicates files on. */
 function sha256Hex(bytes: Uint8Array<ArrayBuffer>): string {
   return new Bun.CryptoHasher('sha256').update(bytes).digest('hex');
 }

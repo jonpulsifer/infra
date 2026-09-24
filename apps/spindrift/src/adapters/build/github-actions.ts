@@ -1,36 +1,7 @@
 /**
- * The hosted-CI build route (§4).
- *
- * §4 puts the default build somewhere with a fast pipe — an image push is
- * upload, the direction a home uplink is weakest — and §15 puts the run in
- * the connected repository: the connected repo owns its Actions minutes,
- * while a **reusable workflow the
- * manifest names** plus a workflow-ref-scoped cloud identity hold the
- * machinery. Everything awkward about this file follows from that one
- * arrangement.
- *
- * **Three consequences worth knowing before reading the code.**
- *
- * 1. **Dispatch names no run.** The dispatch API answers `204` and says nothing
- *    about what it started, so the run has to be *found*. That is why the
- *    caller workflow carries a correlation input it stamps into `run-name`:
- *    matching on a name this route minted is exact, where matching on "the
- *    newest run since I asked" is a race with anyone else pushing.
- * 2. **The result comes back through the log.** Logs are read and never pushed
- *    (§4), so there is no endpoint for a runner to post a digest to — the
- *    runner prints one marker line and this route reads it out of the log it
- *    was already fetching. See `report.ts`.
- * 3. **An archive builds in the platform's own repository.** A repo App runs on
- *    its own minutes, but an uploaded archive has no repository at all — so it
- *    runs where the reusable workflow lives, which the installation already
- *    named in `github.buildWorkflow`. That workflow declares `workflow_call`
- *    and `workflow_dispatch` for exactly this reason.
- *
- * `LIVE_STATUS`, declared and not measured: on a hosted runner the step
- * transitions are readable while the run goes and the text only lands at the
- * end (§4, and the amendment in `04-build-path.md`). §4 makes that visible on
- * the Build rather than hidden, because a checklist-only log is a property of
- * where it ran and not a bug in Spindrift.
+ * The hosted-CI build route: dispatches a caller workflow, finds the run by the
+ * correlation it writes into the run name, and reads the report from the run's
+ * log.
  */
 
 import type { RegistryFlavour } from '../../domain/artifact-name.ts';
@@ -59,25 +30,16 @@ import {
   type PollingOptions,
 } from './route.ts';
 
-/** One run of a workflow, as much of it as this route reads. */
 export interface ActionsRun {
   readonly id: number;
   /** The `run-name` the caller stamped, which is how a run is correlated. */
   readonly name: string | null;
   readonly status: string;
   readonly conclusion: string | null;
-  /**
-   * The run's page on the host, where its log can be watched live.
-   *
-   * Nullable because it is the host's to report and this route does not
-   * compose one from the run id — a URL this module invented would be a guess
-   * about a layout GitHub owns, and a wrong guess is a dead link offered as
-   * the remedy for an empty log.
-   */
+  /** Nullable, because the route never composes a run URL the host did not report. */
   readonly htmlUrl: string | null;
 }
 
-/** One job of a run, and the steps inside it. */
 export interface ActionsJob {
   readonly id: number;
   readonly name: string;
@@ -90,14 +52,7 @@ export interface ActionsJob {
   }[];
 }
 
-/**
- * The far side this route drives.
- *
- * Declared here rather than imported from the integration, the same way
- * `ConfigurationHost` is: what this route needs is six calls, and naming them
- * is what lets a test stand a fake behind the real client without the fake
- * having to be a GitHub App.
- */
+/** The GitHub calls this route makes. */
 export interface ActionsHost {
   installationFor(fullName: string): Promise<RepositoryRef>;
   repository(
@@ -145,46 +100,21 @@ export interface GitHubActionsRouteOptions extends PollingOptions {
   readonly name: string;
   readonly host: ActionsHost;
   /**
-   * The reusable workflow, `owner/repo/.github/workflows/<file>@<ref>`, exactly
-   * as the manifest names it.
-   *
-   * Only the repository half is read here: a dispatch addresses a workflow
-   * file in one repository, and §15 puts the run in the repository that owns
-   * its minutes — so dispatching the reusable workflow directly would run on
-   * the platform's own minutes and ignore the ref the manifest states. This
-   * route therefore always dispatches a **caller** — the one the configuration
-   * PR wrote in a connected repository, or the one committed beside the
-   * reusable workflow here — and the caller's `uses:` carries the manifest's
-   * ref.
+   * The reusable workflow, `owner/repo/.github/workflows/<file>@<ref>`. Only its
+   * repository is read; the dispatched caller workflow's `uses:` pins the ref.
    */
   readonly buildWorkflow: string;
-  /** The zero-config BuildKit frontend the installation pinned (§4). */
   readonly zeroConfigFrontend: string;
-  /** The installation's signing key (§16). See `BuildRequestSpec.signer`. */
   readonly signer: string;
-  /** The attestor a cloud Target's admission asks. See `BuildRequestSpec.attestor`. */
   readonly attestor: string;
-  /**
-   * SPKI PEM, matching the manifest's `build.routes[].sealPublicKey`.
-   *
-   * Its presence is what turns on `carriesHeldSecret`. Absent, this
-   * route composes exactly the dispatch it always has.
-   */
+  /** SPKI PEM, the manifest's `sealPublicKey`. Setting it turns on `carriesHeldSecret`. */
   readonly sealPublicKey?: string;
-  /** Injected so a test can pin the correlation it asserts on. */
   readonly correlation?: () => string;
   /** How long to keep looking for the run a dispatch started. */
   readonly discoveryMs?: number;
 }
 
-/**
- * Where an archive builds: the repository half of the manifest's reference.
- *
- * The manifest schema already refuses anything that does not match this shape,
- * so a failure here is a programming error rather than a configuration one —
- * hence the throw. `null` would push a check onto every call site for a state
- * the boot already made impossible.
- */
+/** Throws, because the manifest schema already refuses any other shape. */
 export function reusableWorkflowRepository(reference: string): string {
   const match = /^([^/@\s]+\/[^/@\s]+)\/\.github\/workflows\/[^@\s]+@/.exec(
     reference,
@@ -195,150 +125,64 @@ export function reusableWorkflowRepository(reference: string): string {
   return match[1] as string;
 }
 
-/** What the workflow is handed, and what the reusable workflow reads back. */
+/** The `spec` input the reusable workflow reads. */
 export interface BuildRequestSpec {
   readonly bundleDigest: string;
   readonly origin: BuildSource['origin'];
   readonly artifactType: BuildSpec['artifactType'];
   readonly kind: BuildSpec['kind'];
   readonly platform: BuildSpec['platform'];
-  /**
-   * The repositories, without tags — one per registry the installation names.
-   *
-   * `destination` (singular) is what every spec carried before two Targets on
-   * one installation turned out not to share a registry. The workflow reads
-   * this and falls back to that, because the caller pins this file by a local
-   * reference that resolves to the default branch while the controller image
-   * waits on a Flux rollout: for the length of that window a spec composed by
-   * the old controller reaches the new workflow.
-   */
   readonly destinations: readonly string[];
-  /** What to push it as (§12); the workflow tags with these and no others. */
+  /** The workflow tags with these and no others. */
   readonly tags: readonly string[];
   readonly buildArgs: Readonly<Record<string, string>>;
-  /**
-   * Where a `files` build lifts the site out of, or `null` for the scope as it
-   * stands. See {@link BuildSpec.outputDirectory}.
-   *
-   * Sent as `null` rather than omitted, because the workflow defaults a missing
-   * field to "lift nothing" for the version-skew reason every other field here
-   * carries one for — and an explicit `null` and an absent key must therefore
-   * mean the same thing on the far side.
-   */
+  /** See {@link BuildSpec.outputDirectory}. The workflow reads absent as `null`. */
   readonly outputDirectory: string | null;
-  /**
-   * The framework a `vercel-output` build declares to the platform's own
-   * builder. See {@link BuildSpec.vercelFramework}; `dispatchBuild` refuses the
-   * shape without one, so a spec that reaches here carrying `vercel-output`
-   * always names it.
-   */
+  /** See {@link BuildSpec.vercelFramework}. Always set for a `vercel-output` build. */
   readonly vercelFramework: string | null;
   /** Pinned by the installation, never chosen by the runner. */
   readonly zeroConfigFrontend: string;
   /**
-   * The installation's signing key, as `supplyChain.signer` names it.
-   *
-   * Sent rather than baked into the workflow because it is this installation's
-   * key and the workflow is not this installation's file — the same reason the
-   * registry and the frontend travel in the spec.
-   *
-   * §16 has core sign the digest, and it still does: the bundle core records
-   * and re-verifies at admission is unchanged. What this adds is a *second*
-   * signature over the same digest, made with the same key, attached to the
-   * artifact **in the registry** — because that is the only place a Target's
-   * own admission can read one. A cluster whose policy engine asks cosign
-   * whether an image is signed is asking about the registry, and core has no
-   * way to answer: a cosign signature is a `sha256-<digest>.sig` object pushed
-   * to the repository, and the controller holds no registry write credential.
-   * The runner does, having just pushed the artifact with it.
+   * The installation's signing key. The runner also signs the digest in the
+   * registry, where a cluster's admission reads signatures; core cannot push there.
    */
   readonly signer: string;
   /**
-   * The attestation authority a cloud Target's own admission asks, as
-   * `projects/<project>/attestors/<name>`, or empty where the installation
-   * named none.
-   *
-   * The second half of the same fact `signer` carries, and separate from it
-   * because the two boundaries want different objects from the same key. A
-   * cluster's policy engine reads a signature off the artifact in the
-   * registry; a cloud runtime's Binary Authorization reads an *attestation* —
-   * a note occurrence in the authority's own project, which is not in the
-   * registry at all and cannot be derived from a signature that is. One key,
-   * two verifiers, two artifacts.
+   * `projects/<project>/attestors/<name>`, or empty. Binary Authorization reads
+   * an attestation in the attestor's project, which no registry signature replaces.
    */
   readonly attestor: string;
   /**
-   * The installation's held registry credential, sealed to `sealPublicKey`
-   * (`sealForRun` below) — absent wherever {@link BuildSpec.registryAuth}
-   * is empty, which is the ordinary case (§16).
-   *
-   * Never the credential itself. `workflow_dispatch` renders every other field
-   * of this request in the run header, so the plaintext travels no further
-   * than the process that composed this object — see
-   * `carriesHeldSecret` for the rest of the reasoning. The reusable
-   * workflow's "Log in with sealed credentials" step is the only place that
-   * ever opens it, and it does so with the private key on the other side of
-   * this pair, held as this repository's `SPINDRIFT_BUILD_SEAL_KEY` secret.
+   * The held registry credentials sealed by `sealForRun`, absent when
+   * `registryAuth` is empty. The run header shows dispatch inputs in the clear.
    */
   readonly sealedRegistryAuth?: string;
-  /**
-   * The Component's resolved build secrets, sealed the same way to the same
-   * key (story 112) — absent wherever {@link BuildSpec.buildSecrets} is empty.
-   * The workflow's "Stage sealed build secrets" step opens it, writes each
-   * value to a file, and hands the engine the named mounts; nothing about the
-   * values reaches the run header, the log, or the artifact.
-   */
+  /** The build secrets, sealed the same way; absent when there are none. */
   readonly sealedBuildSecrets?: string;
 }
 
 export class GitHubActionsBuildRoute implements BuildAdapter {
   readonly name: string;
+  /** A hosted runner shows step transitions live and the log text at the end. */
   readonly logFidelity: LogFidelity = 'LIVE_STATUS';
   readonly provenanceBuilderId =
     'https://github.com/actions/runner/github-hosted';
   /**
-   * **Only where a seal key is configured.** This route is dispatched through
-   * `workflow_dispatch`, and GitHub renders a dispatch's inputs in the run
-   * header — so a credential travelling in the spec in the clear would be
-   * published to everyone who can see the run, in a repository §15
-   * deliberately does not require the installation to own. That is still true
-   * and is still why nothing here ever sends one unsealed.
-   *
-   * What changed is the mechanism for carrying one anyway. A repository
-   * Actions secret written through a libsodium sealed box would have needed a
-   * dependency this package has not taken — the alternative actually built is
-   * the reverse of that write: this route seals a held credential to
-   * `sealPublicKey` (`sealForRun` below) *before* it ever reaches the
-   * dispatch inputs, so what the run header renders is ciphertext. The only
-   * key that opens it is the matching private key, and its only home is the
-   * platform repository's `SPINDRIFT_BUILD_SEAL_KEY` Actions secret — never
-   * this manifest, never git, and not a connected repository's own secrets
-   * either: a caller in a connected repository passes none, so a build that
-   * runs there carries no credential regardless of what this route declares.
-   *
-   * A route with no `sealPublicKey` configured answers `false` here exactly as
-   * before, and `dispatchBuild` refuses a build that needs a stored credential
-   * on it — a route an operator can change, rather than a token an operator
-   * cannot un-publish.
+   * Only with a seal key. The run header shows dispatch inputs, so held secrets
+   * travel sealed, and the workflow opens them with the matching private key.
    */
   readonly carriesHeldSecret: boolean;
   /**
-   * Both, because the run holds two identities at once and the reusable
-   * workflow uses each: `docker/login-action` against `ghcr.io` with the run's own
-   * token, and `google-github-actions/auth` federating into the artifact
-   * registry. So the hosted route is the one that publishes everywhere this
-   * installation pushes, and it is why nothing here has ever needed a stored
-   * credential.
+   * The run logs in to GHCR with its own token and federates into the artifact
+   * registry.
    */
   readonly selfAuthorizedRegistries: readonly RegistryFlavour[] = [
     'ghcr',
     'artifactRegistry',
   ];
   /**
-   * §16's profile level. A platform-controlled reusable workflow, running on a
-   * runner the repository does not control, producing signed provenance — that
-   * is L2. It is not L3: the workflow runs with the connected repository's own
-   * permissions, so its own maintainers can reach the build environment.
+   * L2: the workflow runs with the connected repository's permissions, so that
+   * repository's maintainers can reach the build.
    */
   readonly buildLevel: BuildLevel = 2;
 
@@ -351,15 +195,7 @@ export class GitHubActionsBuildRoute implements BuildAdapter {
     this.carriesHeldSecret = options.sealPublicKey !== undefined;
   }
 
-  /**
-   * Cancel the run at the address the host reported.
-   *
-   * The run id is the host's to assign and which repository the run landed in
-   * was decided at dispatch, so neither is derivable from the dispatch id the
-   * way a Job name is. Both are in the one thing the Build row kept about the
-   * run — the `html_url` the host itself handed back — and reading a host's
-   * own address is not the guess composing one would be.
-   */
+  /** The URL the host reported names the run's repository and id. */
   async cancel(handle: BuildHandle): Promise<void> {
     const run = runAt(handle.runUrl);
     if (run === null) {
@@ -380,49 +216,23 @@ export class GitHubActionsBuildRoute implements BuildAdapter {
     const logs = { backend: this.name, fidelity: this.logFidelity } as const;
     const { host } = this.options;
 
-    // Where the run happens, in preference order.
-    //
-    // §15 puts a repo App's build on its own repository's minutes, and an
-    // archive has no repository at all so it runs where the reusable workflow
-    // lives. The second entry is the same place for a third reason: a connected
-    // repository that does not carry the caller yet.
-    //
-    // **The fallback is sound because the runner never reads the source
-    // repository.** §15 stages one immutable bundle and the workflow fetches it
-    // by URL — `Fetch the staged bundle` is a `curl`, not a checkout — so the
-    // build is byte-identical wherever it runs. What differs is only whose
-    // Actions minutes pay for it, which is a billing preference and not a
-    // correctness one.
-    //
-    // Without this, connecting a repository and creating an App on it were one
-    // act: the configuration PR had to be merged before the first Build could
-    // be dispatched, so the operator had to name every scope up front and wait
-    // on a merge to find out whether the thing built at all. Connecting grants
-    // access; Apps are created on it afterwards, and the first one builds.
+    // A repo App builds on its own repository's minutes, else on the platform
+    // repository's. The runner fetches the staged bundle, so the build is the same.
     const candidates =
       source.origin.type === 'repo' &&
       source.origin.repository !== this.platformRepository
         ? [source.origin.repository, this.platformRepository]
         : [this.platformRepository];
-    // Always a caller, never the reusable workflow itself — a dispatch runs in
-    // the repository it addresses, and §15 puts the run on the connected
-    // repository's own minutes. The connected repository runs the caller the
-    // configuration PR wrote there; the platform repository runs the one
-    // committed beside the reusable workflow. Same file name, same inputs.
+    // A caller workflow in either repository, with the same file name and inputs.
     const workflow = CALLER_WORKFLOW_FILE;
 
-    // The dispatch id where there is one, so the run name says which attempt
-    // it is; the injected generator is for a test that drives the route bare.
+    // The dispatch id where there is one, so the run name says which attempt it is.
     const correlation =
       dispatchId ?? (this.options.correlation ?? (() => crypto.randomUUID()))();
     const runName = `${RUN_NAME_PREFIX} ${correlation}`;
 
-    // `dispatchBuild` already refused a build that needs one where
-    // `carriesHeldSecret` is false, so a seal key is here whenever
-    // `spec.registryAuth` or `spec.buildSecrets` is not empty — the throw
-    // below is for a caller that skipped that refusal, which is a programming
-    // error rather than a configuration one (the same posture
-    // `reusableWorkflowRepository` takes).
+    // Dispatch already refused a held secret without a seal key, so reaching the
+    // throw below is a programming error.
     let sealedRegistryAuth: string | undefined;
     let sealedBuildSecrets: string | undefined;
     if (spec.registryAuth.length > 0 || spec.buildSecrets.length > 0) {
@@ -482,12 +292,8 @@ export class GitHubActionsBuildRoute implements BuildAdapter {
         branch = candidateBranch;
         break;
       } catch (error) {
-        // §4 story 48: a failure *before* the build step — dispatch refused,
-        // the runner never came up — must be visible as text rather than as an
-        // empty log and a spinner. Every attempt is yielded, including the one
-        // that is about to be retried elsewhere, because "we tried your
-        // repository and it has no caller" is the sentence that explains why
-        // the run appears somewhere the operator did not expect.
+        // Every failed attempt is logged, which explains a run in the platform
+        // repository.
         detail = error instanceof Error ? error.message : String(error);
         yield {
           type: 'log',
@@ -519,11 +325,8 @@ export class GitHubActionsBuildRoute implements BuildAdapter {
         DEFAULT_BUILD_TIMEOUT_MS,
     });
     let run: ActionsRun | null = null;
-    // A lookup the far side would not answer is retried until the discovery
-    // deadline, not treated as the dispatch failing: the dispatch already
-    // succeeded and is already on the log, and a `5xx` is the one status class
-    // that says nothing about the request. The last refusal is kept so that a
-    // deadline that expires this way blames the lookup, not the dispatch.
+    // The dispatch succeeded, so a failed lookup is retried until the discovery
+    // deadline, which then blames the last lookup failure.
     let lookupFailure: string | null = null;
     while (run === null) {
       if (discovery.expired()) {
@@ -559,14 +362,8 @@ export class GitHubActionsBuildRoute implements BuildAdapter {
 
     yield { type: 'log', at: now(), line: `run ${run.id} started` };
 
-    // Announced the moment the run is correlated, because this route is
-    // `LIVE_STATUS`: the checklist is the only live thing Spindrift can show,
-    // and this is where the live *text* is. Emitting it here rather than with
-    // the result is what makes it usable during the run instead of after it.
-    //
-    // Truthiness rather than a null check: a host that omits the field entirely
-    // is saying the same thing as one that reports it empty, and an event
-    // carrying `undefined` would reach the Build row as a link to nowhere.
+    // Yielded as soon as the run is found, since at `LIVE_STATUS` the live text
+    // is only on the host's page. A missing or empty URL yields nothing.
     if (run.htmlUrl) {
       yield { type: 'runner', at: now(), url: run.htmlUrl };
     }
@@ -587,9 +384,7 @@ export class GitHubActionsBuildRoute implements BuildAdapter {
           break;
         }
       } catch (error) {
-        // Same posture as the discovery lookup: the run demonstrably exists,
-        // so a status read the far side would not answer is retried within
-        // the budget rather than ending a build that is still going.
+        // The run exists, so a failed status read is retried within the budget.
         const detail = error instanceof Error ? error.message : String(error);
         yield {
           type: 'log',
@@ -598,8 +393,7 @@ export class GitHubActionsBuildRoute implements BuildAdapter {
         };
       }
       if (budget.expired()) {
-        // Best-effort: the Build is failing either way, and a cancel that
-        // did not land leaves a run the host's own limit ends.
+        // Best-effort: the Build fails either way, and the host's limit ends the run.
         yield {
           type: 'log',
           at: now(),
@@ -616,25 +410,15 @@ export class GitHubActionsBuildRoute implements BuildAdapter {
       await budget.tick();
     }
 
-    // The text lands only now, which is what `LIVE_STATUS` means. Reading it
-    // even on a red run is the point: the failure is in there.
+    // Read on red runs too: the failure is in the log.
     let log = '';
     for (const job of jobs) {
       let text: string | null;
       try {
         text = await host.jobLog(ref, repository, job.id);
       } catch (error) {
-        // A verdict of its own, and the reason it is not the dispatch's: by now
-        // the workflow has been dispatched, correlated, and concluded, so
-        // `dispatch failed:` would name the one part that demonstrably worked
-        // and send an operator to read a green run's logs looking for a refusal
-        // that is not in them.
-        //
-        // It is still a failure, because consequence 2 above holds: the report
-        // rides the log, so a log this route cannot read is a build that cannot
-        // say what it built (`report.ts`). `TARGET_UNREACHABLE` is §6's
-        // platform-blamed reason for an API that would not answer, which is
-        // exactly what this is — nothing the developer wrote is at fault.
+        // The report rides the log, so an unreadable log fails the build. The
+        // dispatch worked and the developer is not at fault.
         const detail = error instanceof Error ? error.message : String(error);
         yield {
           type: 'log',
@@ -657,9 +441,7 @@ export class GitHubActionsBuildRoute implements BuildAdapter {
     }
 
     if (conclusion === 'cancelled') {
-      // Ended before a verdict, by this route's budget or by an operator
-      // through `cancel`; the attempt log already says which. §6's `TIMEOUT`
-      // is the one reason that indicts nobody, and nobody is who this indicts.
+      // Cancelled by this route's budget or an operator. `TIMEOUT` blames nobody.
       return buildFailed(
         logs,
         'TIMEOUT',
@@ -673,10 +455,7 @@ export class GitHubActionsBuildRoute implements BuildAdapter {
       if (scaffolding !== null) {
         return buildFailed(
           logs,
-          // §6 blames the **platform** for an object that could not be
-          // fetched, which is what this is: the workflow never reached the
-          // developer's code because the platform's own preamble did not
-          // finish.
+          // The platform's own preamble failed before the developer's code ran.
           'ARTIFACT_UNAVAILABLE',
           `run ${run.id} in ${repository} failed in “${scaffolding}”, a step of Spindrift's own build workflow rather than of the App's build`,
           { runId: run.id, conclusion, step: scaffolding },
@@ -692,9 +471,7 @@ export class GitHubActionsBuildRoute implements BuildAdapter {
 
     const report = parseBuildReport(log);
     if (report === null) {
-      // Green run, no report: the workflow ran something other than a Spindrift
-      // build. Reporting it as an adapter fault rather than a build failure is
-      // deliberate — nothing the developer wrote is at fault for it.
+      // A green run with no report ran something else; the developer is not at fault.
       return buildFailed(
         logs,
         'INTERNAL',
@@ -714,25 +491,9 @@ export class GitHubActionsBuildRoute implements BuildAdapter {
 }
 
 /**
- * Seals a held secret to `sealPublicKey`, so it can travel inside
- * `workflow_dispatch`'s inputs without arriving in the clear
- * (`carriesHeldSecret` above says why that would otherwise matter). One
- * envelope, two payloads: a `RegistryAuth[]` for `sealedRegistryAuth` and a
- * `BuildSecretValue[]` for `sealedBuildSecrets` — sealed separately because
- * the workflow opens them at different steps for different consumers.
- *
- * Hybrid rather than RSA-OAEP alone: OAEP has no room for more than a couple
- * hundred bytes of plaintext under a 2048-bit key, and neither payload is
- * bounded that way. A fresh AES-256-GCM key encrypts the payload; RSA-OAEP
- * wraps only that key.
- *
- * The envelope is `base64(JSON.stringify({k, iv, c}))` — the wrapped AES key,
- * the GCM nonce, and the ciphertext with WebCrypto's own 16-byte tag already
- * appended to it, each base64 on its own. Exported so a test can decrypt what
- * this produces with the *exact* algorithm the reusable workflow runs — see
- * `.github/workflows/spindrift-build.yml`'s "Log in with sealed credentials"
- * and "Stage sealed build secrets" steps, the other half of this pair and the
- * ones the wire format actually has to agree with.
+ * Seals a payload for the dispatch inputs. AES-256-GCM encrypts it and RSA-OAEP
+ * wraps the key, since OAEP alone holds a few hundred bytes. The envelope is
+ * `base64(JSON.stringify({k, iv, c}))`, which the workflow's seal steps decode.
  */
 export async function sealForRun(
   payload: unknown,
@@ -778,49 +539,18 @@ function spkiPemToDer(pem: string): Uint8Array<ArrayBuffer> {
     .replace(/-{5}BEGIN PUBLIC KEY-{5}/, '')
     .replace(/-{5}END PUBLIC KEY-{5}/, '')
     .replace(/\s+/g, '');
-  // Copied into a fresh `Uint8Array<ArrayBuffer>` rather than returned as the
-  // `Buffer` itself: `Buffer`'s type admits `ArrayBufferLike`, which WebCrypto's
-  // `BufferSource` does not, and a cast here would paper over the one call site
-  // that actually needs the narrower type.
+  // A fresh `Uint8Array<ArrayBuffer>`: WebCrypto's `BufferSource` rejects the
+  // `ArrayBufferLike` that `Buffer`'s type admits.
   return new Uint8Array(Buffer.from(body, 'base64'));
 }
 
 /**
- * The one step of the reusable workflow the developer owns.
- *
- * Everything else in that file is Spindrift's: reading the request, fetching
- * the staged bundle, choosing a frontend, logging in to the registry, printing
- * the report. The App's own code is compiled in exactly one step, and naming it
- * is what lets this route tell "your build failed" apart from "our scaffolding
- * failed" — a distinction §6 spends its whole blame column on.
- *
- * Coupled to the workflow by name. The manifest may name a moving ref
- * (`github.buildWorkflow`), so the file this route dispatches can be newer
- * than this constant — a step rename there reads as scaffolding blame until
- * this catches up, the same skew window the platform repository's own
- * local-reference caller already has.
+ * The workflow step that compiles the App's code, which separates a developer
+ * failure from a platform one. It must match the step name in the workflow.
  */
 export const DEVELOPER_BUILD_STEP = 'Build and push';
 
-/**
- * The Spindrift-owned step a red run failed in, or `null` when the App's own
- * build is what failed.
- *
- * This is the fix for a build that reported `blame = developer` for a failure
- * that was entirely the platform's: the workflow was handed a bundle location
- * it could not resolve, died in the fetch step, and the developer was sent to
- * read a Dockerfile that was never compiled. A run that never reached
- * {@link DEVELOPER_BUILD_STEP} cannot have failed because of anything the
- * developer wrote.
- *
- * A run whose jobs report no steps at all answers `null` — the conservative
- * direction, because claiming platform blame without evidence would mask real
- * build failures behind a chip that says "not your fault".
- */
-/**
- * The repository and run id a run's `html_url` names, or `null` when the
- * address is absent or is not one — `https://github.com/<owner>/<repo>/actions/runs/<id>`.
- */
+/** The repository and run id in a run's `html_url`, or `null`. */
 function runAt(
   url: string | null,
 ): { readonly repository: string; readonly id: number } | null {
@@ -838,6 +568,10 @@ function runAt(
   return { repository: match[1] as string, id: Number(match[2]) };
 }
 
+/**
+ * The platform step a red run failed in, or `null` when the App's build step
+ * failed or no step reported a failure.
+ */
 function failedScaffoldingStep(jobs: readonly ActionsJob[]): string | null {
   let scaffolding: string | null = null;
   for (const job of jobs) {
@@ -850,13 +584,7 @@ function failedScaffoldingStep(jobs: readonly ActionsJob[]): string | null {
   return scaffolding;
 }
 
-/**
- * The step transitions not yet yielded.
- *
- * Deduplicated on `(job, step, state)` because the jobs endpoint is polled and
- * reports the same completed step on every pass — without this the timeline
- * would repeat every step once per poll, which reads as a build looping.
- */
+/** Step transitions not yet yielded. The jobs endpoint repeats finished steps. */
 function stepEvents(
   jobs: readonly ActionsJob[],
   seen: Set<string>,
@@ -881,15 +609,14 @@ function stepEvents(
   return events;
 }
 
-/** A step's state, or `null` for one that has not started and has nothing to say. */
+/** A step's state, or `null` for one that has not started. */
 function stepState(
   status: string,
   conclusion: string | null,
 ): 'RUNNING' | 'SUCCEEDED' | 'FAILED' | null {
   if (status === 'in_progress') return 'RUNNING';
   if (status !== 'completed') return null;
-  // `skipped` is not a failure and is not a success; reporting it as either
-  // would put a step on the timeline that never ran.
+  // A skipped step never ran, so it gets no timeline entry.
   if (conclusion === 'skipped') return null;
   return conclusion === 'success' ? 'SUCCEEDED' : 'FAILED';
 }

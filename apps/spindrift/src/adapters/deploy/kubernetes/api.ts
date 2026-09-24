@@ -1,47 +1,24 @@
 /**
- * The Kubernetes API, as thin as the adapter needs it.
- *
- * § Seam 2 names the pattern: "a fake of the far-side HTTP API behind the real
- * client, with the test asserting the requests that were made". That only works
- * if the client takes its transport, so `fetch` is injected and nothing here
- * reaches for a global.
- *
- * There is no client library. §19 already rules out the machinery a library
- * brings — "no CRD, no informer, no controller-runtime" — and what is left is
- * four verbs over REST paths. A dependency for that would be a dependency whose
- * types drift from the four objects this adapter actually writes.
- *
- * **Writes are server-side apply.** A `PATCH` with the apply content type makes
- * Spindrift a named field manager, so a field an operator sets on the same
- * object is not silently reverted by the next deploy — and re-applying an
- * unchanged object is a no-op rather than a new generation.
+ * A thin Kubernetes REST client over an injected `fetch` and token. Writes are
+ * server-side apply, so fields another manager sets survive the next deploy.
  */
 
-/** The transport, in the shape `fetch` already has. */
 export type Fetcher = (request: Request) => Promise<Response>;
 
-/** Mints a bearer token per request. Never a stored credential (§13). */
+/** Mints a bearer token per request. Never a stored credential. */
 export type TokenProvider = () => string | Promise<string>;
 
-/** Where a cluster is reached and how a request to it is authorized. */
 export interface KubernetesEndpoint {
-  /** The API server, without a trailing slash. */
+  /** Without a trailing slash. */
   readonly apiServer: string;
   readonly token: TokenProvider;
-  /** Injected so a test can stand a fake far side behind the real client. */
   readonly fetch?: Fetcher;
 }
 
-/**
- * The field manager every write is attributed to.
- *
- * A constant rather than a value: two installations sharing a cluster still
- * want their writes attributed to Spindrift, and a per-installation manager
- * would make the same object look contended between them.
- */
+/** The same in every installation, so two sharing a cluster never contend. */
 export const FIELD_MANAGER = 'spindrift';
 
-/** A cluster that answered, but not with success. */
+/** A non-2xx answer. A transport failure throws from `fetch` instead. */
 export class KubernetesRequestError extends Error {
   override readonly name = 'KubernetesRequestError';
 
@@ -55,7 +32,6 @@ export class KubernetesRequestError extends Error {
   }
 }
 
-/** Any Kubernetes object, as loosely typed as the API's own JSON. */
 export interface KubernetesObject {
   apiVersion: string;
   kind: string;
@@ -69,17 +45,15 @@ export interface KubernetesObject {
   [key: string]: unknown;
 }
 
-/** Where one object lives, in the API's own path vocabulary. */
 export interface ResourceRef {
   /** `apps/v1`, or `v1` for the core group. */
   apiVersion: string;
-  /** The lowercase plural, as the path uses it — `helmreleases`, `pods`. */
+  /** The lowercase plural the path uses, such as `helmreleases`. */
   plural: string;
   namespace?: string;
   name?: string;
 }
 
-/** The path a ref addresses. Exported because the tests assert on paths. */
 export function resourcePath(ref: ResourceRef): string {
   const prefix = ref.apiVersion.includes('/')
     ? `/apis/${ref.apiVersion}`
@@ -90,7 +64,6 @@ export function resourcePath(ref: ResourceRef): string {
   return `${prefix}${scope}/${ref.plural}${name}`;
 }
 
-/** What a list call returns, of whatever kind was listed. */
 export interface KubernetesList<Item = KubernetesObject> {
   items: Item[];
 }
@@ -98,21 +71,14 @@ export interface KubernetesList<Item = KubernetesObject> {
 export class KubernetesApi {
   constructor(private readonly endpoint: KubernetesEndpoint) {}
 
-  /** One object, or `null` when the API says it is not there. */
+  /** `null` when the object does not exist. */
   async get(ref: ResourceRef): Promise<KubernetesObject | null> {
     return this.json<KubernetesObject>('GET', resourcePath(ref), {
       tolerate: [404],
     });
   }
 
-  /**
-   * Every object matching a ref, or `null` when the *kind* is not served.
-   *
-   * The distinction is the whole reason this returns `null` rather than an
-   * empty list: "no `HelmRelease`s exist" and "this cluster does not know what
-   * a `HelmRelease` is" are different answers, and §13's checklist turns on the
-   * second one.
-   */
+  /** `null` when the kind is not served, which differs from an empty list. */
   async list(
     ref: ResourceRef,
     query?: Record<string, string>,
@@ -127,12 +93,8 @@ export class KubernetesApi {
   }
 
   /**
-   * Server-side apply one object.
-   *
-   * `force` resolves a conflict in Spindrift's favour for the fields Spindrift
-   * owns. Without it a field another manager once set — a replica count edited
-   * by hand, say — would make every subsequent deploy fail with a conflict
-   * instead of converging.
+   * `force` takes conflicting fields, or a field another manager once set would
+   * fail every later deploy with a conflict.
    */
   async apply(object: KubernetesObject, plural: string): Promise<void> {
     const path = resourcePath({
@@ -152,19 +114,8 @@ export class KubernetesApi {
   }
 
   /**
-   * `POST` one object, and answer with what the API server made of it.
-   *
-   * Two callers, and they want opposite things from the reply.
-   * `SelfSubjectAccessReview` answers rather than stores: the API server
-   * replies with what the request's own identity may do, which is how §13's
-   * "OIDC both ways" is checked without holding a credential. A Job stores, and
-   * the object that comes back is the proof it exists.
-   *
-   * **A `404` here is a fault, never an absence.** `POST`ing to a collection
-   * path 404s when the namespace is gone or the group is not served — neither
-   * of which is "there is nothing there", both of which mean nothing was
-   * created. Absence is only an answer for a read, which is why the tolerance
-   * for it is opt-in one method up rather than a default in {@link send}.
+   * A 404 here is a fault: the namespace is gone or the group is not served,
+   * so nothing was created.
    */
   async create(
     ref: ResourceRef,
@@ -175,10 +126,7 @@ export class KubernetesApi {
       resourcePath(ref),
       { body: object },
     );
-    // `send` only answers `null` for a tolerated status and this call tolerates
-    // none, so this is unreachable — asserted rather than assumed because the
-    // whole point of the change above is that a caller must not be able to
-    // treat "created nothing" as "created something".
+    // Unreachable: no status is tolerated, so `send` never answers `null`.
     if (created === null) {
       throw new Error(`POST ${resourcePath(ref)} returned no object`);
     }
@@ -186,13 +134,8 @@ export class KubernetesApi {
   }
 
   /**
-   * Idempotent: deleting what is already gone succeeds (§6).
-   *
-   * `propagation` is for a caller that means to stop what the object is
-   * running, not only to remove it: a `batch/v1` Job deleted through the API
-   * orphans its pods unless a policy says otherwise (`kubectl` sets one; the
-   * API's own default for that version is to orphan), so a build Job deleted
-   * without it keeps building.
+   * Idempotent. Pass `propagation` to stop what the object runs: the API's
+   * default for a `batch/v1` Job orphans its pods, which keep running.
    */
   async delete(
     ref: ResourceRef,
@@ -208,15 +151,8 @@ export class KubernetesApi {
   }
 
   /**
-   * One pod's log as text, or `null` when the pod has none yet.
-   *
-   * Read rather than followed: a `follow=true` connection is a long-lived
-   * stream, and every other read in this adapter is a poll for the reason §6
-   * gives — a watch over the uplink stays open while delivering nothing. A
-   * caller that wants the tail asks again and takes what is new.
-   *
-   * A pod that has not started yet answers `400`, which is not a fault: the
-   * container is pulling, and the honest answer is that there is no log.
+   * `null` before the pod starts (400) or after it is collected (404). Never
+   * followed: a caller polls again for new lines.
    */
   async logs(
     namespace: string,
@@ -247,14 +183,11 @@ export class KubernetesApi {
     const response = await this.send(
       'GET',
       `/api/v1/namespaces/${namespace}/pods/${pod}/log${query}`,
-      // A pod that has been garbage collected is a `404`, and "there is no log"
-      // is the same honest answer for it as for one that has not started.
       { tolerate: [400, 404] },
     );
     return response === null ? null : await response.text();
   }
 
-  /** Whether the API serves a kind at all — §13's checklist, one call. */
   async servesKind(apiVersion: string, kind: string): Promise<boolean> {
     const path = apiVersion.includes('/')
       ? `/apis/${apiVersion}`
@@ -262,8 +195,7 @@ export class KubernetesApi {
     const resources = await this.json<{ resources?: { kind: string }[] }>(
       'GET',
       path,
-      // A group the cluster does not serve has no discovery document, which is
-      // the answer this asks for rather than a fault.
+      // An unserved group has no discovery document.
       { tolerate: [404] },
     );
     return (resources?.resources ?? []).some(
@@ -291,16 +223,8 @@ export class KubernetesApi {
       body?: unknown;
       contentType?: string;
       /**
-       * Statuses the caller has a value for, returned as `null` rather than
-       * raised.
-       *
-       * `404` is in here for every read and for `delete`, and in here for
-       * nothing that writes. It used to be unconditional, on the reasoning that
-       * absence is an answer every caller has a value for — which was true
-       * until a caller started `POST`ing a Job. A create whose namespace was
-       * deleted 404s, and swallowing that turned "nothing was created" into a
-       * started run: an act that reached nothing and reported success. The
-       * distinction is a property of the verb, so the verb states it.
+       * Statuses answered as `null`. Never 404 for `create`: a create that 404s
+       * created nothing, and must not report success.
        */
       tolerate?: readonly number[];
     } = {},

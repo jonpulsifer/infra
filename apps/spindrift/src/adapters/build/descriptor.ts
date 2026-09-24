@@ -18,13 +18,7 @@ export interface BuildRouteContext {
   readonly token: TokenProvider;
   readonly fetch?: (request: Request) => Promise<Response>;
   readonly env?: Record<string, string | undefined>;
-  /**
-   * The bosun build route's outbox, or `null` where this process has no
-   * database — the same "both halves or nothing" posture
-   * `registryCredentials()` takes in `adapters/registry.ts`. `bosunDescriptor`
-   * answers `null` from `create` whenever this is absent, exactly as
-   * `inClusterDescriptor` does for a missing `token`.
-   */
+  /** `null` where this process has no database; the bosun route is then unavailable. */
   readonly outbox?: BosunOutbox | null;
 }
 

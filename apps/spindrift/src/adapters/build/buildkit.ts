@@ -1,66 +1,21 @@
 /**
- * The program every route runs (§4).
- *
- * §4 settles the engine and refuses to make it a per-route choice: "**BuildKit
- * with two frontends** — the repo's Dockerfile if present, else a zero-config
- * builder", and "because Railpack *is* a BuildKit frontend, 'Dockerfile if
- * present, else Railpack' is **not two build systems to operate** — it is one
- * engine with two frontends."
- *
- * This module is what makes that true rather than aspirational. The cloud
- * builder runs this in a build step, the cluster runs it in a Job, and hosted CI
- * runs the same two frontends over the same ladder — so a build that works on
- * one route is a build that works on the others, and the routes differ only in
- * *where* they run and what provenance they can claim.
- *
- * **The ladder runs here and not in core**, which is what the build contract
- * means by "the frontend is not here". A Dockerfile settles how to build and
- * never what the thing is (§5) — core already decided the `kind`, and this
- * script decides nothing except which frontend gets handed the same directory.
- *
- * **What the image must provide.** Declared, not discovered, so an installation
- * that pins an image knows what it is promising: a POSIX `sh`, `wget`, `tar`,
- * `sed`, `base64`, `chmod`, `mktemp`, and `buildctl-daemonless.sh` on the path.
- * Every one of those is in the stock BuildKit image; a hardened replacement that
- * drops one will fail loudly on the first build rather than subtly on the
- * hundredth.
+ * The BuildKit shell program the container routes run: fetch the staged bundle,
+ * build it with the repo's Dockerfile or the zero-config frontend, push, report.
  */
 import type { RegistryAuth } from '../../storage/registry-credentials.ts';
 import type { BuildSecretValue, BuildSource, BuildSpec } from './contract.ts';
 import { BUILD_REPORT_MARKER } from './report.ts';
 
 /**
- * The variable the program reads a Docker config out of.
- *
- * **A variable and not a value in the program**, and the distinction is the
- * whole of the secret handling here. This program is a string that lands in a
- * Job's `spec.template.spec.containers[0].command` and in a Cloud Build step —
- * both readable by anyone who can `get` the object, and both kept for as long
- * as the object is. A token interpolated into it would be a token in an API
- * object with a TTL measured in hours. Read from the environment instead, it is
- * a value the route sets on the container and nothing echoes.
- *
- * `set -x` is never used in this program for the same reason.
+ * The variable the program reads a Docker config from. The program text is
+ * readable on the Job or build resource, so secrets travel only in the
+ * environment and the program never uses `set -x`.
  */
 export const REGISTRY_AUTH_VAR = 'SPINDRIFT_REGISTRY_AUTH';
 
-/**
- * The prefix a build secret's value rides the environment under (story 112).
- *
- * One variable per secret rather than one JSON blob, because the program that
- * reads them promises only a POSIX shell — no `jq` — and a name matched by
- * `VARIABLE_NAME` composes into an environment variable with nothing to
- * escape. The same reasoning as {@link REGISTRY_AUTH_VAR} applies to why they
- * are variables at all: the program is a string in a readable API object, and
- * a value interpolated into it would be a secret in that object for its TTL.
- */
+/** One variable per build secret: the image has no `jq` to split a JSON blob. */
 export const BUILD_SECRET_VAR_PREFIX = 'SPINDRIFT_BUILD_SECRET_';
 
-/**
- * The environment one route's container sets so the program below can write
- * each secret to the file its `--secret` flag names. Routes share this so the
- * variable names cannot drift from the ones the program reads.
- */
 export function buildSecretEnvOf(
   secrets: readonly BuildSecretValue[],
 ): Record<string, string> {
@@ -73,15 +28,8 @@ export function buildSecretEnvOf(
 }
 
 /**
- * A Docker config the BuildKit client and `buildctl` both read.
- *
- * `auths[host].auth` is `base64(username:secret)` — the format every registry
- * client has agreed on, and what `buildctl-daemonless.sh` looks for under
- * `$DOCKER_CONFIG/config.json` when it pushes.
- *
- * Returns `null` for an empty list rather than an empty document, so a route
- * sets no variable at all when there is no credential — which is the ordinary
- * case, and the one where nothing should be written anywhere.
+ * A Docker config for `buildctl`, each `auth` being `base64(username:secret)`.
+ * `null` for no credentials, so the route sets no variable at all.
  */
 export function dockerConfigFor(auth: readonly RegistryAuth[]): string | null {
   if (auth.length === 0) return null;
@@ -95,27 +43,11 @@ export function dockerConfigFor(auth: readonly RegistryAuth[]): string | null {
   });
 }
 
-/** The Docker Hub entry every registry client has agreed to disagree about. */
 const DOCKER_HUB_CONFIG_KEY = 'https://index.docker.io/v1/';
 
 /**
- * The key BuildKit looks a host up under, which is the host for all but one.
- *
- * Docker Hub is the exception, and it is not cosmetic: BuildKit resolves
- * `docker.io` to the registry host `registry-1.docker.io` and then substitutes
- * the legacy index URL before reading the config —
- *
- * ```go
- * hostKey := host
- * if host == DockerHubRegistryHost { hostKey = DockerHubConfigfileKey }
- * ac, err := ap.config.GetAuthConfig(hostKey)
- * ```
- *
- * — so an entry filed under either spelling of the hostname is an entry it
- * never reads, and the push fails as `push access denied, repository does not
- * exist or may require authorization`, which names authorization last and a
- * missing repository first. The hosted route never met this: its workflow runs
- * `docker login`, which writes this key itself.
+ * BuildKit looks Docker Hub credentials up under the legacy index URL. An entry
+ * under either hostname is never read, and the push fails as access denied.
  */
 function configKeyFor(host: string): string {
   return host === 'docker.io' || host === 'registry-1.docker.io'
@@ -123,55 +55,29 @@ function configKeyFor(host: string): string {
     : host;
 }
 
-/** Everything the program needs to know, all of it already decided by core. */
 export interface BuildKitProgramInput {
-  /** Where the staged bundle is fetched from — a depot URL, opaque here. */
   readonly bundleUrl: string;
-  /** §16's join, echoed back in the report so core can check it. */
+  /** Echoed back in the report so core can check it. */
   readonly bundleDigest: string;
-  /** The scope inside the bundle, after §5's unwrap. */
+  /** The scope inside the bundle, after unwrapping a lone top-level directory. */
   readonly subpath: string;
-  /**
-   * The repositories the artifact is pushed to, without tags. Core chose them;
-   * the route never does (§4). One build, one digest, every destination.
-   */
   readonly destinations: readonly string[];
-  /** The tags to push it under (§12). Core chose these too. */
   readonly tags: readonly string[];
-  /** The zero-config frontend the installation pinned. */
   readonly zeroConfigFrontend: string;
-  /** §4: ordinary rows, never fetched from a store. */
   readonly buildArgs: BuildSpec['buildArgs'];
   /**
-   * The *names* of the build secrets riding the environment (story 112). Names
-   * and not values, because this input becomes a program string in a readable
-   * API object — the values travel as {@link buildSecretEnvOf}'s variables,
-   * and the program moves each to a file only the mount reads.
+   * Names only, because this input becomes program text. The values travel in
+   * the variables {@link buildSecretEnvOf} sets.
    */
   readonly buildSecretNames: readonly string[];
 }
 
-/**
- * The program for one build, from what the contract already carries.
- *
- * The two routes that run this in a container — the cloud builder and the
- * cluster Job — differ in *where* they run it and in nothing else, so composing
- * the input is here rather than twice over. §4's "one engine" is only true if
- * one place decides what the engine is told.
- *
- * The frontend is the exception: it is installation configuration rather than
- * anything the contract carries, so a route supplies it.
- */
 export function buildKitProgramFor(
   source: BuildSource,
   spec: BuildSpec,
   zeroConfigFrontend: string,
 ): string {
   return buildKitProgram({
-    // One expression for both origins, which is §4's "repo and archive share
-    // one pipeline" made literal: the program never learns which it is
-    // building, because by then the difference is only a principal on a
-    // receipt (§16).
     bundleUrl: source.origin.location,
     bundleDigest: source.bundleDigest,
     subpath: source.origin.subpath,
@@ -184,40 +90,18 @@ export function buildKitProgramFor(
 }
 
 /**
- * Single-quote a value for `sh`.
- *
- * Every value below reaches a shell, and two of them — the destination and the
- * build arguments — carry developer-influenced text. Quoting is therefore not
- * tidiness: it is the boundary between a build argument and an extra command.
+ * Single-quote a value for `sh`. Destinations and build arguments carry
+ * developer-supplied text, so this is the shell-injection boundary.
  */
 export function quote(value: string): string {
   return `'${value.replaceAll("'", `'\\''`)}'`;
 }
 
 /**
- * The context probe the Dockerfile arm runs, §5's tiebreak between the two
- * COPY conventions one instruction set carries.
- *
- * A monorepo Dockerfile is written against the root that `docker build -f
- * apps/x/Dockerfile .` gives it; a standalone repository's Dockerfile is
- * written against its own directory (`COPY go.mod ./` with go.mod beside it)
- * and keeps that shape when the repository is vendored under a subpath.
- * Handing either kind the other's context fails deep inside the build with
- * `"/go.mod": not found` — a checksum error that names neither convention.
- * The file itself settles it: a COPY/ADD source that resolves beside the
- * Dockerfile and not at the root names the Dockerfile's own directory as the
- * context. Stage copies (`--from=`), URLs, globs and variables decide
- * nothing, so the answer only ever moves off the root on positive evidence.
- *
- * One rule, three readers, held identical by tests: the hosted workflow
- * carries this function verbatim (`spindrift-build.yml`, "Choose the
- * frontend"; `test/adapters/dockerfile-context-arm.test.ts` executes the
- * shipped copy), and `domain/detection/dockerfile-context.ts` mirrors it at
- * inspect time so the sentence the operator reads is what the build does.
- *
- * `sh` throughout — no arrays, no process substitution — because the BuildKit
- * image promises only a POSIX shell. Callers invoke it in a command
- * substitution, which is what keeps its `set --` off their own arguments.
+ * The hosted build workflow carries this function verbatim, which a test checks,
+ * and `domain/detection/dockerfile-context.ts` mirrors it. POSIX `sh` only: the
+ * BuildKit image promises no other shell. Call it in a command substitution so
+ * its `set --` stays off the caller's arguments.
  */
 export const DOCKERFILE_CONTEXT_PROBE = `# Which directory this Dockerfile builds from: prints its own directory when
 # a COPY/ADD source resolves beside it and not at the root, else the root.
@@ -258,13 +142,8 @@ spindrift_dockerfile_context() {
 }`;
 
 /**
- * The `name=` field of the image exporter, carrying every tag (§12).
- *
- * The exporter takes one comma-separated list of full references, and its
- * options are themselves comma-separated — so the field is wrapped in the
- * double quotes buildctl's CSV parser reads, which is a different layer from
- * the single quotes {@link quote} puts around the whole option for `sh`. Both
- * are needed and neither substitutes for the other.
+ * The exporter's `name=` option with every tag. The double quotes are for
+ * buildctl's CSV option parser; {@link quote} adds the shell layer around it.
  */
 function imageNames(input: BuildKitProgramInput): string {
   const refs = input.destinations
@@ -274,28 +153,9 @@ function imageNames(input: BuildKitProgramInput): string {
 }
 
 /**
- * The `else` of §5's ladder: take the plan generator out of the frontend image,
- * generate, hand it over.
- *
- * The railpack frontend reads its input as a **build plan** — a `#syntax=` stub
- * comes back as `invalid character '#' looking for beginning of value`, at every
- * version — so a plan has to be generated by `railpack prepare`. That output is
- * railpack's own serialisation format, versioned with railpack, so generator and
- * frontend must be one release.
- *
- * **The generator is already inside the frontend.** `ghcr.io/railwayapp/
- * railpack-frontend` is the whole railpack binary at `/railpack` with
- * `ENTRYPOINT ["/railpack", "frontend"]` — `frontend` is one subcommand of the
- * CLI that also carries `prepare`. So the release that reads the plan is
- * extracted from the image already pinned to read it, so "same release" is not a
- * thing to arrange: there is one artifact, and it cannot disagree with itself.
- *
- * A named context is how a file leaves an image without a registry client: the
- * dockerfile frontend resolves `docker-image://` itself, so this needs nothing
- * the stock BuildKit image does not already have, and the cluster fetches
- * nothing from github.com. The binary and the plan land in separate directories
- * because the second one is mounted into the build, and a mount is a smaller
- * promise when it holds only what the frontend reads.
+ * The railpack frontend reads a plan from `railpack prepare`. The generator is
+ * copied out of the pinned frontend image through a named context, so the plan
+ * and the frontend always come from one release.
  */
 function zeroConfigArm(input: BuildKitProgramInput): string {
   const frontend = quote(input.zeroConfigFrontend);
@@ -318,29 +178,18 @@ function zeroConfigArm(input: BuildKitProgramInput): string {
 }
 
 /**
- * The `sh -c` program that turns a staged bundle into a pushed artifact.
- *
- * It ends by printing the report marker, because logs are read and never pushed
- * (§4) — there is no endpoint for it to report a digest to, so it reports on
- * the one channel core is already reading. `base64` output is folded by some
- * implementations and not others, hence the `tr`: a wrapped payload is a
- * payload core cannot decode.
+ * The `sh -c` program. The image must provide `sh`, `wget`, `tar`, `ls`, `wc`,
+ * `mkdir`, `chmod`, `mktemp`, `sed`, `base64`, `tr` and `buildctl-daemonless.sh`.
+ * Some `base64` builds fold long lines, hence the `tr` on the report.
  */
 export function buildKitProgram(input: BuildKitProgramInput): string {
-  // Each entry is a whole line, newline included, so an empty set contributes
-  // nothing at all: a bare `${args}` line in the template would leave a blank
-  // line after the command's `\` continuation, ending it — and the flag on
-  // the next line becomes a command of its own (`sh: --opt: not found`,
-  // observed on the first Component built with no build args).
+  // Each entry is a complete line with its newline, so an empty set adds nothing: a
+  // blank line would end the `\` continuation and run the next flag as a command.
   const args = Object.entries(input.buildArgs)
     .map(([key, value]) => `  --opt ${quote(`build-arg:${key}=${value}`)} \\\n`)
     .join('');
 
-  // Story 112: one `--secret` per declared name, same whole-line rule as the
-  // build args above. The id is the name a `RUN --mount=type=secret,id=…`
-  // asks for; the source is the file the block below wrote from the
-  // environment. Names match `VARIABLE_NAME`, so neither needs escaping —
-  // quoted anyway, because the rule is cheaper than the exception.
+  // One `--secret` line per name, like the build args above.
   const secretFlags = input.buildSecretNames
     .map(
       (name) =>
@@ -348,11 +197,8 @@ export function buildKitProgram(input: BuildKitProgramInput): string {
     )
     .join('');
 
-  // Files and not `env=`: `buildctl` reads a secret from a file source, and a
-  // file in a directory this program just created is narrower than a variable
-  // every child process inherits. Each variable is unset the moment its file
-  // exists, so the engine invocation below starts with no secret in its
-  // environment at all.
+  // `buildctl` reads a secret from a file. Each variable is unset once its file
+  // exists, so the engine starts with no secret in its environment.
   const secretSetup =
     input.buildSecretNames.length === 0
       ? ''
@@ -370,14 +216,8 @@ ${input.buildSecretNames
   .join('\n')}
 `;
 
-  // §4 puts the in-cluster route behind an uplink every redownloaded layer
-  // crosses, so the build's cache lives in the registry beside the image: one
-  // tag on the first destination, overwritten by every build of it, which is
-  // what makes §12's "the registry's own cleanup deletes" cover it without a
-  // second policy. `mode=max` exports every layer's cache and not only the
-  // final image's, which is the difference between a cache hit on `RUN npm
-  // ci` and none. A first build finds no cache to import and says so in its
-  // log; the engine treats that as a miss, not a failure.
+  // The cache is one `buildcache` tag on the first destination, overwritten by
+  // each build. `mode=max` caches every stage; a first build logs a harmless miss.
   const cacheRef = `${input.destinations[0] ?? ''}:buildcache`;
 
   return `set -eu

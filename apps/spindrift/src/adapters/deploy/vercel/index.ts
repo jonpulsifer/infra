@@ -1,47 +1,7 @@
 /**
- * The Vercel deploy adapter (§6, §9).
- *
- * Accepts `files`, uploads them, and creates one deployment against a project
- * named for the Component. §6's `WAITING` is a real phase here — unlike the
- * other static backend, the platform queues and builds a deployment rather than
- * releasing it synchronously — so this adapter polls the deployment it just
- * created and ends on what the platform says.
- *
- * **Build stays separate from Deploy** (§4: "a platform's own build-from-source
- * path is never used, because fusing the two would force a rollback to
- * rebuild"). So this never hands Vercel a repository to build: the artifact was
- * built by whichever route the Target's minimum level selected — hosted CI, the
- * cloud service, bosun, in-cluster — and what crosses this seam is the finished
- * tree. `projectSettings` says so in the platform's own terms: no framework, no
- * install and no build command, and the uploaded files served as they are. A
- * rollback re-deploys a digest that already exists rather than building it a
- * second time, which is exactly what §4 bought.
- *
- * **`Public` only** (§9), for the reason `static/index.ts` gives at length: the
- * origin is an address the edge always answers on, so a non-public rendering
- * would ship with a bypassable origin. Placement excludes this backend for a
- * non-public Component by the ordinary reach join
- * (`ASSERTED_REACHES_BY_ADAPTER.vercel`), so one arriving here is core's bug and
- * is reported as `INTERNAL`.
- *
- * **Two identities, not one.** Every other adapter here holds one token because
- * the API it drives and the registry the artifact sits in are the same vendor's.
- * This one is driven with the installation's Vercel bearer and reads its bytes
- * out of the installation's own artifacts registry, which is a different far
- * side with a different credential — see {@link VercelAdapterOptions}.
- *
- * **A re-apply finds the deployment it already made.** The platform mints a new
- * deployment on every create — there is no name to server-side-apply against —
- * so every mechanism that can re-run an attempt (a lease reclaim, a crashed
- * reconciler, a rollout replacing the pod mid-apply) would otherwise be another
- * production deployment. `apply` therefore queries for a deployment carrying
- * this Deploy's {@link DEPLOY_META} before creating one, and adopts what it
- * finds unless the platform already called it failed — a failed deployment
- * never served, so creating its successor *is* the retry. The platform offers
- * no unique-name constraint to lean on, so query-then-create is not atomic:
- * the window is one list read wide, and a refused list read falls through to
- * create rather than blocking the deploy — which is exactly the behaviour a
- * re-run had before the query existed.
+ * The Vercel deploy adapter. Nothing is built on Vercel: a `vercel-output` tree
+ * deploys through its CLI as prebuilt, and a `files` upload through the API. A
+ * deployment queues before it serves, so this polls it to a verdict.
  */
 import {
   mkdir,
@@ -122,60 +82,41 @@ import {
 
 export interface VercelAdapterOptions {
   /**
-   * The platform bearer, minted per request from the installation Secret.
-   *
-   * §13's "nothing stored" is a rule about Targets, and this is the exception it
-   * cannot cover: the platform federates outward only, so there is no projected
-   * token to exchange for one. Held exactly where the 1Password Connect token is
-   * — one installation-wide value read per call, never a column on a Target.
+   * The platform bearer, read per request from the installation Secret. Vercel
+   * federates outward only, so there is no projected token to exchange.
    */
   readonly token: TokenProvider;
   /**
-   * What authorizes reading the artifact, which is not the same far side.
-   *
-   * The bytes live in the installation's artifacts registry (§14), so this is
-   * the federated cloud token every other adapter already holds. Splitting them
-   * is what keeps a Vercel bearer from being sent to a registry, and a cloud
-   * token from being sent to Vercel.
+   * The federated cloud token for the artifact registry, kept apart so neither
+   * credential is ever sent to the other's far side.
    */
   readonly artifactToken: TokenProvider;
   /**
-   * How this installation signs for an object in its source depot, or `null`
-   * where it configured none.
-   *
-   * A third thing, and not a third *identity*: a supplied upload was never
-   * built, so its bytes are a `gs://` object rather than a registry reference,
-   * and reading one takes a signature rather than a bearer. Signing is
-   * `signBlob` under the *federated* identity, before impersonation, which is
-   * why this is the federation itself and not a token provider —
-   * `storage/signed-url.ts` is where that distinction is written down.
+   * Signs a short-lived URL for a supplied upload's `gs://` object, or `null`
+   * where none is configured.
    */
   readonly federation?: FederationOptions | null;
-  /** Injected so a test can stand a fake far side behind the real client. */
   readonly fetch?: Fetcher;
   readonly now?: () => number;
   readonly sleep?: (ms: number) => Promise<void>;
   /** How often the deployment is polled while it queues and builds. */
   readonly pollIntervalMs?: number;
-  /** How long an attempt may run before it is `TIMEOUT` (§6). */
   readonly timeoutMs?: number;
   /**
-   * How a `vercel-output` artifact is deployed — the platform's own CLI, over
-   * the staged tree. Injected so a test stands a fake in front of the real
-   * `vercel deploy`; unset in production, where {@link runVercelCli} spawns it.
+   * Deploys a `vercel-output` artifact. Defaults to {@link runVercelCli}; a test
+   * injects a fake.
    */
   readonly deployPrebuilt?: PrebuiltDeploy;
 }
 
-/** What {@link PrebuiltDeploy} is handed to deploy the staged tree with. */
 export interface PrebuiltDeployInput {
-  /** The extracted deployment tree the CLI runs against — its working directory. */
+  /** The extracted deployment tree, the CLI's working directory. */
   readonly directory: string;
   readonly project: string;
   readonly team: string;
-  /** The platform bearer, as `VERCEL_TOKEN` rather than an argv the process list shows. */
+  /** Passed as `VERCEL_TOKEN`, never in argv where the process list shows it. */
   readonly token: string;
-  /** Stamped onto the deployment, so `findDeployment` can adopt it afterwards. */
+  /** Stamped onto the deployment so `findDeployment` can adopt it. */
   readonly meta: Readonly<Record<string, string>>;
 }
 
@@ -186,21 +127,9 @@ export type PrebuiltDeploy = (
 ) => Promise<PrebuiltDeployResult>;
 
 /**
- * Deploy the staged Build Output tree with the platform's own CLI (§4).
- *
- * The CLI is what `vercel deploy --prebuilt` was written to be — it uploads the
- * `.vercel/output` tree *and* the files each function's `filePathMap` names from
- * the directory it runs in, which is the whole reason the build stages both
- * beside each other. Reimplementing that against the raw API is what this
- * replaces: the CLI batches the upload the API made one request per file, and
- * `--no-wait` hands the deployment straight back for {@link findDeployment} to
- * adopt and `awaitVerdict` to poll, so the platform's own answer is still what
- * the verdict comes from.
- *
- * The token rides in the environment rather than `--token`, so it never reaches
- * a process list; `HOME` is the writable working directory because the CLI
- * writes a `.vercel` scratch there and the container's root filesystem is
- * read-only.
+ * `vercel deploy --prebuilt`, which uploads the Build Output tree and each
+ * function's `filePathMap` files from its working directory. `--no-wait` returns
+ * at once, so the caller finds and polls the deployment.
  */
 async function runVercelCli(
   input: PrebuiltDeployInput,
@@ -209,13 +138,8 @@ async function runVercelCli(
     '--meta',
     `${key}=${value}`,
   ]);
-  // Run the installed CLI directly rather than through `bunx`. The runtime
-  // image ships `bun` but not the `bunx` shim, and `bunx` would in any case
-  // resolve `vercel` from the working directory's node_modules — which for the
-  // extracted tree is none, sending it to the network for a CLI that is already
-  // a pinned dependency. Resolving the bin from this module's own location finds
-  // the installed one offline; `--cwd` is what points the CLI at the tree, so
-  // the process's own directory does not matter.
+  // The image ships no `bunx` shim, and `bunx` would fetch `vercel` over the
+  // network, since the extracted tree has no node_modules.
   let cli: string;
   try {
     cli = Bun.resolveSync('vercel/dist/vc.js', import.meta.dir);
@@ -227,13 +151,8 @@ async function runVercelCli(
       }`,
     };
   }
-  // A HOME of its own, and never the tree. The CLI writes a `.vercel` scratch
-  // under HOME and the container's root filesystem is read-only, so HOME has to
-  // be writable — but it must not be the directory being deployed: the CLI
-  // refuses to deploy `$HOME`, and unattended that refusal is a `(y/N)` prompt
-  // it auto-declines while still exiting 0, so the deploy silently does nothing.
-  // Keeping the two apart is what lets `--cwd` name the tree and HOME name only
-  // scratch.
+  // HOME is writable scratch apart from the tree: the root filesystem is
+  // read-only, and the CLI declines to deploy `$HOME` yet still exits 0.
   const home = await mkdtemp(join(tmpdir(), 'spindrift-vercel-home-'));
   try {
     const proc = Bun.spawn(
@@ -277,27 +196,15 @@ async function runVercelCli(
 }
 
 /**
- * Where the build wrote the symlinks it lifted out of the Build Output tree.
- *
- * The artifact holds regular files only, and a Next tree dedups its routes with
- * `.func` symlinks — well over a hundred of them at a handful of real functions
- * — so the build records each as `{ path, target }` relative to the deployment
- * root instead of copying it out, and {@link extractTree} puts them back. The
- * writer is the staging half of `.github/workflows/spindrift-build.yml`.
+ * The artifact holds regular files only, so the build records each `.func`
+ * symlink here as `{ path, target }` from the deployment root, and
+ * {@link extractTree} restores them.
  */
 const LINKS_MANIFEST = '.vercel/output/__spindrift/func-links.json';
 
 /**
- * Write a fetched artifact's files into the directory the CLI runs against.
- *
- * The bundle reader roots every path at the site with a leading slash; a tree
- * on disk is relative, so the slash comes off — and what lands is the exact
- * tree the build staged: `.vercel/output/` beside the files a filePathMap names,
- * with the symlinks the build lifted out recreated and the manifest gone.
- *
- * Every link is checked to stay inside the tree before it is made. The bundle
- * is untrusted input, and a link out of it is the one way a deployment could
- * read a file that is not its own.
+ * Writes the artifact's files relative to `dir` and restores the build's
+ * symlinks. The bundle is untrusted, so every link must resolve inside the tree.
  */
 async function extractTree(
   files: readonly BundleFile[],
@@ -318,11 +225,8 @@ async function extractTree(
     throw cause;
   }
   await rm(dirname(manifest), { recursive: true });
-  // Where each link really lands, not where its text says it does: a link
-  // whose target walks through an earlier link resolves somewhere the text
-  // never names, so the check is `realpath` after the link exists. Every link
-  // before it has passed the same check, which is what keeps the `mkdir` on
-  // the way in from following one out.
+  // Checked with `realpath` once the link exists, since a target can walk
+  // through an earlier link. Earlier links passed too, so `mkdir` cannot escape.
   const root = await realpath(dir);
   const inside = (path: string) => path === root || path.startsWith(root + sep);
   for (const link of links) {
@@ -340,38 +244,24 @@ async function extractTree(
   }
 }
 
-/** How the operator would name the platform in a sentence about it. */
+/** The platform's name in a sentence about it. */
 const SERVICE_NAME = 'Vercel';
 
-/**
- * The platform's own API root — one hostname for every team, because Vercel
- * runs a single control plane rather than one per customer.
- * `VercelConnection.endpoint` used to be required and typed into the connect
- * form on the theory that it was connection material the way a cluster's
- * `apiServer` is; it never varied between installations, so this is now the
- * default applied wherever `connection.endpoint` is read, with the Target's
- * own value kept only as an override for a perimeter or a mirror in front of
- * the real API.
- */
+/** One API host serves every team; a Target's `endpoint` overrides it. */
 export const DEFAULT_ENDPOINT = 'https://api.vercel.com';
 
 /**
- * The `meta` keys `observe` reads what is serving back out of.
- *
- * The platform stores files and has no notion of an artifact, so a deployment
- * created by something other than Spindrift reports an empty digest and shows
- * as drift — which is right, because it is.
+ * The `meta` keys every deployment is stamped with. One made elsewhere has
+ * none, so it reports an empty digest and shows as drift.
  */
 const DIGEST_META = 'spindriftDigest';
 const DEPLOY_META = 'spindriftDeploy';
 
-/** §17's three runtime questions, answered by one fact, written once. */
 const NOTHING_RUNS = 'Static files are served by the Target.';
 
 const DEFAULT_POLL_MS = 2_000;
 const DEFAULT_TIMEOUT_MS = 10 * 60 * 1_000;
 
-/** One deployment, as much of it as this adapter reads. */
 interface Deployment {
   readonly id?: string;
   readonly url?: string;
@@ -381,7 +271,6 @@ interface Deployment {
   readonly meta?: Readonly<Record<string, string>>;
 }
 
-/** What a list of them answers with. */
 interface DeploymentList {
   readonly deployments?: readonly {
     readonly uid?: string;
@@ -394,13 +283,8 @@ interface DeploymentList {
 export class VercelDeployAdapter implements DeployAdapter {
   readonly adapter: TargetAdapter = 'vercel';
   /**
-   * §6's table, one row further down: an edge site takes files — and this one
-   * also takes the platform's own build output.
-   *
-   * Both, not one. `vercel-output` is what a Component built for this Target
-   * renders to, and it is the shape that carries functions; `files` is still
-   * accepted because §4's supplied artifact — a finished site somebody uploaded
-   * — is that shape and has no build to have produced anything richer.
+   * `vercel-output` carries functions. `files` is still taken for a supplied
+   * upload, which has no build to produce more.
    */
   readonly artifactTypes: readonly ArtifactType[] = ['vercel-output', 'files'];
 
@@ -439,11 +323,8 @@ export class VercelDeployAdapter implements DeployAdapter {
       );
     }
 
-    // Same choice the other files backends make — literally, via the same
-    // predicate — with a different identity doing the reading: a staged address
-    // is an upload's own and is fetched as such, and among registry references
-    // only one in the installation's Google-family artifacts registry is
-    // readable with the federated token this adapter is handed for exactly that.
+    // The platform bearer authorizes nothing at a registry, so the registry arm
+    // reads with the federated token.
     const staged = artifactAddress(desired.artifact);
     const location =
       fetchableStagedAddress(staged) ??
@@ -463,9 +344,8 @@ export class VercelDeployAdapter implements DeployAdapter {
 
     yield this.events.status('APPLYING', { resource: project });
 
-    // The idempotency read — see the file header. Before any byte is fetched
-    // or uploaded, because an adopted deployment needs none of that work done
-    // again: the platform already holds its files.
+    // Every create is a new production deployment, so a re-run adopts the one
+    // this Deploy already made unless it failed. Read-then-create is not atomic.
     const existing = await this.findDeployment(
       http,
       connection,
@@ -504,11 +384,7 @@ export class VercelDeployAdapter implements DeployAdapter {
     }
     yield this.events.log(`the bundle holds ${files.length} files`, project);
 
-    // A `vercel-output` artifact is the platform's own Build Output tree, and
-    // the platform's own CLI is what deploys it — it uploads that tree and the
-    // files each function's filePathMap names, both of which the build staged
-    // beside each other. A supplied `files` upload has no such tree and is
-    // uploaded and created against the API directly, served as the files it is.
+    // A Build Output tree deploys through the CLI; a `files` upload, below.
     if (desired.artifact.type === 'vercel-output') {
       const directory = await mkdtemp(join(tmpdir(), 'spindrift-vercel-'));
       let result: PrebuiltDeployResult;
@@ -525,8 +401,7 @@ export class VercelDeployAdapter implements DeployAdapter {
           },
         });
       } catch (cause) {
-        // The tree not assembling is the same kind of failure as the bundle
-        // not reading — the build produced something that cannot be deployed.
+        // A link escaping the tree is the build's fault, like an unreadable bundle.
         const failure = bundleFailure(cause, ref);
         yield this.events.status('FAILED', {
           resource: project,
@@ -543,9 +418,7 @@ export class VercelDeployAdapter implements DeployAdapter {
         });
         return internalFailure(result.detail);
       }
-      // `--no-wait` hands the deployment back before there is an id in hand, so
-      // the one it just stamped with this Deploy's meta is read back — the same
-      // query the idempotency check above runs, now finding what was just made.
+      // `--no-wait` returns no id, so the deployment is found by its meta.
       const made = await this.findDeployment(
         http,
         connection,
@@ -621,11 +494,6 @@ export class VercelDeployAdapter implements DeployAdapter {
     return yield* this.release(http, connection, project, id, ref, desired);
   }
 
-  /**
-   * The tail every deployment takes to its verdict, created or adopted: the
-   * vanity name goes on (§9's one record re-point — a domain on the project
-   * that is already serving), and then the platform is polled to its answer.
-   */
   private async *release(
     http: CloudHttp,
     connection: VercelAdapterConnection,
@@ -659,13 +527,8 @@ export class VercelDeployAdapter implements DeployAdapter {
   }
 
   /**
-   * What is serving, read from the platform's current production deployment.
-   *
-   * Not from the deployment `apply` created: a promote or a rollback performed
-   * in the dashboard moves what production points at without telling Spindrift,
-   * and reporting the deployment core made would report core's memory rather
-   * than the platform's answer — which is the one thing `observe` exists not to
-   * do (§6).
+   * What production serves now. A dashboard promote or rollback moves it
+   * without telling core, so the deployment `apply` made is not the answer.
    */
   async observe(
     target: DeployTarget,
@@ -729,30 +592,19 @@ export class VercelDeployAdapter implements DeployAdapter {
     return { kind: 'none', because: NOTHING_RUNS };
   }
 
-  /** Nothing here runs, and saying so is the answer (§17). */
   async run(_target: DeployTarget, _ref: DeployRef): Promise<StartedRun> {
     return { kind: 'none', because: NOTHING_RUNS };
   }
 
-  /** Nothing runs here, so there is nothing to restart either. */
   async restart(_target: DeployTarget, _ref: DeployRef): Promise<Restarted> {
     return { kind: 'none', because: NOTHING_RUNS };
   }
 
-  /** The same fact from the reading side. */
   async executions(_target: DeployTarget, _ref: DeployRef): Promise<JobRuns> {
     return { kind: 'none', because: NOTHING_RUNS };
   }
 
-  /**
-   * One pass of §13's checklist and §3's discovery, from one call.
-   *
-   * The three answers come from the shape of one refusal, exactly as the cloud
-   * adapters' do — but the middle question is asked of a bearer rather than of a
-   * federation, so the mapping is this adapter's own rather than
-   * `cloud/checklist.ts`'s. A team's project list is what it asks: an answer
-   * means the platform is up, this credential may act, and the team is there.
-   */
+  /** The checklist, discovery and surface, from one read of the team. */
   async inspect(target: DeployTarget): Promise<TargetInspection> {
     const connection = this.connectionOf(target);
     if (connection === null) {
@@ -775,14 +627,9 @@ export class VercelDeployAdapter implements DeployAdapter {
     };
   }
 
-  // --- apply's steps -------------------------------------------------------
-
   /**
-   * Fetch the bundle and read it into files. Throws; `apply` catches.
-   *
-   * What is fetched and what is *named* part company here on purpose: a signed
-   * URL is a bearer capability, so every sentence below names the address the
-   * artifact carries and never the one that was minted from it.
+   * Fetch the bundle and read it into files. Throws; `apply` catches. Errors
+   * name `location`, never the signed URL, which is a bearer capability.
    */
   private async fetchBundle(
     http: CloudHttp,
@@ -830,15 +677,9 @@ export class VercelDeployAdapter implements DeployAdapter {
   }
 
   /**
-   * The deployment an earlier attempt of this Deploy already created, if any.
-   *
-   * Keyed by {@link DEPLOY_META}, which every create stamps: `meta-{key}` on
-   * the list endpoint is what the first-party client's `list --meta` sends —
-   * like `prebuilt` on the create, a contract that holds without being in the
-   * public REST reference. `null` means none was found **or the read was
-   * refused** — the two collapse on purpose, because a deploy blocked on a
-   * flaky list read would trade a bounded duplicate-create window for a new
-   * way to be stuck. See the file header.
+   * The production deployment stamped with this Deploy's {@link DEPLOY_META}.
+   * The `meta-` filter is what the CLI's `list --meta` sends; the REST reference
+   * omits it. `null` also when the read is refused, so a flaky list never blocks.
    */
   private async findDeployment(
     http: CloudHttp,
@@ -862,13 +703,8 @@ export class VercelDeployAdapter implements DeployAdapter {
   }
 
   /**
-   * Offer every file, and return what the deployment will reference.
-   *
-   * One request per file, which is the API's shape: there is no populate step
-   * that asks which bytes the platform already holds, so a file it has is a
-   * cheap `200` rather than a call that is skipped. The digest is a **SHA-1**
-   * over the raw bytes — the platform's own choice, and what it keys uploaded
-   * content by — so it is also what the deployment names each file with.
+   * One request per file, since the API has no populate step. The platform keys
+   * uploads by the SHA-1 of the raw bytes, and a deployment names files by it.
    */
   private async upload(
     http: CloudHttp,
@@ -888,10 +724,7 @@ export class VercelDeployAdapter implements DeployAdapter {
         },
       });
       if (!uploaded.ok) return { ok: false, failure: uploaded };
-      // Rooted at the site with a leading slash is what the bundle reader
-      // produces; a deployment path is relative to the deployment root, so the
-      // slash comes off. A supplied static upload is the files it is, served at
-      // the root they sit at.
+      // Deployment paths are relative, so the bundle's leading slash comes off.
       referenced.push({
         file: file.path.replace(/^\/+/, ''),
         sha,
@@ -901,14 +734,7 @@ export class VercelDeployAdapter implements DeployAdapter {
     return { ok: true, value: referenced };
   }
 
-  /**
-   * Create the production deployment a supplied static upload is.
-   *
-   * Only a `files` artifact reaches here — a `vercel-output` build is deployed
-   * by the CLI in `apply` — so this always says "a build did not happen": the
-   * platform is told to detect nothing, install nothing and build nothing, and
-   * serve the uploaded files as they are.
-   */
+  /** The production deployment for a supplied `files` upload, served as is. */
   private async create(
     http: CloudHttp,
     connection: VercelAdapterConnection,
@@ -921,18 +747,12 @@ export class VercelDeployAdapter implements DeployAdapter {
       path: '/v13/deployments',
       query: {
         teamId: connection.team,
-        // The platform otherwise refuses a deployment whose detected framework
-        // differs from the project's, waiting on a confirmation no controller
-        // is there to give. What is being deployed is a finished tree, so there
-        // is nothing here for detection to be right or wrong about.
+        // Otherwise a framework mismatch waits on a confirmation nobody gives.
         skipAutoDetectionConfirmation: '1',
       },
       body: {
         name: project,
-        // Names the project the first deployment creates, and addresses it on
-        // every one after that. Spindrift creates no team and no vessel (§14),
-        // but a project is what it places — the peer of the other backend's
-        // site — so this is a create rather than a prerequisite.
+        // Creates the project on the first deployment and addresses it after.
         project,
         target: 'production',
         files,
@@ -940,11 +760,7 @@ export class VercelDeployAdapter implements DeployAdapter {
           [DIGEST_META]: desired.artifact.digest,
           [DEPLOY_META]: desired.deploy,
         },
-        // §4's separation, in the platform's own vocabulary: nothing to detect,
-        // nothing to install, nothing to build, and the uploaded tree served as
-        // it is. These are the *project's* persistent settings — the framework
-        // an operator opening the dashboard sees — so they are set once for what
-        // is, on this create, a project with no build behind it.
+        // Nothing to detect, install or build. These persist on the project.
         projectSettings: {
           framework: null,
           buildCommand: null,
@@ -958,17 +774,15 @@ export class VercelDeployAdapter implements DeployAdapter {
     return { ok: true, value: created.value ?? {} };
   }
 
-  /** Put the vanity name on this project (§9). An existing one is not an error. */
+  /** Put the vanity name on this project. An existing one is not an error. */
   private async attachDomain(
     http: CloudHttp,
     connection: VercelAdapterConnection,
     project: string,
     domain: string,
   ): Promise<Outcome<void>> {
-    // Read first rather than tolerating the refusal: the platform answers `400`
-    // both for a domain this project already has and for one it will not accept,
-    // and a deploy that treated the second as the first would report a name that
-    // resolves nowhere as attached.
+    // Read first: the platform answers 400 both for a domain already here and
+    // for one it will not accept.
     const existing = await http.json<unknown>({
       method: 'GET',
       path: `/v9/projects/${encodeURIComponent(project)}/domains/${encodeURIComponent(domain)}`,
@@ -987,12 +801,8 @@ export class VercelDeployAdapter implements DeployAdapter {
   }
 
   /**
-   * Poll the deployment until the platform reaches a verdict (§6).
-   *
-   * `WAITING` is entered once and reported once: the states before `READY` are
-   * the platform's own queue and build, and translating each of them into a
-   * separate phase would put three events on the timeline that all mean the
-   * same thing to a reader.
+   * Polls the deployment to a verdict. The platform's queue and build states
+   * all report as one `WAITING`.
    */
   private async *awaitVerdict(
     http: CloudHttp,
@@ -1012,9 +822,8 @@ export class VercelDeployAdapter implements DeployAdapter {
         path: `/v13/deployments/${encodeURIComponent(id)}`,
         query: { teamId: connection.team },
       });
-      // A read that failed is not a deployment that failed. The write landed —
-      // this id came back from it — so a refused poll is retried until the
-      // budget runs out, and `TIMEOUT` is the honest verdict if it never clears.
+      // The write landed, so a refused poll is retried until the deadline, and
+      // `TIMEOUT` is the verdict if it never clears.
       const status = read.ok
         ? phaseOf(read.value?.readyState, read.value)
         : { phase: 'WAITING' as DeployPhase };
@@ -1038,18 +847,14 @@ export class VercelDeployAdapter implements DeployAdapter {
       }
 
       if (status.phase === 'LIVE') {
-        // §9: the platform names its own. The `url` is a host without a scheme,
-        // and an address core assembled from nothing is worse than none.
+        // The `url` is a host without a scheme.
         const host = read.ok ? read.value?.url : undefined;
         return {
           phase: 'LIVE',
           ref,
           ...(host === undefined ? {} : { url: `https://${host}` }),
-          // §9: nobody publishes the vanity record onto Vercel's edge today —
-          // `attachDomain` above only tells the platform the name is allowed
-          // to serve here. Every Vercel project answers the same vendor CNAME
-          // regardless of which deployment is live, so this needs no read of
-          // its own the way the project's own `url` above does.
+          // Every project answers on the same vendor CNAME, whichever
+          // deployment is live.
           address: {
             recordType: 'CNAME',
             target: 'cname.vercel-dns.com',
@@ -1082,12 +887,9 @@ export class VercelDeployAdapter implements DeployAdapter {
     }
   }
 
-  // --- inspect's second half -----------------------------------------------
-
   private discover(connection: VercelAdapterConnection): TargetDiscovery {
     return {
-      // Files are served, not run — nothing here for an architecture to be
-      // wrong about.
+      // An empty `arch` excludes no Target on architecture.
       arch: [],
       gpu: false,
       resourceCeiling: {},
@@ -1095,38 +897,20 @@ export class VercelDeployAdapter implements DeployAdapter {
       postgres: false,
       valkey: false,
       egressFiltering: false,
-      // Nothing is admitted: there is no image and no runtime, so reporting an
-      // engine would make `verifiedDeploy` true of a Target that verifies
-      // nothing (§32).
+      // No image is admitted here, and an engine would make `verifiedDeploy`
+      // true of a Target that verifies nothing.
       policyEngine: { installed: false, mode: null },
-      // §17's honest empty state: no process ever wrote a line here.
+      // No runtime logs are read from this platform.
       logHistorySeconds: 0,
       servedHosts: connection.servedHosts ?? [],
       // Nothing is pulled — the bytes were uploaded, and the edge holds them.
       reachableRegistries: [],
-      // §10's reach rule from the other side, and the one store this Target
-      // reaches is the platform itself.
-      //
-      // The old answer here was the empty list, on the ground that nothing
-      // runs so nothing could resolve a reference. That was true of a site
-      // rendered to static files and false of one rendered to functions: a
-      // function is a runtime, and it reads its configuration out of the
-      // project's own environment. `store/vercel.ts` is that environment as a
-      // store of record — which is also the only shape config can take here,
-      // because the platform resolves no references and an environment
-      // variable is a literal.
-      //
-      // A Target property rather than a Component one, which is why this is
-      // unconditional: a Vercel Target can run functions, and whether a
-      // particular Component does is settled by its artifact shape long after
-      // discovery.
+      // Functions read the project's environment, since the platform resolves no
+      // references. Every Vercel Target lists it; discovery cannot see artifacts.
       reachableSecretStores: ['vercel'] as readonly StoreAdapter[],
     };
   }
 
-  // --- plumbing ------------------------------------------------------------
-
-  /** The API root this Target actually reaches, override or default. */
   private endpointOf(connection: VercelAdapterConnection): string {
     return connection.endpoint ?? DEFAULT_ENDPOINT;
   }
@@ -1163,13 +947,8 @@ interface DeploymentFile {
 }
 
 /**
- * Why nothing here can be fetched, said about the address that failed.
- *
- * The other files backends' three cases, worded for this one: no address at
- * all, a bundle staged somewhere nothing outside one process reaches, and a
- * built artifact homed only on a registry this identity cannot read. The middle
- * one used to take the last one's sentence, which sends an operator to IAM over
- * a bundle sitting on a disk.
+ * Why nothing can be fetched: no address, a bundle on one installation's own
+ * disk, or only registries this identity cannot read.
  */
 function unfetchableArtifact(
   artifact: Artifact,
@@ -1186,12 +965,8 @@ function unfetchableArtifact(
 }
 
 /**
- * The platform's deployment state, in §6's phases.
- *
- * `CANCELED` and `BLOCKED` are `REJECTED` rather than a build failure: neither
- * is the code being wrong — one is somebody stopping the deployment, the other
- * is the account's own policy refusing it — and §6 blames the developer for
- * both because both are answered by changing what was asked for.
+ * `CANCELED` and `BLOCKED` are `REJECTED`, not a build failure: someone stopped
+ * the deployment, or the account's policy refused it.
  */
 function phaseOf(
   readyState: string | undefined,
@@ -1227,18 +1002,8 @@ function phaseOf(
 }
 
 /**
- * §13's checklist, as a Vercel Target answers it.
- *
- * One call, three items, separated by the shape of the refusal — the same
- * reasoning `cloud/checklist.ts` sets out, with the middle question asked of a
- * bearer:
- *
- * | The probe said | Unmet | Because |
- * | --- | --- | --- |
- * | `200` | — | the platform answered and this credential may read the team |
- * | `401`/`403` | `API_TOKEN` | the token is missing, expired, or not scoped here |
- * | `404` | `VESSEL` | there is no such team, and Spindrift never creates one |
- * | anything else | all three | nothing was established, and saying so beats guessing |
+ * The prerequisite checklist from one probe. `API_TOKEN` stands in for
+ * `OIDC_FEDERATION`, since the platform federates nothing inward.
  */
 export function vercelChecklist(
   probe: CloudResponse<unknown>,
@@ -1248,13 +1013,8 @@ export function vercelChecklist(
 }
 
 /**
- * Whether that same probe established the team carries this surface.
- *
- * Never `absent`, and that is the honest answer rather than a gap: a team is
- * not a project with services to switch on — every team can hold projects — so
- * there is no refusal that means "this boundary does not do deployments". A
- * failed probe leaves the Target registered and unhealthy, where the loop
- * re-checks it.
+ * Whether the probe shows the team carries deployments. Never `absent`: every
+ * team can hold projects, and a refusal is not an absence.
  */
 export function vercelSurfaceProbe(
   probe: CloudResponse<unknown>,
@@ -1263,24 +1023,18 @@ export function vercelSurfaceProbe(
   return tokenSurfaceProbe(probe, subjectOf(team));
 }
 
-/** What both answers above are said about — the product and the boundary. */
 function subjectOf(team: string): TokenChecklistSubject {
   return { service: SERVICE_NAME, vessel: team, noun: 'team' };
 }
 
 /**
- * One project per (App, Component).
- *
- * The rule itself is `domain/vercel-project.ts`, because the store adapter has
- * to derive the identical name — it writes the environment variables the
- * deployment this creates will read, and two different answers would be config
- * on a project nothing deploys to.
+ * One project per (App, Component), by {@link vercelProjectName}, which the store
+ * adapter shares so config is written to the project deploys use.
  */
 export function projectName(desired: DesiredState): string {
   return vercelProjectName(desired);
 }
 
-/** The adapter's own handle on what `apply` placed — opaque to core (§6). */
 function refOf(
   connection: VercelAdapterConnection,
   project: string,
@@ -1288,7 +1042,6 @@ function refOf(
   return scopedRef(connection.team, 'projects', project);
 }
 
-/** The project this ref names on this connection, or `null` for another's. */
 function parseRef(
   connection: VercelAdapterConnection,
   ref: DeployRef,
@@ -1296,7 +1049,7 @@ function parseRef(
   return parseScopedRef(connection.team, 'projects', ref);
 }
 
-/** The sha1 of some bytes, hex — what the platform keys uploaded files by. */
+/** Hex SHA-1, what the platform keys uploaded files by. */
 function sha1Hex(bytes: Uint8Array<ArrayBuffer>): string {
   return new Bun.CryptoHasher('sha1').update(bytes).digest('hex');
 }

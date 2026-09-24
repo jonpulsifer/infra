@@ -1,22 +1,7 @@
 /**
- * The bosun build route.
- *
- * Bosun is a warm-pool microVM runner daemon — a peer system, not something
- * this process dials. Every other route here reaches out: a workflow
- * dispatch, a cloud API, a Job on a cluster this process already holds a
- * token for. Bosun is the mirror image — an operator-controlled host this
- * process cannot reach, which **long-polls in** over the three
- * shared-secret-authed endpoints `src/web/bosun-route.ts` serves. This route
- * is the far side of that: it writes an intent to the outbox
- * (`src/storage/build-outbox.ts`) and polls the same row for a verdict,
- * exactly the way every other route here polls a status endpoint — the
- * endpoint just happens to be this installation's own database instead of a
- * far side's API.
- *
- * `ON_COMPLETION`, and it has to be: a bosun host reports nothing until it
- * posts a result, so there is nothing to watch live (§4's fidelity is a
- * property of the runner, and this runner has none of the other two modes'
- * shape).
+ * The bosun build route. Bosun hosts long-poll in through
+ * `src/web/bosun-route.ts`, so this route writes an intent to the build outbox
+ * and polls that row for a verdict.
  */
 
 import type { RegistryFlavour } from '../../domain/artifact-name.ts';
@@ -39,38 +24,26 @@ import {
   type PollingOptions,
 } from './route.ts';
 
-/** What a finished attempt reports back, exactly as `bosun-route.ts` stores it. */
+/** A finished attempt's result, as `bosun-route.ts` stores it. */
 export interface BosunOutboxResult {
   readonly status: 'SUCCEEDED' | 'FAILED';
   readonly log: string;
   readonly detail?: string;
 }
 
-/** One outbox row, as much of it as this route reads. */
 export interface BosunOutboxState {
   readonly state: 'PENDING' | 'CLAIMED' | 'DONE';
-  /**
-   * Opaque here rather than typed as {@link BosunOutboxResult}: the outbox
-   * table's column is `jsonb`, and the shape was already checked once, by
-   * `bosun-route.ts`'s zod schema, on the way in. This route trusts its own
-   * database the way every other route trusts the process it just dispatched.
-   */
+  /** Untyped here: `bosun-route.ts` validated it with zod before storing it. */
   readonly result: unknown;
 }
 
 /**
- * The far side this route drives — the outbox, narrowed to the three verbs a
- * build actually needs. Declared here rather than importing `BuildOutbox`
- * itself, the same reason `ActionsHost` is its own interface in
- * `github-actions.ts`: naming exactly what is needed is what lets a test
- * stand a fake behind this route without building the whole store.
- *
- * `src/storage/build-outbox.ts`'s `buildOutbox()` satisfies this directly —
- * its `enqueue`, `get`, and `cancel` already have this shape.
+ * The outbox verbs this route uses. `buildOutbox()` in
+ * `src/storage/build-outbox.ts` satisfies it.
  */
 export interface BosunOutbox {
   enqueue(input: {
-    /** The row's id, when the caller has one to name it by. */
+    /** Omitted, the outbox mints one. */
     readonly id?: string;
     readonly class: string;
     readonly request: unknown;
@@ -84,41 +57,24 @@ export interface BosunRouteOptions extends PollingOptions {
   /** The skiff pool this route enqueues onto. */
   readonly class: string;
   readonly outbox: BosunOutbox;
-  /** The zero-config BuildKit frontend the installation pinned (§4). */
   readonly zeroConfigFrontend: string;
-  /**
-   * The trusted builder identity the build-hull stamps in its statement, as
-   * this installation's manifest names it (§20) — see
-   * `bosunConfigSchema.provenanceBuilderId` for why it travels as
-   * configuration rather than as a constant here.
-   */
+  /** Configured, because it names this installation's own bosun host. */
   readonly provenanceBuilderId: string;
 }
 
 export class BosunBuildRoute implements BuildAdapter {
   readonly name: string;
+  /** A bosun host reports nothing until it posts its result. */
   readonly logFidelity: LogFidelity = 'ON_COMPLETION';
-  /**
-   * A skiff is an operator-controlled microVM under a daemon this repository
-   * cannot reach — the same isolation gap ARC's runner pool carries in this
-   * repo's own SLSA charting, and the same rating for the same reason: the
-   * operator who controls the host also controls what a build running on it
-   * can see.
-   */
+  /** L2: the operator of a bosun host can reach any build running on it. */
   readonly buildLevel: BuildLevel = 2;
   readonly provenanceBuilderId: string;
   /**
-   * The credential travels inside the claim response body, over the same
-   * authed channel every field of the request does, into a skiff's private
-   * directory that nothing outside that microVM reads. That is a materially
-   * different exposure than `github-actions.ts`'s: there, the danger is
-   * GitHub rendering `workflow_dispatch` inputs in a run header anyone with
-   * read access to the repository can open, which is why that route seals the
-   * credential before it ever reaches the request. Nothing here renders the
-   * outbox row anywhere public, so it travels as the other fields do.
+   * Secrets travel in the authenticated claim response, and nothing renders the
+   * outbox row publicly.
    */
   readonly carriesHeldSecret = true;
-  /** A skiff has no ambient registry identity — nothing it pushes to is unaided. */
+  /** A skiff has no registry identity of its own. */
   readonly selfAuthorizedRegistries: readonly RegistryFlavour[] = [];
 
   constructor(private readonly options: BosunRouteOptions) {
@@ -146,14 +102,13 @@ export class BosunBuildRoute implements BuildAdapter {
         buildArgs: spec.buildArgs,
         zeroConfigFrontend: this.options.zeroConfigFrontend,
         registryAuth: spec.registryAuth,
-        // Same channel, same reasoning as the registry credential above. The
-        // hull writes each to a file and hands `docker buildx` the mounts.
+        // The hull writes each secret to a file and hands `docker buildx` the mounts.
         buildSecrets: spec.buildSecrets,
       },
     };
 
-    // The outbox row is named by the dispatch id so `cancel` can find it from
-    // the Build row alone; a route driven bare lets the outbox mint one.
+    // Named by the dispatch id so `cancel` can find the row from the Build row
+    // alone; without one the outbox mints an id.
     const { id } = await outbox.enqueue({
       ...(dispatchId === undefined ? {} : { id: dispatchId }),
       class: this.options.class,
@@ -186,9 +141,7 @@ export class BosunBuildRoute implements BuildAdapter {
       }
 
       if (budget.expired()) {
-        // Best-effort: a failed cancel leaves a row a reclaim will eventually
-        // return to PENDING, which is stale but not wrong — the Build this
-        // route is answering for is already failing either way.
+        // Best-effort: the Build fails either way.
         await outbox.cancel(id).catch(() => {});
         return buildFailed(
           logs,
@@ -204,10 +157,8 @@ export class BosunBuildRoute implements BuildAdapter {
 
     const result = row.result as BosunOutboxResult | null;
     if (result === null) {
-      // A DONE row with no result is one `cancel` closed — this route's own
-      // on its budget, or an operator's through the Build. Nothing else
-      // writes DONE with a null result, and §6's `TIMEOUT` is the one reason
-      // that indicts nobody, which is who a cancellation indicts.
+      // Only `cancel` writes DONE with no result, on this route's budget or for
+      // an operator. `TIMEOUT` is the reason that blames nobody.
       const ending = `build request ${id} was cancelled before a bosun host reported a result`;
       yield { type: 'log', at: now(), line: ending };
       return buildFailed(logs, 'TIMEOUT', ending, { id });
@@ -241,11 +192,7 @@ export class BosunBuildRoute implements BuildAdapter {
     });
   }
 
-  /**
-   * Close the outbox row named by the dispatch id. The poll above sees DONE;
-   * the host that claimed it sees its next heartbeat refused and kills the
-   * skiff, so the image a cancelled build was making is never pushed.
-   */
+  /** The claiming host kills the skiff when its next heartbeat is refused. */
   cancel(handle: BuildHandle): Promise<void> {
     return this.options.outbox.cancel(handle.dispatchId);
   }

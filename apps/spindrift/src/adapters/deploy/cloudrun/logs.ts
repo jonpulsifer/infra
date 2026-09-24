@@ -1,19 +1,9 @@
 /**
- * Reading Cloud Logging: the entry shapes, the record they reduce to, and the
- * cursor that resumes a read.
- *
- * Its own file because two callers now share it. The deploy adapter tails a
- * Component's Service or a run's Job through it, and `functions/` tails a
- * Cloud Run function through the same API — same entries, same defensive
- * reading, same "an entry with no timestamp or no insert id is not a line".
- *
- * The cursor is base64 over `{ at, insertId }` rather than the API's page
- * token: a page token expires and names a position in one query, where a
- * timestamp and an insert id name a position in the log itself, which is what
- * a caller resuming an hour later actually has.
+ * Cloud Logging entries, the records they reduce to, and the resume cursor.
+ * The cursor is `{ at, insertId }`, not a page token: a page token expires and
+ * names a place in one query, where these name a place in the log itself.
  */
 
-/** Where a job's entries carry which task wrote them. */
 export const TASK_INDEX_LABEL = 'run.googleapis.com/task_index';
 
 export interface CloudLogPage {
@@ -28,7 +18,7 @@ export interface CloudLogEntry {
   readonly jsonPayload?: unknown;
   readonly severity?: string;
   readonly resource?: { readonly labels?: Record<string, string> };
-  /** Where a job's entries carry which execution and task wrote them. */
+  /** On a job's entries, the execution and task that wrote them. */
   readonly labels?: Record<string, string>;
 }
 
@@ -52,9 +42,7 @@ export function cloudLogRecord(entry: CloudLogEntry): CloudLogRecord | null {
     at,
     insertId: entry.insertId,
     line,
-    // What wrote the line. A service's replica is a revision; a run's is one of
-    // its tasks, and a run with `taskCount: 1` still names the task rather than
-    // leaving the column reading `unknown` for every line it ever writes.
+    // A revision for a service, a task for a run, even when there is only one.
     replica:
       entry.resource?.labels?.revision_name ??
       taskReplica(entry.labels?.[TASK_INDEX_LABEL]) ??
@@ -62,7 +50,6 @@ export function cloudLogRecord(entry: CloudLogEntry): CloudLogRecord | null {
   };
 }
 
-/** The `task N` a task index reads as, or nothing when there is no index. */
 export function taskReplica(index: string | undefined): string | undefined {
   return index === undefined ? undefined : `task ${index}`;
 }
