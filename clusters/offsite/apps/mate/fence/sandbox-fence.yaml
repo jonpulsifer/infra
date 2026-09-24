@@ -1,6 +1,6 @@
 ---
 # RBAC has no deny, so this keeps sandbox-rbac.yaml's cluster-wide pods/exec
-# out of `mate`. CONNECT covers both the SPDY POST and the WebSocket GET.
+# out of `mate` and every namespace labelled `lolwtf.ca/sandbox-exec: deny`.
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingAdmissionPolicy
 metadata:
@@ -12,23 +12,31 @@ spec:
   failurePolicy: Fail
   matchConstraints:
     resourceRules:
+      # CONNECT covers both the SPDY POST and the WebSocket GET.
       - apiGroups: [""]
         apiVersions: ["v1"]
         operations: ["CONNECT"]
         resources: ["pods/exec", "pods/attach", "pods/portforward"]
-  # Only the sandbox identity into `mate` is evaluated, so no failure here can
-  # touch mate's own exec into its sandboxes.
+  # Only the sandbox identity is evaluated, so mate's own exec into its
+  # sandboxes is never a match, in any namespace.
   matchConditions:
-    - name: sandbox-debug-into-mate
+    - name: sandbox-debug
       expression: >-
-        request.namespace == "mate" &&
         request.userInfo.username == "system:serviceaccount:mate:mate-sandbox-debug"
   validations:
-    - expression: "false"
+    # kube-system, flux-system and agent-sandbox-system carry no Namespace
+    # manifest in this repo, so the CEL names them instead of the label.
+    - expression: >-
+        request.namespace != "mate" &&
+        !(request.namespace in ["agent-sandbox-system", "flux-system", "kube-system"]) &&
+        !(has(namespaceObject.metadata.labels) &&
+        "lolwtf.ca/sandbox-exec" in namespaceObject.metadata.labels &&
+        namespaceObject.metadata.labels["lolwtf.ca/sandbox-exec"] == "deny")
       reason: Forbidden
       message: >-
-        mate-sandbox-debug cannot exec, attach or port-forward into the mate
-        namespace, which holds mate's credentials and every sandbox.
+        mate-sandbox-debug cannot exec, attach or port-forward into mate,
+        kube-system, flux-system, agent-sandbox-system or a namespace labelled
+        lolwtf.ca/sandbox-exec: deny.
 ---
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingAdmissionPolicyBinding

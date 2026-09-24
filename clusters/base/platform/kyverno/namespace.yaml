@@ -5,6 +5,7 @@ metadata:
   name: kyverno
   labels:
     app.kubernetes.io/part-of: kyverno
+    lolwtf.ca/sandbox-exec: deny
     pod-security.kubernetes.io/enforce: restricted
     pod-security.kubernetes.io/audit: restricted
     pod-security.kubernetes.io/warn: restricted
